@@ -1,0 +1,40 @@
+{
+  "at": "2026-10-21T17:26:15.430843+00:00",
+  "build": {
+    "release_version": "0.60.0",
+    "binary_version": "0.60.0",
+    "commit": "eb484b0aabe699b46740bcb787a935fb67bbfa8e",
+    "commit_source": "embedded",
+    "binary_commit": "eb484b0aabe699b46740bcb787a935fb67bbfa8e",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "c99b4c891ffa303e816fe39658a5ebb108129d912b458b9903ae641dad52d7dc",
+    "binary_commit_unix_ts": 1792600416.0,
+    "binary_commit_age_seconds": 3159,
+    "executable_path": "/private/tmp/masc-addon-native-39636870206/tui-macos-arm64-eb484b0aabe699b46740bcb787a935fb67bbfa8e-39636870206/masc",
+    "executable_dir": "/private/tmp/masc-addon-native-39636870206/tui-macos-arm64-eb484b0aabe699b46740bcb787a935fb67bbfa8e-39636870206",
+    "runtime_instance_id": "01a15f60-6fcc-7000-a6d5-386709897fbe",
+    "started_at": "2026-10-21T16:51:58Z",
+    "uptime_seconds": 2057
+  },
+  "paths": {
+    "cwd": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix",
+    "effective_base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix",
+    "effective_masc_root": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc",
+    "current_task_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/current_task",
+    "current_task_shape": "absent",
+    "effective_has_masc_dir": true,
+    "roots_diverge": false,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix",
+    "env_masc_base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix",
+    "resolution_source": "explicit_cli"
+  },
+  "overall_status": "ok",
+  "executed_binary_hashes": {
+    "masc": "c99b4c891ffa303e816fe39658a5ebb108129d912b458b9903ae641dad52d7dc",
+    "masc-tui": "b5ca0e122b43c61dd4416d54d50a05325a16c466c338c299554fd7de3e9c172e"
+  }
+}

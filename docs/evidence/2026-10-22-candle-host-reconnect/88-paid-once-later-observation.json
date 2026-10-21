@@ -1,0 +1,8 @@
+{
+  "at": "2026-10-21T17:26:15Z",
+  "paid_count": 1,
+  "ledger_byte_identical_to_settled_off": true,
+  "ledger_sha256": "f3d140b25a2c27fe62d5bc8add9c20563e34cd82eb8e41fb34be25e04651b5f9",
+  "candle_exact_run_count": 3,
+  "scope": "Later bounded observation after reconnect. An unchanged host-request cycle count is not evidence that maintenance stopped; no worker command or model retry was sent to force progress."
+}

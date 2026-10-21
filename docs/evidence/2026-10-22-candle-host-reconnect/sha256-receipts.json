@@ -1,0 +1,290 @@
+{
+  "created_at": "2026-10-21T17:29:18.738514+00:00",
+  "files": [
+    {
+      "path": "24-private-guest-shim-dependency.json",
+      "bytes": 776,
+      "sha256": "12594c92042b93e00ace88f0095a1180ecff83b16a81daa131b6f8e8a6a15752"
+    },
+    {
+      "path": "29-original-unreadable-evidence.json",
+      "bytes": 1644,
+      "sha256": "b25dd63a333ff0fdca826da7e23854636d31a854b6357c0030c99734e1062487"
+    },
+    {
+      "path": "35-task-normal-resubmission-after-real-guest-write.json",
+      "bytes": 2476,
+      "sha256": "0a98038b49168b92e6cc789dbb96c2fb6c5d4a02c26d95a2daf32d95fd9aeb34"
+    },
+    {
+      "path": "36-actual-guest-artifact-evidence.json",
+      "bytes": 2157,
+      "sha256": "084e4d356e6fc7f6cc8d854bba29b6c291fa1417d3e5c73544539bdd33f2a6fe"
+    },
+    {
+      "path": "38-original-artifact-source-comparison.json",
+      "bytes": 685,
+      "sha256": "8dcb41ea41ad15404f23cd4809eb8d66ff7c06606a4c314a26665bfdc7bdca24"
+    },
+    {
+      "path": "39-normal-private-operator-task-verdict.json",
+      "bytes": 1094,
+      "sha256": "d06952c952283feb78c7f7bc56afc5a150f9ed02f53f4923d3563eb61736c0f2"
+    },
+    {
+      "path": "41-dashboard-addon-off.png",
+      "bytes": 227619,
+      "sha256": "2b2885561b471f10937401b3e1266ca86749dd2257f4a53f3b25bc73c6bc37f2"
+    },
+    {
+      "path": "42-actual-task-autojudge-completion.json",
+      "bytes": 2943,
+      "sha256": "ad351ef9fa1462d75ffc55049406f9892866d51dcf0a41c5be4a120d545e938a"
+    },
+    {
+      "path": "43-goal-normal-proof-request.json",
+      "bytes": 6964,
+      "sha256": "30c9939ae4f85f397ee62248ce49e53d7f3efb201cf867a25618724ebb452f01"
+    },
+    {
+      "path": "45-goal-proof-boundary-observation.json",
+      "bytes": 2661,
+      "sha256": "016ba1b1d0b9b69070b6b54c99fbd26f13ae8a12cecf85d875031c4ea3e28d30"
+    },
+    {
+      "path": "47-private-operator-goal-confirmation.json",
+      "bytes": 2932,
+      "sha256": "f0208c8d9b25bb4f237a06bd6edeec90a205041fe3dc377f83524d2b93f2e752"
+    },
+    {
+      "path": "48-off-original-obligation-retained.json",
+      "bytes": 1708,
+      "sha256": "6e2904af0cfe4fbe9e87cbf9b75160dc1e10eb352b92d880f6538fc118eb62e1"
+    },
+    {
+      "path": "49-off-after-actual-obligation-inventory.json",
+      "bytes": 1071,
+      "sha256": "1a916ca998f4ade350880ece1fc04f4360927afed2feaf34e57539dc073bb5bd"
+    },
+    {
+      "path": "50-off-after-obligation-exact-runs.json",
+      "bytes": 1530,
+      "sha256": "07554014fc7675b1119f5cfea561856c2168b3cfe7dfaf4e6143eec70634d76e"
+    },
+    {
+      "path": "52-dashboard-save-on-actual-inventory.json",
+      "bytes": 7830,
+      "sha256": "ca98a7c3fdba95c67293232bdc15b077e11656ee545bacfe07c375c6e03f5685"
+    },
+    {
+      "path": "54-original-ledger-after-worker-observation-failure.jsonl",
+      "bytes": 1077,
+      "sha256": "7758da23da69632c971116719bd1a96c0f965b61b21dbab5f459a83b876c1e48"
+    },
+    {
+      "path": "55-dashboard-candle-host-observation-failed.png",
+      "bytes": 262585,
+      "sha256": "fb2a60d39f52b0a8163941b0b7e68661adc41bb088e420b88421005c14005ae8"
+    },
+    {
+      "path": "56-failed-worker-off-cleanup.json",
+      "bytes": 7073,
+      "sha256": "89082afe0bb087ec2ffea104a1bbae740347974eef07da1b91ca96d9e5117a9a"
+    },
+    {
+      "path": "57-private-worker-only-source-repair.json",
+      "bytes": 654,
+      "sha256": "cba8023c21370a8cd5603a8bcbb7a8ef691bd4071c19340aa1fbac02dba16c3f"
+    },
+    {
+      "path": "61-repaired-worker-application-boundary.json",
+      "bytes": 13891,
+      "sha256": "b6d3407e82635aedffea1a800922ef959433b8f4295430d592bee213686f99a3"
+    },
+    {
+      "path": "62-dashboard-repaired-worker-applied.png",
+      "bytes": 251106,
+      "sha256": "aea799f193db1ec1a9181e3964cf5f235ab311228147e1c7060f3fafd50e9416"
+    },
+    {
+      "path": "63-first-real-candle-host-exact-status.json",
+      "bytes": 1937,
+      "sha256": "1138d4e1fc6d8bd3e849070cc335553b3e59f5dcd41398ee03358186e7a439c5"
+    },
+    {
+      "path": "66-candle-container-secret-and-state-boundary.json",
+      "bytes": 1155,
+      "sha256": "a5ee13ed4c4281f9a88e1b69c05bdbd2fba3d27b78b7ebe4482e6135f8bb2974"
+    },
+    {
+      "path": "68-repaired-exact-boundary.json",
+      "bytes": 2623,
+      "sha256": "29b91d39fc37020f8da17770e19a7467656fd1ce37842cc0dc8a24f7e0376ad3"
+    },
+    {
+      "path": "72-original-payout-terminal-exact-boundary.json",
+      "bytes": 3590,
+      "sha256": "7db81066c131843c683d980ea42d720bdbfa7d0a1d2fad80a4e3f15552802510"
+    },
+    {
+      "path": "73-original-ledger-post-three-stages.jsonl",
+      "bytes": 2848,
+      "sha256": "f3d140b25a2c27fe62d5bc8add9c20563e34cd82eb8e41fb34be25e04651b5f9"
+    },
+    {
+      "path": "77-settled-off-cleanup.json",
+      "bytes": 13072,
+      "sha256": "762ae1a5614a6bb78caf1536a660293b5e11070599433056c4b7e4fec96e126f"
+    },
+    {
+      "path": "78-settled-off-ledger.jsonl",
+      "bytes": 2848,
+      "sha256": "f3d140b25a2c27fe62d5bc8add9c20563e34cd82eb8e41fb34be25e04651b5f9"
+    },
+    {
+      "path": "79-dashboard-settled-off.png",
+      "bytes": 230920,
+      "sha256": "5755680a9282e0faee33319d3d0c20d99b432cd11f92dbfea64c48673e55b315"
+    },
+    {
+      "path": "80-tui-selected-original-worker-detail-cells.json",
+      "bytes": 577137,
+      "sha256": "dee68cffe5c659e596b43ccad11125448415edcd5b952165af08c74a3c5690e6"
+    },
+    {
+      "path": "80-tui-selected-original-worker-detail.txt",
+      "bytes": 9972,
+      "sha256": "6406c3df954f69fb5333f520532333f67a5d6264af725252abe71637ac35ea89"
+    },
+    {
+      "path": "81-settled-original-installation-reconnected.json",
+      "bytes": 20083,
+      "sha256": "5f336438f92369ca7a2b1dc455a1f63e0396fb3c57de4b4a75e9437b89979d1f"
+    },
+    {
+      "path": "82-reconnected-original-exact-receipts.json",
+      "bytes": 3590,
+      "sha256": "172c6a89c0c3d416f70e7498fb6e60c363c4857ae33398ef1a2813899f4e332d"
+    },
+    {
+      "path": "83-original-a2ffc92a.json",
+      "bytes": 3853,
+      "sha256": "1ea08df12afd467d590481bdff888c36f46656e8d71f5330fa1261ca9bef7889"
+    },
+    {
+      "path": "83-original-abde6d6e.json",
+      "bytes": 3960,
+      "sha256": "420a9b4b3f0f03c1c0bb82d7683f93c0e9b69d771d000a78e11c2d5dbcd76bf8"
+    },
+    {
+      "path": "83-original-fc8e2d76.json",
+      "bytes": 4616,
+      "sha256": "85e6e1feb84d484f0a61a979532f04800f879129f5f80d9e2a7532c15778117b"
+    },
+    {
+      "path": "84-original-payout-after-reconnect.json",
+      "bytes": 673,
+      "sha256": "3f3fe15bbbf1d5b635b5a27a5f2489e8c3284cfe97bfd177202fa8a5a222ff8e"
+    },
+    {
+      "path": "85-dashboard-settled-reconnected.png",
+      "bytes": 253473,
+      "sha256": "3dc1a3a874aa2cc0c2103740bf6937877565e490504158e84d3fcea4bb772ecb"
+    },
+    {
+      "path": "85-dashboard-settled-reconnected.snapshot.txt",
+      "bytes": 32019,
+      "sha256": "438a0d598232ff3593ecd686cd03229a47bd3beb725cc6f9383f1f4f2b96c723"
+    },
+    {
+      "path": "86-post-reconnect-maintenance-inventory.json",
+      "bytes": 20083,
+      "sha256": "94c76567f599a64157645a41cc94beef2d022305601cb59f5d23f2930ee47aa3"
+    },
+    {
+      "path": "87-post-reconnect-later-exact-runs.json",
+      "bytes": 3590,
+      "sha256": "6ac45e1b0f69db703b336184b932da06c8a6b51d7aca4c31846c92f1573618c9"
+    },
+    {
+      "path": "88-paid-once-later-observation.json",
+      "bytes": 418,
+      "sha256": "0b468a399999e54457207aa9406090fb635b5cf6d99a583c2087baeb36d5160c"
+    },
+    {
+      "path": "90-live-native-component-identity.json",
+      "bytes": 2207,
+      "sha256": "feefab3169858ed870335ae8f23540c05db2c10f8b6a8e1343b0b935376d3f19"
+    },
+    {
+      "path": "91-dashboard-real-candle-balance.png",
+      "bytes": 90998,
+      "sha256": "d617aac06486a0406d7630124807aa2eb26ffa5d5662c5121f950c251c380625"
+    },
+    {
+      "path": "91-dashboard-real-candle-balance.snapshot.txt",
+      "bytes": 5170,
+      "sha256": "614905694003dd1b262b46ec3fb896137e698498b99ad42e97b4af92552d96bc"
+    },
+    {
+      "path": "93-private-keeper-shutdown-fresh-session.json",
+      "bytes": 3644,
+      "sha256": "180ba09eb93d984b8acf7bb33e8596e6b4bf43d24ac478e1afb323527aadc726"
+    },
+    {
+      "path": "94-final-addon-owned-cleanup.json",
+      "bytes": 19070,
+      "sha256": "cffb611ce4c67ce4c1363c5402f51ea8c1351d0f5a88f9dcd80073e80ec9c79b"
+    },
+    {
+      "path": "95-tui-final-off-retained-history.txt",
+      "bytes": 9920,
+      "sha256": "5eecd0bedef9d34dbf0e584009d007feac17f506a7ec3d3ded2d333fb37bb97b"
+    },
+    {
+      "path": "96-dashboard-final-off-cleanup.png",
+      "bytes": 236001,
+      "sha256": "f78e8e2a6cff98d127afd5af733eb13f1ee66a426e47db195ec1d2be1c46b157"
+    },
+    {
+      "path": "97-private-keeper-shutdown-observation.json",
+      "bytes": 128453,
+      "sha256": "efcd928207b5b12973a28638910a374031e445fef52d1337847c5de5ae8f3df0"
+    },
+    {
+      "path": "99-owned-qualification-cleanup.json",
+      "bytes": 621,
+      "sha256": "279d7062882534ee18ca31ef683e296a5c5c9ef63578863b365e755ee97b0a1f"
+    },
+    {
+      "path": "README.md",
+      "bytes": 9714,
+      "sha256": "fea879b6c28edba765e25ae298fce5a39643c2141fb981bc8143bb4e9a5cd923"
+    },
+    {
+      "path": "independent-artifact-recovery-review.md",
+      "bytes": 9965,
+      "sha256": "c145784447699c60d6c3b91f41f17ad2b5fcd6649ded7e38cb8186f21d4c30a0"
+    },
+    {
+      "path": "independent-source-review.md",
+      "bytes": 9583,
+      "sha256": "0aaf83f26183903d9c3e4eecdb37589d3f22b352465d2d5f6b365755a18a349f"
+    },
+    {
+      "path": "native-identity.json",
+      "bytes": 702,
+      "sha256": "0247fabab39ced5752810648bab8ecc4efe2f07521c635ce9c4bc21e4e5f3b27"
+    },
+    {
+      "path": "python-after-fix.log",
+      "bytes": 112,
+      "sha256": "59628874279c7f50cc22efab58a49047b4fcaf80a2aa9e0c3d90316f7930a0d5"
+    },
+    {
+      "path": "python-before-fix.log",
+      "bytes": 1183,
+      "sha256": "22cca8f9d33c3ee2a2ef780e3eb7b5c420d795f5dac6ad246daf691a8354068f"
+    }
+  ]
+}

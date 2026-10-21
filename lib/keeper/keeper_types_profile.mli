@@ -121,10 +121,13 @@ val load_keeper_profile_defaults_result_for_base_path :
     rule {!load_keeper_profile_defaults_result} uses; when the listing and every
     fingerprint equal the previous capture's for the same base path and keepers
     directory, that capture is returned without parsing, otherwise every file is
-    parsed again. Like that cache, it cannot see an edit that keeps the size and
-    lands within the file system's mtime resolution of the previous write, nor a
-    permission-only change; {!invalidate_keeper_profile_defaults_cache} drops
-    every held capture after an in-process write.
+    parsed again. A capture in which a file failed to read is returned but not
+    held, so the next capture reads every file again; errors that follow from a
+    file's bytes are held. Like that cache, it cannot see an edit that keeps
+    the size and lands within the file system's mtime resolution of the
+    previous write, nor a permission change that makes a held file unreadable;
+    {!invalidate_keeper_profile_defaults_cache} drops every held capture after
+    an in-process write.
     A declaration is indexed by its file name and, when [keeper.name] differs,
     by that name too, refused under both. *)
 type keeper_profile_snapshot
@@ -159,6 +162,9 @@ val load_declarative_materialization_defaults :
   (declarative_materialization_defaults, keeper_toml_load_error) result
 val load_keeper_profile_defaults_result :
   string -> (keeper_profile_defaults, keeper_toml_load_error) result
+(** Held per name while the declaration's path, mtime and size are unchanged.
+    A read failure ([Read_error]) is returned but not held, so the next call
+    reads the file again; errors that follow from the file's bytes are held. *)
 val invalidate_keeper_profile_defaults_cache : string -> unit
 (** Drops the held defaults for the name and every held profile snapshot. *)
 

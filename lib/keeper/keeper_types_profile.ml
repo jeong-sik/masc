@@ -536,8 +536,17 @@ let keeper_toml_unknown_keys () =
 
 (* Profile defaults cache — strict results are cached by source file
    fingerprint, not by keeper name alone. TOML edits happen outside the
-   process, so both Ok and Error entries must invalidate when their dependency
-   mtimes/sizes change. *)
+   process, so held entries must invalidate when their dependency mtimes/sizes
+   change. Ok results and errors that follow from a file's bytes are held. A
+   read failure is not held: it is an I/O event such as descriptor exhaustion,
+   not a function of the bytes, and nothing in the fingerprint changes when it
+   clears, so the next load reads again. *)
+let load_error_follows_from_bytes (error : keeper_toml_load_error) =
+  match error.kind with
+  | Read_error -> false
+  | Parse_error | Profile_error | Invalid_name | Declaration_not_found _
+  | Unknown_deny_tool _ -> true
+
 type profile_defaults_cache_key = string * string
 
 type profile_defaults_cache_entry =
@@ -589,8 +598,9 @@ let dependency_fingerprint paths =
    covers every listed [*.toml] path, so a file that appears or disappears
    changes it, and it is taken before the files are parsed, so an edit that
    lands during a parse leaves a capture the next listing no longer matches.
-   Ok and Error declarations are held alike: the snapshot is a function of the
-   listed files' bytes, and a held error is the error a re-parse would give. *)
+   A capture is held only when every declaration loaded or failed for a reason
+   that follows from its bytes; a capture with a read failure is returned but
+   not held, so the next capture reads every file again. *)
 type profile_snapshot_entry =
   { snapshot_fingerprint : string
   ; snapshot : keeper_profile_snapshot
@@ -627,8 +637,18 @@ let read_keeper_profile_snapshot ~base_path =
       ; profiles_by_name = index_keeper_profile_declarations declarations
       }
     in
-    Stdlib.Mutex.protect profile_snapshot_mu (fun () ->
-      Hashtbl.replace profile_snapshot_cache key { snapshot_fingerprint; snapshot });
+    let holdable =
+      List.for_all
+        (fun (_, discovery) ->
+          match discovery with
+          | Loaded _ -> true
+          | Invalid { error; _ } -> load_error_follows_from_bytes error)
+        declarations
+    in
+    if holdable
+    then
+      Stdlib.Mutex.protect profile_snapshot_mu (fun () ->
+        Hashtbl.replace profile_snapshot_cache key { snapshot_fingerprint; snapshot });
     snapshot
 ;;
 
@@ -663,16 +683,23 @@ let load_keeper_profile_defaults_result name :
     let dependency_paths =
       profile_dependency_paths ~name ~primary_toml_path result
     in
-    let entry =
-      { primary_toml_path
-      ; dependency_paths
-      ; dependency_fingerprint = dependency_fingerprint dependency_paths
-      ; result
-      }
+    let holdable =
+      match result with
+      | Ok _ -> true
+      | Error error -> load_error_follows_from_bytes error
     in
-    Stdlib.Mutex.lock profile_defaults_mu;
-    Hashtbl.replace profile_defaults_cache key entry;
-    Stdlib.Mutex.unlock profile_defaults_mu;
+    if holdable
+    then (
+      let entry =
+        { primary_toml_path
+        ; dependency_paths
+        ; dependency_fingerprint = dependency_fingerprint dependency_paths
+        ; result
+        }
+      in
+      Stdlib.Mutex.lock profile_defaults_mu;
+      Hashtbl.replace profile_defaults_cache key entry;
+      Stdlib.Mutex.unlock profile_defaults_mu);
     result
 
 let invalidate_keeper_profile_defaults_cache name =

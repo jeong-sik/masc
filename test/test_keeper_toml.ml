@@ -2251,6 +2251,62 @@ let test_projection_profile_snapshot_drops_held_capture_on_invalidate () =
     (snapshot_defaults_exn (KTP.read_keeper_profile_snapshot ~base_path) "rewritten")
       .instructions
 
+(* A read failure is an I/O event, not a function of the file's bytes, so it
+   must not be held under a fingerprint that stays the same once the read
+   works again. chmod changes neither mtime nor size, so the readable file has
+   the exact fingerprint the failed read saw. Root reads through mode 000. *)
+let with_unreadable path f =
+  Unix.chmod path 0o000;
+  Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) f
+
+let check_same_fingerprint_inputs path ~mtime ~size =
+  let stats = Unix.stat path in
+  check (float 0.0) "mode change keeps mtime" mtime stats.Unix.st_mtime;
+  check int "mode change keeps size" size stats.Unix.st_size
+
+let test_projection_profile_snapshot_read_failure_is_not_held () =
+  if Unix.geteuid () = 0 then skip ();
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let path = Filename.concat keepers_dir "flaky.toml" in
+  write_file path (declaration_with_instructions "Answer the question.");
+  set_mtime path 1_000_000.0;
+  let size = (Unix.stat path).Unix.st_size in
+  let failed =
+    with_unreadable path (fun () -> KTP.read_keeper_profile_snapshot ~base_path)
+  in
+  (match KTP.snapshot_profile_defaults failed "flaky" with
+   | Ok _ -> fail "a declaration that cannot be read must not load"
+   | Error error ->
+     check bool "read failure is a read error" true (error.kind = KTP.Read_error));
+  check_same_fingerprint_inputs path ~mtime:1_000_000.0 ~size;
+  ignore (snapshot_defaults_exn (KTP.read_keeper_profile_snapshot ~base_path) "flaky")
+
+let test_profile_defaults_cache_read_failure_is_not_held () =
+  if Unix.geteuid () = 0 then skip ();
+  with_profile_base @@ fun ~base_path:_ ~config_dir ~keepers_dir ->
+  Fun.protect ~finally:Config_dir_resolver.reset @@ fun () ->
+  Unix.putenv "MASC_CONFIG_DIR" config_dir;
+  Config_dir_resolver.reset ();
+  let path = Filename.concat keepers_dir "flaky-defaults.toml" in
+  write_file path (declaration_with_instructions "Answer the question.");
+  set_mtime path 1_000_000.0;
+  let size = (Unix.stat path).Unix.st_size in
+  (match
+     with_unreadable path (fun () ->
+       KTP.load_keeper_profile_defaults_result "flaky-defaults")
+   with
+   | Ok _ -> fail "a declaration that cannot be read must not load"
+   | Error error ->
+     check bool "read failure is a read error" true (error.kind = KTP.Read_error));
+  check_same_fingerprint_inputs path ~mtime:1_000_000.0 ~size;
+  match KTP.load_keeper_profile_defaults_result "flaky-defaults" with
+  | Ok defaults ->
+    check (option string) "next load reads the file again"
+      (Some "Answer the question.") defaults.instructions
+  | Error error ->
+    failf "held read failure outlived its cause: %s"
+      (KTP.keeper_toml_load_error_to_string error)
+
 let () =
   run "Keeper TOML Loader"
     [
@@ -2420,6 +2476,10 @@ let () =
             test_projection_profile_snapshot_unreadable_file_is_not_held_success;
           test_case "projection snapshot drops held captures on invalidate" `Quick
             test_projection_profile_snapshot_drops_held_capture_on_invalidate;
+          test_case "projection snapshot does not hold a read failure" `Quick
+            test_projection_profile_snapshot_read_failure_is_not_held;
+          test_case "profile defaults cache does not hold a read failure" `Quick
+            test_profile_defaults_cache_read_failure_is_not_held;
           test_case "empty dir" `Quick test_discover_empty_dir;
           test_case "with files" `Quick test_discover_with_files;
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;

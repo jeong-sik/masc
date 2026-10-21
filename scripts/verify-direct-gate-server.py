@@ -13,11 +13,16 @@ import secrets
 import shutil
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, HTTPRedirectHandler, ProxyHandler, build_opener
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'lib'))
+
+from recorded_tool_outcome import RecordedCallOutcome, recorded_call_outcome  # noqa: E402
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -361,7 +366,7 @@ def main():
         save(root / 'effect.json', {'path': str(effect.relative_to(base)), 'sha256': hashlib.sha256(effect.read_bytes()).hexdigest(), 'bytes': effect.read_text()})
         rows = [json.loads(line) for path in (base / '.masc/tool_calls').rglob('*.jsonl') for line in path.read_text().splitlines()]
         writes = [row for row in rows if row.get('keeper') == keeper and row.get('tool') == 'Write']
-        if len(writes) != 1 or writes[0]['success'] is not True:
+        if len(writes) != 1 or recorded_call_outcome(writes[0]) is not RecordedCallOutcome.SUCCEEDED:
             raise AssertionError('The completed pre-Gate effect was replayed or lost')
         save(root / 'completed-before-gate.json', writes[0])
         transcript = [json.loads(line) for line in (base / '.masc/keeper_chat' / (keeper + '.jsonl')).read_text().splitlines()]

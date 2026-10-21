@@ -352,17 +352,21 @@ read_tool_log_entries() {
         cat "${path}"
       done \
     | jq -cs --arg keeper "${keeper_name}" '
-        map(select(.keeper == $keeper))
+        map(select(.record_kind == "tool_call" and .keeper == $keeper))
       '
 }
 
 tool_calls_for_evidence() {
   local tool_log_json="$1"
-  printf '%s' "${tool_log_json}" | jq -c '
+  # The log row carries no success flag; the shared recorded outcome decides.
+  # Only a settled success counts, so deferred, unsettled and malformed rows
+  # are not success.
+  printf '%s' "${tool_log_json}" | jq -L "${ROOT_DIR}/scripts/lib" -c '
+    include "recorded-tool-outcome";
     [ .[]
       | {
           tool_name: .tool,
-          success: (.success // false),
+          success: (recorded_call_outcome == "succeeded"),
           input: (.input // {}),
           output: (.output // null),
           route_evidence: (.route_evidence // null),

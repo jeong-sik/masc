@@ -147,16 +147,17 @@ m_tool_call_success_pct() {
     files+=("$file")
   done < <(recent_dated_jsonl_files "$TOOL_CALLS_DIR")
   [[ "${#files[@]}" -gt 0 ]] || { echo "null"; return; }
-  jq -s --argjson cutoff "$(( $(date +%s) - WINDOW_SEC ))" '
+  jq -L "$SCRIPT_DIR/lib" -s --argjson cutoff "$(( $(date +%s) - WINDOW_SEC ))" '
+    include "recorded-tool-outcome";
     def ts_epoch:
       if (.ts | type) == "number" then .ts
       elif (.ts | type) == "string" then (.ts | fromdateiso8601? // 0)
       else 0 end;
-    [ .[] | select(ts_epoch >= $cutoff) ] as $rows
+    [ .[] | select(.record_kind == "tool_call") | select(ts_epoch >= $cutoff) ] as $rows
     | ($rows | length) as $total
     | if $total == 0 then empty
       else
-        ([ $rows[] | select(.success == true) ] | length) as $ok
+        ([ $rows[] | select(recorded_call_outcome == "succeeded") ] | length) as $ok
         | (($ok * 10000 / $total | floor) / 100)
       end
   ' "${files[@]}" 2>/dev/null || echo "null"
@@ -170,19 +171,21 @@ m_execute_failure_pct() {
     files+=("$file")
   done < <(recent_dated_jsonl_files "$TOOL_CALLS_DIR")
   [[ "${#files[@]}" -gt 0 ]] || { echo "null"; return; }
-  jq -s --argjson cutoff "$(( $(date +%s) - WINDOW_SEC ))" '
+  jq -L "$SCRIPT_DIR/lib" -s --argjson cutoff "$(( $(date +%s) - WINDOW_SEC ))" '
+    include "recorded-tool-outcome";
     def ts_epoch:
       if (.ts | type) == "number" then .ts
       elif (.ts | type) == "string" then (.ts | fromdateiso8601? // 0)
       else 0 end;
     [ .[]
+      | select(.record_kind == "tool_call")
       | select(ts_epoch >= $cutoff)
       | select(.tool == "Execute" or .tool == "tool_execute")
     ] as $rows
     | ($rows | length) as $total
     | if $total == 0 then empty
       else
-        ([ $rows[] | select(.success == false) ] | length) as $fail
+        ([ $rows[] | select(recorded_call_outcome == "failed") ] | length) as $fail
         | (($fail * 10000 / $total | floor) / 100)
       end
   ' "${files[@]}" 2>/dev/null || echo "null"

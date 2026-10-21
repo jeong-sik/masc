@@ -7,45 +7,59 @@ type receipt = Unobserved of int
 type error = Workspace_unconfirmed of string | Read_failed of string
   | Invalid_reply of string | Interrupted
 type request = string Fetched.request
-type task_request = { task_ticket : string Fetched.request; creation_ticket : request }
+type ask_origin = {
+  ao_keeper : string; ao_ask_id : string; ao_task_id : string;
+  ao_answered_at : float; ao_stimulus_id : string;
+  ao_workspace : Masc.Tui_decode.server_identity;
+}
+type origin = Task_creation of Dispatch.intent | Answered_ask of ask_origin
+type creation = { intent : Dispatch.intent; fetched : (string,receipt,error) Fetched.source;
+  transport : Dispatch.progress }
+type root = Creation_root of creation | Ask_root of ask_origin * unit ref
+type binding = Creation_binding of request | Ask_binding of unit ref
+type task_request = { task_ticket : string Fetched.request; task_binding : binding }
 type task_snapshot = {
   task_id : string;
   task_observation : Masc.Tui_decode_task_inspection.observation;
   task_sections : Reading.section list;
 }
-type source = Creation | Task | History | Evidence
+type source = Origin | Task | History | Evidence
 type history_request = {
   history_ticket : string Fetched.request;
   history_page : Masc.Tui_decode_task_inspection.history_request;
-  history_creation : request;
+  history_binding : binding;
 }
 type history_snapshot = {
   history_value : Masc.Tui_decode_task_inspection.history;
   history_sections : Reading.section list;
 }
 type evidence_key = { evidence_task : string; verification_id : string }
-type evidence_request = { evidence_ticket : evidence_key Fetched.request; evidence_creation : request }
+type evidence_request = { evidence_ticket : evidence_key Fetched.request; evidence_binding : binding }
 type evidence_snapshot = {
   evidence_key : evidence_key;
   evidence_value : Masc.Tui_decode.verification_evidence;
   evidence_sections : Reading.section list;
 }
 type t = {
-  origin : Dispatch.intent;
-  fetched : (string,receipt,error) Fetched.source;
-  transport : Dispatch.progress;
+  root : root;
   task_fetched : (string,task_snapshot,error) Fetched.source;
   displayed : source;
   history_fetched : (string,history_snapshot,error) Fetched.source;
   evidence_fetched : (evidence_key,evidence_snapshot,error) Fetched.source;
   document : Reading.t;
 }
-let origin t = t.origin
-let arguments t = match t.origin.workspace with
-  | None -> Error (Workspace_unconfirmed "The original creation has no confirmed workspace.")
-  | Some expected -> Ok ["creation_request_id",`String t.origin.request_id;
-      "expected_workspace",`Assoc ["base_path",`String (Masc.Tui_decode.Canonical_path.to_string expected.Masc.Tui_decode.sid_base_path);
-                                   "masc_root",`String (Masc.Tui_decode.Canonical_path.to_string expected.sid_masc_root)]]
+let origin t = match t.root with
+  | Creation_root creation -> Task_creation creation.intent
+  | Ask_root (ask,_) -> Answered_ask ask
+let workspace t = match origin t with
+  | Task_creation intent -> intent.workspace | Answered_ask ask -> Some ask.ao_workspace
+let arguments t = match origin t with
+  | Answered_ask _ -> Error (Invalid_reply "An answered Ask has no creation lookup.")
+  | Task_creation intent -> match intent.workspace with
+    | None -> Error (Workspace_unconfirmed "The original creation has no confirmed workspace.")
+    | Some expected -> Ok ["creation_request_id",`String intent.request_id;
+        "expected_workspace",`Assoc ["base_path",`String (Masc.Tui_decode.Canonical_path.to_string expected.Masc.Tui_decode.sid_base_path);
+                                     "masc_root",`String (Masc.Tui_decode.Canonical_path.to_string expected.sid_masc_root)]]
 let invalid detail = Error (Invalid_reply detail)
 let ( let* ) = Result.bind
 let field key = function
@@ -57,7 +71,9 @@ let field key = function
 let string = function `String value -> Ok value | _ -> invalid "Creation receipt field must be a string"
 let decode t (answer : Masc_tui_mcp.outcome) =
   if answer.is_error then Error (Read_failed answer.text)
-  else match t.origin.workspace with
+  else match origin t with
+  | Answered_ask _ -> invalid "An answered Ask has no creation receipt"
+  | Task_creation intent -> match intent.workspace with
   | None -> Error (Workspace_unconfirmed "The original workspace is unavailable.")
   | Some expected ->
     (try
@@ -66,7 +82,7 @@ let decode t (answer : Masc_tui_mcp.outcome) =
       let* () = match ok with `Bool true -> Ok () | _ -> invalid "Creation receipt is not successful" in
       let* raw = field "creation_request_id" json in
       let* request_id = string raw in
-      let* () = if String.equal request_id t.origin.request_id then Ok ()
+      let* () = if String.equal request_id intent.request_id then Ok ()
         else invalid "Creation receipt names another original request" in
       let* workspace = field "workspace" json in
       let* () = match workspace with `Assoc fields when List.length fields=2 -> Ok ()
@@ -97,14 +113,16 @@ let decode t (answer : Masc_tui_mcp.outcome) =
       | "ambiguous",(_::_::_ as task_ids) -> Ok (Ambiguous {task_ids;backlog_version=version})
       | _ -> invalid "Creation receipt state or cardinality is invalid"
     with Yojson.Json_error detail -> invalid detail)
-let observation t = Fetched.view_for ~equal:String.equal t.fetched ~key:t.origin.request_id
-let pending t = Fetched.in_flight t.fetched
+let observation t = match t.root with
+  | Ask_root _ -> None
+  | Creation_root creation -> Some (Fetched.view_for ~equal:String.equal creation.fetched ~key:creation.intent.request_id)
+let pending t = match t.root with Ask_root _ -> false | Creation_root creation -> Fetched.in_flight creation.fetched
 let section heading body = {Reading.heading;body}
 let error_text = function
   | Workspace_unconfirmed detail -> "Workspace unconfirmed: " ^ detail
   | Read_failed detail -> "Read failed: " ^ detail
   | Invalid_reply detail -> "Reply refused: " ^ detail
-  | Interrupted -> "Inspection interrupted; no creation was repeated."
+  | Interrupted -> "Inspection interrupted; the original operation was not repeated."
 let receipt_sections = function
   | Unobserved version -> [section "Not observed"
       (Printf.sprintf "No creation fact was observed at backlog revision %d. This does not prove that no Task was created; do not repeat creation to find out." version)]
@@ -145,9 +163,22 @@ let prepare_task ~task_id task_observation =
          | Cleanup_verified -> "The retained deletion record reports verified cleanup.")] in
   Result.map (fun task_sections -> {task_id;task_observation;task_sections}) sections
 
-let recorded_task t = match observation t with
-  | Fetched.Ready (Recorded {task_id;_}) when not (pending t) -> Some task_id
-  | Absent | Loading | Failed _ | Ready (Unobserved _ | Ambiguous _ | Recorded _) | Stale _ -> None
+let recorded_task t = match t.root with
+  | Ask_root (ask,_) -> Some ask.ao_task_id
+  | Creation_root _ -> match observation t with
+    | Some (Fetched.Ready (Recorded {task_id;_})) when not (pending t) -> Some task_id
+    | Some _ | None -> None
+let task_binding t = match t.root,recorded_task t with
+  | Ask_root (_,anchor),Some task_id -> Some (task_id,Ask_binding anchor)
+  | Creation_root creation,Some task_id -> Option.map (fun ticket -> task_id,Creation_binding ticket)
+      (Fetched.current_request creation.fetched)
+  | (Ask_root _ | Creation_root _),None -> None
+let same_binding t = function
+  | Ask_binding anchor -> (match t.root with Ask_root (_,current) -> current==anchor | Creation_root _ -> false)
+  | Creation_binding ticket -> (match t.root with
+    | Ask_root _ -> false
+    | Creation_root creation -> match Fetched.current_request creation.fetched with
+      | Some current -> Fetched.same_request ~equal:String.equal current ticket | None -> false)
 let task_view t = match recorded_task t with
   | None -> Fetched.Absent
   | Some key -> Fetched.view_for ~equal:String.equal t.task_fetched ~key
@@ -210,71 +241,95 @@ let part_sections ~label ~pending view sections =
 let task_pending t = Fetched.in_flight t.task_fetched
 let task_sections t =
   let rows=match task_view t with
-    | Fetched.Absent -> [section "Task not read" "Press o to inspect the original recorded Task."]
+    | Fetched.Absent -> [section "Task not read" "Press o to inspect the original linked Task."]
     | Loading -> [section "Task read requested" "Waiting for the exact original Task observation."]
     | Failed error -> [section "Task inspection failed" (error_text error)]
     | Ready value -> value.task_sections
     | Stale (value,error) -> value.task_sections @ [section "Last Task observation · refresh unavailable" (error_text error)] in
   if task_pending t then section "Task lookup pending" "Any retained original Task observation remains below." :: rows else rows
 let refresh_document t =
-  let read = match observation t with
-    | Fetched.Absent -> [section "Not read" "No creation fact has been requested."]
-    | Loading -> [section "Read requested" "Waiting for the exact original creation lookup."]
-    | Failed error -> [section "Inspection failed" (error_text error)]
-    | Ready receipt -> receipt_sections receipt
-    | Stale (receipt,error) -> receipt_sections receipt @ [section "Last reading · refresh unavailable" (error_text error)] in
-  let read = if pending t then section "Lookup pending" "A read is pending; any retained fact and failure remain below." :: read else read in
-  let sections = [section "Original Task" t.origin.title;section "Original Keeper" t.origin.keeper;
-      section "Original creation transport" (transport_text t.transport)] @ read @
-    (match t.displayed with
-     | Creation -> [] | Task -> task_sections t
-     | History -> part_sections ~label:"Stored history" ~pending:(Fetched.in_flight t.history_fetched)
-         (history_view t) (fun value -> value.history_sections)
-     | Evidence -> part_sections ~label:"Verification evidence" ~pending:(Fetched.in_flight t.evidence_fetched)
-         (evidence_view t) (fun value -> value.evidence_sections)) @
-    [section "Original body" t.origin.body;section "Original request" t.origin.request_id;
-     section "Original workspace" (match t.origin.workspace with None -> "Not confirmed"
+  let facts,tail,neighbors=match t.root with
+    | Creation_root creation ->
+      let read=match observation t with
+        | Some Fetched.Absent | None -> [section "Not read" "No creation fact has been requested."]
+        | Some Loading -> [section "Read requested" "Waiting for the exact original creation lookup."]
+        | Some (Failed error) -> [section "Inspection failed" (error_text error)]
+        | Some (Ready receipt) -> receipt_sections receipt
+        | Some (Stale (receipt,error)) -> receipt_sections receipt @ [section "Last reading · refresh unavailable" (error_text error)] in
+      let read=if pending t then section "Lookup pending" "A read is pending; any retained fact and failure remain below." :: read else read in
+      [section "Original Task" creation.intent.title;section "Original Keeper" creation.intent.keeper;
+       section "Original creation transport" (transport_text creation.transport)] @ read,
+      [section "Original body" creation.intent.body;section "Original request" creation.intent.request_id],
+      "[: older retained request · ]: newer · "
+    | Ask_root (ask,_) ->
+      [section "Original answered Ask" ask.ao_ask_id;section "Original Keeper" ask.ao_keeper;
+       section "Canonical Task link" ask.ao_task_id;
+       section "Recorded answer identity" (Printf.sprintf "%.17g\nStimulus: %s" ask.ao_answered_at ask.ao_stimulus_id);
+       section "Origin boundary" "The canonical answered Ask records this Task link. This is not a creation receipt or current Task status."],[],"" in
+  let sections=facts @ (match t.displayed with
+    | Origin -> [] | Task -> task_sections t
+    | History -> part_sections ~label:"Stored history" ~pending:(Fetched.in_flight t.history_fetched)
+        (history_view t) (fun value -> value.history_sections)
+    | Evidence -> part_sections ~label:"Verification evidence" ~pending:(Fetched.in_flight t.evidence_fetched)
+        (evidence_view t) (fun value -> value.evidence_sections)) @ tail @
+    [section "Original workspace" (match workspace t with None -> "Not confirmed"
        | Some workspace -> Masc.Tui_decode.Canonical_path.to_string workspace.sid_base_path ^ "\n" ^ Masc.Tui_decode.Canonical_path.to_string workspace.sid_masc_root);
-     section "Actions" "[: older retained request · ]: newer · r: read the displayed source again · o: original Task · h: fresh history · H: earlier history · v: next observed verification · b: creation facts · Esc: close. No creation, handoff or input recovery is performed here."] in
+     section "Actions" (neighbors ^ "r: refresh displayed source · o: original Task · h: fresh history · H: earlier history · v: next observed verification · b: origin facts · Esc: close. No answer, creation, handoff or input recovery is performed here.")] in
   {t with document=Reading.replace ~title:"Original Task · o Task · h/H history · v evidence · r refresh · Esc close" sections t.document}
-let create origin = {origin;fetched=Fetched.initial;transport=Dispatch.Not_started;task_fetched=Fetched.initial;displayed=Creation;history_fetched=Fetched.initial;evidence_fetched=Fetched.initial;
-  document=Reading.create_observation ~title:"Original Task creation" []}
-let capture_transport transport t = refresh_document {t with transport}
-let start t =
-  let t={t with displayed=Creation;task_fetched=Fetched.suspend_with ~reason:Interrupted t.task_fetched;
-    history_fetched=Fetched.suspend_with ~reason:Interrupted t.history_fetched;
-    evidence_fetched=Fetched.suspend_with ~reason:Interrupted t.evidence_fetched} in
-  match Fetched.refresh ~equal:String.equal t.fetched ~key:t.origin.request_id with
-  | Fetched.Already_loading -> t,None
-  | Started (fetched,request) -> refresh_document {t with fetched},Some request
-let is_current t request = Fetched.is_current ~equal:String.equal t.fetched request
-let complete t request result =
-  if not (is_current t request) then t
-  else refresh_document {t with fetched=Fetched.complete ~equal:String.equal t.fetched request result}
-let suspend ~reason t = refresh_document {t with fetched=Fetched.suspend_with ~reason t.fetched;
-  task_fetched=Fetched.suspend_with ~reason t.task_fetched;
-  history_fetched=Fetched.suspend_with ~reason t.history_fetched;
-  evidence_fetched=Fetched.suspend_with ~reason t.evidence_fetched}
+let initial root = {root;task_fetched=Fetched.initial;displayed=Origin;history_fetched=Fetched.initial;evidence_fetched=Fetched.initial;
+  document=Reading.create_observation ~title:"Original Task" []}
+let create intent = initial (Creation_root {intent;fetched=Fetched.initial;transport=Dispatch.Not_started})
+let create_ask ~keeper ~ask_id ~workspace ~identity ~task =
+  let module Ask = Masc.Tui_decode_asks in
+  let task_id=match task with Ask.Ask_task_observed value -> Some value.akt_task_id
+    | Ask_task_missing id | Ask_task_unavailable id -> Some id | Ask_task_unlinked -> None in
+  match task_id with
+  | Some ao_task_id when String.trim keeper<>"" && String.trim ask_id<>"" && String.trim ao_task_id<>"" ->
+    let ask={ao_keeper=keeper;ao_ask_id=ask_id;ao_task_id;ao_workspace=workspace;
+      ao_answered_at=identity.Ask.afi_answered_at;ao_stimulus_id=identity.afi_stimulus_id} in
+    Ok (refresh_document (initial (Ask_root (ask,ref ()))))
+  | Some _ | None -> invalid "No exact canonical answered Ask Task link is available"
+let capture_transport transport t = match t.root with
+  | Ask_root _ -> t | Creation_root creation -> refresh_document {t with root=Creation_root {creation with transport}}
+let start t = match t.root with
+  | Ask_root _ -> t,None
+  | Creation_root creation ->
+    let t={t with displayed=Origin;task_fetched=Fetched.suspend_with ~reason:Interrupted t.task_fetched;
+      history_fetched=Fetched.suspend_with ~reason:Interrupted t.history_fetched;
+      evidence_fetched=Fetched.suspend_with ~reason:Interrupted t.evidence_fetched} in
+    match Fetched.refresh ~equal:String.equal creation.fetched ~key:creation.intent.request_id with
+    | Fetched.Already_loading -> t,None
+    | Started (fetched,request) -> refresh_document {t with root=Creation_root {creation with fetched}},Some request
+let is_current t request = match t.root with Ask_root _ -> false
+  | Creation_root creation -> Fetched.is_current ~equal:String.equal creation.fetched request
+let complete t request result = match t.root with
+  | Creation_root creation when is_current t request ->
+    refresh_document {t with root=Creation_root {creation with fetched=Fetched.complete ~equal:String.equal creation.fetched request result}}
+  | Ask_root _ | Creation_root _ -> t
+let suspend ~reason t =
+  let root=match t.root with Ask_root _ -> t.root | Creation_root creation ->
+    Creation_root {creation with fetched=Fetched.suspend_with ~reason creation.fetched} in
+  refresh_document {t with root;task_fetched=Fetched.suspend_with ~reason t.task_fetched;
+    history_fetched=Fetched.suspend_with ~reason t.history_fetched;
+    evidence_fetched=Fetched.suspend_with ~reason t.evidence_fetched}
 let document t = t.document
 let move ~count ~height movement t = {t with document=Reading.move ~count ~height movement t.document}
 
 let displayed_source t = t.displayed
 let task_request_id request = Fetched.request_id request.task_ticket
 let task_request_key request = Fetched.request_key request.task_ticket
-let start_task t = match recorded_task t,Fetched.current_request t.fetched with
-  | Some task_id,Some creation_ticket ->
+let start_task t = match task_binding t with
+  | Some (task_id,task_binding) ->
     (match Fetched.refresh ~equal:String.equal t.task_fetched ~key:task_id with
      | Fetched.Already_loading -> t,None
      | Started (task_fetched,task_ticket) ->
        refresh_document {t with task_fetched;displayed=Task;
          history_fetched=Fetched.suspend_with ~reason:Interrupted t.history_fetched;
-         evidence_fetched=Fetched.suspend_with ~reason:Interrupted t.evidence_fetched},Some {task_ticket;creation_ticket})
-  | (Some _ | None),(Some _ | None) -> t,None
+         evidence_fetched=Fetched.suspend_with ~reason:Interrupted t.evidence_fetched},Some {task_ticket;task_binding})
+  | None -> t,None
 let task_is_current t request =
   t.displayed=Task && Fetched.is_current ~equal:String.equal t.task_fetched request.task_ticket
-  && (match Fetched.current_request t.fetched with
-      | Some current -> Fetched.same_request ~equal:String.equal current request.creation_ticket
-      | None -> false)
+  && same_binding t request.task_binding
   && recorded_task t=Some (task_request_key request)
 let complete_task t request result =
   if not (task_is_current t request) then t
@@ -283,18 +338,15 @@ let complete_task t request result =
       if snapshot.task_id=task_request_key request then Ok snapshot
       else Error (Invalid_reply "Prepared Task snapshot belongs to another original Task")) in
     refresh_document {t with task_fetched=Fetched.complete ~equal:String.equal t.task_fetched request.task_ticket result}
-let back_to_creation t = refresh_document {t with displayed=Creation;
+let back_to_origin t = refresh_document {t with displayed=Origin;
   task_fetched=Fetched.suspend_with ~reason:Interrupted t.task_fetched;
   history_fetched=Fetched.suspend_with ~reason:Interrupted t.history_fetched;
   evidence_fetched=Fetched.suspend_with ~reason:Interrupted t.evidence_fetched}
 
 let history_page_request request = request.history_page
 let history_request_id request = Fetched.request_id request.history_ticket
-let same_creation t ticket = match Fetched.current_request t.fetched with
-  | Some current -> Fetched.same_request ~equal:String.equal current ticket
-  | None -> false
-let start_history ~earlier ~limit t = match recorded_task t,Fetched.current_request t.fetched with
-  | Some task_id,Some history_creation ->
+let start_history ~earlier ~limit t = match task_binding t with
+  | Some (task_id,history_binding) ->
     let page=if earlier then
       match Fetched.value (history_view t) with None -> None
       | Some snapshot -> Masc.Tui_decode_task_inspection.history_earlier ~task_id ~limit snapshot.history_value
@@ -306,11 +358,11 @@ let start_history ~earlier ~limit t = match recorded_task t,Fetched.current_requ
         refresh_document {t with history_fetched;displayed=History;
           task_fetched=Fetched.suspend_with ~reason:Interrupted t.task_fetched;
           evidence_fetched=Fetched.suspend_with ~reason:Interrupted t.evidence_fetched},
-        Some {history_ticket;history_page;history_creation})
-  | (Some _ | None),(Some _ | None) -> t,None
+        Some {history_ticket;history_page;history_binding})
+  | None -> t,None
 let history_is_current t request = t.displayed=History
   && Fetched.is_current ~equal:String.equal t.history_fetched request.history_ticket
-  && same_creation t request.history_creation && recorded_task t=Some request.history_page.hr_task_id
+  && same_binding t request.history_binding && recorded_task t=Some request.history_page.hr_task_id
 let complete_history t request result =
   if not (history_is_current t request) then t else
     let result=Result.bind result (fun value ->
@@ -329,8 +381,8 @@ let verification_candidates t =
     | Fetched.Ready history -> history.history_verifications
     | Absent | Loading | Failed _ | Stale _ -> [] in
   current @ List.filter (fun id -> not (List.mem id current)) history
-let start_evidence ~next t = match recorded_task t,Fetched.current_request t.fetched with
-  | Some evidence_task,Some evidence_creation ->
+let start_evidence ~next t = match task_binding t with
+  | Some (evidence_task,evidence_binding) ->
     let current=match Fetched.current_key t.evidence_fetched with
       | Some key when key.evidence_task=evidence_task -> Some key.verification_id
       | Some _ | None -> None in
@@ -352,14 +404,14 @@ let start_evidence ~next t = match recorded_task t,Fetched.current_request t.fet
          refresh_document {t with evidence_fetched;displayed=Evidence;
            task_fetched=Fetched.suspend_with ~reason:Interrupted t.task_fetched;
            history_fetched=Fetched.suspend_with ~reason:Interrupted t.history_fetched},
-         Some {evidence_ticket;evidence_creation})
-  | (Some _ | None),(Some _ | None) -> t,None
+         Some {evidence_ticket;evidence_binding})
+  | None -> t,None
 let evidence_task_id request = (Fetched.request_key request.evidence_ticket).evidence_task
 let evidence_verification_id request = (Fetched.request_key request.evidence_ticket).verification_id
 let evidence_request_id request = Fetched.request_id request.evidence_ticket
 let evidence_is_current t request = t.displayed=Evidence
   && Fetched.is_current ~equal:equal_evidence_key t.evidence_fetched request.evidence_ticket
-  && same_creation t request.evidence_creation && recorded_task t=Some (evidence_task_id request)
+  && same_binding t request.evidence_binding && recorded_task t=Some (evidence_task_id request)
 let complete_evidence t request result =
   if not (evidence_is_current t request) then t else
     let result=Result.bind result (fun value ->

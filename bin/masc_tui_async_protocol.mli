@@ -722,15 +722,15 @@ type async_msg =
     }
   | Observer_received of string option * Masc_tui_observer.delivery list
   | Observer_closed of (unit, Masc_tui_http.observer_error) result
-  | Original_task_read_done of Masc_tui_types.task_creation_read_request
-      * (Masc_tui_task_creation_read.task_snapshot, Masc_tui_task_creation_read.error) result
-  | Original_task_history_done of Masc_tui_types.task_creation_read_request
-      * (Masc_tui_task_creation_read.history_snapshot, Masc_tui_task_creation_read.error) result
-  | Original_task_evidence_done of Masc_tui_types.task_creation_read_request
-      * (Masc_tui_task_creation_read.evidence_snapshot, Masc_tui_task_creation_read.error) result
+  | Original_task_read_done of Masc_tui_types.task_inspection_request
+      * (Masc_tui_original_task_read.task_snapshot, Masc_tui_original_task_read.error) result
+  | Original_task_history_done of Masc_tui_types.task_inspection_request
+      * (Masc_tui_original_task_read.history_snapshot, Masc_tui_original_task_read.error) result
+  | Original_task_evidence_done of Masc_tui_types.task_inspection_request
+      * (Masc_tui_original_task_read.evidence_snapshot, Masc_tui_original_task_read.error) result
   | Task_dispatch_completed of Masc_tui_types.task_dispatch_request
-  | Task_creation_read_done of Masc_tui_types.task_creation_read_request
-      * (Masc_tui_task_creation_read.receipt, Masc_tui_task_creation_read.error) result
+  | Task_creation_read_done of Masc_tui_types.task_inspection_request
+      * (Masc_tui_original_task_read.receipt, Masc_tui_original_task_read.error) result
 
 (* Every async result carries the instant it was ready, so the loop can say
    how long it sat in the mailbox. A result that arrived in a second and was

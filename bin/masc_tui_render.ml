@@ -656,8 +656,8 @@ let frame_choice (state : state) ~terminal_rows =
   | Some view -> `Lane_addons view
   | None -> match current_chat_call_reader state with
   | Some reader -> `Detail_reading (Masc_tui_chat_call_reader.document reader)
-  | None -> match current_task_creation_reader state with
-  | Some reader -> `Detail_reading (Masc_tui_task_creation_read.document reader.tci_original.tdr_inspection)
+  | None -> match current_task_inspector state with
+  | Some reader -> `Detail_reading (Masc_tui_original_task_read.document (task_inspection_source reader.tci_original))
   | None -> match current_detail_reading state with
   | Some reading -> `Detail_reading reading
   | None ->

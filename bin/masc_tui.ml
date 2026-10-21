@@ -9261,102 +9261,104 @@ let drain_queued_message state ~base_path ~mailbox =
   end
 ;;
 
-(* Exact original creation inspection is a read-only workspace observation. *)
-let cancel_task_creation_read state =
+(* Exact original Task inspection is a read-only workspace observation. *)
+let cancel_task_inspection_read state =
   Option.iter (fun reader ->
     let original=reader.tci_original in
-    let pending=original.tdr_inspection_pending in
-    retire_task_creation_request original ~reason:Masc_tui_task_creation_read.Interrupted;
+    let pending=task_inspection_pending original in
+    retire_task_inspection_owner original ~reason:Masc_tui_original_task_read.Interrupted;
     Option.iter (fun request -> Masc_tui_workspace_job.cancel_observation state ~key:request.tcr_job) pending)
-    state.task_creation_reader
+    state.task_inspection_reader
 
-let close_task_creation_reader state =
-  cancel_task_creation_read state;
-  close_task_creation_inspection state ~reason:Masc_tui_task_creation_read.Interrupted
+let close_task_inspection_reader state =
+  cancel_task_inspection_read state;
+  close_task_inspection state ~reason:Masc_tui_original_task_read.Interrupted
 
 let launch_task_creation_read state ~mailbox =
-  cancel_task_creation_read state;
+  cancel_task_inspection_read state;
   Option.iter (fun request ->
-    let source=request.tcr_original.tdr_inspection in
-    let intent=Masc_tui_task_creation_read.origin source in
+    let source=task_inspection_source request.tcr_original in
+    match Masc_tui_original_task_read.origin source with
+    | Answered_ask _ -> ()
+    | Task_creation intent ->
     let identity=intent.workspace and authority=request.tcr_authority in
     let host=server_peer_host and port=state.port and session=state.mcp_session in
     let rpc_id=Printf.sprintf "%s:creation-read:%Ld" intent.request_id
       (match request.tcr_query with Creation_query ticket -> Masc_tui_fetched.request_id ticket
-        | Original_task_query ticket -> Masc_tui_task_creation_read.task_request_id ticket
-        | Original_history_query ticket -> Masc_tui_task_creation_read.history_request_id ticket
-        | Original_evidence_query ticket -> Masc_tui_task_creation_read.evidence_request_id ticket) in
+        | Original_task_query ticket -> Masc_tui_original_task_read.task_request_id ticket
+        | Original_history_query ticket -> Masc_tui_original_task_read.history_request_id ticket
+        | Original_evidence_query ticket -> Masc_tui_original_task_read.evidence_request_id ticket) in
     launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
-      ~boundary_error:(fun detail -> Masc_tui_task_creation_read.Read_failed detail)
+      ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
       ~deliver:(fun result -> Task_creation_read_done (request,result)) (fun () ->
         let ( let* ) = Result.bind in
-        let workspace_error detail=Masc_tui_task_creation_read.Workspace_unconfirmed detail in
-        let* arguments=Masc_tui_task_creation_read.arguments source in
+        let workspace_error detail=Masc_tui_original_task_read.Workspace_unconfirmed detail in
+        let* arguments=Masc_tui_original_task_read.arguments source in
         let* ()=check_workspace_request state ~mailbox ~authority ~identity ~host ~port ()
           |> Result.map_error workspace_error in
         let* session_id=(match session with Some id -> Ok id
           | None -> Masc_tui_http.open_mcp_session ~host ~port ~client_version:Runtime_build_version.current)
-          |> Result.map_error (fun detail -> Masc_tui_task_creation_read.Read_failed detail) in
+          |> Result.map_error (fun detail -> Masc_tui_original_task_read.Read_failed detail) in
         let* ()=check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached
           state ~mailbox ~authority ~identity ~host ~port () |> Result.map_error workspace_error in
         let* answer=Masc_tui_http.call_mcp_tool ~host ~port ~session_id ~request_id:rpc_id
           ~tool:"masc_tasks" ~arguments
-          |> Result.map_error (fun detail -> Masc_tui_task_creation_read.Read_failed detail) in
+          |> Result.map_error (fun detail -> Masc_tui_original_task_read.Read_failed detail) in
         Masc_tui_response_decode.run ~name:"tui.task_creation.decode"
-          (fun () -> Masc_tui_task_creation_read.decode source answer)))
+          (fun () -> Masc_tui_original_task_read.decode source answer)))
     (begin_task_creation_inspection state)
 
 let launch_original_task_read state ~mailbox =
-  cancel_task_creation_read state;
+  cancel_task_inspection_read state;
   Option.iter (fun request -> match request.tcr_query with
     | Creation_query _ | Original_history_query _ | Original_evidence_query _ -> ()
     | Original_task_query ticket ->
-      let task_id=Masc_tui_task_creation_read.task_request_key ticket in
+      let task_id=Masc_tui_original_task_read.task_request_key ticket in
       let host=server_peer_host and port=state.port in
       let read=capture_workspace_json_read state (fun () ->
         Masc_tui_http.fetch_original_task_inspection ~host ~port ~task_id) in
       launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
-        ~boundary_error:(fun detail -> Masc_tui_task_creation_read.Read_failed detail)
+        ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
         ~deliver:(fun result -> Original_task_read_done (request,result)) (fun () ->
           match read () with
-          | Error detail -> Error (Masc_tui_task_creation_read.Read_failed detail)
+          | Error detail -> Error (Masc_tui_original_task_read.Read_failed detail)
           | Ok result -> result)) (begin_original_task_inspection state)
 
 let launch_original_history_read state ~mailbox ~earlier ~limit =
-  cancel_task_creation_read state;
+  cancel_task_inspection_read state;
   Option.iter (fun request -> match request.tcr_query with
     | Creation_query _ | Original_task_query _ | Original_evidence_query _ -> ()
     | Original_history_query ticket ->
       let host=server_peer_host and port=state.port in
-      let page=Masc_tui_task_creation_read.history_page_request ticket in
+      let page=Masc_tui_original_task_read.history_page_request ticket in
       let read=capture_workspace_json_read state (fun () ->
         Masc_tui_http.fetch_original_task_history ~host ~port ~request:page) in
       launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
-        ~boundary_error:(fun detail -> Masc_tui_task_creation_read.Read_failed detail)
+        ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
         ~deliver:(fun result -> Original_task_history_done (request,result)) (fun () ->
-          read () |> Result.map_error (fun detail -> Masc_tui_task_creation_read.Read_failed detail)))
+          read () |> Result.map_error (fun detail -> Masc_tui_original_task_read.Read_failed detail)))
     (begin_original_history_inspection state ~earlier ~limit)
 let original_evidence_failure = function
-  | Verification_evidence_read.Transport detail | Http_error detail | Launch_failure detail -> Masc_tui_task_creation_read.Read_failed detail
-  | Invalid_json detail | Invalid_payload detail -> Masc_tui_task_creation_read.Invalid_reply detail
-  | Workspace_unconfirmed detail -> Masc_tui_task_creation_read.Workspace_unconfirmed detail
-  | Interrupted _ -> Masc_tui_task_creation_read.Interrupted
+  | Verification_evidence_read.Transport detail | Http_error detail | Launch_failure detail -> Masc_tui_original_task_read.Read_failed detail
+  | Invalid_json detail | Invalid_payload detail -> Masc_tui_original_task_read.Invalid_reply detail
+  | Workspace_unconfirmed detail -> Masc_tui_original_task_read.Workspace_unconfirmed detail
+  | Interrupted _ -> Masc_tui_original_task_read.Interrupted
 let launch_original_evidence_read state ~mailbox ~next =
-  cancel_task_creation_read state;
+  cancel_task_inspection_read state;
   Option.iter (fun request -> match request.tcr_query with
     | Creation_query _ | Original_task_query _ | Original_history_query _ -> ()
     | Original_evidence_query ticket ->
       let host=server_peer_host and port=state.port in
-      let task_id=Masc_tui_task_creation_read.evidence_task_id ticket in
-      let verification_id=Masc_tui_task_creation_read.evidence_verification_id ticket in
+      let task_id=Masc_tui_original_task_read.evidence_task_id ticket in
+      let verification_id=Masc_tui_original_task_read.evidence_verification_id ticket in
       let read=capture_workspace_json_read state (fun () -> Ok (
         Masc_tui_http.fetch_original_verification_evidence ~host ~port ~task_id ~verification_id
         |> Result.map_error original_evidence_failure |> fun result -> Result.bind result Fun.id)) in
       launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
-        ~boundary_error:(fun detail -> Masc_tui_task_creation_read.Read_failed detail)
+        ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
         ~deliver:(fun result -> Original_task_evidence_done (request,result)) (fun () ->
           match read () with
-          | Error detail -> Error (Masc_tui_task_creation_read.Workspace_unconfirmed detail)
+          | Error detail -> Error (Masc_tui_original_task_read.Workspace_unconfirmed detail)
           | Ok result -> result)) (begin_original_evidence_inspection state ~next)
 
 (* /task in the composer or the chat pane: create the task first, then hand
@@ -11922,7 +11924,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (match (match keeper_name with Some _ as named -> named | None -> state.msg_target_keeper_name) with
        | None -> report_action state "error" "/task-inspect needs the original Keeper"
        | Some keeper ->
-         close_task_creation_reader state;
+         close_task_inspection_reader state;
          if open_task_creation_inspection state ~keeper then begin
            Masc_tui_message_input.clear state.msg_input;
            launch_task_creation_read state ~mailbox
@@ -13229,6 +13231,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.ask_submit_inflight <- false;
   state.ask_submission_current <- None;
   state.ask_answer_feedback <- None;
+  state.ask_task_inspection <- None;
   Masc_tui_types.retire_ask_followup_read state;
   state.ask_followup <- None;
   state.ask_followup_error <- None;
@@ -15931,6 +15934,9 @@ let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answ
   else begin
   supersede_home_decision_receipt state;
 
+  (match state.task_inspection_reader with
+   | Some {tci_original=Answered_ask_owner _;_} -> cancel_task_inspection_read state
+   | Some {tci_original=Created_task_owner _;_} | None -> ());
   Masc_tui_types.begin_ask_submission_state ~submission state;
   log_ask_answer_observation (Ask_answer_observation.make submission ~at_ns:submission.as_started_ns Ask_answer_observation.Submitted);
   let host = server_peer_host in
@@ -24860,7 +24866,7 @@ and is loaded on demand through keeper_skill.
          each did. *)
       reconcile_detail_reading state;
       if Option.is_none (current_chat_call_reader state) then close_chat_call_reader state;
-      if Option.is_none (current_task_creation_reader state) then close_task_creation_reader state;
+      if Option.is_none (current_task_inspector state) then close_task_inspection_reader state;
       let text_target = text_input_target state ~compact_viewport in
       let recovered_paste = Option.is_some interrupted_paste in
       let machine_activity_on_screen () =
@@ -24916,7 +24922,7 @@ and is loaded on demand through keeper_skill.
           the composer under the card would put the link [y] just copied into a
           draft that goes to a Keeper on the next Enter. It is first, above the
           overlays the card is drawn over. *)
-       | Some (Pasted _) when Option.is_some (current_task_creation_reader state) -> ()
+       | Some (Pasted _) when Option.is_some (current_task_inspector state) -> ()
        | Some (Pasted _) when Option.is_some (current_chat_call_reader state) -> ()
        | Some (Pasted _) when Option.is_some (current_detail_reading state) -> ()
        | Some (Pasted _) when state.msx_open -> ()
@@ -26607,18 +26613,20 @@ and is loaded on demand through keeper_skill.
        (* /about is modal for the help sheet's reason: Esc closes it, c turns
           the candle to its other style, and everything else is swallowed so
           no surface binding or global quit fires under it. *)
-       | Some k when Option.is_some (current_task_creation_reader state) ->
-           (match current_task_creation_reader state with
+       | Some k when Option.is_some (current_task_inspector state) ->
+           (match current_task_inspector state with
             | None -> ()
             | Some reader ->
               let original=reader.tci_original in
-              let source=original.tdr_inspection in
+              let source=task_inspection_source original in
               let count,height=Masc_tui_render_overlays.detail_reading_viewport state
-                (Masc_tui_task_creation_read.document source) in
-              if k="esc" then close_task_creation_reader state
+                (Masc_tui_original_task_read.document source) in
+              if k="esc" then close_task_inspection_reader state
               else if k="r" then
-                (match Masc_tui_task_creation_read.displayed_source source with
-                 | Creation -> launch_task_creation_read state ~mailbox:async_messages
+                (match Masc_tui_original_task_read.displayed_source source with
+                 | Origin -> (match Masc_tui_original_task_read.origin source with
+                   | Task_creation _ -> launch_task_creation_read state ~mailbox:async_messages
+                   | Answered_ask _ -> launch_original_task_read state ~mailbox:async_messages)
                  | Task -> launch_original_task_read state ~mailbox:async_messages
                  | History -> launch_original_history_read state ~mailbox:async_messages ~earlier:false ~limit:(max 1 height)
                  | Evidence -> launch_original_evidence_read state ~mailbox:async_messages ~next:false)
@@ -26626,15 +26634,15 @@ and is loaded on demand through keeper_skill.
                 (match task_creation_neighbor state ~older:(k="[") with
                  | None -> ()
                  | Some original ->
-                   close_task_creation_reader state;
+                   close_task_inspection_reader state;
                    if select_task_creation_inspection state original then
                      launch_task_creation_read state ~mailbox:async_messages)
               else if k="o" then launch_original_task_read state ~mailbox:async_messages
               else if k="h" || k="H" then launch_original_history_read state ~mailbox:async_messages ~earlier:(k="H") ~limit:(max 1 height)
               else if k="v" then launch_original_evidence_read state ~mailbox:async_messages ~next:true
               else if k="b" then begin
-                cancel_task_creation_read state;
-                original.tdr_inspection <- Masc_tui_task_creation_read.back_to_creation original.tdr_inspection
+                cancel_task_inspection_read state;
+                set_task_inspection_source original (Masc_tui_original_task_read.back_to_origin (task_inspection_source original))
               end
               else
                 let movement=match k with
@@ -26645,8 +26653,8 @@ and is loaded on demand through keeper_skill.
                   | "home" | "g" -> Some Masc_tui_detail_reading.First
                   | "end" | "G" -> Some Masc_tui_detail_reading.Last
                   | _ -> None in
-                Option.iter (fun movement -> original.tdr_inspection <-
-                  Masc_tui_task_creation_read.move ~count ~height movement source) movement)
+                Option.iter (fun movement -> set_task_inspection_source original
+                  (Masc_tui_original_task_read.move ~count ~height movement source)) movement)
        | Some k when Option.is_some (current_chat_call_reader state) ->
            (match state.chat_call_reader with
             | None -> ()
@@ -28819,6 +28827,12 @@ and is loaded on demand through keeper_skill.
               && state.detail_tab = Detail_identity ->
            Masc_tui_identity_input.refresh_attached state
              ~refresh:(fun ~keeper_name ~provider_ids -> Masc_tui_identity_requests.launch_refresh state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state) ~keeper_name ~provider_ids)
+       | Some "T" when state.view = Approvals && not (modal_owns_keys state)
+           && Option.is_none (text_input_target state ~compact_viewport) ->
+           cancel_task_inspection_read state;
+           if open_ask_task_inspection state then launch_original_task_read state ~mailbox:async_messages
+           else report_action state "system" "The last answered Ask has no confirmed original Task link to inspect";
+           Render_schedule.request render_schedule Render_schedule.Force
        | Some "R" when state.view = Approvals ->
            (match
               Approval_authority.resolve ~presented:!presented_approval

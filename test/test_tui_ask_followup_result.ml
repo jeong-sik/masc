@@ -230,6 +230,160 @@ let test_session_close_and_unstarted_preserve_resources () = with_answer @@ fun 
     (state.workspace_observation_cancellations=[] && state.ask_followup_cancel=None);
   check bool "closed and unstarted reads do not alter original Task resources" true (before=Masc.Workspace.get_tasks_raw config)
 
+module Task_read = Masc_tui_original_task_read
+module Task_decode = Masc.Tui_decode_task_inspection
+let require_inspection = function Some value -> value | None -> fail "original Task inspection did not begin"
+let inspect_source state =
+  let reader=Ui.current_task_inspector state |> require_inspection in
+  Ui.task_inspection_source reader.tci_original
+let observe_actual_answer state base ask resolution =
+  let request,submission=begin_read state in
+  let result=actual_read base ask resolution ~before_source:(fun _ -> ()) ~parts:(ref [])
+    (fun (event,_) -> match Ui.take_ask_followup_event state request submission event with
+      | Some (Ok _) -> () | Some (Error detail) -> fail detail | None -> fail "actual answer source refused") in
+  check bool "actual canonical follow-up completed" true
+    (Ui.finish_ask_followup_read state request submission result=Some (Ok ()))
+let launch_task_observation state results request deliver read =
+  let envelope=Protocol.capture_workspace_message state in
+  Results.launch ~key:request.Ui.tcr_job ~observation:true state ~results
+    ~boundary_error:(fun detail -> Task_read.Read_failed detail)
+    ~deliver:(fun result -> envelope (deliver result)) read
+let rec next_inspection_result results = match Results.take_ready results with
+  | [ready] -> ready.Results.message
+  | [] -> Eio.Fiber.yield ();next_inspection_result results
+  | _ -> fail "one original inspection produced multiple results"
+let admit_task_observation state = function
+  | Protocol.Workspace_scoped (authority,reading,message) ->
+    Protocol.workspace_message_admitted state ~authority ~reading message &&
+    (match message with
+     | Original_task_read_done (request,result) -> Ui.complete_original_task_inspection state request result
+     | Original_task_history_done (request,result) -> Ui.complete_original_history_inspection state request result
+     | Original_task_evidence_done (request,result) -> Ui.complete_original_evidence_inspection state request result
+     | _ -> fail "original Task inspection changed message kind")
+  | _ -> fail "Task inspection lost its captured read authority"
+let actual_task_read config request =
+  let ticket=match request.Ui.tcr_query with Ui.Original_task_query ticket -> ticket
+    | Creation_query _ | Original_history_query _ | Original_evidence_query _ -> fail "Task query changed kind" in
+  let task_id=Task_read.task_request_key ticket in
+  let status,json=Server_dashboard_task_detail.inspect ~config ~task_id:(Some task_id)
+    |> Server_dashboard_task_detail.inspection_response in
+  match status with
+  | `OK -> Task_decode.observation ~task_id json
+    |> Result.map_error (fun detail -> Task_read.Invalid_reply detail)
+    |> fun result -> Result.bind result (Task_read.prepare_task ~task_id)
+  | `Bad_request | `Not_found | `Service_unavailable -> Error (Task_read.Read_failed (Yojson.Safe.to_string json))
+let actual_history_read config request =
+  let ticket=match request.Ui.tcr_query with Ui.Original_history_query ticket -> ticket
+    | Creation_query _ | Original_task_query _ | Original_evidence_query _ -> fail "history query changed kind" in
+  let page=Task_read.history_page_request ticket in
+  let status,json=Server_dashboard_task_history_page.read ~config ~task_id:(Some page.hr_task_id)
+    ~limit:(Some (string_of_int page.hr_limit)) ~cursor:page.hr_cursor in
+  match status with
+  | `OK -> Task_decode.history_page ~request:page json
+    |> Result.map_error (fun detail -> Task_read.Invalid_reply detail) |> Result.map Task_read.prepare_history
+  | `Bad_request | `Conflict | `Service_unavailable -> Error (Task_read.Read_failed (Yojson.Safe.to_string json))
+let test_answered_ask_opens_actual_task_history_evidence () = with_answer @@ fun base config ask resolution task_id state ->
+  Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
+  observe_actual_answer state base ask resolution;
+  let transition action notes = match Masc.Workspace.transition_r config ~agent_name:"proof-worker" ~task_id ~action ~notes
+    ~prepare_verification_request:(fun ~task ~assignee ~verification_id ~claim ->
+      Masc.Verification_protocol.create_submit_request ~config ~task ~assignee ~verification_id ~claim) () with
+    | Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error) in
+  transition Masc_domain.Claim "claim original answered Task";
+  transition Masc_domain.Start "start original answered Task";
+  transition Masc_domain.Submit_for_verification "captured proof from original answered Task";
+  let verification_id=match (List.find (fun (task : Masc_domain.task) -> task.id=task_id)
+      (Masc.Workspace.get_tasks_raw config)).task_status with
+    | AwaitingVerification value -> value.verification_id
+    | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ -> fail "actual Task did not submit" in
+  (match Masc.Workspace.commit_verdict_r config ~authority:(Masc_domain.Human_operator {operator_id="ask-task-reader"})
+    ~task_id ~verification_id ~verdict:Masc_domain.Verdict_approved ~notes:"actual private fixture verdict" () with
+   | Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error));
+  let before=Masc.Workspace.get_tasks_raw config in
+  state.msg_target_keeper_name <- Some "unrelated-composer-keeper";
+  state.tasks_error <- Some "global listing unavailable";
+  Masc_tui_message_input.insert state.msg_input "unrelated draft remains";
+  check bool "canonical Ask opens independently of global rows or composer target" true (Ui.open_ask_task_inspection state);
+  check bool "Ask has no creation lookup to manufacture or send" true
+    (Task_read.observation (inspect_source state)=None && Ui.begin_task_creation_inspection state=None);
+  let results=Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  let request=Ui.begin_original_task_inspection state |> require_inspection in
+  launch_task_observation state results request (fun result -> Protocol.Original_task_read_done (request,result))
+    (fun () -> actual_task_read config request);
+  check bool "actual original Task observation admitted" true (admit_task_observation state (next_inspection_result results));
+  (match Task_read.task_observation (inspect_source state) with
+   | Masc_tui_fetched.Ready (Task_decode.In_backlog detail) ->
+     check string "exact canonical Ask Task" task_id detail.task.id;
+     (match detail.task.task_status with Done _ -> () | _ -> fail "actual Task verdict not preserved")
+   | _ -> fail "original Task disappeared behind unrelated listing failure");
+  let rec history earlier =
+    let request=Ui.begin_original_history_inspection state ~earlier ~limit:1 |> require_inspection in
+    launch_task_observation state results request (fun result -> Protocol.Original_task_history_done (request,result))
+      (fun () -> actual_history_read config request);
+    check bool "actual original history page admitted" true (admit_task_observation state (next_inspection_result results));
+    match Task_read.history_observation (inspect_source state) with
+    | Masc_tui_fetched.Ready value when Option.is_some value.history_next_cursor -> history true
+    | Ready value -> value | _ -> fail "actual stored Task history unavailable" in
+  let observed=history false in
+  check bool "original stored history retains submitted verification" true (List.mem verification_id observed.history_verifications);
+  let request=Ui.begin_original_evidence_inspection state ~next:true |> require_inspection in
+  let ticket=match request.tcr_query with Ui.Original_evidence_query ticket -> ticket
+    | Creation_query _ | Original_task_query _ | Original_history_query _ -> fail "evidence query changed kind" in
+  check string "pinned original evidence Task" task_id (Task_read.evidence_task_id ticket);
+  check string "pinned original verification" verification_id (Task_read.evidence_verification_id ticket);
+  launch_task_observation state results request (fun result -> Protocol.Original_task_evidence_done (request,result)) (fun () ->
+    Server_routes_http_routes_verification.For_testing.operator_evidence_json ~config ~operator_id:"ask-task-reader"
+      ~task_id ~verification_id |> Result.map_error (fun detail -> Task_read.Read_failed detail)
+    |> fun result -> Result.bind result (fun json ->
+      Masc.Tui_decode.decode_verification_evidence_for_request ~task_id ~verification_id (`Assoc ["ok",`Bool true;"result",json])
+      |> Result.map_error (fun detail -> Task_read.Invalid_reply detail)
+      |> fun result -> Result.bind result (Task_read.prepare_evidence ~task_id ~verification_id)));
+  check bool "actual original submitted evidence admitted" true (admit_task_observation state (next_inspection_result results));
+  (match Task_read.evidence_observation (inspect_source state) with
+   | Masc_tui_fetched.Ready (Masc.Tui_decode.Evidence_items items) -> check bool "actual captured proof retained" true (items<>[])
+   | _ -> fail "actual submitted proof unavailable");
+  check bool "reads leave actual Task and all completion resources unchanged" true (before=Masc.Workspace.get_tasks_raw config);
+  check bool "no replay, creation, handoff or global listing substitution" true
+    (state.task_dispatch_requests=[] && state.pending_task_followups=[] && state.tasks=[] && Ui.task_domain_values state=[]);
+  check string "unrelated operator input survives all observations" "unrelated draft remains" (Masc_tui_message_input.contents state.msg_input)
+let test_answered_ask_inspection_reopen_and_withdraw () = with_answer @@ fun base config ask resolution task_id state ->
+  Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
+  observe_actual_answer state base ask resolution;
+  check bool "original Ask opens" true (Ui.open_ask_task_inspection state);
+  let results=Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  let request=Ui.begin_original_task_inspection state |> require_inspection in
+  launch_task_observation state results request (fun result -> Protocol.Original_task_read_done (request,result)) (fun () -> actual_task_read config request);
+  let late=next_inspection_result results in
+  Ui.close_task_inspection state ~reason:Task_read.Interrupted;
+  check bool "same canonical Ask reopens" true (Ui.open_ask_task_inspection state);
+  let fresh=Ui.begin_original_task_inspection state |> require_inspection in
+  check bool "old visit cannot finish reopened original Task" false (admit_task_observation state late);
+  launch_task_observation state results fresh (fun result -> Protocol.Original_task_read_done (fresh,result)) (fun () -> actual_task_read config fresh);
+  check bool "fresh exact Task observation applies" true (admit_task_observation state (next_inspection_result results));
+  let retry=Ui.begin_original_task_inspection state |> require_inspection in
+  check bool "read failure settles this original source" true
+    (Ui.complete_original_task_inspection state retry (Error (Task_read.Read_failed "original source disconnected")));
+  (match Task_read.task_observation (inspect_source state) with
+   | Masc_tui_fetched.Stale (Task_decode.In_backlog detail,Task_read.Read_failed _) -> check string "failure preserves original Task" task_id detail.task.id
+   | _ -> fail "failure erased previous Task observation");
+  let pending=Ui.begin_original_task_inspection state |> require_inspection in
+  launch_task_observation state results pending (fun result -> Protocol.Original_task_read_done (pending,result)) (fun () -> actual_task_read config pending);
+  let old_scope=next_inspection_result results in
+  Ui.suspend_workspace_readings state;
+  check bool "original Ask can reopen under a fresh read scope" true (Ui.open_ask_task_inspection state);
+  let pending=Ui.begin_original_task_inspection state |> require_inspection in
+  check bool "withdrawn read scope cannot finish the reopened source" false (admit_task_observation state old_scope);
+  launch_task_observation state results pending (fun result -> Protocol.Original_task_read_done (pending,result)) (fun () -> actual_task_read config pending);
+  let withdrawn=next_inspection_result results in
+  let before=Masc.Workspace.get_tasks_raw config in
+  Ui.begin_ask_submission_state state;
+  check bool "new answer owner retires original inspector" true (Ui.current_task_inspector state=None && state.ask_task_inspection=None);
+  check bool "old actual Task result cannot become a new question's result" false (admit_task_observation state withdrawn);
+  check bool "no canonical Task authority is borrowed after withdrawal" false (Ui.open_ask_task_inspection state);
+  check bool "withdrawal preserves actual resources" true (before=Masc.Workspace.get_tasks_raw config)
+
 let () = Eio_main.run @@ fun env ->
   let original=Eio_context.snapshot_state () in
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -237,4 +391,6 @@ let () = Eio_main.run @@ fun env ->
     run "TUI retained actual Ask follow-up results" ["protocol/resources",[
       test_case "actual partial and terminal observations survive a full shared queue" `Quick test_full_queue_keeps_partial_and_terminal;
       test_case "actual stream failure and old visits preserve original Task evidence" `Quick test_failure_and_reopened_scope_keep_original_facts;
-      test_case "session close and missing turn switch preserve actual resources" `Quick test_session_close_and_unstarted_preserve_resources]])
+      test_case "session close and missing turn switch preserve actual resources" `Quick test_session_close_and_unstarted_preserve_resources;
+      test_case "canonical answered Ask opens actual Task history and submitted evidence" `Quick test_answered_ask_opens_actual_task_history_evidence;
+      test_case "answered Ask inspection preserves failed observations and rejects old visits" `Quick test_answered_ask_inspection_reopen_and_withdraw]])

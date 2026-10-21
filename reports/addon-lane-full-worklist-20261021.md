@@ -1,8 +1,25 @@
-# Lane Addon 전체 작업 목록 · 2026-10-21
+# 전체 후속 작업 목록 · 2026-10-21
+
+총 **60개**: 기존 Addon/Lane·Browser 작업 **54개(A–H)** + 이전 대화의 공통 후속 **6개(X)**.
+기존 A01–H06 식별자는 유지한다. 이 수는 완료 건수나 완료율이 아니라 추적할 작업 범위다.
 
 범위: 기존 Lane의 Addon 분리, 공통 연결 구조, Browser 기능, 에이전트 도구·Skill 접근,
-Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 무관한 기능 개발이나 저장소 전체 PR 정리는 포함하지 않는다.
-아래 54개는 남은 구현·설계·검증·통합 작업이다. 이미 구현된 기능은 다시 만드는 대신 남은 적용·검증 범위를 적었다.
+Dashboard·TUI 관측, 실제 사용·복구·설치 검증과 이전 대화의 Pele·빌드·성능·Ollama·PR 운영 후속.
+이미 구현된 기능은 다시 만드는 대신 남은 적용·검증 범위를 적었다. X의 저장소 전체 후속과
+A의 이번 Addon 변경 닫기는 대상 범위가 다르며, 같은 수정이나 실측은 두 번 완료로 집계하지 않는다.
+
+| 영역 | ID | 작업 수 |
+| --- | --- | ---: |
+| 현재 Addon 변경·검증·통합 | A01–A06 | 6 |
+| 공통 연결·소유권·수명 | B01–B06 | 6 |
+| Plugin·Deferred Tools·Skill·Hook | C01–C06 | 6 |
+| 모델 route·Exact Output | D01–D06 | 6 |
+| 기존 Lane·패키지별 추출·실사용 | E01–E12 | 12 |
+| Browser 전체 행동군·engine 선택 | F01–F06 | 6 |
+| Dashboard·TUI 관측·조작 | G01–G06 | 6 |
+| 실제 앱·실패 복구·연속 사용·설치 | H01–H06 | 6 |
+| Pele·빌드·성능·Ollama·PR 운영 | X01–X06 | 6 |
+| **합계** | | **60** |
 
 ## 현재 확보한 기준점
 
@@ -15,12 +32,18 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
   이전 관측 보존·새 incarnation·새 입력 결과를 확인했다. 입력은 synthetic phrase snapshot이다.
 - Dashboard 8개 suite 145건 및 TypeScript 검사 통과. OCaml은 parser 검사만 수행했다.
   두 PR의 독립 source/evidence 검토는 PASS이며, 정식 GitHub 승인·병합·설치와 구분한다.
-- 위 두 PR과 A03 수정 #44721, 경계·작업표 #44726은 Native Stack #44710의 4개 층이며, 2026-10-21 후속 조회에서 모두 Ready/open/unmerged였다. CI 개선 #44727·changelog #44731은 별도 Native Stack #44732다.
+- 위 두 PR과 A03 수정 #44721, 경계·작업표 #44726은 Native Stack #44710의 4개 층이었다.
+  이번 REST 조회에서 맨 위 #44726의 merged=true와 병합 커밋
+  `959eda39beb54bd1111e3d71aa2520822545bd82`를 확인했다. 병합은 설치·실제 TUI 관측의 증거가 아니다.
+  CI 개선 #44727·changelog #44731은 별도 Native Stack #44732로 아직 open/unmerged다.
+  native 오류 수리 #44735도 open/unmerged이며 현재 head는
+  `90046fc5301bbeff108144523d4f6d3f85eef799`다. 이 PR은 REST stack=null이다.
 - Browser Addon의 기존 6개 요구사항은 구현 및 범위를 고정한 분리 실측을 마쳤다.
   Deferred Tools·Hook 선택·host Exact Output도 그 범위에 포함된다.
   기존 완료 영수증 이후 Native Stack #44168이 67층으로 늘었으며,
   현재 마지막 PR은 [#44702](https://github.com/jeong-sik/masc/pull/44702),
-  head `76b741f8816f074249baef3166ca152d9c9d2c13`이다.
+  이번 REST 조회의 head는 `a00a2999099c5805d0e863d3b99263146ebf2cae`다.
+  아래 실행 영수증의 `76b741f` 이후 restack된 소스이므로 그 실행을 새 head 실행으로 취급하지 않는다.
   기존 완료 기록의 #44653은 현재 64번째 층이다. 최신 추가 3층과 전체 통합을 별도로 재판정해야 한다.
 - MSX/DOS는 이미 별도 worker Addon이다. Fusion 패키지도 존재한다.
   VST Phrase는 현재 관측 패키지이며 실제 VST/audio 실행 소유와 구분한다.
@@ -35,12 +58,12 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | exact `7f9e34b` native run `39555509454` 실행 중; syntax job PASS, native artifact 미완료 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
+| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 기존 `39555509454`는 native 타입 오류로 실패. 수리 #44735; 후속 `39559147491` completed/success. feature source `e693bd2`의 두 suite 25건 PASS, artifact `12327745143` 다운로드·두 binary SHA256 확인; 현재 #44735 `90046fc`와의 결속·설치·화면은 별도 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
 | A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 미실행 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
-| A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 `7f9e34b` 소스 수정·독립 검토 2건 PASS; parser PASS, 새 TUI 미실행 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
-| A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | #44707 현재 head 정식 승인 확인; #44721 재리뷰 접수, 맥락 queued | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
-| A05 | Browser 스택의 후속 3개 층과 기존 증거 영향 검토 | 세 층의 전체 delta 직독; exact `76b741f` run `39555413943` 두 suite 14건 PASS, 독립 source delta 검토 PASS; 실제 앱·전체 스택 검증 별도 | #44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증 |
-| A06 | 두 스택의 전체 통합 준비 | open/unmerged | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
+| A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 소스 수정은 관측 스택과 함께 병합. 새 TUI 실제 표시·동작 검증은 미완료 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
+| A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | 병합된 관측 스택의 이전 요청과 신규 #44735를 구분. 신규 현재 head의 실제 판정·미해결 리뷰 확인 필요; 옛 queued는 완료 근거가 아님 | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
+| A05 | Browser 스택의 후속 3개 층과 기존 증거 영향 검토 | 이전 exact `76b741f`의 두 suite 14건 PASS 기록. 현재 top은 restack된 `a00a299`; 새 head/base의 변경 영향 검토와 실제 앱 검증 필요 | #44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증 |
+| A06 | 남은 Browser·CI 스택과 TUI 수리의 통합 준비 | 관측 #44710은 병합. Browser #44168(67층), CI #44732(2층), 별도 #44735는 open/unmerged | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
 
 빌더 요청: `kmsg-2ada1cdc54884c58aa6736a80b598868`는 기존 `566b98b` 대상이다. 후속 exact 후보 `7f9e34b`는 native run `39555509454`로 요청했다. 중복 시작을 피하도록 빌더에게 대체 안내 `kmsg-1974c332ed1abfed8b4bde992b686e8f`를 보냈으며 안내 접수는 원래 작업 취소·실행 여부의 증거가 아니다.
 코드 리뷰: `kmsg-f7fecd527b3870306df62a4079c30ad8` 완료 및 #44707 review `5595612747` APPROVED 직독. head `566b98b5d1645d6312d518bf2810f3e5e0626586`, reviewed base `b95d927e30c6718e0fe656d3019c6cf39766c02c`, diff `ff95fe2ecb2658cee6da5b251d2b119c825270116c978246de762b5374e336c2`. 한 층의 소스 승인이다. #44721 후속 요청 `kmsg-dc966b86727baccd78eaa31700ef384e`는 queued 접수다.
@@ -93,7 +116,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 미구현, runner seam 확인 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
+| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | worker [#44749](https://github.com/jeong-sik/masc/pull/44749)의 source `3487c707`에서 Python 13건 PASS, 독립 source 재검토 2건 PASS. 공통 host wake [#44750](https://github.com/jeong-sik/masc/pull/44750)의 source `50e9bcd6` 구현·구문 검사 PASS. 작업표 [#44751](https://github.com/jeong-sik/masc/pull/44751), Native Stack #44752. 실제 host contract 검사 추가·미실행; production bootstrap·provider·정산 미연결/미검증 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
 | E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 설계 필요 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
@@ -147,16 +170,41 @@ Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현�
 | H05 | 반응 속도·자원·동시 작업 영향 측정 | 후속 실측 | 동일 작업 조건의 전후 latency·queue·CPU·memory 및 TUI/Dashboard 반응을 측정; 다른 Keeper 영향 확인 |
 | H06 | 사용 안내·최종 통합·설치 후 확인 | PR 단계 | manifest/예제/운영·개발 가이드 갱신, 승인된 스택 통합, 선택된 실제 설치본의 identity 및 UI 재확인; Release/Tag라면 해당 전체 검증 별도 수행 |
 
+## X. 이전 대화의 공통 후속 — 6개
+
+이 영역의 오래된 보고서는 당시 기록이다. 이번 목록 작성에서 live 설정·현재 main 빌드·전체 PR을
+새로 전수 검증하지 않았다. 현재 확인하지 않은 증상을 진행 중인 확정 장애로 표시하지 않는다.
+
+| ID | 남은 작업 | 현재 확인 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| X01 | Pele 기반 TUI diagram/chart 도입 범위와 실제 사용 완성 | 현재 로컬 main 소스에 `masc_tui_pele.ml`, `Ctrl-O` preview와 설치 안내가 있음. 최초 도입을 다시 하는 작업은 아님 | 설치본의 renderer/helper identity, 실제 Mermaid 입력→이미지 표시, terminal 폭·theme·오류 처리, 지원 diagram/chart 종류와 미지원 경계를 확인. 속도·bundle 수치는 실제 동일 조건 측정 후 기록 |
+| X02 | 현재 main의 빌드 고장 및 후속 인터페이스·의존성 오류 수리 | 과거 컴파일 오류 수리 보고서 존재. A01은 이번 Addon TUI 후보에 한정; 현재 main 전체 빌드 성공은 이번에 미확인 | 최신 main 최소 빌드의 실제 실패 로그를 기준으로 수리하고 직접 소비자를 확인. source/parser, 최소 실행 파일 빌드, Release 전체 검증을 구분하고 설치본에서도 대상 명령 시작 확인 |
+| X03 | TUI·Dashboard 공통 로딩·채팅·새로고침 지연 개선 | 이전 관련 조사 있음. 새 후보의 설치·동일 조건 실측은 별도 | 같은 서버에서 HTTP refresh·observer SSE·Dashboard 경로, queue와 처리 시간을 함께 측정하고 병목별 전후 결과를 비교. UI 한쪽의 성공을 다른 쪽의 복구로 간주하지 않음 |
+| X04 | Ollama Cloud 동시성 4 및 foreground/background 공정성의 실제 효과 확인 | 10/19 보고서에 2→4 적용과 queue 지배 지연 기록. fairness 구현 PR 기록은 있으나 이번 live 설정·설치 여부는 미확인 | 현재 설정·실행본을 읽고 Keeper의 대기/첫 응답/도구 후속/최종 응답과 Librarian 진행을 함께 측정. tool-only 응답과 진짜 빈 completion, provider 오류를 구분. 동시성 상향만으로 복구 완료 판정하지 않음 |
+| X05 | pr-updater·assignee·reviewer 요청의 실제 처리 상태 관측과 복구 | 사용자가 반응 지연을 제보. 이번에는 worker별 live 상태 미조사 | 원래 요청 ID로 queued→실행→응답/실패를 추적하고 미배달·정지·권한·용량 대기를 구분. 처리 주체·다음 조치·응답이 Dashboard/TUI에서 보이고 중복 재요청 없이 회복 |
+| X06 | 저장소 전체 PR의 리뷰 대응·충돌·Ready 재점검 | 과거 전체 sweep 보고서 다수. 이번 REST 확인은 Addon 관련 지정 PR에 한정 | 현재 open PR 전수 목록과 REST stack을 읽고 최신 head/base/diff, 미해결 리뷰·충돌·draft 상태를 정리. 필요한 대응과 독립 재리뷰를 수행하고 Native Stack 전체 단위로 통합 가능 상태 기록; 병합·배포는 별도 결과로 기록 |
+
+참조(로컬 전용·Git 미추적 자료이며 이 PR의 공개 artifact가 아님):
+
+- 과거 빌드·TUI 대응: `/Users/dancer/me/workspace/yousleepwhen/masc/reports/tui-build-ux-response-20261019.md`
+- Ollama 동시성 변경: `/Users/dancer/me/workspace/yousleepwhen/masc/reports/ollama-concurrency-4-20261019.md`
+- DeepSeek 지연 분석: `/Users/dancer/me/workspace/yousleepwhen/masc/reports/ollama-deepseek-contention-analysis-20261019.md`
+- Fairness 구현·검증 한계: `/Users/dancer/me/workspace/yousleepwhen/masc/reports/ollama-admission-fairness-implementation-20261019.md`
+
+외부 검토에서 읽을 수 없는 로컬 기록을 공개 실행 증거로 취급하지 않는다. X 항목을 실제로 수행할 때
+현재 상태를 다시 확인하고 필요한 근거를 비밀정보가 없는 공개 PR 자료로 연결한다.
+
 ## 권장 순서와 완료 정의
 
-1. A01–A06으로 현재 관측 변경과 Browser 추가 범위를 닫는다. 검사 대기 중에는 독립 작업을 진행한다.
+1. X02에서 실제 확인된 main 빌드 장애가 있으면 먼저 좁혀 수리한다. A01–A06으로 현재 관측 변경의 실행·Browser 추가 범위·통합을 닫는다. 검사 대기 중에는 독립 작업을 진행한다.
 2. B01–B06에서 host authority와 실제 실행의 경계를 확정하고, C/D의 기존 공통 경로를 재사용한다.
 3. 첫 실제 추출은 E01 Candle Appraiser를 기준 사례로 삼는다. D02에서 기존 요청별 schema grant를
    재사용할 범위와 Candle의 host decode·실행 추적 계약을 먼저 확정한다. 필요한 Browser 공통 기반의
    통합 또는 명시적인 스택 의존성을 기록하고 새 중복 broker를 만들지 않는다.
 4. Candle에서 On/Off/재연결/새 판단/중복 없는 정산을 G/H 화면·증거까지 완주한 뒤 E02 Curator로 확장한다.
 5. E03–E12는 의존성과 효과 소유권에 따라 별도 작은 스택으로 진행한다. Browser F와 공통 G는 독립적으로 병행 가능하다.
-6. 각 대상을 `구현 → 독립 리뷰 → 최소 실행 → 실제 화면/결과 → 통합 → 설치본 확인`으로 나누어 기록한다.
+6. X01/X03–X06은 별도 변경 단위로 진행한다. 이 목록 작성만으로 live 설정 변경, 서버 교체, browser profile 재생성, 전체 PR 병합을 실행한 것으로 보지 않는다.
+7. 각 대상을 `구현 → 독립 리뷰 → 최소 실행 → 실제 화면/결과 → 통합 → 설치본 확인`으로 나누어 기록한다.
 
 **대상별 완료:** 설정 저장, 실제 적용, worker 준비, 새 작업 성공, 원래 결과 보존,
 Dashboard·TUI의 원래 근거 표시를 각각 확인한다. Optional은 Off 후 정리와 On 후 새 incarnation의
@@ -166,10 +214,10 @@ Dashboard·TUI의 원래 근거 표시를 각각 확인한다. Optional은 Off �
 
 ## 2026-10-21 구현 후속
 
-- A03: #44721, head `7f9e34bab08484124bb18a477ecb5e5ba0fb5769`, base `cc4529a905bb66db977785ee61894bea00d16ac1`. retained/unknown worker의 실행 키 안내에 handlers와 같은 `can_observe`를 사용한다. 이력·정리·원래 receipt 조회를 보존했다. OCaml parser와 diff 검사 PASS; 독립 source/response 리뷰 PASS. 새 실행 바이너리·화면 증거는 아직 없다.
-- B01/D02 경계 문서: [lane-addon-extraction-boundaries.md](../docs/design/lane-addon-extraction-boundaries.md). 현재 소스와 unmerged Browser 의존성, 옮길 실행/host authority, Candle의 단계별 요청 identity 및 typed 불확실 결과의 빈 경계를 명시했다. 문서가 실제 추출 완료를 뜻하지 않는다.
+- A03: #44721, head `7f9e34bab08484124bb18a477ecb5e5ba0fb5769`, base `cc4529a905bb66db977785ee61894bea00d16ac1`. retained/unknown worker의 실행 키 안내에 handlers와 같은 `can_observe`를 사용한다. 이력·정리·원래 receipt 조회를 보존했다. OCaml parser와 diff 검사 PASS; 독립 source/response 리뷰 PASS. 후속 native artifact 게시를 확인했지만 새 TUI 실제 화면 증거는 아직 없다.
+- B01/D02 경계 문서: [lane-addon-extraction-boundaries.md](https://github.com/jeong-sik/masc/blob/959eda39beb54bd1111e3d71aa2520822545bd82/docs/design/lane-addon-extraction-boundaries.md). 현재 소스와 unmerged Browser 의존성, 옮길 실행/host authority, Candle의 단계별 요청 identity 및 typed 불확실 결과의 빈 경계를 명시했다. 문서가 실제 추출 완료를 뜻하지 않는다.
 - #44707 코드 리뷰의 추가 P3는 G01에 보존한다. 단일 PR 승인을 전체 Native Stack 승인으로 확대하지 않는다.
-- A01: [native run 39555509454](https://github.com/jeong-sik/masc/actions/runs/39555509454), source `7f9e34bab08484124bb18a477ecb5e5ba0fb5769`, workflow `cccb1fc4808435ed06ece3e586095f37d8dd449c`, scenario `addon-lifecycle`. 별도 CI PR #44727의 두 독립 source 검토는 최종 head PASS다. 두 기존 suite와 matching server/TUI/key generator를 선택했으며 실행 조회에서 source/config syntax job 성공, native job `119074243862` 실행 중을 확인했다. 완료 artifact는 아직 없다. 기존 TUI suite는 presentation assertion도 포함하는 mixed suite다. artifact 생성은 실제 화면 검증과 구분한다.
+- A01: [native run 39555509454](https://github.com/jeong-sik/masc/actions/runs/39555509454), source `7f9e34bab08484124bb18a477ecb5e5ba0fb5769`, workflow `cccb1fc4808435ed06ece3e586095f37d8dd449c`, scenario `addon-lifecycle`. 별도 CI PR #44727의 두 독립 source 검토는 최종 head PASS다. 두 기존 suite와 matching server/TUI/key generator를 선택했으며 실행 조회에서 source/config syntax job 성공, native job `119074243862`는 이후 worker-history 함수의 record 타입 추론 오류로 실패했다. 당시 남은 로그 artifact는 실행 바이너리가 아니다. 후속 수리와 재검사 상태는 위 A01 및 아래 정정에 기록한다. 기존 TUI suite는 presentation assertion도 포함하는 mixed suite다. artifact 생성은 실제 화면 검증과 구분한다.
 - A05: #44695 전체 delta는 built-in/Addon action reply 정책 공유, #44698은 session/navigation 정책까지 같은 `Browser_lane.reply_timeout_sec`로 연결한다. #44702는 download의 remote claim 보유자를 무한히 기다리지 않고 local preparation만 join하며, 남은 claim이 있으면 파일·grant 상태를 보존한 sticky cleanup 실패를 남긴다. 입력 행동군이나 Safari 지원을 추가한 변경은 아니다.
 - A05 실행 요청: [run 39555413943](https://github.com/jeong-sik/masc/actions/runs/39555413943), source `76b741f8816f074249baef3166ca152d9c9d2c13`, `minimal=true`, `eio_backend=posix`, suites `test_browser_addon_reply_policy,test_browser_addon_downloads`. 기존 28-case 영수증을 최신 변경의 성공으로 재사용하지 않고 두 영향 경로만 새로 선택했다. 완료된 job `119073936227` 로그를 직독해 exact source와 `MINIMAL_CHECK=true`, 두 selected suite, `TARGET_EIO_BACKEND=posix`를 확인했다. reply policy 1건·downloads 13건, 총 14건 PASS다. 실제 브라우저·provider·전체 회귀 실행은 이 두 suite의 범위가 아니다.
 
@@ -183,4 +231,50 @@ Dashboard·TUI의 원래 근거 표시를 각각 확인한다. Optional은 Off �
 - Lane 의무: `lib/runtime/standalone_lane.mli`와 `.ml`.
 - MSX/DOS의 소스·image 검증과 실사용 한계: `docs/guides/machine-addon-state.md`.
 
-PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값이다. 실행을 재개할 때 다시 읽는다.
+## 이번 목록 갱신의 확인 범위
+
+- PR REST 직접 조회: #44726 merged=true, #44702/#44727/#44731/#44735 open/unmerged.
+  #44735의 현재 head는 `90046fc5301bbeff108144523d4f6d3f85eef799`이며, 로컬 관측 worktree의
+  `e693bd2f80ba744bdfac84ef306430127873e234`와 같지 않다. 이전 head의 검토·실행 요청을 자동 이월하지 않는다.
+- A01 후속 run `39559147491`은 작업 단위를 마친 후 조회에서 completed/success였다.
+  native job `119085954956`와 syntax job `119085955248` 모두 success,
+  artifact `12327745143` / `tui-macos-arm64-e693bd2f80ba744bdfac84ef306430127873e234-39559147491`
+  다운로드 후 receipt와 두 binary SHA256을 대조했다. `test_tui_lane_addons` 20건과
+  `test_lane_addon_application` 5건 PASS 로그를 직접 확인했다. receipt의 installed/runtime 및 visible UI 검증은 false다. workflow head `cccb1fc4808435ed06ece3e586095f37d8dd449c`와
+  feature source `e693bd2f80ba744bdfac84ef306430127873e234`를 구분한다.
+  현재 #44735 `90046fc`에서 실행한 것으로 확대하지 않는다.
+- E01 worker head `3487c7070dfd41094b98cdfffad8752172f764e7` / base
+  `a00a2999099c5805d0e863d3b99263146ebf2cae`: 영속 요청·원래 결과와 unknown terminal,
+  schema 지원 subset, missing/replaced directory, 최초 parent fsync, 깊은 JSON 오류 경계를 보완했다.
+  Python 13건 PASS와 독립 source 재검토 PASS. 이는 scripted host 결과를 이용한 subprocess/재시작 범위다.
+- 공통 host-cycle wake head `50e9bcd690fc3dd35e5c715db9b77fa904fa222b`: completed exported
+  worker reply 후 관측과 host 요청 처리를 깨운다. host refusal·transport unknown·취소와 구분한다.
+  성공/worker-error 두 회귀를 추가했고 parser PASS. 실제 OCaml suite 실행은 아직 미완료다.
+- 새 `test_candle_appraiser_contract`는 실제 manifest·worker MCP descriptor·원래 응답을
+  host의 Hook/Exact validator에 연결하는 검사다. 구문 검사는 PASS, 실제 실행 결과는 아직 없다.
+- Candle 스택의 현재 목적지는 Browser upstream branch
+  `fix/browser-download-abandon-grants-1021`이다. 명시적 cross-stack 의존성이며 main 통합으로 부르지 않는다.
+- X01은 현재 로컬 main `b95d927e30c6718e0fe656d3019c6cf39766c02c`의 source/guide 확인이다.
+  최신 remote main·설치 binary·화면의 동작을 확인한 것은 아니다.
+- 오래된 진행 로그·요청 ID는 시간순 기록으로 보존한다. 현재 상태는 각 표의 최신 행과 이 절을 따른다.
+  전체 60개는 ID가 유일하며 A–H 54개와 X 6개를 합한 수다.
+
+PR head, 스택 크기, 실행·리뷰·설정 상태는 달라질 수 있다. 실제 작업을 시작하거나 완료 판정을 내릴 때 다시 읽는다.
+
+
+## 다음 개발 단위 — Candle production 연결
+
+1. 실제 host contract와 host cycle 두 suite의 최소 실행 결과를 확보하고 실패하면 해당 소비자를 수리한다.
+2. Relation 요청에 원래 task identity를 연결하되 모델 evidence에는 추가하지 않는다.
+3. payout identity·stage·task·captured input/schema/prompt에 결속된 intent를 기존 export owner로 제출한다.
+4. pending·capacity wait·최종 실패·outcome unknown을 구분해 같은 obligation을 유지한다.
+   새 요청 ID를 만들어 불확실한 모델 호출이나 정산을 재실행하지 않는다.
+5. host adapter에 기존 route·trace·완전한 Candle domain decode를 연결하고 bootstrap의 직접 실행 경로를 교체한다.
+6. 원장 authority를 host에 유지한 채 Off→재연결→판단 완료→중복 없는 정산을 실제 provider와 UI에서 확인한다.
+
+이 단계들이 남아 있으므로 E01과 전체 작업 Goal은 완료가 아니다.
+
+
+## [정정: 스택 재배치 시점]
+
+재배치 시점에 확인한 main `c028621762b41108fb42af4c07892583174be273`에는 #44735가 병합되어 있다. Browser Native Stack #44168의 현재 top은 `8d79e51ac947522af7f3d8d4d7fc4fa6461cb0a3`이며, CI Native Stack #44732의 하위 #44727은 `afb4b5f1b380e00cc71d094940aadb6c5427d50a`, 상위 #44731은 `51ffefc85cb3729f562d93e9eae867a1d5180beb`이다. 위의 이전 head·run·승인은 작성 당시의 역사적 범위로 보존하며, 새 Candle head에서 재실행하거나 재승인한 근거로 이월하지 않는다. 이 재배치·정정은 두 스택의 병합이나 설치·실제 동작 확인을 뜻하지 않는다.

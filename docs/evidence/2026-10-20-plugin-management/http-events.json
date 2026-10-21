@@ -1,0 +1,53 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/v1/lane-addons",
+    "input": null
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/lane-addons/observe",
+    "input": {
+      "instance_id": "worker-ego"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/lane-addons",
+    "input": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/lane-addons/package-catalog",
+    "input": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/lane-addons/package-preview",
+    "input": null
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/lane-addons/declaration",
+    "input": {
+      "file_name": "installed-proof.toml",
+      "source_text": "enabled = true\nid = \"installed-proof\"\nrun_id = \"proof-run\"\nmanifest_path = \"/fixture/packages/observation/lane.toml\"\nbinding = { \"path\" = \"/fixture/captured-browser.json\" }\n",
+      "mode": "create"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/lane-addons",
+    "input": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/lane-addons/declaration",
+    "input": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/proof-events",
+    "input": null
+  }
+]

@@ -12,8 +12,8 @@ import { LaneAddonsTimeline, formatLaneTime } from './lane-addons-timeline'
 import { LaneAddonReadings } from './lane-addon-readings'
 import { LaneDeclarationEditor } from './lane-declaration-editor'
 import { LanePackageInstaller } from './lane-package-installer'
+import { LaneInstallationManager } from './lane-installation-manager'
 import { LanePackageActivityPanel } from './lane-package-activity-panel'
-import { LaneAddonConnection } from './lane-addon-connection'
 import { laneDeclarationSessionFor } from '../lib/lane-declaration-sessions'
 import { lanePackageActivityObservationRevision } from '../lib/lane-package-activity-session'
 import { useLaneNavigation, LaneNavigationNotice, clearLaneNavigation } from './lane-navigation'
@@ -464,6 +464,44 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
     </div>`}
     ${error && html`<div aria-label="Lane action failure"><p role="alert" class="text-red-400">${error}</p></div>`}
     ${slice && html`<p role="status">Frozen slice: Refresh updates installation status only. Use Slice to query again, or Clear slice to show the latest snapshot.</p>`}
+    ${snapshot && html`<section class="space-y-2" aria-label="TOML configuration">
+      <h3 class="font-semibold">Installed packages</h3>
+      ${configuration === null
+        ? html`<p>Configuration service has not started.</p>`
+        : html`<p class="break-all">Directory: <code>${configuration.directory}</code></p>
+          <p>Configuration read: ${configuration.complete ? 'complete' : 'incomplete'}</p>
+          ${configuration.issues.map((issue, index) => html`<p key=${index} role="alert" class="text-red-400 break-all">
+            <strong>${issue.source_path}</strong>${issue.id !== null && html` · ${issue.id}`} — ${issue.message}
+            ${isDeclarationFile(configuration.directory, issue.source_path) && html`<button type="button" class=${buttonClass} disabled=${session === null}
+              onClick=${() => editToml(issue.source_path)} aria-label=${`Edit TOML ${issue.source_path}`}>Edit TOML</button>`}
+          </p>`)}
+          <${LaneInstallationManager}
+            key=${JSON.stringify([authority?.workspaceRoot, authority?.epoch, configuration.directory, navigationTarget])}
+            snapshot=${snapshot} editable=${session !== null && authority !== null}
+            readState=${reading ? 'pending' : inventoryError ? 'failed' : 'settled'}
+            onEdit=${editToml}
+            onActivity=${(declaration: NonNullable<LaneAddonSnapshot['configuration']>['declarations'][number]) => {
+              if (session && authority) { releaseTarget(); session.openActivity(declaration.source_path, declaration.id, authority) }
+            }}
+            onObserve=${(instanceId: string) => act(() => observeLaneAddon(instanceId))} />`}
+    </section>`}
+    ${authority === null ? html`<div class="space-y-2">
+      <p role="status">Workspace authority is being verified. Lane reads and actions are unavailable until the workspace is confirmed; your retained TOML drafts are unchanged.</p>
+      <button type="button" class=${buttonClass} disabled=${recoveringAuthority} onClick=${recoverAuthority}>${recoveringAuthority ? 'Checking workspace…' : 'Verify workspace'}</button>
+      ${authorityError && html`<p role="alert">${authorityError} Workspace verification can be retried.</p>`}
+    </div>` : session === null && html`<p role="status">${reading
+      ? 'Reading the current workspace’s TOML configuration before opening retained drafts…'
+      : 'Current workspace TOML configuration is unavailable. Refresh to retry; your retained drafts are unchanged.'}</p>`}
+    ${session !== null && authority !== null && snapshot !== null && html`<${LanePackageActivityPanel}
+      documents=${session} authority=${authority} snapshot=${snapshot} onRefresh=${() => {
+        if (mounted.current && executionWorkspaceAuthority.peek() === authority) void refresh()
+      }} />`}
+    ${session !== null && authority !== null && snapshot !== null && html`<${LanePackageInstaller}
+      key=${JSON.stringify([authority.workspaceRoot, authority.epoch, session.directory])}
+      authority=${authority} documents=${session} snapshot=${snapshot} onSelectionChange=${releaseTarget} />`}
+    <div ref=${declarationFocus} tabIndex=${-1} aria-label="Selected declaration settings">${session !== null && authority !== null && html`<${LaneDeclarationEditor} session=${session} authority=${authority} onSelectionChange=${releaseTarget} onSaved=${() => {
+      if (mounted.current && executionWorkspaceAuthority.peek() === authority) void refresh()
+    }} />`}</div>
     ${snapshot !== null || slice !== null ? html`<${LaneAddonsTimeline} rows=${rows} instances=${snapshot?.instances ?? []} selectedId=${focused?.id}
       onSelect=${(row: { id: string }) => setFocusedRow(row.id)}
       onWindow=${(from: number, to: number) => { setSince(String(from)); setUntil(String(to)) }} />`
@@ -487,50 +525,6 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
       }} disabled=${!snapshot?.instances.some(item => focused.lane_id.startsWith(`${item.instance_id}/`))}>Select this evidence and its instance</button>
       <button type="button" class=${buttonClass} onClick=${() => setFocusedRow(null)}>Close event</button>
     </section>`}
-    ${snapshot && html`<section class="space-y-2" aria-label="TOML configuration">
-      <h3 class="font-semibold">TOML configuration</h3>
-      ${configuration === null
-        ? html`<p>Configuration service has not started.</p>`
-        : html`<p class="break-all">Directory: <code>${configuration.directory}</code></p>
-          <p>Configuration read: ${configuration.complete ? 'complete' : 'incomplete'}</p>
-          ${configuration.issues.map((issue, index) => html`<p key=${index} role="alert" class="text-red-400 break-all">
-            <strong>${issue.source_path}</strong>${issue.id !== null && html` · ${issue.id}`} — ${issue.message}
-            ${isDeclarationFile(configuration.directory, issue.source_path) && html`<button type="button" class=${buttonClass} disabled=${session === null}
-              onClick=${() => editToml(issue.source_path)} aria-label=${`Edit TOML ${issue.source_path}`}>Edit TOML</button>`}
-          </p>`)}
-          <div class="overflow-x-auto"><table class="w-full text-left" aria-label="TOML declarations"><thead><tr>
-            <th>Declaration / file</th><th>Desired revision</th><th>Applied revision / instance</th><th>Configuration status</th>
-          </tr></thead><tbody>${configuration.declarations.map(declaration => html`<tr key=${declaration.id}>
-            <td>${declaration.id}<div class="break-all">${declaration.source_path}</div>
-              <button type="button" class=${buttonClass} disabled=${session === null} onClick=${() => editToml(declaration.source_path)} aria-label=${`Edit TOML ${declaration.source_path}`}>Edit TOML</button>
-              <button type="button" class=${buttonClass} disabled=${session === null || authority === null}
-                onClick=${() => { if (session && authority) { releaseTarget(); session.openActivity(declaration.source_path, declaration.id, authority) } }}
-                aria-label=${`Configure activity for ${declaration.id}`}>On / off</button></td>
-            <td class="break-all">${declaration.desired_revision}</td>
-            <td class="break-all">${declaration.applied_revision ?? 'None'}<div>${declaration.instance_id ?? 'No instance'}</div></td>
-            <td><p>Configured ${declaration.enabled ? 'on' : 'off'}</p>
-              <${LaneAddonConnection} snapshot=${snapshot} installationId=${declaration.id} sourcePath=${declaration.source_path} /></td>
-          </tr>`)}</tbody></table></div>
-          ${configuration.declarations.length === 0 && html`<p>No readable TOML declarations.</p>`}
-          <p>Configuration status tracks installed revisions. Observation status is shown per instance below.</p>`}
-    </section>`}
-    ${authority === null ? html`<div class="space-y-2">
-      <p role="status">Workspace authority is being verified. Lane reads and actions are unavailable until the workspace is confirmed; your retained TOML drafts are unchanged.</p>
-      <button type="button" class=${buttonClass} disabled=${recoveringAuthority} onClick=${recoverAuthority}>${recoveringAuthority ? 'Checking workspace…' : 'Verify workspace'}</button>
-      ${authorityError && html`<p role="alert">${authorityError} Workspace verification can be retried.</p>`}
-    </div>` : session === null && html`<p role="status">${reading
-      ? 'Reading the current workspace’s TOML configuration before opening retained drafts…'
-      : 'Current workspace TOML configuration is unavailable. Refresh to retry; your retained drafts are unchanged.'}</p>`}
-    ${session !== null && authority !== null && snapshot !== null && html`<${LanePackageActivityPanel}
-      documents=${session} authority=${authority} snapshot=${snapshot} onRefresh=${() => {
-        if (mounted.current && executionWorkspaceAuthority.peek() === authority) void refresh()
-      }} />`}
-    ${session !== null && authority !== null && snapshot !== null && html`<${LanePackageInstaller}
-      key=${JSON.stringify([authority.workspaceRoot, authority.epoch, session.directory])}
-      authority=${authority} documents=${session} snapshot=${snapshot} onSelectionChange=${releaseTarget} />`}
-    <div ref=${declarationFocus} tabIndex=${-1} aria-label="Selected declaration settings">${session !== null && authority !== null && html`<${LaneDeclarationEditor} session=${session} authority=${authority} onSelectionChange=${releaseTarget} onSaved=${() => {
-      if (mounted.current && executionWorkspaceAuthority.peek() === authority) void refresh()
-    }} />`}</div>
     <details><summary>Attach a package</summary>
       <form class="flex flex-wrap gap-2 py-2" onSubmit=${(event: Event) => {
         event.preventDefault()

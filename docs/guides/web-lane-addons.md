@@ -1,5 +1,24 @@
 # Web에서 패키지를 고르고 설정하기
 
+Lane Add-ons 상단의 **Installed packages**에서 설치 ID·패키지·Run·파일 경로를
+검색하고, 전체·주의 필요·변경 대기·꺼짐·worker 사용 가능 목록을 고른다.
+설치 폼과 설정 편집기는 관측 이력 위에 있으며 기존 이력·수동 attach worker도
+아래에서 계속 볼 수 있다.
+
+**Requested activity**는 파일이 요청한 On/Off다. **Application / worker status**는
+서버의 적용·정리 판정이며 두 값은 다를 수 있다. Off를 요청해도 정리 실패는
+Needs attention이고, 정리가 확인된 `inactive`만 Configured off로 표시한다.
+적용 판정이 없거나 목록이 불완전하면 미확인으로 남긴다. File and revisions에서는
+원문 revision과 worker 입력의 desired/applied revision을 따로 확인한다.
+
+각 설치의 **Edit TOML**과 **On / off**는 해당 파일의 기존 편집 흐름을 연다.
+**Check observation**은 선언 ID·파일·적용 revision·instance·서버 적용 판정이
+모두 일치하는 live worker에만 연결한다. 이전 worker나 retained 이력으로 대신
+연결하지 않는다. 목록을 새로 읽는 중이거나 실패하면 이전 값은 남지만 이 설치 목록의
+Check observation은 Refresh가 성공할 때까지 사용할 수 없다. 아래 worker 상세 표의
+수동 Observe 진단은 별개다. Worker attached는 관측 결과의 성공이나
+실시간 건강 상태를 뜻하지 않는다.
+
 Monitoring의 Lane Add-ons에서 **Install package**를 연다. Workspace 폴더의
 패키지 제목·revision·설명을 보고 Choose를 누르면 manifest와 image 상태를 다시 읽는다.
 폴더를 열어 더 깊은 위치로 이동하거나 manifest 경로를 직접 입력할 수 있다.

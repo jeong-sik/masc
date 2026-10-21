@@ -349,13 +349,22 @@ let keeper_operations_fields (state : state) ~keeper_name =
        | Some detail ->
            [ "Execution:", Theme.warn () ^ "unavailable · "
              ^ Terminal_text.single_line detail ^ Ansi.reset ]
-       | None -> [ "Execution:", Ansi.dim ^ "loading…" ^ Ansi.reset ])
+       | None ->
+           if state.keeper_lanes_inflight then []
+           else [ "Execution:", Ansi.dim ^ "not observed" ^ Ansi.reset ])
   in
-  match state.lanes, state.lanes_error with
-  | Some _, Some detail ->
-      ("Execution:", Theme.warn () ^ "stale · refresh failed: "
-        ^ Terminal_text.single_line detail ^ Ansi.reset) :: fields
-  | Some _, None | None, _ -> fields
+  let fields = match state.lanes, state.lanes_error with
+    | Some _, Some detail ->
+        ("Execution:", Theme.warn () ^ "stale · refresh failed: "
+          ^ Terminal_text.single_line detail ^ Ansi.reset) :: fields
+    | Some _, None | None, (Some _ | None) -> fields in
+  if state.keeper_lanes_inflight then
+    ("Execution:", Ansi.dim
+      ^ (match state.lanes with
+         | None -> "reading execution snapshot…"
+         | Some _ -> "refreshing execution snapshot · last observation")
+      ^ Ansi.reset) :: fields
+  else fields
 
 let render_keeper_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -749,7 +758,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           "  Candle disabled: " ^ Terminal_text.single_line reason
       | None, Some detail ->
           "  Account unavailable: " ^ Terminal_text.single_line detail
-      | None, None -> "  Loading Item account…"
+      | None, None ->
+          (match pending_detail_read state ~tab:Detail_items ~keeper:k.k_name with
+           | Some _ -> "  Loading Item account…"
+           | None -> "  Item account not observed")
     in
     let is_worn item =
       match portrait_reading with
@@ -1380,13 +1392,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           what
       ^ Ansi.reset
     in
-    let tab_loading_row what =
-      loading_row
-        ?started_ns:
-          (Masc_tui_types.detail_read_started state ~tab:state.detail_tab
-             ~keeper:k.k_name)
-        what
-    in
     let stamped_or view error =
       let observed = match view with
         | Some (stamp, lines) when String.equal stamp k.k_name ->
@@ -1426,7 +1431,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | Some detail, None ->
           [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
             ^ Ansi.reset ]
-      | _, None -> [ Ansi.dim ^ "  (loading channel transports…)" ^ Ansi.reset ]
+      | None, None ->
+          (match Connector_read.view state.connectors_read with
+           | Connector_read.Quiet ->
+               [ Ansi.dim ^ "  Channel transports not observed" ^ Ansi.reset ]
+           | Reading _ | Waiting_after_write | Failed_to_start ->
+               (* The existing typed-source notice below owns pending,
+                  held recheck and failed-start guidance; none is a value. *)
+               [])
       | error, Some snapshot ->
           let connectors = snapshot.cs_connectors in
           let selected_index =
@@ -1706,16 +1718,24 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          rows first, so a Keeper whose schedules are terminal or further down
          was absent from it and the tab said none existed. The page it asks for
          can still truncate, which is why the absence reading stays. *)
-      let error_lines =
-        match state.keeper_schedules_error with
-        | Some (keeper_name, err) when String.equal keeper_name k.k_name ->
-            let stale = match state.keeper_schedules with
-              | Some (name, _) when String.equal name k.k_name -> "STALE · "
-              | Some _ | None -> ""
-            in
-            [ (Theme.bad ()) ^ "  " ^ stale ^ Terminal_text.single_line err ^ Ansi.reset ]
-        | Some _ | None -> []
-      in
+      let pending = detail_read_started state ~tab:Detail_automation ~keeper:k.k_name in
+      let observed = match state.keeper_schedules with
+        | Some (name, _) -> String.equal name k.k_name
+        | None -> false in
+      let error = match state.keeper_schedules_error with
+        | Some (name, detail) when String.equal name k.k_name -> Some detail
+        | Some _ | None -> None in
+      let error_lines = match error with
+        | Some detail ->
+            [ (Theme.bad ()) ^ "  " ^ (if observed then "STALE · " else "")
+              ^ Terminal_text.single_line detail ^ Ansi.reset ]
+        | None -> [] in
+      let progress = match pending with
+        | None -> []
+        | Some started_ns ->
+            [ loading_row ~started_ns (if observed
+                then "refreshing this Keeper's schedules · last observation"
+                else "loading this Keeper's schedules") ] in
       let snapshot_lines = match state.keeper_schedules with
       | Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
           let rows = snapshot.scs_rows in
@@ -1907,10 +1927,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                @ closed_rule
                @ List.map row_line closed)
       | Some _ | None ->
-          if error_lines <> [] then []
-          else [ tab_loading_row "loading this Keeper's schedules" ]
+          (match error, pending with
+           | None, None -> [ Ansi.dim ^ "  Schedules not observed" ^ Ansi.reset ]
+           | Some _, (Some _ | None) | None, Some _ -> [])
       in
-      error_lines @ snapshot_lines
+      error_lines @ progress @ snapshot_lines
     in
     let run_lines () =
       let failure detail =
@@ -1976,20 +1997,28 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           status @ logs
       | Detail_instructions ->
           stamped_or state.keeper_config_view state.keeper_config_view_error
-      | Detail_secrets -> (
-          match secret_lines state k with
-          | Some lines -> lines
-          | None -> (
-              (* The projection rides the Lanes reading. Before that reading
-                 has answered, and after one that failed, the list is empty
-                 for every Keeper, and this tab said "no projection reported"
-                 -- an answer the server had not given. *)
-              match state.lanes, state.lanes_error with
-              | None, Some detail ->
-                  [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset ]
-              | None, None -> [ tab_loading_row "loading" ]
-              | Some _, _ ->
-                  [ Ansi.dim ^ "  (no projection reported for this Keeper)" ^ Ansi.reset ]))
+      | Detail_secrets ->
+          let observed = Option.is_some state.lanes in
+          let failure = match state.lanes_error with
+            | None -> []
+            | Some detail ->
+                [ (Theme.bad ()) ^ "  " ^ (if observed then "STALE · " else "")
+                  ^ Terminal_text.single_line detail ^ Ansi.reset ] in
+          let progress = if state.keeper_lanes_inflight then
+              [ loading_row (if observed
+                  then "refreshing execution snapshot · last observation"
+                  else "reading execution snapshot") ]
+            else [] in
+          let lines = match secret_lines state k with
+            | Some lines -> lines
+            | None ->
+                (match state.lanes, state.lanes_error, state.keeper_lanes_inflight with
+                 | None, None, false ->
+                     [ Ansi.dim ^ "  Execution snapshot not observed" ^ Ansi.reset ]
+                 | None, (Some _ | None), true | None, Some _, false -> []
+                 | Some _, (Some _ | None), (true | false) ->
+                     [ Ansi.dim ^ "  (no projection reported for this Keeper)" ^ Ansi.reset ]) in
+          failure @ progress @ lines
       | Detail_github ->
           let base =
             stamped_or state.github_identity_view

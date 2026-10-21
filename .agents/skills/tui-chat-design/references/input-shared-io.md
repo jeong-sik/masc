@@ -54,6 +54,14 @@
   남아 있으면 재조회 진행·실패와 마지막 관측을 함께 보여준다. 원문 오류는 single-line으로
   정리한다. 이 projection은 실제 조회·초기화·응답 admission·로그인/저장 권한을 바꾸지 않고,
   다른 Keeper의 값이나 container-log pending을 status 요청으로 빌리지 않는다.
+- Info 실행·Secrets는 fleet의 Keeper lanes snapshot과 그 원래 in-flight를 사용한다.
+  값 없는 미조회를 loading으로 만들지 않고, 재조회·실패 중 남은 관측은 현재 실행이나
+  새 검증으로 바꾸지 않는다. Channels는 `Connector_read`의 status/names 단계·쓰기 뒤
+  재확인 대기·시작 실패 안내를 그대로 사용한다. 대기 중인 recheck나 미시작을 읽는 중으로
+  부르거나 별도 detail 요청의 시계를 빌리지 않는다. Automation은 현재 Keeper의 원래
+  schedule 요청으로 진행·재조회와 실제 stamped snapshot·오류를 구분하고 기존 page-capped
+  부재 판정을 유지한다. Item account도 자기 pending이 없으면 미조회다. 표시 projection은
+  source 상태·요청·취소·응답 적용·binding/Item/schedule 효과 권한을 쓰거나 바꾸지 않는다.
 - Keeper 상세의 활동 요약과 Logs는 같은 `Masc_tui_fetched` 관측을 사용한다.
   입력 handler와 cadence는 파일을 읽지 않고 원래 workspace authority·base path·Keeper·
   물리 행 범위에 묶인 I/O 요청을 보낸다. 응답은 원래 read scope와 ticket도 일치해야

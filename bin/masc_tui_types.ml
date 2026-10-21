@@ -9806,19 +9806,19 @@ type state = {
    replacement. Peer images retain the exact reading that acquired them.
    Completion, retirement and footer projection use this same admission. *)
 let image_reading_is_current (state : state) (pending : sent_image_read) =
-  let owner_is_current = match pending.sir_owner with
-    | Local_file_image_read authority -> authority = state.workspace_authority
-    | Draft_image_read (authority, attachment) ->
-      authority = state.workspace_authority
-      && List.exists (fun current -> current == attachment) state.msg_attachments
-    | Peer_image_read reading -> reading == state.workspace_read_authority in
-  owner_is_current
-  && (pending.sir_view <> Resources
-      || (Masc_tui_resource_images.same_reading
-            ~equal:Masc_tui_resource_catalog.equal_key
-            pending.sir_resource state.resource_content
-          && Option.is_none state.resource_pending_key
-          && Option.is_none state.resource_content_error))
+  match pending.sir_owner with
+  | Local_file_image_read authority -> authority = state.workspace_authority
+  | Draft_image_read (authority, attachment) ->
+    authority = state.workspace_authority
+    && List.exists (fun current -> current == attachment) state.msg_attachments
+  | Peer_image_read reading ->
+    reading == state.workspace_read_authority
+    && (pending.sir_view <> Resources
+        || (Masc_tui_resource_images.same_reading
+              ~equal:Masc_tui_resource_catalog.equal_key
+              pending.sir_resource state.resource_content
+            && Option.is_none state.resource_pending_key
+            && Option.is_none state.resource_content_error))
 
 (* These transitions are shared by the mailbox handler and readonly overview
    projection. Preview admission never changes confirmed data or authority. *)

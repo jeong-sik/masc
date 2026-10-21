@@ -190,7 +190,9 @@ authority and exact staged attachment object. Losing peer confirmation alone
 does not withdraw a local draft; replacement or removal of its attachment does.
 Selected local file paths use the same background pixel/colour-cell presenter.
 Their owner is the original local workspace epoch, so peer reconfirmation alone
-does not withdraw them. The worker reads the chosen file once, preserves its
+does not withdraw them. Local files and staged attachments opened through the
+Resources composer do not borrow that surface's unrelated document reading;
+only peer Resource images require the original resource response. The worker reads the chosen file once, preserves its
 source, and converts the captured bytes through the existing image converters.
 This is the file observed by the worker, not a retained file-revision guarantee.
 Explicit HTTP(S) image URLs keep their existing browser/download behavior.

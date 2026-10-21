@@ -1115,7 +1115,17 @@ let test_missing_output_advances_to_frozen_successor () =
       string
       "content-bearing successor serves the request"
       "present-text"
-      (candidate_id (EO.flow_success_candidate success))
+      (candidate_id (EO.flow_success_candidate success));
+    (* Every list of the evidence reads in the order the flow walked: the
+       failed candidate, then its successor. [attempts] used to read newest
+       first while [admissions] and [advances] read oldest first (#38530). *)
+    check
+      (list string)
+      "attempts are listed in the order the flow walked them"
+      [ "missing-text"; "present-text" ]
+      (List.map
+         (fun (attempt : EO.flow_attempt_snapshot) -> attempt.visit.identity.candidate_id)
+         (EO.flow_success_evidence success).attempts)
   | Error _ -> fail "missing output did not advance to its frozen successor"
 ;;
 

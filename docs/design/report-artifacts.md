@@ -21,13 +21,19 @@ workspace, identity and dashboard. It does not require another hosting service.
    renders a compact open card for the successful publication tool result in the
    conversation. The Keeper includes the returned link in its report to users
    of other channels.
-4. Work → Artifacts shows title, author, summary and update time. Selecting a
+4. Work → Artifacts shows title, author, summary, explicit document/web-page
+   format and update time. Format and local-calendar-day filters help find
+   today's publications or updates. The last successful inventory response
+   supplies the displayed list-query time; this is not a human review receipt.
+   An explicit HTML quick-preview action reads only that listed revision and
+   opens an inert embedded preview, including self-contained images. Selecting a
    result opens a viewport-filling reader above the dashboard. Back to list or
    Escape in the reader controls returns to the searchable catalog. Search filters title, summary and
    author. Empty, loading, missing and failed states remain distinguishable.
 5. The reader provides rendered/source views, revision selection, copy-link and
-   exact-source download. HTML uses the remaining viewport; Markdown has a
-   centered reading column. Expand report information for the author, summary
+   exact-source download. HTML uses the remaining viewport. Markdown defaults
+   to the available width for tables and code, with an optional centered reading
+   width. Expand report information for the author, summary
    and any Task or Goal links. A native modal keeps background controls inert.
 6. Updating an artifact requires its ID and expected latest revision. A stale
    revision produces a conflict without overwriting another publication. The
@@ -83,6 +89,11 @@ The isolated document can navigate itself; this is not a general network
 sandbox. It cannot navigate the parent dashboard or read its storage.
 Source is displayed as text. Downloads contain the original stored bytes.
 Bearer tokens and dashboard credentials are never passed into artifact frames.
+
+The catalog quick preview uses an empty sandbox and disallows scripts in its
+initial CSP. It is separate from the interactive full reader: opening the list
+does not fetch every body or run HTML reports. Collapsing the preview, replacing
+its listed revision or changing credentials retires its request ownership.
 
 ## Implementation and evidence
 

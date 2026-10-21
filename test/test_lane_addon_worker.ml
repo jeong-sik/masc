@@ -15,7 +15,9 @@ if argv[:2] == ["image", "inspect"]:
         raise SystemExit(7)
     if argv != ["image", "inspect", "--format", "{{.Id}}", "fixture/image"]:
         raise SystemExit(2)
-    print("sha256:" + "a" * 64)
+    print("not-an-image-id" if (root / "malformed-image").exists() else "sha256:" + "a" * 64)
+    if (root / "retag-after-inspect").exists():
+        (root / "tag-image").write_text("sha256:" + "b" * 64)
     raise SystemExit(0)
 if argv[:1] == ["volume"]:
     action, args = argv[1], argv[2:]
@@ -70,6 +72,7 @@ def on_this_engine(cid):
     # answers "no such container" for it, as a different Docker daemon would.
     return path(cid).exists() and load(cid).get("engine") == engine_id()
 if action == "create":
+    (root / "create-attempted").write_text("create")
     name = value("--name")
     cid = hashlib.sha256((engine_id() + name + labels().get("masc.lane.instance", "")).encode()).hexdigest()
     taken = [file for file in root.glob("*.json")
@@ -79,7 +82,9 @@ if action == "create":
         print("container name already exists", file=sys.stderr)
         raise SystemExit(1)
     mode = args[-1]
-    config = {"Id": cid, "Name": "/" + name, "engine": engine_id(),
+    image_ref = args[args.index("--") + 1]
+    image = (root / "tag-image").read_text() if image_ref == 'fixture/image' and (root / "tag-image").exists() else image_ref
+    config = {"Id": cid, "Name": "/" + name, "Image": image, "engine": engine_id(),
         "State": {"Status": "running"},
         "Config": {"Labels": labels()},
         "HostConfig": {"NanoCpus": round(float(value("--cpus")) * 1000000000),
@@ -88,6 +93,7 @@ if action == "create":
             "PidsLimit": int(value("--pids-limit"))},
         "mode": mode, "argv": args}
     if mode == "unlimited": config["HostConfig"]["PidsLimit"] = 0
+    if mode == "wrong_image": config["Image"] = "sha256:" + "b" * 64
     if mode == "late_create":
         # The daemon accepts the request after the client gave up: the
         # container becomes visible only after the next listing is answered.
@@ -142,6 +148,7 @@ elif action == "rm":
     if path(cid).exists(): path(cid).unlink()
     print(cid, flush=True)
 elif action == "start":
+    (root / (args[-1] + ".started")).write_text("started")
     cid = args[-1]
     mode = load(cid)["mode"]
     (root / (cid + ".pid")).write_text(str(os.getpid()))
@@ -1230,11 +1237,42 @@ let test_world_action_artifact_ingress () = with_fixture (fun env sw dir docker 
   check bool "detach preserves retained artifact bytes" true
     (Masc.Lane_addon_store.read_blob store reference = Ok bytes))
 
+let test_docker_resolved_image_is_the_executed_image () = with_fixture (fun env sw dir docker ->
+  write (Filename.concat dir "retag-after-inspect") "retag";
+  let worker = unwrap (start env sw dir docker "good") in
+  let expected = "sha256:" ^ String.make 64 'a' in
+  let created = Yojson.Safe.from_file (Filename.concat dir (Worker.container_id worker ^ ".json")) in
+  check string "tag changed after inspection" ("sha256:" ^ String.make 64 'b')
+    (Fs_compat.load_file (Filename.concat dir "tag-image"));
+  check string "create used the observed immutable image" expected
+    Yojson.Safe.Util.(created |> member "Image" |> to_string);
+  check string "worker retains the verified image identity" expected
+    (Masc.Lane_addon_engine.image_digest (Worker.image_identity worker));
+  ignore (unwrap (Worker.stop worker)))
+
+let test_docker_wrong_image_never_starts () = with_fixture (fun env sw dir docker ->
+  check bool "mismatched image refuses the generation" true
+    (Result.is_error (start env sw dir docker "wrong_image"));
+  check bool "no package process was started" false
+    (Array.exists (fun file -> Filename.check_suffix file ".started") (Sys.readdir dir));
+  check bool "created container was cleaned up" false
+    (Array.exists (fun file -> Filename.check_suffix file ".json") (Sys.readdir dir)))
+
+let test_docker_malformed_image_never_creates () = with_fixture (fun env sw dir docker ->
+  write (Filename.concat dir "malformed-image") "invalid";
+  check bool "malformed image identity refuses the generation" true
+    (Result.is_error (start env sw dir docker "good"));
+  check bool "invalid image did not issue create" false
+    (Sys.file_exists (Filename.concat dir "create-attempted"));
+  check bool "invalid image did not create any container" false
+    (Array.exists (fun file -> Filename.check_suffix file ".json") (Sys.readdir dir)))
+
 let test_image_preview_does_not_create_worker () = with_fixture (fun env _sw dir docker ->
   let inspect () = Worker.inspect_image ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~package:(package dir "good") ~docker_command:docker () in
-  check string "image identity is the engine reply" ("sha256:" ^ String.make 64 'a') (unwrap (inspect ()));
+  check string "image identity is the engine reply" ("sha256:" ^ String.make 64 'a')
+    (Masc.Lane_addon_engine.image_digest (unwrap (inspect ())));
   check bool "preview creates no container" false
     (Array.exists (fun path -> Filename.check_suffix path ".json") (Sys.readdir dir));
   write (Filename.concat dir "daemon-unavailable") "offline";
@@ -1249,9 +1287,9 @@ let test_docker_control_ignores_the_package_reply_bound () = with_fixture (fun e
   check bool "the engine reply is longer than the declared reply bound" true
     (String.length identity > small.resources.max_reply_bytes);
   check string "image identity is returned" identity
-    (unwrap (Worker.inspect_image ~clock:(Eio.Stdenv.clock env)
+    (Masc.Lane_addon_engine.image_digest (unwrap (Worker.inspect_image ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
-      ~package:small ~docker_command:docker ())))
+      ~package:small ~docker_command:docker ()))))
 
 (* Lists every request of one instance and reads each through the production
    loader, which prefers the terminal outcome over the pending index row. *)
@@ -2559,6 +2597,9 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "sampling refuses nonfinite retained evidence" `Quick test_sampling_refuses_nonfinite_evidence;
   test_case "known sampling outcomes survive cancellation" `Quick test_known_sampling_outcome_survives_cancellation;
   test_case "declared sampling requires the exact host callback" `Quick test_declared_sampling_requires_exact_host_callback;
+  test_case "Docker resolves an immutable image before tag changes" `Quick test_docker_resolved_image_is_the_executed_image;
+  test_case "Docker refuses a mismatched image before package start" `Quick test_docker_wrong_image_never_starts;
+  test_case "Docker refuses malformed image identities before create" `Quick test_docker_malformed_image_never_creates;
   test_case "image preview is read only and preserves engine failures" `Quick test_image_preview_does_not_create_worker;
   test_case "docker control ignores the package reply bound" `Quick test_docker_control_ignores_the_package_reply_bound;
   test_case "world action and binary artifact ingress" `Quick test_world_action_artifact_ingress;

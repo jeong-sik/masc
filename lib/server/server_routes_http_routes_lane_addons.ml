@@ -197,7 +197,8 @@ let package_preview_payload state fields =
         ~clock ~control_timeout_sec:Env_config_runtime.Sidecar.control_command_timeout_sec
         ~mgr ~package () |> Result.map_error Lane_addon_worker.error_to_string in
   let image = match inspection with
-    | Ok digest -> `Assoc ["state",`String "available";"digest",`String digest]
+    | Ok image -> `Assoc ["state",`String "available";
+        "digest",`String (Lane_addon_engine.image_digest image)]
     | Error detail -> `Assoc ["state",`String "unverified";"detail",`String detail] in
   Ok (`Assoc ["manifest_path",`String path;"package",Lane_addon_types.package_to_json package;
               "image",image])

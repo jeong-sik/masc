@@ -862,6 +862,10 @@
  ; section reaches the TUI (send_on_stop), and reading it by raw path would
  ; be a second definition of a field that already had two.
  (libraries
+  masc.masc_core
+  masc.masc_log
+  eio
+  mtime.clock.os
   masc.config_dir_resolver
   masc.fs_compat
   masc.keeper_registry

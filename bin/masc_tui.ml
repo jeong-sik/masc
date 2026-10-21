@@ -21927,53 +21927,12 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
   Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
   apply_raw_mode new_term
 
-(** Main loop *)
-let main
-    (base_path, workspace, port, refresh,
-     reasoning_visibility, tool_visibility) () =
-  (* The provider layer reports through [Llm_provider.Diag], whose default sink
-     writes to stderr -- which here is the terminal this draws on. One INFO line
-     about the embedded model catalog lands between two frames and the screen is
-     no longer what the frame presenter believes it wrote. The server routes
-     these into the structured log at boot; this surface has the same terminal
-     to protect, so it routes them the same way and before anything can ask the
-     catalog a question. *)
-  Provider_diag_log_sink.install ();
-  (* Publish the path selected by this process before any workspace-backed
-     store opens. Otherwise inherited path variables can make the screen read
-     local Keeper metadata from a different workspace than its server. *)
-  Unix.putenv Env_config_core.base_path_env_key base_path;
-  Workspace_utils_backend_setup.cache_resolved_base_path base_path;
-  require_interactive_terminal ();
-  (* stderr is this terminal -- [lsof] on a running surface shows fd 1 and fd 2
-     on the same [/dev/ttys*]. Everything that writes there writes into the
-     drawn screen: the console mirror behind every [Log] record, this binary's
-     own decode reports ([Masc_tui_loader.report]), and anything a library
-     prints without asking. Raising the level to Warn narrowed that to fewer
-     lines; it did not stop them, and it bought the narrowing by dropping Info
-     records from the ring the System logs surface reads.
-
-     So the terminal is taken away from stderr instead. The console is a
-     mirror by its own contract -- {!Console_sink} names the file sink and the
-     ring authoritative -- and a mirror pointed at a file is still a mirror,
-     while one pointed here is a corruption. This runs after
-     [require_interactive_terminal] so its refusal still reaches a person, and
-     before anything can log. *)
-  redirect_stderr_off_terminal ~base_path;
-  Log.init_from_env ();
-  let state =
-    create_state ~reasoning_visibility ~tool_visibility ~workspace
-      ~local_base_path:base_path ~port
-      ~refresh_interval:refresh ()
-  in
-  state.view <- Overview;
-
+let apply_startup_settings state (tui_settings : Masc_tui_config.t) =
   (* A theme named in runtime.toml's [tui] section is applied at boot, so the
      reader's pick survives a restart instead of being re-chosen each session.
      Absent or unknown, the TUI follows the terminal exactly as before:
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
-  let tui_settings = Masc_tui_config.load ~base_path in
   boot_midi_soundfont := tui_settings.midi_soundfont;
   (match tui_settings.last_chat_keeper with
    | Ok None -> ()
@@ -22042,7 +22001,51 @@ let main
   state.voice_send_on_stop <-
     Option.value
       (tui_settings.send_on_stop)
-      ~default:false;
+      ~default:false
+
+(** Main loop *)
+let main
+    (base_path, workspace, port, refresh,
+     reasoning_visibility, tool_visibility) () =
+  (* The provider layer reports through [Llm_provider.Diag], whose default sink
+     writes to stderr -- which here is the terminal this draws on. One INFO line
+     about the embedded model catalog lands between two frames and the screen is
+     no longer what the frame presenter believes it wrote. The server routes
+     these into the structured log at boot; this surface has the same terminal
+     to protect, so it routes them the same way and before anything can ask the
+     catalog a question. *)
+  Provider_diag_log_sink.install ();
+  (* Publish the path selected by this process before any workspace-backed
+     store opens. Otherwise inherited path variables can make the screen read
+     local Keeper metadata from a different workspace than its server. *)
+  Unix.putenv Env_config_core.base_path_env_key base_path;
+  Workspace_utils_backend_setup.cache_resolved_base_path base_path;
+  require_interactive_terminal ();
+  (* stderr is this terminal -- [lsof] on a running surface shows fd 1 and fd 2
+     on the same [/dev/ttys*]. Everything that writes there writes into the
+     drawn screen: the console mirror behind every [Log] record, this binary's
+     own decode reports ([Masc_tui_loader.report]), and anything a library
+     prints without asking. Raising the level to Warn narrowed that to fewer
+     lines; it did not stop them, and it bought the narrowing by dropping Info
+     records from the ring the System logs surface reads.
+
+     So the terminal is taken away from stderr instead. The console is a
+     mirror by its own contract -- {!Console_sink} names the file sink and the
+     ring authoritative -- and a mirror pointed at a file is still a mirror,
+     while one pointed here is a corruption. This runs after
+     [require_interactive_terminal] so its refusal still reaches a person, and
+     before anything can log. *)
+  redirect_stderr_off_terminal ~base_path;
+  Log.init_from_env ();
+  let state =
+    create_state ~reasoning_visibility ~tool_visibility ~workspace
+      ~local_base_path:base_path ~port
+      ~refresh_interval:refresh ()
+  in
+  state.view <- Overview;
+
+  let tui_settings_read = Masc_tui_config.prepare_startup_read
+      ~sw:(Eio_context.get_switch_opt ()) ~base_path in
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
@@ -22202,6 +22205,15 @@ let main
         request_full_repaint 0)
       (fun () -> Unix.kill (Unix.getpid ()) Sys.sigtstp)
   in
+  (* The snapshot is still applied before terminal ownership, setting-dependent
+     output and ordinary key processing. Only independent initialization overlaps
+     the original read; a late saved value cannot replace an operator choice. *)
+  let snapshot = Eio.Promise.await_exn tui_settings_read.result in
+  apply_startup_settings state snapshot.settings;
+  Log.Transport.routine_lazy (fun () -> Printf.sprintf
+    "tui_startup_settings phase=ui_applied started_ns=%Ld reader_entered_ns=%Ld reader_returned_ns=%Ld at_ns=%Ld"
+    tui_settings_read.started_ns snapshot.reader_entered_ns snapshot.reader_returned_ns
+    (Mtime_clock.elapsed_ns ()));
   enter_terminal_session ~cleanup ~terminate ~request_interrupt
     ~request_full_repaint ~suspend
     ~new_term;

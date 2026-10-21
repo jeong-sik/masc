@@ -269,6 +269,60 @@ let load ~base_path =
           Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".midi_soundfont"));
   }
 
+type startup_snapshot = {
+  settings : t;
+  reader_entered_ns : int64;
+  reader_returned_ns : int64;
+}
+type startup_read = {
+  started_ns : int64;
+  result : startup_snapshot Eio.Promise.or_exn;
+}
+
+let startup_read_event ~started_ns ~phase =
+  let at_ns = Mtime_clock.elapsed_ns () in
+  let emit () = try Log.Transport.routine_lazy (fun () ->
+      Printf.sprintf "tui_startup_settings phase=%s started_ns=%Ld at_ns=%Ld"
+        phase started_ns at_ns) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | _ -> () in
+  match Eio_guard.execution_context () with
+  | Eio_fiber -> Eio.Cancel.protect emit
+  | Non_eio -> emit ()
+
+let prepare_startup_read ~sw ~base_path =
+  let started_ns = Mtime_clock.elapsed_ns () in
+  startup_read_event ~started_ns ~phase:"requested";
+  let read () =
+    match Domain_pool_ref.submit_io_or_inline (fun () ->
+      let reader_entered_ns = Mtime_clock.elapsed_ns () in
+      startup_read_event ~started_ns ~phase:"reader_entered";
+      match load ~base_path with
+      | settings ->
+          let reader_returned_ns = Mtime_clock.elapsed_ns () in
+          startup_read_event ~started_ns ~phase:"reader_returned";
+          { settings; reader_entered_ns; reader_returned_ns }
+      | exception exn ->
+          let bt = Printexc.get_raw_backtrace () in
+          startup_read_event ~started_ns
+            ~phase:(match exn with Eio.Cancel.Cancelled _ -> "reader_interrupted" | _ -> "reader_raised");
+          Printexc.raise_with_backtrace exn bt) with
+    | snapshot ->
+        startup_read_event ~started_ns ~phase:"submission_observed";
+        snapshot
+    | exception exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        startup_read_event ~started_ns
+          ~phase:(match exn with Eio.Cancel.Cancelled _ -> "submission_interrupted" | _ -> "submission_raised");
+        Printexc.raise_with_backtrace exn bt in
+  let result = match sw with
+    | Some sw ->
+        Eio.Switch.check sw;
+        Eio.Fiber.fork_promise ~sw read
+    | None ->
+        Eio.Promise.create_resolved (Ok (read ())) in
+  { started_ns; result }
+
 let set_tui_string ~base_path ~key value =
   match Runtime.edit_config_text
       ~runtime_config_path:(runtime_toml_path ~base_path)

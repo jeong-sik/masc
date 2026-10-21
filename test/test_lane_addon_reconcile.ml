@@ -105,7 +105,7 @@ let make_backend () =
           Error (Lifecycle.Worker_failed detail)
       | Ok engine ->
       let connection : Runtime.For_testing.connection = {
-        resolved_image = (match Lane_addon_engine.image_of_inspect package.runtime (match package.runtime with
+        resolved_image = (match Lane_addon_engine.image_of_inspect container.runtime (match container.runtime with
           | Types.Docker -> "sha256:" ^ String.make 64 'a'
           | Types.Apple_container -> "[{\"configuration\":{\"descriptor\":{\"digest\":\"sha256:" ^ String.make 64 'a' ^ "\"}}}]") with
           | Ok image -> image | Error detail -> Alcotest.fail detail);

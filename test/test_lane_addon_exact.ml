@@ -29,13 +29,14 @@ let schema =
 
 let package : Types.package =
   { id = "operator-quiz"; revision = "1"; title = "Exact fixture"
-  ; contributions = [ Types.Observe ]; image = "unused"; command = [ "unused" ]
-  ; directory = "/nonexistent"; skills_directory = None; action_tool = None; runtime = Types.Docker
+  ; contributions = [ Types.Observe ]; command = [ "unused" ]
+  ; directory = "/nonexistent"; skills_directory = None; action_tool = None
   ; state_storage = Types.Ephemeral; tool_invocation = Types.Direct; tool_hooks = []; exported_tools = []; outputs = []
   ; refresh_policy = Types.Every_hint; model_access = Types.Model_disabled
   ; exact_outputs = [ { Types.name = "author"; schema } ]; operator_asks = false
   ; binding_schema = None; presentation = Masc.Lane_addon_presentation.empty
-  ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 } }
+  ; execution = Types.Container { runtime = Types.Docker; image = "unused"
+      ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 } } }
 
 let declaration_id = "quiz"
 

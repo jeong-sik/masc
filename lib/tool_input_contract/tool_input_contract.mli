@@ -93,9 +93,19 @@ val constraint_declaration_paths : Yojson.Safe.t -> string list
     [items]) would never be enforced, so tests compare this list against a
     raw scan of the whole schema. *)
 
-type accepted = Accepted_empty_schema | Accepted_valid | Accepted_normalized
+type accepted = Accepted_empty_schema | Accepted_valid | Accepted_normalized | Accepted_external_subset
 val accepted_reason : accepted -> string
 val violation_reason : violation -> string
-val check_arguments : schema:Yojson.Safe.t option -> name:string -> args:Yojson.Safe.t ->
+type argument_contract = Host_tool | External_export
+(** Host tools own protocol markers and fieldless-call restrictions. External
+    exports own every declared argument name and their open-object schema. *)
+val check_arguments : contract:argument_contract ->
+  schema:Yojson.Safe.t option -> name:string -> args:Yojson.Safe.t ->
   ((Yojson.Safe.t * accepted), rejection) result
-(** Pure schema contract. The caller owns registry lookup, telemetry and effects. *)
+(** Pure schema contract. The caller owns registry lookup, telemetry and effects.
+    External exports preserve their input and use conservative shared checks:
+    property/item required/type/enum/const, top-level closed properties without
+    patternProperties, and
+    declared property/item bounds. General schema applicators/references and
+    other keywords remain worker-owned; [Accepted_external_subset] explicitly
+    does not certify full JSON Schema conformance. *)

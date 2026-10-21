@@ -44,7 +44,7 @@ let test_pre_hook_observes () =
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
       tool_ok "ok");
-  Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
+  Tool_dispatch.register_pre_hook (fun ~schema:_ ~name:_ ~args:_ ->
     log_call "pre";
     Tool_dispatch.Pass);
   let token = match Tool_dispatch.mint_token ~name:"__hook_test" with Ok t -> t | Error e -> Alcotest.fail e in
@@ -61,7 +61,7 @@ let test_pre_hook_short_circuits () =
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
       tool_ok "should not reach");
-  Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
+  Tool_dispatch.register_pre_hook (fun ~schema:_ ~name ~args:_ ->
     log_call "pre_block";
     Tool_dispatch.Reject
       (Tool_result.Failed
@@ -92,11 +92,11 @@ let test_multiple_pre_hooks_first_wins () =
       log_call "handler";
       tool_ok "ok");
   (* First hook: observe only *)
-  Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
+  Tool_dispatch.register_pre_hook (fun ~schema:_ ~name:_ ~args:_ ->
     log_call "pre1";
     Tool_dispatch.Pass);
   (* Second hook: blocks *)
-  Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
+  Tool_dispatch.register_pre_hook (fun ~schema:_ ~name ~args:_ ->
     log_call "pre2_block";
     Tool_dispatch.Reject
       (Tool_result.Failed
@@ -109,7 +109,7 @@ let test_multiple_pre_hooks_first_wins () =
          ; duration_ms = 0.0
          }));
   (* Third hook: should not run *)
-  Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
+  Tool_dispatch.register_pre_hook (fun ~schema:_ ~name:_ ~args:_ ->
     log_call "pre3";
     Tool_dispatch.Pass);
   let token = match Tool_dispatch.mint_token ~name:"__hook_multi" with Ok t -> t | Error e -> Alcotest.fail e in
@@ -171,7 +171,7 @@ let test_full_lifecycle () =
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
       tool_ok "data");
-  Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
+  Tool_dispatch.register_pre_hook (fun ~schema:_ ~name:_ ~args:_ ->
     log_call "pre";
     Tool_dispatch.Pass);
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
@@ -199,7 +199,7 @@ let test_no_hooks_default () =
 
 let test_unknown_tool_skips_hooks () =
   setup ();
-  Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
+  Tool_dispatch.register_pre_hook (fun ~schema:_ ~name:_ ~args:_ ->
     log_call "pre_should_not_run";
     Tool_dispatch.Pass);
   Tool_dispatch.register_dispatch_observer (fun _outcome _result ->

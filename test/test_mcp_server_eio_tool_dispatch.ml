@@ -77,7 +77,7 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
     (fun () ->
       Tool_dispatch.clear_hooks ();
       Tool_dispatch.register_pre_hook
-        (fun ~name ~args:_ ->
+        (fun ~schema:_ ~name ~args:_ ->
           if String.equal name "masc_tool_help" then
             Tool_dispatch.Reject
               (Tool_result.Failed

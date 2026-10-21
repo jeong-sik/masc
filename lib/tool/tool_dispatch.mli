@@ -42,8 +42,10 @@ type pre_hook_action =
   | Proceed of Yojson.Safe.t
   | Reject of Tool_result.result
 
-type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
-(** Pre-hook: receives tool name and args before handler runs. *)
+type pre_hook =
+  schema:Yojson.Safe.t option -> name:string -> args:Yojson.Safe.t -> pre_hook_action
+(** Pre-hook: receives tool name and args before handler runs. [schema] is
+    supplied by a resolved external export; [None] uses registered schemas. *)
 
 type dispatch_observer =
   Dispatch_outcome.t -> Tool_result.result option -> unit
@@ -91,6 +93,7 @@ val clear_hooks : unit -> unit
     (back to identity). *)
 
 val run_pre_hooks :
+  schema:Yojson.Safe.t option ->
   name:string -> args:Yojson.Safe.t -> Tool_result.result option * Yojson.Safe.t
 (** Execute registered pre-hooks in order, threading coerced args.
     Returns [(Some rejection, _)] on short-circuit,
@@ -116,6 +119,15 @@ val guarded_dispatch
     fan-out. [None] means that the token has no directly registered handler. *)
 
 (** {1 Introspection} *)
+
+val guarded_external_dispatch :
+  name:string -> schema:Yojson.Safe.t -> args:Yojson.Safe.t ->
+  handler:handler -> unit -> Tool_result.result
+(** Run a resolved external MCP handler through the same hook snapshot, span,
+    argument rewriting, exception capture and observers as registry dispatch.
+    Does not register or authorize an export. The caller must resolve/authenticate
+    its live export and the handler must recheck its execution ownership. The
+    supplied schema belongs to that exact export, never the global registry. *)
 
 val registered_count : unit -> int
 (** Number of registered tool names. *)

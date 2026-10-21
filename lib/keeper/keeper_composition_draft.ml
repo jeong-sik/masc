@@ -369,7 +369,7 @@ let validate_request (schema : Masc_domain.tool_schema) input =
       if List.length names = List.length (List.sort_uniq String.compare names) then Ok ()
       else Error (Malformed_draft "duplicate request field")
     | _ -> Ok () in
-  match Tool_input_contract.check_arguments ~schema:(Some schema.input_schema)
+  match Tool_input_contract.check_arguments ~contract:Tool_input_contract.Host_tool ~schema:(Some schema.input_schema)
       ~name:schema.name ~args:input with
   | Ok _ -> Ok ()
   | Error rejected -> Error (Malformed_draft rejected.message)

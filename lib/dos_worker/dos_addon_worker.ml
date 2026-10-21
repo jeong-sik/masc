@@ -231,7 +231,7 @@ let create ~base_path () =
         match Option.bind (Controller.dos_tool_of_name call.tool) (fun tool ->
           Option.map (fun schema -> tool, schema) (List.assoc_opt tool schemas)) with
         | Some found -> Ok found | None -> Error "Unknown exported machine tool" in
-      match Tool_input_contract.check_arguments ~schema:(Some schema.input_schema)
+      match Tool_input_contract.check_arguments ~contract:Tool_input_contract.Host_tool ~schema:(Some schema.input_schema)
         ~name:schema.name ~args:call.arguments with
       | Error error -> Ok (response (Tool_input_contract.rejection_result error))
       | Ok (arguments, _) ->

@@ -16,7 +16,7 @@ let emit_validation_telemetry ~tool ~result ~reason =
     ()
 ;;
 
-let validate ?schema ~name ~args () =
+let validate_with_contract ~contract ?schema ~name ~args () =
   let checked =
     try
       let schema =
@@ -24,7 +24,7 @@ let validate ?schema ~name ~args () =
         | Some _ as schema -> schema
         | None -> Tool_dispatch.lookup_schema name
       in
-      check_arguments ~schema ~name ~args
+      check_arguments ~contract ~schema ~name ~args
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn ->
@@ -46,7 +46,7 @@ let validate ?schema ~name ~args () =
     (match accepted with
      | Accepted_normalized ->
        Log.Tool_validation.debug "tool_input_validation normalized args for %s" name
-     | Accepted_empty_schema | Accepted_valid -> ());
+     | Accepted_empty_schema | Accepted_valid | Accepted_external_subset -> ());
     Ok prepared_args
   | Error rejection ->
     emit_validation_telemetry
@@ -74,19 +74,24 @@ let validate ?schema ~name ~args () =
     Error rejection
 ;;
 
+let validate ?schema ~name ~args () =
+  validate_with_contract ~contract:Host_tool ?schema ~name ~args ()
+;;
+
 let validate_args ?schema ~name ~args () =
   match validate ?schema ~name ~args () with
   | Ok prepared_args -> Ok prepared_args
   | Error rejection -> Error (rejection_result rejection)
 ;;
 
-let validation_action ~name ~args : Tool_dispatch.pre_hook_action =
-  match validate ~name ~args () with
+let validation_action ~schema ~name ~args : Tool_dispatch.pre_hook_action =
+  let contract = match schema with None -> Host_tool | Some _ -> External_export in
+  match validate_with_contract ~contract ?schema ~name ~args () with
   | Ok prepared_args when Yojson.Safe.equal prepared_args args -> Tool_dispatch.Pass
   | Ok prepared_args -> Tool_dispatch.Proceed prepared_args
   | Error rejection -> Tool_dispatch.Reject (rejection_result rejection)
 ;;
 
 let register_pre_hook () =
-  Tool_dispatch.register_pre_hook (fun ~name ~args -> validation_action ~name ~args)
+  Tool_dispatch.register_pre_hook validation_action
 ;;

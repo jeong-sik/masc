@@ -877,8 +877,10 @@ type accepted =
   | Accepted_empty_schema
   | Accepted_valid
   | Accepted_normalized
+  | Accepted_external_subset
 
 let accepted_reason = function
+  | Accepted_external_subset -> "external_schema_subset"
   | Accepted_empty_schema -> "empty_schema"
   | Accepted_valid -> "valid"
   | Accepted_normalized -> "normalized"
@@ -960,8 +962,13 @@ let rejection_result (rejection : rejection) =
     }
 ;;
 
-let check_arguments ~(schema : Yojson.Safe.t option) ~name ~args =
-  let prepared_args = strip_internal_marker_args args in
+type argument_contract = Host_tool | External_export
+
+let check_arguments ~contract ~(schema : Yojson.Safe.t option) ~name ~args =
+  let prepared_args = match contract with
+    | Host_tool -> strip_internal_marker_args args
+    | External_export -> args
+  in
   let reject ~schema violation message =
     Error { tool_name = name; schema; violation; message }
   in
@@ -973,7 +980,7 @@ let check_arguments ~(schema : Yojson.Safe.t option) ~name ~args =
       (Printf.sprintf
          "Tool '%s' has no registered input schema; refusing schema-less dispatch"
          name)
-  | Some schema when not (schema_has_properties schema) ->
+  | Some schema when contract = Host_tool && not (schema_has_properties schema) ->
     if required_names schema <> []
     then
       reject
@@ -991,7 +998,11 @@ let check_arguments ~(schema : Yojson.Safe.t option) ~name ~args =
         (Printf.sprintf "Tool '%s' declares no input fields but received arguments" name)
   | Some schema ->
     let reject = reject ~schema:(Some schema) in
-    (match retired_transition_alias_names ~name prepared_args with
+    let retired_aliases = match contract with
+      | Host_tool -> retired_transition_alias_names ~name prepared_args
+      | External_export -> []
+    in
+    (match retired_aliases with
      | alias :: aliases ->
        reject
          (Retired_transition_alias { fields = alias :: aliases })
@@ -1005,7 +1016,21 @@ let check_arguments ~(schema : Yojson.Safe.t option) ~name ~args =
         | Some message ->
           reject Arguments_did_not_arrive (Printf.sprintf "Tool '%s' %s" name message)
         | None ->
-          (match schema_shape_error schema prepared_args with
+          (match (match contract with
+                  | Host_tool -> schema_shape_error schema prepared_args
+                  | External_export ->
+                      (* The oneOf presence checker above models host-generated
+                         exact forms, not arbitrary external alternatives. Only
+                         reject a top-level closed-property violation here. *)
+                      let unsupported =
+                        match Json_util.assoc_member_opt "patternProperties" schema with
+                        | Some _ -> [] (* Pattern acceptance belongs to the worker. *)
+                        | None -> unsupported_arg_names schema prepared_args
+                      in
+                      (match unsupported with
+                       | [] -> None
+                       | fields -> Some (Unsupported_fields { fields },
+                           "received fields forbidden by additionalProperties=false"))) with
            | Some (violation, message) ->
              reject violation (Printf.sprintf "Tool '%s' %s" name message)
            | None ->
@@ -1047,7 +1072,10 @@ let check_arguments ~(schema : Yojson.Safe.t option) ~name ~args =
                         (Schema_bound_malformed { path; keyword })
                         (Printf.sprintf "Tool '%s' %s" name message)
                     | None ->
-                      if Yojson.Safe.equal prepared_args args
-                      then Ok (prepared_args, Accepted_valid)
-                      else Ok (prepared_args, Accepted_normalized)))))))
+                      match contract with
+                      | External_export -> Ok (prepared_args, Accepted_external_subset)
+                      | Host_tool ->
+                          if Yojson.Safe.equal prepared_args args
+                          then Ok (prepared_args, Accepted_valid)
+                          else Ok (prepared_args, Accepted_normalized)))))))
 ;;

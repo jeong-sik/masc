@@ -606,9 +606,19 @@ let test_answered_ask_inspection_reopen_and_withdraw () = with_answer @@ fun bas
 let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base config ask resolution task_id state ->
   (* Last case: the process-global production sink owns its channel until exit.
      This private directory is removed only after all sink reads have finished. *)
-  let log_dir=Filename.temp_dir ~temp_dir:base "followup-logs-" "" in
   Log.set_level Log.Info;
-  Log.Ring.init_file_sink log_dir;
+  let server_logs=Filename.concat (Masc.Workspace.masc_dir config) "logs" in
+  Fs_compat.mkdir_p server_logs;
+  Log.Ring.init_file_sink server_logs;
+  Log.Server.info "Original server log resource before client storage";
+  let stored_files directory=Array.to_list (Sys.readdir directory)
+    |> List.filter_map (fun name ->
+      let path=Filename.concat directory name in
+      if Sys.is_directory path then None else
+        Some (name,In_channel.with_open_bin path In_channel.input_all))
+    |> List.sort (fun (left,_) (right,_) -> String.compare left right) in
+  let server_before=stored_files server_logs in
+  let log_dir=Masc_tui_observation_store.initialize ~base_path:base |> require in
   let since_seq=(Log.Ring.bounds ()).total-1 in
   let before=Masc.Workspace.get_tasks_raw config in
   let run_read before_source = Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
@@ -683,6 +693,30 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
     (has failed "finished" (Projection.followup_result_to_json (Error (Projection.Followup_read_failed "")))
      && has unstarted "finished" (Projection.followup_result_to_json (Error (Projection.Followup_not_started "")))
      && not (has unstarted "worker_entered" `Null));
+  let first_before=stored_files log_dir in
+  let replacement=Masc_tui_observation_store.initialize ~base_path:base |> require in
+  check bool "same PID starts a fresh private client store" true (replacement<>log_dir);
+  check bool "client store is private" true ((Unix.stat replacement).Unix.st_perm land 0o077=0);
+  let replacement_before=stored_files replacement in
+  check bool "new client sink imports no prior Ask payload" true
+    (List.for_all (fun (_,body) ->
+      String.split_on_char '\n' body |> List.filter (fun line -> line<>"")
+      |> List.for_all (fun line ->
+        member "event" (member "details" (Yojson.Safe.from_string line))<>`String "tui_ask_followup")) replacement_before);
+  let blocker=Filename.concat base "blocked-log-base" in
+  Out_channel.with_open_bin blocker (fun channel -> output_string channel "owned regular file");
+  (match Masc_tui_observation_store.initialize ~base_path:blocker with
+   | Error _ -> () | Ok _ -> fail "non-directory base unexpectedly initialized a store");
+  let _read,result=run_read (fun _ -> ()) in
+  check bool "actual original read continues after storage setup failure" true (result=Some (Ok ()));
+  exact_task state task_id;
+  check bool "replacement leaves original session bytes intact" true (first_before=stored_files log_dir);
+  check bool "client stores do not append to server daily logs" true (server_before=stored_files server_logs);
+  check bool "current store still receives actual original reads" true
+    (List.exists (fun (_,body) ->
+      String.split_on_char '\n' body |> List.filter (fun line -> line<>"")
+      |> List.exists (fun line ->
+        member "event" (member "details" (Yojson.Safe.from_string line))=`String "tui_ask_followup")) (stored_files replacement));
   check bool "observation and persistence do not mutate canonical Task resources" true
     (before=Masc.Workspace.get_tasks_raw config)
 

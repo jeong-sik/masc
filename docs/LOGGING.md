@@ -55,6 +55,29 @@ parse the console summary. Ring JSONL, dashboard export and TUI log decoding
 already preserve this field. This does not add an Ask cohort report or prove a
 runtime speedup. See [the source boundary audit](audits/tui-ask-followup-structured-20261021.md).
 
+## TUI process storage
+
+The TUI owns a different Log.Ring from its server. Its structured details are
+written below the opening local `<base-path>/.masc/logs/tui/session-<pid>-*/`,
+using the existing `system_log_YYYY-MM-DD.jsonl` sink. Each invocation creates a
+fresh private directory, so startup does not import server or earlier session
+history. The selected path is announced in the existing
+`<base-path>/.masc/logs/masc-tui-<pid>.log` stderr mirror. No log from a later
+remote/workspace identity change moves this local process store.
+
+Initialization runs after stderr redirection and level setup, before TUI state
+and read producers. Expected filesystem failure leaves the TUI running and
+records a warning through the ring/console path. `details.event =
+"tui_observation_store"` records initialized/unavailable outcome and monotonic
+clocks spanning the setup. This adds synchronous startup filesystem work;
+existing input-reader startup intervals begin later and do not include it.
+
+The client directory is local evidence. The server dashboard does not read it
+automatically; a compatible decoder alone does not prove visible UI or server
+export. Logging levels can omit rows, a crash can interrupt a write, and normal
+sink flush is not fsync. These are process-owned retained log directories; this
+change adds no automatic deletion policy. See [the storage source audit](audits/tui-observation-store-20261021.md).
+
 ## Absent fields
 
 `Log.Kv.render` builds a `key=value` message and leaves out every field whose

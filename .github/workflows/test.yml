@@ -102,7 +102,7 @@ jobs:
           df -h /
 
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.candidate_sha || github.sha }}
 
@@ -160,14 +160,14 @@ jobs:
       # Targeted non-minimal suites also need one for the sandbox image cache.
       - name: Set up image cache for targeted suites
         if: inputs.minimal == false && inputs.suite != ''
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # The release lane exercises the embedded recipe through the shipped CLI.
       # Behavior only needs the same checked-in image; preparing it must not
       # force a separate server build before Dune schedules the full suite.
       - name: Prepare Keeper sandbox image
         if: inputs.minimal == false
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         env:
           DOCKER_BUILD_SUMMARY: 'false'
           DOCKER_BUILD_RECORD_UPLOAD: 'false'
@@ -260,7 +260,7 @@ jobs:
 
       - name: Upload equipped portrait HTTP evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: candle-equipped-portrait
           path: ${{ runner.temp }}/candle-equipped-portrait/
@@ -269,7 +269,7 @@ jobs:
 
       - name: Upload the full Dune suite log
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-suite-log
           overwrite: ${{ inputs.candidate_verification == true }}
@@ -283,7 +283,7 @@ jobs:
       # records the environment and is not uploaded.
       - name: Upload the Dune suite timing
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-suite-timing
           overwrite: ${{ inputs.candidate_verification == true }}
@@ -311,7 +311,7 @@ jobs:
 
       - name: Upload creative artifact proof
         if: always() && inputs.minimal == false
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: keeper-creative-proof-${{ inputs.candidate_sha || github.sha }}
           path: |
@@ -321,7 +321,7 @@ jobs:
 
       - name: Upload the suite runner log
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: suite-runner-log
           overwrite: ${{ inputs.candidate_verification == true }}

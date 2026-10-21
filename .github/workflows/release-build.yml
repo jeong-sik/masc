@@ -11,15 +11,15 @@ jobs:
     name: Build shared dashboard assets
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
       - name: Build production dashboard once
         run: |
           corepack enable && corepack prepare pnpm@10.31.0 --activate
           scripts/build-dashboard-if-needed.sh --force
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-dashboard-${{ github.sha }}-${{ github.run_id }}
           path: assets/dashboard/
@@ -61,7 +61,7 @@ jobs:
       MASC_BIN_DIR: _build/default/bin
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check version truth
         run: |
@@ -208,7 +208,7 @@ jobs:
 
       - name: Upload runtime probe binaries
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: runtime-probe-${{ matrix.arch }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: runtime-probe/
@@ -266,7 +266,7 @@ jobs:
           echo "server and TUI binaries carry no dynamic sqlite dependency"
 
       - name: Download verified-source dashboard assets
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-dashboard-${{ github.sha }}-${{ github.run_id }}
           path: assets/dashboard/
@@ -429,7 +429,7 @@ jobs:
 
       - name: Upload failed installation diagnostics
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: install-failure-${{ matrix.arch }}
           if-no-files-found: ignore
@@ -438,7 +438,7 @@ jobs:
             dist/first-keeper-turn-*/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: masc-${{ matrix.arch }}
           overwrite: true
@@ -452,7 +452,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check the release body and its date before tagging
         env:
@@ -486,7 +486,7 @@ jobs:
             "${counts_args[@]}"
 
       - name: Retain the exact release body checked by this RC
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rc-release-body-${{ github.sha }}-${{ github.run_id }}
           path: release-body.md
@@ -500,10 +500,10 @@ jobs:
 
     steps:
       - name: Checkout repo for config seed hashes
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           pattern: masc-*
@@ -571,7 +571,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Upload assembled distribution
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-distribution-${{ github.run_id }}
           overwrite: true

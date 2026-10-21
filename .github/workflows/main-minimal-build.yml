@@ -26,7 +26,7 @@ jobs:
       # Keep user-written rules (including generated build identity) live.
       DUNE_CACHE: enabled-except-user-rules
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -59,7 +59,7 @@ jobs:
 
       - name: Look for a successful build of these inputs
         id: receipt
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ci-main-build-receipt
           key: ${{ steps.inputs.outputs.receipt }}
@@ -77,7 +77,7 @@ jobs:
 
       - name: Reuse Dune build artifacts
         if: steps.receipt.outputs.cache-hit != 'true'
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/masc-dune-cache
           key: ${{ steps.inputs.outputs.dune }}-${{ github.sha }}
@@ -111,7 +111,7 @@ jobs:
       # at the next scheduled check; cache eviction also causes a rebuild.
       - name: Remember successful build inputs
         if: success() && steps.receipt.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ci-main-build-receipt
           key: ${{ steps.inputs.outputs.receipt }}

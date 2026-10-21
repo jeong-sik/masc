@@ -16,7 +16,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build the owned DOS environment and homebrew program
@@ -38,7 +38,7 @@ jobs:
       - name: Retain the exact worker image for host qualification
         if: ${{ always() && steps.build.outcome == 'success' }}
         run: docker save masc-lane-dos-world:0.1.0 | gzip > proof/dos-world-image.tar.gz
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: dos-lane-package-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}

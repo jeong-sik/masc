@@ -11,21 +11,18 @@ val wrap_rows : width:int -> (string * string) list -> (string * string) list
     as they are, so field alignment survives. *)
 
 val section :
-  evidence:
-    (string
-    * ( Masc_tui_evidence_picture.evidence
-      , Masc_tui_types.Verification_evidence_read.failure )
-      result)
-    option ->
-  task_id:string ->
+  evidence:(Masc_tui_evidence_picture.evidence,
+    Masc_tui_types.Verification_evidence_read.failure) Masc_tui_fetched.observation ->
+  in_flight:bool ->
+  workspace_confirmed:bool ->
   width:int ->
   content_height:int ->
   display:Masc_tui_portrait_view.display ->
   (string * string) list
   * (Masc_tui_evidence_picture.slot * Masc_tui_evidence_picture.pixels) list
-(** The section for [task_id], from the evidence read for that task; an
-    answer that names another task is not drawn and the section reads
-    "loading...". Each binary artifact is a caption row. On a terminal that
+(** The original detail's typed evidence observation. Never-asked, pending,
+    previous-value refresh and typed failures remain distinct. The caller
+    projects the exact verification-request/Task key; another key is absent. Each binary artifact is a caption row. On a terminal that
     draws pixels, a picture that fits ({!Masc_tui_evidence_picture.block}) is
     also a run of blank rows under its caption; its slot gives the index of the
     first blank row among the section's rows and the cells it takes. Each item

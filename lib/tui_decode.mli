@@ -2472,6 +2472,13 @@ type verification_evidence =
 
 val decode_verification_evidence :
   Yojson.Safe.t -> (verification_evidence, string) result
+val decode_verification_evidence_for_request :
+  task_id:string -> verification_id:string -> Yojson.Safe.t ->
+  (verification_evidence, string) result
+(** Require the unique original Task and verification identity in the response
+    envelope before decoding evidence access/content. A newer submission for
+    the same Task cannot become this detail's evidence. No source is inferred. *)
+
 
 val runtime_context_source_label : runtime_context_source -> string
 val runtime_reasoning_effort_label : Llm_provider.Reasoning_effort.t -> string

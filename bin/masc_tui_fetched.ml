@@ -21,48 +21,54 @@ type 'k request =
   ; generation : int64
   }
 
-type ('k, 'a) status =
+type ('k, 'a, 'error) status =
   | Status_absent
   | Status_loading of 'k request
-  | Status_retrying of 'k request * string
+  | Status_retrying of 'k request * 'error
       (** Explicit retry with no successful value. The known failure remains
           observed while this new request owns settlement. *)
   | Status_ready of 'k request * 'a
-  | Status_refreshing of 'k request * 'a * string option
+  | Status_refreshing of 'k request * 'a * 'error option
       (** A revalidation of what is already on screen: the request is in
           flight and ['a] is the last good value, which keeps rendering until
           the completion lands. Without this state every periodic refresh
           flips Ready back to Loading and the pane collapses to its
-          placeholder for a frame. The string is the failure of the
+          placeholder for a frame. The error is the failure of the
           revalidation before this one, when that one failed: a retry does
           not make the value fresh, so it keeps reading as stale. *)
-  | Status_stale of 'k request * 'a * string
+  | Status_stale of 'k request * 'a * 'error
       (** A revalidation failed. ['a] is the last good value and stays on
           screen with the reason beside it, rather than a failed refresh
           reading as a pane with nothing in it. *)
-  | Status_failed of 'k request * string
+  | Status_failed of 'k request * 'error
 
-type ('k, 'a) t =
+type ('k, 'a, 'error) source =
   { latest_generation : int64
-  ; status : ('k, 'a) status
+  ; status : ('k, 'a, 'error) status
   }
 
-type 'a view =
+type ('k, 'a) t = ('k, 'a, string) source
+
+type ('a, 'error) observation =
   | Absent  (** Never asked. *)
   | Loading  (** Asked, no answer yet, nothing to show meanwhile. *)
   | Ready of 'a
-  | Stale of 'a * string
+  | Stale of 'a * 'error
       (** The last good value, and why the refresh after it failed. *)
-  | Failed of string  (** Known failure without a value; a retry may be pending. *)
+  | Failed of 'error  (** Known failure without a value; a retry may be pending. *)
+
+type 'a view = ('a, string) observation
 
 let value = function
   | Ready value | Stale (value, _) -> Some value
   | Absent | Loading | Failed _ -> None
 ;;
 
-type ('k, 'a) start_result =
+type ('k, 'a, 'error) reading =
   | Already_loading
-  | Started of ('k, 'a) t * 'k request
+  | Started of ('k, 'a, 'error) source * 'k request
+
+type ('k, 'a) start_result = ('k, 'a, string) reading
 
 let initial = { latest_generation = 0L; status = Status_absent }
 let request_key request = request.key
@@ -127,16 +133,19 @@ let cancel_pending ~reason state =
       { state with status = Status_stale (request, value, error) }
   | Status_absent | Status_ready _ | Status_stale _ | Status_failed _ -> state
 
-let suspend state =
+let suspend_with ~reason state =
   let status = match state.status with
     | Status_loading request ->
-        Status_failed (request, "Reading suspended; waiting for workspace identity.")
+        Status_failed (request, reason)
     | Status_retrying (request, error) -> Status_failed (request, error)
     | Status_refreshing (request, value, _) ->
-        Status_stale (request, value, "Reading suspended; waiting for workspace identity.")
+        Status_stale (request, value, reason)
     | (Status_absent | Status_ready _ | Status_stale _ | Status_failed _) as status -> status
   in
   { state with status }
+
+let suspend state =
+  suspend_with ~reason:"Reading suspended; waiting for workspace identity." state
 
 let complete ~equal state request result =
   if not (is_current ~equal state request)

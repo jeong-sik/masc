@@ -14,7 +14,7 @@ let wrap_rows ~width lines =
        else Message_layout.wrap_words ~max_cells:(max 1 width) text
             |> List.map (fun row -> style, row)) lines
 
-let section ~evidence ~task_id ~width ~content_height ~display =
+let section ~evidence ~in_flight ~workspace_confirmed ~width ~content_height ~display =
   let wrap ~prefix text =
     Message_layout.wrap_body ~max_cells:(max 1 (width - 6))
       ~sanitize:Keeper_chat.terminal_safe_text text
@@ -75,12 +75,17 @@ let section ~evidence ~task_id ~width ~content_height ~display =
         | Picture.Undrawn_image _ | Picture.Binary_only | Picture.Unshown _ -> caption, None)
   in
   let message rows = wrap_rows ~width rows, [] in
-  let rows, pictures =
-    match evidence with
-    | Some (id, result) when String.equal id task_id -> (
-        match result with
-        | Ok (Picture.Items []) -> message [ Ansi.dim, "    (no inspectable evidence)" ]
-        | Ok (Picture.Items items) ->
+  let failure_rows = function
+    | Failure.Transport detail -> wrap ~prefix:"    " detail
+    | Http_error detail -> wrap ~prefix:"    Read failed: " detail
+    | Invalid_json detail -> wrap ~prefix:"    Invalid JSON: " detail
+    | Invalid_payload detail -> wrap ~prefix:"    Decode failed: " detail
+    | Launch_failure detail -> wrap ~prefix:"    Read did not complete: " detail
+    | Workspace_unconfirmed detail -> wrap ~prefix:"    Workspace unconfirmed: " detail
+    | Interrupted detail -> wrap ~prefix:"    Read interrupted: " detail in
+  let contents = function
+        | Picture.Items [] -> message [ Ansi.dim, "    (no inspectable evidence)" ]
+        | Picture.Items items ->
             let _offset, rev_rows, rev_pictures =
               List.fold_left
                 (fun (offset, rev_rows, rev_pictures) item ->
@@ -104,18 +109,34 @@ let section ~evidence ~task_id ~width ~content_height ~display =
                 (0, [], []) items
             in
             List.rev rev_rows, List.rev rev_pictures
-        | Ok (Picture.Access_unavailable reason) ->
+        | Picture.Access_unavailable reason ->
             (* The producer's reason is already the evidence access verdict. *)
             message (wrap ~prefix:"    " reason)
-        | Error (Failure.Transport detail) ->
-            (* The transport boundary already says "GET failed". *)
-            message (wrap ~prefix:"    " detail)
-        | Error (Failure.Http_error detail) -> message (wrap ~prefix:"    Read failed: " detail)
-        | Error (Failure.Invalid_json detail) -> message (wrap ~prefix:"    Invalid JSON: " detail)
-        | Error (Failure.Invalid_payload detail) ->
-            message (wrap ~prefix:"    Decode failed: " detail)
-        | Error (Failure.Launch_failure detail) -> message (wrap ~prefix:"    Read failed: " detail))
-    | Some _ | None -> message [ Ansi.dim, "    loading..." ]
+  in
+  let rows, pictures = match evidence with
+    | Masc_tui_fetched.Absent -> message (wrap ~prefix:"    "
+        (if workspace_confirmed then "Evidence not read; press r to refresh."
+         else "Workspace identity unconfirmed; evidence not read."))
+    | Loading -> message (wrap ~prefix:"    "
+        (if workspace_confirmed then "Reading the original verification evidence…"
+         else "Workspace unconfirmed; the evidence read is unconfirmed."))
+    | Failed failure -> message
+        ((if in_flight then wrap ~prefix:"    " "Retrying evidence read…" else []) @ failure_rows failure)
+    | Ready evidence ->
+      let rows,pictures = contents evidence in
+      let notes = if not workspace_confirmed then
+        wrap ~prefix:"    " "Workspace unconfirmed; showing the last observed evidence."
+        else if in_flight then wrap ~prefix:"    " "Refreshing; showing the previous evidence." else [] in
+      let notes = wrap_rows ~width notes in
+      notes @ rows,List.map (fun ((slot : Picture.slot),pixels) ->
+        {slot with first=List.length notes+slot.first},pixels) pictures
+    | Stale (evidence,failure) ->
+      let rows,pictures = contents evidence in
+      let notes = wrap_rows ~width
+        (wrap ~prefix:"    " (if in_flight then "Retrying; showing the previous evidence."
+          else "Showing the last observed evidence.") @ failure_rows failure) in
+      notes @ rows,List.map (fun ((slot : Picture.slot),pixels) ->
+        {slot with first=List.length notes+slot.first},pixels) pictures
   in
   let heading = wrap_rows ~width [ (Ansi.dim, ""); (Ansi.bold, "  EVIDENCE CONTENT") ] in
   let heading_rows = List.length heading in

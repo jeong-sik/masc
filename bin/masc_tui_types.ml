@@ -7855,7 +7855,25 @@ module Verification_evidence_read = struct
     | Invalid_json of string
     | Invalid_payload of string
     | Launch_failure of string
+    | Workspace_unconfirmed of string
+    | Interrupted of string
 end
+
+type verification_evidence_key = {
+  vek_request_id : string;
+  vek_task_id : string;
+}
+let equal_verification_evidence_key left right =
+  String.equal left.vek_request_id right.vek_request_id
+  && String.equal left.vek_task_id right.vek_task_id
+
+type verification_evidence_request = {
+  ver_ticket : verification_evidence_key Masc_tui_fetched.request;
+  ver_job : unit ref;
+  ver_authority : workspace_authority;
+  ver_reading : unit ref;
+  ver_workspace : Tui_decode.server_identity option;
+}
 
 type usage_section = Usage_plan | Usage_trend | Usage_keepers
 let next_usage_section = function
@@ -8763,7 +8781,9 @@ type state = {
   mutable task_document_body: task_document_slot;
   mutable task_document_history: task_document_slot;
   mutable verification_evidence:
-    (string * (Masc_tui_evidence_picture.evidence, Verification_evidence_read.failure) result) option;
+    (verification_evidence_key, Masc_tui_evidence_picture.evidence,
+      Verification_evidence_read.failure) Masc_tui_fetched.source;
+  mutable verification_evidence_request: verification_evidence_request option;
   (* One cache is shared by the calls surface and chat full-detail mode. The
      scope and generation are the authority: cursor position is not, because
      palette/Answering can open a chat without moving the roster cursor. *)
@@ -11282,7 +11302,44 @@ let complete_tools_async_detail state request result =
       state.tools_async_detail request.tad_ticket result
   end
 
+(* The immutable fetched ticket owns reply admission; the separate physical
+   job token only addresses cancellation of its actual workspace worker. *)
+let begin_verification_evidence_read state key =
+  match Masc_tui_fetched.refresh ~equal:equal_verification_evidence_key
+      state.verification_evidence ~key with
+  | Masc_tui_fetched.Already_loading -> None
+  | Started (reading, ticket) ->
+    let request = {ver_ticket=ticket;ver_job=ref ();ver_authority=state.workspace_authority;
+      ver_reading=state.workspace_read_authority;ver_workspace=state.server_identity} in
+    state.verification_evidence <- reading;
+    state.verification_evidence_request <- Some request;
+    Some request
+
+let complete_verification_evidence_read state request result =
+  match state.verification_evidence_request with
+  | Some current when current == request
+      && request.ver_authority = state.workspace_authority
+      && request.ver_reading == state.workspace_read_authority
+      && Masc_tui_fetched.is_current ~equal:equal_verification_evidence_key
+        state.verification_evidence request.ver_ticket ->
+    state.verification_evidence <- Masc_tui_fetched.complete
+      ~equal:equal_verification_evidence_key state.verification_evidence request.ver_ticket result;
+    state.verification_evidence_request <- None;
+    true
+  | Some _ | None -> false
+
+let retire_verification_evidence_read state ~reason =
+  state.verification_evidence <- Masc_tui_fetched.cancel_pending ~reason state.verification_evidence;
+  state.verification_evidence_request <- None
+
+let suspend_verification_evidence_read state =
+  state.verification_evidence <- Masc_tui_fetched.suspend_with
+    ~reason:(Verification_evidence_read.Workspace_unconfirmed "Waiting for workspace identity.")
+    state.verification_evidence;
+  state.verification_evidence_request <- None
+
 let suspend_workspace_readings state =
+  suspend_verification_evidence_read state;
   state.chat_call_reader <- None;
   state.chat_call_pending <- None;
   state.task_history <- Masc_tui_fetched.suspend state.task_history;
@@ -15017,7 +15074,8 @@ let create_state
   task_history_request = None;
   task_document_body = initial_task_document_slot;
   task_document_history = initial_task_document_slot;
-  verification_evidence = None;
+  verification_evidence = Masc_tui_fetched.initial;
+  verification_evidence_request = None;
   keeper_calls = None;
   keeper_calls_error = None;
   keeper_calls_keeper = None;

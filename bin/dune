@@ -2837,7 +2837,8 @@
   masc_tui_keeper_chat_projection
   masc_tui_message_layout
   masc_tui_portrait_view
-  masc_tui_types))
+  masc_tui_types
+  masc_tui_fetched))
 
 ;; A Keeper's own still portrait beside the Identity facts of its detail,
 ;; with the cache that keeps a roster walk from re-rendering it. Apart from

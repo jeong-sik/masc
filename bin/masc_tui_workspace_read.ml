@@ -84,3 +84,17 @@ let read_json ~kept_reads ~address_of ~send ~decode ~host ~port ~path =
         decode ~allow_empty:false ~status_code:status ~body)
   in
   validate_workspace_read_json json
+
+type response_failure = Transport_failed of string | Workspace_refused of string
+
+let read_response ~send ~host ~port ~path =
+  match current_workspace_read () with
+  | Some {wr_proof=Health_identity;_} ->
+    Error (Workspace_refused "A raw response cannot establish the decoded workspace health identity")
+  | None | Some {wr_proof=Request_precondition;_} ->
+    let ( let* ) = Result.bind in
+    let* path = workspace_read_path ~host ~port ~path
+      |> Result.map_error (fun detail -> Workspace_refused detail) in
+    let* response = send ~path |> Result.map_error (fun detail -> Transport_failed detail) in
+    validate_workspace_read_response response
+    |> Result.map_error (fun detail -> Workspace_refused detail)

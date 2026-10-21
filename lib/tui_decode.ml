@@ -7610,6 +7610,22 @@ let decode_verification_evidence json =
   | `String other -> Error ("unknown evidence access state: " ^ other)
   | _ -> Error "evidence access state is missing"
 
+let decode_verification_evidence_for_request ~task_id ~verification_id json =
+  let one name fields =
+    match List.filter (fun (key,_) -> String.equal key name) fields with
+    | [(_,value)] -> Some value
+    | [] | _ :: _ -> None in
+  let matches = match json with
+    | `Assoc root ->
+      (match one "result" root with
+       | Some (`Assoc result) ->
+         one "task_id" result = Some (`String task_id)
+         && one "verification_id" result = Some (`String verification_id)
+       | Some _ | None -> false)
+    | _ -> false in
+  if matches then decode_verification_evidence json
+  else Error "Evidence does not name the original Task and verification request"
+
 (** Decoded durable async inventory. Malformed counters are errors, never zero.
     The active inventory contains queued, running and cancelling requests only. *)
 type async_request_phase = Async_queued | Async_running | Async_cancelling

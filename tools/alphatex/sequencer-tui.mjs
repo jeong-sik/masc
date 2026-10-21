@@ -52,6 +52,7 @@ const help = [
   ':note C4 0 1 96              pitch, beat, duration, optional velocity',
   ':chord Cmaj7 0 4 drop2 4 0  symbol, beat, duration, mode, octave, inversion',
   ':revoice Cmaj7 drop2 4 0  change cursor voices; retain timing/dynamics; u:compare',
+  ':revoice-led 0 12 drop2 C3 C5 Dm7 G7 Cmaj7 changes exact onset groups, retaining rhythm/dynamics; u:compare',
   ':harmony mix|track lists key-set changes; arrows choose, Enter returns to notes, Esc closes',
   ':harmony-export PATH saves the complete ready analysis without replacing a file',
   ':progression 0 4 rootless Dm7 G7 Cmaj7',

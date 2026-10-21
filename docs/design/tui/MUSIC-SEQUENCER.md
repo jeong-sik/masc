@@ -63,6 +63,28 @@ multiple channels/ports. Other expression events retain their original keys and
 bytes, so polyphonic pressure is not retargeted by this note edit. Analysis remains
 candidate-based and uses key durations, not inferred pedal-extended sound.
 
+`:revoice-led START END MODE LOW HIGH SYMBOL...` applies an explicit chord
+sequence to existing exact-onset groups in the current phrase or imported-source
+track. The half-open range selects onsets rather than clipping note tails. One
+symbol belongs to each onset; each group must have the same number of voices,
+and no selected group's held keys may cross the next selected onset. The last
+group's releases may extend past END. Notes starting outside the range remain
+unchanged, including earlier tails. Arpeggios are separate exact onsets; there is
+no grouping threshold or inferred chord label.
+
+The shared progression search filters candidates to the existing voice count
+before minimizing total sorted-voice semitone movement over the whole path.
+Each onset maps original low-to-high note IDs onto that path. IDs, timings and
+dynamics remain intact; one undo/redo revision compares performances. Imported
+MIDI additionally preserves native PPQ/SMPTE clocks, paired release wire forms,
+release velocities, source ports and every non-note event. Channel/source-note
+selection disambiguates routing; a stale note anchor is refused. Unclosed notes
+before END and unmatched/overlapping keys in the selected range/scope are refused
+instead of silently omitting unsafe voices. Whole-candidate phrase overlap and
+MIDI pairing checks still apply against unchanged notes. Poly-pressure is not
+retargeted to the replacement pitches. These edits use the existing export,
+harmony, saved-document and editable-arrangement consumers.
+
 The harmonic timeline runs in the owned sequencer worker. It sweeps exact
 note-on/off boundaries, retains shared-key overlap counts and rests, and represents
 zero-duration source notes as points. Mix analysis uses audible phrase tracks or

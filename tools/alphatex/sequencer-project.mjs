@@ -177,8 +177,9 @@ export function chordVoicing(symbol, { mode = 'close', octave = 4, inversion = 0
 // dictionary voicing in the musician's inclusive register. Dynamic programming
 // minimizes total low-to-high voice movement over the entire progression, not
 // just the next chord. Equal-cost paths use stable sorted candidate order.
-export function voiceLedProgression(symbols, { mode, low, high }) {
+export function voiceLedProgression(symbols, { mode, low, high, voiceCount }) {
   low = pitch(low); high = pitch(high)
+  if (voiceCount !== undefined) int(voiceCount, 'voicing voice count', 1)
   if (low > high) throw new Error('Voicing register low must not exceed high')
   if (!Array.isArray(symbols) || !symbols.length) throw new Error('A voice-led progression needs chords')
   const candidates = symbols.map(symbol => {
@@ -200,7 +201,8 @@ export function voiceLedProgression(symbols, { mode, low, high }) {
         for (let octave = first; octave <= last; octave++) rows.push(shape.map(value => tonic + octave * 12 + value))
       }
     }
-    rows = rows.filter(row => row.length && row.every((value, i) => Number.isSafeInteger(value) && value >= low && value <= high && (!i || value > row[i - 1]))
+    rows = rows.filter(row => row.length && (voiceCount === undefined || row.length === voiceCount)
+      && row.every((value, i) => Number.isSafeInteger(value) && value >= low && value <= high && (!i || value > row[i - 1]))
       && (!chord.bass || row[0] % 12 === Note.chroma(chord.bass)))
     rows = [...new Map(rows.map(row => [row.join(','), row])).values()].sort((a, b) => {
       for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i]
@@ -247,6 +249,32 @@ export function revoiceNotes(notes, tick, symbol, options) {
   return voices.map((note, index) => ({ id: note.id, pitch: pitches[index] }))
 }
 
+// Exact onset groups are a musician-selected progression, not inferred attacks.
+// Retain every voice's rhythm/dynamics; crossing groups need separate decisions.
+export function revoiceProgressionNotes(notes, { start, end, symbols, ...options }) {
+  int(start, 'revoicing range start'); int(end, 'revoicing range end', start + 1)
+  const groups = new Map()
+  for (const note of notes) {
+    if (note.start < start || note.start >= end) continue
+    if (!groups.has(note.start)) groups.set(note.start, [])
+    groups.get(note.start).push(note)
+  }
+  const rows = [...groups.entries()].sort(([a], [b]) => a - b)
+  if (!rows.length) throw new Error('No note onsets in the revoicing range')
+  if (!Array.isArray(symbols) || symbols.length !== rows.length) throw new Error('Give one chord symbol per exact note-onset group')
+  const voiceCount = rows[0][1].length
+  for (const [index, [tick, voices]] of rows.entries()) {
+    if (voices.length !== voiceCount) throw new Error('Revoicing onset groups need a constant number of voices')
+    const next = rows[index + 1]?.[0]
+    if (next !== undefined && voices.some(note => tick + note.duration > next)) {
+      throw new Error('Revoicing groups overlap the next onset; use separate cursor voicing edits')
+    }
+  }
+  const path = voiceLedProgression(symbols, { ...options, voiceCount })
+  return rows.flatMap(([, voices], index) => [...voices].sort((a, b) => a.pitch - b.pitch)
+    .map((note, voice) => ({ id: note.id, pitch: path[index][voice] })))
+}
+
 // Every edit is transactional: validate a private candidate before returning it.
 // Callers may retain immutable before/after documents for undo and redo.
 export function editProject(project, trackId, edit) {
@@ -254,7 +282,7 @@ export function editProject(project, trackId, edit) {
   const next = structuredClone(project)
   const track = next.tracks.find(track => track.id === trackId)
   if (!track) throw new Error('Selected track no longer exists')
-  if (track.channel === GM_DRUM_CHANNEL && ['chord', 'revoice', 'progression', 'progression-led'].includes(edit.kind)) {
+  if (track.channel === GM_DRUM_CHANNEL && ['chord', 'revoice', 'revoice-led', 'progression', 'progression-led'].includes(edit.kind)) {
     throw new Error('Chord voicings need a melodic track; drum notes select percussion sounds')
   }
   const add = note => track.notes.push({ id: uniqueId('note', track.notes), ...note })
@@ -286,6 +314,13 @@ export function editProject(project, trackId, edit) {
     }
     case 'revoice': {
       const changes = new Map(revoiceNotes(track.notes, edit.tick, edit.symbol, edit).map(note => [note.id, note.pitch]))
+      for (const note of track.notes) if (changes.has(note.id)) note.pitch = changes.get(note.id)
+      break
+    }
+    case 'revoice-led': {
+      int(edit.start, 'revoicing range start', 0, next.length - 1)
+      int(edit.end, 'revoicing range end', edit.start + 1, next.length)
+      const changes = new Map(revoiceProgressionNotes(track.notes, edit).map(note => [note.id, note.pitch]))
       for (const note of track.notes) if (changes.has(note.id)) note.pitch = changes.get(note.id)
       break
     }

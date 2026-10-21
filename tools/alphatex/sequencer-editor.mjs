@@ -141,6 +141,7 @@ function runCommand(editor, line) {
     case 'note': count(3, 4); edit = { kind: 'note', pitch: pitch(args[0]), start: beats(args[1]), duration: beats(args[2]), velocity: args[3] === undefined ? editor.velocity : Number(args[3]) }; break
     case 'chord': count(3, 6); edit = { kind: 'chord', symbol: args[0], start: beats(args[1]), duration: beats(args[2]), mode: args[3] ?? 'close', octave: args[4] === undefined ? 4 : Number(args[4]), inversion: args[5] === undefined ? 0 : Number(args[5]), velocity: editor.velocity }; break
     case 'revoice': count(2, 4); edit = { kind: 'revoice', tick: editor.tick, symbol: args[0], mode: args[1], octave: args[2] === undefined ? 4 : Number(args[2]), inversion: args[3] === undefined ? 0 : Number(args[3]) }; break
+    case 'revoice-led': count(6, Number.MAX_SAFE_INTEGER); edit = { kind: 'revoice-led', start: beats(args[0]), end: beats(args[1]), mode: args[2], low: pitch(args[3]), high: pitch(args[4]), symbols: args.slice(5) }; break
     case 'progression': count(4, Number.MAX_SAFE_INTEGER); edit = { kind: 'progression', start: beats(args[0]), duration: beats(args[1]), mode: args[2], octave: 3, symbols: args.slice(3), velocity: editor.velocity }; break
     case 'progression-led': count(6, Number.MAX_SAFE_INTEGER); edit = { kind: 'progression-led', start: beats(args[0]), duration: beats(args[1]), mode: args[2], low: pitch(args[3]), high: pitch(args[4]), symbols: args.slice(5), velocity: editor.velocity }; break
     case 'tempo': count(1); edit = { kind: 'tempo', value: Number(args[0]) }; break
@@ -182,7 +183,7 @@ function runCommand(editor, line) {
     default: throw new Error(`Unknown command: ${command}; use :help`)
   }
   const next = apply(editor, edit)
-  if (command === 'revoice') {
+  if (command === 'revoice' || command === 'revoice-led') {
     const selected = selectedNote(editor)
     const voice = next.project.tracks[next.track].notes.find(note => note.id === selected?.id)
     return { editor: voice ? { ...next, pitch: voice.pitch } : next }

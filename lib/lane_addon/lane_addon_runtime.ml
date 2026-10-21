@@ -898,7 +898,7 @@ let run_host_cycle m e (port : host_port) =
                (Lane_addon_host_request.result_arguments ~request_id ~result)) in
              read_answer (Lane_addon_records.read_records ~base_path:m.base_path ~store:m.store ~grants
                ~github:!github_reader ~measure
-               ~max_bytes:e.package.resources.max_reply_bytes ~source_id ~start))
+               ~max_bytes:(Lane_addon_types.max_reply_bytes e.package) ~source_id ~start))
     | Lane_addon_host_request.Ask {request_id; questions; context} ->
         (match asker with
          | Error reason -> Ok (not_allowed reason)
@@ -948,14 +948,14 @@ let run_host_cycle m e (port : host_port) =
                ~source_id ~commit ~path))
     | Lane_addon_host_request.Read_result {request_id; original_request_id; source_id; sha256; offset} ->
         (match offload (fun () -> Lane_addon_host_delivery.read ~store:m.store ~owner ~request_id
-            ~original_request_id ~source_id ~sha256 ~offset ~max_bytes:e.package.resources.max_reply_bytes) with
+            ~original_request_id ~source_id ~sha256 ~offset ~max_bytes:(Lane_addon_types.max_reply_bytes e.package)) with
          | Ok body -> Ok (Deliver body)
          | Error (Lane_addon_host_delivery.Refused reason) -> Ok (not_allowed reason)
          | Error (Storage_failed detail) -> Error (Result_delivery_failed {request_id; detail})) in
   let try_request request =
     let request_id = Lane_addon_host_request.request_id request in
     let* retained = offload (fun () -> Lane_addon_host_delivery.restore ~store:m.store ~owner ~request
-        ~max_bytes:e.package.resources.max_reply_bytes)
+        ~max_bytes:(Lane_addon_types.max_reply_bytes e.package))
       |> Result.map_error (function
         | Lane_addon_host_delivery.Refused detail | Storage_failed detail -> Result_delivery_failed {request_id; detail}) in
     match retained with Some arguments -> Ok (Restore arguments) | None -> produce request in
@@ -971,7 +971,7 @@ let run_host_cycle m e (port : host_port) =
   let deliver request result =
     let request_id = Lane_addon_host_request.request_id request in
     let* arguments = offload (fun () -> Lane_addon_host_delivery.arguments ~store:m.store ~owner ~request
-        ~max_bytes:e.package.resources.max_reply_bytes ~result)
+        ~max_bytes:(Lane_addon_types.max_reply_bytes e.package) ~result)
       |> Result.map_error (function
         | Lane_addon_host_delivery.Refused detail | Storage_failed detail -> Result_delivery_failed {request_id; detail}) in
     deliver_arguments ~request_id arguments in

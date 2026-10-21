@@ -1,4 +1,5 @@
-(** Session-owned terminal results for workspace readers and retained operations. Shared
+(** Session-owned partial observations and terminal results for workspace readers
+    and retained operations. Shared
     notification capacity is not authority to retain a result or a launch error. *)
 type 'message t
 
@@ -55,3 +56,27 @@ val launch_session :
     a retained receipt never authorizes refreshing a foreign workspace or
     repeating the operation. No-switch/ordinary synchronous launch errors are
     retained through the same queue-independent publication. *)
+
+val launch_observation :
+  ?key:unit ref ->
+  ?observe_job:(Masc_tui_workspace_job.event -> unit) ->
+  ?on_not_run:(unit -> unit) ->
+  Masc_tui_types.state -> results:'message t ->
+  boundary_error:(string -> 'error) ->
+  progress:('part -> 'message) ->
+  deliver:(('a, 'error) result -> 'message) ->
+  (('part -> unit) -> ('a, 'error) result) -> unit
+(** One workspace observation publishes partial facts and its terminal result
+    through the same original registration. Publications retain FIFO order and
+    never wait for shared notification capacity. Publishing a part keeps the
+    registration; terminal publication closes it. Late parts after settlement,
+    withdrawal or session close cannot reopen it. Already published parts remain
+    claimable until session close and still need original UI admission.
+
+    [progress] only forms the original message/scope; no UI effects. Producer
+    protocol validation, source ordering, received timestamps and source/error
+    meaning remain with the caller. No coalescing, dropping or numeric cap.
+    [on_not_run] also releases caller metadata when workspace withdrawal wins
+    before the worker enters, without manufacturing a terminal result. Actual
+    worker cancellation, cleanup and ownership use the existing workspace job.
+    Work/callbacks may still block; cancellation still propagates. *)

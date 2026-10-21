@@ -2659,6 +2659,13 @@ from an unconfirmed workspace still wait for the complete verified refresh.
 Question updates keep the existing answer reader and notification behavior;
 they do not finish the other loading indicators or change workspace authority.
 
+After an answer is recorded, reaction, Tool and original Task observations arrive
+independently. A received Task observation remains available if another source
+fails; sources that never arrived stay unconfirmed. Follow-up parts and their
+final result remain retained while other notifications are queued. Changing the
+read authority retires old responses. A received observation does not prove that
+the Keeper consumed the answer or completed useful work.
+
 A refresh delivers its question listing once. Starting an answer retires older
 question reads, so a delayed background response cannot restore the question
 after the answer's own reload removed it. New question listings resume when

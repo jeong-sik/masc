@@ -4207,13 +4207,29 @@ let handle_keeper_ask_answer ~actor state request reqd =
    answers through POST /api/v1/keepers/ask-answer; the choice ids it sends
    back come from the rows it was given, so no surface ever matches on label
    text and rewording a choice cannot orphan an answer. *)
+type ask_followup_frame =
+  | Followup_started of Keeper_ask_answer_wake.followup_identity
+  | Followup_source of Keeper_ask_answer_wake.followup_identity * Keeper_ask_answer_wake.followup_source
+  | Followup_completed of Keeper_ask_answer_wake.followup_identity
+let ask_followup_frame_json ~workspace ~state_ready ~keeper_name ~ask_id frame =
+  let phase,(identity : Keeper_ask_answer_wake.followup_identity),fields=match frame with
+    | Followup_started identity -> "started",identity,[]
+    | Followup_completed identity -> "complete",identity,[]
+    | Followup_source (identity,source) ->
+      let name,value=Keeper_ask_answer_wake.followup_source_to_json source in
+      "source",identity,["source",`String name;"value",value] in
+  `Assoc ["workspace",workspace;"state_ready",`Bool state_ready;
+    "keeper",`String keeper_name;"answer_progress_for",`String ask_id;
+    "answer_progress",`Assoc (["state",`String phase;"answered_at",`Float identity.answered_at;
+      "stimulus_id",`String identity.stimulus_id] @ fields)]
+
 exception Ask_followup_stream_closed
 
 let stream_keeper_ask_followup ~base_path ~workspace ~state_ready ~keeper_name
     ~(ask : Keeper_ask.ask) ~resolution request reqd =
   let writer = ref None and closed = ref false in
   let mutex = Eio.Mutex.create () in
-  let send phase (identity : Keeper_ask_answer_wake.followup_identity) fields =
+  let send frame =
     let output = match !writer with
       | Some writer -> writer
       | None ->
@@ -4222,10 +4238,7 @@ let stream_keeper_ask_followup ~base_path ~workspace ~state_ready ~keeper_name
         let output = Httpun.Reqd.respond_with_streaming reqd response in
         writer := Some output;
         output in
-    let json = `Assoc ["workspace",workspace;"state_ready",`Bool state_ready;
-      "keeper",`String keeper_name;"answer_progress_for",`String ask.ask_id;
-      "answer_progress",`Assoc (["state",`String phase;
-        "answered_at",`Float identity.answered_at;"stimulus_id",`String identity.stimulus_id] @ fields)] in
+    let json=ask_followup_frame_json ~workspace ~state_ready ~keeper_name ~ask_id:ask.ask_id frame in
     if not (keeper_stream_send_raw output mutex closed
         (Sse_wire.format_event_yojson ~event_type:"ask_followup" json))
     then raise Ask_followup_stream_closed in
@@ -4236,16 +4249,14 @@ let stream_keeper_ask_followup ~base_path ~workspace ~state_ready ~keeper_name
       respond_json_value_with_cors ~status:`Service_unavailable request reqd
         (keeper_chat_stream_error_json "workspace state is not ready")
     else match Keeper_ask_answer_wake.observe_followup
-        ~on_started:(fun identity -> send "started" identity [])
-        ~on_source:(fun identity source ->
-          let name,value = Keeper_ask_answer_wake.followup_source_to_json source in
-          send "source" identity ["source",`String name;"value",value])
+        ~on_started:(fun identity -> send (Followup_started identity))
+        ~on_source:(fun identity source -> send (Followup_source (identity,source)))
         ~base_path ~keeper_name ~ask ~resolution () with
     | Error detail ->
       respond_json_value_with_cors ~status:`Service_unavailable request reqd
         (keeper_chat_stream_error_json detail)
-    | Ok followup -> send "complete"
-        {answered_at=followup.answered_at;stimulus_id=followup.stimulus_id} [])
+    | Ok followup -> send (Followup_completed
+        {answered_at=followup.answered_at;stimulus_id=followup.stimulus_id}))
   with
   | Ask_followup_stream_closed -> ()
   | Eio.Cancel.Cancelled _ as exn -> raise exn

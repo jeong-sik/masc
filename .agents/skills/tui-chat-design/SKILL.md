@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 원본 비동기 요청·Task·검증 증거·이력 상세와 파일 경계 이어읽기, 소스별 표시 준비 단계·물리/논리 관측, 채팅·입력·로딩·진행 상태, 시작 설정·인증 준비·키 인계·음성 보정과 녹음 관측·늦은 터미널 응답, 비동기 조회·상세의 소스별 미조회·진행·재확인 대기·마지막 관측·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회·후속 source 수신/미확인과 이전 증거를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools·Connectors의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·구성 조회·디렉터리 페이지의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, 공용 완료·원래 Task 생성/취소 영수증의 세션 소유 보관과 알림 큐·입력 revision과 명시적 명령 복구·정확한 Task 생성 사실 조회·목록과 독립적인 원래 Task의 live/archive/삭제 관측·연속 이력·과거 검증 증거와 inspector, 조회 실패·중단·미시작, worker·caller·UI 반영·취소·등록 해제와 paint 증거를 구분한다."
+description: "MASC TUI의 채팅·입력·Ask/승인·원본 요청/Task/검증 증거·로딩 가시성을 바꿀 때 쓴다. 비동기·공유 조회의 부분/종단 수신과 마지막 관측, workspace/ticket 소유권·입력 보존·worker/caller/UI/paint 구분을 다룬다. 시작·인증·설정·음성·Tools/Runtime/Board 등 상세 규칙은 본문의 주제별 reference를 선택해 읽는다."
 ---
 
 # 대화를 먼저 읽는 채팅

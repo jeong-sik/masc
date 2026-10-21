@@ -14,6 +14,17 @@ val ask_already_answered_response :
 (** Conflict receipt for the canonical first answer, never the requesting
     surface's losing choices. Delivery can still await automatic recovery. *)
 
+type ask_followup_frame =
+  | Followup_started of Keeper_ask_answer_wake.followup_identity
+  | Followup_source of Keeper_ask_answer_wake.followup_identity * Keeper_ask_answer_wake.followup_source
+  | Followup_completed of Keeper_ask_answer_wake.followup_identity
+val ask_followup_frame_json :
+  workspace:Yojson.Safe.t -> state_ready:bool -> keeper_name:string -> ask_id:string ->
+  ask_followup_frame -> Yojson.Safe.t
+(** Canonical source-stream frame. Each phase carries the same workspace,
+    Keeper, Ask and committed answer identity. Source frames contain only their
+    actual source; serializing a frame does not certify stream completion. *)
+
 (** Server_routes_http_keeper_stream — keeper chat
     streaming HTTP route + payload parser.
 

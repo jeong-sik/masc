@@ -279,8 +279,14 @@ status: reference
     하나의 자리가 여러 번 이어지는 것이고, 복제된 자리와는 다르다. 그러므로 loop region은
     새 개념이 아니라 반복을 가진 Region, 곧 이 항목의 특수한 경우이고, 따로 표제어를
     세우지 않는다. 코드도 같다: UMP 루프 계획은 `timeline.regions`의 각 항목에서
-    `repeatCount`를 읽어 클립을 만들고, 0이면 "invalid captured loop region"으로
-    거절한다(`UmpLoopTransport.swift`). 브라우저 장면이 문서 구조에서 갈라 읽는 구역은
+    `repeatCount`를 읽어 클립을 만든다. 거절 조건은 `repeatCount` 하나가 아니다 —
+    `repeatCount`가 0이거나, `id`가 비었거나, `source`가 `timeline.sources`에 없거나,
+    `component`가 `.audio`인 Region 중 하나만 걸려도 그 계획 전체가
+    "invalid captured loop region"으로 서지 않는다(`UmpLoopTransport.swift`의 `UmpLoopPlan`).
+    같은 파일이 계획 수준에서도 "invalid captured loop arrangement"(schemaVersion·duration·
+    빈 sources·빈 regions·중복 id)와 "captured loop trim exceeds original source"(자른 구간이
+    원본 길이를 넘음)를 따로 낸다. 그래서 Region의 자격은 반복 횟수만이 아니라 원본
+    `source`와 그 길이에 함께 매인다. 브라우저 장면이 문서 구조에서 갈라 읽는 구역은
     이 낱말이 아니며 **Browser Scene Region** 항목이 맡는다.
   → [tools/alphatex/README.md](../../tools/alphatex/README.md) ·
   [tools/alphatex/CAPTURE-UMP-REGIONS.md](../../tools/alphatex/CAPTURE-UMP-REGIONS.md) ·
@@ -301,7 +307,8 @@ status: reference
 
 **Audition (오디션, 미리 듣기)**
 : 소리를 내어 확인하는 행위를 통틀어 이르는 말. 같은 낱말이 서로 다른 대상을 가리키므로
-  문장에서는 무엇을 듣는지 반드시 함께 적는다. 지금 코드와 문서에서 확인되는 쓰임은 넷이다.
+  문장에서는 무엇을 듣는지 반드시 함께 적는다. 지금 코드와 문서에서 확인되는 쓰임은
+  아래 다섯이며, 그중 `solo/mute 확인`은 이 낱말 대신 다른 표현을 쓰는 자리다.
   - `Source audition` — 가져온 MIDI 소스의 순서 있는 원본 메시지 열을 명시한 MIDI 출력이나
     VST로 내보내는 재생. 처음부터 시작하고 pause/resume과 source-clock seek를 지원한다
     (MIDI-SOURCE.md "Ordered source audition", README.md "Imported performance audition").
@@ -314,6 +321,11 @@ status: reference
     arrangement transport": "A mixed route also supports solo/mute audition of either
     source kind.").
     들을 대상을 고르는 라우트 조작이지 재생 기능이 아니므로 "audition" 대신 이렇게 쓴다.
+  - `arrangement region audition` — 어레인지먼트의 Region 창을 trim·repeat·resume·seek
+    규칙대로 들려주는 재생. 원본 전체를 한 번에 보내는 full-source audition과 달리,
+    스케줄러가 밀린 복사를 건너뛰고 현재 위상만 되살린다(ARRANGEMENT.md "WAV arrangement
+    transport"의 "This phase policy differs from the original full-source audition's
+    complete ordered-stream delivery.").
   - 이름 경계: `monitoring`은 `audition`이 아니다. `:monitor`는 오디오 입력을,
     `:midi-monitor`는 들어오는 MIDI를 다른 목적지로 계속 전달하는 상태다
     (README.md의 `:monitor`·`:midi-monitor`). 한 번 듣고 끝나는 재생과 달리 라우트가 열려

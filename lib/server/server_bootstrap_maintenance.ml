@@ -757,41 +757,14 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
              recovery_ctx)
         transition_projection_budget
     in
+    let delivery_recovery = Server_maintenance_delivery_recovery.create () in
     let reconcile_broadcast_mentions () =
-      match
-        Workspace_broadcast.reconcile_pending_mentions
-          (Mcp_server.workspace_config state)
-      with
-      | Error detail ->
-        Log.Server.warn "broadcast mention reconciliation unavailable: %s" detail
-      | Ok report ->
-        List.iter
-          (fun (receipt : Workspace_broadcast.mention_outbox_quarantine_receipt) ->
-             Log.Server.error
-               "broadcast mention quarantine source=%s quarantine=%s reason=%s sha256=%s detail=%s"
-               receipt.source_name
-               receipt.quarantine_name
-               (Workspace_broadcast.mention_outbox_quarantine_reason_to_string
-                  receipt.reason)
-               receipt.raw_sha256
-               receipt.detail)
-          report.quarantine_receipts;
-        if report.pending_rows > 0 || report.corrupt_rows > 0
-        then
-          Log.Server.info
-            "broadcast mention reconciliation outbox=%d pending=%d accepted=%d already_accepted=%d deferred=%d rejected=%d corrupt=%d"
-            report.outbox_rows
-            report.pending_rows
-            report.accepted
-            report.already_accepted
-            report.deferred
-            report.rejected
-            report.corrupt_rows
+      Server_maintenance_delivery_recovery.pulse ~sw
+        ~config:(Mcp_server.workspace_config state) delivery_recovery Broadcast_mentions
     in
     let reconcile_goal_events () =
-      match Goal_delivery.flush (Mcp_server.workspace_config state) with
-      | Ok () -> ()
-      | Error detail -> Log.Server.warn "goal effect outbox delivery deferred: %s" detail
+      Server_maintenance_delivery_recovery.pulse ~sw
+        ~config:(Mcp_server.workspace_config state) delivery_recovery Goal_effects
     in
     let composition_completions =
       Keeper_composition_completion_wake.create ~base_path:config.base_path () in

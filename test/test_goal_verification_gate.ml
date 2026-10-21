@@ -1794,6 +1794,110 @@ let test_proof_effect_delivery_recovers_audit_and_partial_recipients () =
      Workspace_goals.Proof_refuted {reason="target not observed"}, "executing"]
 ;;
 
+let test_maintenance_mention_delivery_proceeds_while_goal_delivery_is_locked () =
+  with_workspace @@ fun config ->
+  let module Recovery = Server_maintenance_delivery_recovery in
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Original maintenance proof" in
+  ignore (must_succeed "request proof" (transition ctx goal_id "request_complete"));
+  (* Retain an actual committed proof notification before its host is present. *)
+  ignore (Goal_delivery.For_testing.replace_backend None);
+  ignore (must_succeed "commit proof with deferred delivery"
+    (verifier_transition config goal_id Workspace_goals.Proof_proven "original evidence"));
+  let notice = match (notification_store config).pending_notifications with
+    | [notice] -> notice
+    | [] | _ :: _ -> fail "expected original pending proof notification" in
+  ignore (Goal_delivery.For_testing.replace_backend
+    (Some Server_bootstrap_loops.For_testing.goal_notification_backend));
+  List.iter (persist_notification_keeper config) ["alpha";"beta"];
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  let oc = open_out (Filename.concat keepers_dir "beta.toml") in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    output_string oc
+      "[keeper]\ninstructions = \"Maintenance delivery fixture.\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n");
+  let previous_handler = Workspace_broadcast.For_testing.replace_on_broadcast_mention
+    (fun delivery -> match delivery.Workspace_broadcast.mention with
+      | None -> Workspace_broadcast.Passive
+      | Some _ -> Workspace_broadcast.Deferred Handler_unavailable) in
+  Fun.protect ~finally:(fun () ->
+    Workspace_broadcast.set_on_broadcast_mention previous_handler) (fun () ->
+    (* Stage the real authoritative message/outbox while its host is absent;
+       recovery below uses the production recipient delivery implementation. *)
+    let original = match Workspace_broadcast.broadcast ~audience:Fleet_conversation
+        config ~from_agent:"operator" ~content:"@beta retain original maintenance request" with
+      | Ok delivery -> delivery
+      | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error) in
+    Workspace_broadcast.set_on_broadcast_mention
+      (Server_bootstrap_loops.For_testing.deliver_broadcast_mention
+        ~config ~base_path:config.base_path ~is_running:(fun _ -> false)
+        ~is_registered_keeper:(fun _ -> false)
+        ~wakeup:(fun _ -> fail "stopped recipient must not be woken"));
+    let goal_settled, resolve_goal = Eio.Promise.create () in
+    let mention_settled, resolve_mention = Eio.Promise.create () in
+    let recovery = Recovery.create ~on_settled:(fun ~base_path -> function
+      | Recovery.Goal_settled result -> Eio.Promise.resolve resolve_goal (base_path,result)
+      | Recovery.Broadcast_settled result -> Eio.Promise.resolve resolve_mention (base_path,result)) () in
+    Eio.Switch.run (fun sw ->
+      let goal_delivery_lock = Filename.concat (Workspace.masc_dir config)
+          "goal-notification-delivery" in
+      File_lock_eio.with_lock goal_delivery_lock (fun () ->
+        Recovery.pulse ~sw ~config recovery Goal_effects;
+        Recovery.pulse ~sw ~config recovery Broadcast_mentions;
+        let observed_base, mention_result = Eio.Promise.await mention_settled in
+        check string "mention observer retains original workspace" config.base_path observed_base;
+        (match mention_result with
+         | Error detail -> fail detail
+         | Ok report ->
+           check (list string) "recipient has no predecessor barrier" [] report.blocked_targets;
+           check bool "healthy mention has no global barrier" false report.global_barrier);
+        check bool "Goal delivery still waits for its real lock" false
+          (Eio.Promise.is_resolved goal_settled);
+        check string "proof phase is not delivery progress" "awaiting_confirmation"
+          (stored_phase config goal_id);
+        (match (notification_store config).pending_notifications with
+         | [pending] ->
+           check string "locked original notice survives" notice.notification_id pending.notification_id;
+           check string "locked original Goal survives" goal_id pending.goal_id
+         | [] | _ :: _ -> fail "locked original proof notification changed");
+        (match notification_rows config "beta" original.request_id with
+         | [row] -> check string "original mention content retained" original.content row.content
+         | [] | _ :: _ -> fail "original mention was not delivered exactly once");
+        (match Workspace_broadcast.find_broadcast ~request_id:original.request_id
+            config ~from_agent:original.from_agent ~content:original.content with
+         | Ok (Some delivery) ->
+           check int "recovery retains authoritative sequence" original.seq delivery.seq;
+           (match delivery.mention_delivery with
+            | Workspace_broadcast.Accepted | Already_accepted -> ()
+            | Passive | Pending | Deferred _ | Rejected _ -> fail "original mention not acknowledged")
+         | Ok None -> fail "original committed message disappeared"
+         | Error error -> fail (Workspace_broadcast.broadcast_error_to_string error));
+        (* A repeated pulse while the original worker is blocked must leave
+           that worker owning the reservation, rather than replacing it. *)
+        Recovery.pulse ~sw ~config recovery Goal_effects);
+      let observed_base, goal_result = Eio.Promise.await goal_settled in
+      check string "Goal observer retains original workspace" config.base_path observed_base;
+      match goal_result with
+      | Ok () -> ()
+      | Error detail -> fail detail);
+    check int "Goal outbox acknowledged after original lock release" 0
+      (List.length (notification_store config).pending_notifications);
+    List.iter (fun keeper ->
+      match notification_rows config keeper notice.notification_id with
+      | [row] -> check string "original proof content retained" notice.content row.content
+      | [] | _ :: _ -> fail "original Goal notice did not reach each snapshotted recipient")
+      ["alpha";"beta"];
+    (* New rounds reread durable ACKs using the production drains. *)
+    let retry = Recovery.create () in
+    Eio.Switch.run (fun sw ->
+      Recovery.pulse ~sw ~config retry Goal_effects;
+      Recovery.pulse ~sw ~config retry Broadcast_mentions);
+    check int "fresh mention recovery preserves one original transcript" 1
+      (List.length (notification_rows config "beta" original.request_id));
+    List.iter (fun keeper -> check int "fresh proof recovery preserves one original transcript" 1
+      (List.length (notification_rows config keeper notice.notification_id))) ["alpha";"beta"])
+;;
+
 let test_proof_delivery_survives_reconciliation_and_goal_removal () =
   List.iter (fun recovery -> with_workspace @@ fun config ->
     let ctx = workspace_ctx config in
@@ -1899,6 +2003,8 @@ let () =
             test_proof_request_follows_the_phase_machine
         ; test_case "audit and partial recipient failures recover exactly once" `Quick
             test_proof_effect_delivery_recovers_audit_and_partial_recipients
+        ; test_case "mention recovery proceeds while original Goal delivery is locked" `Quick
+            test_maintenance_mention_delivery_proceeds_while_goal_delivery_is_locked
         ; test_case "scan and explicit repeat retain effects across rename/delete" `Quick
             test_proof_delivery_survives_reconciliation_and_goal_removal
         ; test_case "roster read failure cannot become an empty audience" `Quick

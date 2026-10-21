@@ -46,13 +46,27 @@ type 'a t constraint 'a = [> float Eio.Time.clock_ty ]
 val create :
   context:'a Keeper_types_profile.context ->
   ?on_result:(Keeper_tool_execution_journal.continuation ->
-    (Tool_result.result, error) result -> unit) -> unit -> 'a t
-val pulse : sw:Eio.Switch.t -> 'a t -> (unit, Keeper_tool_execution_journal.error) result
-(** Schedule each validated ready-run intake before inspecting later pending
-    names and return without joining the intake workers. Each child yields
+    (Tool_result.result, error) result -> unit) ->
+  ?on_discovery:(base_path:string ->
+    (unit, Keeper_tool_execution_journal.error) result -> unit) -> unit -> 'a t
+(** [on_discovery] receives each actual discovery/intake-reservation result with
+    its original base path. [Ok ()] means the pass returned, not that every
+    marker was readable, intake finished or its DAG completed. Partial failures
+    keep their original diagnostics. The default observer logs whole-pass errors.
+    Ordinary observer failure cannot undo admission or consume new demand. *)
+val pulse : sw:Eio.Switch.t -> 'a t -> unit
+(** Record maintenance demand in the controller's switch-owned discovery drain
+    and return without joining discovery or intake. The discovery child yields
+    before its first pass. Maintenance and result-ready notifications share one
+    drain: demand before a pass shares it, demand during discovery or observation
+    requests a fresh subsequent pass. Each pass obtains its own lazy declarations.
+    No cached discovery/profile or execution permission is introduced.
+
+    Within a pass, schedule each validated ready-run intake before inspecting
+    later pending names. Each intake child yields
     inside its reservation cleanup before held-evidence probes, declaration
-    acquisition or original intake. Discovery still runs in the caller and
-    may yield to children before the full scan finishes; directory listing
+    acquisition or original intake. Discovery runs in the drain child and
+    may yield to intakes before the full scan finishes; directory listing
     still completes first. A late discovery failure can coexist with earlier
     reserved workers; their exact admission and switch cleanup remain in force.
     Active intake and workers reporting held original authority suppress
@@ -64,28 +78,30 @@ val pulse : sw:Eio.Switch.t -> 'a t -> (unit, Keeper_tool_execution_journal.erro
     held until public recovery or a changed request owner. A new controller can
     retry intake. Holds are process-local
     scheduling hints, never durable effect authority. Exact durable owner/node
-    CAS still admits the worker. Eligible intakes in one pulse share one immutable
+    CAS still admits the worker. Eligible intakes in one discovery pass share one immutable
     declaration projection, acquired on first demand through the common I/O
-    executor. A pulse containing only active candidates or unreleased holds performs no
-    declaration read. A later pulse captures anew; metadata, Skill publication,
+    executor. A pass containing only active candidates or unreleased holds performs no
+    declaration read. A later pass captures anew; metadata, Skill publication,
     original evidence and admission remain per intake. Cancelled acquisition may
     restart for a remaining caller after worker cleanup. Single-domain Eio caller.
-    No timer, freshness interval or timeout. A cancelled/finished switch is
-    rejected before discovery and each new active-run reservation; a declined
-    [fork] cannot leave an original run falsely active. Cancellation is not a
-    journal error. *)
+    No timer, freshness interval or timeout. Check the supplied lifetime switch
+    before recording demand, discovery admission and each active-run reservation.
+    The drain stays active through observation and cancellation cleanup. Failed
+    scheduling releases its reservation; cancellation is not a journal error.
+    Physical I/O can still delay shutdown. Draining demand does not prove intake
+    completion or physical DAG worker exit. *)
 
 val notify_result_ready : sw:Eio.Switch.t -> 'a t -> unit
-(** Nonblocking lifecycle hint after an original job result is durable. New
-    notification workers yield back to producers before discovery; callers
-    only record demand. Notifications before the first read share
-    that read, and notifications during a read request one subsequent fresh
-    pulse. No timer, authority, cached discovery/profile or worker replacement
-    is introduced. Explicit maintenance [pulse] remains independent.
-    Cancellation/exception cleanup retires only this notification worker;
+(** Nonblocking lifecycle hint after an original job result is durable. Uses
+    the same drain as maintenance [pulse]; callers only record demand. New
+    workers yield back to producers before discovery. Notifications before the
+    first read share it; notifications during a read or its observation request
+    a fresh subsequent pass, including when another maintenance pulse arrives.
+    Cancellation/exception cleanup retires only this discovery drain;
     durable discovery and later maintenance remain the recovery source.
-    Debug observations retain callback count, discovery starts/settlements/errors
-    and the drain boundary, not job counts, effect success or worker-exit proof.
+    Observations distinguish maintenance/result demand, actual starts/returns,
+    errors/raised passes, interruption and drain boundary; counts are not limits,
+    job counts, effect success or worker-exit proof.
     Single-domain Eio caller, using the controller's lifetime switch. *)
 
 module For_testing : sig
@@ -102,9 +118,10 @@ module For_testing : sig
       profiles:Keeper_types_profile.keeper_profile_snapshot ->
       context:'a Keeper_types_profile.context ->
       Keeper_tool_execution_journal.continuation -> (Tool_result.result, error) result) ->
-    sw:Eio.Switch.t -> 'a t -> (unit, Keeper_tool_execution_journal.error) result
+    sw:Eio.Switch.t -> 'a t -> unit
   (** Use canonical discovery, declaration reads and the production scheduler
       with a controlled intake outcome. The callback receives the same immutable
-      projection as production intake. No journal, request or backend state is
-      fabricated. *)
+      projection as production intake. Maintenance and notifications use the
+      same drain; the first admitted resume callback owns that drain's passes.
+      No journal, request or backend state is fabricated. *)
 end

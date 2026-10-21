@@ -1436,7 +1436,7 @@ let test_held_continuation_is_not_retried_until_restart () =
      the context, so only the config (discovery root) is live data. *)
   let pulse supervisor =
     Eio.Switch.run @@ fun sw ->
-    Wake.For_testing.pulse ~resume:stub ~sw supervisor |> require "hold-proof pulse" in
+    Wake.For_testing.pulse ~resume:stub ~sw supervisor in
   let supervisor = Wake.create ~context () in
   pulse supervisor;
   let first = List.length !calls in
@@ -1530,7 +1530,7 @@ let test_original_evidence_repair_reactivates_continuation ~skill_publication ()
   check bool "unavailable original evidence remains a failed preparation, not a retained success" true
     (failed.outcome=O.Returned_error
      && not (List.exists (fun (sample : O.sample) -> sample.component=O.Retained_turn_surface) failed.samples));
-  let pulse () = Eio.Switch.run (fun sw -> Wake.pulse ~sw supervisor |> require "authority recovery pulse") in
+  let pulse () = Eio.Switch.run (fun sw -> Wake.pulse ~sw supervisor) in
   pulse ();
   check int "unchanged unavailable evidence starts no further intake" 1 (List.length !outcomes);
   check int "unavailable evidence never calls the job backend" backend_before (List.length (calls fixture));
@@ -1636,7 +1636,7 @@ let test_continuation_pulse_shares_declarations ~invalid_initial () =
      publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
   let supervisor = Wake.create ~context () in
   reject_cancelled_recovery_scope (fun sw ->
-    Wake.pulse ~sw supervisor |> require "cancelled continuation scope");
+    Wake.pulse ~sw supervisor);
   check (list string) "rejected scope retains both canonical original waits" original_requests (ready_ids ());
   let backend_before = List.length (calls fixture) in
   let pulse ~invalid ~instructions =
@@ -1656,8 +1656,7 @@ let test_continuation_pulse_shares_declarations ~invalid_initial () =
           (* An edit after the first intake cannot split this pulse's projection.
              It must become visible to the next independent pulse. *)
           if List.length !observed = 1 then write_profile "next projection";
-          Error (Wake.Runtime_failed "observation-only intake retains the canonical wait"))
-        |> require "profile projection pulse");
+          Error (Wake.Runtime_failed "observation-only intake retains the canonical wait")));
     check (list string) "both original requests use this projection" original_requests
       (List.sort String.compare !observed) in
   pulse ~invalid:invalid_initial ~instructions:"original projection";
@@ -2341,13 +2340,10 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
       ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
       "original child authority requires repair") in
   let before_hold = active_requests () in
-  Wake.For_testing.pulse ~resume:held_resume ~sw:context.sw held_wake
-    |> require "automatic intake reports an exact held owner";
+  Wake.For_testing.pulse ~resume:held_resume ~sw:context.sw held_wake;
   Eio.Promise.await held;
-  Wake.For_testing.pulse ~resume:held_resume ~sw:context.sw held_wake
-    |> require "second pulse retains held owner";
-  Wake.For_testing.pulse ~resume:held_resume ~sw:context.sw held_wake
-    |> require "third pulse retains held owner";
+  Wake.For_testing.pulse ~resume:held_resume ~sw:context.sw held_wake;
+  Wake.For_testing.pulse ~resume:held_resume ~sw:context.sw held_wake;
   Eio.Fiber.yield ();
   check int "unchanged held owner never repeats automatic intake" 1 !held_intakes;
   check string "held intake never replaces the original request" held_owner
@@ -2358,7 +2354,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
     let requests_before = active_requests () in
     let refused,notify_refused = Eio.Promise.create () in
     let wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
-    Wake.pulse ~sw:context.sw wake |> require label;
+    Wake.pulse ~sw:context.sw wake;
     (match Eio.Promise.await refused with
      | Error (Wake.Profile_unavailable {kind=Invalid_name;_}) -> incr profile_owner_refusals
      | Error error -> failf "%s: unexpected profile failure: %s" label (Wake.error_to_string error)
@@ -2389,8 +2385,8 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
       | Ok (Tool_result.Deferred _ | Tool_result.Failed _) | Error _ ->
         other_intakes := outcome :: !other_intakes) () in
   let recovery_started = Mtime_clock.counter () in
-  Wake.pulse ~sw:context.sw wake |> require "actual provider-free maintenance pulse";
-  Wake.pulse ~sw:context.sw wake |> require "repeated pulse while original intake is scheduled";
+  Wake.pulse ~sw:context.sw wake;
+  Wake.pulse ~sw:context.sw wake;
   let resumed = Eio.Promise.await accepted |> Tool_result.data in
   let ok, completed, completed_entry = await_composition env fixture resumed in
   let recovery_ms = Mtime.Span.to_float_ns (Mtime_clock.count recovery_started) /. 1_000_000. in
@@ -2540,8 +2536,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   Fun.protect
       ~finally:(fun () -> if Sys.file_exists detached_draft then Unix.rename detached_draft draft_path)
       (fun () ->
-        Wake.For_testing.pulse ~resume:resume_without_original ~sw:context.sw unavailable_wake
-          |> require "canonical discovery followed by actual missing-original intake";
+        Wake.For_testing.pulse ~resume:resume_without_original ~sw:context.sw unavailable_wake;
         (match Eio.Promise.await held_outcome with
          | Ok result -> check bool "missing draft remains an unaccepted intake refusal" true (Tool_result.is_failed result)
          | Error error -> fail (Wake.error_to_string error));
@@ -2554,8 +2549,8 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   (* Restoring readable evidence makes discovery ready again. The production
      controller must keep this same owner held until explicit resume, rather
      than accepting another worker on each ordinary maintenance pulse. *)
-  Wake.pulse ~sw:context.sw unavailable_wake |> require "first ordinary pulse after original draft repair";
-  Wake.pulse ~sw:context.sw unavailable_wake |> require "second ordinary pulse after original draft repair";
+  Wake.pulse ~sw:context.sw unavailable_wake;
+  Wake.pulse ~sw:context.sw unavailable_wake;
   Eio.Fiber.yield ();
   check int "repaired unchanged owner does not repeat automatic intake" 1 !pre_admission_intakes;
   check (list string) "pre-admission hold never starts a physical worker" before_unavailable (active_requests ());
@@ -2670,7 +2665,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
     (Journal.continuation_request_id second_candidate);
   let refused,notify_refused = Eio.Promise.create () in
   let denied_wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
-  Wake.pulse ~sw:context.sw denied_wake |> require "actual maintenance pulse under current Tool denial";
+  Wake.pulse ~sw:context.sw denied_wake;
   let accepted_refusal = match Eio.Promise.await refused with
     | Ok result when Tool_result.is_success result -> Tool_result.data result
     | Ok _ -> fail "current Tool denial did not accept a failure successor"
@@ -2771,11 +2766,11 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   check int "both discoveries retire all four original physical request markers" 4
     (restored_discovery.retired + after_refusal.retired);
   let quiet_wake = Wake.create ~context () in
-  Wake.pulse ~sw:context.sw quiet_wake |> require "pulse after permanent refusal";
+  Wake.pulse ~sw:context.sw quiet_wake;
   check int "next pulse has 0 ready candidates" 0 (List.length (pending ()).ready);
   write_profile false;
   let restored_wake = Wake.create ~context () in
-  Wake.pulse ~sw:context.sw restored_wake |> require "pulse after restoring the profile";
+  Wake.pulse ~sw:context.sw restored_wake;
   check int "restored contract cannot resurrect a settled run" 0 (List.length (pending ()).ready);
   check (list string) "failure successor leaves no active async worker" [] (active_requests ())
 
@@ -3443,7 +3438,7 @@ let test_completion_hint_resumes_original_dag () = with_fixture @@ fun env _init
   let hints = ref [] in
   let jobs = Completion_wake.create ~config ~on_result_ready:(fun (record : Store.record) ->
       hints := (record,Store.result_ready record,pending_completions fixture,List.length (calls fixture)) :: !hints;
-      Wake.pulse ~sw:context.sw continuations |> require "actual durable completion hints original DAG") () in
+      Wake.pulse ~sw:context.sw continuations) () in
   (* Change the current turn before the original job completes. No direct
      composition resume or independent continuation pulse follows this point. *)
   set_source fixture ~task_id:"task-B" ~turn:52;
@@ -3605,7 +3600,7 @@ let test_prepared_job_launch_and_continuation ~launch_after_result () = with_fix
   let hints = ref [] in
   let jobs = Completion_wake.create ~config ~on_result_ready:(fun (record : Store.record) ->
       hints := (record,Store.result_ready record,pending_completions fixture,List.length (calls fixture)) :: !hints;
-      Wake.pulse ~sw:context.sw continuations |> require "actual durable completion hints original DAG") () in
+      Wake.pulse ~sw:context.sw continuations) () in
   (* Change the current turn before the original job completes. No direct
      composition resume or independent continuation pulse follows this point. *)
   set_source ~answer_source_ids:[later_answer] fixture ~task_id:"task-B" ~turn:52;
@@ -4988,7 +4983,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
       check bool "nested completion hint follows actual durable output" true (Store.result_ready record);
       backend_at_ready := Some (List.length (calls fixture));
       if not fault_after_acceptance then
-        Wake.pulse ~sw:context.sw refusals |> require "nested original completion hint intake";
+        Wake.pulse ~sw:context.sw refusals;
       Eio.Promise.resolve notify_ready ()) () in
   let events = Filename.concat
       (Masc.Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id))
@@ -5061,7 +5056,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
   Fun.protect ~finally:(fun () -> Unix.rename detached events) (fun () ->
     let refused,notify = Eio.Promise.create () in
     let wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify outcome) () in
-    Wake.pulse ~sw:context.sw wake |> require "fresh nested intake with absent original activation";
+    Wake.pulse ~sw:context.sw wake;
     (match Eio.Promise.await refused with
      | Ok (Tool_result.Failed _) -> () | Ok _ | Error _ -> fail "missing original activation was invented");
     check string "missing activation keeps exact original owner" retained_wait_request
@@ -5069,7 +5064,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
   let resumed,notify = Eio.Promise.create () in
   let fresh = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify outcome) () in
   let recovery_started = Mtime_clock.counter () in
-  Wake.pulse ~sw:context.sw fresh |> require "fresh nested original authority recovery pulse";
+  Wake.pulse ~sw:context.sw fresh;
   let resumed = match Eio.Promise.await resumed with
     | Ok (Tool_result.Completed _ as result) -> Tool_result.data result
     | Ok _ | Error _ -> fail "restored nested activation could not resume original work" in
@@ -5615,6 +5610,129 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
      "program_creates",`Int (effect_count fixture "create");"program_starts",`Int (effect_count fixture "start")]))
 
 exception Fixture_result_observer_failed
+
+let test_prepared_discovery_demand_survives_observer_failure () =
+  with_fixture @@ fun env _initialize fixture ->
+  with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
+  with_parked_named_producer env fixture @@ fun parked ->
+  let module Wake = Masc.Keeper_composition_continuation_wake in
+  let module Async = Masc.Keeper_msg_async in
+  control fixture (`Assoc ["state",`String "exited"]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"collect-before-prepared-discovery" ~turn:52 "keeper_job_status" (argument parked.job_id)));
+  let original_job = load fixture parked.job_id in
+  let child_source = Journal.continuation_source parked.child_continuation
+  and parent_source = Journal.continuation_source parked.parent_continuation in
+  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
+  Fs_compat.mkdir_p (Filename.dirname declaration);
+  write declaration "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Original discovery demand fixture\"\n";
+  let context : _ Masc.Keeper_types_profile.context =
+    {config=parked.config;agent_name="prepared-discovery-maintenance";
+     sw=Async.server_background_switch () |> require "prepared discovery background switch";
+     clock=Eio.Stdenv.clock env;proc_mgr=Some (Eio.Stdenv.process_mgr env);net=None;
+     publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
+  let directory = Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path:fixture.base_path) "keeper_msg_requests")
+      "prepared_continuations" in
+  let original_markers = Sys.readdir directory |> Array.to_list |> List.map (fun name ->
+    name,read (Filename.concat directory name)) in
+  let saved_directory = directory ^ ".fixture-saved" in
+  Unix.rename directory saved_directory;
+  write directory "actual prepared discovery directory unavailable\n";
+  let read_pending () = Journal.pending_continuations ~base_path:fixture.base_path
+      ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness in
+  let original_error = match read_pending () with
+    | Error error -> error | Ok _ -> fail "actual pending directory fault did not reject discovery" in
+  let child, publish_child = Eio.Promise.create ()
+  and parent, publish_parent = Eio.Promise.create () in
+  let observed = Eio.Stream.create 0 in
+  let released, release = Eio.Promise.create () in
+  let exception Discovery_observer_failed in
+  let supervisor = Wake.create ~context
+      ~on_discovery:(fun ~base_path result ->
+        Eio.Stream.add observed (base_path,result);
+        match result with
+        | Ok () -> ()
+        | Error _ -> Eio.Promise.await released; raise Discovery_observer_failed)
+      ~on_result:(fun candidate outcome ->
+        let source = Journal.continuation_source candidate in
+        if Masc.Keeper_tool_plan.Composition_run_id.equal source.composition_run_id child_source.composition_run_id then (
+          if not (Eio.Promise.is_resolved child) then Eio.Promise.resolve publish_child (candidate,outcome))
+        else if Masc.Keeper_tool_plan.Composition_run_id.equal source.composition_run_id parent_source.composition_run_id then (
+          if not (Eio.Promise.is_resolved parent) then Eio.Promise.resolve publish_parent (candidate,outcome))) () in
+  let independent : Keeper_event_queue.stimulus =
+    {post_id="independent-during-prepared-discovery";urgency=Normal;arrived_at=201.;payload=Bootstrap} in
+  let require_returned () =
+    let base_path,result = Eio.Stream.take observed in
+    check string "discovery retains its original workspace" fixture.base_path base_path;
+    result |> require "actual fresh prepared discovery" in
+  let accepted promise original =
+    let candidate,outcome = Eio.Promise.await promise in
+    check string "intake retains original canonical waiting request"
+      (Journal.continuation_request_id original) (Journal.continuation_request_id candidate);
+    check (option string) "intake retains original Task after current turn changes" (Some "task-A")
+      (Journal.continuation_source candidate).source_task_id;
+    match outcome with
+    | Ok (Tool_result.Completed _ as result) -> Tool_result.data result
+    | Ok (Tool_result.Deferred _ | Tool_result.Failed _) | Error _ -> fail "original continuation was not accepted" in
+  set_source fixture ~task_id:"task-other" ~turn:90;
+  let completed_child,completed_parent = Eio.Switch.run (fun sw ->
+    Fun.protect
+      ~finally:(fun () -> if not (Eio.Promise.is_resolved released) then Eio.Promise.resolve release ())
+      (fun () ->
+        Wake.pulse ~sw supervisor;
+        Wake.notify_result_ready ~sw supervisor;
+        Event_registry.enqueue_durable_result ~base_path:fixture.base_path keeper independent
+          |> require "independent durable work before discovery observation";
+        let base_path,result = Eio.Stream.take observed in
+        check string "failed discovery retains original workspace" fixture.base_path base_path;
+        (match result with
+         | Error error -> check bool "original typed discovery error reaches observation" true (error=original_error)
+         | Ok () -> fail "failed or unfinished discovery became success");
+        List.iter (fun (name,bytes) -> check string "failed discovery preserves original marker bytes"
+          bytes (read (Filename.concat saved_directory name))) original_markers;
+        check bool "failed scan admits no child" false (Eio.Promise.is_resolved child);
+        Sys.remove directory;
+        Unix.rename saved_directory directory;
+        write (Filename.concat directory "malformed-marker.json") "not-json\n";
+        (* Both triggers arrive while the original error observer is still
+           active. Its ordinary failure must leave a fresh original pass due. *)
+        Wake.notify_result_ready ~sw supervisor;
+        Wake.pulse ~sw supervisor;
+        Eio.Promise.resolve release ();
+        require_returned ();
+        let child_request = accepted child parked.child_continuation in
+        let child_ok,completed_child,_ = await_composition env fixture child_request in
+        check bool "fresh discovery resumes the original named child" true child_ok;
+        ignore (Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path
+          |> require "publish original child terminal result");
+        Wake.notify_result_ready ~sw supervisor;
+        require_returned ();
+        let parent_request = accepted parent parked.parent_continuation in
+        let parent_ok,completed_parent,parent_entry = await_composition env fixture parent_request in
+        check bool "fresh result demand resumes the original parent" true parent_ok;
+        let source = match parent_entry.request_context with
+          | Some fields -> `Assoc fields | None -> fail "original parent source context was lost" in
+        check_json "completed parent retains original Task" (`String "task-A") (source |> member "source_task_id");
+        completed_child,completed_parent)) in
+  let stdout_sha = completed_child |> member "exports" |> member "stdout" |> member "value" |> to_string in
+  let stdout = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"read-discovery-original-stdout"
+      ~turn:91 "keeper_artifact_read" (`Assoc ["sha256",`String stdout_sha])) in
+  check_json "recovered original child exposes usable complete stdout" (`String stdout_bytes) (stdout |> member "content");
+  check_json "original parent consumes its child's actual result" (`Bool true)
+    (completed_parent |> member "exports" |> member "child_result" |> member "available");
+  let recovered_job = load fixture parked.job_id in
+  check bool "discovery does not replace or rewrite the original completed job" true
+    (recovered_job.phase=original_job.phase && recovered_job.outputs=original_job.outputs
+     && recovered_job.source=original_job.source);
+  check bool "independent durable work survives both original continuations" true
+    (pending_completions fixture |> List.exists (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      Keeper_event_queue.stimulus_identity_equal independent selection.source));
+  let pending = read_pending () |> require "canonical final prepared discovery" in
+  (match pending.ready,pending.failures with
+   | [],[name,Journal.Invalid_continuation_marker _] ->
+       check string "partial marker failure remains explicit" "malformed-marker.json" name
+   | _ -> fail "original continuations remained ready or partial damage disappeared")
 
 let test_completion_discovery_failure_preserves_original_result () =
   let channel = Keeper_continuation_channel.dashboard ~thread_id:"discovery-original-thread"
@@ -6405,6 +6523,8 @@ let () = match Array.to_list Sys.argv with
       ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
       ; test_case "async discovery failure retains original output and recovers beside partial marker damage" `Quick
           test_completion_discovery_failure_preserves_original_result
+      ; test_case "prepared discovery preserves new demand through observer failure and resumes original child and parent" `Quick
+          test_prepared_discovery_demand_survives_observer_failure
       ; test_case "cancelled recovery retains original output and a fresh scope delivers once and cleans" `Quick
           test_completion_cancelled_round_preserves_original_result
       ; test_case "held absence uses a presence hint and reactivates only original authority" `Quick

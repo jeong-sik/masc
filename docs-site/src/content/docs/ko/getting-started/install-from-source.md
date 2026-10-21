@@ -61,13 +61,22 @@ dune build bin/main_eio.exe bin/masc_tui.exe
 ## 4. 자율 Keeper 켜기 (선택)
 
 미리 빌드된 설치와 마찬가지로, Keeper는 모델 런타임과 명령 격리가 필요합니다.
-`masc setup`으로 모델 런타임과 기본 샌드박스 이미지를 준비하고 시작하거나, 설정이 끝난 작업 공간에서 `masc start`로 서버를 바로 띄웁니다.
+`masc` 명령을 쓰기 전에 소스 실행 파일과 동반 도구를 함께 설치하세요.
+위 quickstart에서 사용한 작업 공간을 그대로 이어갑니다.
 
 ```bash
-masc setup --base-path ~/masc
+scripts/install-local-build.sh --base-path "$HOME/masc-quickstart"
+"$HOME/.local/bin/masc" setup --base-path "$HOME/masc-quickstart"
 # 또는 설정이 완료된 뒤 서버만 바로 시작:
-masc start --base-path ~/masc
+"$HOME/.local/bin/masc" start --base-path "$HOME/masc-quickstart"
 ```
+
+설치 스크립트는 서버, TUI, browser host와 배포 사전 점검 도구를 빌드해
+`~/.local/bin`에 설치합니다. `--prefix`를 넘겼다면 선택한 실행 파일 경로를
+사용하세요. setup은 모델 연결과 선택한 sandbox를 준비하고 TUI를 엽니다.
+브라우저 대시보드도 쓰려면
+[README](https://github.com/jeong-sik/masc/blob/main/README.ko.md#소스에서)의
+대시보드 빌드 안내를 따르세요.
 
 키 없이 쓰는 방법은 [로컬 AI 모델 연결](/ko/runbooks/llama-server/)을, 격리
 요건은 [명령어 안전 격리](/ko/runbooks/sandbox/)를 보세요.

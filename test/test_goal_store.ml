@@ -569,6 +569,83 @@ let upsert_exn config ?id ?title ?metric ?target_value ?due_date ?priority () =
   | Ok (goal, _) -> goal
   | Error error -> fail (write_error_msg error)
 
+let test_blank_criterion_edits_preserve_store_and_outbox () =
+  List.iter (fun phase ->
+    with_workspace @@ fun config ->
+    let created = match Goal_store.upsert_goal_with_events config ~actor:"creator"
+        ~title:"Measured service" ~metric:"p99" ~target_value:"400ms" () with
+      | Ok (goal, `created, _) -> goal
+      | Ok (_, `updated _, _) -> fail "expected a creation"
+      | Error error -> fail (write_error_msg error) in
+    let current = { created with phase; last_review_note = Some "prior review";
+      last_review_at = Some (iso_now ()) } in
+    let state = available config in
+    Goal_store.write_state config { state with goals = [current] };
+    let primary = Goal_store.goals_path config in
+    let mirror = goals_recovery_path config in
+    let ledger = Filename.concat (Filename.dirname primary) "goal_events.jsonl" in
+    let before = Fs_compat.load_file primary, Fs_compat.load_file mirror in
+    let generation = Goal_projection_generation.current () in
+    List.iter (fun blank ->
+      let attempts =
+        [ (fun () -> Goal_store.upsert_goal_with_events config ~actor:"editor"
+              ~id:created.id ~title:blank ());
+          (fun () -> Goal_store.upsert_goal_with_events config ~actor:"editor"
+              ~id:created.id ~metric:blank ());
+          (fun () -> Goal_store.upsert_goal_with_events config ~actor:"editor"
+              ~id:created.id ~target_value:blank ()) ] in
+      List.iter (fun attempt ->
+        (match attempt () with
+         | Error (Goal_store.Rejected _) -> ()
+         | Error error -> fail (write_error_msg error)
+         | Ok _ -> fail "blank criterion edit was accepted");
+        check string "refusal preserves primary, revision, review and outbox"
+          (fst before) (Fs_compat.load_file primary);
+        check string "refusal preserves recovery mirror"
+          (snd before) (Fs_compat.load_file mirror);
+        check int "refusal preserves projection generation" generation
+          (Goal_projection_generation.current ());
+        check bool "refusal publishes no audit rows" false (Sys.file_exists ledger))
+        attempts) [""; " \t\n"])
+    Goal_phase.all
+
+let test_incomplete_historical_criterion_can_be_maintained_and_repaired () =
+  with_workspace ~now:calendar_fixture_now @@ fun config ->
+  let old = { (make_goal "historical" "Historical condition") with
+    phase = Goal_phase.Paused Goal_phase.Resume_verifying;
+    last_review_note = Some "old review"; last_review_at = Some (iso_now ()) } in
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 7;
+      updated_at = iso_now (); goals = [old] };
+  let maintained = upsert_exn config ~id:old.id ~priority:1
+      ~due_date:"2026-09-21" () in
+  check string "maintenance preserves revision" old.criterion_revision maintained.criterion_revision;
+  check bool "maintenance preserves suspension" true (old.phase = maintained.phase);
+  check int "priority still editable" 1 maintained.priority;
+  check (option string) "existing goals may be overdue" (Some "2026-09-21") maintained.due_date;
+  let primary = Goal_store.goals_path config in
+  let before = Fs_compat.load_file primary in
+  (match Goal_store.upsert_goal config ~id:old.id ~title:"Renamed" () with
+   | Error (Goal_store.Rejected _) -> ()
+   | Error error -> fail (write_error_msg error)
+   | Ok _ -> fail "partial edit left an incomplete effective criterion");
+  check string "partial repair writes nothing" before (Fs_compat.load_file primary);
+  (* Supplying the exact stored value is unchanged, including on historical
+     incomplete rows. It retains existing successful-upsert semantics. *)
+  let unchanged = upsert_exn config ~id:old.id ~title:old.title () in
+  check string "unchanged criterion preserves revision" old.criterion_revision unchanged.criterion_revision;
+  let repaired = upsert_exn config ~id:old.id ~title:"  Repaired condition  "
+      ~metric:"  board:measurement  " ~target_value:"  zero failures  " () in
+  check string "accepted title is not normalized" "  Repaired condition  " repaired.title;
+  check (option string) "accepted metric is not normalized"
+    (Some "  board:measurement  ") repaired.metric;
+  check (option string) "accepted target is not numerically constrained"
+    (Some "  zero failures  ") repaired.target_value;
+  check bool "repair changes revision" true (repaired.criterion_revision <> old.criterion_revision);
+  check bool "repair keeps suspension with fresh restore target" true
+    (repaired.phase = Goal_phase.Paused Goal_phase.Resume_executing);
+  check (option string) "repair clears current review" None repaired.last_review_note
+
 let test_criterion_edits_invalidate_proof_phase () =
   with_workspace @@ fun config ->
   let original = upsert_exn config ~title:"Measured service" ~metric:"p99" ~target_value:"400ms" () in
@@ -643,7 +720,7 @@ let test_upsert_accepts_a_real_calendar_day () =
 (* Creation input check. A goal born without a
    name states no success condition to hold it to, on either create path;
    a goal born past its due date is overdue before its first observation.
-   Updates stay ungated: an existing goal's due date passing is ordinary
+   Due-date updates may be overdue: an existing goal's due date passing is ordinary
    life, and backdating a stored date is a correction, not a birth. *)
 let test_upsert_refuses_a_blank_title_and_a_past_due_date_at_creation () =
   with_workspace ~now:calendar_fixture_now @@ fun config ->
@@ -1525,7 +1602,11 @@ let () =
           test_case "pending phase precedes drop and retry preserves history" `Quick
             test_pending_phase_precedes_drop_and_survives_retry ] );
       ( "proof identity",
-        [ test_case "criterion edits invalidate proof phase" `Quick test_criterion_edits_invalidate_proof_phase;
+        [ test_case "blank criterion edits preserve every phase and outbox" `Quick
+            test_blank_criterion_edits_preserve_store_and_outbox;
+          test_case "historical incomplete criteria remain maintainable and repairable" `Quick
+            test_incomplete_historical_criterion_can_be_maintained_and_repaired;
+          test_case "criterion edits invalidate proof phase" `Quick test_criterion_edits_invalidate_proof_phase;
           test_case "upsert revision witness survives later commits" `Quick test_upsert_revision_witness_survives_later_commits;
           test_case "transaction uses primary and preserves no-op" `Quick test_transact_goal_authoritative_and_noop;
           test_case "missing revision refuses bound mutation" `Quick test_missing_criterion_revision_refuses_bound_mutation ] );

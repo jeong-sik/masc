@@ -17,7 +17,9 @@ val handle_goal_list
   -> Tool_result.result
 
 (** [handle_goal_upsert ctx args] handles [masc_goal_upsert] —
-    create-or-update a goal record. Validates priority and rejects lifecycle
+    create-or-update a goal record. Explicit empty criterion strings are
+    preserved for the store's locked effective-condition validation; omission
+    retains the stored field. Validates priority and rejects lifecycle
     fields, which belong to [masc_goal_transition]. Lifecycle field errors are
     reported via the dedicated
     [goal_upsert_lifecycle_error] formatter. A committed write remains successful

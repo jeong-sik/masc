@@ -305,10 +305,10 @@ status: reference
     다른 쪽을 놓친다. `UmpLoopPlan`(`UmpLoopTransport.swift`)이 "loop"를 넣어 부르는 것을
     `UmpRegionTransport.init(timeline:)`(`UmpRegions.swift`)은 "region"으로 부르거나, 여러
     조건을 한 문자열에 묶은 자리를 둘로 나눠 낸다. 그래서 실패 문자열을 보면 어느 계획기가
-    거절했는지도 함께 알 수 있다. 아래는 두 계획기가 갈리는 자리만 모은 것이지 두 파일의
-    거절 문자열 전체 목록이 아니다. 같은 축을 다루는 문자열이 더 있으니(`invalid captured
-    epoch phase`·`captured deadline exceeds the host clock range` 등) 목록에 없다고 없는
-    문자열로 읽지 않는다.
+    거절했는지도 함께 알 수 있다. 아래는 두 계획기(와 세 번째 오프라인 경로)가 갈리는 자리만
+    모은 것이지 두 파일의 거절 문자열 전체 목록이 아니다. 같은 축을 다루는 문자열이 더
+    있으니(`invalid captured epoch phase`·`captured deadline exceeds the host clock range` 등)
+    목록에 없다고 없는 문자열로 읽지 않는다.
     - `invalid captured region arrangement` = 루프의 `invalid captured loop arrangement`
       (schemaVersion·duration·빈 `sources`·빈 `regions`·각각의 중복 `id`),
       `missing captured source identity` = 루프의 `missing captured loop source identity`.
@@ -335,10 +335,14 @@ status: reference
     - 같은 자리를 세 번째 계획기가 또 다른 이름으로 맡는다. `UmpRegionExtraction`은
       `sourceDivisor`를 선택이 아닌 필수(`String`)로 받고 `invalid UMP extraction span`·
       `UMP extraction exceeds source`·`UMP extraction packet exceeds source`를 낸다. 그래서
-      오프라인 편집 경로의 실패는 위 `captured …` 문자열을 하나도 남기지 않는다.
+      오프라인 편집 경로의 거절은 위 `captured …` 문자열 대신 이 셋으로 나온다. 다만
+      `extract()`가 `umpUnsigned`로 `source.extent`·`offset`·`extent`·`sourceDivisor`를 먼저
+      읽으므로(`UmpRegions.swift:92-93`), 그 값이 십진 문자열이 아니면 이 경로도 두 계획기와
+      같은 `invalid captured region integer`를 공유한다(`:4`).
     이 목록은 코드가 소유한 문자열을 옮겨 적은 임시 해독표라 코드가 바뀌면 함께 낡는다.
     갱신할 때는 각 문자열을 `git grep -F`로 다시 확인하고, 더 나은 수리는 두 계획기가 같은
     조건에 같은 문자열을 내도록 코드 쪽을 통일하는 것이다.
+    현재 문자열을 한 번에 훑으려면 `git grep -n -F "captured" tools/alphatex/native/Ump*.swift`.
     그래서 Region의 자격은 반복 횟수만이 아니라 원본
     `source`와 그 길이, 그리고 다른 Region과의 채널 점유에 함께 매인다. 브라우저 장면이
     문서 구조에서 갈라 읽는 구역은

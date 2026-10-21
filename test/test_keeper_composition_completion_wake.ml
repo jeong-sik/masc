@@ -744,6 +744,28 @@ let completion_delivery_recovers_without_replaying_or_reconsuming () =
       (Atomic.get dispatched) recovered.delivered)
 ;;
 
+let produce_pending_completion ~base_path keeper_name body =
+  let module Outbox = Masc.Keeper_composition_completion_outbox in
+  Eio.Switch.run (fun background_sw ->
+    let done_, settled = Eio.Promise.create () in
+    let request = Async.submit_with_request_id
+        ~request_context:["composition_tool",`String composition_tool;
+          "source_task_id",`String (keeper_name ^ "-original-task")]
+        ~on_accepted:(fun request_id ->
+          Outbox.prepare ~base_path ~keeper_name ~request_id ~composition_tool
+          |> Result.map_error Outbox.error_to_string)
+        (* Leave actual durable completion obligations for recovery; the
+           producer switch joins its own physical worker before returning. *)
+        ~on_worker_settled:(fun _ -> Eio.Promise.resolve settled ())
+        ~background_sw ~base_path ~caller:keeper_name ~keeper_name
+        ~f:(fun ~request_id:_ _ ->
+          Tool_result.make_ok ~tool_name:composition_tool ~start_time:(Tool_timing.start ())
+            ~data:(`Assoc ["original_output",`String body]) ()) ()
+      |> Result.get_ok in
+    Eio.Promise.await done_;
+    request)
+;;
+
 let independent_completion_owners_keep_original_proofs () =
   with_workspace (fun config ->
     ensure_keeper config ~keeper_name:"alpha";
@@ -751,25 +773,7 @@ let independent_completion_owners_keep_original_proofs () =
     let module Outbox = Masc.Keeper_composition_completion_outbox in
     let module Fence = Masc.Keeper_shutdown_intake_fence in
     let base_path = config.Workspace.base_path in
-    let produce keeper_name body =
-      Eio.Switch.run (fun background_sw ->
-        let done_, settled = Eio.Promise.create () in
-        let request = Async.submit_with_request_id
-            ~request_context:["composition_tool",`String composition_tool;
-              "source_task_id",`String (keeper_name ^ "-original-task")]
-            ~on_accepted:(fun request_id ->
-              Outbox.prepare ~base_path ~keeper_name ~request_id ~composition_tool
-              |> Result.map_error Outbox.error_to_string)
-            (* Leave actual durable completion obligations for recovery; the
-               producer switch joins its own physical worker before returning. *)
-            ~on_worker_settled:(fun _ -> Eio.Promise.resolve settled ())
-            ~background_sw ~base_path ~caller:keeper_name ~keeper_name
-            ~f:(fun ~request_id:_ _ ->
-              Tool_result.make_ok ~tool_name:composition_tool ~start_time:(Tool_timing.start ())
-                ~data:(`Assoc ["original_output",`String body]) ()) ()
-          |> Result.get_ok in
-        Eio.Promise.await done_;
-        request) in
+    let produce = produce_pending_completion ~base_path in
     let alpha = produce "alpha" "alpha output" in
     let beta = produce "beta" "beta output" in
     let discovered = Outbox.discover ~base_path |> Result.get_ok in
@@ -798,14 +802,23 @@ let independent_completion_owners_keep_original_proofs () =
               Eio.Promise.resolve enter ();
               Eio.Promise.await released)) in
           Eio.Promise.await entered;
-          let recovery = Wake.create ~base_path ~on_report:(fun ~keeper_name report ->
+          let discoveries = Eio.Stream.create 0 in
+          let recovery = Wake.create ~base_path
+            ~on_discovery:(fun ~base_path:_ result -> Eio.Stream.add discoveries result)
+            ~on_report:(fun ~keeper_name report ->
             if String.equal keeper_name "beta" then (
               if not (Eio.Promise.is_resolved beta_done) then Eio.Promise.resolve publish_beta report)
             else if String.equal keeper_name "alpha" then (
               if not (Eio.Promise.is_resolved alpha_blocked) then Eio.Promise.resolve publish_blocked report
               else if not (Eio.Promise.is_resolved alpha_done) then Eio.Promise.resolve publish_alpha report)
             else fail "completion recovery changed original owner") () in
-          let pulse () = match Wake.pulse ~sw recovery with
+          let pulse () =
+            Wake.pulse ~sw recovery;
+            let result = Eio.Stream.take discoveries in
+            (* Let the observer's pure discovery cleanup finish. The original
+               owner may still be blocked; this is not owner quiescence. *)
+            Eio.Fiber.yield ();
+            match result with
             | Ok () -> () | Error error -> fail (Outbox.error_to_string error) in
           pulse ();
           let beta_report = Eio.Promise.await beta_done in
@@ -863,6 +876,102 @@ let independent_completion_owners_keep_original_proofs () =
            | [] | _ :: _ -> fail "repeated pulses changed beta's exact queued result"))))
 ;;
 
+let discovery_failure_retains_original_completion_and_recovers_with_partial_damage () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:"alpha";
+    ensure_keeper config ~keeper_name:"beta";
+    let module Outbox = Masc.Keeper_composition_completion_outbox in
+    let base_path = config.Workspace.base_path in
+    let original = produce_pending_completion ~base_path "alpha" "original output" in
+    let canonical () =
+      match Async.load_canonical_durable_terminal ~base_path ~caller:"alpha" original.request_id with
+      | Ok proof -> Async.durable_terminal_entry proof
+      | Error error -> fail (Async.canonical_terminal_error_to_string error) in
+    let original_proof = canonical () in
+    (* Fault the production partition itself, preserving the exact original
+       obligation for restoration; no replacement outbox reader is installed. *)
+    let directory = Filename.concat
+        (Common.masc_dir_from_base_path ~base_path)
+        "composition-completion-delivery/pending" in
+    let saved_directory = directory ^ ".fixture-saved" in
+    Unix.rename directory saved_directory;
+    Fs_compat.save_file directory "outbox directory unavailable during discovery";
+    let exception Discovery_observer_failed in
+    let discoveries = Eio.Stream.create 0 in
+    let recovery = Wake.create ~base_path ~on_discovery:(fun ~base_path result ->
+      Eio.Stream.add discoveries (base_path,result);
+      match result with
+      | Ok () -> ()
+      | Error _ -> raise Discovery_observer_failed) () in
+    let independent : Event_queue.stimulus =
+      {post_id="independent-during-completion-discovery";urgency=Normal;
+       arrived_at=201.;payload=Bootstrap} in
+    let failed = Eio.Switch.run (fun sw ->
+      Wake.pulse ~sw recovery;
+      (* Commit actual independent work before joining discovery observation. *)
+      (match Masc.Keeper_registry_event_queue.enqueue_durable_result
+          ~base_path "beta" independent with
+       | Ok () -> () | Error detail -> fail detail);
+      Eio.Stream.take discoveries) in
+    (match failed with
+     | observed_base, Error (Outbox.Storage_failed _) ->
+         check string "discovery failure keeps original workspace" base_path observed_base
+     | _, Error (Outbox.Invalid_obligation _ | Request_unavailable _
+                | Canonical_result_unavailable _) ->
+         fail "directory failure lost its original storage-error type"
+     | _, Ok () -> fail "failed or unfinished discovery became success");
+    (match queued_results ~base_path ~keeper_name:"alpha" with
+     | [] -> () | _ :: _ -> fail "unavailable discovery admitted a completion");
+    (match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:"beta" with
+     | Error detail -> fail detail
+     | Ok queue -> check bool "independent durable work retains its source" true
+         (Event_queue.to_list queue
+          |> List.exists (Event_queue.stimulus_identity_equal independent)));
+    check bool "failed discovery preserves original terminal and Task provenance" true
+      (canonical () = original_proof);
+    Sys.remove directory;
+    Unix.rename saved_directory directory;
+    let damaged_name = "malformed-obligation.json" in
+    let damaged_path = Filename.concat directory damaged_name in
+    let damaged_bytes = "not-json\n" in
+    Fs_compat.save_file damaged_path damaged_bytes;
+    let fresh_round () = Eio.Switch.run (fun sw ->
+      Wake.pulse ~sw recovery;
+      Eio.Stream.take discoveries) in
+    let require_returned = function
+      | observed_base, Ok () -> check string "fresh discovery retains workspace" base_path observed_base
+      | _, Error error -> fail (Outbox.error_to_string error) in
+    require_returned (fresh_round ());
+    let require_original () =
+      match queued_results ~base_path ~keeper_name:"alpha" with
+      | [_, completion] ->
+          check string "exact original request reaches its submitter"
+            original.request_id completion.Event_queue.cc_request_id;
+          check string "original composition producer is retained"
+            composition_tool completion.cc_tool;
+          (match completion.cc_terminal with
+           | Event_queue.Composition_succeeded -> ()
+           | Composition_failed _ | Composition_cancelled _ ->
+               fail "discovery changed the canonical outcome")
+      | [] | _ :: _ -> fail "original completion was lost, replaced or duplicated" in
+    require_original ();
+    require_returned (fresh_round ());
+    require_original ();
+    check bool "recovery preserves canonical output, original Task and producer context" true
+      (canonical () = original_proof);
+    (match Outbox.discover ~base_path with
+     | Error error -> fail (Outbox.error_to_string error)
+     | Ok discovery ->
+         (match discovery.entries with
+          | [] -> () | _ :: _ -> fail "delivered original obligation was not retired");
+         (match discovery.failures with
+          | [name, Outbox.Invalid_obligation _] ->
+              check string "partial failure keeps its original filename" damaged_name name
+          | [] | _ :: _ -> fail "partial malformed obligation was hidden or reattributed"));
+    check string "partial damage stays visible and unchanged"
+      damaged_bytes (Fs_compat.load_file damaged_path))
+;;
+
 let rec mkdir_p path =
   if path = "" || path = "." || path = "/"
   then ()
@@ -918,6 +1027,8 @@ let () =
             completion_delivery_recovers_without_replaying_or_reconsuming
         ; test_case "independent completion owners retain original proof and fresh authority" `Quick
             independent_completion_owners_keep_original_proofs
+        ; test_case "async discovery failure preserves original completion and partial damage" `Quick
+            discovery_failure_retains_original_completion_and_recovers_with_partial_damage
         ; test_case "a failure carries its detail" `Quick a_failure_carries_its_detail
         ; test_case "the same result arrives once" `Quick the_same_result_arrives_once
         ; test_case "conflicting results preserve the original" `Quick

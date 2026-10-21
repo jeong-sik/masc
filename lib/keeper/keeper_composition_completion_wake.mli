@@ -63,19 +63,39 @@ type t
 val create :
   base_path:string ->
   ?on_report:(keeper_name:string -> Keeper_composition_completion_outbox.report -> unit) ->
+  ?on_discovery:(base_path:string ->
+    (unit, Keeper_composition_completion_outbox.error) result -> unit) ->
   unit -> t
-val pulse : sw:Eio.Switch.t -> t -> (unit, Keeper_composition_completion_outbox.error) result
-(** Server-lifetime supervisor. Discover validated original obligations, then
-    reserve one switch-owned worker per non-active Keeper. Workers yield before
-    delivery and preserve that owner's original discovery order. The caller
-    does not join request-proof, queue or ACK I/O; discovery itself still joins.
-    Each obligation is reread and must match its original root/request/recipient,
-    then current terminal/journal/waiting proof and once-only queue checks apply.
-    New obligations for an active owner wait for a later pulse. Active entries
+(** Server-lifetime supervisor. [on_report] covers settled original-owner
+    batches, before observer/active cleanup, not consumption, logical
+    Composition progress or worker-exit proof. Observer failure cannot undo
+    committed delivery.
+
+    [on_discovery] receives the actual outbox discovery and owner-reservation
+    result with the original base path. [Ok ()] means that pass returned, not
+    that owner delivery finished or every pending record was readable. Partial
+    malformed/unreadable records retain their original diagnostics while
+    healthy owners can recover. The default observer logs whole-discovery
+    failure. No obligation or canonical result body reaches this observer. *)
+
+val pulse : sw:Eio.Switch.t -> t -> unit
+(** Reserve a switch-owned discovery child and return without joining outbox
+    discovery. Return is scheduling only; the original typed discovery result
+    reaches [on_discovery]. The child yields before the original pass. One
+    discovery remains active through observation and cleanup; active pulses
+    coalesce. Complete discovery still precedes owner reservations within the
+    child. A failed discovery neither cancels existing owners nor proves absence.
+
+    Validated original obligations reserve one worker per non-active Keeper
+    under the original supplied switch. Owner workers yield before delivery
+    and preserve that owner's original discovery order. Each obligation is
+    reread and must match its original root/request/recipient, then current
+    terminal/journal/waiting proof and once-only queue checks apply.
+    New obligations for an active owner wait for a later admitted discovery.
+    No captured obligation/result is reused across owner workers. Active owners
     remain until worker/cancellation cleanup. Check the supplied lifetime switch
-    before discovery, reservation and scheduling. Cancellation is not a storage
-    failure; protected physical I/O can still delay shutdown.
-    Reports cover settled original-owner batches, before observer/active cleanup,
-    not consumption, logical Composition progress or worker-exit proof. Observer
-    failure cannot undo committed delivery. No new timer, retry cap, pool,
-    execution permission or replacement request. Single-domain Eio caller. *)
+    before discovery scheduling and each owner reservation. Failed discovery
+    scheduling releases its active flag. Cancellation is not a storage failure;
+    protected physical I/O can still delay shutdown. No new timer, retry cap,
+    pool, execution permission or replacement request. Single-domain Eio caller;
+    active flags are scheduling hints only. *)

@@ -1058,7 +1058,7 @@ let test_bundled_keeper_profiles_resolve_prompt_defaults () =
       |> List.iter (fun file ->
            let path = Filename.concat keepers_dir file in
            let name = Filename.chop_extension file in
-           match KTP.load_keeper_profile_defaults_result name with
+           match KTP.load_keeper_profile_defaults_result_for_base_path ~base_path:repo name with
            | Error e ->
              fail
                (Printf.sprintf
@@ -2143,6 +2143,144 @@ let test_projection_profile_snapshot_fleet_wiring () =
       (Server_routes_http_runtime_fleet_scan.read_keeper_metas ~profile_snapshot:next config) in
   check (list string) "next fleet projection sees removal" [] refreshed.bootable_names
 
+(* The light dashboard shell captures a profile snapshot on every 2-second
+   tick (#44549). A capture whose listed files and fingerprints are unchanged
+   is the held capture itself, so nothing is parsed again; on origin/main every
+   capture parsed every TOML into a fresh value. The mtimes below are set
+   explicitly so the cases do not depend on the file system's clock
+   resolution. *)
+let set_mtime path seconds = Unix.utimes path seconds seconds
+
+let declaration_with_instructions text =
+  Printf.sprintf "[keeper]\ninstructions = %S\n" text
+
+let test_projection_profile_snapshot_reuses_unchanged_capture () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  write_file (Filename.concat keepers_dir "held-a.toml")
+    (declaration_with_instructions "Answer the question.");
+  write_file (Filename.concat keepers_dir "held-b.toml") "[keeper]\ngoal = [\n";
+  let first = KTP.read_keeper_profile_snapshot ~base_path in
+  let second = KTP.read_keeper_profile_snapshot ~base_path in
+  check bool "unchanged files return the held capture" true (first == second);
+  check bool "held declaration is the parsed value itself" true
+    (snapshot_defaults_exn first "held-a" == snapshot_defaults_exn second "held-a");
+  match KTP.snapshot_profile_defaults second "held-b" with
+  | Ok _ -> fail "held capture must keep the parse error"
+  | Error error -> check bool "held error keeps its kind" true (error.kind = KTP.Parse_error)
+
+let test_projection_profile_snapshot_sees_same_size_edit () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let path = Filename.concat keepers_dir "edited.toml" in
+  write_file path (declaration_with_instructions "first answer");
+  set_mtime path 1_000_000.0;
+  let before = KTP.read_keeper_profile_snapshot ~base_path in
+  write_file path (declaration_with_instructions "later answer");
+  set_mtime path 1_000_001.0;
+  let after = KTP.read_keeper_profile_snapshot ~base_path in
+  check (option string) "next capture reads the edited bytes" (Some "later answer")
+    (snapshot_defaults_exn after "edited").instructions;
+  check (option string) "earlier capture keeps what it read" (Some "first answer")
+    (snapshot_defaults_exn before "edited").instructions
+
+let test_projection_profile_snapshot_sees_listing_changes () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let a = Filename.concat keepers_dir "listed-a.toml" in
+  let b = Filename.concat keepers_dir "listed-b.toml" in
+  let declaration = declaration_with_instructions "Answer the question." in
+  write_file a declaration;
+  set_mtime a 1_000_000.0;
+  ignore (snapshot_defaults_exn (KTP.read_keeper_profile_snapshot ~base_path) "listed-a");
+  (* The added file has the same size and mtime as the held one: only the
+     listing differs. *)
+  write_file b declaration;
+  set_mtime b 1_000_000.0;
+  let added = KTP.read_keeper_profile_snapshot ~base_path in
+  check (list string) "next capture sees the added file" [ "listed-a"; "listed-b" ]
+    (KTP.snapshot_configured_keeper_names added);
+  ignore (snapshot_defaults_exn added "listed-b");
+  Sys.remove a;
+  let removed = KTP.read_keeper_profile_snapshot ~base_path in
+  check (list string) "next capture sees the removal" [ "listed-b" ]
+    (KTP.snapshot_configured_keeper_names removed);
+  match KTP.snapshot_profile_defaults removed "listed-a" with
+  | Ok _ -> fail "removed declaration must not come back from the held capture"
+  | Error error ->
+    check bool "removed declaration is not found" true
+      (error.kind = KTP.Declaration_not_found "listed-a")
+
+let test_projection_profile_snapshot_unreadable_file_is_not_held_success () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let path = Filename.concat keepers_dir "blocked.toml" in
+  let declaration = declaration_with_instructions "Answer the question." in
+  write_file path declaration;
+  ignore (snapshot_defaults_exn (KTP.read_keeper_profile_snapshot ~base_path) "blocked");
+  (* A directory under the declaration's name is listed but cannot be read
+     as a file, for any user. *)
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  let blocked = KTP.read_keeper_profile_snapshot ~base_path in
+  let live_error =
+    match KTP.discover_keepers_toml keepers_dir with
+    | [ KTP.Invalid { error; _ } ] -> error
+    | _ -> fail "uncached discovery must refuse the unreadable declaration"
+  in
+  (match KTP.snapshot_profile_defaults blocked "blocked" with
+   | Ok _ -> fail "unreadable declaration must not load from the held capture"
+   | Error captured ->
+     check bool "unreadable declaration is a read error" true
+       (captured.kind = KTP.Read_error);
+     check bool "same error as an uncached discovery" true (captured = live_error));
+  Unix.rmdir path;
+  write_file path declaration;
+  ignore (snapshot_defaults_exn (KTP.read_keeper_profile_snapshot ~base_path) "blocked")
+
+let test_projection_profile_snapshot_drops_held_capture_on_invalidate () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let path = Filename.concat keepers_dir "rewritten.toml" in
+  write_file path (declaration_with_instructions "first answer");
+  set_mtime path 1_000_000.0;
+  ignore (KTP.read_keeper_profile_snapshot ~base_path);
+  (* A rewrite within the mtime resolution keeps the same size and mtime; the
+     in-process writers call the invalidation after they publish a
+     declaration. *)
+  write_file path (declaration_with_instructions "later answer");
+  set_mtime path 1_000_000.0;
+  KTP.invalidate_keeper_profile_snapshots ();
+  check (option string) "capture after invalidation reads the new bytes"
+    (Some "later answer")
+    (snapshot_defaults_exn (KTP.read_keeper_profile_snapshot ~base_path) "rewritten")
+      .instructions
+
+(* A read failure is an I/O event, not a function of the file's bytes, so it
+   must not be held under a fingerprint that stays the same once the read
+   works again. chmod changes neither mtime nor size, so the readable file has
+   the exact fingerprint the failed read saw. Root reads through mode 000. *)
+let with_unreadable path f =
+  Unix.chmod path 0o000;
+  Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) f
+
+let check_same_fingerprint_inputs path ~mtime ~size =
+  let stats = Unix.stat path in
+  check (float 0.0) "mode change keeps mtime" mtime stats.Unix.st_mtime;
+  check int "mode change keeps size" size stats.Unix.st_size
+
+let test_projection_profile_snapshot_read_failure_is_not_held () =
+  if Unix.geteuid () = 0 then skip ();
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let path = Filename.concat keepers_dir "flaky.toml" in
+  write_file path (declaration_with_instructions "Answer the question.");
+  set_mtime path 1_000_000.0;
+  let size = (Unix.stat path).Unix.st_size in
+  let failed =
+    with_unreadable path (fun () -> KTP.read_keeper_profile_snapshot ~base_path)
+  in
+  (match KTP.snapshot_profile_defaults failed "flaky" with
+   | Ok _ -> fail "a declaration that cannot be read must not load"
+   | Error error ->
+     check bool "read failure is a read error" true (error.kind = KTP.Read_error));
+  check_same_fingerprint_inputs path ~mtime:1_000_000.0 ~size;
+  ignore (snapshot_defaults_exn (KTP.read_keeper_profile_snapshot ~base_path) "flaky")
+
 let () =
   run "Keeper TOML Loader"
     [
@@ -2302,6 +2440,18 @@ let () =
             test_projection_profile_snapshot_refuses_name_mismatch;
           test_case "projection snapshot missing basename is Declaration_not_found" `Quick
             test_projection_profile_snapshot_missing_name_is_not_found;
+          test_case "projection snapshot reuses an unchanged capture" `Quick
+            test_projection_profile_snapshot_reuses_unchanged_capture;
+          test_case "projection snapshot sees a same-size edit" `Quick
+            test_projection_profile_snapshot_sees_same_size_edit;
+          test_case "projection snapshot sees added and removed files" `Quick
+            test_projection_profile_snapshot_sees_listing_changes;
+          test_case "projection snapshot does not hold success for an unreadable file" `Quick
+            test_projection_profile_snapshot_unreadable_file_is_not_held_success;
+          test_case "projection snapshot drops held captures on invalidate" `Quick
+            test_projection_profile_snapshot_drops_held_capture_on_invalidate;
+          test_case "projection snapshot does not hold a read failure" `Quick
+            test_projection_profile_snapshot_read_failure_is_not_held;
           test_case "empty dir" `Quick test_discover_empty_dir;
           test_case "with files" `Quick test_discover_with_files;
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;

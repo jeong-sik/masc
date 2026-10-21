@@ -685,7 +685,7 @@ let test_durable_drain_publishes_scoped_health () =
         (fun oc -> Printf.fprintf oc
           "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\nsandbox_image = \"base\"\n"
           keeper_name "test durable health" "docker");
-      Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name;
+      Masc.Keeper_types_profile.invalidate_keeper_profile_snapshots ();
       (match Masc.Keeper_meta_store.replace_snapshot config (make_meta keeper_name) with
        | Ok () -> () | Error detail -> Alcotest.fail detail);
       run ();

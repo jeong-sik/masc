@@ -397,12 +397,20 @@ val default_capture_timeout_seconds : float
     TUI and the keeper listen tool both pass nothing, and the listen tool's
     schema advertises this value. *)
 
+type capture_level =
+  | Level_observed of float
+  | Level_unavailable
+  | Meter_closed
+(** Meter observations are distinct from recorder admission or physical cleanup.
+    A measured zero amplitude is [Level_observed neg_infinity]; an unreadable
+    recording is [Level_unavailable], never a fabricated silent measurement. *)
+
 val record_and_transcribe :
   agent_id:string ->
   ?timeout_sec:float ->
   ?language_code:string ->
   ?noise_floor:float ->
-  ?on_level:(float -> unit) ->
+  ?on_level:(capture_level -> unit) ->
   ?should_stop:(unit -> stop_request option) ->
   unit ->
   (Yojson.Safe.t, string) result
@@ -414,10 +422,10 @@ val record_and_transcribe :
     recording stops once the room has been quiet again for
     {!Voice_config.trailing_silence_seconds}.
 
-    [on_level] receives each of those readings in dBFS, so a caller can draw
-    the same number the decision is made from. It receives
-    [Float.neg_infinity] while there is no audio to measure and once more when
-    the capture ends.
+    [on_level] receives [Level_observed] in dBFS for a successful file reading,
+    [Level_unavailable] when no reading is available, and [Meter_closed] when
+    the capture race has returned. The last observation is not a transcription
+    result or proof of physical recorder cleanup.
 
     [should_stop] is polled at the same rate. [Keep_what_was_heard] ends the
     recording and still transcribes what was said -- the usual reason to stop

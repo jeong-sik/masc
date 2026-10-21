@@ -409,16 +409,20 @@ let document_markdown ~width body =
    Part of the prompt rather than drawn beside it, so the cursor column, which
    is computed from the prompt's width, does not have to know about it. *)
 let voice_meter_text (state : state) =
-  match state.voice_capture, state.voice_level_db with
+  match state.voice_capture, state.voice_capture_phase, state.voice_level_db with
   (* The old capture still occupies the slot until its terminal reply; a
      retargeted draft must not advertise that it is recording new speech. *)
-  | Some _, _ when state.voice_capture_withdrawn -> "[이전 음성 종료 대기] "
+  | Some _, _, _ when state.voice_capture_withdrawn -> "[이전 음성 종료 대기] "
   (* Continuous mode between utterances: no capture is running, but the row is
      still listening and the operator needs to know before speaking. *)
-  | None, _ when state.voice_continuous <> None -> "[대기] "
-  | None, _ -> ""
-  | Some _, None -> "[듣는 중] "
-  | Some _, Some db ->
+  | None, _, _ when state.voice_continuous <> None -> "[대기] "
+  | None, _, _ -> ""
+  | Some _, Voice_calibrating, _ -> "[마이크 보정 중] "
+  | Some _, Voice_starting, _ -> "[음성 시작 중] "
+  | Some _, Voice_stopping, _ -> "[음성 종료 대기] "
+  | Some _, Voice_processing, _ -> "[음성 처리 중] "
+  | Some _, Voice_recording, None -> "[입력 관측 대기] "
+  | Some _, Voice_recording, Some db ->
     let width = 12 in
     let filled =
       if db = Float.neg_infinity

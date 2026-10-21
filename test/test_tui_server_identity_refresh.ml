@@ -2054,8 +2054,9 @@ let test_local_source_failures_are_independent () =
        && state.msg_target_keeper_name = Some keeper.k_name
        && state.local_workspace = Local_workspace_failed "archive unavailable"
        && Masc_tui_message_input.contents state.msg_input = "original draft survives metadata failure");
-  let original_draft=Masc_tui_message_input.contents state.msg_input in
+  let original_draft = Masc_tui_message_input.contents state.msg_input in
   state.voice_capture <- Some keeper.k_name;
+  state.voice_capture_phase <- Voice_calibrating;
   state.voice_continuous <- Some keeper.k_name;
   state.voice_floor <- Some (-50.);
   state.voice_stop_requested <- None;
@@ -2068,10 +2069,17 @@ let test_local_source_failures_are_independent () =
        && state.voice_stop_requested = Some Masc.Voice_bridge.Discard
        && state.voice_continuous = None && state.voice_floor = None
        && Masc_tui_composer_projection.classify_key state Masc_tui_composer.send_key = Masc_tui_composer.Send other.k_name);
+  Alcotest.(check bool) "withdrawn calibration and levels cannot prepare the replacement draft" true
+    (not (observe_voice_calibration state ~keeper:keeper.k_name ~floor:(Some 0.01))
+       && not (observe_voice_level state ~keeper:keeper.k_name ~level:(Masc.Voice_bridge.Level_observed (-20.)))
+       && state.voice_capture_phase = Voice_stopping
+       && state.voice_floor = None && state.voice_level_db = None);
   retarget_message state (Some keeper.k_name);
   Masc_tui_message_input.clear state.msg_input;
   Masc_tui_message_input.insert state.msg_input original_draft;
   request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
+  Alcotest.(check bool) "same-name return cannot borrow the withdrawn probe" false
+    (observe_voice_calibration state ~keeper:keeper.k_name ~floor:(Some 0.01));
   Alcotest.(check bool) "returning to the original name cannot revive its withdrawn transcription" true
     (settle_voice_capture state ~keeper:keeper.k_name = Some Voice_withdrawn
        && state.voice_capture = None
@@ -2082,13 +2090,53 @@ let test_local_source_failures_are_independent () =
   Masc_tui_message_input.clear state.msg_input;
   Masc_tui_message_input.insert state.msg_input "other Keeper draft";
   state.voice_capture <- Some other.k_name;
+  state.voice_capture_phase <- Voice_calibrating;
+  state.voice_continuous <- Some other.k_name;
   state.voice_stop_requested <- None;
+  Alcotest.(check bool) "pre-start refusal cannot release an occupied microphone session" false
+    (refuse_voice_start state ~keeper:other.k_name);
+  Alcotest.(check bool) "the current probe prepares its own floor without claiming live input" true
+    (observe_voice_calibration state ~keeper:other.k_name ~floor:(Some 0.01)
+       && state.voice_capture_phase = Voice_starting
+       && state.voice_floor = Some 0.01 && state.voice_level_db = None);
   Alcotest.(check bool) "an older different Keeper completion cannot settle the replacement capture" true
     (settle_voice_capture state ~keeper:keeper.k_name = None
        && state.voice_capture = Some other.k_name
-       && Masc_tui_message_input.contents state.msg_input = "other Keeper draft"
-       && settle_voice_capture state ~keeper:other.k_name
-          = Some (Voice_current Masc.Voice_bridge.Keep_what_was_heard))
+       && Masc_tui_message_input.contents state.msg_input = "other Keeper draft");
+  Alcotest.(check bool) "an unreadable meter cannot claim that input was observed" true
+    (observe_voice_level state ~keeper:other.k_name ~level:Masc.Voice_bridge.Level_unavailable
+       && state.voice_capture_phase = Voice_starting && state.voice_level_db = None);
+  Alcotest.(check bool) "only the replacement session's observed level admits recording" true
+    (not (observe_voice_level state ~keeper:keeper.k_name ~level:(Masc.Voice_bridge.Level_observed (-30.)))
+       && observe_voice_level state ~keeper:other.k_name ~level:(Masc.Voice_bridge.Level_observed (-20.))
+       && state.voice_capture_phase = Voice_recording);
+  Alcotest.(check bool) "a measured silent level remains distinct from an unavailable reading" true
+    (observe_voice_level state ~keeper:other.k_name
+       ~level:(Masc.Voice_bridge.Level_observed Float.neg_infinity)
+       && state.voice_level_db = Some Float.neg_infinity
+       && observe_voice_level state ~keeper:other.k_name ~level:Masc.Voice_bridge.Level_unavailable
+       && state.voice_level_db = None && state.voice_capture_phase = Voice_recording);
+  Alcotest.(check bool) "closing the meter retains the session until its result and rejects older progress" true
+    (observe_voice_level state ~keeper:other.k_name ~level:Masc.Voice_bridge.Meter_closed
+       && state.voice_capture_phase = Voice_processing && state.voice_capture = Some other.k_name
+       && observe_voice_calibration state ~keeper:other.k_name ~floor:(Some 0.01)
+       && not (observe_voice_level state ~keeper:other.k_name
+         ~level:(Masc.Voice_bridge.Level_observed (-20.)))
+       && state.voice_capture_phase = Voice_processing);
+  request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
+  Alcotest.(check bool) "late progress cannot turn a stopping session back into recording" true
+    (observe_voice_calibration state ~keeper:other.k_name ~floor:(Some 0.02)
+       && observe_voice_level state ~keeper:other.k_name ~level:(Masc.Voice_bridge.Level_observed (-10.))
+       && state.voice_capture_phase = Voice_stopping
+       && state.voice_capture = Some other.k_name);
+  Alcotest.(check bool) "terminal settlement precedes a later refused start" true
+    (settle_voice_capture state ~keeper:other.k_name
+       = Some (Voice_current Masc.Voice_bridge.Keep_what_was_heard)
+       && refuse_voice_start state ~keeper:other.k_name
+       && state.voice_capture = None && state.voice_continuous = None
+       && state.voice_floor = None && state.voice_level_db = None
+       && state.local_workspace = Local_workspace_failed "archive unavailable"
+       && Masc_tui_message_input.contents state.msg_input = "other Keeper draft")
 
 let test_local_source_tickets_cannot_cross_or_survive_suspension () =
   let open Masc_tui_types in

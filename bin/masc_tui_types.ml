@@ -7940,6 +7940,13 @@ type home_chat_receipt =
   | Unobserved_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
   | Unreadable_chat_receipt of string
 
+type voice_capture_phase =
+  | Voice_calibrating
+  | Voice_starting
+  | Voice_recording
+  | Voice_processing
+  | Voice_stopping
+
 type message_draft = {
   draft_text : string;
   draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
@@ -8641,9 +8648,9 @@ type state = {
      once it is already receiving text cannot be found by looking. Focus is
      what routes keys into it, and the operator takes and releases that. *)
   mutable composer_focused: bool;
-  (* A microphone capture in flight, and the level it is hearing.
+  (* One microphone session in flight, including its optional room probe.
      [voice_capture] is the keeper the transcript is bound for, taken when the
-     capture starts: the roster cursor moves on its own under a refresh, and a
+     session is admitted: the roster cursor moves on its own under a refresh, and a
      transcript that arrived seconds later would otherwise land on whoever is
      selected now.
 
@@ -8651,6 +8658,9 @@ type state = {
      operator can see the microphone is hearing them. Without it a dead input
      device and a quiet room look identical — both end as an empty draft. *)
   mutable voice_capture: string option;
+  (* Phase observed by the UI for this occupied session. Recording requires
+     a measured level event; unavailable/closed readings do not prove input. *)
+  mutable voice_capture_phase: voice_capture_phase;
   mutable voice_level_db: float option;
   (* What a second ^Y or an Esc asked of the running capture, read by it ten
      times a second. A request rather than a cancellation because the recording
@@ -11860,10 +11870,57 @@ let hide_browser_lane state =
 (* Discard belongs to this capture until it settles. A later stop/keep key
    must not revive a transcript whose recording the operator abandoned. *)
 let request_voice_stop (state : state) request =
+  (if Option.is_some state.voice_capture then state.voice_capture_phase <- Voice_stopping);
   match state.voice_stop_requested with
   | Some Masc.Voice_bridge.Discard -> ()
   | None | Some Masc.Voice_bridge.Keep_what_was_heard ->
       state.voice_stop_requested <- Some request
+
+let voice_capture_is_current (state : state) ~keeper =
+  state.voice_capture = Some keeper
+  && state.msg_target_keeper_name = Some keeper
+  && not state.voice_capture_withdrawn
+
+let observe_voice_calibration (state : state) ~keeper ~floor =
+  if voice_capture_is_current state ~keeper then begin
+    (match state.voice_capture_phase with
+     | Voice_calibrating -> state.voice_capture_phase <- Voice_starting
+     | Voice_starting | Voice_recording | Voice_processing | Voice_stopping -> ());
+    (* A toggled-off mode must not regain its floor from the old probe. The
+       in-flight worker already holds its own measured value. *)
+    if state.voice_continuous = Some keeper then state.voice_floor <- floor;
+    true
+  end else false
+
+let observe_voice_level (state : state) ~keeper ~level =
+  if voice_capture_is_current state ~keeper
+     && state.voice_stop_requested <> Some Masc.Voice_bridge.Discard then
+    match level with
+    | Masc.Voice_bridge.Level_observed db ->
+        (match state.voice_capture_phase with
+         | Voice_processing -> false
+         | Voice_stopping -> state.voice_level_db <- Some db; true
+         | Voice_calibrating | Voice_starting | Voice_recording ->
+             state.voice_capture_phase <- Voice_recording;
+             state.voice_level_db <- Some db;
+             true)
+    | Level_unavailable -> state.voice_level_db <- None; true
+    | Meter_closed ->
+        state.voice_level_db <- None;
+        (match state.voice_capture_phase with
+         | Voice_stopping -> ()
+         | Voice_calibrating | Voice_starting | Voice_recording | Voice_processing ->
+             state.voice_capture_phase <- Voice_processing);
+        true
+  else false
+
+let refuse_voice_start (state : state) ~keeper =
+  if state.voice_capture = None && state.msg_target_keeper_name = Some keeper then begin
+    state.voice_continuous <- None;
+    state.voice_floor <- None;
+    state.voice_level_db <- None;
+    true
+  end else false
 
 let withdraw_voice_capture (state : state) =
   state.voice_continuous <- None;
@@ -11922,6 +11979,7 @@ let settle_voice_capture (state : state) ~keeper =
       else Voice_current (Option.value state.voice_stop_requested
           ~default:Masc.Voice_bridge.Keep_what_was_heard) in
     state.voice_capture <- None;
+    state.voice_capture_phase <- Voice_starting;
     state.voice_capture_withdrawn <- false;
     state.voice_level_db <- None;
     Some disposition
@@ -14910,6 +14968,7 @@ let create_state
   keeper_action_serial = 0;
   composer_focused = false;
   voice_capture = None;
+  voice_capture_phase = Voice_starting;
   voice_level_db = None;
   voice_stop_requested = None;
   voice_capture_withdrawn = false;

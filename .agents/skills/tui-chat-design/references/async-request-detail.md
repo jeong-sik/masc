@@ -60,6 +60,17 @@
   초안은 유지하고 진행 중인 녹음은 기존 Discard 정책을 따른다. 철회된 capture의 점유는
   terminal 응답까지 남기며 A→B→A나 이후 Keep 요청으로 되살리지 않는다. 종료 대기
   표시는 실제 철회·점유 사실을 읽고, 이전 callback이 새 대상의 초안·capture를 해제하지 않는다.
+- 연속 음성의 잡음 보정도 같은 비동기 음성 세션이 소유한다. 입력 handler에서 probe를
+  기다리지 않고 보정부터 terminal까지 마이크 점유를 유지한다. 보정 중 Keep/Discard는
+  기존 probe 정리 뒤 처리하고 후속 recorder를 시작하지 않는다. switch는 점유 전에 확인하며
+  시작 거절을 owner 없는 terminal로 보내지 않는다. 원래 Keeper에 실패를 표시한다.
+  `capture_level`의 측정·읽기 불가·미터 종료를 구분하고 float sentinel로 추정하지 않는다.
+  시작과 보정을 녹음으로, 미터 종료를 capture 정리로 표시하지 않는다. 늦은 진행은
+  철회된 세션·처리 중·종료 대기를 새 녹음 상태로 되돌리지 않는다.
+  보정/보정 알림 대기 뒤 실제 recorder를 시작하기 직전에 원래 연속 모드가 여전히 켜져
+  있는지 확인한다. 해제됐으면 원래 terminal로 세션을 정착하고 recorder는 시작하지 않는다.
+  이미 시작한 녹음의 Keep/Discard 정책과 구분하며, 채팅 footer도 같은 준비 단계 관측을
+  읽는다. `.ml` 이벤트를 바꾸면 공개 `.mli`의 생성자와 payload도 함께 고친다.
 - 명시적 채팅 방문 기록은 `Masc_tui_chat_visit`의 세션 FIFO로 저장하고 초안 복원을
   config commit 뒤에 세우지 않는다. 각 효과는 원래 base·Keeper와 Runtime의 최신 파일
   잠금 편집을 사용하며 방문을 합치거나 실패 효과를 재실행하지 않는다. Home은 최신

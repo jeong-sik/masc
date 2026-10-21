@@ -266,7 +266,8 @@ type async_msg =
       (Yojson.Safe.t, string) result
       * (Yojson.Safe.t, string) result
       * string option
-  | Voice_level of { keeper : string; db : float }
+  | Voice_calibrated of { keeper : string; floor : float option }
+  | Voice_level of { keeper : string; level : Masc.Voice_bridge.capture_level }
   | Voice_transcribed of { keeper : string; text : string }
   | Voice_silent of { keeper : string; reason : string }
   (* The operator abandoned a recording that had speech in it. Its own row
@@ -991,7 +992,7 @@ let rec workspace_message_is_read = function
      operation outcome. *)
   | Msx_tick_withdrawn _
   | Voice_agent_voice_saved _
-  | Voice_level _
+  | Voice_calibrated _ | Voice_level _
   | Voice_transcribed _
   | Voice_silent _
   | Voice_discarded _
@@ -1104,7 +1105,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Dos_live_loaded (_, _) | Voice_wizard_saved (_, _)
     | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
     | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _)
-    | Voice_config_loaded (_, _, _) | Voice_level _ | Voice_transcribed _
+    | Voice_config_loaded (_, _, _) | Voice_calibrated _ | Voice_level _ | Voice_transcribed _
     | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _
     | Http_refresh_failed (_, _, _) | Approvals_listing_superseded
     | Approvals_summary_loaded (_, _, _, _) | Surface_composer_released
@@ -1244,7 +1245,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Msx_activity_loaded (_, _) | Msx_live_loaded (_, _) | Dos_live_loaded (_, _)
   | Voice_wizard_saved (_, _) | Voice_agent_voices_loaded _
   | Voice_agent_voice_saved _ | Voice_wizard_probed (_, _)
-  | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _) | Voice_level _
+  | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _) | Voice_calibrated _ | Voice_level _
   | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
   | Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
   | Approvals_listing_superseded | Approvals_summary_loaded (_, _, _, _)

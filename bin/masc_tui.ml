@@ -16789,9 +16789,11 @@ let handle_keeper_action state ~base_path ~mailbox action =
         | Keeper_control.Gate_submit ->
             start_keeper_action state ~base_path ~mailbox keeper.k_name action
 
-(* Apply one keystroke the composer claimed. Sending routes through the same
-   chat surface the [c] key opens, so a message typed on the roster and one
-   typed in the chat view take the identical dispatch path. *)
+let report_voice_failure state ~keeper error =
+  chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_failure
+    ("voice failed: " ^ error);
+  state.last_action <- Some ("voice failed: " ^ error, Unix.gettimeofday ())
+
 (* One microphone capture, off the input loop.
 
    [Voice_bridge.record_and_transcribe] blocks for as long as the operator
@@ -16805,34 +16807,16 @@ let handle_keeper_action state ~base_path ~mailbox action =
    of the newest bytes is the level being heard now. Nothing else can tell the
    operator their input device is dead — a dead microphone and a quiet room
    both end as an empty draft. *)
-let launch_voice_capture state ~mailbox ~keeper =
-  let run () =
-    let result =
-      try
-        Ok
-          (Masc.Voice_bridge.record_and_transcribe
-             ~agent_id:keeper
-             ?noise_floor:state.voice_floor
-             (* The level the capture makes its own decisions from, so the bar
-                and the trigger cannot disagree. It arrives from the capture's
-                fiber, which is why it goes through the mailbox rather than
-                straight into the field. *)
-             ~on_level:(fun db -> enqueue_async mailbox (Voice_level { keeper; db }))
-             ~should_stop:(fun () -> state.voice_stop_requested)
-             ())
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    let msg =
-      match result with
-      | Error e -> Voice_failed { keeper; error = e }
-      | Ok (Error e) -> Voice_failed { keeper; error = e }
-      | Ok (Ok json) -> (
-        (* Read through the bridge's own reader so every status it can write
-           has a row here: a string match folds a transcriber that answered
-           with empty text into "nothing was heard", which blames the
-           microphone for the endpoint. *)
+let launch_voice_capture ?(calibrate = false) state ~mailbox ~keeper =
+  let inherited_floor = state.voice_floor in
+  let capture noise_floor =
+    match Masc.Voice_bridge.record_and_transcribe
+        ~agent_id:keeper ?noise_floor
+        ~on_level:(fun level -> enqueue_async mailbox (Voice_level { keeper; level }))
+        ~should_stop:(fun () -> state.voice_stop_requested) () with
+    | Error error -> Voice_failed { keeper; error }
+    | Ok json ->
+        (* Read the bridge's typed outcome rather than guessing from text. *)
         match Masc.Voice_bridge.capture_outcome_of_json json with
         | Masc.Voice_bridge.Transcript { text; _ } -> Voice_transcribed { keeper; text }
         | Masc.Voice_bridge.Transcriber_returned_nothing { endpoint_id } ->
@@ -16849,21 +16833,54 @@ let launch_voice_capture state ~mailbox ~keeper =
         | Masc.Voice_bridge.Unrecognized_status status ->
           Voice_failed { keeper; error = "voice result carried an unknown status: " ^ status }
         | Masc.Voice_bridge.Status_absent ->
-          Voice_failed { keeper; error = "voice result carried no status" })
+          Voice_failed { keeper; error = "voice result carried no status" }
+  in
+  let run () =
+    let msg =
+      try
+        if calibrate then begin
+          (* This probe owns the same microphone session as the capture. The
+             key handler returns while it waits, but another capture must wait
+             for this session's original terminal response. *)
+          let floor = Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper () in
+          enqueue_async mailbox (Voice_calibrated { keeper; floor });
+          match state.voice_stop_requested with
+          | Some Masc.Voice_bridge.Discard ->
+              Voice_discarded { keeper; reason = "microphone preparation discarded" }
+          | Some Masc.Voice_bridge.Keep_what_was_heard ->
+              Voice_silent { keeper; reason = "stopped during microphone preparation; no speech recorded" }
+          | None ->
+              (* The probe and its mailbox publication both yield. Turning
+                 continuous mode off during either wait must not start a new
+                 recorder. Once recording has started its existing Keep/
+                 Discard policy still owns speech already captured. *)
+              (match state.voice_continuous with
+               | Some active when String.equal active keeper -> capture floor
+               | Some _ | None -> Voice_silent
+                   {keeper; reason = "continuous mode stopped during microphone preparation"})
+        end else capture inherited_floor
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Voice_failed { keeper; error = Printexc.to_string exn }
     in
     enqueue_async mailbox msg
   in
   match Eio_context.get_switch_opt () with
   | None ->
-    enqueue_async
-      mailbox
-      (Voice_failed { keeper; error = "Eio switch is unavailable" })
+      (* No capture exists to settle. Report this synchronous refusal at its
+         original call site instead of sending a terminal event with no owner. *)
+      ignore (refuse_voice_start state ~keeper);
+      report_voice_failure state ~keeper "background recorder unavailable"
   | Some sw ->
-    state.voice_capture <- Some keeper;
-    state.voice_capture_withdrawn <- false;
-    state.voice_level_db <- None;
-    state.voice_stop_requested <- None;
-    Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+      (* Eio fork can skip its body on an already cancelled switch. Check before
+         claiming a microphone session; cancellation is not a recorder error. *)
+      Eio.Switch.check sw;
+      state.voice_capture <- Some keeper;
+      state.voice_capture_phase <- (if calibrate then Voice_calibrating else Voice_starting);
+      state.voice_capture_withdrawn <- false;
+      state.voice_level_db <- None;
+      state.voice_stop_requested <- None;
+      Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
 ;;
 
 (* Continuous mode's only moving part: after each capture settles, start the
@@ -16878,6 +16895,9 @@ let rearm_continuous_capture state ~mailbox ~keeper =
   | Some _ | None -> ()
 ;;
 
+(* Apply one keystroke the composer claimed. Sending routes through the same
+   chat surface the [c] key opens, so a message typed on the roster and one
+   typed in the chat view take the identical dispatch path. *)
 let handle_composer_key state ~base_path ~mailbox key =
   if state.view = Overview || state.workspace_identity <> Masc_tui_types.Workspace_identity_match
      || Option.is_some (browser_lane_on_screen state)
@@ -16902,6 +16922,7 @@ let handle_composer_key state ~base_path ~mailbox key =
       (match state.voice_continuous with
        | Some _ ->
            state.voice_continuous <- None;
+           state.voice_floor <- None;
            state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
        | None ->
       (* One capture at a time: a second microphone would contend for the same
@@ -16920,6 +16941,7 @@ let handle_composer_key state ~base_path ~mailbox key =
       (match state.voice_continuous with
        | Some _ ->
            state.voice_continuous <- None;
+           state.voice_floor <- None;
            state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
        | None when Option.is_some state.voice_capture ->
            (* A manual or withdrawn capture still owns the microphone. The
@@ -16930,15 +16952,13 @@ let handle_composer_key state ~base_path ~mailbox key =
              else "voice: recording in progress" in
            state.last_action <- Some (notice, Unix.gettimeofday ())
        | None ->
-           (* The floor is measured once here rather than per capture, which is
-              what makes the gap between utterances short enough to speak
-              across. It is dropped when the mode ends, so a session that moves
-              to a different room measures again. *)
+           (* Request one room probe in the asynchronous session, then reuse
+              its floor between utterances. Turning the mode off drops it. *)
            state.voice_continuous <- Some keeper_name;
-           state.voice_floor <- Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper_name ();
+           state.voice_floor <- None;
            state.last_action <- Some ("voice: continuous on", Unix.gettimeofday ());
            if state.voice_capture = None
-           then launch_voice_capture state ~mailbox ~keeper:keeper_name);
+           then launch_voice_capture ~calibrate:true state ~mailbox ~keeper:keeper_name);
       true
   | Composer.Release_focus ->
       (* A running capture is the innermost thing Esc can leave, so it goes
@@ -17310,7 +17330,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         | Msx_activity_loaded (_, _) | Msx_live_loaded (_, _) | Dos_live_loaded (_, _)
         | Voice_wizard_saved (_, _) | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
         | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _)
-        | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
+        | Voice_calibrated _ | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
         | (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | Http_refresh_failed (_, _, _)
         | Approvals_summary_loaded (_, _, _, _) | Http_scoped_refresh_done (_, _, _)
         | Http_scoped_refresh_failed (_, _, _, _, _, _) | Board_post_refresh_done (_, _)
@@ -17687,10 +17707,10 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
        | Error message ->
            state.voice_setup <- None;
            state.voice_setup_error <- Some message)
-  | Voice_level { keeper; db } ->
-      if state.voice_capture = Some keeper
-         && state.voice_stop_requested <> Some Masc.Voice_bridge.Discard
-      then state.voice_level_db <- Some db
+  | Voice_calibrated { keeper; floor } ->
+      ignore (observe_voice_calibration state ~keeper ~floor)
+  | Voice_level { keeper; level } ->
+      ignore (observe_voice_level state ~keeper ~level)
   | Voice_transcribed { keeper; text } ->
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
@@ -17779,8 +17799,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            it again, and a loop that re-arms on failure spins. *)
         state.voice_continuous <- None;
         state.voice_floor <- None;
-        chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_failure
-          ("voice failed: " ^ error))
+        report_voice_failure state ~keeper error)
   | Http_overview_loaded preview ->
       Masc_tui_types.accept_overview_preview state preview
   | Http_surface_read_completed (context, completed) ->
@@ -18621,7 +18640,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            state.goal_confirmation <- Goal_confirmation.Inspecting read
        | Runtime_form_save_changed _, _ | Keeper_settings_save_changed _, _ -> ()
        | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
-       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_logs_loaded _ | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatched _ | Task_dispatch_failed _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
+       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_logs_loaded _ | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatched _ | Task_dispatch_failed _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
       | Ok message ->
           state.goal_action_pending <- None;
@@ -29086,13 +29105,12 @@ and is loaded on demand through keeper_skill.
                            Some (notice, Unix.gettimeofday ())
                      | None, Some keeper ->
                          state.voice_continuous <- Some keeper;
-                         state.voice_floor <-
-                           Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper ();
+                         state.voice_floor <- None;
                          state.last_action <-
                            Some ("voice: continuous on", Unix.gettimeofday ());
                          if state.voice_capture = None
                          then
-                           launch_voice_capture state ~mailbox:async_messages ~keeper
+                           launch_voice_capture ~calibrate:true state ~mailbox:async_messages ~keeper
                      | None, None -> ())
                    k
                in

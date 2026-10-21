@@ -29,6 +29,11 @@ val local_source_pending_note : state -> local_read_source -> string option
 val runtime_assignment_label : runtime_assignment -> string
 (** The assignment shown in the runtime picker and Runtime Stats value. *)
 
+val voice_meter_text : state -> string
+(** Current microphone phase shared by composer and chat: preparation, starting,
+    observed recording, unavailable input, processing or original-slot stopping.
+    A missing level is not evidence of active recording. Presentation only. *)
+
 val runtime_assignment_targets : runtime_assignment -> string -> bool
 (** Whether an assignment resolves to the named lane or runtime. *)
 

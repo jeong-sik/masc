@@ -1878,6 +1878,11 @@ let end_at_operator_stop request phase =
   | Keep_what_was_heard, Listening { floor } -> Stopped_before_speech (Some floor)
 ;;
 
+type capture_level =
+  | Level_observed of float
+  | Level_unavailable
+  | Meter_closed
+
 let watch_capture_level
       ~clock
       ~audio_file
@@ -1905,8 +1910,8 @@ let watch_capture_level
       in
       on_level
         (match level with
-         | Some amplitude -> db_of_amplitude amplitude
-         | None -> Float.neg_infinity);
+         | Some amplitude -> Level_observed (db_of_amplitude amplitude)
+         | None -> Level_unavailable);
       match advance_phase ~capture ~now ~level phase with
       | Finish ending -> ending
       | Continue next ->
@@ -2033,7 +2038,7 @@ let record_and_transcribe
       ?(timeout_sec = default_capture_timeout_seconds)
       ?language_code
       ?noise_floor
-      ?(on_level = fun (_ : float) -> ())
+      ?(on_level = fun (_ : capture_level) -> ())
       ?(should_stop = fun () -> None)
       ()
   =
@@ -2125,7 +2130,7 @@ let record_and_transcribe
                   ~deadline:(Eio.Time.now clock +. timeout_sec)))
       in
       play_tone 440.0;
-      on_level Float.neg_infinity;
+      on_level Meter_closed;
       (match outcome with
        | Error message -> Error message
        | Ok (Stopped_before_speech floor) ->

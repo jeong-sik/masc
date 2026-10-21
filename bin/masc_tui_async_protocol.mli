@@ -248,7 +248,8 @@ type async_msg =
       (Yojson.Safe.t, string) result
       * (Yojson.Safe.t, string) result
       * string option
-  | Voice_level of { keeper : string; db : float }
+  | Voice_calibrated of { keeper : string; floor : float option }
+  | Voice_level of { keeper : string; level : Masc.Voice_bridge.capture_level }
   | Voice_transcribed of { keeper : string; text : string }
   | Voice_silent of { keeper : string; reason : string }
   (* The operator abandoned a recording that had speech in it. Its own row

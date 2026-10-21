@@ -1,6 +1,6 @@
 ---
 name: tui-chat-design
-description: "MASC TUI의 원본 비동기 요청·Task·이력 상세와 파일 경계 이어읽기, 소스별 표시 준비 단계·물리/논리 관측, 채팅·입력·로딩·진행 상태, 시작 키 인계와 늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools·Connectors의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·구성 조회·디렉터리 페이지의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker·caller·UI 반영·취소·등록 해제와 paint 증거를 구분한다."
+description: "MASC TUI의 원본 비동기 요청·Task·이력 상세와 파일 경계 이어읽기, 소스별 표시 준비 단계·물리/논리 관측, 채팅·입력·로딩·진행 상태, 시작 키 인계·음성 보정과 녹음 관측·늦은 터미널 응답, 비동기 조회·설정 저장·긴 질문의 요약과 전체 읽기·Ask 답변과 재조회를 바꿀 때 쓴다. Keeper·Work·로그·Board·Runtime·Overview·Tools·Connectors의 원본 요청·입력·revision·소유권, 준비 상세·현재 턴·이력·구성 조회·디렉터리 페이지의 workspace 검증과 캐시 영수증, 공유 조회와 부분 실패, worker·caller·UI 반영·취소·등록 해제와 paint 증거를 구분한다."
 ---
 
 # 대화를 먼저 읽는 채팅
@@ -16,7 +16,7 @@ Keeper 는 `keeper_skill` 을 같은 `identity` 에 `file = "references/<파일>
 | 바꾸는 일 | 파일 |
 |---|---|
 | 시작 입력·늦은 터미널 응답, workspace JSON 조회와 이력, Tools 구성 조회 | [references/startup-and-workspace-reads.md](references/startup-and-workspace-reads.md) |
-| 원본 비동기 요청 상세, Connector 조회와 페이지 | [references/async-request-detail.md](references/async-request-detail.md) |
+| 원본 비동기 요청 상세·음성 보정과 입력 관측, Connector 조회와 페이지 | [references/async-request-detail.md](references/async-request-detail.md) |
 | 복합 조회의 부분 수신 | [references/composite-partial-reads.md](references/composite-partial-reads.md) |
 | 에디터 준비, Keeper 설정·Sandbox 저장, Runtime 할당·catalogue·폼·원문·snapshot·source 준비 | [references/keeper-and-runtime-settings.md](references/keeper-and-runtime-settings.md) |
 | 입력 주변: 진행줄·준비 미리보기·준비 상세·응답 활동 | [references/input-progress-and-preparation.md](references/input-progress-and-preparation.md) |

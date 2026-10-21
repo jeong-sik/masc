@@ -5245,9 +5245,8 @@ let render_keeper_message (state : state) =
          keys they name are the ones a capture is not waiting for. *)
       | None when state.voice_capture <> None ->
         let bar =
-          match state.voice_level_db with
-          | None -> Printf.sprintf "%s듣는 중…%s" Ansi.dim Ansi.reset
-          | Some db ->
+          match state.voice_capture_phase, state.voice_level_db with
+          | Voice_recording, Some db when not state.voice_capture_withdrawn ->
             Printf.sprintf
               "%s%s%s  %s%.0f dB%s"
               (Masc_tui_theme.tone Masc_tui_theme.Accent)
@@ -5258,6 +5257,9 @@ let render_keeper_message (state : state) =
               Ansi.dim
               db
               Ansi.reset
+          | Voice_recording, (Some _ | None)
+          | (Voice_calibrating | Voice_starting | Voice_stopping | Voice_processing), (Some _ | None) ->
+              Printf.sprintf "%s%s%s" Ansi.dim (voice_meter_text state) Ansi.reset
         in
         (* Both endings, because they are not the same and the difference is
            what the operator loses. Ctrl-Y keeps the sentence; Esc abandons it. *)

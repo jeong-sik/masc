@@ -92,8 +92,10 @@ gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
 ```
 
 Use `addon-lifecycle` for an Addon installation/worker observation candidate.
-The two suites check TUI request/state ownership and host application decisions;
-they do not assert screen wording, layout or row order. The matching server and
+The two existing suites cover TUI request/state ownership and host application
+decisions. The selected TUI suite also contains existing presentation assertions;
+this scenario adds no new screen wording, layout or row-order tests, and does not
+classify that mixed suite as request/state-only proof. The matching server and
 TUI are packaged for separate actual On/Off/reconnect observations. Passing these
 suites does not prove that a container, real model or visible terminal executed.
 Both selected targets must exist; a missing target fails instead of reducing scope.

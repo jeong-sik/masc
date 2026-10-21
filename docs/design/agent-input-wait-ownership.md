@@ -196,3 +196,78 @@ reconciliation, SSE invalidation and persistent TUI projection remain required.
 Caller and response integration must ship together before this stack can become
 ready. All #38005 layers remain Draft; this contract does not authorize
 installation, merge or whole-issue completion.
+
+## Explicit direct response admission
+
+The existing administrative `POST /api/v1/keepers/:name/checkpoints` accepts
+`action: "respond_input"`. Its body carries the original `operation_id`, exact
+`checkpoint_ref` (`trace_id`, `turn_count`, `sha256`), complete `pending_input`
+from the owned observation, and one closed `response` value:
+
+```json
+{"kind":"answer","value":"the explicit answer"}
+```
+
+Or use `{"kind":"declined"}` or `{"kind":"timeout"}`. Timeout is an explicit
+response, never elapsed-time expiry. Missing, duplicate or extra protocol fields,
+invalid references and unknown response kinds are rejected before Owner lookup.
+A valid request cannot create a missing Owner or infer a waiting operation.
+The existing route's administrative authentication remains required.
+
+The Registry submits one exclusive maintenance attempt to the existing Owner.
+Busy returns without response effects. Before effects, the unpaused original
+maintenance child captures the exact queued wait, operation digest, current
+input relation, trace and original session root. The caller's complete wait
+must match that original authority; matching IDs with a different question do
+not pass. The direct turn separately compares its visible InputRequired request
+with the complete stored request before delivering that question.
+
+Physical installation rechecks exact retained bytes, original operation scope,
+complete pending, and canonical history. The canonical must retain the original
+messages and agree on all nonhistory fields. Only the capture timestamp and an
+independently validated derived session `message_count` can differ. Context,
+working-context, MCP, tools, parameters, usage or turn drift requires explicit
+reconciliation; a same request ID is no permission to overwrite either source.
+Missing/corrupt/diverged canonical is likewise refused in this layer. These
+remaining reconciliation cases must be handled before the whole feature ships.
+
+The public Core response owner derives the canonical question and consumes the
+request in a temporary Agent without provider dispatch. Physical installation
+updates an existing validated derived message count to the consumed history
+length, freezes the complete candidate, retains those exact bytes and installs
+canonical with an exact predecessor CAS. A sealed receipt belongs to that same
+original Owner authority/maintenance child. File retention/CAS and SQLite are
+separate commits; a partial file install is evidence requiring reconciliation,
+not acceptance or automatic retry permission.
+
+The Owner consumes that receipt only while the same unpaused maintenance child
+and trace remain current. One SQLite transaction compares the original queued
+wait/digest and input predecessor, publishes the consumed checkpoint and converts
+that wait to the same operation's checkpoint continuation. Generic claim stays
+blocked until this response transition. Afterwards the existing checkpoint
+continuation restores the original scope and consumes its exact reference without
+appending the original prompt again. Acceptance is not continuation completion.
+Duplicates refuse without consuming a different request. An uncertain journal
+acknowledgement stays Error even when the transaction actually committed; reread
+the actual original operation/input before reconciling, never blindly resubmit.
+
+Actual source scenarios cover three explicit Owner responses and same-operation
+continuation, stale question and busy/duplicate refusal, Store atomicity and
+pre/post-commit faults, physical stale nonhistory refusal and valid derived
+count, and real HTTP/Registry/Owner/SQLite admission plus snapshot consumption, duplicate
+refusal and malformed-proof/missing-Owner boundaries. The positive HTTP scenario
+prepares its original wait in the journal and uses no provider. These are not
+provider/full direct-turn/UI execution proof. Executing them remains separate.
+
+Official-client elicitation is currently unsupported: `prepare_turn` refuses
+`ElicitInput`; adapter successes produce Completed/scheduling yields, and Codex
+MCP elicitation cancels with Host_input_unavailable. Its lifecycle InputRequired
+consumer is not a producer. The actual direct Agent Core InputRequired path
+installs the native binding/terminal receipt required by waiting admission.
+Enabling official-client input later requires its own continuation authority.
+The existing unified success receipt precedes durable wait admission; a later
+admission error does not rewrite that earlier run receipt into operation success.
+
+All layers remain Draft. Autonomous waiting, dedicated input-wait classification,
+canonical/live/retained divergence reconciliation, snapshot/SSE invalidation and
+persistent/reconnected Acting/TUI are still required for #38005 acceptance.

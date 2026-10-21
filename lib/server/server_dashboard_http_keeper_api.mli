@@ -186,7 +186,8 @@ val state_diagram_runtime_fsm_mermaid :
 val handle_keeper_checkpoints_post :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
-(** Handle admin [POST /checkpoints] history deletion and checkpoint purge. *)
+(** Handle admin [POST /checkpoints] history deletion, checkpoint purge and
+    explicit original-operation input responses. Acceptance is not execution completion. *)
 
 (** {1 Keeper name validation} *)
 

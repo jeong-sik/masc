@@ -806,6 +806,9 @@ let direct_checkpoint ~base_path ~keeper_name ~operation_id =
 let defer_direct_checkpoint ~base_path ~keeper_name ~operation_id ~execution_digest ~checkpoint =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.defer_direct_checkpoint owner ~operation_id ~execution_digest ~checkpoint)
+let respond_direct_input_wait ~base_path ~keeper_name ~net ~operation_id ~observed ~response =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.respond_direct_input_wait owner ~net ~operation_id ~observed ~response)
 let direct_input_wait ~base_path ~keeper_name ~operation_id =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.direct_input_wait owner ~operation_id)

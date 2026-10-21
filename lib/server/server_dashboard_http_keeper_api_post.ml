@@ -560,6 +560,39 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
               ("receipts", `List (List.map runtime_trace_public_json receipts));
             ] )
 
+(* Wire parsing ends here; Owner commands use closed response constructors. *)
+let decode_direct_input_response args =
+  let ( let* ) = Result.bind in
+  let fields expected = function
+    | `Assoc fields when List.sort String.compare (List.map fst fields)=List.sort String.compare expected -> Ok fields
+    | _ -> Error "input response must contain exactly its declared fields" in
+  let text = function `String value -> Ok value | _ -> Error "input response string required" in
+  let* args = Keeper_chat_operation.canonical_json args
+    |> Result.map_error (fun _ -> "input response JSON contains duplicate fields or invalid numbers") in
+  let* args = fields ["action";"operation_id";"checkpoint_ref";"pending_input";"response"] args in
+  let* operation_id=text (List.assoc "operation_id" args) in
+  let* operation_id=Keeper_chat_operation.Operation_id.of_string operation_id in
+  let* reference=fields ["trace_id";"turn_count";"sha256"] (List.assoc "checkpoint_ref" args) in
+  let* trace=text (List.assoc "trace_id" reference) in
+  let* trace_id=Keeper_id.Trace_id.of_string trace in
+  let* turn_count=match List.assoc "turn_count" reference with
+    | `Int value -> Ok value | _ -> Error "input response checkpoint turn required" in
+  let* sha256=text (List.assoc "sha256" reference) in
+  let* checkpoint=Keeper_checkpoint_ref.of_persisted ~trace_id ~turn_count ~sha256
+    |> Result.map_error (fun _ -> "input response checkpoint reference is invalid") in
+  let* pending=Agent_core.Agent_input_request.pending_of_json (List.assoc "pending_input" args) in
+  let* observed=Keeper_semantic_execution.input_wait ~checkpoint ~pending in
+  let* response=match List.assoc "response" args with
+    | `Assoc [("kind",`String "declined")] -> Ok Agent_core.Hooks.Declined
+    | `Assoc [("kind",`String "timeout")] -> Ok Agent_core.Hooks.Timeout
+    | `Assoc response_fields ->
+      let* fields=fields ["kind";"value"] (`Assoc response_fields) in
+      (match List.assoc "kind" fields with
+       | `String "answer" -> Ok (Agent_core.Hooks.Answer (List.assoc "value" fields))
+       | _ -> Error "input response kind is invalid")
+    | _ -> Error "input response requires an explicit answer, declined or timeout" in
+  Ok (operation_id,observed,response)
+
 let handle_keeper_checkpoints_post state req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_suffix req_path keeper_suffix_checkpoints in
@@ -610,6 +643,20 @@ let handle_keeper_checkpoints_post state req reqd body_str =
       match action with
       | "preview_purge" as purge_action -> purge ~purge_action ~apply:false
       | "apply_purge" as purge_action -> purge ~purge_action ~apply:true
+      | "respond_input" ->
+        (match decode_direct_input_response args,state.Mcp_server.net with
+         | Error detail,_ -> respond_error ~ok:false reqd detail
+         | Ok _,None -> respond_error ~status:`Service_unavailable ~ok:false reqd "server input response context is unavailable"
+         | Ok (operation_id,observed,response),Some net ->
+           (match Keeper_owner_registry.respond_direct_input_wait ~base_path:config.base_path
+               ~keeper_name:name ~net ~operation_id ~observed ~response with
+            | Error error -> respond_error ~status:`Conflict ~ok:false reqd
+                (Keeper_owner_registry.command_error_to_string error)
+            | Ok (`Busy _) -> respond_error ~status:`Conflict ~ok:false reqd
+                "Keeper is busy; no input response effects began"
+            | Ok `Accepted -> Http.Response.json_value ~request:req
+                (`Assoc ["ok",`Bool true;"action",`String "respond_input";"keeper",`String name;
+                  "operation_id",`String (Keeper_chat_operation.Operation_id.to_string operation_id)]) reqd))
       | "delete_history" ->
           let snapshot_ids =
             Safe_ops.json_string_list "snapshot_ids" args

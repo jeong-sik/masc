@@ -512,7 +512,7 @@ let test_stopping_owner_leaves_the_active_call_for_restart_recovery () =
    differ: they are bound by the exact published checkpoint, not string equality. *)
 type input_wait_fixture = Owned_wait | Consumed_input | Missing_retained | Corrupt_retained | Changed_retained | Foreign_scope
 
-let test_owned_input_wait fixture () =
+let test_owned_input_wait ?response fixture () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
   let root = Filename.temp_dir "owner-input-wait-" "" in
@@ -529,7 +529,7 @@ let test_owned_input_wait fixture () =
     {run_id="lifecycle-original-input";request={request_id="question-original";
       participant_name=Some "operator";question="Which original choice?";
       schema=Some (`Assoc ["type",`String "string"]);timeout_s=Some 0.1;created_at=1.}} in
-  let owned = ref None in
+  let owned = ref None and admitted = ref None in
   Eio.Switch.run (fun sw ->
     let owner_cell = ref None and first = ref true and ready = ref true in
     let finished,notify_finished = Eio.Promise.create () in
@@ -537,9 +537,23 @@ let test_owned_input_wait fixture () =
     let execute ~sw:_ ~keeper_name:_ ~claim =
       let operation : Chat_operation.t = match owner_ok (claim ()) with Some operation -> operation | None -> fail "no claimed original" in
       let owner = Option.get !owner_cell in
-      if not !first then Owner.Operation_succeeded {outcome_ref="independent actual result"}
+      if not !first then begin
+        if Chat_operation.Operation_id.equal operation.operation_id id then begin
+          let original : Chat_operation.t = Option.get !admitted in
+          check bool "resumed Running operation keeps original input and digest" true
+            (operation.input=original.input && operation.execution_digest=original.execution_digest);
+          let source=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir
+              ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+            |> Result.get_ok |> Keeper_checkpoint_store.exact_snapshot_checkpoint in
+          check bool "response resumed with consumed pending" true (source.pending_input=None);
+          let observed=owner_ok (Owner.direct_checkpoint owner ~operation_id:id) |> Option.get in
+          owner_ok (Owner.resume_direct_checkpoint owner ~operation_id:id ~observed)
+        end;
+        Owner.Operation_succeeded {outcome_ref="actual original or independent result"}
+      end
       else begin
         first := false;
+        admitted := Some operation;
         let initial = Keeper_context_core.create ~eio:true ~system_prompt:"original input fixture"
           |> Keeper_context_core.checkpoint_of_context in
         let frame_scope = match fixture with Foreign_scope -> later
@@ -586,8 +600,10 @@ let test_owned_input_wait fixture () =
         let retained = Filename.concat (Filename.concat session_dir Keeper_checkpoint_store.retained_dirname)
             (reference.sha256 ^ ".json") in
         (match fixture with
-         | Owned_wait -> Fs_compat.save_file
-             (Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:canonical.session_id) "corrupt canonical"
+         | Owned_wait -> (match response with
+             | None -> Fs_compat.save_file
+                 (Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:canonical.session_id) "corrupt canonical"
+             | Some _ -> ())
          | Missing_retained -> Unix.unlink retained
          | Corrupt_retained -> Fs_compat.save_file retained "corrupt retained"
          | Changed_retained -> Fs_compat.save_file retained ("\n" ^ Fs_compat.load_file retained)
@@ -621,7 +637,48 @@ let test_owned_input_wait fixture () =
        check bool "original remains queued after child settlement" true
          ((operation_of owner id).state=Chat_operation.Queued);
        check bool "unresolved wait does not become claimable" false
-         (Owner.operation_projection owner).has_claimable_queued
+         (Owner.operation_projection owner).has_claimable_queued;
+       (match response with
+        | None -> ()
+        | Some response ->
+          let before=operation_of owner id in
+          let invalid={waiting.pending with request={waiting.pending.request with question="another question"}} in
+          let invalid=Keeper_semantic_execution.input_wait ~checkpoint:waiting.checkpoint ~pending:invalid |> Result.get_ok in
+          (match Owner.respond_direct_input_wait owner ~net:env#net ~operation_id:id ~observed:invalid ~response with
+           | Error (Owner.Operation_rejected (Store.Invalid_input _)) -> ()
+           | Error error -> fail (Owner.error_to_string error) | Ok _ -> fail "foreign canonical question acquired response authority");
+          check bool "refused question preserves original wait" true
+            (Option.equal Keeper_semantic_execution.equal_input_wait (Some waiting)
+              (owner_ok (Owner.direct_input_wait owner ~operation_id:id)));
+          let busy=Owner.run_maintenance_if_idle owner (fun () ->
+            Owner.respond_direct_input_wait owner ~net:env#net ~operation_id:id ~observed:waiting ~response)
+            |> owner_ok in
+          (match busy with `Ran (Ok (`Busy _)) -> ()
+           | `Ran (Ok `Accepted | Error _) | `Busy _ -> fail "busy response was not rejected before effects");
+          (match Owner.respond_direct_input_wait owner ~net:env#net ~operation_id:id ~observed:waiting ~response with
+           | Ok `Accepted -> () | Ok (`Busy _) -> fail "idle response was busy"
+           | Error error -> fail (Owner.error_to_string error));
+          let after=await_terminal ~clock:env#clock owner id in
+          check bool "same original operation succeeds and redacts terminal input" true
+            (after.input=None && Chat_operation.Operation_id.equal after.operation_id before.operation_id
+              && match after.state with Succeeded _ -> true | Queued | Running _ | Failed _ | Cancelled _ -> false);
+          let snapshot=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir
+              ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) |> Result.get_ok in
+          let consumed=Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot in
+          check bool "no pending wait remains after explicit response" true (consumed.pending_input=None);
+          let expected=match response with
+            | Agent_core.Hooks.Answer answer -> [Agent_core.Types.user_msg "original admitted input";
+                Agent_core.Types.user_msg ("[User input] Which original choice?: " ^ Yojson.Safe.to_string answer)]
+            | Declined | Timeout -> [Agent_core.Types.user_msg "original admitted input"] in
+          check bool "response uses canonical question and does not append original prompt again" true (consumed.messages=expected);
+          (match Owner.respond_direct_input_wait owner ~net:env#net ~operation_id:id ~observed:waiting ~response with
+           | Error (Owner.Operation_rejected (Store.Invalid_input _)) -> ()
+           | Error error -> fail (Owner.error_to_string error) | Ok _ -> fail "duplicate response was accepted");
+          let unchanged=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir
+              ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) |> Result.get_ok in
+          check bool "duplicate preserves exact consumed bytes" true
+            (Keeper_checkpoint_ref.equal (Keeper_checkpoint_store.exact_snapshot_reference snapshot)
+              (Keeper_checkpoint_store.exact_snapshot_reference unchanged)))
      | (Consumed_input | Missing_retained | Corrupt_retained | Changed_retained | Foreign_scope),
          Error (Owner.Operation_rejected (Store.Invalid_input _)) ->
        check bool "refusal leaves original running" true (is_running (operation_of owner id));
@@ -641,6 +698,10 @@ let test_owned_input_wait fixture () =
        let ready = ref false in
        let owner = start_owner ~sw ~path ~name ~runner:(runner ~ready (fun ~sw:_ ~keeper_name:_ ~claim:_ ->
          fail "unresolved input was redispatched after restart")) in
+       (match response with
+        | Some _ -> check bool "accepted response stays consumed after actual Owner reopen" true
+            (owner_ok (Owner.direct_input_wait owner ~operation_id:id)=None)
+        | None ->
        check bool "original wait survives actual Owner reopen" true
          (Option.is_some (owner_ok (Owner.direct_input_wait owner ~operation_id:id)));
        check bool "restarted wait remains blocked" false (Owner.operation_projection owner).has_claimable_queued;
@@ -648,7 +709,7 @@ let test_owned_input_wait fixture () =
        check bool "cancellation settles original wait" true
          (owner_ok (Owner.direct_input_wait owner ~operation_id:id)=None);
        check bool "cancellation preserves global input fact" true
-         ((owner_ok (Owner.current_input_checkpoint owner)).observation=Store.Input_observed (Option.get !owned)))
+         ((owner_ok (Owner.current_input_checkpoint owner)).observation=Store.Input_observed (Option.get !owned))))
    | Consumed_input | Missing_retained | Corrupt_retained | Changed_retained | Foreign_scope -> ())
 ;;
 
@@ -671,6 +732,12 @@ let () =
         ; test_case "success without a disposition is not recorded" `Quick
             test_success_without_a_disposition_is_not_recorded
         ; test_case "owned input wait blocks original while independent work and restart survive" `Quick (test_owned_input_wait Owned_wait)
+        ; test_case "explicit Answer resumes the same operation without duplicate input" `Quick
+            (test_owned_input_wait ~response:(Agent_core.Hooks.Answer (`String "yes")) Owned_wait)
+        ; test_case "explicit Declined resumes the same operation without synthetic input" `Quick
+            (test_owned_input_wait ~response:Agent_core.Hooks.Declined Owned_wait)
+        ; test_case "explicit Timeout is a response, not elapsed-time expiry" `Quick
+            (test_owned_input_wait ~response:Agent_core.Hooks.Timeout Owned_wait)
         ; test_case "consumed input cannot be deferred as waiting" `Quick (test_owned_input_wait Consumed_input)
         ; test_case "missing retained input refuses despite readable canonical" `Quick (test_owned_input_wait Missing_retained)
         ; test_case "corrupt retained input refuses despite readable canonical" `Quick (test_owned_input_wait Corrupt_retained)

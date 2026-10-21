@@ -967,6 +967,109 @@ let check_unavailable_inventory kind observed =
   check string "exact unavailable category" kind (observed |> member "error" |> member "kind" |> to_string)
 ;;
 
+let test_input_response_http_accepts_only_original_wait () =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  with_temp_dir @@ fun dir -> Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs env#fs;
+  let ok = function Ok value -> value | Error detail -> fail detail in
+  let module Journal=Keeper_chat_operation_store in
+  let module Native=Keeper_native_call in
+  let state=Mcp_server.For_testing.create_state ~base_path:dir in
+  let state={state with Mcp_server.net=Some env#net} in
+  let config=Mcp_server.workspace_config state in
+  let keeper_name="http-original-input-response" and trace_id="trace-http-original-response" in
+  let meta=make_checkpoint_inventory_meta ~name:keeper_name ~trace_id in
+  let meta={meta with Keeper_meta_contract.activation_mode=Keeper_activation_mode.Manual} in
+  Keeper_meta_store.replace_snapshot config meta |> ok;
+  let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path:dir in
+  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.save_file (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+    "[keeper]\ninstructions = \"Input response fixture\"\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
+  let operation_id=Keeper_chat_operation.Operation_id.of_string "original-http-wait" |> ok in
+  let pending=inventory_pending ~run_id:"lifecycle-http-original" ~request_id:"http-request-original" ~question:"Original HTTP question?" in
+  let checkpoint={ (make_inventory_checkpoint ~session_id:trace_id ~turn_count:2 ~created_at:10.) with pending_input=Some pending } in
+  let frame=Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+      (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation operation_id)) |> Result.get_ok in
+  Keeper_repetition_context.save checkpoint.context frame;
+  let session_dir=Keeper_types_support.keeper_session_dir config trace_id in
+  Fs_compat.mkdir_p session_dir;
+  let snapshot=Keeper_checkpoint_store.exact_snapshot_of_value ~expected_session_id:meta.runtime.trace_id checkpoint |> Result.get_ok in
+  let reference=Keeper_checkpoint_store.retain_exact_snapshot ~session_dir snapshot
+      |> Keeper_checkpoint_store.require_confirmed_installation |> Result.get_ok in
+  (match Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+   | Ok (Keeper_checkpoint_store.Saved _) -> () | Ok (Stale_noop _) | Error _ -> fail "HTTP response canonical fixture was not installed");
+  let path=Journal.path_for_keeper ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config) ~keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let journal=Journal.open_or_create ~path |> Result.map_error Journal.error_to_string |> ok in
+  let journal_ok x=Result.map_error Journal.error_to_string x |> ok in
+  let original_input=`Assoc ["message",`String "original HTTP admitted input"] in
+  Journal.submit journal ~now:1. ~operation_id ~source:(`Assoc []) ~input:original_input |> journal_ok |> ignore;
+  let operation=Journal.claim_next journal ~now:2. |> journal_ok |> Option.get in
+  let call_id="019a0010-1000-7000-8000-000000000041" in
+  let locator=Agent_core.Agent.execution_locator_of_yojson
+      (`Assoc ["version",`Int 1;"run_id",`String "execution-run-http-original"]) |> ok in
+  let call=Native.create ~call_id ~runtime_id:"native.primary" ~operation_digest:operation.execution_digest
+      ~api:(Native.New_input {seed_message_count=List.length checkpoint.messages}) ~seed_checkpoint:reference ~locator |> ok in
+  Journal.update_direct_native_call journal ~now:3. ~operation_id ~execution_digest:operation.execution_digest
+    (Native.Bind {observed=Native.No_native_call;call}) |> journal_ok;
+  Journal.update_direct_input_checkpoint journal ~now:4. ~operation_id ~execution_digest:operation.execution_digest
+    ~call_id ~observed:reference ~observed_input:None ~checkpoint:reference |> journal_ok |> ignore;
+  Journal.update_direct_native_call journal ~now:5. ~operation_id ~execution_digest:operation.execution_digest
+    (Native.Terminal {call_id;disposition={Agent_core.Agent.outcome=Agent_core.Agent.Terminal_succeeded;recovery=Agent_core.Agent.Retire}}) |> journal_ok;
+  let waiting=Keeper_semantic_execution.input_wait ~checkpoint:reference ~pending |> ok in
+  Journal.defer_direct_input_wait journal ~now:6. ~operation_id ~execution_digest:operation.execution_digest ~waiting |> journal_ok |> ignore;
+  Journal.close journal |> journal_ok;
+  Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config
+    |> Result.map_error Keeper_owner_registry.install_error_to_string |> ok |> ignore;
+  let body=Yojson.Safe.to_string (`Assoc ["action",`String "respond_input";
+    "operation_id",`String (Keeper_chat_operation.Operation_id.to_string operation_id);
+    "checkpoint_ref",`Assoc ["trace_id",`String trace_id;"turn_count",`Int reference.turn_count;"sha256",`String reference.sha256];
+    "pending_input",Agent_core.Agent_input_request.pending_to_json pending;"response",`Assoc ["kind",`String "declined"]]) in
+  let post ()=checkpoint_http_response ~meth:"POST" ~keeper_name ~body (fun reqd ->
+    Server_dashboard_http_keeper_api_post.handle_keeper_checkpoints_post state (Httpun.Reqd.request reqd) reqd body) in
+  let status,_=post () in check int "actual HTTP Registry Owner response accepts original wait" 200 status;
+  let result=Keeper_owner_registry.direct_input_wait ~base_path:dir ~keeper_name ~operation_id
+    |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok in
+  check bool "HTTP acceptance consumes original durable wait" true (result=None);
+  let next=Keeper_owner_registry.direct_checkpoint ~base_path:dir ~keeper_name ~operation_id
+    |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok in
+  check bool "HTTP acceptance enables only original checkpoint continuation" true (Option.is_some next);
+  let status,json=get_checkpoint_inventory state ~keeper_name in check int "current input remains observable" 200 status;
+  check string "host snapshot agrees input consumed" "owned_none"
+    Yojson.Safe.Util.(json |> member "input_wait_observation" |> member "status" |> to_string);
+  let status,_=post () in check int "same HTTP response is not admitted twice" 409 status
+;;
+
+let test_input_response_http_requires_explicit_exact_proof () =
+  with_temp_dir @@ fun dir -> Eio_main.run @@ fun env ->
+  let state=Mcp_server.For_testing.create_state ~base_path:dir in
+  let state={state with Mcp_server.net=Some env#net} in
+  let checkpoint=Keeper_checkpoint_ref.create
+      ~trace_id:(Keeper_id.Trace_id.of_string "original-http-response-trace" |> Result.get_ok)
+      ~turn_count:2 ~canonical_checkpoint_bytes:"original input bytes" |> Result.get_ok in
+  let pending=inventory_pending ~run_id:"original-run" ~request_id:"original-request" ~question:"Original question?" in
+  let fields=["action",`String "respond_input";"operation_id",`String "original-http-response";
+    "checkpoint_ref",`Assoc ["trace_id",`String (Keeper_id.Trace_id.to_string checkpoint.trace_id);
+      "turn_count",`Int checkpoint.turn_count;"sha256",`String checkpoint.sha256];
+    "pending_input",Agent_core.Agent_input_request.pending_to_json pending;
+    "response",`Assoc ["kind",`String "declined"]] in
+  let post fields =
+    let body=Yojson.Safe.to_string (`Assoc fields) in
+    checkpoint_http_response ~meth:"POST" ~keeper_name:"missing-response-owner" ~body (fun reqd ->
+      Server_dashboard_http_keeper_api_post.handle_keeper_checkpoints_post
+        state (Httpun.Reqd.request reqd) reqd body) in
+  let status,_=post fields in
+  check int "valid explicit response cannot create a missing Owner or accept a wait" 409 status;
+  List.iter (fun invalid -> let status,_=post invalid in
+    check int "malformed response is rejected before Owner lookup" 400 status)
+    [("operation_id",`String "duplicate")::fields;
+     ("unknown",`Bool true)::fields;
+     ("response",`Assoc ["kind",`String "timeout";"value",`String "not an answer"])::List.remove_assoc "response" fields;
+     List.remove_assoc "pending_input" fields]
+;;
+
 let test_input_wait_inventory_tracks_exact_replacements () =
   with_input_wait_inventory @@ fun ~trace_id ~session_dir:_ ~canonical:_ ~read ~save ~publish ~consume
       ~reference:_ ~restart ~change_trace:_ ~drain:_ ->
@@ -1450,6 +1553,8 @@ let () =
             "input wait follows exact same-turn replacement and settlement"
             `Quick
             test_input_wait_inventory_tracks_exact_replacements
+        ; test_case "HTTP accepts only original durable wait and snapshot observes consumption" `Quick test_input_response_http_accepts_only_original_wait
+        ; test_case "input response requires exact explicit proof and an existing Owner" `Quick test_input_response_http_requires_explicit_exact_proof
         ; test_case "owned input ignores missing corrupt or stale canonical" `Quick test_input_wait_inventory_ignores_canonical_drift
         ; test_case "input wait never borrows unavailable retained or historical state" `Quick test_input_wait_inventory_refuses_unavailable_retained
         ; test_case "input wait remains observable during Owner drain" `Quick test_input_wait_inventory_observes_draining_owner

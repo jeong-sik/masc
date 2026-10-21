@@ -160,9 +160,68 @@ let test_autonomous_input_owner_rejects_lost_response_lineage () =
     (observed.pending_input=None && observed.messages=(Option.get !accepted).messages);
   ignore (Keeper_owner.begin_stopping owner |> prepared)
 
+let test_install_refuses_stale_nonhistory () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs env#fs;
+  let root=Filename.temp_dir "input-response-stale-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) @@ fun () ->
+  let owned=pending ~run_id:"original-run" ~request_id:"original-request" in
+  let checkpoint=source_checkpoint owned in
+  let operation_id=Keeper_chat_operation.Operation_id.of_string "original-response-operation" |> Result.get_ok in
+  let scope=Keeper_execution_scope_id.direct_operation operation_id in
+  let frame=Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+      (Keeper_repetition_snapshot.Fresh scope) |> Result.get_ok in
+  Keeper_repetition_context.save checkpoint.context frame;
+  let retained=exact checkpoint in
+  let reference=Store.exact_snapshot_reference retained in
+  let waiting=Keeper_semantic_execution.input_wait ~checkpoint:reference ~pending:owned |> Result.get_ok in
+  let authority=Response.authorize ~session_root:root ~operation_id ~waiting in
+  let session_dir=Filename.concat root checkpoint.session_id in
+  Fs_compat.mkdir_p session_dir;
+  ignore (Store.retain_exact_snapshot ~session_dir retained |> Store.require_confirmed_installation |> Result.get_ok);
+  let candidates =
+    [ (let context=Core.Context.copy checkpoint.context in
+       Core.Context.delete context "retained-entry"; {checkpoint with context})
+    ; {checkpoint with working_context=None}
+    ; {checkpoint with tools=[]}
+    ; {checkpoint with mcp_sessions=[]}
+    ; {checkpoint with turn_count=checkpoint.turn_count+1} ] in
+  List.iter (fun stale ->
+    let canonical=Store.agent_core_checkpoint_path ~session_dir ~session_id:checkpoint.session_id in
+    (match Fs_compat.save_file_atomic canonical (Core.Checkpoint.to_string stale) with
+     | Ok () -> () | Error detail -> fail detail);
+    let before=Fs_compat.load_file canonical in
+    (match Response.install ~net:env#net ~authority ~response:Core.Hooks.Declined with
+     | Error (Response.Invalid_response _) -> ()
+     | Error _ | Ok _ -> fail "stale nonhistory was accepted or misclassified");
+    check string "refused response does not overwrite canonical evidence" before (Fs_compat.load_file canonical);
+    let after=Store.load_retained_exact_snapshot ~session_dir ~reference |> Result.get_ok in
+    check string "refused response preserves exact original retained bytes"
+      (Store.exact_snapshot_canonical_bytes retained) (Store.exact_snapshot_canonical_bytes after)) candidates;
+  let context=Core.Context.copy checkpoint.context in
+  Core.Context.set_scoped context Session "message_count" (`Int (List.length checkpoint.messages));
+  let canonical={checkpoint with Core.Checkpoint.context} in
+  let path=Store.agent_core_checkpoint_path ~session_dir ~session_id:checkpoint.session_id in
+  (match Fs_compat.save_file_atomic path (Core.Checkpoint.to_string canonical) with
+   | Ok () -> () | Error detail -> fail detail);
+  let receipt=match Response.install ~net:env#net ~authority ~response:(Core.Hooks.Answer (`String "yes")) with
+    | Ok receipt -> receipt | Error error -> fail (Response.installation_error_to_string error) in
+  check bool "physical receipt stays bound to original authority" true (Response.belongs_to receipt authority);
+  let consumed=Store.load_retained_exact_snapshot ~session_dir ~reference:(Response.installed_checkpoint receipt)
+    |> Result.get_ok |> Store.exact_snapshot_checkpoint in
+  check bool "physical Answer consumes original pending" true (consumed.pending_input=None);
+  check int "physical Answer adds only canonical response" 2 (List.length consumed.messages);
+  check bool "consumed derived count agrees with new history" true
+    (Core.Context.get_scoped consumed.context Session "message_count"=Some (`Int 2));
+  check bool "physical Answer keeps original working context tools and MCP" true
+    (consumed.working_context=checkpoint.working_context && consumed.tools=checkpoint.tools
+      && consumed.mcp_sessions=checkpoint.mcp_sessions)
+
 let () =
   run "Keeper stored input response"
-    [ "autonomous input ownership",
+    [ "physical response ownership",
+      [test_case "same pending cannot discard retained context working-context tools MCP or turn" `Quick test_install_refuses_stale_nonhistory];
+      "autonomous input ownership",
       [test_case "consumed answer lineage survives settlement and rejects stale sources" `Quick
          test_autonomous_input_owner_rejects_lost_response_lineage];
       "candidate preparation",

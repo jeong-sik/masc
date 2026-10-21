@@ -457,6 +457,14 @@ val terminal_direct_native_call : t -> operation_id:Chat_operation.Operation_id.
   call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition -> (unit, error) result
 val defer_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Chat_operation.t, error) result
+val respond_direct_input_wait : t -> net:Eio_context.eio_net ->
+  operation_id:Keeper_chat_operation.Operation_id.t -> observed:Keeper_semantic_execution.input_wait ->
+  response:Agent_core.Hooks.elicitation_response ->
+  ([ `Accepted | `Busy of autonomous_block ], error) result
+(** Explicit response under an exclusive original Owner maintenance child. Busy
+    means no response effects began. Acceptance consumes the exact wait/input
+    witness and enables only the original operation continuation. Partial file
+    installation or uncertain journal acknowledgement remains Error. *)
 val direct_input_wait : t -> operation_id:Chat_operation.Operation_id.t ->
   (Keeper_semantic_execution.input_wait option, error) result
 val defer_direct_input_wait : t -> operation_id:Chat_operation.Operation_id.t ->

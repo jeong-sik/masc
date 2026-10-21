@@ -349,6 +349,16 @@ val defer_direct_input_wait : t -> now:float -> operation_id:Operation.Operation
     expiry or generic resume. An uncertain commit stays Error; read actual
     state before reconciliation. This grants no response admission. *)
 
+val resolve_direct_input_wait : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  execution_digest:string -> observed:Keeper_semantic_execution.input_wait ->
+  checkpoint:Keeper_checkpoint_ref.t -> (unit, error) result
+(** The Owner first validates its exclusive response child and sealed physical
+    installation receipt. One transaction consumes the exact queued wait and
+    current input predecessor, publishes its consumed checkpoint and enables the
+    same operation's checkpoint continuation. This is never a new prompt.
+    Duplicate/stale responses refuse; uncertain commit acknowledgement stays
+    Error and grants no retry or retained-file deletion authority. *)
+
 val defer_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Operation.t, error) result
 val resume_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t ->

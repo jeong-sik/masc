@@ -52,7 +52,7 @@ let test_a_page_keeps_one_row_of_the_window_it_leaves () =
     (Masc_tui_scroll.page_up ~count:80 ~height:10 65);
   check int "page up stops at the top" 0
     (Masc_tui_scroll.page_up ~count:80 ~height:10 0);
-  check int "page up from a stale scroll answers from the bound" 62
+  check int "page up from a stale scroll answers from the bound one page back" 62
     (Masc_tui_scroll.page_up ~count:81 ~height:10 999)
 
 (* A surface no listing counts has no bound below to hold the scroll at, but a
@@ -79,7 +79,7 @@ let test_the_window_follows_the_row_that_left_it () =
     (Masc_tui_scroll.ensure_visible ~cursor:0 ~height:10 0);
   check int "a run that left above the window starts the window at it" 3
     (Masc_tui_scroll.ensure_span_visible ~start:3 ~stop:4 ~height:5 10);
-  check int "a run that left below the window ends the window at it" 16
+  check int "a run taller than the window ends the window at its first row" 16
     (Masc_tui_scroll.ensure_span_visible ~start:20 ~stop:25 ~height:5 10);
   check int "a run the window already shows leaves the window alone" 10
     (Masc_tui_scroll.ensure_span_visible ~start:12 ~stop:13 ~height:5 10)
@@ -251,5 +251,8 @@ let () =
             test_the_position_row_says_only_what_is_true
         ] )
     ; ( "position"
+        (* Empty on purpose: Masc_tui_scroll.Position does not exist on main yet.
+           The stack that introduces it (starting at #44842) owns this group, so
+           filling it here would only collide. Delete this note with that stack. *)
       , [] )
     ]

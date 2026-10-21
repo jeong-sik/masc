@@ -2951,6 +2951,9 @@ let internal_descriptors : t list =
       ~name:Keeper_runtime_schemas_toml.keeper_image_read.name
       ~description:Keeper_runtime_schemas_toml.keeper_image_read.description
       ~input_schema:Keeper_runtime_schemas_toml.keeper_image_read.input_schema
+      (* Concurrent: one file or stored-image read; the only write keeps the
+         verified bytes in the content-addressed vision store, which replaces a
+         file atomically and is not pruned on this path. *)
       ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_read_image

@@ -54,9 +54,12 @@ export function ObservedMetricChart({ label, unit, series, formatValue }: {
             ` : null}
             ${(segment.length === 1 ? segment : [segment[0]!, segment[segment.length - 1]!]).map(row => {
               const p = coordinate(row)
-              return html`<circle cx=${p.x} cy=${p.y} r="2" fill=${series.color}>
+              // A round-capped zero-length stroke stays circular when the
+              // responsive viewBox stretches only the horizontal coordinate.
+              return html`<path d=${`M ${p.x} ${p.y} h 0`} fill="none" stroke=${series.color}
+                stroke-width="4" stroke-linecap="round" vector-effect="non-scaling-stroke">
                 <title>${series.name} · ${timeLabel(row.ts)} · ${formatValue(row.value)}</title>
-              </circle>`
+              </path>`
             })}
           `))}
         </svg>

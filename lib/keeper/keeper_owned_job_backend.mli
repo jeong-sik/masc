@@ -4,7 +4,7 @@
 type spec =
   { job_id : string
   ; keeper_name : string
-  ; base_path : string
+  ; base_path : string  (** Existing physical root from [canonical_base_path]. *)
   ; workspace_host_path : string
   ; argv : string list
   }
@@ -34,6 +34,20 @@ type error =
   | Log_publication_failed of string
 
 val error_to_string : error -> string
+
+type base_path_error =
+  | Invalid_base_path of string
+  | Missing_base_path
+  | Non_directory_base_path
+  | Base_path_io_failed of string
+
+val base_path_error_to_string : base_path_error -> string
+val canonical_base_path : string -> (string, base_path_error) result
+(** Normalize the explicit workspace input on the caller, then resolve its
+    existing physical directory on a host thread. Parent-directory aliases
+    identify the same workspace; a symbolic link at the root itself is refused.
+    Missing/unreadable roots never fall back to lexical spelling. Cancellation
+    propagates. This is name resolution, not frozen directory/effect authority. *)
 
 val prepare :
   config:Workspace.config ->

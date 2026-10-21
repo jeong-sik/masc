@@ -57,6 +57,39 @@ let error_to_string = function
       (match path with None -> "" | Some path -> " at " ^ path) detail
   | Log_publication_failed detail -> "owned job log publication failed: " ^ detail
 
+type base_path_error =
+  | Invalid_base_path of string
+  | Missing_base_path
+  | Non_directory_base_path
+  | Base_path_io_failed of string
+
+let base_path_error_to_string = function
+  | Invalid_base_path detail -> detail
+  | Missing_base_path -> "workspace base directory is missing"
+  | Non_directory_base_path -> "workspace base must be a directory, not a symbolic link"
+  | Base_path_io_failed detail -> detail
+
+let canonical_base_path base_path =
+  (* Anchor relative input before leaving the caller. A host worker must not
+     infer a new cwd, and a failed realpath must not grant lexical authority. *)
+  let* absolute = Config_dir_resolver.canonical_base_path base_path
+    |> Result.map_error (fun error -> Invalid_base_path
+      (Config_dir_resolver.canonical_base_path_error_to_string error)) in
+  Eio_guard.run_in_systhread ~label:"owned job workspace identity" (fun () ->
+    try
+      (* Keep the existing backend root-leaf no-symlink restriction while
+         accepting aliases in parent components, such as macOS /var. *)
+      if (Unix.lstat absolute).Unix.st_kind <> Unix.S_DIR
+      then Error Non_directory_base_path
+      else Ok (Unix.realpath absolute)
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Error Missing_base_path
+    | Unix.Unix_error (Unix.ENOTDIR, _, _) -> Error Non_directory_base_path
+    | Unix.Unix_error (error, operation, argument) ->
+      Error (Base_path_io_failed
+        (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)))
+    | Sys_error detail -> Error (Base_path_io_failed detail))
+
 let component = "keeper-owned-job"
 let container_kind = "owned-job"
 let job_label = "masc.mcp.owned_job"
@@ -180,8 +213,8 @@ let snapshot_directories spec ~owner_uid =
       Error (Preparation_refused (Printf.sprintf "%s(%s): %s" function_ argument (Unix.error_message error))))
 
 let directories_unchanged prepared =
-  let* canonical = Config_dir_resolver.canonical_base_path prepared.spec.base_path
-    |> Result.map_error (fun error -> Preparation_refused (Config_dir_resolver.canonical_base_path_error_to_string error)) in
+  let* canonical = canonical_base_path prepared.spec.base_path
+    |> Result.map_error (fun error -> Preparation_refused (base_path_error_to_string error)) in
   let* () = if canonical = prepared.spec.base_path && prepared.uid = Unix.getuid () then Ok ()
     else Error (Preparation_refused "canonical base or process owner changed") in
   let* actual = snapshot_directories prepared.spec ~owner_uid:prepared.uid in
@@ -407,8 +440,11 @@ let prepare ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_me
     ~docker_config_path spec =
   let* () = validate_spec spec docker_config_path in
   let* invocation = invocation_of_spec spec in
-  let* canonical_base = Config_dir_resolver.canonical_base_path config.base_path
-    |> Result.map_error (fun error -> Invalid_spec (Config_dir_resolver.canonical_base_path_error_to_string error)) in
+  let* canonical_base = canonical_base_path config.base_path
+    |> Result.map_error (function
+      | Invalid_base_path detail -> Invalid_spec detail
+      | (Missing_base_path | Non_directory_base_path | Base_path_io_failed _) as error ->
+        Preparation_refused (base_path_error_to_string error)) in
   let* () = if canonical_base <> spec.base_path || meta.name <> spec.keeper_name
     then Error (Invalid_spec "configuration and Keeper do not own this specification") else Ok () in
   let* () = match meta.sandbox_profile with

@@ -44,6 +44,7 @@ let docker_peer = Keeper_owned_job_fixture_transport.source
 
 type fixture =
   { base_path : string
+  ; configured_base_path : string
   ; meta : Masc.Keeper_meta_contract.keeper_meta
   ; cell : Call_log.turn_ctx_cell
   ; control_path : string
@@ -107,7 +108,7 @@ let with_environment values f =
 
 let stage label = Printf.eprintf "OWNED_JOB_STAGE %s\n%!" label
 
-let with_fixture ?fixture_base_path ?continuation_channel f =
+let with_fixture ?fixture_base_path ?continuation_channel ?(parent_alias=false) f =
   let base_path = match fixture_base_path with Some path -> path | None ->
     let path = Filename.temp_file "masc-owned-job-feature-" "" in
     Unix.unlink path;
@@ -144,7 +145,13 @@ let with_fixture ?fixture_base_path ?continuation_channel f =
     ; "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE", Some ""
     ; "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS", Some "true"
     ; "MASC_KEEPER_SANDBOX_REQUIRE_USERNS", Some "true" ] @@ fun () ->
-  let config = Workspace.default_config base_path in
+  let configured_base_path = if parent_alias then (
+    let alias = Filename.concat base_path "workspace-parent-alias" in
+    Unix.symlink (Filename.dirname base_path) alias;
+    Filename.concat alias (Filename.basename base_path)) else base_path in
+  let config = Workspace.default_config configured_base_path in
+  if parent_alias then check string "actual public bundle uses the requested parent alias"
+    configured_base_path config.base_path;
   ignore (Workspace.init config ~agent_name:(Some "operator"));
   Fs_compat.mkdir_p (Filename.concat base_path ".agents/skills");
   Masc_test_deps.write_sandbox_image_catalog ~base_path ["base", "masc-sandbox-base:fixture-owned-job"];
@@ -158,7 +165,7 @@ let with_fixture ?fixture_base_path ?continuation_channel f =
   let meta = { meta with sandbox_profile = Masc.Keeper_types_profile.Docker; sandbox_image = Some "base" } in
   ignore (Masc.Keeper_meta_store.replace_snapshot config meta |> require "fixture Keeper persistence");
   ignore (Masc.Keeper_registry.register_offline ~base_path keeper meta);
-  let surface = frozen_surface ~base_path ~sandbox_profile:meta.sandbox_profile in
+  let surface = frozen_surface ~base_path:configured_base_path ~sandbox_profile:meta.sandbox_profile in
   let cell = Call_log.create_turn_ctx_cell () in
   let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
     {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
@@ -167,7 +174,7 @@ let with_fixture ?fixture_base_path ?continuation_channel f =
       ?continuation_channel
       ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"owned job fixture")
       ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:cell () in
-  let fixture = {base_path;meta;cell;make_bundle;
+  let fixture = {base_path;configured_base_path;meta;cell;make_bundle;
       control_path=Filename.concat base_path "control.json";
       daemon_path=Filename.concat base_path "daemon.json";
       kill_marker=Filename.concat base_path "kill-entered"} in
@@ -5751,8 +5758,8 @@ let test_prepared_discovery_demand_survives_observer_failure () =
 
 type result_signal_scenario = Direct_signal | Delivery_queue_recovery | Observer_scope_cancelled
 
-let test_prepared_result_scope_preserves_original_resources ~scenario () =
-  with_fixture @@ fun env _initialize fixture ->
+let test_prepared_result_scope_preserves_original_resources ?(parent_alias=false) ~scenario () =
+  with_fixture ~parent_alias @@ fun env _initialize fixture ->
   with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
   with_parked_named_producer env fixture @@ fun parked ->
   let module Wake = Masc.Keeper_composition_continuation_wake in
@@ -5764,7 +5771,10 @@ let test_prepared_result_scope_preserves_original_resources ~scenario () =
   let notification (record : Store.record) : Journal.result_notification =
     {base_path=record.base_path;keeper_name=record.keeper_name;
      dependency=Dependency.Owned_job record.job_id} in
-  let original_hint = notification (load fixture parked.job_id) in
+  let original_owner = load fixture parked.job_id in
+  check string "actual producer hint has the physical journal workspace"
+    fixture.base_path original_owner.base_path;
+  let original_hint = notification original_owner in
   let discover hint = Journal.discover_pending_continuations
       ~scope:(Journal.Result_notifications [hint]) ~on_ready:ignore
       ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness
@@ -6593,6 +6603,113 @@ let test_cleanup_cancelled_before_start () = with_fixture @@ fun _env _initializ
   check_json "before-start cancellation does not fabricate logs" (`List []) (result |> member "artifacts")
 
 
+let test_parent_alias_keeps_original_job_and_outputs () =
+  with_fixture ~parent_alias:true @@ fun _env initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let store = Tool_blob_store.create ~base_path:fixture.base_path in
+  let input_bytes = "original alias input\n" in
+  let input = Tool_blob_store.put_durable store ~bytes:input_bytes ~mime:"text/plain" in
+  let inputs = [`Assoc ["path",`String "input.txt";
+      "artifact",Tool_output.normalized_artifact_ref_to_json input]] in
+  let argv = ["fixture-program";"input.txt"] in
+  let started = with_bundle fixture (fun bundle -> start fixture bundle ~inputs argv) in
+  let id = job_id started in
+  let original = load fixture id in
+  let module Backend = Masc.Keeper_owned_job_backend in
+  let spec = Backend.specification original.preparation in
+  check string "owner records the physical workspace" fixture.base_path original.base_path;
+  check string "backend preparation uses the same physical workspace" original.base_path spec.base_path;
+  let paths = Store.paths ~base_path:fixture.base_path original.job_id in
+  check string "original input reaches the actual private workspace" input_bytes
+    (read (Filename.concat paths.workspace "input.txt"));
+  check string "actual bind mount agrees with the canonical owner" paths.workspace
+    (daemon fixture |> member "container" |> member "Mounts" |> to_list |> List.hd |> member "Source" |> to_string);
+  Process_eio.reset_for_testing (); initialize ();
+  let replayed = with_bundle fixture (fun bundle -> start fixture bundle ~inputs argv) in
+  check string "original invocation through the alias reuses its durable job" id (job_id replayed);
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"alias-original-status" ~turn:52 "keeper_job_status" (argument id)));
+  let result = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"alias-original-result" ~turn:52 "keeper_job_result" (argument id)) in
+  check bool "the alias returns the original usable result" true (result |> member "result_ready" |> to_bool);
+  check int "original exit code survives the alias" 7 (result |> member "exit_code" |> to_int);
+  let completed = load fixture id in
+  let from_alias = Store.load ~base_path:fixture.configured_base_path ~keeper_name:keeper original.job_id
+    |> store_value "same original job through the alias" in
+  let recovered = Store.recover ~base_path:fixture.configured_base_path ~keeper_name:keeper original.job_id
+    |> store_value "same committed original owner through alias recovery" in
+  check bool "physical and aliased reads retain the same committed owner" true
+    (completed=from_alias && completed=recovered);
+  check bool "source and inputs survive replay and later Task" true
+    (completed.source=original.source && completed.inputs=original.inputs);
+  check_json "frozen original preparation is not rewritten on reads"
+    (Backend.preparation_to_json original.preparation) (Backend.preparation_to_json completed.preparation);
+  check_original_source fixture (Store.result_json completed);
+  (match completed.outputs with
+   | Some (Store.Outputs_complete (stdout,stderr)) ->
+     List.iter (fun (reference,bytes) ->
+       check (option string) "actual original output bytes remain readable" (Some bytes)
+         (Tool_blob_store.fetch store ~sha256:reference.Tool_output.sha256 |> require "original alias output"))
+       [stdout,stdout_bytes;stderr,stderr_bytes]
+   | None | Some (Store.Outputs_unavailable _) -> fail "alias lost original complete outputs")
+
+let test_parent_alias_retarget_cannot_borrow_original_authority () =
+  with_fixture ~parent_alias:true @@ fun _env _initialize fixture ->
+  let module Backend = Masc.Keeper_owned_job_backend in
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  let original = load fixture id in
+  let owner = owner_path fixture id in
+  let original_bytes = read owner in
+  let foreign_parent = Filename.concat fixture.base_path "foreign-parent" in
+  let foreign_root = Filename.concat foreign_parent (Filename.basename fixture.base_path) in
+  Fs_compat.mkdir_p foreign_root;
+  let foreign_paths = Store.paths ~base_path:foreign_root original.job_id in
+  Fs_compat.mkdir_p foreign_paths.job_dir;
+  let foreign_owner = Filename.concat foreign_paths.job_dir "owner.jsonl" in
+  write foreign_owner original_bytes;
+  Unix.chmod foreign_owner 0o600;
+  (match Store.load ~base_path:foreign_root ~keeper_name:keeper original.job_id with
+   | Error (Store.Invalid_authority _) -> ()
+   | Ok _ | Error (Corrupt _ | Missing | Conflict | Io_failed _ | Commit_unconfirmed _) ->
+     fail "a copied original journal must not acquire foreign workspace authority");
+  let alias = Filename.dirname fixture.configured_base_path in
+  Unix.unlink alias;
+  Unix.symlink foreign_parent alias;
+  let spec = Backend.specification original.preparation in
+  let original_paths = Store.paths ~base_path:fixture.base_path original.job_id in
+  (match Backend.prepare ~config:(Workspace.default_config fixture.configured_base_path)
+      ~meta:fixture.meta ~docker_config_path:original_paths.cli_config_dir spec with
+   | Error (Backend.Invalid_spec _) -> ()
+   | Ok _ | Error (Image_refused _ | Preparation_refused _ | Process_refused _ | Command_failed _
+       | Response_rejected _ | Log_capture_incomplete _ | Log_capture_failed _ | Log_publication_failed _) ->
+     fail "retargeted configuration must refuse the original preparation before backend effects");
+  (match Store.load ~base_path:fixture.configured_base_path ~keeper_name:keeper original.job_id with
+   | Error (Store.Invalid_authority _) -> ()
+   | Ok _ | Error (Corrupt _ | Missing | Conflict | Io_failed _ | Commit_unconfirmed _) ->
+     fail "retargeted alias must not inherit the copied original owner");
+  let leaf_alias = Filename.concat fixture.base_path "root-leaf-alias" in
+  Unix.symlink fixture.base_path leaf_alias;
+  (match Store.load ~base_path:leaf_alias ~keeper_name:keeper original.job_id with
+   | Error (Store.Invalid_authority _) -> ()
+   | Ok _ | Error (Corrupt _ | Missing | Conflict | Io_failed _ | Commit_unconfirmed _) ->
+     fail "root-leaf symlink must remain refused");
+  (match Store.load ~base_path:(Filename.concat fixture.base_path "missing-root") ~keeper_name:keeper original.job_id with
+   | Error Store.Missing -> ()
+   | Ok _ | Error (Invalid_authority _ | Corrupt _ | Conflict | Io_failed _ | Commit_unconfirmed _) ->
+     fail "missing original authority must stay missing");
+  check string "foreign copied journal is never rewritten" original_bytes (read foreign_owner);
+  check string "original durable owner is never rewritten" original_bytes (read owner);
+  (match Backend.inspect original.preparation with
+   | Backend.Running container_id ->
+     (match original.phase with
+      | Store.Running original_id -> check string "original running container retains its frozen authority" original_id container_id
+      | Prepared | Create_requested | Created _ | Start_requested | Exited _ | Cancelled_before_start _
+      | Cancelled_unconfirmed_launch -> fail "original job did not start")
+   | Absent | Created _ | Stopped _ | Unconfirmed _ -> fail "retargeted alias disturbed the original backend")
+
 let () = match Array.to_list Sys.argv with
   | [_;"--lose-native-parent-after-child-acceptance";base_path;draft_sha;run_id] ->
     lose_native_parent_after_child_acceptance base_path draft_sha run_id
@@ -6601,6 +6718,12 @@ let () = match Array.to_list Sys.argv with
   run "Keeper owned jobs"
     ["public lifecycle",
       [ test_case "structured launch, original source, restart and artifact ownership" `Quick test_running_restart_exit_and_artifacts
+      ; test_case "parent-directory alias retains original invocation, input and complete outputs" `Quick
+          test_parent_alias_keeps_original_job_and_outputs
+      ; test_case "retargeted parent alias and copied owner cannot borrow original authority" `Quick
+          test_parent_alias_retarget_cannot_borrow_original_authority
+      ; test_case "aliased producer automatically resumes original child and parent" `Quick
+          (test_prepared_result_scope_preserves_original_resources ~parent_alias:true ~scenario:Direct_signal)
       ; test_case "terminal cleanup preserves full result and GC ownership" `Quick test_terminal_cleanup_preserves_result_and_gc
       ; test_case "cleanup refuses a changed daemon" `Quick (fun () -> test_cleanup_refuses_backend_change ["daemon_id",`String "different-daemon"])
       ; test_case "cleanup refuses a same-label replacement container" `Quick (fun () -> test_cleanup_refuses_backend_change ["replacement",`Bool true])

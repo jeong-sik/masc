@@ -1343,6 +1343,9 @@ let backend ~store ~artifact_store () = match !override with
             let* command = match package.command with
               | [] -> Error (Lifecycle.Worker_failed "native command is empty")
               | executable::arguments -> Ok {Lane_addon_native_worker.executable;arguments} in
+            let env=match package.worker_service with
+              | Mcp_tools -> None
+              | Browser_service -> Some (Browser_addon_environment.project (Unix.environment ())) in
             let* cleanup_context=match package.worker_service with
               | Mcp_tools -> Ok None
               | Browser_service -> offload (fun () ->
@@ -1471,6 +1474,7 @@ let backend ~store ~artifact_store () = match !override with
                 stop=(fun () -> stop_worker worker);
               } in
                match Lane_addon_native_worker.start ~sw ~clock ~admission ~launcher ~contract ~command
+                 ?env
                  ~grace_seconds:Process_eio.child_exit_grace_seconds ~cwd:Eio.Path.(fs / package.directory)
                  ~artifact_store:store ~on_created:(fun worker ->
                    let* connection = wrap ~ready:false worker in on_created connection;Ok ()) () with

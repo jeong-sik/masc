@@ -91,8 +91,10 @@ let () =
          Keep-alive connections must therefore retire with this daemon instead
          of becoming ordinary children that keep the outer switch alive. *)
       Eio.Switch.run (fun server_sw ->
-        while true do Eio.Net.accept_fork ~sw:server_sw socket ~on_error:raise serve done);
-      `Stop_daemon);
+        let rec accept () =
+          Eio.Net.accept_fork ~sw:server_sw socket ~on_error:raise serve;
+          accept () in
+        accept ()));
     let fixture_url=Printf.sprintf "http://127.0.0.1:%d/fixture" port in
     let workspace_port=require (Workspace_connection.port port |> Result.map_error Workspace_connection.error_message) in
     require (Workspace_connection.save ~base_path ~port:workspace_port |> Result.map_error Workspace_connection.error_message);

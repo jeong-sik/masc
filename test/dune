@@ -2055,7 +2055,7 @@
 (test
  (name test_server_mcp_session_persist)
  (modules test_server_mcp_session_persist)
- (libraries alcotest masc_server eio eio_main unix yojson))
+ (libraries alcotest masc_server masc.otel_dispatch_hook eio eio_main unix yojson))
 
 ; The /health?full=1 operator rollup: which sections overall_status is
 ; answerable for, and which it structurally cannot reach (#34893).

@@ -75,11 +75,16 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   Stdlib mutex를 기다리거나 오래된 선행 snapshot을 뒤늦게 쓰지 않는다. 실행 중 host I/O는
   취소로 강제 종료되지 않으며 이미 교체한 파일을 취소가 되돌리지 않는다. 누락·읽기 실패·
   JSON 실패·root 거절·실제 적용을 구분하고, 원래 protocol/profile/timestamp 정책을 유지한다.
-  해석 중 필드별 불변 map을 준비하고 취소 확인 뒤 비어 있지 않은 map만 현재 registry와
-  합친다. 중복 ID의 마지막 유효 필수값·마지막 존재 선택값을 유지하고, 선택값 부재를 삭제로
+  해석 중 필드별 불변 map을 준비하고 취소 확인 뒤 현재 registry와 한 CAS로 합친다.
+  유효 protocol map이 비어 있으면 게시를 생략하되 정상 복원 정리는 마친다. 중복 ID의 마지막 유효 필수값·마지막 존재 선택값을 유지하고, 선택값 부재를 삭제로
   해석하지 않는다. transport가 존재하면 그 객체 전체를 교체한다. 적용 시점의 관련 없는
-  세션을 보존하며 restore 값의 원래 충돌 우선순위도 지킨다. 필드별 CAS는 전체 registry의
-  원자적 transaction이 아니고 재시도에서 병합이 반복될 수 있다. caller 갱신 호출 감소를
+  세션을 보존하며 restore 값의 원래 충돌 우선순위도 지킨다. protocol·profile·활동·시작·transport map은 하나의 불변 atomic registry에 둔다.
+  유효 등록은 protocol과 활동·시작·선택 transport를 함께 게시하고, 알려진 세션의 profile
+  갱신도 활동과 함께 게시한다. profile만으로 알려진 세션 권한을 만들지 않고 별개 API 호출을
+  하나의 transaction으로 간주하지 않는다. 저장과 기간 관측은 registry를 한 번 캡처한다.
+  삭제는 기존 기간 관측·client 등록 해제 뒤 모든 로컬 필드를 함께 제거한다. clock은 CAS 밖에서
+  읽으며 profile-only 호출에도 한 번 읽는다. CAS 재시도에서 순수 map 갱신·병합이 반복되고
+  서로 다른 필드 갱신도 같은 atomic 값에서 경합하므로 무조건 빨라졌다고 하지 않는다. caller 갱신 호출 감소를
   CPU·시작 준비·입력 지연의 실측 개선으로 환산하지 않는다.
   세션 저장은 `Saved`·`Skipped reason`·`Save_failed error`를 구분한다. 생략은 미복원 원본·
   성공적으로 정리되지 않은 복원·경로의 최초 복원 거절 원인으로 나눈다. 미정리에는 취소된

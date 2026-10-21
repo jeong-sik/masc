@@ -7933,9 +7933,11 @@ type acting_pane_preference =
 
 type home_chat_receipt =
   | No_chat_receipt
+  | Saving_chat of Keeper_id.Keeper_name.t
   | Recorded_chat of Keeper_id.Keeper_name.t
   | Session_chat of { keeper : Keeper_id.Keeper_name.t; save_error : string }
   | Unconfirmed_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
+  | Unobserved_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
   | Unreadable_chat_receipt of string
 
 type message_draft = {
@@ -8048,6 +8050,8 @@ type state = {
   mutable home_decision_receipt : (home_request * string) option;
   mutable home_decision_inflight : home_request option;
   mutable home_last_chat : home_chat_receipt;
+  home_chat_writer : Masc_tui_chat_visit.t;
+  mutable home_chat_visit : Masc_tui_chat_visit.request option;
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
   mutable usage_telemetry_open: bool;
@@ -11876,6 +11880,23 @@ let release_composer_for_browser_reader (state : state) =
   state.composer_focused <- false;
   withdraw_voice_capture state
 
+(* The latest explicit visit owns the Home receipt. The same name can be
+   visited again before an older write settles, so compare the request too. *)
+let accept_chat_visit (state : state) (completion : Masc_tui_chat_visit.completion) =
+  let current = String.equal completion.request.base_path state.local_base_path
+    && Option.exists (Masc_tui_chat_visit.same_request completion.request) state.home_chat_visit in
+  if current then begin
+    state.home_chat_visit <- None;
+    let keeper = completion.request.keeper in
+    state.home_last_chat <-
+      match completion.outcome with
+      | Masc_tui_chat_visit.Saved Runtime.Durable -> Recorded_chat keeper
+      | Saved (Runtime.Durability_unconfirmed { detail }) -> Unconfirmed_chat { keeper; detail }
+      | Refused save_error | Not_started save_error -> Session_chat { keeper; save_error }
+      | Unobserved detail -> Unobserved_chat { keeper; detail }
+  end;
+  current
+
 (* A draft target transfer also withdraws its pending voice contribution. Keep
    the microphone occupied until the old terminal event settles, including an
    A -> B -> A return before that event. Reopening the same target is not a transfer. *)
@@ -14602,6 +14623,8 @@ let create_state
   home_decision_receipt = None;
   home_decision_inflight = None;
   home_last_chat = No_chat_receipt;
+  home_chat_writer = Masc_tui_chat_visit.create ();
+  home_chat_visit = None;
   metrics_scroll = 0;
   metrics_section = Section_fleet;
   usage_telemetry_open = false;

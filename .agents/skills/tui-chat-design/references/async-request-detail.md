@@ -60,6 +60,17 @@
   초안은 유지하고 진행 중인 녹음은 기존 Discard 정책을 따른다. 철회된 capture의 점유는
   terminal 응답까지 남기며 A→B→A나 이후 Keep 요청으로 되살리지 않는다. 종료 대기
   표시는 실제 철회·점유 사실을 읽고, 이전 callback이 새 대상의 초안·capture를 해제하지 않는다.
+- 명시적 채팅 방문 기록은 `Masc_tui_chat_visit`의 세션 FIFO로 저장하고 초안 복원을
+  config commit 뒤에 세우지 않는다. 각 효과는 원래 base·Keeper와 Runtime의 최신 파일
+  잠금 편집을 사용하며 방문을 합치거나 실패 효과를 재실행하지 않는다. Home은 최신
+  opaque request만 저장 결과로 정착시켜 A→B→A의 옛 응답도 거절한다. 저장 대기·거절·
+  내구성 미확인·결과 미확인을 구분하고 superseded 실패도 원래 Keeper로 남긴다.
+  기존 입력/시간 예산 사이에서 owned 결과를 적용하며 bounded mailbox로 종료 flush를
+  막지 않는다. 정상 종료의 drain은 config I/O가 정착하는 경우의 보장이다. 반환하지 않는
+  lock/storage 작업은 close를 Closing/미완료에 남기며 종료 시간 상한을 약속하지 않는다.
+  caller 취소 보호와 실제 writer 취소·효과 정착을 구분하고, 아직 실행 중인 효과를 추측해
+  성공·미저장·결과 미관측으로 정착시키지 않는다. 메모리 초안과 config 영속화, 소스상 대기
+  제거와 실측 속도를 구분한다.
 - Task 표시 준비는 원래 consumer/요청/run/Task·workspace·폭·ticket에 귀속해 시작, worker
   진입/반환, caller 관측, UI 적용/거절, 소유권 철회, 취소 요청과 실제 등록 해제를 별도로 남긴다.
   같은 요청의 원자적 사실만 준비 단계 안내에 쓰며, 미관측 단계는 null로 남긴다. worker 반환을

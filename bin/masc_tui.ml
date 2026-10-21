@@ -848,6 +848,26 @@ let clear_keeper_history_projection state =
     state.msg_older_loading <- false;
     state.msg_older_error <- None
 
+let apply_chat_visit_completion state (completion : Masc_tui_chat_visit.completion) =
+  let applied = accept_chat_visit state completion in
+  let target = Keeper_id.Keeper_name.to_string completion.request.keeper in
+  match completion.outcome with
+  | Masc_tui_chat_visit.Saved Runtime.Durable -> applied
+  | Saved (Runtime.Durability_unconfirmed {detail}) ->
+      add_event state "error" ("Conversation " ^ target ^ " saved; durability unconfirmed: " ^ detail); true
+  | Refused detail | Not_started detail ->
+      add_event state "error" ("Conversation " ^ target ^ " remembered only in this session: " ^ detail); true
+  | Unobserved detail ->
+      add_event state "error" ("Conversation " ^ target ^ " save outcome unknown: " ^ detail); true
+
+let drain_chat_visit_completions state ~can_take =
+  let changed = ref false in
+  Masc_tui_chat_visit.drain_completed state.home_chat_writer ~can_take
+    ~apply:(fun completion ->
+      let applied = apply_chat_visit_completion state completion in
+      changed := !changed || applied);
+  !changed
+
 let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
     ?(remember_home_chat = true) state
     keeper_name ~drain_queue =
@@ -883,20 +903,10 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
         | Error reason ->
             add_event state "error" ("Could not remember chat target: " ^ reason)
         | Ok target ->
-            (* Another TUI may have visited a different Keeper or changed the
-               startup choice since this state was loaded. Record every explicit
-               visit against the current text under the shared config lock. *)
-            (match Masc_tui_config.record_chat_visit
-                     ~base_path:state.local_base_path target with
-             | Ok Runtime.Durable ->
-                 state.home_last_chat <- Recorded_chat target
-             | Ok (Runtime.Durability_unconfirmed { detail }) ->
-                 state.home_last_chat <- Unconfirmed_chat { keeper = target; detail };
-                 add_event state "error" ("Conversation saved; durability unconfirmed: " ^ detail)
-             | Error reason ->
-                 state.home_last_chat <- Session_chat { keeper = target; save_error = reason };
-                 add_event state "error"
-                   ("Conversation remembered only in this session: " ^ reason))));
+            let request = Masc_tui_chat_visit.submit state.home_chat_writer
+                ~sw:(Eio_context.get_switch_opt ()) ~base_path:state.local_base_path target in
+            state.home_chat_visit <- Some request;
+            state.home_last_chat <- Saving_chat target));
   state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
   state.keeper_message_focus <- Right_pane;
@@ -21635,6 +21645,8 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
     | None -> false
     | Some deadline -> Int64.compare (Mtime_clock.elapsed_ns ()) deadline >= 0
   in
+  let chat_changed = drain_chat_visit_completions state
+      ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
   let rec loop changed =
     (* The session retains the round across both drains and later passes.
        Identity changes queued when the round starts stay ahead of owned
@@ -21673,7 +21685,7 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
           Render_schedule.request render_schedule Render_schedule.Force);
         loop true
   in
-  loop progress_changed
+  loop (progress_changed || chat_changed)
 
 (* What a size change costs, wherever it was noticed: the presenter's cached
    screen describes the old geometry, and the next frame has to be drawn
@@ -32968,7 +32980,9 @@ and is loaded on demand through keeper_skill.
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in
-  run_loop ()
+  Fun.protect ~finally:(fun () ->
+    Masc_tui_chat_visit.close state.home_chat_writer;
+    ignore (drain_chat_visit_completions state ~can_take:(fun () -> true))) run_loop
 
 let run_with_eio_context f =
   (* The server's minor heap, for the same reason: every frame allocates the

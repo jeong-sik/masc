@@ -440,6 +440,25 @@ test('Stop in the same admitted input batch prevents a queued capture derivation
   } finally { await closeController(view) }
 })
 
+test('selected capture cut remains bound to its region and cursor through derivation and independent placement', async () => {
+  const view = await controller()
+  try {
+    await primeWave(view); await primeCapture(view)
+    view.command('region capture-1 4 100 1000 3'); view.command('cursor 7'); await flush()
+    view.command('capture-midi-region'); await flush()
+    const job = view.observed.requests.find(job => job.kind === 'capture-midi-region')
+    assert.deepEqual(job.cut, { offset: '100', extent: '1000' }); assert.equal(job.asset, 'capture-1')
+    assert.equal(job.tick, 6720)
+    const result = importPhraseDocument(job.project, importMidiSource(midi()))
+    view.worker.emit('message', { id: job.id, ok: true, result }); await flush()
+    view.key('return'); view.command('save'); await flush()
+    const saved = view.observed.saved.at(-1).project
+    assert.deepEqual(saved.clips[0], job.project.clips[0])
+    assert.equal(saved.clips.at(-1).position, 6720)
+    assert.equal(saved.clips.at(-1).asset, result.asset)
+  } finally { await closeController(view) }
+})
+
 test('captured-region commands persist typed bounds and select paired preparation with complete project ownership',async()=>{
   const view=await controller()
   try {

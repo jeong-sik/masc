@@ -205,6 +205,11 @@ export function arrangementCommand(editor, line) {
       if (!editor.project.assets.some(item => item.id === asset && item.kind === 'capture')) throw new Error('Choose a captured WAV/MIDI take')
       return { editor, effect: { kind: command, asset } }
     }
+    case 'capture-midi-region': {
+      count(0); const clip = selectedRegion(editor)
+      if (!clip || clip.component === 'audio' || !editor.project.assets.some(asset => asset.id === clip.asset && asset.kind === 'capture')) throw new Error('Select an original captured MIDI region first')
+      return { editor, effect: { kind: command, asset: clip.asset, tick: editor.tick, cut: { offset: clip.offset, extent: clip.extent } } }
+    }
     case 'practice-midi': case 'practice-backing': {
       count(0, 1); const asset = args[0] ?? editor.asset
       if (!editor.project.assets.some(item => item.id === asset && item.kind === 'practice')) throw new Error('Choose a raw practice take')

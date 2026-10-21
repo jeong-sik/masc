@@ -346,6 +346,8 @@ derives an editable MIDI1 variant without replacing the WAV or raw UMP. Use
 `:edit-midi` for note, chord and voicing experiments, then place the returned
 variant independently. Inputs/groups retain separate MIDI ports. See the
 [capture conversion workflow and expression boundaries](ARRANGEMENT.md#terminal-workflow).
+Use `:capture-midi-region` on a captured MIDI region to derive only that source
+span, restoring supported entry notes/pedals and clipping its ending explicitly.
 
 Move the cursor with arrows; Enter inserts or removes a note. Shift+arrows moves
 the selected note. `[`/`]` changes its length, `+`/`-` changes velocity, and `g`

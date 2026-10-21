@@ -83,6 +83,7 @@ struct UmpArrangement: Decodable {
 // Source IDs are state addresses only: no destination or device is opened.
 struct UmpRegionExtraction: Decodable {
     let schemaVersion: Int
+    let dueAdmission: UmpDueAdmission
     let source: UmpRegionSource
     let offset: String
     let extent: String
@@ -90,21 +91,21 @@ struct UmpRegionExtraction: Decodable {
     func extract() throws -> [String: Any] {
         let bound = try umpUnsigned(source.extent), cut = try umpUnsigned(offset)
         let length = try umpUnsigned(extent), divisor = try umpUnsigned(sourceDivisor)
-        guard schemaVersion == 1, bound > 0, length > 0, divisor > 0 else { throw MidiFailure("invalid practice extraction span") }
+        guard schemaVersion == 1, bound > 0, length > 0, divisor > 0 else { throw MidiFailure("invalid UMP extraction span") }
         let after = try umpAdd(cut, length)
-        guard !umpRationalLess(bound, 1, after, divisor) else { throw MidiFailure("practice extraction exceeds source") }
+        guard !umpRationalLess(bound, 1, after, divisor) else { throw MidiFailure("UMP extraction exceeds source") }
         let timed = try source.timeline.timedEvents()
-        guard timed.allSatisfy({ UInt128($0.ticks) < bound }) else { throw MidiFailure("practice extraction packet exceeds source") }
+        guard timed.allSatisfy({ UInt128($0.ticks) < bound }) else { throw MidiFailure("UMP extraction packet exceeds source") }
         let before = timed.firstIndex { !umpRationalLess(UInt128($0.ticks), 1, cut, divisor) } ?? timed.count
         let through = timed.firstIndex { umpRationalLess(cut, divisor, UInt128($0.ticks), 1) } ?? timed.count
         let end = timed.firstIndex { !umpRationalLess(UInt128($0.ticks), 1, after, divisor) } ?? timed.count
         let events = timed.map(\.event)
-        let final = try umpRestoration(events, prefixCount: end, replacing: UmpFootprint())
+        let final = try UmpVoiceHistory(events, prefixCount: end)
         // Historical voices expiring exactly at entry have no overlap with
         // this cut. Genuine attacks at entry remain in the original due stream.
         let expired = Set(final.expiredNotes.filter { $0.value < through }.map(\.key))
         let entry = try umpRestoration(events, prefixCount: before, followingCount: through - before,
-                                       preambleEndIndex: end, excludingNotes: expired, replacing: UmpFootprint())
+                                       preambleEndIndex: end, dueAdmission: dueAdmission, excludingNotes: expired, replacing: UmpFootprint())
         func row(_ event: UmpEvent, _ position: UInt128) -> [String: Any] {
             ["offset": String(position), "source": event.source, "words": event.words]
         }
@@ -127,7 +128,7 @@ struct UmpRegionExtraction: Decodable {
                 : try umpAdd(umpMultiply(delta - 1, divisor), divisor - remainder)
             result.append(row(event, position))
         }
-        return ["schemaVersion": 1, "kind": "practice-region-events", "extent": extent,
+        return ["schemaVersion": 1, "kind": "ump-region-events", "extent": extent,
                 "sourceDivisor": sourceDivisor, "events": result]
     }
 }

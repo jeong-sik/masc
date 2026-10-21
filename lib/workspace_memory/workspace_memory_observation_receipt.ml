@@ -49,10 +49,26 @@ let checked_commit capture (commit:Progress.commit) =
   let* _,change = Capture.commit_plan capture ~judgment:commit.judgment in
   if Yojson.Safe.equal change.before commit.change.before && Yojson.Safe.equal change.after commit.change.after
   then Ok () else Error "Curator observation commit differs from its original complete before/after plan"
+let checked_conflict capture observed =
+  let* fields = match observed with
+    | `Assoc fields when List.sort String.compare (List.map fst fields)=["kind";"state"] -> Ok fields
+    | _ -> Error "Original Curator conflict evidence requires its complete domain state" in
+  let* expected = match Capture.work capture,List.assoc "kind" fields with
+    | Capture.Classification _,`String "classification" ->
+      let* state = Workspace_memory_ledger.of_json (List.assoc "state" fields) in
+      Ok (`Assoc ["kind",`String "classification";"state",Workspace_memory_ledger.to_json state])
+    | Capture.Briefing _,`String "briefing" ->
+      let* state = Workspace_memory_briefing.of_json (List.assoc "state" fields) in
+      Ok (`Assoc ["kind",`String "briefing";"state",Workspace_memory_briefing.to_json state])
+    | Capture.Classification _,_ | Capture.Briefing _,_ -> Error "Original Curator conflict has a different domain kind" in
+  let* expected = Lane_addon_action.canonical expected in
+  if Yojson.Safe.equal observed expected then Ok ()
+  else Error "Original Curator conflict evidence is not a complete canonical domain state"
 let disposition capture phase = match phase with
   | Progress.Finished commit -> let* () = checked_commit capture commit in Ok (Confirmed_commit commit)
   | Progress.Conflicted (commit,observed) ->
-    let* () = checked_commit capture commit in Ok (Domain_conflict (commit,observed))
+    let* () = checked_commit capture commit in
+    let* () = checked_conflict capture observed in Ok (Domain_conflict (commit,observed))
   | Progress.Rejected {stage=Before_dispatch;evidence}
   | Progress.Subdividing ({stage=Before_dispatch;evidence},_)
   | Progress.Subdivided ({stage=Before_dispatch;evidence},_) -> Ok (Before_dispatch_refusal evidence)

@@ -649,7 +649,7 @@ let test_typed_observer_distinguishes_conflict_and_before_dispatch_refusal ()=wi
   let capture,output=classification base_path ["Original conflicting domain"] in
   let judged=retain store capture output in
   let intended=advance store judged (Progress.Commit_intended (change capture output)) in
-  let observed=`Assoc ["kind",`String "classification";"state",`Assoc ["other_owner",`Bool true]] in
+  let observed=`Assoc ["kind",`String "classification";"state",Ledger.to_json (get (Ledger.load ~base_path))] in
   let conflicted=advance store intended (Progress.Commit_conflicted observed) in
   let receipt=prepare_observation base_path store conflicted ~now:(fun () -> 5.) |> observed_completion in
   (match receipt.disposition with Observation.Domain_conflict (_,actual) -> check json "actual conflict remains evidence" observed actual

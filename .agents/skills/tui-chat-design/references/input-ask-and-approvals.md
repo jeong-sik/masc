@@ -78,6 +78,14 @@
   등록을 유지하고 종단만 닫는다. 공용 bounded 알림 큐의 빈자리를 기다리거나 부분을
   합치거나 버리지 않는다. 원래 발행 순서·source 수신 시각을 보존하고, UI에서는 읽기
   관측으로 분류해 captured read authority와 원래 질문·답변·ticket을 함께 검사한다.
+  부분 관측 API는 caller가 미리 만든 원래 `cancelled` 종단 메시지도 같은 등록에 보관한다.
+  실제 Eio 취소는 원래 backtrace와 함께 전파하고, 이미 받은 부분 다음에 취소 사실을
+  게시한다. UI가 원래 ticket·질문/답변·workspace/read 권한으로 적용할 때만 읽기 티켓을
+  settle한다. 다른 질문·새 조회·닫힌 결과 세션을 다시 열지 않는다. 취소된 switch의
+  dispatch 전 거절과 worker 진입 전 철회도 caller 메타데이터를 정리한다. 일반 retained
+  operation·session API는 취소를 종단 결과로 만들지 않는 기존 의미를 유지한다.
+  미도착 source는 미확인, 받은 source는 원래 관측으로 남기며 화면은 읽기 불완전의 원인도
+  함께 표시한다. 종단 게시나 UI settle을 물리 worker 정리·등록 해제 증거로 부르지 않는다.
   실제 worker 진입 전 철회·미시작과 worker 취소·등록 해제는 구분하며, 이미 발행한
   부분 사실은 세션이 닫힐 때까지 보관한다. 늦은 part나 종단이 끝난 등록·세션을 다시
   열지 못한다. 새 cap·timer·retry·도구 제한을 만들지 않고 대기 제거를 속도 실측으로

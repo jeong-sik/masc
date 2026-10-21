@@ -432,8 +432,13 @@ status: reference
     채널의 외부 노트는 보증하지 않는다.
   - 이름 경계: `Phrase` 미리듣기는 편집 중인 프로젝트를 SoundFont/WAV/VST로 합성해
     들려주는 재생이고, 소스 오디션은 파일의 원래 메시지 순서를 그대로 보내는 재생이다.
-    소스 오디션은 VST 악기나 MIDI 출력을 명시해야 하고, 두 경로의 재생 동작이 같지 않다
-    (sequencer-tui.mjs: "Source audition requires a VST instrument or MIDI output").
+    소스 오디션은 내보낼 경로를 명시해야 한다. 렌더 형식이 `midi`(MIDI 출력)·
+    `vst-midi`(VST)·`fluid-plan`(명시적으로 묶은 FluidSynth)·`arrangement`(Region 전송)·
+    `harmony`(분석) 중 하나가 아니면 시작하지 않고 거절한다(sequencer-tui.mjs: "Source
+    audition requires FluidSynth, a VST instrument or MIDI output"). FluidSynth가 이
+    조건에 든 것은 묶인 FluidSynth 경로가 생긴 뒤이고(README.md: "available through the
+    explicitly bound FluidSynth route below"), 경로마다
+    재생 동작이 같지 않다.
   - 재생 경계: pause/resume와 소스 시계 기준 seek는 채널 상태 재구성 경계를 거쳐
     지원한다(MIDI-SOURCE.md: "Audition starts at the beginning and supports pause/resume
     and source-clock seek"). 소스 오디션은 세션 국소 소스 구간 루프를 함께 지원한다 —
@@ -446,6 +451,16 @@ status: reference
     앞부분에 없는 초기 채널값을 되돌려야 하는 seek는 거절된다(`MidiTransport.swift`의
     "source seek cannot restore an initial channel value absent from the source prefix").
     알 수 없는 초기 필드와 기기 고유 부작용도 조용히 넘어가지 않고 명시적으로 실패한다.
+  - 거절 조건: seek 위치가 소스 tick 범위를 벗어나면 `midi-source-playback.mjs`의
+    "Seek must be within the source MIDI ticks"로 거절하고, 세션 구간이 잡혀 있으면 그
+    구간 밖 seek도 거절한다(sequencer-tui.mjs: "Seek must be within the source loop range").
+    계획 불변식도 하나 있다: native 전송은 timeline의 `schemaVersion`으로 층을 가르고
+    (`source`는 2 이상, `arrangement`는 3), `source`인데 `arrangement`가 아닌 timeline에
+    loop가 실려 오면 "source audition plays once; loop state reconstruction is not
+    connected"로 거절한다(`MidiTransport.swift`). 이것은 사용자 조건이 아니라 계획
+    모양의 불변식이다 — `:loop`가 잡힌 소스 계획은 `midi-source-playback.mjs`가
+    `schemaVersion: 3`과 `sources`·`regions`로 만들어 `arrangement` 쪽으로 가므로, 반복
+    재생 자체는 거절되지 않는다.
   - 서술 이력: #43769(`2fa99025a2`)의 MIDI-SOURCE.md는 "Pause, resume, seek and looping
     are explicitly unavailable for source timelines"라고 적었고, #43792(`59d3653d3b`)가 그
     문장을 pause/resume·seek 지원 문장으로 바꿨으며, #44513이 `:loop` 세션 구간 루프를

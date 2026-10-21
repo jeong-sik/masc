@@ -22,7 +22,7 @@ import { recordingEpoch } from './arrangement-recording.mjs'
 import { recordingCorrectionContext, recordingCorrectionCapture } from './recording-correction.mjs'
 import { measureAudioCalibration } from './audio-calibration.mjs'
 import { calibrationMilliseconds, calibrationResidual, validateCalibrationCapture } from './calibration-profile.mjs'
-import { InstrumentPicker, pickerFooter, selectionLabel } from './instruments.mjs'
+import { InstrumentPicker, pickerFooter, projectSoundLabel } from './instruments.mjs'
 import { defaultStateDirectory } from './vst.mjs'
 import { captureVstSound } from './project-sound-files.mjs'
 
@@ -134,7 +134,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
             pendingSound = null
             adopt(arrangementSound(editor, asset, sound))
             route = { kind: 'audio', output: route.output }
-            status = `Selected ${selectionLabel(sound.selection)}`
+            status = `Selected ${projectSoundLabel(sound)}`
             play()
           })
         }).catch(error => { if (pendingSound === owned && accepting && !closed) status = error.message })
@@ -1038,9 +1038,18 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   function playbackSummary() {
     return `Playback ${transport.kind}${transport.event?.practice?.phase === 'count-in' ? ' · count-in ' + transport.event.practice.remainingSeconds.toFixed(2) + ' s' : ''} · ${(transport.event?.currentTime ?? 0).toFixed(2)} s · ${transport.event?.device.name ?? route.output ?? route.midiOutput ?? 'default output'}`
   }
+  function soundAsset() {
+    const id = picker.view ? pickerAsset : selectedRegion(editor)?.asset ?? editor.asset
+    return editor.project.assets.find(asset => asset.id === id)
+  }
+  function instrumentSummary(asset) {
+    return `Instrument ${projectSoundLabel(asset.source.sound)} · ${safeText(asset.id)}`
+  }
   function statusBody() {
+    const asset = soundAsset()
     return [status, '', playbackSummary(),
       `Recording ${recording?.phase ?? 'idle'} · input ${input ?? 'not selected'} · MIDI ${midiInput}`,
+      ...(asset?.kind === 'midi' ? [instrumentSummary(asset)] : []),
       `Project: ${path}`].join('\n')
   }
   function draw() {
@@ -1057,7 +1066,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (picker.view) {
       const items = picker.items(), capacity = Math.max(1, rows - 4)
       const start = Math.max(0, (picker.view.cursor ?? 0) - capacity + 1)
-      const lines = [picker.view.title, `${pickerAsset} · ${status}`,
+      const target = soundAsset()
+      const lines = [picker.view.title, `${pickerAsset} · ${target?.kind === 'midi' ? projectSoundLabel(target.source.sound) : 'No MIDI source'} · ${status}`,
         ...(picker.view.query === undefined ? [] : [`${picker.view.kind === 'preset_name' ? 'Name' : picker.view.kind === 'preset_path' ? 'Path' : picker.view.searching ? 'Search' : 'Filter'}: ${picker.view.query}`]),
         ...items.slice(start, start + capacity).map((item, index) => `${start + index === picker.view.cursor ? '›' : ' '} ${picker.isActive(item) ? '●' : ' '} ${item.name}`)]
       let output = '\x1b[H'
@@ -1112,8 +1122,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       if (!project.lanes.length) lines.push('Import a source, then Enter or :place to add its first lane and region.')
       lines.push(clip ? `${clip.id} · ${clip.name}${clip.audioChannel ? ` [input ${clip.audioChannel.input} → output ${clip.audioChannel.output}]` : ''}${clip.component ? ` (${clip.component}${clip.placement ? `, ${clip.placement.kind === 'calibrated' ? 'measured' : 'manual'} advance ${Number(clip.placement.advanceNanoseconds.numerator) / Number(clip.placement.advanceNanoseconds.denominator) / 1e6} ms` : ''})` : ''} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} ${['capture', 'practice'].includes(project.assets.find(asset => asset.id === clip.asset).kind) ? `host ticks${clip.sourceDivisor === undefined ? '' : ' / ' + clip.sourceDivisor}` : ''} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
       lines.push(asset ? `${asset.id} · ${asset.name}${asset.selectedTake === undefined ? '' : ` · take ${BigInt(asset.selectedTake) + 1n} (:takes)`} · ${asset.kind === 'wave' ? `${asset.metadata.frames} frames / ${asset.metadata.sampleRate} Hz / ${asset.metadata.channels} channels` : asset.kind === 'capture' ? `${asset.manifest.audioFrames} frames + ${asset.manifest.midiPacketCount} UMP packets; Enter opens the take` : asset.kind === 'practice' ? `${asset.metadata.packets} original UMP packets; Enter places a host-clock region` : 'original MIDI ticks; format-2 patterns require explicit selection'}` : 'No imported asset. :import-wave FILE or :import-midi FILE')
-      const sounding = project.assets.find(asset => asset.id === (clip?.asset ?? editor.asset))
-      if (sounding?.kind === 'midi') lines.push(`Instrument ${sounding.source.sound?.kind === 'vst' ? selectionLabel(sounding.source.sound.selection) : 'choose with i'} · ${sounding.id}`)
+      const sounding = soundAsset()
+      if (sounding?.kind === 'midi') lines.push(instrumentSummary(sounding))
       lines.push(`Library ${project.assets.length} sources · ${project.clips.length} regions · a cycles sources · i instrument · ? help`, path)
     }
     let output = '\x1b[H'

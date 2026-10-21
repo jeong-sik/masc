@@ -510,7 +510,7 @@ let resolve_machine_output m ~consumer_id machine =
   | [e] when e.state = Lifecycle.Attached && e.started && not e.stopping && e.seq > 0
       && e.pending = Idle && e.active_tool_calls = 0 && Option.is_none e.current_action ->
       Ok {Lane_addon_sources.worker_instance=e.instance_id;worker_seq=e.seq;
-        worker_max_bytes=e.package.resources.max_reply_bytes;worker_output=e.output}
+        worker_max_bytes=(Lane_addon_types.max_reply_bytes e.package);worker_output=e.output}
   | [_] -> Error "machine worker observation is unavailable or refreshing"
   | [] -> Error "no shared machine worker is attached"
   | _ -> Error "multiple shared workers provide the machine"
@@ -604,7 +604,9 @@ let stop_entry ~sw ~backend m e =
       | None, Some engine when not e.running -> Some (None, fun () ->
           let* state_owner = state_owner_for_entry m e
             |> Result.map_error (fun message -> Lifecycle.Cleanup_unconfirmed message) in
-          backend.recover_stop ~runtime:e.package.runtime ~state_owner ~instance_id:e.instance_id ~engine ~container_id:None)
+          let* container = Lane_addon_types.container e.package
+            |> Result.map_error (fun detail -> Lifecycle.Cleanup_unconfirmed detail) in
+          backend.recover_stop ~runtime:container.runtime ~state_owner ~instance_id:e.instance_id ~engine ~container_id:None)
       | None, (None | Some _) -> None (* startup still owns the unresolved create operation *) in
     match cleanup with
     | None -> ()
@@ -721,7 +723,7 @@ let commit_output m e ~sources output =
   let* namespaced_bytes = add_output_bytes
     (Int64.of_int (String.length (Yojson.Safe.to_string (output_to_json output)))) allowance in
   let* () =
-    if namespaced_bytes <= Int64.of_int e.package.resources.max_reply_bytes
+    if namespaced_bytes <= Int64.of_int (Lane_addon_types.max_reply_bytes e.package)
     then Ok () else Error "namespaced observation exceeds the declared host observation envelope" in
   let output = namespace e seq output in
   let write = match Eio.Fiber.get observation_writer_key with
@@ -904,7 +906,7 @@ let run_host_cycle m e (port : host_port) =
                (Lane_addon_host_request.result_arguments ~request_id ~result)) in
              read_answer (Lane_addon_records.read_records ~base_path:m.base_path ~store:m.store ~grants
                ~github:!github_reader ~measure
-               ~max_bytes:e.package.resources.max_reply_bytes ~source_id ~start))
+               ~max_bytes:(Lane_addon_types.max_reply_bytes e.package) ~source_id ~start))
     | Lane_addon_host_request.Ask {request_id; questions; context} ->
         (match asker with
          | Error reason -> Ok (not_allowed reason)
@@ -954,14 +956,14 @@ let run_host_cycle m e (port : host_port) =
                ~source_id ~commit ~path))
     | Lane_addon_host_request.Read_result {request_id; original_request_id; source_id; sha256; offset} ->
         (match offload (fun () -> Lane_addon_host_delivery.read ~store:m.store ~owner ~request_id
-            ~original_request_id ~source_id ~sha256 ~offset ~max_bytes:e.package.resources.max_reply_bytes) with
+            ~original_request_id ~source_id ~sha256 ~offset ~max_bytes:(Lane_addon_types.max_reply_bytes e.package)) with
          | Ok body -> Ok (Deliver body)
          | Error (Lane_addon_host_delivery.Refused reason) -> Ok (not_allowed reason)
          | Error (Storage_failed detail) -> Error (Result_delivery_failed {request_id; detail})) in
   let try_request request =
     let request_id = Lane_addon_host_request.request_id request in
     let* retained = offload (fun () -> Lane_addon_host_delivery.restore ~store:m.store ~owner ~request
-        ~max_bytes:e.package.resources.max_reply_bytes)
+        ~max_bytes:(Lane_addon_types.max_reply_bytes e.package))
       |> Result.map_error (function
         | Lane_addon_host_delivery.Refused detail | Storage_failed detail -> Result_delivery_failed {request_id; detail}) in
     match retained with Some arguments -> Ok (Restore arguments) | None -> produce request in
@@ -977,7 +979,7 @@ let run_host_cycle m e (port : host_port) =
   let deliver request result =
     let request_id = Lane_addon_host_request.request_id request in
     let* arguments = offload (fun () -> Lane_addon_host_delivery.arguments ~store:m.store ~owner ~request
-        ~max_bytes:e.package.resources.max_reply_bytes ~result)
+        ~max_bytes:(Lane_addon_types.max_reply_bytes e.package) ~result)
       |> Result.map_error (function
         | Lane_addon_host_delivery.Refused detail | Storage_failed detail -> Result_delivery_failed {request_id; detail}) in
     deliver_arguments ~request_id arguments in
@@ -1298,7 +1300,7 @@ let observation_for_export ~config ~access ~name = Eio_context.run_on_owner_doma
            | Detaching | Detached -> Ok None
            | Attached | Observing ->
                if e.seq = 0 || not e.started || e.stopping then Error "machine worker observation is not available yet"
-               else Ok (Some {instance_id=e.instance_id;observation_seq=e.seq;max_bytes=e.package.resources.max_reply_bytes;
+               else Ok (Some {instance_id=e.instance_id;observation_seq=e.seq;max_bytes=(Lane_addon_types.max_reply_bytes e.package);
                  refreshing=e.state = Lifecycle.Observing || e.pending <> Idle || e.active_tool_calls > 0 || Option.is_some e.current_action;output=e.output}))
       | _ -> Error "multiple visible installations provide this machine")
 
@@ -1923,7 +1925,8 @@ let preserve_state_runtime ~configuration ~(package : package) bindings =
             then Ok ()
             else
               let* previous_runtime = retained_runtime previous_package in
-              if previous_runtime = package.runtime then Ok ()
+              let* container = Lane_addon_types.container package in
+              if previous_runtime = container.runtime then Ok ()
               else Error "Persistent state belongs to a different runtime; use a new installation id"
         | None | Some _ -> Ok ()) (Ok ()) bindings
 
@@ -2810,7 +2813,10 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
       | Ok state, Ok runtime -> waiting ~runtime state
       | Error _, _ | _, Error _ -> false in
     let retire sw e =
-      if waiting ~runtime:e.package.runtime e.state then () else
+      let blocked = match e.package.execution with
+        | Container container -> waiting ~runtime:container.runtime e.state
+        | Host_process _ -> false in
+      if blocked then () else
       match detach_entry ~sw m e with
       | Ok _ -> ()
       | Error message ->
@@ -2828,7 +2834,8 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
        foreign holder, ends the sweep for this process. An engine that does
        not answer is an issue of this beat. *)
     let runtimes_in_use =
-      let declared = List.map (fun (d : Lane_addon_config.declaration) -> d.package.runtime) snapshot.declarations in
+      let declared = List.filter_map (fun (d : Lane_addon_config.declaration) ->
+        Lane_addon_types.container_runtime d.package) snapshot.declarations in
       let retained = List.filter_map (fun (_, fields) ->
         Option.bind (List.assoc_opt "package" fields) (fun json ->
           Result.to_option (let* package = object_ json in retained_runtime package))) histories in

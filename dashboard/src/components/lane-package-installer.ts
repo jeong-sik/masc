@@ -23,7 +23,7 @@ export function LanePackageInstaller({ authority, documents, snapshot, onSelecti
       <${ActionButton} onClick=${() => owner.close()}>Close installer</${ActionButton}></header>
     <p>Choose a package, fill its input fields, then prepare a local TOML draft. Only Save TOML writes the declaration.</p>
     ${state.error && html`<p role="alert" class="whitespace-pre-wrap break-words">${state.error}</p>`}
-    ${busy && html`<p role="status">${state.phase === 'catalog' ? 'Reading local packages…' : 'Reading package and image state…'}</p>`}
+    ${busy && html`<p role="status">${state.phase === 'catalog' ? 'Reading local packages…' : 'Reading package execution…'}</p>`}
     <div class="flex flex-wrap items-end gap-2"><label class="min-w-0 flex-1">Workspace folder
       <${TextInput} class="w-full" value=${directory} placeholder=${state.folder ?? 'Workspace root'} onInput=${(event: Event) => owner.editPath('folderInput', (event.target as HTMLInputElement).value, authority)} /></label>
       <${ActionButton} disabled=${busy} onClick=${() => owner.browse(directory === '' ? null : directory, authority)}>Open folder</${ActionButton}>
@@ -51,8 +51,10 @@ export function LanePackageInstaller({ authority, documents, snapshot, onSelecti
       ${[...state.drafts].map(([key, draft], index) => html`<option value=${key}>${draft.preview.package.title} · ${draft.id || 'unnamed'} · input set ${index + 1}</option>`)}
     </select></label>`}
     ${selected && selectedKey !== null && html`<fieldset disabled=${busy} class="min-w-0 space-y-4"><legend class="font-semibold">Configure ${selected.preview.package.title} · ${selected.preview.package.revision}</legend>
-      <p class="break-all">${selected.preview.manifest_path}</p><p class="break-all">Image: ${selected.preview.package.image}</p>
-      <p class="break-words">${selected.preview.image.state === 'available' ? `Available: ${selected.preview.image.digest}` : `Image unverified: ${selected.preview.image.detail}`}</p>
+      <p class="break-all">${selected.preview.manifest_path}</p>
+      ${selected.preview.execution.kind === 'host_process' ? html`<p>Runs as a host process.</p>`
+        : html`<p class="break-all">Image: ${selected.preview.execution.image_name}</p>
+          <p class="break-words">${(selected.preview.execution.image.state === 'available' ? `Available: ${selected.preview.execution.image.digest}` : `Image unverified: ${selected.preview.execution.image.detail}`)}</p>`}
       ${selected.previewAuthority !== authority && html`<p role="status">A fresh package preview is required. Inputs are retained; recheck the package before preparing a draft.</p>`}
       <${ActionButton} onClick=${() => owner.preview(selected.preview.manifest_path, authority)}>Recheck package</${ActionButton}>
       <label class="block">Installation ID<${TextInput} class="block w-full" value=${selected.id} onInput=${(event: Event) => owner.update(selectedKey, { id: (event.target as HTMLInputElement).value }, authority)} /></label>

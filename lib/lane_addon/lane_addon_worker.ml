@@ -157,21 +157,25 @@ let inspect_image ~clock ~control_timeout_sec ~mgr ~(package : package)
   if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
     Error (Invalid_package "control_timeout_sec must be finite and positive")
   else
-  let runtime = package.runtime in
+  let* container = Lane_addon_types.container package
+    |> Result.map_error (fun detail -> Invalid_package detail) in
+  let runtime = container.runtime in
   let command = command_for runtime ~docker_command ~container_command in
   let* raw = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command
-      ~operation:"image inspect" (Engine.image_arguments runtime package.image) in
+      ~operation:"image inspect" (Engine.image_arguments runtime container.image) in
   Engine.image_of_inspect runtime raw |> Result.map_error (engine_error runtime ~operation:"image inspect")
 
 let validate_package (package : package) =
-  match Lane_addon_types.check_resources ~runtime:package.runtime package.resources with
+  let* container = Lane_addon_types.container package
+    |> Result.map_error (fun detail -> Invalid_package detail) in
+  match Lane_addon_types.check_resources ~runtime:container.runtime container.resources with
   | Error detail -> Error (Invalid_package detail)
   | Ok () ->
-  if String.trim package.image = "" || package.command = [] then
+  if String.trim container.image = "" || package.command = [] then
     Error (Invalid_package "image and command are required")
   else if Filename.is_relative package.directory then
     Error (Invalid_package "package directory must be absolute")
-  else Ok ()
+  else Ok container
 
 let verify_absent ~runtime ~run id =
   (* Only a successful enumeration can establish absence. *)
@@ -271,7 +275,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
     else Ok () in
   let* () = if Float.is_finite control_timeout_sec && control_timeout_sec > 0. then Ok ()
     else Error (Invalid_package "control_timeout_sec must be finite and positive") in
-  let* () = validate_package package in
+  let* container = validate_package package in
   let* () = match package.state_storage, state_owner with
     | Persistent, None -> Error (Invalid_package "persistent state requires a host-owned installation identity")
     | Ephemeral, Some _ -> Error (Invalid_package "package did not declare persistent state")
@@ -288,7 +292,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
   let* () = match package.action_tool, artifact_store with
     | Some _, None -> Error (Invalid_package "action worker requires its owned artifact store")
     | _ -> Ok () in
-  let runtime = package.runtime in
+  let runtime = container.runtime in
   let command = command_for runtime ~docker_command ~container_command in
   let* package_mount = Engine.mount_argument runtime
       { source = package.directory; destination = "/addon" }
@@ -309,7 +313,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
     |> Result.map_error (fun fault -> Engine_fault { runtime; fault }) in
   (* Resolve the image for this generation. Docker creates by this immutable
      ID; Apple verifies its resolved descriptor before starting the process. *)
-  let* raw_image = run ~operation:"image inspect" (Engine.image_arguments runtime package.image) in
+  let* raw_image = run ~operation:"image inspect" (Engine.image_arguments runtime container.image) in
   let* image = Engine.image_of_inspect runtime raw_image
     |> Result.map_error (engine_error runtime ~operation:"image inspect") in
   let* () = match state_owner with
@@ -380,8 +384,8 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
     let* () = Lane_addon_slot.claim port ~name ~instance_id ~mine ~is_live_instance
       |> Result.map_error (fun failure -> Lifecycle failure) in
     run ~operation:"create"
-      (Engine.create_arguments package ~name ~instance_id ~state_owner:mine
-         ~image:(Engine.image_create_reference image ~requested:package.image)
+      (Engine.create_arguments container ~command:package.command ~name ~instance_id ~state_owner:mine
+         ~image:(Engine.image_create_reference image ~requested:container.image)
          ~scope ~package_mount ~mounts:mounted ~state_mounts:state_mount) in
   let* created = match Lane_addon_slot.proven port ~expected:engine
       ~lift:(fun failure -> Lifecycle failure) create_on_engine with
@@ -407,7 +411,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
       on_created worker;
       let* () = if Protocol.revoked protocol then Error Stopped else Ok () in
       let* inspected = run ~operation:"inspect" (Engine.inspect_arguments runtime id) in
-      let* inspected_id = Engine.verify_container runtime ~name ~resources:package.resources ~image inspected
+      let* inspected_id = Engine.verify_container runtime ~name ~resources:container.resources ~image inspected
         |> Result.map_error (engine_error runtime ~operation:"inspect") in
       if not (String.equal inspected_id id) then
         Error (engine_error runtime ~operation:"inspect" "container ID changed")
@@ -421,7 +425,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
         let* client = Agent_core.Mcp.connect ~sw ~mgr ~command
             ~args:(Engine.start_arguments runtime id)
             ~stderr:(stderr_w :> Eio.Flow.sink_ty Eio.Resource.t)
-            ~max_response_bytes:package.resources.max_reply_bytes ?sampling_handler ()
+            ~max_response_bytes:(Lane_addon_types.max_reply_bytes package) ?sampling_handler ()
           |> Result.map_error protocol_error in
         Eio.Flow.close stderr_w;
         let* () = Protocol.initialize protocol client |> protocol_result in

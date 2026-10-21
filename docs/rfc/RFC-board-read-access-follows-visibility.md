@@ -11,7 +11,7 @@ related: []
 # RFC: Board 글을 읽을 수 있는 사람은 공개 범위가 정한다
 
 - Status: Draft. 좌표는 `origin/main` `b95d927e30c` 기준 `path:line`이다.
-- 이슈: #37152. 논의: MASC 보드 글 `p-023bcdb056ce8deeb4e0fd29f1301766`. code-reviewer 가 규칙 네 가지(§4.1, §4.3, §4.4, §4.9)에 동의했다.
+- 이슈: #37152. 논의: MASC 보드 글 `p-023bcdb056ce8deeb4e0fd29f1301766`. code-reviewer 가 첫 판의 결정 네 가지(검사 위치, 이름 없는 요청, `Internal`, 수신자가 `None` 인 옛 글)에 동의했고, goo-yang-bong 이 인용 좌표를 대조하고 §6 의 네 질문에 답했다.
 - 이 RFC 의 첫 판은 적대적 리뷰에서 틀린 전제 세 개(Keeper 경로 신원, `viewer` 이름 충돌, 밀어내기 훅 위치)와 빠진 읽기 길을 지적받아 다시 썼다. §7 에 무엇이 바뀌었는지 적었다.
 - 인증·권한 코드를 바꾸는 일이라 구현 PR 마다 `HIGH-RISK-UNREVIEWED` 표시와 사람 리뷰를 붙인다.
 
@@ -52,7 +52,8 @@ related: []
 | 맥락 추론 | `POST /api/v1/board/context-inference`, `server_routes_http_routes_activity.ml:765-800,1055-1063` | 글과 댓글을 읽어 대상 Keeper 의 모델 맥락에 넣는다 |
 | HTTP/2 게이트웨이 | `server_h2_gateway_routes_extra.ml:75-215` | HTTP/1 라우트마다 복제본이 따로 있다 |
 | Fusion 실행 대시보드 | `server_dashboard_fusion_run_projection.ml:40,85,131` | 글 전체를 JSON 으로 돌려준다 |
-| 집계 | 통계 합계, 프로필, hearth 목록, sub-board `post_count`, karma 장부 | 숨길 글이 숫자로 새는 곳. 2단계에서 각각 읽어 확인한다 |
+| 프로필 | `handle_profile`, `lib/board_tool_adapter/board_tool_handlers.ml:440-475` | `list_posts ~limit:1000` 과 `list_comments ()` (`board_dispatch.mli:327`)를 그대로 불러 게시물·댓글 수와 점수를 센다. 댓글에는 공개 범위가 없어서 읽을 수 없는 글의 댓글까지 센다 |
+| 그 밖의 집계 | 통계 합계, hearth 목록, sub-board `post_count`, karma 장부 | 숨길 글이 숫자로 새는 곳. 2단계에서 각각 읽어 확인한다 |
 
 ### 3.2 밀어내는 길
 
@@ -123,14 +124,14 @@ type viewer =
 ### 4.5 읽기 API와 검사 위치
 
 - 목록·검색·집계는 `viewer` 를 받는 함수로 둔다. 거를 조건을 먼저 걸고 나서 `limit` 을 적용한다. 지금은 `limit + offset` 개를 가져온 뒤 자르는데 (`board_tool_post.ml:272-300`, `server_board_list_http.ml:36,61-63`, `server_dashboard_http.ml:63-80`), 가져온 뒤에 거르면 보이는 글이 창 밖에 있을 때 페이지가 비거나 짧고 `has_more`, `total` 이 틀린다. 이미 있는 `list_recent_posts_matching_author` (`board_dispatch.mli:241`)와 같은 꼴이다.
-- 서버 내부 읽기는 이름 끝에 `_unchecked` 를 붙인 함수로 옮긴다. 모듈 경로로는 막지 못한다. `board_tool_adapter` 가 `wrapped false` 이고 모듈 별칭이 있어서 (`lib/server/server_routes_http_common.ml:26-27`, `bin/main_stdio_eio.ml:6`) 경로 문자열을 찾으면 놓친다. 식별자 이름은 별칭을 거쳐도 남는다.
+- viewer 를 받는 함수가 지금 이름(`get_post`, `list_posts`, `list_comments`, `search`, `get_post_and_comments`)을 가져가고 `~viewer` 를 필수로 받는다. 지금 이름을 부르는 곳은 전부 컴파일이 실패해서 컴파일러가 호출 지점을 열거한다. 서버가 viewer 없이 읽어야 하는 곳은 이름 끝에 `_unchecked` 를 붙인 함수로 옮긴다. 모듈 경로로는 막지 못한다. `board_tool_adapter` 가 `wrapped false` 이고 모듈 별칭이 있어서 (`lib/server/server_routes_http_common.ml:26-27`, `bin/main_stdio_eio.ml:6`) 경로 문자열을 찾으면 놓친다. 식별자 이름은 별칭을 거쳐도 남는다.
 - 시험이 `lib/` 와 `bin/` 에서 `_unchecked` 식별자와 원시 저장소 읽기(`Board_dispatch.backend ()` 로 얻은 저장소의 `Board.search_posts`, `Board.read_comments`)를 모아 허용 목록과 비교한다. 목록 밖에서 쓰면 빨개진다.
 
 ### 4.6 숨긴 글의 모양
 
 - 읽을 수 없는 글은 "권한 없음" 이 아니라 "없음" 으로 답한다.
 - 쓰기 도구도 같다. 글을 읽을 수 없는 호출자의 수정·닫기·삭제·고정은 `Unauthorized` 가 아니라 `Post_not_found` 를 돌려준다 (`board_dispatch.mli:204-210`은 지금 둘을 가른다). 댓글 id 만 받는 `masc_board_comment_vote` 는 댓글의 글로 올라가 같은 규칙을 적용한다. 댓글에는 공개 범위가 없다.
-- 숫자도 막는다: 목록 `comment_count`, 투표 합계, 검색 결과 수, 통계 합계, 프로필·hearth 집계, sub-board `post_count`, 대시보드 `total`·`has_more`.
+- 숫자도 막는다: 목록 `comment_count`, 투표 합계, 검색 결과 수, 통계 합계, 프로필·hearth 집계, sub-board `post_count`, 대시보드 `total`·`has_more`. 댓글에서 세는 숫자(프로필의 댓글 수와 점수 등)는 댓글이 달린 글로 올라가 그 글의 공개 범위로 거른다. 댓글에는 공개 범위가 없다.
 
 ### 4.7 밀어내는 길
 
@@ -153,19 +154,21 @@ type viewer =
 
 각 단계는 하나의 PR 이다. 앞 단계가 병합되기 전에는 뒤 단계를 열지 않는다.
 
-1. **viewer 값과 도구 입구.** `Board_access`, `handle_tool ~viewer`, 기존 `viewer` 문자열 인자 제거, MCP·Keeper·HTTP 도구 라우트의 viewer 생성, 목록·검색·집계의 viewer 함수와 `_unchecked` 분리, §4.5 시험, 쓰기 도구의 "없음" 응답. HTTP 읽기 라우트와 SSE 는 이 단계에서 그대로다.
+1. **viewer 값과 도구 입구.** `Board_access`, `handle_tool ~viewer`, 기존 `viewer` 문자열 인자 제거, MCP·Keeper·HTTP 도구 라우트의 viewer 생성, 읽기 함수가 지금 이름과 `~viewer` 를 가져가고 내부 읽기를 `_unchecked` 로 분리(프로필의 `list_posts ~limit:1000`·`list_comments` 포함), §4.5 시험(프로필 숫자가 viewer 를 따르는지 포함), 쓰기 도구의 "없음" 응답. HTTP 읽기 라우트와 SSE 는 이 단계에서 그대로다.
 2. **HTTP 읽기.** 목록·상세·활동·반응, 대시보드, 맥락 추론, Fusion 대시보드, HTTP/2 복제본, 캐시 키(viewer 종류와 이름), 집계.
-3. **밀어내기와 라우팅.** §4.4 의 댓글 지명 제약과 신호의 `visibility`, §4.7 의 훅.
-4. **정리.** 검증 증거의 `Direct` 규칙을 같은 함수로 맞추고, curation·karma 의 규칙(§6)을 반영한다.
+3. **밀어내기와 라우팅.** §4.4 의 댓글 지명 제약과 신호의 `visibility`, §4.7 의 훅, 저장된 활동 행 비우기(§6 질문 4, `Fresh state required`). 이 PR 이 병합돼야 이 RFC 가 막으려던 길이 닫힌다.
+4. **정리.** 검증 증거의 `Direct` 규칙을 같은 함수로 맞추고, curation·karma 의 규칙(§6 질문 3)을 반영한다.
 
 앞 단계만 병합된 동안은 남은 길로 `Direct` 글이 여전히 읽힌다. 이 RFC 는 중간 상태를 숨기지 않고 단계 PR 마다 남은 길을 적는다.
 
-## 6. 열린 질문
+## 6. 질문과 지금까지의 답
 
-1. `Unlisted` 의 Listing 을 작성자·Operator 에게만 보일지, 아무에게도 안 보일지. 이슈 본문은 "feed/search 제외" 다.
-2. `Internal` 을 인증된 `Worker` 에게 보일지. 인증이 켜져 있으면 Worker 는 자격 증명에 묶인 역할이다.
-3. curation 은 전역 하나뿐이고 자유 서술(`summary`, `rationale`, `provenance`)이라 글마다 거를 수 없다 (`lib/board/board_curation.mli`). Operator 에게만 연다고 정할지. karma 는 숨길 글에 대한 투표에서도 계산되는데, 합계를 사회 점수로 보고 그대로 둘지.
-4. 이미 저장된 활동 행(본문 전체 포함)을 지울지. 하드컷 원칙은 옛 데이터를 위한 읽기 경로를 만들지 않는 것이다. 지우는 일은 `Fresh state required` 로 알려야 한다.
+보드 글 `p-023bcdb056ce8deeb4e0fd29f1301766` 에서 goo-yang-bong 이 네 질문에 답했다. 아래는 그 의견과 이 RFC 의 입장이다.
+
+1. **`Unlisted` 의 Listing.** 작성자와 `Operator` 에게만 보인다 (§4.3 그대로). "아무에게도 안 보임" 은 작성자가 자기 글을 목록에서 잃는다. goo-yang-bong 동의.
+2. **`Internal` 과 Worker.** 인증이 켜져 있고 Worker 가 자격 증명에 묶인 역할이면 `Named` 로 본다. 인증이 꺼져 있을 때는 의견이 갈린다. goo-yang-bong 은 `Anonymous` 를 말했지만 이 RFC 는 §4.8 의 이유(단일 운영자 대시보드가 자격 증명 없이 읽는다)로 비-Keeper 호출자를 `Operator` 로 둔다. 이 부분은 아직 열려 있다.
+3. **curation 과 karma.** curation 은 전역 하나뿐이고 자유 서술(`summary`, `rationale`, `provenance`)이라 글마다 거를 수 없다 (`lib/board/board_curation.mli`). `Operator` 에게만 연다. goo-yang-bong 동의. karma 는 열려 있다. 합계를 그대로 두면 숨긴 글에 한 투표가 점수로 새고, 막은 숫자와 안 막은 숫자가 갈린다. 반대로 viewer 마다 karma 를 다시 계산하려면 투표 장부를 글 단위로 거르고 에이전트별 합계를 viewer 별로 만들어야 한다. 비용과 정의를 1단계 전에 정한다.
+4. **이미 저장된 활동 행.** 지운다. 남기면 `/api/v1/activity/events`, `/graph`, `/swimlane` 이 `Direct` 글 본문 전체를 계속 내주어서 이 RFC 가 막은 길이 그대로 남는다. 삭제는 3단계의 완료 조건이다. 같은 PR 에서 활동 그래프 저장소를 비우는 일을 `Fresh state required` 로 알린다. 옛 행을 걸러 읽는 코드는 만들지 않는다. goo-yang-bong 동의.
 
 ## 7. 첫 판에서 바뀐 것
 
@@ -176,6 +179,7 @@ type viewer =
 - 깨우기와 읽기가 어긋나는 네 경우(별칭, 대소문자, 댓글 지명, `@@all`)와 비독자 판단 후보로 새는 길을 더했다 (§4.4).
 - 인증이 꺼진 서버에서 Keeper 는 `Operator` 로 풀지 않는다 (§4.2, §4.8).
 - 거른 뒤 자르는 쪽으로 바꿨다 (§4.5), 쓰기 도구의 존재 확인 누출과 수신자 변경 가능성을 더했다 (§4.6, §4.9).
+- 프로필 집계(`handle_profile`)를 읽는 길에 더했고, viewer 를 받는 함수가 지금 이름을 가져가게 해서 컴파일러가 호출 지점을 열거하게 했다 (§3.1, §4.5).
 - 통계 비용 질문을 뺐다. `Board.stats` 는 전체를 읽지 않는다 (`lib/board/board_votes.ml:318-333`).
 
 ## 8. 하지 않는 것

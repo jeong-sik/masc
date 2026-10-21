@@ -1,7 +1,8 @@
 # Task history continuation membership
 
-Follows #44786 on Native Stack #44161. Work Task detail and Tools original Task
-detail both use `Tui_decode_task_inspection.history_page` through the existing
+Follows the real-producer metadata repair #44798 and Task history #44786 on
+Native Stack #44161. Work Task detail and Tools original Task detail both use
+`Tui_decode_task_inspection.history_page` through the existing
 `fetch_task_history_page` CPU decode path.
 
 ## As-Is / To-Be

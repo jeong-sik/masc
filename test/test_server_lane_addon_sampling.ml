@@ -421,6 +421,8 @@ max_reply_bytes=4194304
       let _handler = require (factory ~sw ~store ~instance_id ~package ~binding) in
       starts := instance_id :: !starts;
       let connection : Lane_addon_runtime.For_testing.connection = {
+        resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
+          | Ok image -> image | Error detail -> Alcotest.fail detail);
         host = None; container_id=Store.digest instance_id; exported_tools = (fun () -> []); call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools")); action_schema=(fun () -> None);
         act=(fun ~arguments:_ -> Error "read-only fixture");
         observe=(fun ~binding:_ ~sources:_ -> Ok {Lane_addon_types.rows=[];coverage=[]});

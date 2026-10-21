@@ -94,6 +94,8 @@ let with_fixture f =
                   start=(fun ~sw:_ ~state_owner:_ ~instance_id ~package:_ ~binding:_ ~on_engine ~is_live_instance:_ ~on_created ->
                     started := instance_id :: !started;
                     let connection : Runtime.For_testing.connection = {
+        resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
+          | Ok image -> image | Error detail -> Alcotest.fail detail);
                       observe=(fun ~binding:_ ~sources:_ -> Ok output);
                       exported_tools = (fun () -> []);
                       call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));

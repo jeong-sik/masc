@@ -37,6 +37,7 @@ type connection = {
   act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
   stop : unit -> (unit, Lifecycle.failure) result;
   container_id : string;
+  resolved_image : Lane_addon_engine.image_identity;
   host : host_port option;
 }
 type backend = {
@@ -131,6 +132,7 @@ type host_status = { cycles : int; waiting : (string * Yojson.Safe.t) list; issu
 type entry = {
   instance_id : string; run_id : string; package : package; binding : Yojson.Safe.t;
   mutable state : Lifecycle.state; mutable engine : Lifecycle.engine option;
+  mutable resolved_image : Lane_addon_engine.image_identity option;
   mutable seq : int; mutable output : output;
   mutable connection : owned_connection option; mutable stopping : bool;
   mutable cleanup_running : bool; changed : Eio.Condition.t; mutable wake : unit Eio.Promise.t;
@@ -406,6 +408,7 @@ let entry_json e =
     "revision", `String e.package.revision; "phase", phase_to_json (phase_of e);
     "lifecycle", Lifecycle.state_to_json e.state;
     "engine", (match e.engine with None -> `Null | Some engine -> Lifecycle.engine_to_json engine);
+    "resolved_image", Option.fold ~none:`Null ~some:Lane_addon_engine.image_identity_to_json e.resolved_image;
     "observation_seq", `Int e.seq; "rows_count", `Int (List.length e.output.rows);
     "observation_pending", `Bool (match e.pending with
       | Observe_now | Refresh_sources -> true | Run_actions | Idle -> false); "coalesced_wakes", `Int e.coalesced_wakes;
@@ -1028,6 +1031,7 @@ let run ~sw backend m e =
           | Ok () -> Ok ()
           | Error message -> e.engine <- None; Error message in
         let created c = e.connection <- Some {export_owner;worker=c};
+          e.resolved_image <- Some c.resolved_image;
           publish_resource Lane_addon_resource_events.Acquired e (Some c.container_id) None;
           (match persist m e with Ok () -> () | Error message ->
             e.stopping <- true; e.state <- fail_state e (Lifecycle.Persistence_failed message));
@@ -1159,6 +1163,7 @@ let backend ~store () = match !override with
           |> Result.map_error (fun message -> Lifecycle.Worker_failed message) in
         let wrap worker = {
           container_id = Lane_addon_worker.container_id worker;
+          resolved_image = Lane_addon_worker.image_identity worker;
           exported_tools = (fun () -> Lane_addon_worker.exported_tools worker);
           call_exported_tool = (fun ~on_result ~authorize ~principal ~name ~arguments ->
             Lane_addon_worker.call_exported_tool ~on_result ?authorize ~principal worker ~name ~arguments
@@ -1939,7 +1944,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     | Some owner -> validate_connection m ~run_id ~configuration_id:owner.id ~binding in
   let promise, resolver = Eio.Promise.create () in
   let e = { instance_id = Random_id.uuid_v7 (); run_id; package; binding;
-    state = Lifecycle.Attached; engine = None; seq = 0; output = {rows=[];coverage=[]}; connection = None;
+    state = Lifecycle.Attached; engine = None; resolved_image = None; seq = 0; output = {rows=[];coverage=[]}; connection = None;
     stopping = false; cleanup_running = false; changed = Eio.Condition.create (); wake = promise; resolver; pending = Idle;
     refresh_interest; source_access; visibility; last_committed_sources=None; unchanged_source_refreshes=0;
     running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
@@ -3171,6 +3176,7 @@ module For_testing = struct
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (unit, Lifecycle.failure) result;
     container_id : string;
+    resolved_image : Lane_addon_engine.image_identity;
     host : host_port option;
   }
   type nonrec backend = backend = {

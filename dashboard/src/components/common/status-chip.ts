@@ -80,8 +80,8 @@ const STATUS_CHIP_TONES: ReadonlySet<string> = new Set([
  *      restarting, paused, stopped, crashed, dead, offline.
  *
  *   2. Dashboard-layer names defined in `types/core.ts#KeeperLifecycleState`
- *      and the live agent `status` union: active, preparing,
- *      handoff-imminent, idle, unbooted, busy, listening, inactive.
+ *      and the live agent `status` union: active, idle, unbooted, busy,
+ *      listening, inactive.
  *
  * Both collapse into the same five visual groups the design system
  * prescribes (ok / working / warn / paused / error), with inactive
@@ -97,9 +97,7 @@ export function keeperStateTone(state: string): StatusChipTone {
     case 'active':
       return 'ok'
     // working — in flight, not actionable
-    case 'handoff-imminent':
     case 'draining':
-    case 'preparing':
     case 'listening':
       return 'info'
     // warn — degraded but not crashed

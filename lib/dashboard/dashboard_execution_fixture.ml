@@ -232,13 +232,13 @@ let execution_smoke_fixture_json () =
                 ("status", `String "active");
                 ("tone", `String "bad");
                 ("state", `String "critical");
-                ("note", `String "핸드오프 임박");
+                ("note", `String "오류 발생");
                 ("focus", `String "masc-keeper-autonomy");
                 ("last_signal_at", `String generated_at);
                 ("turn_count", `Int 84);
                 ("context_ratio", `Float 0.91);
                 ("continuity", `String "Gen 2 · Turns 84 · Goals 2");
-                ("lifecycle", `String "handoff-imminent");
+                ("lifecycle", `String "active");
                 ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-claude"));
                 ("emoji", `String "🤖");
                 ("koreanName", `String "dm-keeper");

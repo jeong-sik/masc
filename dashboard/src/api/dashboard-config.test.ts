@@ -9,7 +9,6 @@ import {
 import {
   DashboardConfigSchemaDriftError,
   fetchDashboardConfig,
-  parseContextThresholds,
 } from './dashboard-config'
 
 const currentWire = {
@@ -65,45 +64,5 @@ describe('fetchDashboardConfig', () => {
     )))
 
     expect(error).toBeInstanceOf(DashboardConfigSchemaDriftError)
-  })
-})
-
-describe('parseContextThresholds', () => {
-  it('uses already-resolved config values without reopening wire nulls', () => {
-    const data = Effect.runSync(runWithHttp(fetchDashboardConfig(), {
-      getUnknown: () => Effect.succeed({
-        ...currentWire,
-        categories: {
-          dashboard: [
-            {
-              env: 'MASC_DASHBOARD_CTX_PREPARING',
-              description: 'preparing',
-              value: null,
-              default: '0.71',
-              source: 'default',
-              source_detail: 'compiled default value',
-              provenance: {
-                kind: 'default',
-                detail: 'compiled default value',
-                env: 'MASC_DASHBOARD_CTX_PREPARING',
-                raw_source: 'compiled_default',
-                raw_env_present: false,
-                raw_env_blank: false,
-                default: '0.71',
-                sensitive: false,
-                value_redacted: false,
-              },
-              sensitive: false,
-            },
-          ],
-        },
-      }),
-    }))
-
-    expect(parseContextThresholds(data, {
-      critical: 0.9,
-      warn: 0.7,
-      high: 0.8,
-    })).toEqual({ critical: 0.9, warn: 0.71, high: 0.8 })
   })
 })

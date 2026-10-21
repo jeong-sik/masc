@@ -577,8 +577,6 @@ export interface KeeperTrustSummary {
 // of trusting arbitrary wire strings.
 export type KeeperLifecycleState =
   | 'active'
-  | 'preparing'
-  | 'handoff-imminent'
   | 'idle'
   | 'offline'
   | 'unbooted'

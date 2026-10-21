@@ -26,8 +26,6 @@ import {
   ensureDevToken,
   installRejectedCredentialRecovery,
 } from './api/dev-token'
-import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_HIGH } from './config/constants'
-import { setContextThresholds } from './config/context-thresholds'
 import { DashboardMain, DashboardHealthStrip, isKeeperDetailDashboardRoute } from './components/dashboard-shell'
 import { RemoteWarningBanner } from './components/auth-status'
 import { BundleStaleBanner, WorktreeServerBanner } from './components/bundle-stale-banner'
@@ -188,27 +186,6 @@ export function App() {
         scheduleDevTokenReadinessProbe()
         void refreshShell({ light: true })
         requestNamespaceTruthNow()
-
-        void Promise.all([
-          import('./api/dashboard-config'),
-          import('./api/effect-http'),
-        ])
-          .then(([configApi, effectHttp]) =>
-            effectHttp.dashboardRuntime
-              .runPromise(configApi.fetchDashboardConfig())
-              .then(data => ({ configApi, data })),
-          )
-          .then(({ configApi, data }) => {
-            const thresholds = configApi.parseContextThresholds(data, {
-              critical: CONTEXT_RATIO_CRITICAL,
-              warn: CONTEXT_RATIO_WARN,
-              high: CONTEXT_RATIO_HIGH,
-            })
-            setContextThresholds(thresholds)
-          })
-          .catch(err => {
-            console.warn('[app] dashboard config fetch failed', err instanceof Error ? err.message : err)
-          })
 
         void connectDashboardWS(route.value)
       })

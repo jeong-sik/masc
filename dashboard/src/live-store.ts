@@ -5,7 +5,6 @@ import type { JournalEntry } from './types'
 import { keepers } from './store'
 import type { PipelineStage } from './types/core'
 import type { AuditEntry } from './api/dashboard'
-import { contextThresholds } from './config/context-thresholds'
 import type { StatusChipTone } from './components/common/status-chip'
 
 export type PulseState = 'working' | 'idle'
@@ -19,8 +18,6 @@ export interface KeeperPressure {
 export interface KeeperHealthSummary {
   activeCount: number
   totalCount: number
-  warningCount: number
-  criticalCount: number
   pressures: KeeperPressure[]
 }
 
@@ -28,14 +25,8 @@ export const keeperHealthSummary: ReadonlySignal<KeeperHealthSummary> = computed
   const all = keepers.value
   const active = all.filter(k => k.keepalive_running === true)
 
-  let warningCount = 0
-  let criticalCount = 0
-
-  const thresholds = contextThresholds.value
   const pressures: KeeperPressure[] = active.map(k => {
     const ratio = k.context_ratio ?? null
-    if (ratio != null && ratio > thresholds.critical) criticalCount++
-    else if (ratio != null && ratio > thresholds.warn) warningCount++
     // No `as PipelineStage` cast: `k.pipeline_stage` is `PipelineStage | undefined`
     // post-normalize (toPipelineStage at keeper-store-normalize.ts), so the
     // `?? 'unknown'` (PipelineStage member) is already correctly typed.
@@ -49,8 +40,6 @@ export const keeperHealthSummary: ReadonlySignal<KeeperHealthSummary> = computed
   return {
     activeCount: active.length,
     totalCount: all.length,
-    warningCount,
-    criticalCount,
     pressures,
   }
 })

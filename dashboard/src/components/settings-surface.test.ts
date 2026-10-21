@@ -406,8 +406,6 @@ function makeDashboardConfig(overrides: Partial<DashboardConfig> = {}): Dashboar
         makeConfigEntry({ env: 'MASC_CONFIG_DIR', description: 'Config directory override', displayValue: '(none)', defaultValue: '(none)', source: 'default', sourceDetail: 'compiled default value' }),
       ],
       dashboard: [
-        makeConfigEntry({ env: 'MASC_DASHBOARD_CTX_PREPARING', description: 'Context preparing', displayValue: '0.70', defaultValue: '0.70', source: 'default', sourceDetail: 'compiled default value' }),
-        makeConfigEntry({ env: 'MASC_DASHBOARD_CTX_HANDOFF_IMMINENT', description: 'Context imminent', displayValue: '0.85', defaultValue: '0.85', source: 'default', sourceDetail: 'compiled default value' }),
         makeConfigEntry({ env: 'MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO', description: 'Runtime warning', displayValue: '0.95', defaultValue: '0.95', source: 'default', sourceDetail: 'compiled default value' }),
         makeConfigEntry({ env: 'MASC_DASHBOARD_SIGNAL_STALE_SEC', description: 'Signal stale', displayValue: '1200.0', defaultValue: '1200.0', source: 'default', sourceDetail: 'compiled default value' }),
       ],
@@ -1434,8 +1432,8 @@ describe('SettingsSurface', () => {
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
 
     await waitFor(() => {
-      expect(container.textContent).toContain('MASC_DASHBOARD_CTX_PREPARING')
-      expect(container.textContent).toContain('70%')
+      expect(container.textContent).toContain('MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO')
+      expect(container.textContent).toContain('95%')
       expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live thresholds read-only')
       expect(container.querySelector('[data-control-id="settings-notify-thresholds"]')?.getAttribute('data-control-kind'))
         .toBe('live-read')
@@ -1505,7 +1503,7 @@ describe('SettingsSurface', () => {
     })
 
     expect(container.querySelector('[data-testid="notify-thresholds"]')).toBeNull()
-    expect(container.textContent).not.toContain('MASC_DASHBOARD_CTX_PREPARING')
+    expect(container.textContent).not.toContain('MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO')
     expect(container.querySelector('[data-testid="notify-routing-readonly"]')).toBeNull()
   })
 

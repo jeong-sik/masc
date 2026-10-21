@@ -1,20 +1,14 @@
 include Dashboard_execution_helpers
 
-(** Keeper lifecycle phase — deterministic from status, context ratio,
-    and activity timestamps. Serialized to string at JSON boundary only. *)
+(** Keeper lifecycle phase — deterministic from pause, health and activity
+    timestamps. Serialized to string at JSON boundary only. *)
 type keeper_lifecycle =
   | Lc_offline
-  | Lc_handoff_imminent
-  | Lc_preparing
-  | Lc_high
   | Lc_active
   | Lc_idle
 
 let keeper_lifecycle_to_string = function
   | Lc_offline -> "offline"
-  | Lc_handoff_imminent -> "handoff-imminent"
-  | Lc_preparing -> "preparing"
-  | Lc_high -> "high"
   | Lc_active -> "active"
   | Lc_idle -> "idle"
 
@@ -44,12 +38,6 @@ let keeper_execution_state_to_string = function
 let signal_stale_sec = Env_config.Dashboard.signal_stale_sec
 let signal_quiet_sec = Env_config.Dashboard.signal_quiet_sec
 let signal_live_sec  = Env_config.Dashboard.signal_live_sec
-
-(** Keeper context-ratio lifecycle thresholds.
-    SSOT: [Env_config.Dashboard] module. *)
-let ctx_handoff_imminent = Env_config.Dashboard.ctx_handoff_imminent
-let ctx_preparing        = Env_config.Dashboard.ctx_preparing
-let ctx_high             = Env_config.Dashboard.ctx_high
 
 (** Keeper action-age threshold (seconds).
     SSOT: [Env_config.Dashboard] module. *)
@@ -301,17 +289,8 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
   let lifecycle =
     if liveness = Cl_paused then Lc_idle
     else if continuity_offline then Lc_offline
-    else
-      match context_ratio with
-      | Some ratio when ratio >= ctx_handoff_imminent ->
-          Lc_handoff_imminent
-      | Some ratio when ratio >= ctx_preparing -> Lc_preparing
-      | Some ratio when ratio >= ctx_high -> Lc_high
-      | Some _ | None ->
-          (* Both outcomes of the signal test were Lc_idle, so the test
-             distinguished nothing. last_signal_ts still feeds last_signal_at
-             and signal_age_s; only this branch is gone. *)
-          if last_action_ts > 0.0 then Lc_active else Lc_idle
+    else if last_action_ts > 0.0 then Lc_active
+    else Lc_idle
   in
   let (state, tone, note) =
     match liveness with
@@ -322,21 +301,11 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
        the same thing. *)
     | Cl_failing -> (Exec_critical, Tone_bad, "오류 발생")
     | Cl_live ->
-      match lifecycle with
-      | Lc_handoff_imminent ->
-          (Exec_critical, Tone_bad, "핸드오프 임박")
-      | Lc_preparing | Lc_high ->
-          (Exec_warning, Tone_warn, "연속성 압력이 높습니다")
-      | Lc_offline | Lc_active | Lc_idle ->
-          (* The branch removed here warned whenever the lifetime autonomous
-             turn counter was zero. Being lifetime, it could only ever fire on
-             a keeper that had never taken an autonomous turn, and never again
-             once it took one - including after it stopped. *)
-          if effective_activity_age_s >= keeper_action_stale_sec then
-            (Exec_warning, Tone_warn,
-             Printf.sprintf "마지막 활동 %.0f시간 전" (effective_activity_age_s /. Masc_time_constants.hour))
-          else
-            (Exec_healthy, Tone_ok, "정상 동작 중")
+      if effective_activity_age_s >= keeper_action_stale_sec then
+        (Exec_warning, Tone_warn,
+         Printf.sprintf "마지막 활동 %.0f시간 전" (effective_activity_age_s /. Masc_time_constants.hour))
+      else
+        (Exec_healthy, Tone_ok, "정상 동작 중")
   in
   let continuity = Printf.sprintf "Turns %d" turn_count in
   let focus =

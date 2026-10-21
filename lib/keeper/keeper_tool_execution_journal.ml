@@ -322,7 +322,10 @@ let same_source_observation left right = canonical_equal
 
 (* Checkpoint's strict codec owns content variants and failure provenance. Its
    wire codec deliberately omits ToolResult.json, so this typed sidecar retains
-   that optional value and recursively restores nested result blocks. *)
+   that optional value and recursively restores nested result blocks. The
+   sidecar value is not checked here: [valid_json] over the whole row, run when
+   an attempt settles and when a row is read, refuses non-finite numbers and
+   duplicate keys in it. *)
 let rec block_json block =
   let checkpoint = match Agent_core.Checkpoint.content_block_to_json_result ~scope:"composition journal content" block with
     | Ok json -> json | Error error -> refuse (Agent_core.Error.to_string error) in

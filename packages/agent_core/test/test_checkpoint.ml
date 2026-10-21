@@ -442,6 +442,47 @@ let test_a_save_from_the_written_checkpoint_reuses_its_encodings () =
      : Checkpoint.t)
 ;;
 
+(* 운영의 저장은 [to_json_result] 가 아니라 이 memo 경로다. [ToolResult.json] 은
+   wire 에 쓰이지 않으므로, 거기에 중복 키나 NaN 이 있어도 저장이 거절되면 안 된다. *)
+let test_unretained_tool_result_json_does_not_refuse_the_memo_save () =
+  let open Types in
+  let duplicate = `Assoc [ "same", `Int 1; "same", `Int 2 ] in
+  [ "duplicate key", `Assoc [ "nested", duplicate ]
+  ; "NaN", `Assoc [ "nested", `List [ `Float Float.nan ] ]
+  ; "-infinity", `Assoc [ "nested", `List [ `Float Float.neg_infinity ] ]
+  ]
+  |> List.iter (fun (label, json) ->
+    let checkpoint =
+      make_checkpoint
+        ~messages:
+          [ message
+              Tool
+              (ToolResult
+                 { tool_use_id = "call-1"
+                 ; content = "result"
+                 ; outcome = Tool_succeeded
+                 ; json = Some json
+                 ; content_blocks = None
+                 })
+          ]
+        ()
+    in
+    let memo = Checkpoint.create_encoding_memo () in
+    match Checkpoint.to_pieces_with_encoding_memo memo checkpoint with
+    | exception Invalid_argument detail ->
+      Alcotest.failf "%s: the memo save refused the unretained json: %s" label detail
+    | pieces, (_ : Checkpoint.t option) ->
+      (match Checkpoint.of_string (String.concat "" pieces) with
+       | Ok
+           { Checkpoint.messages =
+               [ { Types.content = [ ToolResult { content = "result"; json = None; _ } ]; _ } ]
+           ; _
+           } -> ()
+       | Ok _ -> Alcotest.failf "%s: the saved ToolResult is not content with json = None" label
+       | Error error ->
+         Alcotest.failf "%s: the saved document does not decode: %s" label (Error.to_string error)))
+;;
+
 (* 재시작 뒤 첫 턴은 파일을 읽어 시작한다. 그 읽기가 memo 를 채우면 첫 저장도
    히스토리를 다시 인코딩하거나 디코드하지 않고, 돌려준 값은 읽은 레코드를 그대로
    쓴다. *)
@@ -848,6 +889,8 @@ let () =
             test_a_save_from_the_written_checkpoint_reuses_its_encodings
         ; test_case "a read checkpoint saves without encoding its messages" `Quick
             test_a_read_checkpoint_saves_without_encoding_its_messages
+        ; test_case "an unretained ToolResult.json does not refuse the memo save" `Quick
+            test_unretained_tool_result_json_does_not_refuse_the_memo_save
         ; test_case "a read message a save would refuse is not held" `Quick
             test_a_read_message_a_save_would_refuse_is_not_held
         ; test_case "a read message the encoder writes differently is not held" `Quick
@@ -858,8 +901,28 @@ let () =
             match Checkpoint.drop_unencodable_json (make_checkpoint ()) with
             | None -> ()
             | Some _ -> Alcotest.fail "an encodable checkpoint has nothing to drop")
-        ; test_case "drop_unencodable_json drops a duplicate-key ToolResult json" `Quick (fun () ->
+        ; test_case "drop_unencodable_json drops a duplicate-key ToolUse input" `Quick (fun () ->
             let poisoned =
+              make_checkpoint
+                ~messages:
+                  [ message
+                      Types.Assistant
+                      (Types.ToolUse
+                         { id = "call-1"
+                         ; name = "read"
+                         ; input = `Assoc [ ("k", `Int 1); ("k", `Int 2) ]
+                         })
+                  ]
+                ()
+            in
+            check_checkpoint_rejected "duplicate-key ToolUse input" poisoned;
+            match Checkpoint.drop_unencodable_json poisoned with
+            | None -> Alcotest.fail "a duplicate-key payload is droppable"
+            | Some recovered -> check_checkpoint_json_contract recovered)
+        ; test_case "drop_unencodable_json is None when only ToolResult.json is unencodable" `Quick (fun () ->
+            (* The wire does not write the field, so the checkpoint encodes and
+               there is nothing to recover. *)
+            let checkpoint =
               make_checkpoint
                 ~messages:
                   [ message
@@ -868,17 +931,16 @@ let () =
                          { tool_use_id = "call-1"
                          ; content = "result"
                          ; outcome = Tool_succeeded
-                         ; json =
-                             Some (`Assoc [ ("k", `Int 1); ("k", `Int 2) ])
+                         ; json = Some (`Assoc [ ("k", `Int 1); ("k", `Int 2) ])
                          ; content_blocks = None
                          })
                   ]
                 ()
             in
-            check_checkpoint_rejected "duplicate-key ToolResult json" poisoned;
-            match Checkpoint.drop_unencodable_json poisoned with
-            | None -> Alcotest.fail "a duplicate-key payload is droppable"
-            | Some recovered -> check_checkpoint_json_contract recovered)
+            check_checkpoint_json_contract checkpoint;
+            match Checkpoint.drop_unencodable_json checkpoint with
+            | None -> ()
+            | Some _ -> Alcotest.fail "an encodable checkpoint has nothing to drop")
         ; test_case "drop_unencodable_json is None for a non-payload refusal" `Quick (fun () ->
             (* An identifier violation is not a json payload problem: there is
                nothing to drop, so recovery must not offer a copy and the
@@ -953,21 +1015,6 @@ let () =
                     ]
                   ()
               in
-              let tool_result_json =
-                make_checkpoint
-                  ~messages:
-                    [ message
-                        Types.Tool
-                        (Types.ToolResult
-                           { tool_use_id = "call-1"
-                           ; content = "result"
-                           ; outcome = Tool_succeeded
-                           ; json = Some (`Assoc [ "nested", `List [ `Float value ] ])
-                           ; content_blocks = None
-                           })
-                    ]
-                  ()
-              in
               let context = Context.create_sync () in
               Context.set context "nested" (`Assoc [ "value", `Float value ]);
               let input_schema =
@@ -1002,7 +1049,6 @@ let () =
               ; "min_p", { (make_checkpoint ()) with min_p = Some value }
               ; "message metadata", metadata
               ; "ToolUse.input", tool_input
-              ; "ToolResult.json", tool_result_json
               ; "Context value", make_checkpoint ~context ()
               ; ( "working_context"
                 , { (make_checkpoint ()) with
@@ -1049,21 +1095,6 @@ let () =
                   ]
                 ()
             in
-            let tool_result_json =
-              make_checkpoint
-                ~messages:
-                  [ message
-                      Types.Tool
-                      (Types.ToolResult
-                         { tool_use_id = "call-1"
-                         ; content = "result"
-                         ; outcome = Tool_succeeded
-                         ; json = Some (`Assoc [ "nested", duplicate ])
-                         ; content_blocks = None
-                         })
-                  ]
-                ()
-            in
             let context = Context.create_sync () in
             Context.set context "value" (`Assoc [ "nested", duplicate ]);
             let reasoning_details =
@@ -1080,8 +1111,7 @@ let () =
                 ()
             in
             let cases =
-              [ "ToolResult.json", tool_result_json
-              ; "message metadata", metadata
+              [ "message metadata", metadata
               ; "ToolUse.input", tool_input
               ; "Context value", make_checkpoint ~context ()
               ; ( "working_context"
@@ -1099,7 +1129,7 @@ let () =
             List.iter
               (fun (path, checkpoint) -> check_checkpoint_rejected path checkpoint)
               cases;
-            match Checkpoint.to_json tool_result_json with
+            match Checkpoint.to_json tool_input with
             | _ -> fail "throwing serializer accepted a duplicate public JSON value"
             | exception Invalid_argument message ->
               check
@@ -1107,6 +1137,48 @@ let () =
                 "throwing API keeps Invalid_argument"
                 true
                 (String.starts_with ~prefix:"Checkpoint.to_json:" message))
+        ; test_case "an unretained ToolResult.json does not refuse the save" `Quick (fun () ->
+            (* [ToolResult.json] is the parse of [content]. The wire writes
+               [content] and never the parse, so a duplicate key or a
+               non-finite number in it must not refuse the checkpoint. *)
+            let duplicate = `Assoc [ "same", `Int 1; "same", `Int 2 ] in
+            [ "duplicate key", `Assoc [ "nested", duplicate ]
+            ; "NaN", `Assoc [ "nested", `List [ `Float Float.nan ] ]
+            ; "+infinity", `Assoc [ "nested", `List [ `Float Float.infinity ] ]
+            ]
+            |> List.iter (fun (label, json) ->
+              let checkpoint =
+                make_checkpoint
+                  ~messages:
+                    [ message
+                        Types.Tool
+                        (Types.ToolResult
+                           { tool_use_id = "call-1"
+                           ; content = "result"
+                           ; outcome = Tool_succeeded
+                           ; json = Some json
+                           ; content_blocks = None
+                           })
+                    ]
+                  ()
+              in
+              match Checkpoint.to_json_result checkpoint with
+              | Error error ->
+                fail (label ^ ": the unretained json refused the save: " ^ Error.to_string error)
+              | Ok encoded ->
+                (match Checkpoint.of_json encoded with
+                 | Ok
+                     { Checkpoint.messages =
+                         [ { Types.content =
+                               [ Types.ToolResult { content = "result"; json = None; _ } ]
+                           ; _
+                           }
+                         ]
+                     ; _
+                     } -> ()
+                 | Ok _ -> fail (label ^ ": the restored ToolResult is not content with json = None")
+                 | Error error ->
+                   fail (label ^ ": the saved checkpoint does not decode: " ^ Error.to_string error))))
         ; test_case "old version 4 is rejected" `Quick (fun () ->
             match Checkpoint.of_json (`Assoc [ "version", `Int 4 ]) with
             | Error (Error.Serialization (Error.VersionMismatch { got = 4; _ })) -> ()

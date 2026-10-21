@@ -345,7 +345,8 @@ let references_in_chat_operation_store ~ownership_root path =
                | Keeper_semantic_execution.Official_checkpointed _
                | Keeper_semantic_execution.Interrupted_execution
                | Keeper_semantic_execution.Runtime_retry _
-               | Keeper_semantic_execution.Gate_wait _ ->
+               | Keeper_semantic_execution.Gate_wait _
+               | Keeper_semantic_execution.Input_wait _ ->
                  after_record)
             | Keeper_semantic_execution.Preparing
             | Keeper_semantic_execution.Ready

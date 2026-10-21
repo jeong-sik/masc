@@ -129,7 +129,40 @@ Owner reinstall, missing/corrupt/hash-mismatched retained evidence, unavailable
 Owner/prior history and metadata trace drift. Source typing, executing these
 fixtures, and product acceptance remain separate evidence.
 
-Owner-serialized response admission/CAS, durable waiting and continuation
-lifecycle, live/retained reconciliation, SSE invalidation and persistent TUI
-projection remain unfinished. All #38005 layers remain Draft; this contract
-does not authorize installation, merge or whole-issue completion.
+## Durable direct-operation waiting
+
+`Keeper_semantic_execution.Input_wait` records the complete canonical pending
+request and exact owned checkpoint reference in the existing `Recovering`
+representation. It retains that checkpoint and is distinct from an ordinary
+checkpoint, runtime retry or Gate wait. Generic resume and successful settlement
+cannot consume it. Its request timeout never becomes a timer or expiry policy.
+
+`Keeper_chat_operation_store.defer_direct_input_wait` admits this state only
+for the original running direct operation and execution digest. Within one
+SQLite transaction it checks the current input-owner reference and the original
+native call's matching checkpoint and settled `Retire` disposition, records
+the wait, acknowledges the native receipt and queues the same operation. The
+original input and admission order survive. Active or unknown native effects,
+stale references/digests and conflicting canonical questions refuse. A queued
+duplicate is idempotent only when the complete waiting value still matches.
+
+Claim, priority, ordinary resume and restart paths leave an unresolved wait
+blocked regardless of elapsed time. Independent queued inputs remain claimable.
+Explicit cancellation settles the original wait while preserving the separate
+global input-owner fact. Uncertain commit acknowledgement remains an error;
+readback exposes the actual committed state without converting that error into
+acceptance or releasing retained-file deletion authority.
+
+This Store API is a journal boundary, not proof that a physical retained
+checkpoint contains the request. Its caller must validate the original child,
+trace, session root and exact retained payload before admission. The SQLite
+fixtures exercise real journal transactions, restart, identity refusal,
+independent work, cancellation and commit faults; their opaque checkpoint
+references do not establish filesystem availability or runtime integration.
+
+The actual turn/Owner producer does not yet call this API: `InputRequired`
+still follows the existing result delivery path. Wiring that producer, durable
+autonomous waiting, Owner-serialized response admission/CAS and continuation,
+live/retained reconciliation, SSE invalidation and persistent TUI projection
+remain required. All #38005 layers remain Draft; this contract does not
+authorize installation, merge or whole-issue completion.

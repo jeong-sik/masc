@@ -3,6 +3,7 @@
     claim slots (installation and any shared resources), never worker inputs.
     Lease inodes are stable and must never be unlinked or replaced. *)
 type t
+type preparation = Unpublished | Current of t
 type process = { instance_id : string; pid : int; started : string }
 type status = Awaiting_exec | Live of process | Cleanup_pending of process | Settled
 type error = Invalid_claim of string | Stale_claim | Consumed_claim
@@ -15,6 +16,19 @@ val prepare : directories:string list -> instance_id:string -> (t, error) result
     An instance is admitted only once in each slot. Its durable reservation is
     retained across replacements, retirement and process exit; retries require
     a fresh instance ID. A failed partial preparation may reserve some slots. *)
+val reopen : directories:string list -> instance_id:string -> (t, error) result
+(** Recover this exact existing claim without admitting or creating anything.
+    Every slot's current intent and permanent history must exist and match. *)
+val current : directories:string list -> (t, error) result
+(** Reopen the single current claim shared by all existing host-selected slots.
+    Missing, conflicting or damaged records are refused. No files are created. *)
+val recover_preparation : directory:string -> (preparation, error) result
+(** Inspect one host-selected installation slot under its stable gate. Empty
+    bootstrap metadata may be completed without admitting execution. A single
+    complete, unconsumed reservation without a published intent is fenced as
+    retired and returned as [Current], preserving its permanent instance history. [Unpublished] has no reservation to clean up.
+    Published, consumed, conflicting or damaged authority is never recreated or
+    treated as a fresh slot. Gate and lease inodes are never replaced. *)
 val instance_id : t -> string
 val directories : t -> string list
 val retire : t -> (unit, error) result
@@ -36,3 +50,7 @@ val exec : instance_id:string -> directories:string list -> command:string ->
     must preserve inherited lease descriptors until exit. Descendants that leave
     the group require their package's explicit resource ownership/cleanup.
     Never call in the MASC server. No payload starts on partial acquisition. *)
+module For_testing : sig
+  val prepare : sync_ancestry:(string -> unit) -> directories:string list ->
+    instance_id:string -> (t, error) result
+end

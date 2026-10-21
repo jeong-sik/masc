@@ -88,7 +88,7 @@ let make_backend () =
   let proven ~engine work =
     Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~state_owner ~instance_id ~(package : Types.package) ~binding:_ ~on_engine ~is_live_instance ~on_created ->
+    start = (fun ~sw:_ ~state_owner ~instance_id ~installation_id:_ ~(package : Types.package) ~binding:_ ~on_authority ~is_live_instance ~on_created ->
       let* container = Types.container package
         |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
       Hashtbl.replace state.state_owners instance_id
@@ -108,8 +108,8 @@ let make_backend () =
         resolved_image = (match Lane_addon_engine.image_of_inspect container.runtime (match container.runtime with
           | Types.Docker -> "sha256:" ^ String.make 64 'a'
           | Types.Apple_container -> "[{\"configuration\":{\"descriptor\":{\"digest\":\"sha256:" ^ String.make 64 'a' ^ "\"}}}]") with
-          | Ok image -> image | Error detail -> Alcotest.fail detail);
-        host = None; container_id;
+          | Ok image -> Some image | Error detail -> Alcotest.fail detail);
+                host = None; resource = Lifecycle.Container_resource container_id;
         exported_tools = (fun () -> []);
         call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
         action_schema = (fun () -> None);
@@ -133,13 +133,14 @@ let make_backend () =
                 stop_sent := true;
                 record (Stopped instance_id);
                 Eio.Promise.resolve release_stop ()
-              end) removed);
+              end;
+              Lifecycle.Released {engine;container_id=Some container_id}) removed);
       } in
       if not !(state.startup_available) then begin
         record (Startup_failed instance_id);
         Error (Lifecycle.Worker_failed "worker dependency unavailable")
       end else begin
-        match on_engine engine with
+        match on_authority (Lifecycle.Container_authority {runtime=container.runtime;engine}) with
         | Error detail -> Error (Lifecycle.Persistence_failed detail)
         | Ok () when !(state.create_refusal) <> None ->
             (* The engine is on record; the create itself is refused. *)
@@ -165,9 +166,14 @@ let make_backend () =
                      Ok connection)
       end);
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
-    image_ready = (fun ~package:_ ->
+    package_ready = (fun ~package:_ ->
       if !(state.image_available) then Ok () else Error "image is not on the host");
-    recover_stop = (fun ~runtime ~state_owner ~instance_id ~engine ~container_id ->
+    recover_stop = (fun ~state_owner ~instance_id ~authority ~resource ->
+      match authority,resource with
+      | Lifecycle.Native_admission _,_ | Lifecycle.Container_authority _,Some (Lifecycle.Native_resource _) ->
+          Error (Lifecycle.Cleanup_unconfirmed "container fixture requires container authority")
+      | Lifecycle.Container_authority {runtime;engine},(None | Some (Lifecycle.Container_resource _)) ->
+      let container_id = Option.bind resource Lifecycle.container_id in
       Hashtbl.replace state.recovered_runtimes instance_id runtime;
       Hashtbl.replace state.recovered_state_owners instance_id
         (Option.map (Lane_addon_worker_state.volume_name ~runtime) state_owner);
@@ -186,7 +192,8 @@ let make_backend () =
             | None, None -> Lane_addon_engine.Name (container_name instance_id), None in
           let removed = proven ~engine (fun () ->
             Lane_addon_slot.release (Fake.port state.world) ~lookup ~instance_id ~mine) in
-          Result.map (fun () -> record (Recovery_completed (instance_id, container_id))) removed
+          Result.map (fun () -> record (Recovery_completed (instance_id, container_id));
+            Lifecycle.Released {engine;container_id}) removed
         end
       end);
     condition_met = (fun ~runtime:_ condition ->
@@ -551,7 +558,11 @@ mode = "persistent"
     let old_id = declared_instance config "observer" |> text "instance_id" in
     await_ready clock config old_id;
     let captured = instance config old_id in
-    let container_id = text "container_id" captured in
+    let container_id = member "resource" captured |> text "id" in
+    (match runtime with
+     | Types.Docker -> check bool "current Docker writer omits its default runtime" false
+         (List.mem_assoc "runtime" (member "package" captured |> Yojson.Safe.Util.to_assoc))
+     | Types.Apple_container -> ());
     check string "runtime snapshot marks actual entry live" "live" (text "runtime_presence" captured);
     detach clock config old_id;
     (* All live fake work is stopped before replaying the captured persistent
@@ -741,7 +752,7 @@ let test_historical_missing_container_identity_is_recovered () =
     detach clock config old_id;
     Runtime.For_testing.reset ();
     let fields = Yojson.Safe.Util.to_assoc captured in
-    let without_id = `Assoc (("container_id", `Null) :: List.remove_assoc "container_id" fields) in
+    let without_id = `Assoc (("resource", `Null) :: List.remove_assoc "resource" fields) in
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     unwrap (Store.save_binding store ~instance_id:old_id without_id);
     write path bytes;
@@ -782,7 +793,7 @@ let test_historical_never_started_leaves_no_binding () =
     check int "failed startup has no observation history" 0
       (number "observation_seq" never_started);
     check bool "failed startup owns no container" true
-      (member "container_id" never_started = `Null);
+      (member "resource" never_started = `Null);
     check int "the backend never observed" 0 (List.length !(state.observations));
     ignore (dispatch config Runtime.Detach ["instance_id", `String old_id]);
     await clock (fun () ->
@@ -872,7 +883,7 @@ let test_historical_recovery_failure_waits_for_maintenance () =
     let old_id = declared_instance config "observer" |> text "instance_id" in
     await_ready real_clock config old_id;
     let captured = instance config old_id in
-    let cid = Some (text "container_id" captured) in
+    let cid = Some (member "resource" captured |> text "id") in
     detach real_clock config old_id;
     Runtime.For_testing.reset ();
     (* Replay only after the live fake has actually stopped. The service must
@@ -1546,7 +1557,7 @@ let test_another_engine_does_not_release_a_worker () =
     let container = Store.digest id in
     check bool "the container is on the first engine" true (Fake.holds state.home container);
     check string "the first engine is on record" "engine-a"
-      (instance config id |> member "engine" |> text "id");
+      (instance config id |> member "execution_authority" |> member "engine" |> text "id");
     Fake.point_at state.world (Fake.docker "engine-b");
     write path (declaration ~enabled:false ~id:"observer" ~manifest ());
     ignore (reconcile config directory);
@@ -1875,7 +1886,7 @@ let test_an_incarnation_is_live_while_it_has_a_worker_or_a_cleanup () =
     check bool "an incarnation with a worker is live" true (live old_id);
     check bool "an incarnation nothing holds is not live" false (live "nobody");
     let captured = instance config old_id in
-    let container_id = text "container_id" captured in
+    let container_id = member "resource" captured |> text "id" in
     detach clock config old_id;
     Runtime.For_testing.reset ();
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in

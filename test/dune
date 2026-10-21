@@ -5587,6 +5587,13 @@
  (action (run %{test} %{dep:../bin/masc_native_addon_launcher.exe})))
 
 (test
+ (name test_lane_addon_native_runtime)
+ (modules test_lane_addon_native_runtime)
+ (libraries masc masc.native_addon_lease masc_process masc.fs_compat alcotest eio eio_main yojson unix masc.masc_eio_context eio.unix)
+ (deps ../bin/masc_native_addon_launcher.exe)
+ (action (run %{test} %{dep:../bin/masc_native_addon_launcher.exe})))
+
+(test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
  (libraries masc.lane_addon_call_context masc masc.string_util masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat base64))

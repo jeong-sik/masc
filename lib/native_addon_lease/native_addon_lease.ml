@@ -1,4 +1,5 @@
 type t = { instance_id : string; directories : string list }
+type preparation = Unpublished | Current of t
 type process = { instance_id : string; pid : int; started : string }
 type status = Awaiting_exec | Live of process | Cleanup_pending of process | Settled
 type error = Invalid_claim of string | Stale_claim | Consumed_claim
@@ -15,9 +16,9 @@ let directories (t : t) = t.directories
 let ( let* ) = Result.bind
 external open_directory : string -> Unix.file_descr = "masc_native_lease_directory"
 external open_private_file : Unix.file_descr -> string -> bool -> Unix.file_descr = "masc_native_lease_file"
-let open_file directory name = open_private_file directory name true
 external holder : Unix.file_descr -> int = "masc_native_lease_holder"
 external leads_process_group : unit -> bool = "masc_native_lease_group_leader"
+external replace_private_file : Unix.file_descr -> string -> string -> unit = "masc_native_lease_replace"
 type slot = { directory : Unix.file_descr;
   lease : Unix.file_descr; intent : Unix.file_descr; owner : Unix.file_descr }
 type intent = Admitted of string | Retired of string
@@ -30,16 +31,17 @@ let close_all descriptors =
     try Unix.close fd; previous with Unix.Unix_error _ as exn ->
       match previous with None -> Some exn | Some _ -> previous) None descriptors in
   match failure with None -> () | Some exn -> raise exn
-let with_slots directories work = protect (fun () -> Mutex.protect coordinator (fun () ->
+let with_slots ?(create=false) directories work = protect (fun () -> Mutex.protect coordinator (fun () ->
   let opened = ref [] in
   let retain fd = opened := fd :: !opened;fd in
   Fun.protect ~finally:(fun () -> close_all !opened) (fun () ->
     let slots = List.map (fun path ->
       let directory = retain (open_directory path) in
-      let gate = retain (open_file directory "gate") in
+      let file name = retain (open_private_file directory name create) in
+      let gate = file "gate" in
       Unix.lockf gate Unix.F_LOCK 0;
-      {directory;lease=retain (open_file directory "lease");
-        intent=retain (open_file directory "intent.json");owner=retain (open_file directory "owner.json")}) directories in
+      let slot = {directory;lease=file "lease";intent=file "intent.json";owner=file "owner.json"} in
+      Unix.fsync directory;slot) directories in
     work slots)))
 let read fd =
   ignore (Unix.lseek fd 0 Unix.SEEK_SET);
@@ -56,7 +58,7 @@ let write_json slot fd value =
     let written = Unix.write fd bytes offset (Bytes.length bytes-offset) in
     if written=0 then raise (Sys_error "native lease write made no progress") else loop (offset+written) in
   loop 0; Unix.fsync fd; Unix.fsync slot.directory
-let parse fd decode = match read fd with
+let parse fd decode = Unix.fsync fd;match read fd with
   | "" -> Ok None
   | bytes -> (try decode (Yojson.Safe.from_string bytes) |> Result.map Option.some
       with Yojson.Json_error detail -> Error (State_invalid detail))
@@ -73,11 +75,14 @@ let read_owner slot = parse slot.owner (function
         when String.trim instance_id<>"" && pid>1 && String.trim started<>"" -> Ok {instance_id;pid;started}
       | _ -> Error (State_invalid "invalid native process receipt"))
   | _ -> Error (State_invalid "invalid native process receipt"))
-let write_intent slot instance state = write_json slot slot.intent
+let write_metadata slot name value =
+  replace_private_file slot.directory name (Yojson.Safe.to_string value)
+let write_intent slot instance state = write_metadata slot "intent.json"
   (`Assoc ["instance_id",`String instance;"state",`String state])
-let with_history ?(create=false) slot instance work =
-  let digest = Digestif.SHA256.(to_hex (digest_string instance)) in
-  let fd = open_private_file slot.directory ("instance-" ^ digest ^ ".json") create in
+let history_name instance =
+  "instance-" ^ Digestif.SHA256.(to_hex (digest_string instance)) ^ ".json"
+let with_history slot instance work =
+  let fd = open_private_file slot.directory (history_name instance) false in
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> work fd)
 let read_history fd instance =
   let* history = parse fd (function
@@ -91,9 +96,9 @@ let read_history fd instance =
   match history with
   | Some history -> Ok history
   | None -> Error (State_invalid "native instance history is empty")
-let write_history slot fd instance state =
+let write_history slot instance state =
   let state = match state with Reserved -> "reserved" | Revoked -> "revoked" | Consumed -> "consumed" in
-  write_json slot fd (`Assoc ["instance_id",`String instance;"state",`String state])
+  write_metadata slot (history_name instance) (`Assoc ["instance_id",`String instance;"state",`String state])
 let unused_instance slot instance =
   try with_history slot instance (fun fd ->
   let* history = read_history fd instance in
@@ -123,43 +128,148 @@ let predecessor_clear slot =
     | None -> Ok ()
     | Some previous -> let* gone = cleared previous in
         if gone then Ok () else Error (Busy "native predecessor or foreground group is not released")
-let claim ~create ~instance_id ~directories =
-  if String.trim instance_id="" || String.contains instance_id '\000' then Error (Invalid_claim "native instance must be nonblank without NUL")
-  else if directories=[] || List.exists (fun path -> Filename.is_relative path || String.contains path '\000') directories then
+let rec sync_ancestry path =
+  let fd = Unix.openfile path [Unix.O_RDONLY;Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd);
+  let parent = Filename.dirname path in
+  if parent<>path then sync_ancestry parent
+let canonical_directories ~sync_ancestry ~create directories =
+  if directories=[] || List.exists (fun path -> Filename.is_relative path || String.contains path '\000') directories then
     Error (Invalid_claim "native claims require absolute private directories")
   else protect (fun () ->
     if create then List.iter (fun path ->
       try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ()) directories;
     let directories = List.map (fun path ->
       let directory = open_directory path in
-      Fun.protect ~finally:(fun () -> Unix.close directory) (fun () -> Unix.realpath path)) directories in
-    Ok {instance_id;directories=List.sort_uniq String.compare directories})
+      Fun.protect ~finally:(fun () -> Unix.close directory) (fun () ->
+        let canonical = Unix.realpath path in
+        Unix.fsync directory;sync_ancestry (Filename.dirname canonical);canonical)) directories in
+    Ok (List.sort_uniq String.compare directories))
+let claim ?(sync_ancestry=sync_ancestry) ~create ~instance_id ~directories () =
+  if String.trim instance_id="" || String.contains instance_id '\000' then Error (Invalid_claim "native instance must be nonblank without NUL")
+  else let* directories = canonical_directories ~sync_ancestry ~create directories in
+    Ok {instance_id;directories}
 let traverse f = List.fold_left (fun result slot -> let* () = result in f slot) (Ok ())
-let prepare ~directories ~instance_id =
-  let* t = claim ~create:true ~instance_id ~directories in
-  let* () = with_slots t.directories (fun slots ->
+let prepare_with_sync ~sync_ancestry ~directories ~instance_id =
+  let* t = claim ~sync_ancestry ~create:true ~instance_id ~directories () in
+  let* () = with_slots ~create:true t.directories (fun slots ->
       let* () = traverse (fun slot ->
         let* () = predecessor_clear slot in
         let* _intent = read_intent slot in
         unused_instance slot instance_id) slots in
       (* Reserve before publishing the current intent. Never erase these files:
          latest-owner receipts alone forget A when B replaces it. *)
-      List.iter (fun slot -> with_history ~create:true slot instance_id (fun fd ->
-        write_history slot fd instance_id Reserved)) slots;
+      List.iter (fun slot -> write_history slot instance_id Reserved) slots;
       List.iter (fun slot -> write_intent slot instance_id "admitted") slots;Ok ()) in
   Ok t
+let prepare = prepare_with_sync ~sync_ancestry
 let check_current (t : t) slot =
   let* intent = read_intent slot in
   match intent with
   | Some (Admitted instance) when instance=t.instance_id -> Ok false
   | Some (Retired instance) when instance=t.instance_id -> Ok true
   | None | Some (Admitted _ | Retired _) -> Error Stale_claim
+let validate_existing t slots = traverse (fun slot ->
+  let* _retired = check_current t slot in
+  with_history slot t.instance_id (fun fd -> read_history fd t.instance_id |> Result.map ignore)) slots
+let reopen ~directories ~instance_id =
+  let* t = claim ~create:false ~instance_id ~directories () in
+  let* () = with_slots t.directories (validate_existing t) in Ok t
+let current ~directories =
+  let* directories = canonical_directories ~sync_ancestry ~create:false directories in
+  with_slots directories (fun slots ->
+    match slots with
+    | [] -> Error (Invalid_claim "native claim has no slots")
+    | slot::_ ->
+        let* intent = read_intent slot in
+        let* instance_id = match intent with
+          | Some (Admitted id | Retired id) -> Ok id
+          | None -> Error (State_invalid "current native intent is missing") in
+        let t = {directories;instance_id} in
+        let* () = validate_existing t slots in Ok t)
+let temporary_metadata name = match String.split_on_char '-' name with
+  | [".pending";pid;sequence] ->
+      (match int_of_string_opt pid, int_of_string_opt sequence with
+       | Some pid, Some sequence -> pid > 0 && sequence > 0
+       | None, (Some _ | None) | Some _, None -> false)
+  | [] | [_] | [_;_] | [_;_;_] | _::_::_::_ -> false
+let preparation_histories path directory =
+  Array.fold_left (fun result name ->
+    let* histories = result in
+    if List.mem name ["gate";"lease";"intent.json";"owner.json"] then Ok histories
+    else
+      let fd = open_private_file directory name false in
+      Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+        (* Staged metadata is never an authority name and cannot admit a
+           launcher. Keep it for diagnosis after an interrupted atomic write. *)
+        if temporary_metadata name then Ok histories
+        else
+          let* instance = parse fd (function
+            | `Assoc fields -> (match List.assoc_opt "instance_id" fields with
+                | Some (`String instance) when name=history_name instance -> Ok instance
+                | None | Some _ -> Error (State_invalid "unknown native preparation metadata"))
+            | _ -> Error (State_invalid "unknown native preparation metadata")) in
+          match instance with
+          | None -> Error (State_invalid "native preparation history is empty")
+          | Some instance ->
+              let* history = read_history fd instance in Ok ((instance,history)::histories)))
+    (Ok []) (Sys.readdir path)
+let recover_preparation ~directory:path =
+  let* directories = canonical_directories ~sync_ancestry ~create:false [path] in
+  protect (fun () ->
+    let directory = open_directory path in
+    let* may_complete = Fun.protect ~finally:(fun () -> Unix.close directory) (fun () ->
+      let contents name =
+        try
+          let fd = open_private_file directory name false in
+          Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Ok (Some (read fd)))
+        with Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None in
+      let* intent = contents "intent.json" in
+      let* owner = contents "owner.json" in
+      match intent, owner with
+      | Some text, _ when text<>"" -> Ok false
+      | _, Some text when text<>"" -> Ok false
+      | (None | Some _), (None | Some _) ->
+          let* histories = preparation_histories path directory in
+          if List.exists (fun (_,history) -> match history with
+              | Reserved | Revoked -> false | Consumed -> true) histories then Ok false
+          else match histories with
+            | [] | [_] -> Ok true
+            | _::_::_ -> Error (State_invalid "unpublished native reservations disagree")) in
+    with_slots ~create:may_complete directories (function
+      | [slot] ->
+          let* intent = read_intent slot in
+          (match intent with
+           | Some (Admitted instance_id | Retired instance_id) ->
+               let claim={directories;instance_id} in
+               let* ()=validate_existing claim [slot] in Ok (Current claim)
+           | None when not may_complete -> Error (State_invalid "current native intent is missing")
+           | None ->
+               let* ()=predecessor_clear slot in
+               let* owner=read_owner slot in
+               (match owner with
+                | Some _ -> Error (State_invalid "unpublished slot has a native owner")
+                | None ->
+                    let* histories=preparation_histories path slot.directory in
+                    match histories with
+                    | [] -> Ok Unpublished
+                    | [instance_id,history] ->
+                        (match history with
+                         | Consumed -> Error (State_invalid "native preparation was already consumed")
+                         | Reserved | Revoked ->
+                             (* Recover cleanup authority, never execution. The
+                                original ID remains permanently unavailable. *)
+                             write_history slot instance_id Revoked;
+                             write_intent slot instance_id "retired";
+                             Ok (Current {directories;instance_id}))
+                    | _::_::_ -> Error (State_invalid "unpublished native reservations disagree")))
+      | [] | _::_::_ -> Error (Invalid_claim "native preparation requires one installation slot")))
 let retire t = with_slots t.directories (fun slots ->
   let* () = traverse (fun slot -> check_current t slot |> Result.map ignore) slots in
   let* () = traverse (fun slot -> with_history slot t.instance_id (fun fd ->
     let* history = read_history fd t.instance_id in
     match history with
-    | Reserved -> write_history slot fd t.instance_id Revoked; Ok ()
+    | Reserved -> write_history slot t.instance_id Revoked; Ok ()
     | Revoked | Consumed -> Ok ())) slots in
   List.iter (fun slot -> write_intent slot t.instance_id "retired") slots;Ok ())
 let slot_status t slot =
@@ -217,7 +327,7 @@ let request_termination t =
       Owner_process_identity.request_termination identity
       |> Result.map_error (fun error -> Termination_refused error)) (Ok ()) identities)
 let exec ~instance_id ~directories ~command ~arguments =
-  let* t = claim ~create:false ~instance_id ~directories in
+  let* t = claim ~create:false ~instance_id ~directories () in
   if String.trim command="" || List.exists (fun text -> String.contains text '\000') (command::arguments) then
     Error (Invalid_claim "native command must be nonblank without NUL")
   else if not (leads_process_group ()) then Error (Invalid_claim "native launcher must lead its foreground process group")
@@ -229,11 +339,13 @@ let exec ~instance_id ~directories ~command ~arguments =
       reserved_instance slot instance_id) slots in
     let* started = Option.to_result ~none:Identity_unavailable (Posix_spawn_detached.process_start (Unix.getpid ())) in
     List.iter (fun slot -> Unix.lockf slot.lease Unix.F_TLOCK 0) slots;
-    List.iter (fun slot -> with_history slot instance_id (fun fd ->
-      write_history slot fd instance_id Consumed)) slots;
+    List.iter (fun slot -> write_history slot instance_id Consumed) slots;
     List.iter (fun slot -> write_json slot slot.owner
       (`Assoc ["instance_id",`String instance_id;"pid",`Int (Unix.getpid ());"started",`String started])) slots;
     (* Closing ANY descriptor for a POSIX lease inode drops that process's lock.
        Keep only the exact lease descriptor through exec; gates/metadata close. *)
     List.iter (fun slot -> Unix.clear_close_on_exec slot.lease) slots;
     Unix.execvpe command (Array.of_list (command::arguments)) (Unix.environment ()))
+module For_testing = struct
+  let prepare = prepare_with_sync
+end

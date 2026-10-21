@@ -26,6 +26,47 @@ let engine_of_json = function
        | _ -> Error "invalid container engine identity")
   | _ -> Error "invalid container engine identity"
 
+type authority =
+  | Container_authority of { runtime : Lane_addon_types.runtime; engine : engine }
+  | Native_admission of { installation_id : string }
+type resource =
+  | Container_resource of string
+  | Native_resource of { pid : int; started : string option }
+let sorted_identity = List.sort (fun (a,_) (b,_) -> String.compare a b)
+let authority_to_json = function
+  | Container_authority {runtime;engine} -> `Assoc ["kind",`String "container";
+      "runtime",`String (Lane_addon_types.runtime_to_string runtime);"engine",engine_to_json engine]
+  | Native_admission {installation_id} -> `Assoc ["kind",`String "host_process";"installation_id",`String installation_id]
+let authority_of_json = function
+  | `Assoc fields -> (match sorted_identity fields with
+      | ["engine",engine;"kind",`String "container";"runtime",`String runtime] ->
+          Result.bind (engine_of_json engine) (fun engine ->
+            Option.to_result ~none:"invalid owner runtime" (Lane_addon_types.runtime_of_string runtime)
+            |> Result.map (fun runtime -> Container_authority {runtime;engine}))
+      | ["installation_id",`String installation_id;"kind",`String "host_process"] when String.trim installation_id<>"" ->
+          Ok (Native_admission {installation_id})
+      | _ -> Error "invalid execution authority")
+  | _ -> Error "invalid execution authority"
+let resource_to_json = function
+  | Container_resource id -> `Assoc ["kind",`String "container";"id",`String id]
+  | Native_resource {pid;started} -> `Assoc ["kind",`String "host_process";"pid",`Int pid;
+      "started",Option.fold ~none:`Null ~some:(fun text -> `String text) started]
+let resource_of_json = function
+  | `Assoc fields -> (match sorted_identity fields with
+      | ["id",`String id;"kind",`String "container"] when String.trim id<>"" -> Ok (Container_resource id)
+      | ["kind",`String "host_process";"pid",`Int pid;"started",started] when pid>1 ->
+          (match started with
+           | `Null -> Ok (Native_resource {pid;started=None})
+           | `String text when String.trim text<>"" -> Ok (Native_resource {pid;started=Some text})
+           | _ -> Error "invalid native process incarnation")
+      | _ -> Error "invalid execution resource")
+  | _ -> Error "invalid execution resource"
+let container_id = function Container_resource id -> Some id | Native_resource _ -> None
+let resource_to_string = function
+  | Container_resource id -> "container " ^ id
+  | Native_resource {pid;started} -> Printf.sprintf "native process %d%s" pid
+      (Option.fold ~none:"" ~some:(fun value -> " (" ^ value ^ ")") started)
+
 type observed_engine =
   | Other_engine of engine
   | Unreadable_engine of string
@@ -51,6 +92,7 @@ type failed = { cause : failure; first : failure option }
 type release =
   | Never_created
   | Released of { engine : engine; container_id : string option }
+  | Native_released of { installation_id : string; instance_id : string }
 type state =
   | Attached
   | Observing
@@ -211,6 +253,8 @@ let release_to_json = function
   | Released { engine; container_id } ->
       `Assoc ["kind", `String "released"; "engine", engine_to_json engine;
               "container_id", (match container_id with None -> `Null | Some id -> `String id)]
+  | Native_released {installation_id;instance_id} -> `Assoc ["kind",`String "native_released";
+      "installation_id",`String installation_id;"instance_id",`String instance_id]
 
 let release_of_json = function
   | `Assoc ["kind", `String "never_created"] -> Ok Never_created
@@ -223,6 +267,9 @@ let release_of_json = function
              | `String id when String.trim id <> "" -> Ok (Some id)
              | _ -> Error "invalid released container identity" in
            Ok (Released { engine; container_id })
+       | ["installation_id",`String installation_id;"instance_id",`String instance_id;"kind",`String "native_released"]
+         when String.trim installation_id<>"" && String.trim instance_id<>"" ->
+           Ok (Native_released {installation_id;instance_id})
        | _ -> Error "invalid Lane release evidence")
   | _ -> Error "invalid Lane release evidence"
 

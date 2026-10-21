@@ -12,6 +12,11 @@ let container_spec package = T.container package |> require
 let ensure condition detail = if not condition then failwith detail
 let member = Yojson.Safe.Util.member
 let text key value = member key value |> Yojson.Safe.Util.to_string
+let container_resource_id instance =
+  match Lane_addon_lifecycle.resource_of_json (member "resource" instance) |> require with
+  | Lane_addon_lifecycle.Container_resource id -> id
+  | Lane_addon_lifecycle.Native_resource _ ->
+      failwith "Docker qualification requires a container execution resource"
 let list key value = member key value |> Yojson.Safe.Util.to_list
 let write path bytes = Out_channel.with_open_bin path (fun out -> output_string out bytes)
 let json_file path value = write path (Yojson.Safe.pretty_to_string value ^ "\n")
@@ -306,7 +311,7 @@ let run ~repo_root ~output_dir ~head_sha =
           ensure (List.length !tracked=4) "qualification did not create exactly four installed workers";
           List.iter (fun instance ->
             let id = text "instance_id" instance in
-            let container = text "container_id" instance in
+            let container = container_resource_id instance in
             let data = owned_container id container in
             let package_id = text "addon_id" instance in
             let package = List.find (fun (package : T.package) -> package.id=package_id) images in

@@ -98,7 +98,7 @@ let surface_row_texts (state : state) : surface -> string list option =
              let rows = memory_fact_rows state in
              (* The exact filter projection, including field order: a phrase
                 crossing a field boundary must remain countable and reachable. *)
-             List.map memory_fact_search_text rows)
+             List.map (memory_fact_search_text ~fleet:(memory_facts_is_fleet state)) rows)
           (memory_facts_snapshot state)
       else
         Option.map

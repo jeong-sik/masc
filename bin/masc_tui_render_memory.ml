@@ -641,18 +641,9 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
     else
       let keeper =
         match row with
-        | Memory_row_fact fact ->
-            (match String.index_opt fact.mf_origin ' ' with
-             | Some idx when idx > 0 -> String.sub fact.mf_origin 0 idx
-             | _ -> if String.trim fact.mf_origin <> "" then fact.mf_origin else "fleet")
-        | Memory_row_source_fact fact ->
-            (match String.split_on_char ':' fact.msf_path with
-             | k :: _ when String.trim k <> "" -> String.trim k
-             | _ -> "fleet")
-        | Memory_row_invalidation row ->
-            (match String.split_on_char ':' row.mi_source_path with
-             | k :: _ when String.trim k <> "" -> String.trim k
-             | _ -> "fleet")
+        | Memory_row_fact fact -> fact.mf_keeper
+        | Memory_row_source_fact fact -> fact.msf_keeper
+        | Memory_row_invalidation row -> row.mi_keeper
       in
       let clean = Terminal_text.single_line keeper in
       let truncated =
@@ -685,14 +676,7 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
       let cat_badge = format_row_badge Badge_source in
       let age = memory_fact_age_label fact.msf_first_seen in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
-      let raw_path =
-        if is_fleet then
-          match String.split_on_char ':' fact.msf_path with
-          | _ :: rest -> String.concat ":" rest
-          | [] -> fact.msf_path
-        else fact.msf_path
-      in
-      let path_raw = Terminal_text.single_line raw_path in
+      let path_raw = Terminal_text.single_line fact.msf_path in
       let path_width = Message_layout.display_width path_raw in
       let path_str =
         if path_width > 16 then
@@ -717,14 +701,7 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
       let cat_badge = format_row_badge Badge_dropped in
       let age = memory_fact_age_label row.mi_invalidated_at in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
-      let raw_path =
-        if is_fleet then
-          match String.split_on_char ':' row.mi_source_path with
-          | _ :: rest -> String.concat ":" rest
-          | [] -> row.mi_source_path
-        else row.mi_source_path
-      in
-      let path_raw = Terminal_text.single_line raw_path in
+      let path_raw = Terminal_text.single_line row.mi_source_path in
       let path_width = Message_layout.display_width path_raw in
       let path_str =
         if path_width > 16 then
@@ -855,14 +832,8 @@ let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
         (* The word comes from [Keeper_memory_os_types.category], a closed
              set this build spells itself, so it is printed rather than
              escaped: there is no wire text left in it to escape. *)
-        field "Category:" (Memory_category.category_to_string fact.mf_category)
-          (* Two labelled readings used to share this row, the first in a
-             hand-sized slot of fifteen cells. Every other field in this pane
-             owns a row, and the slot was a guess: in the fleet reading the
-             origin carries its keeper, and the shortest keeper name in the
-             fleet already makes it seventeen bytes, so "Timeline:" lost the
-             space before it on every row. Printf's width counts bytes as
-             well, which the middle dot in that reading is three of. *)
+        field "Keeper:" (Terminal_text.single_line fact.mf_keeper)
+        @ field "Category:" (Memory_category.category_to_string fact.mf_category)
         @ field "Origin:" (Terminal_text.single_line fact.mf_origin)
         @ field "Timeline:"
             (Printf.sprintf "First: %s \xc2\xb7 Last: %s"
@@ -881,7 +852,8 @@ let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
       ; claim_lines
       ; claim_line_count
       ; other_lines =
-        field "Bound Path:" (Terminal_text.single_line fact.msf_path)
+        field "Keeper:" (Terminal_text.single_line fact.msf_keeper)
+        @ field "Bound Path:" (Terminal_text.single_line fact.msf_path)
         @ field "File SHA:"
             (Printf.sprintf "%s · %sFirst Seen:%s %s" 
                (Terminal_text.single_line fact.msf_sha256)
@@ -895,7 +867,8 @@ let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
       ; claim_lines = []
       ; claim_line_count = 0
       ; other_lines =
-        field "Reason:" (Terminal_text.single_line row.mi_reason)
+        field "Keeper:" (Terminal_text.single_line row.mi_keeper)
+        @ field "Reason:" (Terminal_text.single_line row.mi_reason)
         @ field "Source Path:" (Terminal_text.single_line row.mi_source_path)
         @ field "Dropped At:"
             (memory_fact_age_label row.mi_invalidated_at ^ " ago")
@@ -1380,9 +1353,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
     ~(push_selected : string -> unit)
     ~(push_divider : unit -> unit)
     ~(push_empty : unit -> unit) : unit =
-  let is_fleet =
-    Option.equal String.equal state.memory_facts_keeper (Some "*")
-  in
+  let is_fleet = memory_facts_is_fleet state in
   let rows = memory_fact_rows state in
   let total = List.length rows in
   let cursor = max 0 (min state.memory_facts_cursor (total - 1)) in

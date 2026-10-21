@@ -25,8 +25,10 @@ val no_memory_fact_events : memory_fact_events
 (** One remembered fact from a keeper's ordinary Memory OS store. The
     category and origin are the server's closed taxonomy, carried as the
     strings it spelled them in: this side renders and groups them by exact
-    equality and never classifies on its own. *)
+    equality and never classifies on its own. [mf_keeper] names the keeper
+    whose store holds the fact. *)
 type memory_fact = {
+  mf_keeper : string;
   mf_claim : string;
   mf_category : Keeper_memory_os_types.category;
   mf_origin : string;
@@ -37,16 +39,20 @@ type memory_fact = {
 }
 
 (** A fact bound to a file: it holds only while the file at [msf_path] still
-    hashes to [msf_sha256]. *)
+    hashes to [msf_sha256]. [msf_keeper] names the keeper whose store holds
+    it. *)
 type memory_source_fact = {
+  msf_keeper : string;
   msf_claim : string;
   msf_first_seen : float;
   msf_path : string;
   msf_sha256 : string;
 }
 
-(** A source-bound fact the store dropped, and the server's reason string. *)
+(** A source-bound fact the store dropped, and the server's reason string.
+    [mi_keeper] names the keeper whose store dropped it. *)
 type memory_invalidation = {
+  mi_keeper : string;
   mi_source_path : string;
   mi_invalidated_at : float;
   mi_reason : string;
@@ -62,14 +68,10 @@ type 'a memory_store_reading =
   | Memory_store_present of 'a
 
 type memory_ordinary_store = {
-  mos_revision : int;
-  mos_updated_at : float;
   mos_facts : memory_fact list;
 }
 
 type memory_source_store = {
-  mss_revision : int;
-  mss_updated_at : float;
   mss_facts : memory_source_fact list;
   mss_invalidations : memory_invalidation list;
 }
@@ -91,11 +93,13 @@ val decode_memory_fact_snapshot :
     event history. *)
 
 val merge_keeper_memory_facts :
-  now:float ->
   (string * (memory_fact_snapshot, string) result) list ->
   memory_fact_snapshot * string option
 (** Merge per-keeper fact listings into the "all keepers" view ([mfs_keeper =
-    "*"]). Each fact is tagged with its keeper. The second value names every
+    "*"]). Each row keeps the server's origin and path text and names its
+    keeper in its own field, set from the list's keeper name. The merged
+    stores carry no revision or update time, because they are not one store.
+    The second value names every
     keeper that could not be read -- a failed load, or a store answering
     [Memory_store_read_error] -- as ["N of M keepers not read: ..."]; [None]
     when all were read. [Memory_store_absent] is a keeper with no memory yet,

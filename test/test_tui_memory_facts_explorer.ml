@@ -4,7 +4,8 @@ module Types = Masc_tui_types
 
 let make_fact ?(category = Cat.Fact) ?(origin = "chat") ?(first = 100.0)
     ?(last = 200.0) ?(events = Masc.Tui_decode_memory_facts.no_memory_fact_events) ~claim id : Masc.Tui_decode_memory_facts.memory_fact =
-  { mf_claim = claim
+  { mf_keeper = "test_keeper"
+  ; mf_claim = claim
   ; mf_category = category
   ; mf_origin = origin
   ; mf_first_seen = first
@@ -21,14 +22,16 @@ let retrieved ~count ~days ~last ?(retracted = 0) ?(revised_from = []) () :
   }
 
 let make_source_fact ~path ~claim sha : Masc.Tui_decode_memory_facts.memory_source_fact =
-  { msf_claim = claim
+  { msf_keeper = "test_keeper"
+  ; msf_claim = claim
   ; msf_first_seen = 150.0
   ; msf_path = path
   ; msf_sha256 = sha
   }
 
 let make_invalidation ~path ~reason ts : Masc.Tui_decode_memory_facts.memory_invalidation =
-  { mi_source_path = path
+  { mi_keeper = "test_keeper"
+  ; mi_source_path = path
   ; mi_invalidated_at = ts
   ; mi_reason = reason
   }
@@ -37,15 +40,10 @@ let make_snapshot ~ordinary_facts ~source_facts ~invalidations =
   { Masc.Tui_decode_memory_facts.mfs_keeper = "test_keeper"
   ; mfs_ordinary =
       Masc.Tui_decode_memory_facts.Memory_store_present
-        { mos_revision = 1
-        ; mos_updated_at = 300.0
-        ; mos_facts = ordinary_facts
-        }
+        { mos_facts = ordinary_facts }
   ; mfs_source =
       Masc.Tui_decode_memory_facts.Memory_store_present
-        { mss_revision = 1
-        ; mss_updated_at = 300.0
-        ; mss_facts = source_facts
+        { mss_facts = source_facts
         ; mss_invalidations = invalidations
         }
   ; mfs_events_read_error = None
@@ -286,6 +284,28 @@ let test_search_filtering () =
   check int "no match" 0 (List.length (Types.memory_fact_rows state))
 ;;
 
+(* The keeper is part of what the all-keepers list shows beside each row, so
+   a query for its name finds that keeper's rows there. A single keeper's view
+   does not show it, and its name matches nothing the view does not display. *)
+let test_search_matches_the_keeper_only_where_it_is_shown () =
+  let snapshot =
+    make_snapshot
+      ~ordinary_facts:[ make_fact ~claim:"Dune build" "1" ]
+      ~source_facts:[]
+      ~invalidations:[]
+  in
+  let single = make_state () in
+  answer_memory_facts single snapshot;
+  single.search_last <- "test_keeper";
+  check int "a single keeper's view does not match its own name" 0
+    (List.length (Types.memory_fact_rows single));
+  let fleet = make_state () in
+  answer_memory_facts fleet { snapshot with Masc.Tui_decode_memory_facts.mfs_keeper = "*" };
+  fleet.search_last <- "test_keeper";
+  check int "the all-keepers view matches the keeper its rows name" 1
+    (List.length (Types.memory_fact_rows fleet))
+;;
+
 let () =
   run "masc_tui_memory_facts_explorer"
     [ ( "navigation"
@@ -298,7 +318,10 @@ let () =
         ; test_case "use-based sorting reads the record" `Quick test_use_based_sorting
         ] )
     ; ( "search"
-      , [ test_case "search filtering" `Quick test_search_filtering ] )
+      , [ test_case "search filtering" `Quick test_search_filtering
+        ; test_case "search matches the keeper only where it is shown" `Quick
+            test_search_matches_the_keeper_only_where_it_is_shown
+        ] )
     ; ( "layout"
       , [] )
     ]

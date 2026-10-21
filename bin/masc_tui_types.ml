@@ -16961,15 +16961,29 @@ let surface_search_query surface query =
     | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
     | Runtime | Config | Resources | Tools | System_logs -> query
 
-let memory_fact_search_text = function
+(* The all-keepers view lists facts of every keeper and names the keeper on
+   each row; a single keeper's view does not. *)
+let memory_facts_is_fleet (state : state) =
+  Option.equal String.equal state.memory_facts_keeper (Some "*")
+
+(* The keeper joins the text only where the list shows it, so a query matches
+   what the row displays. *)
+let memory_fact_search_text ~fleet row =
+  let with_keeper keeper text = if fleet then text ^ " " ^ keeper else text in
+  match row with
   | Memory_row_fact f ->
-      f.Masc.Tui_decode_memory_facts.mf_claim ^ " "
-      ^ Memory_category.category_to_string f.Masc.Tui_decode_memory_facts.mf_category
-      ^ " " ^ f.Masc.Tui_decode_memory_facts.mf_origin
+      with_keeper f.Masc.Tui_decode_memory_facts.mf_keeper
+        (f.Masc.Tui_decode_memory_facts.mf_claim ^ " "
+         ^ Memory_category.category_to_string f.Masc.Tui_decode_memory_facts.mf_category
+         ^ " " ^ f.Masc.Tui_decode_memory_facts.mf_origin)
   | Memory_row_source_fact f ->
-      f.Masc.Tui_decode_memory_facts.msf_claim ^ " " ^ f.Masc.Tui_decode_memory_facts.msf_path
+      with_keeper f.Masc.Tui_decode_memory_facts.msf_keeper
+        (f.Masc.Tui_decode_memory_facts.msf_claim ^ " "
+         ^ f.Masc.Tui_decode_memory_facts.msf_path)
   | Memory_row_invalidation f ->
-      f.Masc.Tui_decode_memory_facts.mi_reason ^ " " ^ f.Masc.Tui_decode_memory_facts.mi_source_path
+      with_keeper f.Masc.Tui_decode_memory_facts.mi_keeper
+        (f.Masc.Tui_decode_memory_facts.mi_reason ^ " "
+         ^ f.Masc.Tui_decode_memory_facts.mi_source_path)
 
 (* The filter the Memory surface is narrowed by: the text being typed while a
    search is open, and the applied one otherwise. Every count, every list and
@@ -17211,12 +17225,14 @@ let memory_fact_rows (state : state) : memory_fact_row list =
       in
       let all_rows = ordinary @ source_rows @ invalidation_rows in
       let query = memory_search_query state in
+      let fleet = memory_facts_is_fleet state in
       let filtered_rows =
         if query = "" then all_rows
         else
           List.filter
             (fun row ->
-              Masc_tui_pick_list.lowercase_contains ~needle:query (memory_fact_search_text row))
+              Masc_tui_pick_list.lowercase_contains ~needle:query
+                (memory_fact_search_text ~fleet row))
             all_rows
       in
       (match state.memory_facts_sort with

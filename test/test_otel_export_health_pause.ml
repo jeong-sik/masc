@@ -127,6 +127,7 @@ let test_probe_failures_stop_warning_once_inactive () =
     | _ -> Alcotest.fail "expected a TCP probe listener"
   in
   let endpoint = Printf.sprintf "http://127.0.0.1:%d" port in
+  let started = (Log.Ring.bounds ()).Log.Ring.total in
   Otel_spans.setup_exporter ~endpoint ~probe_interval:0.05 ~sw env;
   check
     bool
@@ -142,6 +143,27 @@ let test_probe_failures_stop_warning_once_inactive () =
     "the exporter reached its deactivation"
     true
     (wait_until ~clock ~timeout:5.0 (fun () -> Otel_spans.consecutive_failures () >= 5));
+  (* The warnings that did fire say why the probe failed, so a collector that
+     never connects is not reported as a bare "health check failed". *)
+  let leading_warnings =
+    Log.Ring.recent
+      ~limit:500
+      ~min_level:(Log.level_to_int Log.Warn)
+      ~since_seq:(started - 1)
+      ~order:`Oldest_first
+      ()
+    |> List.filter (fun (entry : Log.Ring.entry) ->
+      contains ~needle:"OTLP health check failed" entry.Log.Ring.message)
+  in
+  check bool "the failures before deactivation warned" true (leading_warnings <> []);
+  check
+    bool
+    "each of those warnings carries the probe failure"
+    true
+    (List.for_all
+       (fun (entry : Log.Ring.entry) ->
+          contains ~needle:(endpoint ^ ": ") entry.Log.Ring.message)
+       leading_warnings);
   let cursor = (Log.Ring.bounds ()).Log.Ring.total in
   let failures_before = Otel_spans.consecutive_failures () in
   Eio.Time.sleep clock 0.5;
@@ -173,6 +195,62 @@ let test_probe_failures_stop_warning_once_inactive () =
   Eio.Time.sleep clock 0.7
 ;;
 
+(* The probe's answer is a value. A refused connection comes back as the
+   exception that refused it, where a bare [false] left the caller nothing to
+   log and the health-check lines said only that the check failed. *)
+let test_probe_returns_the_reason_it_failed () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let clock = env#clock in
+  let collector = listen_probe_target ~sw env 0 in
+  let port =
+    match Eio.Net.listening_addr collector with
+    | `Tcp (_, port) -> port
+    | _ -> Alcotest.fail "expected a TCP probe listener"
+  in
+  let endpoint = Printf.sprintf "http://127.0.0.1:%d" port in
+  (match Otel_spans.probe_endpoint ~env endpoint with
+   | Ok () -> ()
+   | Error failure ->
+     Alcotest.failf
+       "probe of a live listener failed: %s"
+       (Otel_spans.probe_failure_to_string failure));
+  Eio.Flow.close collector;
+  check
+    bool
+    "the probe fails once the listener is closed"
+    true
+    (wait_until ~clock ~timeout:5.0 (fun () ->
+       Result.is_error (Otel_spans.probe_endpoint ~env endpoint)));
+  match Otel_spans.probe_endpoint ~env endpoint with
+  | Error (Otel_spans.Probe_raised _ as failure) ->
+    check
+      bool
+      "the failure names the refused connection"
+      true
+      (contains ~needle:"Connection_failure" (Otel_spans.probe_failure_to_string failure))
+  | Error Otel_spans.No_address ->
+    Alcotest.fail "a literal loopback address resolved to nothing"
+  | Ok () -> Alcotest.fail "probe reached a closed listener"
+;;
+
+let test_probe_failure_text_tells_the_cases_apart () =
+  check
+    string
+    "a raised exception is carried as its own text"
+    (Printexc.to_string Exit)
+    (Otel_spans.probe_failure_to_string (Otel_spans.Probe_raised Exit));
+  check
+    bool
+    "no address reads differently from a raised exception"
+    false
+    (String.equal
+       (Otel_spans.probe_failure_to_string Otel_spans.No_address)
+       (Otel_spans.probe_failure_to_string (Otel_spans.Probe_raised Exit)))
+;;
+
 let () =
   run
     "otel_export_health_pause"
@@ -185,6 +263,14 @@ let () =
             "probe failures stop warning once the exporter is inactive"
             `Quick
             test_probe_failures_stop_warning_once_inactive
+        ; test_case
+            "probe returns the reason it failed"
+            `Quick
+            test_probe_returns_the_reason_it_failed
+        ; test_case
+            "probe failure text tells the cases apart"
+            `Quick
+            test_probe_failure_text_tells_the_cases_apart
         ] )
     ]
 ;;

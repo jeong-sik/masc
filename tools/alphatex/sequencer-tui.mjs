@@ -17,11 +17,13 @@ import { InstrumentPicker } from './instruments.mjs'
 import { defaultStateDirectory, snapshotWriter } from './vst.mjs'
 import { renderVstPhrase } from './sequencer-vst.mjs'
 import { captureVstSound } from './project-sound-files.mjs'
+import { captureFluidSound, isFluidSound, renderFluidSound } from './soundfont.mjs'
 import { openStepInput, sameStepContext, stepControl } from './step-input.mjs'
 import { phraseBacking } from './phrase-backing.mjs'
 import { MidiSourcePicker } from './midi-source-picker.mjs'
 
 const help = [
+  ':soundfont-fluid [SF2_PATH] saves a FluidSynth SF2; its control-block timing is reported with the selected sound.',
   ':step-input chooses a MIDI keyboard; :step-input SOURCE_UID arms it directly; :step-stop drains.',
   ':step-input [SOURCE_UID] --monitor also plays the selected VST through the audio output.',
   ':practice-input [SOURCE_UID] plays live on this track while the other audible phrase tracks repeat; no note edits.',
@@ -120,8 +122,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     task = task.then(() => {
       if (!accepting || closed || suspended) return
       stop()
-      if (choice.kind === 'vst') {
-        const capture = captureVstSound(choice.selection)
+      if (choice.kind === 'vst' || choice.kind === 'fluid-selection') {
+        const capture = choice.kind === 'vst' ? captureVstSound(choice.selection) : captureFluidSound(choice.path ?? soundfontPath)
         let cancelled = false
         const owned = { cancel() { if (!cancelled) { cancelled = true; capture.cancel() } } }
         pendingSound = owned
@@ -129,7 +131,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
           task = task.then(() => {
             if (cancelled || pendingSound !== owned || !accepting || closed || suspended) return
             pendingSound = null
-            adoptSound(sound)
+            adoptSound(sound, choice.preview !== false)
           }).catch(error => { status = error.message }).finally(draw)
           return task
         }).catch(error => {
@@ -139,15 +141,16 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       } else adoptSound(choice)
     }).catch(error => { status = error.message }).finally(draw)
   }
-  function adoptSound(sound) {
+  function adoptSound(sound, preview = true) {
       // Stop the previous sound's preview while its selection still describes
       // it, so play() renders the adopted sound instead of pausing the old one.
       stopPlayback()
       clearHarmony()
       editor = editorSound(editor, sound)
       selectedMidiOutput = undefined; portBindings = []
-      status = sound.kind === 'vst' ? `Selected ${sound.selection.name}` : 'Selected SoundFont'
-      play()
+      status = sound.kind === 'vst' ? `Selected ${sound.selection.name}` : isFluidSound(sound)
+        ? `Selected FluidSynth ${sound.engine.version} · ${sound.font.name} · MIDI control ${sound.engine.controlFrames} samples` : 'Selected SoundFont'
+      if (preview) play()
   }
   const picker = new InstrumentPicker({ directory: stateDirectory, notify: draw,
     selected: selection => chooseInstrument({ kind: 'vst', selection }),
@@ -284,7 +287,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         if (pitch === editor.pitch) cells[cursor] = current ? '◆' : '◇'
         lines.push(`${Note.fromMidi(pitch).padStart(5)}  ${cells.join('')}`)
       }
-      const instrument = audioInstrument().kind === 'vst' ? `VST ${audioInstrument().selection.name}` : audioInstrument().kind === 'soundfont' ? 'SoundFont' : 'choose instrument'
+      const instrument = audioInstrument().kind === 'vst' ? `VST ${audioInstrument().selection.name}` : isFluidSound(audioInstrument())
+        ? `FluidSynth ${audioInstrument().engine.version} · ${audioInstrument().font.name} · MIDI control ${audioInstrument().engine.controlFrames} samples` : audioInstrument().kind === 'soundfont' ? 'SoundFont' : 'choose instrument'
       const destination = portBindings.length ? portBindings.map(binding => `${binding.port}→${binding.destination}`).join(', ')
         : selectedMidiOutput === undefined ? selectedOutput ?? 'system default' : `MIDI ${selectedMidiOutput}`
       lines.push(`Playhead ${(playTick() / per).toFixed(2)} · loop ${project.loop.start / per}–${project.loop.end / per} · ${instrument} · output ${destination} · ${path}`)
@@ -308,7 +312,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (transport.cancel) Atomics.store(transport.cancel, 0, 1)
     transport.native?.cancel()
     transport.handle?.stop()
-    if (currentVstRender || transport.native) observe({ state: 'stop_requested',
+    if (currentVstRender || transport.native && audioInstrument().kind === 'vst') observe({ state: 'stop_requested',
       selection: audioInstrument().kind === 'vst' ? audioInstrument().selection : null, render: currentVstRender })
     currentVstRender = null
     transport = { kind: 'stopped' }
@@ -316,7 +320,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   function render(snapshot, options = {}) {
     if (!accepting) throw new Error('Sequencer is closing')
     if (workerFailure) throw new Error(workerFailure)
-    if (snapshot.kind === 'midi-source' && !['midi', 'vst-midi', 'arrangement', 'harmony'].includes(options.format)) throw new Error('Source audition requires a VST instrument or MIDI output')
+    if (snapshot.kind === 'midi-source' && !['midi', 'vst-midi', 'fluid-plan', 'arrangement', 'harmony'].includes(options.format)) throw new Error('Source audition requires FluidSynth, a VST instrument or MIDI output')
     const id = ++jobNumber, cancel = new Int32Array(new SharedArrayBuffer(4)), path = join(directory, `${id}.${options.format === 'midi' ? 'json' : options.format === 'vst-midi' ? 'mid' : 'wav'}`)
     const promise = new Promise((resolve, reject) => { jobs.set(id, { resolve, reject, cancel }) })
     worker.postMessage({ id, path, project: snapshot, cancel: cancel.buffer, options: { ...options, soundfontPath } })
@@ -384,6 +388,13 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   }
   function renderAudio(snapshot, options = {}) {
     if (!snapshot.sound) throw new Error('Choose an instrument with i before exporting audio')
+    if (isFluidSound(snapshot.sound)) {
+      const preparation = render(snapshot, { ...options, format: 'fluid-plan' })
+      const native = renderFluidSound(snapshot.sound, { preparation, outputPath: join(directory, `${jobNumber}.fluid.wav`) })
+      nativeRenders.add(native)
+      native.promise.finally(() => nativeRenders.delete(native)).catch(() => {})
+      return { promise: native.promise, cancel: preparation.cancel, native }
+    }
     if (snapshot.sound.kind === 'soundfont') return render(snapshot, { ...options, format: 'wav' })
     const sound = snapshot.sound, selection = sound.selection
     const preparation = render(snapshot, { ...options, format: 'vst-midi' })
@@ -425,7 +436,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         if (wave.vst) observe({ state: 'failed', selection: wave.selection, render: wave.vst, error: error.message }); draw() }
     }).finally(() => { players.delete(handle) })
     players.set(handle, settled)
-    status = wave.vst ? `VST: ${wave.selection.name}` : midiDestination !== undefined ? 'MIDI output' : wave.clippedSamples > 0 ? 'Preview clipped; lower :level' : 'SoundFont preview'; draw()
+    status = wave.vst ? `VST: ${wave.selection.name}` : midiDestination !== undefined ? 'MIDI output' : wave.soundfont ? `FluidSynth ${wave.soundfont.engine.version}` : wave.clippedSamples > 0 ? 'Preview clipped; lower :level' : 'SoundFont preview'; draw()
   }
   function play() {
     if (!accepting || suspended || childTask) return
@@ -442,10 +453,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       ...(editor.project.kind === 'midi-source' ? { sourceLoop: editor.sourceLoop } : {}) }
     const result = midiRoute ? render(editor.project, { ...options, format: 'midi' }) : renderAudio(editor.project, options)
     transport = { kind: 'rendering', cancel: result.cancel, native: result.native }
-    if (result.native) observe({ state: 'rendering', selection: audioInstrument().selection, render: null })
+    if (result.native && audioInstrument().kind === 'vst') observe({ state: 'rendering', selection: audioInstrument().selection, render: null })
     result.promise.then(wave => startPlayer(wave, id)).catch(error => {
       if (!closed && id === generation) { transport = { kind: 'stopped' }; status = error.message;
-        if (result.native) observe({ state: 'failed', selection: audioInstrument().selection, render: null, error: error.message }); draw() }
+        if (result.native && audioInstrument().kind === 'vst') observe({ state: 'failed', selection: audioInstrument().selection, render: null, error: error.message }); draw() }
     })
     draw()
   }
@@ -503,6 +514,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   async function effect(value, menuOwner = null) {
     if (!accepting && ['play', 'record', 'wave', 'arrange', 'step-input'].includes(value.kind)) return
     switch (value.kind) {
+      case 'soundfont-fluid': chooseInstrument({ kind: 'fluid-selection', path: value.path, preview: false }); break
       case 'step-input':
         if (value.source !== undefined) startStepInput(value.source, value.monitor, value.practice, value.recording)
         else {

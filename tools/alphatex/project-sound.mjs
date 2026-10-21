@@ -14,6 +14,20 @@ export function validateVstSelection(value) {
 // The original path is a label; playback never reads that mutable path again.
 export function validateSound(sound) {
   if (sound?.kind === 'soundfont' && Object.keys(sound).length === 1) return sound
+  if (sound?.kind === 'soundfont' && sound.engine?.kind === 'fluidsynth') {
+    if (Object.keys(sound).some(key => !['kind', 'engine', 'font', 'bankStyle'].includes(key))
+      || Object.keys(sound.engine).some(key => !['kind', 'version', 'controlFrames'].includes(key))
+      || typeof sound.engine.version !== 'string' || !sound.engine.version
+      || !Number.isSafeInteger(sound.engine.controlFrames) || sound.engine.controlFrames <= 0
+      || !['gm', 'gs', 'xg', 'mma'].includes(sound.bankStyle)
+      || !sound.font || Object.keys(sound.font).some(key => !['name', 'data', 'sha256'].includes(key))
+      || typeof sound.font.name !== 'string' || !sound.font.name || typeof sound.font.data !== 'string') throw new Error('Invalid bound SoundFont')
+    const bytes = Buffer.from(sound.font.data, 'base64')
+    if (!bytes.length || bytes.toString('base64') !== sound.font.data
+      || createHash('sha256').update(bytes).digest('hex') !== sound.font.sha256
+      || bytes.toString('ascii', 0, 4) !== 'RIFF' || bytes.toString('ascii', 8, 12) !== 'sfbk') throw new Error('Bound SF2 content changed')
+    return sound
+  }
   if (sound?.kind !== 'vst' || Object.keys(sound).some(key => !['kind', 'selection', 'preset', 'instrument'].includes(key))) throw new Error('Invalid project sound')
   const selection = validateVstSelection(sound.selection)
   if (Object.keys(sound.selection).some(key => !(key in selection))) throw new Error('Invalid project VST selection fields')

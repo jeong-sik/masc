@@ -530,7 +530,7 @@ ambiguity and unmatched input events remain in the original source.
 Source audition can render a selected single-port performance through a VST or
 send the complete ordered MIDI wire stream to explicit outputs as described below.
 Choose a VST with `i`; `:wave PATH` exports its rendered performance. Source
-SoundFont synthesis remains unfinished.
+SoundFont synthesis is available through the explicitly bound FluidSynth route below; the built-in AlphaSynth selection is unchanged.
 See [MIDI source semantics](MIDI-SOURCE.md) for retained data,
 source-event identities and timing behavior.
 
@@ -1020,3 +1020,51 @@ selected window, including prefixes needed to restore held notes. Pausing and
 seeking stage both owners; either source/output failure stops the joint owner.
 Captured sources, clicks, cycle-aware recording and physical timing evidence
 remain separate work.
+
+### Bound FluidSynth SoundFont audition
+
+In a phrase or imported MIDI editor, `:soundfont-fluid [SF2_PATH]` selects the
+installed FluidSynth library through Python 3. Omit the path to snapshot the
+configured SoundFont or bundled Sonivox SF2. Selection saves the actual SF2 bytes,
+SHA256, engine version, bank interpretation (MMA), and engine control quantum in
+the musical document. It selects without starting playback. Space auditions;
+`:wave PATH` exports float32 stereo at 44100 Hz; `:save` retains the sound for
+reopen. The existing built-in SoundFont picker continues to use AlphaSynth.
+
+This route requires Python 3 and the FluidSynth shared library. On macOS,
+install it with `brew install fluid-synth` (the
+[Homebrew formula](https://formulae.brew.sh/formula/fluid-synth)). If the library
+cannot be loaded, selection reports `FluidSynth library unavailable` and the
+current sound remains selected. Choose another instrument to leave this route.
+
+Original SMF/RMID bytes, source edits, tempo maps, SMPTE/drop-frame clocks and
+explicit format-2 pattern choice remain the source authority. Independent MIDI
+ports own independent synth instances. Notes, CC, program/bank, pitch bend,
+channel/poly pressure and engine-supported complete SysEx are passed to the
+actual synth; fragmented/system wire and unhandled SysEx are refused. MIDI2
+UMP synthesis is not added here. Engine support does not imply every SF2
+modulator or vendor protocol has an audible implementation.
+
+FluidSynth uses a reported internal control quantum (64 samples in the tested
+2.6.0 library). Rendering places each nonterminal source event at the next
+quantum boundary from a common source origin. It may sound up to 63 samples
+later at that quantum. The render receipt retains `[port, sourceFrame,
+renderFrame]` for each event and maximum delay; the original rational source
+clock is never rounded to this quantum. Distinct note boundaries that collapse
+together, or events moved past the finite document horizon, are refused. Events
+at the exclusive document end have `renderFrame: null`: they are cleanup, not
+an audible tail. The WAV ends at the authored source horizon; extend the phrase
+length to include a longer release. This is not sample-exact MIDI sound
+application or an automatic tail detector.
+
+A native render reads a private frozen SF2 and writes private audio. After
+receipt/hash checks, exclusive file publication is sealed. Cancellation before
+that seal joins the child and cleans the private root; cancellation after the
+seal is ignored by that completed publication. Stop/close still fence playback.
+An existing output is preserved. No audio or MIDI device is opened for rendering.
+A changed/unavailable engine version or control quantum requires an explicit new
+selection; the saved font is not replaced with a mutable external file.
+
+This layer connects phrase/imported-source audition and WAV export. Arrangement
+playback/export and raw practice/capture sound realization still need integration
+with this engine; their current routes are not replaced implicitly.

@@ -8,6 +8,7 @@ import { EventEmitter } from 'node:events'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import * as editor from '../sequencer-editor.mjs'
+import { isFluidSound } from '../soundfont.mjs'
 
 // Exercise actual controller decisions with owned IO substitutes. No terminal
 // output, layout, audio hardware or player behavior is asserted.
@@ -31,6 +32,9 @@ async function controller(options = {}) {
   const slot = `sequencer-${randomUUID()}`
   globalThis[slot] = {
     process, sameStepContext, stepControl, phraseBacking, ...editor, Worker, InstrumentPicker,
+    isFluidSound,
+    captureFluidSound() { throw new Error('Unexpected FluidSynth selection') },
+    renderFluidSound() { throw new Error('Unexpected FluidSynth render') },
     openStepInput(request) {
       observed.inputs++
       if (options.openStepInput) return options.openStepInput(request)

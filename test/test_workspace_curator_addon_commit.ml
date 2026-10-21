@@ -459,6 +459,67 @@ let test_nested_successor_has_no_root_sibling ()=with_workspace (fun base_path s
   let _,same_child=narrow base_path store root |> accepted |> successor in
   check string "the root still names its first child" child.request_id same_child.request_id;
   check int "one root, one child, one grandchild only" 3 (List.length (owned (Owner.discover ~store ~scope:Capture.scope))))
+let host_result base_path store capture output =
+  let request=get (Server_workspace_memory_addon_validation.request capture) in
+  let runner ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
+    match validate output with
+    | Ok output -> Exact.Call_ended (Exact.Answered {output;slot="original-host";usage=None})
+    | Error detail -> Exact.Call_ended (Exact.Invalid_output {detail})) in
+  get (Exact.run ~store ~declaration_id:"curator" ~package:(package ()) ~runner
+    ~validate_request:(Server_workspace_memory_addon_validation.authorize ~base_path) request)
+let test_original_host_terminal_recovers_without_a_live_runtime ()=with_workspace (fun base_path _ ->
+  let config=Workspace.default_config base_path in
+  let store=Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let capture,output=classification base_path ["Original admitted fact a";"Original admitted fact b"] in
+  let pending=advance store (retain_capture store capture) Progress.Dispatch_intended in
+  (match host_result base_path store capture output with
+   | Exact.Final (Exact.Call_final (Exact.Answered _)) -> () | _ -> fail "fixture needs an original host terminal");
+  let record=match Consumer.resume ~config ~request_id:pending.request_id |> accepted with
+    | Consumer.Judgment {record;expected=Capture.Classification_commit _;_} -> record
+    | _ -> fail "original host result should need no Runtime/export/worker" in
+  Consumer.settle ~config ~request_id:record.request_id |> accepted |> committed |> ignore;
+  check int "original host judgment commits with no new worker" 2
+    (List.length (Ledger.dispositions (get (Ledger.load ~base_path))));
+  (match Consumer.resume ~config ~request_id:record.request_id |> accepted with
+   | Consumer.Settled _ -> () | _ -> fail "completed original must remain settled"))
+let test_bad_original_host_record_cannot_fall_back_to_a_worker ()=with_workspace (fun base_path store ->
+  let capture,output=classification base_path ["Original admitted source"] in
+  let record=advance store (retain_capture store capture) Progress.Dispatch_intended in
+  host_result base_path store capture output |> ignore;
+  let wire=match get (Store.load_exact_request store ~declaration_id:"curator" ~request_id:record.request_id) with
+    | Some (`Assoc fields) -> `Assoc (("unknown",`Bool true)::fields)
+    | Some _ | None -> fail "original Exact record" in
+  get (Store.save_exact_request store ~declaration_id:"curator" ~request_id:record.request_id wire);
+  check bool "invalid host evidence refuses before the supplied worker edge" true
+    (match no_worker_resume base_path store record with Error (Consumer.Unavailable _) -> true
+     | Ok _ | Error (Consumer.Rejected _ | Consumer.Uncertain _) -> false);
+  check json "failed read leaves the original dispatch history unchanged" (Progress.to_json record.progress)
+    (Progress.to_json (original store capture).progress))
+let test_observed_host_answer_still_requires_full_domain_validation ()=with_workspace (fun base_path store ->
+  let capture,output=classification base_path ["Original source"] in
+  let record=advance store (retain_capture store capture) Progress.Dispatch_intended in
+  host_result base_path store capture output |> ignore;
+  let wire=match get (Store.load_exact_request store ~declaration_id:"curator" ~request_id:record.request_id) with
+    | Some (`Assoc fields) ->
+      let final=`Assoc ["status",`String "answered";"slot",`String "original-host";
+        "output",`Assoc ["decisions",`List []]] in
+      `Assoc (List.map (fun (key,value) -> key,if key="final" then final else value) fields)
+    | Some _ | None -> fail "original Exact record" in
+  get (Store.save_exact_request store ~declaration_id:"curator" ~request_id:record.request_id wire);
+  check bool "partial wire shape is never a valid original domain judgment" true
+    (match no_worker_resume base_path store record with Error (Consumer.Rejected _) -> true
+     | Ok _ | Error (Consumer.Unavailable _ | Consumer.Uncertain _) -> false);
+  check int "no invalid original disposition is committed" 0
+    (List.length (Ledger.dispositions (get (Ledger.load ~base_path)))))
+let test_installation_identity_is_canonical_and_kind_bound () =
+  List.iter (fun installation ->
+    let encoded=Owner.installation_id installation in
+    check bool "original identity round trips without losing its kind" true
+      (get (Owner.installation_of_id encoded)=installation)) [Owner.Configuration "curator";Owner.Manual "curator"];
+  List.iter (fun encoded -> check bool "unknown blank extra or noncanonical installation refuses" true
+      (Result.is_error (Owner.installation_of_id encoded)))
+    ["curator";"[\"other\",\"curator\"]";"[\"configuration\",\"\"]";
+     "[\"configuration\", \"curator\"]";"[\"manual\",\"curator\",false]"]
 let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "classification applies once and survives journal reopen" `Quick test_classification_commit_and_reopen;
   test_case "real save with lost receipt confirms after without another write" `Quick test_lost_save_receipt_after_publication;
@@ -489,4 +550,8 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "direct Exact authority cannot bypass parent acknowledgement" `Quick test_direct_exact_authority_requires_acknowledged_ancestry;
   test_case "missing predecessor refuses resume and direct Exact" `Quick (test_missing_or_cyclic_parent_refuses true);
   test_case "cyclic predecessor refuses resume and direct Exact" `Quick (test_missing_or_cyclic_parent_refuses false);
-  test_case "nested refusal narrows the child without a root sibling" `Quick test_nested_successor_has_no_root_sibling]]
+  test_case "nested refusal narrows the child without a root sibling" `Quick test_nested_successor_has_no_root_sibling;
+  test_case "original host terminal recovers and commits without live Runtime" `Quick test_original_host_terminal_recovers_without_a_live_runtime;
+  test_case "invalid host original refuses without worker fallback" `Quick test_bad_original_host_record_cannot_fall_back_to_a_worker;
+  test_case "observed original still requires complete domain validation" `Quick test_observed_host_answer_still_requires_full_domain_validation;
+  test_case "original installation kind and canonical identity" `Quick test_installation_identity_is_canonical_and_kind_bound]]

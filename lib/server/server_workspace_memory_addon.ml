@@ -194,10 +194,21 @@ let resume_with ~store ~base_path ~request_id ~call =
      | Pending | Capacity_wait | Finished _ ->
        Error (Rejected "Worker state contradicts original pre-admission host progress"))
   | Progress.Dispatch_pending _ ->
-    (match invoke read with
-     | Ok (state,evidence) -> received original ~submission:false state evidence
-     | Error error -> observe original Worker_unknown (fun value -> Progress.Outcome_unknown value)
-         (`Assoc ["detail",`String (error_to_string error)]))
+    let* installation = rejected (Owner.installation_of_id original.installation_id) in
+    let* declaration_id = match installation with
+      | Owner.Configuration id -> Ok id
+      | Owner.Manual _ -> Error (Rejected "Original Curator work requires its configured installation") in
+    let* request = rejected (Binding.request capture) in
+    let* retained = Eio_unix.run_in_systhread (fun () ->
+      Exact.observe_retained ~store ~declaration_id ~schema:(Capture.output_schema capture) request)
+      |> Result.map_error (fun detail -> Unavailable detail) in
+    (match retained with
+     | Exact.Retained_terminal final -> finish original final
+     | Exact.Retained_absent | Exact.Retained_open ->
+       match invoke read with
+       | Ok (state,evidence) -> received original ~submission:false state evidence
+       | Error error -> observe original Worker_unknown (fun value -> Progress.Outcome_unknown value)
+           (`Assoc ["detail",`String (error_to_string error)]))
 let resume ~config ~request_id =
   let reserved=reserved () in
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in

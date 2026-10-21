@@ -103,6 +103,12 @@ let refused ~start_time detail = result ~start_time ~failed:true ~disposition:To
 let selection_detail error =
   Yojson.Safe.to_string (`Assoc ["error",Browser_selection.error_to_json error;
     "clients",`List (List.map B.client_json (B.active_clients ()))])
+let reply_timeout_sec = function
+  | B.Page_act action -> B.Action.reply_timeout_sec action
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
+  | Page_scene _ | Page_interact _ | Session_open _ | Session_close | Session_status
+  | Page_goto _ | Page_elements _ | Page_context _ | Page_instruct _ | Page_locate _
+  | Page_extract _ -> B.default_timeout_sec
 let invoke ~owner ~principal arguments =
   let start_time=Tool_timing.start () in
   let run () =
@@ -124,7 +130,7 @@ let invoke ~owner ~principal arguments =
       | Some id -> Browser_addon_owner.dispatch_upload owner ~id ~actor ~route:selected.route ~verb
       | None -> Browser_addon_owner.dispatch owner {W.incarnation=Browser_addon_owner.incarnation owner;
           command=W.Issue {route=selected.route;verb;actor=Some actor;
-            timeout_sec=B.default_timeout_sec;only_if_idle=false}} in
+            timeout_sec=reply_timeout_sec verb;only_if_idle=false}} in
     let data=match W.reply_to_json reply with
       | `Assoc fields -> `Assoc (fields @ ["browserSelection",Browser_selection.to_json selected;
           "browserConnection",`Assoc (Browser_binding.connection_fields binding)])

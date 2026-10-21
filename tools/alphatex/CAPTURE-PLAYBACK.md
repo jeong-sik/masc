@@ -13,8 +13,8 @@ the complete take. `:midi-output MIDI_UID` sets a default MIDI route;
 `:output AUDIO_UID` chooses audio. Input IDs remain the recorded source identities,
 not display names. A new default MIDI selection clears source overrides.
 An arrangement's `:open-take` also passes its selected audio and default MIDI
-outputs to this viewer. WAV-only audition with an explicit output uses the native
-WAV owner; an output selection is never silently ignored by `afplay`.
+outputs to this viewer. On macOS, WAV-only audition uses the native WAV owner,
+including the system default output. An explicit output selection is never ignored.
 
 ## Source and clock authority
 
@@ -56,8 +56,15 @@ private files before returning terminal ownership.
 
 Native take playback supports `p` to pause/resume, `:pause`, `:resume`, and
 `:seek SECONDS` to move WAV and MIDI together. Space or `:stop` stops the take.
-Select an audio or MIDI output to use this native route; default WAV-only `afplay`
-audition continues to use Space for play/stop.
+On macOS this also works for default WAV-only audition. Other platforms retain
+external WAV play/stop and explicitly report that its position is unavailable.
+
+The viewer shows the native playback position and duration, plus a playhead over
+the waveform and MIDI notes. While playing, `≈` marks the position advanced from
+the latest native acknowledgement. Paused and seek positions come from the
+acknowledged state, including refused operations. Follow mode tracks this playhead;
+with no playback reading it follows the recorded end. Left/Right turns following
+off so the displayed waveform can be inspected independently; `f` restores it.
 
 On resume or seek, reconstruction preserves original control order and restores
 only keys still held or retained by sustain/sostenuto at the new position.

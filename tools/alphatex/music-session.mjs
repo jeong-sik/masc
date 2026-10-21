@@ -41,15 +41,28 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
   }
   const inputs = () => available?.audio.filter(device => device.inputs > 0) ?? []
   const midiChoices = () => [{ id: 'all', name: 'All MIDI inputs' }, { id: 'none', name: 'No MIDI input' }, ...(available?.midi ?? [])]
+  function playbackPosition() {
+    if (pairedState === null) return null
+    const elapsed = pairedState.kind === 'playing' ? (performance.now() - pairedState.since) / 1000 : 0
+    return Math.min(pairedState.duration, pairedState.currentTime + elapsed)
+  }
   function draw() {
     if (closed) return
     dirty = false
     const reading = statusReader.render(process.stdout)
     if (reading !== null) { process.stdout.write(reading); return }
     const rows = process.stdout.rows || 24, width = Math.max(1, (process.stdout.columns || 80) - 9)
-    if (follow && timeline) start = Math.max(0, timeline.duration - span)
+    const position = playbackPosition()
+    if (follow && timeline) start = position === null ? Math.max(0, timeline.duration - span)
+      : Math.min(Math.max(0, timeline.duration - span), Math.max(0, position - span / 2))
+    const playhead = position === null ? null : Math.floor((position - start) * width / span)
+    const cursor = cells => cells.map((cell, index) => index === playhead ? '│' : cell).join('')
     const lines = [
       `Music session · ${phase} · ${timeline?.duration.toFixed(2) ?? '0.00'}s · ${status}`,
+      pairedState !== null
+        ? `Playback ${pairedState.kind} · ${pairedState.kind === 'playing' ? '≈' : ''}${position.toFixed(2)} / ${pairedState.duration.toFixed(2)}s · ${pairedState.device.name}`
+        : playbackTask ? `Playback ${playbackAbort?.signal.aborted ? 'stopping' : 'preparing'}`
+          : player ? 'Playback external WAV · position unavailable' : 'Playback idle',
       `Next audio: ${inputs()[inputIndex]?.name ?? 'no input'} · MIDI: ${midiChoices()[midiIndex]?.name ?? ''}${timeline ? ` · Take: ${timeline.manifest.input.name}` : ''}`,
       `Save: ${take ?? root}`,
       `Outputs: audio ${audioOutput ?? 'system default'} · MIDI ${selectedMidi ?? 'WAV only'} · ${sourceOutputs.length} source bindings`,
@@ -65,7 +78,8 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
       'Stateful UMP seeks restore live voices and expression when source baselines are known.',
       'e: export one MIDI 2.0 Clip per input source (saved takes only)',
       'Up/Down: scroll tracks; Left/Right: move the time window',
-      '+/-: zoom time; f: follow the end of the take',
+      '+/-: zoom time; f: follow playback or the end of the take',
+      'The playhead follows the acknowledged native position; ≈ advances it while playing.',
       '?: show/hide help; q/Esc: finish recording and return',
     )
     else if (timeline) {
@@ -76,7 +90,7 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
         tracks.push(`Audio ${channel + 1} · ${timeline.sampleRate}Hz · ${peak ? `${(20 * Math.log10(peak)).toFixed(1)} dBFS` : 'silence'} · display ±${scale.toFixed(3)}`)
         for (let y = 0; y < 5; y++) {
           const high = (1 - y * 0.4) * scale, low = high - 0.4 * scale
-          tracks.push(`       ${peaks.map(pair => pair && (pair[0] !== 0 || pair[1] !== 0) && pair[1] >= low && pair[0] <= high ? '█' : y === 2 ? '─' : ' ').join('')}`)
+          tracks.push(`       ${cursor(peaks.map(pair => pair && (pair[0] !== 0 || pair[1] !== 0) && pair[1] >= low && pair[0] <= high ? '█' : y === 2 ? '─' : ' '))}`)
         }
       }
       for (const track of timeline.midi.values()) {
@@ -91,7 +105,7 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
             const last = Math.min(width - 1, Math.floor(((note.end ?? timeline.duration) - start) * width / span))
             for (let x = first; x <= last; x++) cells[x] = '━'
           }
-          tracks.push(`${String(pitch).padStart(6)} ${cells.join('')}`)
+          tracks.push(`${String(pitch).padStart(6)} ${cursor(cells)}`)
         }
       }
     }
@@ -105,6 +119,7 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
     process.stdout.write(output)
   }
   function stopPlayer() {
+    pairedState = null
     playbackAbort?.abort(); paired?.terminate()
     if (player) { player.kill('SIGTERM'); player = null }
   }
@@ -147,9 +162,10 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
   function playWave() {
     if (player || playbackTask) { stopPlayer(); status = 'Stopped'; return }
     if (phase !== 'saved' || !take) return
-    if (selectedMidi !== undefined || sourceOutputs.length || audioOutput !== undefined) { playCaptured(); return }
-    const child = spawn(process.platform === 'darwin' ? 'afplay' : 'ffplay',
-      process.platform === 'darwin' ? [join(take, 'audio.wav')] : ['-nodisp', '-autoexit', '-loglevel', 'error', join(take, 'audio.wav')],
+    if (process.platform === 'darwin' || selectedMidi !== undefined || sourceOutputs.length || audioOutput !== undefined) { playCaptured(); return }
+    pairedState = null
+    const child = spawn('ffplay',
+      ['-nodisp', '-autoexit', '-loglevel', 'error', join(take, 'audio.wav')],
       { stdio: ['ignore', 'ignore', 'pipe'] })
     player = child
     let detail = ''
@@ -164,6 +180,7 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
   }
   function playCaptured() {
     const abort = new AbortController(); playbackAbort = abort
+    pairedState = null
     status = 'Preparing original WAV and UMP…'
     const input = take, midiOutput = selectedMidi, sourceBindings = sourceOutputs, output = audioOutput
     playbackTask = (async () => {
@@ -175,13 +192,14 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
           : await prepareCapturedWave(input, { directory, signal: abort.signal })
         abort.signal.throwIfAborted()
         paired = openPlayback({ ...plan, midiBindings: plan.bindings, output, signal: abort.signal, onEvent(event) {
-          if (['playing', 'paused', 'stopped'].includes(event.kind)) pairedState = event.kind
-          if (!closed && !abort.signal.aborted) { status = event.kind === 'error' ? event.message : event.refusal ?? `Capture ${event.kind}`;draw() }
+          if (closed || abort.signal.aborted) return
+          if (['playing', 'paused', 'stopped'].includes(event.kind)) pairedState = { ...event, since: performance.now() }
+          status = event.kind === 'error' ? event.message : event.refusal ?? `Capture ${event.kind}`; draw()
         } })
         await paired.completion
-      } catch (error) { if (!closed && !abort.signal.aborted) status = error.message }
+      } catch (error) { if (!closed && !abort.signal.aborted) { pairedState = null; status = error.message } }
       finally {
-        paired = null; pairedState = null
+        paired = null
         try { if (directory) await rm(directory, { recursive: true, force: true }) }
         finally { playbackAbort = null; playbackTask = null; draw() }
       }
@@ -226,7 +244,7 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
     if (text === '?') { helpShown = !helpShown; scroll = 0; draw(); return }
     switch (key.name) {
       case 'p':
-        try { outputCommand(pairedState === 'paused' ? 'resume' : 'pause') } catch (error) { status = error.message }
+        try { outputCommand(pairedState?.kind === 'paused' ? 'resume' : 'pause') } catch (error) { status = error.message }
         draw(); return
       case 'r': startRecording(); return
       case 'o': {
@@ -283,7 +301,7 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
   for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(name, onSignal)
   signal?.addEventListener('abort', onAbort, { once: true })
   if (!embedded) process.stdout.write('\x1b[?1049h\x1b[?25l\x1b[2J')
-  const timer = setInterval(() => { if (dirty) draw() }, 100)
+  const timer = setInterval(() => { if (dirty || pairedState?.kind === 'playing') draw() }, 100)
   try {
     if (signal?.aborted) finish()
     draw()

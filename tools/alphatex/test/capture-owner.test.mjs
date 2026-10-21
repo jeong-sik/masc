@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { openPlayback } from '../playback.mjs'
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
-async function scenario(paired) {
+async function scenario(paired, defaultOutput = false) {
  const process=new EventEmitter(),observed={plans:[],options:[],spawn:[],removed:[],kills:[],commands:[]}
  process.platform='darwin'
  process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
@@ -34,17 +34,21 @@ async function scenario(paired) {
  const source=(await readFile(new URL('../music-session.mjs',import.meta.url),'utf8')).replace(/^import .*$/gm,'')
  const prefix=`const {${Object.keys(globalThis[slot]).join(',')}}=globalThis[${JSON.stringify(slot)}];\n`
  const {viewSession}=await import('data:text/javascript;base64,'+Buffer.from(prefix+source).toString('base64'))
- const done=viewSession({directory:'/original-take',output:'selected-audio',...(paired?{midiOutput:'123'}:{}),signal:abort.signal})
+ const output=defaultOutput?undefined:'selected-audio'
+ const done=viewSession({directory:'/original-take',output,...(paired?{midiOutput:'123'}:{}),signal:abort.signal})
  try {
   await flush();process.stdin.emit('keypress',' ',{name:'space'});await flush()
   assert.equal(observed.plans.length,1)
   assert.equal(observed.plans[0].kind,paired?'paired':'wave')
   assert.equal(observed.options.length,1)
-  assert.equal(observed.options[0].output,'selected-audio')
+  assert.equal(observed.options[0].output,output)
   assert.deepEqual(observed.options[0].midiBindings,paired?[{port:0,destination:'123'}]:undefined)
   assert.equal(observed.spawn.length,1,'actual wrapper admits the selected capture route')
-  assert.ok(observed.spawn[0].args.includes('--output'))
-  assert.equal(observed.spawn[0].args.at(-1),'selected-audio')
+  if(defaultOutput) assert.equal(observed.spawn[0].args.includes('--output'),false)
+  else {
+   assert.ok(observed.spawn[0].args.includes('--output'))
+   assert.equal(observed.spawn[0].args.at(-1),'selected-audio')
+  }
   const event={kind:'playing',currentTime:0,duration:1,device:{id:'selected-audio',name:'Audio',outputs:2},loop:false,...(paired?{format:'capture-session',clock:{kind:'mach-host-time'},bindings:[{port:0,device:{kind:'midi',protocol:2,nativeProtocol:2,id:'123',name:'MIDI'}}]}:{})}
   observed.child.stdout.write(JSON.stringify(event)+'\n');await flush()
   process.stdin.emit('keypress','p',{name:'p'});await flush()
@@ -70,3 +74,4 @@ async function scenario(paired) {
 }
 test('captured session passes explicit source bindings through the actual playback protocol and drains its child',()=>scenario(true))
 test('WAV-only session passes the selected audio output to native playback and drains its child',()=>scenario(false))
+test('default macOS WAV audition uses native pause/seek and drains its child without pinning an output',()=>scenario(false,true))

@@ -1144,7 +1144,7 @@ let read_verification_evidence ~prepare ~(host : string) ~(port : int)
 let fetch_verification_evidence ~host ~port ~task_id ~verification_id =
   read_verification_evidence ~prepare:Fun.id ~host ~port ~task_id ~verification_id
 let fetch_original_verification_evidence ~host ~port ~task_id ~verification_id =
-  read_verification_evidence ~prepare:(Masc_tui_task_creation_read.prepare_evidence ~task_id ~verification_id)
+  read_verification_evidence ~prepare:(Masc_tui_original_task_read.prepare_evidence ~task_id ~verification_id)
     ~host ~port ~task_id ~verification_id
 
 (** Fetch one goal's merged event timeline
@@ -1174,7 +1174,7 @@ let read_task_history_page ~prepare ~host ~port ~(request : Masc.Tui_decode_task
 let fetch_task_history_page ~host ~port ~request =
   read_task_history_page ~prepare:Fun.id ~host ~port ~request
 let fetch_original_task_history ~host ~port ~request =
-  read_task_history_page ~prepare:Masc_tui_task_creation_read.prepare_history ~host ~port ~request
+  read_task_history_page ~prepare:Masc_tui_original_task_read.prepare_history ~host ~port ~request
 
 let fetch_original_task_detail ~host ~port ~task_id ~previous =
   let path=Uri.make ~path:"/api/v1/dashboard/tasks/detail" ~query:["task_id",[task_id]] () |> Uri.to_string in
@@ -1188,8 +1188,8 @@ let fetch_original_task_inspection ~host ~port ~task_id =
   let path=Uri.make ~path:"/api/v1/dashboard/tasks/inspection" ~query:["task_id",[task_id]] () |> Uri.to_string in
   Result.map (fun json -> Masc_tui_response_decode.run ~name:"task.original_inspection.decode_wait" (fun () ->
     let decoded=Masc.Tui_decode_task_inspection.observation ~task_id json
-      |> Result.map_error (fun detail -> Masc_tui_task_creation_read.Invalid_reply detail) in
-    Result.bind decoded (Masc_tui_task_creation_read.prepare_task ~task_id)))
+      |> Result.map_error (fun detail -> Masc_tui_original_task_read.Invalid_reply detail) in
+    Result.bind decoded (Masc_tui_original_task_read.prepare_task ~task_id)))
     (get_json ~host ~port ~path)
 
 (** Fetch a keeper's durable tool-call log

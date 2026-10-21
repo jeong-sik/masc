@@ -436,7 +436,7 @@ let test_creation_receipt_refusals_and_corrupt_primary env () = Eio.Switch.run @
   check bool "refused lookup cannot repair or replace its primary" true
     (Yojson.Safe.from_string (Fs_compat.load_file primary)=corrupt)
 
-module Creation_read = Masc_tui_task_creation_read
+module Creation_read = Masc_tui_original_task_read
 let retained_actual_creation state call ~workspace ~request_id =
   let intent={ (creation_intent ~workspace ~original:"/task inspect original\noriginal body"
     ~title:"inspect original" ~body:"original body") with request_id } in
@@ -458,7 +458,7 @@ let inspect_actual call source =
   | Ok answer -> Creation_read.decode source answer
   | Error detail -> Error (Creation_read.Read_failed detail)
 let launch_inspection results state call request =
-  let source=request.tcr_original.tdr_inspection in
+  let source=task_inspection_source request.tcr_original in
   let envelope=Protocol.capture_workspace_message state in
   Results.launch ~key:request.tcr_job ~observation:true state ~results
     ~boundary_error:(fun detail -> Creation_read.Read_failed detail)
@@ -483,7 +483,7 @@ let creation_state base workspace =
 let begin_inspection state = match begin_task_creation_inspection state with
   | Some request -> request | None -> fail "explicit original inspection did not begin"
 let recorded original task_id = match Creation_read.observation original.tdr_inspection with
-  | Masc_tui_fetched.Ready (Creation_read.Recorded receipt) ->
+  | Some (Masc_tui_fetched.Ready (Creation_read.Recorded receipt)) ->
     check string "exact actual created Task observed" task_id receipt.task_id
   | _ -> fail "actual original creation fact was not retained"
 
@@ -514,7 +514,7 @@ let test_original_inspection_and_refused_actual_reply env () = Eio.Switch.run @@
   (match result with Error (Creation_read.Invalid_reply _) -> () | _ -> fail "foreign original request was accepted");
   check bool "refused reply settles only its current source" true (complete_task_creation_inspection state retry result);
   (match Creation_read.observation original.tdr_inspection with
-   | Masc_tui_fetched.Stale (Creation_read.Recorded receipt,Creation_read.Invalid_reply _) ->
+   | Some (Masc_tui_fetched.Stale (Creation_read.Recorded receipt,Creation_read.Invalid_reply _)) ->
        check string "failed recheck keeps original fact" task_id receipt.task_id
    | _ -> fail "refused reply erased the retained creation fact");
   check (option string) "stale fact grants no ready Task-open decision" None
@@ -536,7 +536,7 @@ let test_inspection_reopen_history_and_workspace_withdrawal env () = Eio.Switch.
   Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
   launch_inspection results state call first;
   let late=owned_message results in
-  close_task_creation_inspection state ~reason:Creation_read.Interrupted;
+  close_task_inspection state ~reason:Creation_read.Interrupted;
   check bool "same original inspector can reopen" true (open_task_creation_inspection state ~keeper:"creation-keeper");
   let second=begin_inspection state in
   launch_inspection results state call second;
@@ -548,7 +548,7 @@ let test_inspection_reopen_history_and_workspace_withdrawal env () = Eio.Switch.
   let neighbor=match task_creation_neighbor state ~older:false with Some original -> original
     | None -> fail "newer retained original disappeared" in
   check bool "history chooses original identity, not equal title" true (neighbor==newer && neighbor!=original);
-  close_task_creation_inspection state ~reason:Creation_read.Interrupted;
+  close_task_inspection state ~reason:Creation_read.Interrupted;
   check bool "newer exact original selectable" true (select_task_creation_inspection state neighbor);
   let latest=begin_inspection state in
   launch_inspection results state call latest;
@@ -561,10 +561,10 @@ let test_inspection_reopen_history_and_workspace_withdrawal env () = Eio.Switch.
   suspend_workspace_readings state;
   state.workspace_authority <- Workspace_authority 1;
   state.server_identity <- Some other_workspace;
-  check bool "foreign workspace never displays the original inspector" true (current_task_creation_reader state=None);
+  check bool "foreign workspace never displays the original inspector" true (current_task_inspector state=None);
   check bool "late original reading cannot borrow foreign workspace" false (admit_inspection state late_foreign);
   (match Creation_read.observation newer.tdr_inspection with
-   | Masc_tui_fetched.Stale (Creation_read.Recorded receipt,Creation_read.Workspace_unconfirmed _) ->
+   | Some (Masc_tui_fetched.Stale (Creation_read.Recorded receipt,Creation_read.Workspace_unconfirmed _)) ->
        check string "withdrawal retains its last original creation fact" newer_id receipt.task_id
    | _ -> fail "withdrawal erased the original reading or left it pending");
   original_unconfirmed original;original_unconfirmed newer;
@@ -666,7 +666,7 @@ let test_original_task_delete_failure_and_late_scope env () = Eio.Switch.run @@ 
   let first=original_task_request state in
   launch_original_inspection results state config first;
   let late=owned_message results in
-  close_task_creation_inspection state ~reason:Creation_read.Interrupted;
+  close_task_inspection state ~reason:Creation_read.Interrupted;
   check bool "same original reopens" true (open_task_creation_inspection state ~keeper:"creation-keeper");
   creation_proof state call results;
   let fresh=original_task_request state in
@@ -864,7 +864,7 @@ let test_original_proof_failure_reopen_and_scope env () = Eio.Switch.run @@ fun 
    | Error _ -> () | Ok _ -> fail "non-component verification identity reached evidence lookup");
   Fs_compat.save_file path recorded;
   let old=evidence_request state ~next:false in launch_evidence results state config old;
-  let held=owned_message results in close_task_creation_inspection state ~reason:Creation_read.Interrupted;
+  let held=owned_message results in close_task_inspection state ~reason:Creation_read.Interrupted;
   check bool "same original inspector reopens" true (open_task_creation_inspection state ~keeper:"creation-keeper");
   creation_proof state call results;ignore (read_history_prefix results state config original ~earlier:false);
   let fresh=evidence_request state ~next:true in launch_evidence results state config fresh;

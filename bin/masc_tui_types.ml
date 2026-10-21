@@ -7905,29 +7905,51 @@ type task_dispatch_request = {
   tdr_authority : workspace_authority;
   tdr_editor : Masc_tui_message_input.revision;
   tdr_editor_keeper : string option;
-  mutable tdr_inspection : Masc_tui_task_creation_read.t;
-  mutable tdr_inspection_pending : task_creation_read_request option;
+  mutable tdr_inspection : Masc_tui_original_task_read.t;
+  mutable tdr_inspection_pending : task_inspection_request option;
 }
-and task_creation_read_request = {
-  tcr_original : task_dispatch_request;
+and ask_task_inspection = {
+  ati_submission : ask_submission;
+  mutable ati_source : Masc_tui_original_task_read.t;
+  mutable ati_pending : task_inspection_request option;
+}
+and task_inspection_owner = Created_task_owner of task_dispatch_request | Answered_ask_owner of ask_task_inspection
+and task_inspection_request = {
+  tcr_original : task_inspection_owner;
   tcr_authority : workspace_authority;
   tcr_reading : unit ref;
-  tcr_query : task_creation_query;
+  tcr_query : task_inspection_query;
   tcr_job : unit ref;
 }
-and task_creation_query =
-  | Creation_query of Masc_tui_task_creation_read.request
-  | Original_task_query of Masc_tui_task_creation_read.task_request
-  | Original_history_query of Masc_tui_task_creation_read.history_request
-  | Original_evidence_query of Masc_tui_task_creation_read.evidence_request
+and task_inspection_query =
+  | Creation_query of Masc_tui_original_task_read.request
+  | Original_task_query of Masc_tui_original_task_read.task_request
+  | Original_history_query of Masc_tui_original_task_read.history_request
+  | Original_evidence_query of Masc_tui_original_task_read.evidence_request
 
-type task_creation_reader = {
-  tci_original : task_dispatch_request;
+type task_inspection_reader = {
+  tci_original : task_inspection_owner;
   tci_authority : workspace_authority;
   tci_reading : unit ref;
   tci_surface : surface;
   tci_target : string option;
 }
+
+let task_inspection_source = function
+  | Created_task_owner original -> original.tdr_inspection | Answered_ask_owner original -> original.ati_source
+let set_task_inspection_source owner source = match owner with
+  | Created_task_owner original -> original.tdr_inspection <- source | Answered_ask_owner original -> original.ati_source <- source
+let task_inspection_pending = function
+  | Created_task_owner original -> original.tdr_inspection_pending | Answered_ask_owner original -> original.ati_pending
+let set_task_inspection_pending owner pending = match owner with
+  | Created_task_owner original -> original.tdr_inspection_pending <- pending | Answered_ask_owner original -> original.ati_pending <- pending
+let same_task_inspection_owner a b = match a,b with
+  | Created_task_owner a,Created_task_owner b -> a==b
+  | Answered_ask_owner a,Answered_ask_owner b -> a==b
+  | Created_task_owner _,Answered_ask_owner _ | Answered_ask_owner _,Created_task_owner _ -> false
+let retire_task_inspection_owner original ~reason =
+  set_task_inspection_source original (Masc_tui_original_task_read.suspend ~reason (task_inspection_source original));
+  set_task_inspection_pending original None
 
 type keeper_composer_draft = {
   kcd_text : string;
@@ -8152,7 +8174,8 @@ type state = {
      never becomes an action target when selection or polling changes. *)
   mutable chat_call_reader : (chat_call_origin * Masc_tui_chat_call_reader.t) option;
   mutable chat_call_pending : chat_call_request option;
-  mutable task_creation_reader : task_creation_reader option;
+  mutable task_inspection_reader : task_inspection_reader option;
+  mutable ask_task_inspection : ask_task_inspection option;
   mutable detail_reading: (workspace_authority * surface * Masc_tui_detail_reading.t) option;
   mutable keeper_deletions_open: bool;
   mutable keeper_deletions_loading: bool;
@@ -9998,6 +10021,12 @@ let disarm_ask_submit (state : state) =
   retire_armed_ask_submit_notice state
 
 let begin_ask_submission_state ?submission (state : state) =
+  Option.iter (fun original -> retire_task_inspection_owner (Answered_ask_owner original)
+    ~reason:Masc_tui_original_task_read.Interrupted) state.ask_task_inspection;
+  state.ask_task_inspection <- None;
+  (match state.task_inspection_reader with
+   | Some {tci_original=Answered_ask_owner _;_} -> state.task_inspection_reader <- None
+   | Some {tci_original=Created_task_owner _;_} | None -> ());
   retire_ask_followup_read state;
   state.ask_followup <- None;
   state.ask_followup_error <- None;
@@ -10504,7 +10533,7 @@ let begin_task_dispatch state intent =
     tdr_authority=state.workspace_authority;
     tdr_editor=Masc_tui_message_input.revision state.msg_input;
     tdr_editor_keeper=state.msg_target_keeper_name;
-    tdr_inspection=Masc_tui_task_creation_read.create intent;tdr_inspection_pending=None} in
+    tdr_inspection=Masc_tui_original_task_read.create intent;tdr_inspection_pending=None} in
   state.task_dispatch_requests <- request :: state.task_dispatch_requests;
   state.retained_task_dispatch_requests <- request :: state.retained_task_dispatch_requests;
   request
@@ -10565,26 +10594,41 @@ let recover_task_dispatch_input state ~keeper =
     Masc_tui_message_input.insert state.msg_input (Masc_tui_task_dispatch.intent request.tdr_dispatch).original;
     Some request
 
-let current_task_creation_reader state =
-  match state.task_creation_reader with
-  | Some reader when reader.tci_authority=state.workspace_authority
-      && reader.tci_reading==state.workspace_read_authority && reader.tci_surface=state.view
-      && reader.tci_target=state.msg_target_keeper_name
-      && state.workspace_identity=Workspace_identity_match && server_authority_ready state ->
-    let intent=Masc_tui_task_dispatch.intent reader.tci_original.tdr_dispatch in
-    (match intent.workspace,state.server_identity with
-     | Some expected,Some current when server_workspace_matches ~expected:(Some expected) (Ok current) -> Some reader
+let ask_task_link = function
+  | Masc.Tui_decode_asks.Ask_task_observed value -> Some value.akt_task_id
+  | Ask_task_missing id | Ask_task_unavailable id -> Some id | Ask_task_unlinked -> None
+let answered_ask_anchor state =
+  match state.ask_followup with
+  | Some (submission,reading) when ask_followup_owner_current state submission ->
+    let observed=Masc_tui_ask_projection.followup_view reading in
+    (match observed.fv_identity,observed.fv_task.fo_value with
+     | Some identity,Some task -> Option.map (fun task_id -> submission,identity,task,task_id) (ask_task_link task)
      | (Some _ | None),(Some _ | None) -> None)
   | Some _ | None -> None
+let same_answered_ask_anchor original submission identity task_id =
+  original.ati_submission.as_request==submission.as_request &&
+  match Masc_tui_original_task_read.origin original.ati_source with
+  | Task_creation _ -> false
+  | Answered_ask ask -> ask.ao_task_id=task_id && ask.ao_answered_at=identity.Masc.Tui_decode_asks.afi_answered_at
+      && ask.ao_stimulus_id=identity.afi_stimulus_id
+let current_task_inspector state =
+  match state.task_inspection_reader with
+  | Some reader when reader.tci_authority=state.workspace_authority
+      && reader.tci_reading==state.workspace_read_authority && reader.tci_surface=state.view
+      && state.workspace_identity=Workspace_identity_match && server_authority_ready state ->
+    let owner_current=match reader.tci_original with
+      | Created_task_owner _ -> reader.tci_target=state.msg_target_keeper_name
+      | Answered_ask_owner original -> (match answered_ask_anchor state with
+        | Some (submission,identity,_,task_id) -> same_answered_ask_anchor original submission identity task_id
+        | None -> false) in
+    (match owner_current,Masc_tui_original_task_read.workspace (task_inspection_source reader.tci_original),state.server_identity with
+     | true,Some expected,Some current when server_workspace_matches ~expected:(Some expected) (Ok current) -> Some reader
+     | (true | false),(Some _ | None),(Some _ | None) -> None)
+  | Some _ | None -> None
 
-let retire_task_creation_request original ~reason =
-  original.tdr_inspection <- Masc_tui_task_creation_read.suspend ~reason original.tdr_inspection;
-  original.tdr_inspection_pending <- None
-
-let close_task_creation_inspection state ~reason =
-  Option.iter (fun reader -> retire_task_creation_request reader.tci_original ~reason)
-    state.task_creation_reader;
-  state.task_creation_reader <- None
+let close_task_inspection state ~reason =
+  Option.iter (fun reader -> retire_task_inspection_owner reader.tci_original ~reason) state.task_inspection_reader;
+  state.task_inspection_reader <- None
 
 let task_creation_inspectable state ~keeper =
   List.filter (fun original -> task_dispatch_eligible state ~keeper original
@@ -10595,12 +10639,12 @@ let select_task_creation_inspection state original =
   let keeper=(Masc_tui_task_dispatch.intent original.tdr_dispatch).keeper in
   if not (List.exists ((==) original) (task_creation_inspectable state ~keeper)) then false
   else begin
-    Option.iter (fun previous -> if previous.tci_original!=original then
-      retire_task_creation_request previous.tci_original ~reason:Masc_tui_task_creation_read.Interrupted)
-      state.task_creation_reader;
-    original.tdr_inspection <- Masc_tui_task_creation_read.capture_transport
+    Option.iter (fun previous -> if not (same_task_inspection_owner previous.tci_original (Created_task_owner original)) then
+      retire_task_inspection_owner previous.tci_original ~reason:Masc_tui_original_task_read.Interrupted)
+      state.task_inspection_reader;
+    original.tdr_inspection <- Masc_tui_original_task_read.capture_transport
       (Masc_tui_task_dispatch.progress original.tdr_dispatch) original.tdr_inspection;
-    state.task_creation_reader <- Some {tci_original=original;tci_authority=state.workspace_authority;
+    state.task_inspection_reader <- Some {tci_original=Created_task_owner original;tci_authority=state.workspace_authority;
       tci_reading=state.workspace_read_authority;tci_surface=state.view;tci_target=state.msg_target_keeper_name};
     true
   end
@@ -10610,70 +10654,91 @@ let open_task_creation_inspection state ~keeper =
   | [] -> false
   | original::_ -> select_task_creation_inspection state original
 
+let open_ask_task_inspection state =
+  if state.workspace_identity<>Workspace_identity_match || not (server_authority_ready state) then false
+  else match answered_ask_anchor state,state.server_identity with
+  | Some (({as_asker=Masc.Tui_decode_asks.Ask_keeper keeper;_} as submission),identity,task,task_id),Some workspace ->
+    let original=match state.ask_task_inspection with
+      | Some original when same_answered_ask_anchor original submission identity task_id
+          && server_workspace_matches ~expected:(Masc_tui_original_task_read.workspace original.ati_source) (Ok workspace) -> Ok original
+      | Some _ | None -> Result.map (fun ati_source -> {ati_submission=submission;ati_source;ati_pending=None})
+          (Masc_tui_original_task_read.create_ask ~keeper ~ask_id:submission.as_ask_id
+            ~workspace ~identity ~task) in
+    (match original with
+     | Error _ -> false
+     | Ok original ->
+       let owner=Answered_ask_owner original in
+       Option.iter (fun previous -> if not (same_task_inspection_owner previous.tci_original owner) then
+         retire_task_inspection_owner previous.tci_original ~reason:Masc_tui_original_task_read.Interrupted) state.task_inspection_reader;
+       state.ask_task_inspection <- Some original;
+       state.task_inspection_reader <- Some {tci_original=owner;tci_authority=state.workspace_authority;
+         tci_reading=state.workspace_read_authority;tci_surface=state.view;tci_target=state.msg_target_keeper_name};true)
+  | (Some _ | None),(Some _ | None) -> false
+
 let task_creation_neighbor state ~older =
-  match current_task_creation_reader state with
-  | None -> None
-  | Some reader ->
-    let keeper=(Masc_tui_task_dispatch.intent reader.tci_original.tdr_dispatch).keeper in
+  match current_task_inspector state with
+  | None | Some {tci_original=Answered_ask_owner _;_} -> None
+  | Some {tci_original=Created_task_owner original;_} ->
+    let keeper=(Masc_tui_task_dispatch.intent original.tdr_dispatch).keeper in
     let originals=task_creation_inspectable state ~keeper in
-    Option.bind (List.find_index ((==) reader.tci_original) originals) (fun index ->
+    Option.bind (List.find_index ((==) original) originals) (fun index ->
       let next=if older then index+1 else index-1 in
       if next<0 then None else List.nth_opt originals next)
 
 let begin_task_inspector_read state start =
-  match current_task_creation_reader state with
+  match current_task_inspector state with
   | None -> None
   | Some reader ->
     let original=reader.tci_original in
-    let source,query=start original.tdr_inspection in
-    original.tdr_inspection <- source;
+    let source,query=start (task_inspection_source original) in
+    set_task_inspection_source original source;
     Option.map (fun tcr_query ->
       let request={tcr_original=original;tcr_authority=state.workspace_authority;
         tcr_reading=state.workspace_read_authority;tcr_query;tcr_job=ref ()} in
-      original.tdr_inspection_pending <- Some request;request) query
+      set_task_inspection_pending original (Some request);request) query
 let begin_task_creation_inspection state = begin_task_inspector_read state (fun source ->
-  let source,ticket=Masc_tui_task_creation_read.start source in source,Option.map (fun ticket -> Creation_query ticket) ticket)
+  let source,ticket=Masc_tui_original_task_read.start source in source,Option.map (fun ticket -> Creation_query ticket) ticket)
 let begin_original_task_inspection state = begin_task_inspector_read state (fun source ->
-  let source,ticket=Masc_tui_task_creation_read.start_task source in source,Option.map (fun ticket -> Original_task_query ticket) ticket)
+  let source,ticket=Masc_tui_original_task_read.start_task source in source,Option.map (fun ticket -> Original_task_query ticket) ticket)
 let begin_original_history_inspection state ~earlier ~limit = begin_task_inspector_read state (fun source ->
-  let source,ticket=Masc_tui_task_creation_read.start_history ~earlier ~limit source in source,Option.map (fun ticket -> Original_history_query ticket) ticket)
+  let source,ticket=Masc_tui_original_task_read.start_history ~earlier ~limit source in source,Option.map (fun ticket -> Original_history_query ticket) ticket)
 let begin_original_evidence_inspection state ~next = begin_task_inspector_read state (fun source ->
-  let source,ticket=Masc_tui_task_creation_read.start_evidence ~next source in source,Option.map (fun ticket -> Original_evidence_query ticket) ticket)
+  let source,ticket=Masc_tui_original_task_read.start_evidence ~next source in source,Option.map (fun ticket -> Original_evidence_query ticket) ticket)
 let complete_task_inspector_read state request ~is_current ~apply =
   let original=request.tcr_original in
-  match original.tdr_inspection_pending with
+  match task_inspection_pending original with
   | Some pending when pending==request ->
     let owned=request.tcr_authority=state.workspace_authority
       && request.tcr_reading==state.workspace_read_authority
-      && (match current_task_creation_reader state with
-          | Some reader -> reader.tci_original==original | None -> false)
-      && is_current original.tdr_inspection in
+      && (match current_task_inspector state with
+          | Some reader -> same_task_inspection_owner reader.tci_original original | None -> false)
+      && is_current (task_inspection_source original) in
     if owned then begin
-      original.tdr_inspection <- apply original.tdr_inspection;
-      original.tdr_inspection_pending <- None
-    end else retire_task_creation_request original
-      ~reason:(Masc_tui_task_creation_read.Workspace_unconfirmed "Original inspection ownership changed.");
+      set_task_inspection_source original (apply (task_inspection_source original));
+      set_task_inspection_pending original None
+    end else retire_task_inspection_owner original
+      ~reason:(Masc_tui_original_task_read.Workspace_unconfirmed "Original inspection ownership changed.");
     owned
   | Some _ | None -> false
 let complete_task_creation_inspection state request result = match request.tcr_query with
   | Creation_query ticket -> complete_task_inspector_read state request
-    ~is_current:(fun source -> Masc_tui_task_creation_read.is_current source ticket)
-    ~apply:(fun source -> Masc_tui_task_creation_read.complete source ticket result)
+    ~is_current:(fun source -> Masc_tui_original_task_read.is_current source ticket)
+    ~apply:(fun source -> Masc_tui_original_task_read.complete source ticket result)
   | Original_task_query _ | Original_history_query _ | Original_evidence_query _ -> false
 let complete_original_task_inspection state request result = match request.tcr_query with
   | Original_task_query ticket -> complete_task_inspector_read state request
-    ~is_current:(fun source -> Masc_tui_task_creation_read.task_is_current source ticket)
-    ~apply:(fun source -> Masc_tui_task_creation_read.complete_task source ticket result)
+    ~is_current:(fun source -> Masc_tui_original_task_read.task_is_current source ticket)
+    ~apply:(fun source -> Masc_tui_original_task_read.complete_task source ticket result)
   | Creation_query _ | Original_history_query _ | Original_evidence_query _ -> false
 let complete_original_history_inspection state request result = match request.tcr_query with
   | Original_history_query ticket -> complete_task_inspector_read state request
-    ~is_current:(fun source -> Masc_tui_task_creation_read.history_is_current source ticket)
-    ~apply:(fun source -> Masc_tui_task_creation_read.complete_history source ticket result)
+    ~is_current:(fun source -> Masc_tui_original_task_read.history_is_current source ticket)
+    ~apply:(fun source -> Masc_tui_original_task_read.complete_history source ticket result)
   | Creation_query _ | Original_task_query _ | Original_evidence_query _ -> false
 let complete_original_evidence_inspection state request result = match request.tcr_query with
   | Original_evidence_query ticket -> complete_task_inspector_read state request
-    ~is_current:(fun source -> Masc_tui_task_creation_read.evidence_is_current source ticket)
-    ~apply:(fun source -> Masc_tui_task_creation_read.complete_evidence source ticket result)
+    ~is_current:(fun source -> Masc_tui_original_task_read.evidence_is_current source ticket)
+    ~apply:(fun source -> Masc_tui_original_task_read.complete_evidence source ticket result)
   | Creation_query _ | Original_task_query _ | Original_history_query _ -> false
 
 let task_handoff_may_focus state ~keeper = function
@@ -11564,8 +11629,8 @@ let suspend_verification_evidence_read state =
   state.verification_evidence_request <- None
 
 let suspend_workspace_readings state =
-  close_task_creation_inspection state
-    ~reason:(Masc_tui_task_creation_read.Workspace_unconfirmed "Waiting for original workspace identity.");
+  close_task_inspection state
+    ~reason:(Masc_tui_original_task_read.Workspace_unconfirmed "Waiting for original workspace identity.");
   suspend_verification_evidence_read state;
   state.chat_call_reader <- None;
   state.chat_call_pending <- None;
@@ -14811,7 +14876,7 @@ let open_detail_reading (state : state) reading =
   state.detail_reading <- Some (state.workspace_authority, state.view, reading)
 
 let modal_owns_keys (state : state) =
-  Option.is_some (current_task_creation_reader state)
+  Option.is_some (current_task_inspector state)
   || Option.is_some (current_chat_call_reader state)
   || Option.is_some (current_detail_reading state)
   || state.help_open || state.keeper_deletions_open || state.agenda_open
@@ -14988,7 +15053,8 @@ let create_state
   help_open = false;
   chat_call_reader = None;
   chat_call_pending = None;
-  task_creation_reader = None;
+  task_inspection_reader = None;
+  ask_task_inspection = None;
   detail_reading = None;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;

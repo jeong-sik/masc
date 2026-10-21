@@ -82,6 +82,15 @@
   부분 사실은 세션이 닫힐 때까지 보관한다. 늦은 part나 종단이 끝난 등록·세션을 다시
   열지 못한다. 새 cap·timer·retry·도구 제한을 만들지 않고 대기 제거를 속도 실측으로
   환산하지 않는다. wire frame은 서버의 typed formatter 하나에서 만든다.
+- Approvals의 `T`는 마지막으로 답변한 원래 Ask의 canonical answer identity와 Task 링크로
+  공용 원본 Task inspector를 연다. 생성 요청과 Ask 출처는 닫힌 타입으로 구분한다.
+  Ask에는 생성 영수증·생성 조회가 없으며 현재 Keeper나 전역 Task 목록을 빌리지 않는다.
+  `o`·`h/H`·`v`·`r`은 기존 exact Task·저장 이력·verification 제출의 읽기 경로를 쓰고,
+  `b`는 원래 Ask·답변 시각·stimulus·Task·workspace 연결만 보여 준다. 입력·선택·답변
+  재전송·Task 생성·handoff를 수행하지 않는다. 같은 Ask 재방문은 마지막 관측을 보관하며,
+  각 조회는 새 ticket과 현재 viewer·workspace/read authority를 확인한다. 새 답변 소유자와
+  출처 변경은 이전 조회를 철회하고 늦은 응답을 거부한다. typed answer editor가 키를 소유할
+  때는 `T`를 가로채지 않는다. 이 연결은 Goal 완료나 화면·시간 개선의 실측이 아니다.
 - 질문의 `o`는 기록된 원본 출처를 로컬에서 펼치고, `O`는 그 Turn_ref에 고정한
   inspector를 연다. 최근 목록 탐색과 고정한 원본은 별도 타입이다. 원본이 없으면
   현재 Keeper 턴으로 대체하지 않는다. 입력 중인 자유문자는 그대로 입력하고,

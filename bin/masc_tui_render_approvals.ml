@@ -377,7 +377,12 @@ let draw_ask_answer_feedback buf cols (state : state) =
             (if akt_evidence_current then Theme.info () else Theme.warn ()) in
       box_wrapped_field buf cols ~head:"  "
         ~style:(source_style observed.fv_task task_style)
-        (task_text ^ source_notice observed.fv_task))
+        (task_text ^ source_notice observed.fv_task);
+      (match observed.fv_identity,observed.fv_task.fo_value with
+       | Some _,Some (Decode.Ask_task_missing _ | Ask_task_unavailable _ | Ask_task_observed _) ->
+         box_wrapped_field buf cols ~head:"  " ~style:(Theme.info ())
+           "T: inspect this last answered Ask's original Task · h/H history · v verification evidence"
+       | (Some _ | None),(Some _ | None) -> ()))
       followup;
     (match state.ask_followup_error with
      | None -> ()

@@ -629,9 +629,13 @@ worker's browser/driver children inherit the projected environment. This is
 not a same-user filesystem sandbox. The older actual browser rows above do not
 prove execution after this change. Its selected checks are:
 
-- [Native runtime/Exact Output 39528969166](https://github.com/jeong-sik/masc/actions/runs/39528969166), composition `a18c0a80d4334fe7be95cb2b3ccf2ba79a139192`: environment sentinels in the actual worker and child, operational settings and retained host credentials; result pending.
-- [External WebExtension 39528932570](https://github.com/jeong-sik/masc/actions/runs/39528932570), exact source `f2d71690c8b0d1c63bad7e5e1abae2ae645fe53f`: result pending.
-- [Owned Gecko 39528937218](https://github.com/jeong-sik/masc/actions/runs/39528937218), the same exact source: model and transfer result pending.
+- [Native runtime/Exact Output 39528969166](https://github.com/jeong-sik/masc/actions/runs/39528969166), composition `a18c0a80d4334fe7be95cb2b3ccf2ba79a139192`: the whole run failed because the native runtime fixture omitted its direct `Common` library dependency. Its environment-sentinel assertions did not execute. The separately selected native Exact Output case passed, including retained delivery without another provider call.
+- [External WebExtension 39528932570](https://github.com/jeong-sik/masc/actions/runs/39528932570), exact source `f2d71690c8b0d1c63bad7e5e1abae2ae645fe53f`: 25/25 steps and 12 tool receipts; real native messaging/HTTP ingress, one witnessed click, borrowed Firefox preservation, fresh client/incarnation, stale refusal and final owned-worker cleanup. The fixture then deleted its external Firefox session and verified browser exit.
+- [Owned Gecko 39528937218](https://github.com/jeong-sik/masc/actions/runs/39528937218), the same exact source: 26/26 steps and 16 receipts; one canonical-schema model request, observed-node result, exact 65,567-byte upload/download, retained artifacts and confirmed cleanup. Both actual browser runs used workflow `f14befbde7638f40c26e8e2b74138970f3cccc04` and isolated Firefox 158.0.1; their source/workflow records and all five/four retained native executable hashes were verified.
+
+The environment-sentinel fixture still needs its direct dependency repaired and
+an actual passing execution. The two actual browser successes do not substitute
+for that missing check.
 
 Full regression, personal-site sessions, installed TUI behavior, other browser
 families, formal whole-stack approval and merge remain separate claims.
@@ -661,8 +665,8 @@ retained. The first explicit [run39527028175](https://github.com/jeong-sik/masc/
 failed before browser execution on warning 21 in the HTTP daemon callback.
 The environment-boundary source above also replaces that callback with a
 tail-recursive accept loop while preserving its nested switch ownership. The
-replacement external run is listed separately; the compile failure is not
-external browser evidence.
+replacement external run passed 25/25 as recorded above; the original compile
+failure remains separate from that actual browser evidence.
 
 ### Real Gecko locate and transfer probe
 

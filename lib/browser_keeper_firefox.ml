@@ -12,6 +12,27 @@ let firefox_argv (config : Browser_configuration.live_bidi) =
   ; string_of_int config.port
   ]
 
+(* Firefox opens whatever page a Keeper is sent to, and its content processes
+   keep the environment it started with. It gets the environment a Keeper's
+   subprocess gets ([Env_keeper_scrub]: an exact set of process keys, proxy
+   values with their credentials scrubbed, no token) and, beyond it, the
+   names that tell a desktop which session a window belongs to. A token the
+   server was started with (MASC_ADMIN_TOKEN, a dashboard URL carrying one, a
+   provider key) does not reach a page's process. Headless Firefox 158.0 on
+   macOS opened its BiDi port with only HOME, PATH, TMPDIR and USER (measured
+   2026-10-21). The session names are the ones a Linux desktop passes to a
+   window and carry paths and addresses, no credential. *)
+let firefox_session_names =
+  [ "DISPLAY"; "WAYLAND_DISPLAY"; "XAUTHORITY"; "XDG_RUNTIME_DIR"; "XDG_SESSION_TYPE"
+  ; "XDG_CURRENT_DESKTOP"; "XDG_DATA_DIRS"; "DBUS_SESSION_BUS_ADDRESS" ]
+
+let firefox_environment inherited =
+  let name entry =
+    match String.index_opt entry '=' with Some i -> String.sub entry 0 i | None -> entry in
+  let session =
+    List.filter (fun entry -> List.mem (name entry) firefox_session_names) (Array.to_list inherited) in
+  Array.append (Env_keeper_scrub.filter_environment inherited) (Array.of_list session)
+
 let host_argv ~launcher (config : Browser_configuration.live_bidi) =
   [ launcher
   ; Browser_bidi_host_status.bidi_url_flag

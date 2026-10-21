@@ -685,10 +685,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         ~on_result_ready:(fun _ ->
           Keeper_composition_continuation_wake.notify_result_ready ~sw prepared_continuations) () in
     let reconcile_owned_job_completions () =
-      match Keeper_owned_job_completion_wake.pulse ~sw owned_job_completions with
-      | Error error -> Log.Server.warn "owned job completion discovery unavailable: %s"
-          (Keeper_owned_job_store.error_to_string error)
-      | Ok () -> ()
+      Keeper_owned_job_completion_wake.pulse ~sw owned_job_completions
     in
     let ask_answers = Keeper_ask_answer_wake.create ~base_path:config.base_path () in
     let reconcile_ask_answers () =

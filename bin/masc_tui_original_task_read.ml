@@ -342,6 +342,11 @@ let suspend ~reason t =
     evidence_fetched=Fetched.suspend_with ~reason t.evidence_fetched}
 let document t = t.document
 let move ~count ~height movement t = {t with document=Reading.move ~count ~height movement t.document}
+let search_key ~width ~height ~key t =
+  Option.map (fun document -> {t with document})
+    (Reading.search_key ~width ~height ~key t.document)
+let search_insert ~width ~height ~text t =
+  {t with document=Reading.search_insert ~width ~height ~text t.document}
 
 let displayed_source t = t.displayed
 let task_request_id request = Fetched.request_id request.task_ticket

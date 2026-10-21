@@ -716,7 +716,10 @@ names. A line that starts with `/` is a command for the TUI instead:
   leaves its previous reading and the failure. This reader shows full captured
   text and binary identity/preview availability; it does not draw image pixels.
   Reading submitted evidence is separate from an approval or useful-work verdict.
-  Esc closes the inspector.
+  `/` searches the displayed original document; typing and paste stay in that
+  query. Enter keeps it for `n`/`N` to move between matching rows. While editing,
+  source keys such as `r`, `h` and `v` are query text, and Esc cancels the query
+  while keeping the inspector open. Outside query editing, Esc closes it.
   Inspection never repeats creation, restores input or hands work to a Keeper.
   New input survives late replies. Closing/reopening or changing workspace
   retires old reply admission; retained observations belong to this TUI session.

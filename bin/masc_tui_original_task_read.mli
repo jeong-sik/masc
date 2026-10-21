@@ -47,6 +47,12 @@ val recorded_task : t -> string option
 val capture_transport : Masc_tui_task_dispatch.progress -> t -> t
 val document : t -> Masc_tui_detail_reading.t
 val move : count:int -> height:int -> Masc_tui_detail_reading.movement -> t -> t
+val search_key : width:int -> height:int -> key:string -> t -> t option
+(** Search the displayed original document before dispatching source controls.
+    [None] leaves the key to those controls. Query editing consumes printable
+    keys and Esc without changing the origin, read tickets or draft. *)
+val search_insert : width:int -> height:int -> text:string -> t -> t
+(** Paste into an editing query only; otherwise leave the source unchanged. *)
 
 type task_request
 type task_snapshot

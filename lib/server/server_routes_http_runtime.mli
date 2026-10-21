@@ -249,9 +249,11 @@ val make_health_response_body :
     full-health snapshot or its background worker. *)
 
 val invalidate_full_health_snapshot : unit -> unit
-(** Drop the cached full-health fields and request a background refresh after a
-    live state mutation. Until refresh completes, [full=1] returns bounded
-    warming placeholders instead of a previously ready snapshot. Cancellation
+(** Mark the cached observation stale and request a background refresh after a
+    live state mutation. [full=1] retains its fields and measurement timestamp,
+    with stale metadata; only a cold cache returns warming placeholders.
+    A worker invalidated during its scan cannot certify a current snapshot.
+    Cancellation
     does not interrupt it, and a caller outside Eio invalidates without waking
     the refresh loop, which then refreshes at its next interval. *)
 
@@ -275,10 +277,14 @@ module For_testing : sig
     request_authority:Server_request_authority.authority ->
     Httpun.Request.t ->
     unit
-  (** Synchronously recomputes and stores the cached full-health snapshot. *)
+  (** Synchronously recomputes the observation. A failed snapshot preserves the
+      last-good fields through the same publication boundary as the worker. *)
 
   val mark_full_health_snapshot_failure : Proactive_refresh.failure -> unit
   (** Records a failed background refresh without recomputing the snapshot. *)
+
+  val mark_full_health_refresh_wait_failure : Proactive_refresh.failure -> unit
+  (** Records the active worker's waiter failure once while its compute runs. *)
 
   val full_health_refresh_timing : unit -> float * float * float
   (** Returns [(interval_sec, timeout_sec, ttl_sec)] for full-health refresh. *)
@@ -287,9 +293,12 @@ module For_testing : sig
   (** Returns the fixed leading-edge coalescing bound for mutation wakes. *)
 
   val run_full_health_refresh_worker :
-    sw:Eio.Switch.t -> compute:(unit -> unit) -> unit
+    sw:Eio.Switch.t ->
+    compute:(unit -> (unit, Proactive_refresh.failure) result) -> unit
   (** Runs an injected compute through the production full-health singleflight
-      coordinator.  The worker is attached to [sw], not to a caller timeout. *)
+      coordinator. [Error failure] represents a completed compute that returned a
+      failed observation (not a thrown worker exception). The worker is attached
+      to [sw], not to a caller timeout. *)
 
   val full_health_refresh_worker_stats : unit -> int * int * bool * int * bool * bool
   (** Returns [(submissions, joins, active, invalidation_generation,

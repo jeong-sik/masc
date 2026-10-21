@@ -97,5 +97,5 @@
  (libraries masc masc.server masc.browser_lane masc.browser_configuration masc.time_compat
   masc.fs_compat masc.config masc.runtime masc.masc_eio_context masc.multimodal masc.masc_tool_blob_store
   masc.skill_snapshot masc.skill_snapshot_service masc.skill_reference
-  masc.lane_addon_call_context masc.tool_types exact_output_fixture
+  masc.lane_addon_call_context masc.tool_types masc.agent_core exact_output_fixture cohttp
   eio eio_main eio.unix yojson unix mirage-crypto-rng.unix))

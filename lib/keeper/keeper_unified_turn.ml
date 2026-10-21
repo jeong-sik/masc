@@ -726,6 +726,7 @@ let run_keeper_cycle
            Keeper_unified_turn_pre_dispatch.build_runtime_execution
              ~meta
              ~runtime_id:effective_runtime_runtime_name
+             ~deferred_runtime_lane
            |> Result.map (fun execution -> entry_profile_defaults, execution)
          in
          (match profile_and_execution

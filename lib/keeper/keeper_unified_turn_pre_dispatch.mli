@@ -40,13 +40,21 @@ val turn_profile_and_meta :
 val build_runtime_execution
   :  meta:Keeper_meta_contract.keeper_meta
   -> runtime_id:string
+  -> deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option
   -> ( Keeper_turn_runtime_budget.runtime_execution
      , Agent_core.Error.t )
      result
 (** Build a [runtime_execution] for the given [runtime_id] under
     [meta]'s context.
 
+    The context window is the smallest window among every candidate that can
+    serve the turn's prompt. For a lane that is the lane's candidates. When
+    [deferred_runtime_lane] is the hint the turn resumes from (its
+    [next_runtime_id] is [runtime_id]), it is [Keeper_turn_driver.deferred_runtime_ids]
+    of that hint, the candidates the walk still rotates through.
+
     Failure modes (returned as [Error]):
+    - [deferred_runtime_lane] resumes at a runtime other than [runtime_id].
     - The exact [runtime_id] has no configured context window.
     - [meta.max_context_override] is not positive.
 

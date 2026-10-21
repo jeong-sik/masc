@@ -596,6 +596,7 @@ let run_keeper_invocation_turn_admitted_inner
          Keeper_unified_turn_pre_dispatch.build_runtime_execution
            ~meta
            ~runtime_id:turn_runtime_id
+           ~deferred_runtime_lane:resume_lane
        with
 	         | Error error ->
 	           Progress.stop_tracking turn_task_id;

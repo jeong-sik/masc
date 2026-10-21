@@ -60,6 +60,7 @@ let turn_profile_and_meta ~base_path ~(entry_meta : keeper_meta) :
 let build_runtime_execution
       ~(meta : keeper_meta)
       ~(runtime_id : string)
+      ~(deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option)
   : ( Keeper_turn_runtime_budget.runtime_execution
     , Agent_core.Error.t )
     result
@@ -87,6 +88,32 @@ let build_runtime_execution
            { field = "runtime_id"
            ; detail = Printf.sprintf "Runtime lane %s has no candidates" runtime_id
            })))
+  in
+  (* A deferred walk resumes at [next_runtime_id] and then rotates through
+     [later_runtime_ids]; [Keeper_turn_driver.deferred_runtime_ids] is the
+     walk's own list. The hint belongs to the turn that resumes at its
+     [next_runtime_id]; a hint for another runtime is a caller mistake, not a
+     list to skip. *)
+  let* remaining_context_ids =
+    match deferred_runtime_lane with
+    | None -> Ok remaining_context_ids
+    | Some hint when not (String.equal hint.Keeper_turn_driver.next_runtime_id runtime_id) ->
+      Error
+        (Agent_core.Error.Internal
+           (Printf.sprintf
+              "deferred runtime lane resumes at %s but the turn runs %s"
+              hint.Keeper_turn_driver.next_runtime_id
+              runtime_id))
+    | Some hint ->
+      Ok
+        (List.fold_left
+           (fun ids candidate_id ->
+              if String.equal candidate_id entry_runtime_id
+                 || List.exists (String.equal candidate_id) ids
+              then ids
+              else ids @ [ candidate_id ])
+           remaining_context_ids
+           (Keeper_turn_driver.deferred_runtime_ids hint))
   in
   let log_pre_dispatch_error ~site detail =
     Log.Keeper.error

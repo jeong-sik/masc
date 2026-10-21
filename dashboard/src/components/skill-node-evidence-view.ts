@@ -27,10 +27,10 @@ function NodeSettlement({ node, peak }: { node: SkillExecutorSettlement; peak: n
       <summary class="cursor-pointer break-words">
         <strong>${node.node_id}</strong> · ${node.tool_name} · ${node.result.disposition}
         · ${node.result.duration_ms}ms
+        <div class="mt-2 h-2 overflow-hidden rounded bg-[var(--color-border-default)]" aria-hidden="true">
+          <div class="h-full" style=${{ width: `${peak > 0 ? node.result.duration_ms / peak * 100 : 0}%`, backgroundColor: color }} />
+        </div>
       </summary>
-      <div class="mt-2 h-2 overflow-hidden rounded bg-[var(--color-border-default)]" aria-hidden="true">
-        <div class="h-full" style=${{ width: `${peak > 0 ? node.result.duration_ms / peak * 100 : 0}%`, backgroundColor: color }} />
-      </div>
       <div class="mt-1 text-3xs ss-muted">
         ${executionOrigin(node.execution_origin)} · batch ${node.schedule.batch_index}
         · ${node.schedule.execution_mode} · planned ${node.schedule.planned_index}
@@ -43,7 +43,7 @@ function NodeSettlement({ node, peak }: { node: SkillExecutorSettlement; peak: n
             : `Truncated to ${node.truncated_to} bytes`}</div>
           ${node.deferred_kind === null ? null : html`<div>Deferred: ${node.deferred_kind}</div>`}
           ${node.failure_effect_disposition === null ? null : html`<div>Effect evidence: ${node.failure_effect_disposition}</div>`}
-          <div class="grid min-w-0 gap-2 lg:grid-cols-2">
+          <div class="grid min-w-0 gap-2">
             <div class="min-w-0"><strong>Observed input</strong>
               <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-bg-elevated)] p-2">${payload(node.input)}</pre>
             </div>

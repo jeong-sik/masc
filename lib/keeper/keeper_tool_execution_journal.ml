@@ -1778,7 +1778,7 @@ let continuation_readiness ~read_composition_result (continuation : continuation
     | Waiting_for_results, true -> Ok Waiting_for_results)
       (Ok Results_ready) continuation.dependencies)
 
-let named_result_owner_state journal binding = filesystem (fun () ->
+let named_result_owner_state (journal : t) binding = filesystem (fun () ->
   let* state = strict_read ~root:journal.root journal.path in
   let* () = check_source journal state in
   let* original = original_named_binding journal state in
@@ -2028,7 +2028,7 @@ let worker_child_admission (worker : worker) ~node_ids =
     let* () = check_worker worker state in
     Ok (nodes_child_admission state.nodes ~node_ids))
 
-let validate_source_plan journal ~plan =
+let validate_source_plan (journal : t) ~plan =
   let* recorded = frozen_plan ~base_path:journal.base_path journal.immutable_source in
   let* actual = Keeper_tool_plan_request.to_yojson plan
     |> Result.map_error (fun _ -> Plan_identity_conflict) in
@@ -2070,7 +2070,7 @@ let submission_operand (attempt : attempt) plan =
   | Some {target=(Plan.Child_arguments _ | Plan.Child_submission _ | Child_result _ | Descriptor_target _);_} | None ->
     Error (Node_identity_conflict attempt.occurrence.node_id)
 
-let original_nested_context journal =
+let original_nested_context (journal : t) =
   let* run = read_manifest ~base_path:journal.base_path journal.immutable_source.run_reference in
   let* json = match run with
     | `Assoc fields -> (match List.assoc_opt "nested_activation" fields with

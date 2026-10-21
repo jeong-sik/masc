@@ -6706,7 +6706,7 @@ let test_parent_alias_retarget_cannot_borrow_original_authority () =
    | Backend.Running container_id ->
      (match original.phase with
       | Store.Running original_id -> check string "original running container retains its frozen authority" original_id container_id
-      | Prepared | Create_requested | Created _ | Start_requested | Exited _ | Cancelled_before_start _
+      | Prepared | Create_requested | Created _ | Start_requested _ | Exited _ | Cancelled_before_start _
       | Cancelled_unconfirmed_launch -> fail "original job did not start")
    | Absent | Created _ | Stopped _ | Unconfirmed _ -> fail "retargeted alias disturbed the original backend")
 

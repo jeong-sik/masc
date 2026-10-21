@@ -200,7 +200,7 @@ let read ~root path =
   | Some contents when contents.snapshot.Fs_compat.permissions land 0o077 = 0 -> Ok (Some contents.content)
   | Some _ -> Error (Unreadable_intent "record is not private")
 
-let check_source request source =
+let check_source request (source : Journal.source) =
   let matches = String.equal source.Journal.keeper_name request.keeper_name
     && String.equal source.parent_tool_use_id request.tool_use_id
     && source.source_turn = request.turn && source.source_task_id = request.source_task_id

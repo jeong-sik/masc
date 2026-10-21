@@ -5201,9 +5201,9 @@ let launch_lane_addons ?target state ~mailbox request =
   else begin
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
-  let target = match target with
-    | Some target -> target
-    | None -> Addons.request_read_target view request in
+  match Addons.request_read_target ?target view request with
+  | Error refusal -> state.lane_addons <- Some (Addons.refuse_read_scope view refusal)
+  | Ok target ->
   if view.loading then
     (* The answer to the key just pressed goes at the top of the pane, so a
        reader scrolled into a draft would not see it. *)
@@ -17618,13 +17618,17 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
             {view with loading=false;error=None;snapshot_read_error=Some detail;
               application_reading=Masc_tui_lane_application.accept (Error detail)}
         | Error (`Detail detail) ->
-            {view with loading=false;error=lane_addons_detail_failure detail}
+            let detail_read_error = match target with
+              | Masc_tui_lane_addons.Read_detail (id, incarnation) -> Some (id, incarnation, detail)
+              | Read_screen | Read_installation_results _ -> view.detail_read_error in
+            {view with loading=false;error=lane_addons_detail_failure detail;detail_read_error}
         | Error (`Request detail) ->
             {view with loading=false;error=lane_addons_request_failure detail}
         | Ok reply ->
             let view = match reply.lar_snapshot with
               | None -> view
-              | Some snapshot -> Masc_tui_lane_addons.reconcile_snapshot view snapshot in
+              | Some snapshot -> Masc_tui_lane_addons.reconcile_read_snapshot view
+                  ~target ~diagnostic:reply.lar_diagnostic snapshot in
             let view = match reply.lar_receipt with
               | None -> view
               | Some receipt -> Masc_tui_lane_addons.acknowledge_broadcast view receipt in

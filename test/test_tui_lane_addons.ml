@@ -5,6 +5,7 @@ module UI = Masc_tui_lane_addons
 module Draft = Masc_tui_lane_declaration
 module Owner = Masc.Lane_addon_declaration
 let ok = function Ok value -> value | Error message -> fail message
+let read_ok = function Ok value -> value | Error _ -> fail "request scope was refused"
 let owner_ok = function Ok value -> value | Error error -> fail error.Owner.message
 let write path text = Out_channel.with_open_bin path (fun channel -> output_string channel text)
 let manifest = {|id="operator-test"
@@ -1497,12 +1498,15 @@ let connection_workers_preserve_other_installation_owners () =
     (ids removed.installation_workers)
 
 let detail_reads_keep_original_incarnation_and_receipts () =
-  let original = {UI.initial with screen=UI.Detail ("worker", "epoch-1")} in
-  let inspect_target = UI.request_read_target original UI.Inspect in
+  let snapshot = UI.decode (installation_inspect ~runtime:"live" ()) |> ok in
+  let owner = {(List.hd snapshot.instances) with id="worker";incarnation="epoch-1";run_id="original-run"} in
+  let original = {UI.initial with screen=UI.Detail ("worker", "epoch-1");
+    snapshot=Some {snapshot with instances=[owner]}} in
+  let inspect_target = UI.request_read_target original UI.Inspect |> read_ok in
   check bool "inventory refresh stays bound before the worker becomes retained" true
     (inspect_target=UI.Read_detail ("worker", "epoch-1"));
   let history_target = UI.request_read_target original
-      (UI.Slice ["run_id", "original-run"]) in
+      (UI.Slice ["run_id", "original-run"]) |> read_ok in
   check bool "history refresh keeps the same original detail" true
     (history_target=inspect_target);
   check bool "the matching detail may receive its retained result" true
@@ -1516,11 +1520,11 @@ let detail_reads_keep_original_incarnation_and_receipts () =
   check bool "returning to the inventory rejects a departed detail read" false
     (UI.read_still_wanted UI.initial ~showing:true inspect_target);
   check bool "inventory reads remain inventory reads" true
-    (UI.request_read_target UI.initial UI.Inspect=UI.Read_screen);
+    (UI.request_read_target UI.initial UI.Inspect=Ok UI.Read_screen);
   let action : UI.action_request = {instance_id="worker";incarnation="epoch-1";
     request_id="original-action";action=`Assoc []} in
   List.iter (fun request ->
-    let target = UI.request_read_target original request in
+    let target = UI.request_read_target original request |> read_ok in
     check bool "submitted effects and status receipts survive detail navigation" true
       (target=UI.Read_screen
        && UI.read_still_wanted UI.initial ~showing:false target))
@@ -1528,7 +1532,173 @@ let detail_reads_keep_original_incarnation_and_receipts () =
      UI.Evidence (`Assoc []); UI.Act action; UI.Action_status action;
      UI.Subscriptions (`Assoc [])]
 
+let partial_detail_read_keeps_original_results_and_fresh_inventory () =
+  let snapshot = UI.decode (installation_inspect ~runtime:"live" ()) |> ok in
+  let original = List.hd snapshot.instances in
+  let other = {original with id="other-worker";incarnation="other-epoch"} in
+  let row (worker : UI.instance) : UI.Row.row = {
+    id=worker.id ^ "/1/result";lane_id=worker.id ^ "/result";
+    kind=UI.Row.Value;title="Recorded result";observed_at=1.;subject_id=worker.run_id;
+    clock=None;actor=None;fields=["value",`Int 17];
+    evidence=[{uri="artifact://original";sha256=Some "original-hash"}];related_ids=[]} in
+  let old_row = row original and unrelated_row = row other in
+  let old_coverage : UI.Row.coverage = {source_id="original-source";incarnation="source-epoch";
+    cursor=Some "1";complete=true;detail=None} in
+  let prior = {snapshot with instances=[original;other];
+    output={rows=[old_row;unrelated_row];coverage=[old_coverage]};complete=Some true} in
+  let draft = Draft.create "unsaved.toml" |> ok in
+  let before = {UI.initial with snapshot=Some prior;
+    screen=UI.Detail (original.id,original.incarnation);row_cursor=0;
+    selected=[old_row.id];documents=[draft];receipt=Some (`String "original-receipt")} in
+  let stopped = {original with runtime_presence=UI.Retained_binding;phase=UI.Row.Detached} in
+  let current_row = {unrelated_row with fields=["value",`Int 23]} in
+  let fresh_configuration : UI.configuration = {directory="/fresh";complete=true;declarations=[]} in
+  let fresh = {snapshot with instances=[stopped;other];configuration=Some fresh_configuration;
+    output={rows=[current_row];coverage=[]}} in
+  let target = UI.request_read_target before UI.Inspect |> read_ok in
+  let apply view fresh = UI.reconcile_read_snapshot view ~target
+      ~diagnostic:(Some (UI.Detail_read_failure "retained store unavailable")) fresh in
+  let after = apply before fresh in
+  let received = Option.get after.snapshot in
+  check bool "new cleanup and configuration remain authoritative" true
+    (received.instances=fresh.instances && received.configuration=fresh.configuration);
+  check bool "retained worker cannot acquire fresh execution authority" false
+    (UI.can_observe (Option.get (UI.selected_instance after)));
+  check bool "only the original result joins fresh unrelated rows" true
+    (received.output.rows=[current_row;old_row]);
+  check bool "old coverage does not certify a failed new read" true
+    (received.output.coverage=fresh.output.coverage && received.complete=None);
+  check (option string) "original selected record remains selected" (Some old_row.id)
+    (Option.map (fun (r : UI.Row.row) -> r.id) (UI.selected_row after));
+  check bool "failure, original receipt and unsaved document are independent" true
+    (after.detail_read_error=Some (original.id,original.incarnation,"retained store unavailable")
+     && after.receipt=before.receipt && after.documents=before.documents
+     && after.selected=before.selected);
+  let retried = apply {after with error=Some (UI.Input_failure "unrelated input")} fresh in
+  check bool "another failed read preserves rows without duplicating them" true
+    ((Option.get retried.snapshot).output.rows=received.output.rows
+     && retried.detail_read_error=after.detail_read_error);
+  let export = UI.evidence_request after |> ok in
+  let export_target = UI.request_read_target after export |> read_ok in
+  check bool "export carries original row IDs independently of detail navigation" true
+    (match export with
+     | UI.Evidence json ->
+         export_target=UI.Read_screen
+         && Yojson.Safe.Util.member "instance_id" json=`String original.id
+         && Yojson.Safe.Util.member "row_ids" json=`List [`String old_row.id]
+     | UI.Inspect | UI.Attach _ | UI.Observe _ | UI.Detach _ | UI.Slice _
+     | UI.Act _ | UI.Action_status _ | UI.Subscriptions _ -> false);
+  let exported = UI.reconcile_read_snapshot after ~target:export_target ~diagnostic:None fresh in
+  check bool "an inventory-only effect reply is not a successful detail read" true
+    ((Option.get exported.snapshot).output.rows=received.output.rows
+     && (Option.get exported.snapshot).instances=fresh.instances
+     && exported.detail_read_error=after.detail_read_error
+     && exported.receipt=after.receipt && exported.documents=after.documents);
+  let binding_order = {original with binding=`Assoc ["sources",`List [];"topic",`String "a"]} in
+  let reordered = {binding_order with phase=UI.Row.Detached;runtime_presence=UI.Retained_binding;
+    binding=`Assoc ["topic",`String "a";"sources",`List []]} in
+  let reordered_before = {before with snapshot=Some {prior with instances=[binding_order;other]}} in
+  let reordered_read = apply reordered_before {fresh with instances=[reordered;other]} in
+  check bool "JSON object order does not change the original binding" true
+    ((Option.get reordered_read.snapshot).output.rows=received.output.rows);
+  let empty = {fresh with output={rows=[];coverage=[]};complete=Some true} in
+  let succeeded = UI.reconcile_read_snapshot after ~target ~diagnostic:None empty in
+  check bool "a successful empty read really replaces the old result" true
+    ((Option.get succeeded.snapshot).output.rows=[]
+     && (Option.get succeeded.snapshot).complete=Some true
+     && succeeded.detail_read_error=None && succeeded.row_cursor=(-1));
+  let unread = apply {before with snapshot=None} fresh in
+  check bool "first read failure does not invent previous results" true
+    ((Option.get unread.snapshot).output=fresh.output && Option.is_some unread.detail_read_error);
+  List.iter (fun replacement ->
+    let replaced = apply before {fresh with instances=[replacement;other]} in
+    check bool "another binding cannot borrow the prior result" true
+      ((Option.get replaced.snapshot).output.rows=[current_row]))
+    [{stopped with incarnation="replacement-epoch"};{stopped with run_id="another-run"};
+     {stopped with revision="another-package-revision"};
+     {stopped with installation_id=Some "another-installation"};
+     {stopped with source_path=Some "/another/owner.toml"};
+     {stopped with configuration_revision=Some "another-binding"};
+     {stopped with binding=`Assoc ["sources",`List [`String "another-source"]]}];
+  let removed_after_export = UI.reconcile_read_snapshot exported ~target:export_target ~diagnostic:None
+      {fresh with instances=[other]} in
+  check bool "a later inventory-only reply removes a withdrawn owner and its stale marker" true
+    ((Option.get removed_after_export.snapshot).output.rows=[current_row]
+     && removed_after_export.detail_read_error=None);
+  let vanished = apply before {fresh with instances=[other]} in
+  check bool "a removed original owner does not borrow another worker's rows" true
+    ((Option.get vanished.snapshot).output.rows=[current_row]);
+  let newly_recorded = {old_row with fields=["value",`Int 31]} in
+  let duplicate = apply before {fresh with output={rows=[newly_recorded;current_row];coverage=[]}} in
+  check bool "a received row wins over a cached row of the same identity" true
+    ((Option.get duplicate.snapshot).output.rows=[newly_recorded;current_row])
+
+let detail_slice_scope_precedes_successful_result_admission () =
+  let snapshot = UI.decode (installation_inspect ~runtime:"live" ()) |> ok in
+  let owner = List.hd snapshot.instances in
+  let row : UI.Row.row = {id=owner.id ^ "/1/result";lane_id=owner.id ^ "/result";
+    kind=UI.Row.Value;title="Recorded result";observed_at=1.;subject_id=owner.run_id;
+    clock=None;actor=None;fields=["value",`Int 17];evidence=[];related_ids=[]} in
+  let before = {UI.initial with screen=UI.Detail (owner.id,owner.incarnation);
+    snapshot=Some {snapshot with output={rows=[row];coverage=[]}};
+    detail_read_error=Some (owner.id,owner.incarnation,"original history unavailable");
+    receipt=Some (`String "original-receipt");draft=Some "original draft";
+    generation=7;selected=[row.id];row_cursor=0} in
+  let slice fields = UI.parse_request ("slice " ^ Yojson.Safe.to_string (`Assoc fields)) |> ok in
+  List.iter (fun (request, expected) ->
+    match UI.request_read_target before request with
+    | Ok _ -> fail "an unrelated scope was admitted to the original detail"
+    | Error refusal ->
+        check bool "the request has its original typed scope refusal" true (refusal=expected);
+        let after = UI.refuse_read_scope before refusal in
+        check bool "refusal changes only the input diagnostic before dispatch" true
+          ({after with error=before.error}=before))
+    [slice ["run_id",`String "other-run"],
+       UI.Slice_run_mismatch {expected=owner.run_id;requested="other-run"};
+     slice [], UI.Slice_run_required;
+     slice ["run_id",`String "  "], UI.Slice_run_blank;
+     slice ["run_id",`String owner.run_id;"run_id",`String "other-run"], UI.Slice_run_ambiguous;
+     slice ["run_id",`String owner.run_id;"run_id",`String owner.run_id], UI.Slice_run_ambiguous];
+  let matching = slice ["run_id",`String owner.run_id;"lane_id",`String "no-matching-lane";
+    "since",`Int 1;"until",`Int 2] in
+  let target = UI.request_read_target before matching |> read_ok in
+  check bool "same-run filters retain the original detail identity" true
+    (target=UI.Read_detail (owner.id,owner.incarnation));
+  List.iter (fun explicit ->
+    check bool "an explicit target cannot bypass original scope" true
+      (UI.request_read_target ~target:explicit before matching=Error UI.Slice_target_mismatch))
+    [UI.Read_screen;UI.Read_detail (owner.id,"replacement");UI.Read_installation_results "other"];
+  check bool "the matching explicit history target remains valid" true
+    (UI.request_read_target ~target before matching=Ok target);
+  check bool "an explicit target cannot admit another run" true
+    (match UI.request_read_target ~target before (slice ["run_id",`String "other-run"]) with
+     | Error (UI.Slice_run_mismatch _) -> true
+     | Error (UI.Detail_owner_unavailable | UI.Slice_run_required | UI.Slice_run_blank
+         | UI.Slice_run_ambiguous | UI.Slice_target_mismatch) | Ok _ -> false);
+  List.iter (fun request ->
+    check bool "Overview still supports arbitrary and global slices" true
+      (UI.request_read_target {before with screen=UI.Overview} request=Ok UI.Read_screen))
+    [slice [];slice ["run_id",`String "other-run"]];
+  let absent = {before with snapshot=Some {snapshot with instances=[]}} in
+  let replacement = {owner with incarnation="replacement"} in
+  List.iter (fun view ->
+    check bool "missing or replaced owners cannot borrow a run" true
+      (UI.request_read_target view matching=Error UI.Detail_owner_unavailable))
+    [absent;{before with snapshot=Some {snapshot with instances=[replacement]}}];
+  List.iter (fun complete ->
+    let empty = UI.decode_slice ~snapshot
+      (`Assoc ["rows",`List [];"coverage",`List [];"complete",`Bool complete]) |> ok in
+    let after = UI.reconcile_read_snapshot before ~target ~diagnostic:None empty in
+    check bool "successful same-run empty filters clear old rows and failure" true
+      ((Option.get after.snapshot).output.rows=[] && after.detail_read_error=None
+       && (Option.get after.snapshot).complete=Some complete
+       && after.receipt=before.receipt && after.draft=before.draft)) [true;false]
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "detail Slice scope precedes successful result admission" `Quick
+    detail_slice_scope_precedes_successful_result_admission;
+  test_case "partial detail read keeps original results and fresh authority" `Quick
+    partial_detail_read_keeps_original_results_and_fresh_inventory;
   test_case "detail reads keep original incarnation and independent receipts" `Quick
     detail_reads_keep_original_incarnation_and_receipts;
   test_case "connection workers preserve separate installation owners" `Quick connection_workers_preserve_other_installation_owners;

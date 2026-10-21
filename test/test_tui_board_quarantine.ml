@@ -54,6 +54,10 @@ let test_inventory_item_round_trips () =
         with
         Command.attempt_provenance = None
       }
+    ; item ~phase:Command.Inventory_requeue_unfinished ~requeued_at:(Some 170.0)
+        ~partition_id:"ba-root-d" ~quarantined_at:140.0 ()
+    ; item ~phase:Command.Inventory_requeue_unreconciled ~requeued_at:(Some 180.0)
+        ~partition_id:"ba-root-e" ~quarantined_at:150.0 ()
     ]
   in
   let decoded =
@@ -122,7 +126,29 @@ let test_decode_reads_ledger_errors () =
   in
   check int "one ledger error" 1 (List.length decoded.Quarantine.errors);
   check int "no unreadable error rows" 0
-    (List.length decoded.Quarantine.unreadable_errors)
+    (List.length decoded.Quarantine.unreadable_errors);
+  let both =
+    decode_ok
+      (inventory_json []
+         [ { Command.keeper_name = "alpha"
+           ; kind = Command.Inventory_candidate_ledger_unavailable
+           }
+         ; { Command.keeper_name = "beta"
+           ; kind = Command.Inventory_partition_ledger_unavailable
+           }
+         ])
+  in
+  check bool "both ledger error kinds read back as written" true
+    (both.Quarantine.errors
+     = [ { Command.keeper_name = "alpha"
+         ; kind = Command.Inventory_candidate_ledger_unavailable
+         }
+       ; { Command.keeper_name = "beta"
+         ; kind = Command.Inventory_partition_ledger_unavailable
+         }
+       ]);
+  check int "and neither is an unreadable error row" 0
+    (List.length both.Quarantine.unreadable_errors)
 ;;
 
 let fixture_quarantines () =
@@ -147,6 +173,28 @@ let test_the_requeue_key_takes_the_oldest_waiting_row () =
     (Option.map
        (fun (item : Command.inventory_item) -> item.Command.partition_id)
        (Quarantine.oldest_waiting quarantines))
+;;
+
+(* Q sends the same request for an unfinished requeue, and the server finishes
+   the partition write the earlier attempt did not reach. An unreconciled row
+   would only come back refused, so it is not a target (#38276). *)
+let test_an_unfinished_requeue_still_waits_and_an_unreconciled_one_does_not () =
+  let quarantines =
+    decode_ok
+      (inventory_json
+         [ item ~phase:Command.Inventory_requeue_unfinished ~requeued_at:(Some 40.0)
+             ~partition_id:"unfinished" ~quarantined_at:10.0 ()
+         ; item ~phase:Command.Inventory_requeue_unreconciled ~requeued_at:(Some 41.0)
+             ~partition_id:"unreconciled" ~quarantined_at:20.0 ()
+         ; item ~phase:Command.Inventory_requeued ~requeued_at:(Some 42.0)
+             ~partition_id:"done" ~quarantined_at:30.0 ()
+         ]
+         [])
+  in
+  check (list string) "only the unfinished requeue is a Q target" [ "unfinished" ]
+    (List.map
+       (fun (item : Command.inventory_item) -> item.Command.partition_id)
+       (Quarantine.waiting quarantines))
 ;;
 
 let test_bulk_requeue_attempts_every_waiting_row_in_order () =
@@ -231,6 +279,29 @@ let ready_fetched ~keeper_name value =
     Masc_tui_fetched.complete ~equal:String.equal next request value
 ;;
 
+(* A fleet whose only quarantine row is one the partition ledger does not
+   explain has nothing to resend, but it is not "nothing blocked" either: the
+   tab carries a Bad line for it and no quiet Dim line (#38276). Tones only, no
+   wording. *)
+let test_an_unreconciled_row_does_not_read_as_nothing_blocked () =
+  let quarantines =
+    decode_ok
+      (inventory_json
+         [ item ~phase:Command.Inventory_requeue_unreconciled ~requeued_at:(Some 41.0)
+             ~partition_id:"unreconciled" ~quarantined_at:20.0 ()
+         ]
+         [])
+  in
+  let tones =
+    List.map fst
+      (Quarantine.lines ~now:100.0
+         (ready_fetched ~keeper_name:"alpha" (Ok quarantines))
+         ~keeper_name:"alpha")
+  in
+  check bool "a Bad line names the row" true (List.mem Quarantine.Bad tones);
+  check bool "no Dim line says all is quiet" false (List.mem Quarantine.Dim tones)
+;;
+
 let test_wire_strings_are_sanitized () =
   let quarantines =
     decode_ok
@@ -269,10 +340,14 @@ let () =
     ; ( "lines"
       , [ test_case "requeue takes the oldest waiting row" `Quick
             test_the_requeue_key_takes_the_oldest_waiting_row
+        ; test_case "an unfinished requeue waits, an unreconciled one does not" `Quick
+            test_an_unfinished_requeue_still_waits_and_an_unreconciled_one_does_not
         ; test_case "bulk attempts all fenced rows in order" `Quick
             test_bulk_requeue_attempts_every_waiting_row_in_order
         ; test_case "bulk refuses a stale list" `Quick
             test_bulk_requeue_refuses_a_stale_list
+        ; test_case "an unreconciled row does not read as nothing blocked" `Quick
+            test_an_unreconciled_row_does_not_read_as_nothing_blocked
         ; test_case "wire strings are sanitized" `Quick test_wire_strings_are_sanitized
         ] )
     ]

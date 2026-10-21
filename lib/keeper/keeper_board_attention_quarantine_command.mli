@@ -100,10 +100,24 @@ val success_json : audit:Yojson.Safe.t -> t -> report -> Yojson.Safe.t
 val failure_json : audit:Yojson.Safe.t -> execution_error -> Yojson.Safe.t
 
 
+(** The candidate ledger says how far the operator's requeue got; once a
+    requeue is recorded the partition ledger says whether it finished.
+    - [Inventory_requeue_unfinished]: the candidate records the requeue and the
+      partition is still [Blocked] at the quarantined generation, or its row is
+      absent. [execute] restores an absent row from the candidate and finishes
+      the requeue.
+    - [Inventory_requeued]: the partition left [Blocked] after the recorded
+      requeue.
+    - [Inventory_requeue_unreconciled]: the candidate records a requeue that
+      the partition ledger does not explain (the partition names another
+      candidate or generation, or the ledger is unreadable) and [execute]
+      refuses it. It is not shown as finished. *)
 type inventory_phase =
   | Inventory_quarantined
   | Inventory_requeue_requested
+  | Inventory_requeue_unfinished
   | Inventory_requeued
+  | Inventory_requeue_unreconciled
 
 type inventory_item =
   { keeper_name : string
@@ -121,6 +135,9 @@ type inventory_item =
 
 type inventory_error_kind =
   | Inventory_candidate_ledger_unavailable
+  | Inventory_partition_ledger_unavailable
+      (** Read only for a keeper with a recorded requeue; that keeper's
+          requeued rows are [Inventory_requeue_unreconciled]. *)
 
 type inventory_error =
   { keeper_name : string

@@ -61,10 +61,15 @@ let category_words : Candidate.quarantine_failure_category -> string = function
   | Candidate.Unexpected_worker_failure -> "worker failed unexpectedly"
 ;;
 
+(* An unfinished requeue still waits: Q sends the same request, and the server
+   finishes the partition write the earlier attempt did not reach. An
+   unreconciled row does not: the request would only come back refused. *)
 let awaits_operator (item : Command.inventory_item) =
   match item.Command.phase with
-  | Command.Inventory_quarantined | Command.Inventory_requeue_requested -> true
-  | Command.Inventory_requeued -> false
+  | Command.Inventory_quarantined
+  | Command.Inventory_requeue_requested
+  | Command.Inventory_requeue_unfinished -> true
+  | Command.Inventory_requeued | Command.Inventory_requeue_unreconciled -> false
 ;;
 
 let items (quarantines : t) =
@@ -214,10 +219,17 @@ let lines ~now fetched ~keeper_name =
     [ Bad, "could not read: " ^ Terminal_text.single_line detail ]
   | Masc_tui_fetched.Ready quarantines ->
     let waiting_items = waiting quarantines in
+    let unreconciled_items =
+      items quarantines
+      |> List.filter (fun (item : Command.inventory_item) ->
+        item.Command.phase = Command.Inventory_requeue_unreconciled)
+      |> List.sort compare_oldest
+    in
     let summary =
-      match waiting_items with
-      | [] -> [ Dim, "nothing blocked" ]
-      | _ :: _ ->
+      match waiting_items, unreconciled_items with
+      | [], [] -> [ Dim, "nothing blocked" ]
+      | [], _ :: _ -> []
+      | _ :: _, _ ->
         [ ( Warn
           , Printf.sprintf
               "%d blocked, waiting for an operator \xc2\xb7 Q oldest \xc2\xb7 B all"
@@ -235,9 +247,11 @@ let lines ~now fetched ~keeper_name =
                  (List.filter
                     (fun (item : Command.inventory_item) ->
                        match item.Command.phase with
-                       | Command.Inventory_requeue_requested -> true
-                       | Command.Inventory_quarantined | Command.Inventory_requeued ->
-                         false)
+                       | Command.Inventory_requeue_requested
+                       | Command.Inventory_requeue_unfinished -> true
+                       | Command.Inventory_quarantined
+                       | Command.Inventory_requeued
+                       | Command.Inventory_requeue_unreconciled -> false)
                     members)
              in
              let asked_words =
@@ -254,11 +268,24 @@ let lines ~now fetched ~keeper_name =
         (by_category waiting_items)
     in
     let requeued =
-      List.length (List.filter (fun item -> not (awaits_operator item)) (items quarantines))
+      List.length
+        (List.filter
+           (fun (item : Command.inventory_item) ->
+              item.Command.phase = Command.Inventory_requeued)
+           (items quarantines))
     in
     let requeued_lines =
-      if requeued = 0 then []
-      else [ Dim, Printf.sprintf "%d requeued on the candidate ledger" requeued ]
+      (if requeued = 0 then [] else [ Dim, Printf.sprintf "%d requeued" requeued ])
+      @
+      match unreconciled_items with
+      | [] -> []
+      | oldest :: _ ->
+        [ ( Bad
+          , Printf.sprintf
+              "%d requeue(s) the partition ledger does not confirm \xc2\xb7 oldest %s"
+              (List.length unreconciled_items)
+              (Terminal_text.single_line oldest.Command.partition_id) )
+        ]
     in
     let unreadable = unreadable_rows quarantines @ quarantines.unreadable_errors in
     let unreadable_lines =
@@ -274,11 +301,12 @@ let lines ~now fetched ~keeper_name =
     let ledger_lines =
       List.map
         (fun (error : Command.inventory_error) ->
+           let keeper = Terminal_text.single_line error.Command.keeper_name in
            match error.Command.kind with
            | Command.Inventory_candidate_ledger_unavailable ->
-             ( Bad
-             , "candidate ledger unreadable for "
-               ^ Terminal_text.single_line error.Command.keeper_name ))
+             Bad, "candidate ledger unreadable for " ^ keeper
+           | Command.Inventory_partition_ledger_unavailable ->
+             Bad, "partition ledger unreadable for " ^ keeper)
         quarantines.errors
     in
     summary @ group_lines @ requeued_lines @ unreadable_lines @ ledger_lines

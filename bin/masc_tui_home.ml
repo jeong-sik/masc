@@ -273,7 +273,11 @@ let home_initial_reading_ready state selected =
 
 let home_notice_lines state =
   let clean = Masc_tui_ansi.Terminal_text.single_line in
-  (match state.opening_notice with
+  (match Masc_tui_credential_preparation.status state.credential_preparation with
+   | Not_requested | Settled -> []
+   | Preparing _ -> [" Preparing workspace access…"]
+   | Awaiting_ui _ -> [" Workspace access result awaiting application…"])
+  @ (match state.opening_notice with
    | None -> []
    | Some notice -> [" " ^ clean notice])
   @ (match state.home_decision_receipt with

@@ -2164,6 +2164,13 @@ let tui_auto_start_attempted = ref false
    against a reachable server settles it. *)
 let tui_credential_retry_pending = ref false
 
+let launch_credential_preparation state ~purpose ~base_path ~host ~port =
+  let module Preparation = Masc_tui_credential_preparation in
+  ignore (Preparation.start state.credential_preparation
+      ~sw:(Eio_context.get_switch_opt ()) ~purpose ~base_path ~host ~port
+      ~install:(fun () -> Masc_tui_http.install_operator_token ~base_path ~host ~port)
+    : Preparation.request option)
+
 (* Resolve [name] on $PATH — the fallback after the sibling-binary probe.
    [Sys.file_exists] is the same presence test the installer's layout gives
    us; the executable bit is not re-checked here because a non-executable
@@ -14678,6 +14685,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     in
     let run_refresh () =
       let completed = try
+          Masc_tui_credential_preparation.await_initial state.credential_preparation;
           Http_refresh_done
              (load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_dataset ~on_overview ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request
                 ~refresh_ticket ~host ~port ~approval_ticket
@@ -14703,6 +14711,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
             Masc_tui_types.finish_http_surface_read state surface_request;
             finish_observed_http_refresh state ~ticket:refresh_ticket)
           (fun () ->
+             Masc_tui_credential_preparation.await_initial state.credential_preparation;
              apply_http_refresh_outcome state ~mailbox
                (load_http_surfaces ~surface_request ~on_initial_identity:None ~on_progress:None ~on_dataset:None ~on_overview:None ~on_asks:None ~on_approvals:None ~on_roster:None ~ask_request ~roster_request
                   ~refresh_ticket ~host ~port ~approval_ticket
@@ -15146,6 +15155,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     let latest_identity = ref None in
     let read_refresh () =
       try
+        Masc_tui_credential_preparation.await_initial state.credential_preparation;
         let ( let* ) = Result.bind in
         let identity = currency_authority.car_identity in
         (* A superseded scoped probe must not enqueue an unticketed identity
@@ -17260,13 +17270,8 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
     !tui_credential_retry_pending
     && contact = Masc_tui_server_lifecycle.Server_reached
   then begin
-    let outcome = Masc_tui_http.install_operator_token ~base_path ~host ~port in
-    if not (Masc_tui_credential.outcome_needs_retry outcome) then begin
-      tui_credential_retry_pending := false;
-      Option.iter
-        (add_event state (Masc_tui_credential.outcome_level outcome))
-        (Masc_tui_credential.outcome_notice outcome)
-    end
+    launch_credential_preparation state
+      ~purpose:Masc_tui_credential_preparation.Workspace_retry ~base_path ~host ~port
   end
 
 (* A server action belongs to the Keeper that submitted it even when its
@@ -21638,6 +21643,34 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
   in
   let chat_changed = drain_chat_visit_completions state
       ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
+  let credential_changed =
+    if over_budget () then false else
+    let module Preparation = Masc_tui_credential_preparation in
+    match Preparation.take_completed state.credential_preparation with
+    | None -> false
+    | Some completion ->
+        (match completion.outcome with
+         | Observed outcome ->
+             let retry = Masc_tui_credential.outcome_needs_retry outcome in
+             tui_credential_retry_pending := retry;
+             let announce = match completion.request.purpose with
+               | Initial -> true | Workspace_retry -> not retry in
+             if announce then Option.iter
+               (add_event state (Masc_tui_credential.outcome_level outcome))
+               (Masc_tui_credential.outcome_notice outcome)
+         | Not_started reason | Unobserved reason ->
+             tui_credential_retry_pending := false;
+             add_event state "error" reason);
+        Log.Transport.routine_lazy (fun () -> Printf.sprintf
+          "tui_credential_preparation_applied purpose=%s started_ns=%Ld worker_started_ns=%s observed_ns=%Ld applied_ns=%Ld outcome=%s"
+          (match completion.request.purpose with Initial -> "initial" | Workspace_retry -> "workspace_retry")
+          completion.request.started_ns
+          (match completion.worker_started_ns with None -> "unavailable" | Some ns -> Int64.to_string ns)
+          completion.observed_ns (Mtime_clock.elapsed_ns ())
+          (match completion.outcome with
+           | Observed _ -> "observed" | Not_started _ -> "not_started" | Unobserved _ -> "unobserved"));
+        true
+  in
   let rec loop changed =
     (* The session retains the round across both drains and later passes.
        Identity changes queued when the round starts stay ahead of owned
@@ -21676,7 +21709,7 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
           Render_schedule.request render_schedule Render_schedule.Force);
         loop true
   in
-  loop (progress_changed || chat_changed)
+  loop (progress_changed || chat_changed || credential_changed)
 
 (* What a size change costs, wherever it was noticed: the presenter's cached
    screen describes the old geometry, and the next frame has to be drawn
@@ -22342,22 +22375,16 @@ let main
      holds one the operator sees the cause ahead of the symptom: a tokenless
      process cannot dispatch, and cannot reconcile a dispatch an authenticated
      predecessor left behind. *)
-  (let outcome = Masc_tui_http.install_operator_token ~base_path ~host ~port in
-   (* On a first install nothing has served this base path yet, so the mint
-      gate refuses and this is not the answer to keep: the server that makes
-      the workspace is the one this TUI is about to start. Latching the retry
-      here is what stops a fresh install from sending the operator to
-      [masc login]. *)
-   tui_credential_retry_pending :=
-     Masc_tui_credential.outcome_needs_retry outcome;
-   match Masc_tui_credential.outcome_notice outcome with
-   | Some notice -> add_event state (Masc_tui_credential.outcome_level outcome) notice
-   | None -> ());
+  (* HTTP workers await this original installer, independently of input and
+     UI consumption. A quick installation can still begin the health probe
+     while the terminal capability probe runs. *)
+  Masc_tui_http.install_credential_preparation state.credential_preparation;
+  launch_credential_preparation state
+    ~purpose:Masc_tui_credential_preparation.Initial ~base_path ~host ~port;
   start_http_refresh state ~host ~port ~intent:Revalidate
     ~refresh_inflight:http_refresh_inflight
     ~scoped_refresh_inflight:http_scoped_refresh_inflight
-    ~scoped_refresh_followup
-    ~mailbox:async_messages;
+    ~scoped_refresh_followup ~mailbox:async_messages;
   add_event state "system" "TUI started";
 
   (* Main loop *)

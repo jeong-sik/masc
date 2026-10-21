@@ -4,6 +4,14 @@
 
 ## 시작 입력과 터미널 응답
 
+- workspace 접근의 첫 bearer 준비와 workspace 생성 뒤 재확인은 세션 소유 child에서 기존
+  installer를 실행한다. 인증 파일·역할·mint lock 정책은 바꾸지 않는다. 입력과 상태 반영은
+  실제 installer의 관측을 기다리지 않고 진행하며, HTTP worker와 bearer header 작성자는
+  이미 시작된 준비의 promise를 기다린다. 첫 HTTP는 UI drain이나 terminal probe 완료를
+  새 선행조건으로 삼지 않는다. 요청·worker 관측·UI 반영은 따로 기록하고, 결과는 공용
+  mailbox 공간 없이 원래 owner에 남긴다. 실패·실행 불가·중단을 성공이나 bearer 권한으로
+  바꾸지 않는다. 진단은 기존 routine lazy 정책을 쓴다. 초기 runtime 설정 읽기와 직접 stat,
+  기존 probe·보호된 mint I/O의 정리는 남아 있으므로 전체 시작·종료 시간 단축을 주장하지 않는다.
 - 시작 probe에 실제 replay 바이트가 생기면 기능 응답을 더 기다리지 않고 같은 디코더와
   입력 버퍼를 입력 루프에 넘긴다. 미완성 OSC/CSI·UTF-8·paste를 finish하거나 버리지 않는다.
   기존 무입력 deadline/byte cap을 줄이거나 새 reader·timer를 추가하지 않는다.

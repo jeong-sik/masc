@@ -4,6 +4,13 @@
 
 ## 입력 주변 — Ask 답변·승인 요약·원본 inspector·상태줄·footer·메뉴
 
+- 후속 출처의 관측 비교는 원래 instance/request/read-admission 캡슐에 붙은 `source_processed`
+  행의 수신·UI 처리 시각과 applicator 결과를 쓴다. 세 데이터 source를 각각 집계하고,
+  미관측·같은 source의 복수 관측·원본/시각 충돌은 구분해 전체 시도 분모에 남긴다.
+  모호한 행에서 첫/최신 시간을 골라 채우지 않는다. 실패·중단 읽기의 정상 부분 관측은
+  유지하며, 나중 capture 모순이 발견되면 source 시간도 철회한다. 처리·적용은 source 성공,
+  Task 유용 작업·paint 증거가 아니다. 비교 필드·범위는
+  `docs/guides/TUI-ASK-FOLLOWUP-COMPARISON.md`를 따른다.
 - Ask 답변 영수증은 원래 제출 요청에 한 번만 보존한다. 그 중복 방지 조건으로 목록 재조회
   완료 관측까지 막지 않는다. 재조회는 실제 Result와 현재 제출·workspace 소유권으로 별도
   관측하고, 실패가 이미 보존한 POST 영수증을 덮지 않는다. 원래 제출 시작 시각에 확인·POST·

@@ -767,6 +767,10 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   let after_logs=copy_logs "after" after_dir in
   let after_admissions=copy_admissions "after" after_store in
   let member=Yojson.Safe.Util.member in
+  let matches_declaration read row =
+    let expected=Yojson.Safe.from_string (Yojson.Safe.to_string (declaration read)) in
+    List.for_all (fun key -> member key (member "identity" row)=member key expected)
+      ["instance_id";"request";"read_admission_started_ns"] in
   let conditions=`Assoc (List.map (fun key -> key,`Null)
     ["fixture";"workspace_snapshot";"action";"server_binary";"terminal"]) in
   let arm reads logs admissions=`Assoc ["instances",`List [`String (instance_id (List.hd reads))];
@@ -831,14 +835,63 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
        && member "admission_capture_ns" (member "metrics" row)<>`Null) before_attempts);
   check bool "filtered admission has original file evidence without a supplied declaration" true
     (List.exists (fun row ->
-       List.for_all (fun key -> member key (member "identity" row)=member key (declaration unobserved))
-         ["instance_id";"request";"read_admission_started_ns"]
+       matches_declaration unobserved row
        && member "outcome" row=`String "unobserved"
        && (match member "admission_evidence" row with `List (_::_) -> true | _ -> false)) before_attempts);
   check bool "actual completed read remains its own outcome" true (member "complete" (outcomes "after")=`Int 1);
   check bool "unknown conditions never become matching or execution proof" true
     (member "declared_conditions_match" (member "comparison" case)=`Bool false
      && member "execution_verified" (member "comparison" case)=`Bool false);
+  (* The real producer finishes before this case admits its queued sources.
+     Replacing receipt by UI-processing time is therefore a contradictory
+     same-owner clock fact, even though each individual row remains ordered. *)
+  let completed_row=List.find (matches_declaration completed) after_attempts in
+  let source_row=match member "records" completed_row with
+    | `List rows -> List.find (fun row -> member "phase" row=`String "source_processed"
+        && member "source" row=`String "linked_task") rows
+    | _ -> fail "actual source processing record missing" in
+  let source_evidence=member "evidence" source_row in
+  check bool "source interval retains its original artifact reference" true
+    (match member "observations" (member "linked_task" (member "source_observations" completed_row)) with
+     | `List [row] -> member "evidence" row=source_evidence
+     | _ -> false);
+  let set key value = function
+    | `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
+    | _ -> fail "expected actual report object" in
+  let source_path=member "artifact" source_evidence |> Yojson.Safe.Util.to_string in
+  let source_line=member "line" source_evidence |> Yojson.Safe.Util.to_int in
+  let bytes=In_channel.with_open_bin (Filename.concat output source_path) In_channel.input_all in
+  let changed=String.split_on_char '\n' bytes |> List.mapi (fun index line ->
+    if index+1<>source_line then line else
+    let entry=Yojson.Safe.from_string line in
+    let details=member "details" entry in
+    set "details" (set "received_ns" (member "observed_ns" details) details) entry |> Yojson.Safe.to_string)
+    |> String.concat "\n" in
+  let bad_source="source-clock.jsonl" in
+  Out_channel.with_open_bin (Filename.concat output bad_source) (fun channel -> output_string channel changed);
+  let original_case=match member "cases" packet with `List [row] -> row | _ -> fail "actual packet case missing" in
+  let after_arm=member "after" original_case in
+  let bad_logs=match member "logs" after_arm with
+    | `List logs -> `List (List.map (fun row -> if member "path" row=`String source_path
+        then `Assoc ["path",`String bad_source;"sha256",`String (sha changed)] else row) logs)
+    | _ -> fail "actual source artifact list missing" in
+  let bad_packet=Filename.concat output "source-clock-packet.json" in
+  let bad_json=Filename.concat output "source-clock-report.json" in
+  Out_channel.with_open_bin bad_packet (fun channel -> output_string channel
+    (Yojson.Safe.to_string (set "cases" (`List [set "after" (set "logs" bad_logs after_arm) original_case]) packet)));
+  check bool "UI processing cannot masquerade as an earlier source receipt" true
+    (run [Filename.concat script_dir "tui_ask_followup_report.py";bad_packet;"--json";bad_json;
+      "--markdown";Filename.concat output "source-clock-report.md"]=Unix.WEXITED 2);
+  let bad_report=Yojson.Safe.from_file bad_json in
+  check bool "contradictory original clocks withhold source intervals" true
+    (match member "cases" bad_report with
+     | `List [case] -> (match member "attempts" (member "after" case) with
+       | `List [row] -> member "outcome" row=`String "invalid"
+         && member "state" (member "linked_task" (member "source_observations" row))=`String "invalid_attempt"
+         && member "source_received_to_processed_ns" (member "metrics"
+              (member "linked_task" (member "source_observations" row)))=`Null
+       | _ -> false)
+     | _ -> false);
   let original_path=match before_logs with
     | entry::_ -> (match member "path" entry with `String path -> path | _ -> fail "source artifact path missing")
     | [] -> fail "actual before store had no artifact" in

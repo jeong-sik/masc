@@ -647,13 +647,14 @@ let test_current_completion_requires_origin_and_nullable_duration () =
         | field -> field) fields)
     | _ -> fail "completion row is not an object" in
   let set key value fields = (key, value) :: List.remove_assoc key fields in
-  let check_rejected (label, change) =
-    Fs_compat.save_file path (registration ^ "\n" ^
-      Yojson.Safe.to_string (rewrite change) ^ "\n");
+  let check_rejected_bytes label row =
+    Fs_compat.save_file path (registration ^ "\n" ^ row ^ "\n");
     let report = R.cut_replay_log ~execute:false path in
     check int (label ^ ": both rows inspected") 2 report.Run_registry_core.lines_read;
     check int (label ^ ": completion is malformed, not a terminal receipt")
       1 report.Run_registry_core.malformed_lines in
+  let check_rejected (label, change) =
+    check_rejected_bytes label (Yojson.Safe.to_string (rewrite change)) in
   List.iter check_rejected
     [ "missing origin", List.remove_assoc "origin"
     ; "unknown origin", set "origin" (`String "future_origin")
@@ -663,13 +664,29 @@ let test_current_completion_requires_origin_and_nullable_duration () =
     ; "negative integer duration", set "elapsed_s" (`Int (-1))
     ; "string duration", set "elapsed_s" (`String "0.5")
     ; "boolean duration", set "elapsed_s" (`Bool false)
-    ; "NaN duration", set "elapsed_s" (`Float Float.nan)
-    ; "infinite duration", set "elapsed_s" (`Float Float.infinity)
     ; "missing usage", List.remove_assoc "usage"
     ; "measured replay duration", set "origin" (`String "restart_replay")
     ; "forged replay success", (fun fields ->
         fields |> set "origin" (`String "restart_replay") |> set "elapsed_s" `Null)
     ];
+  (* Safe writers correctly refuse nonstandard numbers. Raw literals are
+     deliberate invalid input bytes, so the finite decoder is actually reached. *)
+  let raw = Yojson.Raw.from_string (Yojson.Safe.to_string completion) in
+  List.iter (fun literal ->
+    let row = match raw with
+      | `Assoc fields -> `Assoc (List.map (function
+          | "completion", `Assoc payload ->
+            "completion", `Assoc (("elapsed_s", `Floatlit literal) :: List.remove_assoc "elapsed_s" payload)
+          | field -> field) fields)
+      | _ -> fail "expected original completion object" in
+    let bytes = Yojson.Raw.to_string row in
+    let parsed = Yojson.Safe.from_string bytes in
+    check bool (literal ^ ": malformed duration reaches the numeric codec") true
+      (match Yojson.Safe.Util.(member "elapsed_s" (member "completion" parsed)) with
+       | `Float value -> not (Float.is_finite value)
+       | _ -> false);
+    check_rejected_bytes (literal ^ " duration") bytes)
+    ["NaN"; "Infinity"; "-Infinity"];
   (* Null is an explicit absence of measurement, not zero or a replay origin. *)
   Fs_compat.save_file path (registration ^ "\n" ^
     Yojson.Safe.to_string (rewrite (set "elapsed_s" `Null)) ^ "\n");

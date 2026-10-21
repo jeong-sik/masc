@@ -502,3 +502,20 @@ public owner 11건 중 9건 통과·2건 실패이며, 두 fixture의 대기 pre
 범위와 source hash가 있다. OCaml parser/source 확인은 컴파일·실행과 구분한다.
 독립 draft 리뷰에서 발견한 세대 간 payload 정리, 재시작 뒤 합성 duration, 불가능한 failed
 overlay fixture는 수리했으며 frozen-head 재검토와 선택 실행 증거가 필요하다.
+
+
+## 2026-10-22 whole-stack restack and executed observation response
+
+상위 Browser target이 1b189f483e5b1879b4e1bc4f1c85507bc683381b로 바뀐 뒤
+Native Stack44922의 19층 전체가 재배치됐다. 기존 로컬19 head를 보존하고, 공개된
+remote vector와 각 층의 patch를 대조해 채택했다. 재배치 직후 #44979는9a0ce9e8,
+#44985는91e2199c다. 이전 head의 승인·실행을 새 승인·실행으로 취급하지 않는다.
+
+기존 c7b42a1590974b99ebd87380c75cb248535364df의 선택 CI
+[39694884916](https://github.com/jeong-sik/masc/actions/runs/39694884916)는 실제 컴파일 후
+registry 36/37·projection17·Candle14·Librarian55건 통과, 전체 FAIL이었다. 실패는
+NaN을 Safe JSON writer로 직렬화하다 codec 전에 예외가 난 fixture 오류다. 테스트만
+Raw Floatlit 입력으로 바꿔 NaN/Infinity/-Infinity가 실제 finite decoder에 도달하는지
+검사하며, production codec과 writer의 strict finite 거절은 유지한다. 이 수정의 새 실행
+결과는 아직 미확인이다. 원래54개 항목명·완료 기준과 실제 provider/UI/설치 미완료 경계는
+그대로 유지한다.

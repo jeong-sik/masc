@@ -5,6 +5,7 @@
 type section = { heading : string; body : string }
 type t
 type row = Heading of string | Content of string | Note of string
+type search_mark = No_match | Match | Current_match
 type movement = First | Last | By of int
 
 val create : title:string -> section list -> t
@@ -20,6 +21,12 @@ val replace_prepared : title:string -> hints:string -> width:int -> row list -> 
     The caller owns preparation/source identity and re-prepares on resize. *)
 val hints : t -> string option
 val rows : width:int -> t -> row list
+val rows_with_search : width:int -> t -> (row * search_mark) list
+(** The same complete rows, paired with this capture's literal search matches.
+    [Current_match] is the last search landing at this exact width; ordinary
+    movement, replacement and width changes do not borrow that landing.
+    Preparation notices at a different width never become matches. Original
+    row text and styles are unchanged; presentation of a mark belongs outside. *)
 val scroll : count:int -> height:int -> t -> int
 val move : count:int -> height:int -> movement -> t -> t
 (** [Last] retains an end anchor across reflow and replacement of the same

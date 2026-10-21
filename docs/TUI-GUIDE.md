@@ -1059,8 +1059,13 @@ line breaks. If no original execution ID was recorded, the reader says so.
 
 Inside a result, `j`/`k`, PageUp/PageDown and Home/End scroll the whole record.
 `/` searches the captured document; Enter keeps the query for `n`/`N` to move
-between matching rows. Esc while typing cancels the query and keeps the reader
-open. Query input and paste stay in this reader; they do not edit the chat draft.
+between matching rows. Matching rows carry `*` in their existing left margin;
+the current search landing carries `>` and a reverse-video band, including with
+`NO_COLOR`. Search marks temporarily replace those rows' inline styles without
+changing their text, wrapping or original copy. Ordinary scrolling clears the
+current landing while retaining the matching-row marks. Esc while typing cancels
+the query and keeps the reader open. Query input and paste stay in this reader;
+they do not edit the chat draft.
 `r` rereads the same execution and keeps the last result, read position and any
 known read failure while the new read is pending. A missing, ambiguous or
 unavailable record remains a read failure. Esc returns to the original call

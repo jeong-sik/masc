@@ -3,6 +3,7 @@ module Position = Masc_tui_scroll.Position
 type section = { heading : string; body : string }
 type document_kind = Captured | Observation
 type row = Heading of string | Content of string | Note of string
+type search_mark = No_match | Match | Current_match
 type search = { query : string; editing : bool; landing : (int * int) option }
 type t = { title : string; sections : section list; position : Position.t;
   kind : document_kind; prepared : (int * row list) option; hints : string option; search : search option }
@@ -57,21 +58,34 @@ let search_query reading = Option.map (fun search -> search.query) reading.searc
 let searchable_rows ~width reading = match reading.prepared with
   | Some (prepared_width, _) when prepared_width<>width -> []
   | Some _ | None -> rows ~width reading
-let matches ~width reading query =
-  if query="" then [] else
-  searchable_rows ~width reading
+let rows_with_search ~width reading =
+  let available = match reading.prepared with
+    | Some (prepared_width, _) -> prepared_width=width
+    | None -> true in
+  rows ~width reading
   |> List.mapi (fun index row ->
-    let text=match row with Heading text | Content text | Note text -> text in
-    if Masc_tui_pick_list.lowercase_contains ~needle:query (Masc_tui_theme.strip_sgr text)
-    then Some index else None)
+    let mark = match reading.search with
+      | Some search when available && search.query<>"" ->
+          let text=match row with Heading text | Content text | Note text -> text in
+          if Masc_tui_pick_list.lowercase_contains ~needle:search.query
+              (Masc_tui_theme.strip_sgr text) then
+            if search.landing=Some (width,index) then Current_match else Match
+          else No_match
+      | Some _ | None -> No_match in
+    row,mark)
+let matches ~width reading =
+  rows_with_search ~width reading
+  |> List.mapi (fun index (_,mark) -> match mark with
+      | No_match -> None
+      | Match | Current_match -> Some index)
   |> List.filter_map Fun.id
 let search_count ~width reading = match reading.search with
   | None -> 0
-  | Some search -> List.length (matches ~width reading search.query)
+  | Some _ -> List.length (matches ~width reading)
 let search_land ~width ~height ~backwards ~from_start reading = match reading.search with
   | None -> reading
   | Some search ->
-    let candidates=matches ~width reading search.query in
+    let candidates=matches ~width reading in
     let count=List.length (searchable_rows ~width reading) in
     let after=if from_start then -1 else match search.landing with
       | Some (landing_width,index) when landing_width=width -> index

@@ -285,16 +285,23 @@ let detail_reading_viewport (state : state) reading =
 
 let render_detail_reading (state : state) reading =
   let terminal_rows, cols = get_terminal_size () in
-  let document = detail_reading_document reading ~cols in
-  let count, height = detail_reading_viewport state reading in
+  let document = Masc_tui_detail_reading.rows_with_search
+      ~width:(detail_reading_width cols) reading in
+  let count = List.length document in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let height = overlay_window_height ~rows ~count in
   let scroll = Masc_tui_detail_reading.scroll ~count ~height reading in
   let source_title = Terminal_text.single_line (Masc_tui_detail_reading.title reading) in
   let title, search_hint = match Masc_tui_detail_reading.search_query reading with
     | None -> source_title, "/:find"
     | Some query ->
+        let match_count = List.fold_left (fun count (_,mark) ->
+          match mark with
+          | Masc_tui_detail_reading.No_match -> count
+          | Match | Current_match -> count+1) 0 document in
         let query_label = Printf.sprintf "/%s (%d)"
           (Terminal_text.single_line query)
-          (Masc_tui_detail_reading.search_count ~width:(detail_reading_width cols) reading) in
+          match_count in
         let editing = Masc_tui_detail_reading.search_editing reading in
         (* The footer can collapse to its help door. Keep the query with the
            document too, ahead of its title so narrow readers can see it. *)
@@ -308,12 +315,20 @@ let render_detail_reading (state : state) reading =
     ~title:(screen_title (" " ^ title))
     ~hints:(search_hint ^ "  " ^ hints)
     ~body:(fun ~budget:_ c ->
-      List.iteri (fun index row ->
+      List.iteri (fun index (row,mark) ->
         if index >= scroll && index < scroll + height then
-          match row with
-          | Masc_tui_detail_reading.Heading text -> c.push_styled ~style:Ansi.bold ("  " ^ text)
-          | Content text -> c.push ("  " ^ text)
-          | Note text -> c.push_styled ~style:(Theme.recede ()) ("  " ^ text)) document;
+          let text = match row with
+            | Masc_tui_detail_reading.Heading text | Content text | Note text -> text in
+          match mark with
+          | Masc_tui_detail_reading.Current_match ->
+              c.push_selected ("> " ^ Masc_tui_theme.strip_sgr text)
+          | Match ->
+              c.push_styled ~style:Ansi.underline ("* " ^ Masc_tui_theme.strip_sgr text)
+          | No_match ->
+              match row with
+              | Masc_tui_detail_reading.Heading text -> c.push_styled ~style:Ansi.bold ("  " ^ text)
+              | Content text -> c.push ("  " ^ text)
+              | Note text -> c.push_styled ~style:(Theme.recede ()) ("  " ^ text)) document;
       Option.iter c.push (overlay_window_row ~scroll ~height count))
 
 (* The sheet's rows and the viewport that shows them, at this width. One

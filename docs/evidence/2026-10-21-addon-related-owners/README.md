@@ -21,6 +21,10 @@ Three Dashboard test files / 62 tests pass; TypeScript exits0. `dashboard-vitest
 
 Dashboard tests cover disjoint ID/path groups, same-ID file moves, unrelated same-name workers, manual attachments and a missing selected declaration not borrowing another ID's application. The added TUI test checks actual read-model membership and original incarnation/revision/failed-cleanup state; it adds no wording, layout or row-order assertions. These OCaml scenarios have not executed yet.
 
+## Independent source review
+
+`source-review.md` records a local independent source PASS for the bottom head, base and complete diff. It is not a formal GitHub APPROVE, an execution receipt or a verdict on later code.
+
 ## Remaining evidence
 
 Request only `test_tui_lane_addons` on the final frozen source for this changed direct consumer. Reusing the older G01 native artifact or its direct-consumer result would not test this new TUI read model. Dispatch acceptance, source approval, actual Dashboard/TUI observation, whole-stack integration and installed runtime are separate claims. No live operator server, profile or binary was replaced.

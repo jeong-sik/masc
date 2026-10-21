@@ -680,6 +680,17 @@ let test_typed_briefing_observer_binds_the_original_prepared_commit ()=with_work
      check json "receipt contains complete actual Briefing after state" (change capture output).after commit.change.after
    | Domain_conflict _ | Before_dispatch_refusal _ | Execution_refusal _ -> fail "original Briefing commit lost");
   prepare_observation base_path store prepared.original ~now:never_clock |> ignore)
+let test_typed_observer_rejects_incomplete_conflict_evidence ()=with_workspace (fun base_path store ->
+  let capture,output=classification base_path ["Original conflict must be a complete domain observation"] in
+  let judged=retain store capture output in
+  let intended=advance store judged (Progress.Commit_intended (change capture output)) in
+  let malformed=`Assoc ["kind",`String "classification";"state",`Assoc ["other_owner",`Bool true]] in
+  let conflicted=advance store intended (Progress.Commit_conflicted malformed) in
+  check bool "generic conflict cannot turn malformed state into a typed domain receipt" true
+    (match prepare_observation_result base_path store conflicted ~now:(fun () -> 3.) with
+     | Error (Consumer.Rejected _) -> true | Ok _ | Error (Unavailable _ | Uncertain _) -> false);
+  check bool "malformed conflict remains original evidence without terminal receipt" true
+    ((Progress.observer (original store capture).progress).completion=Receipt.Unobserved))
 let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "classification applies once and survives journal reopen" `Quick test_classification_commit_and_reopen;
   test_case "real save with lost receipt confirms after without another write" `Quick test_lost_save_receipt_after_publication;
@@ -722,4 +733,5 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "observer rejects schema-shaped incomplete original judgment" `Quick (test_typed_observer_rechecks_full_judgment_and_commit true);
   test_case "parent refusal and child have separate original observer identities" `Quick test_typed_observer_keeps_parent_refusal_separate_from_child;
   test_case "observer conflict differs from unsent host refusal" `Quick test_typed_observer_distinguishes_conflict_and_before_dispatch_refusal;
-  test_case "observer Briefing receipt binds complete original prepared state" `Quick test_typed_briefing_observer_binds_the_original_prepared_commit]]
+  test_case "observer Briefing receipt binds complete original prepared state" `Quick test_typed_briefing_observer_binds_the_original_prepared_commit;
+  test_case "observer rejects incomplete original conflict evidence" `Quick test_typed_observer_rejects_incomplete_conflict_evidence]]

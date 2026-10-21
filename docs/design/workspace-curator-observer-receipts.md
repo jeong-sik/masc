@@ -18,7 +18,8 @@ Completion derives from the actual original phase. Finished requires the strict
 Answered final, full semantic validation and exactly the original expected
 before/after commit plan. Settlement and observation share this same pure
 Capture.commit_plan. A model answer in Judged or an uncertain commit is not
-success. Conflict retains the original plan and actual conflicting evidence.
+success. Conflict validates the complete original domain state and retains that
+evidence with the original plan.
 Before-dispatch refusal remains distinct from a strict original execution
 terminal, including unknown. A parent's same refusal survives successor linking
 and cannot become its child's result. Each child has its own original run ID.
@@ -56,7 +57,7 @@ consumers; a zero would invent latency. Basic usage stays in the original final
 while unavailable extended statistics remain absent. Production Curator still
 uses its old direct provider route and must be replaced after these dependencies.
 
-Eight new real-Store/domain scenario sources cover pending intent through actual
+Nine new real-Store/domain scenario sources cover pending intent through actual
 commit, unchanged byte/identity on reopen, full slot/basic usage and honest absent
 timing, valid generic but false domain receipts, invented commit/incomplete
 judgment refusal, parent/child separation, conflict versus unsent refusal, and

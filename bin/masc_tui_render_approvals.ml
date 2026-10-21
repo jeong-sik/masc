@@ -311,7 +311,7 @@ let draw_ask_answer_feedback buf cols (state : state) =
          let facts = if facts=[] then ["no turn entry observed"] else facts in
          let facts = if reactions.ar_evidence_complete then facts else facts @ ["evidence incomplete"] in
          let facts = if reactions.ar_evidence_current then facts
-           else facts @ ["last observed; latest read did not confirm"] in
+           else facts @ ["some earlier observations remain unconfirmed"] in
          box_wrapped_field buf cols ~head:"  "
            ~style:(if reactions.ar_evidence_complete && reactions.ar_evidence_current
                then Theme.info () else Theme.warn ())

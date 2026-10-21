@@ -106,7 +106,14 @@ let merge_reactions (fresh : Decode.ask_reactions) (prior : Decode.ask_reactions
   | Decode.Ask_reactions_unavailable, Some old -> stale_reactions old
   | Ask_reactions_observed fresh, Some (Ask_reactions_observed old) ->
       let retain fresh old = match fresh with Some _ -> fresh | None -> old in
+      let needs_prior fresh old = Option.is_none fresh && Option.is_some old in
+      let retained =
+        needs_prior fresh.ar_turn_started_at old.ar_turn_started_at
+        || needs_prior fresh.ar_turn_finished_at old.ar_turn_finished_at
+        || needs_prior fresh.ar_queue_settled_at old.ar_queue_settled_at
+        || needs_prior fresh.ar_queue_cancelled_at old.ar_queue_cancelled_at in
       Decode.Ask_reactions_observed {fresh with
+        ar_evidence_current=fresh.ar_evidence_current && not retained;
         ar_turn_started_at=retain fresh.ar_turn_started_at old.ar_turn_started_at;
         ar_turn_finished_at=retain fresh.ar_turn_finished_at old.ar_turn_finished_at;
         ar_queue_settled_at=retain fresh.ar_queue_settled_at old.ar_queue_settled_at;

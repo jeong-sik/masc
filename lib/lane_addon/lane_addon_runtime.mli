@@ -146,10 +146,8 @@ type inventory_issue = {
     owner the record names. [issue_terminal] is true for a detached record that
     names its declaration: it holds no worker, so nothing waits on it. *)
 type configuration_application = {
-  id : string;
-  source_path : string;
+  owner : configuration_owner;
   source_revision : string;
-  desired_revision : string;
   enabled : bool;
   application : Lane_addon_application.t;
 }

@@ -60,8 +60,8 @@ let package_rows ~(declarations : Config.snapshot) ~(instances : Addon.inventory
           let application = if not declarations.complete then
               Lane_addon_application.Unknown ["Declaration inventory is incomplete"]
             else match List.filter (fun (observed : Addon.configuration_application) ->
-              observed.id=d.id && observed.source_path=d.source_path
-              && observed.source_revision=d.source_revision && observed.desired_revision=d.revision
+              observed.owner.id=d.id && observed.owner.source_path=d.source_path
+              && observed.source_revision=d.source_revision && observed.owner.revision=d.revision
               && observed.enabled=d.enabled) applications with
               | [observed] -> observed.application
               | [] -> Lane_addon_application.Unknown ["No application observation matches this declaration revision"]

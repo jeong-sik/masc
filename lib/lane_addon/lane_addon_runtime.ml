@@ -102,8 +102,8 @@ type inventory_issue = {
   issue_reason : retained_fault_reason;
 }
 type configuration_application = {
-  id : string; source_path : string; source_revision : string;
-  desired_revision : string; enabled : bool; application : Lane_addon_application.t;
+  owner : configuration_owner; source_revision : string;
+  enabled : bool; application : Lane_addon_application.t;
 }
 type inventory = {
   owner_present : bool; instances : inventory_instance list;
@@ -1542,8 +1542,8 @@ let inventory ~config = Eio_context.run_on_owner_domain (fun () ->
     | Some m -> match m.configuration_status with
       | None -> []
       | Some reading -> List.map (fun (d : Lane_addon_config.declaration) ->
-          {id=d.id;source_path=d.source_path;source_revision=d.source_revision;
-           desired_revision=d.revision;enabled=d.enabled;
+          {owner={id=d.id;source_path=d.source_path;revision=d.revision};
+           source_revision=d.source_revision;enabled=d.enabled;
            application=configuration_application m ~reading ~inventory:(Some inventory) d})
           reading.snapshot.declarations in
   {inventory with applications})

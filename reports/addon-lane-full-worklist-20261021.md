@@ -129,7 +129,7 @@ Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현�
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | [#44801](https://github.com/jeong-sik/masc/pull/44801) 후속 구현: host application을 원래 id/path/source·desired revision/enabled에 결속해 공통 inventory와 두 UI에 전달. Dashboard 62건·TypeScript PASS, OCaml parser PASS; native 실행·실제 화면 미확인 | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
+| G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | [#44801](https://github.com/jeong-sik/masc/pull/44801) 후속 구현: host application을 원래 id/path/source·desired revision/enabled에 결속해 공통 inventory와 두 UI에 전달. Dashboard 62건·TypeScript PASS, OCaml parser PASS. direct run39592343953은 새 record label의 owner 타입 추론 오류로 컴파일 FAIL; 기존 typed owner 재사용 수리 후 재검증 필요. native 실행·실제 화면 미확인 | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
 | G02 | 입력→Hook→worker→모델→출력/소비자의 연결 관계 표시 | 일부 Flow 있음 | 실제 연결 reference에 근거해 표시; 관측 그래프를 실행 허가로 사용하지 않음 |
 | G03 | 요청부터 종료·정리까지 원래 timeline/trace 연결 | 부분 구현; Dashboard가 버리던 host_requests를 원래 worker/incarnation에 결속해 보존·표시하는 후속 구현. 모델 lane/provider/operator/source 대기와 전달·기록 실패를 닫힌 타입으로 읽고, 손상 진단은 worker·결과와 분리. 전체 요청 이력·실제 화면·설치 검증 필요 | request/run/instance/revision, 대기 이유·결과·실패·정리 증거를 같은 원래 작업으로 추적 |
 | G04 | 교체·경로/ID 변경·이전 소유자 이력 표시 | 후속 소스 구현: 같은 ID worker와 같은 TOML 경로의 다른 ID를 두 UI에서 분리. Dashboard 3파일62건·tsc PASS, TUI 관측 모델 parser PASS; 독립 리뷰·OCaml 실행·실제 UI 별도 | 새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근 |
@@ -208,3 +208,8 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - 다음 최소 실행 범위: 같은 공개 후보 SHA의 native `addon-lifecycle` artifact와 직접 변경한 `test_lane_addon_reconcile,test_server_lane_inventory,test_tui_lane_inventory`를 선택한다. 접수 뒤 CI watch/대기를 하지 않고 독립 작업을 계속한다. 성공 run·artifact·실제 TUI 관측은 각각 따로 확인한다.
 - Browser Stack #44168은 이번 REST 조회에서 67층 open, top #44702 `d35d2559c56814b38615545a5f4f081304bccc05`다. 그 tree의 `Server_candle_appraiser.run_with`는 host에 intent를 보존한 뒤 원래 요청을 read/submit하고 `Candle_appraisal.decode`를 거쳐 결과를 정산 호출자에게 돌린다. worker는 `addons/candle-appraiser`에 존재한다. 따라서 E01을 미구현으로 되풀이하지 않는다. 이 소스 확인은 전체 스택 재리뷰·provider 성공·원장 중복 방지의 실제 재연결·Dashboard/TUI·main 통합 증거를 대신하지 않는다.
 - 아직 필요한 실제 사용: A02의 TUI On/Off/재연결, Candle의 실제 LLM 판단과 host 정산, 같은 후보 H01 조합 및 H02–H06. G01 후속 하나로 전체 연결 그래프·모든 Lane 추출·54개 완료를 선언하지 않는다.
+
+
+### G01 컴파일 실행 피드백
+
+직접 소비자 run [39592343953](https://github.com/jeong-sik/masc/actions/runs/39592343953), product `5840bab469e8277194e405e6f2ec2cd712fc614e`는 `Lane_addon_runtime.attach_entry`에서 `configuration_application option`과 `configuration_owner option`이 맞지 않아 컴파일 FAIL로 종료했다. 새 관측 record의 id/source_path가 기존 record 추론을 가린 구현 결함이다. 관측 record가 기존 `configuration_owner`를 `owner` 필드로 보관하도록 고쳐 중복 owner 필드를 제거했다. 서버는 원래 owner의 ID·path·desired revision과 source revision·enabled를 여전히 모두 대조한다. 기존 성공 Dashboard/parser 결과는 이 실패를 대체하지 않는다. 수리 후 OCaml 실행·native artifact는 별도 확인해야 한다.

@@ -138,8 +138,8 @@ let application_is_bound_to_the_observed_declaration () = with_fixture (fun _env
   let declarations = Config.load ~directory in
   let d = match declarations.declarations with [d] -> d | _ -> fail "one valid declaration" in
   let observed application : Addon.configuration_application =
-    {id=d.id;source_path=d.source_path;source_revision=d.source_revision;
-     desired_revision=d.revision;enabled=d.enabled;application} in
+    {owner={id=d.id;source_path=d.source_path;revision=d.revision};
+     source_revision=d.source_revision;enabled=d.enabled;application} in
   let read declarations applications =
     match Inventory.For_testing.package_rows ~declarations ~applications ~instances:[] ~exact_outputs:(fun _ -> []) with
     | [{state=Inventory.Package_state {declaration=Some (Valid value);instances=[]};_}] -> value.application
@@ -155,8 +155,10 @@ let application_is_bound_to_the_observed_declaration () = with_fixture (fun _env
   unknown [];
   let current = observed Lane_addon_application.Inactive in
   List.iter (fun stale -> unknown [stale])
-    [{current with id="other"};{current with source_path="/other.toml"};
-     {current with source_revision="old-file"};{current with desired_revision="old-binding"};
+    [{current with owner={current.owner with id="other"}};
+     {current with owner={current.owner with source_path="/other.toml"}};
+     {current with source_revision="old-file"};
+     {current with owner={current.owner with revision="old-binding"}};
      {current with enabled=true}];
   unknown [current;current];
   match read {declarations with complete=false} [current] with

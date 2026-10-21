@@ -132,6 +132,50 @@ let unconfirmed_backend_preserves_files () = with_committed_download (fun _root 
   check bool "abandoned descriptors cannot be readmitted" true (Result.is_error (Broker.publish broker source));
   check bool "later cleanup retains the unconfirmed result" true (Broker.cleanup broker=first);
   check string "unconfirmed backend preserves source" contents (read source))
+let abandon_preserves_an_unreleased_claim () = with_download (fun root source contents broker ->
+  let marker=ok (Broker.publish broker source) in
+  let id=grant broker source marker in
+  let descriptor=descriptor (claim broker id) in
+  let path=ok (Broker.snapshot_path ~directory:root ~snapshot_id:descriptor.snapshot_id) in
+  (* Abandon must return before this same caller commits or releases. A
+     vanished remote holder cannot be required to perform either operation. *)
+  let first=Broker.abandon broker in
+  check bool "a held claim cannot confirm backend teardown" true (Result.is_error first);
+  check string "abandon retains the original bytes" contents (read source);
+  check string "the held immutable snapshot remains readable" contents (read path);
+  check bool "abandon does not fabricate grant release" true
+    (Result.is_error (Broker.claim broker ~id ~actor ~route ~verb));
+  check bool "repeated abandon does not join the remote holder" true (Broker.abandon broker=first);
+  check bool "sticky cleanup does not join the remote holder" true (Broker.cleanup broker=first);
+  (* The actual host importer needs the snapshot path/metadata, not the
+     broker's original-file pin. Import and commit only after abandonment. *)
+  let receipt=publish root descriptor in
+  commit broker id receipt;
+  release broker id;
+  check bool "the original claim can settle after abandonment" true
+    (publication_is receipt (claim broker id));
+  check bool "settlement cannot confer later deletion authority" true (Broker.cleanup broker=first);
+  check string "settlement preserves the abandoned original" contents (read source);
+  check string "settlement preserves the abandoned snapshot" contents (read path))
+let abandon_preserves_an_unreleased_commit () = with_download (fun root source contents broker ->
+  let marker=ok (Broker.publish broker source) in
+  let id=grant broker source marker in
+  let descriptor=descriptor (claim broker id) in
+  let path=ok (Broker.snapshot_path ~directory:root ~snapshot_id:descriptor.snapshot_id) in
+  let receipt=publish root descriptor in
+  commit broker id receipt;
+  let first=Broker.abandon broker in
+  check bool "a committed grant cannot confirm backend teardown" true (Result.is_error first);
+  check bool "abandon leaves the committed grant held" true
+    (Result.is_error (Broker.claim broker ~id ~actor ~route ~verb));
+  check bool "sticky cleanup does not wait for committed release" true (Broker.cleanup broker=first);
+  commit broker id receipt;
+  release broker id;
+  check bool "the committed grant can settle after abandonment" true
+    (publication_is receipt (claim broker id));
+  check bool "a later cleanup keeps the original failure" true (Broker.cleanup broker=first);
+  check string "committed original survives unconfirmed teardown" contents (read source);
+  check string "committed snapshot survives unconfirmed teardown" contents (read path))
 let partial_is_preserved () = with_download (fun _root source _contents broker ->
   check bool "unobserved completed or partial files block cleanup" true (Result.is_error (Broker.cleanup broker));
   check bool "unobserved source is retained" true (Sys.file_exists source))
@@ -144,4 +188,6 @@ let () = run "browser Addon download ownership" ["transfer",[
   test_case "replacement parent cannot inherit source ownership" `Quick changed_parent_is_preserved;
   test_case "duplicate snapshots settle one original source" `Quick duplicate_snapshots_settle;
   test_case "unconfirmed backend releases pins without deleting files" `Quick unconfirmed_backend_preserves_files;
+  test_case "abandon returns before the original claim settles" `Quick abandon_preserves_an_unreleased_claim;
+  test_case "abandon returns before the original commit is released" `Quick abandon_preserves_an_unreleased_commit;
   test_case "unknown downloads survive retirement" `Quick partial_is_preserved]]

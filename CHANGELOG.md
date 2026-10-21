@@ -113,6 +113,7 @@
 
 ### Fixed
 
+- The System / Tools footer no longer advertises Enter, which the fitter never drops and whose row squeezed the action diagnosis out of the 100-column surface footer; the Skill-evidence role stays live outside async runs and is named on the sheet's Enter row. (#44908)
 - Keep rendered MIDI audio regions on their original rational source clock, preserving sample cuts, finite repeat boundaries and silence across far seeks. (#44141)
 - A failed `docker run` of a Keeper container now reports `status=exit=N` (or `signal=N`) and says `output=<no output>` when the run printed nothing, in the `docker_container_start_failed` and `docker_managed_container_start_failed` messages. The persistent-container start also reports `container_after_run=stopped|absent|running|unknown`, the state a probe by container name found right after the failure. The status used to appear only for mount failures, so a run that printed just a container id left no cause. (#44158)
 - The operator snapshot's keeper rows now carry `current_task_id` (null when the keeper holds no task). The dashboard briefing's `current_work` and the execution surface's `focus` read that key, and the rows never had it, so every keeper showed as holding no task. (#44162)
@@ -287,6 +288,7 @@
 
 ### Internal
 
+- Give the strict `current nonterminal event set` projection test a valid `KEEPER_THINKING_DELTA` payload so the value table matches the decoder contract #44254 added. (#44907)
 - An exact-output lane declaration carries a typed owner instead of a free `id` string; the registry key, the `[runtime.exact_output_lanes.<id>]` table name and preset keys are derived from it in one place, and `Blank_lane_id` is removed because nothing can produce it. Wire strings are unchanged. (#44157)
 - A Lane Add-on package's exact-output request is retained by declaration id and request id before a call may be sent (a lane that is off or unconfigured is retained as a not-final attempt, and nothing is sent), and a request listed again gets the retained final result without a second call; a started attempt with no outcome is `outcome_unknown`, the same id with another body is `request_id_reused`, an undeclared output is `not_allowed`, and only an answer that matches the declared schema becomes `answered`, including a retained answer delivered after the package changed its schema. Nothing calls it yet; the server runner and the worker cycle follow. (#44184)
 - Exact-lane failures (HTTP execution causes, candidate rejections, CLI walk failures) are classified once by `Exact_lane_failure` as transient, auth refused, configuration refused, input refused or output unusable; the Candle appraiser reads only whether a failure is transient, with the same answers as before. (#44202)

@@ -831,10 +831,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
               (match failure.keeper_name with Some keeper -> keeper | None -> "<unconfirmed owner>")
               (match failure.ask_id with Some ask_id -> ask_id | None -> "<store>")
               (Keeper_ask_answer_wake.error_to_string failure.error)) report.failures;
-          if report.enqueued > 0 then Log.Server.info
-            "ask answer recovery inspected=%d enqueued=%d pending=%d already_delivered=%d failures=%d"
-            report.inspected report.enqueued report.already_pending report.already_delivered
-            (List.length report.failures)
+          let summary () = Printf.sprintf
+              "ask answer recovery inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d failures=%d"
+              report.inspected report.evidence_window_reads report.enqueued report.already_pending report.already_delivered
+              (List.length report.failures) in
+          if report.enqueued > 0 then Log.Server.info "%s" (summary ())
+          else Log.Server.routine_lazy summary
     in
     reconcile_goal_events ();
     reconcile_composition_completions ();

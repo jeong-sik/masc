@@ -239,12 +239,14 @@ val strict_source_delivery_snapshot_result :
   keeper_name:string ->
   since:float ->
   (strict_source_delivery_snapshot, strict_delivery_evidence_error) result
-(** One owned canonical read for a batch of recovery identities, bounded to
-    rows recorded at/after [since] (unix seconds, UTC-day granularity): a
-    delivery cannot predate the answer it delivers, so corruption before
-    [since] can never be evidence about the sources this snapshot judges.
+(** One owned canonical read for a batch of recovery identities, using the
+    same append-validated file evidence and window as the single-source reader.
+    Positive [since] uses UTC-day granularity through all later partitions;
+    nonpositive [since] reads the whole store. Delivery cannot predate its
+    answer, so earlier day partitions are outside a positive answer's window.
     The immutable snapshot retains exact typed positive sources and
     incomplete-row evidence; it never retains raw answer or reaction bodies.
+    Reuse only within the owning recovery pass and identical Keeper/window.
     It is an observation, not permission to enqueue without the queue
     owner's fresh once-only check. *)
 

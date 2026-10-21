@@ -286,8 +286,7 @@ let followup_to_json (followup : followup) =
 let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
   let ( let* ) = Result.bind in
   let* stimulus = answered_stimulus ~keeper_name ask resolution in
-  let* consumed = already_delivered stimulus
-      |> Result.map_error (fun error -> Delivery_evidence_unavailable error) in
+  let* consumed = already_delivered stimulus in
   if consumed then Ok Already_delivered
   else
     (* Delivery evidence cannot predate the answer it delivers: bound every
@@ -305,7 +304,7 @@ let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
            snapshot. Check again before sending even a live wake hint. *)
         let* consumed = Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
             ~base_path ~keeper_name ~not_before:evidence_since ~post_id:stimulus.post_id
-            ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus)
+          ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus)
             |> Result.map_error (fun error -> Delivery_evidence_unavailable error) in
         if consumed then Ok Already_delivered
         else (
@@ -324,42 +323,97 @@ let deliver ~base_path ~keeper_name ~ask_id =
         Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
           ~base_path ~keeper_name ~not_before:stimulus.Keeper_event_queue.arrived_at
           ~post_id:stimulus.Keeper_event_queue.post_id
-          ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus)) ask resolution
+            ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus)
+        |> Result.map_error (fun error -> Delivery_evidence_unavailable error)) ask resolution
 
 type failure = { keeper_name : string option; ask_id : string option; error : error }
 type report =
   { inspected : int
+  ; evidence_window_reads : int
   ; enqueued : int
   ; already_pending : int
   ; already_delivered : int
   ; failures : failure list
   }
 
+type delivery_window = Whole_store | Answer_day of string
+type window_demand = One_source | Multiple_sources
+module Delivery_windows = Map.Make (struct
+  type t = delivery_window
+  let compare = Stdlib.compare
+end)
+
+let delivery_window since =
+  if since <= 0. then Ok Whole_store
+  else
+    match Jsonl_writer.day_key ~ts:since with
+    | day -> Ok (Answer_day day)
+    | exception ((Unix.Unix_error _ | Invalid_argument _) as exn) ->
+        Error (Invalid_answered_record
+          ("answer timestamp has no UTC calendar day: " ^ Printexc.to_string exn))
+
 let reconcile ~base_path =
   let ( let* ) = Result.bind in
   let* logs = Keeper_ask_store.discover_rows_result ~base_path in
-  let initial = { inspected = 0; enqueued = 0; already_pending = 0; already_delivered = 0; failures = [] } in
+  let initial = { inspected = 0; evidence_window_reads = 0; enqueued = 0; already_pending = 0; already_delivered = 0; failures = [] } in
   let report = List.fold_left (fun report log ->
       match log with
       | Keeper_ask_store.Unreadable_log error ->
           { report with failures = { keeper_name = None; ask_id = None;
               error = Ask_store_unavailable error } :: report.failures }
       | Keeper_ask_store.Canonical_rows { keeper_name; rows } ->
-          let answered = List.filter (fun (_, (_, resolution)) ->
-            match resolution with Keeper_ask.Answered_by _ -> true
-            | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> false) rows in
-          List.fold_left (fun report (ask_id, (ask, resolution)) ->
+          let answered, demands = List.fold_left (fun (answered, demands) row ->
+            let _, (_, resolution) = row in
+            match resolution with
+            | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> answered, demands
+            | Keeper_ask.Answered_by { answered_at; _ } ->
+                let demands = if not (Float.is_finite answered_at) then demands
+                  else
+                    match delivery_window answered_at with
+                    | Error _ -> demands
+                    | Ok window ->
+                        let demand = match Delivery_windows.find_opt window demands with
+                          | None -> One_source
+                          | Some (One_source | Multiple_sources) -> Multiple_sources in
+                        Delivery_windows.add window demand demands in
+                row :: answered, demands) ([], Delivery_windows.empty) rows in
+          let answered = List.rev answered in
+          (* A pass owns these immutable reads. Keeper and UTC-day boundaries
+             remain distinct; a failed earlier window cannot taint a later one.
+             Demand the first read in row order, rather than preparing a barrier
+             before the first ready answer can reach the queue owner. *)
+          let windows = ref Delivery_windows.empty in
+          let window_reads = ref 0 in
+          let already_delivered (stimulus : Keeper_event_queue.stimulus) =
+            let since = stimulus.arrived_at in
+            let* window = delivery_window since in
+            let snapshot = match Delivery_windows.find_opt window !windows with
+              | Some snapshot -> snapshot
+              | None ->
+                  incr window_reads;
+                  let snapshot = Keeper_reaction_ledger.strict_source_delivery_snapshot_result
+                      ~base_path ~keeper_name ~since in
+                  (* A single-use window is not retained alongside the shared
+                     ones. All-distinct dates keep no large proof snapshots. *)
+                  (match Delivery_windows.find_opt window demands with
+                   | Some Multiple_sources ->
+                       windows := Delivery_windows.add window snapshot !windows
+                   | Some One_source | None -> ());
+                  snapshot in
+            Result.bind snapshot (fun snapshot ->
+              Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+                ~post_id:stimulus.post_id
+                ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus))
+            |> Result.map_error (fun error -> Delivery_evidence_unavailable error) in
+          let report = List.fold_left (fun report (ask_id, (ask, resolution)) ->
             let report = { report with inspected = report.inspected + 1 } in
-            match deliver_row ~base_path ~keeper_name ~already_delivered:(fun stimulus ->
-                Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
-                  ~base_path ~keeper_name ~not_before:stimulus.Keeper_event_queue.arrived_at
-                  ~post_id:stimulus.Keeper_event_queue.post_id
-                  ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus))
-                ask resolution with
+            match deliver_row ~base_path ~keeper_name ~already_delivered ask resolution with
             | Ok Enqueued -> { report with enqueued = report.enqueued + 1 }
             | Ok Already_pending -> { report with already_pending = report.already_pending + 1 }
             | Ok Already_delivered -> { report with already_delivered = report.already_delivered + 1 }
             | Error error -> { report with failures = { keeper_name = Some keeper_name;
-                ask_id = Some ask_id; error } :: report.failures }) report answered)
+                ask_id = Some ask_id; error } :: report.failures }) report answered in
+          { report with evidence_window_reads =
+              report.evidence_window_reads + !window_reads })
     initial logs in
   Ok { report with failures = List.rev report.failures }

@@ -426,7 +426,7 @@ let test_a_held_turn_keeps_only_the_rows_the_log_does_not_draw () =
     ]
   in
   let held =
-    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held" } ]
+    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held"; ht_diagrams=[] } ]
   in
   let retained = Tui_types.rows_the_logs_do_not_draw ~held rows in
   let retained_role role = List.exists (fun (row : Tui_types.msg_entry) ->
@@ -476,16 +476,16 @@ let test_source_scoped_row_check_matches_full_held_scan () =
     ]
   in
   let held =
-    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-a" }
-    ; { Tui_types.ht_source = autonomous_source }
-    ; { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-b" }
+    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-a"; ht_diagrams=[] }
+    ; { Tui_types.ht_source = autonomous_source; ht_diagrams=[] }
+    ; { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-b"; ht_diagrams=[] }
     ]
   in
   let full_scan =
     List.filter_map
       (fun (entry : Tui_types.msg_entry) ->
         if List.exists (fun turn -> Tui_types.log_draws_row turn entry) held
-        then Tui_types.media_remainder entry
+        then Tui_types.media_remainder ~diagrams:[] entry
         else Some entry)
       rows
   in

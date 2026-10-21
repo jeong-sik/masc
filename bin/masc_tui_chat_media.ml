@@ -110,6 +110,33 @@ let newest_image media =
   | [] -> None
 ;;
 
+let without_drawn_diagrams ~sources media previews =
+  let rec consume source = function
+    | [] -> None
+    | head :: tail when String.equal source head -> Some tail
+    | head :: tail -> Option.map (List.cons head) (consume source tail)
+  in
+  let uncovered source_of values =
+    let _, kept = List.fold_left (fun (remaining, kept) value ->
+      match source_of value with
+      | None -> remaining, value :: kept
+      | Some source ->
+          match consume source remaining with
+          | None -> remaining, value :: kept
+          | Some remaining -> remaining, kept) (sources, []) values in
+    List.rev kept
+  in
+  let media_source = function
+    | Mermaid diagram -> Some diagram.source
+    | Image _ | Voice _ | Attach _ | Svg _ -> None in
+  let preview_source = function
+    | Masc_tui_image_preview.Output_image {source=Inline_mermaid source;_} -> Some source
+    | Named_path _ | Staged _ | Stored_attachment _
+    | Output_image {source=(Inline_data _ | Inline_svg _ | Server_path _ | Remote_uri _);_}
+    | Unavailable_image _ | No_image -> None in
+  uncovered media_source media, uncovered preview_source previews
+;;
+
 (* {1 Playback}
 
    What /listen plays: an attach with an audio or MIDI extension whose bytes

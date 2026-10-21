@@ -13,13 +13,31 @@ module Runtime = Masc.Keeper_turn_sandbox_runtime
 (* Every keeper goes through finalization, and only microvm keepers have a
    guest. If an absent guest were an error the shutdown would block on it, so
    this pins that removing nothing succeeds -- run against a name that has
-   never had a guest. *)
+   never had a guest. Absence is what the runtime's listing says, so the
+   [container] on PATH is a fake whose inspect and listing both report no
+   guest: the host's own CLI, or a host without one, would decide the case
+   instead. *)
 let test_removing_an_absent_guest_succeeds () =
   let base_path = Filename.temp_file "microvm_teardown_" "" in
   Unix.unlink base_path;
   Unix.mkdir base_path 0o755;
+  let cli = Filename.concat base_path "container" in
+  Out_channel.with_open_bin cli (fun channel ->
+    output_string channel
+      "#!/bin/sh\n\
+       case \"$1\" in\n\
+      \  stop|delete) exit 0 ;;\n\
+      \  inspect) echo \"Error: container not found: $2\" >&2; exit 1 ;;\n\
+      \  list) printf '[]\\n' ;;\n\
+      \  *) exit 99 ;;\n\
+       esac\n");
+  Unix.chmod cli 0o755;
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (base_path ^ ":" ^ previous_path);
   Fun.protect
-    ~finally:(fun () -> try Unix.rmdir base_path with _ -> ())
+    ~finally:(fun () ->
+      Unix.putenv "PATH" previous_path;
+      Fs_compat.remove_tree base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        match
@@ -36,14 +54,9 @@ let test_removing_an_absent_guest_succeeds () =
        with
        | Ok () -> ()
        | Error detail ->
-         (* container absent from the host is not a failed teardown either:
-            the suite has to pass on a machine without the CLI. *)
-         if not (Astring.String.is_infix ~affix:"executable file not found" detail)
-            && not (Astring.String.is_infix ~affix:"No such file" detail)
-         then
-           Alcotest.failf
-             "removing a guest that was never started must succeed, got: %s"
-             detail)
+         Alcotest.failf
+           "removing a guest that was never started must succeed, got: %s"
+           detail)
 
 (* A caller that forgets the runtime gets a refusal, not a guess. Shutdown
    finalization treats a teardown failure as a warning and finishes, so an

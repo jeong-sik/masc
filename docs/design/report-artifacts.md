@@ -175,12 +175,16 @@ authoritatively absent record). Both routes use the existing Admin authority and
 private, no-store HTTP response. The actor comes from authentication, not JSON.
 
 Each mutation verifies the published revision and body digest, then compares the
-opaque change ID under a durable transaction lock. A successful check or uncheck
+opaque change ID from a stable-lock snapshot. The whole-record atomic replacement
+must match that exact file identity and cursor under the same retained stable
+lock. A successful check or uncheck
 persists a fresh change ID and its actor/time. Unchecking does not delete the
 record, so an old checked state cannot overwrite a later uncheck. Conflict
 responses return the current record; an uncertain durable commit requires a
 refresh before retry. Checks live under the resolved workspace runtime root and
-do not modify publication manifests, history or source bytes.
+do not modify publication manifests, history or source bytes. Data and lock
+leaves are owned regular files; the stable protocol creates a new lock
+exclusively and validates an existing descriptor binding before writing it.
 
 This layer supplies the shared storage/API. Dashboard and TUI confirmation
 controls and their live cross-client verification remain separate work.

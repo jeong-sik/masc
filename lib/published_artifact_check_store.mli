@@ -16,6 +16,7 @@ val list : base_path:string -> (listing, error) result
     records. Failed or partial reads must remain unknown in clients. *)
 val set : base_path:string -> actor:string -> Published_artifact_check.request ->
   (Published_artifact_check.t, error) result
-(** Verifies the exact published revision and digest before a locked CAS write.
-    A rename followed by fsync failure returns [Commit_uncertain]; reread before
-    retrying. Unchecking persists a new change ID rather than deleting state. *)
+(** Verifies the exact published revision and digest before an atomic replacement
+    at the exact stable-lock file cursor. A published rename whose durability or
+    settlement is uncertain returns [Commit_uncertain]; reread before retrying.
+    Unchecking persists a new change ID rather than deleting state. *)

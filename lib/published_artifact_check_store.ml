@@ -33,12 +33,26 @@ let directory_entries ~base_path =
   | Ok entries -> Ok entries
   | Error error -> Error (Unavailable (Fs_compat.owned_regular_file_read_error_to_string error))
 
-let load_file ~base_path name =
+let read_snapshot ~base_path name =
+  let file = Filename.concat (root ~base_path) name in
+  (* Validate the owned parent and data leaf before entering the shared stable
+     transaction protocol. Its lock is created exclusively and an existing
+     leaf is bound to its regular descriptor before any marker write. *)
   match Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
-    ~ownership_root:base_path (Filename.concat (root ~base_path) name) with
+    ~ownership_root:base_path file with
   | Error _ -> Error (Unavailable "artifact check could not be read")
-  | Ok None -> Ok None
-  | Ok (Some {content;_}) ->
+  | Ok (None | Some _) ->
+    let* _ = Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
+      ~ownership_root:base_path (Fs_compat.private_jsonl_lock_path file)
+      |> Result.map_error (fun _ -> Unavailable "artifact check lock is not an owned regular file") in
+    Fs_compat.read_private_jsonl_durable_locked_result file ~after:None
+    |> Result.map_error (fun error -> Unavailable
+      (Fs_compat.private_jsonl_transaction_error_to_string error))
+
+let decode_snapshot name (snapshot : Fs_compat.private_jsonl_snapshot) =
+  if Fs_compat.Private_jsonl_cursor.is_missing snapshot.cursor then Ok None
+  else
+    let content = snapshot.bytes in
     if not (String.is_valid_utf_8 content) then Error (Unavailable "artifact check is not valid UTF-8")
     else match Yojson.Safe.from_string content with
       | json ->
@@ -48,6 +62,10 @@ let load_file ~base_path name =
            if String.equal name (filename check.target) then Ok (Some check)
            else Error (Unavailable "artifact check filename identity mismatch"))
       | exception Yojson.Json_error _ -> Error (Unavailable "invalid artifact check JSON")
+
+let load_file ~base_path name =
+  let* snapshot = read_snapshot ~base_path name in
+  decode_snapshot name snapshot
 
 let list ~base_path = protect (fun () ->
   let* entries = directory_entries ~base_path in
@@ -74,31 +92,37 @@ let set ~base_path ~actor (request : Check.request) = protect (fun () ->
     | Ok _ -> Ok ()
     | Error _ -> Error (Unavailable "artifact check directory could not be prepared") in
   let* _ = directory_entries ~base_path in
-  match File_lock_eio.with_durable_lock_observed
-    ~lock_path:(path ~base_path request.target ^ ".lock") (fun () ->
-      let* previous = load_file ~base_path (filename request.target) in
-      let* () = match previous with
-        | Some check when not (Check.same_target check.target request.target) ->
-          Error (Unavailable "stored check revision digest mismatch")
-        | None | Some _ -> Ok () in
-      let previous_change = Option.map (fun (check : Check.t) -> check.change_id) previous in
-      if previous_change <> request.expected_change_id then Error (Conflict previous)
-      else
-        let change_id = Random_id.prefixed ~prefix:"check-" ~bytes:16 in
-        let* () = if Some change_id = previous_change then Error (Unavailable "check identity collision")
-          else Ok () in
-        let* check = Check.create ~actor ~at:(Types_core.now_iso ()) ~change_id request
-          |> Result.map_error (fun message -> Invalid message) in
-        match Keeper_fs.save_json_durable_atomic ~ownership_root:base_path
-          (path ~base_path request.target) (Check.to_json check) with
-        | Ok () -> Ok check
-        | Error error ->
-          if error.renamed then Error (Commit_uncertain check)
-          else Error (Unavailable (Keeper_fs.durable_write_error_to_string error))) with
-  | File_lock_eio.Lock_not_acquired error ->
-    Error (Unavailable (File_lock_eio.durable_lock_error_to_string error))
-  | File_lock_eio.Body_completed {value;release_error=None} -> value
-  | File_lock_eio.Body_completed {value;release_error=Some error} ->
-    Log.Misc.error "artifact check lock release: %s"
-      (File_lock_eio.durable_lock_error_to_string error);
-    value)
+  let file = path ~base_path request.target in
+  let name = filename request.target in
+  let* snapshot = read_snapshot ~base_path name in
+  let* previous = decode_snapshot name snapshot in
+  let* () = match previous with
+    | Some check when not (Check.same_target check.target request.target) ->
+      Error (Unavailable "stored check revision digest mismatch")
+    | None | Some _ -> Ok () in
+  let previous_change = Option.map (fun (check : Check.t) -> check.change_id) previous in
+  if previous_change <> request.expected_change_id then Error (Conflict previous)
+  else
+    let change_id = Random_id.prefixed ~prefix:"check-" ~bytes:16 in
+    let* () = if Some change_id = previous_change then Error (Unavailable "check identity collision")
+      else Ok () in
+    let* check = Check.create ~actor ~at:(Types_core.now_iso ()) ~change_id request
+      |> Result.map_error (fun message -> Invalid message) in
+    let rec failed = function
+      | Fs_compat.Cursor_mismatch _ ->
+        let* current = load_file ~base_path name in Error (Conflict current)
+      | Rewrite_published_durability_unknown _ -> Error (Commit_uncertain check)
+      | Transaction_settlement_failed {primary=Transaction_succeeded _;_} ->
+        Error (Commit_uncertain check)
+      | Transaction_settlement_failed {primary=Transaction_failed error;_} -> failed error
+      | (Stable_lock_contended _ | Unexpected_stable_lock_permissions _
+        | Invalid_stable_lock_state _ | Unexpected_transaction_file_kind _
+        | Ambiguous_transaction_file_identity _ | Transaction_path_binding_changed _
+        | Transaction_content_changed _ | Incomplete_transaction_tail _
+        | Invalid_transaction_suffix | Private_jsonl_operation_failed _
+        | Rewrite_stage_failed _ | Transaction_append_failed _) as error ->
+        Error (Unavailable (Fs_compat.private_jsonl_transaction_error_to_string error)) in
+    match Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
+      file ~expected:snapshot.cursor (Yojson.Safe.to_string (Check.to_json check) ^ "\n") with
+    | Ok _ -> Ok check
+    | Error error -> failed error)

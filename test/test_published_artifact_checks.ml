@@ -130,7 +130,7 @@ let test_corrupt_or_unsafe_storage () = with_base (fun base_path ->
     (List.length partial.diagnostics);
   check_unavailable (S.set ~base_path ~actor:"human"
     (change ~expected:(Some checked.change_id) ~checked:false artifact.id revision));
-  Fs_compat.save_file file (Yojson.Safe.to_string (C.to_json checked));
+  Fs_compat.save_file file (Yojson.Safe.to_string (C.to_json checked) ^ "\n");
   let held = Filename.concat base_path "held-check.json" in
   Unix.rename file held; Unix.symlink held file;
   Alcotest.(check int) "symlink read is a diagnostic" 1
@@ -144,10 +144,38 @@ let test_corrupt_or_unsafe_storage () = with_base (fun base_path ->
     check_unavailable (S.set ~base_path ~actor:"human"
       (change ~expected:(Some checked.change_id) ~checked:false artifact.id revision))))
 
+let test_lock_symlink () = with_base (fun outside -> with_base (fun base_path ->
+  let artifact, revision = publish ~base_path "report" in
+  let checked = set ~base_path ~actor:"human" (change ~checked:true artifact.id revision) in
+  let dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "published_artifact_checks" in
+  let file = Filename.concat dir (artifact.id ^ "-r1.json") in
+  let lock = Fs_compat.private_jsonl_lock_path file in
+  let held = lock ^ "-held" in
+  let target = Filename.concat outside "must-not-create-or-modify" in
+  let original = Fs_compat.load_file file in
+  Unix.rename lock held;
+  Fun.protect ~finally:(fun () -> Unix.unlink lock; Unix.rename held lock) (fun () ->
+    Unix.symlink target lock;
+    let refuse () = match S.set ~base_path ~actor:"human"
+      (change ~expected:(Some checked.change_id) ~checked:false artifact.id revision) with
+      | Error (S.Unavailable _) -> ()
+      | Error error -> Alcotest.fail (S.error_message error)
+      | Ok _ -> Alcotest.fail "unsafe lock admitted" in
+    refuse ();
+    Alcotest.(check bool) "dangling lock does not create an external file" false (Sys.file_exists target);
+    Fs_compat.save_file target "external bytes";
+    refuse ();
+    Alcotest.(check string) "existing external target is unchanged" "external bytes" (Fs_compat.load_file target);
+    Alcotest.(check string) "prior check bytes remain unchanged" original (Fs_compat.load_file file));
+  let listing = S.list ~base_path |> stored in
+  Alcotest.(check string) "prior check survives refused lock requests" checked.change_id
+    (List.hd listing.checks).change_id))
+
 let () = Eio_main.run (fun _ ->
   Alcotest.run "shared artifact revision checks"
     ["durable explicit confirmation",[
       Alcotest.test_case "shared recovery, exact revision and stale uncheck" `Quick test_revision_and_shared_state;
       Alcotest.test_case "two clients compete through durable CAS" `Quick test_concurrent_cas;
       Alcotest.test_case "strict request, actor spoof and immutable digest" `Quick test_strict_request_and_digest;
+      Alcotest.test_case "lock links cannot create or alter external files" `Quick test_lock_symlink;
       Alcotest.test_case "corrupt and unsafe storage remain unknown" `Quick test_corrupt_or_unsafe_storage]])

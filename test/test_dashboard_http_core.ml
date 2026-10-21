@@ -7995,7 +7995,7 @@ let test_skill_evidence_joins_activation_and_composition () =
     }
   in
   let completed tool_name data =
-    Lib.Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data ()
+    Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data ()
   in
   let node =
     `Assoc
@@ -8015,7 +8015,7 @@ let test_skill_evidence_joins_activation_and_composition () =
                    | Agent_core.Tool_contract.Serial -> "serial"
                    | Concurrent -> "concurrent") )
             ] )
-      ; "result", Lib.Tool_result.to_json (completed "keeper_lane_status" (`Assoc []))
+      ; "result", Tool_result.to_json (completed "keeper_lane_status" (`Assoc []))
       ; "tool_use_id", `String "lane-status-1"
       ; "failure_effect_disposition", `Null
       ; "deferred_kind", `Null

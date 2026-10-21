@@ -371,6 +371,14 @@ status: reference
   - `Source audition` — 가져온 MIDI 소스의 순서 있는 원본 메시지 열을 명시한 MIDI 출력이나
     VST로 내보내는 재생. 처음부터 시작하고 pause/resume과 source-clock seek를 지원한다
     (MIDI-SOURCE.md "Ordered source audition", README.md "Imported performance audition").
+    다른 문서는 같은 재생을 `full-source audition`이라 부른다 — `grep -F "audition"`
+    한 번으로 두 이름이 다 잡히도록 여기 함께 적는다(ARRANGEMENT.md의 "full-source audition
+    remains available separately"·"original full-source audition's complete ordered-stream
+    delivery", CAPTURE-PLAYBACK.md "Full-source audition still emits every original message",
+    CAPTURE-UMP-REGIONS.md "full-source audition remains available", README.md "capture timing
+    survive full-source audition", `tools/alphatex/native/UmpTransport.swift`의 `// distinct from
+    an original full-source audition`). `full-source`는 이 재생을 가리키는 다른 이름이지
+    더 큰 범위의 재생이 아니다.
   - `Source-window audition` — 소스 피아노 롤에서 `:loop START END`로 잡은 세션 국소 소스
     구간만 반복해 들려주는 재생. 루프 선택은 소스 문서와 MIDI/WAV 내보내기를 바꾸지 않고,
     VST 경로는 선택한 연주 전체를 먼저 렌더한 뒤 그 구간의 half-open PCM 프레임만 읽는다 —

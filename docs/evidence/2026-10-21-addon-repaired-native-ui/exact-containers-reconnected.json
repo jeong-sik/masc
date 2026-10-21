@@ -1,0 +1,37 @@
+{
+  "engine_id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7",
+  "containers": [
+    {
+      "instance": "01a15ea2-34fe-7000-807a-f3b83ebd94a8",
+      "container": "fac3d15c6c309e65e8e6787acbd048079ca8b8feeb9020efa98bdce6a620a9e4",
+      "returncode": 0,
+      "id": "fac3d15c6c309e65e8e6787acbd048079ca8b8feeb9020efa98bdce6a620a9e4",
+      "name": "/masc-lane-2c52d0c29c659d9703aca617dd2e34bc7e8d26c1df37e36ed81054f166c1c9a2",
+      "state": {
+        "Status": "running",
+        "Running": true,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 39220,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-10-21T13:24:12.193143085Z",
+        "FinishedAt": "0001-01-01T00:00:00Z"
+      },
+      "image": "sha256:6dc223be960dd1a2adb9da10c34dcd9610231478a8e2e74a324a459c0bc02745",
+      "labels": {
+        "masc.lane.instance": "01a15ea2-34fe-7000-807a-f3b83ebd94a8",
+        "masc.lane.scope": "61c18923703c3f4ad958db3dca49c6898e5b45b9466a716ebf160669b2cf2160",
+        "org.opencontainers.image.revision": "65112e0ee411ea7aa52b457bdda029eb2fc86475"
+      }
+    },
+    {
+      "instance": "01a15e9c-7fad-7000-937e-b01fd76c5e1c",
+      "container": "435d8f25e3442abf0bc41142235528366b8e0abd7b25a5235004f46ddad916c2",
+      "returncode": 1,
+      "stderr": "error: no such object: 435d8f25e3442abf0bc41142235528366b8e0abd7b25a5235004f46ddad916c2"
+    }
+  ]
+}

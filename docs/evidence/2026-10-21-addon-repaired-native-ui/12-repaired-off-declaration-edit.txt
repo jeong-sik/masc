@@ -1,0 +1,56 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Lane Add-ons                                                                                                                                            │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│?:help  Esc:back  J/K:scroll                                                                                                                                  │
+│Input: no $EDITOR or $VISUAL is set; TOML draft retained                                                                                                      │
+│Raw details                                                                                                                                                   │
+│Snapshot unknown                                                                                                                                              │
+│TOML installations · /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc/config/lane-addons · inventory co│
+│mplete                                                                                                                                                        │
+│> native-ui-proof · /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc/config/lane-addons/native-ui.toml │
+│   Configured off                                                                                                                                             │
+│   Off · worker cleanup confirmed                                                                                                                             │
+│   desired bd3724755fdd04251623bfeee10c523a566a024e11055902a78f0b1ba8b9e25f                                                                                   │
+│   applied none                                                                                                                                               │
+│Accepted file application · Off · worker cleanup confirmed                                                                                                    │
+│Application follows visible-pane refresh · r:read now                                                                                                         │
+│TOML draft native-ui.toml                                                                                                                                     │
+│Draft: disabled · save requests worker cleanup and keeps this file                                                                                            │
+│ Space:on/off draft  E:edit  s:save  l:read current  u:use current revision  U:replace draft  Esc:back (draft kept)                                           │
+│Base 3ab7d7ae15d85cecd884312b72d8b23ae1b85d8c3ebf4b25e4848e973fd07818 · /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-202610│
+│21-fx3087s5/.masc/config/lane-addons/native-ui.toml                                                                                                           │
+│Saved · durable · file receipt; worker application is tracked separately                                                                                      │
+│Current 3ab7d7ae15d85cecd884312b72d8b23ae1b85d8c3ebf4b25e4848e973fd07818 · valid TOML declaration                                                             │
+│Current file text (u keeps the draft; U replaces it)                                                                                                          │
+│id = "native-ui-proof"                                                                                                                                        │
+│enabled = false                                                                                                                                               │
+│run_id = "native-ui-proof"                                                                                                                                    │
+│manifest_path = "/private/tmp/masc-addon-inventory-application-20261021/addons/vst-phrase/lane.toml"                                                          │
+│                                                                                                                                                              │
+│[[binding.sources]]                                                                                                                                           │
+│source_id = "vst-phrase"                                                                                                                                      │
+│kind = "snapshot_file"                                                                                                                                        │
+│path = "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/source.json"                                                │
+│                                                                                                                                                              │
+│Draft text                                                                                                                                                    │
+│id = "native-ui-proof"                                                                                                                                        │
+│enabled = false                                                                                                                                               │
+│run_id = "native-ui-proof"                                                                                                                                    │
+│manifest_path = "/private/tmp/masc-addon-inventory-application-20261021/addons/vst-phrase/lane.toml"                                                          │
+│                                                                                                                                                              │
+│[[binding.sources]]                                                                                                                                           │
+│source_id = "vst-phrase"                                                                                                                                      │
+│kind = "snapshot_file"                                                                                                                                        │
+│path = "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/source.json"                                                │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help  Esc:back  Space:on/off draft  E:edit  s:save  l:reload  u/U:revision  Colon:palette  A:command
+ Choose a Keeper before writing · i:choose

@@ -1,0 +1,25 @@
+{"at": 1792588695.1950521, "keys": ":addons\r", "settle_ms": 1000, "capture": "01-repaired-on-overview", "show": true}
+{"at": 1792588703.062342, "keys": "\r", "settle_ms": 800, "capture": "02-repaired-on-detail", "show": true}
+{"at": 1792588760.529471, "keys": "E", "settle_ms": 700, "capture": "03-repaired-edit-on", "show": false}
+{"at": 1792588801.240034, "keys": " ", "settle_ms": 500, "capture": "04-repaired-off-draft", "show": false}
+{"at": 1792588810.365379, "keys": "s", "settle_ms": 1000, "capture": "05-repaired-off-save", "show": false}
+{"at": 1792588826.774286, "keys": "\u001b", "settle_ms": 500, "capture": "06-repaired-off-detail-return", "show": true}
+{"at": 1792588850.28635, "keys": "r", "settle_ms": 1000, "capture": "07-repaired-retained-manual-refresh", "show": true}
+{"at": 1792588889.655647, "settle_ms": 600, "capture": "08-repaired-retained-after-cadence", "show": false}
+{"at": 1792588926.696747, "keys": "E", "settle_ms": 500, "capture": "09-repaired-reenable-edit", "show": false}
+{"at": 1792588955.6405098, "keys": " ", "settle_ms": 400, "capture": "10-repaired-on-draft", "show": false}
+{"at": 1792588980.956906, "keys": "\u001b", "settle_ms": 400, "capture": "11-repaired-off-overview", "show": true}
+{"at": 1792589019.76422, "keys": "jE", "settle_ms": 500, "capture": "12-repaired-off-declaration-edit", "show": false}
+{"at": 1792589039.2148879, "keys": " ", "settle_ms": 400, "capture": "13-repaired-on-draft", "show": false}
+{"at": 1792589051.096045, "keys": "s", "settle_ms": 1000, "capture": "14-repaired-on-saved", "show": false}
+{"at": 1792589065.727968, "keys": "\u001b", "settle_ms": 500, "capture": "15-repaired-after-reconnect", "show": true}
+{"at": 1792589094.891815, "keys": "j\r", "settle_ms": 800, "capture": "16-repaired-new-result", "show": false}
+{"at": 1792589159.325053, "keys": "\u001b", "settle_ms": 300, "show": false}
+{"at": 1792589170.204187, "keys": "h\r", "settle_ms": 700, "capture": "17-repaired-old-after-reconnect", "show": true}
+{"at": 1792589188.227482, "keys": "r", "settle_ms": 700, "capture": "18-repaired-old-refreshed-after-reconnect", "show": false}
+{"at": 1792589218.481899, "keys": "\u001b", "settle_ms": 300, "show": false}
+{"at": 1792589236.91777, "keys": "hjE", "settle_ms": 600, "capture": "19-repaired-final-off-edit", "show": false}
+{"at": 1792589256.403477, "keys": " ", "settle_ms": 400, "capture": "20-repaired-final-off-draft", "show": false}
+{"at": 1792589267.77391, "keys": "s", "settle_ms": 800, "capture": "21-repaired-final-off-save", "show": false}
+{"at": 1792589301.972111, "keys": "r", "settle_ms": 600, "capture": "22-repaired-final-cleanup-observed", "show": false}
+{"at": 1792589317.653313, "stop": true}

@@ -806,17 +806,13 @@ let docker_exec_only (t : t) =
   else Ok ()
 ;;
 
-(* [microvm_backend] names the runtime to ask, or [None] for the Docker
-   daemon. Two probes of the same fact taking the backend differently is how
-   one of them drifts back to a single runtime, so this reads it the way
-   [inspect_container_running] already does. *)
-let inspect_container_exists ?timeout_sec ~microvm_backend container_name =
+(* Whether the Docker daemon can see the named container, in any state. A
+   microvm guest is asked through [probe_microvm_container_state], which also
+   tells a missing guest from a runtime that could not be asked. *)
+let inspect_container_exists ?timeout_sec container_name =
   let inspect_argv =
-    match microvm_backend with
-    | Some backend -> Keeper_sandbox_microvm.inspect_argv_for backend ~container_name
-    | None ->
-      Keeper_sandbox_runtime.docker_command_argv ()
-      @ [ "inspect"; "--format"; "{{.Id}}"; container_name ]
+    Keeper_sandbox_runtime.docker_command_argv ()
+    @ [ "inspect"; "--format"; "{{.Id}}"; container_name ]
   in
   let inspect_st, inspect_out =
     run_argv_with_status ?timeout_sec inspect_argv
@@ -1363,7 +1359,7 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
    said keeps that text whole in a field; the sentence an operator reads is
    written once, in [microvm_start_failure_message]. *)
 type microvm_post_boot_check =
-  | Inspect_cannot_see
+  | Runtime_does_not_list
   | Work_root_unusable
 
 type microvm_start_failure =
@@ -1392,6 +1388,13 @@ type microvm_start_failure =
       ; container_name : string
       ; detail : string
       }
+  | Booted_guest_state_unknown of
+      { container_name : string
+      ; detail : string
+      }
+      (** The boot argv exited 0 and the runtime could not then be asked
+          about the guest. The guest is left running with its snapshot and
+          boot record; the next start probes it again. *)
   | Boot_command_failed of
       { status : Unix.process_status
       ; output : string
@@ -1400,7 +1403,7 @@ type microvm_start_failure =
           name, or its state could not be read. *)
 
 let microvm_post_boot_check_label = function
-  | Inspect_cannot_see -> "container ran but inspect cannot see"
+  | Runtime_does_not_list -> "container ran but the runtime does not list it"
   | Work_root_unusable ->
     "guest cannot prove its work volume is mounted and its keeper root usable"
 ;;
@@ -1426,6 +1429,12 @@ let microvm_start_failure_message failure =
       (Printf.sprintf
          "%s %s: %s"
          (microvm_post_boot_check_label check)
+         container_name
+         detail)
+  | Booted_guest_state_unknown { container_name; detail } ->
+    failed
+      (Printf.sprintf
+         "guest %s booted and was left running; its state could not be read: %s"
          container_name
          detail)
   | Boot_command_failed { status; output } ->
@@ -1754,10 +1763,11 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
            }
          in
          let st, out = run_argv_with_status ?timeout_sec argv in
-         (* A guest that came up but cannot be seen, or cannot hold the
-            keeper's root on its volume, is taken down again: the remote
-            lane has nowhere to run in it, and leaving it would hand the
-            next turn a guest that adopts cleanly and fails on every call. *)
+         (* A guest that came up but that the runtime confirms is not
+            there, or that cannot hold the keeper's root on its volume, is
+            taken down again: the remote lane has nowhere to run in it, and
+            leaving it would hand the next turn a guest that adopts cleanly
+            and fails on every call. *)
          let take_down_after_boot ~check ~detail =
            let removed =
              match
@@ -1786,13 +1796,17 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                including the one [microvm_remote_endpoint] exists to adopt,
                whose [mkdir] failed and whose take-down failed too. *)
             record_microvm_boot container_name booted;
+            (* The same probe as every other step. Listed in any state, it is
+               the guest this call booted; a stopped one fails the work root
+               check below. Confirmed absent, it is taken down. Unknown, it is
+               left running with its snapshot and record: taking down a guest
+               nobody could ask about may delete one that is up. *)
             (match
-               inspect_container_exists
-                 ?timeout_sec
-                 ~microvm_backend:(Some backend)
-                 container_name
+               probe_microvm_container_state ?timeout_sec ~backend container_name
              with
-             | Ok () ->
+             | Ok
+                 ( Keeper_sandbox_runtime.Docker_container_running
+                 | Keeper_sandbox_runtime.Docker_container_stopped ) ->
                (match
                   ensure_microvm_keeper_work_root
                     ?timeout_sec
@@ -1808,10 +1822,11 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                   take_down_after_boot
                     ~check:Work_root_unusable
                     ~detail)
-             | Error inspect_out ->
+             | Ok Keeper_sandbox_runtime.Docker_container_absent ->
                take_down_after_boot
-                 ~check:Inspect_cannot_see
-                 ~detail:inspect_out)
+                 ~check:Runtime_does_not_list
+                 ~detail:"the runtime's listing does not name the guest"
+             | Error detail -> Error (Booted_guest_state_unknown { container_name; detail }))
           | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
             (* Two turns of one keeper can race to boot the shared name;
                the loser's run fails on the name and the guest the winner
@@ -2195,12 +2210,7 @@ let start_container ?timeout_sec (t : t) =
               let st, out = run_argv_with_status ?timeout_sec argv in
               match st with
               | Unix.WEXITED 0 ->
-                (match
-                   inspect_container_exists
-                     ?timeout_sec
-                     ~microvm_backend:None
-                     container_name
-                 with
+                (match inspect_container_exists ?timeout_sec container_name with
                  | Ok () ->
                    set_state t (Running { container_name });
                    Ok container_name
@@ -2269,7 +2279,7 @@ let start_container ?timeout_sec (t : t) =
     if start_st = Unix.WEXITED 0
     then (
       match
-        inspect_container_exists ?timeout_sec ~microvm_backend:None container_name
+        inspect_container_exists ?timeout_sec container_name
       with
       | Ok () -> adopt_running ()
       | Error inspect_out ->

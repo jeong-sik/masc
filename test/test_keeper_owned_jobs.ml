@@ -3829,11 +3829,9 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
     { trace_id = Some fixture.meta.runtime.trace_id; session_id = None; keeper_turn_id; answer_source_ids = [] } in
   let journal = Journal.prepare ~observation ~base_path:fixture.base_path source |> require "interrupted launch journal" in
   let run = Plan.Composition_run_id.to_string composition_run_id in
-  let parent = Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation in
-  let launch_tool_use_id = Printf.sprintf "composition:%d:%s:%d:%s:%d:%s"
-      (String.length run) run (String.length parent) parent (String.length "launch") "launch" in
-  control_launch fixture ~tool_use_id:launch_tool_use_id ~keeper_turn_id
-    (`Assoc ["mode",`String "start_blocked"]);
+  let launch_node = match Plan.nodes (Draft.plan draft) with
+    | [node] -> Plan.Node_id.to_string node.Plan.id
+    | [] | _ :: _ :: _ -> fail "interrupted fixture must retain its one validated launch node" in
   let request_context = Some
       [ "composition_tool", `String Draft.run_tool_name
       ; "parent_tool_use_id", `String source.parent_tool_use_id
@@ -3868,6 +3866,15 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
         Eio.Promise.resolve notify_settled1 settlement)
       ~f:(fun ~request_id request_sw ->
         let worker = match !worker1 with Some worker -> worker | None -> fail "unbound interrupted worker" in
+        (* The actual async surface replaces the original SDK parent with
+           this accepted request identity before deriving leaf call IDs.
+           Arm only once that exact request is known, before execution. *)
+        let parent = "composition-async:" ^ request_id in
+        let launch_tool_use_id = Printf.sprintf "composition:%d:%s:%d:%s:%d:%s"
+            (String.length run) run (String.length parent) parent
+            (String.length launch_node) launch_node in
+        control_launch fixture ~tool_use_id:launch_tool_use_id ~keeper_turn_id
+          (`Assoc ["mode",`String "start_blocked"]);
         let rec await_start () =
           if Sys.file_exists (Filename.concat fixture.base_path "start-entered") then ()
           else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.005; await_start ()) in
@@ -3887,6 +3894,8 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
             Async.worker_interrupted ~reason:"fixture interrupted the actual start reply")) () in
   let first = first |> require "interrupted original request accepted" in
   ignore (Eio.Promise.await settled1);
+  check_json "the exact first async launch consumed its pre-handle fault" (`List [])
+    (Yojson.Safe.from_file fixture.control_path |> member "armed");
   let terminal request_id =
     let rec read () = match Async.load_canonical_durable_terminal ~base_path:fixture.base_path
         ~caller:keeper request_id with

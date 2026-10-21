@@ -379,20 +379,24 @@ def named_skill_reuse(args, root, head):
         else:
             require(len(activations) == 1, "named reuse needs one original Skill activation")
             activation = activations[0]
-            invocation = activation["invocation"]
-            require(invocation == {"kind": "composition", "origin": {"kind": "task_composition",
-                    "task_ids": [fixture["task_id"]]}, "tool_name": fixture["skill_tool_name"]} and
-                    activation["identity"] == fixture["skill_reference"]["identity"] and
-                    activation["content_revision"] == fixture["skill_reference"]["content_revision"] and
-                    activation["turn_ref"] == turn["turn_ref"] and
-                    activation["runtime_id"] == turn["runtime_profile"],
-                    "named reuse was not the exact Task Skill in this turn and Runtime")
             parents = [row for row in calls if row["tool"] == fixture["skill_tool_name"] and
                        row.get("execution_id") in turn["execution_ids"] and
                        row["tool_use_id"] == activation["skill_tool_use_id"] and
                        row["turn"] == activation["agent_core_turn"]]
             require(len(parents) == 1 and parents[0]["input"] == {"job_id": fixture["selected_job_id"]},
                     "named reuse lost its original SDK invocation or selected job")
+            parent_execution_id = parents[0].get("execution_id")
+            require(isinstance(parent_execution_id, str) and bool(parent_execution_id),
+                    "named reuse has no physical parent execution identity")
+            invocation = activation["invocation"]
+            require(invocation == {"kind": "composition", "origin": {"kind": "task_composition",
+                    "task_ids": [fixture["task_id"]]}, "tool_name": fixture["skill_tool_name"],
+                    "execution_id": parent_execution_id} and
+                    activation["identity"] == fixture["skill_reference"]["identity"] and
+                    activation["content_revision"] == fixture["skill_reference"]["content_revision"] and
+                    activation["turn_ref"] == turn["turn_ref"] and
+                    activation["runtime_id"] == turn["runtime_profile"],
+                    "named reuse was not the exact Task Skill in this turn and Runtime")
             execution = read(directory / "actual-composition-execution.json")
             summaries = [row for row in calls if row["tool"] == "keeper_composition_run_summary" and
                          row.get("parent_tool_use_id") == parents[0]["tool_use_id"] and

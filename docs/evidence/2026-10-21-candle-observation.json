@@ -1,0 +1,69 @@
+{
+  "schema": "masc.candle.readonly-observation.v1",
+  "captured_at_utc": "2026-10-21T12:01:18.024299+00:00",
+  "scope": "Read-only HTTP health, config file and JSONL inspection. Not an atomic cross-file snapshot, domain decode, live transaction, UI acceptance or current source execution result.",
+  "source_audit_commit": "4fff07da4516d871a7ef71260585afaedad6c776",
+  "runtime": {
+    "binary_version": "0.59.0",
+    "binary_commit": "ad6ca89213d57c9ac978e1f3e5704292c4334cf6",
+    "executable_sha256": "e1369a16114abf4a6c73956f86507e340c5e3b992f460997caed3c4defa3e03e",
+    "runtime_instance_id": "01a15e35-a3d0-7000-a7f8-8fdc0680915b",
+    "started_at": "2026-10-21T11:25:36Z"
+  },
+  "health": {
+    "status": "ok",
+    "overall_status": "degraded",
+    "candle_cause_attributed": false
+  },
+  "workspace_identity": "effective_base_path and effective_masc_root checked via /health?full=1; host paths omitted",
+  "config": {
+    "path": "<config-dir>/candle.toml",
+    "sha256": "7a3fce4b4677306b805bb825bd3293c9e52593a1eb6527141c5f3a5728eb40d7",
+    "half_life_hours": 168,
+    "weight_max": 1,
+    "deduction_rate": 0,
+    "deduction_floor": 1000,
+    "share_rounding": "largest_remainder",
+    "remainder_tie_break": "name_ascending",
+    "deduction_rounding": "down",
+    "grades_milli": {
+      "trivial": 100,
+      "small": 700,
+      "medium": 1000,
+      "large": 1000,
+      "epic": 1000
+    },
+    "pricing_table_present": false,
+    "price_entry_count": 18
+  },
+  "ledger": {
+    "path": "<base-path>/.masc/candle-ledger.jsonl",
+    "sha256": "49096de5afab3fc4a2176091753c1f25d81d1a06229f1452fe58e06da3afe98c",
+    "bytes": 10709,
+    "rows": 40,
+    "json_parse_errors": [],
+    "event_counts": {
+      "half_life_set": 2,
+      "purchased": 1,
+      "equipped": 1,
+      "granted": 28,
+      "snapshot": 2,
+      "payout_owed": 2,
+      "candidates": 2,
+      "paid": 1,
+      "unattributed": 1
+    },
+    "first_at": "2026-10-06T07:52:37Z",
+    "last_at": "2026-10-14T08:47:23Z"
+  },
+  "raw_record_totals": {
+    "granted_milli": 280,
+    "paid_allocation_milli": 1000,
+    "recorded_purchase_milli": 0,
+    "gift_events": 0,
+    "current_decayed_balance_or_supply_computed": false
+  },
+  "mutations_performed": false,
+  "ocaml_tests_or_builds_run": false,
+  "raw_private_ledger_published": false
+}

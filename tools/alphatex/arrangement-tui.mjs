@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from './arrangement-playback.mjs'
-import { startVstArrangement } from './arrangement-vst.mjs'
+import { startSoundArrangement } from './arrangement-sound.mjs'
 import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementPracticePass, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
@@ -300,7 +300,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     recording?.controller.abort(); recording?.handle?.stop()
     recordStart = null
     generation++; transportPending = false
-    if (preparing?.kind === 'vst') preparing.handle.cancel()
+    if (preparing?.kind === 'sound') preparing.handle.cancel()
     else if (preparing?.kind === 'worker' && !workerFailure) worker.postMessage({ kind: 'cancel', request: preparing.id })
     preparing = null
     transport.handle?.stop()
@@ -324,10 +324,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     started.catch(() => {})
     const expected = ++generation, project = editor.project, output = selection.output
     transport = { kind: 'preparing' }; status = 'Preparing arrangement sources…'
-    const vst = selection.kind === 'prepare-vst' ? startVstArrangement({ project, route, sourceRoot, directory, request,
+    const sound = selection.kind === 'prepare-sound' ? startSoundArrangement({ project, route, sourceRoot, directory, request,
       cancelRequest: id => { if (!workerFailure) worker.postMessage({ kind: 'cancel', request: id }) } }) : null
-    if (vst) preparing = { kind: 'vst', handle: vst }
-    const prepared = vst ? vst.promise : request({ ...selection, project, sourceRoot, directory }, id => { preparing = { kind: 'worker', id } })
+    if (sound) preparing = { kind: 'sound', handle: sound }
+    const prepared = sound ? sound.promise : request({ ...selection, project, sourceRoot, directory }, id => { preparing = { kind: 'worker', id } })
     const preparation = (async () => {
       let result, playbackCompletion, playbackHandle
       try {
@@ -392,9 +392,9 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (playbackCompletion) await playbackCompletion
         if (result) {
           await Promise.allSettled([...(planInspections.get(result) ?? [])])
-          if (!vst) await rm(dirname(result.path), { recursive: true, force: true })
+          if (!sound) await rm(dirname(result.path), { recursive: true, force: true })
         }
-        if (vst) await vst.dispose()
+        if (sound) await sound.dispose()
       }
     })()
     preparations.add(preparation)

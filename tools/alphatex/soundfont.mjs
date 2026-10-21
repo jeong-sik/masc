@@ -59,7 +59,9 @@ export function renderFluidSound(sound, { preparation, outputPath, run = runHost
   const promise = (async () => {
     try {
       const prepared = await preparation.promise; check()
-      const plan = JSON.parse(await readFile(prepared.path, 'utf8')); check()
+      const bytes = await readFile(prepared.path); check()
+      if (digest(bytes) !== prepared.sha256) throw new Error('SoundFont source plan changed before native admission')
+      const plan = JSON.parse(bytes.toString('utf8'))
       const frameRange = plan.sourceWindow ? sourceAudioFrames(plan.sourceWindow.clock, plan.sampleRate) : null
       if (frameRange && (frameRange.frameCount <= 0 || frameRange.offsetFrames + frameRange.frameCount > plan.frames)) {
         throw new Error('Selected source loop has no complete SoundFont PCM window')
@@ -94,7 +96,7 @@ export function renderFluidSound(sound, { preparation, outputPath, run = runHost
       // playback through the TUI generation; it does not undo a sealed file.
       sealed = true
       await link(renderedPath, outputPath)
-      return { path: outputPath, duration: plan.frames / plan.sampleRate, clippedSamples: 0, format: 'wav', soundfont: { ...result, path: outputPath },
+      return { path: outputPath, duration: plan.frames / plan.sampleRate, clippedSamples: 0, format: 'wav', soundfont: { ...result, path: outputPath, planSha256: prepared.sha256 },
         ...(plan.sourceWindow ? { sourceWindow: plan.sourceWindow,
           frameRange } : {}) }
     } finally { if (root) await rm(root, { recursive: true, force: true }) }

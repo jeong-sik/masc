@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, writeFile, readFile, rm, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { captureFluidSound, fluidRenderPlan, renderFluidSound } from '../soundfont.mjs'
 import { importMidiSource, midiSourceFromEvents } from '../midi-source.mjs'
 import { validateSound } from '../project-sound.mjs'
@@ -12,6 +13,7 @@ import { saveProject, loadProject } from '../sequencer-files.mjs'
 
 const channel = (tick, bytes) => ({ tick, kind: 'channel', bytes })
 const meta = (tick, type, data) => ({ tick, kind: 'meta', type, data })
+const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 function source(sustain = 127) {
   return midiSourceFromEvents([meta(0, 0x51, [7, 161, 32]), channel(0, [0xc0, 0]),
     channel(0, [0xb0, 64, sustain]), channel(0, [0x90, 60, 100]),
@@ -22,8 +24,9 @@ async function fixture(action) {
   const sound = await captureFluidSound().promise
   const render = async (project, name, changed = {}) => {
     const plan = { ...fluidRenderPlan(project), ...changed }, path = join(root, name + '.json')
-    await writeFile(path, JSON.stringify(plan))
-    return renderFluidSound(sound, { preparation: { promise: Promise.resolve({ path }), cancel: new Int32Array(new SharedArrayBuffer(4)) }, outputPath: join(root, name + '.wav') })
+    const bytes = Buffer.from(JSON.stringify(plan))
+    await writeFile(path, bytes)
+    return renderFluidSound(sound, { preparation: { promise: Promise.resolve({ path, sha256: digest(bytes) }), cancel: new Int32Array(new SharedArrayBuffer(4)) }, outputPath: join(root, name + '.wav') })
   }
   try { await action({ root, sound, render }) } finally { await rm(root, { recursive: true, force: true }) }
 }

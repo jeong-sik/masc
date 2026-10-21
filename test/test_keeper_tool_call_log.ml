@@ -1732,6 +1732,73 @@ let test_dashboard_aggregate_separates_unsettled_from_malformed () =
     Alcotest.(check int) "unsettled rows stay out of settled total" 0
       (Safe_ops.json_int ~default:(-1) "total" summary))
 
+(* A composition writes one [tool_call] row per step and one [composition_run]
+   summary row for the whole run. The summary is not another call: counting it
+   read one composition as its step count plus one calls, and its success as
+   one more settled invocation (#38687). *)
+let test_dashboard_aggregate_does_not_count_the_composition_summary () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.open_store (tool_calls_location dir)
+    in
+    let row ~record_kind ~tool ~wire_outcome =
+      `Assoc
+        [ ("ts", `Float (Unix.gettimeofday ()))
+        ; ("record_kind", `String record_kind)
+        ; ("keeper", `String "k")
+        ; ("tool", `String tool)
+        ; ("input", `Assoc [])
+        ; ("output", `String "ok")
+        ; ("result_bytes", `Int 2)
+        ; ("wire_outcome", `String wire_outcome)
+        ; ("duration_ms", `Float 2.0)
+        ]
+    in
+    Dated_jsonl.append store
+      (row ~record_kind:"tool_call" ~tool:"step_one" ~wire_outcome:"ok");
+    Dated_jsonl.append store
+      (row ~record_kind:"tool_call" ~tool:"step_two" ~wire_outcome:"error");
+    Dated_jsonl.append store
+      (row ~record_kind:"composition_run" ~tool:"keeper_tool_composition"
+         ~wire_outcome:"ok");
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check int) "the two steps are the calls" 2
+      (Safe_ops.json_int ~default:(-1) "total" summary);
+    Alcotest.(check int) "only a step's success counts" 1
+      (Safe_ops.json_int ~default:(-1) "success" summary);
+    Alcotest.(check int) "the summary is not malformed" 0
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    let tools =
+      Yojson.Safe.Util.(member "by_tool" summary |> to_list)
+      |> List.filter_map (Safe_ops.json_string_opt "name")
+      |> List.sort String.compare
+    in
+    Alcotest.(check (list string)) "the summary row is not a tool's call"
+      [ "step_one"; "step_two" ] tools)
+
+let test_dashboard_aggregate_names_an_unknown_record_kind_malformed () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.open_store (tool_calls_location dir)
+    in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float (Unix.gettimeofday ()))
+         ; ("record_kind", `String "composition_runs")
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
+         ; ("wire_outcome", `String "ok")
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check int) "a record kind nothing writes is malformed" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    Alcotest.(check int) "and enters no total" 0
+      (Safe_ops.json_int ~default:(-1) "total" summary))
+
 let test_dashboard_hourly_trend_numeric_ts () =
   with_tmp_log_dir (fun dir ->
     let store =
@@ -3286,6 +3353,10 @@ let () =
             test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate
         ; eio_test "dashboard aggregate separates unsettled and malformed"
             test_dashboard_aggregate_separates_unsettled_from_malformed
+        ; eio_test "dashboard aggregate does not count the composition summary"
+            test_dashboard_aggregate_does_not_count_the_composition_summary
+        ; eio_test "dashboard aggregate names an unknown record kind malformed"
+            test_dashboard_aggregate_names_an_unknown_record_kind_malformed
         ; eio_test "dashboard hourly trend buckets numeric ts"
             test_dashboard_hourly_trend_numeric_ts
         ; eio_test "dashboard aggregate window hours"

@@ -1,10 +1,28 @@
 # Browser worker
 
 This package runs `masc-browser-addon-worker` as a native Add-on. The installed
-worker and `masc-native-addon-launcher` must be available on the server's PATH.
+worker, `masc-native-addon-launcher` and `masc-browser-process-owner` must be
+available on the server's PATH.
 The host supplies the private socket, incarnation and message bound; package
 bindings cannot choose them. Native execution uses a foreground process group
 and durable resource claims. It is not a container sandbox.
+
+From a source checkout with its opam environment and dependencies prepared,
+install the matching programs together:
+
+```bash
+bash scripts/install-local-build.sh --with-browser-addon
+```
+
+The default prefix is `~/.local/bin`; use `--prefix DIR` to choose another.
+Ensure the server process receives that prefix on its actual `PATH`, including
+when started by a service manager. `--skip-build --build-dir DIR` requires all
+three executable inputs alongside the ordinary installer inputs. Missing or
+non-executable Addon inputs are refused before installed programs or guest
+shims change. Installation does not create an Addon declaration or enable a
+browser backend. The manifest, schemas and skill remain in this checkout;
+retain it and point the declaration at its actual `addons/browser/lane.toml`.
+The release download installer does not supply this optional program set.
 
 The worker exports `browser_command` through ordinary Add-on discovery. The host
 supplies verified caller context through the private control port. The package

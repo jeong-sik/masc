@@ -11,4 +11,4 @@ description = "APPROVE or REJECT."
 [[params]]
 name = "reason"
 type = "string"
-description = "Explain the evidence checked and the result for APPROVE or REJECT. If verification failed, name the missing evidence or lookup error. Always provide a concise reason."
+description = "Explain the evidence checked and the result concisely. Task REJECT requires a non-empty reason naming the unmet requirement or lookup error; a Task APPROVE reason is recommended but may be omitted. Goal APPROVE and REJECT both require a non-empty reason."

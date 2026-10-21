@@ -57,11 +57,12 @@ let block_reason_to_string = function
      like `rg foo | wc -l`, run the primary command and process \
      output at the LLM layer. To write files, use Write."
   | Injection ->
-    "Shell injection syntax (;, &&, standalone &, `, $) not allowed. Run ONE command per \
-     call. To change directory, use the `cwd` argument - Good: cwd='<dir>', \
-     cmd='ls'. Bad: cmd='cd <dir> && ls' or cmd='cmd1 ; cmd2'. \
-     Relative paths resolve from `cwd` (defaults to playground root). For file writes, \
-     use Edit or Write."
+    "This shell surface could not parse the command or rejects a construct in it, \
+     such as an unquoted glob, background execution, control flow, or an unsupported \
+     expansion. Supported constructs depend on the caller; this does not mean all \
+     chaining, pipes, or variable expansion are forbidden. Use argv when the tool \
+     offers it, or simplify the shell command to the supported syntax. Relative \
+     paths resolve from cwd."
   | Process_substitution ->
     render_block_reason
       Prompt_names.exec_policy_block_reason_process_substitution

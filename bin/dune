@@ -2316,7 +2316,6 @@
  (modules masc_tui_loader masc_tui_http masc_tui_schedule_decode)
  (libraries masc_tui_artifact_check_action masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
   masc_tui_chat_call_reader
-  masc_tui_board_reader
   masc_tui_task_payloads
   masc
   masc.masc_core

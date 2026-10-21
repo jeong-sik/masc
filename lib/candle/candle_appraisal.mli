@@ -6,9 +6,11 @@ type task = { task_id : string; title : string; keeper : string }
 type relation = Related | Unrelated
 type trace = { run_id : string; slot_id : string }
 type task_relation = { task_id : string; relation : relation; trace : trace }
+(** [Relation.task_id] identifies the original candidate for audit and request
+    retention. [input] omits it, even when two candidates have the same title. *)
 type request =
   | Grade of { goal : goal; grades : (Candle_grade.t * string) list }
-  | Relation of { goal : goal; task_title : string }
+  | Relation of { goal : goal; task_id : string; task_title : string }
   | Weights of { goal : goal; tasks : task list; keepers : string list; weight_max : int }
 type decision = Grade_decided of Candle_grade.t | Relation_decided of relation
   | Weights_decided of (string * int) list

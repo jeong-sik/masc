@@ -26,21 +26,83 @@ let detail ?previous ~task_id json =
     | Some previous when Masc_domain.equal_task previous.task task -> previous.task
     | Some _ | None -> task in
   Ok {task;canonical_goal_id;diagnostics}
+let source = function
+  | `String "activity-events" -> Ok Tui_decode.Task_activity
+  | `String "events" -> Ok Tui_decode.Task_audit
+  | _ -> Error "Unknown Task history source"
+let source_name = function Tui_decode.Task_activity -> "activity-events" | Tui_decode.Task_audit -> "events"
+let original_ids fields = List.filter_map (fun key -> List.assoc_opt key fields) ["task";"task_id"]
+let exact_ids ~task_id identities =
+  if identities=[] then Error "Task observation lacks its original Task identity"
+  else List.fold_left (fun prior identity -> let* ()=prior in let* id=nonblank identity in
+    if id=task_id then Ok () else Error "Task observation has a conflicting original Task") (Ok ()) identities
+let entity = function
+  | `Null -> Ok None
+  | json ->
+    let* fields=Agent_core.Execution_json.object_fields ~context:"Task history entity"
+      ~required:["kind";"id"] ~optional:[] json in
+    let* kind=nonblank (List.assoc "kind" fields) in
+    let* id=nonblank (List.assoc "id" fields) in Ok (Some (kind,id))
 let history ~task_id json =
   let* () = validate json in
   let* rows = match json with `List rows -> Ok rows | _ -> Error "Task history is not a list" in
-  let* () = List.fold_left (fun prior row ->
-    let* () = prior in
-    let* fields = match row with `Assoc fields -> Ok fields | _ -> Error "Task history row is not an object" in
-    let identities=List.filter_map (fun name -> List.assoc_opt name fields) ["task";"task_id"] in
-    if identities=[] then Error "Task history row has no original Task identity"
-    else List.fold_left (fun prior identity -> let* () = prior in let* id=nonblank identity in
-      if id=task_id then Ok () else Error "Task history row differs from the original source Task") (Ok ()) identities
-  ) (Ok ()) rows in
-  Tui_decode.decode_task_history json
+  let* reversed=List.fold_left (fun prior row ->
+    let* acc=prior in
+    let* envelope=Agent_core.Execution_json.object_fields ~context:"Task physical observation"
+      ~required:["source";"file";"offset";"event"] ~optional:[] row in
+    let* source=source (List.assoc "source" envelope) in
+    let* file=nonblank (List.assoc "file" envelope) in
+    let* ()=match String.split_on_char '/' file with
+      | [store;month;name] when store=source_name source ->
+        (match Dated_jsonl.Layout.year_and_month_of_directory_name month with
+         | Some (year,month) when Dated_jsonl.Layout.day_file_name_is_valid ~year ~month name -> Ok ()
+         | Some _ | None -> Error "Task observation has an invalid dated file")
+      | _ -> Error "Task observation file differs from its declared source" in
+    let* offset=match List.assoc "offset" envelope with `Int offset when offset>=0 -> Ok offset
+      | _ -> Error "Invalid original Task byte offset" in
+    let origin : Tui_decode.task_history_origin={tho_source=source;tho_file=file;tho_offset=offset} in
+    let raw=List.assoc "event" envelope in
+    let* fields=match raw with `Assoc fields -> Ok fields | _ -> Error "Task history event is not an object" in
+    let* event=match source with
+      | Tui_decode.Task_audit ->
+        let* ()=exact_ids ~task_id (original_ids fields) in
+        (match Tui_decode.decode_task_history (`List [raw]) with
+         | Ok [event] -> Ok {event with th_origin=Some origin}
+         | Ok _ -> Error "Task audit observation count changed" | Error error -> Error error)
+      | Tui_decode.Task_activity ->
+        let* _fields=Agent_core.Execution_json.object_fields ~context:"canonical Task activity"
+          ~required:["seq";"ts_ms";"ts_iso";"kind";"actor";"subject";"payload";"tags"]
+          ~optional:["context"] raw in
+        let ids fields=Option.to_list (List.assoc_opt "task_id" fields) in
+        let* ()=match List.assoc_opt "tags" fields with
+          | Some (`List tags) when List.for_all (function `String _ -> true | _ -> false) tags -> Ok ()
+          | Some _ | None -> Error "Invalid canonical activity tags" in
+        let* event=match Activity_graph.event_of_yojson raw with
+          | Some event -> Ok event | None -> Error "Invalid canonical Task activity" in
+        let* actor=match List.assoc_opt "actor" fields with Some json -> entity json
+          | None -> Error "Task activity lacks actor observation" in
+        let* subject=match List.assoc_opt "subject" fields with Some json -> entity json
+          | None -> Error "Task activity lacks subject observation" in
+        let payload=match event.payload with `Assoc fields -> fields | _ -> [] in
+        let* context=match List.assoc_opt "context" fields with
+          | None -> Ok [] | Some (`Assoc fields) -> Ok fields | Some _ -> Error "Invalid Task context" in
+        let identities=ids payload @ ids context
+          @ (match subject with Some ("task",id) -> [`String id] | Some _ | None -> []) in
+        let* ()=exact_ids ~task_id identities in
+        let string key=match List.assoc_opt key payload with Some (`String value) -> Some value | _ -> None in
+        Ok {Tui_decode.th_origin=Some origin;th_ts=event.ts_iso;th_label=event.kind;
+          th_actor=Option.map (fun (_,id) -> id) actor;
+          th_from_status=string "from_status";th_to_status=string "to_status";
+          th_note=Some (Yojson.Safe.pretty_to_string event.payload)} in
+    if List.exists (fun (prior:Tui_decode.task_history_event) -> prior.th_origin=Some origin) acc
+    then Error "Task history repeated one physical observation" else Ok (event::acc)
+  ) (Ok []) rows in
+  Ok (List.rev reversed)
 
+type history_source_state = Source_observed | Source_not_created
 type history =
   { history_task_id : string; history_events : Tui_decode.task_history_event list
+  ; history_sources : (Tui_decode.task_history_source * history_source_state) list
   ; history_records : Yojson.Safe.t list; history_verifications : string list; history_next_cursor : string option; history_cursors : string list }
 type history_request =
   { hr_task_id : string; hr_limit : int; hr_cursor : string option; hr_prefix : history option }
@@ -53,9 +115,9 @@ let history_earlier ~task_id ~limit prefix =
 let history_page ~request json =
   let* ()=validate json in
   let* fields=Agent_core.Execution_json.object_fields ~context:"original Task history page"
-    ~required:["schema";"task_id";"cursor";"events";"next_cursor"] ~optional:[] json in
+    ~required:["schema";"task_id";"cursor";"sources";"events";"next_cursor"] ~optional:[] json in
   let* ()=match List.assoc "schema" fields with
-    | `String "masc.task-history.page/v1" -> Ok () | _ -> Error "Unsupported Task history page schema" in
+    | `String "masc.task-history.page/v2" -> Ok () | _ -> Error "Unsupported Task history page schema" in
   let* id=nonblank (List.assoc "task_id" fields) in
   let* ()=if id=request.hr_task_id then Ok () else Error "Task history page differs from its original Task" in
   let cursor name = match List.assoc name fields with
@@ -66,6 +128,22 @@ let history_page ~request json =
   let seen=match request.hr_prefix with None -> [] | Some prefix -> prefix.history_cursors in
   let seen=match echo with None -> seen | Some cursor -> cursor::seen in
   let* ()=match next with Some cursor when List.mem cursor seen -> Error "Task history cursor did not advance"
+    | Some _ | None -> Ok () in
+  let* sources=match List.assoc "sources" fields with
+    | `List rows -> List.fold_left (fun prior row ->
+      let* acc=prior in
+      let* fields=Agent_core.Execution_json.object_fields ~context:"Task history source coverage"
+        ~required:["source";"state"] ~optional:[] row in
+      let* source=source (List.assoc "source" fields) in
+      let* state=match List.assoc "state" fields with
+        | `String "observed" -> Ok Source_observed | `String "not-created" -> Ok Source_not_created
+        | _ -> Error "Unknown Task source observation" in
+      if List.mem_assoc source acc then Error "Repeated Task history source" else Ok (acc @ [source,state])) (Ok []) rows
+    | _ -> Error "Missing Task source observations" in
+  let* ()=if List.mem_assoc Tui_decode.Task_activity sources && List.mem_assoc Tui_decode.Task_audit sources
+    && List.exists (fun (_,state) -> state=Source_observed) sources then Ok () else Error "Incomplete Task source observations" in
+  let* ()=match request.hr_prefix with
+    | Some prefix when prefix.history_sources<>sources -> Error "Task history source coverage changed"
     | Some _ | None -> Ok () in
   let raw_events=List.assoc "events" fields in
   let* events=history ~task_id:id raw_events in
@@ -90,9 +168,20 @@ let history_page ~request json =
       | Some id -> Ok (Verification_ids.add id seen,id::ids)) (Ok (verification_seen,List.rev prefix)) rows
     | _ -> Error "Task history events are not a list" in
   let history_verifications=List.rev rev_ids in
+  let* ()=List.fold_left (fun prior (event:Tui_decode.task_history_event) ->
+    let* ()=prior in match event.th_origin with
+    | Some origin when List.assoc_opt origin.tho_source sources=Some Source_observed -> Ok ()
+    | Some _ | None -> Error "Task observation came from an unobserved source") (Ok ()) events in
   let* ()=if List.length events<=request.hr_limit then Ok () else Error "Task history page exceeds its requested demand" in
-  let events=match request.hr_prefix with None -> events | Some prefix -> prefix.history_events @ events in
-  Ok {history_task_id=id;history_events=events;history_records;history_verifications;history_next_cursor=next;history_cursors=seen}
+  let* events=match request.hr_prefix with
+    | None -> Ok events
+    | Some prefix ->
+      if List.exists (fun (event:Tui_decode.task_history_event) ->
+        List.exists (fun (prior:Tui_decode.task_history_event) -> prior.th_origin=event.th_origin) prefix.history_events) events
+      then Error "Task continuation repeated an original physical observation"
+      else Ok (prefix.history_events @ events) in
+  Ok {history_task_id=id;history_sources=sources;history_events=events;history_records;history_verifications;history_next_cursor=next;history_cursors=seen}
+
 
 type deletion_cleanup = Cleanup_required | Cleanup_verified
 type deletion_observation = {

@@ -7402,7 +7402,11 @@ let decode_goal_detail_timeline json =
    raw event-stream lines, not a uniform projection, so every field except
    [ts] is optional and an unknown event type still renders as its type
    string instead of being dropped. *)
+type task_history_source = Task_activity | Task_audit
+type task_history_origin =
+  { tho_source : task_history_source; tho_file : string; tho_offset : int }
 type task_history_event = {
+  th_origin : task_history_origin option;
   th_ts : string;
   th_label : string;  (** [action] when present, else [type], else "event" *)
   th_from_status : string option;
@@ -7426,6 +7430,7 @@ let decode_task_history json =
           | None -> (match str "type" with Some t -> t | None -> "event")
         in
         {
+          th_origin = None;
           th_ts = Option.value (str "ts") ~default:"";
           th_label;
           th_from_status = str "from_status";

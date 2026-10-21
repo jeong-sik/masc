@@ -10,10 +10,13 @@ val detail : ?previous:detail -> task_id:string -> Yojson.Safe.t -> (detail, str
     for the same captured original source and workspace; this is no
     admission, freshness or authority cache. Run decoding/equality on the CPU path. *)
 val history : task_id:string -> Yojson.Safe.t -> (Tui_decode.task_history_event list, string) result
-(** History rows must name the captured Task through [task] or [task_id].
-    Conflicting identities are rejected rather than shown under that Task. *)
+(** Source-tagged physical observations must name the captured Task through
+    their declared source codec. All present original identities must agree;
+    conflicting nested identities and unknown sources are rejected. *)
+type history_source_state = Source_observed | Source_not_created
 type history = private
   { history_task_id : string
+  ; history_sources : (Tui_decode.task_history_source * history_source_state) list
   ; history_events : Tui_decode.task_history_event list
   ; history_records : Yojson.Safe.t list
   ; history_verifications : string list

@@ -1003,7 +1003,7 @@ let test_first_loss_retains_unproven_effects mode () =
         let collected=collected @ next.events in
         match next.next_cursor with None -> collected | Some cursor -> earlier cursor collected in
       let complete=first.events @ earlier cursor [] in
-      let action name = List.exists (fun row -> Json_util.get_string row "action"=Some name) complete in
+      let action name = List.exists (fun row -> Json_util.get_string (Yojson.Safe.Util.member "event" row) "action"=Some name) complete in
       check bool "older original records survive contiguous page traversal" true
         (action "original-before-a" && action "original-before-b");
       check bool "post-capture appends do not enter its older prefix" false (action "newer-after-capture");
@@ -1736,12 +1736,87 @@ let test_launch_leaf_refuses_incomplete_invocation_identity () = with_workspace 
    | Ok Journal.Dispatch -> ()
    | Ok _ | Error _ -> fail "identity refusal left a durable attempt behind"))
 
+(* The actual create hook writes only canonical activity. Exercise that
+   producer, both current source stores and the strict TUI page consumer. *)
+let test_task_history_current_sources () = with_workspace (fun _env _sw base_path ->
+  let module History = Masc.Task.History_page in
+  let module Decode = Masc.Tui_decode_task_inspection in
+  let config=Workspace.default_config base_path in
+  Masc.Workspace_metric_hooks.install ();
+  let created=Workspace.add_task_with_result ~created_by:keeper config
+    ~title:"Canonical original task" ~priority:3 ~description:"original source" |> require "actual task create" in
+  let task_id=created.task_id in
+  let page result=match result with Ok page -> page | Error _ -> fail "current Task history unavailable" in
+  let first=History.read ~config ~task_id ~max_events:1 () |> page in
+  check bool "actual creation is readable without a generic event copy" true
+    (List.exists (fun row -> Json_util.get_string row "source"=Some "activity-events"
+      && Json_util.get_string (Yojson.Safe.Util.member "event" row) "kind"=Some "task.created") first.events);
+  let decoded=Decode.history_page ~request:(Decode.history_first ~task_id ~limit:1) (History.to_json first)
+    |> require "actual canonical TUI decoder" in
+  check bool "original lifecycle actor and physical provenance survive" true
+    (List.exists (fun (event:Masc.Tui_decode.task_history_event) ->
+      event.th_actor=Some keeper && event.th_label="task.created"
+      && Option.is_some event.th_origin) decoded.history_events);
+  let emit kind = ignore (Masc.Activity_graph.emit config ~kind
+    ~actor:(Masc.Activity_graph.entity ~kind:"agent" keeper)
+    ~subject:(Masc.Activity_graph.entity ~kind:"task" task_id)
+    ~payload:(`Assoc ["task_id",`String task_id]) ~tags:["task"] ()) in
+  emit "task.started";
+  let first=History.read ~config ~task_id ~max_events:1 () |> page in
+  let cursor=first.next_cursor |> Option.get in
+  let audit=Filename.concat (Workspace.masc_dir config) "events" in
+  let absent=not (Sys.file_exists audit) in
+  Workspace_utils_ops.log_event config (`Assoc ["task_id",`String task_id;"type",`String "task_transition";
+    "ts",`String "2026-10-21T00:00:00Z";"actor",`String keeper;
+    "handoff_context",`Assoc ["summary",`String "audit original handoff"]]);
+  if absent then (match History.read ~config ~task_id ~max_events:1 ~cursor () with
+    | Error History.Source_changed -> () | _ -> fail "newly created source entered a captured absent source");
+  let first=History.read ~config ~task_id ~max_events:1 () |> page in
+  let cursor=first.next_cursor |> Option.get in
+  let cursor=History.cursor_of_string (History.cursor_to_string cursor) |> require "two-source cursor" in
+  emit "task.after-capture";
+  Workspace_utils_ops.log_event config (`Assoc ["task_id",`String task_id;"type",`String "audit-after-capture"]);
+  let rec earlier cursor acc =
+    let next=History.read ~config ~task_id ~max_events:1 ~cursor () |> page in
+    let acc=acc @ next.events in match next.next_cursor with None -> acc | Some cursor -> earlier cursor acc in
+  let all=first.events @ earlier cursor [] in
+  let rows=Decode.history ~task_id (`List all) |> require "two-source original decode" in
+  check bool "both original active stores retained" true
+    (List.exists (fun row -> Json_util.get_string row "source"=Some "events") all
+     && List.exists (fun row -> Json_util.get_string row "source"=Some "activity-events") all);
+  check bool "later appends from either source excluded" false
+    (List.exists (fun row -> let raw=Yojson.Safe.Util.member "event" row in
+      Json_util.get_string raw "kind"=Some "task.after-capture"
+      || Json_util.get_string raw "type"=Some "audit-after-capture") all);
+  check bool "audit handoff survives alongside original lifecycle" true
+    (List.exists (fun (event:Masc.Tui_decode.task_history_event) -> event.th_note=Some "audit original handoff") rows);
+  let canonical=List.find (fun row -> Json_util.get_string row "source"=Some "activity-events") all in
+  let corrupt=match canonical with
+    | `Assoc fields ->
+      let raw=List.assoc "event" fields in
+      let raw=match raw with `Assoc fields -> `Assoc (("context",`Assoc ["task_id",`String "foreign-task"])::List.remove_assoc "context" fields)
+        | _ -> fail "canonical producer shape" in
+      `Assoc (("event",raw)::List.remove_assoc "event" fields)
+    | _ -> fail "physical observation shape" in
+  (match Decode.history ~task_id (`List [corrupt]) with Error _ -> () | Ok _ -> fail "conflicting nested task was accepted");
+  (match Decode.history ~task_id (`List [canonical;canonical]) with Error _ -> () | Ok _ -> fail "same physical source row repeated");
+  let origin=Json_util.get_string canonical "file" |> Option.get in
+  let path=Filename.concat (Workspace.masc_dir config) origin in
+  let original=read path in
+  let parked=Filename.concat base_path "physical-activity-original" in
+  Unix.rename path parked;
+  Fun.protect ~finally:(fun () -> Unix.unlink path; Unix.rename parked path) (fun () ->
+    write path original;
+    match History.read ~config ~task_id ~max_events:1 ~cursor () with
+    | Error History.Source_changed -> () | _ -> fail "replaced canonical source advanced original cursor"))
+
 let () = match Array.to_list Sys.argv with
   | [_; "--resume-child"; base_path; run_id] -> child_resume base_path run_id
   | [_; "--refuse-active-child"; base_path; run_id] -> child_refuse_active base_path run_id
   | [_; "--lose-before-first-wait"; base_path; run_id; mode] -> child_first_loss base_path run_id mode
   | _ -> Alcotest.run "prepared async execution journal"
       ["continuation", [
+        test_case "canonical creation and both current Task history sources" `Quick test_task_history_current_sources;
         test_case "restart reuses completed data and occurrence" `Quick test_restart_reuses_completed;
         test_case "source and plan identity refuse unsafe dispatch" `Quick test_source_and_plan_identity;
         test_case "original source observations freeze once without late backfill" `Quick test_source_observation_is_frozen_at_creation;

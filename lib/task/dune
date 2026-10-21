@@ -28,6 +28,7 @@
   time_compat
   fs_compat
   masc.dated_jsonl
+  masc.activity_graph
   digestif
   base64
   masc_random_id

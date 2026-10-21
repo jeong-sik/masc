@@ -429,12 +429,16 @@ let test_history_read_keeps_original_workspace_through_replacement () =
   in
   let identity_a = identity base_a and identity_b = identity base_b in
   let history context =
-    `Assoc ["schema",`String "masc.task-history.page/v1";"task_id",`String "task-original";
-      "cursor",`Null;"next_cursor",`Null;"events",`List [`Assoc ["type", `String "task_transition";
+    `Assoc ["schema",`String "masc.task-history.page/v2";"task_id",`String "task-original";
+      "cursor",`Null;"next_cursor",`Null;
+      "sources",`List [`Assoc ["source",`String "activity-events";"state",`String "not-created"];
+        `Assoc ["source",`String "events";"state",`String "observed"]];
+      "events",`List [`Assoc ["source",`String "events";"file",`String "events/2026-10/19.jsonl";
+      "offset",`Int 0;"event",`Assoc ["type", `String "task_transition";
       "task", `String "task-original"; "agent", `String "original-keeper";
       "ts", `String "2026-10-19T01:00:00Z";
       "from_status", `String "todo"; "to_status", `String "in_progress";
-      "handoff_context", `Assoc ["summary", `String context]]]]
+      "handoff_context", `Assoc ["summary", `String context]]]]]
   in
   let receipt = Masc.Workspace.read_precondition_admission_header in
   let tag = "\"same-history-tag\"" in

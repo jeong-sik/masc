@@ -4355,10 +4355,13 @@ let test_detail_histories_follow_refresh_and_workspace_owners () =
   let task_rows status =
     let request=Masc.Tui_decode_task_inspection.history_first ~task_id ~limit:1 in
     Masc.Tui_decode_task_inspection.history_page ~request (`Assoc
-      ["schema",`String "masc.task-history.page/v1";"task_id",`String task_id;
-       "cursor",`Null;"next_cursor",`Null;"events",`List [`Assoc
-        ["type",`String "task_transition";"task",`String task_id;"agent",`String "original-keeper";
-         "ts",`String "2026-10-19T01:00:00Z";"from_status",`String "todo";"to_status",`String status]]])
+      ["schema",`String "masc.task-history.page/v2";"task_id",`String task_id;
+       "cursor",`Null;"next_cursor",`Null;
+       "sources",`List [`Assoc ["source",`String "activity-events";"state",`String "not-created"];
+         `Assoc ["source",`String "events";"state",`String "observed"]];
+       "events",`List [`Assoc ["source",`String "events";"file",`String "events/2026-10/19.jsonl";
+        "offset",`Int 0;"event",`Assoc ["type",`String "task_transition";"task",`String task_id;"agent",`String "original-keeper";
+         "ts",`String "2026-10-19T01:00:00Z";"from_status",`String "todo";"to_status",`String status]]]])
     |> function Ok rows -> rows | Error detail -> Alcotest.fail detail in
   let goal_rows summary =
     Tui_decode.decode_goal_detail_timeline (`Assoc

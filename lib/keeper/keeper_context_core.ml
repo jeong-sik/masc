@@ -109,7 +109,9 @@ let save_agent_core_checkpoint_classified
            (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
          checkpoint
      with
-     | Ok outcome -> Ok (checkpoint, outcome)
+     | Ok (Keeper_checkpoint_store.Saved { checkpoint = stored; _ } as outcome) ->
+       Ok (stored, outcome)
+     | Ok (Keeper_checkpoint_store.Stale_noop _ as outcome) -> Ok (checkpoint, outcome)
      | Error error -> Error (Persistence_error error))
 
 let save_agent_core_checkpoint

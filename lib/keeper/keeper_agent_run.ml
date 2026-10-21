@@ -1893,8 +1893,8 @@ let run_turn
                   canonical_bytes
                   outcome;
                 match save_result with
-                | Ok (Keeper_checkpoint_store.Saved _) ->
-                  last_persisted_checkpoint_ref := Some checkpoint;
+                | Ok (Keeper_checkpoint_store.Saved { checkpoint = stored; _ }) ->
+                  last_persisted_checkpoint_ref := Some stored;
                   if Atomic.compare_and_set restart_notice_after_first_save true false
                   then
                     Turn_helpers.record_history_restart

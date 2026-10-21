@@ -368,6 +368,39 @@ let test_finalization_cannot_hide_unencodable_state () =
     ((not reused) && selected == invalid)
 ;;
 
+(* A save that recovered the payload stores a different value from the one the
+   run produced, so the stored value is not taken for the run's checkpoint and
+   finalization saves the run's checkpoint itself. *)
+let test_recovery_copy_is_not_taken_for_the_run_checkpoint () =
+  let open Agent_core.Types in
+  let poisoned =
+    checkpoint
+      ~working_context:None
+      [ message User [ Text "run it" ]
+      ; message
+          Assistant
+          [ ToolUse
+              { id = "call-1"
+              ; name = "Execute"
+              ; input = `Assoc [ "cmd", `String "a"; "cmd", `String "b" ]
+              }
+          ]
+      ]
+  in
+  match Agent_core.Checkpoint.drop_unencodable_json poisoned with
+  | None -> Alcotest.fail "the duplicate-key input must be droppable"
+  | Some recovered ->
+    let selected, reused =
+      Finalize.select_finalization_checkpoint
+        ~last_persisted_checkpoint:(Some recovered)
+        poisoned
+    in
+    Alcotest.(check bool)
+      "the recovery copy is not the run's checkpoint"
+      true
+      ((not reused) && selected == poisoned)
+;;
+
 let test_contract_observation_preserves_current_turn_suffix () =
   let open Agent_core.Types in
   let history =
@@ -1077,6 +1110,9 @@ let () =
         ; Alcotest.test_case
             "finalization does not hide unencodable state"
             `Quick test_finalization_cannot_hide_unencodable_state
+        ; Alcotest.test_case
+            "a recovery copy is not taken for the run's checkpoint"
+            `Quick test_recovery_copy_is_not_taken_for_the_run_checkpoint
         ; Alcotest.test_case
             "contract observation rejects prefix mismatch"
             `Quick

@@ -122,7 +122,9 @@ val save_agent_core_checkpoint :
     this checkpoint became the canonical one, [Stale_noop] when a newer writer
     already owns it and nothing was written. {!save_agent_core_checkpoint}
     answers [Ok] for both, so a caller that reports what it stored uses this
-    one. *)
+    one. On [Saved] the checkpoint is the one the file holds, which is a
+    recovery copy when the payload could not be encoded; on [Stale_noop] it is
+    the one that was offered. *)
 val save_agent_core_checkpoint_classified :
   runtime_id:string ->
   keeper_name:string ->

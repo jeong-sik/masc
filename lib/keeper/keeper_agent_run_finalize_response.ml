@@ -307,6 +307,16 @@ let finalize
                outcome;
              Result.map (fun outcome -> `Written outcome) save_result)
          in
+         (* What the file holds after this save. A reused save left the file as
+            [patched]; a written one reports the value it wrote, which is not
+            [patched] when the payload had to be recovered. *)
+         let stored_checkpoint =
+           match save_outcome with
+           | Ok `Reused -> Some patched
+           | Ok (`Written (Keeper_checkpoint_store.Saved { checkpoint; _ })) ->
+             Some checkpoint
+           | Ok (`Written (Keeper_checkpoint_store.Stale_noop _)) | Error _ -> None
+         in
          (match save_outcome with
        | Ok `Reused
        | Ok (`Written (Keeper_checkpoint_store.Saved _)) ->
@@ -339,7 +349,7 @@ let finalize
                         completion_contract_result) );
                ])
            Keeper_runtime_manifest.Checkpoint_saved;
-         Ok (Some patched)
+         Ok stored_checkpoint
        | Ok (`Written (Keeper_checkpoint_store.Stale_noop
                 { incoming_turn_count; known_turn_count })) ->
          Log.Keeper.warn ~keeper_name:meta.name

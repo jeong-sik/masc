@@ -54,6 +54,11 @@ type save_agent_core_outcome =
       { relation : save_agent_core_relation
       ; turn_count : int
       ; canonical_bytes : int
+      ; checkpoint : Agent_core.Checkpoint.t
+        (** What the canonical file now holds: the checkpoint passed in, or
+            the recovery copy with the unencodable json dropped when its
+            payload could not be encoded. A caller that reasons about the
+            stored history reads this, not the value it passed. *)
       }
   | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
 

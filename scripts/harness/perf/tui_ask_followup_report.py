@@ -237,11 +237,14 @@ def analyze_arm(value, root):
     output = {"errors": [], "attempts": [], "store_initializations": [], "unselected_rows": 0, "execution_verified": False}
     errors = output["errors"]
     output["log_artifacts"] = []
+    output["admission_artifacts"] = []
+    output["unselected_admission_rows"] = 0
     groups = {}
     declared = set()
+    admission_evidence = {}
     if type(value) is not dict:
         value = {}
-    if set(value) != {"instances", "attempts", "conditions", "source_commit", "binary", "logs"}:
+    if set(value) != {"instances", "attempts", "admissions", "conditions", "source_commit", "binary", "logs"}:
         errors.append("unsupported cohort declaration fields")
     instances = []
     if type(value.get("instances")) is list:
@@ -268,6 +271,36 @@ def analyze_arm(value, root):
             declared.add(key); groups.setdefault(key, [])
         except EvidenceError as error:
             errors.append(str(error))
+    admission_declarations = value.get("admissions")
+    if type(admission_declarations) is not list:
+        errors.append("missing admission artifact list")
+        admission_declarations = []
+    seen_admissions, seen_admission_artifacts = set(), set()
+    for artifact_index, declaration in enumerate(admission_declarations):
+        try:
+            blob = artifact(root, declaration)
+            output["admission_artifacts"].append(dict(declaration, verified=True))
+            require(declaration["sha256"] not in seen_admission_artifacts, "reused admission artifact")
+            seen_admission_artifacts.add(declaration["sha256"])
+            lines = blob.decode("utf-8").splitlines()
+        except (EvidenceError, UnicodeDecodeError) as error:
+            errors.append("admission artifact %d: %s" % (artifact_index, str(error))); continue
+        for index, line in enumerate(lines, 1):
+            try:
+                row = load_json(line)
+                fields(row, {"schema_version", "event", "instance_id", "request", "read_admission_started_ns"})
+                require(type(row["schema_version"]) is int and row["schema_version"] == 1
+                        and row["event"] == "tui_ask_followup_admission", "unsupported admission record")
+                key = identity({k: row[k] for k in ("instance_id", "request", "read_admission_started_ns")})
+                if key[0] not in instances:
+                    output["unselected_admission_rows"] += 1; continue
+                require(key not in seen_admissions, "duplicate admitted attempt")
+                seen_admissions.add(key)
+                declared.add(key); groups.setdefault(key, [])
+                admission_evidence[key] = [{"artifact": declaration["path"], "sha256": declaration["sha256"], "line": index}]
+            except (EvidenceError, KeyError, TypeError) as error:
+                errors.append("admission artifact %d line %d: %s" % (artifact_index, index,
+                    str(error) if isinstance(error, EvidenceError) else "malformed admission evidence"))
     try:
         fields(value.get("conditions"), CONDITIONS)
         output["declared_conditions"] = {k: None if v is None else digest(v) for k, v in value["conditions"].items()}
@@ -330,6 +363,8 @@ def analyze_arm(value, root):
                 errors.append("artifact %d line %d: %s" % (artifact_index, index, str(error) if isinstance(error, EvidenceError) else "malformed selected evidence"))
     output["attempts"] = [attempt(key, rows, key in declared) for key, rows in sorted(groups.items())]
     for item in output["attempts"]:
+        item["admission_evidence"] = admission_evidence.get(identity(item["identity"]), [])
+    for item in output["attempts"]:
         errors.extend(item["errors"])
         if not item["declared"]:
             errors.append("observed attempt absent from declared denominator")
@@ -344,7 +379,7 @@ def analyze_arm(value, root):
 
 def analyze(packet, root):
     fields(packet, {"schema_version", "cases"})
-    require(type(packet["schema_version"]) is int and packet["schema_version"] == 1, "unsupported packet version")
+    require(type(packet["schema_version"]) is int and packet["schema_version"] == 2, "unsupported packet version")
     require(type(packet["cases"]) is list, "missing case denominator")
     cases = []
     labels = Counter(v.get("id") for v in packet["cases"] if type(v) is dict and type(v.get("id")) is str)
@@ -376,9 +411,10 @@ def analyze(packet, root):
                     "before_observed": a["observed"], "after_observed": b["observed"]}
         case["comparison"] = {"declared_conditions_match": matched, "descriptive_delta_available": eligible,
                               "execution_verified": False, "metrics": deltas}
-    return {"schema_version": 1, "kind": "descriptive_original_ask_followup", "cases": cases,
+    return {"schema_version": 2, "kind": "descriptive_original_ask_followup", "cases": cases,
             "limits": ["Declarations and artifact bytes do not prove execution/source/binary/install identity.",
-                       "Only declared and observed attempts are known; filtered or wholly unrecorded undeclared attempts are unknown.",
+                       "Only declared, journaled and observed attempts are known; capture failure or an unflushed interruption can still leave unknown attempts.",
+                       "Admission journals bypass log severity; their bytes are not proof of exhaustive capture, dispatch or execution.",
                        "Durations describe observed subsets, with every attempt retained in denominators; no speed/readiness verdict.",
                        "Store initialization spans precede input-reader timing; they are retained separately, not a full cold-start duration.",
                        "Opaque source snapshots and read completion do not prove useful Task progress or visible UI."]}
@@ -421,7 +457,7 @@ def main():
         report["packet_sha256"] = hashlib.sha256(packet_bytes).hexdigest()
         report["analyzer_source_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     except (EvidenceError, OSError) as error:
-        report = {"schema_version": 1, "kind": "invalid_packet", "errors": [str(error)]}
+        report = {"schema_version": 2, "kind": "invalid_packet", "errors": [str(error)]}
     try:
         with args.json.open("x", encoding="utf-8") as json_file, args.markdown.open("x", encoding="utf-8") as markdown_file:
             json_file.write(json.dumps(report, ensure_ascii=False, indent=2)+"\n")

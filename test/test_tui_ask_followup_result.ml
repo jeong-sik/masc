@@ -91,6 +91,11 @@ let launch ?key state results request submission ~released perform =
   let expected_workspace=match state.Ui.server_identity with Some identity -> identity | None -> fail "fixture workspace identity is missing" in
   let read=Protocol.capture_ask_followup_read ~instance:state.observation_instance
     ~request ~submission ~expected_workspace ~admission_started_ns in
+  (match state.Ui.observation_store with
+   | None -> ()
+   | Some store -> ignore (Masc_tui_observation_store.record_admission store
+       ~origin:read.afr_origin ~request:(Ui.Snapshot_read.request_id request)
+       ~admission_started_ns));
   let envelope=Protocol.capture_workspace_message state in
   let stop,resolve=Eio.Promise.create () in
   Ui.supersede_ask_followup_worker state
@@ -610,16 +615,24 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   Log.set_level Log.Info;
   let packet_dir=Filename.temp_dir ~temp_dir:base "comparison-packet-" "" in
   let sha bytes=Digestif.SHA256.(to_hex (digest_string bytes)) in
-  let copy_logs label directory=Array.to_list (Sys.readdir directory) |> List.mapi (fun index name ->
+  let copy_logs label directory=Array.to_list (Sys.readdir directory)
+    |> List.filter (fun name -> not (Sys.is_directory (Filename.concat directory name))) |> List.mapi (fun index name ->
     let body=In_channel.with_open_bin (Filename.concat directory name) In_channel.input_all in
     let relative=Printf.sprintf "%s-%d.jsonl" label index in
     Out_channel.with_open_bin (Filename.concat packet_dir relative) (fun channel -> output_string channel body);
     `Assoc ["path",`String relative;"sha256",`String (sha body)]) in
+  let copy_admissions label store =
+    let body=In_channel.with_open_bin (Masc_tui_observation_store.admissions_path store) In_channel.input_all in
+    let relative=label ^ "-admissions.jsonl" in
+    Out_channel.with_open_bin (Filename.concat packet_dir relative) (fun channel -> output_string channel body);
+    [`Assoc ["path",`String relative;"sha256",`String (sha body)]] in
   let declaration (read : Protocol.ask_followup_read)=`Assoc [
     "instance_id",`String (instance_id read);
     "request",`Int (Ui.Snapshot_read.request_id read.afr_request);
     "read_admission_started_ns",`Intlit (Int64.to_string read.afr_admission_started_ns)] in
-  let before_dir=Masc_tui_observation_store.initialize ~base_path:base |> require in
+  let before_store=Masc_tui_observation_store.initialize ~base_path:base |> require in
+  state.observation_store <- Some before_store;
+  let before_dir=Masc_tui_observation_store.directory before_store in
   let results=Results.create () in
   let request,submission=begin_read state in
   launch state results request submission ~released:(fun () -> ())
@@ -630,14 +643,23 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
    | Some (Error (Projection.Followup_not_started _)) -> ()
    | Some _ | None -> fail "actual missing-switch attempt did not settle");
   Results.close results;
-  (* This original admitted read is deliberately never dispatched or logged.
-     Its independent declaration must stay unobserved in the packet. *)
+  (* This original admitted read is never dispatched. Its Info observation is
+     filtered, but the production admission journal must retain its identity. *)
   let admission_started_ns=Mtime_clock.elapsed_ns () in
   let request,submission=begin_read state in
   let unobserved=Protocol.capture_ask_followup_read ~instance:state.observation_instance
     ~request ~submission ~expected_workspace:(identity base) ~admission_started_ns in
+  Fun.protect ~finally:(fun () -> Log.set_level Log.Info) (fun () ->
+    Log.set_level Log.Warn;
+    Masc_tui_observation_store.record_admission before_store
+      ~origin:unobserved.afr_origin ~request:(Ui.Snapshot_read.request_id request)
+      ~admission_started_ns |> require;
+    Observation.emit unobserved ~sources:None Observation.Followup_read_started);
+  let before_admissions=copy_admissions "before" before_store in
   let before_logs=copy_logs "before" before_dir in
-  let after_dir=Masc_tui_observation_store.initialize ~base_path:base2 |> require in
+  let after_store=Masc_tui_observation_store.initialize ~base_path:base2 |> require in
+  state2.observation_store <- Some after_store;
+  let after_dir=Masc_tui_observation_store.directory after_store in
   let completed=Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
     let results=Results.create () in
     Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
@@ -651,13 +673,14 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
     check bool "actual after source settles" true (apply_batch state2 (ref []) batch=Some (Ok ()));
     read in
   let after_logs=copy_logs "after" after_dir in
+  let after_admissions=copy_admissions "after" after_store in
   let conditions=`Assoc (List.map (fun key -> key,`Null)
     ["fixture_sha256";"workspace_snapshot_sha256";"action_sha256";"server_binary_sha256";"terminal_sha256"]) in
-  let arm reads logs=`Assoc ["instances",`List [`String (instance_id (List.hd reads))];
+  let arm reads logs admissions=`Assoc ["instances",`List [`String (instance_id (List.hd reads))];
     "attempts",`List (List.map declaration reads);"conditions",conditions;
-    "source_commit",`Null;"binary",`Null;"logs",`List logs] in
-  let packet=`Assoc ["schema_version",`Int 1;"cases",`List [`Assoc ["id",`String "actual-protocol-resources";
-    "before",arm [unstarted;unobserved] before_logs;"after",arm [completed] after_logs]]] in
+    "source_commit",`Null;"binary",`Null;"logs",`List logs;"admissions",`List admissions] in
+  let packet=`Assoc ["schema_version",`Int 2;"cases",`List [`Assoc ["id",`String "actual-protocol-resources";
+    "before",arm [unstarted] before_logs before_admissions;"after",arm [completed] after_logs after_admissions]]] in
   let packet_path=Filename.concat packet_dir "packet.json" in
   Out_channel.with_open_bin packet_path (fun channel -> output_string channel (Yojson.Safe.to_string packet));
   let json_path=Filename.concat packet_dir "report.json" and markdown_path=Filename.concat packet_dir "report.md" in
@@ -674,6 +697,13 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   let outcomes arm=member "outcomes" (member "summary" (member arm case)) in
   check bool "actual unstarted and declared unobserved reads stay in denominator" true
     (member "not_started" (outcomes "before")=`Int 1 && member "unobserved" (outcomes "before")=`Int 1);
+  let before_attempts=match member "attempts" (member "before" case) with `List rows -> rows | _ -> fail "admitted attempts lost" in
+  check bool "filtered admission has original file evidence without a supplied declaration" true
+    (List.exists (fun row ->
+       List.for_all (fun key -> member key (member "identity" row)=member key (declaration unobserved))
+         ["instance_id";"request";"read_admission_started_ns"]
+       && member "outcome" row=`String "unobserved"
+       && (match member "admission_evidence" row with `List (_::_) -> true | _ -> false)) before_attempts);
   check bool "actual completed read remains its own outcome" true (member "complete" (outcomes "after")=`Int 1);
   check bool "unknown conditions never become matching or execution proof" true
     (member "declared_conditions_match" (member "comparison" case)=`Bool false
@@ -707,7 +737,9 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
         Some (name,In_channel.with_open_bin path In_channel.input_all))
     |> List.sort (fun (left,_) (right,_) -> String.compare left right) in
   let server_before=stored_files server_logs in
-  let log_dir=Masc_tui_observation_store.initialize ~base_path:base |> require in
+  let store=Masc_tui_observation_store.initialize ~base_path:base |> require in
+  state.observation_store <- Some store;
+  let log_dir=Masc_tui_observation_store.directory store in
   let since_seq=(Log.Ring.bounds ()).total-1 in
   let before=Masc.Workspace.get_tasks_raw config in
   let run_read before_source = Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
@@ -827,7 +859,9 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
      && has unstarted "finished" (Projection.followup_result_to_json (Error (Projection.Followup_not_started "")))
      && not (has unstarted "worker_entered" `Null));
   let first_before=stored_files log_dir in
-  let replacement=Masc_tui_observation_store.initialize ~base_path:base |> require in
+  let replacement_store=Masc_tui_observation_store.initialize ~base_path:base |> require in
+  state.observation_store <- Some replacement_store;
+  let replacement=Masc_tui_observation_store.directory replacement_store in
   check bool "same PID starts a fresh private client store" true (replacement<>log_dir);
   check bool "client store is private" true ((Unix.stat replacement).Unix.st_perm land 0o077=0);
   let replacement_before=stored_files replacement in
@@ -840,6 +874,13 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
   Out_channel.with_open_bin blocker (fun channel -> output_string channel "owned regular file");
   (match Masc_tui_observation_store.initialize ~base_path:blocker with
    | Error _ -> () | Ok _ -> fail "non-directory base unexpectedly initialized a store");
+  let admission_path=Masc_tui_observation_store.admissions_path replacement_store in
+  Sys.remove admission_path;
+  Unix.mkdir admission_path 0o700;
+  (match Masc_tui_observation_store.record_admission replacement_store
+     ~origin:completed.afr_origin ~request:(Ui.Snapshot_read.request_id completed.afr_request)
+     ~admission_started_ns:completed.afr_admission_started_ns with
+   | Error _ -> () | Ok () -> fail "directory blocker accepted an admission record");
   let _read,result=run_read (fun _ -> ()) in
   check bool "actual original read continues after storage setup failure" true (result=Some (Ok ()));
   exact_task state task_id;

@@ -1,3 +1,7 @@
+type t = { directory : string; admissions : string }
+let directory t = t.directory
+let admissions_path t = t.admissions
+
 let initialize ~base_path =
   let started_ns=Mtime_clock.elapsed_ns () in
   let outcome=match
@@ -9,21 +13,26 @@ let initialize ~base_path =
        private directory permissions; no path is derived from event contents. *)
     let directory=Filename.temp_dir ~temp_dir:root
       (Printf.sprintf "session-%d-" (Unix.getpid ())) "" in
+    let admissions_directory=Filename.concat directory "admissions" in
+    Fs_compat.mkdir_p admissions_directory;
+    let admissions=Filename.concat admissions_directory "ask-followup.jsonl" in
+    Out_channel.with_open_gen [Open_wronly;Open_creat;Open_excl;Open_binary]
+      0o600 admissions (fun _ -> ());
     Log.Ring.init_file_sink directory;
-    directory
+    {directory;admissions}
   with
-  | directory -> Ok directory
+  | store -> Ok store
   | exception (Unix.Unix_error _ | Sys_error _ as exn) ->
     Error (Printexc.to_string exn) in
   let observed_ns=Mtime_clock.elapsed_ns () in
   let level,phase,directory=match outcome with
-    | Ok directory -> Log.Info,"initialized",Some directory
+    | Ok store -> Log.Info,"initialized",Some store.directory
     | Error _ -> Log.Warn,"unavailable",None in
   (* Emission is outside filesystem error conversion: a logging failure must
      not become a second initialization attempt or a different I/O outcome. *)
   Log.Startup.emit_lazy level (fun () ->
     let message=match outcome with
-      | Ok path -> "Structured TUI logs initialized: " ^ path
+      | Ok store -> "Structured TUI logs initialized: " ^ store.directory
       | Error detail ->
         "Structured TUI log storage unavailable; retaining ring and stderr mirror: " ^ detail in
     message,`Assoc [
@@ -34,3 +43,17 @@ let initialize ~base_path =
       "initialization_started_ns",`Intlit (Int64.to_string started_ns);
       "observed_ns",`Intlit (Int64.to_string observed_ns)]);
   outcome
+
+let record_admission store ~origin ~request ~admission_started_ns =
+  let result=match Fs_compat.append_jsonl store.admissions (`Assoc [
+    "schema_version",`Int 1;
+    "event",`String "tui_ask_followup_admission";
+    "instance_id",`String (Masc_tui_observation_origin.instance_id origin);
+    "request",`Int request;
+    "read_admission_started_ns",`Intlit (Int64.to_string admission_started_ns)]) with
+    | () -> Ok ()
+    | exception (Unix.Unix_error _ | Sys_error _ as exn) -> Error (Printexc.to_string exn) in
+  (match result with
+   | Ok () -> ()
+   | Error detail -> Log.Startup.warn "Ask follow-up admission capture unavailable: %s" detail);
+  result

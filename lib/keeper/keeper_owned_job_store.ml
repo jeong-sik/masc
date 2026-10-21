@@ -59,8 +59,13 @@ let error_to_string = function
   | Commit_unconfirmed detail -> "job commit unconfirmed: " ^ detail
 
 let canonical_base_path base_path =
-  try Ok (Keeper_registry_types.canonical_base_path_exn base_path)
-  with Invalid_argument detail -> Error (Invalid_authority detail)
+  Backend.canonical_base_path base_path
+  |> Result.map_error (function
+    | Backend.Invalid_base_path detail -> Invalid_authority detail
+    | Missing_base_path -> Missing
+    | Non_directory_base_path -> Invalid_authority
+        (Backend.base_path_error_to_string Backend.Non_directory_base_path)
+    | Base_path_io_failed detail -> Io_failed detail)
 
 let paths ~base_path job_id =
   let root = Filename.concat
@@ -216,7 +221,12 @@ let result_ready (record : record) = match record.phase, record.outputs with
 let validate_record (record : record) =
   let spec = Backend.specification record.preparation in
   let expected_paths = paths ~base_path:record.base_path record.job_id in
-  let* canonical = canonical_base_path record.base_path in
+  (* Historical rows retain their structural check. The public operation
+     resolves its root once; scope_matches then binds the final owner to it.
+     Re-resolving every old row would add filesystem work per journal entry. *)
+  let* canonical = Config_dir_resolver.canonical_base_path record.base_path
+    |> Result.map_error (fun error -> Invalid_authority
+      (Config_dir_resolver.canonical_base_path_error_to_string error)) in
   if canonical <> record.base_path || record.keeper_name = ""
      || spec.job_id <> Job_id.to_string record.job_id
      || spec.keeper_name <> record.keeper_name || spec.base_path <> record.base_path

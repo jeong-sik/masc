@@ -77,6 +77,10 @@ type error =
 
 val error_to_string : error -> string
 val canonical_base_path : string -> (string, error) result
+(** Existing physical workspace identity shared with backend preparation and
+    Composition journals. Parent aliases resolve before paths are derived;
+    root-leaf symlinks, missing and unreadable roots refuse. Missing remains
+    [Missing]; host I/O failure is [Io_failed]. No lexical fallback or cache. *)
 val paths : base_path:string -> Job_id.t -> paths
 val prepare_workspace : base_path:string -> Job_id.t -> input list -> (paths, error) result
 (** Checksum-verified immutable artifacts copied into a new job-private workspace.

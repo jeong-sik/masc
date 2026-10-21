@@ -1,6 +1,6 @@
 ---
 name: ocaml-coding
-description: "masc 저장소의 lib/·bin/·test/ OCaml 5.5 + Eio 코드를 작성·수정할 때 쓴다. typed 오류·취소와 자원 수명, 준비·Skill 권한, durable 결과의 switch 수명 관측과 공유 비동기 발견, 실제 worker 정리, .mli 우선 변경과 검증 경계를 안내한다. 준비·예약·실행·UI 관측을 구분한다."
+description: "masc 저장소의 lib/·bin/·test/ OCaml 5.5 + Eio 코드를 작성·수정할 때 쓴다. typed 오류·취소와 자원 수명, 준비·Skill 권한과 job의 물리 workspace identity, durable 결과의 switch 수명 관측과 공유 비동기 발견, 실제 worker 정리, .mli 우선 변경과 검증 경계를 안내한다. 준비·예약·실행·UI 관측을 구분한다."
 ---
 
 # masc OCaml 점검표
@@ -146,6 +146,14 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   발견 중 I/O가 job/intake child를 실행할 수 있으므로 전체 발견 뒤 실행을 보장한다고
   쓰지 않는다. owned-job 진입 취소로 제거된 process-local held hint는
   다음 회차에 전체 재검사를 요구할 수 있지만 원래 durable 결과와 전달 의무는 유지한다.
+
+- owned-job의 명시적 base 입력은 caller에서 절대 경로로 정규화한 뒤 기존 물리
+  디렉터리로 해석한다. 상위 디렉터리 alias는 같은 workspace를 가리키지만 root 자체의
+  symlink는 거부한다. 생성·조회·invocation binding·backend 준비가 같은 물리 identity를
+  쓰고, 관측용 원래 설정 경로는 바꾸지 않는다. Missing·I/O 오류를 lexical fallback으로
+  허용하거나 다른 root의 복사 journal에 권한을 주지 않는다. 경로 해석은 effect 허가가
+  아니며 기존 owner·nofollow·device/inode·daemon·입력·출력 검증을 유지한다.
+  추가 root I/O 비용과 취소·실패·미시작 표본도 기록한다.
 
 - owned-job maintenance `pulse`는 같은 server switch의 발견 child를 예약하고 반환한다.
   실제 marker 발견·job 예약 결과는 원래 base path와 typed `Store.error`를 유지한

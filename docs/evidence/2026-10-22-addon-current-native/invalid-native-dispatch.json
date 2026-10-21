@@ -1,0 +1,10 @@
+{
+  "run": 39631235633,
+  "submitted_source": "91cd67b1b35d6b286ea6192b617e2fc38ae43db0",
+  "actual_source_at_that_time": "91cd67b1b355d98081bebc081603d84d898ee0de",
+  "observed_status_before_cancel": "queued",
+  "action": "cancel requested before any build observation",
+  "replacement_run": 39631388009,
+  "replacement_source": "d06fc9229f2d46597933526d06863e0473c87874",
+  "reason": "Author copied an incorrect full SHA; no successful check claimed"
+}

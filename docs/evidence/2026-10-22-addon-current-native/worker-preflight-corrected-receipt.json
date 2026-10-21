@@ -1,0 +1,39 @@
+{
+  "started_at": "2026-10-21T15:41:58.406945+00:00",
+  "finished_at": "2026-10-21T15:41:58.963530+00:00",
+  "exit_code": 0,
+  "is_error": false,
+  "rows": 1,
+  "source": "6f68dbc38d7c3dfd53fd1ded00f6a4bd3622609d",
+  "actual_row": [
+    {
+      "id": "e8e8b75037064ace8cb1bde36d94521f726b782d9295136ffc7e04d0f326da1d",
+      "lane_id": "phrase",
+      "kind": "value",
+      "title": "SoundFont: pause_requested",
+      "observed_at": 1792597232.2662039,
+      "subject_id": "current-input-1",
+      "clock": null,
+      "actor": null,
+      "fields": {
+        "source_id": "vst-phrase",
+        "incarnation": "current-native-synthetic-source",
+        "source_event_id": "current-input-1",
+        "state": "pause_requested",
+        "scope": "latest_local_phrase_state",
+        "playback_evidence": "local player process events; device audibility is not measured",
+        "action_receipt": false
+      },
+      "evidence": [],
+      "related_ids": []
+    }
+  ],
+  "setup_correction": "Original direct RPC omitted evidence list normally attached by host snapshot capture. This corrected direct RPC explicitly uses [] and does not prove host capture. Original refused input is retained.",
+  "not_proven": [
+    "host runtime",
+    "TUI",
+    "real VST/audio",
+    "actual model",
+    "host-managed On/Off"
+  ]
+}

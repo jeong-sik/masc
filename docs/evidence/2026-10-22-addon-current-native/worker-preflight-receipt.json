@@ -1,0 +1,30 @@
+{
+  "started_at": "2026-10-21T15:41:26.735707+00:00",
+  "finished_at": "2026-10-21T15:41:27.142416+00:00",
+  "argv": [
+    "docker",
+    "run",
+    "--rm",
+    "-i",
+    "--network",
+    "none",
+    "--label",
+    "masc.proof-owner=addon-current-native-20261022",
+    "masc-lane-vst-phrase:0.1.0"
+  ],
+  "exit_code": 0,
+  "source": "6f68dbc38d7c3dfd53fd1ded00f6a4bd3622609d",
+  "worker_image": "sha256:6dc223be960dd1a2adb9da10c34dcd9610231478a8e2e74a324a459c0bc02745",
+  "worker_code_matches_selected_source": true,
+  "source_incarnation": "current-native-synthetic-source",
+  "input": "synthetic; pause_requested does not control a player",
+  "not_proven": [
+    "native server/TUI",
+    "host managed lifecycle",
+    "actual audio or LLM",
+    "operator installation"
+  ],
+  "worker_is_error": true,
+  "rows": 0,
+  "output_sha256": "bdff9b2ffea0e92cadbad0e5388e6cfcfbe2ab32f47301137f2405508dc5abd2"
+}

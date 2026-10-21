@@ -35,12 +35,12 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 고정 d9 native24+5건·matching identity 성공 유지. e6 Keeper 오류·main4d25 TUI warning4로 각각 FAIL. 기존 #44864 및 #44874/#44875 수리를 재사용한003f52 native39625447860 접수; 결과·matching artifact 미확인 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
-| A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 고정 7b16a917 실제 On→Off→On에서 retained refresh 결함 재현. 고정 d9b62724 실제 TUI에서 원래 row/selection·읽기 실패·실제 Evidence receipt 공존, 잘못된 run 입력 거절·복구·same-run empty 관측. lifecycle 수리·운영 설치·같은 후보 Dashboard는 별도 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
+| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 고정6f68 native39626945820: TUI24+application5 PASS. 두 실행 파일 내장 SHA·해시·key reference 대조 완료; 같은 source Dashboard build 성공. 후속 #44895 d06fc922 native39631388009는 별도 요청·결과 미확인 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
+| A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 같은6f68 API/Docker/Dashboard/TUI로 On→Off→On 및 Remove TOML+worker→재설치 실행. 세 incarnation·원래 결과/receipt·실제 정리 확인. Evidence 직후 retained row 소실 재현→#44895 소스 수리·독립 PASS; 수정 바이너리 재검증·운영 설치 별도 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
 | A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 main 병합. 고정 `7b16a917` 실제 TUI에서 retained 실행 키 미노출·수동 Observe 거절·이력 진입 확인; 전체 상세 새로고침 결함은 A02/G06에서 별도 추적 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
 | A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | 공통 #44710·G01 #44803 및 G06 #44840의 6개 층 main 병합 확인. G06 병합 head와 이후 fragment-only branch head를 구분. Browser #44168 전체 현재 판정·남은 맥락 리뷰와 새 follow-up head의 재승인은 별도 | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
 | A05 | Browser 스택의 후속 3개 층과 기존 증거 영향 검토 | 세 층의 전체 delta 직독; exact `76b741f` run `39555413943` 두 suite 14건 PASS, 독립 source delta 검토 PASS; 실제 앱·전체 스택 검증 별도 | #44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증 |
-| A06 | 두 스택의 전체 통합 준비 | 공통·G01·G06 main 병합. Browser67층 d35는 현재 head/base/diff 결속 승인29, 부재/과거승인38; REST #44192 dirty. whole-stack 현 main 재배치·일괄push를 pr-updater에 요청(queued), 실제 수행 미확인. 증거 #44851도 open | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
+| A06 | 두 스택의 전체 통합 준비 | 공통·G01·G06 main 병합. pr-updater가 Browser67층 whole rebase/push 완료 보고; REST top #44702 aa0e05f6로 변경 확인. 현재 결속 승인0/67·old-head만43/최신승인부재24. top만dirty이며 로컬 main 비교에서도 작업표 문서 충돌 재현. Firefox 환경 전달 SOURCE PASS·실제 실행 별도 | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
 
 빌더 요청: `kmsg-2ada1cdc54884c58aa6736a80b598868`는 기존 `566b98b` 대상이다. 후속 exact 후보 `7f9e34b`는 native run `39555509454`로 요청했다. 중복 시작을 피하도록 빌더에게 대체 안내 `kmsg-1974c332ed1abfed8b4bde992b686e8f`를 보냈으며 안내 접수는 원래 작업 취소·실행 여부의 증거가 아니다.
 코드 리뷰: `kmsg-f7fecd527b3870306df62a4079c30ad8` 완료 및 #44707 review `5595612747` APPROVED 직독. head `566b98b5d1645d6312d518bf2810f3e5e0626586`, reviewed base `b95d927e30c6718e0fe656d3019c6cf39766c02c`, diff `ff95fe2ecb2658cee6da5b251d2b119c825270116c978246de762b5374e336c2`. 한 층의 소스 승인이다. #44721 후속 요청 `kmsg-dc966b86727baccd78eaa31700ef384e`는 queued 접수다.
@@ -93,7 +93,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | Browser d35 기존 package/host는 open. Python worker13건 및 exact d35 compiled contract2+appraisal_flow24건 PASS·원본 증거 보존. 실제 host-managed Off/On·provider·원래 obligation 중복 없는 정산과 두 UI는 미검증 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
+| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 고정d35 worker13+compiled contract2/appraisal24 PASS 유지. 실제 Docker3개·같은 named volume에서 원래 pending/answered/unknown 보존·변경 거절·정리 실측 및 독립 감사 PASS. 실제 host-managed Off/On·provider·원래 obligation 정산·두 UI는 미검증; 새 Browser head로 증거 자동 이월 없음 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
 | E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 설계 필요 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
@@ -134,7 +134,7 @@ Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현�
 | G03 | 요청부터 종료·정리까지 원래 timeline/trace 연결 | 부분 구현; Dashboard가 버리던 host_requests를 원래 worker/incarnation에 결속해 보존·표시하는 후속 구현. 모델 lane/provider/operator/source 대기와 전달·기록 실패를 닫힌 타입으로 읽고, 손상 진단은 worker·결과와 분리. 전체 요청 이력·실제 화면·설치 검증 필요 | request/run/instance/revision, 대기 이유·결과·실패·정리 증거를 같은 원래 작업으로 추적 |
 | G04 | 교체·경로/ID 변경·이전 소유자 이력 표시 | 후속 소스 구현: 같은 ID worker와 같은 TOML 경로의 다른 ID를 두 UI에서 분리. Dashboard 3파일62건·tsc PASS, TUI 관측 모델 parser PASS; 독립 리뷰·OCaml 실행·실제 UI 별도 | 새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근 |
 | G05 | 에이전트 작업 중 표시와 현재 포인터/입력 활동 표시 | 범위별 재확인 필요 | 실제 동작 이벤트 기반으로 작업자·활동·포인터 위치 표시; 완료·중단·해제 때 표시 정리 |
-| G06 | 두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화 | d9의 run-scope 거절·원래 결과/실패/영수증·복구·same-run empty 실측 유지. global-query 수리 main 포함이나 수리 후보 두 native는 별도 컴파일 오류로 FAIL. 기존 TUI 수리 포함003f52 native 요청; corrected HTTP/화면·모든 경계 미완료 | draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능 |
+| G06 | 두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화 | 같은6f68의 bare global Slice HTTP200·retained refresh·읽기 실패/원래 row/receipt 공존·cross-run 거절·복구 관측. Evidence 보존 직후 row 소실 결함 #44895로 수리, application 마지막 관측도 보존. 수정 실행·모든 workspace/revision 경계 미완료 | draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능 |
 
 
 G04 후속 [#44807](https://github.com/jeong-sik/masc/pull/44807) · 다른 설치 ID의 같은 TOML 경로
@@ -150,7 +150,7 @@ G04 후속 [#44807](https://github.com/jeong-sik/masc/pull/44807) · 다른 설�
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| H01 | 같은 후보의 API·worker·Dashboard·TUI 조합 검증 | 일부 분리 실측 | On/Off와 Remove TOML+worker→재설치를 구분해 실행; 정확한 source/build 조합을 기록하고 서로 다른 증거 층을 합쳐 완료로 세지 않음 |
+| H01 | 같은 후보의 API·worker·Dashboard·TUI 조합 검증 | 같은6f68의 API·실제 worker·Dashboard·TUI 조합으로 Off와 Remove TOML+worker를 구분하고 재설치/세 incarnation/원래 이력/정리를 관측. Evidence 후 row 소실 발견으로 전체 성공 판정은 보류; 수정 후보 실행과 다른 패키지/운영 설치 별도 | On/Off와 Remove TOML+worker→재설치를 구분해 실행; 정확한 source/build 조합을 기록하고 서로 다른 증거 층을 합쳐 완료로 세지 않음 |
 | H02 | 실제 LLM·실제 앱에서 작업 완주 | Browser 모델 일부는 scripted | fixture 검증과 구분해 실제 Agent의 discovery→Skill→선택→실행→결과 확인을 수행; hover toolbar/drag 등 원래 증상 해결 확인 |
 | H03 | 실패·중단·재시작·설정 교체 복구 검증 | 부분 시나리오 있음 | 실행 중 Off, 지연/유실 응답, 부분 생성, 죽은 worker, 정리 실패·engine 변경·lease 거절에서 중복 효과/잘못된 삭제 없이 복구 |
 | H04 | 반복 연결과 장시간 연속 사용 검증 계획·실측 | 후속 실측 계획 | 제품의 10턴 이상·1/2/4/24h+ 목표에 연결한 시나리오·실측 범위를 정하고 연속성·누수·복구 근거 수집; 매 작은 PR에 전체 장기 검증을 반복하는 gate로 삼지 않음 |
@@ -263,3 +263,16 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 
 - 요청39624635082를 다음 publication 경계에서 처음 결과 확인했고, exact d35·minimal true·posix·선택된 두 suite의 실제 로그를 읽었다. `test_candle_appraiser_contract` 2건(0.527s), `test_candle_appraisal_flow` 24건(1.450s), 합26건 PASS다. [원본 실행 발췌·terminal API·해시 영수증](../docs/evidence/2026-10-22-candle-worker/README.md)을 보존한다.
 - 실제 Python stdio/restart+host Grade와 production payout worker+scripted Addon 정산의 각각을 검증했다. actual host-managed container Off/On, common Exact 실제 provider 및 원래 obligation 정산을 하나로 이은 증거는 아니다. 실제 provider·두 UI·운영 설치·전체67층 또는54개 완료로 세지 않는다.
+
+### 2026-10-22 KST · 같은 소스의 실제 두 UI와 재설치 경계
+
+- [고정6f68의 실제 API·Docker·Dashboard·TUI 증거](../docs/evidence/2026-10-22-addon-current-native/README.md)를 보존했다. native39626945820의 기존24+5 suite와 matching 두 실행 파일 내장 SHA/해시를 직독 확인했고, 깨끗한 같은 source checkout에서 Dashboard를 빌드했다. 운영 설치를 교체하지 않았다.
+- Dashboard On→Off→On 뒤 TUI Remove TOML+worker와 Dashboard New TOML 재설치를 따로 실행했다. 같은 installation ID에서 실제 세 incarnation이 각각 원래 입력을 읽었다. Off는 파일을 보존했고 Remove는 파일을 실제 삭제했다. 최종 Slice에 원래 세 row가 남고, 기록된 같은 engine에서 세 원래 container가 모두 부재였다. 임시 server/TUI/proxy와 browser task를 종료했다.
+- global `slice {}`는 끝의 `?` 없이 실제 HTTP200을 받았다. empty의 complete=false를 전체 coverage 성공으로 바꾸지 않았다. 실제 Slice EOF·원래 row/selection/receipt·cross-run 거절·복구도 관측했다.
+- 같은 실측에서 Evidence 성공 직후 후속 inventory가 retained row를 지우는 결함을 발견했다. #44895의 d06fc9229f2d46597933526d06863e0473c87874는 Evidence receipt만 반영하고 Request 전 application 마지막 관측/실패를 suspend로 보존한다. 독립 적대적 소스 리뷰에서 처음 찾은 application 초기화 P2까지 해소해 잔여 P0–P2 없음 판정을 받았다. 실제 수정 UI와 정식 승인은 별도다.
+- 수정 후보 native39631388009는 정확한 현재 full SHA를 원격 PR과 대조한 뒤 요청했다. 앞 요청39631235633에는 작성자가 잘못된 full SHA를 전달해 queued 관측 뒤 취소 요청했다. 잘못된 요청이나 요청 접수는 실행 성공 증거가 아니다.
+- [Candle 실제 container/volume 원본 증거](../docs/evidence/2026-10-22-candle-container/README.md)는 고정d35의 실제 세 container와 같은 persistent volume을 사용했다. 실제 host Runtime Off/On, common Exact provider와 host Paid 원장을 통과한 것으로 합치지 않는다. E01의 원래 완료 기준은 남아 있다.
+- pr-updater terminal 응답은 Browser67층 whole rebase/push를 보고했고 REST top은 d35에서 aa0e05f6fcdfb4d0e5d35650dbbe07f169515971로 바뀌었다. 업데이트 보고는 source/승인/build/runtime PASS가 아니며, 기존67개 head의 승인은 새 head로 이월하지 않는다. 현재 승인·충돌과 삭제된 Keeper Firefox 환경 scrub 대체 경계를 독립 재검토한다.
+- 전체54개 ID·작업·완료 기준은 유지했다. 이 checkpoint는 A01/A02/G06/H01과 E01의 실제 증거를 늘리고 확인된 결함을 수리한 진척이며, 운영 설치·Browser67층 병합·E01 전체·54개 완료 판정이 아니다.
+
+- Browser 재배치 뒤 독립 census는 현재 결속 승인0/67, 최신 formal승인 부재24/옛head만43이며 current FAIL/HOLD·CR·Draft·미해결 thread0을 확인했다. top44702만dirty다. 실제 main c3efec4 대 aa0e merge-tree도 작업표 한 파일 충돌을 반환해 단순 API 전파 지연으로 단정하지 않는다. Firefox 삭제 전·후 실행 sink의 환경 허용목록은 독립 SOURCE PASS이나 이 사실이 전체67층 승인·실제 Firefox 실행을 뜻하지 않는다.

@@ -1,0 +1,5 @@
+{
+  "remaining_owned_container_ids": [],
+  "volume_inspect_exit": 1,
+  "volume_inspect_stderr": "Error response from daemon: get masc-candle-proof-state-0c67b092c532: no such volume\n"
+}

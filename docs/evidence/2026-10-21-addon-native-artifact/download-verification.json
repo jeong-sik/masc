@@ -1,0 +1,76 @@
+{
+  "at": "2026-10-21T12:07:40.029239+00:00",
+  "run": 39595834943,
+  "artifact_id": 12343798542,
+  "receipt": {
+    "source_sha": "7b16a9175711aefe744c5c704e038a42fd5b6b7b",
+    "workflow_sha": "97468f95df78f35a35bb3fe14a9670240cced930",
+    "scenario": "addon-lifecycle",
+    "platform": "macos-arm64",
+    "sha256": "5b96375632e178754e700c0d7651c56059e0a42428392cdeddcbaf98c982490f",
+    "key_reference": {
+      "path": "key-reference.md",
+      "sha256": "e57d5bfbc890b6fed1e58e0cc19188c79e17e9ca9bdab43e2920c1ac2486a95d",
+      "producer": "bin/masc_tui_keys_doc_cli.exe"
+    },
+    "server_sha256": "7c0b6ddf2ee9252a6d5d2d1f0808d20410cfa10a83f79958e7b209c40c95fc36",
+    "build_targets": [
+      "bin/masc_tui.exe",
+      "bin/masc_tui_keys_doc_cli.exe",
+      "bin/main_eio.exe",
+      "test/test_tui_lane_addons.exe",
+      "test/test_lane_addon_application.exe"
+    ],
+    "expected_tests": [
+      "test_tui_lane_addons",
+      "test_lane_addon_application"
+    ],
+    "executed_tests": [
+      "test_tui_lane_addons",
+      "test_lane_addon_application"
+    ],
+    "test_results": [
+      {
+        "suite": "test_tui_lane_addons",
+        "suite_exit_code": 0,
+        "log_exit_code": 0
+      },
+      {
+        "suite": "test_lane_addon_application",
+        "suite_exit_code": 0,
+        "log_exit_code": 0
+      }
+    ],
+    "behavior_passed": true,
+    "installed_runtime_verified": false,
+    "visible_ui_verified": false,
+    "packaging": "native executable; see native-dependencies.txt for dynamic libraries"
+  },
+  "local_checks": {
+    "masc-tui": {
+      "sha256": "5b96375632e178754e700c0d7651c56059e0a42428392cdeddcbaf98c982490f",
+      "matches_receipt": true,
+      "build_identity": {
+        "exit": 0,
+        "stdout": "7b16a9175711aefe744c5c704e038a42fd5b6b7b",
+        "stderr": ""
+      }
+    },
+    "masc": {
+      "sha256": "7c0b6ddf2ee9252a6d5d2d1f0808d20410cfa10a83f79958e7b209c40c95fc36",
+      "matches_receipt": true,
+      "build_identity": {
+        "exit": 0,
+        "stdout": "7b16a9175711aefe744c5c704e038a42fd5b6b7b",
+        "stderr": "[2026-10-21 21:07:43] [INFO] [MCP] Tag registry initialized: 181 tools registered"
+      }
+    },
+    "key-reference.md": {
+      "sha256": "e57d5bfbc890b6fed1e58e0cc19188c79e17e9ca9bdab43e2920c1ac2486a95d",
+      "matches_receipt": true
+    }
+  },
+  "native_identity_verified": true,
+  "visible_ui_verified": false,
+  "installed_runtime_verified": false
+}

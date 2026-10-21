@@ -239,7 +239,7 @@ export interface SkillCompositionEvidence {
   composition_tool: string
   composition_execution: 'inline' | 'async'
   result: Record<string, unknown>
-  executor_settlements: readonly Record<string, unknown>[]
+  executor_settlements: readonly SkillExecutorSettlement[]
   recorded_at: number
 }
 
@@ -508,6 +508,8 @@ const CompositionNodeSchema = Schema.Struct({
   result_bytes: NonNegativeSafeIntegerSchema,
   truncated_to: Schema.NullOr(NonNegativeSafeIntegerSchema),
 })
+
+export type SkillExecutorSettlement = Schema.Schema.Type<typeof CompositionNodeSchema>
 
 const TaskInstructionOriginSchema = Schema.Struct({
   kind: Schema.Literal('task_instruction'),

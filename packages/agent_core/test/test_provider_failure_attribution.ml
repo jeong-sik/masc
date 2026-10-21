@@ -602,48 +602,29 @@ let test_empty_completion_end_turn_is_its_own_variant () =
    retryable. *)
 let test_empty_completion_unmodeled_stop_reason_fails_loud () =
   let token = "provider_specific_overflow" in
-  match
-    Attribution.core_error_of_http_error
+  let detail = "provider returned an empty assistant turn" in
+  match Attribution.core_error_of_http_error ~provider:"fixture"
       (Http.ProviderFailure
-         { kind = Http.Empty_completion { stop_reason = Types.Unknown token }
-         ; message = "provider returned an empty assistant turn"
-         })
-  with
-  | Error.Api
-      (Llm_provider.Retry.InvalidRequest
-         { message; reason = Llm_provider.Retry.Unknown_invalid_request } as api) ->
-    check_bool
-      "names the unmodeled stop_reason token"
-      true
-      (Util.string_contains ~needle:token message);
-    check_bool "not retryable" false (Llm_provider.Retry.is_retryable api)
-  | other ->
-    Alcotest.failf
-      "expected Api InvalidRequest naming the unmodeled token, got %s"
-      (Error.to_string other)
+         { kind = Http.Empty_completion { stop_reason = Types.Unknown token }; message = detail }) with
+  | Error.Provider (Llm_provider.Error.EmptyCompletion observed as provider_error) ->
+    check_string "provider retained" "fixture" observed.provider;
+    check_bool "unknown token remains typed" true (observed.stop_reason = Types.Unknown token);
+    check_string "diagnostic retained" detail observed.detail;
+    check_bool "same-attempt retry refused" false (Llm_provider.Error.is_retryable provider_error)
+  | other -> Alcotest.failf "expected typed provider empty completion, got %s" (Error.to_string other)
 ;;
 
-(* The agent-core error boundary is the second promotion site for the same rule. If it
-   keeps rendering an unmodeled empty completion as provider unavailability, the
-   retry loop reappears one layer below the attribution fix. *)
-let test_error_boundary_unmodeled_stop_reason_is_invalid_request () =
+let test_error_boundary_unmodeled_stop_reason_stays_typed () =
   let token = "provider_specific_overflow" in
-  match
-    Llm_provider.Error.of_http_error
+  let detail = "provider returned an empty assistant turn" in
+  match Llm_provider.Error.of_http_error ~provider:"fixture"
       (Http.ProviderFailure
-         { kind = Http.Empty_completion { stop_reason = Types.Unknown token }
-         ; message = "provider returned an empty assistant turn"
-         })
-  with
-  | Llm_provider.Error.InvalidRequest { reason; _ } ->
-    check_bool
-      "names the unmodeled stop_reason token"
-      true
-      (Util.string_contains ~needle:token reason)
-  | other ->
-    Alcotest.failf
-      "expected InvalidRequest naming the unmodeled token, got %s"
-      (Llm_provider.Error.to_string other)
+         { kind = Http.Empty_completion { stop_reason = Types.Unknown token }; message = detail }) with
+  | Llm_provider.Error.EmptyCompletion observed ->
+    check_string "provider retained" "fixture" observed.provider;
+    check_bool "unknown token remains typed" true (observed.stop_reason = Types.Unknown token);
+    check_string "diagnostic retained" detail observed.detail
+  | other -> Alcotest.failf "expected typed empty completion, got %s" (Llm_provider.Error.to_string other)
 ;;
 
 let test_stream_finalization_keeps_empty_completion_evidence () =
@@ -753,9 +734,9 @@ let () =
             `Quick
             test_empty_completion_unmodeled_stop_reason_fails_loud
         ; Alcotest.test_case
-            "error boundary renders unmodeled stop_reason as invalid request"
+            "error boundary retains typed unmodeled stop reason"
             `Quick
-            test_error_boundary_unmodeled_stop_reason_is_invalid_request
+            test_error_boundary_unmodeled_stop_reason_stays_typed
         ] )
     ; ( "agent detailed API"
       , [ Alcotest.test_case

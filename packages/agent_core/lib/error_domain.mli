@@ -27,6 +27,9 @@ type provider_error =
   | `Authorization_error of string
   | `Server_error of int * string (** status, message *)
   | `Network_error of string
+  | `Empty_completion of string * Llm_provider.Types.stop_reason * string
+    (** Provider, typed stop reason and detail; never flattened to a network
+        error or invalid request. Same-attempt retry remains refused. *)
   | `Provider_timeout of Llm_provider.Http_client.timeout_phase option * string
   | `Streaming_timeout of
       Llm_provider.Http_client.timeout_phase * string * string option

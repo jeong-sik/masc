@@ -75,32 +75,13 @@ let core_error_of_http_error ?(accept_rejected = Api_invalid_request) ?provider 
        provider-unavailability handling as [ProviderTerminal] / other
        [ProviderFailure]. This site's [Error.Api] wrapper is preserved.
 
-       An empty turn whose stop_reason token agent core does not model is neither
-       case. Routing it to provider-unavailability makes the consumer retry or
-       rotate the identical prompt, which never terminates when the real
-       condition was an overflow reported with an unmodeled token: the consumer
-       reaches its compaction path only on a typed overflow, so the turn fails
-       repeatedly without an error that names the cause. It is surfaced as a
-       non-retryable request error naming the token instead.
-
-       WORKAROUND: [InvalidRequest] is reused because [api_error] has no
-       "unmodeled provider contract" variant, and adding one breaks every
-       exhaustive matcher in agent core and in its consumers. Root fix: a
-       dedicated variant, scheduled with the next breaking API change. *)
+       An unknown token stays a typed empty response with its original provider
+       and diagnostic detail. It is neither an invalid request nor proof of
+       overflow. Consumer recovery classifies the retained stop reason. *)
     (match Retry.verdict_of_empty_completion ~stop_reason ~message with
      | Retry.Empty_overflow overflow -> Error.Api overflow
-     | Retry.Empty_attributed ->
-       Error.Provider (Llm_provider.Error.of_http_error ?provider err)
-     | Retry.Empty_unattributed { token } ->
-       Error.Api
-         (Retry.InvalidRequest
-            { message =
-                Printf.sprintf
-                  "empty completion with unmodeled stop_reason=%S: %s"
-                  token
-                  message
-            ; reason = Retry.Unknown_invalid_request
-            }))
+     | Retry.Empty_attributed | Retry.Empty_unattributed _ ->
+       Error.Provider (Llm_provider.Error.of_http_error ?provider err))
   | Http.ProviderTerminal _
   | Http.ProviderFailure
       { kind =

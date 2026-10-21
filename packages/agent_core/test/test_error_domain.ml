@@ -6,6 +6,22 @@ module Retry = Llm_provider.Retry
 
 (* ── Roundtrip: core_error -> poly -> core_error ───────────── *)
 
+let test_roundtrip_empty_completion () =
+  List.iter (fun stop_reason ->
+    let original = Error.Provider (Llm_provider.Error.EmptyCompletion
+      { provider = "fixture"; stop_reason; detail = "original provider diagnostic" }) in
+    let poly = Error_domain.of_core_error original in
+    (match poly with
+     | `Empty_completion (provider, observed_reason, detail) ->
+       Alcotest.(check string) "provider preserved" "fixture" provider;
+       Alcotest.(check bool) "typed reason preserved" true (observed_reason = stop_reason);
+       Alcotest.(check string) "detail preserved" "original provider diagnostic" detail
+     | _ -> Alcotest.fail "empty completion must not become a network or request error");
+    Alcotest.(check bool) "roundtrip is exact" true (Error_domain.to_core_error poly = original);
+    Alcotest.(check bool) "retry policy is not widened by projection" false (Error_domain.is_retryable poly))
+    [Llm_provider.Types.EndTurn; Llm_provider.Types.Unknown "provider-specific"]
+;;
+
 let test_roundtrip_api_rate_limited () =
   let orig =
     Error.Api (Retry.RateLimited { retry_after = Some 1.5; message = "slow down" })
@@ -992,6 +1008,7 @@ let () =
             "provider roundtrip all"
             `Quick
             test_provider_roundtrip_all_via_to_sdk
+        ; Alcotest.test_case "typed empty completion roundtrip" `Quick test_roundtrip_empty_completion
         ; Alcotest.test_case "tool_exec_failed" `Quick test_to_core_error_tool_exec_failed
         ; Alcotest.test_case "tool_timeout" `Quick test_to_core_error_tool_timeout
         ] )

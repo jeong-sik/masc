@@ -24431,14 +24431,18 @@ and is loaded on demand through keeper_skill.
           Option.iter (observe_input_received input_reader) input;
           input
       in
-      let input = match current_code_hover state, input with
-        | Some _, Some (Mouse_wheel (direction, _, _)) ->
+      let input = match input with
+        | Some (Mouse_wheel (direction, _, _))
+            when Option.is_some (current_code_hover state) ->
             Some (Key (match direction with
               | Masc.Tui_mouse_protocol.Wheel_up -> "up"
               | Masc.Tui_mouse_protocol.Wheel_down -> "down"))
-        | Some _, Some (Mouse_left_press _) -> state.code_hover <- None; input
-        | Some _, Some (Key ("tab" | "shift-tab" | "\t")) -> state.code_hover <- None; input
-        | (Some _ | None), (Some _ | None) -> input in
+        | Some (Mouse_left_press _ | Key ("tab" | "shift-tab" | "\t"))
+            when Option.is_some (current_code_hover state) ->
+            state.code_hover <- None; input
+        | Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_left_press _
+               | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _)
+        | None -> input in
       (* A queued action retires a deferred return before any handler changes
          its reading. Repeated B shares its pending request; protocol replies
          and idle cadence are observations rather than operator actions. *)

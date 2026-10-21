@@ -112,6 +112,7 @@ val followup_source_to_json : followup_source -> string * Yojson.Safe.t
 type failure = { keeper_name : string option; ask_id : string option; error : error }
 type report =
   { inspected : int
+  ; evidence_window_reads : int
   ; enqueued : int
   ; already_pending : int
   ; already_delivered : int
@@ -119,7 +120,13 @@ type report =
   }
 
 val reconcile : base_path:string -> (report, Keeper_ask_store.read_error) result
-(** Startup/maintenance recovery. Reads the strict ask rows and, per answered
-    ask, one delivery-evidence read bounded to rows at/after that answer's
-    canonical time, then only unresolved sources reach owner-lock enqueue.
+(** Startup/maintenance recovery. Reads strict ask rows, captures delivery
+    evidence on the first demand for each Keeper/canonical-answer UTC-day window,
+    then reuses that immutable observation for shared windows in this pass only.
+    Windows appearing once in discovered answered rows are not retained in
+    the pass's snapshot map. Calendar conversion failure stays with the original
+    answer row and cannot abort the demand index before other rows are delivered.
+    [evidence_window_reads] counts those capture calls, including failures, not
+    physical file reads or successful deliveries. Only unresolved sources reach
+    enqueue; the queue owner's fresh evidence and lifecycle checks are retained.
     No timer, history cap, second answer store or outbox. *)

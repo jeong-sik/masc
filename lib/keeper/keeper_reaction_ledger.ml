@@ -1026,21 +1026,21 @@ let strict_delivery_evidence_error_to_string = function
    of the first one. The value is a pure function of the rows and
    [keeper_name], which lets a day file's part be kept while the file only
    grows. *)
-module Delivery_proof_set = Set.Make (struct
-  type t = string * string
+module Delivery_source_set = Set.Make (struct
+  type t = string * stimulus_kind
 
   let compare = Stdlib.compare
 end)
 
 type delivery_evidence =
-  { proven : Delivery_proof_set.t
+  { proven : Delivery_source_set.t
   ; malformed_rows : int
   ; semantic_invalid_rows : int
   ; first_invalid : row_quarantine_reason option
   }
 
 let no_delivery_evidence =
-  { proven = Delivery_proof_set.empty
+  { proven = Delivery_source_set.empty
   ; malformed_rows = 0
   ; semantic_invalid_rows = 0
   ; first_invalid = None
@@ -1071,21 +1071,21 @@ let add_delivery_evidence ~keeper_name evidence = function
        if not (delivery_reaction_matches reaction_kind transition_receipt)
        then evidence
        else
-         (match assoc_field "reaction" metadata.raw with
-          | None -> evidence
-          | Some reaction ->
-            (match string_field "post_id" reaction, string_field "stimulus_kind" reaction with
-             | Some post_id, Some stimulus_kind ->
-               { evidence with
-                 proven = Delivery_proof_set.add (post_id, stimulus_kind) evidence.proven
-               }
-             | Some _, None | None, Some _ | None, None -> evidence)))
+         let reference = match assoc_field "reaction" metadata.raw with
+           | None -> Error Missing_reaction
+           | Some reaction -> decode_reaction_stimulus_reference reaction in
+         match reference with
+         | Ok source ->
+             { evidence with proven = Delivery_source_set.add source evidence.proven }
+         | Error reason ->
+             { evidence with semantic_invalid_rows = evidence.semantic_invalid_rows + 1;
+               first_invalid = note_first_invalid evidence reason })
 ;;
 
 (* [later] holds the rows of files after the ones [earlier] holds, so the
    first invalid row of the pair is the earlier one's when it has any. *)
 let append_delivery_evidence earlier later =
-  { proven = Delivery_proof_set.union earlier.proven later.proven
+  { proven = Delivery_source_set.union earlier.proven later.proven
   ; malformed_rows = earlier.malformed_rows + later.malformed_rows
   ; semantic_invalid_rows = earlier.semantic_invalid_rows + later.semantic_invalid_rows
   ; first_invalid =
@@ -1211,101 +1211,35 @@ let read_delivery_evidence ~keeper_name store ~not_before =
         | Error _ -> read_delivery_evidence_uncached ~keeper_name store ~not_before))
 ;;
 
-let event_queue_delivery_seen_for_source_strict_result
-      ~not_before
-      ~base_path ~keeper_name ~post_id ~stimulus_kind =
-  if String.equal post_id ""
-  then Error (Delivery_evidence_unavailable Evidence_invalid_stimulus_id)
-  else
-    let expected_stimulus_kind = stimulus_kind_to_string stimulus_kind in
-    let store = store_for_base_path ~base_path ~keeper_name in
-    (* Evidence for this source can only exist from the day its request was
-       submitted onward: a row for it cannot be older than the request that
-       produced it. [not_before] narrows the read to day partitions at or after
-       that submission time's UTC day, so a torn write in an unrelated older
-       partition no longer turns this source's absence into
-       [Evidence_incomplete], and the read covers far fewer rows while the queue
-       owner lock is held. *)
-    match read_delivery_evidence ~keeper_name store ~not_before with
-    | Error error -> Error (Delivery_evidence_unavailable (Evidence_read_error error))
-    | Ok evidence when Delivery_proof_set.mem (post_id, expected_stimulus_kind) evidence.proven ->
-      Ok true
-    | Ok { first_invalid = None; _ } -> Ok false
-    | Ok { first_invalid = Some first_reason; malformed_rows; semantic_invalid_rows; _ } ->
-      Error
-        (Evidence_incomplete
-           { malformed_row_count = malformed_rows
-           ; semantic_invalid_row_count = semantic_invalid_rows
-           ; first_reason
-           })
-;;
-
-module Delivery_source_set = Set.Make (struct
-  type t = string * stimulus_kind
-  let compare = Stdlib.compare
-end)
-
-type strict_source_delivery_snapshot = {
-  delivered_sources : Delivery_source_set.t;
-  incomplete : strict_delivery_evidence_error option;
-}
+type strict_source_delivery_snapshot = delivery_evidence
 
 let strict_source_delivery_snapshot_result ~base_path ~keeper_name ~since =
-  let delivered_sources = ref Delivery_source_set.empty in
-  let malformed_row_count = ref 0 in
-  let semantic_invalid_row_count = ref 0 in
-  let first_reason = ref None in
-  let note_reason reason =
-    match !first_reason with
-    | None -> first_reason := Some reason
-    | Some _ -> ()
-  in
-  let note_invalid reason =
-    incr semantic_invalid_row_count;
-    note_reason reason
-  in
   let store = store_for_base_path ~base_path ~keeper_name in
-  (* The window cannot start before the answer: delivery evidence predating
-     [since] cannot exist for a source created by that answer, so a damaged
-     row from before it must not make this snapshot incomplete. Day-file
-     granularity keeps the read bounded by the answer's window. *)
-  let since_date = Log.format_utc_date_of since in
-  let until_date = Log.format_utc_date_of (Float.max since (Time_compat.now ())) in
-  match Dated_jsonl.iter_range_entries_result store ~since:since_date ~until:until_date (function
-    | Dated_jsonl.Malformed_json _ ->
-        incr malformed_row_count;
-        note_reason Malformed_json_row
-    | Dated_jsonl.Parsed row ->
-        (match decode_current_row ~keeper_name row with
-         | Error reason -> note_invalid reason
-         | Ok (Current_stimulus _) -> ()
-         | Ok (Current_reaction { metadata; reaction_kind; transition_receipt }) ->
-             if delivery_reaction_matches reaction_kind transition_receipt then
-               match assoc_field "reaction" metadata.raw with
-               | None -> note_invalid Missing_reaction
-               | Some reaction ->
-                   (match decode_reaction_stimulus_reference reaction with
-                    | Error reason -> note_invalid reason
-                    | Ok source -> delivered_sources :=
-                        Delivery_source_set.add source !delivered_sources))) with
-  | Error error -> Error (Delivery_evidence_unavailable (Evidence_read_error error))
-  | Ok () ->
-      let incomplete = Option.map (fun first_reason ->
-        Evidence_incomplete
-          { malformed_row_count = !malformed_row_count
-          ; semantic_invalid_row_count = !semantic_invalid_row_count
-          ; first_reason }) !first_reason in
-      Ok { delivered_sources = !delivered_sources; incomplete }
+  read_delivery_evidence ~keeper_name store ~not_before:since
+  |> Result.map_error (fun error -> Delivery_evidence_unavailable (Evidence_read_error error))
 ;;
 
 let source_delivery_seen_in_snapshot snapshot ~post_id ~stimulus_kind =
   if String.equal post_id "" then
     Error (Delivery_evidence_unavailable Evidence_invalid_stimulus_id)
-  else if Delivery_source_set.mem (post_id, stimulus_kind) snapshot.delivered_sources then
-    Ok true
-  else match snapshot.incomplete with
+  else if Delivery_source_set.mem (post_id, stimulus_kind) snapshot.proven then Ok true
+  else match snapshot.first_invalid with
     | None -> Ok false
-    | Some error -> Error error
+    | Some first_reason ->
+        Error (Evidence_incomplete
+          { malformed_row_count = snapshot.malformed_rows
+          ; semantic_invalid_row_count = snapshot.semantic_invalid_rows
+          ; first_reason })
+;;
+
+let event_queue_delivery_seen_for_source_strict_result
+      ~not_before ~base_path ~keeper_name ~post_id ~stimulus_kind =
+  if String.equal post_id "" then
+    Error (Delivery_evidence_unavailable Evidence_invalid_stimulus_id)
+  else
+    Result.bind
+      (strict_source_delivery_snapshot_result ~base_path ~keeper_name ~since:not_before)
+      (fun snapshot -> source_delivery_seen_in_snapshot snapshot ~post_id ~stimulus_kind)
 ;;
 
 let nested_string_field outer inner json =

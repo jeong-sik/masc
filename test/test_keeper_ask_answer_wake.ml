@@ -684,14 +684,63 @@ let test_reconcile_delivers_past_preanswer_corruption () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path = config.Workspace.base_path in
   ensure_keeper "alpha";
+  ensure_keeper "beta";
   write_preanswer_corruption ~base_path ~keeper_name:"alpha";
-  ignore (persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"pulse-corruption-answer"
-      ~answered_at:(Unix.gettimeofday ()) ());
+  ignore (persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"historical-answer" ());
+  ignore (persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"historical-sibling" ());
+  let now = Unix.gettimeofday () in
+  let original = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"fresh-original"
+      ~task_id:"task-original" ~answered_at:now () in
+  ignore (persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"fresh-sibling"
+      ~answered_at:now ());
+  (* The same source ID and day belong to a different Keeper. Alpha's failed
+     window must not hide beta's valid absence or later positive proof. *)
+  ignore (persist_answer ~base_path ~keeper_name:"beta" ~ask_id:"historical-answer" ());
+  let canonical_logs = List.map (fun keeper_name ->
+      let path = Keeper_ask_store.log_path ~base_path ~keeper_name in
+      path, Fs_compat.load_file path) ["alpha"; "beta"] in
+  let check_pending keeper_name expected =
+    let actual = pending_asks ~base_path ~keeper_name
+        |> List.map (fun (_, payload) -> payload.Keeper_event_queue.ask_id)
+        |> List.sort String.compare in
+    check (list string) (keeper_name ^ " exact pending answer sources")
+      (List.sort String.compare expected) actual in
+  let check_failures report =
+    let failed = List.map (fun (failure : Wake.failure) ->
+        (match failure.keeper_name, failure.ask_id, failure.error with
+         | Some "alpha", Some ask_id,
+             Wake.Delivery_evidence_unavailable (Keeper_reaction_ledger.Evidence_incomplete _) -> ask_id
+         | _ -> fail "a Keeper/window failure replaced an independent source outcome")) report.Wake.failures in
+    check (list string) "only the original damaged answer window is retained"
+      ["historical-answer"; "historical-sibling"] (List.sort String.compare failed) in
   let report = reconcile_or_fail ~base_path in
-  check int "recovery enqueues the fresh answer past pre-answer corruption" 1 report.enqueued;
-  check int "recovery has no retained failures" 0 (List.length report.failures);
-  check int "one exact answer source is pending" 1
-    (List.length (pending_asks ~base_path ~keeper_name:"alpha"))
+  check_failures report;
+  check_pending "alpha" ["fresh-original"; "fresh-sibling"];
+  check_pending "beta" ["historical-answer"];
+  let beta_source = match pending_asks ~base_path ~keeper_name:"beta" with
+    | [source, _] -> source | _ -> fail "beta's original answer source is missing" in
+  terminalize_answer ~base_path ~keeper_name:"beta" beta_source;
+  check_failures (reconcile_or_fail ~base_path);
+  check_pending "alpha" ["fresh-original"; "fresh-sibling"];
+  check_pending "beta" [];
+  (* A new pulse must replace its failed captures rather than keep a negative
+     cache. The durable queue still performs its own current once-only check. *)
+  Sys.remove (Filename.concat
+    (Keeper_reaction_ledger.store_dir ~base_path ~keeper_name:"alpha") "2020-01/01.jsonl");
+  let recovered = reconcile_or_fail ~base_path in
+  (match recovered.failures with [] -> () | _ -> fail "repaired window was not read afresh");
+  check_pending "alpha" ["fresh-original"; "fresh-sibling"; "historical-answer"; "historical-sibling"];
+  check_pending "beta" [];
+  (match Keeper_ask_store.rows_result ~base_path ~keeper_name:"alpha" with
+   | Ok (Keeper_ask_store.Stored_rows rows) ->
+       (match List.assoc_opt original.ask_id rows with
+        | Some (ask, _) ->
+            check (option string) "original question retains its Task association"
+              (Some "task-original") ask.Keeper_ask.task_id
+        | None -> fail "original question disappeared")
+   | Ok Keeper_ask_store.Missing_log | Error _ -> fail "canonical question log unavailable");
+  List.iter (fun (path, content) ->
+    check string "recovery never rewrites the answer" content (Fs_compat.load_file path)) canonical_logs
 ;;
 
 let test_lifecycle_fence_defers_delivery_until_recovery () =

@@ -5,4 +5,4 @@
   ../config/prompts/candle_appraiser_grade.md
   ../config/prompts/candle_appraiser_relation.md
   ../config/prompts/candle_appraiser_weights.md)
- (libraries masc_test_deps masc.server masc_candle exact_output_fixture))
+ (libraries masc_test_deps masc.server masc_candle mcp_protocol))

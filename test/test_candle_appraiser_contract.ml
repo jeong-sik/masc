@@ -83,5 +83,82 @@ let test_real_package_contract () =
       check bool "the terminal answer is no longer dispatched" true
         (member "requests" (member "structuredContent" (result 6)) = `List [])))
 
+(* Restart the real stdio process at every RPC. The production server consumer
+   must recover the same disk-backed intent; only provider judgment is scripted. *)
+let test_real_worker_resumes_the_server_consumer () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Process_eio.init ~cwd_default:(Eio.Stdenv.cwd env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env);
+  Fun.protect ~finally:(fun () -> Process_eio.reset_for_testing (); Fs_compat.clear_fs ()) (fun () ->
+    let package = Lane_addon_manifest.load ~path:"../addons/candle-appraiser/lane.toml"
+      |> Result.map_error Lane_addon_manifest.error_to_string |> unwrap in
+    let base_path = Filename.temp_dir "candle-server-worker-" "" in
+    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+      let state = Filename.concat base_path "worker" in
+      Fs_compat.mkdir_p state;
+      let rpc operation =
+        let input = `Assoc (["jsonrpc", `String "2.0"; "id", `Int 1] @ Json.to_assoc operation)
+          |> Yojson.Safe.to_string in
+        let status, stdout, stderr = Process_eio.run_argv_with_stdin_and_status_split
+          ~stdin_content:(input ^ "\n")
+          ["python3"; Filename.concat package.directory "server.py"; "--state"; state] in
+        (match status with Unix.WEXITED 0 -> ()
+         | Unix.WEXITED code -> failf "worker exited %d: %s" code stderr
+         | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> failf "worker signal %d" signal);
+        check string "no worker diagnostics" "" stderr;
+        Json.member "result" (Yojson.Safe.from_string (String.trim stdout)) in
+      let tool = rpc (`Assoc ["method", `String "tools/list"])
+        |> member "tools" |> Json.to_list
+        |> List.map (fun raw -> Mcp_protocol.Mcp_types.tool_of_yojson raw |> unwrap)
+        |> List.find (fun (tool : Mcp_protocol.Mcp_types.tool) -> tool.name = "candle_appraise") in
+      let hooks = Hooks.prepare ~hooks:package.tool_hooks tool |> unwrap in
+      let submitted = ref 0 in
+      let port ~arguments =
+        ignore (Hooks.before_call hooks arguments |> unwrap);
+        if Json.(member "kind" arguments = `String "submit") then incr submitted;
+        let reply = rpc (admitted arguments) |> Mcp_protocol.Mcp_types.tool_result_of_yojson |> unwrap in
+        ignore (Hooks.after_call hooks reply |> unwrap);
+        Ok reply in
+      Prompt_defaults.init ();
+      Prompt_registry.set_markdown_dir "../config/prompts";
+      let registry_path = Filename.concat base_path "runs.jsonl" in
+      let registry = Exact_lane_run_registry.create ~path:registry_path () in
+      let identity : Candle_appraisal.identity = {goal_id="server-original";request_id="payout-original";
+        verification_run_id="proof-original"} in
+      let request = Candle_appraisal_intent.request intent in
+      let store = Lane_addon_store.create ~root:(Filename.concat base_path "request-ownership") in
+      let retain ~request_id ~request = Lane_addon_tool_request_owner.retain ~store
+        ~scope:"candle-appraisals" ~request_id ~installation_id:"original-installation"
+        ~package_id:package.id ~tool:"candle_appraise" ~request
+        |> Result.map_error (fun error -> Lane_addon_runtime.Unavailable (Lane_addon_tool_request_owner.error_to_string error)) in
+      let run registry = Server_candle_appraiser.For_testing.run ~registry ~base_path ~retain ~call:port ~identity request in
+      (match run registry with
+       | Error (Candle_appraisal.Transport_unavailable _) -> ()
+       | Ok _ | Error (Candle_appraisal.Invalid_response _ | Candle_appraisal.Execution_rejected _) ->
+         fail "the real worker must retain pending before host delivery");
+      let listed = rpc (call "lane_host_requests" (`Assoc []))
+        |> member "structuredContent" |> member "requests" |> Json.to_list in
+      let original = match listed with
+        | [original] -> Lane_addon_exact.request_of_json original |> unwrap
+        | _ -> fail "exactly the original Grade must be pending" in
+      let output = List.find (fun (output : Lane_addon_types.exact_output) -> output.name = "grade") package.exact_outputs in
+      let checked = Lane_addon_exact.validate_answer ~output original (member "output" answer) |> unwrap in
+      let final = Lane_addon_exact.Call_final (Lane_addon_exact.Answered {
+        output=checked;slot="scripted-original";usage=None}) in
+      let delivered = rpc (call "lane_host_result" (`Assoc ["request_id", `String original.request_id;
+        "result", Lane_addon_exact.final_to_json final])) in
+      check bool "host result is retained" true Json.(to_bool (member "accepted" (member "structuredContent" delivered)));
+      let returned = match run (Exact_lane_run_registry.replay registry_path) with
+        | Ok returned -> returned | Error error -> fail (Candle_appraisal.error_to_string error) in
+      check string "consumer trace retains the original intent" original.request_id returned.trace.run_id;
+      check string "consumer trace retains the actual slot" "scripted-original" returned.trace.slot_id;
+      check int "worker restarts do not cause a second submit" 1 !submitted;
+      let listed = rpc (call "lane_host_requests" (`Assoc [])) |> member "structuredContent" |> member "requests" in
+      check bool "terminal original is not dispatched again" true (listed = `List [])))
+
 let () = run "Candle actual package/host contract"
-  ["contract", [test_case "manifest, advertised Hooks and retained answer" `Quick test_real_package_contract]]
+  ["contract", [
+    test_case "manifest, advertised Hooks and retained answer" `Quick test_real_package_contract;
+    test_case "real worker restarts resume the production consumer" `Quick test_real_worker_resumes_the_server_consumer]]

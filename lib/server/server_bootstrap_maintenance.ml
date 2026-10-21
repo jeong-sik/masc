@@ -676,10 +676,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     in
     let prepared_continuations = Keeper_composition_continuation_wake.create ~context:recovery_ctx () in
     let reconcile_prepared_continuations () =
-      match Keeper_composition_continuation_wake.pulse ~sw prepared_continuations with
-      | Ok () -> ()
-      | Error error -> Log.Server.warn "prepared continuation discovery unavailable: %s"
-          (Keeper_tool_execution_journal.error_to_string error)
+      Keeper_composition_continuation_wake.pulse ~sw prepared_continuations
     in
     let owned_job_completions = Keeper_owned_job_completion_wake.create ~config
         ~on_result_ready:(fun _ ->

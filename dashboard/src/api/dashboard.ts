@@ -254,6 +254,7 @@ export {
 
 export type {
   KeeperCostMetric,
+  KeeperMetricsRead,
   KeeperCostMetricsResponse,
   KeeperDecision,
   KeeperDecisionContext,

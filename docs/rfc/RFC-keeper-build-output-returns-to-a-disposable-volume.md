@@ -271,6 +271,10 @@ removes it (§B) and links the checkout, so the gap lasts one guest life.
 
 ### B. A fresh boot removes real build output from the work volume (implemented)
 
+RFC-keeper-boot-runs-no-one-shot-container is the source for the work
+volume's ext4 `discard` default and for where and how this removal runs.
+This section keeps why the removal exists and what it removes.
+
 §A links only a checkout whose `_build` does not exist yet, and its scan
 runs once per guest. Keepers make a worktree per task and build it in the
 same session, so the real `_build` comes first, the next boot's scan refuses
@@ -300,9 +304,7 @@ scope:
   already skips;
 - a failed removal is printed and does not stop the boot.
 
-Where the removal runs, as which user, and how the freed blocks return to
-the host are specified in RFC-keeper-boot-runs-no-one-shot-container. The
-guest that serves the first turn finds those checkouts without a real
+The guest that serves the first turn finds those checkouts without a real
 `_build`, and §A links them.
 
 The cost is the one §C already accepts: the first `dune build` of each such

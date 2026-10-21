@@ -34,7 +34,7 @@ Apple backend 의 Keeper 가 새로 부팅할 때마다 masc 는 일회용 helpe
 ## 1. 결정
 
 - D1. `Boot` 분기에서 일회용 컨테이너를 띄우지 않는다. 볼륨이 이미 `discard` 기본값을 가지고 있으면 게스트 자신의 `container run` 말고 다른 `container run` 은 없다.
-- D2. `discard` 기본값은 부팅 때마다 호스트에서 읽어 확인한다. `container volume inspect` 가 주는 `source` 파일의 ext4 superblock 을 읽는다. 컨테이너를 띄우지 않는다. 값이 없으면 `tune2fs -o discard` 만 하는 helper 를 띄운다. 그 helper 가 실패하면 부팅을 거절한다(§4.1).
+- D2. `discard` 기본값은 부팅 때마다 호스트에서 읽어 확인한다. `container volume inspect` 가 주는 `source` 파일의 ext4 superblock 을 읽는다. 컨테이너를 띄우지 않는다. 값이 없으면 `tune2fs -o discard` 만 하는 helper 를 띄운다. 그 helper 가 실패하면 부팅을 거절한다. 그 거절은 타입이 있는 상태로 남고, 다시 확인할 때는 superblock 만 읽는다(§4.1).
 - D3. 진짜 `_build` 제거는 새로 부팅한 게스트 안에서 한다. `ensure_microvm_build_links` 의 scan 보다 먼저, Keeper 의 uid:gid 로, exec-shim runner 를 거쳐 실행한다. 먼저 이름을 바꾸고 그다음 지운다. `Adopt` 분기에서는 지우지 않는다(§4.2).
 - D4. `fstrim` 과 `remount,nodiscard` 를 지운다. `CAP_DAC_OVERRIDE` 도 필요 없어진다(§4.3).
 - D5. 하드 컷이다. 기존 work volume 34개는 모두 `discard` 기본값을 이미 가지고 있다(§6). 옮기는 코드나 운영자가 한 번 돌릴 명령은 없다.
@@ -113,7 +113,12 @@ helper 의 `-trim` 이름은 `Keeper_sandbox_container_name.Micro_vm_work_volume
 
 - 확인: 부팅 때마다 호스트가 `container volume inspect` 의 `configuration.source`(볼륨 이미지 파일)를 열어 superblock 을 읽는다. 오프셋 1024 의 superblock 에서 magic(`0xEF53`, 오프셋 `0x38`)과 `s_default_mount_opts`(오프셋 `0x100`)의 `EXT4_DEFM_DISCARD`(`0x0400`)를 본다. 이 시점에는 어떤 게스트도 볼륨을 붙이고 있지 않다(§2 의 1단계 뒤). 결과는 타입으로 나눈다. `Discard_default_set | Discard_default_absent | Superblock_unreadable of string`.
 - 쓰기: `Discard_default_absent` 일 때만 helper 를 띄운다. 지금 argv 에서 `CAP_DAC_OVERRIDE` 를 빼고 script 는 `findmnt` 와 `tune2fs -o discard` 만 한다. 새 Keeper 의 첫 부팅에서 한 번 일어나고, 그때는 40~65초 막힘이 한 번 생긴다. 다른 게스트가 볼륨을 붙이고 있으면 helper 는 시작하지 못한다. Virtualization.framework 는 VM 이 붙인 이미지를 다시 붙이지 않는다(10-06 측정, "The storage device attachment is invalid"). 그래서 helper 가 살아 있는 게스트의 볼륨을 두 번째로 마운트하는 일은 없다.
-- 실패: helper 가 실패하거나 `Superblock_unreadable` 이면 부팅을 거절한다. 게스트가 지운 블록이 영영 돌아가지 않는 볼륨으로 띄우지 않는다. 다음 부팅이 다시 확인한다. 볼륨을 만든 직후 서버가 죽어 기본값 없이 남아도, 다음 부팅의 확인이 helper 를 다시 띄운다.
+- 실패: helper 가 실패하거나 `Superblock_unreadable` 이면 부팅을 거절한다. 게스트가 지운 블록이 영영 돌아가지 않는 볼륨으로 띄우지 않는다. 볼륨을 만든 직후 서버가 죽어 기본값 없이 남으면, 다음 서버 프로세스의 첫 부팅이 helper 를 띄워 고친다(Q1).
+- 거절은 저절로 닫히지 않는다. 다음 부팅도 같은 볼륨, 같은 이미지로 같은 결과를 낸다. 그런데 횟수 제한이나 대기 시간은 두지 않는다(`docs/constitution.xml` 의 `forbidden#budget_gate`, 워크어라운드 거부 기준). 대신 거절을 타입이 있는 상태로 둔다. 이 상태는 운영자가 손대거나 볼륨이 바뀔 때까지 남는다.
+  - 상태: 그 Keeper 의 microVM 기록(`record_microvm_boot` 가 쓰는 메모리 안 registry)에 `Work_volume_refused of { volume_name; reason }` 을 둔다. `reason` 은 `Discard_helper_failed of { status; output }` 또는 `Superblock_unreadable of string` 이다. 상태에는 거절할 때 읽은 superblock 결과도 함께 둔다. 상태가 있는 동안의 시작은 superblock 만 다시 읽는다. 호스트 파일의 몇 바이트를 읽는 일이고 컨테이너를 띄우지 않는다. 새로 읽은 결과가 거절할 때와 다르면, 볼륨이 바뀐 것이므로 상태를 지우고 보통 길을 탄다(flag 가 있으면 부팅, 없으면 helper 한 번). 같으면 같은 거절을 돌려주고 helper 는 띄우지 않는다. 운영자의 `masc_keeper_sandbox_start` 는 상태를 지우고 helper 를 한 번 다시 허락한다. 상태를 디스크에 쓰지 않는 이유: 사실은 superblock 에 이미 있고, 따로 적은 기록은 운영자가 손으로 고친 뒤 낡는다. 그래서 서버를 재시작하면 상태가 사라지고 첫 부팅이 helper 를 한 번 더 띄운다(볼륨 하나, 재시작 한 번에 막힘 한 번).
+  - (a) 남는 신호: 그 게스트가 필요한 모든 도구 호출이 `microvm_start_failed` 로 실패하고, 메시지에 볼륨 이름과 `reason` 이 들어간다. Keeper 의 sandbox 상태(`Keeper_sandbox_control.live_status_json`, TUI sandbox 패널)에 `work_volume_refusal` 을 보인다. `guest_size_error` 처럼 읽을 때 superblock 을 새로 읽어 만들고, 저장하지 않는다. 이 거절로 턴이 끝나면 execution receipt 에 `Disp_operator_action_required` 와 새 reason `Reason_work_volume_refused` 를 달고, `needs_operator_broadcast` 가 운영자에게 알린다. 상태에 들어가는 순간 WARN 로그 한 줄을 남긴다.
+  - (b) 운영자가 할 일과 잃는 것: ① `container volume inspect <volume>` 의 `source` 를 읽기만 해서 확인한다(`xxd -s 1080 -l 2 -p` 가 `53ef`, `xxd -s 1280 -l 4 -p` 의 둘째 바이트에서 `0x04` 비트가 켜져 있으면 flag 가 있다. 지금 34개는 모두 `00040000` 이다). ② flag 만 없으면 helper 와 같은 argv 를 손으로 한 번 돌린다. `tune2fs` 가 있는 이미지(`masc-sandbox:general` 은 있다)를 쓴다. 잃는 것은 없고, 40~65초 막힘이 한 번 생긴다. 거절 상태에서는 게스트가 볼륨을 붙이지 않으므로 Keeper 를 멈출 필요는 없다. ③ superblock 을 못 읽거나 파일 시스템이 깨졌으면, 먼저 이미지를 복사해 둔다(`cp -c <source> <백업>`, APFS clone 이라 바로 끝난다). 그다음 일회용 컨테이너에서 `e2fsck` 를 돌리고, 고쳐지면 ②로 간다. ④ 그래도 안 되면 `container volume delete <volume>` 뒤 `masc_keeper_sandbox_start` 를 부른다. 다음 부팅이 새 볼륨을 만들고 helper 를 띄운다. 이때 `/masc-work/<keeper>` 전체를 잃는다. checkout, push 하지 않은 커밋, 커밋하지 않은 변경, Keeper 가 쓴 task·문서 파일이 다 사라진다. ③의 복사본이 남는 유일한 자료다. 복사본에서 파일을 꺼내는 방법은 정하지 않았다(Q7).
+  - (c) 언제 올라가나: 시간이나 횟수로 올라가지 않는다. 상태에 들어가는 순간 도구 오류, sandbox 상태, 로그에 보인다. 운영자 알림이 바로 나가는지는 Q7 의 둘째 답(턴을 시작 단계에서 끝낼지)에 달렸다. 상태는 운영자가 손대거나 superblock 이 바뀔 때까지 그대로 남는다.
 
 `Created` 결과(`ensure_work_volume_for`)에만 helper 를 띄우는 방법도 있다. 이 방법은 superblock 을 읽지 않는다. 대신 만든 직후 서버가 죽으면 기본값 없는 볼륨이 남고 아무도 고치지 않는다. 그래서 확인을 고른다(§10 Q1).
 
@@ -131,8 +136,8 @@ helper 의 `-trim` 이름은 `Keeper_sandbox_container_name.Micro_vm_work_volume
 
 "거의" 인 이유가 하나 있다. 한 Keeper 의 두 턴이 같은 이름으로 동시에 부팅하려 하면, 진 쪽은 `run` 이 실패한 뒤 이긴 쪽 게스트를 adopt 한다(`keeper_turn_sandbox_runtime.ml:1807-1845`). 진 쪽은 work volume 이 마운트됐는지만 보고 넘어가므로, 이긴 쪽이 아직 지우는 동안 진 쪽 턴이 빌드를 시작할 수 있다. 그래서 지우기를 두 단계로 나눈다.
 
-1. 이름 바꾸기: 지울 `_build` 를 같은 checkout 안의, scan 과 dune 이 쓰지 않는 이름으로 옮긴다. 같은 파일 시스템 안의 `rename` 이라 checkout 하나에 밀리초 단위다. 이 단계가 끝나면 `_build` 자리는 비고, scan 이 같은 부팅에서 링크를 만든다.
-2. 지우기: 옮긴 트리를 지운다. 어떤 빌드도 그 이름을 쓰지 않으므로, 진 쪽 턴의 빌드와 겹쳐도 그 빌드에는 닿지 않는다. 앞선 부팅에서 지우다 끊긴 트리도 같은 이름이라 여기서 함께 지운다.
+1. 이름 바꾸기: 옮길 자리는 한 곳으로 정한다. Keeper root 바로 아래의 `.masc-build-removing` 디렉토리다(`/masc-work/<keeper>/.masc-build-removing`). 지울 `_build` 마다 그 아래에 `mktemp -d` 로 새 디렉토리를 하나 만들고, `_build` 를 그 안으로 `mv` 한다. 같은 볼륨 안의 `rename` 이라 checkout 하나에 밀리초 단위다. 이 단계가 끝나면 `_build` 자리는 비고, scan 이 같은 부팅에서 링크를 만든다. scan 은 `_build` 라는 이름만 찾으므로 이 디렉토리를 보지 않는다.
+2. 지우기: `.masc-build-removing` 아래를 모두 지운다. 이번 부팅에 옮긴 것과 앞선 부팅에서 지우다 끊긴 것이 같은 자리에 있으므로 규칙은 하나다: 새 부팅의 2단계가 `.masc-build-removing` 아래를 비우고, 비면 그 디렉토리도 지운다. 그래서 이 디렉토리는 지우기가 끊긴 뒤에만 남아 보인다. Keeper root 자체가 checkout 인 Keeper 라면 그때 그 `git status` 에 보일 수 있다. 어떤 빌드도 이 자리를 쓰지 않으므로, 진 쪽 턴의 빌드와 겹쳐도 그 빌드에는 닿지 않는다.
 
 경합이 남는 구간은 `container run` 부터 1단계가 끝날 때까지다. 그 사이에 진 쪽 빌드가 시작되면 그 빌드는 `_build` 를 잃고 실패한다. 잃는 것은 빌드 결과물이고 소스가 아니다.
 
@@ -176,13 +181,21 @@ helper 의 `-trim` 이름은 `Keeper_sandbox_container_name.Micro_vm_work_volume
 테스트는 화면 글자나 로그 문장을 고정하지 않는다. argv 와 타입으로 본다.
 
 - V1. 부팅 argv(가짜 container CLI 를 주입한 테스트). 기본값이 있는 work volume 으로 새로 부팅하면 `run` argv 는 게스트의 것 하나뿐이다. helper 이름이 들어간 argv 가 없다. `fstrim` 을 실행하는 script 도 없다. 게스트 대상 `exec` 하나가 Keeper 의 uid:gid 로 제거 script 를 나른다. `Adopt` 분기는 제거 `exec` 를 보내지 않는다.
-- V2. superblock 읽기. 실제 ext4 레이아웃 바이트로 만든 작은 파일로 `Discard_default_set`, `Discard_default_absent`, `Superblock_unreadable`(짧은 파일, magic 이 다른 파일)을 본다. `Discard_default_absent` 일 때만 helper argv 가 나가는지, helper 실패와 `Superblock_unreadable` 이 부팅을 거절하는지도 본다.
-- V3. 제거 script. 지금 있는 실제 임시 트리 테스트를 새 뿌리(`/masc-work/<keeper>`)로 옮긴다. 지우는 것과 남기는 것의 경우는 지금과 같다. 이름을 바꾼 뒤 `_build` 자리가 비는지, 앞선 부팅이 남긴 트리를 지우는지, 이름 바꾸기 뒤에 새로 생긴 `_build` 는 건드리지 않는지를 더한다.
+- V2. superblock 읽기. 실제 ext4 레이아웃 바이트로 만든 작은 파일로 `Discard_default_set`, `Discard_default_absent`, `Superblock_unreadable`(짧은 파일, magic 이 다른 파일)을 본다. `Discard_default_absent` 일 때만 helper argv 가 나가는지, helper 실패와 `Superblock_unreadable` 이 부팅을 거절하는지도 본다. 거절 상태에서는 다음 시작이 superblock 만 읽고 helper argv 를 내지 않는지, flag 가 보이면 상태가 지워지고 부팅하는지, `masc_keeper_sandbox_start` 뒤에는 helper argv 가 한 번 나가는지, sandbox 상태 JSON 의 `work_volume_refusal` 이 상태와 같은 값을 보이는지도 본다.
+- V3. 제거 script. 지금 있는 실제 임시 트리 테스트를 새 뿌리(`/masc-work/<keeper>`)로 옮긴다. 지우는 것과 남기는 것의 경우는 지금과 같다. 더할 것: 1단계 뒤 `_build` 자리가 비고 옮긴 트리가 `<keeper root>/.masc-build-removing/<mktemp 이름>/` 에 있는지, 2단계 뒤 `.masc-build-removing` 이 없어지는지, 앞선 부팅이 남긴 `.masc-build-removing/<이름>` 도 지우는지, 1단계 뒤에 새로 생긴 `_build` 는 건드리지 않는지, 같은 checkout 이름이 두 번 나와도 `mktemp` 이름이 겹치지 않는지.
 - V4. 구현 전에 한 번 잰다. 살아 있는 게스트 하나에서 `discard` 를 켠 채 큰 `_build` 를 지우는 동안 다른 컨테이너의 exec/ls 가 막히는지 본다(U4). 같은 때 그 트리에 Keeper uid 가 아닌 주인의 파일이나 쓸 수 없는 디렉토리가 있는지도 센다. `find <root> -name _build -prune ...` 를 읽기만 한다. 둘 중 하나라도 나쁘면 §4.2 를 다시 정한다.
 - V5. 배포 뒤 라이브. 재시작부터 마지막 새 부팅 뒤 5분까지 센다.
   - masc 가 띄운 일회용 컨테이너: 2초마다 `container ls -a --format json` 을 뽑아 helper 종류의 이름이 나타난 횟수를 센다. 새 Keeper 가 없으면 0 이어야 한다.
   - 같은 초에 몰린 실패: 20초를 넘기고 exit≠0 으로 끝난 `shell_ir dispatch` 의 수와 그것들이 끝난 초, 그리고 `container exec`/`container list` 에 대한 `Process_eio` timeout 의 수. 10-20 23:28 재시작(같은 기준으로 8건, timeout 3건)과 비교한다.
-  - 몰린 실패가 남으면 그 초 가까이에 끝난 컨테이너를 찾는다. 게스트 교체(U2)라면 그 숫자가 U2 의 측정이 된다.
+  - 게스트 교체(U2, Q3 에 따라 따로 잰다): 재시작 창 동안 2초마다 `container ls -a --format json` 을 부르는 sampler 를 돌린다. sampler 는 호출마다 시작·끝 시각과 각 `masc-keeper-vm-*` 이름의 생성 시각을 적는다. `ls` 자신이 막히면 그 호출의 걸린 시간이 곧 막힌 구간이다. 결과는 재시작 한 번에 한 줄씩 아래 표에 채운다.
+
+    | 재시작(KST) | 새로 부팅한 게스트 N | 옛 게스트가 사라진 순간 수 | `ls` 가 20초 넘게 걸린 구간 수, 가장 긴 것 | 그 구간 가운데 끝 2초 안에 옛 게스트가 사라진 것 | 20초 넘고 exit≠0 인 dispatch | 그 가운데 끝난 초가 막힌 구간 끝과 같은 것 | `Process_eio` timeout |
+    |---|---|---|---|---|---|---|---|
+    | 10-20 23:28 (helper 있음, 비교용) | 18 (helper 줄 수) | 재지 않음 | 재지 않음 | 재지 않음 | 8 | 8 (helper 끝과 같은 초) | 3 |
+
+    - N: 재시작 뒤 생성 시각이 바뀐 `masc-keeper-vm-*` 이름의 수.
+    - 옛 게스트가 사라진 순간: 옛 생성 시각으로 마지막에 보인 sample 과, 그 이름이 처음 안 보인 sample 사이.
+    - 막힌 구간의 끝 2초 안에 옛 게스트가 사라진 것이 많으면, 게스트 교체가 막힘을 만든다는 측정이 된다. 그때의 구간 길이가 U2 의 값이다.
 - V6. 호스트 디스크. 하루 뒤 Keeper 세 개의 `volume.img` 호스트 크기(`du`)가 게스트 안의 사용량과 비슷한지 본다. `fstrim` 없이도 블록이 돌아가는지 확인하는 것이다.
 
 ## 8. 앞선 RFC 와 문서에서 바뀌는 곳
@@ -209,7 +222,8 @@ RFC-keeper-build-output-returns-to-a-disposable-volume 에서 이 커밋이 바�
 ## 9. 구현 범위
 
 - `Keeper_sandbox_microvm`: `work_volume_reclaim_script`, `fstrim_guest_path`, `mount_guest_path`, `reclaim_apple_work_volume` 를 지운다. `apple_work_volume_trim_argv` 는 tune2fs 만 하는 helper argv 로 바꾸고 `CAP_DAC_OVERRIDE` 를 뺀다. `build_output_removal_script` 는 게스트 경로를 받는다. superblock 읽기와 그 결과 타입을 더한다.
-- `Keeper_turn_sandbox_runtime`: `Boot` 분기에서 `reclaim_work_volume_space` 를 superblock 확인(+필요할 때만 helper)으로 바꾼다. 새 부팅 뒤 `ensure_microvm_build_links` 앞에 게스트 안 제거 `exec` 를 넣는다.
+- `Keeper_turn_sandbox_runtime`: `Boot` 분기에서 `reclaim_work_volume_space` 를 superblock 확인(+필요할 때만 helper)으로 바꾼다. `microvm_start_failure` 에 `Work_volume_refused` 를 더하고, 거절 상태를 microVM 기록에 둔다. 새 부팅 뒤 `ensure_microvm_build_links` 앞에 게스트 안 제거 `exec` 를 넣는다.
+- `Keeper_sandbox_control.live_status_json` 에 `work_volume_refusal` 을, `Keeper_execution_receipt` 에 `Reason_work_volume_refused` 를 더한다. receipt 쪽은 Q7 의 둘째 답에 따라 범위가 정해진다.
 - 테스트: `test/test_keeper_sandbox_microvm.ml` 의 trim argv/script/정리 테스트(`:2114-2263`)를 V1~V3 에 맞게 바꾼다.
 - 바꾸기 전에 지우는 함수마다 호출하는 곳을 `git grep` 으로 모두 센다.
 
@@ -227,3 +241,7 @@ RFC-keeper-build-output-returns-to-a-disposable-volume 에서 이 커밋이 바�
   - 결정(2026-10-21, 운영자): 이름을 바꾼 뒤 지운다(§4.2 그대로).
 - Q6. apple/container 에 이 측정(1.3.1, 컨테이너 하나 종료 → `containerList` 42~65초 막힘)을 올릴지.
   - 결정(2026-10-21, 운영자): 올리지 않는다. masc 쪽에서 helper 를 부팅 경로에서 빼는 일을 먼저 한다.
+- Q7. §4.1 의 거절 상태에 관한 셋.
+  - 거절을 메모리 안에만 두고, 서버 재시작 때 helper 를 한 번 다시 띄우는 것을 받아들일지. 디스크에 쓰면 재시작해도 다시 띄우지 않는다. 대신 superblock 이 이미 가진 사실을 한 번 더 적는 기록이 생긴다.
+  - 거절 상태의 Keeper 가 턴을 계속 받게 둘지, 아니면 턴 시작 단계에서 `Reason_work_volume_refused` 로 끝낼지. 계속 받으면 그 턴의 도구는 모두 실패하고, 턴이 그 실패로 끝나지 않으면 운영자 알림(`needs_operator_broadcast`)도 나가지 않는다. 끝내면 알림이 바로 나가지만, 턴 시작에 볼륨 확인이라는 단계가 하나 더 붙는다.
+  - §4.1 (b)④ 뒤 복사본에서 파일을 꺼내는 방법을 정할지. `container volume` 에는 이미지를 들여오는 명령이 없다. 꺼내려면 호스트 e2fsprogs 나 Apple 이 관리하는 볼륨 폴더에 손을 대야 한다.

@@ -50,6 +50,7 @@ type failure =
   | Not_a_note of string
   | Fret_out_of_range of string
   | Chord_string_twice of int
+  | Tie_without_note of int
   | Effect_without_note
   | Unsupported_rhythm of string
   | No_music
@@ -59,10 +60,17 @@ type failure =
   | Alternate_ending_out_of_range of string
   | Repeat_without_bar
 
+(* How a note sounds on its beat: picked, or held on from the earlier note on
+   its string. alphaTex writes the held one with [-] where the fret goes. *)
+type attack =
+  | Struck
+  | Tied
+
 type note = {
   fret : string;
   on_string : int;
   marked : bool;
+  attack : attack;
 }
 
 (* A beat's duration, the way a reader shows it: the plain lengths, the dot
@@ -179,6 +187,9 @@ let failure_text = function
       Printf.sprintf "fret %s is not a fret this draws" (quoted fret)
   | Chord_string_twice string ->
       Printf.sprintf "a chord with two notes on string %d" string
+  | Tie_without_note string ->
+      Printf.sprintf "a tie on string %d with no note on that string in its bar or the three before"
+        string
   | Effect_without_note -> "an effect with no note before it"
   | Unsupported_rhythm markup ->
       Printf.sprintf "{%s} changes a beat's length, which this does not draw"
@@ -397,6 +408,12 @@ let max_strings = 12
    not frets. *)
 let max_fret_digits = 2
 
+(* What stands where the fret goes: a fret, or [-] for a tie, which has no
+   fret of its own until the note it holds is found. *)
+type written =
+  | Fret of string
+  | Tie
+
 type item_error =
   | Item_not_a_note
   | Item_bad_duration of string
@@ -406,7 +423,9 @@ type item_error =
 let note_item word =
   let limit = String.length word in
   let rec digits i = if i < limit && is_digit word.[i] then digits (i + 1) else i in
-  let fret_stop = if limit > 0 && word.[0] = 'x' then 1 else digits 0 in
+  let fret_stop =
+    if limit > 0 && (word.[0] = 'x' || word.[0] = '-') then 1 else digits 0
+  in
   if fret_stop = 0 || fret_stop >= limit || word.[fret_stop] <> '.' then
     Error Item_not_a_note
   else if fret_stop > max_fret_digits then
@@ -418,7 +437,8 @@ let note_item word =
       match int_of_string_opt (String.sub word (fret_stop + 1) (string_stop - fret_stop - 1)) with
       | None -> Error Item_not_a_note
       | Some on_string ->
-          let note = { fret = String.sub word 0 fret_stop; on_string; marked = false } in
+          let written = if word.[0] = '-' then Tie else Fret (String.sub word 0 fret_stop) in
+          let note = (written, on_string) in
           if string_stop = limit then Ok (note, None)
           else if word.[string_stop] <> '.' then Error Item_not_a_note
           else begin
@@ -484,17 +504,28 @@ let ticks_of_said said = span_of_duration (Plain said)
 
 (* A note names a string the tuning has. The tuning is settled before the
    first note ([Tuning_after_music]), so this is known as each note is read. *)
-let on_tuning ~strings note =
-  if note.on_string < 1 || note.on_string > strings then
-    Error (String_past_tuning { string = note.on_string; strings })
-  else Ok note
+let on_tuning ~strings on_string =
+  if on_string < 1 || on_string > strings then
+    Error (String_past_tuning { string = on_string; strings })
+  else Ok on_string
+
+(* A written note with its fret known. A tie takes the fret of the note it
+   holds, which [held] finds by string among the beats already read. *)
+let sounding_note ~held written on_string =
+  match written with
+  | Fret fret -> Ok { fret; on_string; marked = false; attack = Struck }
+  | Tie -> (
+      match held on_string with
+      | Some fret -> Ok { fret; on_string; marked = false; attack = Tied }
+      | None -> Error (Tie_without_note on_string))
 
 (* The bracketed members, whitespace apart. A chord's time is the bracket's
    [.dur] alone, so a member carries none. A member may carry technique markup
    in braces, written against it or after a space, which marks that note. Two
    notes on one string cannot both be drawn in the cell they share, so a chord
-   never holds more notes than the tuning has strings. *)
-let chord_notes ~strings inner =
+   never holds more notes than the tuning has strings. A tied member holds a
+   note from an earlier beat, never one of its own chord. *)
+let chord_notes ~strings ~held inner =
   let ( let* ) = Result.bind in
   let limit = String.length inner in
   let rec members found index =
@@ -534,11 +565,13 @@ let chord_notes ~strings inner =
         match note_item word with
         | Ok (_, Some _) -> Error (Not_a_note word)
         | Error error -> Error (item_failure word error)
-        | Ok (note, None) ->
-            let* note = on_tuning ~strings note in
-            if List.exists (fun earlier -> earlier.on_string = note.on_string) placed then
-              Error (Chord_string_twice note.on_string)
-            else notes ({ note with marked } :: placed) rest)
+        | Ok ((written, on_string), None) ->
+            let* on_string = on_tuning ~strings on_string in
+            if List.exists (fun earlier -> earlier.on_string = on_string) placed then
+              Error (Chord_string_twice on_string)
+            else
+              let* note = sounding_note ~held written on_string in
+              notes ({ note with marked } :: placed) rest)
   in
   let* found = members [] 0 in
   match found with
@@ -894,6 +927,35 @@ let collect_endings tokens =
 let string_count state =
   List.length (Option.value state.b_tuning ~default:default_tuning)
 
+(* The bars before a tie's own that alphaTab 1.8.4 looks back through for the
+   note the tie holds (Note.findTieOrigin, _maxOffsetForSameLineSearch). *)
+let tie_bars_back = 3
+
+(* The fret a tie on [on_string] holds, found the way alphaTab finds it: the
+   latest earlier note on that string, past rests and notes on other strings,
+   in the tie's bar or the three before it. An empty bar counts as one of the
+   three, as alphaTab reads it as a bar of rest. With none there, alphaTab
+   plays the tie as an open string; the reader refuses it instead. *)
+let held_fret state on_string =
+  let on_this_string (sounding : sounding) =
+    List.find_map
+      (fun (note : note) -> if note.on_string = on_string then Some note.fret else None)
+      sounding.s_notes
+  in
+  let rec in_bars back bars =
+    if back = 0 then None
+    else
+      match bars with
+      | [] -> None
+      | (_, beats) :: earlier -> (
+          match List.find_map on_this_string beats with
+          | Some fret -> Some fret
+          | None -> in_bars (back - 1) earlier)
+  in
+  match List.find_map on_this_string state.b_beats with
+  | Some fret -> Some fret
+  | None -> in_bars tie_bars_back state.b_measures
+
 let beat_of_word state word =
   let ( let* ) = Result.bind in
   let limit = String.length word in
@@ -931,10 +993,11 @@ let beat_of_word state word =
             | None -> Error (Duration_outside_subset word))
        | Some _, [] -> Error (Not_a_note word)
        | None, _ -> Error (Duration_outside_subset word))
-  | '0'..'9' | 'x' ->
+  | '0'..'9' | 'x' | '-' ->
       (match note_item word with
-       | Ok (note, said) ->
-           let* note = on_tuning ~strings:(string_count state) note in
+       | Ok ((written, on_string), said) ->
+           let* on_string = on_tuning ~strings:(string_count state) on_string in
+           let* note = sounding_note ~held:(held_fret state) written on_string in
            push_beat ?said [ note ] state
        | Error error -> Error (item_failure word error))
   | _ -> Error (Not_a_note word)
@@ -1154,7 +1217,7 @@ let read source =
               let* state = mark_latest_beat state in
               step state rest))
     | Tk_chord (inner, said) :: rest ->
-        let* notes = chord_notes ~strings:(string_count state) inner in
+        let* notes = chord_notes ~strings:(string_count state) ~held:(held_fret state) inner in
         let* state = push_beat ?said notes state in
         step state rest
     | Tk_bar :: rest ->

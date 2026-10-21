@@ -13,7 +13,8 @@ let failure : Score.failure Alcotest.testable =
     ( = )
 
 (* A score as (units, beats) for each measure; a beat as (start, span, notes);
-   a note as "fret@string", with a [*] when technique markup rode on it. *)
+   a note as "fret@string", led by a [-] when it is tied and held on from the
+   note before it, with a [*] when technique markup rode on it. *)
 let shape (score : Score.t) =
   List.map
     (fun (measure : Score.measure) ->
@@ -25,7 +26,9 @@ let shape (score : Score.t) =
             , ( beat.marked
               , List.map
                   (fun (note : Score.note) ->
-                    Printf.sprintf "%s@%d%s" note.fret note.on_string
+                    Printf.sprintf "%s%s@%d%s"
+                      (match note.attack with Score.Struck -> "" | Score.Tied -> "-")
+                      note.fret note.on_string
                       (if note.marked then "*" else ""))
                   beat.notes ) ))
           measure.beats ))
@@ -81,6 +84,54 @@ let test_a_length_written_after_the_markup () =
 let test_a_dead_note () =
   check_music "x is a fret" ":4 x.6 3.6"
     [ 192, [ 0, 96, ( false, [ "x@6" ] ); 96, 96, ( false, [ "3@6" ] ) ] ]
+
+(* [-] where the fret goes is a tie, not a rest: the note holds the fret of
+   the latest earlier note on its string. alphaTab 1.8.4 read every case
+   below the same way (Note.findTieOrigin). *)
+let test_a_tie_holds_the_note_before_it () =
+  check_music "on the next beat" ":4 7.4 -.4"
+    [ 192, [ 0, 96, ( false, [ "7@4" ] ); 96, 96, ( false, [ "-7@4" ] ) ] ];
+  check_music "past a rest" ":4 7.4 r -.4"
+    [ 288, [ 0, 96, ( false, [ "7@4" ] ); 96, 96, ( false, [] ); 192, 96, ( false, [ "-7@4" ] ) ] ];
+  check_music "past a note on another string" ":4 7.4 5.3 -.4"
+    [ 288, [ 0, 96, ( false, [ "7@4" ] ); 96, 96, ( false, [ "5@3" ] ); 192, 96, ( false, [ "-7@4" ] ) ] ];
+  check_music "a tie held by a tie" ":4 7.4 -.4 -.4"
+    [ 288, [ 0, 96, ( false, [ "7@4" ] ); 96, 96, ( false, [ "-7@4" ] ); 192, 96, ( false, [ "-7@4" ] ) ] ];
+  check_music "across a bar line, with its own length" ":4 7.4 | -.4.8"
+    [ 96, [ 0, 96, ( false, [ "7@4" ] ) ]; 48, [ 0, 48, ( false, [ "-7@4" ] ) ] ];
+  check_music "three bars back" ":4 7.4 | 5.3 | 5.3 | -.4"
+    [ 96, [ 0, 96, ( false, [ "7@4" ] ) ]; 96, [ 0, 96, ( false, [ "5@3" ] ) ]
+    ; 96, [ 0, 96, ( false, [ "5@3" ] ) ]; 96, [ 0, 96, ( false, [ "-7@4" ] ) ] ];
+  check_music "chord members" ":4 (7.4 5.3) (-.4 -.3)"
+    [ 192, [ 0, 96, ( false, [ "7@4"; "5@3" ] ); 96, 96, ( false, [ "-7@4"; "-5@3" ] ) ] ];
+  check_music "with markup after it" ":4 7.4 -.4{h}"
+    [ 192, [ 0, 96, ( false, [ "7@4" ] ); 96, 96, ( false, [ "-7@4*" ] ) ] ];
+  (* alphaTab plays these as an open string, which [-] does not say. *)
+  check_failure "with no note before it" ":4 -.4 3.3" (Tie_without_note 4);
+  check_failure "with the note only on another string" ":4 7.3 -.4" (Tie_without_note 4);
+  check_failure "four bars back" ":4 7.4 | 5.3 | 5.3 | 5.3 | -.4" (Tie_without_note 4);
+  check_failure "empty bars count as bars" ":4 7.4 | | | | -.4" (Tie_without_note 4);
+  check_failure "a chord member holds no member of its own chord" ":4 (7.4 -.3)"
+    (Tie_without_note 3);
+  check_failure "on a string the tuning lacks" ":4 7.6 -.7"
+    (String_past_tuning { string = 7; strings = 6 });
+  check_failure "a dash with no string" ":4 7.4 -" (Not_a_note "-")
+
+(* The Bass VI solo a Keeper sent on 2026-10-21 failed the whole preview at
+   its first [-.4.8]. Its first bar, as alphaTab 1.8.4 reads it. *)
+let test_a_bass_vi_line_with_ties () =
+  check_music "ties after notes on the same string"
+    "\\title \"Bamseom - Solo Rise v1\"\n\
+     \\tempo 76\n\
+     \\instrument 34\n\
+     \\tuning E3 B2 G2 D2 A1 E1\n\
+     \\clef f4\n\
+     .\n\
+     \\ts 4 4\n\
+     3.5.8{txt \"C | C major tones\"} 5.2.16 5.3.16 7.4.4 -.4.8 5.4.4 -.4.8 |"
+    [ 384, [ 0, 48, ( false, [ "3@5*" ] ); 48, 24, ( false, [ "5@2" ] ); 72, 24, ( false, [ "5@3" ] )
+           ; 96, 96, ( false, [ "7@4" ] ); 192, 48, ( false, [ "-7@4" ] ); 240, 96, ( false, [ "5@4" ] )
+           ; 336, 48, ( false, [ "-5@4" ] ) ] ]
 
 (* Technique markup is not drawn, and the note it rode on is still there:
    same count, same string, same fret, marked. *)
@@ -719,6 +770,9 @@ let () =
         ; Alcotest.test_case "a length written after the markup" `Quick
             test_a_length_written_after_the_markup
         ; Alcotest.test_case "a dead note" `Quick test_a_dead_note
+        ; Alcotest.test_case "a tie holds the note before it" `Quick
+            test_a_tie_holds_the_note_before_it
+        ; Alcotest.test_case "a Bass VI line with ties" `Quick test_a_bass_vi_line_with_ties
         ; Alcotest.test_case "markup marks the note and keeps it" `Quick
             test_markup_marks_the_note_and_keeps_it
         ; Alcotest.test_case "what is read and not played" `Quick

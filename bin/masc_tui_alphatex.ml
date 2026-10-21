@@ -33,9 +33,19 @@ let failure_text = function
    width for each string. The whole tab still grows with the score -- about
    three lines of pane for every measure of whole rests on twelve strings. *)
 
-(* What a note writes on its line: its fret, and a [*] after it when it
-   carried technique markup that is not drawn. *)
-let note_text (note : Score.note) = if note.marked then note.fret ^ "*" else note.fret
+(* What a note writes on its line: its fret, in parentheses when it is tied
+   and held on rather than picked, and a [*] after it when it carried
+   technique markup that is not drawn. alphaTab's own tablature hides a tied
+   note inside a bar; this tab has no tie arc or stem to show it by, and a
+   hidden note would read as a rest, so every tied note keeps its fret in the
+   parentheses alphaTab gives one at the start of a bar. *)
+let note_text (note : Score.note) =
+  let fret =
+    match note.attack with
+    | Score.Struck -> note.fret
+    | Score.Tied -> "(" ^ note.fret ^ ")"
+  in
+  if note.marked then fret ^ "*" else fret
 
 (* The rhythm line names each beat's length with one letter at its first
    cell, the way ASCII tab writes them: [w h q e s] for the whole, half,

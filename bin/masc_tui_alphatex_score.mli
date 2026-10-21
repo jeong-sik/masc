@@ -3,7 +3,11 @@
     The subset read: the directives [\title], [\tempo], [\ts] and [\tuning],
     and the lone [.] that ends them; durations [:1] [:2] [:4] [:8] [:16];
     notes [fret.string] with an optional [.dur], the fret one or two digits or
-    [x]; chords [(…).dur]; rests [r] and [r.dur]; and bars [|]. A beat that
+    [x], or [-] for a tie; chords [(…).dur]; rests [r] and [r.dur]; and bars
+    [|]. A tie holds the latest earlier note on its string, past rests and
+    notes on other strings, in its bar or the three before it -- where
+    alphaTab 1.8.4 looks. A tie with no such note fails: alphaTab would play
+    it as an open string, which is not what [-] says. A beat that
     says its own duration sets it for the beats after it. [\title],
     [\subtitle], [\tempo] and [\ts] are kept on the score: the pane draws them
     on the header line ahead of the tab, with the subtitle behind the title. A
@@ -100,6 +104,7 @@ type failure =
   | Not_a_note of string  (** the word as written *)
   | Fret_out_of_range of string  (** more digits than a fret has *)
   | Chord_string_twice of int  (** the string two chord members share *)
+  | Tie_without_note of int  (** the string of a tie with no note to hold *)
   | Effect_without_note
   | Unsupported_rhythm of string  (** the markup: a dot, a tuplet, a grace note *)
   | No_music  (** directives alone: no note and no rest *)
@@ -115,10 +120,16 @@ val failure_text : failure -> string
 (** Counts are in ticks: a whole note is 384, so every plain length and
     every dotted or tuplet form lands on an integer. *)
 
+(** How a note sounds on its beat. *)
+type attack =
+  | Struck  (** picked on its beat *)
+  | Tied  (** [-]: held on from the earlier note on its string *)
+
 type note = {
-  fret : string;  (** as written; [x] for a dead note *)
+  fret : string;  (** as written, [x] for a dead note; a tie's is the fret it holds *)
   on_string : int;  (** 1 is the highest string; always one the tuning has *)
   marked : bool;  (** technique markup rode on it *)
+  attack : attack;
 }
 
 type duration =

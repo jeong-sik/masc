@@ -21,7 +21,7 @@ pnpm exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorker
 pnpm exec tsc --noEmit
 ```
 
-Six files / 62 tests pass; TypeScript exits 0. `dashboard-vitest.txt` is the actual test output. `ocaml-parser.json` records ten changed ML/MLI files and parser-only results. `git diff --check` also passes.
+Six files / 62 tests pass; TypeScript exits 0. `dashboard-vitest.txt` retains the actual test output with trailing blank lines removed. `ocaml-parser.json` records ten changed ML/MLI files and parser-only results. `git diff --check` also passes.
 
 The new host behavior tests cover unreconciled reads, the exact declaration identity join, conflicting/incomplete observations, no worker side effects and four different applications with the same empty worker inventory. The TUI test checks decoded state and refused contradictory protocol values rather than new screen wording/layout assertions. These OCaml test sources have not yet executed.
 
@@ -34,3 +34,8 @@ The new host behavior tests cover unreconciled reads, the exact declaration iden
 Request one exact-source `addon-lifecycle` native proof and the three changed direct consumer suites (`test_lane_addon_reconcile,test_server_lane_inventory,test_tui_lane_inventory`) on the final published candidate. Dispatch acceptance is not a passing result. The native artifact must contain matching TUI/server/key-generator identities and completed behavior results. Actual On/Off/reconnect in an isolated workspace, original/new incarnations, cleanup status and original receipts need separate API and visible TUI evidence. No live operator runtime has been replaced.
 
 The older native run [39555509454](https://github.com/jeong-sik/masc/actions/runs/39555509454) failed compiling `connection_worker_lines`; its 5 KB artifact contains only build diagnostics. The type annotation repair is present in this source through main, but that does not prove a rebuilt executable.
+
+
+## Frozen execution requests
+
+Native run [39592340135](https://github.com/jeong-sik/masc/actions/runs/39592340135) selects product source `5840bab469e8277194e405e6f2ec2cd712fc614e` and the fixed `addon-lifecycle` scenario. Minimal run [39592343953](https://github.com/jeong-sik/masc/actions/runs/39592343953) selects that same candidate and `test_lane_addon_reconcile,test_server_lane_inventory,test_tui_lane_inventory`. Both dispatches were accepted; results and artifacts remain unverified. The later evidence-only correction removes trailing blank lines from the retained log and records these request IDs. It changes no product/test source blob; future artifact evidence must name its actual `5840bab…` product source, not a later documentation head.

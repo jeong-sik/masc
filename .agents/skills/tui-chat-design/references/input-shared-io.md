@@ -84,6 +84,23 @@
   증명이나 재전송 권한이 아니고 동명 제목을 증거로 쓰지 않는다. 삭제·archive 뒤에도
   사실을 유지하며 원래 ID 재사용을 막는다. TUI의 자동 재조회·재시작 후 입력 복구는 별개다.
   기록 보관·backlog 직렬화/해석·ID 예약 순회와 명시적 조회 비용도 실측 분모에 포함한다.
+- `/task-inspect`는 같은 Keeper와 확인된 원래 workspace의 보관된 생성 요청을 읽는다.
+  `[`/`]`의 명시적 이력 선택은 원래 wrapper identity를 유지하고 제목으로 합치지 않는다.
+  생성 transport 종단 사실과 조회 source는 별개다. 조회는 원래 request ID·두 workspace
+  경로·양의 backlog revision·상태/Task ID cardinality를 검증하고, 미관측·단일 기록·복수
+  기록·실패/중단을 typed 상태로 유지한다. 재조회는 명시적 `r`에서만 시작하며 실패해도
+  마지막 원래 사실을 남긴다. 단일 ready 기록의 `o`만 기존 Task 조회를 여는 명시적 의도다.
+  현재 loaded Task 행이 없으면 inspector를 유지하고 현재 존재 미확인을 알린다. 생성
+  사실을 global Task 목록의 존재로 추정하거나 일반 목록으로 조용히 보내지 않는다.
+  조회가 입력 복구·생성 replay·Keeper handoff·현재 Task 상태나 유용한 작업 완료를 허가하지 않는다.
+  viewer·원래 wrapper·workspace authority/read epoch·ticket과 pending 객체가 함께 맞아야
+  적용한다. 닫기·이력 이동·workspace 철회는 응답 권한을 먼저 retire하고 기존 관측 job만
+  취소 요청한다. 실제 worker 정리와 pending UI source 종료는 별개다. 늦은 원래 응답을
+  다시 연 같은 요청이나 다른 요청에 적용하지 않고, 새 입력·첨부·참조를 건드리지 않는다.
+  원래 요청은 unread source만 할당하고 명시적 조회에서 문서를 준비한다. 같은 문서로
+  실제 행과 viewport/scroll을 계산하며 원래 본문·오류와 모든 복수 ID를 이어 읽을 수 있다.
+  source/문서/마지막 사실 보관·명시적 이력 탐색·기존 MCP session/인증/worker 비용을 남기고
+  화면 문구/행 순서 검사나 새 timer·retry·cap을 만들지 않는다. 렌더링 소스는 paint 증거가 아니다.
 - Keeper 생성은 editor가 반환한 뒤 workspace 확인과 create-only POST를 소유 fiber에서
   수행한다. 확인 중·전송 중·종료 상태는 원래 요청에 묶고, 전송 전 중단·서버 거절·
   생성 확인·결과 미확인을 구분한다. POST 진입 뒤 취소·연결 실패는 결과 미확인이며

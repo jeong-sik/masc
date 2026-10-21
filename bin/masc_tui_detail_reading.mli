@@ -1,4 +1,4 @@
-(** An immutable, read-only capture of a selected object's complete details.
+(** An immutable, read-only document for a selected object's complete details.
     The surface owns freshness and selection; this reader never follows a
     changing cursor, refreshes data, or authorizes an action. *)
 
@@ -8,6 +8,9 @@ type row = Heading of string | Content of string | Note of string
 type movement = First | Last | By of int
 
 val create : title:string -> section list -> t
+val create_observation : title:string -> section list -> t
+(** Source-owned observation documents use their own refresh controls and
+    lifecycle notes; they do not show the captured-document reopen hint. *)
 val replace : title:string -> section list -> t -> t
 (** Replace the same source observation while retaining its independent scroll intent. *)
 val title : t -> string

@@ -7905,6 +7905,22 @@ type task_dispatch_request = {
   tdr_authority : workspace_authority;
   tdr_editor : Masc_tui_message_input.revision;
   tdr_editor_keeper : string option;
+  mutable tdr_inspection : Masc_tui_task_creation_read.t;
+  mutable tdr_inspection_pending : task_creation_read_request option;
+}
+and task_creation_read_request = {
+  tcr_original : task_dispatch_request;
+  tcr_authority : workspace_authority;
+  tcr_reading : unit ref;
+  tcr_ticket : Masc_tui_task_creation_read.request;
+  tcr_job : unit ref;
+}
+type task_creation_reader = {
+  tci_original : task_dispatch_request;
+  tci_authority : workspace_authority;
+  tci_reading : unit ref;
+  tci_surface : surface;
+  tci_target : string option;
 }
 
 type keeper_composer_draft = {
@@ -8130,6 +8146,7 @@ type state = {
      never becomes an action target when selection or polling changes. *)
   mutable chat_call_reader : (chat_call_origin * Masc_tui_chat_call_reader.t) option;
   mutable chat_call_pending : chat_call_request option;
+  mutable task_creation_reader : task_creation_reader option;
   mutable detail_reading: (workspace_authority * surface * Masc_tui_detail_reading.t) option;
   mutable keeper_deletions_open: bool;
   mutable keeper_deletions_loading: bool;
@@ -10480,7 +10497,8 @@ let begin_task_dispatch state intent =
   let request = {tdr_dispatch=Masc_tui_task_dispatch.create intent;
     tdr_authority=state.workspace_authority;
     tdr_editor=Masc_tui_message_input.revision state.msg_input;
-    tdr_editor_keeper=state.msg_target_keeper_name} in
+    tdr_editor_keeper=state.msg_target_keeper_name;
+    tdr_inspection=Masc_tui_task_creation_read.create intent;tdr_inspection_pending=None} in
   state.task_dispatch_requests <- request :: state.task_dispatch_requests;
   state.retained_task_dispatch_requests <- request :: state.retained_task_dispatch_requests;
   request
@@ -10516,8 +10534,7 @@ let restore_task_dispatch_input state request =
     true
   end else false
 
-let recover_task_dispatch_input state ~keeper =
-  let eligible request =
+let task_dispatch_eligible state ~keeper request =
     let intent = Masc_tui_task_dispatch.intent request.tdr_dispatch in
     String.equal intent.keeper keeper
     && (match intent.workspace with
@@ -10528,14 +10545,104 @@ let recover_task_dispatch_input state ~keeper =
         | None -> request.tdr_authority = state.workspace_authority)
     && match Masc_tui_task_dispatch.progress request.tdr_dispatch with
        | Completed {outcome=(Not_sent _ | Server_error _ | Unconfirmed _);_} -> true
-       | Not_started | Reserved | Preparing | Sending | Completed {outcome=Created _;_} -> false in
-  match List.find_opt eligible state.retained_task_dispatch_requests with
+       | Not_started | Reserved | Preparing | Sending | Completed {outcome=Created _;_} -> false
+
+let retained_task_dispatch state ~keeper =
+  List.find_opt (task_dispatch_eligible state ~keeper) state.retained_task_dispatch_requests
+
+let recover_task_dispatch_input state ~keeper =
+  match retained_task_dispatch state ~keeper with
   | None -> None
   | Some request ->
     state.msg_command_menu <- Masc_tui_command.Menu_idle;
     Masc_tui_message_input.clear state.msg_input;
     Masc_tui_message_input.insert state.msg_input (Masc_tui_task_dispatch.intent request.tdr_dispatch).original;
     Some request
+
+let current_task_creation_reader state =
+  match state.task_creation_reader with
+  | Some reader when reader.tci_authority=state.workspace_authority
+      && reader.tci_reading==state.workspace_read_authority && reader.tci_surface=state.view
+      && reader.tci_target=state.msg_target_keeper_name
+      && state.workspace_identity=Workspace_identity_match && server_authority_ready state ->
+    let intent=Masc_tui_task_dispatch.intent reader.tci_original.tdr_dispatch in
+    (match intent.workspace,state.server_identity with
+     | Some expected,Some current when server_workspace_matches ~expected:(Some expected) (Ok current) -> Some reader
+     | (Some _ | None),(Some _ | None) -> None)
+  | Some _ | None -> None
+
+let retire_task_creation_request original ~reason =
+  original.tdr_inspection <- Masc_tui_task_creation_read.suspend ~reason original.tdr_inspection;
+  original.tdr_inspection_pending <- None
+
+let close_task_creation_inspection state ~reason =
+  Option.iter (fun reader -> retire_task_creation_request reader.tci_original ~reason)
+    state.task_creation_reader;
+  state.task_creation_reader <- None
+
+let task_creation_inspectable state ~keeper =
+  List.filter (fun original -> task_dispatch_eligible state ~keeper original
+    && Option.is_some (Masc_tui_task_dispatch.intent original.tdr_dispatch).workspace)
+    state.retained_task_dispatch_requests
+
+let select_task_creation_inspection state original =
+  let keeper=(Masc_tui_task_dispatch.intent original.tdr_dispatch).keeper in
+  if not (List.exists ((==) original) (task_creation_inspectable state ~keeper)) then false
+  else begin
+    Option.iter (fun previous -> if previous.tci_original!=original then
+      retire_task_creation_request previous.tci_original ~reason:Masc_tui_task_creation_read.Interrupted)
+      state.task_creation_reader;
+    original.tdr_inspection <- Masc_tui_task_creation_read.capture_transport
+      (Masc_tui_task_dispatch.progress original.tdr_dispatch) original.tdr_inspection;
+    state.task_creation_reader <- Some {tci_original=original;tci_authority=state.workspace_authority;
+      tci_reading=state.workspace_read_authority;tci_surface=state.view;tci_target=state.msg_target_keeper_name};
+    true
+  end
+
+let open_task_creation_inspection state ~keeper =
+  match task_creation_inspectable state ~keeper with
+  | [] -> false
+  | original::_ -> select_task_creation_inspection state original
+
+let task_creation_neighbor state ~older =
+  match current_task_creation_reader state with
+  | None -> None
+  | Some reader ->
+    let keeper=(Masc_tui_task_dispatch.intent reader.tci_original.tdr_dispatch).keeper in
+    let originals=task_creation_inspectable state ~keeper in
+    Option.bind (List.find_index ((==) reader.tci_original) originals) (fun index ->
+      let next=if older then index+1 else index-1 in
+      if next<0 then None else List.nth_opt originals next)
+
+let begin_task_creation_inspection state =
+  match current_task_creation_reader state with
+  | None -> None
+  | Some reader ->
+    let original=reader.tci_original in
+    let source,ticket=Masc_tui_task_creation_read.start original.tdr_inspection in
+    original.tdr_inspection <- source;
+    Option.map (fun tcr_ticket ->
+      let request={tcr_original=original;tcr_authority=state.workspace_authority;
+        tcr_reading=state.workspace_read_authority;tcr_ticket;tcr_job=ref ()} in
+      original.tdr_inspection_pending <- Some request;request) ticket
+
+let complete_task_creation_inspection state request result =
+  let original=request.tcr_original in
+  match original.tdr_inspection_pending with
+  | Some pending when pending==request ->
+    let admitted = request.tcr_authority=state.workspace_authority
+      && request.tcr_reading==state.workspace_read_authority
+      && (match current_task_creation_reader state with
+          | Some reader -> reader.tci_original==original | None -> false)
+      && Masc_tui_task_creation_read.is_current original.tdr_inspection request.tcr_ticket in
+    if admitted then begin
+      original.tdr_inspection <- Masc_tui_task_creation_read.complete
+        original.tdr_inspection request.tcr_ticket result;
+      original.tdr_inspection_pending <- None
+    end else retire_task_creation_request original
+      ~reason:(Masc_tui_task_creation_read.Workspace_unconfirmed "Original inspection ownership changed.");
+    admitted
+  | Some _ | None -> false
 
 let task_handoff_may_focus state ~keeper = function
   | None -> false
@@ -11425,6 +11532,8 @@ let suspend_verification_evidence_read state =
   state.verification_evidence_request <- None
 
 let suspend_workspace_readings state =
+  close_task_creation_inspection state
+    ~reason:(Masc_tui_task_creation_read.Workspace_unconfirmed "Waiting for original workspace identity.");
   suspend_verification_evidence_read state;
   state.chat_call_reader <- None;
   state.chat_call_pending <- None;
@@ -14670,7 +14779,8 @@ let open_detail_reading (state : state) reading =
   state.detail_reading <- Some (state.workspace_authority, state.view, reading)
 
 let modal_owns_keys (state : state) =
-  Option.is_some (current_chat_call_reader state)
+  Option.is_some (current_task_creation_reader state)
+  || Option.is_some (current_chat_call_reader state)
   || Option.is_some (current_detail_reading state)
   || state.help_open || state.keeper_deletions_open || state.agenda_open
   || state.context_inspector_open || state.about_open
@@ -14846,6 +14956,7 @@ let create_state
   help_open = false;
   chat_call_reader = None;
   chat_call_pending = None;
+  task_creation_reader = None;
   detail_reading = None;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;

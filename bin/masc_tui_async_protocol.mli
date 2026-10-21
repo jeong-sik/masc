@@ -723,6 +723,8 @@ type async_msg =
   | Observer_received of string option * Masc_tui_observer.delivery list
   | Observer_closed of (unit, Masc_tui_http.observer_error) result
   | Task_dispatch_completed of Masc_tui_types.task_dispatch_request
+  | Task_creation_read_done of Masc_tui_types.task_creation_read_request
+      * (Masc_tui_task_creation_read.receipt, Masc_tui_task_creation_read.error) result
 
 (* Every async result carries the instant it was ready, so the loop can say
    how long it sat in the mailbox. A result that arrived in a second and was

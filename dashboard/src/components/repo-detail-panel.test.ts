@@ -29,23 +29,20 @@ describe('normalizeBranch', () => {
       name: 'main',
       is_default: true,
       is_remote: false,
-      last_commit_at: '2024-01-15T10:30:00Z',
     }
     expect(normalizeBranch(raw)).toEqual({
       name: 'main',
       is_default: true,
       is_remote: false,
-      last_commit_at: '2024-01-15T10:30:00Z',
     })
   })
 
-  it('defaults booleans to false and last_commit_at to null when absent', () => {
+  it('defaults booleans to false when absent', () => {
     const raw = { name: 'feature-x' }
     expect(normalizeBranch(raw)).toEqual({
       name: 'feature-x',
       is_default: false,
       is_remote: false,
-      last_commit_at: null,
     })
   })
 
@@ -54,13 +51,11 @@ describe('normalizeBranch', () => {
       name: 'dev',
       is_default: 'yes',
       is_remote: 1,
-      last_commit_at: null,
     }
     expect(normalizeBranch(raw)).toEqual({
       name: 'dev',
       is_default: false,
       is_remote: false,
-      last_commit_at: null,
     })
   })
 })

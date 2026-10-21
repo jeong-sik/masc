@@ -382,7 +382,8 @@ let draw_ask_answer_feedback buf cols (state : state) =
        | Some _,Some (Decode.Ask_task_missing _ | Ask_task_unavailable _ | Ask_task_observed _) ->
          box_wrapped_field buf cols ~head:"  " ~style:(Theme.info ())
            "T: inspect this last answered Ask's original Task · h/H history · v verification evidence"
-       | (Some _ | None),(Some _ | None) -> ()))
+       | Some _,(Some Decode.Ask_task_unlinked | None)
+       | None,(Some _ | None) -> ()))
       followup;
     (match state.ask_followup_error with
      | None -> ()

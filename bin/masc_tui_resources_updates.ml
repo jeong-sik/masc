@@ -63,13 +63,13 @@ let begin_check state ~report =
     let ( let* ) = Result.bind in
     let* request = Masc_tui_artifact_check_action.prepare state.artifact_checks report in
     state.artifact_check_pending <- Some request;
-    state.artifact_checks <- Masc_tui_fetched.suspend state.artifact_checks;
+    state.artifact_checks <- Masc_tui_fetched.clear state.artifact_checks;
     Ok request
 
 let check_changed state request = match state.artifact_check_pending with
   | Some current when Masc_tui_artifact_check_action.same_request current request ->
     state.artifact_check_pending <- None;
-    state.artifact_checks <- Masc_tui_fetched.suspend state.artifact_checks;
+    state.artifact_checks <- Masc_tui_fetched.clear state.artifact_checks;
     true
   | Some _ | None -> false
 

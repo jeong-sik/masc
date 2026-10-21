@@ -18,6 +18,7 @@ characters) and `native-tui-scenario`:
 | `code-references` | TUI, server and the five test executables | `test_lsp_workspace_pool`, `test_lsp_questions`, `test_lsp_message_router`, `test_lsp_process_manager`, `test_server_ide_lsp_proxy` |
 | `resource-reading` | TUI, server and the four test executables | `test_tui_published_reports`, `test_tui_resource_document_search`, `test_tui_resource_image_admission`, `test_tui_resource_images` |
 | `addon-lifecycle` | TUI, server and the two test executables | `test_tui_lane_addons`, `test_lane_addon_application` |
+| `source-readers` | TUI, server and the seven test executables | The four `original-tool-result` suites plus `test_tui_workspace_entries`, `test_tui_keys`, `test_tui_palette_matching` |
 
 The server target is `bin/main_eio.exe`; the TUI is `bin/masc_tui.exe`.
 Every scenario also builds `bin/masc_tui_keys_doc_cli.exe`, the canonical key
@@ -55,6 +56,24 @@ retained state. It packages the matching server and TUI for a separate actual
 Keeper-result read. These four suites do not certify music/Code integration,
 complete producer stdout capture, or visible UI behavior. The selected source
 must contain all four targets; a missing target fails instead of reducing scope.
+
+Use `source-readers` when a selected candidate changes both retained original
+tool-result reading and Code's captured file source. It runs the existing four
+original-result suites and the three direct Code document consumers in one
+native build. The workspace entries suite exercises source-byte preservation,
+copy ownership and file navigation; the keys and palette suites exercise the
+same document's search and symbol consumers. This includes the existing Reader
+fixture compile checks without dispatching a second native build. It packages
+the matching server/TUI and records all seven completed suite names in the
+same receipt. It does not run the five LSP suites, real Pyright, music playback
+or visible terminal/clipboard verification. A selected source lacking any
+target fails instead of omitting that suite.
+
+```sh
+gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
+  -f native-tui-source-sha=SOURCE_COMMIT_40_HEX \
+  -f native-tui-scenario=source-readers
+```
 
 Use `code-references` for a selected Code reference-readiness candidate. The
 workspace-pool suite drives the real question API and transport with a controlled

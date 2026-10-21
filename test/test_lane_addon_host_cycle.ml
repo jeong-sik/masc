@@ -280,41 +280,6 @@ let test_only_accepted_exact_results_wake_owner kind () =
     await clock (fun () -> cycles config>=1);
     check int "no successful Exact delivery fact is invented" 0 !received)
 
-let test_addon_metadata_wakes_the_original_curator_without_a_memory_commit () =
-  let allowed=ref false and calls=ref 0 in
-  let owner_setup _clock config =
-    Prompt_registry.set_markdown_dir "../config/prompts";Prompt_defaults.init ();
-    let base_path=config.Workspace.base_path in
-    let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-    let fact=Keeper_memory_os_types.observed ~claim:"Fact present before the Addon metadata wake"
-      ~category:Keeper_memory_os_types.Fact ~now:1_700_000_000.
-      ~origin:{kind=Keeper_memory_os_types.Authored;trace_id="addon-owner-wake"} in
-    ignore (Keeper_memory_os_current.replace ~keepers_dir ~keeper_id:"writer" ~expected_revision:None
-      ~now:1_700_000_000. ~source:{kind=Keeper_memory_os_current.Librarian;trace_id="addon-owner-wake"}
-      ~facts:[fact] () |> unwrap);
-    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
-      incr calls;
-      let decisions=List.map (fun (pending : Workspace_memory_ledger.pending_fact) ->
-        `Assoc ["fact_id",`String (Workspace_memory_request.fact_id pending.fact);
-          "kind",`String "create_claim";"value",`String pending.claim]) selected in
-      Ok (`Assoc ["decisions",`List decisions],"original-fixture",None) in
-    let summarize ~batch:_=Ok (`Assoc ["briefing",`String "The original fact was classified."],"original-fixture",None) in
-    let sw=match Eio_context.get_root_switch_opt () with Some sw -> sw | None -> fail "missing actual owner switch" in
-    Server_workspace_memory_curator.For_testing.start_with_enabled ~sw ~base_path ~enabled:(fun () -> !allowed) ~execute ~summarize;
-    fun () -> Server_workspace_memory_curator.For_testing.stop ~base_path in
-  let curator_manifest=Printf.sprintf "id=\"workspace-curator\"\n%s"
-    (String.concat "\n" (List.tl (String.split_on_char '\n' manifest))) in
-  with_installation ~owner_setup ~manifest:curator_manifest (fun clock config _ _ _ ->
-    let base_path=config.Workspace.base_path in
-    await clock (fun () -> Server_workspace_memory_curator.For_testing.is_idle ~base_path);
-    check int "disabled owner parks without classifying" 0 !calls;
-    allowed:=true;
-    let source=Filename.concat (Runtime.configuration_directory config) "quiz.toml" in
-    write source (declaration ^ "\n# a new actual capture source revision\n");
-    ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> unwrap);
-    await clock (fun () -> !calls=1 && Server_workspace_memory_curator.For_testing.is_idle ~base_path);
-    check int "the original owner classified the existing fact without a new commit" 1
-      (List.length (Workspace_memory_ledger.dispositions (Workspace_memory_ledger.load ~base_path |> unwrap))))
 
 let test_withdrawal_event_before_stale_listing () =
   let revision=ref 0 and ids=ref [] and changed=Eio.Condition.create () in
@@ -532,12 +497,35 @@ let test_capture_factory_uses_actual_live_declaration_before_any_rpc () =
     (match Lane_addon_tool_request_owner.load ~store ~scope:"trusted-capture" ~request_id:"original" with
      | Ok (Some record) -> check bool "factory output is durably retained before return" true (Yojson.Safe.equal record.request captured)
      | Ok None | Error _ -> fail "capture returned before retaining its original request");
+    (match Runtime.with_tool_request_destination ~config ~access ~reserved:[] ~export
+      ~publish:(fun _ -> Error (Runtime.Outcome_unknown "controlled local publication uncertainty")) with
+     | Error (Runtime.Outcome_unknown _) -> ()
+     | Ok _ | Error (Runtime.Unavailable _ | Runtime.Host_refusal _) -> fail "publication uncertainty lost its typed meaning");
+    (match Runtime.with_tool_request_destination ~config ~access ~reserved:[] ~export
+      ~publish:(fun _ -> Eio.Fiber.yield ();raise (Sys_error "controlled local publication interruption")) with
+     | exception Sys_error _ -> ()
+     | Ok _ | Error _ -> fail "publication interruption was silently converted");
+    (match Runtime.capture_tool_request_owner ~config ~access ~reserved:[] ~export
+       ~scope:"trusted-capture" ~request_id:"original" ~capture with
+     | Ok replay -> check bool "serializer survives journal callback failure and reuses original ID" true
+         (Yojson.Safe.equal replay captured)
+     | Error _ -> fail "local publication exception poisoned configured admission");
     let forbidden _=fail "stale or conflicting export called the capture factory" in
     (match Runtime.capture_tool_request_owner ~config ~access ~reserved:["queue_question"] ~export
        ~scope:"trusted-capture" ~request_id:"collision" ~capture:forbidden with
      | Error (Runtime.Unavailable _) -> ()
      | Ok _ | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) -> fail "reserved name admitted capture");
-    write source ("enabled=false\n" ^ In_channel.with_open_bin source In_channel.input_all);
+    let document=Runtime.read_declaration ~access ~config (`Assoc ["source_path",`String source])
+      |> Result.map_error (fun error -> error.Lane_addon_declaration.message) |> unwrap in
+    Runtime.save_declaration ~access ~config (`Assoc ["mode",`String "save";"file_name",`String "quiz.toml";
+      "expected_source_revision",member "source_revision" document;
+      "source_text",`String ("enabled=false\n" ^ In_channel.with_open_bin source In_channel.input_all)])
+      |> Result.map_error (fun error -> error.Lane_addon_declaration.message) |> unwrap |> ignore;
+    check bool "saved Off has not yet been reconciled out of the cached export" true (Option.is_some (current ()));
+    (match Runtime.capture_tool_request_owner ~config ~access ~reserved:[] ~export
+       ~scope:"trusted-capture" ~request_id:"off-before-reconcile" ~capture:forbidden with
+     | Error (Runtime.Unavailable _) -> ()
+     | Ok _ | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) -> fail "committed Off reused stale configured authority");
     ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> unwrap);
     await clock (fun () -> current ()=None);
     (match Runtime.capture_tool_request_owner ~config ~access ~reserved:[] ~export
@@ -1427,8 +1415,7 @@ let () =
             (test_only_accepted_exact_results_wake_owner Transport_failed)
         ; test_case "an accepted non-Exact request does not wake an Exact owner" `Quick
             (test_only_accepted_exact_results_wake_owner Non_exact)
-        ; test_case "actual metadata wakes the parked original Curator" `Quick
-            test_addon_metadata_wakes_the_original_curator_without_a_memory_commit ] )
+        ] )
     ; ( "grants"
       , [ test_case "an operator declaration attaches with its grants" `Quick
             test_an_operator_declaration_attaches_with_its_grants

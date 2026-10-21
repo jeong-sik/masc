@@ -218,8 +218,9 @@
  (modules test_workspace_memory_curator_lane)
  (deps ../config/prompts/workspace_memory_curator.md
        ../config/prompts/workspace_memory_briefing.md
-       ../config/prompts/keeper.md)
- (libraries alcotest masc masc.tool_types masc.agent_core masc.agent_core.llm_provider masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
+       ../config/prompts/keeper.md
+       (source_tree ../addons/workspace-curator) ../addons/protocol.py ../addons/exact_worker.py)
+ (libraries alcotest masc masc.tool_types masc.agent_core masc.agent_core.llm_provider masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture mcp_protocol masc_process yojson eio eio_main unix))
 
 (test
  (name test_msx_vision)

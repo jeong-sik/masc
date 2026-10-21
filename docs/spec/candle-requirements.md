@@ -192,6 +192,25 @@ Candle 전용 정책 편집 화면, 환불·재판매·미귀속 판정 재개. 
 | CND-API-05 | 화면용 observation은 정책 append·행 복구를 하지 않는다. Keeper balance 조회는 변경된 HalfLifeSet을 발행할 수 있어 일반 읽기와 분리한다 | 구현 | S06/S11/S13, T04 |
 | CND-API-06 | summary/개인 계정/portrait를 한 응답의 일관된 authoritative observation으로 만든다. 서로 다른 시점의 설정·원장으로 금액과 장비를 합치지 않는다 | 구현. 전체 시스템 linearizability 보장과 다름 | S13/S16, T04 |
 
+주요 호출면은 다음과 같다. 이 표의 예시는 계약 설명이며 운영 사건을 실행하라는 지시가 아니다.
+
+| 호출면 | 입력 | 반환 / 효과 |
+|---|---|---|
+| keeper_candle_balance | 추가 인자 없음, 인증된 자기 Keeper | 잔액·감쇠·반감기·마지막 사건·소유. 필요한 정책 행을 발행할 수 있음 |
+| keeper_candle_catalog | 추가 인자 없음 | 정규 id/slot/price_status/price_milli |
+| keeper_candle_purchase | item, 선택적 expected_price_milli 정수 상한 | 실제 구매 금액과 구매 뒤 계정. 구매만으로 착용하지 않음 |
+| keeper_candle_equip | slot=face/neck/head/hand/base, item=id 또는 default | 현재 equipment와 changed. 소유권 구매는 하지 않음 |
+| keeper_candle_gift | to, amount_milli+reason 또는 item 중 정확히 하나 | 송수신자·이전 내역·양쪽 잔액. 두 이전 종류를 한 요청에 섞지 않음 |
+| keeper_portrait_read | 선택적 size(48–512, 기본160), preview_item | PNG artifact·시작/현재/그림 장비·카탈로그. 구매 소유 목록은 아님. ledger 불가용은 명시하고 기본 외형 PNG로 fallback 가능 |
+| GET /api/v1/keepers/{name}/items | 선택적 expected_workspace, CanReadState | ready/off/disabled 계정 또는 오류. ready는 account_revision/balance_milli/owned_items/catalog |
+| GET /api/v1/keepers/{name}/portrait.png | size(16–512, 기본160), preview, expected_equipment와 서버 read 정책 | PNG/ETag/304 또는 refusal. Item API와 MCP portrait의 파라미터·fallback 계약은 다름 |
+| masc-candle-grant | --keeper, --amount-milli, --reason, 선택적 --base DIR | 로컬 grant와 stdout 영수증. 다른 CLI의 --base-path가 아닌 --base 사용 |
+
+`masc-candle-grant`는 `bin/dune`의 별도 public executable이다. 현재 기본 binary installer의
+동반 실행 파일 목록에는 없으므로 일반 binary 설치만으로 명령이 생긴다고 가정하지 않는다.
+별도 소스 빌드/설치와 호환성 확인이 필요하다. 또한 gift TOML 도구 설명의 ‘같은 사유’
+중복 제한도 실제 금액을 포함한 키와 다르므로 GIFT-02의 계약 정리 범위에 포함한다.
+
 ### 3.10 TUI·Dashboard·초상화
 
 | ID | 요구사항과 수용 조건 | 현재 상태 | 근거 |

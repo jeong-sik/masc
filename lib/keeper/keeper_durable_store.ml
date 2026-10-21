@@ -767,13 +767,47 @@ let gate_pending_store =
   ; scan =
       (fun ~base_path ->
          let path = Keeper_gate_path.pending ~base_path in
-         Ok
-           (scan_files
-              ~paths:(if Fs_compat.file_exists path then [ path ] else [])
-              ~decode:(fun ~path:_ contents ->
-                match Yojson.Safe.from_string contents with
-                | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
-                | json -> Keeper_approval_queue_codec.validate_pending_snapshot ~base_path json)))
+         let log_path = Keeper_gate_path.pending_log ~base_path in
+         let read path =
+           try
+             match Unix.lstat path with
+             | stat when stat.Unix.st_kind = Unix.S_REG ->
+               Ok (Some (Fs_compat.load_file path))
+             | _ -> Error (path ^ ": not a regular file")
+           with
+           | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | (Sys_error _ | Unix.Unix_error _) as exn ->
+             Error (path ^ ": " ^ Printexc.to_string exn)
+         in
+         let validate contents =
+           let module Codec = Keeper_approval_queue_codec in
+           let* json =
+             try Ok (Yojson.Safe.from_string contents)
+             with Yojson.Json_error detail -> Error (path ^ ": invalid JSON: " ^ detail)
+           in
+           let* () = Codec.validate_pending_snapshot ~base_path json in
+           let* pending_map, delivery_map, next_sequence, snapshot_generation, _ =
+             Codec.snapshot_of_yojson ~base_path json
+           in
+           let* log = read log_path in
+           let bytes = match log with Some bytes -> bytes | None -> "" in
+           (* Preflight preserves incomplete tails for owner recovery. The
+              runtime's read-and-recover path must not run in this scanner. *)
+           if String.length bytes > 0 && bytes.[String.length bytes - 1] <> '\n'
+           then Error (log_path ^ ": incomplete append-log tail; owner recovery required")
+           else
+             Codec.replay_log_lines ~base_path ~snapshot_generation ~pending_map
+               ~delivery_map ~next_sequence (String.split_on_char '\n' bytes)
+             |> Result.map (fun _ -> ())
+             |> Result.map_error (fun detail -> log_path ^ ": " ^ detail)
+         in
+         (* An absent snapshot is a reset store: the production loader ignores
+            an orphan log, so the scanner does too. Never reset either file. *)
+         Ok (match read path with
+           | Ok None -> empty_report
+           | Error detail -> count_row empty_report (Error detail)
+           | Ok (Some contents) -> count_row empty_report (validate contents)))
   }
 ;;
 

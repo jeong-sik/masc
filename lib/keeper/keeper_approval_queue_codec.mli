@@ -72,6 +72,18 @@ val apply_log_row :
   pending_approval Set_util.StringMap.t * persisted_delivery Set_util.StringMap.t ->
   log_row -> pending_approval Set_util.StringMap.t * persisted_delivery Set_util.StringMap.t
 
+val replay_log_lines :
+  base_path:string -> snapshot_generation:int ->
+  pending_map:pending_approval Set_util.StringMap.t ->
+  delivery_map:persisted_delivery Set_util.StringMap.t -> next_sequence:int ->
+  string list ->
+  (pending_approval Set_util.StringMap.t * persisted_delivery Set_util.StringMap.t
+   * int * int, string) result
+(** Replay complete append-log lines with production generation and final
+    sequence validation. Returns pending entries, deliveries, next sequence
+    and applied-row count. Filesystem reads and incomplete-tail recovery
+    belong to the caller; this function never repairs evidence. *)
+
 val exact_attempt_quarantine_summary_status : exact_attempt_quarantine_cause -> summary_status
 val validate_entry_exact_attempt :
   id:string -> input_hash:string -> sequence:int -> summary_status:summary_status ->

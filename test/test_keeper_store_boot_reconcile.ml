@@ -1402,6 +1402,59 @@ let test_preparation_refuses_a_failed_session_quarantine () =
         | _ -> fail "successful quarantine must retain exactly one rejected binding"))
 ;;
 
+let test_gate_preflight_replays_wal_without_repair () =
+  let module Codec = Keeper_approval_queue_codec in
+  let module Map = Set_util.StringMap in
+  List.iter (fun (label, log, refused) ->
+    with_workspace (fun config ->
+      let base_path = config.Workspace.base_path in
+      let snapshot_path = Keeper_gate_path.pending ~base_path in
+      let log_path = Keeper_gate_path.pending_log ~base_path in
+      let snapshot = Codec.snapshot_to_yojson ~base_path ~next_sequence:1
+        ~generation:1 ~pending_map:Map.empty ~delivery_map:Map.empty
+        |> Yojson.Safe.to_string in
+      write_bytes snapshot_path snapshot;
+      write_bytes log_path log;
+      let before = Array.to_list (Sys.readdir (Filename.dirname snapshot_path))
+        |> List.sort String.compare in
+      (match D.preflight_scan D.Id.Gate_pending with
+       | None -> fail "Gate must have a preflight scan"
+       | Some scan ->
+         match D.run scan ~base_path with
+         | Error detail -> fail detail
+         | Ok report ->
+           check int (label ^ ": one snapshot/WAL authority") 1 report.rows;
+           check int (label ^ ": refusal") refused report.refused);
+      check string (label ^ ": snapshot bytes retained") snapshot
+        (Fs_compat.load_file snapshot_path);
+      check string (label ^ ": WAL bytes retained") log (Fs_compat.load_file log_path);
+      check (list string) (label ^ ": no recovery or lock files created") before
+        (Array.to_list (Sys.readdir (Filename.dirname snapshot_path)) |> List.sort String.compare)))
+    [ "valid current WAL",
+        "{\"kind\":\"pending_remove\",\"generation\":1,\"next_sequence\":1,\"id\":\"absent\"}\n", 0
+    ; "malformed complete row", "not-json\n", 1
+    ; "future generation",
+        "{\"kind\":\"pending_remove\",\"generation\":2,\"next_sequence\":1,\"id\":\"absent\"}\n", 1
+    ; "unknown row kind",
+        "{\"kind\":\"invented\",\"generation\":1,\"next_sequence\":1,\"id\":\"absent\"}\n", 1
+    ; "incomplete tail", "{\"kind\":", 1
+    ]
+;;
+
+let test_gate_preflight_preserves_orphan_wal () =
+  with_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let path = Keeper_gate_path.pending_log ~base_path in
+    write_bytes path "unread orphan WAL";
+    (match D.preflight_scan D.Id.Gate_pending with
+     | None -> fail "Gate must have a preflight scan"
+     | Some scan ->
+       match D.run scan ~base_path with
+       | Error detail -> fail detail
+       | Ok report -> check int "missing snapshot is the production reset state" 0 report.rows);
+    check string "orphan WAL remains untouched" "unread orphan WAL" (Fs_compat.load_file path))
+;;
+
 let () =
   run
     "keeper store boot reconcile"
@@ -1440,6 +1493,10 @@ let () =
     ; ( "one list"
       , [ test_case "the preflight refuses what boot names" `Quick
             test_preflight_refuses_what_boot_names
+        ; test_case "Gate preflight replays WAL without repairing evidence" `Quick
+            test_gate_preflight_replays_wal_without_repair
+        ; test_case "Gate preflight preserves an orphan WAL" `Quick
+            test_gate_preflight_preserves_orphan_wal
         ; test_case "admission preflight decodes and preserves pending input" `Quick
             test_preflight_reads_admission_queue_without_consuming
         ; test_case "the preflight names the transcript line appends refuse" `Quick

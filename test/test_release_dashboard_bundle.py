@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import tarfile
 import tempfile
@@ -313,8 +314,12 @@ class Distribution(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         installed = (self.prefix / "masc").resolve()
         bundle.verify_tree(installed.parent, self.asset)
-        self.assertIn(str(installed.parent / "assets"), result.stdout)
-        self.assertIn("MASC_ASSETS_DIR=", result.stdout)
+        command = next(line.strip() for line in result.stdout.splitlines()
+                       if line.startswith('  env '))
+        arguments = shlex.split(command)
+        self.assertIn('MASC_ASSETS_DIR=' + str(installed.parent / 'assets'), arguments)
+        self.assertEqual(arguments[-5:], ['setup', '--base-path', str(self.root / 'base'),
+                                         '--port', '8935'])
         self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
         again = self.run_installer(mirror)
         self.assertEqual(again.returncode, 0, again.stderr)

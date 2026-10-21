@@ -511,8 +511,9 @@ status: reference
 **Path Rest (경로 휴식)**
 : Keeper turn의 runtime walk가 한 경로를 지금 보내지 않고 기다리게 두는 상태와 그 해제
   규칙. 드라이버는 경로마다 `Path_resting { release_at; walk_promotes_at_release }`로
-  적고(`lib/keeper/keeper_turn_driver.ml`, `type path_rest_part`), 기다릴 때는 다음
-  발송 시각을 `Wait_until { release_at; waiting_on; basis }`로 남긴다. walk는 head부터
+  적고(`lib/keeper/keeper_turn_driver.ml`의 `type path_rest`, `keeper_turn_driver.mli`가
+  `val path_rest`로 공개한다), 기다릴 때는 다음 발송 시각을
+  `Wait_until { release_at; waiting_on; basis }`로 남긴다. walk는 head부터
   보내므로 head가 쉬면 head의 해제 시각까지 기다리고, 뒤 경로가 walk 순서에서 그
   시각에 다시 올라오는 경우에만 기다림이 짧아진다(`walk_rest`).
   - 세 층을 구분한다: **닫힌 quota 창**은 provider가 보고한 관측이고, **Runtime Rate
@@ -524,7 +525,9 @@ status: reference
     walk가 그 경로를 다시 올린다. provider가 시각을 말하지 않은 rate limit은 바닥 시각을
     둔 `Rest_dated`가 되고, 시각 없는 quota 관측은 `Rest_until_answered`가 되어
     해제 때 기다림만 끝나며 순서 강등은 성공 답까지 남는다
-    (`Keeper_turn_driver.runtime_path_rest`). `Rest_until_answered` 의 대기 자체도
+    (`Keeper_turn_driver.runtime_path_rest`). 두 이름은 내부 `type path_rest_part`의
+    변종이고, 경로 단위 공개 투영은 `type path_rest`의 `Path_resting`이다.
+    `Rest_until_answered` 의 대기 자체도
     `now`에서 굴러가는 바닥 시각으로 풀린다.
   - 실패한 시도는 휴식이 아니다. 그 경로를 후보가 답할 때까지 뒤로 미룰 뿐, 발송을
     기다리게 하지 않는다(`RFC-0458 §3.4`).

@@ -2,7 +2,8 @@
 
 The offline reader consumes client Log.Ring JSONL from the opening local
 `<base-path>/.masc/logs/tui/session-<pid>-*/`. Copy the relevant complete retained
-files into a comparison packet directory before hashing. This command does not
+files into a comparison packet directory before hashing, or use the materializer
+below. This command does not
 collect data, run a TUI/provider, deploy a binary or establish execution identity:
 
 ```sh
@@ -12,6 +13,74 @@ python3 scripts/harness/perf/tui_ask_followup_report.py packet/packet.json \
 
 Both outputs must be new files. Existing files, including input artifacts, are
 not overwritten. This source unit has not run this command or its resource case.
+
+## Materialize explicitly selected files
+
+The offline materializer accepts a plan and an explicit source root. It copies
+only the listed files into a new private output directory, hashes their exact
+bytes and produces the existing v2 packet. It never discovers a cohort from
+successful log rows or executes an input file:
+
+```sh
+python3 scripts/harness/perf/tui_ask_followup_packet.py plan.json \
+  --source-root evidence-src --output packet
+python3 scripts/harness/perf/tui_ask_followup_report.py packet/packet.json \
+  --json packet/report.json --markdown packet/report.md
+```
+
+The plan has `schema_version: 1` and `cases`, with the same explicit case,
+instance, independent attempt and declared source-commit fields as the packet.
+Its `logs`/`admissions` lists contain canonical relative input paths, and `binary`
+is an input path or null. `condition_files` replaces `conditions`: its five keys
+are `fixture`, `workspace_snapshot`, `action`, `server_binary`, `terminal` and
+values are input paths or null. Their actual byte hashes become the five packet
+condition values. Unknown nulls stay unknown. For example:
+
+```json
+{
+  "schema_version": 1,
+  "cases": [{
+    "id": "original-ask-case",
+    "before": {
+      "instances": ["original-before-instance"], "attempts": [],
+      "condition_files": {"fixture": "fixture.json", "workspace_snapshot": null, "action": null, "server_binary": null, "terminal": null},
+      "source_commit": null, "binary": null,
+      "admissions": ["before/admissions.jsonl"], "logs": ["before/events.jsonl"]
+    },
+    "after": {
+      "instances": ["original-after-instance"], "attempts": [],
+      "condition_files": {"fixture": "fixture.json", "workspace_snapshot": null, "action": null, "server_binary": null, "terminal": null},
+      "source_commit": null, "binary": null,
+      "admissions": ["after/admissions.jsonl"], "logs": ["after/events.jsonl"]
+    }
+  }]
+}
+```
+
+Supply every original selected instance and independently known attempt,
+including attempts lost through capture failure. Empty supplied lists do not
+prove complete capture; valid journaled attempts still join the denominator.
+The materializer refuses existing outputs, including empty directories/symlinks,
+and never overwrites the source files. Input files must pass the reader's same
+no-symlink, regular/stable descriptor checks. Files are copied individually, not
+as an atomic snapshot of a running workspace. Choose independently frozen inputs;
+changing one source after copying does not change the already copied bytes.
+
+`source-plan.json` retains the original plan bytes. `materialization.json` records
+source/output path mappings, SHA256/byte sizes, errors, plan/tool source hashes
+and its own monotonic preparation span. When analysis is reached, `validation.json` retains the reader's
+known attempts and errors. Missing or invalid input keeps status failed and
+withholds `packet.json`; incomplete materialization disables descriptive deltas.
+A failure writing the output itself can leave partial files and a missing receipt;
+exit 2 is never success. A new output is required for another preparation.
+
+Copying/hashing/validation add I/O, disk and memory costs. Each selected path is
+read once by capture and each unique byte digest is stored once, then validation
+reads copied packet artifacts again. The receipt clock covers work before its
+final serialization/write, belongs to this Python process, and must not be added
+to original TUI clocks. No file is fsynced and no execution, atomic snapshot,
+complete capture, installed binary or measured speedup is certified. Matching
+condition-file hashes remain declarations about execution inputs.
 
 ## Packet contract
 

@@ -764,6 +764,19 @@ val container_listing_for : Keeper_microvm_backend.t -> container_listing
     [Listing_not_established] for msb, whose listing rows carry no labels
     (they live in msb inspect under active_config.labels). *)
 
+val guest_inventory_argv_for : Keeper_microvm_backend.t -> string list
+(** The argv that lists every guest the runtime holds, whatever its state or
+    owner. {!container_listing_for} scopes the same listing to a keeper. *)
+
+val guest_names_of_inventory_for
+  :  Keeper_microvm_backend.t
+  -> string
+  -> (string list, string) result
+(** The guest names in the output of {!guest_inventory_argv_for}. An empty
+    listing is [Ok []]. Output that is not the listing this runtime answers,
+    or a row that carries no name, is [Error]: a decoder that skipped such a
+    row would read a changed answer shape as "no such guest". *)
+
 val list_live_containers_for :
   Keeper_microvm_backend.t ->
   base_path:string ->

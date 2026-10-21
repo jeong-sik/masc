@@ -571,6 +571,85 @@ let test_only_a_labelled_listing_is_offered () =
    | _ -> fail "nerdctl labelled inventory missing")
 ;;
 
+(* The state probe asks "is this name listed" only after an inspect failed. A
+   row it cannot read has to fail the answer: skipping it would read a changed
+   output shape as "no such guest". The Apple rows follow container 1.3.1,
+   which carries the name both as [id] and as [configuration.id]; the msb rows
+   follow 0.6.16. *)
+let test_guest_names_come_from_each_runtimes_own_listing () =
+  let names backend raw = Microvm.guest_names_of_inventory_for backend raw in
+  let expect label expected = function
+    | Ok found -> check (Alcotest.list Alcotest.string) label expected found
+    | Error detail -> Alcotest.failf "%s: %s" label detail
+  in
+  let refuses label = function
+    | Error _ -> ()
+    | Ok found ->
+      Alcotest.failf "%s: read as %s" label (String.concat "," found)
+  in
+  let nerdctl_row ~id_digit name =
+    Printf.sprintf
+      {|{"id":"%s","name":"%s","image":"img","status":"Up","created_at":"2026-10-21","runtime":"io.containerd.kata.v2","labels":null}|}
+      (String.make 64 id_digit)
+      name
+  in
+  expect
+    "container names both spellings of the id"
+    [ "vm-a"; "vm-b" ]
+    (names
+       Backend.Apple_container
+       {|[{"id":"vm-a","configuration":{"id":"vm-a"},"status":{"state":"running"}},{"configuration":{"id":"vm-b"},"status":{"state":"stopped"}}]|});
+  expect
+    "msb names"
+    [ "sbx-a" ]
+    (names
+       Backend.Microsandbox
+       {|[{"created_at":"2026-10-21","image":"img","name":"sbx-a","status":"running"}]|});
+  expect
+    "nerdctl names"
+    [ "vm-n"; "vm-m" ]
+    (names
+       Backend.Nerdctl_kata
+       (nerdctl_row ~id_digit:'a' "vm-n" ^ "\n" ^ nerdctl_row ~id_digit:'b' "vm-m" ^ "\n"));
+  expect "container with no guests" [] (names Backend.Apple_container "[]");
+  expect "msb with no guests" [] (names Backend.Microsandbox "[]");
+  expect "nerdctl with no guests" [] (names Backend.Nerdctl_kata "");
+  refuses "container row without an id" (names Backend.Apple_container {|[{"status":{}}]|});
+  refuses "container object instead of an array" (names Backend.Apple_container {|{"id":"vm-a"}|});
+  refuses "container text instead of JSON" (names Backend.Apple_container "no containers");
+  refuses "msb row without a name" (names Backend.Microsandbox {|[{"status":"running"}]|});
+  refuses "msb row that is not an object" (names Backend.Microsandbox {|["sbx-a"]|});
+  refuses "nerdctl row that is not the template" (names Backend.Nerdctl_kata "vm-n Up")
+;;
+
+(* The listing the probe reads and the listing the sweep scopes are one argv per
+   runtime, so a flag one of them needs cannot drift from the other. *)
+let test_the_guest_inventory_argv_is_the_sweeps_listing () =
+  (match Microvm.container_listing_for Backend.Apple_container with
+   | Microvm.Labelled_json_array argv ->
+     check
+       (Alcotest.list Alcotest.string)
+       "container"
+       argv
+       (Microvm.guest_inventory_argv_for Backend.Apple_container)
+   | Microvm.Nerdctl_labelled_json_lines _ | Microvm.Listing_not_established _ ->
+     fail "Apple listing changed kind");
+  (match Microvm.container_listing_for Backend.Nerdctl_kata with
+   | Microvm.Nerdctl_labelled_json_lines argv ->
+     check
+       (Alcotest.list Alcotest.string)
+       "nerdctl"
+       argv
+       (Microvm.guest_inventory_argv_for Backend.Nerdctl_kata)
+   | Microvm.Labelled_json_array _ | Microvm.Listing_not_established _ ->
+     fail "nerdctl listing changed kind");
+  check
+    (Alcotest.list Alcotest.string)
+    "msb lists every sandbox, running or stopped"
+    [ "msb"; "list"; "--format"; "json" ]
+    (Microvm.guest_inventory_argv_for Backend.Microsandbox)
+;;
+
 let test_the_log_tail_flag_is_per_runtime () =
   check
     (Alcotest.list Alcotest.string)
@@ -858,6 +937,10 @@ let () =
     ; ( "reaping"
       , [ Alcotest.test_case "only a labelled listing is offered" `Quick
             test_only_a_labelled_listing_is_offered
+        ; Alcotest.test_case "guest names come from each runtime's own listing" `Quick
+            test_guest_names_come_from_each_runtimes_own_listing
+        ; Alcotest.test_case "the guest inventory argv is the sweep's listing" `Quick
+            test_the_guest_inventory_argv_is_the_sweeps_listing
         ] )
     ; ( "state"
       , [ Alcotest.test_case "each parser reads its own runtime's shape" `Quick

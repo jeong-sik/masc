@@ -2285,11 +2285,22 @@ type container_listing =
   | Nerdctl_labelled_json_lines of string list
   | Listing_not_established of string
 
+(* Every guest the runtime holds, of any state and any owner. The sweep reads
+   it for labels; the state probe reads it for names only. *)
+let guest_inventory_argv_for backend =
+  match (backend : Backend.t) with
+  | Backend.Apple_container ->
+    command_argv_for backend @ [ "list"; "-a"; "--format"; "json" ]
+  | Backend.Microsandbox -> command_argv_for backend @ [ "list"; "--format"; "json" ]
+  | Backend.Nerdctl_kata ->
+    command_argv_for backend @ [ "ps"; "-a"; "--no-trunc"; "--format";
+      {|{"id":{{json .ID}},"name":{{json .Names}},"image":{{json .Image}},"status":{{json .Status}},"created_at":{{json .CreatedAt}},"runtime":{{json .Runtime}},"labels":{{json .LabelsMap}}}|} ]
+;;
+
 let container_listing_for backend =
   match (backend : Backend.t) with
   | Backend.Apple_container ->
-    Labelled_json_array
-      (command_argv_for backend @ [ "list"; "-a"; "--format"; "json" ])
+    Labelled_json_array (guest_inventory_argv_for backend)
   | Backend.Microsandbox ->
     Listing_not_established
       "msb list can be scoped server-side with --label, but its --format \
@@ -2298,9 +2309,7 @@ let container_listing_for backend =
        cannot be read back from the listing; msb keeps labels in `inspect` \
        under active_config.labels, one call per guest"
   | Backend.Nerdctl_kata ->
-    Nerdctl_labelled_json_lines
-      (command_argv_for backend @ [ "ps"; "-a"; "--no-trunc"; "--format";
-        {|{"id":{{json .ID}},"name":{{json .Names}},"image":{{json .Image}},"status":{{json .Status}},"created_at":{{json .CreatedAt}},"runtime":{{json .Runtime}},"labels":{{json .LabelsMap}}}|} ])
+    Nerdctl_labelled_json_lines (guest_inventory_argv_for backend)
 ;;
 
 type nerdctl_inventory_entry =
@@ -2394,6 +2403,69 @@ let nerdctl_owner_pid row =
           int_of_string_opt with
   | Some pid when pid > 0 -> Some pid
   | Some _ | None -> None
+;;
+
+(* The names a listing shows, for the one question "is this guest here". A row
+   this code cannot read fails the whole answer: dropping it would turn a
+   runtime whose output changed shape into "no such guest", the reading that
+   boots a second guest beside a live one. *)
+let guest_names_of_apple_listing raw =
+  (* [container_id_of_entry] raises on a row that is not an object. *)
+  let id_of_row = function
+    | `Assoc fields ->
+      let string_field fields name =
+        match List.assoc_opt name fields with
+        | Some (`String value) -> Some value
+        | Some _ | None -> None
+      in
+      (match string_field fields "id" with
+       | Some _ as id -> id
+       | None ->
+         (match List.assoc_opt "configuration" fields with
+          | Some (`Assoc configuration) -> string_field configuration "id"
+          | Some _ | None -> None))
+    | _ -> None
+  in
+  match Yojson.Safe.from_string raw with
+  | `List rows ->
+    List.fold_right
+      (fun row names ->
+         match names, id_of_row row with
+         | (Error _ as failure), _ -> failure
+         | Ok names, Some id -> Ok (id :: names)
+         | Ok _, None -> Error "container list: a row carries no id")
+      rows
+      (Ok [])
+  | _ -> Error "container list: unparseable JSON"
+  | exception Yojson.Json_error _ -> Error "container list: unparseable JSON"
+;;
+
+let guest_names_of_microsandbox_listing raw =
+  match Yojson.Safe.from_string raw with
+  | `List rows ->
+    List.fold_right
+      (fun row names ->
+         match names, row with
+         | (Error _ as failure), _ -> failure
+         | Ok names, `Assoc fields ->
+           (match List.assoc_opt "name" fields with
+            | Some (`String name) -> Ok (name :: names)
+            | Some _ | None -> Error "msb list: a row carries no name")
+         | Ok _, _ -> Error "msb list: a row is not an object")
+      rows
+      (Ok [])
+  | _ -> Error "msb list: unparseable JSON"
+  | exception Yojson.Json_error _ -> Error "msb list: unparseable JSON"
+;;
+
+let guest_names_of_inventory_for backend raw =
+  match (backend : Backend.t) with
+  | Backend.Apple_container -> guest_names_of_apple_listing raw
+  | Backend.Microsandbox -> guest_names_of_microsandbox_listing raw
+  | Backend.Nerdctl_kata ->
+    Result.map
+      (List.map (fun row -> row.nerdctl_name))
+      (nerdctl_inventory_of_json_lines raw)
 ;;
 
 let nerdctl_live_containers_of_json_lines ~base_path ~keeper_name raw =

@@ -826,8 +826,36 @@ let inspect_container_exists ?timeout_sec ~microvm_backend container_name =
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error inspect_out
 ;;
 
-(* [container] has no [--format] template; state comes back as JSON and a
-   missing container as a non-zero exit, which maps to absent. *)
+(* Whether the runtime lists a guest under [container_name]. Asked only after
+   an inspect failed, so a runtime that cannot answer either question is an
+   [Error] and never "not listed". *)
+let microvm_guest_listed ?timeout_sec ~backend container_name =
+  let st, out =
+    run_argv_with_status
+      ?timeout_sec
+      (Keeper_sandbox_microvm.guest_inventory_argv_for backend)
+  in
+  match st with
+  | Unix.WEXITED 0 ->
+    Result.map_error
+      (Printf.sprintf "microvm guest inventory for %s is unreadable: %s" container_name)
+      (Result.map
+         (List.exists (String.equal container_name))
+         (Keeper_sandbox_microvm.guest_names_of_inventory_for backend out))
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+    Error
+      (Printf.sprintf
+         "microvm guest inventory for %s failed: status=%s output=%s"
+         container_name
+         (Keeper_sandbox_exec_failure.status_label st)
+         (Keeper_sandbox_runtime.docker_failure_output_for_log out))
+;;
+
+(* [container] has no [--format] template; state comes back as JSON. A failed
+   inspect does not say the guest is gone: a container apiserver that cannot
+   answer fails it with the same exit code as a name that does not exist. Absent
+   is concluded only when the runtime then lists its guests and this name is
+   not among them, the way the Docker probe confirms it. *)
 let probe_microvm_container_state ?timeout_sec ~backend container_name =
   let st, out =
     run_argv_with_status
@@ -841,7 +869,17 @@ let probe_microvm_container_state ?timeout_sec ~backend container_name =
      | Ok false -> Ok Keeper_sandbox_runtime.Docker_container_stopped
      | Error _ as err -> err)
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-    Ok Keeper_sandbox_runtime.Docker_container_absent
+    let inspect_failure =
+      Printf.sprintf
+        "microvm inspect state probe failed for %s: status=%s output=%s"
+        container_name
+        (Keeper_sandbox_exec_failure.status_label st)
+        (Keeper_sandbox_runtime.docker_failure_output_for_log out)
+    in
+    (match microvm_guest_listed ?timeout_sec ~backend container_name with
+     | Ok false -> Ok Keeper_sandbox_runtime.Docker_container_absent
+     | Ok true -> Error inspect_failure
+     | Error inventory_failure -> Error (inspect_failure ^ "; " ^ inventory_failure))
 ;;
 
 let inspect_container_running ?timeout_sec ~microvm_backend container_name =

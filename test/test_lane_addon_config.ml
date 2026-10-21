@@ -551,6 +551,7 @@ let exact_outputs_are_selected_independently () = with_directory (fun _root pack
   write (Filename.concat packages "answer.json") schema;
   write manifest (package () ^ {|
 [world.tools]
+export = []
 hooks = ["validate_input", "validate_output"]
 [world.exact_outputs.plan]
 schema = "answer.json"

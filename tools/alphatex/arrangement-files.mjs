@@ -7,7 +7,7 @@ import { practicePasses } from './practice-passes.mjs'
 import { practiceMidi } from './practice-midi.mjs'
 import { captureMidi } from './capture-midi.mjs'
 import { extractUmpRegion } from './ump-region-midi.mjs'
-import { materializeUmp } from './ump-source.mjs'
+import { materializeUmp, umpVariantAsset } from './ump-source.mjs'
 import { captureRange, captureRegionTime } from './capture-time.mjs'
 import { practicePaths, readPracticeFiles, inspectPracticeAsset } from './practice-source-files.mjs'
 import { readFile, writeFile, rename, open, mkdir, mkdtemp, lstat, link, rm, chmod } from 'node:fs/promises'
@@ -287,11 +287,7 @@ export async function readUmpCapture(project, assetID, options) {
 }
 export async function importUmpVariant(project, assetID, ump, options) {
   const { asset, packets } = await readUmpCapture(project, assetID, options)
-  materializeUmp(packets, ump, asset.parts.midi.sha256)
-  const variant = { ...asset, id: arrangementID(project.assets, 'asset'), name: `${asset.name} UMP variant` }
-  if (ump === undefined) delete variant.ump
-  else variant.ump = structuredClone(ump)
-  delete variant.selectedTake
+  const variant = { ...umpVariantAsset(asset, packets, ump), id: arrangementID(project.assets, 'asset') }
   options?.signal?.throwIfAborted()
   return { project: editArrangement(project, { kind: 'asset-add', asset: variant }), asset: variant.id }
 }

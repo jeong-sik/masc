@@ -465,13 +465,14 @@ test('selected capture cut remains bound to its region and cursor through deriva
   } finally { await closeController(view) }
 })
 
+const nativeUmpPackets = () => [{ kind: 'midi', protocol: 2, timestampOrigin: 'packet', hostTime: '200', source: 'keys', words: [0x40903c00, 0x90000000] }]
 test('native UMP child returns only its overlay and creates an independently selected capture asset', async () => {
   const view = await controller()
   try {
     const asset = await primeCapture(view)
     view.command('edit-ump'); await flush()
     const job = view.observed.requests.find(job => job.kind === 'prepare-ump')
-    view.worker.emit('message', { id: job.id, ok: true, result: { asset, packets: [] } }); await flush()
+    view.worker.emit('message', { id: job.id, ok: true, result: { asset, packets: nativeUmpPackets() } }); await flush()
     const child = view.observed.umpEditors[0]
     const ump = { schemaVersion: 1, midiSha256: asset.parts.midi.sha256, notes: [{ packet: 0, word: 0, pitch: 30976, velocity: 0 }] }
     child.finish({ changed: true, asset: { ...asset, ump } }); await flush()
@@ -483,6 +484,37 @@ test('native UMP child returns only its overlay and creates an independently sel
     const saved = view.observed.saved.at(-1).project
     assert.deepEqual(saved.assets[0], asset); assert.deepEqual(saved.assets[1].ump, ump)
     assert.equal(saved.clips.at(-1).position, 3840); assert.equal(saved.clips.at(-1).asset, 'capture-2')
+  } finally { await closeController(view) }
+})
+
+for (const boundary of ['worker-before-return', 'worker-during-import', 'worker-after-import-reply', 'import-refused']) test(`native UMP draft survives ${boundary} without claiming source verification`, async () => {
+  const view = await controller()
+  try {
+    const asset = await primeCapture(view), packets = nativeUmpPackets()
+    view.command('edit-ump'); await flush()
+    const prepared = view.observed.requests.find(job => job.kind === 'prepare-ump')
+    view.worker.emit('message', { id: prepared.id, ok: true, result: { asset, packets } }); await flush()
+    const ump = { schemaVersion: 1, midiSha256: asset.parts.midi.sha256, notes: [{ packet: 0, word: 0, pitch: 30976, velocity: 0 }] }
+    if (boundary === 'worker-before-return') view.worker.emit('error', new Error('Worker closed with edited child'))
+    view.observed.umpEditors[0].finish({ changed: true, asset: { ...asset, ump } }); await flush()
+    if (boundary !== 'worker-before-return') {
+      const imported = view.observed.requests.find(job => job.kind === 'import-ump'); assert.ok(imported)
+      if (boundary === 'worker-during-import') view.worker.emit('error', new Error('Worker closed during verification'))
+      else if (boundary === 'import-refused') view.worker.emit('message', { id: imported.id, ok: false, error: 'Source verification unavailable' })
+      else {
+        const draft = editorAPI.arrangementUmpDraft(editorAPI.arrangementEditor(imported.project), { asset, packets }, ump)
+        view.worker.emit('message', { id: imported.id, ok: true, result: { project: draft.project, asset: draft.asset } })
+        view.worker.emit('error', new Error('Worker closed after reply'))
+      }
+      await flush()
+    }
+    view.key('q'); await view.done
+    const retained = (view.observed.recovered.at(-1) ?? view.observed.saved.at(-1)).project
+    assert.deepEqual(retained.assets[0], asset)
+    assert.deepEqual(retained.assets.at(-1).ump, ump)
+    assert.notEqual(retained.assets.at(-1).id, asset.id)
+    assert.equal(retained.assets.length, 2)
+    assert.equal(view.process.stdin.listenerCount('keypress'), 0)
   } finally { await closeController(view) }
 })
 
@@ -514,6 +546,31 @@ test('implicit native UMP editing retains its admitted source through recording 
   } finally {
     for (const capture of view.observed.captures) capture.finish()
     for (const job of view.observed.requests.filter(job => job.kind === 'attach-recording')) view.worker.emit('message', { id: job.id, ok: false, error: 'Fixture closed' })
+    await closeController(view)
+  }
+})
+
+test('Worker failure during native UMP monitor retirement keeps one parent input owner', async () => {
+  const view = await controller()
+  try {
+    const asset = await primeCapture(view)
+    view.command('input input'); view.command('monitor output'); await flush()
+    const monitor = view.observed.monitors.at(-1)
+    view.command('edit-ump'); await flush()
+    const job = view.observed.requests.find(job => job.kind === 'prepare-ump')
+    view.worker.emit('message', { id: job.id, ok: true, result: { asset, packets: [] } }); await flush()
+    view.worker.emit('error', new Error('Worker closed during monitor retirement'))
+    monitor.finish({ state: 'monitored' }); await flush()
+    assert.equal(view.observed.umpEditors.length, 0)
+    assert.equal(view.process.stdin.listenerCount('keypress'), 1)
+    view.command('title Retained after Worker failure'); await flush()
+    view.key('q')
+    for (const monitor of view.observed.monitors) monitor.finish({ state: 'monitored' })
+    await view.done
+    assert.equal(view.observed.recovered.length, 1)
+    assert.equal(view.observed.recovered[0].project.title, 'Retained after Worker failure')
+  } finally {
+    for (const monitor of view.observed.monitors) monitor.finish({ state: 'monitored' })
     await closeController(view)
   }
 })

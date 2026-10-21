@@ -61,6 +61,11 @@ before the editor or arrangement resumes.
 q returns a changed overlay as a new capture asset in one arrangement undo
 revision. Ctrl+C or an external session abort discards the child result. No edits
 means no extra asset. Existing source assets and regions remain unchanged.
+If the Worker fails or final source verification refuses the edited result, the
+validated opening packets still produce a separate editable draft in the same
+unchanged parent project. The failure stays reported; normal save/playback still
+verify current source files. Closing uses the parent's existing recovery path
+when saving is unavailable, preserving the overlay and original source hashes.
 Use `:place NEW_ASSET BEAT` to place it independently, or `:open-take` to audition.
 Use `:split-take` to compare a MIDI component against the original audio. Existing
 save/save-as copies the raw parts and retains the overlay for portable reopen;

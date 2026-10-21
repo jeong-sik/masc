@@ -8,7 +8,7 @@ import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from './arrangement-playback.mjs'
 import { startSoundArrangement } from './arrangement-sound.mjs'
-import { arrangementEditor, arrangementAction, arrangementCommand, arrangementCommandAdmission, arrangementImported, arrangementPracticePass, arrangementPracticeSound, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
+import { arrangementEditor, arrangementAction, arrangementCommand, arrangementCommandAdmission, arrangementImported, arrangementUmpDraft, arrangementPracticePass, arrangementPracticeSound, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
 import { captureFluidSound } from './soundfont.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
@@ -525,7 +525,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     const prepared = request({ kind: 'prepare-ump', project, asset, sourceRoot, directory }, id => { preparing = { kind: 'worker', id } })
     transport = { kind: 'preparing' }; status = 'Opening native UMP experiment'
     const preparation = (async () => {
-      let controller
+      let controller, terminalBorrowed = false
       try {
         const source = await prepared
         if (generation === expected) preparing = null
@@ -537,7 +537,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         transport = { kind: 'stopped' }
         await Promise.all([settleMonitoring(), settleLiveMidi()])
         if (!accepting || controller.signal.aborted || generation !== expected || editor.project !== project) return
-        suspended = true; process.stdin.off('keypress', keypress)
+        suspended = true; process.stdin.off('keypress', keypress); terminalBorrowed = true
         async function io(kind, edited, signal, path) {
           signal.throwIfAborted()
           const candidate = { ...project, assets: project.assets.map(item => item.id === asset ? edited : item) }
@@ -561,15 +561,24 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
             } finally { if (snapshot) await rm(snapshot.directory, { recursive: true, force: true }) }
           },
           onExport: (candidate, target, signal) => io('export-ump', candidate, signal, target) })
-        if (!accepting || controller.signal.aborted || generation !== expected || editor.project !== project || !edited?.changed) return
-        const imported = await request({ kind: 'import-ump', project, asset, ump: edited.asset.ump, sourceRoot, directory })
-        if (!accepting || controller.signal.aborted || generation !== expected || editor.project !== project) return
-        adopt(arrangementImported(editor, imported)); status = 'Native UMP variant imported; :place adds its region, :open-take auditions'
+        if (!accepting || controller.signal.aborted || editor.project !== project || !edited?.changed) return
+        if (generation !== expected && !workerFailure) return
+        const draft = arrangementUmpDraft(editor, source, edited.asset.ump)
+        let imported, failure
+        try {
+          imported = await request({ kind: 'import-ump', project, asset, ump: edited.asset.ump, sourceRoot, directory })
+        } catch (error) { failure = error }
+        if (!accepting || controller.signal.aborted || editor.project !== project || generation !== expected && !workerFailure) return
+        if (failure || workerFailure) {
+          adopt(draft); status = `Native UMP draft retained; source verification failed: ${(failure ?? workerFailure).message}`
+        } else {
+          adopt(arrangementImported(editor, imported)); status = 'Native UMP variant imported; :place adds its region, :open-take auditions'
+        }
       } catch (error) { if (generation === expected) { preparing = null; transport = { kind: 'stopped' }; status = error.message } }
       finally {
         if (controller && takeAbort === controller) {
           takeAbort = null; suspended = false
-          if (accepting && !closed) process.stdin.on('keypress', keypress)
+          if (terminalBorrowed && accepting && !closed) process.stdin.on('keypress', keypress)
         }
         if (takeTask === preparation) takeTask = null
         if (phrasePreparation === preparation) phrasePreparation = null

@@ -74,6 +74,14 @@ export function umpSourceNotes(packets, edits, midiSha256) {
       basis: attribute === 3 ? 'absolute-attribute' : attribute === 0 ? 'key-index' : 'opaque-attribute' }
   })
 }
+export function umpVariantAsset(asset, packets, ump) {
+  materializeUmp(packets, ump, asset.parts.midi.sha256)
+  const variant = { ...asset, name: `${asset.name} UMP variant` }
+  if (ump === undefined) delete variant.ump
+  else variant.ump = structuredClone(ump)
+  delete variant.selectedTake
+  return variant
+}
 export function editUmpNotes(packets, current, midiSha256, changes) {
   validateUmpEdits(current, midiSha256)
   const notes = new Map((current?.notes ?? []).map(note => [`${note.packet}:${note.word}`, { ...note }]))

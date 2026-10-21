@@ -64,6 +64,10 @@ let deferral_gate = function
   | Commit_refused _ -> "Commit_refused"
 ;;
 
+(* A review that raised is keyed the same way, by its own name, and is the
+   gate the Task verifier's notice uses for the same event. *)
+let raised_gate = "Raised"
+
 let deferral_detail = function
   | Not_reviewed { detail; model_absent_runtimes; _ } ->
     (* Display-only suffix: names the permanently refused candidates so the
@@ -339,19 +343,13 @@ let defer ~goal_id deferral =
 
 (* Report the scheduling owner's actual disposition. The Board neither arms
    retries nor supplies their authority. *)
-let announce_deferral ~goal_id ~request_id ~disposition deferral =
-  let evaluator_runtime =
-    match deferral with
-    | Not_reviewed { evaluator_runtime; _ } -> evaluator_runtime
-    | Review_not_bound _ | Proof_lookup_unavailable _ | Verdict_without_reason
-    | Commit_refused _ -> None
-  in
+let announce_stall ~goal_id ~request_id ~disposition ~gate ~detail ~evaluator_runtime =
   match
     Verification_protocol.notify_stalled_verification_with_runtime
       ~authority:Workspace_goals.verifier_authority
       ~subject:(Verification_protocol.Goal_review { goal_id; request_id; disposition })
-      ~gate:(deferral_gate deferral)
-      ~detail:(deferral_detail deferral)
+      ~gate
+      ~detail
       ~evaluator_runtime
   with
   | () -> ()
@@ -365,9 +363,53 @@ let announce_deferral ~goal_id ~request_id ~disposition deferral =
       (Printexc.to_string exn)
 ;;
 
+let announce_deferral ~goal_id ~request_id ~disposition deferral =
+  let evaluator_runtime =
+    match deferral with
+    | Not_reviewed { evaluator_runtime; _ } -> evaluator_runtime
+    | Review_not_bound _ | Proof_lookup_unavailable _ | Verdict_without_reason
+    | Commit_refused _ -> None
+  in
+  announce_stall
+    ~goal_id
+    ~request_id
+    ~disposition
+    ~gate:(deferral_gate deferral)
+    ~detail:(deferral_detail deferral)
+    ~evaluator_runtime
+;;
+
 (* Capture the Goal and its durable request under the Goal lock. The callback
    performs no writes; the model runs only after this lock is released. *)
 let bind_review = Goal_verification.bind_review
+;;
+
+(* A review that raised stalls the request the way a deferral does, under the
+   gate the Task verifier uses for the same event. Nothing arms a retry: the
+   scheduling owner isolates the exception and the Goal waits in Verifying for
+   the next request_complete. Only a request that still stands is announced.
+   An exception while reading it is logged, not raised over the review's own
+   exception; a Goal that has left Verifying, or a read that returns an error,
+   posts nothing. *)
+let announce_raised ~config ~goal_id ~request_id ~evaluator_runtime ~detail =
+  match bind_review config ~goal_id with
+  | Ok (_, (current, _, _)) when String.equal current request_id ->
+    announce_stall
+      ~goal_id
+      ~request_id
+      ~disposition:Verification_protocol.No_retry_armed
+      ~gate:raised_gate
+      ~detail
+      ~evaluator_runtime
+  | Ok _ | Error _ -> ()
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    Log.Misc.error
+      "goal verifier could not read the request to announce a raised review \
+       goal_id=%s request_id=%s error=%s"
+      goal_id
+      request_id
+      (Printexc.to_string exn)
 ;;
 
 let process_pending_work_inner
@@ -579,6 +621,15 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
            { detail = "review fiber cancelled: " ^ Printexc.to_string exn }));
     raise exn
   | exn ->
+    (* The notice goes first: the run registry write below raises when the
+       registry cannot persist, and a failure of the registry is exactly when
+       the Board is most needed. *)
+    announce_raised
+      ~config
+      ~goal_id:work.goal_id
+      ~request_id
+      ~evaluator_runtime:!evaluator_runtime
+      ~detail:(Printexc.to_string exn);
     Goal_verification_run_registry.mark_completed
       registry
       ~run_id

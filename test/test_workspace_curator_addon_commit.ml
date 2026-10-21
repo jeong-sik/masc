@@ -754,7 +754,7 @@ let test_discovery_parks_original_without_new_successor ()=with_workspace (fun b
   check string "parked original is not rewritten" before (bytes path))
 let test_discovery_recovers_existing_intent child_present ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Retained parent source a";"Retained parent source b"] in
-  let parent,child,_=intent store capture size_input in
+  let _,child,_=intent store capture size_input in
   if child_present then (
     let retained=retain_capture store child in
     check bool "ordinary restore refuses before the parent ACK" true

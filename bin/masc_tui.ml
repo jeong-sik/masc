@@ -30215,14 +30215,16 @@ and is loaded on demand through keeper_skill.
                 launch_verification_load state ~mailbox:async_messages
             | Planning ->
                 launch_verification_load state ~mailbox:async_messages;
-                (* The open Task's history asks for its first page again.
-                   The drawn observation stays until the answer replaces
-                   it; nothing else re-reads it while the authority holds. *)
+                (* The open Task's history asks for its first page again, and
+                   the open Goal's timeline is read again. The drawn
+                   observation stays until the answer replaces it; nothing
+                   else re-reads either while the authority holds. *)
                 (match state.planning_mode with
                  | Planning_list ->
                      Option.iter (launch_task_history_load state ~mailbox:async_messages)
                        state.task_detail_id
-                 | Planning_detail _ -> ())
+                 | Planning_detail goal_id ->
+                     launch_goal_timeline_load state ~mailbox:async_messages goal_id)
              | Clients ->
                  launch_clients_load state ~mailbox:async_messages
              | Lanes ->

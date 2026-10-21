@@ -201,6 +201,290 @@ let real_server_cases =
     [])
 ;;
 
+(* A controlled server, not a timer: proof/check answers only after didOpen
+   and wrong-owner diagnostics have been sent. The test then explicitly
+   releases the matching analysis observation. *)
+let analysis_server = {py|
+import json, signal, sys
+active = None
+last = None
+checks = []
+versions = []
+closes = []
+references = []
+hold_references = False
+held_references = []
+reference_checks = []
+def send(value):
+    body = json.dumps(dict(jsonrpc='2.0', **value)).encode()
+    sys.stdout.buffer.write(('Content-Length: %d\r\n\r\n' % len(body)).encode() + body)
+    sys.stdout.buffer.flush()
+def state():
+    return dict(versions=versions, closes=closes, references=references)
+def answer(ident):
+    send(dict(id=ident, result=state()))
+def diagnostics(uri, version):
+    params = dict(uri=uri, diagnostics=[])
+    if version is not None: params['version'] = version
+    send(dict(method='textDocument/publishDiagnostics', params=params))
+while True:
+    headers = {}
+    while True:
+        line = sys.stdin.buffer.readline()
+        if not line: sys.exit(0)
+        if line == b'\r\n': break
+        key, value = line.decode().split(':', 1)
+        headers[key.lower()] = value.strip()
+    msg = json.loads(sys.stdin.buffer.read(int(headers['content-length'])))
+    method = msg.get('method')
+    params = msg.get('params') or {}
+    if method == 'initialize':
+        send(dict(id=msg['id'], result=dict(capabilities={})))
+    elif method == 'textDocument/didOpen':
+        active = dict(params['textDocument'], analyzed=False)
+        last = active
+        versions.append(active['version'])
+        diagnostics(active['uri'] + '/other.py', active['version'])
+        diagnostics(active['uri'], active['version'] - 1)
+        diagnostics(active['uri'], None)
+        waiting = []
+        for ident, opened in checks:
+            if len(versions) >= opened: answer(ident)
+            else: waiting.append((ident, opened))
+        checks = waiting
+    elif method == 'proof/check':
+        opened = params.get('after_open', 0)
+        if active is None or len(versions) < opened: checks.append((msg['id'], opened))
+        else: answer(msg['id'])
+    elif method == 'proof/state': answer(msg['id'])
+    elif method == 'proof/payload': answer(msg['id'])
+    elif method == 'proof/awaitReference':
+        if references: answer(msg['id'])
+        else: reference_checks.append(msg['id'])
+    elif method == 'proof/holdReferences': hold_references = True
+    elif method == 'proof/releaseReferences':
+        for value in held_references: send(value)
+        held_references.clear()
+    elif method == 'proof/blockInput':
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})
+        answer(msg['id'])
+        signal.sigwait({signal.SIGUSR1})
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGUSR1})
+    elif method == 'proof/analyzed':
+        if active is not None: active['analyzed'] = True
+        if last is not None: diagnostics(last['uri'], last['version'])
+    elif method == 'proof/crash': sys.exit(0)
+    elif method == 'textDocument/references':
+        references.append(dict(version=active['version'], params=params))
+        lines = [0, 1] if active['analyzed'] else [0]
+        value = dict(id=msg['id'], result=[dict(uri=active['uri'], range=dict(
+            start=dict(line=line, character=0), end=dict(line=line, character=1))) for line in lines])
+        if hold_references: held_references.append(value)
+        else: send(value)
+        for ident in reference_checks: answer(ident)
+        reference_checks.clear()
+    elif method == 'textDocument/didClose':
+        closes.append(active['version'])
+        active = None
+    elif method == 'shutdown': send(dict(id=msg['id'], result=None))
+    elif method == 'exit': sys.exit(0)
+|py}
+
+let with_analysis_server f =
+  let root=temp_dir "masc-lsp-analysis" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let script=Filename.concat root "server.py" in
+    let path=Filename.concat root "phrase.py" in
+    Out_channel.with_open_bin script (fun channel -> output_string channel analysis_server);
+    Out_channel.with_open_bin path (fun channel -> output_string channel "phrase = 1\nprint(phrase)\n");
+    Eio_main.run (fun env ->
+      Lsp_workspace_pool.with_pool ~clock:(Eio.Stdenv.clock env)
+        ~proc_mgr:(Eio.Stdenv.process_mgr env)
+        ~servers:(fun _ -> "python3",["python3";script])
+        (fun pool -> Eio.Switch.run (fun sw -> f sw pool root path))))
+;;
+
+let pool_result = function
+  | Ok value -> value
+  | Error error -> failf "%a" Lsp_workspace_pool.pp_error error
+;;
+let analysis_control ?(after_open=0) pool root method_ =
+  Lsp_workspace_pool.ask pool ~language:Lsp_process_manager.Python
+    ~workspace_root:root ~method_ ~params:(`Assoc ["after_open",`Int after_open]) |> pool_result
+;;
+let release_analysis pool root =
+  Lsp_workspace_pool.notify pool ~language:Lsp_process_manager.Python
+    ~workspace_root:root ~method_:"proof/analyzed" ~params:(`Assoc []) |> pool_result
+;;
+let reference_query pool root path =
+  Lsp_questions.ask pool ~language:Lsp_process_manager.Python ~workspace_root:root
+    ~path ~line:1 ~character:6 ~question:Lsp_questions.References
+;;
+let reference_answer promise = match Eio.Promise.await promise with
+  | Ok (Ok (Lsp_questions.Locations locations)) -> locations
+  | Ok (Ok (Hover_text _)) -> fail "expected references"
+  | Ok (Error error) -> failf "%a" Lsp_questions.pp_error error
+  | Error exn -> raise exn
+;;
+let count_field name state = Yojson.Safe.Util.(state |> member name |> to_list |> List.length)
+
+let test_versioned_analysis_and_cancel () = with_analysis_server (fun sw pool root path ->
+  let read expected_calls =
+    let query=Eio.Fiber.fork_promise ~sw (fun () -> reference_query pool root path) in
+    let state=analysis_control pool root "proof/check" in
+    check int "wrong URI, previous version and unversioned diagnostics cannot start references"
+      expected_calls (count_field "references" state);
+    release_analysis pool root;
+    let locations=reference_answer query in
+    check (list int) "one prepared question returns both original locations" [0;1]
+      (List.map (fun (location:Lsp_questions.location) -> location.line) locations)
+  in
+  read 0;
+  let cancellation,resolve=Eio.Promise.create () in
+  let cancelled=Eio.Fiber.fork_promise ~sw (fun () ->
+    Eio.Cancel.sub (fun context ->
+      Eio.Promise.resolve resolve context;
+      reference_query pool root path)) in
+  let context=Eio.Promise.await cancellation in
+  let state=analysis_control pool root "proof/check" in
+  check int "waiting analysis never sends an optimistic reference query" 1
+    (count_field "references" state);
+  Eio.Cancel.cancel context Exit;
+  check bool "read cancellation propagates" true
+    (match Eio.Promise.await cancelled with
+     | Error (Eio.Cancel.Cancelled _) -> true
+     | Error _ | Ok _ -> false);
+  release_analysis pool root;
+  read 1;
+  let state=analysis_control pool root "proof/state" in
+  check int "one query per successfully prepared read" 2 (count_field "references" state);
+  check int "success and cancellation close every opened document" 3 (count_field "closes" state);
+  let versions=Yojson.Safe.Util.(state |> member "versions" |> to_list |> List.map to_int) in
+  check bool "fresh versions cannot borrow a cancelled or earlier analysis" true
+    (match versions with [first;cancelled;last] -> first<cancelled && cancelled<last | _ -> false))
+;;
+
+let test_analysis_process_exit () = with_analysis_server (fun sw pool root path ->
+  let query=Eio.Fiber.fork_promise ~sw (fun () -> reference_query pool root path) in
+  ignore (analysis_control pool root "proof/check");
+  Lsp_workspace_pool.notify pool ~language:Lsp_process_manager.Python ~workspace_root:root
+    ~method_:"proof/crash" ~params:(`Assoc []) |> pool_result;
+  check bool "an exited server cannot publish a partial references success" true
+    (match Eio.Promise.await query with
+     | Ok (Error (Lsp_questions.Server (Lsp_workspace_pool.Server_failed _))) -> true
+     | Ok (Error _ | Ok _) | Error _ -> false))
+;;
+
+let test_concurrent_reference_documents () = with_analysis_server (fun sw pool root first_path ->
+  let second_path=Filename.concat root "other.py" in
+  Out_channel.with_open_bin second_path (fun channel -> output_string channel "phrase = 2\nprint(phrase)\n");
+  let first=Eio.Fiber.fork_promise ~sw (fun () -> reference_query pool root first_path) in
+  let second=Eio.Fiber.fork_promise ~sw (fun () -> reference_query pool root second_path) in
+  let state=analysis_control ~after_open:1 pool root "proof/check" in
+  check int "another document cannot replace the active prepared References read" 1
+    (count_field "versions" state);
+  check int "neither question runs before its analysis" 0 (count_field "references" state);
+  release_analysis pool root;
+  let state=analysis_control ~after_open:2 pool root "proof/check" in
+  check int "first question settles before the second prepares" 1 (count_field "references" state);
+  check int "first document is closed before the second opens" 1 (count_field "closes" state);
+  release_analysis pool root;
+  List.iter (fun (path,query) ->
+    let locations=reference_answer query in
+    check bool "each answer retains its own document identity" true
+      (List.length locations=2 && List.for_all
+        (fun (location:Lsp_questions.location) -> String.equal location.path path) locations))
+    [first_path,first;second_path,second])
+;;
+
+let peer_document root =
+  let peer=Filename.concat root "peer" in
+  Unix.mkdir peer 0o700;
+  let path=Filename.concat peer "phrase.py" in
+  Out_channel.with_open_bin path (fun channel -> output_string channel "phrase = 2\nprint(phrase)\n");
+  peer,path
+;;
+let control_notification pool root method_ =
+  Lsp_workspace_pool.notify pool ~language:Lsp_process_manager.Python ~workspace_root:root
+    ~method_ ~params:(`Assoc []) |> pool_result
+;;
+let test_other_process_exit_preserves_request () = with_analysis_server (fun sw pool root path ->
+  let peer,peer_path=peer_document root in
+  control_notification pool root "proof/holdReferences";
+  let original=Eio.Fiber.fork_promise ~sw (fun () -> reference_query pool root path) in
+  ignore (analysis_control pool root "proof/check");
+  release_analysis pool root;
+  ignore (analysis_control pool root "proof/awaitReference");
+  let other=Eio.Fiber.fork_promise ~sw (fun () -> reference_query pool peer peer_path) in
+  ignore (analysis_control pool peer "proof/check");
+  control_notification pool peer "proof/crash";
+  (match Eio.Promise.await other with
+   | Ok (Error (Lsp_questions.Server (Lsp_workspace_pool.Server_failed _))) -> ()
+   | Ok (Error _ | Ok _) | Error _ -> fail "peer exit must fail its own analysis read");
+  ignore (analysis_control pool root "proof/state");
+  control_notification pool root "proof/releaseReferences";
+  let locations=reference_answer original in
+  check int "another process EOF cannot reject this process's pending response" 2
+    (List.length locations))
+;;
+
+let test_blocked_writer_does_not_hold_other_process () = with_analysis_server (fun sw pool root _path ->
+  let peer,_peer_path=peer_document root in
+  ignore (analysis_control pool peer "proof/blockInput");
+  let cancellation,resolve=Eio.Promise.create () in
+  let writing=Eio.Fiber.fork_promise ~sw (fun () ->
+    Eio.Cancel.sub (fun context ->
+      Eio.Promise.resolve resolve context;
+      (* Larger than the native pipe buffer; the controlled peer has stopped
+         reading. This is a resource fixture, not a product content limit. *)
+      Lsp_workspace_pool.ask pool ~language:Lsp_process_manager.Python
+        ~workspace_root:peer ~method_:"proof/payload"
+        ~params:(`Assoc ["body",`String (String.make 1_048_576 'x')]))) in
+  let context=Eio.Promise.await cancellation in
+  Eio.Fiber.yield ();
+  check bool "the controlled peer leaves the write pending" false (Eio.Promise.is_resolved writing);
+  let queued=Eio.Fiber.fork_promise ~sw (fun () ->
+    Lsp_workspace_pool.ask pool ~language:Lsp_process_manager.Python
+      ~workspace_root:peer ~method_:"proof/queued" ~params:(`Assoc [])) in
+  Eio.Fiber.yield ();
+  ignore (analysis_control pool root "proof/state");
+  Eio.Cancel.cancel context Exit;
+  check bool "a partial-frame cancellation propagates" true
+    (match Eio.Promise.await writing with
+     | Error (Eio.Cancel.Cancelled _) -> true
+     | Ok _ | Error _ -> false);
+  check bool "queued writer sees an owned closed transport as a typed failure" true
+    (match Eio.Promise.await queued with
+     | Ok (Error (Lsp_workspace_pool.Server_failed _)) -> true
+     | Ok (Ok _ | Error _) | Error _ -> false);
+  ignore (analysis_control pool root "proof/state"))
+;;
+
+let test_cancel_queued_writer_preserves_active_frame () = with_analysis_server (fun sw pool root _path ->
+  let proc=Lsp_workspace_pool.ensure pool ~language:Lsp_process_manager.Python
+      ~workspace_root:root |> pool_result in
+  ignore (analysis_control pool root "proof/blockInput");
+  let active=Eio.Fiber.fork_promise ~sw (fun () ->
+    Lsp_workspace_pool.ask pool ~language:Lsp_process_manager.Python ~workspace_root:root
+      ~method_:"proof/payload" ~params:(`Assoc ["body",`String (String.make 1_048_576 'x')])) in
+  Eio.Fiber.yield ();
+  check bool "the active frame is still being written" false (Eio.Promise.is_resolved active);
+  let cancellation,resolve=Eio.Promise.create () in
+  let queued=Eio.Fiber.fork_promise ~sw (fun () -> Eio.Cancel.sub (fun context ->
+    Eio.Promise.resolve resolve context;
+    Lsp_workspace_pool.ask pool ~language:Lsp_process_manager.Python ~workspace_root:root
+      ~method_:"proof/state" ~params:(`Assoc []))) in
+  let context=Eio.Promise.await cancellation in
+  Eio.Fiber.yield ();
+  Eio.Cancel.cancel context Exit;
+  (match Eio.Promise.await queued with
+   | Error (Eio.Cancel.Cancelled _) -> ()
+   | Ok _ | Error _ -> fail "queued write cancellation must propagate");
+  Eio.Process.signal proc.proc Sys.sigusr1;
+  check bool "cancelling an unstarted writer cannot retire the active frame owner" true
+    (match Eio.Promise.await active with Ok (Ok _) -> true | Ok (Error _) | Error _ -> false))
+;;
+
 (* #36431: an answer whose last byte and the deadline land in the same
    scheduler pass. The mock clock queues the watcher's wake ahead of the
    work's on purpose -- set_time past the deadline, then resolve -- so an
@@ -283,6 +567,14 @@ let () =
             test_missing_command_is_not_an_empty_answer
         ] )
     ; "live server", real_server_cases
+    ; ( "document analysis"
+      , [ test_case "exact version, cancellation and fresh retry" `Quick test_versioned_analysis_and_cancel
+        ; test_case "process exit fails the waiting read" `Quick test_analysis_process_exit
+        ; test_case "concurrent References retain their document owners" `Quick test_concurrent_reference_documents
+        ; test_case "peer EOF preserves another process request" `Quick test_other_process_exit_preserves_request
+        ; test_case "a blocked writer does not hold another process" `Quick test_blocked_writer_does_not_hold_other_process
+        ; test_case "queued cancellation preserves the active frame" `Quick test_cancel_queued_writer_preserves_active_frame
+        ] )
     ; ( "initialize deadline"
       , [ test_case
             "an answer that arrived as the window closed stands"

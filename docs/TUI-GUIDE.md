@@ -2181,6 +2181,11 @@ The same servers back the Keeper's `keeper_code_query` tool, so a Keeper
 asked about a language whose server is missing falls back to reading text.
 For OCaml, `references` also needs `dune build @ocaml-index`; without it the
 answer names that command rather than returning a short list.
+Python reference queries wait for analysis of the opened file version before
+asking for locations, so a cold server does not answer using only the opened
+file and its imports. If that observation is unavailable, the query fails
+explicitly and the current file remains open. This preparation does not claim
+that every workspace diagnostic has completed.
 
 ### Tools
 

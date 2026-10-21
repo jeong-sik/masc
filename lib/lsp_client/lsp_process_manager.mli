@@ -4,12 +4,17 @@
     ([read_exact], [read_header_line], [parse_content_length]) are
     intentionally not exposed. *)
 
+type transport_state = Open | Closed
+exception Closed_transport
+
 type lsp_process = {
   lang_id : string;
   proc : Eio_unix.Process.ty Eio.Std.r;
   stdin_w : [ Eio.Flow.sink_ty | Eio.Resource.close_ty ] Eio.Std.r;
   stdout_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r;
   stderr_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r;
+  write_mutex : Eio.Mutex.t;
+  transport_state : transport_state Atomic.t;
 }
 
 type spawn_error =
@@ -143,7 +148,8 @@ val command_for_lang : string -> (string * string list) option
 val lang_of_path : string -> string
 
 (** Allocate a fresh JSON-RPC request ID for this process. *)
-(** Write a JSON-RPC message to the process stdin with Content-Length framing. *)
+(** Write a complete Content-Length frame under this process's write mutex.
+    No router table lock or other process's write lock is held. *)
 val write_message : lsp_process -> string -> unit
 
 (** Read one complete LSP message from stdout. Returns the JSON payload string. *)

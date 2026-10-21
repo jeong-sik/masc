@@ -214,50 +214,17 @@ let ask pool ~language ~workspace_root ~path ~line ~character ~question =
   | Ok text ->
     let uri = Lsp_uri.file_uri_of_path path in
     let method_ = method_of_question question in
-    let open_params =
-      `Assoc
-        [ ( "textDocument"
-          , `Assoc
-              [ "uri", `String uri
-              ; "languageId", `String (Lsp_process_manager.lang_id_of_language language)
-              ; "version", `Int 1
-              ; "text", `String text
-              ] )
-        ]
-    in
-    (match
-       Lsp_workspace_pool.notify
-         pool
-         ~language
-         ~workspace_root
-         ~method_:"textDocument/didOpen"
-         ~params:open_params
-     with
+    let readiness=match question,language with
+      | References,Lsp_process_manager.Python -> Lsp_workspace_pool.Versioned_diagnostics
+      | (Definition | Hover),_
+      | References,(Ocaml | Typescript | Javascript | Rust | Go | C | Cpp | Swift
+          | Java | Kotlin | Ruby | Php | Lua | Bash | Json | Yaml | Zig | Haskell
+          | Elixir | Dart | Scala | Csharp | Markdown) -> Lsp_workspace_pool.Open_notification in
+    (match Lsp_workspace_pool.ask_document pool ~language ~workspace_root ~uri ~text
+        ~readiness ~method_ ~params:(position_params ~uri ~line ~character ~question) with
      | Error err -> Error (Server err)
-     | Ok () ->
-       let answer =
-         Lsp_workspace_pool.ask
-           pool
-           ~language
-           ~workspace_root
-           ~method_
-           ~params:(position_params ~uri ~line ~character ~question)
-       in
-       (* Closed whatever the answer was: the pool holds the server past this
-          call, and a document left open shadows the file on disk for every
-          later question. *)
-       let (_ : (unit, Lsp_workspace_pool.error) result) =
-         Lsp_workspace_pool.notify
-           pool
-           ~language
-           ~workspace_root
-           ~method_:"textDocument/didClose"
-           ~params:(`Assoc [ "textDocument", text_document_id uri ])
-       in
-       (match answer with
-        | Error err -> Error (Server err)
-        | Ok json ->
-          (match answer_of_json question json with
-           | Ok answer -> Ok answer
-           | Error reason -> Error (Unparsed_answer { method_; reason }))))
+     | Ok json ->
+       match answer_of_json question json with
+       | Ok answer -> Ok answer
+       | Error reason -> Error (Unparsed_answer {method_;reason}))
 ;;

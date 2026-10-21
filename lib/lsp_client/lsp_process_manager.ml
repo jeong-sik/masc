@@ -6,12 +6,17 @@
     - Structured cleanup via [Eio.Switch]
     - Per-language command resolution *)
 
+type transport_state = Open | Closed
+exception Closed_transport
+
 type lsp_process =
   { lang_id : string
   ; proc : Eio_unix.Process.ty Eio.Std.r
   ; stdin_w : [ Eio.Flow.sink_ty | Eio.Resource.close_ty ] Eio.Std.r
   ; stdout_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r
   ; stderr_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r
+  ; write_mutex : Eio.Mutex.t
+  ; transport_state : transport_state Atomic.t
   }
 
 type spawn_error =
@@ -413,8 +418,25 @@ let command_exists cmd =
 let write_message (proc : lsp_process) (json : string) =
   let payload = Bytes.unsafe_of_string json in
   let header = Printf.sprintf "Content-Length: %d\r\n\r\n" (Bytes.length payload) in
-  Eio.Flow.copy_string header proc.stdin_w;
-  Eio.Flow.copy_string json proc.stdin_w
+  Eio.Mutex.use_ro proc.write_mutex (fun () ->
+    match Atomic.get proc.transport_state with
+    | Closed -> raise Closed_transport
+    | Open ->
+      try
+        Eio.Flow.copy_string header proc.stdin_w;
+        Eio.Flow.copy_string json proc.stdin_w
+      with
+      | Invalid_argument _ as exn ->
+        (* A concurrent owned shutdown can close the FD after the check.
+           Preserve unrelated programming errors; never inspect error text. *)
+        let state=Atomic.get proc.transport_state in
+        Atomic.set proc.transport_state Closed;
+        (match state with
+        | Closed -> raise Closed_transport
+        | Open -> raise exn)
+      | exn -> (* cancel-guard-ok: close ownership before unlocking a partial frame *)
+        Atomic.set proc.transport_state Closed;
+        raise exn)
 ;;
 
 (** Read exactly [n] bytes from a flow into a string. *)
@@ -564,7 +586,8 @@ let spawn
               "LSP %s stderr reader ended: %s"
               lang_id
               (Printexc.to_string exn));
-        Ok { lang_id; proc; stdin_w; stdout_r; stderr_r }
+        Ok { lang_id; proc; stdin_w; stdout_r; stderr_r;write_mutex=Eio.Mutex.create ();
+          transport_state=Atomic.make Open }
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Process_error (Printexc.to_string exn)))
@@ -590,6 +613,7 @@ let spawn
     spawn mutex. Each is best-effort and logs at debug on failure;
     [Eio.Cancel.Cancelled] is re-raised so cancellation still propagates. *)
 let shutdown (proc : lsp_process) =
+  Atomic.set proc.transport_state Closed;
   let quietly what f =
     try f () with
     | Eio.Cancel.Cancelled _ as e -> raise e

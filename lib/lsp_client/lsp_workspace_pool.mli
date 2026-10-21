@@ -70,9 +70,11 @@ val ensure
   -> (Lsp_process_manager.lsp_process, error) result
 
 (** One JSON-RPC request to the server for [(lang_id, workspace_root)], with
-    the server started if needed. A request that outlives
-    [request_timeout_sec] answers [Server_failed] and leaves the server in the
-    pool — that timeout describes this question, not the server's health. *)
+    the server started if needed. Frame transmission and answer observation
+    each use the existing [request_timeout_sec] transport window. An answer
+    timeout reports [Server_failed] without treating the server as dead; an
+    interrupted/failed frame retires that physical process because a partial
+    header/body cannot be reused. *)
 val ask
   :  t
   -> language:Lsp_process_manager.language
@@ -80,6 +82,35 @@ val ask
   -> method_:string
   -> params:Yojson.Safe.t
   -> (Yojson.Safe.t, error) result
+
+type document_readiness =
+  | Open_notification
+  | Versioned_diagnostics
+
+val ask_document
+  :  t
+  -> language:Lsp_process_manager.language
+  -> workspace_root:string
+  -> uri:string
+  -> text:string
+  -> readiness:document_readiness
+  -> method_:string
+  -> params:Yojson.Safe.t
+  -> (Yojson.Safe.t, error) result
+(** Open a fresh document version, prepare it, ask once on that same process,
+    and close it even on cancellation. Calls for the same process/document
+    serialize through close. [Versioned_diagnostics] reads also serialize on
+    the server key: Pyright cancels an earlier References query when another
+    arrives, including a query for a different document. Direct reads keep
+    their per-document ownership without this References lock.
+
+    [Versioned_diagnostics] waits for [textDocument/publishDiagnostics] for
+    this process, exact URI and open version. It does not inspect diagnostic
+    text or count. Pyright's first document analysis follows workspace source
+    enumeration; asking before it can return only the opened file's references.
+    The existing request deadline also bounds this protocol observation;
+    missing evidence is an error, never permission to accept a partial answer.
+    This is not a universal project-completeness claim for arbitrary servers. *)
 
 (** One JSON-RPC notification to the server for [(language, workspace_root)],
     with the server started if needed. A notification has no answer, so the

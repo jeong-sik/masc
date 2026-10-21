@@ -660,6 +660,11 @@ let test_current_nonterminal_event_set () =
                                        ; retry_delay_ms = 250
                                        ; error_status = Some 529 }
           ]
+      else if String.equal name "KEEPER_THINKING_DELTA" then
+        (* The strict decoder requires an object with an integer index; a Null
+           falls through and is rejected. The server writes this exact shape
+           (Server_keeper_chat_agui_projection, the Thinking_delta branch). *)
+        `Assoc ["index", `Int 0; "delta", `String "thinking"]
       else if String.equal name "KEEPER_TOOL_CALL_ADMITTED" then
         (* Admits the TOOL_CALL_START above: same occurrence, and the provider
            name is that start's toolCallName. *)

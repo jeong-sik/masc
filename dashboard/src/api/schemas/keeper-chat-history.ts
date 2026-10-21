@@ -129,8 +129,8 @@ const KeeperChatTraceStepSchema = union([
 
 // RFC-0235 P3: server-parsed rich chat blocks carried on persisted history
 // rows. Keep this aligned with keeper_chat_blocks.ml and the dashboard
-// renderer's ChatBlock union; malformed block arrays cause the whole row to be
-// dropped by safeParseKeeperChatHistoryMessage so the transcript stays clean.
+// renderer's ChatBlock union. safeParseKeeperChatHistoryMessage rejects rows
+// with malformed block arrays; history readers reject the whole observation.
 export const KeeperChatBlockSchema = union([
   object({
     t: literal('p'),
@@ -271,8 +271,8 @@ export const KeeperChatHistoryMessageSchema = object({
   // Current-record contract: keeper_chat_store mints a stable id on every
   // append and rejects persisted rows whose id is absent or blank. Rows
   // projected outside the chat store (autonomous turns via
-  // Keeper_autonomous_turn_source) must mint one too — safeParse drops any
-  // row without a non-blank id, with no error surface.
+  // Keeper_autonomous_turn_source) must mint one too. safeParse rejects rows
+  // without a non-blank id; history readers surface an observation failure.
   id: string(),
   role: union([literal('user'), literal('assistant'), literal('system'), literal('tool'), literal('request_failure')]),
   // Autonomous turns can complete through tools without terminal prose. The

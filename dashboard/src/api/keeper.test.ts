@@ -276,6 +276,32 @@ describe('Keeper Event Queue API', () => {
   })
 })
 
+describe('fetchKeeperChatHistory aggregate decoding', () => {
+  const validRow = { id: 'saved', role: 'user', content: 'persisted', ts: 1 }
+
+  it.each([
+    [validRow, { ...validRow, id: ' ' }],
+    [{ ...validRow, blocks: 'invalid' }],
+    [validRow, null],
+  ])('rejects a malformed row instead of reporting a shorter successful history: %j', async (...rows) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(rows), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+    await expect(fetchKeeperChatHistory('echo')).rejects.toThrow('invalid history row at index')
+  })
+
+  it.each([[], [validRow, { ...validRow, id: 'next', future_field: true }]])(
+    'preserves an actual empty read and additive schema fields: %j', async (...rows) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(rows), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })))
+      expect((await fetchKeeperChatHistory('echo')).map(row => row.id)).toEqual(rows.map(row => row.id))
+    },
+  )
+})
+
 describe('streamKeeperMessage', () => {
   const devTokenResponse = () => new Response(
     JSON.stringify({ token: 'test-dev-token', actor: 'dashboard', role: 'admin' }),

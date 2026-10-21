@@ -42,6 +42,26 @@ val terminal_of_status :
 (** Canonical settled outcome used by delivery and result projection.
     Active request states have no terminal completion. *)
 
+val observe_results :
+  sw:Eio.Switch.t -> base_path:string ->
+  on_result_ready:(Keeper_tool_execution_journal.result_notification -> unit) -> unit
+(** Install a typed workspace observer until [sw] is released. Resolve its
+    physical workspace once through the common host executor before installing.
+    Registrations retain only live callbacks, no candidate/result cache. Multiple
+    live observers may coexist; cleanup removes only its own physical registration.
+    Call on the server's single Eio owner domain before recovery pulses.
+
+    Direct durable settlement and outbox recovery publish after successful
+    durable queue delivery, before ACK, using the original first Named binding.
+    Unconfirmed, unadmitted, recoverable physical or still-waiting attempts do
+    not publish. Prepared runs have no Named result binding. Ordinary observer
+    failure, including a different observer's cancelled lifetime, cannot turn
+    committed delivery into failure. The publisher's own cancellation propagates.
+    A callback already captured at release still checks its supplied lifetime;
+    this does not undo a previously admitted intake or forcibly stop host I/O.
+    Subscription lookup, original-binding projection and callback/logging work
+    are preparation costs; complete maintenance remains the recovery source. *)
+
 val on_worker_settled
   :  base_path:string
   -> composition_tool:string

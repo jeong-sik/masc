@@ -696,7 +696,7 @@ let completion_delivery_recovers_without_replaying_or_reconsuming () =
     Sys.remove queue_path;
     Async.For_testing.clear ();
     let queued_but_unacknowledged = Outbox.flush ~base_path
-        ~deliver:(fun ~composition_tool entry ->
+        ~deliver:(fun ~completion:_ ~composition_tool entry ->
           match Wake.deliver ~base_path ~not_before:entry.Async.submitted_at
               ~keeper_name:entry.Async.submitted_by
               ~request_id:entry.request_id ~composition_tool ~terminal:Event_queue.Composition_succeeded with
@@ -864,7 +864,7 @@ let independent_completion_owners_keep_original_proofs () =
           check bool "beta canonical output and Task provenance retained" true
             (canonical beta.request_id "beta" = original_beta);
           (* An already acknowledged original hint is not delivery authority. *)
-          (match Outbox.recover beta_hint ~deliver:(fun ~composition_tool (entry : Async.entry) ->
+          (match Outbox.recover beta_hint ~deliver:(fun ~completion:_ ~composition_tool (entry : Async.entry) ->
              match Wake.terminal_of_status entry.status with
              | None -> Error "no canonical terminal"
              | Some terminal -> Wake.deliver ~base_path ~not_before:entry.submitted_at

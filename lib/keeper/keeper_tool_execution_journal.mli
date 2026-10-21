@@ -257,10 +257,36 @@ val continuation_source : continuation -> source
 val continuation_request_id : continuation -> string
 val continuation_dependencies : continuation -> Keeper_composition_dependency.t list
 
+type result_notification =
+  { base_path : string
+  ; keeper_name : string
+  ; dependency : Keeper_composition_dependency.t
+  }
+(** Original canonical workspace, Keeper and typed result identity. This is
+    only a discovery hint, never evidence of readiness or effect permission. *)
+
 type completion_disposition =
   | Canonical_completion
   | Recovery_pending
   | Unadmitted_attempt
+
+type completion_observation
+(** Immutable source/state captured by the original completion-disposition
+    read, not admission authority or a cached result. Keep only for that
+    delivery attempt; later consumers still read their original authority. *)
+
+val observe_completion :
+  base_path:string -> Keeper_msg_async.entry -> (completion_observation, error) result
+val completion_observation_disposition : completion_observation -> completion_disposition
+val completion_result_notification :
+  completion_observation -> (result_notification option, error) result
+(** After durable result delivery, derive the original first admitted Named
+    result binding from this observation and its canonical original request.
+    Successors never substitute their physical request ID. Prepared runs,
+    recovery-pending/unadmitted attempts or requests without a journal source
+    return [Ok None]. Errors do not change already committed delivery; callers
+    retain/log them and let complete maintenance revalidate independently.
+    This read is a hint projection, not proof that a dependent may run. *)
 
 val completion_disposition :
   base_path:string -> Keeper_msg_async.entry -> (completion_disposition, error) result
@@ -303,14 +329,6 @@ val continuation_readiness :
 (** Strict owner reads only. No collection, backend call, launch or Task
     inference. The read does not reserve execution or replace admission. *)
 
-type result_notification =
-  { base_path : string
-  ; keeper_name : string
-  ; dependency : Keeper_composition_dependency.t
-  }
-(** Original canonical workspace, Keeper and typed result identity. This is
-    only a discovery hint, never evidence of readiness or effect permission. *)
-
 type discovery_scope = All_pending | Result_notifications of result_notification list
 (** Maintenance reads all result dependencies. A notification pass still checks
     every marker and its original journal/terminal authority, but reads result
@@ -323,6 +341,9 @@ type discovery_scope = All_pending | Result_notifications of result_notification
 
 type pending_continuations =
   { inspected : int
+      (** Ready + waiting + unselected + retired + failures. Successful
+          lock-infrastructure inspections are excluded; each failed directory
+          entry inspection is counted. *)
   ; ready : continuation list
   ; waiting : int
   ; unselected : int

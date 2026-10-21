@@ -1661,12 +1661,22 @@ let waiting_continuation journal = filesystem (fun () ->
 type read_composition_result =
   base_path:string -> keeper_name:string -> Dependency.composition -> (Dependency.readiness,string) result
 
+type result_notification =
+  { base_path : string
+  ; keeper_name : string
+  ; dependency : Dependency.t
+  }
+
 type completion_disposition =
   | Canonical_completion
   | Recovery_pending
   | Unadmitted_attempt
 
-let completion_disposition ~base_path (entry : Async.entry) = filesystem (fun () ->
+type completion_observation =
+  { observed_disposition : completion_disposition
+  ; observed_source : (t * state) option }
+
+let observe_completion ~base_path (entry : Async.entry) = filesystem (fun () ->
   let fields = Option.value ~default:[] entry.request_context in
   let values name = List.filter_map (fun (key,value) ->
     if String.equal key name then Some value else None) fields in
@@ -1674,7 +1684,7 @@ let completion_disposition ~base_path (entry : Async.entry) = filesystem (fun ()
   | [],[] ->
     if values "composition_tool" = [`String Keeper_tool_composition_catalog.run_tool_name]
     then Error (Invalid_source "prepared completion lacks its journal artifact envelope")
-    else Ok Canonical_completion
+    else Ok {observed_disposition=Canonical_completion;observed_source=None}
   | [_],[_] ->
     let* composition_run_id = match values "composition_run_id" with
       | [`String identity] -> Plan.Composition_run_id.of_string identity
@@ -1703,10 +1713,28 @@ let completion_disposition ~base_path (entry : Async.entry) = filesystem (fun ()
           | None -> Error Ownership_changed in
       let* after = strict_read ~root:journal.root journal.path in
       let* () = check_source journal after in
-      if same_owner before.owner after.owner then Ok disposition else observe () in
+      if same_owner before.owner after.owner
+      then Ok {observed_disposition=disposition;observed_source=Some (journal,before)}
+      else observe () in
     observe ()
   | ([],_::_) | (_::_,[]) | (_::_,_::_) ->
     Error (Invalid_source "completion has a partial or duplicate journal artifact envelope"))
+
+let completion_observation_disposition observation = observation.observed_disposition
+
+let completion_disposition ~base_path entry =
+  observe_completion ~base_path entry |> Result.map completion_observation_disposition
+
+let completion_result_notification observation = filesystem (fun () ->
+  match observation.observed_disposition,observation.observed_source with
+  | (Recovery_pending | Unadmitted_attempt),_ | Canonical_completion,None -> Ok None
+  | Canonical_completion,Some (journal,state) ->
+    match journal.immutable_source.producer with
+    | Prepared -> Ok None
+    | Named _ ->
+      let* binding = original_named_binding journal state in
+      Ok (Some {base_path=journal.base_path;keeper_name=journal.immutable_source.keeper_name;
+        dependency=Dependency.Composition_result binding}))
 
 let completion_pending ~base_path entry =
   completion_disposition ~base_path entry |> Result.map (function
@@ -1819,11 +1847,6 @@ let observe_named_result ~base_path ~keeper_name (binding : Dependency.compositi
     | Some (entry,resolution) -> Ok (journal,entry,Some resolution)
     | None -> Ok (journal,entry,None))
 
-type result_notification =
-  { base_path : string
-  ; keeper_name : string
-  ; dependency : Dependency.t
-  }
 type discovery_scope = All_pending | Result_notifications of result_notification list
 
 module Result_keys = Stdlib.Set.Make (struct

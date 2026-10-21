@@ -3831,7 +3831,7 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
       (Journal.completion_pending ~base_path:fixture.base_path entry |> require "pending launch proof");
     let delivered = ref 0 in
     let report = Outbox.flush ~base_path:fixture.base_path
-        ~deliver:(fun ~composition_tool:_ _ -> incr delivered; Ok ()) |> require "actual pending outbox" in
+        ~deliver:(fun ~completion:_ ~composition_tool:_ _ -> incr delivered; Ok ()) |> require "actual pending outbox" in
     check int (label ^ " emits no outbox notification") 0 !delivered;
     check int (label ^ " delivers no terminal") 0 report.delivered;
     check (list (pair string string)) (label ^ " keeps readable guarded outbox authority") []
@@ -5749,7 +5749,9 @@ let test_prepared_discovery_demand_survives_observer_failure () =
        check string "partial marker failure remains explicit" "malformed-marker.json" name
    | _ -> fail "original continuations remained ready or partial damage disappeared")
 
-let test_prepared_result_scope_preserves_original_resources () =
+type result_signal_scenario = Direct_signal | Delivery_queue_recovery | Observer_scope_cancelled
+
+let test_prepared_result_scope_preserves_original_resources ~scenario () =
   with_fixture @@ fun env _initialize fixture ->
   with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
   with_parked_named_producer env fixture @@ fun parked ->
@@ -5799,16 +5801,18 @@ let test_prepared_result_scope_preserves_original_resources () =
      sw=Async.server_background_switch () |> require "result-scoped background lifetime";
      clock=Eio.Stdenv.clock env;proc_mgr=Some (Eio.Stdenv.process_mgr env);net=None;
      publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
-  let observations = Eio.Stream.create 0 and results = Eio.Stream.create 0 in
+  let child,publish_child = Eio.Promise.create ()
+  and parent,publish_parent = Eio.Promise.create () in
   let supervisor = Wake.create ~context
-      ~on_discovery:(fun ~base_path result -> Eio.Stream.add observations (base_path,result))
-      ~on_result:(fun candidate outcome -> Eio.Stream.add results (candidate,outcome)) () in
-  let observed () =
-    let root,result = Eio.Stream.take observations in
-    check string "scope observations retain original workspace" fixture.base_path root;
-    result |> require "result-scoped original discovery returned" in
-  let accepted original =
-    let candidate,outcome = Eio.Stream.take results in
+      ~on_result:(fun candidate outcome ->
+        let request_id = Journal.continuation_request_id candidate in
+        if String.equal request_id (Journal.continuation_request_id parked.child_continuation) then (
+          if not (Eio.Promise.is_resolved child) then Eio.Promise.resolve publish_child (candidate,outcome))
+        else if String.equal request_id (Journal.continuation_request_id parked.parent_continuation) then (
+          if not (Eio.Promise.is_resolved parent) then Eio.Promise.resolve publish_parent (candidate,outcome))
+        else fail "result signal admitted an unrelated canonical continuation") () in
+  let accepted promise original =
+    let candidate,outcome = Eio.Promise.await promise in
     check string "selected intake keeps exact original canonical request"
       (Journal.continuation_request_id original) (Journal.continuation_request_id candidate);
     check (option string) "selected intake keeps original Task after unrelated work" (Some "task-A")
@@ -5816,25 +5820,64 @@ let test_prepared_result_scope_preserves_original_resources () =
     match outcome with
     | Ok (Tool_result.Completed _ as result) -> Tool_result.data result
     | Ok (Tool_result.Deferred _ | Tool_result.Failed _) | Error _ -> fail "selected original intake refused" in
+  let independent : Keeper_event_queue.stimulus =
+    {post_id="independent-through-composition-signal";urgency=Normal;arrived_at=301.;payload=Bootstrap} in
+  Event_registry.enqueue_durable_result ~base_path:fixture.base_path keeper independent
+    |> require "independent original queue work before result signal";
+  let queue_path = Filename.concat
+      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path:fixture.base_path) keeper)
+      Keeper_event_queue_persistence.snapshot_filename in
+  let original_queue = read queue_path in
+  let alias = Filename.concat fixture.base_path "result-observer-root-alias" in
+  Unix.symlink fixture.base_path alias;
   let child_result,parent_result = Eio.Switch.run (fun sw ->
+    Masc.Keeper_composition_completion_wake.observe_results ~sw ~base_path:alias
+      ~on_result_ready:(Wake.notify_result_ready ~sw supervisor);
+    let stopped_observer = match scenario with
+      | Direct_signal | Delivery_queue_recovery -> None
+      | Observer_scope_cancelled ->
+        let installed,mark_installed = Eio.Promise.create () in
+        let blocked,_unused_release = Eio.Promise.create () in
+        let observer = Eio.Fiber.fork_promise ~sw (fun () ->
+          let exception Stop_observer in
+          try Eio.Switch.run (fun observer_sw ->
+            Masc.Keeper_composition_completion_wake.observe_results
+              ~sw:observer_sw ~base_path:alias ~on_result_ready:(fun _ ->
+                Eio.Switch.fail observer_sw Stop_observer;
+                Eio.Switch.check observer_sw);
+            Eio.Promise.resolve mark_installed ();
+            Eio.Promise.await blocked)
+          with Stop_observer | Eio.Cancel.Cancelled _ -> ()) in
+        Eio.Promise.await installed;
+        Some observer in
+    (match scenario with
+     | Delivery_queue_recovery -> write queue_path "actual broken queue snapshot during original child completion"
+     | Direct_signal | Observer_scope_cancelled -> ());
     (* Real unrelated and related notifications coalesce before discovery.
        The scope can select the original child without admitting its parent. *)
     Wake.notify_result_ready ~sw supervisor (notification peer);
     Wake.notify_result_ready ~sw supervisor original_hint;
-    observed ();
-    let child_request = accepted parked.child_continuation in
+    let child_request = accepted child parked.child_continuation in
     let child_ok,child_result,_ = await_composition env fixture child_request in
     check bool "original child finishes from its saved job result" true child_ok;
-    ignore (Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path
-      |> require "durably publish original named child result");
-    let child_hint : Journal.result_notification =
-      {base_path=fixture.base_path;keeper_name=keeper;
-       dependency=Dependency.Composition_result parked.binding} in
-    Wake.notify_result_ready ~sw supervisor child_hint;
-    observed ();
-    let parent_request = accepted parked.parent_continuation in
+    (match scenario with
+     | Direct_signal | Observer_scope_cancelled -> ()
+     | Delivery_queue_recovery ->
+       let failed = Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path
+         |> require "original child outbox retained through actual queue fault" in
+       check bool "exact original physical result retains its failed delivery obligation" true
+         (List.exists (fun (request_id,_) -> String.equal request_id
+           (child_request |> member "request_id" |> to_string)) failed.failures);
+       check bool "queue fault publishes no usable parent result" false (Eio.Promise.is_resolved parent);
+       write queue_path original_queue;
+       ignore (Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path
+         |> require "retry actual original completion after queue repair"));
+    (* No manual parent result hint or maintenance pulse: direct completion or
+       recovered durable delivery must notify the original dependent parent. *)
+    let parent_request = accepted parent parked.parent_continuation in
     let parent_ok,parent_result,_ = await_composition env fixture parent_request in
     check bool "original parent consumes its exact named child result" true parent_ok;
+    Option.iter Eio.Promise.await_exn stopped_observer;
     child_result,parent_result) in
   let stdout_sha = child_result |> member "exports" |> member "stdout" |> member "value" |> to_string in
   let stdout = with_bundle fixture (fun bundle -> invoke fixture bundle
@@ -5843,6 +5886,9 @@ let test_prepared_result_scope_preserves_original_resources () =
   check_json "selected original result remains useful" (`String stdout_bytes) (stdout |> member "content");
   check_json "parent's usable result retains the original child" (`Bool true)
     (parent_result |> member "exports" |> member "child_result" |> member "available");
+  check bool "independent queue work survives automatic original parent resumption" true
+    (pending_completions fixture |> List.exists (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      Keeper_event_queue.stimulus_identity_equal independent selection.source));
   check string "unrelated job's actual durable owner bytes survive both scoped intakes"
     peer_bytes (read (owner_path fixture peer_id));
   let after = load fixture parked.job_id in
@@ -6642,8 +6688,12 @@ let () = match Array.to_list Sys.argv with
           test_completion_discovery_failure_preserves_original_result
       ; test_case "prepared discovery preserves new demand through observer failure and resumes original child and parent" `Quick
           test_prepared_discovery_demand_survives_observer_failure
-      ; test_case "typed result scope preserves two actual jobs and original child-parent results" `Quick
-          test_prepared_result_scope_preserves_original_resources
+      ; test_case "typed original child completion automatically resumes parent and retains unrelated job" `Quick
+          (test_prepared_result_scope_preserves_original_resources ~scenario:Direct_signal)
+      ; test_case "actual queue failure and completion recovery retain original parent and job outputs" `Quick
+          (test_prepared_result_scope_preserves_original_resources ~scenario:Delivery_queue_recovery)
+      ; test_case "another observer's cancelled lifetime cannot suppress original parent result" `Quick
+          (test_prepared_result_scope_preserves_original_resources ~scenario:Observer_scope_cancelled)
       ; test_case "cancelled recovery retains original output and a fresh scope delivers once and cleans" `Quick
           test_completion_cancelled_round_preserves_original_result
       ; test_case "held absence uses a presence hint and reactivates only original authority" `Quick

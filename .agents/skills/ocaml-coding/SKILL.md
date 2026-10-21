@@ -1,6 +1,6 @@
 ---
 name: ocaml-coding
-description: "masc 저장소의 lib/·bin/·test/ OCaml 5.5 + Eio 코드를 작성·수정할 때 쓴다. typed 오류·취소와 자원 수명, 준비·Skill 권한, maintenance·결과 알림의 공유 비동기 발견, 실제 worker 정리, .mli 우선 변경과 검증 경계를 안내한다. 준비·예약·실행·UI 관측을 구분한다."
+description: "masc 저장소의 lib/·bin/·test/ OCaml 5.5 + Eio 코드를 작성·수정할 때 쓴다. typed 오류·취소와 자원 수명, 준비·Skill 권한, durable 결과의 switch 수명 관측과 공유 비동기 발견, 실제 worker 정리, .mli 우선 변경과 검증 경계를 안내한다. 준비·예약·실행·UI 관측을 구분한다."
 ---
 
 # masc OCaml 점검표
@@ -170,6 +170,12 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   않는다. 알림 도착을 intake·Task 재개·효과 허가로 기록하지 않는다. drain의 identity와
   순수한 예약 해제·취소 정리를 지키고 같은 lifetime switch를 사용한다. 유지보수/알림 횟수는
   관측일 뿐 제한값이 아니다. timer·재시도 간격·결과/프로필 cache를 만들지 않는다.
+  Composition의 직접 완료와 outbox 복구는 같은 원래 completion 관측을 전달하고 durable
+  queue 전달 뒤 ACK 전에 첫 admitted Named result binding을 투영한다. 후속 물리 request ID나
+  현재 Task로 대체하지 않는다. 미확정·unadmitted·복구 중 물리 완료는 알림을 만들지 않는다.
+  typed observer는 실제 workspace와 server switch에 묶고 자기 등록만 해제한다. 다른 observer의
+  취소는 현재 publisher의 취소 검사 뒤 격리하며, publisher 자신의 취소는 전파한다. binding
+  투영 실패를 전달 실패나 새 실행 허가로 바꾸지 않고 maintenance의 원래 재검증을 유지한다.
 
 소스 패턴이나 임의 개수 상한으로 구현을 제한하지 않는다. 타입 검사와 실제 동작 테스트로 변경을 검증하고, 로컬 빌드와 CI 실행 시점은 헌법의 실행 프로토콜을 따른다.
 

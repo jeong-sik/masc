@@ -10672,7 +10672,9 @@ let open_ask_task_inspection state =
        state.ask_task_inspection <- Some original;
        state.task_inspection_reader <- Some {tci_original=owner;tci_authority=state.workspace_authority;
          tci_reading=state.workspace_read_authority;tci_surface=state.view;tci_target=state.msg_target_keeper_name};true)
-  | (Some _ | None),(Some _ | None) -> false
+  | Some ({as_asker=Masc.Tui_decode_asks.Ask_installation _;_},_,_,_),(Some _ | None)
+  | Some ({as_asker=Masc.Tui_decode_asks.Ask_keeper _;_},_,_,_),None
+  | None,(Some _ | None) -> false
 
 let task_creation_neighbor state ~older =
   match current_task_inspector state with

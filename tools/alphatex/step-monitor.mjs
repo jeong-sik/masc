@@ -1,21 +1,19 @@
 import { Worker } from 'node:worker_threads'
 import { randomUUID } from 'node:crypto'
-import { validateSound } from './project-sound.mjs'
-import { monitorPacket } from './step-monitor-session.mjs'
+import { monitorPacket, monitorSoundIdentity, validateMonitorSound } from './step-monitor-session.mjs'
 export { monitorPacket } from './step-monitor-session.mjs'
 
 // The terminal owns note decisions; the worker owns every device demand and
 // synth block. No per-block acknowledgement crosses the terminal event loop.
-export function openStepMonitor({ sound, output, channel, signal, backing,
+export function openStepMonitor({ sound, output, channel, signal, backing, initial,
   createWorker = (url, options) => new Worker(url, options) }) {
-  validateSound(sound)
-  if (sound.kind !== 'vst') throw new Error('Choose a VST instrument before monitored step input')
+  validateMonitorSound(sound)
   if (!Number.isInteger(channel) || channel < 0 || channel > 15) throw new Error('Invalid monitor target channel')
   signal?.throwIfAborted()
   sound = structuredClone(sound)
   const id = randomUUID()
   const worker = createWorker(new URL('./step-monitor-worker.mjs', import.meta.url), {
-    workerData: { sound, output, channel, id, backing }, name: 'music-monitor' })
+    workerData: { sound, output, channel, id, backing, initial }, name: 'music-monitor' })
   const threadId = worker.threadId
   let held = new Map(), pending = null, inspection = null, snapshot = null
   let stopping = false, closed = false, terminal = null, failure = null
@@ -26,8 +24,7 @@ export function openStepMonitor({ sound, output, channel, signal, backing,
   ready.catch(() => {}); completion.catch(() => {}); clock.catch(() => {})
   const diagnostics = () => structuredClone({
     ...(snapshot ?? { schemaVersion: 1, kind: 'step-monitor', id, channel,
-      sound: { name: sound.selection.name, identifier: sound.instrument.identifier,
-        version: sound.instrument.version, presetSHA256: sound.preset.sha256 }, pcm: null }),
+      sound: monitorSoundIdentity(sound), pcm: null }),
     worker: { threadId, closed, terminalReceived: terminal !== null, failure: failure?.message ?? null },
   })
   const post = value => { if (!closed) worker.postMessage(value) }

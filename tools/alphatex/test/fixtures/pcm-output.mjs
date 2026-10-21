@@ -1,18 +1,19 @@
 import { createInterface } from 'node:readline'
 const mode = process.argv[2]
+const blockFrames = mode === 'fluid' ? 64 : 8, prefill = BigInt(blockFrames * 2)
 if (mode === 'cancel-race') process.on('SIGTERM', () => {})
 let next = 1n, admitted = 0n
 let demandTimer
 const reply = row => process.stdout.write(JSON.stringify(row) + '\n')
-const need = () => reply({ kind: 'need', id: String(next++), frames: 8, startFrame: String(admitted) })
+const need = () => reply({ kind: 'need', id: String(next++), frames: blockFrames, startFrame: String(admitted) })
 const final = (success = true, fault = 'none') => ({ kind: 'stopped', success, fault,
   faultFrames: fault === 'none' ? '0' : '8', admittedFrames: String(admitted),
   renderedFrames: mode === 'total' ? '999' : success ? '0' : String(admitted),
   discardedFrames: success ? String(admitted) : '0', underrunFrames: fault === 'underrun' ? '8' : '0',
-  demand: { completedBlocks: String(admitted / 8n), lastResponseNanoseconds: admitted ? '17' : '0',
-    playingBlocks: String(admitted > 16n ? admitted / 8n - 2n : 0n), maxPlayingResponseNanoseconds: admitted > 16n ? '19' : '0',
+  demand: { completedBlocks: String(admitted / BigInt(blockFrames)), lastResponseNanoseconds: admitted ? '17' : '0',
+    playingBlocks: String(admitted > prefill ? admitted / BigInt(blockFrames) - 2n : 0n), maxPlayingResponseNanoseconds: admitted > prefill ? '19' : '0',
     maxResponseNanoseconds: admitted ? '19' : '0', pendingNanoseconds: null } })
-reply({ kind: 'ready', schemaVersion: mode === 'clock-version' ? 2 : 3, device: { id: mode === 'identity' ? 'other' : 'owned', name: 'Owned fixture' }, sampleRate: 48000, blockFrames: 8, prefillFrames: 16 })
+reply({ kind: 'ready', schemaVersion: mode === 'clock-version' ? 2 : 3, device: { id: mode === 'identity' ? 'other' : 'owned', name: 'Owned fixture' }, sampleRate: 48000, blockFrames, prefillFrames: Number(prefill) })
 const clock = { kind: 'clock', schemaVersion: 1, device: { id: mode === 'clock-device' ? 'other' : 'owned', name: 'Owned fixture' },
   sampleRate: mode === 'clock-rate' ? 44100 : 48000,
   clock: { kind: 'mach-host-time', numer: mode === 'clock-timebase' ? 0 : 125, denom: 3 },
@@ -22,21 +23,21 @@ need()
 createInterface({ input: process.stdin }).on('close', () => clearTimeout(demandTimer)).on('line', line => {
   const row = JSON.parse(line)
   if (row.kind === 'block') {
-    admitted += 8n
-    if (admitted === 16n) {
+    admitted += BigInt(blockFrames)
+    if (admitted === prefill) {
       reply({ kind: 'playing' })
       if (!['clock-missing', 'clock-at-final'].includes(mode)) process.stdout.write([clock, ...(mode === 'clock-duplicate' ? [clock] : [])].map(JSON.stringify).join('\n') + '\n')
     }
-    if (['fault-final','format-final'].includes(mode) && admitted === 16n) {
+    if (['fault-final','format-final'].includes(mode) && admitted === prefill) {
       const fault = mode === 'fault-final' ? 'underrun' : 'render-format'
       // Both receipts are already available to the reader. A separate write
       // could be killed after error but before final, a different valid case.
       process.stdout.write([ { kind: 'error', message: fault }, final(false, fault) ].map(JSON.stringify).join('\n') + '\n')
       process.exitCode = 1; process.stdin.destroy(); return
     }
-    if (mode === 'underrun' && admitted === 16n) { reply({ kind: 'error', message: 'PCM underrun' }); return }
-    if (mode === 'demand') reply({ kind: 'need', id: '999', frames: 8, startFrame: '0' })
-    else if (mode === 'paced') demandTimer = setTimeout(need, 2)
+    if (mode === 'underrun' && admitted === prefill) { reply({ kind: 'error', message: 'PCM underrun' }); return }
+    if (mode === 'demand') reply({ kind: 'need', id: '999', frames: blockFrames, startFrame: '0' })
+    else if (['paced', 'fluid'].includes(mode)) demandTimer = setTimeout(need, 2)
     else need()
   } else if (row.kind === 'stop') {
     clearTimeout(demandTimer)

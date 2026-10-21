@@ -19,7 +19,7 @@ const packet = words => ({ kind: 'midi', source: '10', protocol: 2, timestampOri
 async function runtime({ pcm = 'paced', vst = 'valid' } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'monitor-worker-'))
   const trace = join(directory, 'events.jsonl'), workers = []
-  for (const file of ['step-monitor.mjs', 'step-monitor-worker.mjs', 'step-monitor-session.mjs',
+  for (const file of ['synth-stream.mjs', 'soundfont-stream.mjs', 'soundfont_stream.py', 'soundfont_host.py', 'step-monitor.mjs', 'step-monitor-worker.mjs', 'step-monitor-session.mjs',
     'render-midi-clock.mjs', 'exact-time.mjs', 'phrase-backing.mjs', 'sequencer-project.mjs', 'project-sound.mjs', 'pcm-output.mjs', 'vst-stream.mjs', 'session-data.mjs', 'wave-file.mjs']) {
     await copyFile(new URL(`../${file}`, import.meta.url), join(directory, file))
   }
@@ -210,4 +210,29 @@ test('worker relays output/synth faults and closed child receipts', async () => 
       await fixture.assertClosed()
     } finally { owner.stop(); await owner.completion.catch(() => {}); await fixture.dispose() }
   }
+})
+
+test('actual FluidSynth runs inside the demand worker with independent live/backing voices', async () => {
+  const { captureFluidSound } = await import('../soundfont.mjs')
+  const selected = await captureFluidSound().promise, fixture = await runtime({ pcm: 'fluid' })
+  const project = newProject()
+  project.tracks.push({ ...structuredClone(project.tracks[0]), id: 'bass', name: 'Backing', channel: 1, program: 33,
+    notes: [{ id: 'bass-1', pitch: 48, start: 0, duration: 960, velocity: 100 }] })
+  const owner = fixture.open({ sound: selected, channel: 0, backing: phraseBacking(project, 'track-1', true),
+    initial: [[0xc0,0],[0xb0,7,100],[0xb0,10,64],[0xc1,33],[0xb1,7,100],[0xb1,10,64]] })
+  try {
+    await owner.ready
+    await owner.send(owner.prepare(packet([0x40903c00,0xa0000000])))
+    await owner.send(owner.prepare(packet([0x40803c00,0])))
+    const report = await owner.inspect()
+    assert.equal(report.sound.kind,'soundfont')
+    assert.equal(report.sound.fontSHA256,selected.font.sha256)
+    assert.equal(report.sound.engine.controlFrames,selected.engine.controlFrames)
+    assert.equal(report.backing.instances,2)
+    owner.stop();await owner.completion
+    const rows=await fixture.assertClosed()
+    assert.ok(rows.some(row=>row.kind==='pcm'&&row.samples.some(value=>value!==0)))
+    assert.equal(rows.filter(row=>row.kind==='start'&&row.name==='masc-vst-host').length,0)
+    assert.equal(owner.diagnostics().worker.closed,true)
+  } finally { owner.stop();await owner.completion.catch(()=>{});await fixture.dispose() }
 })

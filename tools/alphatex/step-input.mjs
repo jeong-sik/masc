@@ -123,10 +123,16 @@ export function stepPacket(editor, pending, packet) {
 // packet may itself be waiting to enter the queue.
 export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState = () => {},
   audio, practice = false, recording, openTake = openPracticeTake, openMonitor = openStepMonitor, openInput = openMidiInput }) {
-  if (practice && !audio) throw new Error('Practice input requires VST monitoring')
+  if (practice && !audio) throw new Error('Practice input requires instrument monitoring')
   if (recording && !practice) throw new Error('Practice recording requires live practice mode')
+  if (recording && audio?.sound?.kind !== 'vst') throw new Error('SoundFont practice recording is not supported; select a VST or use :practice-input without recording')
   if (audio) audio = structuredClone(audio)
   const editor = getEditor(), { channel, track } = target(editor)
+  if (audio?.sound?.engine?.kind === 'fluidsynth') {
+    const tracks = sourceDocument(editor) ? [{ channel, program: 0, level: 100, pan: 64 }] : editor.project.tracks
+    audio.initial = tracks.flatMap(track => [[0xc0 | track.channel, track.program],
+      [0xb0 | track.channel, 7, track.level], [0xb0 | track.channel, 10, track.pan]])
+  }
   const takeContext = recording ? structuredClone({ path: recording.path, project: editor.project, track: track.id, sound: audio.sound, backing: audio.backing }) : null
   const cancellation = new AbortController()
   const stopped = new Error('Step input stopped before arming')

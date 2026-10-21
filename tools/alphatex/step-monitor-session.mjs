@@ -1,6 +1,7 @@
 import { unpackMidi } from './session-data.mjs'
 import { validateSound } from './project-sound.mjs'
 import { openVstStream } from './vst-stream.mjs'
+import { openFluidStream } from './soundfont-stream.mjs'
 import { openPcmOutput } from './pcm-output.mjs'
 import { randomUUID } from 'node:crypto'
 import { backingClock } from './phrase-backing.mjs'
@@ -53,13 +54,25 @@ export function monitorPacket(packet, channel, held = new Map()) {
   return { held: next, messages }
 }
 
+export function monitorSoundIdentity(sound) {
+  return sound.kind === 'vst' ? { name: sound.selection.name, identifier: sound.instrument.identifier,
+    version: sound.instrument.version, presetSHA256: sound.preset.sha256 }
+    : { kind: 'soundfont', name: sound.font.name, engine: { ...sound.engine },
+      bankStyle: sound.bankStyle, fontSHA256: sound.font.sha256, timing: 'control-block-ceil' }
+}
+export function validateMonitorSound(sound) {
+  validateSound(sound)
+  if (sound.kind !== 'vst' && sound.engine?.kind !== 'fluidsynth') throw new Error('Choose a VST or bound FluidSynth instrument before monitored step input')
+}
+const openMonitorSynth = (sound, options) => sound.kind === 'vst' ? openVstStream(sound, options) : openFluidStream(sound, options)
+
 // One slot is sufficient: the MIDI input owner awaits send() before admitting
 // its next packet. Audio demand consumes that slot without entering the UI queue.
-export function openMonitorSession({ sound, output, channel, signal, backing,
-  openOutput = openPcmOutput, openSynth = openVstStream, id = randomUUID() }) {
-  validateSound(sound)
-  if (sound.kind !== 'vst') throw new Error('Choose a VST instrument before monitored step input')
+export function openMonitorSession({ sound, output, channel, signal, backing, initial = [],
+  openOutput = openPcmOutput, openSynth = openMonitorSynth, id = randomUUID() }) {
+  validateMonitorSound(sound)
   sound = structuredClone(sound)
+  initial = structuredClone(initial)
   if (!Number.isInteger(channel) || channel < 0 || channel > 15) throw new Error('Invalid monitor target channel')
   signal?.throwIfAborted()
   const cancellation = new AbortController()
@@ -89,7 +102,7 @@ export function openMonitorSession({ sound, output, channel, signal, backing,
           if (backing) clock = backingClock(backing, sampleRate)
           for (const voiceChannel of [channel, ...(backing?.channels ?? [])]) {
             const owner = openSynth(sound, { sampleRate, signal: cancellation.signal })
-            voices.push({ channel: voiceChannel, owner })
+            voices.push({ channel: voiceChannel, owner, initial: initial.filter(bytes => (bytes[0] & 15) === voiceChannel) })
             owner.completion.catch(error => { if (error !== stopped) fail(error) })
           }
         }
@@ -101,8 +114,14 @@ export function openMonitorSession({ sound, output, channel, signal, backing,
             .sort((a, b) => a.frame - b.frame) : admitted?.messages ?? []
           // Dedicated instances retain independent same-pitch voices even when
           // a plug-in treats MIDI channels as omni. One device demand clocks all.
-          const blocks = await Promise.all(voices.map(voice => voice.owner.render(frames,
-            clock ? messages.filter(message => (message.bytes[0] & 15) === voice.channel) : messages)))
+          const blocks = await Promise.all(voices.map(async voice => {
+            const pcm = await voice.owner.render(frames, [
+              ...voice.initial.map(bytes => ({ frame: 0, bytes })),
+              ...(clock ? messages.filter(message => (message.bytes[0] & 15) === voice.channel) : messages),
+            ])
+            voice.initial = []
+            return pcm
+          }))
           const block = blocks[0]
           if (clock) for (let offset = 0; offset < block.length; offset += 4) {
             let sample = 0
@@ -146,8 +165,7 @@ export function openMonitorSession({ sound, output, channel, signal, backing,
   return { ready, completion, clock: pcm.clock,
     diagnostics() {
       return { schemaVersion: 1, kind: 'step-monitor', id, channel,
-        sound: { name: sound.selection.name, identifier: sound.instrument.identifier,
-          version: sound.instrument.version, presetSHA256: sound.preset.sha256 },
+        sound: monitorSoundIdentity(sound),
         pcm: pcm.diagnostics(), ...(backing ? { backing: {
           ...(clock?.diagnostics() ?? { track: backing.track, channel: backing.channel, producedFrames: '0' }),
           channels: backing.channels, instances: voices.length, peak, clippedSamples: String(clippedSamples),

@@ -150,8 +150,14 @@ let copy t path id = io (fun () ->
       let sha256,bytes=stream Digestif.SHA256.empty 0 in
       Unix.fsync output;
       let* ()=check t in let* ()=check_parents parents in
-      let* ()=if same_file before (Unix.fstat source) && same_file before (Unix.lstat path)
-        && bytes=before.st_size then Ok () else Error "download source changed while copying" in
+      let after=Unix.fstat source in
+      let current=Unix.lstat path in
+      let* ()=if same_file before after && same_file before current
+        && bytes=before.st_size then Ok () else Error
+          ("download source changed while copying: " ^ Yojson.Safe.to_string (`Assoc [
+            "snapshotId",`String id;"before",file_observation before;
+            "opened",file_observation observed;"descriptorAfter",file_observation after;
+            "pathAfter",file_observation current;"copiedBytes",`Int bytes])) in
       let copied=Unix.fstat output in
       let descriptor={snapshot_id=id;root_device=t.root_stat.st_dev;root_inode=t.root_stat.st_ino;
         device=copied.st_dev;inode=copied.st_ino;bytes;sha256} in

@@ -4,6 +4,40 @@ open Masc_domain
 
 module AgentMap = Set_util.StringMap
 
+(* Separate from the actor's cached state: callers admit/release discoveries
+   without its mutex. CAS callbacks only transform immutable scope records. *)
+module Restore_scopes = struct
+  type token = unit ref
+  type scope = {
+    token : token;
+    retired : Set_util.StringSet.t;
+  }
+  type t = scope list Atomic.t
+
+  let create () : t = Atomic.make []
+
+  let open_ (scopes : t) =
+    let token = ref () in
+    Atomic_util.update scopes (fun active ->
+      { token; retired = Set_util.StringSet.empty } :: active);
+    token
+
+  let retire (scopes : t) agent_name =
+    Atomic_util.update scopes (List.map (fun scope ->
+      { scope with retired = Set_util.StringSet.add agent_name scope.retired }))
+
+  let rec take (scopes : t) token =
+    let active = Atomic.get scopes in
+    match List.find_opt (fun scope -> scope.token == token) active with
+    | None -> None
+    | Some scope ->
+        let remaining = List.filter (fun scope -> scope.token != token) active in
+        if Atomic.compare_and_set scopes active remaining then Some scope.retired
+        else take scopes token
+
+  let clear scopes = Atomic.set scopes []
+end
+
 (** Session info stored in registry *)
 type session = {
   agent_name: string;
@@ -34,7 +68,7 @@ type msg =
   | Push_notification of Yojson.Safe.t * int resolver
   | Get_session of string * session option resolver
   | Get_sessions of session AgentMap.t resolver
-  | Restore_discovered_req of string list * float * unit resolver
+  | Restore_discovered_req of Restore_scopes.token * string list * float * unit resolver
 
 type registry_state = {
   sessions: session AgentMap.t;
@@ -54,6 +88,7 @@ type registry = {
   state: registry_state ref;
   state_mutex: Mutex.t;
   loop_started: bool Atomic.t;
+  restore_scopes: Restore_scopes.t;
 }
 
 exception Registry_closed
@@ -75,6 +110,7 @@ let create ?(config = default_rate_limit) () = {
   state = ref (empty_registry_state ());
   state_mutex = Mutex.create ();
   loop_started = Atomic.make false;
+  restore_scopes = Restore_scopes.create ();
 }
 
 let create_tracker now = {
@@ -131,7 +167,7 @@ let drop_oldest_event ~agent_name ~kind st =
     Some dropped_event
 ;;
 
-let process_msg config state msg =
+let process_msg ~restore_scopes config state msg =
   match msg with
   | Register (agent_name, now, p) ->
       let existing = AgentMap.mem agent_name state.sessions in
@@ -152,6 +188,9 @@ let process_msg config state msg =
       { state with sessions = sessions' }
 
   | Unregister agent_name ->
+      (* Retire even an absent name: a real connection may have registered and
+         gone away while an older directory snapshot was in flight. *)
+      Restore_scopes.retire restore_scopes agent_name;
       let sessions' = AgentMap.remove agent_name state.sessions in
       Log.Session.info "Session unregistered: %s (total: %d)"
         agent_name (AgentMap.cardinal sessions');
@@ -301,30 +340,36 @@ let process_msg config state msg =
       Eio.Promise.resolve_ok p status;
       state
 
-  | Restore_discovered_req (agent_names, now, p) ->
-      let sessions, restored = List.fold_left (fun (sessions, restored) agent_name ->
-        (* Discovery may yield before dispatch. A real connection or a prior
-           restore can establish the name in the meantime; keep its live queue
-           and activity rather than replacing it with an empty restored one. *)
-        if AgentMap.mem agent_name sessions then (sessions, restored)
-        else
-          let session = {
-            agent_name;
-            connected_at = now;
-            last_activity = now;
-            is_listening = false;
-            message_queue = Eio.Stream.create max_notification_queue;
-          } in
-          (AgentMap.add agent_name session sessions, restored + 1)
-      ) (state.sessions, 0) agent_names in
-      if restored > 0 then
-        Log.Session.info "Restored %d session(s) from disk" restored;
-      Eio.Promise.resolve_ok p ();
-      { state with sessions }
+  | Restore_discovered_req (token, agent_names, now, p) ->
+      (match Restore_scopes.take restore_scopes token with
+       | None ->
+           Eio.Promise.resolve_error p Registry_closed;
+           state
+       | Some retired ->
+           let sessions, restored = List.fold_left (fun (sessions, restored) agent_name ->
+             (* Keep both live queues and removals processed while this restore
+                was admitted. A later fresh restore has its own empty scope. *)
+             if AgentMap.mem agent_name sessions
+                || Set_util.StringSet.mem agent_name retired then (sessions, restored)
+             else
+               let session = {
+                 agent_name;
+                 connected_at = now;
+                 last_activity = now;
+                 is_listening = false;
+                 message_queue = Eio.Stream.create max_notification_queue;
+               } in
+               (AgentMap.add agent_name session sessions, restored + 1)
+           ) (state.sessions, 0) agent_names in
+           if restored > 0 then
+             Log.Session.info "Restored %d session(s) from disk" restored;
+           Eio.Promise.resolve_ok p ();
+           { state with sessions })
 
 let process_registry_msg registry msg =
   Stdlib.Mutex.protect registry.state_mutex (fun () ->
-    registry.state := process_msg registry.config !(registry.state) msg)
+    registry.state := process_msg ~restore_scopes:registry.restore_scopes
+      registry.config !(registry.state) msg)
 
 let dispatch registry msg =
   if Atomic.get registry.loop_started then Eio.Stream.add registry.mailbox msg
@@ -359,12 +404,13 @@ let resolve_msg_error msg =
   | Push_notification (_, u) -> cancel u
   | Get_session (_, u) -> cancel u
   | Get_sessions u -> cancel u
-  | Restore_discovered_req (_, _, u) -> cancel u
+  | Restore_discovered_req (_, _, _, u) -> cancel u
 
 let start_loop registry ~sw =
   if Atomic.compare_and_set registry.loop_started false true then begin
     Eio.Switch.on_release sw (fun () ->
       Atomic.set registry.loop_started false;
+      Restore_scopes.clear registry.restore_scopes;
       let rec drain () =
         match Eio.Stream.take_nonblocking registry.mailbox with
         | None -> ()
@@ -377,7 +423,7 @@ let start_loop registry ~sw =
         let msg = Eio.Stream.take registry.mailbox in
         let state' =
           Stdlib.Mutex.protect registry.state_mutex (fun () ->
-            let state' = process_msg registry.config state msg in
+            let state' = process_msg ~restore_scopes:registry.restore_scopes registry.config state msg in
             registry.state := state';
             state')
         in
@@ -511,14 +557,26 @@ let discover_agent_names ~agents_path =
         else None)
     else [])
 
-let restore_from_disk registry ~agents_path =
+let restore_from_disk_with ~after_discovery registry ~agents_path =
   Eio_guard.check_if_ready ();
   let now = Time_compat.now () in
-  let agent_names = discover_agent_names ~agents_path in
-  Eio_guard.check_if_ready ();
-  let p, r = Eio.Promise.create () in
-  dispatch registry (Restore_discovered_req (agent_names, now, r));
-  await_exn_if_needed p
+  let token = Restore_scopes.open_ registry.restore_scopes in
+  Fun.protect
+    ~finally:(fun () -> ignore (Restore_scopes.take registry.restore_scopes token))
+    (fun () ->
+      let agent_names = discover_agent_names ~agents_path in
+      after_discovery ();
+      Eio_guard.check_if_ready ();
+      let p, r = Eio.Promise.create () in
+      dispatch registry (Restore_discovered_req (token, agent_names, now, r));
+      await_exn_if_needed p)
+
+let restore_from_disk registry ~agents_path =
+  restore_from_disk_with ~after_discovery:(fun () -> ()) registry ~agents_path
+
+module For_testing = struct
+  let restore_from_disk = restore_from_disk_with
+end
 
 (* ============================================ *)
 (* MCP 2025-11-25 Spec: Mcp-Session-Id          *)

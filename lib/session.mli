@@ -31,8 +31,9 @@ type rate_tracker = {
 (** Session registry managing all connected agents. *)
 type registry
 
-(** Raised when a registry operation is still queued while its actor switch is
-    released. This is distinct from cooperative Eio cancellation. *)
+(** Raised when a registry operation is still queued, or an unclaimed restore
+    is in discovery, while its actor switch is released. This is distinct from
+    cooperative Eio cancellation. *)
 exception Registry_closed
 
 (** {1 Registry Lifecycle} *)
@@ -48,7 +49,9 @@ val start_loop : registry -> sw:Eio.Switch.t -> unit
 (** Register a new agent session (or replace if name exists). *)
 val register : registry -> agent_name:string -> session
 
-(** Unregister an agent session. *)
+(** Unregister an agent session. When processed, this also retires its name
+    from every currently admitted restore, even if no session currently exists.
+    A fresh restore admitted afterward may restore the persisted name again. *)
 val unregister : registry -> agent_name:string -> unit
 
 (** Update the activity timestamp and optionally the listening flag. *)
@@ -124,10 +127,30 @@ val connected_agents : registry -> string list
     directory no-op behavior are unchanged; file contents are not read. A host
     discovery error reaches the caller before any restore message is queued.
     Entry/completion cancellation checks prevent a cancelled discovery from
-    dispatching. Cancellation after dispatch does not retract an accepted message
-    or forcibly stop host I/O. Non-Eio callers discover inline. This restores
-    agent-name presence, separately from MCP transport-session authority. *)
+    dispatching. Each admitted restore retains names unregistered while it is
+    open and omits them when the owner applies its discovered names. This includes
+    an absent name registered and removed during discovery. The bookkeeping is
+    released on success, failure or cancellation; no permanent tombstone or
+    clock/count expiry is used. A later fresh restore may restore that name.
+
+    The owner claims the restore scope before applying it. Caller cancellation
+    before that claim can invalidate even an already queued restore; after the
+    claim it does not undo publication. Actor-switch release invalidates all
+    unclaimed scopes, including discoveries whose callers outlive the actor, so
+    their late results cannot apply after restart. Neither mechanism forcibly
+    stops host I/O. Non-Eio callers discover inline. This restores agent-name
+    presence, separately from MCP transport-session authority. *)
 val restore_from_disk : registry -> agents_path:string -> unit
+
+module For_testing : sig
+  (** The same real directory discovery, scope and owner-publication protocol.
+      Runs [after_discovery] on the caller after host discovery, before the
+      completion cancellation check and owner dispatch. The callback only orders
+      actual registration/removal, cancellation and actor-lifetime scenarios;
+      it does not replace storage or expose registry/scope internals. *)
+  val restore_from_disk :
+    after_discovery:(unit -> unit) -> registry -> agents_path:string -> unit
+end
 
 (** {1 MCP Session Store} *)
 

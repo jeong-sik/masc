@@ -124,6 +124,8 @@ let pretty_resource_text ~mime text =
   | None when resource_mime_is_markdown mime -> text
   | None -> text
 
+type piece = Markdown_text of string | Html_text of string
+
 let resource_document entry
     (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded =
   let resource = Catalog.metadata entry in
@@ -166,56 +168,54 @@ let resource_document entry
     | (Catalog.Mcp _ | Catalog.Report _), true | Catalog.Mcp _, false -> details in
   let part_document index (part : Masc_tui_mcp.resource_content) =
     let part_mime = Option.value part.rc_mime_type ~default:mime in
-    let body =
-      match part.rc_kind with
+    let body = match part.rc_kind with
       | Masc_tui_mcp.Resource_text text ->
-          (match presentation with
-           | Catalog.Document -> pretty_resource_text ~mime:part_mime text
-           | Catalog.Source -> Masc_tui_markdown_theme.fenced
-               ~language:(Option.value (resource_language_of_mime part_mime) ~default:"")
-               (Masc_tui_text_block.lines text |> String.concat "\n"))
-      | Masc_tui_mcp.Resource_blob { base64 } ->
-          Printf.sprintf
-            "%s · `%s` · %d base64 bytes"
-            (if Masc_tui_resource_images.is_image part_mime then "Image data" else "Binary data")
-            part_mime (String.length base64)
-    in
+        (match presentation with
+         | Catalog.Document when resource_mime_essence part_mime = "text/html" -> Html_text text
+         | Catalog.Document -> Markdown_text (pretty_resource_text ~mime:part_mime text)
+         | Catalog.Source -> Markdown_text (Masc_tui_markdown_theme.fenced
+             ~language:(Option.value (resource_language_of_mime part_mime) ~default:"")
+             (Masc_tui_text_block.lines text |> String.concat "\n")))
+      | Masc_tui_mcp.Resource_blob {base64} ->
+        Markdown_text (Printf.sprintf "%s · `%s` · %d base64 bytes"
+          (if Masc_tui_resource_images.is_image part_mime then "Image data" else "Binary data")
+          part_mime (String.length base64)) in
     match contents with
     | Some (_ :: _ :: _) ->
-        Printf.sprintf "### Part %d · %s\n\n%s" index part_mime body
-    | Some (_ :: []) | Some [] | None -> body
-  in
-  let body =
-    match (error, contents) with
-    | Some detail, _ -> detail
-    | None, None when requested -> "(reading resource…)"
-    | None, None -> "(Enter reads the selected resource.)"
+      [Markdown_text (Printf.sprintf "### Part %d · %s" index part_mime); body]
+    | Some (_ :: []) | Some [] | None -> [body] in
+  let body = match error, contents with
+    | Some detail, _ -> [Markdown_text detail]
+    | None, None when requested -> [Markdown_text "(reading resource…)"]
+    | None, None -> [Markdown_text "(Enter reads the selected resource.)"]
     | None, Some parts ->
-        let texts = text_parts parts in
-        let text_selection = match selected_text_part texts text_cursor with
-          | Some (part, _) -> Printf.sprintf "Text %d/%d · part %d · (/): select · y: copy source\n\n"
-              (text_cursor + 1) (List.length texts) part
-          | None -> "" in
-        let images = Masc_tui_resource_images.images ~mime_type:resource.mime_type parts in
-        let selection = match List.nth_opt images image_cursor with
-          | Some (part, _) -> Printf.sprintf "Image %d/%d · part %d · ,/.: select · Ctrl-O: preview\n\n"
-              (image_cursor + 1) (List.length images) part
-          | None -> "" in
-        text_selection ^ selection ^ (parts |> List.mapi (fun index part -> part_document (index + 1) part)
-        |> String.concat "\n\n")
-  in
-  metadata ^ "\n\n---\n\n" ^ body
+      let texts = text_parts parts in
+      let text_selection = match selected_text_part texts text_cursor with
+        | Some (part, _) -> Printf.sprintf "Text %d/%d · part %d · (/): select · y: copy source"
+            (text_cursor + 1) (List.length texts) part
+        | None -> "" in
+      let images = Masc_tui_resource_images.images ~mime_type:resource.mime_type parts in
+      let selection = match List.nth_opt images image_cursor with
+        | Some (part, _) -> Printf.sprintf "Image %d/%d · part %d · ,/.: select · Ctrl-O: preview"
+            (image_cursor + 1) (List.length images) part
+        | None -> "" in
+      [Markdown_text (text_selection ^ "\n\n" ^ selection)]
+        @ List.concat (List.mapi (fun index part -> part_document (index + 1) part) parts) in
+  Markdown_text (metadata ^ "\n\n---") :: body
 
 let rows ~cols reading =
-  let document =
-    resource_document reading.entry reading.contents ~error:reading.error
-      ~requested:reading.requested ~image_cursor:reading.image_cursor
-      ~text_cursor:reading.text_cursor ~revisions:reading.revisions
-      ~presentation:reading.presentation ~metadata_expanded:reading.metadata_expanded
-  in
-  Message_layout.wrap_body ~markdown:Masc_tui_markdown_theme.document
-    ~max_cells:(max 1 (framed_inner_width cols - 4))
-    ~sanitize:Terminal_text.single_line document
+  let width = max 1 (framed_inner_width cols - 4) in
+  resource_document reading.entry reading.contents ~error:reading.error
+    ~requested:reading.requested ~image_cursor:reading.image_cursor
+    ~text_cursor:reading.text_cursor ~revisions:reading.revisions
+    ~presentation:reading.presentation ~metadata_expanded:reading.metadata_expanded
+  |> List.concat_map (function
+    | Markdown_text document ->
+      Message_layout.wrap_body ~markdown:Masc_tui_markdown_theme.document
+        ~max_cells:width ~sanitize:Terminal_text.single_line document @ [""]
+    | Html_text source ->
+      Masc_tui_artifact_html.project source
+      |> Masc_tui_artifact_html_rows.render ~width)
 
 let search_rows ~cols state =
   match current state with

@@ -634,10 +634,22 @@
  (libraries masc_tui_mcp masc masc.tool_types masc.time_codec unix yojson digestif))
 
 (library
+ (name masc_tui_artifact_html)
+ (wrapped false)
+ (modules masc_tui_artifact_html)
+ (libraries masc.markup_document))
+
+(library
+ (name masc_tui_artifact_html_rows)
+ (wrapped false)
+ (modules masc_tui_artifact_html_rows)
+ (libraries masc_tui_artifact_html masc_tui_message_layout masc_tui_ansi masc_tui_text_block))
+
+(library
  (name masc_tui_resource_images)
  (wrapped false)
  (modules masc_tui_resource_images)
- (libraries masc_tui_mcp masc_tui_image_preview))
+ (libraries masc_tui_artifact_html masc_tui_mcp masc_tui_image_preview))
 
 (library
  (name masc_tui_acting)
@@ -1827,7 +1839,7 @@
  (name masc_tui_resource_document)
  (wrapped false)
  (modules masc_tui_resource_document)
- (libraries masc_tui_types masc_tui_ansi masc_tui_message_layout masc_tui_text_block
+ (libraries masc_tui_artifact_html masc_tui_artifact_html_rows masc_tui_types masc_tui_ansi masc_tui_message_layout masc_tui_text_block
   masc_tui_resource_catalog masc_tui_mcp masc_tui_resource_images
   masc_tui_markdown_theme masc_tui_roster_pane masc_tui_theme masc yojson))
 

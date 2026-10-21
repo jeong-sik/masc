@@ -1,0 +1,15 @@
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:54:25.1398180Z File "lib/keeper/keeper_tool_execution_journal.ml", line 2032, characters 67-83:
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:54:25.1398770Z 2032 |   let* recorded = frozen_plan ~base_path:journal.base_path journal.immutable_source in
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:54:25.1400870Z                                                                           ^^^^^^^^^^^^^^^^
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:54:25.1401350Z Error: This expression has type result_notification
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:54:25.1401750Z        There is no field immutable_source within type result_notification
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:54:29.5074370Z File "lib/keeper/keeper_composition_named_submission.ml", line 205, characters 27-45:
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:54:29.5075020Z 205 |     && String.equal source.parent_tool_use_id request.tool_use_id
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:54:29.5075400Z                                  ^^^^^^^^^^^^^^^^^^
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:54:29.5075810Z Error: This expression has type Journal.result_notification
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:54:29.5076430Z        There is no field parent_tool_use_id within type Journal.result_notification
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:55:51.3812130Z ##[error]Process completed with exit code 1.
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:55:51.4152210Z ##[group]Run actions/upload-artifact@v7
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:55:51.4152630Z with:
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:55:51.4153050Z   name: tui-macos-arm64-e6c7521a0b709de79ed8997d204cd5924f395dbb-39620100070
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T14:55:51.4153470Z   path: proof/

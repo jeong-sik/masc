@@ -6,7 +6,8 @@
     - [GET /api/v1/verification/specs] — TLA+ spec index.
     - [GET /api/v1/verification/tlc-results] — latest observed TLC
       log projection.
-    - [GET /api/v1/verification/evidence] — token-bound CanAdmin evidence.
+    - [GET /api/v1/verification/evidence] — token-bound CanAdmin evidence for
+      an exact Task and verification submission, including historical requests.
     - [POST /api/v1/verification/verdict] — token-bound CanAdmin verdict.
 
     Keeper task actions do not expose the evidence or verdict routes. *)
@@ -47,6 +48,7 @@ module For_testing : sig
     config:Workspace.config ->
     operator_id:string ->
     task_id:string ->
+    verification_id:string ->
     (Yojson.Safe.t, string) result
 
   val commit_operator_verdict :

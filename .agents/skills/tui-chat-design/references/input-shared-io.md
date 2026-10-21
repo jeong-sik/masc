@@ -97,6 +97,16 @@
   함께 결속하고 목록·현재 Keeper Task로 대체하거나 일반 목록으로 조용히 보내지 않는다.
   primary 오류는 복구본으로 덮지 않고 archive 오류·식별 불가 행은 부재를 확정하지 않는다.
   삭제 기록의 cleanup은 과거 관측이며 현재 물리 정리 성공이나 완료 판정이 아니다.
+  `h`는 원래 Task의 새 저장 이력 prefix를 읽고 `H`는 그 cursor의 이전 페이지를 읽는다.
+  page 수요는 viewport에서 오며 전체 이력 cap이 아니다. 원래 event JSON과 제출 ID를
+  보관해 판정 사유·authority를 요약에서 잃지 않는다. cursor 소진은 관측 prefix의 끝이다.
+  `v`는 ready Task/이력에서 관측한 제출을 명시적으로 선택하며 증거 `r`은 그 Task·제출에
+  고정된다. 과거 증거는 현재 assignee나 awaiting 상태로 바꾸어 조회하지 않는다.
+  CanAdmin 증거 API는 exact task_id·verification_id를 요구하고 durable header의 ID·Task를
+  확인한다. 파일 경계를 넘는 ID·손상·삭제된 제출·다른 Task는 성공한 빈 증거로 바꾸지 않는다.
+  문서 준비는 decode와 같은 CPU scope에서 수행하며 실패 시 마지막 증거와 오류를 유지한다.
+  binary는 전체 identity·preview 상태만 표시하고 이 inspector에서 pixels를 그렸다고 하지 않는다.
+  저장 증거 열람·과거 판정·현재 Task 상태·Goal 완료를 같은 사실로 바꾸지 않는다.
   조회가 입력 복구·생성 replay·Keeper handoff·상태 변경이나 유용한 작업 완료를 허가하지 않는다.
   viewer·원래 wrapper·workspace authority/read epoch·ticket과 pending 객체가 함께 맞아야
   적용한다. 닫기·이력 이동·workspace 철회는 응답 권한을 먼저 retire하고 기존 관측 job만

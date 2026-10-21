@@ -15,6 +15,8 @@ val history : task_id:string -> Yojson.Safe.t -> (Tui_decode.task_history_event 
 type history = private
   { history_task_id : string
   ; history_events : Tui_decode.task_history_event list
+  ; history_records : Yojson.Safe.t list
+  ; history_verifications : string list
   ; history_next_cursor : string option
   ; history_cursors : string list }
 type history_request = private
@@ -29,7 +31,11 @@ val history_earlier : task_id:string -> limit:int -> history -> history_request 
 val history_page : request:history_request -> Yojson.Safe.t -> (history, string) result
 (** Validate exact Task, request-cursor echo, schema and page demand before
     appending to the captured immutable prefix. A missing next cursor ends only
-    the observed stored prefix. Parsing/concatenation belongs on the CPU path. *)
+    the observed stored prefix. Exact verification ids retain first-observed
+    order across the prefix; malformed ids fail rather than disappear.
+    Original records remain available for explicit full evidence reading;
+    display summaries do not erase verdict reasons or authority metadata.
+    Parsing/concatenation belongs on the CPU path. *)
 
 type deletion_cleanup = Cleanup_required | Cleanup_verified
 type deletion_observation = {

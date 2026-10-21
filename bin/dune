@@ -3075,4 +3075,4 @@
  (name masc_tui_task_creation_read)
  (wrapped false)
  (modules masc_tui_task_creation_read)
- (libraries masc.masc_types masc masc_tui_task_dispatch masc_tui_mcp masc_tui_fetched masc_tui_detail_reading yojson))
+ (libraries masc.masc_types masc masc_tui_evidence_picture masc_tui_task_dispatch masc_tui_mcp masc_tui_fetched masc_tui_detail_reading yojson))

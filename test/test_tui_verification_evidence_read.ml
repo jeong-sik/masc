@@ -52,7 +52,7 @@ let read config expected key response = bound expected (fun () ->
     | Error (Masc.Workspace.Invalid_workspace_precondition | Workspace_precondition_failed) ->
       Ok {Masc_http_client.status=409;headers=[];body="foreign workspace refused"} in
   match Read.read_response ~host:"127.0.0.1" ~port:8935
-      ~path:("/api/v1/verification/evidence?task_id=" ^ key.vek_task_id) ~send with
+      ~path:("/api/v1/verification/evidence?task_id=" ^ key.vek_task_id ^ "&verification_id=" ^ key.vek_request_id) ~send with
   | Error (Read.Transport_failed reason) -> Error (Failure.Transport reason)
   | Error (Workspace_refused reason) -> Error (Failure.Workspace_unconfirmed reason)
   | Ok response when response.status <> 200 -> Error (Failure.Http_error response.body)

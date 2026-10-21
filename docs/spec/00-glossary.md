@@ -511,8 +511,9 @@ status: reference
 **Path Rest (경로 휴식)**
 : Keeper turn의 runtime walk가 한 경로를 지금 보내지 않고 기다리게 두는 상태와 그 해제
   규칙. 드라이버는 경로마다 `Path_resting { release_at; walk_promotes_at_release }`로
-  적고(`lib/keeper/keeper_turn_driver.ml`, `type path_rest_part`), 기다릴 때는 다음
-  발송 시각을 `Wait_until { release_at; waiting_on; basis }`로 남긴다. walk는 head부터
+  적고(`lib/keeper/keeper_turn_driver.ml`의 `type path_rest`, `keeper_turn_driver.mli`가
+  `val path_rest`로 공개한다), 기다릴 때는 다음 발송 시각을
+  `Wait_until { release_at; waiting_on; basis }`로 남긴다. walk는 head부터
   보내므로 head가 쉬면 head의 해제 시각까지 기다리고, 뒤 경로가 walk 순서에서 그
   시각에 다시 올라오는 경우에만 기다림이 짧아진다(`walk_rest`).
   - 세 층을 구분한다: **닫힌 quota 창**은 provider가 보고한 관측이고, **Runtime Rate
@@ -524,7 +525,9 @@ status: reference
     walk가 그 경로를 다시 올린다. provider가 시각을 말하지 않은 rate limit은 바닥 시각을
     둔 `Rest_dated`가 되고, 시각 없는 quota 관측은 `Rest_until_answered`가 되어
     해제 때 기다림만 끝나며 순서 강등은 성공 답까지 남는다
-    (`Keeper_turn_driver.runtime_path_rest`). `Rest_until_answered` 의 대기 자체도
+    (`Keeper_turn_driver.runtime_path_rest`). 두 이름은 내부 `type path_rest_part`의
+    변종이고, 경로 단위 공개 투영은 `type path_rest`의 `Path_resting`이다.
+    `Rest_until_answered` 의 대기 자체도
     `now`에서 굴러가는 바닥 시각으로 풀린다.
   - 실패한 시도는 휴식이 아니다. 그 경로를 후보가 답할 때까지 뒤로 미룰 뿐, 발송을
     기다리게 하지 않는다(`RFC-0458 §3.4`).
@@ -2141,7 +2144,7 @@ status: reference
   - **`web_extension`**: 브라우저 확장 프로그램의 페이지 내부 DOM 조작 기반. 탭 활성화(`Tab_activation` / `activate_tab`)와 측정된 확장 줌(`Browser_zoom`)을 제공하지만, 브라우저가 인정하는 신뢰 포인터가 없어 신뢰 포인터·키보드 역량(`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_keyboard`)과 기본 탭 생성(`Tab_creation`)은 지원하지 않는다.
   - **`webdriver_bidi`**: W3C WebDriver BiDi 프로토콜 기반의 브라우저 호스트 직접 제어(`masc-browser-host --bidi-url`). 신뢰 포인터·키보드 역량(`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_keyboard`)과 기본 탭 생성(`Tab_creation`)을 제공하지만, 창 포커스를 함께 빼앗는 특성 때문에 조용한 탭 활성화(`Tab_activation`)와 확장 줌(`Browser_zoom`)은 제공하지 않는다.
   - **공통 지원(9종)**: `Tab_listing`·`Text_read`·`Document_source`·`Element_inventory`·`Viewport_capture`·`Scene_read`·`Dom_interaction`·`Point_click`·`Point_scroll`. 두 전송 방식의 제공·비제공 조합은 코드가 전부 나열해 고정한다(`Browser_lane.live_transport_serves`).
-  선택된 연결의 전송 방식이 요청된 역량을 제공하지 못하면 서버는 명령을 큐에 넣기 전에 `live_transport_unsupported` 거절 코드로 차단하고, 그 역량을 제공하는 전송 방식 이름 목록(`servingTransports`)과 그런 전송 방식으로 연결된 브라우저 연결 목록(`servingClients`)을 함께 돌려준다. 그런 연결이 하나도 없으면 그 응답은 대신 각 전송 방식의 운영자 설정 안내(`Browser_lane.live_transport_setup`)를 `retry` 문장에 담는다. 두 목록 뒤에는 그 레인에서 관측된 전체 연결 목록(`clients`)이 붙고, `servingClients`가 비어 있으면서 BiDi 호스트 기록이 있으면 그 기록의 요약이 `bidiHost`로 함께 실린다. 어느 경우에도 브라우저 명령은 발송되지 않는다. 선택한 연결에서 성공한 실시간 브라우저 응답(`BrowserRead` 등)과 탭·연결 목록(`BrowserTabs`)의 각 항목은 `clientId`와 함께 `transport` 필드를 노출하며, 연결 선택 이전의 오류 응답(`No_live_client` 등)과는 구분된다(#41839).
+  선택된 연결의 전송 방식이 요청된 역량을 제공하지 못하면 서버는 명령을 큐에 넣기 전에 `live_transport_unsupported` 거절 코드로 차단하고, 그 역량을 제공하는 전송 방식 이름 목록(`servingTransports`)과 그런 전송 방식으로 연결된 브라우저 연결 목록(`servingClients`)을 함께 돌려준다. 그런 연결이 하나도 없으면 그 응답은 대신 각 전송 방식의 운영자 설정 안내(`Browser_lane.live_transport_setup`)를 `retry` 문장에 담는다. 두 목록 뒤에는 그 레인에서 관측된 전체 연결 목록(`clients`)이 붙는다. `webdriver_bidi`가 그 역량을 제공하는 경우에만 서버가 BiDi 호스트 기록을 읽으며, 그때 `servingClients`가 비어 있으면 그 기록의 요약이 결정 필드 자리의 `bidiHost`로 실린다. `webdriver_bidi`가 그 역량을 제공하지 않으면(`Browser_zoom`·`Tab_activation`) 호스트가 살아 있어도 `bidiHost`는 실리지 않는다. 어느 경우에도 브라우저 명령은 발송되지 않는다. 선택한 연결에서 성공한 실시간 브라우저 응답(`BrowserRead` 등)과 탭·연결 목록(`BrowserTabs`)의 각 항목은 `clientId`와 함께 `transport` 필드를 노출하며, 연결 선택 이전의 오류 응답(`No_live_client` 등)과는 구분된다(#41839).
   - **이름 경계**: `transport`는 이 문서에서 여러 축으로 쓰인다. 이 항목은 연결된 브라우저와
     통신하는 수단(`Browser_lane.live_transport`, `Web_extension`·`Webdriver_bidi`)만 가리킨다.
     서버·MCP 계층의 전송 통로는 `lib/transport.ml`과 `09-server-transport.md`의

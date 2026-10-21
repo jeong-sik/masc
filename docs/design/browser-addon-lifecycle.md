@@ -46,6 +46,21 @@ receipts remain distinct from successful contract validation.
    commands. Native installation startup remains unavailable until its durable
    ownership and restart recovery are connected; a parsed manifest is not a
    running native installation.
+   The separate `Native_addon_lease` library and
+   `masc-native-addon-launcher` executable provide durable slot admission. The
+   host prepares private installation/resource directories before launch; the
+   launcher takes stable kernel file leases, persists its process incarnation,
+   and execs the payload without changing PID/group. Every instance ID has a
+   durable, single-admission history: replacements never make old pending,
+   retired or consumed launchers reusable. Existing empty/torn history is a
+   refusal, not evidence of a new instance. Partial preparation requires a fresh
+   ID. Retirement fences late launchers before identity-bound TERM; settlement
+   requires no holder, no original process and no live foreground group.
+   This admission component is not yet connected to the live native worker or
+   Runtime installation selection. Its payload must preserve inherited lease
+   descriptors; trusted native execution is not container isolation. This follows
+   [POSIX exec/descriptor semantics](https://pubs.opengroup.org/onlinepubs/9799919799/functions/exec.html):
+   closing a descriptor for a process-owned lease inode releases its locks.
 4. A browser worker that owns WebExtension/BiDi command queues and owned Gecko/
    Chrome execution. Core admission and artifact/model brokers remain host edges;
    built-in browser execution and tool fallback are removed.

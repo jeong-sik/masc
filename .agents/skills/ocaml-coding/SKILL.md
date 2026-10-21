@@ -1,6 +1,6 @@
 ---
 name: ocaml-coding
-description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 이미지 카탈로그 등 막히는 I/O, Task Skill 준비 쌍 연결과 Keeper별 비동기 Ask·Composition 완료 복구, 회차별 증거 공유, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
+description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 이미지 카탈로그 등 막히는 I/O, Task Skill 준비 쌍 연결과 Keeper별 비동기 Ask·Composition 완료 복구, Goal·Broadcast maintenance의 원래 전달 경계, 회차별 증거 공유, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
 ---
 
 # masc OCaml 점검표
@@ -86,6 +86,12 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   같은 core를 사용한다. 이미 ACK된 힌트는 권한이 아니며 active 중의 새 의무는 후속 pulse가
   다시 발견한다. 발견/재읽기 비용을 포함하고, batch 결과·observer·worker 정리를 구분한다.
   준비된 DAG의 waiting attempt를 logical 완료로 알리거나 물리 작업을 재실행하지 않는다.
+
+- Goal·명시적 Broadcast outbox의 maintenance도 원래 drain을 server switch 소유
+  worker에 예약한다. 종류별 active 예약은 observer·취소 정리까지 유지하고 실제 작업 전
+  yield한다. 예약한 pulse의 workspace 설정만 쓰며 새 scope나 다음 pulse로 결과를 넘기지
+  않는다. Goal의 원래 잠금·수신자 snapshot·ACK, Broadcast의 순서·대상별 선행 조건·ACK를
+  유지한다. drain 반환·worker 정리·Keeper 소비·원본 Task 진척은 서로 다른 증거다.
 
 - 제공받은 switch로 자동 복구 fiber를 예약할 때는 discovery 전과 실제 예약 직전에
   `Eio.Switch.check`를 한다. `Cancel.protect`도 취소된 switch를 다시 켜지 않는다.

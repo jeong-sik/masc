@@ -1,0 +1,11 @@
+test suite	Checkout	2026-10-21T11:43:27.4948618Z   ref: 7b16a9175711aefe744c5c704e038a42fd5b6b7b
+test suite	Test	2026-10-21T11:44:39.1554387Z   MINIMAL_CHECK: true
+test suite	Test	2026-10-21T11:44:39.1554773Z   TARGET_SUITES: test_lane_addon_reconcile,test_server_lane_inventory,test_tui_lane_inventory
+test suite	Test	2026-10-21T11:44:39.1555220Z   TARGET_EIO_BACKEND: posix
+test suite	Test	2026-10-21T11:44:39.6128964Z [targeted] dune build test/test_lane_addon_reconcile.exe test/test_server_lane_inventory.exe test/test_tui_lane_inventory.exe test/fixtures/lane_addon_bindings_without_read_authority/consumer.json test/fixtures/lane_addon_bindings_without_read_authority/producer-a.json test/fixtures/lane_addon_bindings_without_read_authority/producer-b.json
+test suite	Test	2026-10-21T11:47:53.3494221Z Test Successful in 0.993s. 52 tests run.
+test suite	Test	2026-10-21T11:47:53.3548983Z [targeted] test/test_lane_addon_reconcile: OK in 1s
+test suite	Test	2026-10-21T11:47:53.5984961Z Test Successful in 0.069s. 13 tests run.
+test suite	Test	2026-10-21T11:47:53.6063874Z [targeted] test/test_server_lane_inventory: OK in 0s
+test suite	Test	2026-10-21T11:47:53.7635663Z Test Successful in 0.011s. 13 tests run.
+test suite	Test	2026-10-21T11:47:53.7688151Z [targeted] test/test_tui_lane_inventory: OK in 0s

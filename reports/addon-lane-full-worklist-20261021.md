@@ -35,7 +35,7 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 기존 run `39555509454`는 native 컴파일 FAIL로 종료; 진단 artifact만 남음. 원인 타입 수리 `9f6db24a357`은 main에 포함; 수리 후 실행 artifact 미확보 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
+| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 완료 — 고정 G01 제품 `7b16a9175711aefe744c5c704e038a42fd5b6b7b`: native run `39595834943`의 TUI 20건·application 5건 PASS, artifact `12343798542` 확보. 실제 server/TUI build identity와 파일 해시를 대조; 후속 G04/G03·실제 화면은 별도 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
 | A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 미실행 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
 | A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 main 병합 완료; retained 실행 키 안내와 can_observe를 맞춘 소스·독립 검토 확보. 새 TUI 화면 미실행 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
 | A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | 공통 Stack #44710 네 층 병합 완료. G01 후속 소스 독립 리뷰 P0–P2 없음; 최종 head의 MASC 재리뷰는 별도 필요 | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
@@ -129,7 +129,7 @@ Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현�
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | [#44801](https://github.com/jeong-sik/masc/pull/44801) 후속 구현: host application을 원래 id/path/source·desired revision/enabled에 결속해 공통 inventory와 두 UI에 전달. Dashboard 62건·TypeScript PASS, OCaml parser PASS. direct run39592343953은 새 record label의 owner 타입 추론 오류로 컴파일 FAIL; 기존 typed owner 재사용 수리 후 재검증 필요. native 실행·실제 화면 미확인 | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
+| G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | [#44801](https://github.com/jeong-sik/masc/pull/44801) host application의 원래 id/path/source·desired revision/enabled 결속 구현. 수리한 고정 제품의 direct run `39594048964` 3suite78건과 native artifact 2suite25건 PASS. Dashboard 62건·tsc PASS; 전체 연결 그래프·실제 화면·설치 미확인 | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
 | G02 | 입력→Hook→worker→모델→출력/소비자의 연결 관계 표시 | 일부 Flow 있음 | 실제 연결 reference에 근거해 표시; 관측 그래프를 실행 허가로 사용하지 않음 |
 | G03 | 요청부터 종료·정리까지 원래 timeline/trace 연결 | 부분 구현; Dashboard가 버리던 host_requests를 원래 worker/incarnation에 결속해 보존·표시하는 후속 구현. 모델 lane/provider/operator/source 대기와 전달·기록 실패를 닫힌 타입으로 읽고, 손상 진단은 worker·결과와 분리. 전체 요청 이력·실제 화면·설치 검증 필요 | request/run/instance/revision, 대기 이유·결과·실패·정리 증거를 같은 원래 작업으로 추적 |
 | G04 | 교체·경로/ID 변경·이전 소유자 이력 표시 | 후속 소스 구현: 같은 ID worker와 같은 TOML 경로의 다른 ID를 두 UI에서 분리. Dashboard 3파일62건·tsc PASS, TUI 관측 모델 parser PASS; 독립 리뷰·OCaml 실행·실제 UI 별도 | 새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근 |
@@ -213,3 +213,9 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 ### G01 컴파일 실행 피드백
 
 직접 소비자 run [39592343953](https://github.com/jeong-sik/masc/actions/runs/39592343953), product `5840bab469e8277194e405e6f2ec2cd712fc614e`는 `Lane_addon_runtime.attach_entry`에서 `configuration_application option`과 `configuration_owner option`이 맞지 않아 컴파일 FAIL로 종료했다. 새 관측 record의 id/source_path가 기존 record 추론을 가린 구현 결함이다. 관측 record가 기존 `configuration_owner`를 `owner` 필드로 보관하도록 고쳐 중복 owner 필드를 제거했다. 서버는 원래 owner의 ID·path·desired revision과 source revision·enabled를 여전히 모두 대조한다. 기존 성공 Dashboard/parser 결과는 이 실패를 대체하지 않는다. 수리 후 OCaml 실행·native artifact는 별도 확인해야 한다.
+
+## 2026-10-21 완료 실행 영수증 · A01 / G01
+
+- `docs/evidence/2026-10-21-addon-native-artifact/`에 완료된 native 영수증·두 suite 로그·내려받은 바이너리 identity/hash 대조 및 직접 관련 3suite 실행 로그 발췌를 보존한다. 실행 제품은 `7b16a9175711aefe744c5c704e038a42fd5b6b7b`, workflow는 `97468f95df78f35a35bb3fe14a9670240cced930`다. 이 문서 층의 head를 실행 소스로 바꾸어 적지 않는다.
+- A01의 이전 실패·수리 후 미실행 표기는 당시 관측으로 남긴다. 새 native run `39595834943`은 완료 성공이고 실제 TUI/server의 build identity와 receipt 해시도 일치했다. `test_tui_lane_addons` 20건과 `test_lane_addon_application` 5건을 실행했다. 별도 direct run `39594048964`는 reconcile52·server inventory13·TUI inventory13건 PASS다. 전체 회귀는 이번 후보에서 미실행이다.
+- A02의 실제 화면·운영 설치본 변경은 미실행이다. G04 #44807/#44809와 G03 #44824/#44828은 별도 후보이므로 이 artifact가 해당 후속들을 검증했다고 세지 않는다. H01–H06과 전체 54개 완료는 남아 있다.

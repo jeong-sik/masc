@@ -1,6 +1,6 @@
 ---
 name: ocaml-coding
-description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 이미지 카탈로그 등 막히는 I/O, Task Skill 준비 쌍 연결과 Keeper별 비동기 Ask·Composition 완료 복구, Goal·Broadcast maintenance와 transition outbox 페이지의 원래 전달·cursor 경계, 회차별 증거 공유, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
+description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 이미지 카탈로그 등 막히는 I/O, Task Skill 준비 쌍 연결과 Keeper별 비동기 Ask 발견·오류 전달 및 Composition 완료 복구, Goal·Broadcast maintenance와 transition outbox 페이지의 원래 전달·cursor 경계, 회차별 증거 공유, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
 ---
 
 # masc OCaml 점검표
@@ -74,6 +74,10 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   최신 증거·lifecycle fence를 다시 확인한다. window capture 수는 파일 I/O·작업 진척이 아니다.
 
 - 서버 Ask 복구는 같은 수명의 `Keeper_ask_answer_wake` supervisor와 switch를 사용한다.
+  `pulse` 반환은 discovery child 예약이며 실제 성공이 아니다. 원래 발견·owner 예약 결과는
+  원래 base path와 함께 `on_discovery`로 전달하고 전체 읽기 실패도 같은 타입으로 남긴다.
+  discovery는 observer·정리까지 하나만 활성화하며 실제 읽기 전에 yield한다. 미완료를
+  `Ok`나 빈 목록으로 바꾸지 않고, 일부 불가 log의 진단과 정상 owner 복구를 함께 유지한다.
   발견한 원래 Keeper별로 active 작업을 한 번만 예약하고, worker는 양보한 뒤 원래 행 순서로
   복구한다. 다른 Keeper의 intake/파일 잠금을 maintenance나 독립 Keeper가 함께 기다리지 않는다.
   active 중 발견한 새 답변은 현재 batch를 덮지 않고 후속 pulse가 fresh하게 읽는다.

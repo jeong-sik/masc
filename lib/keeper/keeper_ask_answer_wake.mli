@@ -133,27 +133,41 @@ val reconcile : base_path:string -> (report, Keeper_ask_store.read_error) result
 
 type t
 val create :
-  base_path:string -> ?on_report:(keeper_name:string -> report -> unit) -> unit -> t
+  base_path:string -> ?on_report:(keeper_name:string -> report -> unit) ->
+  ?on_discovery:(base_path:string -> (unit, Keeper_ask_store.read_error) result -> unit) ->
+  unit -> t
 (** One server-lifetime recovery supervisor. [on_report] observes a settled
     original Keeper batch, not answer consumption, Task progress or effect
-    success. Observer failure cannot undo committed deliveries. *)
+    success. Observer failure cannot undo committed deliveries.
 
-val pulse : sw:Eio.Switch.t -> t -> (unit, Keeper_ask_store.read_error) result
-(** Discover canonical answer logs, then reserve an independent switch-owned
-    worker for each non-active Keeper with answered rows. Workers yield before
-    recovery; this entrypoint does not join queue-owner or delivery I/O. The
-    directory/log discovery itself still completes before any reservation.
+    [on_discovery] receives the actual directory/log discovery and owner
+    reservation result, with the original base path. [Ok ()] means that pass
+    returned, not that owner delivery finished. Partial unreadable logs retain
+    their existing diagnostics while healthy owners can recover. The default
+    observer logs a whole-discovery failure. No question/answer rows are exposed
+    to this observer. Observer failure cannot undo already reserved workers. *)
+
+val pulse : sw:Eio.Switch.t -> t -> unit
+(** Reserve a switch-owned discovery child, then return without joining its
+    directory/log reads. Return is scheduling only; actual discovery success or
+    failure reaches [on_discovery]. The child yields before the original
+    discovery/reservation pass. One discovery remains active through its
+    observer and cleanup; pulses while active coalesce. Once read, canonical
+    logs reserve independent owner workers under the original supplied switch.
+    Complete discovery still precedes owner reservation within that child.
     Within one Keeper preserve original row order and pass-local evidence-window
     reuse, including failures. Other Keepers do not wait for that owner's intake
     mutex or file lock. The fresh queue-owner evidence and lifecycle fence
     remain authoritative for every delivery.
 
     Active owners are reserved once until the original worker settles or is
-    cancelled. New answers for an active owner wait for a later pulse; no
+    cancelled. New answers for an active owner wait for a later admitted
+    discovery; no
     captured row/result is reused across workers. A changed/failed discovery
     neither cancels an existing worker nor authorizes absence. Unreadable logs
     are reported while healthy owners can recover. Check the supplied switch
-    before discovery and each reservation; cancellation is never a store error.
+    before discovery scheduling and every reservation; cancellation is never a
+    store error. A scheduling failure releases its discovery reservation.
     Root-switch cancellation still joins protected physical I/O. No timer,
     retry cap, replacement question, Task inference or fresh authority is added.
     Single-domain Eio caller; the active set is only a scheduling hint. *)

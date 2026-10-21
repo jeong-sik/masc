@@ -760,6 +760,7 @@ let test_recovery_pulse_keeps_independent_owners_moving () =
     let first_alpha, publish_first_alpha = Eio.Promise.create () in
     let next_alpha, publish_next_alpha = Eio.Promise.create () in
     let beta, publish_beta = Eio.Promise.create () in
+    let discoveries = Eio.Stream.create 0 in
     let fence = ref None in
     let finish () =
       if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve unlock ();
@@ -775,7 +776,9 @@ let test_recovery_pulse_keeps_independent_owners_moving () =
             Eio.Promise.resolve enter ();
             Eio.Promise.await release)) in
       Eio.Promise.await entered;
-      let recovery = Wake.create ~base_path ~on_report:(fun ~keeper_name report ->
+      let recovery = Wake.create ~base_path
+        ~on_discovery:(fun ~base_path:_ result -> Eio.Stream.add discoveries result)
+        ~on_report:(fun ~keeper_name report ->
           if String.equal keeper_name "alpha" then (
             if not (Eio.Promise.is_resolved first_alpha) then
               Eio.Promise.resolve publish_first_alpha report
@@ -784,7 +787,13 @@ let test_recovery_pulse_keeps_independent_owners_moving () =
           else if String.equal keeper_name "beta" then (
             if not (Eio.Promise.is_resolved beta) then Eio.Promise.resolve publish_beta report)
           else fail "a recovery report replaced its canonical owner") () in
-      let pulse () = match Wake.pulse ~sw recovery with
+      let pulse () =
+        Wake.pulse ~sw recovery;
+        let discovered = Eio.Stream.take discoveries in
+        (* Let this observer return and its pure discovery reservation cleanup
+           run. Owner delivery remains independently blocked by the real fence. *)
+        Eio.Fiber.yield ();
+        match discovered with
         | Ok () -> () | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
       pulse ();
       let beta_report = Eio.Promise.await beta in
@@ -854,6 +863,80 @@ let test_recovery_pulse_keeps_independent_owners_moving () =
        | _ -> fail "repeated pulse replaced or duplicated beta's original source");
       check string "alpha recovery does not rewrite answers" alpha_log (Fs_compat.load_file alpha_path);
       check string "beta recovery does not rewrite answers" beta_log (Fs_compat.load_file beta_path)))
+;;
+
+let test_discovery_failure_is_observed_asynchronously_and_recovers_original_answer () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  ensure_keeper "alpha";
+  ensure_keeper "beta";
+  let original = persist_answer ~base_path ~keeper_name:"alpha"
+      ~ask_id:"discovery-original" ~task_id:"discovery-original-task" () in
+  let log_path = Keeper_ask_store.log_path ~base_path ~keeper_name:"alpha" in
+  let original_log = Fs_compat.load_file log_path in
+  let ask_directory = Filename.dirname log_path in
+  let saved_directory = ask_directory ^ ".fixture-saved" in
+  Unix.rename ask_directory saved_directory;
+  Fs_compat.save_file ask_directory "directory unavailable during discovery";
+  let exception Discovery_observer_failed in
+  let discoveries = Eio.Stream.create 0 in
+  let recovery = Wake.create ~base_path ~on_discovery:(fun ~base_path result ->
+    Eio.Stream.add discoveries (base_path,result);
+    match result with
+    | Ok () -> ()
+    | Error _ -> raise Discovery_observer_failed) () in
+  let independent : Keeper_event_queue.stimulus =
+    {post_id="independent-during-ask-discovery";urgency=Normal;arrived_at=201.;payload=Bootstrap} in
+  let failed = Eio.Switch.run (fun sw ->
+    Wake.pulse ~sw recovery;
+    (* Actual durable work can proceed before joining the discovery outcome.
+       No replacement directory reader or recovery callback is installed. *)
+    (match Keeper_registry_event_queue.enqueue_durable_result ~base_path "beta" independent with
+     | Ok () -> () | Error detail -> fail detail);
+    Eio.Stream.take discoveries) in
+  (match failed with
+   | observed_base, Error (Keeper_ask_store.Log_read_failed {path;_}) ->
+     check string "discovery failure retains original workspace" base_path observed_base;
+     check string "actual directory failure is retained" ask_directory path
+   | _, Error (Keeper_ask_store.Log_decode_failed _) -> fail "directory failure became a decode failure"
+   | _, Ok () -> fail "unfinished or failed discovery was reported as successful");
+  check (list string) "unavailable discovery admits no original answer" []
+    (List.map (fun (_,payload) -> payload.Keeper_event_queue.ask_id)
+      (pending_asks ~base_path ~keeper_name:"alpha"));
+  (match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:"beta" with
+   | Error detail -> fail detail
+   | Ok queue -> check bool "independent durable queue retains its actual source" true
+       (Keeper_event_queue.to_list queue
+        |> List.exists (Keeper_event_queue.stimulus_identity_equal independent)));
+  Sys.remove ask_directory;
+  Unix.rename saved_directory ask_directory;
+  let fresh_round () = Eio.Switch.run (fun sw ->
+    Wake.pulse ~sw recovery;
+    Eio.Stream.take discoveries) in
+  (match fresh_round () with
+   | observed_base, Ok () -> check string "fresh discovery retains original workspace" base_path observed_base
+   | _, Error error -> fail (Keeper_ask_store.read_error_to_string error));
+  let check_original_delivery () =
+    match pending_asks ~base_path ~keeper_name:"alpha" with
+    | [_,payload] ->
+      check string "fresh discovery delivers original Ask" original.ask_id payload.Keeper_event_queue.ask_id;
+      check bool "original continuation survives discovery failure" true
+        (Keeper_continuation_channel.same_route original.continuation payload.channel)
+    | [] | _ :: _ -> fail "original answer was lost, replaced or duplicated" in
+  check_original_delivery ();
+  (match fresh_round () with
+   | _, Ok () -> ()
+   | _, Error error -> fail (Keeper_ask_store.read_error_to_string error));
+  check_original_delivery ();
+  (match Keeper_ask_store.rows_result ~base_path ~keeper_name:"alpha" with
+   | Ok (Keeper_ask_store.Stored_rows rows) ->
+     (match List.assoc_opt original.ask_id rows with
+      | Some (ask,_) -> check (option string) "original Task is retained" original.task_id ask.Keeper_ask.task_id
+      | None -> fail "original question disappeared")
+   | Ok Keeper_ask_store.Missing_log -> fail "original log disappeared"
+   | Error error -> fail (Keeper_ask_store.read_error_to_string error));
+  check string "discovery and delivery never rewrite original answer bytes"
+    original_log (Fs_compat.load_file log_path)
 ;;
 
 let test_lifecycle_fence_defers_delivery_until_recovery () =
@@ -1308,6 +1391,8 @@ let () =
             test_reconcile_delivers_past_preanswer_corruption
         ; test_case "blocked recovery owner preserves independent delivery and fresh authority" `Quick
             test_recovery_pulse_keeps_independent_owners_moving
+        ; test_case "async discovery failure preserves original answer and fresh recovery" `Quick
+            test_discovery_failure_is_observed_asynchronously_and_recovers_original_answer
         ; test_case "lifecycle fence defers answer delivery" `Quick
             test_lifecycle_fence_defers_delivery_until_recovery
         ; test_case "canonical owner survives nonidentity filename" `Quick

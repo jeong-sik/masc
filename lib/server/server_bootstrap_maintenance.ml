@@ -695,10 +695,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     in
     let ask_answers = Keeper_ask_answer_wake.create ~base_path:config.base_path () in
     let reconcile_ask_answers () =
-      match Keeper_ask_answer_wake.pulse ~sw ask_answers with
-      | Error error -> Log.Server.warn "ask answer recovery discovery unavailable: %s"
-          (Keeper_ask_store.read_error_to_string error)
-      | Ok () -> ()
+      Keeper_ask_answer_wake.pulse ~sw ask_answers
     in
     reconcile_goal_events ();
     reconcile_composition_completions ();

@@ -49,6 +49,10 @@ let captures base_path store=records store |> List.map (fun record ->
   record,capture)
 let await clock condition=Eio.Time.with_timeout_exn clock F.fixture_wait_seconds (fun () ->
   let rec loop ()=if condition () then () else (Eio.Fiber.yield ();loop ()) in loop ())
+let reconcile_until_export clock ~config =
+  await clock (fun () ->
+    ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
+    (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[])
 let is_finished record=match Progress.phase record.Owner.progress with
   | Progress.Finished _ -> true
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
@@ -283,8 +287,7 @@ let test_new_child_rejects_changed_worker_inputs ()=
     let configured=Lane_addon_config.load_file ~path:source |> get in
     save_source config source (Printf.sprintf "id=\"curator\"\nenabled=true\nrun_id=\"changed-original-inputs\"\nmanifest_path=%s\n[binding]\nsources=[]\n"
       (Yojson.Safe.to_string (`String configured.manifest_path)));
-    ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
-    await clock (fun () -> (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[]);
+    reconcile_until_export clock ~config;
     check bool "a replacement worker does not grant an original new child" true
       (Result.is_error (Consumer.narrow ~config ~request_id:parent.request_id));
     check int "changed configured input mints no child" 1 (List.length (records store));
@@ -386,8 +389,7 @@ let test_successor_frontier_ignores_an_old_semantic_destination ()=
     let configured=Lane_addon_config.load_file ~path:source |> get in
     save_source config source (Printf.sprintf "id=\"curator\"\nenabled=true\nrun_id=\"current-successor-frontier\"\nmanifest_path=%s\n[binding]\nsources=[]\n"
       (Yojson.Safe.to_string (`String configured.manifest_path)));
-    ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
-    await clock exports_ready;
+    reconcile_until_export clock ~config;
     check bool "the old refusal cannot admit a child on replacement inputs" true
       (Result.is_error (Consumer.narrow ~config ~request_id:old.request_id));
     commit_facts base_path (old_claims @ current_claims);

@@ -197,10 +197,10 @@ Candle 전용 정책 편집 화면, 환불·재판매·미귀속 판정 재개. 
 | 호출면 | 입력 | 반환 / 효과 |
 |---|---|---|
 | keeper_candle_balance | 추가 인자 없음, 인증된 자기 Keeper | 잔액·감쇠·반감기·마지막 사건·소유. 필요한 정책 행을 발행할 수 있음 |
-| keeper_candle_catalog | 추가 인자 없음 | 정규 id/slot/price_status/price_milli |
-| keeper_candle_purchase | item, 선택적 expected_price_milli 정수 상한 | 실제 구매 금액과 구매 뒤 계정. 구매만으로 착용하지 않음 |
+| keeper_candle_catalog | 추가 인자 없음 | 정규 id/slot/price_status. price_milli는 priced 항목에만 존재 |
+| keeper_candle_purchase | item, 선택적 expected_price_milli 0 이상 정수 상한 | 실제 구매 금액과 구매 뒤 계정. 구매만으로 착용하지 않음 |
 | keeper_candle_equip | slot=face/neck/head/hand/base, item=id 또는 default | 현재 equipment와 changed. 소유권 구매는 하지 않음 |
-| keeper_candle_gift | to, amount_milli+reason 또는 item 중 정확히 하나 | 송수신자·이전 내역·양쪽 잔액. 두 이전 종류를 한 요청에 섞지 않음 |
+| keeper_candle_gift | to + (amount_milli와 reason 또는 item); item에는 reason 불가 | 송수신자·이전 내역·양쪽 잔액. 두 이전 종류를 한 요청에 섞지 않음 |
 | keeper_portrait_read | 선택적 size(48–512, 기본160), preview_item | PNG artifact·시작/현재/그림 장비·카탈로그. 구매 소유 목록은 아님. ledger 불가용은 명시하고 기본 외형 PNG로 fallback 가능 |
 | GET /api/v1/keepers/{name}/items | 선택적 expected_workspace, CanReadState | ready/off/disabled 계정 또는 오류. ready는 account_revision/balance_milli/owned_items/catalog |
 | GET /api/v1/keepers/{name}/portrait.png | size(16–512, 기본160), preview, expected_equipment와 서버 read 정책 | PNG/ETag/304 또는 refusal. Item API와 MCP portrait의 파라미터·fallback 계약은 다름 |

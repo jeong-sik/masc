@@ -417,8 +417,8 @@ receipts remain distinct from successful contract validation.
    consumer fixture exercises accepted, changed-document, changed-meaning,
    invented-reference, cancelled and retired requests using a scripted
    WebDriver transport. These definitions are not executed browser/model proof.
-   The real Gecko consumer probe below still needs an actual execution result;
-   Gecko persistent-profile admission remains separate. Scoped transfer brokers
+   The real Gecko consumer execution is recorded below; Gecko persistent-profile
+   admission remains separate. Scoped transfer brokers
    and Chrome/extension/shared-model
    integration evidence is recorded under [Completion evidence](#completion-evidence);
    it does not establish external-provider quality or personal-site behavior.
@@ -635,7 +635,11 @@ observed geometry and the separate model explanation. The probe checks exactly
 one model request and no upload/download before continuing its original transfer
 and cleanup scenario. Requests, responses and the selected output are retained.
 The provider is scripted; this does not measure a real model's response quality.
-This probe extension has not yet been compiled or executed.
+[Run39522964504](https://github.com/jeong-sik/masc/actions/runs/39522964504)
+compiled source `4f43c20bf9237616b75ff00bead7bf5d2dfb8c44` and passed 26/26
+steps on isolated Firefox 158.0.1: one scripted provider request, 18 tool receipts,
+one upload/download each, confirmed worker/session cleanup and retained artifacts.
+Source/workflow identities and all four native executable hashes were verified.
 
 [Real Chrome run 39497965428](https://github.com/jeong-sik/masc/actions/runs/39497965428)
 passed 42/42 recorded steps in each of private and persistent modes. Its source

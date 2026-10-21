@@ -177,8 +177,11 @@ let prepare_task ~task_id task_observation =
 let recorded_task t = match t.root with
   | Ask_root (ask,_) -> Some ask.ao_task_id
   | Creation_root _ -> match observation t with
-    | Some (Fetched.Ready (Recorded {task_id;_})) when not (pending t) -> Some task_id
-    | Some _ | None -> None
+    | Some (Fetched.Ready (Recorded {task_id;_})) ->
+      if pending t then None else Some task_id
+    | Some (Fetched.Ready (Unobserved _ | Ambiguous _)
+        | Fetched.Absent | Fetched.Loading | Fetched.Stale _ | Fetched.Failed _)
+    | None -> None
 let task_binding t = match t.root,recorded_task t with
   | Ask_root (_,anchor),Some task_id -> Some (task_id,Ask_binding anchor)
   | Creation_root creation,Some task_id -> Option.map (fun ticket -> task_id,Creation_binding ticket)

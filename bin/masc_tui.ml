@@ -5286,9 +5286,12 @@ let launch_lane_addons ?target state ~mailbox request =
           ~body:(Yojson.Safe.to_string args)) in
         Ok (reply ~receipt:json ())
     | Addons.Slice query ->
-        let query = List.map (fun (key, value) -> key ^ "=" ^ Masc_tui_http.percent_encode_query_value value) query |> String.concat "&" in
-        let* json = detail_result (get_json
-          ~path:("/api/v1/lane-addons/slice?" ^ query)) in
+        let path = match query with
+          | [] -> "/api/v1/lane-addons/slice"
+          | _ :: _ ->
+              let query = List.map (fun (key, value) -> key ^ "=" ^ Masc_tui_http.percent_encode_query_value value) query |> String.concat "&" in
+              "/api/v1/lane-addons/slice?" ^ query in
+        let* json = detail_result (get_json ~path) in
         let* previous, source = match view.snapshot with
           | Some snapshot -> Ok (snapshot, Cached_snapshot)
           | None -> let* snapshot = inventory_result (inspect ()) in

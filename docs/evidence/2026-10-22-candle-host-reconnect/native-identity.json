@@ -1,0 +1,15 @@
+{
+  "source_sha": "eb484b0aabe699b46740bcb787a935fb67bbfa8e",
+  "native_run": 39636870206,
+  "native_hashes": {
+    "masc": "c99b4c891ffa303e816fe39658a5ebb108129d912b458b9903ae641dad52d7dc",
+    "masc-tui": "b5ca0e122b43c61dd4416d54d50a05325a16c466c338c299554fd7de3e9c172e",
+    "key-reference.md": "7aae284947e0a787ed89cf8d991b501ce60890803eadac6bf308b10291cf3fa9"
+  },
+  "executed_build_identities": {
+    "masc": "eb484b0aabe699b46740bcb787a935fb67bbfa8e",
+    "masc-tui": "eb484b0aabe699b46740bcb787a935fb67bbfa8e"
+  },
+  "dashboard_built_files": 671,
+  "scope": "The native component stayed eb484; worker changed to b427, then a changelog-only d4 commit. This is not a fresh full build of d4."
+}

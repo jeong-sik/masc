@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-21T17:11:07.700657+00:00",
+  "task_id": "task-001",
+  "verification_id": "vrf-5ee2e4f6674a8ccda7adaa075d60da5b",
+  "artifact_bytes": 400,
+  "artifact_sha256": "5b134dd3c26718e3394be103657c4c55be9887be86fbef75dbe39dce8b8d5e46",
+  "source_sha256": "b4e3984bdbf0fb70cf065c9313e8fa31b0f943cc403d3731a95c997447981078",
+  "checkout_equals_exact_git_blob": true,
+  "measurement_values_match": true,
+  "original_failed_submission_preserved": true,
+  "limitation": "Source-byte identity qualification only. Host performed comparison; Keeper preserved measurement in actual guest. Final newline differs from original host measurement. Not runtime behavior or full54 proof."
+}

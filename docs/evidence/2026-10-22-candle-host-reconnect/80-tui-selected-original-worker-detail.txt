@@ -1,0 +1,56 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Lane Add-ons                                                                                                                                            │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│?:help  Esc:back  Tab:section  j/k:move  D:raw                                                                                                                │
+│candle-host-qual-eb484 · Candle appraisal worker · attached                                                                                                   │
+│[1 Results]  2 Links  3 Installation  4 Records                                                                                                               │
+│                                                                                                                                                              │
+│Durable Candle judgments; settlement remains host-owned                                                                                                       │
+│candle/appraisals (1)                                │ Candle appraisal requests                                                                              │
+│> Candle appraisal requests                          │ candle/appraisals · 2026-10-21 17:22:16.641 UTC                                                        │
+│                                                     │                                                                                                        │
+│                                                     │ Pending judgments  0 requests                                                                          │
+│                                                     │ Retained results  3 requests                                                                           │
+│                                                                                                                                                              │
+│Activity timeline                                                                                                                                             │
+│Wall time 1792603336.642 → 1792603336.642 · o event · v value · * relation                                                                                    │
+│>candle/appraisals · afe374c9 |---------------------------------------------------------------v--------------------------------------------------------------|│
+│                                                                                                                                                              │
+│Received snapshot coverage · all Add-ons                                                                                                                      │
+│01a15f7c-2d5a-7000-a8b0-3b37afe374c9 · complete · cursor 1                                                                                                    │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  o:observe  d:remove TOML + worker  D:raw  J/K:scroll  r:refresh
+ Choose a Keeper before writing · i:choose

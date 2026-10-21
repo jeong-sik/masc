@@ -187,8 +187,8 @@ captured local payload in the same worker without a peer request or verified
 server identity; previewing leaves the original encoded attachment intact.
 Their result still belongs to the original generation, view, Keeper, workspace
 authority and exact staged attachment object. Losing peer confirmation alone
-does not withdraw a local draft; replacement or removal of its attachment does. Named-file previews, browser layout and copied source bytes
-are unchanged.
+does not withdraw a local draft; replacement or removal of its attachment does.
+Named-file previews, browser layout and copied source bytes are unchanged.
 Acquisition progress is a temporary footer observation of the pending read,
 bound to its generation, view, Keeper, workspace and original resource reading.
 It disappears when that read completes or loses ownership; it is not appended

@@ -20382,7 +20382,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
          && view = state.view && (view = Resources || keeper_name = state.msg_target_keeper_name) && same_skill then begin
         let notice = image_notice state ~view ~keeper_name in
         let refuse reason =
-          notice ~kind:Notice_failure (Printf.sprintf "sent image %s: %s" name reason)
+          notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" name reason)
         in
         match result with
         | Error reason -> refuse reason

@@ -1,6 +1,6 @@
 ---
 name: ocaml-coding
-description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 이미지 카탈로그 등 막히는 I/O, Task Skill 준비 쌍 연결과 Ask 복구의 회차별 증거 공유, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
+description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 이미지 카탈로그 등 막히는 I/O, Task Skill 준비 쌍 연결과 Keeper별 비동기 Ask 복구·회차별 증거 공유, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
 ---
 
 # masc OCaml 점검표
@@ -72,6 +72,13 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   기존 파일 cursor cache와 회차의 불변 snapshot을 구분하며, 실패한 window를 다른 날짜나
   Keeper에 빌리지 않는다. 순서·원래 답변/Task 연결은 유지하고 실제 enqueue는 owner lock의
   최신 증거·lifecycle fence를 다시 확인한다. window capture 수는 파일 I/O·작업 진척이 아니다.
+
+- 서버 Ask 복구는 같은 수명의 `Keeper_ask_answer_wake` supervisor와 switch를 사용한다.
+  발견한 원래 Keeper별로 active 작업을 한 번만 예약하고, worker는 양보한 뒤 원래 행 순서로
+  복구한다. 다른 Keeper의 intake/파일 잠금을 maintenance나 독립 Keeper가 함께 기다리지 않는다.
+  active 중 발견한 새 답변은 현재 batch를 덮지 않고 후속 pulse가 fresh하게 읽는다.
+  예약·시작·batch 결과·중단을 구분하며, 취소 정리 전 active를 해제하거나 전달을 Task 진척으로
+  부르지 않는다. discovery 자체·같은 Keeper의 직렬 대기·보호된 물리 I/O 정리는 여전히 남는다.
 
 - 제공받은 switch로 자동 복구 fiber를 예약할 때는 discovery 전과 실제 예약 직전에
   `Eio.Switch.check`를 한다. `Cancel.protect`도 취소된 switch를 다시 켜지 않는다.

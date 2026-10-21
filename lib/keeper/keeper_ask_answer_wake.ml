@@ -352,68 +352,164 @@ let delivery_window since =
         Error (Invalid_answered_record
           ("answer timestamp has no UTC calendar day: " ^ Printexc.to_string exn))
 
+let empty_report =
+  { inspected=0; evidence_window_reads=0; enqueued=0;
+    already_pending=0; already_delivered=0; failures=[] }
+
+let reconcile_rows ~base_path ~keeper_name report rows =
+  let ( let* ) = Result.bind in
+  let answered, demands = List.fold_left (fun (answered, demands) row ->
+    let _, (_, resolution) = row in
+    match resolution with
+    | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> answered, demands
+    | Keeper_ask.Answered_by { answered_at; _ } ->
+        let demands = if not (Float.is_finite answered_at) then demands
+          else
+            match delivery_window answered_at with
+            | Error _ -> demands
+            | Ok window ->
+                let demand = match Delivery_windows.find_opt window demands with
+                  | None -> One_source
+                  | Some (One_source | Multiple_sources) -> Multiple_sources in
+                Delivery_windows.add window demand demands in
+        row :: answered, demands) ([], Delivery_windows.empty) rows in
+  let answered = List.rev answered in
+  (* A pass owns these immutable reads. Keeper and UTC-day boundaries
+     remain distinct; a failed earlier window cannot taint a later one.
+     Demand the first read in row order, rather than preparing a barrier
+     before the first ready answer can reach the queue owner. *)
+  let windows = ref Delivery_windows.empty in
+  let window_reads = ref 0 in
+  let already_delivered (stimulus : Keeper_event_queue.stimulus) =
+    let since = stimulus.arrived_at in
+    let* window = delivery_window since in
+    let snapshot = match Delivery_windows.find_opt window !windows with
+      | Some snapshot -> snapshot
+      | None ->
+          incr window_reads;
+          let snapshot = Keeper_reaction_ledger.strict_source_delivery_snapshot_result
+              ~base_path ~keeper_name ~since in
+          (* A single-use window is not retained alongside the shared
+             ones. All-distinct dates keep no large proof snapshots. *)
+          (match Delivery_windows.find_opt window demands with
+           | Some Multiple_sources ->
+               windows := Delivery_windows.add window snapshot !windows
+           | Some One_source | None -> ());
+          snapshot in
+    Result.bind snapshot (fun snapshot ->
+      Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+        ~post_id:stimulus.post_id
+        ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus))
+    |> Result.map_error (fun error -> Delivery_evidence_unavailable error) in
+  let report = List.fold_left (fun report (ask_id, (ask, resolution)) ->
+    let report = { report with inspected = report.inspected + 1 } in
+    match deliver_row ~base_path ~keeper_name ~already_delivered ask resolution with
+    | Ok Enqueued -> { report with enqueued = report.enqueued + 1 }
+    | Ok Already_pending -> { report with already_pending = report.already_pending + 1 }
+    | Ok Already_delivered -> { report with already_delivered = report.already_delivered + 1 }
+    | Error error -> { report with failures = { keeper_name = Some keeper_name;
+        ask_id = Some ask_id; error } :: report.failures }) report answered in
+  { report with evidence_window_reads =
+      report.evidence_window_reads + !window_reads }
+
 let reconcile ~base_path =
   let ( let* ) = Result.bind in
   let* logs = Keeper_ask_store.discover_rows_result ~base_path in
-  let initial = { inspected = 0; evidence_window_reads = 0; enqueued = 0; already_pending = 0; already_delivered = 0; failures = [] } in
   let report = List.fold_left (fun report log ->
       match log with
       | Keeper_ask_store.Unreadable_log error ->
           { report with failures = { keeper_name = None; ask_id = None;
               error = Ask_store_unavailable error } :: report.failures }
       | Keeper_ask_store.Canonical_rows { keeper_name; rows } ->
-          let answered, demands = List.fold_left (fun (answered, demands) row ->
-            let _, (_, resolution) = row in
-            match resolution with
-            | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> answered, demands
-            | Keeper_ask.Answered_by { answered_at; _ } ->
-                let demands = if not (Float.is_finite answered_at) then demands
-                  else
-                    match delivery_window answered_at with
-                    | Error _ -> demands
-                    | Ok window ->
-                        let demand = match Delivery_windows.find_opt window demands with
-                          | None -> One_source
-                          | Some (One_source | Multiple_sources) -> Multiple_sources in
-                        Delivery_windows.add window demand demands in
-                row :: answered, demands) ([], Delivery_windows.empty) rows in
-          let answered = List.rev answered in
-          (* A pass owns these immutable reads. Keeper and UTC-day boundaries
-             remain distinct; a failed earlier window cannot taint a later one.
-             Demand the first read in row order, rather than preparing a barrier
-             before the first ready answer can reach the queue owner. *)
-          let windows = ref Delivery_windows.empty in
-          let window_reads = ref 0 in
-          let already_delivered (stimulus : Keeper_event_queue.stimulus) =
-            let since = stimulus.arrived_at in
-            let* window = delivery_window since in
-            let snapshot = match Delivery_windows.find_opt window !windows with
-              | Some snapshot -> snapshot
-              | None ->
-                  incr window_reads;
-                  let snapshot = Keeper_reaction_ledger.strict_source_delivery_snapshot_result
-                      ~base_path ~keeper_name ~since in
-                  (* A single-use window is not retained alongside the shared
-                     ones. All-distinct dates keep no large proof snapshots. *)
-                  (match Delivery_windows.find_opt window demands with
-                   | Some Multiple_sources ->
-                       windows := Delivery_windows.add window snapshot !windows
-                   | Some One_source | None -> ());
-                  snapshot in
-            Result.bind snapshot (fun snapshot ->
-              Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
-                ~post_id:stimulus.post_id
-                ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus))
-            |> Result.map_error (fun error -> Delivery_evidence_unavailable error) in
-          let report = List.fold_left (fun report (ask_id, (ask, resolution)) ->
-            let report = { report with inspected = report.inspected + 1 } in
-            match deliver_row ~base_path ~keeper_name ~already_delivered ask resolution with
-            | Ok Enqueued -> { report with enqueued = report.enqueued + 1 }
-            | Ok Already_pending -> { report with already_pending = report.already_pending + 1 }
-            | Ok Already_delivered -> { report with already_delivered = report.already_delivered + 1 }
-            | Error error -> { report with failures = { keeper_name = Some keeper_name;
-                ask_id = Some ask_id; error } :: report.failures }) report answered in
-          { report with evidence_window_reads =
-              report.evidence_window_reads + !window_reads })
-    initial logs in
-  Ok { report with failures = List.rev report.failures }
+          reconcile_rows ~base_path ~keeper_name report rows)
+    empty_report logs in
+  Ok {report with failures=List.rev report.failures}
+
+type recovery_phase = Reserved | Started | Settled of report | Interrupted | Raised
+
+let observe_recovery ~keeper_name ~started_ns phase =
+  let emit () = try Log.Server.routine_lazy (fun () ->
+      let phase, detail = match phase with
+        | Reserved -> "reserved", ""
+        | Started -> "started", ""
+        | Interrupted -> "interrupted", ""
+        | Raised -> "raised", ""
+        | Settled report -> "settled", Printf.sprintf
+            " inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d failures=%d"
+            report.inspected report.evidence_window_reads report.enqueued
+            report.already_pending report.already_delivered (List.length report.failures) in
+      Printf.sprintf "ask_recovery_owner keeper=%s started_ns=%Ld phase=%s at_ns=%Ld%s"
+        keeper_name started_ns phase (Mtime_clock.elapsed_ns ()) detail)
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | _ -> () in
+  Eio.Cancel.protect emit
+
+let log_report ~keeper_name report =
+  List.iter (fun (failure : failure) ->
+    Log.Server.warn "ask answer recovery retained keeper=%s ask_id=%s error=%s"
+      keeper_name
+      (match failure.ask_id with Some ask_id -> ask_id | None -> "<store>")
+      (error_to_string failure.error)) report.failures;
+  if report.enqueued > 0 then Log.Server.info
+    "ask answer recovery keeper=%s inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d failures=%d"
+    keeper_name report.inspected report.evidence_window_reads report.enqueued
+    report.already_pending report.already_delivered (List.length report.failures)
+
+type t =
+  { base_path : string
+  ; on_report : keeper_name:string -> report -> unit
+  ; mutable active : Set_util.StringSet.t }
+
+let create ~base_path ?(on_report=log_report) () =
+  {base_path;on_report;active=Set_util.StringSet.empty}
+
+let pulse ~sw supervisor =
+  let ( let* ) = Result.bind in
+  Eio.Switch.check sw;
+  let* logs = Keeper_ask_store.discover_rows_result ~base_path:supervisor.base_path in
+  List.iter (function
+    | Keeper_ask_store.Unreadable_log error ->
+        Log.Server.warn "ask answer recovery discovery retained error=%s"
+          (Keeper_ask_store.read_error_to_string error)
+    | Keeper_ask_store.Canonical_rows {keeper_name; rows} ->
+        if not (Set_util.StringSet.mem keeper_name supervisor.active)
+           && List.exists (fun (_, (_, resolution)) -> match resolution with
+          | Keeper_ask.Answered_by _ -> true
+          | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> false) rows then (
+          Eio.Switch.check sw;
+          let started_ns = Mtime_clock.elapsed_ns () in
+          supervisor.active <- Set_util.StringSet.add keeper_name supervisor.active;
+          let release () =
+            supervisor.active <- Set_util.StringSet.remove keeper_name supervisor.active in
+          try
+            observe_recovery ~keeper_name ~started_ns Reserved;
+            Eio.Switch.check sw;
+            Eio.Fiber.fork ~sw (fun () ->
+              Fun.protect ~finally:release (fun () ->
+                try
+                  (* Reserve all independent owners without joining their queues,
+                     even when the configured filesystem completes inline. *)
+                  Eio.Fiber.yield ();
+                  observe_recovery ~keeper_name ~started_ns Started;
+                  let report = reconcile_rows ~base_path:supervisor.base_path
+                      ~keeper_name empty_report rows in
+                  let report = {report with failures=List.rev report.failures} in
+                  observe_recovery ~keeper_name ~started_ns (Settled report);
+                  (try supervisor.on_report ~keeper_name report with
+                   | Eio.Cancel.Cancelled _ as exn -> raise exn
+                   | exn -> Log.Server.warn "ask answer recovery observer failed keeper=%s: %s"
+                       keeper_name (Printexc.to_string exn))
+                with
+                | Eio.Cancel.Cancelled _ as exn ->
+                    observe_recovery ~keeper_name ~started_ns Interrupted;
+                    raise exn
+                | exn ->
+                    observe_recovery ~keeper_name ~started_ns Raised;
+                    Log.Server.warn "ask answer recovery worker retained keeper=%s: %s"
+                      keeper_name (Printexc.to_string exn)))
+          with exn ->
+            let bt = Printexc.get_raw_backtrace () in
+            release ();
+            Printexc.raise_with_backtrace exn bt)) logs;
+  Ok ()

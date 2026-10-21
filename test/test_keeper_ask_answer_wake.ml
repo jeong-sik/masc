@@ -743,6 +743,119 @@ let test_reconcile_delivers_past_preanswer_corruption () =
     check string "recovery never rewrites the answer" content (Fs_compat.load_file path)) canonical_logs
 ;;
 
+let test_recovery_pulse_keeps_independent_owners_moving () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  ensure_keeper "alpha";
+  ensure_keeper "beta";
+  let original = persist_answer ~base_path ~keeper_name:"alpha"
+      ~ask_id:"original-alpha" ~task_id:"original-task" () in
+  let independent = persist_answer ~base_path ~keeper_name:"beta"
+      ~ask_id:"original-beta" ~task_id:"independent-task" () in
+  let beta_path = Keeper_ask_store.log_path ~base_path ~keeper_name:"beta" in
+  let beta_log = Fs_compat.load_file beta_path in
+  Eio.Switch.run (fun sw ->
+    let entered, enter = Eio.Promise.create () in
+    let release, unlock = Eio.Promise.create () in
+    let first_alpha, publish_first_alpha = Eio.Promise.create () in
+    let next_alpha, publish_next_alpha = Eio.Promise.create () in
+    let beta, publish_beta = Eio.Promise.create () in
+    let fence = ref None in
+    let finish () =
+      if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve unlock ();
+      Option.iter (fun operation_id ->
+        ignore (Keeper_shutdown_intake_fence.rollback_shutdown
+            ~base_path ~keeper_name:"alpha" ~operation_id)) !fence in
+    Fun.protect ~finally:finish (fun () ->
+      (* Hold the actual lifecycle-intake mutex, not a replacement recovery
+         callback. Alpha's queue mutation must wait while beta remains usable. *)
+      let holder = Eio.Fiber.fork_promise ~sw (fun () ->
+        Keeper_shutdown_intake_fence.run_durable_intake_if_open
+          ~base_path ~keeper_name:"alpha" (fun _ ->
+            Eio.Promise.resolve enter ();
+            Eio.Promise.await release)) in
+      Eio.Promise.await entered;
+      let recovery = Wake.create ~base_path ~on_report:(fun ~keeper_name report ->
+          if String.equal keeper_name "alpha" then (
+            if not (Eio.Promise.is_resolved first_alpha) then
+              Eio.Promise.resolve publish_first_alpha report
+            else if not (Eio.Promise.is_resolved next_alpha) then
+              Eio.Promise.resolve publish_next_alpha report)
+          else if String.equal keeper_name "beta" then (
+            if not (Eio.Promise.is_resolved beta) then Eio.Promise.resolve publish_beta report)
+          else fail "a recovery report replaced its canonical owner") () in
+      let pulse () = match Wake.pulse ~sw recovery with
+        | Ok () -> () | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
+      pulse ();
+      let beta_report = Eio.Promise.await beta in
+      (match beta_report.failures with [] -> () | _ -> fail "independent owner failed");
+      check bool "alpha is still waiting for its actual intake" false
+        (Eio.Promise.is_resolved first_alpha);
+      (match pending_asks ~base_path ~keeper_name:"beta" with
+       | [_, payload] ->
+           check string "independent original Ask already committed"
+             independent.ask_id payload.Keeper_event_queue.ask_id
+       | _ -> fail "blocked alpha prevented beta's exact delivery");
+      check (list string) "blocked owner has no pending delivery" []
+        (List.map (fun (_, payload) -> payload.Keeper_event_queue.ask_id)
+           (pending_asks ~base_path ~keeper_name:"alpha"));
+      let later = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"later-alpha" () in
+      let alpha_path = Keeper_ask_store.log_path ~base_path ~keeper_name:"alpha" in
+      let alpha_log = Fs_compat.load_file alpha_path in
+      (* A second pulse may discover the new answer but cannot replace the
+         active owner's original captured batch or start another worker. *)
+      pulse ();
+      let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+      fence := Some operation_id;
+      ignore (Keeper_shutdown_intake_fence.begin_shutdown
+          ~base_path ~keeper_name:"alpha" ~operation_id);
+      Eio.Promise.resolve unlock ();
+      (match Eio.Promise.await_exn holder with
+       | Keeper_shutdown_intake_fence.Intake_committed () -> ()
+       | Intake_shutdown_reserved _ -> fail "the already admitted holder changed");
+      let blocked = Eio.Promise.await first_alpha in
+      (match blocked.failures with
+       | [failure] ->
+           check (option string) "refusal keeps original owner" (Some "alpha") failure.Wake.keeper_name;
+           check (option string) "refusal keeps original active batch"
+             (Some original.ask_id) failure.Wake.ask_id;
+           (match failure.Wake.error with
+            | Wake.Queue_storage_failed _ -> ()
+            | Ask_store_unavailable _ | Ask_missing _ | Ask_not_answered _
+            | Invalid_answered_record _ | Delivery_evidence_unavailable _ ->
+                fail "fresh intake fence was not authoritative")
+       | [] | _ :: _ -> fail "original active batch was replaced or duplicated");
+      check (list string) "fresh shutdown refuses delivery" []
+        (List.map (fun (_, payload) -> payload.Keeper_event_queue.ask_id)
+           (pending_asks ~base_path ~keeper_name:"alpha"));
+      ignore (Keeper_shutdown_intake_fence.rollback_shutdown
+          ~base_path ~keeper_name:"alpha" ~operation_id);
+      fence := None;
+      pulse ();
+      let recovered = Eio.Promise.await next_alpha in
+      (match recovered.failures with [] -> () | _ -> fail "released owner did not recover");
+      let pending = pending_asks ~base_path ~keeper_name:"alpha" in
+      check (list string) "later pulse commits both original answer sources"
+        (List.sort String.compare [original.ask_id;later.ask_id])
+        (List.sort String.compare (List.map
+          (fun (_, payload) -> payload.Keeper_event_queue.ask_id) pending));
+      List.iter (fun (_, payload) ->
+        check bool "original continuation survives recovery" true
+          (Keeper_continuation_channel.same_route original.continuation payload.Keeper_event_queue.channel)) pending;
+      (match Keeper_ask_store.rows_result ~base_path ~keeper_name:"alpha" with
+       | Ok (Keeper_ask_store.Stored_rows rows) ->
+           (match List.assoc_opt original.ask_id rows with
+            | Some (ask, _) -> check (option string) "original Task retained"
+                original.task_id ask.Keeper_ask.task_id
+            | None -> fail "original question was lost")
+       | Ok Keeper_ask_store.Missing_log | Error _ -> fail "original question unavailable");
+      (match pending_asks ~base_path ~keeper_name:"beta" with
+       | [_, payload] when String.equal payload.Keeper_event_queue.ask_id independent.ask_id -> ()
+       | _ -> fail "repeated pulse replaced or duplicated beta's original source");
+      check string "alpha recovery does not rewrite answers" alpha_log (Fs_compat.load_file alpha_path);
+      check string "beta recovery does not rewrite answers" beta_log (Fs_compat.load_file beta_path)))
+;;
+
 let test_lifecycle_fence_defers_delivery_until_recovery () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path = config.Workspace.base_path in
@@ -1193,6 +1306,8 @@ let () =
             test_fresh_answer_delivers_past_preanswer_corruption
         ; test_case "reconcile delivers past pre-answer corruption" `Quick
             test_reconcile_delivers_past_preanswer_corruption
+        ; test_case "blocked recovery owner preserves independent delivery and fresh authority" `Quick
+            test_recovery_pulse_keeps_independent_owners_moving
         ; test_case "lifecycle fence defers answer delivery" `Quick
             test_lifecycle_fence_defers_delivery_until_recovery
         ; test_case "canonical owner survives nonidentity filename" `Quick

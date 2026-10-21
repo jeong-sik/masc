@@ -74,7 +74,7 @@ let prepare request=
           (String.concat "\n" (Masc_tui_text_block.lines input.content.original))
         |> List.map (fun line -> D.Content line)
       | Html -> Masc_tui_artifact_html.project input.content.original
-        |> Masc_tui_artifact_html_rows.render ~width:input.width
+        |> Masc_tui_artifact_html_rows.render ~image_action:No_image_action ~width:input.width
         |> List.map (fun line -> D.Content line) in
   note ("Post: " ^ input.key.post_id ^ "\nSHA-256: " ^ input.key.sha256
     ^ "\n" ^ string_of_int input.key.bytes ^ " bytes · "

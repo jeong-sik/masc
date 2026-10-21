@@ -41,4 +41,5 @@ val read_bytes
   -> host:string -> port:int -> path:string -> (string, string) result
 (** Bind the actual binary GET and validate the same workspace admission
     receipt as JSON reads. The transport caller enforces the body size bound.
+    Unbound and health-identity-only contexts cannot authorize binary content.
     No cache, content decoding or effect authorization is involved. *)

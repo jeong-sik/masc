@@ -55,6 +55,11 @@ let test_binary_workspace_admission () = Eio_main.run (fun _ ->
   let seen=ref None in
   let send headers ~path=seen:=Some path;Ok Masc_http_client.{status=200;headers;body=original} in
   let read send=Masc_tui_workspace_read.read_bytes ~send ~host:"localhost" ~port:8935 ~path:"/api/v1/artifact-bytes/digest" in
+  Alcotest.(check bool) "unbound binary content is not admitted" true
+    (Result.is_error (read (send [receipt])));
+  Alcotest.(check bool) "health-only proof cannot authorize binary content" true
+    (Masc_tui_workspace_read.with_binding ~host:"localhost" ~port:8935 ~expected
+      ~proof:Health_identity (fun () -> Result.is_error (read (send [receipt]))));
   Alcotest.(check bool) "missing binary receipt refuses content" true
     (bound (fun () -> Result.is_error (read (send []))));
   Alcotest.(check bool) "duplicate receipt refuses content" true

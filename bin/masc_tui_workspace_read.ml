@@ -101,6 +101,10 @@ let read_response ~send ~host ~port ~path =
 
 let read_bytes ~send ~host ~port ~path =
   let ( let* ) = Result.bind in
+  let* ()=match current_workspace_read () with
+    | Some {wr_proof=Request_precondition;_} -> Ok ()
+    | None | Some {wr_proof=Health_identity;_} ->
+      Error "Binary reading requires an expected workspace request precondition" in
   let* path=workspace_read_path ~host ~port ~path in
   let* response=send ~path |> fun result -> Result.bind result validate_workspace_read_response in
   if Masc.Tui_decode.is_success_http_status response.Masc_http_client.status then Ok response.body

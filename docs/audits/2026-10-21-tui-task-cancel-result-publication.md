@@ -25,16 +25,16 @@ It does not move work to a new/root switch or extend the original switch's
 lifetime. Runtime cancellation still propagates; it does not become a success
 or failure receipt.
 
-The dedicated Task cancellation keeps its original initial authority gate,
-two pre-dispatch workspace checks, MCP session, request ID, cancel arguments,
-reason/handoff, expected workspace and typed tool verdict. The server's FSM
-still decides whether cancellation is allowed. The existing UI handler,
-follow-up retention and foreign withdrawal remain unchanged. An accepted
-operation's receipt does not authorize reading a foreign workspace, reopening
-another detail, repeating the cancellation or clearing a new composer draft.
-No automatic resend, fallback or replacement operation is added. A transport
-failure after a send remains the existing error channel; this unit does not
-solve uncertain remote outcomes or prove restart recovery.
+The dedicated Task cancellation retains its initial authority gate and uses
+main's authenticated operator cancellation endpoint, original reason and
+expected workspace. Confirmed, refused and unanswered outcomes remain distinct;
+ordinary exceptions inside an attempted request remain unconfirmed, while
+no-switch/launch refusal never becomes success. The server's FSM still decides
+whether cancellation is allowed. Original UI receipt/follow-up decisions and
+foreign withdrawal remain unchanged. An accepted operation's receipt does not
+authorize a foreign read, reopening another detail, repeating the cancellation
+or clearing a new composer draft. No automatic resend or replacement operation
+is added. This source integration does not prove restart recovery.
 
 The original immutable Atomic core and finite Delivery_round are unchanged.
 Terminal results now join the existing owned batch after the captured shared
@@ -62,9 +62,9 @@ wait does not make the entire Task cancellation or input path nonblocking.
 ## Authored protocol/resource cases — unexecuted
 
 A dedicated fixture initializes real in-process MCP sessions and creates claimed
-Tasks in isolated persistent workspaces. It uses the production TUI request and
-cancel argument encoders, actual `masc_transition`, response decoder, Task
-readback, retained-result producer and Delivery_round:
+Tasks in isolated persistent workspaces. Cancellation uses the actual operator
+route parser/commit with its expected-workspace precondition, Task readback,
+typed receipt, retained-result producer and Delivery_round:
 
 1. An actual accepted cancellation is held at a controlled post-commit boundary.
    Workspace authority/root changes while a full unrelated notification remains.
@@ -76,14 +76,14 @@ readback, retained-result producer and Delivery_round:
    refusal as an error for the original intent; both Tasks remain claimed.
 
 These are authored cases, not executed results. They do not exercise HTTP
-networking/session opening, the main launcher/workspace checks/full UI loop,
+authentication/networking/session opening, the main launcher/workspace checks/full UI loop,
 physical overlap/cleanup, logs, visible TUI, input or paint. No private registry
 hooks or helper-count/UI wording/layout/row-order/snapshot/PTY assertions.
 
-Four changed OCaml files passed parsing only, interface first. Twelve exact
-source-preservation sections include the original Atomic core, Task cancellation
-work body, UI receipt/follow-up decisions, drain, source types/protocol,
-workspace job and MCP/HTTP implementation. Direct test libraries are declared;
+The original unit recorded parsing-only evidence before integration. The
+main/stack integration combines the operator cancellation contract with owned
+result publication and adapts the resource fixture to that contract. Historical
+source-preservation counts do not certify this integrated candidate. Direct test libraries are declared;
 no new product dependencies. No typing/warning/link/build/tests/CI/native/model/
 controller/audio/PTY/runtime execution, install/restart/live writes, self
 approval or merge. Independent current-head source review and whole-stack

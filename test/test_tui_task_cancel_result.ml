@@ -1,6 +1,6 @@
-(** Actual in-process MCP Task cancellation and persistent workspaces meet the
-    production retained-result producer and finite UI delivery policy. No HTTP
-    network, TUI process, screen or provider is exercised. *)
+(** Actual in-process operator cancellation commit and persistent workspaces meet the
+    production retained-result producer and finite UI delivery policy. HTTP
+    authentication, network, TUI process, screen and provider are not exercised. *)
 open Alcotest
 open Masc_tui_types
 module Mcp = Masc.Mcp_server_eio
@@ -48,10 +48,16 @@ let with_server ~clock ~sw ~owner f =
    | Claimed {assignee;_} -> check string "original Task belongs to its session" owner assignee
    | _ -> fail "original session did not claim its Task");
   f base config (identity base) original call
-let cancel ~call ~task_id ~expected_workspace ~reason =
-  call (Wire.request_body ~request_id:"original-cancel" ~tool:"masc_transition"
-    ~arguments:(Wire.task_cancel_arguments ~task_id ~reason ~expected_workspace))
-  |> tool_result ~request_id:"original-cancel"
+let cancel ~config ~task_id ~(expected_workspace : Masc.Tui_decode.server_identity) ~reason =
+  Server_routes_http_routes_verification.For_testing.commit_operator_cancel_json
+    ~config ~operator_id:"operator-cancel-test"
+    (`Assoc ["task_id", `String task_id; "reason", `String reason;
+      "expected_workspace", `Assoc [
+        "base_path", `String (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path);
+        "masc_root", `String (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root)]])
+  |> Result.map (fun _ -> "operator cancellation accepted")
+  |> Result.map_error Masc_domain.masc_error_to_string
+
 let claimed config owner = match (task config).Masc_domain.task_status with
   | Claimed {assignee;_} -> check string "original owner remains" owner assignee
   | _ -> fail "unstarted/refused operation changed the actual Task"
@@ -96,7 +102,7 @@ let after_shared results shared original =
 let test_accepted_cancel_outlives_workspace_withdrawal env () =
   Eio.Switch.run @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
-  with_server ~clock ~sw ~owner:"cancel-owner-a" @@ fun base_a config_a expected_a original_a call_a ->
+  with_server ~clock ~sw ~owner:"cancel-owner-a" @@ fun base_a config_a expected_a original_a _call_a ->
   with_server ~clock ~sw ~owner:"cancel-owner-b" @@ fun _base_b config_b expected_b _original_b _call_b ->
   let foreign_before = Masc.Workspace.get_tasks_raw config_b in
   let state = create_state ~workspace:"cancel-resource" ~local_base_path:base_a ~port:8935 ~refresh_interval:2. () in
@@ -108,9 +114,9 @@ let test_accepted_cancel_outlives_workspace_withdrawal env () =
   let reason = "original operator cancellation reason" in
   Eio_context.with_turn_switch sw (fun () ->
     launch results ~delivered:deliver ~task_id:original_a.id ~expected_workspace:expected_a (fun () ->
-      let result = cancel ~call:call_a ~task_id:original_a.id ~expected_workspace:expected_a ~reason in
+      let result = cancel ~config:config_a ~task_id:original_a.id ~expected_workspace:expected_a ~reason in
       ignore (require_ok result);
-      cancelled config_a ~owner:"cancel-owner-a" ~reason;
+      cancelled config_a ~owner:"operator-cancel-test" ~reason;
       Eio.Promise.resolve accept ();
       Eio.Promise.await release;
       result));
@@ -136,7 +142,7 @@ let test_accepted_cancel_outlives_workspace_withdrawal env () =
   let run,withdrawn = take_task_followups state ~ready:(fun _ -> true) in
   check bool "original receipt cannot authorize a foreign workspace read" true (run=[]);
   check bool "foreign follow-up is explicitly withdrawn" true (withdrawn=[Task_cancel_refresh {task_id=original_a.id;certainty=Cancellation_confirmed}]);
-  cancelled config_a ~owner:"cancel-owner-a" ~reason;
+  cancelled config_a ~owner:"operator-cancel-test" ~reason;
   check bool "foreign actual Task resources remain unchanged" true (foreign_before=Masc.Workspace.get_tasks_raw config_b)
 
 let test_no_switch_closed_owner_and_real_workspace_refusal env () =
@@ -144,10 +150,10 @@ let test_no_switch_closed_owner_and_real_workspace_refusal env () =
   Fun.protect ~finally:(fun () -> Eio_context.restore_state snapshot) @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
-  with_server ~clock ~sw ~owner:"cancel-owner-original" @@ fun _base config expected original call ->
+  with_server ~clock ~sw ~owner:"cancel-owner-original" @@ fun _base config expected original _call ->
   with_server ~clock ~sw ~owner:"cancel-owner-foreign" @@ fun _foreign_base foreign_config foreign _other _call ->
   let reason = "original reason retained on refusal" in
-  let perform () = cancel ~call ~task_id:original.id ~expected_workspace:expected ~reason in
+  let perform () = cancel ~config ~task_id:original.id ~expected_workspace:expected ~reason in
   Eio_context.For_testing.clear_root_switch ();
   check bool "fixture has no operation switch" true (Option.is_none (Eio_context.get_switch_opt ()));
   let results = Results.create () and shared,notification = seed_shared () in
@@ -175,7 +181,7 @@ let test_no_switch_closed_owner_and_real_workspace_refusal env () =
   let delivered,deliver = Eio.Promise.create () in
   Eio_context.with_turn_switch sw (fun () ->
     launch successor ~delivered:deliver ~task_id:original.id ~expected_workspace:expected (fun () ->
-      cancel ~call ~task_id:original.id ~expected_workspace:foreign ~reason));
+      cancel ~config ~task_id:original.id ~expected_workspace:foreign ~reason));
   Eio.Promise.await delivered;
   let reply,_ = take successor shared Protocol.Delivery_round.empty in
   let _,workspace,result = receipt (ready reply).message in

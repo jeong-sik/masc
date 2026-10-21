@@ -633,6 +633,9 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   let before_store=Masc_tui_observation_store.initialize ~base_path:base |> require in
   state.observation_store <- Some before_store;
   let before_dir=Masc_tui_observation_store.directory before_store in
+  let blocked_admission=Masc_tui_observation_store.admissions_path before_store in
+  Sys.remove blocked_admission;
+  Unix.mkdir blocked_admission 0o700;
   let results=Results.create () in
   let request,submission=begin_read state in
   launch state results request submission ~released:(fun () -> ())
@@ -643,6 +646,9 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
    | Some (Error (Projection.Followup_not_started _)) -> ()
    | Some _ | None -> fail "actual missing-switch attempt did not settle");
   Results.close results;
+  Unix.rmdir blocked_admission;
+  Out_channel.with_open_gen [Open_wronly;Open_creat;Open_excl;Open_binary]
+    0o600 blocked_admission (fun _ -> ());
   (* This original admitted read is never dispatched. Its Info observation is
      filtered, but the production admission journal must retain its identity. *)
   let admission_started_ns=Mtime_clock.elapsed_ns () in
@@ -717,6 +723,12 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   check bool "actual unstarted and declared unobserved reads stay in denominator" true
     (member "not_started" (outcomes "before")=`Int 1 && member "unobserved" (outcomes "before")=`Int 1);
   let before_attempts=match member "attempts" (member "before" case) with `List rows -> rows | _ -> fail "admitted attempts lost" in
+  check bool "actual capture failure remains separate from unstarted read outcome" true
+    (member "observed_failures" (member "admission_capture" (member "summary" (member "before" case)))=`Int 1
+     && List.exists (fun row -> member "outcome" row=`String "not_started"
+       && (match member "capture_failures" row with
+           | `List [failure] -> member "origin" failure=Masc_tui_observation_origin.to_json unstarted.afr_origin
+           | _ -> false)) before_attempts);
   check bool "filtered admission has original file evidence without a supplied declaration" true
     (List.exists (fun row ->
        List.for_all (fun key -> member key (member "identity" row)=member key (declaration unobserved))
@@ -922,8 +934,21 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
      ~origin:completed.afr_origin ~request:(Ui.Snapshot_read.request_id completed.afr_request)
      ~admission_started_ns:completed.afr_admission_started_ns with
    | Error _ -> () | Ok () -> fail "directory blocker accepted an admission record");
-  let _read,result=run_read (fun _ -> ()) in
-  check bool "actual original read continues after storage setup failure" true (result=Some (Ok ()));
+  let capture_failed_read,result=run_read (fun _ -> ()) in
+  check bool "actual original read completes despite capture failure" true (result=Some (Ok ()));
+  let local_after_failure=Masc_tui_system_logs.client_snapshot ~limit:(Log.Ring.bounds ()).total ~min_level:None |> require in
+  let failure_entry=List.find_opt (fun entry ->
+    let details=entry.Masc.Tui_decode.sl_details in
+    member "event" details=`String "tui_ask_followup_admission_failed"
+    && member "request" details=`Int (Ui.Snapshot_read.request_id capture_failed_read.afr_request)
+    && member "origin" details=Masc_tui_observation_origin.to_json capture_failed_read.afr_origin)
+    local_after_failure.sys_entries in
+  (match failure_entry with
+   | None -> fail "actual capture failure missing from local decoded Logs source"
+   | Some entry ->
+     check bool "capture diagnostic retains original admission clock and channel" true
+       (Yojson.Safe.to_string (member "read_admission_started_ns" entry.sl_details)=Int64.to_string capture_failed_read.afr_admission_started_ns
+        && entry.sl_level=Masc.Tui_decode.System_warn && entry.sl_category=Some "boundary"));
   exact_task state task_id;
   check bool "replacement leaves original session bytes intact" true (first_before=stored_files log_dir);
   check bool "client stores do not append to server daily logs" true (server_before=stored_files server_logs);

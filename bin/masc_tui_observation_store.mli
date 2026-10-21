@@ -23,7 +23,14 @@ val record_admission :
 (** Append the original admitted read identity before dispatch, independently of
     logger severity. Reuses Fs_compat's serialized JSONL append/flush backend.
     No outcome is inferred and no question/answer body is stored. Filesystem
-    failures return Error and emit a best-effort warning; cancellation and
+    failures return Error and emit a best-effort structured Warn/Boundary event
+    containing the original captured provenance, request and admission clock,
+    the failed capture span and opaque filesystem explanation. The event does
+    not describe a producer/UI outcome. One clock is captured before every
+    append; on failure the second is captured before lazy warning formatting,
+    so the span covers attempted capture through error conversion, not warning
+    output or proof that physical write/flush completed.
+    Existing module severity policy still applies. Cancellation and
     unexpected exceptions propagate. This synchronous preparation cost belongs
     after the original admission clock, before started/worker observations.
     Flush is not fsync or proof of complete capture after failure/interruption. *)

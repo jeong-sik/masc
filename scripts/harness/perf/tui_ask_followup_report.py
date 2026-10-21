@@ -192,6 +192,27 @@ def record(entry):
     return key, value
 
 
+def capture_failure(entry):
+    fields(entry, ENVELOPE)
+    integer(entry["seq"]); text(entry["ts"]); text(entry["message"], False)
+    if entry["keeper_name"] is not None:
+        text(entry["keeper_name"])
+    if entry["turn_id"] is not None:
+        integer(entry["turn_id"])
+    require((entry["level"], entry["source"], entry["module"], entry["category"])
+            == ("WARN", "structured", "startup", "boundary"), "capture failure has wrong logging channel")
+    value = entry["details"]
+    fields(value, {"event", "schema_version", "origin", "request", "read_admission_started_ns",
+                   "capture_started_ns", "observed_ns", "error"})
+    require(type(value["schema_version"]) is int and value["schema_version"] == 1
+            and value["event"] == "tui_ask_followup_admission_failed", "unsupported capture failure")
+    context = origin(value["origin"])
+    key = context["tui_instance_id"], integer(value["request"]), ns(value["read_admission_started_ns"])
+    require(key[2] <= ns(value["capture_started_ns"]) <= ns(value["observed_ns"]), "invalid capture clock order")
+    text(value["error"])
+    return key, dict(value, capture_duration_ns=value["observed_ns"]-value["capture_started_ns"])
+
+
 def attempt(key, records, declared):
     errors = []
     output = {"identity": dict(zip(("instance_id", "request", "read_admission_started_ns"), key)),
@@ -248,6 +269,7 @@ def analyze_arm(value, root):
     groups = {}
     declared = set()
     admission_evidence = {}
+    capture_failures = {}
     if type(value) is not dict:
         value = {}
     if set(value) != ARM_FIELDS:
@@ -353,6 +375,18 @@ def analyze_arm(value, root):
                     output["store_initializations"].append(dict(details, evidence={"artifact": declaration["path"],
                         "sha256": declaration["sha256"], "line": index}))
                     continue
+                if event == "tui_ask_followup_admission_failed":
+                    context = origin(details["origin"])
+                    if context["tui_instance_id"] not in instances:
+                        output["unselected_rows"] += 1; continue
+                    key, row = capture_failure(entry)
+                    row_id = key[0], entry["seq"], entry["ts"]
+                    require(row_id not in seen_rows, "duplicate selected log row")
+                    seen_rows.add(row_id)
+                    groups.setdefault(key, [])
+                    capture_failures.setdefault(key, []).append(dict(row, evidence={"artifact": declaration["path"],
+                        "sha256": declaration["sha256"], "line": index, "seq": entry["seq"], "ts": entry["ts"]}))
+                    continue
                 if event != "tui_ask_followup":
                     output["unselected_rows"] += 1; continue
                 context = origin(details["origin"])
@@ -369,13 +403,27 @@ def analyze_arm(value, root):
                 errors.append("artifact %d line %d: %s" % (artifact_index, index, str(error) if isinstance(error, EvidenceError) else "malformed selected evidence"))
     output["attempts"] = [attempt(key, rows, key in declared) for key, rows in sorted(groups.items())]
     for item in output["attempts"]:
-        item["admission_evidence"] = admission_evidence.get(identity(item["identity"]), [])
+        key = identity(item["identity"])
+        item["admission_evidence"] = admission_evidence.get(key, [])
+        failures = capture_failures.get(key, [])
+        item["capture_failures"] = failures
+        if failures:
+            original = item.get("original_provenance", failures[0]["origin"])
+            item["original_provenance"] = original
+            if any(row["origin"] != original for row in failures):
+                item["errors"].append("original provenance changed within admission capture evidence")
+                item["outcome"] = "invalid"
+                item["metrics"] = dict.fromkeys(METRICS)
     for item in output["attempts"]:
         errors.extend(item["errors"])
         if not item["declared"]:
             errors.append("observed attempt absent from declared denominator")
     output["declared_attempts"] = len(declared)
     output["summary"] = {"attempts": len(groups), "outcomes": dict(Counter(v["outcome"] for v in output["attempts"])), "metrics": {}}
+    failures = [row for item in output["attempts"] for row in item["capture_failures"]]
+    output["summary"]["admission_capture"] = {"observed_failures": len(failures),
+        "attempts_with_observed_failures": sum(bool(item["capture_failures"]) for item in output["attempts"]),
+        "observed_failed_capture_sum_ns": sum(row["capture_duration_ns"] for row in failures)}
     for name in METRICS:
         values = [v["metrics"][name] for v in output["attempts"] if v["metrics"][name] is not None]
         output["summary"]["metrics"][name] = {"observed": len(values), "attempts": len(groups), "sum_ns": sum(values),
@@ -421,6 +469,7 @@ def analyze(packet, root):
             "limits": ["Declarations and artifact bytes do not prove execution/source/binary/install identity.",
                        "Only declared, journaled and observed attempts are known; capture failure or an unflushed interruption can still leave unknown attempts.",
                        "Admission journals bypass log severity; their bytes are not proof of exhaustive capture, dispatch or execution.",
+                       "Capture warnings are original observation facts, not producer/UI outcomes; missing warnings do not prove capture success.",
                        "Durations describe observed subsets, with every attempt retained in denominators; no speed/readiness verdict.",
                        "Store initialization spans precede input-reader timing; they are retained separately, not a full cold-start duration.",
                        "Opaque source snapshots and read completion do not prove useful Task progress or visible UI."]}
@@ -429,11 +478,12 @@ def analyze(packet, root):
 def markdown(report):
     lines = ["# Original Ask follow-up comparison", "", "Descriptive artifact report; execution and speedup are unverified.", ""]
     for case in report["cases"]:
-        lines += ["## Case %d" % (case["case_index"]+1), "", "| Cohort | Attempts | Read outcomes | Evidence errors |", "|---|---:|---|---:|"]
+        lines += ["## Case %d" % (case["case_index"]+1), "", "| Cohort | Attempts | Read outcomes | Capture failures observed | Evidence errors |", "|---|---:|---|---:|---:|"]
         for name in ("before", "after"):
             arm = case[name]; summary = arm["summary"]
             outcomes = ", ".join("%s: %d" % pair for pair in sorted(summary["outcomes"].items())) or "none observed"
-            lines.append("| %s | %d | %s | %d |" % (name, summary["attempts"], outcomes, len(arm["errors"])))
+            lines.append("| %s | %d | %s | %d | %d |" % (name, summary["attempts"], outcomes,
+                summary["admission_capture"]["observed_failures"], len(arm["errors"])))
         lines += ["", "| Interval | Before mean ms (observed/all) | After mean ms (observed/all) | Observed mean delta ms |", "|---|---|---|---|"]
         for name in sorted(METRICS):
             values = [case[arm]["summary"]["metrics"][name] for arm in ("before", "after")]

@@ -152,3 +152,10 @@ Copy it separately from daily logs for the [comparison packet](guides/TUI-ASK-FO
 Missing event logs remain unobserved attempts. Journal writes add synchronous
 preparation/flush work; capture failures are best-effort warnings and can leave
 unknown attempts. Retained bytes do not prove exhaustive capture or execution.
+
+Admission-write errors carry a structured Startup Warn/Boundary diagnostic with
+the original TUI instance, request, admission clock and failed capture span.
+Inspect the This TUI Logs source for its structured details. A storage diagnostic
+is separate from the original read's producer/UI outcome; missing warnings do
+not establish capture success. The comparison reader retains these observed
+failures without discarding independently declared attempts.

@@ -140,6 +140,30 @@ require complete equal declared conditions and error-free, disjoint cohorts.
 They describe observed subsets, not an overall speedup or readiness verdict.
 Every report explicitly keeps execution verification false.
 
+Admission-write failures use an explicit structured
+`tui_ask_followup_admission_failed` event at Startup Warn/Boundary, schema version
+1. It retains original `origin`, `request`, `read_admission_started_ns`,
+`capture_started_ns`, `observed_ns` and the opaque filesystem `error`. The parser
+checks original identity, channel and clock order, preserves artifact/line/row
+provenance, and rejects changed origins or duplicate log rows. Message text is
+not used to recover identity or select an outcome.
+
+Each attempt retains `capture_failures` separately from producer/UI records and
+outcomes. Summary/Markdown count observed capture failures; JSON also retains
+each failed capture span and their observed sum. Valid filesystem failure facts
+are not malformed evidence and do not by themselves invalidate a cohort with
+an independent declared denominator. A warning alone can retain a known attempt
+as unobserved; it still does not supply an independent roster declaration, worker
+entry, dispatch-not-started or terminal outcome. Missing warnings are unknown
+because severity policy or sink/interruption failures can hide them.
+
+The span begins before the capture attempt and ends after error conversion,
+before lazy warning formatting/output. It does not prove write/flush was reached
+or completed. One entry clock is added to all admission writes;
+only failed captures have this additional observed span. Warning construction
+remains lazy under the existing Startup module threshold. It is not complete
+write-cost accounting or original Task progress.
+
 Declared attempts with no records remain `unobserved`; started/partial/producer-
 returned attempts without UI settlement remain `unfinished`. Complete, failed,
 cancelled, withdrawn and not-started UI outcomes remain distinct. Missing worker,

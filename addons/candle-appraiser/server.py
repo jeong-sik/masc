@@ -21,7 +21,7 @@ import tomllib
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
-from protocol import InvalidInput, OUTPUT_SCHEMA, encode_output, object_value, reply_id  # noqa: E402
+from protocol import INPUT_SCHEMA, InvalidInput, OUTPUT_SCHEMA, encode_output, object_value, reply_id  # noqa: E402
 
 TEXT = {"type": "string", "minLength": 1}
 EMPTY = {"type": "object", "properties": {}, "additionalProperties": False}
@@ -52,13 +52,6 @@ TOOL_OUTPUT = {"type": "object", "oneOf": [
     closed({"request_id": TEXT, "state": {"type": "string", "const": "finished"}, "result": OBJECT}),
 ]}
 
-CONTEXT = {"type": "object", "additionalProperties": False,
-           "properties": {"instance_id": TEXT, "incarnation": TEXT},
-           "required": ["instance_id", "incarnation"]}
-OBSERVE = {"type": "object", "additionalProperties": False,
-           "properties": {"context": CONTEXT, "binding": OBJECT,
-                          "sources": {"type": "array", "items": OBJECT}},
-           "required": ["context", "binding", "sources"]}
 HOST_RESULT = {"type": "object", "additionalProperties": False,
                "properties": {"request_id": TEXT, "result": OBJECT}, "required": ["request_id", "result"]}
 CONTROL = {"type": "object", "additionalProperties": False,
@@ -272,7 +265,6 @@ class Worker:
     def __init__(self, state: Path, max_reply_bytes: int):
         self.store = Store(state)
         self.max_reply_bytes = max_reply_bytes
-        self.context = None
 
     def fits(self, result: dict) -> bool:
         envelope = {"jsonrpc": "2.0", "id": 2 ** 53, "result": tool_result(result)}
@@ -361,20 +353,14 @@ class Worker:
         return {"accepted": True}
 
     def observe(self, args) -> dict:
-        args = exact(args, {"context", "binding", "sources"}, "observation")
-        context = exact(args["context"], {"instance_id", "incarnation"}, "context")
-        for key, value in context.items():
-            text(value, key)
-        if self.context is not None and self.context != context:
-            raise InvalidInput("observation belongs to another worker incarnation")
-        self.context = context
+        exact(args, {"binding", "sources"}, "observation")
         records = self.store.records()
         fields = {"pending": sum(record["result"] is None for record in records),
                   "finished": sum(record["result"] is not None for record in records),
                   "requests": [record["request"]["request_id"] for record in records]}
         output = {"rows": [{"id": "appraisals", "lane_id": "candle/appraisals", "kind": "value",
                             "title": "Candle appraisal requests", "observed_at": time.time(),
-                            "subject_id": context["instance_id"], "clock": None, "actor": None,
+                            "subject_id": TOOL_NAME, "clock": None, "actor": None,
                             "fields": fields, "evidence": [], "related_ids": []}], "coverage": []}
         if not self.fits(output):
             # Aggregate counts remain available without truncating an intent or
@@ -391,7 +377,7 @@ def tool_result(output: dict) -> dict:
 
 TOOLS = [
     {"name": "lane_observe", "description": "Read retained Candle appraisal counts and request identities.",
-     "inputSchema": OBSERVE, "outputSchema": OUTPUT_SCHEMA},
+     "inputSchema": INPUT_SCHEMA, "outputSchema": OUTPUT_SCHEMA},
     {"name": TOOL_NAME, "description": "Read an original Candle appraisal; host authority also admits new requests.",
      "inputSchema": TOOL_INPUT, "outputSchema": TOOL_OUTPUT},
     {"name": "lane_call", "description": "Host-admitted caller envelope; never export this control port.",

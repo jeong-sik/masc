@@ -64,6 +64,13 @@ explicitly identifies the individual-read path. A finished request means a
 terminal Exact result was retained; it does not mean a grade passed domain
 validation, money was paid, or a Goal completed.
 
+Observation uses the common derive-only `binding`/`sources` envelope. Candle
+does not declare an action tool, so the host does not send action context to
+`lane_observe`. The host binds each returned observation to its original worker
+instance and incarnation; the row subject identifies `candle_appraise`, not a
+worker-supplied authority. Exported tool calls retain their separate admitted
+caller envelope.
+
 Build the optional container from the repository root:
 
 ```sh

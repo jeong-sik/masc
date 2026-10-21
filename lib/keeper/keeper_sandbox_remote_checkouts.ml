@@ -20,16 +20,25 @@ type inspected_checkout =
   ; behind : int option
   }
 
+type layout =
+  { entries : string list
+  ; discovery : Keeper_playground_checkouts.discovery
+  }
+
 let probe_script =
   {|\
-import os, sys, json, subprocess, time
+import os, sys, json, subprocess, time, stat
+from collections import deque
 
-# The four arguments are built by the OCaml side; a malformed one is its
+# The arguments are built by the OCaml side; a malformed one is its
 # defect and ends the probe with a traceback the caller reports.
 catalog = json.loads(sys.argv[1])
 checkout_budget = int(sys.argv[2])
 entry_budget = int(sys.argv[3])
 target_ref_stale_after_s = int(sys.argv[4])
+mode = sys.argv[5]
+if mode not in ('inspect', 'layout'):
+    raise ValueError('unknown probe mode')
 
 def canon_url(u):
     if not u: return ''
@@ -149,53 +158,70 @@ def inspect_git(path):
 
 root = '.'
 checkouts = []
-queue = ['']
+queue = deque([''])
 scanned = 0
 limit = None
+unreadable = None
+root_entries = sorted(os.listdir(root)) if mode == "layout" else None
 
-git_root = os.path.join(root, '.git')
-if os.path.exists(git_root):
-    git_link = 'directory' if os.path.isdir(git_root) else 'pointer_file'
-    info = inspect_git(root)
+def git_link_at(path):
+    try:
+        kind = os.lstat(os.path.join(path, '.git')).st_mode
+    except FileNotFoundError:
+        return None
+    if stat.S_ISDIR(kind): return 'directory'
+    if stat.S_ISREG(kind): return 'pointer_file'
+    return None
+
+def record_checkout(path, rel, git_link):
+    info = inspect_git(path) if mode == 'inspect' else {}
     checkouts.append({
-        'relative_path': '.',
-        'name': os.path.basename(os.path.abspath(root)),
+        'relative_path': rel or '.',
+        'name': os.path.basename(os.path.abspath(path)),
         'git_link': git_link,
         **info
     })
+
+root_git_link = git_link_at(root)
+if root_git_link:
+    record_checkout(root, '', root_git_link)
 else:
     # Past either budget by one, as the host walk is: the extra find is
     # what says the budget was exhausted rather than exactly met.
     while queue and len(checkouts) <= checkout_budget and scanned <= entry_budget:
-        rel = queue.pop(0)
+        rel = queue.popleft()
         full = os.path.join(root, rel) if rel else root
-        scanned += 1
-        git_path = os.path.join(full, '.git')
-        if rel and os.path.exists(git_path):
-            git_link = 'directory' if os.path.isdir(git_path) else 'pointer_file'
-            info = inspect_git(full)
-            checkouts.append({
-                'relative_path': rel,
-                'name': os.path.basename(os.path.abspath(full)),
-                'git_link': git_link,
-                **info
-            })
-            continue
         try:
-            entries = sorted(os.listdir(full))
-        except OSError:
+            entries = root_entries if not rel and root_entries is not None else sorted(os.listdir(full))
+        except OSError as error:
+            if unreadable is None:
+                unreadable = {'kind': 'directory_unreadable',
+                              'relative_path': rel, 'detail': str(error)}
             continue
+        scanned += len(entries)
+        if scanned > entry_budget:
+            break
         for e in entries:
-            if e in ('.', '..', '.git'): continue
+            if e in ('.', '..'): continue
             c_full = os.path.join(full, e)
-            if os.path.isdir(c_full) and not os.path.islink(c_full):
+            # lstat never follows directory or .git symlinks out of the tree.
+            kind = os.lstat(c_full).st_mode
+            if stat.S_ISDIR(kind):
                 c_rel = os.path.join(rel, e) if rel else e
+                git_link = git_link_at(c_full)
+                if git_link:
+                    record_checkout(c_full, c_rel, git_link)
+                    if len(checkouts) > checkout_budget:
+                        break
+                    continue
                 queue.append(c_rel)
 
 if len(checkouts) > checkout_budget:
     limit = {'kind': 'checkout_budget_exhausted', 'budget': checkout_budget}
 elif scanned > entry_budget:
     limit = {'kind': 'entry_budget_exhausted', 'scanned': scanned, 'budget': entry_budget}
+elif unreadable is not None:
+    limit = unreadable
 
 checkouts.sort(key=lambda c: c['relative_path'])
 checkouts = checkouts[:checkout_budget]
@@ -205,6 +231,8 @@ result = {
     'scanned': scanned,
     'limit': limit
 }
+if mode == "layout":
+    result["entries"] = root_entries
 print(json.dumps(result))
 |}
 
@@ -278,9 +306,13 @@ let parse_limit : Yojson.Safe.t -> (Keeper_playground_checkouts.limit option, st
      | "checkout_budget_exhausted" ->
        let* budget = int_field "budget" fields in
        Ok (Some (Keeper_playground_checkouts.Checkout_budget_exhausted { budget }))
+     | "directory_unreadable" ->
+       let* relative_path = string_field "relative_path" fields in
+       let* detail = string_field "detail" fields in
+       Ok (Some (Keeper_playground_checkouts.Directory_unreadable { relative_path; detail }))
      | other -> Error (Printf.sprintf "limit: unknown kind %S" other))
 
-let parse_checkout ~root json =
+let parse_checkout_path ~root json =
   let* fields = object_fields "checkout" json in
   let* relative_path = string_field "relative_path" fields in
   let* name = string_field "name" fields in
@@ -296,6 +328,11 @@ let parse_checkout ~root json =
   let checkout : Keeper_playground_checkouts.checkout =
     { relative_path; absolute_path; name; git_link }
   in
+  Ok checkout
+
+let parse_checkout ~root json =
+  let* fields = object_fields "checkout" json in
+  let* checkout = parse_checkout_path ~root json in
   let* origin =
     let* state = string_field "origin_state" fields in
     let* url = optional_string_field "origin" fields in
@@ -378,6 +415,44 @@ let parse_probe_json ~root raw_json =
     in
     Ok (Ok discovery, inspections)
 
+let parse_layout_json ~root raw_json =
+  match Yojson.Safe.from_string raw_json with
+  | exception Yojson.Json_error detail -> Error ("invalid probe json: " ^ detail)
+  | json ->
+    let* fields = object_fields "probe output" json in
+    let* entries =
+      match field "entries" fields with
+      | `List entries ->
+        List.fold_left (fun result entry ->
+          let* entries = result in
+          match entry with
+          | `String entry -> Ok (entry :: entries)
+          | other -> wrong_shape "entries[]" "a string" other)
+          (Ok []) entries |> Result.map List.rev
+      | other -> wrong_shape "entries" "a list" other
+    in
+    let* checkouts =
+      match field "checkouts" fields with
+      | `List rows ->
+        List.fold_left (fun result row ->
+          let* checkouts = result in
+          let* checkout = parse_checkout_path ~root row in
+          Ok (checkout :: checkouts)) (Ok []) rows |> Result.map List.rev
+      | other -> wrong_shape "checkouts" "a list" other
+    in
+    (* Missing [limit] must not be read as a complete scan. *)
+    let* limit_json =
+      match List.assoc_opt "limit" fields with
+      | Some limit -> Ok limit
+      | None -> Error "probe output is missing limit"
+    in
+    let* limit = parse_limit limit_json in
+    let discovery = match limit with
+      | None -> Keeper_playground_checkouts.Complete checkouts
+      | Some limit -> Keeper_playground_checkouts.Partial { found = checkouts; limit }
+    in
+    Ok { entries; discovery }
+
 let catalog_to_json_arg catalog =
   let repos =
     match catalog with
@@ -400,19 +475,18 @@ module For_testing = struct
   let probe_script = probe_script
 end
 
-let discover_and_inspect
-    ~timeout_sec
-    ~(config : Workspace.config)
-    ~(meta : keeper_meta)
-    ~catalog
-    ()
+type probe_mode = Inspect | Layout
+
+let run_probe ~timeout_sec ~(config : Workspace.config)
+    ~(meta : keeper_meta) ~catalog ~mode ~parse ()
   =
   let root =
     match Keeper_sandbox_remote_lane.workspace_root ~config ~meta with
     | Ok r -> r
     | Error _ -> "."
   in
-  if not (Keeper_sandbox_remote_lane.is_guest_booted ~config ~meta ())
+  let requires_boot_marker = match mode with Inspect -> true | Layout -> false in
+  if requires_boot_marker && not (Keeper_sandbox_remote_lane.is_guest_booted ~config ~meta ())
   then
     (* A microvm keeper that has not yet booted its guest in this process
        lifetime has no playground to inspect — absence, not a failure. *)
@@ -438,6 +512,7 @@ let discover_and_inspect
         ; string_of_int Keeper_playground_checkouts.max_reported_checkouts
         ; string_of_int Keeper_playground_checkouts.max_scanned_entries
         ; string_of_int target_ref_stale_after_s
+        ; (match mode with Inspect -> "inspect" | Layout -> "layout")
         ]
       in
       (* Matched rather than collapsed with [status_tuple]: that helper turns
@@ -469,7 +544,7 @@ let discover_and_inspect
       | Masc_exec.Sandbox_target.Ran { status; stdout; stderr; _ } ->
       match status with
       | Unix.WEXITED 0 ->
-        (match parse_probe_json ~root stdout with
+        (match parse ~root stdout with
          | Ok result -> Ok result
          | Error err ->
            Error (Keeper_playground_checkouts.Root_unreadable { root; detail = err }))
@@ -496,3 +571,11 @@ let discover_and_inspect
       | Unix.WSTOPPED signal ->
         let detail = Printf.sprintf "remote probe stopped %d" signal in
         Error (Keeper_playground_checkouts.Root_unreadable { root; detail })
+
+let discover_and_inspect ~timeout_sec ~config ~meta ~catalog () =
+  run_probe ~timeout_sec ~config ~meta ~catalog ~mode:Inspect
+    ~parse:parse_probe_json ()
+
+let discover_layout ~timeout_sec ~config ~meta () =
+  run_probe ~timeout_sec ~config ~meta ~catalog:(Ok []) ~mode:Layout
+    ~parse:parse_layout_json ()

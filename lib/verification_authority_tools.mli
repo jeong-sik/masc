@@ -35,6 +35,8 @@ val root_layout : t -> (Task.Anti_rationalization.lookup_root, string) result
 (** The paths the lookup tools resolve against, listed from disk at review
     time and relative to the ownership root: bounded immediate entries plus
     every checkout returned by the shared checkout-discovery authority.
+    Endpoint-owned Keepers are observed on their attached endpoint, matching
+    Read/Grep; their host bookkeeping directory is never a layout fallback.
     Unavailable or partial discovery is [Error], so a caller must defer the
     review instead of turning an incomplete list into absence evidence. A
     workspace producer whose root does not exist is [Producer_root_absent]:

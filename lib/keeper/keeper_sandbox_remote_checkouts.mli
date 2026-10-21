@@ -35,6 +35,23 @@ type inspected_checkout =
   ; behind : int option
   }
 
+type layout =
+  { entries : string list
+  ; discovery : Keeper_playground_checkouts.discovery
+  }
+
+val discover_layout :
+  timeout_sec:float -> config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta -> unit ->
+  (layout, Keeper_playground_checkouts.scan_error) result
+(** Observe immediate entries and checkout locations on the attached endpoint,
+    without starting a guest or running git. Uses the inspection probe's shared
+    traversal and resource bounds. Missing/unreachable endpoints and unreadable
+    directories never become an empty complete tree. *)
+
+val parse_layout_json : root:string -> string -> (layout, string) result
+(** Strict decoder for the discovery-only endpoint response. *)
+
 val parse_probe_json :
   root:string ->
   string ->

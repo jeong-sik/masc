@@ -715,11 +715,18 @@ let submitted_evidence_identity_line (item : Yojson.Safe.t) =
   | Ok Evidence_invalid_reference ->
     Ok (Printf.sprintf "(unreadable: %s)" invalid_reference_code)
   | Ok (Evidence_artifact_unreadable { reference; reason }) ->
+    let diagnostic = match reason with
+      | Evidence_read_error detail -> evidence_read_failure_code reason ^ ": " ^ detail
+      | Evidence_missing | Evidence_not_regular_file
+      | Evidence_outside_worker_playground | Evidence_invalid_utf8
+      | Evidence_symbolic_link | Evidence_changed_during_read ->
+        evidence_read_failure_code reason
+    in
     Ok
       (Printf.sprintf
          "%s (unreadable: %s)"
          reference
-         (evidence_read_failure_code reason))
+         diagnostic)
   | Ok (Evidence_artifact_binary { reference; sha256; _ }) ->
     Ok
       (Printf.sprintf

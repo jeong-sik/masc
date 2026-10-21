@@ -86,23 +86,29 @@ let ssh_fixture_endpoint = "fixture"
    compile -- the same contract test_keeper_sandbox_read_backend keeps. *)
 let ssh_fixture_body = "remote-file-content"
 
-let fake_ssh_script =
+let ssh_script_for ~layout_body =
   Printf.sprintf
-    {|#!/bin/sh
-cat >/dev/null 2>/dev/null &
-printf '%%s' '%s'
-printf '%%s' '%s' >&2
-exit 0
+    {|#!/usr/bin/env python3
+import sys, json, base64
+prefix = sys.stdin.buffer.read(8)
+length = int.from_bytes(prefix, "big")
+frame = prefix + sys.stdin.buffer.read(length)
+request, _ = json.JSONDecoder().raw_decode(frame[8:].decode())
+argv = [base64.b64decode(arg).decode() for arg in request['argv']]
+body = %s if argv[-1] == 'layout' else %s
+sys.stdout.write(body)
+sys.stderr.write(%s)
 |}
-    ssh_fixture_body
-    (Exec_ssh_protocol.render_trailer
-       { v = Exec_ssh_protocol.newest
-       ; exit = Some 0
-       ; signal = None
-       ; timed_out = false
-       ; shim_error = None
-       ; observed_syscalls = []
-       })
+    (Yojson.Safe.to_string (`String layout_body))
+    (Yojson.Safe.to_string (`String ssh_fixture_body))
+    (Yojson.Safe.to_string (`String
+       (Exec_ssh_protocol.render_trailer
+         { v = Exec_ssh_protocol.newest; exit = Some 0; signal = None
+         ; timed_out = false; shim_error = None; observed_syscalls = [] })))
+;;
+
+let fake_ssh_script =
+  ssh_script_for ~layout_body:{|{"entries":[],"checkouts":[],"limit":null}|}
 ;;
 
 let write_runtime_toml ~base_path =
@@ -613,8 +619,39 @@ let make_checkout root relative =
   mkdir (Filename.concat checkout ".git")
 ;;
 
+let test_endpoint_layout_ignores_host_bookkeeping () =
+  let body = {|{"entries":["repo"],"checkouts":[{"relative_path":"repo","name":"repo","git_link":"directory"}],"limit":null}|} in
+  with_surface ~ssh_script:(ssh_script_for ~layout_body:body) (fun config surface ->
+    let host_root = producer_playground config producer in
+    (* The host has a stale checkout the endpoint never reported. *)
+    make_checkout host_root "stale-host-only";
+    let layout = VAT.root_layout surface |> require_layout in
+    Alcotest.(check bool) "endpoint checkout is advertised" true
+      (List.exists (Astring.String.is_infix ~affix:"repo/") layout);
+    Alcotest.(check bool) "host bookkeeping is not advertised" false
+      (List.exists (Astring.String.is_infix ~affix:"stale-host-only") layout);
+    match dispatch_text surface ~name:"tool_read_file"
+      ~args:(`Assoc ["file_path", `String "repo/evidence/log.txt"]) with
+    | Ok body -> Alcotest.(check bool) "Read uses the same endpoint" true
+        (Astring.String.is_infix ~affix:ssh_fixture_body body)
+    | Error detail -> Alcotest.fail detail)
+;;
+
+let test_endpoint_layout_fails_closed () =
+  List.iter (fun body ->
+    with_surface ~ssh_script:(ssh_script_for ~layout_body:body) (fun config surface ->
+      ignore (producer_playground config producer);
+      match VAT.root_layout surface with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "unavailable endpoint layout became a usable tree"))
+    [ "not-json"
+    ; {|{"entries":[],"checkouts":[],"limit":{"kind":"directory_unreadable","relative_path":"repo","detail":"permission denied"}}|}
+    ; {|{"entries":[],"checkouts":[]}|}
+    ]
+;;
+
 let test_root_layout_fails_closed_when_discovery_is_unavailable () =
-  with_surface (fun _config surface ->
+  with_surface ~sandbox_profile:"docker" (fun _config surface ->
     match VAT.root_layout surface with
     | Ok (AR.Producer_tree layout) ->
       Alcotest.failf
@@ -631,7 +668,7 @@ let test_root_layout_fails_closed_when_discovery_is_unavailable () =
 ;;
 
 let test_root_layout_fails_closed_when_checkout_discovery_is_partial () =
-  with_surface (fun config surface ->
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
     let root = producer_playground config producer in
     for index = 0 to Masc.Keeper_playground_checkouts.max_reported_checkouts do
       make_checkout root (Printf.sprintf "checkout-%02d" index)
@@ -651,7 +688,7 @@ let test_root_layout_fails_closed_when_checkout_discovery_is_partial () =
 ;;
 
 let test_root_layout_reports_entries_and_discovered_checkouts () =
-  with_surface (fun config surface ->
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
     let root = producer_playground config producer in
     let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
     make_checkout root "repos/masc";
@@ -681,7 +718,7 @@ let test_root_layout_reports_entries_and_discovered_checkouts () =
 ;;
 
 let test_prompt_states_the_root_and_not_a_repository () =
-  with_surface (fun config surface ->
+  with_surface ~sandbox_profile:"docker" (fun config surface ->
     let root = producer_playground config producer in
     make_checkout root "repos/masc";
     let request : AR.review_request =
@@ -1252,6 +1289,10 @@ let () =
             test_prompt_states_the_available_surface
         ; Alcotest.test_case "an absent root renders its own lookup section" `Quick
             test_absent_root_renders_its_own_lookup_section
+        ; Alcotest.test_case "endpoint layout ignores stale host bookkeeping" `Quick
+            test_endpoint_layout_ignores_host_bookkeeping
+        ; Alcotest.test_case "endpoint layout fails closed on unreadable or malformed results" `Quick
+            test_endpoint_layout_fails_closed
         ; Alcotest.test_case
             "root_layout reports entries and discovered checkouts"
             `Quick

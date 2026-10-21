@@ -6,7 +6,11 @@ done: it moves to awaiting_verification and waits for a completion \
 authority's verdict, which no Keeper can produce. It also does not hold your \
 next claim while it waits. Every evidence_refs entry must be \
 artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, or \
-fusion:<run-id>. Files and collaboration sources are captured at submission; \
+fusion:<run-id>. Artifact paths include the checkout prefix: a file at \
+repo/evidence/build.log is artifact:repo/evidence/build.log even with Execute \
+cwd=repo. The response evidence_capture names this saved request and reports \
+unreadable or truncated artifacts; submission success is not capture success. \
+Files and collaboration sources are captured at submission; \
 Board/Fusion reads during review use those frozen bytes, including comments \
 and original Fusion producer identity. A note is narrative, not captured proof. \
 Pure-placeholder results ('done', 'ok', etc.) are rejected."""

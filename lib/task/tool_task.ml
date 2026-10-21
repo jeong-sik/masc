@@ -303,12 +303,34 @@ and handle_transition ~tool_name ~start_time ctx args =
   (* The pre-transition verification_id capture (issue #7543) is gone with the
      approve/reject actions: no agent transition consumes an AwaitingVerification
      state any more, so there is nothing to snapshot before it changes. *)
+  (* Bind the receipt to the request created by this transition, before its
+     notification can race with a verdict or another submission. An ordinary
+     diagnostic read failure does not reject submission; cancellation still
+     propagates through the existing preparation/commit boundary. *)
+  let submission_receipt = ref None in
+  let prepare_verification_request ~task ~assignee ~verification_id ~claim =
+    let open Result.Syntax in
+    let* () = (Atomic.get Workspace_hooks.verification_submit_request_fn)
+      ctx.config ~task ~assignee ~verification_id ~claim in
+    let receipt = match Workspace_verification_store.submission_receipt
+      ~base_path:ctx.config.base_path ~request_id:verification_id
+      ~task_id ~worker:assignee with
+      | Ok receipt -> receipt
+      | Error reason -> `Assoc ["verification_id", `String verification_id;
+          "diagnostics_unavailable", `String
+            (Workspace_verification_store.evidence_access_failure_to_string
+              ~request_id:verification_id reason)]
+    in
+    submission_receipt := Some receipt;
+    Ok ()
+  in
   let result =
     Workspace.transition_task_r
       ctx.config
       ~agent_name:ctx.agent_name
       ~task_id
       ~action
+      ~prepare_verification_request
       ?expected_version
       ~notes
       ~reason
@@ -391,7 +413,11 @@ and handle_transition ~tool_name ~start_time ctx args =
         (Printf.sprintf "Invalid task state: %s" message)
     | (Error (Masc_error.Task (Masc_error.Task_error.NotFound _ | (Masc_error.Task_error.AlreadyClaimed _ | (Masc_error.Task_error.NotClaimed _ | (Masc_error.Task_error.InvalidId _ | Masc_error.Task_error.VerificationSuperseded _))))) | Error (Masc_error.Agent _ | (Masc_error.Auth _ | Masc_error.System _)) | Ok _) as result -> result_to_response ~tool_name ~start_time result
   in
-  transition_result_to_response result
+  match result, !submission_receipt with
+  | Ok message, Some receipt ->
+    Tool_result.make_ok ~tool_name ~start_time
+      ~data:(`Assoc ["result", `String message; "evidence_capture", receipt]) ()
+  | Ok _, None | Error _, _ -> transition_result_to_response result
 
 let handle_update_priority ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in

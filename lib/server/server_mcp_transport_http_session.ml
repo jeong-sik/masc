@@ -72,6 +72,8 @@ let record_mcp_server_session_duration ?error_type session_id =
       ~labels
       duration_s
 
+(* The private callers provide either a valid protocol registration or a
+   state whose protocol membership was checked in the same CAS callback. *)
 let with_session_activity ?otel_transport_context ~now session_id (state : registry) =
   { state with
     started=(if SMap.mem session_id state.started then state.started
@@ -526,6 +528,9 @@ let load_sessions_from_file ~base_path () =
          cancellation/ownership checks; an older suspended load cannot apply
          after a newer load has claimed this path on the owner domain. *)
       let patch = sessions.patch in
+      (* Every valid decoded row adds protocol/activity/start together. No
+         protocol rows therefore means no publishable patch; decoded_entries
+         remains diagnostic, never an admission or authority gate. *)
       if not (SMap.is_empty patch.versions) then begin
         Atomic_util.update session_registry (fun current ->
           { versions=merge_restored patch.versions current.versions
@@ -554,8 +559,10 @@ let reap_stale_sessions ~base_path ~is_active_session =
     SMap.fold (fun sid _ (stale_acc, grace_acc) ->
       if is_active_session sid then begin
         (* Active right now — refresh timestamp, keep session *)
-        Atomic_util.update session_registry
-          (fun state -> {state with timestamps=SMap.add sid now state.timestamps});
+        Atomic_util.update session_registry (fun state ->
+          if SMap.mem sid state.versions then
+            {state with timestamps=SMap.add sid now state.timestamps}
+          else state);
         (stale_acc, grace_acc)
       end else begin
         (* Not active — check grace period *)

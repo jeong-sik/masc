@@ -42,6 +42,7 @@ let output_image ~name ~src =
 
 let inline_svg ~name svg = Output_image { name; source = Inline_svg svg }
 let mermaid ~name source = Output_image { name; source = Inline_mermaid source }
+let mermaid_source source = Inline_mermaid source
 
 let in_message ~text ~attachments =
   match List.find_opt (function

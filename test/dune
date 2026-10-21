@@ -4128,6 +4128,11 @@
   yojson))
 
 (test
+ (name test_tui_chart_shares)
+ (modules test_tui_chart_shares)
+ (libraries alcotest masc_tui_chart))
+
+(test
  (name test_tui_render_metrics)
  (modules test_tui_render_metrics)
  (libraries

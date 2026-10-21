@@ -48,6 +48,15 @@ type bar_item = {
   style : Masc_tui_theme.status option;
 }
 
+type distribution_share = { percentage : int; filled_cells : int }
+
+val distribution_shares : cells:int -> int list -> distribution_share list
+(** Exact integer floors of each nonnegative count's percentage and share of
+    [cells], before the renderer's minimum one-cell marker for positive counts.
+    Negative counts and cell capacities are treated as zero. An empty or
+    all-zero input has zero shares. The denominator and scaled numerators do
+    not overflow even when their sums or products exceed [max_int]. *)
+
 val distribution_bars :
   width:int ->
   bar_item list ->
@@ -55,7 +64,9 @@ val distribution_bars :
 (** [distribution_bars ~width items] renders counts and shares of the supplied
     nonnegative counts. Every bar uses the same 0–100 percent scale; missing
     categories outside [items] are not part of the denominator. Empty tracks
-    use a neutral colour. Output is bounded within [width] display cells. *)
+    use a neutral colour. Shares are rounded down exactly, so displayed
+    percentages need not sum to 100; a positive count has at least one filled
+    cell when a track is available. Output is bounded within [width] display cells. *)
 
 (** {1 High-Resolution Braille Curve Plots} *)
 

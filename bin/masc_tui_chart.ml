@@ -203,21 +203,39 @@ type bar_item = {
   style : Masc_tui_theme.status option;
 }
 
+type distribution_share = { percentage : int; filled_cells : int }
+
+let distribution_shares ~cells counts =
+  let counts = List.map (fun count -> Z.of_int (Stdlib.max 0 count)) counts in
+  let total = List.fold_left Z.add Z.zero counts in
+  let cells = Z.of_int (Stdlib.max 0 cells) in
+  let percentage_scale = Z.of_int 100 in
+  let scaled scale count =
+    if Z.equal total Z.zero then 0
+    else
+      (* [count <= total], so the quotient fits the original int scale even
+         when the exact sum or multiplication does not fit an OCaml int. *)
+      Z.to_int (Z.div (Z.mul count scale) total)
+  in
+  List.map (fun count ->
+    { percentage = scaled percentage_scale count
+    ; filled_cells = scaled cells count }) counts
+;;
+
 let distribution_bars ~width items =
   if width <= 0 || items = [] then []
   else
-    let total = List.fold_left (fun acc it -> acc +. float_of_int (Stdlib.max 0 it.count)) 0. items in
     let count_width = List.fold_left (fun acc it ->
       Stdlib.max acc (String.length (string_of_int (Stdlib.max 0 it.count)))) 5 items in
     let max_name_len = List.fold_left (fun acc it -> Stdlib.max acc (Layout.display_width it.name)) 0 items in
     let name_col_width = Stdlib.min 18 (Stdlib.max 6 max_name_len) in
     let fixed_cols = 2 + name_col_width + 2 + 1 + count_width + 1 + 6 in
     let bar_width = Stdlib.max 0 (width - fixed_cols) in
-    List.map
-      (fun it ->
+    let shares = distribution_shares ~cells:bar_width (List.map (fun it -> it.count) items) in
+    List.map2
+      (fun it share ->
         let count = Stdlib.max 0 it.count in
-        let share = if total <= 0. then 0. else float_of_int count /. total in
-        let pct = int_of_float (share *. 100.) in
+        let pct = share.percentage in
         let color =
           match it.style with
           | Some s -> Masc_tui_theme.status s
@@ -232,7 +250,7 @@ let distribution_bars ~width items =
         else
           let filled =
             if count <= 0 then 0
-            else Stdlib.max 1 (Stdlib.min bar_width (int_of_float (share *. float_of_int bar_width)))
+            else Stdlib.max 1 (Stdlib.min bar_width share.filled_cells)
           in
           let unfilled = Stdlib.max 0 (bar_width - filled) in
           Printf.sprintf "  %s  %s%s%s%s%s %*d (%2d%%)"
@@ -244,7 +262,7 @@ let distribution_bars ~width items =
             Masc_tui_theme.Sgr.reset
             count_width count
             pct)
-      items
+      items shares
 ;;
 
 let braille_cell ~mask =

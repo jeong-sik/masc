@@ -18,7 +18,10 @@ what was actually measured; a chart must not broaden their authority.
 
 The filled length and percentage label use the same denominator: the sum of
 the supplied nonnegative counts. Every row has a common 0–100% axis. A 50/50
-split gives two half-length bars. A positive share below one cell uses one cell;
+split gives two half-length bars. Each percentage and cell share is rounded
+down independently, so the displayed percentages can sum to less than 100%.
+The calculation uses exact integers even when the total or scaled numerator
+exceeds a machine integer. A positive share below one cell uses one cell;
 the count and percentage remain the exact readable context for that resolution.
 Empty tracks are neutral, including failed=0. Large counts reserve their actual
 digit width so the value does not overrun the pane.

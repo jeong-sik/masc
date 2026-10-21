@@ -31,6 +31,30 @@ func umpNanoseconds(_ seconds: Double) throws -> UInt64 {
     guard seconds.isFinite, seconds >= 0, value < Double(UInt64.max) else { throw MidiFailure("captured region exceeds the native host timeline") }
     return UInt64(value)
 }
+// Exact-entry ordering contract: within the entry's same-tick batch, the
+// state a voice keeps must be established earlier in the source order than
+// each attack it follows. Events at one tick have no time order of their
+// own, so a state event that only follows an attack at the entry tick is
+// that attack's expression with an ambiguous baseline; admission refuses
+// such an entry instead of replaying an invented preamble. Voice lifecycle
+// pairs (Note Off, kill, release) stay with their attack, later ticks keep
+// playing as expression, and the baseline rules themselves remain UmpState's;
+// this checks only their order at the entry tick.
+func umpExactEntryOrder(_ clip: UmpRegionClip) throws {
+    let from = clip.prefix(at: clip.cut, inclusive: false), through = clip.prefix(at: clip.cut)
+    var attacks: Set<UmpAddress> = []
+    for ordinal in from..<through {
+        let message = UmpMessage(clip.events[ordinal])
+        switch message.action {
+        case .on: attacks.insert(message.address)
+        case .absolute, .pedal, .reset:
+            guard !attacks.contains(message.address) else {
+                throw UmpRefusal("captured UMP entry needs its same-tick baseline earlier than the attack it follows")
+            }
+        default: break
+        }
+    }
+}
 struct UmpRegionSource: Decodable {
     let id: String
     let extent: String
@@ -446,6 +470,12 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             for other in admitted where umpRationalLess(other.lowerBound, other.denom, clip.lowerBound, clip.denom) {
                 clip.entryPrior.formUnion(other.footprint.scoped(to: clip.scope))
             }
+            // Exact-entry ordering: within the entry's same-tick batch, the
+            // state a voice keeps must be established before each attack it
+            // follows. A state event that only follows an attack at the same
+            // tick cannot repair that attack without inventing a preamble the
+            // source never played at entry.
+            try umpExactEntryOrder(clip)
             // Entry events and silent preambles remain an original due stream.
             // Explicit baselines must precede each attack/relative use; they
             // cannot repair a historical live voice's patch or escape the cut.

@@ -170,14 +170,14 @@ let attack=try owner([source("take",[packet(0,bend),packet(0,on),packet(0,off)])
 host=0;sent=[];try attack.stageCoordinated(at:0);try attack.runCoordinated(anchorNanoseconds:10);host=10;attack.tick()
 precondition(sent.map{$0.1}==[bend,on,off],"entry attack and original release survive the exact cut")
 attack.finish(reason:"test",error:nil,publish:false)
-// A first copy follows no earlier change on its channels: a take whose
-// expression follows its Note On is admitted and plays in original order.
+// A first copy follows no earlier change on its channels. The exact-entry
+// ordering contract makes the state a voice keep precede each attack: a state
+// event that only follows its Note On at the same tick is that attack's
+// expression and cannot repair it, so admission refuses the entry.
 let pressure:[UInt32]=[0x43d50000,0x80000000],cc:[UInt32]=[0x43b50100,0x80000000]
-let take=try owner([source("take",[packet(0,on),packet(0,bend),packet(10_000_000,pressure),packet(20_000_000,cc),packet(30_000_000,off)])],[clip(extent:"100000000")],duration:0.1)
-host=0;sent=[];try take.stageCoordinated(at:0);try take.runCoordinated(anchorNanoseconds:10);host=10;take.tick()
-precondition(sent.map{$0.1}==[on,bend],"entry attack with the expression that follows it")
-host=40_000_010;take.tick();precondition(sent.map{$0.1}==[on,bend,pressure,cc,off],"expression after the Note On plays")
-take.finish(reason:"test",error:nil,publish:false)
+refuses{_ = try owner([source("take",[packet(0,on),packet(0,bend),packet(10_000_000,pressure),packet(20_000_000,cc),packet(30_000_000,off)])],[clip(extent:"100000000")],duration:0.1)}
+_ = try owner([source("take",[packet(0,bend),packet(0,on),packet(10_000_000,pressure),packet(20_000_000,cc),packet(30_000_000,off)])],[clip(extent:"100000000")],duration:0.1)
+_ = try owner([source("take",[packet(0,on),packet(0,off)])],[clip(extent:"100000000")],duration:0.1)
 // A recorded silent preamble establishes state at its own original deadlines,
 // not eagerly at admission or at the region's first scheduler callback.
 let control:[UInt32]=[0x43b54a00,0xabcdef01]
@@ -309,7 +309,10 @@ refuses{_ = try owner([source("take",[packet(0,on),packet(1,bend)])],[clip(repea
 let pc1:[UInt32]=[0x23c50500],bank1:[UInt32]=[0x23b50001],on1:[UInt32]=[0x23953c7f]
 refuses{_ = try owner([source("take",[packet(0,pc1),packet(0,bank1),packet(0,on1)])],[clip(repeatCount:2)],duration:2)}
 _ = try owner([source("take",[packet(0,bank1),packet(0,pc1),packet(0,on1)])],[clip(repeatCount:2)],duration:2)
-_ = try owner([source("take",[packet(0,p0),packet(0,pitch),packet(0,on),packet(0,pn),packet(0,detach),packet(1,p1),packet(1,pitch),packet(1,pn)])],[clip(repeatCount:2)],duration:2)
+// A per-note bend after the entry attack is expression, not its baseline.
+// Keep that refusal and establish the admissible baseline before the attack.
+refuses{_ = try owner([source("take",[packet(0,p0),packet(0,pitch),packet(0,on),packet(0,pn),packet(0,detach),packet(1,p1),packet(1,pitch),packet(1,pn)])],[clip(repeatCount:2)],duration:2)}
+_ = try owner([source("take",[packet(0,p0),packet(0,pitch),packet(0,pn),packet(0,on),packet(0,detach),packet(1,p1),packet(1,pitch),packet(1,pn)])],[clip(repeatCount:2)],duration:2)
 // A later region on the same channel follows the earlier one's changes.
 refuses{_ = try owner([first,source("other",[packet(0,on),packet(1,p1)])],[clip(extent:"100000000"),clip("second",source:"other",start:0.1,extent:"100000000")],duration:0.2)}
 // Admission covers playback in order; a seek back that would bring a later

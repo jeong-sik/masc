@@ -35,12 +35,12 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 고정 d9b62724의 native run 39614788834 완료 성공: TUI 24건·application 5건, matching server/TUI 해시·내장 SHA 대조 완료. 실제 관측에서 추가 global-query 결함을 찾아 e6c7521a로 수리; 새 exact native run 39620100070 접수, 결과 미확인 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
+| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 고정 d9 native 24+5건·matching identity 성공 유지. global-query 수리 e6 native 39620100070은 Keeper record 타입 오류 2개로 컴파일 FAIL. #44864가 이후 main 수리; 포함된 현재 main 4d25f9e의 native 39623698078 접수, 결과 미확인 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
 | A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 고정 7b16a917 실제 On→Off→On에서 retained refresh 결함 재현. 고정 d9b62724 실제 TUI에서 원래 row/selection·읽기 실패·실제 Evidence receipt 공존, 잘못된 run 입력 거절·복구·same-run empty 관측. lifecycle 수리·운영 설치·같은 후보 Dashboard는 별도 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
 | A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 main 병합. 고정 `7b16a917` 실제 TUI에서 retained 실행 키 미노출·수동 Observe 거절·이력 진입 확인; 전체 상세 새로고침 결함은 A02/G06에서 별도 추적 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
-| A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | 공통 Stack #44710과 G01 Stack #44803 세 층 main 병합 확인. G06의 과거0f/6f 승인 결속과 CR 해소를 확인했으나 실제 충돌 후 whole5 restack 및 새 수리·증거 층으로 head/scope 변경; 현재 재리뷰 필요 | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
+| A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | 공통 #44710·G01 #44803 및 G06 #44840의 6개 층 main 병합 확인. G06 병합 head와 이후 fragment-only branch head를 구분. Browser #44168 전체 현재 판정·남은 맥락 리뷰와 새 follow-up head의 재승인은 별도 | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
 | A05 | Browser 스택의 후속 3개 층과 기존 증거 영향 검토 | 세 층의 전체 delta 직독; exact `76b741f` run `39555413943` 두 suite 14건 PASS, 독립 source delta 검토 PASS; 실제 앱·전체 스택 검증 별도 | #44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증 |
-| A06 | 두 스택의 전체 통합 준비 | 공통 #44710 및 G01 #44803 main 병합. Browser #44168은 67층 open, top #44702 d35d2559. G06 #44840은 main b2397d64 위로 전체 재배치·충돌 수리 후 global-query 및 새 증거 층 추가; 현재 승인·전체 통합 필요 | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
+| A06 | 두 스택의 전체 통합 준비 | 공통·G01·G06 6층 main 병합. Browser #44168은 67층 open/top #44702 d35d2559; 과거 repaired-native 증거 #44851의 두 층도 open. 현재 native 검증과 나머지 전체 스택 통합·설치 별도 | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
 
 빌더 요청: `kmsg-2ada1cdc54884c58aa6736a80b598868`는 기존 `566b98b` 대상이다. 후속 exact 후보 `7f9e34b`는 native run `39555509454`로 요청했다. 중복 시작을 피하도록 빌더에게 대체 안내 `kmsg-1974c332ed1abfed8b4bde992b686e8f`를 보냈으며 안내 접수는 원래 작업 취소·실행 여부의 증거가 아니다.
 코드 리뷰: `kmsg-f7fecd527b3870306df62a4079c30ad8` 완료 및 #44707 review `5595612747` APPROVED 직독. head `566b98b5d1645d6312d518bf2810f3e5e0626586`, reviewed base `b95d927e30c6718e0fe656d3019c6cf39766c02c`, diff `ff95fe2ecb2658cee6da5b251d2b119c825270116c978246de762b5374e336c2`. 한 층의 소스 승인이다. #44721 후속 요청 `kmsg-dc966b86727baccd78eaa31700ef384e`는 queued 접수다.
@@ -134,7 +134,7 @@ Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현�
 | G03 | 요청부터 종료·정리까지 원래 timeline/trace 연결 | 부분 구현; Dashboard가 버리던 host_requests를 원래 worker/incarnation에 결속해 보존·표시하는 후속 구현. 모델 lane/provider/operator/source 대기와 전달·기록 실패를 닫힌 타입으로 읽고, 손상 진단은 worker·결과와 분리. 전체 요청 이력·실제 화면·설치 검증 필요 | request/run/instance/revision, 대기 이유·결과·실패·정리 증거를 같은 원래 작업으로 추적 |
 | G04 | 교체·경로/ID 변경·이전 소유자 이력 표시 | 후속 소스 구현: 같은 ID worker와 같은 TOML 경로의 다른 ID를 두 UI에서 분리. Dashboard 3파일62건·tsc PASS, TUI 관측 모델 parser PASS; 독립 리뷰·OCaml 실행·실제 UI 별도 | 새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근 |
 | G05 | 에이전트 작업 중 표시와 현재 포인터/입력 활동 표시 | 범위별 재확인 필요 | 실제 동작 이벤트 기반으로 작업자·활동·포인터 위치 표시; 완료·중단·해제 때 표시 정리 |
-| G06 | 두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화 | 고정 d9b62724 실제 native에서 other/omitted/blank/duplicate run 입력의 전송 전 거절·원래 결과/실패/영수증 보존·정상 복구·same-run filtered empty 확인. Overview global slice {}의 /slice?→400을 추가 발견; #44868 수리 소스 PASS, 새 native 결과 미확인. 모든 workspace/실패 경계 완료 아님 | draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능 |
+| G06 | 두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화 | 고정 d9의 run-scope 거절·원래 결과/실패/영수증 보존·복구·same-run empty 실제 관측 유지. /slice?→400 수리 #44868 main 병합. 수리 e6 native는 별도 Keeper 컴파일 오류로 FAIL; #44864 포함 main native 39623698078 요청. corrected global 요청·모든 workspace/실패 경계 미완료 | draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능 |
 
 
 G04 후속 [#44807](https://github.com/jeong-sik/masc/pull/44807) · 다른 설치 ID의 같은 TOML 경로
@@ -236,3 +236,10 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - G01의 세 merged 상태와 병합 커밋은 확인했다. G06 충돌 수리는 새 main의 G01 기록과 기존 A02/G06 실측 기록을 모두 보존했다. 54개 ID·작업 내용·완료 기준은 바꾸지 않았다. 새 head의 MASC 재리뷰·전체 통합·설치가 남는다.
 - E01은 미구현이 아니다. 기존 Browser 후보 d35d2559의 package·Server_candle_appraiser 입력 보존/원래 요청 read/authoritative Absent submit/완전 domain decode 경계를 직접 읽었다. 실제 provider와 Off 후 obligation/재연결·정산 및 두 UI는 미검증이다. 기존 구현을 기준으로 그 경계를 검증한다.
 - 실측용 프로세스3개·포트2개와 정확한 이전 컨테이너2개의 부재를 종료 후 별도로 확인했다. private 로그인·credential·server log는 공개하지 않았다. 현재 54개 목표는 진행 중이다.
+
+## 2026-10-22 재개 · 실제 병합과 실패 결과 정정
+
+- [원래 실패·병합·새 요청 영수증](../docs/evidence/2026-10-22-addon-verification-resume/README.md)을 보존한다. G06 #44840의 6층은 실제 병합됐다. REST의 이전 head를 전파 지연으로 추정했던 것은 잘못이며, 병합 뒤의 fragment-only 두 branch head와 병합 당시 PR head를 분리한다. 이 세션이 해당 병합을 제출한 것은 아니다.
+- e6 native run 39620100070은 결과 미확인이 아니라 컴파일 FAIL이다. Keeper record 추론 오류 두 건은 이후 병합된 #44864가 수리했다. 기존 수리를 재사용하며, 수리 소스가 있다는 사실을 성공 바이너리로 바꾸어 세지 않는다.
+- 현재 main `4d25f9e175120740de2a0c254693c4bd73fbd534`의 addon-lifecycle [39623698078](https://github.com/jeong-sik/masc/actions/runs/39623698078)을 한 번 요청했다. 목적은 G06 수리와 기존 Keeper 수리가 함께 있는 matching server/TUI 확보다. 두 기존 suite 범위이며, 실행 결과·artifact 해시·실제 global Slice 성공과 화면은 아직 미확인이다. CI를 watch하거나 반복 조회하지 않는다.
+- Browser #44168(top #44702, d35d2559, 67층)과 repaired-native 증거 #44851은 이번 REST 조회에서도 open이다. 현재 main의 native 후보가 unmerged Browser/Candle Addon 경로나 전체 54개를 실행한다고 주장하지 않는다. 54개 ID·작업·완료 기준은 유지한다.

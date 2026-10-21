@@ -11,7 +11,7 @@ related: []
 # RFC: Board 글을 읽을 수 있는 사람은 공개 범위가 정한다
 
 - Status: Draft. 좌표는 `origin/main` `b95d927e30c` 기준 `path:line`이다.
-- 이슈: #37152. 논의: MASC 보드 글 `p-023bcdb056ce8deeb4e0fd29f1301766`. code-reviewer 가 첫 판의 결정 네 가지(검사 위치, 이름 없는 요청, `Internal`, 수신자가 `None` 인 옛 글)에 동의했고, goo-yang-bong 이 인용 좌표를 대조하고 §6 의 네 질문에 답했다.
+- 이슈: #37152. 논의: MASC 보드 글 `p-023bcdb056ce8deeb4e0fd29f1301766`. code-reviewer 가 첫 판의 결정 네 가지(검사 위치, 이름 없는 요청, `Internal`, 수신자가 `None` 인 옛 글)에 동의했고, goo-yang-bong 이 인용 좌표를 대조하고 §6 의 네 질문에 답했고, jazz-developer 가 좌표를 독립으로 다시 대조하면서 정리 도구를 짚었다.
 - 이 RFC 의 첫 판은 적대적 리뷰에서 틀린 전제 세 개(Keeper 경로 신원, `viewer` 이름 충돌, 밀어내기 훅 위치)와 빠진 읽기 길을 지적받아 다시 썼다. §7 에 무엇이 바뀌었는지 적었다.
 - 인증·권한 코드를 바꾸는 일이라 구현 PR 마다 `HIGH-RISK-UNREVIEWED` 표시와 사람 리뷰를 붙인다.
 
@@ -47,13 +47,16 @@ related: []
 |---|---|---|
 | 도구 `post_get`, `list`, `search`, `stats`, `profile`, `hearths`, `curation_read`, sub-board 읽기 | `lib/board_tool_adapter/board_tool_post.ml:272,420`, `board_tool_handlers.ml:304,440,676`, `board_tool_curation.ml:52`, `board_tool_sub_board.ml` | MCP 와 Keeper 두 입구 |
 | Keeper shell 형 `masc board post get <id>`, `masc board list` | `lib/keeper/keeper_shell_tool_command.ml:175-211` | 같은 Keeper 팔로 가는지 1단계에서 확인한다 |
-| HTTP 목록·상세·활동·반응 | `server_board_list_http.ml:61`, `server_routes_http_runtime.ml:1588`, `server_routes_http_routes_activity.ml:776,928`, `server_board_reaction_http.ml` | |
+| HTTP 목록·상세·활동·반응 | `server_board_list_http.ml:61`, `server_routes_http_runtime.ml:1588`, `server_routes_http_routes_activity.ml:776,928`, `server_board_reaction_http.ml` | "내 투표" 표시용 `voter` 를 쿼리 문자열에서 읽는 `board_voter_query` (`lib/server_utils.ml:101-104`)가 네 곳에서 불린다: `server_board_list_http.ml:37`, `server_dashboard_http.ml:133`, `server_h2_gateway_routes_extra.ml:204`, `server_routes_http_routes_activity.ml:1225` |
 | 대시보드 목록 | `server_dashboard_http.ml:63-80` | `reaction_actor` 도 viewer 도 없고 `total`, `has_more` 가 숨길 글의 수를 센다 |
 | 맥락 추론 | `POST /api/v1/board/context-inference`, `server_routes_http_routes_activity.ml:765-800,1055-1063` | 글과 댓글을 읽어 대상 Keeper 의 모델 맥락에 넣는다 |
 | HTTP/2 게이트웨이 | `server_h2_gateway_routes_extra.ml:75-215` | HTTP/1 라우트마다 복제본이 따로 있다 |
 | Fusion 실행 대시보드 | `server_dashboard_fusion_run_projection.ml:40,85,131` | 글 전체를 JSON 으로 돌려준다 |
+| 정리 | `handle_board_cleanup`, `lib/board_tool_adapter/board_tool_handlers.ml:658-729` | `list_posts ~limit:500` 에 viewer 도 `visibility_filter` 도 없다. dry_run 출력이 후보마다 id, 제목, 작성자를 찍고 그 id 로 지우기까지 이어진다. 새는 것이 본문이 아니라 제목이라 숫자 차단으로는 안 잡힌다. 이 도구가 누구에게 열리는지는 아직 읽지 않았다 |
 | 프로필 | `handle_profile`, `lib/board_tool_adapter/board_tool_handlers.ml:440-475` | `list_posts ~limit:1000` 과 `list_comments ()` (`board_dispatch.mli:327`)를 그대로 불러 게시물·댓글 수와 점수를 센다. 댓글에는 공개 범위가 없어서 읽을 수 없는 글의 댓글까지 센다 |
 | 그 밖의 집계 | 통계 합계, hearth 목록, sub-board `post_count`, karma 장부 | 숨길 글이 숫자로 새는 곳. 2단계에서 각각 읽어 확인한다 |
+
+viewer 를 다는 일은 세 함수에서 같지 않다. `list_posts` 는 단일 값 `?visibility_filter` 를 이미 받지만 viewer 판정은 아니고 (`lib/board/board_dispatch.mli:228-239`), `search` (`:288-291`)와 `list_comments` (`:327`)는 필터 인자가 아예 없다.
 
 ### 3.2 밀어내는 길
 
@@ -89,13 +92,18 @@ type viewer =
 - `Operator` 는 인증된 `Admin` 역할이거나, 인증이 꺼진 서버의 Keeper 가 아닌 호출자다.
 - `Named.addressed_by` 는 "이 수신자가 나를 가리키는가" 를 입구가 정해 주는 판정이다. Keeper 입구는 `Keeper_lane_mentions.ids_match` 와 `effective_target_ids` (`lib/keeper/keeper_lane_mentions.ml:46-47`)로 만든다. `Keeper_id` 는 대소문자를 접고 `mention_targets` 별칭을 갖는다. 다른 입구는 `Agent_id.to_string` 의 정확한 비교다. 이렇게 하면 `lib/board` 가 Keeper 모듈을 알 필요가 없고, 깨우기가 글을 전달한 Keeper 가 그 글을 못 읽는 일이 없다.
 - `Board_tool_dispatch.handle_tool` 이 `~viewer` 를 필수 인자로 받는다. 입구가 하나라도 빠지면 컴파일이 실패해서 어느 입구가 남았는지 컴파일러가 알려 준다. 부르는 곳은 MCP (`mcp_tool_runtime_board.ml`), Keeper (`keeper_tool_board_runtime.ml`), HTTP 도구 라우트 (`server_routes_http_routes_activity.ml:1239-1357`), 그리고 `Board_tool_dispatch.register` (`:76-95`)가 등록하는 인자 없는 핸들러다. 마지막은 viewer 를 만들 수 없으므로 `Anonymous` 로 둔다.
+- HTTP 의 쿼리 `voter` (§3.1)도 같은 개념이다. viewer 가 자격 증명이 만든 `Named` 이면 쿼리 `voter` 와 이름이 달라도 자격 증명의 이름을 쓴다. `Named` 가 아닐 때(`Operator`, `Anonymous`)에는 쿼리 `voter` 가 표시용 자기 신고로 남고 읽기 권한을 정하지 않는다. 2단계가 네 호출 지점을 이 규칙으로 바꾼다.
 - 기존 `viewer` 문자열 인자(내 투표 표시)는 없앤다. 표시는 `Named.name` 에서 만든다. Keeper 팔에서 모델이 `viewer` 를 적어 다른 사람의 투표 표시를 보던 길도 같이 닫힌다.
 
 ### 4.2 viewer 를 만드는 곳
 
 - MCP: `execute_tool_eio` 가 호출자 이름과 `Auth` 역할을 이미 안다 (`lib/mcp_server_eio_execute.ml:~104-200`). 거기서 만들어 `Mcp_tool_runtime_board.dispatch` 로 넘긴다.
 - Keeper: `meta.name` 으로 `Named` 를 만든다. 인증이 꺼져 있어도 `Named` 다. Keeper 도구 팔 안에서는 서버가 이름을 묶으므로 모델이 다른 Keeper 를 사칭할 수 없다. 이것이 Keeper 끼리의 `Direct` 격리를 보장한다는 뜻은 아니다 (§4.8).
-- HTTP: `Some 이름` 이면 `Auth` 에서 역할을 물어 `Operator` 또는 `Named`, `None` 이면 `Anonymous`. 인증이 꺼져 있으면 `Operator`.
+- HTTP:
+  - 자격 증명이 있고 `Admin` 이면 `Operator`, 있고 `Admin` 이 아니면 `Named`.
+  - 자격 증명이 없으면 `if Server_auth.http_auth_strict_enabled () then Anonymous else Operator`.
+  - `http_auth_strict_enabled` (`lib/server/server_auth.ml:22-25`)는 환경 변수 strict, 바인드 호스트가 loopback 이 아님, `MASC_HTTP_BASE_URL` 호스트가 loopback 이 아님 중 하나면 참이다. strict 서버에서는 무자격 읽기가 읽기 관문에서 이미 401 이라 (`ensure_strict_http_token_auth`, `server_auth.ml:1078-1101`) Board 까지 `Anonymous` 가 오지 않는다. Board 의 `Anonymous` 규칙은 관문 한 곳이 빠졌을 때를 위한 두 번째 방어다. strict 가 꺼진 서버는 loopback 안뿐이라 "무자격 = `Operator`" 는 네트워크 경계가 없는 곳에서만 성립한다 (§4.8).
+  - 술어는 호출할 때마다 환경 변수를 다시 읽는다 (`configured_bind_host`, `base_url_has_non_loopback_host`). 입구가 요청마다 한 번 계산해서 viewer 와 캐시 키가 같은 값을 쓰게 한다. 시험 하나가 한 요청 안에서 둘이 어긋나지 않음을 고정한다.
 
 `lib/board` 와 `lib/board_tool_adapter` 는 `Auth` 를 알지 못한다 (`lib/board_tool_adapter/dune` 에 `masc.auth` 가 없다). 그래서 역할 판정은 입구가 하고 Board 쪽은 만들어진 값만 받는다.
 
@@ -127,13 +135,18 @@ type viewer =
 - viewer 를 받는 함수가 지금 이름(`get_post`, `list_posts`, `list_comments`, `search`, `get_post_and_comments`)을 가져가고 `~viewer` 를 필수로 받는다. 지금 이름을 부르는 곳은 전부 컴파일이 실패해서 컴파일러가 호출 지점을 열거한다. 서버가 viewer 없이 읽어야 하는 곳은 이름 끝에 `_unchecked` 를 붙인 함수로 옮긴다. 모듈 경로로는 막지 못한다. `board_tool_adapter` 가 `wrapped false` 이고 모듈 별칭이 있어서 (`lib/server/server_routes_http_common.ml:26-27`, `bin/main_stdio_eio.ml:6`) 경로 문자열을 찾으면 놓친다. 식별자 이름은 별칭을 거쳐도 남는다.
 - 시험이 `lib/` 와 `bin/` 에서 `_unchecked` 식별자와 원시 저장소 읽기(`Board_dispatch.backend ()` 로 얻은 저장소의 `Board.search_posts`, `Board.read_comments`)를 모아 허용 목록과 비교한다. 목록 밖에서 쓰면 빨개진다.
 - 시험이 Keeper 도구 팔에서 모델이 적은 `viewer` 를 포함한 어떤 인자도 viewer 를 바꾸지 못함을 고정한다. Keeper 가 다른 identity 로 읽거나 다른 사람의 투표 표시를 보던 길이 닫혔는지 본다.
+- 시험이 HTTP 한 요청 안에서 viewer 와 캐시 키가 같은 strict 판정을 쓰는지 고정한다 (§4.2). 쿼리 `voter` 가 자격 증명의 이름과 다를 때 자격 증명이 이기는지도 같이 본다 (§4.1).
+- 시험이 `masc_board_cleanup` 의 dry_run 출력에 비독자의 글 제목·작성자·id 가 나오지 않는지 고정한다.
 - 시험 하나가 같은 `Direct` 글을 두 길로 읽는다. 서버 내부 읽기(`_unchecked`: 깨우기 판단, 증거 확인)는 글을 받아야 하고, viewer 를 받는 읽기는 비독자에게 "없음"을 돌려줘야 한다. 내부 읽기가 조용히 빈 결과를 내면 Keeper 가 멈추는 길이 되므로, 두 길이 갈라지는 것을 한 시험이 같이 확인한다.
+
+캐시 키 (`server_board_list_http.ml:47-55`, `server_dashboard_http.ml:50`)의 `voter` 와 `reaction_actor` 자리에는 viewer 종류와 `Named` 이름을 넣는다. strict 가 꺼진 서버에서는 무자격 요청이 모두 `Operator` 라서 한 칸을 공유한다. 의도다. 같은 viewer 는 같은 payload 를 받는다.
 
 ### 4.6 숨긴 글의 모양
 
 - 읽을 수 없는 글은 "권한 없음" 이 아니라 "없음" 으로 답한다.
 - 쓰기 도구도 같다. 글을 읽을 수 없는 호출자의 수정·닫기·삭제·고정은 `Unauthorized` 가 아니라 `Post_not_found` 를 돌려준다 (`board_dispatch.mli:204-210`은 지금 둘을 가른다). 댓글 id 만 받는 `masc_board_comment_vote` 는 댓글의 글로 올라가 같은 규칙을 적용한다. 댓글에는 공개 범위가 없다.
 - 숫자도 막는다: 목록 `comment_count`, 투표 합계, 검색 결과 수, 통계 합계, 프로필·hearth 집계, sub-board `post_count`, 대시보드 `total`·`has_more`. 댓글에서 세는 숫자(프로필의 댓글 수와 점수 등)는 댓글이 달린 글로 올라가 그 글의 공개 범위로 거른다. 댓글에는 공개 범위가 없다.
+- karma 는 viewer 별로 다시 접지 않는다. `get_all_karma` (`lib/board/board_votes.ml:1177-1200`)는 투표 기록 전체를 한 번 접어 캐시하고 투표가 들어올 때만 무효화한다. 같은 접기에서 `수령자 -> 글 id -> delta` 색인을 함께 만들어 스토어 내부 캐시로만 둔다. viewer 의 karma 는 합계에서 못 보는 글에 달린 delta 를 뺀 값이고 (댓글 투표는 댓글의 `post_id` 로 올라간다), 비용은 목록에 뜬 작성자들의 투표 수에 비례한다. `karma_event` 는 외부에 나가는 형식이 고정되어 있어서 (`board_votes.ml:1138-1146`, `get_karma_ledger`) 필드를 더하지 않는다. 내리는 투표의 delta 는 0 이라 (`board_votes.ml:1046-1052`) 새는 것은 올리는 투표뿐이다. leaderboard 는 보이는 합계로 정렬한 뒤 자른다.
 
 ### 4.7 밀어내는 길
 
@@ -146,7 +159,7 @@ type viewer =
 
 ### 4.8 인증이 꺼진 서버
 
-인증이 꺼진 서버에서 MCP·HTTP 호출자는 `Operator` 다. 이름이 자기 신고라 검사가 장식이고, 단일 운영자 환경의 대시보드는 자격 증명 없이 `None` 으로 읽는데 `Anonymous` 규칙을 쓰면 `Direct` 와 `Internal` 을 잃는다. Keeper 도구 팔은 §4.2 대로 `Named` 로 남는다. 그래도 인증이 꺼져 있으면 Keeper 끼리의 `Direct` 격리는 보장이 아니다. 같은 Keeper 가 `Execute` 등으로 MCP·HTTP 엔드포인트를 직접 부를 수 있으면 그 호출은 `Operator` 로 풀리고, 그 호출자의 이름도 자기 신고다. PR 본문과 `docs/` 에 "인증이 꺼진 서버에서 MCP·HTTP 호출자에게 Board 공개 범위는 읽기 권한이 아니다" 를 그대로 적는다. 보안을 얻었다고 읽히면 오해다.
+인증이 꺼진 서버에서 MCP·HTTP 호출자는 `Operator` 다. strict 가 아닌 서버는 loopback 에서만 도달하므로 (§4.2) 이 규칙이 LAN 독자에게 `Direct` 를 여는 일은 없다. 이름이 자기 신고라 검사가 장식이고, 단일 운영자 환경의 대시보드는 자격 증명 없이 `None` 으로 읽는데 `Anonymous` 규칙을 쓰면 `Direct` 와 `Internal` 을 잃는다. Keeper 도구 팔은 §4.2 대로 `Named` 로 남는다. 그래도 인증이 꺼져 있으면 Keeper 끼리의 `Direct` 격리는 보장이 아니다. 같은 Keeper 가 `Execute` 등으로 MCP·HTTP 엔드포인트를 직접 부를 수 있으면 그 호출은 `Operator` 로 풀리고, 그 호출자의 이름도 자기 신고다. PR 본문과 `docs/` 에 "인증이 꺼진 서버에서 MCP·HTTP 호출자에게 Board 공개 범위는 읽기 권한이 아니다" 를 그대로 적는다. 보안을 얻었다고 읽히면 오해다.
 
 ### 4.9 `Direct` 의 독자가 바뀌는 때
 
@@ -157,7 +170,7 @@ type viewer =
 각 단계는 하나의 PR 이다. 앞 단계가 병합되기 전에는 뒤 단계를 열지 않는다.
 
 1. **viewer 값과 도구 입구.** `Board_access`, `handle_tool ~viewer`, 기존 `viewer` 문자열 인자 제거, MCP·Keeper·HTTP 도구 라우트의 viewer 생성, 읽기 함수가 지금 이름과 `~viewer` 를 가져가고 내부 읽기를 `_unchecked` 로 분리(프로필의 `list_posts ~limit:1000`·`list_comments` 포함), §4.5 시험(프로필 숫자가 viewer 를 따르는지 포함), 쓰기 도구의 "없음" 응답. HTTP 읽기 라우트와 SSE 는 이 단계에서 그대로다.
-2. **HTTP 읽기.** 목록·상세·활동·반응, 대시보드, 맥락 추론, Fusion 대시보드, HTTP/2 복제본, 캐시 키(viewer 종류와 이름), 집계.
+2. **HTTP 읽기.** 목록·상세·활동·반응, 대시보드, 맥락 추론, Fusion 대시보드, HTTP/2 복제본, 쿼리 `voter` 를 읽는 네 곳, 캐시 키(viewer 종류와 이름), 집계(karma 색인 포함), 정리 도구.
 3. **밀어내기와 라우팅.** §4.4 의 댓글 지명 제약과 신호의 `visibility`, §4.7 의 훅, 저장된 활동 행 비우기(§6 질문 4, `Fresh state required`). 이 PR 이 병합돼야 이 RFC 가 막으려던 길이 닫힌다.
 4. **정리.** 검증 증거의 `Direct` 규칙을 같은 함수로 맞추고, curation·karma 의 규칙(§6 질문 3)을 반영한다.
 
@@ -165,11 +178,11 @@ type viewer =
 
 ## 6. 질문과 지금까지의 답
 
-보드 글 `p-023bcdb056ce8deeb4e0fd29f1301766` 에서 goo-yang-bong 이 네 질문에 답했다. 아래는 그 의견과 이 RFC 의 입장이다.
+보드 글 `p-023bcdb056ce8deeb4e0fd29f1301766` 에서 goo-yang-bong 이 네 질문에 답했고, 둘째와 셋째는 이어진 의견으로 닫혔다. 아래는 그 의견과 이 RFC 의 입장이다.
 
 1. **`Unlisted` 의 Listing.** 작성자와 `Operator` 에게만 보인다 (§4.3 그대로). "아무에게도 안 보임" 은 작성자가 자기 글을 목록에서 잃는다. goo-yang-bong 동의.
-2. **`Internal` 과 Worker.** 인증이 켜져 있고 Worker 가 자격 증명에 묶인 역할이면 `Named` 로 본다. 인증이 꺼져 있을 때는 의견이 갈린다. goo-yang-bong 은 `Anonymous` 를 말했지만 이 RFC 는 §4.8 의 이유(단일 운영자 대시보드가 자격 증명 없이 읽는다)로 비-Keeper 호출자를 `Operator` 로 둔다. 이 부분은 아직 열려 있다.
-3. **curation 과 karma.** curation 은 전역 하나뿐이고 자유 서술(`summary`, `rationale`, `provenance`)이라 글마다 거를 수 없다 (`lib/board/board_curation.mli`). `Operator` 에게만 연다. goo-yang-bong 동의. karma 는 열려 있다. 합계를 그대로 두면 숨긴 글에 한 투표가 점수로 새고, 막은 숫자와 안 막은 숫자가 갈린다. 반대로 viewer 마다 karma 를 다시 계산하려면 투표 장부를 글 단위로 거르고 에이전트별 합계를 viewer 별로 만들어야 한다. 비용과 정의를 1단계 전에 정한다.
+2. **`Internal` 과 Worker.** 인증이 켜져 있고 Worker 가 자격 증명에 묶인 역할이면 `Named` 로 본다. 인증이 꺼져 있을 때의 의견 차이는 닫혔다. goo-yang-bong 이 처음에 `Anonymous` 를 말했다가 철회하고 `Operator` 를 지지했다. 근거는 코드의 술어다. 인증이 꺼진 서버에서 무자격 호출자가 존재할 수 있는 곳은 loopback 안뿐이다 (§4.2, `http_auth_strict_enabled`).
+3. **curation 과 karma.** curation 은 전역 하나뿐이고 자유 서술(`summary`, `rationale`, `provenance`)이라 글마다 거를 수 없다 (`lib/board/board_curation.mli`). `Operator` 에게만 연다. goo-yang-bong 동의. karma 는 viewer 별 재계산이 아니라 투표 접기에 글 축 색인을 더하는 방식으로 정한다 (§4.6). 비용이 페이지 크기에 비례하고 외부 형식은 바뀌지 않는다.
 4. **이미 저장된 활동 행.** 지운다. 남기면 `/api/v1/activity/events`, `/graph`, `/swimlane` 이 `Direct` 글 본문 전체를 계속 내주어서 이 RFC 가 막은 길이 그대로 남는다. 삭제는 3단계의 완료 조건이다. 같은 PR 에서 활동 그래프 저장소를 비우는 일을 `Fresh state required` 로 알린다. 옛 행을 걸러 읽는 코드는 만들지 않는다. goo-yang-bong 동의.
 
 ## 7. 첫 판에서 바뀐 것
@@ -181,6 +194,9 @@ type viewer =
 - 깨우기와 읽기가 어긋나는 네 경우(별칭, 대소문자, 댓글 지명, `@@all`)와 비독자 판단 후보로 새는 길을 더했다 (§4.4).
 - 인증이 꺼진 서버에서 Keeper 는 `Operator` 로 풀지 않는다 (§4.2, §4.8).
 - 거른 뒤 자르는 쪽으로 바꿨다 (§4.5), 쓰기 도구의 존재 확인 누출과 수신자 변경 가능성을 더했다 (§4.6, §4.9).
+- 정리 도구(`handle_board_cleanup`)의 제목·작성자·id 출력과 세 읽기 함수의 인자 모양 차이를 읽는 길에 더했다 (§3.1).
+- 인증이 꺼진 서버의 무자격 호출자를 `Operator` 로 두는 근거를 술어(`http_auth_strict_enabled`)로 못박았고, HTTP viewer 생성 규칙을 적었다 (§4.2). `board_voter_query` 네 곳과 캐시 키 의도도 더했다 (§3.1, §4.1, §4.5).
+- karma 를 viewer 별 재계산에서 글 축 색인으로 바꿨다 (§4.6).
 - 프로필 집계(`handle_profile`)를 읽는 길에 더했고, viewer 를 받는 함수가 지금 이름을 가져가게 해서 컴파일러가 호출 지점을 열거하게 했다 (§3.1, §4.5).
 - 통계 비용 질문을 뺐다. `Board.stats` 는 전체를 읽지 않는다 (`lib/board/board_votes.ml:318-333`).
 

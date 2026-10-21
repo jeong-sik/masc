@@ -14,7 +14,7 @@ const receipt: ToolCallEntry = {
   execution_id: 'exact-execution', route_evidence: { descriptor_id: 'keeper.artifact.publish' },
   output: JSON.stringify({ schema: 'masc.published_artifact.v1', revision_url: 'https://untrusted.invalid',
     artifact: { id, revision: 2, title: '연구 결과', summary: '보고서가 저장됐습니다.', author: 'writer',
-      body: { sha256: 'a'.repeat(64) },
+      body: { _blob: { sha256: 'a'.repeat(64), bytes: 20, mime: 'text/markdown', preview: '보고서 원문' } },
       created_at: '2026-10-19T01:00:00Z', format: 'markdown', task_id: null, goal_id: null, url: 'https://untrusted.invalid' } }),
 }
 describe('published report conversation card', () => {

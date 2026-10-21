@@ -1,0 +1,45 @@
+{
+  "artifacts": [
+    {
+      "id": "artifact-1144068d3af7705e56a40b63986aefd9",
+      "url": "/dashboard/#/workspace?section=artifacts&artifact=artifact-1144068d3af7705e56a40b63986aefd9",
+      "revision": 2,
+      "title": "공유 확인 · 밤섬 보고서",
+      "summary": "v2도 같은 원문",
+      "format": "markdown",
+      "author": "artifact-dashboard-ui",
+      "created_at": "2026-10-21T08:43:05Z",
+      "body": {
+        "_blob": {
+          "sha256": "6728fccc55d39a3e1fc5bee1468db5421073e4d8b7884d8efa15d3ad2c9783b9",
+          "bytes": 258,
+          "mime": "text/markdown",
+          "preview": "# 공유 확인 · 밤섬 보고서    읽기와 확인은 별개입니다. 원본 CRLF·한글·표 보존.    | 악기 | 구간 | 확인 사항 |  | --- | --- | --- |  | Bass VI | C → C♯ → D |"
+        }
+      },
+      "task_id": null,
+      "goal_id": null
+    },
+    {
+      "id": "artifact-bcb19c9a97041618d0441ae9d6214b84",
+      "url": "/dashboard/#/workspace?section=artifacts&artifact=artifact-bcb19c9a97041618d0441ae9d6214b84",
+      "revision": 1,
+      "title": "HTML 미리보기 보고서",
+      "summary": "형식 구분·미리보기·원문",
+      "format": "html",
+      "author": "artifact-dashboard-ui",
+      "created_at": "2026-10-21T08:43:05Z",
+      "body": {
+        "_blob": {
+          "sha256": "d8594b7d27ac58ed4ab727aedf2e00625d40e3b948c6d30e1e2d7ca860420da4",
+          "bytes": 247,
+          "mime": "text/html",
+          "preview": "<!doctype html><h1>HTML 미리보기 보고서</h1><p>읽기와 명시 확인을 분리합니다.</p><table><caption>소요 시간 (ms)</caption><tr><th>항목</th><th>값</th></tr><tr><td>읽기</td>"
+        }
+      },
+      "task_id": null,
+      "goal_id": null
+    }
+  ],
+  "diagnostics": []
+}

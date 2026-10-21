@@ -968,7 +968,14 @@ let for_surface = function
          than per row: with the list focused the cursor moves and [/] lands
          it on a match; with the text focused the same keys move the reading.
          Both ends answer to Home and End. *)
-      [ b Navigate "j/k" "move"
+      [ b Act "f" "format" ~help:"cycle all resources, artifacts, Markdown and HTML"
+      ; b Act "t" "today" ~help:"toggle the local publication day captured at this keypress"
+      ; b Act "w" "layout" ~help:"switch full-width list/reader and side-by-side browsing"
+      ; b Act "v" "document / source" ~detail:Detail_only
+          ~help:"show the document or its original text syntax; copied bytes stay original"
+      ; b Act "i" "report info" ~detail:Detail_only
+          ~help:"expand the URI, type, size and complete report metadata"
+      ; b Navigate "j/k" "move"
           ~help:"move the list; with the text focused, scroll it"
       ; b Navigate "h/l" "pane" ~help:"focus the resource list or text"
       ; b Navigate "Ctrl-W" "focus"

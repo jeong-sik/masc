@@ -6893,7 +6893,7 @@ let row_list (state : state) : row_list option =
      it. With the text focused j/k scrolls the reading instead and there is no
      row to land on -- the same condition [Masc_tui_surface_search.surface_row_texts] reads. *)
   | Resources ->
-      (match state.resource_focus, state.resources_list with
+      (match state.resource_focus, visible_resources state with
        | Right_pane, _ | _, None -> None
        | Left_pane, Some rows ->
            windowed ~count:(List.length rows) ~cursor:state.resources_cursor
@@ -10789,7 +10789,7 @@ let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
 let current_resource_images (state : state) =
   match state.resource_content, state.resource_pending_key, state.resource_content_error with
   | Some (uri, contents), None, None ->
-    let mime_type = Option.bind state.resources_list (fun resources ->
+    let mime_type = Option.bind (visible_resources state) (fun resources ->
       Option.bind (Masc_tui_resource_catalog.entry_for_key resources uri)
         (fun resource -> (Masc_tui_resource_catalog.metadata resource).mime_type)) in
     Masc_tui_resource_images.images ~mime_type contents
@@ -11360,7 +11360,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       | Attach_image_ref_missing_value | Preset_list | Preset_save _ | Preset_save_missing_name
       | Preset_restore _ | Preset_restore_missing_name | Preset_show _ | Preset_show_missing_name
       | Preset_delete _ | Preset_delete_missing_name | Listen
-      | Open_music | Music_invalid_arguments | Open_score _ | Score_invalid_index
+      | Open_artifacts | Open_music | Music_invalid_arguments | Open_score _ | Score_invalid_index
       | Open_images _ | List_images | Images_invalid_index | Unknown _ -> true
   then
     notice ~kind:Notice_failure
@@ -11688,6 +11688,12 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       list_conversation_images state
   | Masc_tui_command.Music_invalid_arguments ->
       notice ~kind:Notice_failure "Use /music; choose a project or take in the workbench"
+  | Masc_tui_command.Open_artifacts ->
+      state.resource_day <- None;
+      Masc_tui_resources_updates.select_scope state Masc_tui_resource_catalog.Published_reports;
+      state.resource_focus <- Left_pane;
+      state.resource_layout <- Masc_tui_resource_catalog.Full_width;
+      goto_surface state ~mailbox Resources
   | Masc_tui_command.Open_music ->
       Masc_tui_message_input.clear state.msg_input;
       (match open_music () with
@@ -17275,7 +17281,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Help | Masc_tui_command.Features
        | Masc_tui_command.Show_load_errors
        | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
-       | Masc_tui_command.Open_music | Masc_tui_command.Music_invalid_arguments
+       | Masc_tui_command.Open_artifacts | Masc_tui_command.Open_music | Masc_tui_command.Music_invalid_arguments
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
         | Masc_tui_command.Open_usage | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
@@ -28867,6 +28873,19 @@ and is loaded on demand through keeper_skill.
        | Some (("[" | "]") as bracket) when state.view = Changes ->
            cycle_changes_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
+       | Some "f" when state.view = Resources ->
+           Masc_tui_resources_updates.select_scope state
+             (Masc_tui_resource_catalog.next_scope state.resource_scope)
+       | Some "t" when state.view = Resources ->
+           Masc_tui_resources_updates.toggle_today state ~now:(Unix.gettimeofday ())
+       | Some "w" when state.view = Resources ->
+           Masc_tui_resources_updates.toggle_layout state
+       | Some "v" when state.view = Resources && state.resource_focus = Right_pane ->
+           Masc_tui_resources_updates.toggle_presentation state
+       | Some "i" when state.view = Resources && state.resource_focus = Right_pane ->
+           state.resource_metadata_expanded <- not state.resource_metadata_expanded;
+           state.resource_scroll <- 0;
+           state.resource_search_cursor <- 0
        | Some "\015" when state.view = Resources && state.resource_focus = Right_pane ->
            open_resource_image state ~mailbox:async_messages
        | Some (("(" | ")") as direction)
@@ -28888,7 +28907,7 @@ and is loaded on demand through keeper_skill.
          when state.view = Resources && state.resource_focus = Right_pane ->
            step_detail_cursor
              ~count:
-               (match state.resources_list with
+               (match visible_resources state with
                 | None -> 0
                 | Some resources -> List.length resources)
              ~cursor:state.resources_cursor
@@ -31517,7 +31536,7 @@ and is loaded on demand through keeper_skill.
                     Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
                 else
                   let total =
-                    match state.resources_list with
+                    match visible_resources state with
                     | Some rows -> List.length rows
                     | None -> 0
                   in

@@ -78,7 +78,9 @@ let sections =
         ; description = "latest completed reply to the clipboard" }
       ] )
   ; ( "See what happened"
-    , [ { opener = Command "context"
+    , [ { opener = Command "artifacts"
+        ; description = "Markdown/HTML reports: f selects format, t filters today, Enter reads full width; {/} selects revisions" }
+      ; { opener = Command "context"
         ; description = "inspect the last observed provider input" }
       ; { opener = Key "Ctrl-X"
         ; description = "context inspector over this chat's last turn" }

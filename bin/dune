@@ -631,7 +631,7 @@
  (name masc_tui_resource_catalog)
  (wrapped false)
  (modules masc_tui_resource_catalog)
- (libraries masc_tui_mcp masc masc.tool_types yojson digestif))
+ (libraries masc_tui_mcp masc masc.tool_types masc.time_codec unix yojson digestif))
 
 (library
  (name masc_tui_resource_images)

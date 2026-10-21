@@ -2,37 +2,68 @@
 open Masc_tui_types
 module Catalog = Masc_tui_resource_catalog
 
+let reconcile state =
+  let rows = Option.value (visible_resources state) ~default:[] in
+  let open_key = match state.resource_pending_key,
+      state.resource_content_error, state.resource_content with
+    | Some key, _, _ | None, Some (key, _), _ | None, None, Some (key, _) -> Some key
+    | None, None, None -> None in
+  let rec index_of_key index key = function
+    | [] -> None
+    | entry :: rest -> if Catalog.owns_key entry key then Some index
+        else index_of_key (index + 1) key rest in
+  match Option.bind open_key (fun key -> index_of_key 0 key rows) with
+  | Some cursor -> state.resources_cursor <- cursor
+  | None ->
+    state.resources_cursor <- max 0 (min state.resources_cursor (List.length rows - 1));
+    if Option.is_some open_key then begin
+      state.resource_pending_key <- None;
+      state.resource_read_owner <- None;
+      state.resource_revision_history <- [];
+      state.resource_content <- None;
+      state.resource_content_error <- None;
+      state.resource_scroll <- 0;
+      state.resource_search_cursor <- 0;
+      state.resource_text_cursor <- 0;
+      state.resource_image_cursor <- 0;
+      state.resource_focus <- Left_pane
+    end
+
 let listed state result =
   match result with
   | Ok { Catalog.entries = rows; notes } ->
     state.resources_list <- Some rows;
     state.resources_error <- (match notes with [] -> None | _ -> Some (String.concat " · " notes));
-    let open_uri = match
-        state.resource_pending_key, state.resource_content_error, state.resource_content with
-      | Some uri, _, _ -> Some uri
-      | None, Some (uri, _), _ -> Some uri
-      | None, None, Some (uri, _) -> Some uri
-      | None, None, None -> None in
-    let rec index_of_uri index uri = function
-      | [] -> None
-      | resource :: rest ->
-        if Catalog.owns_key resource uri then Some index
-        else index_of_uri (index + 1) uri rest in
-    (match Option.bind open_uri (fun uri -> index_of_uri 0 uri rows) with
-     | Some cursor -> state.resources_cursor <- cursor
-     | None ->
-       state.resources_cursor <- max 0 (min state.resources_cursor (List.length rows - 1));
-       if Option.is_some open_uri then begin
-         state.resource_pending_key <- None;
-         state.resource_read_owner <- None;
-         state.resource_revision_history <- [];
-         state.resource_content <- None;
-         state.resource_content_error <- None;
-         state.resource_scroll <- 0;
-         state.resource_search_cursor <- 0;
-         state.resource_text_cursor <- 0
-       end)
+    reconcile state
   | Error detail -> state.resources_error <- Some detail
+
+let select_scope state scope =
+  state.resource_scope <- scope;
+  state.resources_cursor <- 0;
+  state.search <- None;
+  state.search_last <- "";
+  reconcile state
+
+let toggle_today state ~now =
+  state.resource_day <- (match state.resource_day with
+    | None -> Some (Catalog.local_day now)
+    | Some _ -> None);
+  select_scope state state.resource_scope
+
+let reset_document_position state =
+  state.resource_scroll <- 0;
+  state.resource_search_cursor <- 0
+
+let toggle_layout state =
+  state.resource_layout <- (match state.resource_layout with
+    | Catalog.Full_width -> Catalog.Side_by_side
+    | Side_by_side -> Full_width);
+  reset_document_position state
+
+let toggle_presentation state =
+  state.resource_presentation <- (match state.resource_presentation with
+    | Catalog.Document -> Catalog.Source | Source -> Document);
+  reset_document_position state
 
 let read_done state ~(request : Catalog.read_request) result =
   match state.resource_pending_key, state.resource_read_owner with
@@ -53,7 +84,7 @@ let read_done state ~(request : Catalog.read_request) result =
   | (Some _ | None), (Some _ | None) -> ()
 
 let open_selected state ~read =
-  match Option.bind state.resources_list (fun resources ->
+  match Option.bind (visible_resources state) (fun resources ->
       List.nth_opt resources state.resources_cursor) with
   | None -> ()
   | Some resource ->

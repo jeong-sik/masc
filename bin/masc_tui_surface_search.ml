@@ -268,7 +268,7 @@ let surface_row_texts ~cols (state : state) : surface -> string list option =
   (* The focused pane owns the search. Document rows come from the exact
      shared rendering projection, so matches land on the visible reading. *)
   | Resources when state.resource_focus = Left_pane ->
-      Option.map (List.map Masc_tui_resource_catalog.display_name) state.resources_list
+      Option.map (List.map Masc_tui_resource_catalog.display_name) (visible_resources state)
   | Resources -> Masc_tui_resource_document.search_rows ~cols state
   | Overview | Acting | Metrics
   | Keepers

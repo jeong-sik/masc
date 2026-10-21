@@ -11,12 +11,14 @@ type t = {
   image_cursor : int;
   text_cursor : int;
   revisions : Catalog.report list;
+  presentation : Catalog.presentation;
+  metadata_expanded : bool;
 }
 
 let entry reading = reading.entry
 
 let current (state : state) =
-  let entries = match state.resources_list with Some rows -> rows | None -> [] in
+  let entries = match visible_resources state with Some rows -> rows | None -> [] in
   let cursor = max 0 (min state.resources_cursor (List.length entries - 1)) in
   let selected = List.nth_opt entries cursor in
   let shown_key = match state.resource_pending_key,
@@ -36,7 +38,9 @@ let current (state : state) =
         | None -> false in
       {entry;contents;error;requested;image_cursor=state.resource_image_cursor;
        text_cursor=state.resource_text_cursor;
-       revisions=state.resource_revision_history})
+       revisions=state.resource_revision_history;
+       presentation=state.resource_presentation;
+       metadata_expanded=state.resource_metadata_expanded})
       (Catalog.entry_for_key entries key))
 
 let text_parts parts =
@@ -81,9 +85,8 @@ let fenced_pretty_json text =
   in
   Masc_tui_markdown_theme.fenced ~language:"json" pretty
 
-(* The Resources surface: the MCP resource inventory on the left, the
-   selected read on the right. Wide terminals show both; narrow ones show
-   the list, and Enter swaps to the content until Esc. *)
+(* List and document share one full-width surface by default. Side-by-side
+   browsing is an explicit choice; drawing and search use the same pane width. *)
 
 let resource_mime_essence mime =
   match String.split_on_char ';' (String.lowercase_ascii (String.trim mime)) with
@@ -122,7 +125,7 @@ let pretty_resource_text ~mime text =
   | None -> text
 
 let resource_document entry
-    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions =
+    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded =
   let resource = Catalog.metadata entry in
   let present = function
     | Some text when String.trim text <> "" -> text
@@ -143,7 +146,7 @@ let resource_document entry
          report.revision.revision (List.length revisions)
          (if available Catalog.Older then "" else " unavailable")
          (if available Catalog.Newer then "" else " unavailable")] in
-  let metadata =
+  let details =
     String.concat "\n\n"
       ([ Catalog.origin entry
       ; "**About:** " ^ present resource.description
@@ -152,12 +155,25 @@ let resource_document entry
       ; "**Type:** `" ^ mime ^ "` · **Size:** " ^ size
       ] @ revision_note)
   in
+  let metadata = match entry, metadata_expanded with
+    | Catalog.Report report, false ->
+      String.concat "\n\n" ([
+        Printf.sprintf "**%s · v%d** · %s · %s"
+          (match report.revision.format with Masc.Published_artifact.Markdown -> "Markdown" | Html -> "HTML")
+          report.revision.revision report.revision.author report.revision.created_at;
+        report.revision.summary
+      ] @ revision_note)
+    | (Catalog.Mcp _ | Catalog.Report _), true | Catalog.Mcp _, false -> details in
   let part_document index (part : Masc_tui_mcp.resource_content) =
     let part_mime = Option.value part.rc_mime_type ~default:mime in
     let body =
       match part.rc_kind with
       | Masc_tui_mcp.Resource_text text ->
-          pretty_resource_text ~mime:part_mime text
+          (match presentation with
+           | Catalog.Document -> pretty_resource_text ~mime:part_mime text
+           | Catalog.Source -> Masc_tui_markdown_theme.fenced
+               ~language:(Option.value (resource_language_of_mime part_mime) ~default:"")
+               (Masc_tui_text_block.lines text |> String.concat "\n"))
       | Masc_tui_mcp.Resource_blob { base64 } ->
           Printf.sprintf
             "%s · `%s` · %d base64 bytes"
@@ -191,19 +207,18 @@ let resource_document entry
   metadata ^ "\n\n---\n\n" ^ body
 
 let rows ~cols reading =
-  let pane_cols = if cols >= Masc_tui_roster_pane.threshold_cols
-    then cols - Masc_tui_roster_pane.pane_cols else cols in
   let document =
     resource_document reading.entry reading.contents ~error:reading.error
       ~requested:reading.requested ~image_cursor:reading.image_cursor
       ~text_cursor:reading.text_cursor ~revisions:reading.revisions
+      ~presentation:reading.presentation ~metadata_expanded:reading.metadata_expanded
   in
   Message_layout.wrap_body ~markdown:Masc_tui_markdown_theme.document
-    ~max_cells:(max 1 (framed_inner_width pane_cols - 4))
+    ~max_cells:(max 1 (framed_inner_width cols - 4))
     ~sanitize:Terminal_text.single_line document
 
 let search_rows ~cols state =
   match current state with
   | Some ({contents=Some _;error=None;_} as reading) ->
-      Some (List.map Masc_tui_theme.strip_sgr (rows ~cols reading))
+      Some (List.map Masc_tui_theme.strip_sgr (rows ~cols:(resource_content_cols state ~cols) reading))
   | Some {contents=(Some _|None);error=(Some _|None);_} | None -> None

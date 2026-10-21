@@ -5,6 +5,44 @@ type key = Mcp_uri of string | Report_revision of report
 type t = Mcp of Masc_tui_mcp.resource | Report of report
 type listing = { entries : t list; notes : string list }
 type reading = { parts : Masc_tui_mcp.resource_content list; revisions : report list }
+type scope = All_resources | Published_reports | Markdown_reports | Html_reports
+type layout = Full_width | Side_by_side
+type presentation = Document | Source
+type day = { year : int; month : int; day : int }
+
+let local_day seconds =
+  let tm = Unix.localtime seconds in
+  { year = tm.tm_year + 1900; month = tm.tm_mon + 1; day = tm.tm_mday }
+
+let on_day day = function
+  | Mcp _ -> false
+  | Report report ->
+    match Time_codec.parse_rfc3339 report.revision.created_at with
+    | Ok seconds -> local_day seconds = day
+    | Error Time_codec.Invalid_rfc3339 -> false
+
+let select ~scope ~day entries =
+  List.filter (fun entry ->
+    let included = match scope, entry with
+      | All_resources, (Mcp _ | Report _) -> true
+      | Published_reports, Report _ -> true
+      | Markdown_reports, Report report -> report.revision.format = Published.Markdown
+      | Html_reports, Report report -> report.revision.format = Published.Html
+      | (Published_reports | Markdown_reports | Html_reports), Mcp _ -> false in
+    included && match day with None -> true | Some day -> on_day day entry) entries
+
+let scope_label = function
+  | All_resources -> "All resources"
+  | Published_reports -> "Artifacts"
+  | Markdown_reports -> "Markdown documents"
+  | Html_reports -> "HTML pages"
+
+let next_scope = function
+  | All_resources -> Published_reports
+  | Published_reports -> Markdown_reports
+  | Markdown_reports -> Html_reports
+  | Html_reports -> All_resources
+
 type direction = Older | Newer
 type read_request = { key : key; owner : unit ref }
 
@@ -54,7 +92,9 @@ let metadata = function
 
 let display_name = function
   | Mcp resource -> Masc_tui_mcp.display_name resource
-  | Report report -> Printf.sprintf "Report · %s · r%d" report.revision.title report.revision.revision
+  | Report report -> Printf.sprintf "%s · %s · v%d"
+      (match report.revision.format with Published.Markdown -> "Markdown" | Html -> "HTML")
+      report.revision.title report.revision.revision
 
 let origin = function
   | Mcp _ -> "MCP resource — read-only data exposed by this server."

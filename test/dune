@@ -6365,7 +6365,7 @@
 (test
  (name test_tui_published_reports)
  (modules test_tui_published_reports)
- (libraries alcotest masc masc.masc_tool_blob_store digestif yojson masc_tui_resource_catalog
+ (libraries masc.time_codec alcotest masc masc.masc_tool_blob_store digestif yojson masc_tui_resource_catalog
   masc_tui_types masc_tui_resources_updates masc_tui_mcp))
 
 (test

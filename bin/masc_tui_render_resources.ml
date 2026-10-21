@@ -4,7 +4,6 @@ open Masc_tui_types
 open Masc_tui_ansi
 open Masc_tui_render_prim
 
-module Message_layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
 module Catalog = Masc_tui_resource_catalog
 
@@ -13,12 +12,12 @@ let render_resources (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let split = cols >= keeper_split_threshold_cols in
-  pane_surface_header buf cols state ~name:"System / Resources" ~split;
+  let split = resource_split state ~cols in
+  pane_surface_header buf cols state ~name:"Artifacts / Resources" ~split;
   let pane_rows = pane_surface_content_height ~rows in
   let list_rows_budget = pane_rows in
   let rows_list =
-    match state.resources_list with Some rows -> rows | None -> []
+    match visible_resources state with Some rows -> rows | None -> []
   in
   let total = List.length rows_list in
   let cursor = max 0 (min state.resources_cursor (total - 1)) in
@@ -36,7 +35,7 @@ let render_resources (state : state) =
     framed_line pane_buf pane_cols
       ((if list_focused then Ansi.bold else Ansi.dim)
        ^ (if list_focused then " \xe2\x96\xb8 " else " ")
-       ^ "Resources"
+       ^ Catalog.scope_label state.resource_scope
        ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
        ^ Ansi.reset);
     framed_divider pane_buf pane_cols;
@@ -50,33 +49,42 @@ let render_resources (state : state) =
             ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
           1
       | None ->
-          (match resources_empty_note state.resources_list with
+          (match resources_empty_note (visible_resources state) with
            | Some note ->
                framed_line pane_buf pane_cols (Ansi.dim ^ note ^ Ansi.reset);
                1
            | None -> 0)
     in
-    let list_rows_budget = max 0 (list_rows_budget - status_rows) in
-    let first =
-      if cursor < list_rows_budget then 0 else cursor - list_rows_budget + 1
-    in
-    let rows_list_window = Rows.of_list ~first:first ~height:list_rows_budget rows_list in
+    let period = match state.resource_day with
+      | None -> "all dates"
+      | Some day -> Printf.sprintf "%04d-%02d-%02d local" day.year day.month day.day in
+    framed_line pane_buf pane_cols (Ansi.dim ^ " " ^ period
+      ^ " · f: format · t: today · w: layout" ^ Ansi.reset);
+    let list_rows_budget = max 0 (list_rows_budget - status_rows - 1) in
+    let entry_rows = 3 in
+    let visible = max 1 (list_rows_budget / entry_rows) in
+    let first = max 0 (cursor - visible + 1) in
+    let today = Catalog.local_day (Unix.gettimeofday ()) in
     for i = 0 to list_rows_budget - 1 do
-      match Rows.at rows_list_window (first + i) with
+      let index = first + i / entry_rows in
+      match List.nth_opt rows_list index with
       | Some resource ->
-          let selected = first + i = cursor in
-          let name = Terminal_text.single_line (Catalog.display_name resource) in
-          let line =
-            if selected then
-              Theme.selection ^ " " ^ name
-              ^ String.make
-                  (max 0
-                     (framed_inner_width pane_cols - 1 - Message_layout.display_width name))
-                  ' '
-              ^ Ansi.reset
-            else " " ^ name
-          in
-          framed_line pane_buf pane_cols line
+          let selected = index = cursor in
+          let metadata = Catalog.metadata resource in
+          let line = match i mod entry_rows with
+            | 0 -> (if selected then " ▸ " else "   ") ^ Catalog.display_name resource
+              ^ (if Catalog.on_day today resource then " · today" else "")
+            | 1 -> "   " ^ (match resource with
+                | Catalog.Report report -> report.revision.summary
+                | Mcp _ -> Option.value metadata.description ~default:metadata.uri)
+            | _ -> "   " ^ (match resource with
+                | Catalog.Report report -> Printf.sprintf "%s · %s · %d bytes"
+                    report.revision.author report.revision.created_at report.revision.body.bytes
+                | Mcp _ -> "MCP · " ^ Option.value metadata.mime_type ~default:"type unknown") in
+          let line = Terminal_text.single_line line in
+          let color = if selected then Theme.selection
+            else if i mod entry_rows = 0 then Ansi.bold else Ansi.dim in
+          framed_line pane_buf pane_cols (color ^ line ^ Ansi.reset)
       | None -> framed_empty pane_buf pane_cols
     done;
     framed_bottom pane_buf pane_cols
@@ -103,7 +111,7 @@ let render_resources (state : state) =
            box_empty pane_buf pane_cols
          done
      | Some reading ->
-         let rendered = Masc_tui_resource_document.rows ~cols reading in
+         let rendered = Masc_tui_resource_document.rows ~cols:pane_cols reading in
          let total_lines = List.length rendered in
          let max_scroll = max 0 (total_lines - content_height) in
          let scroll = max 0 (min state.resource_scroll max_scroll) in

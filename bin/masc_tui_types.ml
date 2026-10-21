@@ -8538,6 +8538,11 @@ type state = {
   mutable resources_list: Masc_tui_resource_catalog.t list option;
   mutable resources_error: string option;
   mutable resources_cursor: int;
+  mutable resource_scope: Masc_tui_resource_catalog.scope;
+  mutable resource_day: Masc_tui_resource_catalog.day option;
+  mutable resource_layout: Masc_tui_resource_catalog.layout;
+  mutable resource_presentation: Masc_tui_resource_catalog.presentation;
+  mutable resource_metadata_expanded: bool;
   mutable resource_content:
     (Masc_tui_resource_catalog.key * Masc_tui_mcp.resource_content list) option;
   mutable resource_content_error: (Masc_tui_resource_catalog.key * string) option;
@@ -10967,6 +10972,17 @@ let workspace_operation_reply state ~authority ~reading (receipt, observation) =
     | Ok _ -> Error "Action outcome retained; follow-up reading was retired while workspace identity was unconfirmed. Refresh before acting again."
   in
   receipt, observation
+
+let visible_resources state =
+  Option.map (Masc_tui_resource_catalog.select ~scope:state.resource_scope
+    ~day:state.resource_day) state.resources_list
+
+let resource_split state ~cols =
+  state.resource_layout = Masc_tui_resource_catalog.Side_by_side
+  && cols >= Masc_tui_roster_pane.threshold_cols
+
+let resource_content_cols state ~cols =
+  if resource_split state ~cols then cols - Masc_tui_roster_pane.pane_cols else cols
 
 let retain_resource_read state ~key =
   let same_resource = match state.resource_content with
@@ -15310,6 +15326,11 @@ let create_state
   resources_list = None;
   resources_error = None;
   resources_cursor = 0;
+  resource_scope = Masc_tui_resource_catalog.All_resources;
+  resource_day = None;
+  resource_layout = Masc_tui_resource_catalog.Full_width;
+  resource_presentation = Masc_tui_resource_catalog.Document;
+  resource_metadata_expanded = false;
   resource_content = None;
   resource_content_error = None;
   resource_pending_key = None;

@@ -193,7 +193,7 @@ let palette_entries (state : state) =
   @ [ "go Clients", Palette_goto Clients ]
   @ [ "go Schedules", Palette_goto Schedules ]
   @ [ "go Code", Palette_goto Code ]
-  @ [ "go Resources", Palette_goto Resources ]
+  @ [ "go Artifacts / Resources", Palette_goto Resources ]
   @ [ "go Tools", Palette_goto Tools ]
   (* Two surfaces had no row: Runtime sits under Config behind [9], Changes
      under Keepers behind [f], and the palette is where a destination is
@@ -303,6 +303,7 @@ let palette_subsequence ~needle haystack =
    commands fold their aliases into one entry the same way
    (Masc_tui_command.spelled_catalog). *)
 let palette_action_words = function
+  | Palette_goto Resources -> [ "artifacts"; "reports"; "resources" ]
   | Palette_goto Metrics -> [ "metrics"; "telemetry"; "charts"; "stats" ]
   | Palette_usage_scope (Some scope_id) -> [scope_id]
   | Palette_addon_results id -> [id]
@@ -310,7 +311,7 @@ let palette_action_words = function
       ( Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
       | Approvals | Planning | Schedules | Verification | Harness | Fusion
       | Repositories | Code | Changes | Connectors | Runtime | Config
-      | Resources | Tools | System_logs )
+      | Tools | System_logs )
   | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
   | Palette_collab | Palette_msx | Palette_dos
   | Palette_lane_addons | Palette_usage_scope None | Palette_config _ | Palette_gate_mode _

@@ -22,6 +22,7 @@ type t =
   | Open_images of int
   | List_images
   | Images_invalid_index
+  | Open_artifacts
   | Open_music
   | Music_invalid_arguments
   | Listen
@@ -139,6 +140,11 @@ let catalog =
     ; aliases = []
     ; args = ""
     ; summary = "play the newest audio or MIDI attachment in this conversation"
+    }
+  ; { word = "artifacts"
+    ; aliases = [ "reports" ]
+    ; args = ""
+    ; summary = "browse published Markdown and HTML reports in a full-width reader"
     }
   ; { word = "settings"
     ; aliases = []
@@ -407,6 +413,7 @@ let parse text =
     | "errors", "" -> Show_load_errors
     | "help", _ -> Help
     | "features", _ -> Features
+    | ("artifacts" | "reports"), "" when body = "" -> Open_artifacts
     | "about", _ | "splash", _ -> About
     | "addons", arg -> Lane_addons arg
     | "play", "" | "play", "invites" -> Play_invites

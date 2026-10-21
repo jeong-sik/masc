@@ -67,14 +67,11 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   if (snapshot.phase === 'draining') {
     return 'lifecycle 가 stopped 로 정착되기 전에 draining 이 완료되어야 함.'
   }
-  if (snapshot.runtime.state === 'selecting' || snapshot.runtime.state === 'trying') {
-    return 'provider routing 이 반환되면 KCL 이 done 또는 exhausted 로 정착해야 함.'
-  }
   switch (snapshot.turn_phase) {
     case 'prompting':
       return 'prompt assembly 완료 시 KTC 가 executing 으로 진행해야 함.'
     case 'routing':
-      return 'runtime routing 이 완료되면 KCL 이 trying 으로 진행해야 함.'
+      return 'runtime routing 이 완료되면 KCL 이 executing 으로 진행해야 함.'
     case 'executing':
       return 'execution 은 turn 을 finalize 하거나 runtime transition 을 유도해야 함.'
     case 'finalizing':
@@ -164,18 +161,6 @@ export function deriveOperationalInsight(
       evidence: [
         `KSM ${snapshot.phase}`,
         snapshot.last_outcome ? `turn #${snapshot.last_outcome.turn_id}` : 'no last_outcome',
-      ],
-    }
-  }
-  if (snapshot.runtime.state === 'selecting' || snapshot.runtime.state === 'trying') {
-    return {
-      tone: 'info',
-      headline: 'Provider 작업이 활성 frontier',
-      detail: 'runtime 가 live turn 의 ownership 을 가져감 — 중요한 next edge 는 provider completion 또는 exhaustion.',
-      nextStep: nextExpectedStep(snapshot),
-      evidence: [
-        `KTC ${snapshot.turn_phase}`,
-        `KCL ${snapshot.runtime.state}`,
       ],
     }
   }

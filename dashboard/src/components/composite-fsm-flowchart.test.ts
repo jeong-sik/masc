@@ -6,6 +6,11 @@ import {
   COMPOSITE_FSM_TLA_SPEC_PATHS,
   buildCompositeFsmMermaid,
 } from './composite-fsm-flowchart'
+import {
+  serverDecisionStages,
+  serverRuntimeStates,
+  serverTurnPhases,
+} from './keeper-runtime-wire-states.test-fixture'
 
 function repoRoot(): string {
   const cwd = process.cwd()
@@ -37,6 +42,25 @@ describe('buildCompositeFsmMermaid', () => {
     // them as distinct nodes.
     expect(src).toContain('ktc_idle["idle"]')
     expect(src).toContain('kcl_idle["idle"]')
+  })
+
+  const drawnIn = (axis: string) => {
+    const region = new RegExp(`subgraph ${axis} [\\s\\S]*?\\n {2}end`).exec(src)?.[0] ?? ''
+    return [...region.matchAll(/\w+\["([^"]+)"\]/g)].map(m => m[1]!)
+  }
+
+  it.each([
+    ['KTC', serverTurnPhases],
+    ['KDP', serverDecisionStages],
+    ['KCL', serverRuntimeStates],
+  ] as const)('draws the %s states the server sends and no others', (axis, serverStates) => {
+    expect([...drawnIn(axis)].sort()).toEqual([...serverStates()].sort())
+  })
+
+  it('gives every node an edge or class refers to a label', () => {
+    const referenced = new Set(src.match(/\b(?:ksm|ktc|kdp|kcl)_\w+/g))
+    const labelled = new Set([...src.matchAll(/\b((?:ksm|ktc|kdp|kcl)_\w+)\["/g)].map(m => m[1]))
+    expect([...referenced].sort()).toEqual([...labelled].sort())
   })
 
   it('covers the full KSM state surface (8 phases)', () => {

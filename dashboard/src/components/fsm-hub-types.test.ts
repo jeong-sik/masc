@@ -67,7 +67,7 @@ describe('extractLaneValue', () => {
   })
 
   it('extracts runtime', () => {
-    expect(extractLaneValue(snapshot({ runtime: { state: 'trying' } }), 'runtime')).toBe('trying')
+    expect(extractLaneValue(snapshot({ runtime: { state: 'executing' } }), 'runtime')).toBe('executing')
   })
 
   it('handles all valid phase values', () => {

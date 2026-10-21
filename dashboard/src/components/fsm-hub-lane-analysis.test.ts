@@ -49,18 +49,10 @@ describe('isObservedStall', () => {
     expect(isObservedStall('turn', 'prompting', 44)).toBe(false)
   })
 
-  // --- runtime lane ---
-
-  it('detects selecting stall at 30s', () => {
-    expect(isObservedStall('runtime', 'selecting', 30)).toBe(true)
-  })
-
-  it('detects trying stall at 45s', () => {
-    expect(isObservedStall('runtime', 'trying', 45)).toBe(true)
-  })
-
-  it('does not detect runtime stall below threshold', () => {
-    expect(isObservedStall('runtime', 'selecting', 29)).toBe(false)
+  // The runtime lane is computed from the turn phase, so the turn lane's
+  // stall is its stall: judging both would count one stuck turn twice.
+  it('does not judge the runtime lane on its own', () => {
+    expect(isObservedStall('runtime', 'executing', 600)).toBe(false)
   })
 
   // --- unknown lane ---

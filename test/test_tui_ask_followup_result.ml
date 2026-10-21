@@ -91,15 +91,17 @@ let launch ?key state results request submission ~released perform =
   Ui.supersede_ask_followup_worker state
     (Some (request,fun detail -> ignore (Eio.Promise.try_resolve resolve detail))) ~detail:"original read superseded";
   let finish ()=Ui.finish_ask_followup_worker state request in
-  Results.launch_observation ?key state ~results ~boundary_error:Fun.id ~on_not_run:finish
+  Results.launch_observation ?key state ~results ~boundary_error:(fun detail -> Projection.Followup_read_failed detail)
+    ~not_started:(fun detail -> Projection.Followup_not_started detail) ~on_not_run:finish
     ~observe_job:(function Masc_tui_workspace_job.Cancellation_requested -> () | Registration_released -> released ())
     ~cancelled:(envelope (Protocol.Ask_followup_finished (request,submission,
-      Error "Answer follow-up observation cancelled; any received sources are retained.")))
+      Error Projection.Followup_cancelled)))
     ~progress:(fun (event,received_ns) -> envelope (Protocol.Ask_followup_observed (request,submission,event,received_ns)))
     ~deliver:(fun result -> envelope (Protocol.Ask_followup_finished (request,submission,result)))
     (fun publish -> Fun.protect ~finally:finish (fun () ->
-      Eio.Fiber.first (fun () -> perform publish) (fun () -> Error (Eio.Promise.await stop))))
-type admission = Part of Decode.ask_followup_event * int64 | Terminal of (unit,string) result | Refused
+      Eio.Fiber.first (fun () -> perform publish |> Result.map_error (fun detail -> Projection.Followup_read_failed detail))
+        (fun () -> let _detail=Eio.Promise.await stop in Error Projection.Followup_withdrawn)))
+type admission = Part of Decode.ask_followup_event * int64 | Terminal of Projection.followup_result | Refused
 let apply state message = match message with
   | Protocol.Workspace_scoped (authority,reading,inner) ->
     if not (Protocol.workspace_message_admitted state ~authority ~reading inner) then Refused else
@@ -151,9 +153,14 @@ let test_full_queue_keeps_partial_and_terminal () = with_answer @@ fun base conf
   Eio.Promise.await task_seen;Eio.Fiber.yield ();
   ignore (apply_ready state results seen);exact_task state task_id;
   check bool "unreturned reaction source stays pending" true ((view state).fv_reactions.fo_state=Projection.Followup_pending);
+  check bool "held actual source remains unfinished" true
+    (Option.bind (Ui.current_ask_followup state) Projection.followup_completion=None);
   Masc_tui_message_input.insert state.msg_input "new input while follow-up is observed";
   Eio.Promise.resolve release ();Eio.Promise.await left;
   check bool "terminal retained without taking shared notification" true (terminal state results seen=Ok ());
+  Ui.retire_ask_followup_read state;
+  check bool "retiring completed actual read preserves its original terminal cause" true
+    (Option.bind (Ui.current_ask_followup state) Projection.followup_completion=Some (Ok ()));
   check bool "shared queue stayed physically occupied" true (Eio.Stream.length shared=1);
   check bool "all actual frame facts and received clocks keep publication order" true (List.rev !parts=List.rev !seen);
   check bool "physical job cleanup releases only its registration" true
@@ -174,7 +181,13 @@ let test_failure_and_reopened_scope_keep_original_facts () = with_answer @@ fun 
       | Linked_task _ -> Eio.Promise.resolve task_resolve () | Tool_results _ -> ()));
   Eio.Promise.await task_seen;Eio.Fiber.yield ();ignore (apply_ready state results seen);exact_task state task_id;
   Eio.Promise.resolve release ();Eio.Promise.await left;
-  check bool "failed aggregate is retained beside actual partial fact" true (Result.is_error (terminal state results seen));
+  (match terminal state results seen with
+   | Error (Projection.Followup_read_failed _) -> ()
+   | Ok () | Error (Followup_cancelled | Followup_not_started _ | Followup_withdrawn) -> fail "actual disconnect lost its failed cause");
+  Ui.retire_ask_followup_read state;
+  (match Option.bind (Ui.current_ask_followup state) Projection.followup_completion with
+   | Some (Error (Projection.Followup_read_failed _)) -> ()
+   | Some _ | None -> fail "retirement relabelled the actual failed read");
   exact_task state task_id;
   check bool "unreceived reaction is unconfirmed, never observed empty" true
     ((view state).fv_reactions.fo_state=Projection.Followup_unconfirmed);
@@ -183,6 +196,8 @@ let test_failure_and_reopened_scope_keep_original_facts () = with_answer @@ fun 
     (actual_read base ask resolution ~parts:(ref []) ~before_source:(fun _ -> ()));
   Eio.Promise.await old_left;
   let held=Results.take_ready results in Ui.retire_ask_followup_read state;
+  check bool "active original read retirement retains a typed withdrawal" true
+    (Option.bind (Ui.current_ask_followup state) Projection.followup_completion=Some (Error Projection.Followup_withdrawn));
   let fresh,owner=begin_read state and fresh_left,fresh_resolve=Eio.Promise.create () in
   launch state results fresh owner ~released:(fun () -> ignore (Eio.Promise.try_resolve fresh_resolve ()))
     (actual_read base ask resolution ~parts:(ref []) ~before_source:(fun _ -> ()));
@@ -212,8 +227,9 @@ let test_session_close_and_unstarted_preserve_resources () = with_answer @@ fun 
   let request,submission=begin_read state in
   launch state results request submission ~released:(fun () -> ())
     (actual_read base ask resolution ~parts:(ref []) ~before_source:(fun _ -> ()));
-  check bool "missing actual turn switch retains an unstarted read failure" true
-    (Result.is_error (terminal state results (ref [])));
+  (match terminal state results (ref []) with
+   | Error (Projection.Followup_not_started _) -> ()
+   | Ok () | Error (Followup_read_failed _ | Followup_cancelled | Followup_withdrawn) -> fail "missing switch was not retained as an unstarted attempt");
   Results.close results;
   Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
   let results=Results.create () in
@@ -259,8 +275,9 @@ let test_actual_followup_cancellation_settles_after_cleanup () = with_answer @@ 
   Eio.Promise.resolve cleanup_release ();Eio.Promise.await left;
   let held=Results.take_ready results in
   let cancelled=List.find_map (fun (ready : Protocol.async_msg Results.ready) -> match apply state ready.message with
-    | Terminal (Error _) -> Some ready.message
-    | Part _ -> None | Terminal (Ok ()) -> fail "actual cancellation became success"
+    | Terminal (Error Projection.Followup_cancelled) -> Some ready.message
+    | Part _ -> None
+    | Terminal (Ok () | Error (Followup_read_failed _ | Followup_not_started _ | Followup_withdrawn)) -> fail "actual cancellation lost its typed cause"
     | Refused -> fail "current cancelled original read was refused") held in
   let cancelled=match cancelled with Some message -> message | None -> fail "cancelled worker left an orphaned read ticket" in
   check bool "cancelled original request settled and actual job registration released" true
@@ -293,7 +310,8 @@ let test_cancelled_dispatch_retains_unstarted_original_observation () = with_ans
     false
   with Eio.Cancel.Cancelled Stop_before_dispatch -> true in
   check bool "original pre-dispatch cancellation still propagates" true propagated;
-  check bool "unstarted original read retains a terminal observation" true (Result.is_error (terminal state results (ref [])));
+  check bool "pre-dispatch cancellation retains its actual cancellation cause" true
+    (terminal state results (ref [])=Error Projection.Followup_cancelled);
   check bool "unstarted cancellation leaves no pending ticket or worker metadata" true
     (not (Ui.Snapshot_read.in_flight state.ask_followup_read) && state.ask_followup_cancel=None
      && state.workspace_observation_cancellations=[]);
@@ -321,7 +339,7 @@ let observe_actual_answer state base ask resolution =
     (fun (event,_) -> match Ui.take_ask_followup_event state request submission event with
       | Some (Ok _) -> () | Some (Error detail) -> fail detail | None -> fail "actual answer source refused") in
   check bool "actual canonical follow-up completed" true
-    (Ui.finish_ask_followup_read state request submission result=Some (Ok ()))
+    (Ui.finish_ask_followup_read state request submission (Result.map_error (fun detail -> Projection.Followup_read_failed detail) result)=Some (Ok ()))
 let launch_task_observation state results request deliver read =
   let envelope=Protocol.capture_workspace_message state in
   Results.launch ~key:request.Ui.tcr_job ~observation:true state ~results

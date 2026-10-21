@@ -502,8 +502,9 @@ count is drawn beyond the available space.
 
 Answer follow-up reads show the reason when interrupted or incomplete alongside
 any received source observations. A cancelled read releases its original reading
-state when its outcome is admitted, allowing the next read to start. Original
-Task status and stored evidence remain independently observed.
+state when its outcome is admitted, allowing the next read to start. Failed,
+cancelled, unstarted and withdrawn reads retain distinct outcomes; leaving a
+completed reading preserves that original outcome. Original Task status and stored evidence remain independently observed.
 
 ## Work / Task Review
 

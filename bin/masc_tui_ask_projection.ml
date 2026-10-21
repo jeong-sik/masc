@@ -56,6 +56,24 @@ let answer_feedback_to_json feedback =
       | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference);
     "recording", `String recording; "delivery", delivery]
 
+type followup_failure =
+  | Followup_read_failed of string
+  | Followup_cancelled
+  | Followup_not_started of string
+  | Followup_withdrawn
+type followup_result = (unit, followup_failure) result
+let followup_failure_text = function
+  | Followup_read_failed detail -> detail
+  | Followup_cancelled -> "Answer follow-up observation cancelled; any received sources are retained."
+  | Followup_not_started detail -> "Answer follow-up observation did not start: " ^ detail
+  | Followup_withdrawn -> "Answer follow-up observation withdrawn; any received sources are retained."
+let followup_result_to_json result =
+  let state=match result with
+    | Ok () -> "complete" | Error (Followup_read_failed _) -> "failed"
+    | Error Followup_cancelled -> "cancelled" | Error (Followup_not_started _) -> "not_started"
+    | Error Followup_withdrawn -> "withdrawn" in
+  `Assoc ["state",`String state]
+
 type followup_source_state = Followup_pending | Followup_received | Followup_unconfirmed
 type 'a followup_observation = {
   fo_value : 'a option;
@@ -67,7 +85,7 @@ type followup_view = {
   fv_tools : Decode.ask_tool_actions followup_observation;
   fv_task : Decode.ask_linked_task followup_observation;
 }
-type followup_phase = Followup_receiving | Followup_finished
+type followup_phase = Followup_receiving | Followup_finished of followup_result
 type followup = {
   fu_view : followup_view;
   fu_stream : Decode.ask_followup_stream;
@@ -146,7 +164,7 @@ let merge_task (fresh : Decode.ask_linked_task) (prior : Decode.ask_linked_task 
 
 let observe_followup reading event =
   match reading.fu_phase with
-  | Followup_finished -> Error "answer follow-up read has already finished"
+  | Followup_finished _ -> Error "answer follow-up read has already finished"
   | Followup_receiving ->
     Result.bind (Decode.accept_ask_followup_event reading.fu_stream event) (fun stream ->
       let view = reading.fu_view in
@@ -171,16 +189,21 @@ let observe_followup reading event =
         Result.map (fun view -> {reading with
           fu_view={view with fv_identity=Some identity};fu_stream=stream}) updated)
 
-let finish_followup reading result =
-  let result = match result with
-    | Error _ as error -> error
-    | Ok () -> Decode.finish_ask_followup_stream reading.fu_stream in
-  let finish source = {source with fo_state=(match source.fo_state with
-    | Followup_pending -> Followup_unconfirmed
-    | (Followup_received | Followup_unconfirmed) as state -> state)} in
-  let view = reading.fu_view in
-  {reading with fu_phase=Followup_finished;fu_view={view with
-    fv_reactions=finish view.fv_reactions;fv_tools=finish view.fv_tools;fv_task=finish view.fv_task}}, result
+let followup_completion reading = match reading.fu_phase with
+  | Followup_receiving -> None | Followup_finished result -> Some result
+let finish_followup reading result = match reading.fu_phase with
+  | Followup_finished prior -> reading,prior
+  | Followup_receiving ->
+    let result = match result with
+      | Error _ as error -> error
+      | Ok () -> Decode.finish_ask_followup_stream reading.fu_stream
+          |> Result.map_error (fun detail -> Followup_read_failed detail) in
+    let finish source = {source with fo_state=(match source.fo_state with
+      | Followup_pending -> Followup_unconfirmed
+      | (Followup_received | Followup_unconfirmed) as state -> state)} in
+    let view = reading.fu_view in
+    {reading with fu_phase=Followup_finished result;fu_view={view with
+      fv_reactions=finish view.fv_reactions;fv_tools=finish view.fv_tools;fv_task=finish view.fv_task}}, result
 
 let followup_to_json reading =
   let view = reading.fu_view in
@@ -226,7 +249,8 @@ let followup_to_json reading =
         "phase", `String (Masc_domain.task_status_to_string value.akt_status);
         "location", `String (match value.akt_location with Ask_task_backlog -> "backlog" | Ask_task_archive -> "archive");
         "observed_at", `Float value.akt_observed_at] in
-  `Assoc ["identity", (match view.fv_identity with None -> `Null | Some identity ->
+  `Assoc ["completion", (match followup_completion reading with None -> `Null | Some result -> followup_result_to_json result);
+    "identity", (match view.fv_identity with None -> `Null | Some identity ->
       `Assoc ["answered_at", `Float identity.afi_answered_at;"stimulus_id", `String identity.afi_stimulus_id]);
     "reaction_evidence", source reactions view.fv_reactions;
     "tool_actions", source tools view.fv_tools;"linked_task", source task view.fv_task]

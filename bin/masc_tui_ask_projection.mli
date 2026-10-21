@@ -41,6 +41,17 @@ val answer_feedback_to_json : answer_feedback -> Yojson.Safe.t
 (** Original request identities and typed recording/delivery facts only.
     Choice/free-text bodies and server error details are not logged. *)
 
+type followup_failure =
+  | Followup_read_failed of string
+  | Followup_cancelled
+  | Followup_not_started of string
+  | Followup_withdrawn
+type followup_result = (unit, followup_failure) result
+val followup_failure_text : followup_failure -> string
+val followup_result_to_json : followup_result -> Yojson.Safe.t
+(** Closed terminal cause only; error details and question/answer bodies are
+    excluded. Cancellation does not assert worker entry or physical cleanup. *)
+
 type followup_source_state = Followup_pending | Followup_received | Followup_unconfirmed
 type 'a followup_observation = private {
   fo_value : 'a option;
@@ -60,7 +71,7 @@ val begin_followup : previous:followup option -> followup
 val followup_view : followup -> followup_view
 val observe_followup :
   followup -> Masc.Tui_decode_asks.ask_followup_event -> (followup, string) result
-val finish_followup : followup -> (unit, string) result -> followup * (unit, string) result
+val finish_followup : followup -> followup_result -> followup * followup_result
 (** One strict stream per read. Original answer and linked Task identities cannot
     change across refreshes. A failed/incomplete transport retains admitted
     sources; only unfinished sources become unconfirmed. Beginning a new read
@@ -68,6 +79,9 @@ val finish_followup : followup -> (unit, string) result -> followup * (unit, str
     still need prior positive clocks: its merged observation is current only
     when the latest source confirms every retained clock. Source receipt and
     complete transport do not recertify earlier facts. *)
+val followup_completion : followup -> followup_result option
+(** None is an unfinished current read. A terminal value is immutable: later
+    retirement cannot relabel a completed/failed/cancelled/unstarted attempt. *)
 val followup_to_json : followup -> Yojson.Safe.t
 (** Observation states, canonical identities and execution facts, excluding
     question/answer bodies, Task descriptions and error details. *)

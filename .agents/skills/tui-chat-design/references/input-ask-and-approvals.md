@@ -90,6 +90,19 @@
   부분 사실은 세션이 닫힐 때까지 보관한다. 늦은 part나 종단이 끝난 등록·세션을 다시
   열지 못한다. 새 cap·timer·retry·도구 제한을 만들지 않고 대기 제거를 속도 실측으로
   환산하지 않는다. wire frame은 서버의 typed formatter 하나에서 만든다.
+- 후속 읽기의 종단 원인은 `followup_result`의 실패·취소·미시작·철회로 구분한다.
+  실제 strict frame 완료를 확인한 성공만 complete이고, 현재 읽기에 종단이 없으면 unfinished다.
+  최초 종단은 불변이며 나중의 화면 철회가 성공·실패·취소 원인을 바꾸지 않는다. 새 읽기는
+  이전 source 사실을 보관하되 새 미완료 수명을 가진다. 미시작은 switch 부재처럼 진입하지
+  않았다는 근거가 있는 경우만 쓰며 dispatch 예외나 취소만으로 worker 진입을 추정하지 않는다.
+  structured trace는 원래 submission 시작 시각·질문·요청 번호에 결속해 started,
+  worker_entered, producer_returned/cancelled, cancel_requested/registration_released와
+  UI finished를 분리한다. source_processed의 ui_admitted와 source_applied를 구분하고
+  observed_ns는 실제 기록 시각, admitted_ns는 UI에서 처리한 경우에만 남긴다.
+  completion은 typed 원인만 직렬화하며 오류 본문·답변은 로그에 넣지 않는다. 같은 요청의
+  producer와 UI 행을 별개 시도로 세지 않고, 종단 없는 물리/논리 구간을 unfinished로 보존한다.
+  clock/trace/source serialization·오류 formatter 비용도 실측 분모에 남긴다. Task 완료·paint나
+  실제 비교 실측으로 바꾸어 주장하지 않는다.
 - Approvals의 `T`는 마지막으로 답변한 원래 Ask의 canonical answer identity와 Task 링크로
   공용 원본 Task inspector를 연다. 생성 요청과 Ask 출처는 닫힌 타입으로 구분한다.
   Ask에는 생성 영수증·생성 조회가 없으며 현재 Keeper나 전역 Task 목록을 빌리지 않는다.

@@ -14126,17 +14126,51 @@ let current_surface_needs state =
       (not (Masc_tui_render.acting_pane_suppressed state))
     state.view
 
-let log_ask_followup request submission ~sources ~phase ~source ~received_ns ~outcome =
-  let facts = Option.map Masc_tui_ask_projection.followup_to_json sources in
+type ask_followup_trace =
+  | Followup_read_started
+  | Followup_worker_entered
+  | Followup_source_applied of Masc.Tui_decode_asks.ask_followup_event * int64 * bool
+  | Followup_producer_returned of Ask.followup_result
+  | Followup_producer_cancelled
+  | Followup_job_event of Masc_tui_workspace_job.event
+  | Followup_ui_settled of Ask.followup_result
+
+let log_ask_followup request submission ~sources event =
+  let phase,source,received_ns,source_applied,completion=match event with
+    | Followup_read_started -> "started",None,None,None,None
+    | Followup_worker_entered -> "worker_entered",None,None,None,None
+    | Followup_producer_returned result -> "producer_returned",None,None,None,Some result
+    | Followup_producer_cancelled -> "cancelled",None,None,None,Some (Error Ask.Followup_cancelled)
+    | Followup_job_event Masc_tui_workspace_job.Cancellation_requested -> "cancel_requested",None,None,None,None
+    | Followup_job_event Registration_released -> "registration_released",None,None,None,None
+    | Followup_ui_settled result -> "finished",None,None,None,Some result
+    | Followup_source_applied (source,received_ns,admitted) ->
+      let source=match source with
+        | Masc.Tui_decode_asks.Ask_followup_started _ -> "started"
+        | Ask_followup_completed _ -> "complete"
+        | Ask_followup_source (_,Ask_followup_reactions _) -> "reaction_evidence"
+        | Ask_followup_source (_,Ask_followup_tools _) -> "tool_actions"
+        | Ask_followup_source (_,Ask_followup_task _) -> "linked_task" in
+      "source_processed",Some source,Some received_ns,Some admitted,None in
+  let ui_admitted=match event with
+    | Followup_source_applied _ | Followup_ui_settled _ -> true
+    | Followup_read_started | Followup_worker_entered | Followup_producer_returned _
+    | Followup_producer_cancelled | Followup_job_event _ -> false in
+  let observed_ns=Mtime_clock.elapsed_ns () in
+  let facts = Option.map Ask.followup_to_json sources in
   Log.Transport.info "tui_ask_followup=%s" (Yojson.Safe.to_string (`Assoc [
     "asker", Masc_tui_ask_projection.asker_to_json submission.as_asker;"ask_id", `String submission.as_ask_id;
     "request", `Int (Snapshot_read.request_id request);
+    "submission_started_ns",`Intlit (Int64.to_string submission.as_started_ns);
     "question_source_turn_ref", (match submission.as_source_turn_ref with
       | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference);
     "phase", `String phase;"source", (match source with None -> `Null | Some source -> `String source);
     "received_ns", (match received_ns with None -> `Null | Some ns -> `Intlit (Int64.to_string ns));
-    "admitted_ns", `Intlit (Int64.to_string (Mtime_clock.elapsed_ns ()));
-    "outcome", `String outcome;
+    "observed_ns",`Intlit (Int64.to_string observed_ns);
+    "ui_admitted",(if ui_admitted then `Bool true else `Null);
+    "source_applied",(match source_applied with None -> `Null | Some value -> `Bool value);
+    "admitted_ns",(if ui_admitted then `Intlit (Int64.to_string observed_ns) else `Null);
+    "completion",(match completion with None -> `Null | Some result -> Ask.followup_result_to_json result);
     "sources", (match facts with None -> `Null | Some facts -> facts)]))
 
 (* The reads a full refresh tick sends beside its surface bundle. They go out
@@ -14156,26 +14190,32 @@ let launch_ask_followup_load state ~mailbox =
           ~detail:"answer follow-up observation superseded";
         let finish ()=Masc_tui_types.finish_ask_followup_worker state request in
         log_ask_followup request submission ~sources:(Masc_tui_types.current_ask_followup state)
-          ~phase:"started" ~source:None ~received_ns:None ~outcome:"pending";
+          Followup_read_started;
         Masc_tui_workspace_result.launch_observation state ~results:mailbox.workspace_results
-          ~on_not_run:finish ~boundary_error:Fun.id
-          ~cancelled:(envelope (Ask_followup_finished (request,submission,
-            Error "Answer follow-up observation cancelled; any received sources are retained.")))
+          ~on_not_run:finish ~boundary_error:(fun detail -> Ask.Followup_read_failed detail)
+          ~observe_job:(fun event -> log_ask_followup request submission ~sources:None (Followup_job_event event))
+          ~not_started:(fun detail -> Ask.Followup_not_started detail)
+          ~cancelled:(envelope (Ask_followup_finished (request,submission,Error Ask.Followup_cancelled)))
           ~progress:(fun (event,received_ns) -> envelope (Ask_followup_observed (request,submission,event,received_ns)))
           ~deliver:(fun result -> envelope (Ask_followup_finished (request,submission,result)))
           (fun publish -> Fun.protect ~finally:finish (fun () ->
-            match clock with
-            | None -> Error "Eio clock is unavailable for answer follow-up observation"
-            | Some clock ->
-              try Eio.Fiber.first
+            log_ask_followup request submission ~sources:None Followup_worker_entered;
+            let result=try match clock with
+              | None -> Error (Ask.Followup_read_failed "Eio clock is unavailable for answer follow-up observation")
+              | Some clock -> Eio.Fiber.first
                 (fun () -> Masc_tui_http.observe_keeper_ask_followup ~clock ~expected_workspace
                   ~keeper_name ~ask_id:submission.as_ask_id ~host ~port
-                  ~on_event:(fun event -> publish (event,Mtime_clock.elapsed_ns ())))
-                (fun () -> Error (Eio.Promise.await superseded))
-              with Eio.Cancel.Cancelled _ as exn ->
-                log_ask_followup request submission ~sources:None ~phase:"cancelled" ~source:None
-                  ~received_ns:None ~outcome:"cancelled";
-                raise exn))
+                  ~on_event:(fun event -> publish (event,Mtime_clock.elapsed_ns ()))
+                  |> Result.map_error (fun detail -> Ask.Followup_read_failed detail))
+                (fun () -> let _detail=Eio.Promise.await superseded in Error Ask.Followup_withdrawn)
+              with
+              | Eio.Cancel.Cancelled _ as exn ->
+                let backtrace=Printexc.get_raw_backtrace () in
+                log_ask_followup request submission ~sources:None Followup_producer_cancelled;
+                Printexc.raise_with_backtrace exn backtrace
+              | exn -> Error (Ask.Followup_read_failed (Printexc.to_string exn)) in
+            log_ask_followup request submission ~sources:None (Followup_producer_returned result);
+            result))
     | None, _ | Some _, None -> ()
 
 let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =
@@ -19718,21 +19758,13 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         result approvals
   | Ask_followup_observed (request, submission, event, received_ns) ->
       Option.iter (fun result ->
-        let source = match event with
-          | Masc.Tui_decode_asks.Ask_followup_started _ -> "started"
-          | Ask_followup_completed _ -> "complete"
-          | Ask_followup_source (_, Ask_followup_reactions _) -> "reaction_evidence"
-          | Ask_followup_source (_, Ask_followup_tools _) -> "tool_actions"
-          | Ask_followup_source (_, Ask_followup_task _) -> "linked_task" in
         log_ask_followup request submission ~sources:(Masc_tui_types.current_ask_followup state)
-          ~phase:"source_admitted" ~source:(Some source)
-          ~received_ns:(Some received_ns) ~outcome:(match result with Ok _ -> "observed" | Error _ -> "refused"))
+          (Followup_source_applied (event,received_ns,Result.is_ok result)))
         (Masc_tui_types.take_ask_followup_event state request submission event)
   | Ask_followup_finished (request, submission, result) ->
       Option.iter (fun result ->
         log_ask_followup request submission ~sources:(Masc_tui_types.current_ask_followup state)
-          ~phase:"finished" ~source:None
-          ~received_ns:None ~outcome:(match result with Ok () -> "complete" | Error _ -> "unconfirmed"))
+          (Followup_ui_settled result))
         (Masc_tui_types.finish_ask_followup_read state request submission result)
   | Ask_answer_receipt_ready submission ->
       apply_ask_answer_receipt state submission ~mailbox

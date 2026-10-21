@@ -387,7 +387,7 @@ let draw_ask_answer_feedback buf cols (state : state) =
     (match state.ask_followup_error with
      | None -> ()
      | Some detail -> box_wrapped_field buf cols ~head:"  " ~style:(Theme.warn ())
-         ("Follow-up read incomplete · completed sources retained\n" ^ detail));
+         ("Follow-up read incomplete · completed sources retained\n" ^ Masc_tui_ask_projection.followup_failure_text detail));
     Option.iter (fun detail ->
       box_line buf cols ("  " ^ Ansi.dim ^ Terminal_text.single_line detail ^ Ansi.reset)) detail)
     (Masc_tui_types.current_ask_answer_feedback state)

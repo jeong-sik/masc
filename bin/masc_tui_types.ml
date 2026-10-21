@@ -10636,9 +10636,6 @@ let take_task_dispatch_completion state request =
     | Not_started | Reserved | Preparing | Sending -> None
     | Completed completion ->
       state.task_dispatch_requests <- List.filter ((!=) request) state.task_dispatch_requests;
-      (match completion.outcome with
-       | Created _ -> state.retained_task_dispatch_requests <- List.filter ((!=) request) state.retained_task_dispatch_requests
-       | Not_sent _ | Server_error _ | Unconfirmed _ -> ());
       Some completion.outcome
 
 let restore_task_dispatch_input state request =
@@ -10654,7 +10651,7 @@ let restore_task_dispatch_input state request =
     true
   end else false
 
-let task_dispatch_eligible state ~keeper request =
+let task_dispatch_matches state ~keeper request =
     let intent = Masc_tui_task_dispatch.intent request.tdr_dispatch in
     String.equal intent.keeper keeper
     && (match intent.workspace with
@@ -10663,12 +10660,15 @@ let task_dispatch_eligible state ~keeper request =
             && server_workspace_matches ~expected:(Some expected)
               (match state.server_identity with Some id -> Ok id | None -> Error "unread")
         | None -> request.tdr_authority = state.workspace_authority)
+
+let task_dispatch_recoverable state ~keeper request =
+    task_dispatch_matches state ~keeper request
     && match Masc_tui_task_dispatch.progress request.tdr_dispatch with
        | Completed {outcome=(Not_sent _ | Server_error _ | Unconfirmed _);_} -> true
        | Not_started | Reserved | Preparing | Sending | Completed {outcome=Created _;_} -> false
 
 let retained_task_dispatch state ~keeper =
-  List.find_opt (task_dispatch_eligible state ~keeper) state.retained_task_dispatch_requests
+  List.find_opt (task_dispatch_recoverable state ~keeper) state.retained_task_dispatch_requests
 
 let recover_task_dispatch_input state ~keeper =
   match retained_task_dispatch state ~keeper with
@@ -10716,8 +10716,11 @@ let close_task_inspection state ~reason =
   state.task_inspection_reader <- None
 
 let task_creation_inspectable state ~keeper =
-  List.filter (fun original -> task_dispatch_eligible state ~keeper original
-    && Option.is_some (Masc_tui_task_dispatch.intent original.tdr_dispatch).workspace)
+  List.filter (fun original -> task_dispatch_matches state ~keeper original
+    && Option.is_some (Masc_tui_task_dispatch.intent original.tdr_dispatch).workspace
+    && match Masc_tui_task_dispatch.progress original.tdr_dispatch with
+       | Completed _ -> true
+       | Not_started | Reserved | Preparing | Sending -> false)
     state.retained_task_dispatch_requests
 
 let select_task_creation_inspection state original =

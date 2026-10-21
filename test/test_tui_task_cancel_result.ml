@@ -487,6 +487,44 @@ let recorded original task_id = match Creation_read.observation original.tdr_ins
     check string "exact actual created Task observed" task_id receipt.task_id
   | _ -> fail "actual original creation fact was not retained"
 
+let test_successful_creation_inspection_without_recovery env () = Eio.Switch.run @@ fun sw ->
+  let clock=Eio.Stdenv.clock env in
+  with_server ~clock ~sw ~owner:"inspect-created" @@ fun base config workspace _original call ->
+  Eio_context.with_turn_switch sw @@ fun () ->
+  let state=creation_state base workspace in
+  let intent=creation_intent ~workspace ~original:"/task inspect successful\noriginal body"
+    ~title:"inspect successful" ~body:"original body" in
+  let original=begin_task_dispatch state intent in
+  check bool "unsettled creation is not inspectable" false
+    (open_task_creation_inspection state ~keeper:intent.keeper);
+  Dispatch.launch original.tdr_dispatch ~prepare:(fun () -> Ok "original-session")
+    ~send:(send_creation call);
+  await_task original;
+  let task_id=match take_task_dispatch_completion state original with
+    | Some (Dispatch.Created {task_id;_}) -> task_id
+    | _ -> fail "actual successful creation was not received" in
+  let before=Masc.Workspace.get_tasks_raw config in
+  Input.insert state.msg_input "keep this new draft";
+  check bool "successful creation cannot restore a resubmittable command" true
+    (recover_task_dispatch_input state ~keeper:intent.keeper=None);
+  check bool "successful original remains inspectable after receipt consumption" true
+    (open_task_creation_inspection state ~keeper:intent.keeper);
+  let request=begin_inspection state and results=Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  launch_inspection results state call request;
+  check bool "exact successful creation fact admitted" true
+    (admit_inspection state (owned_message results));
+  recorded original task_id;
+  check string "read-only successful inspection preserves the new draft"
+    "keep this new draft" (Input.contents state.msg_input);
+  check bool "inspection cannot create another Task or replay the receipt" true
+    (before=Masc.Workspace.get_tasks_raw config && take_task_dispatch_completion state original=None);
+  check bool "another Keeper cannot borrow this completed intent" false
+    (open_task_creation_inspection state ~keeper:"another-keeper");
+  state.workspace_identity <- Workspace_identity_unread;
+  check bool "unconfirmed workspace cannot reopen completed inspection" false
+    (open_task_creation_inspection state ~keeper:intent.keeper)
+
 let test_original_inspection_and_refused_actual_reply env () = Eio.Switch.run @@ fun sw ->
   let clock=Eio.Stdenv.clock env in
   with_server ~clock ~sw ~owner:"inspect-original" @@ fun base config workspace _original call ->
@@ -913,6 +951,8 @@ let () = Eio_main.run @@ fun env ->
           (test_creation_receipt_after_lost_reply_and_duplicate_request env);
         test_case "actual creation refusals and corrupt primary never borrow recovery authority" `Quick
           (test_creation_receipt_refusals_and_corrupt_primary env);
+        test_case "successful actual creation stays inspectable without recovery or replay" `Quick
+          (test_successful_creation_inspection_without_recovery env);
         test_case "original actual creation inspection and refused cross-request reply preserve input" `Quick
           (test_original_inspection_and_refused_actual_reply env);
         test_case "actual receipt inspection survives reopen/history and refuses foreign workspace" `Quick

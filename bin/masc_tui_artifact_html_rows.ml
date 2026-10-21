@@ -18,9 +18,13 @@ let render ~width (projection : Html.t) =
         let safe = Ansi.Terminal_text.single_line line in
         if safe = "" then [""] else Layout.split_cells ~max_cells:width safe)
       |> style Ansi.Ansi.dim
-    | List_item (depth,value) ->
+    | (List_item (depth,value) | List_continuation (depth,value)) as item ->
       let indent = String.make (min (max 0 (width - 2)) (depth * 2)) ' ' in
-      let prefix = indent ^ "• " in
+      let marker = match item with
+        | Html.List_item _ -> "• "
+        | List_continuation _ -> "  "
+        | Paragraph _ | Heading _ | Preformatted _ | Table _ | Image _ -> "" in
+      let prefix = indent ^ marker in
       let continuation = String.make (Layout.display_width prefix) ' ' in
       Layout.wrap_words ~max_cells:(max 1 (width - Layout.display_width prefix)) (plain value)
       |> List.mapi (fun index row -> (if index=0 then prefix else continuation) ^ row)

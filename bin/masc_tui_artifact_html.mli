@@ -8,6 +8,7 @@ type block =
   | Heading of int * string
   | Preformatted of string
   | List_item of int * string
+  | List_continuation of int * string
   | Table of cell list list
   | Image of image
 type t = private { blocks : block list; images : image list }

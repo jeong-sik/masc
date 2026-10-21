@@ -8,6 +8,7 @@ type block =
   | Heading of int * string
   | Preformatted of string
   | List_item of int * string
+  | List_continuation of int * string
   | Table of cell list list
   | Image of image
 
@@ -21,6 +22,13 @@ let ignored = function
 let hidden attributes = List.mem_assoc "hidden" attributes
   || List.assoc_opt "aria-hidden" attributes = Some "true"
 
+let block_boundary = function
+  | "address" | "article" | "aside" | "blockquote" | "dd" | "div" | "dl" | "dt"
+  | "figcaption" | "figure" | "footer" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+  | "header" | "hr" | "li" | "main" | "nav" | "ol" | "p" | "section" | "table"
+  | "tbody" | "td" | "th" | "thead" | "tr" | "ul" -> true
+  | _ -> false
+
 let rec text = function
   | Html.Text value -> value
   | Element {name;attributes;children;_} ->
@@ -31,7 +39,7 @@ let rec text = function
       let body = String.concat "" (List.map text children) in
       match name, List.assoc_opt "href" attributes with
       | "a", Some href -> body ^ " (" ^ href ^ ")"
-      | _ -> body
+      | _ -> if block_boundary name then "\n" ^ body ^ "\n" else body
 
 let words value =
   let out = Buffer.create (String.length value) in
@@ -113,11 +121,13 @@ let rec flow depth nodes =
           | "svg" | "canvas" -> [Image {label="Graphic";
               source=Unavailable "inline graphic markup; use source or the web report"}]
           | "li" ->
-            let inline, nested = List.partition (function
-              | Html.Element {name=("ul"|"ol");_} -> false
-              | Html.Text _ | Element _ -> true) children in
-            List_item (depth, words (String.concat "" (List.map text inline)))
-              :: flow (depth + 1) nested
+            let first = ref true in
+            flow (depth + 1) children |> List.map (function
+              | Paragraph value ->
+                if !first then begin first := false; List_item (depth,value) end
+                else List_continuation (depth,value)
+              | (Heading _ | Preformatted _ | List_item _ | List_continuation _
+                | Table _ | Image _) as block -> block)
           | "table" -> [Table (table_rows children)]
           | _ -> flow depth children in
         List.iter emit nested

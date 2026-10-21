@@ -484,30 +484,45 @@ let admit_task_observation state = function
      | Original_task_evidence_done (request,result) -> Ui.complete_original_evidence_inspection state request result
      | _ -> fail "original Task inspection changed message kind")
   | _ -> fail "Task inspection lost its captured read authority"
-let actual_task_read config request =
+let actual_task_read ?reply_task_id config request =
   let ticket=match request.Ui.tcr_query with Ui.Original_task_query ticket -> ticket
     | Creation_query _ | Original_history_query _ | Original_evidence_query _ -> fail "Task query changed kind" in
   let task_id=Task_read.task_request_key ticket in
-  let status,json=Server_dashboard_task_detail.inspect ~config ~task_id:(Some task_id)
+  let status,json=Server_dashboard_task_detail.inspect ~config ~task_id:(Some (Option.value ~default:task_id reply_task_id))
     |> Server_dashboard_task_detail.inspection_response in
   match status with
   | `OK -> Task_decode.observation ~task_id json
     |> Result.map_error (fun detail -> Task_read.Invalid_reply detail)
     |> fun result -> Result.bind result (Task_read.prepare_task ~task_id)
   | `Bad_request | `Not_found | `Service_unavailable -> Error (Task_read.Read_failed (Yojson.Safe.to_string json))
-let actual_history_read config request =
+let actual_history_read ?reply_task_id config request =
   let ticket=match request.Ui.tcr_query with Ui.Original_history_query ticket -> ticket
     | Creation_query _ | Original_task_query _ | Original_evidence_query _ -> fail "history query changed kind" in
   let page=Task_read.history_page_request ticket in
-  let status,json=Server_dashboard_task_history_page.read ~config ~task_id:(Some page.hr_task_id)
+  let status,json=Server_dashboard_task_history_page.read ~config ~task_id:(Some (Option.value ~default:page.hr_task_id reply_task_id))
     ~limit:(Some (string_of_int page.hr_limit)) ~cursor:page.hr_cursor in
   match status with
   | `OK -> Task_decode.history_page ~request:page json
     |> Result.map_error (fun detail -> Task_read.Invalid_reply detail) |> Result.map Task_read.prepare_history
   | `Bad_request | `Conflict | `Service_unavailable -> Error (Task_read.Read_failed (Yojson.Safe.to_string json))
-let test_answered_ask_opens_actual_task_history_evidence () = with_answer @@ fun base config ask resolution task_id state ->
-  Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
-  observe_actual_answer state base ask resolution;
+let unrelated_inspection_task config =
+  match Workspace_task_create.add_task_with_result config ~created_by:"other-inspection-source"
+    ~title:"unrelated original source" ~priority:3 ~description:"different actual Task reply" with
+  | Ok created -> created.task_id
+  | Error error -> fail (Workspace_task_create.add_task_error_to_string error)
+let evidence_ticket request = match request.Ui.tcr_query with
+  | Ui.Original_evidence_query ticket -> ticket
+  | Creation_query _ | Original_task_query _ | Original_history_query _ -> fail "evidence query changed kind"
+let actual_evidence_read config request =
+  let ticket=evidence_ticket request in
+  let task_id=Task_read.evidence_task_id ticket and verification_id=Task_read.evidence_verification_id ticket in
+  Server_routes_http_routes_verification.For_testing.operator_evidence_json ~config ~operator_id:"ask-task-reader"
+    ~task_id ~verification_id |> Result.map_error (fun detail -> Task_read.Read_failed detail)
+  |> fun result -> Result.bind result (fun json ->
+    Masc.Tui_decode.decode_verification_evidence_for_request ~task_id ~verification_id (`Assoc ["ok",`Bool true;"result",json])
+    |> Result.map_error (fun detail -> Task_read.Invalid_reply detail)
+    |> fun result -> Result.bind result (Task_read.prepare_evidence ~task_id ~verification_id))
+let submit_original_inspection_task config task_id =
   let transition action notes = match Masc.Workspace.transition_r config ~agent_name:"proof-worker" ~task_id ~action ~notes
     ~prepare_verification_request:(fun ~task ~assignee ~verification_id ~claim ->
       Masc.Verification_protocol.create_submit_request ~config ~task ~assignee ~verification_id ~claim) () with
@@ -515,10 +530,15 @@ let test_answered_ask_opens_actual_task_history_evidence () = with_answer @@ fun
   transition Masc_domain.Claim "claim original answered Task";
   transition Masc_domain.Start "start original answered Task";
   transition Masc_domain.Submit_for_verification "captured proof from original answered Task";
-  let verification_id=match (List.find (fun (task : Masc_domain.task) -> task.id=task_id)
+  match (List.find (fun (task : Masc_domain.task) -> task.id=task_id)
       (Masc.Workspace.get_tasks_raw config)).task_status with
-    | AwaitingVerification value -> value.verification_id
-    | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ -> fail "actual Task did not submit" in
+  | AwaitingVerification value -> value.verification_id
+  | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ -> fail "actual Task did not submit"
+let test_answered_ask_opens_actual_task_history_evidence () = with_answer @@ fun base config ask resolution task_id state ->
+  Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
+  observe_actual_answer state base ask resolution;
+  let verification_id=submit_original_inspection_task config task_id in
+  let foreign_task=unrelated_inspection_task config in
   (match Masc.Workspace.commit_verdict_r config ~authority:(Masc_domain.Human_operator {operator_id="ask-task-reader"})
     ~task_id ~verification_id ~verdict:Masc_domain.Verdict_approved ~notes:"actual private fixture verdict" () with
    | Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error));
@@ -550,26 +570,88 @@ let test_answered_ask_opens_actual_task_history_evidence () = with_answer @@ fun
     | Ready value -> value | _ -> fail "actual stored Task history unavailable" in
   let observed=history false in
   check bool "original stored history retains submitted verification" true (List.mem verification_id observed.history_verifications);
+  let failed=Ui.begin_original_history_inspection state ~earlier:false ~limit:1 |> require_inspection in
+  launch_task_observation state results failed (fun result -> Protocol.Original_task_history_done (failed,result))
+    (fun () -> actual_history_read ~reply_task_id:foreign_task config failed);
+  check bool "actual foreign history is refused under original Task and prefix retained" true
+    (admit_task_observation state (next_inspection_result results));
+  (match Task_read.history_observation (inspect_source state) with
+   | Masc_tui_fetched.Stale (value,Task_read.Invalid_reply _) ->
+     check bool "failed refresh retains actual original submission IDs" true (List.mem verification_id value.history_verifications)
+   | _ -> fail "foreign history replaced or erased the original prefix");
   let request=Ui.begin_original_evidence_inspection state ~next:true |> require_inspection in
-  let ticket=match request.tcr_query with Ui.Original_evidence_query ticket -> ticket
-    | Creation_query _ | Original_task_query _ | Original_history_query _ -> fail "evidence query changed kind" in
+  let ticket=evidence_ticket request in
   check string "pinned original evidence Task" task_id (Task_read.evidence_task_id ticket);
   check string "pinned original verification" verification_id (Task_read.evidence_verification_id ticket);
-  launch_task_observation state results request (fun result -> Protocol.Original_task_evidence_done (request,result)) (fun () ->
-    Server_routes_http_routes_verification.For_testing.operator_evidence_json ~config ~operator_id:"ask-task-reader"
-      ~task_id ~verification_id |> Result.map_error (fun detail -> Task_read.Read_failed detail)
-    |> fun result -> Result.bind result (fun json ->
-      Masc.Tui_decode.decode_verification_evidence_for_request ~task_id ~verification_id (`Assoc ["ok",`Bool true;"result",json])
-      |> Result.map_error (fun detail -> Task_read.Invalid_reply detail)
-      |> fun result -> Result.bind result (Task_read.prepare_evidence ~task_id ~verification_id)));
+  (match Task_read.evidence_basis (inspect_source state) with
+   | Some {eb_source=Task_read.From_history;eb_observation=Selection_retained (Invalid_reply _)} -> ()
+   | Some _ | None -> fail "retained history selection lost its original failure basis");
+  launch_task_observation state results request (fun result -> Protocol.Original_task_evidence_done (request,result))
+    (fun () -> actual_evidence_read config request);
   check bool "actual original submitted evidence admitted" true (admit_task_observation state (next_inspection_result results));
   (match Task_read.evidence_observation (inspect_source state) with
    | Masc_tui_fetched.Ready (Masc.Tui_decode.Evidence_items items) -> check bool "actual captured proof retained" true (items<>[])
    | _ -> fail "actual submitted proof unavailable");
-  check bool "reads leave actual Task and all completion resources unchanged" true (before=Masc.Workspace.get_tasks_raw config);
+  check bool "reads leave original and unrelated Task records unchanged" true (before=Masc.Workspace.get_tasks_raw config);
   check bool "no replay, creation, handoff or global listing substitution" true
     (state.task_dispatch_requests=[] && state.pending_task_followups=[] && state.tasks=[] && Ui.task_domain_values state=[]);
   check string "unrelated operator input survives all observations" "unrelated draft remains" (Masc_tui_message_input.contents state.msg_input)
+let test_retained_task_submission_keeps_selection_basis () = with_answer @@ fun base config ask resolution task_id state ->
+  Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
+  observe_actual_answer state base ask resolution;
+  let verification_id=submit_original_inspection_task config task_id in
+  let foreign_task=unrelated_inspection_task config in
+  let before=Masc.Workspace.get_tasks_raw config in
+  Masc_tui_message_input.insert state.msg_input "new input survives retained proof inspection";
+  check bool "original answered Ask opens for submitted Task" true (Ui.open_ask_task_inspection state);
+  let results=Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  let original=Ui.begin_original_task_inspection state |> require_inspection in
+  launch_task_observation state results original (fun result -> Protocol.Original_task_read_done (original,result))
+    (fun () -> actual_task_read config original);
+  check bool "actual submitted original Task admitted" true (admit_task_observation state (next_inspection_result results));
+  let failed=Ui.begin_original_task_inspection state |> require_inspection in
+  launch_task_observation state results failed (fun result -> Protocol.Original_task_read_done (failed,result))
+    (fun () -> actual_task_read ~reply_task_id:foreign_task config failed);
+  check bool "actual foreign Task reply settles as a rejected refresh" true (admit_task_observation state (next_inspection_result results));
+  (match Task_read.task_observation (inspect_source state) with
+   | Masc_tui_fetched.Stale (Task_decode.In_backlog detail,Task_read.Invalid_reply _) ->
+     (match detail.task.task_status with
+      | AwaitingVerification value -> check string "original actual submission retained" verification_id value.verification_id
+      | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ -> fail "retained original submission lost")
+   | _ -> fail "failed refresh erased original Task observation");
+  let first=Ui.begin_original_evidence_inspection state ~next:true |> require_inspection in
+  check string "retained original Task selects exact submission" verification_id
+    (Task_read.evidence_verification_id (evidence_ticket first));
+  (match Task_read.evidence_basis (inspect_source state) with
+   | Some {eb_source=Task_read.From_task;eb_observation=Selection_retained (Invalid_reply _)} -> ()
+   | Some _ | None -> fail "retained Task selection lost failure context");
+  (* Retire that unstarted evidence read, begin a Task retry, then explicitly
+     select the retained submission while that retry is still pending. *)
+  let retry=Ui.begin_original_task_inspection state |> require_inspection in
+  let selected=Ui.begin_original_evidence_inspection state ~next:true |> require_inspection in
+  let basis=match Task_read.evidence_basis (inspect_source state) with
+    | Some ({eb_source=Task_read.From_task;eb_observation=Selection_retrying (Invalid_reply _)} as basis) -> basis
+    | Some _ | None -> fail "selection borrowed later suspension instead of original pending/failure context" in
+  check bool "retired Task retry cannot replace selected evidence source" false
+    (Ui.complete_original_task_inspection state retry (actual_task_read config retry));
+  check bool "retired first evidence ticket cannot replace the next selection" false
+    (Ui.complete_original_evidence_inspection state first (actual_evidence_read config first));
+  launch_task_observation state results selected (fun result -> Protocol.Original_task_evidence_done (selected,result))
+    (fun () -> actual_evidence_read config selected);
+  check bool "original retained submission reads its actual stored proof" true (admit_task_observation state (next_inspection_result results));
+  (match Task_read.evidence_observation (inspect_source state) with
+   | Masc_tui_fetched.Ready (Masc.Tui_decode.Evidence_items items) -> check bool "actual retained proof items" true (items<>[])
+   | _ -> fail "retained original submission proof unavailable");
+  let refresh=Ui.begin_original_evidence_inspection state ~next:false |> require_inspection in
+  check string "evidence refresh preserves pinned submission" verification_id
+    (Task_read.evidence_verification_id (evidence_ticket refresh));
+  check bool "evidence refresh preserves exact selection-time basis" true
+    (match Task_read.evidence_basis (inspect_source state) with Some retained -> retained==basis | None -> false);
+  check bool "original Task resources remain unchanged by proof inspection" true (before=Masc.Workspace.get_tasks_raw config);
+  check string "operator input remains unchanged" "new input survives retained proof inspection"
+    (Masc_tui_message_input.contents state.msg_input)
+
 let test_answered_ask_inspection_reopen_and_withdraw () = with_answer @@ fun base config ask resolution task_id state ->
   Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
   observe_actual_answer state base ask resolution;
@@ -1003,6 +1085,7 @@ let () = Eio_main.run @@ fun env ->
       test_case "actual workspace reads preserve distinct original provenance across replacement" `Quick test_actual_workspaces_keep_distinct_original_provenance;
       test_case "actual original read retains admission identity after health metadata changes" `Quick test_actual_read_keeps_admission_identity_after_health_changes;
       test_case "canonical answered Ask opens actual Task history and submitted evidence" `Quick test_answered_ask_opens_actual_task_history_evidence;
+      test_case "retained original submitted Task preserves selection provenance and proof" `Quick test_retained_task_submission_keeps_selection_basis;
       test_case "answered Ask inspection preserves failed observations and rejects old visits" `Quick test_answered_ask_inspection_reopen_and_withdraw;
       test_case "actual comparison artifacts retain missing attempts and corrupted input" `Quick test_actual_followup_report_keeps_unobserved_and_bad_artifacts;
       test_case "actual structured observations survive daily JSONL and dashboard decode" `Quick test_actual_followup_structured_sink_and_export]])

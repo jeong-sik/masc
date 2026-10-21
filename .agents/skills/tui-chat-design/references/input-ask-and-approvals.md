@@ -122,6 +122,14 @@
   각 조회는 새 ticket과 현재 viewer·workspace/read authority를 확인한다. 새 답변 소유자와
   출처 변경은 이전 조회를 철회하고 늦은 응답을 거부한다. typed answer editor가 키를 소유할
   때는 `T`를 가로채지 않는다. 이 연결은 Goal 완료나 화면·시간 개선의 실측이 아니다.
+- 원본 Task inspector의 증거 선택은 같은 원본 Task·이력의 Ready 또는 값이 보존된
+  Stale 관측에서 이미 알려진 제출 ID를 읽는다. 새로고침 실패로 그 ID를 숨기거나
+  새 목록·현재 Keeper에서 다른 ID를 빌리지 않는다. 값 없는 실패/Loading/Absent에서는
+  ID를 만들지 않는다. 선택 때의 출처(Task/이력)와 관측/갱신 중/오류 보존/재시도 중
+  상태를 닫힌 타입으로 anchor에 붙이고 Evidence 상세에 표시한다. 이는 선택 당시의
+  근거이며 현재 Task 상태·새 실행 허가가 아니다. `r`은 같은 제출·같은 근거를 유지하고,
+  명시적인 다음 선택만 새 anchor를 만든다. ticket·원본 binding·workspace 판정은 유지한다.
+  이력/Task 조회를 물러나면서 생긴 Interrupted가 선택 전의 원래 실패 근거를 덮지 않는다.
 - 질문의 `o`는 기록된 원본 출처를 로컬에서 펼치고, `O`는 그 Turn_ref에 고정한
   inspector를 연다. 최근 목록 탐색과 고정한 원본은 별도 타입이다. 원본이 없으면
   현재 Keeper 턴으로 대체하지 않는다. 입력 중인 자유문자는 그대로 입력하고,

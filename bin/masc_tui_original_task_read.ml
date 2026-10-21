@@ -34,7 +34,18 @@ type history_snapshot = {
   history_sections : Reading.section list;
 }
 type evidence_key = { evidence_task : string; verification_id : string }
-type evidence_request = { evidence_ticket : evidence_key Fetched.request; evidence_binding : binding }
+type evidence_source = From_task | From_history
+type selection_observation =
+  | Selection_observed
+  | Selection_refreshing
+  | Selection_retained of error
+  | Selection_retrying of error
+type evidence_basis = {
+  eb_source : evidence_source;
+  eb_observation : selection_observation;
+}
+type evidence_anchor = { ea_key : evidence_key; ea_basis : evidence_basis }
+type evidence_request = { evidence_ticket : evidence_anchor Fetched.request; evidence_binding : binding }
 type evidence_snapshot = {
   evidence_key : evidence_key;
   evidence_value : Masc.Tui_decode.verification_evidence;
@@ -45,7 +56,7 @@ type t = {
   task_fetched : (string,task_snapshot,error) Fetched.source;
   displayed : source;
   history_fetched : (string,history_snapshot,error) Fetched.source;
-  evidence_fetched : (evidence_key,evidence_snapshot,error) Fetched.source;
+  evidence_fetched : (evidence_anchor,evidence_snapshot,error) Fetched.source;
   document : Reading.t;
 }
 let origin t = match t.root with
@@ -186,8 +197,11 @@ let history_view t = match recorded_task t with
   | None -> Fetched.Absent
   | Some key -> Fetched.view_for ~equal:String.equal t.history_fetched ~key
 let evidence_view t = match recorded_task t,Fetched.current t.evidence_fetched with
-  | Some task_id,Some (key,value) when key.evidence_task=task_id -> value
+  | Some task_id,Some (key,value) when key.ea_key.evidence_task=task_id -> value
   | (Some _ | None),(Some _ | None) -> Fetched.Absent
+let evidence_basis t = match recorded_task t,Fetched.current_key t.evidence_fetched with
+  | Some task_id,Some anchor when anchor.ea_key.evidence_task=task_id -> Some anchor.ea_basis
+  | (Some _ | None),(Some _ | None) -> None
 let task_observation t = match task_view t with
   | Fetched.Absent -> Fetched.Absent | Loading -> Loading | Failed error -> Failed error
   | Ready value -> Ready value.task_observation
@@ -247,6 +261,17 @@ let task_sections t =
     | Ready value -> value.task_sections
     | Stale (value,error) -> value.task_sections @ [section "Last Task observation · refresh unavailable" (error_text error)] in
   if task_pending t then section "Task lookup pending" "Any retained original Task observation remains below." :: rows else rows
+let evidence_basis_sections t = match evidence_basis t with
+  | None -> [section "Verification selection"
+      "No submission ID has been selected from this original Task or its observed history. This is not absence of stored evidence."]
+  | Some basis ->
+    [section "Submission selection source" (match basis.eb_source with
+       | From_task -> "Original Task observation" | From_history -> "Original stored history observation");
+     section "Selection-time observation" (match basis.eb_observation with
+       | Selection_observed -> "A completed source observation was available at selection; this does not assert current Task status."
+       | Selection_refreshing -> "The previous source observation was available; its refresh was pending at selection."
+       | Selection_retained error -> "The previous source observation was retained after an unavailable refresh at selection.\n" ^ error_text error
+       | Selection_retrying error -> "The retained source observation had a retry pending at selection. Its prior failure remains:\n" ^ error_text error)]
 let refresh_document t =
   let facts,tail,neighbors=match t.root with
     | Creation_root creation ->
@@ -270,7 +295,7 @@ let refresh_document t =
     | Origin -> [] | Task -> task_sections t
     | History -> part_sections ~label:"Stored history" ~pending:(Fetched.in_flight t.history_fetched)
         (history_view t) (fun value -> value.history_sections)
-    | Evidence -> part_sections ~label:"Verification evidence" ~pending:(Fetched.in_flight t.evidence_fetched)
+    | Evidence -> evidence_basis_sections t @ part_sections ~label:"Verification evidence" ~pending:(Fetched.in_flight t.evidence_fetched)
         (evidence_view t) (fun value -> value.evidence_sections)) @ tail @
     [section "Original workspace" (match workspace t with None -> "Not confirmed"
        | Some workspace -> Masc.Tui_decode.Canonical_path.to_string workspace.sid_base_path ^ "\n" ^ Masc.Tui_decode.Canonical_path.to_string workspace.sid_masc_root);
@@ -370,35 +395,45 @@ let complete_history t request result =
       else Error (Invalid_reply "Prepared history names another original Task")) in
     refresh_document {t with history_fetched=Fetched.complete ~equal:String.equal t.history_fetched request.history_ticket result}
 let equal_evidence_key a b = a.evidence_task=b.evidence_task && a.verification_id=b.verification_id
+let equal_evidence_anchor a b = equal_evidence_key a.ea_key b.ea_key
+let selection_value source ~pending = function
+  | Fetched.Ready value -> Some (value,{eb_source=source;
+      eb_observation=(if pending then Selection_refreshing else Selection_observed)})
+  | Stale (value,error) -> Some (value,{eb_source=source;
+      eb_observation=(if pending then Selection_retrying error else Selection_retained error)})
+  | Absent | Loading | Failed _ -> None
 let verification_candidates t =
-  let current=match task_observation t with
-    | Fetched.Ready (Masc.Tui_decode_task_inspection.In_backlog detail | In_archive detail) ->
+  let current=match selection_value From_task ~pending:(Fetched.in_flight t.task_fetched)
+      (task_observation t) with
+    | Some ((Masc.Tui_decode_task_inspection.In_backlog detail | In_archive detail),basis) ->
       (match detail.task.task_status with
-       | Masc_domain.AwaitingVerification {verification_id;_} -> [verification_id]
+       | Masc_domain.AwaitingVerification {verification_id;_} -> [verification_id,basis]
        | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ -> [])
-    | Absent | Loading | Failed _ | Stale _ | Ready (Not_observed | Deletion_recorded _) -> [] in
-  let history=match history_observation t with
-    | Fetched.Ready history -> history.history_verifications
-    | Absent | Loading | Failed _ | Stale _ -> [] in
-  current @ List.filter (fun id -> not (List.mem id current)) history
+    | Some ((Not_observed | Deletion_recorded _),_) | None -> [] in
+  let history=match selection_value From_history ~pending:(Fetched.in_flight t.history_fetched)
+      (history_observation t) with
+    | Some (history,basis) -> List.map (fun id -> id,basis) history.history_verifications
+    | None -> [] in
+  current @ List.filter (fun (id,_) -> not (List.exists (fun (known,_) -> String.equal id known) current)) history
 let start_evidence ~next t = match task_binding t with
   | Some (evidence_task,evidence_binding) ->
     let current=match Fetched.current_key t.evidence_fetched with
-      | Some key when key.evidence_task=evidence_task -> Some key.verification_id
+      | Some anchor when anchor.ea_key.evidence_task=evidence_task -> Some anchor
       | Some _ | None -> None in
     let ids=verification_candidates t in
+    let candidate row=Option.map (fun (verification_id,ea_basis) ->
+      {ea_key={evidence_task;verification_id};ea_basis}) row in
     let chosen=if not next && t.displayed=Evidence then current else
       match current with
-      | None -> List.nth_opt ids 0
-      | Some current ->
-        (match List.find_index (String.equal current) ids with
-         | Some index -> (match List.nth_opt ids (index+1) with Some id -> Some id | None -> List.nth_opt ids 0)
-         | None -> List.nth_opt ids 0) in
+      | None -> candidate (List.nth_opt ids 0)
+      | Some anchor ->
+        (match List.find_index (fun (id,_) -> String.equal anchor.ea_key.verification_id id) ids with
+         | Some index -> candidate (match List.nth_opt ids (index+1) with Some row -> Some row | None -> List.nth_opt ids 0)
+         | None -> candidate (List.nth_opt ids 0)) in
     (match chosen with
      | None -> refresh_document {t with displayed=Evidence},None
-     | Some verification_id ->
-       let key={evidence_task;verification_id} in
-       match Fetched.refresh ~equal:equal_evidence_key t.evidence_fetched ~key with
+     | Some key ->
+       match Fetched.refresh ~equal:equal_evidence_anchor t.evidence_fetched ~key with
        | Fetched.Already_loading -> t,None
        | Started (evidence_fetched,evidence_ticket) ->
          refresh_document {t with evidence_fetched;displayed=Evidence;
@@ -406,15 +441,15 @@ let start_evidence ~next t = match task_binding t with
            history_fetched=Fetched.suspend_with ~reason:Interrupted t.history_fetched},
          Some {evidence_ticket;evidence_binding})
   | None -> t,None
-let evidence_task_id request = (Fetched.request_key request.evidence_ticket).evidence_task
-let evidence_verification_id request = (Fetched.request_key request.evidence_ticket).verification_id
+let evidence_task_id request = (Fetched.request_key request.evidence_ticket).ea_key.evidence_task
+let evidence_verification_id request = (Fetched.request_key request.evidence_ticket).ea_key.verification_id
 let evidence_request_id request = Fetched.request_id request.evidence_ticket
 let evidence_is_current t request = t.displayed=Evidence
-  && Fetched.is_current ~equal:equal_evidence_key t.evidence_fetched request.evidence_ticket
+  && Fetched.is_current ~equal:equal_evidence_anchor t.evidence_fetched request.evidence_ticket
   && same_binding t request.evidence_binding && recorded_task t=Some (evidence_task_id request)
 let complete_evidence t request result =
   if not (evidence_is_current t request) then t else
     let result=Result.bind result (fun value ->
-      if equal_evidence_key value.evidence_key (Fetched.request_key request.evidence_ticket) then Ok value
+      if equal_evidence_key value.evidence_key (Fetched.request_key request.evidence_ticket).ea_key then Ok value
       else Error (Invalid_reply "Prepared evidence names another original Task or submission")) in
-    refresh_document {t with evidence_fetched=Fetched.complete ~equal:equal_evidence_key t.evidence_fetched request.evidence_ticket result}
+    refresh_document {t with evidence_fetched=Fetched.complete ~equal:equal_evidence_anchor t.evidence_fetched request.evidence_ticket result}

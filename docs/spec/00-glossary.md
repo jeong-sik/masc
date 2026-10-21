@@ -319,15 +319,31 @@ status: reference
 **Audition (오디션, 미리 듣기)**
 : 소리를 내어 확인하는 행위를 통틀어 이르는 말. 같은 낱말이 서로 다른 대상을 가리키므로
   문장에서는 무엇을 듣는지 반드시 함께 적는다. 지금 코드와 문서에서 확인되는 쓰임은
-  아래 다섯이며, 그중 `solo/mute 확인`은 이 낱말 대신 다른 표현을 쓰는 자리다.
+  아래 여덟이며, 그중 `solo/mute 확인`은 이 낱말 대신 다른 표현을 쓰는 자리다.
   - `Source audition` — 가져온 MIDI 소스의 순서 있는 원본 메시지 열을 명시한 MIDI 출력이나
     VST로 내보내는 재생. 처음부터 시작하고 pause/resume과 source-clock seek를 지원한다
     (MIDI-SOURCE.md "Ordered source audition", README.md "Imported performance audition").
+  - `Source-window audition` — 소스 피아노 롤에서 `:loop START END`로 잡은 세션 국소 소스
+    구간만 반복해 들려주는 재생. 루프 선택은 소스 문서와 MIDI/WAV 내보내기를 바꾸지 않고,
+    VST 경로는 선택한 연주 전체를 먼저 렌더한 뒤 그 구간의 half-open PCM 프레임만 읽는다 —
+    구간 가장자리는 각각 그 시점 이후 첫 PCM 프레임으로 올리고, PCM 프레임이 하나도 없는
+    창은 조용히 넘기지 않고 명시적으로 실패한다(MIDI-SOURCE.md "Source-window audition").
+    원본 전체를 한 번에 보내는 `Source audition`과 다른 쓰임이다.
   - `WAV-only audition` — 캡처 구간의 WAV만 `:play-audio`로 듣는 재생
     (CAPTURE-AUDIO-CLOCK.md "Captured-region WAV audition", README.md의 `:play-audio`).
   - `paired audition` — 저장한 take의 WAV와 UMP 스트림을 함께 듣는 재생
     (CAPTURE-PLAYBACK.md: "A saved take can audition its original WAV and UMP stream
     together.").
+  - `Bound SoundFont audition` — 문서에 묶인 SoundFont 선택으로 그 악기를 써서 듣는 재생.
+    `:soundfont-fluid [SF2_PATH]`는 선택과 실제 SF2 바이트·SHA256·엔진 버전을 문서에
+    저장할 뿐 재생을 시작하지 않고, 재생은 Space가 한다(README.md "Bound FluidSynth
+    SoundFont audition"). 원시 practice take에는 `:practice-soundfont asset-1`이 그 take
+    하나에 별도의 묶인 선택을 저장하며, `:practice-sound-original`이 원래 캡처한 VST나
+    SoundFont로 되돌린다.
+  - `Practice audition` — 저장한 원시 practice take를 원래 캡처한 VST나 그 take에 묶은
+    SoundFont로 다시 듣는 재생. 두 경로 모두 선언된 MIDI1 투영을 쓰고, 지원하지 않는
+    속성과 겹치는 보이스는 거절하며, 명시한 외부 raw 라우트가 이 국소 선택보다 앞선다
+    (README.md의 `:practice-soundfont` 항목).
   - `solo/mute 확인` — 섞인 라우트에서 한 층만 남겨 들어 보는 확인(ARRANGEMENT.md "WAV
     arrangement transport": "A mixed route also supports solo/mute audition of either
     source kind.").
@@ -337,6 +353,11 @@ status: reference
     스케줄러가 밀린 복사를 건너뛰고 현재 위상만 되살린다(ARRANGEMENT.md "Expressive MIDI
     arrangement transport"의 "This phase policy differs from the original full-source audition's
     complete ordered-stream delivery.").
+  - 이름 경계: `live-audition integration`은 연속 VST 합성과 device-clocked PCM 출력
+    층이 미리 듣기를 받쳐 주는 관계를 이르는 이름이고, 한 번의 재생 동작이 아니다
+    (README.md: "The continuous VST synthesis and device-clocked PCM output layers
+    support live-audition integration."). "live audition"처럼 붙여 써서 재생 하나를
+    가리키지 않는다.
   - 이름 경계: `monitoring`은 `audition`이 아니다. `:monitor`는 오디오 입력을,
     `:midi-monitor`는 들어오는 MIDI를 다른 목적지로 계속 전달하는 상태다
     (README.md의 `:monitor`·`:midi-monitor`). 한 번 듣고 끝나는 재생과 달리 라우트가 열려

@@ -20,6 +20,16 @@
   mailbox 공간 없이 원래 owner에 남긴다. 실패·실행 불가·중단을 성공이나 bearer 권한으로
   바꾸지 않는다. 진단은 기존 routine lazy 정책을 쓴다. 초기 runtime 설정 읽기와 직접 stat,
   기존 probe·보호된 mint I/O의 정리는 남아 있으므로 전체 시작·종료 시간 단축을 주장하지 않는다.
+- 설정 적용·terminal session/query 뒤 `prepare_terminal_probe`는 원래 switch 소유
+  수집을 준비하고 loop 진입을 수집 완료에 묶지 않는다. 준비가 남아 있는 동안 stdin과
+  입력 buffer는 그 producer만 읽는다. loop의 readiness는 소비 가능한 입력을 주장하지
+  않고 `read_input`은 원래 promise나 기존 render deadline까지만 기다린다. 소비자 대기
+  취소로 producer를 취소하거나 새 probe/reader를 만들지 않는다. owning loop의
+  `poll_terminal_probe`가 원래 decoder를 설치하고 현재 관측을 게시한 뒤 정상 입력을 연다.
+  기능 관측 전 첫 frame은 가능하지만 실제 paint·입력 응답·속도 향상 증거는 아니다.
+  switch/clock이 없으면 기존 동기 수집을 유지한다. dispatch 원본 관측은 child 예약 전에
+  만들고 실패/중단/worker 미진입·미설치를 보존한다. pool/systhread adapter 반환과 loop의
+  decoder 설치는 별개이며 보호된 물리 I/O 정리는 계속 원래 switch에 남는다.
 - 시작 probe에 실제 replay 바이트가 생기면 기능 응답을 더 기다리지 않고 같은 디코더와
   입력 버퍼를 입력 루프에 넘긴다. 미완성 OSC/CSI·UTF-8·paste를 finish하거나 버리지 않는다.
   기존 무입력 deadline/byte cap을 줄이거나 새 reader·timer를 추가하지 않는다.

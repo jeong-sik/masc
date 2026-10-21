@@ -40,11 +40,17 @@ type startup_capture = {
   decoder : Masc_tui_terminal_probe.decoder option Atomic.t;
 }
 
+type probe_preparation = {
+  result : Masc_tui_terminal_probe.decoder Eio.Promise.or_exn;
+  wait : timeout:float -> unit;
+}
+
 type input_reader = {
   bytes : Bytes.t;
   mutable filled : int;
   mutable position : int;
   mutable terminal_probe : Masc_tui_terminal_probe.decoder option;
+  mutable probe_preparation : probe_preparation option;
   mutable terminal_publisher :
     (Masc_tui_terminal_probe.observation -> unit) option;
   mutable published_terminal_observation : Masc_tui_terminal_probe.observation option;
@@ -67,6 +73,7 @@ let create_input_reader () =
     filled = 0;
     position = 0;
     terminal_probe = None;
+    probe_preparation = None;
     terminal_publisher = None;
     published_terminal_observation = None;
     startup_captures = [];
@@ -183,9 +190,11 @@ let terminal_has_bytes ~remaining =
    across buffer boundaries too. EINTR means readiness was not observed;
    defer at most to the existing frame deadline and let the reader retry. *)
 let input_reader_has_ready_input reader =
-  input_reader_has_pending_bytes reader
-  || try terminal_has_bytes ~remaining:0.0 with
-     | Unix.Unix_error (Unix.EINTR, _, _) -> true
+  match reader.probe_preparation with
+  | Some _ -> false
+  | None -> input_reader_has_pending_bytes reader
+    || try terminal_has_bytes ~remaining:0.0 with
+       | Unix.Unix_error (Unix.EINTR, _, _) -> true
 
 let refill_input_reader reader ~timeout =
   let timeout_ns =
@@ -349,11 +358,12 @@ let paste_is_quiet last_byte_ns =
    can already be buffered, and the startup probe can still have replay; a
    clock alone cannot prove that a paused paste has no unread tail. *)
 let input_byte_ready reader =
-  match take_input_byte reader ~timeout:0.0 with
-  | None -> false
-  | Some _ ->
-      return_input_byte reader;
-      true
+  match reader.probe_preparation with
+  | Some _ -> false
+  | None ->
+    match take_input_byte reader ~timeout:0.0 with
+    | None -> false
+    | Some _ -> return_input_byte reader; true
 
 let paste_can_recover reader clock =
   paste_is_quiet clock.last_byte_ns && not (input_byte_ready reader)
@@ -428,7 +438,7 @@ let in_paste reader =
   | No_paste -> false
 
 (** Read one key, one paste, or one thing the terminal said back. *)
-let read_input ?(timeout = 0.1) reader () : input_event option =
+let read_available_input ~timeout reader () : input_event option =
   (* The reader belongs to this fiber. Keeping it here lets readiness use
      [await_readable] and the Eio timer; moving the whole decoder to a system
      thread also moves buffered keys and every frame-deadline poll there.
@@ -503,13 +513,18 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
         (fun kind -> observe_installed reader (Startup.First_input_decoded kind)) (input_kind event)) event;
       event)
 
+let read_input ?(timeout = 0.1) reader () : input_event option =
+  match reader.probe_preparation with
+  | Some preparation -> preparation.wait ~timeout; None
+  | None -> read_available_input ~timeout reader ()
+
 (* How long to wait for the combined palette and graphics answers. A terminal
    replies as soon as it has parsed a supported query; an unsupported query
    says nothing, and this is the whole cost of finding that out, paid once at
    startup when no user input has already arrived. *)
 let terminal_probe_wait_seconds = 0.2
 
-let read_terminal_probe reader ~palette_requested =
+let terminal_probe_collector reader ~palette_requested =
   let dispatched_ns = Mtime_clock.elapsed_ns () in
   let capture = {facts=Atomic.make (Startup.create ~pid:(Unix.getpid ()) ~dispatched_ns);
                  decoder=Atomic.make None} in
@@ -519,8 +534,8 @@ let read_terminal_probe reader ~palette_requested =
     if Eio_guard.is_eio_fiber () then Eio.Cancel.protect (fun () -> observe event)
     else observe event in
   let failure = function Eio.Cancel.Cancelled _ -> Startup.Interrupted | _ -> Startup.Raised in
-  match
-    observe Startup.Dispatched;
+  observe Startup.Dispatched;
+  let collect () = match
     Eio_guard.run_in_systhread ~label:"tui-terminal-probe" (fun () ->
       let bytes_read = ref 0 in
       match
@@ -571,11 +586,64 @@ let read_terminal_probe reader ~palette_requested =
     let backtrace = Printexc.get_raw_backtrace () in
     observe_failure (Startup.Caller_observed (Startup.Call_failed (failure error)));
     Printexc.raise_with_backtrace error backtrace
+  in
+  capture,collect
 ;;
 
 let install_terminal_probe reader decoder =
+  if Option.is_some reader.probe_preparation then
+    invalid_arg "terminal probe producer still owns the input reader";
   reader.terminal_probe <- Some decoder;
   observe_installed reader Startup.Decoder_installed
+
+type terminal_probe_progress = Probe_pending | Probe_installed | Probe_unchanged
+
+let prepare_terminal_probe ~sw ~clock reader ~palette_requested =
+  if Option.is_some reader.probe_preparation || Option.is_some reader.terminal_probe then
+    invalid_arg "terminal probe requires a fresh input reader";
+  (* Reserve the original capture on the owning domain before scheduling,
+     so a child that never enters still leaves its dispatched-only evidence. *)
+  let capture,collect=terminal_probe_collector reader ~palette_requested in
+  let scheduled=match
+    (Option.iter Eio.Switch.check sw;
+     match sw,clock with
+     | Some sw,Some clock -> Some (Eio.Fiber.fork_promise ~sw collect,clock)
+     | None,_ | Some _,None -> None)
+  with
+  | scheduled -> scheduled
+  | exception error ->
+    let backtrace=Printexc.get_raw_backtrace () in
+    let observe ()=observe_capture capture ~at_ns:(Mtime_clock.elapsed_ns ())
+      (Startup.Caller_observed (Startup.Call_failed
+        (match error with Eio.Cancel.Cancelled _ -> Startup.Interrupted | _ -> Startup.Raised))) in
+    if Eio_guard.is_eio_fiber () then Eio.Cancel.protect observe else observe ();
+    Printexc.raise_with_backtrace error backtrace in
+  match scheduled with
+  | Some (result,clock) ->
+    let wait ~timeout =
+      if timeout > 0. then Eio.Fiber.first
+        (fun () -> ignore (Eio.Promise.await_exn result))
+        (fun () -> Eio.Time.sleep clock timeout) in
+    reader.probe_preparation <- Some {result;wait}
+  | None ->
+    let decoder=collect () in
+    install_terminal_probe reader decoder
+
+let poll_terminal_probe reader =
+  match reader.probe_preparation with
+  | None -> Probe_unchanged
+  | Some preparation ->
+    match Eio.Promise.peek preparation.result with
+    | None -> Probe_pending
+    | Some (Error error) -> raise error
+    | Some (Ok decoder) ->
+      (* Producer returned before ownership moves; no UI path touches its
+         buffer while the original promise is unresolved. Install and publish
+         under this caller before normal input can read replay or buffer tail. *)
+      reader.probe_preparation <- None;
+      install_terminal_probe reader decoder;
+      publish_terminal_observation reader decoder;
+      Probe_installed
 
 let abandon_draining reader =
   Masc_tui_input_decoder.abandon_draining reader.decoder

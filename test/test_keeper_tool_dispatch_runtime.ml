@@ -9229,14 +9229,16 @@ let composable_output_probes =
            (* Same reason as the goal probe: the run item's task_id, plan and
               timestamps are only reachable through a non-empty [runs]. *)
            let stamp = "2026-01-01T00:00:00Z" in
-           Masc.Run_eio.write_run
+           (match Masc.Run_eio.write_run
              config
              { Masc.Run_eio.task_id = "composable-output-probe-run"
              ; agent_name = None
              ; plan = "probe plan"
              ; created_at = stamp
              ; updated_at = stamp
-             };
+             } with
+            | Ok () -> ()
+            | Error error -> Alcotest.fail (Masc.Run_eio.error_to_string error));
            `Assoc [])
     }
   ; { tool_name = "masc_get_metrics"

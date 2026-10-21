@@ -42,7 +42,10 @@ val run_json_path : Workspace_utils.config -> string -> string
     per-[run.json] file locks to prevent lost updates across
     concurrent fibers. *)
 
-val write_run : Workspace_utils.config -> run_record -> unit
+val write_run : Workspace_utils.config -> run_record -> (unit, error) result
+(** An authoritative metadata write failure is returned to the caller.
+    A committed Memory backend value remains successful if only its local
+    filesystem mirror fails; that mirror failure is logged separately. *)
 
 val read_run :
   Workspace_utils.config -> string -> (run_record, error) result

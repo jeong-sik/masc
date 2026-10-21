@@ -2135,13 +2135,22 @@ status: reference
 
 **Live Transport (라이브 전송 방식)**
 : MASC 실시간 브라우저 연결(`live client`)이 브라우저와 통신하는 물리적·프로토콜 전송 수단(#41795, #41839).
-  닫힌 셋 `Web_extension`(`"web_extension"`)과 `Webdriver_bidi`(`"webdriver_bidi"`) 둘이다(`Browser_lane.live_transport`).
+  닫힌 두 값 `Web_extension`(`"web_extension"`)과 `Webdriver_bidi`(`"webdriver_bidi"`)이다(`Browser_lane.live_transport`).
   각 전송 방식이 제공할 수 있는 작업 역량(`Browser_lane.live_capability`)은 타입 표(`live_transport_serves`)로 엄격히 고정된다.
   - **역량 12종**: `Tab_listing`·`Text_read`·`Document_source`·`Element_inventory`·`Viewport_capture`·`Scene_read`·`Dom_interaction`·`Point_click`·`Point_scroll`·`Trusted_hover`·`Trusted_drag`·`Tab_activation`.
   - **`web_extension`**: 브라우저 확장 프로그램의 페이지 내부 DOM 조작 기반. 탭 활성화(`Tab_activation` / `activate_tab`)를 제공하지만, 브라우저가 인정하는 신뢰 포인터가 없어 호버와 드래그(`Trusted_hover`·`Trusted_drag`)는 지원하지 않는다.
   - **`webdriver_bidi`**: W3C WebDriver BiDi 프로토콜 기반의 브라우저 호스트 직접 제어(`masc-browser-host --bidi-url`). 신뢰 호버와 드래그(`Trusted_hover`·`Trusted_drag`)를 제공하지만, 창 포커스를 함께 빼앗는 특성 때문에 조용한 탭 활성화(`Tab_activation`)는 제공하지 않는다.
   - **공통 지원(9종)**: `Tab_listing`·`Text_read`·`Document_source`·`Element_inventory`·`Viewport_capture`·`Scene_read`·`Dom_interaction`·`Point_click`·`Point_scroll`.
   선택된 연결의 전송 방식이 요청된 역량을 제공하지 못하면 서버는 명령을 큐에 넣기 전에 `live_transport_unsupported` 거절 코드로 차단하며, 해당 역량을 지원하는 연결된 다른 브라우저 수나 운영자 안내 문서를 반환한다. 선택한 연결에서 성공한 실시간 브라우저 응답(`BrowserRead` 등)과 탭·연결 목록(`BrowserTabs`)의 각 항목은 `clientId`와 함께 `transport` 필드를 노출하며, 연결 선택 이전의 오류 응답(`No_live_client` 등)과는 구분된다(#41839).
+  - **이름 경계**: `transport`는 이 문서에서 여러 축으로 쓰인다. 이 항목은 연결된 브라우저와
+    통신하는 수단(`Browser_lane.live_transport`, `Web_extension`·`Webdriver_bidi`)만 가리킨다.
+    서버·MCP 계층의 전송 통로는 `lib/transport.ml`과 `09-server-transport.md`의
+    HTTP·WebSocket·gRPC가 다루는 별개 축이고, 악기 재생을 앞으로 진행시키는 운반은
+    `tools/alphatex/ARRANGEMENT.md`의 "WAV arrangement transport"·"Expressive MIDI
+    arrangement transport" 절이 다루는 재생 축이다. `Sandbox Target`의 `Transport_failed`는
+    명령 실행 결과에서 원격 런타임 전송 장애만 가리키는 코드다. 문장에서 축이 정해지지
+    않으면 `transport`만 쓰지 않고 "라이브 전송 방식"·"서버 전송 계층"·"어레인지먼트 재생
+    운반"으로 적는다.
   → [Browser_lane](../../lib/browser_lane/browser_lane.ml) ·
   [Browser_host](../../lib/browser_host/browser_host.mli) ·
   [browser-bidi-live-host 설계](../../docs/design/browser-bidi-live-host.md)

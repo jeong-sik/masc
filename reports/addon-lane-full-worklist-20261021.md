@@ -111,7 +111,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
-| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | capture exact d4d54ed의 7-suite39653626146은92건 PASS. original-owner progress exact c231ab1의 5-suite39657204150도70건 PASS(새 progress6 포함). strict scope 발견·hashed key/전체 history 검증·known-ID 동일 no-follow descriptor read/fsync 및 settled absence를 후속 source 구현, 실제 삭제/교체·link·sync/권한 실패7검사 추가. 새 발견8-suite39660035294는 기존 worker fixture의 누락 request_schema로 compile FAIL(검사 실행 전); fixture에 false 명시. 수정 head 실행·production owner/semantic flow/wake/worker 통합과 실제 중지·재개는 남음 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
+| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | capture exact d4d54ed의 7-suite39653626146은92건 PASS. original-owner progress exact c231ab1의 5-suite39657204150도70건 PASS(새 progress6 포함). strict scope 발견·hashed key/전체 history 검증·known-ID 동일 no-follow descriptor read/fsync 및 settled absence를 후속 source 구현, 실제 삭제/교체·link·sync/권한 실패7검사 추가. 새 발견8-suite39660035294는 기존 worker fixture의 누락 request_schema로 compile FAIL(검사 실행 전); fixture에 typed Package_schema_only 명시. 수정 head 실행·production owner/semantic flow/wake/worker 통합과 실제 중지·재개는 남음 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
 | E05 | Board Attention 실행의 Addon 경계 검토·추출 | 조사·설계, Required | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
@@ -356,4 +356,4 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 ### E02 발견 선택 실행의 기존 worker fixture 수리
 
 - exact61c6014의 [8-suite39660035294](https://github.com/jeong-sik/masc/actions/runs/39660035294)는 completed/failure다. `test_lane_addon_worker.ml:537`의 기존 exact output에 필수 `request_schema`가 없어 컴파일에서 멈췄으며, 선택된 발견 검사도 실행되지 않았다. [실제 실패 발췌와 원본 해시](../docs/evidence/2026-10-22-curator-discovery/initial-compile-failure.json)를 보존한다.
-- 기존 worker-port fixture는 요청별 schema를 사용하지 않으므로 `request_schema=false`를 명시했다. 파싱 성공을 compiled 실행으로 세지 않으며, 같은8-suite의 수정 후보 결과를 별도로 확인한다. A01–H06의54개 작업과 완료 기준은 유지한다.
+- 기존 worker-port fixture는 요청별 schema를 사용하지 않으므로 `request_schema=Types.Package_schema_only`를 명시했다. 파싱 성공을 compiled 실행으로 세지 않으며, 같은8-suite의 수정 후보 결과를 별도로 확인한다. A01–H06의54개 작업과 완료 기준은 유지한다.

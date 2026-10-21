@@ -16,6 +16,11 @@ on:
           - firefox
           - gecko
         default: chromium
+      firefox_version:
+        description: 'Mozilla Firefox release fixture for firefox/gecko, isolated from the runner app'
+        required: true
+        type: string
+        default: '158.0.1'
 permissions:
   contents: read
 
@@ -34,6 +39,7 @@ jobs:
         env:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           PROOF_BROWSER: ${{ inputs.browser }}
+          FIREFOX_FIXTURE_VERSION: ${{ inputs.firefox_version }}
         run: |
           python3 - <<'PYCODE'
           import os, re
@@ -41,6 +47,10 @@ jobs:
               raise SystemExit("candidate_sha must be a full 40-character source commit")
           if os.environ["PROOF_BROWSER"] not in ("chromium", "firefox", "gecko"):
               raise SystemExit("browser must be chromium, firefox or gecko")
+          if os.environ["PROOF_BROWSER"] in ("firefox", "gecko") and not re.fullmatch(
+              r"[0-9]+\.[0-9]+(?:\.[0-9]+)?", os.environ["FIREFOX_FIXTURE_VERSION"]
+          ):
+              raise SystemExit("firefox_version must name a numeric Mozilla release")
           PYCODE
 
       - uses: actions/checkout@v7
@@ -92,12 +102,64 @@ jobs:
           npx --yes @puppeteer/browsers@3.2.3 install chrome@154.0.8037.57 --path "$RUNNER_TEMP/chrome-for-testing" > "$RUNNER_TEMP/chrome-for-testing.txt"
           echo "CHROME_FOR_TESTING=$(tail -1 "$RUNNER_TEMP/chrome-for-testing.txt" | sed 's/^[^ ]* //')" >> "$GITHUB_ENV"
 
-      - name: Install Firefox
+      - name: Install the selected isolated Firefox release
         if: inputs.browser == 'firefox' || inputs.browser == 'gecko'
+        env:
+          FIREFOX_FIXTURE_VERSION: ${{ inputs.firefox_version }}
         run: |
-          if [[ ! -x /Applications/Firefox.app/Contents/MacOS/firefox ]]; then
-            brew install --cask firefox
-          fi
+          python3 - <<'PYCODE'
+          import hashlib, json, os, shutil, urllib.parse, urllib.request
+          from pathlib import Path
+          version = os.environ["FIREFOX_FIXTURE_VERSION"]
+          root = Path(os.environ["RUNNER_TEMP"]) / "browser-addon-firefox"
+          root.mkdir(mode=0o700)
+          relative = f"mac/en-US/Firefox {version}.dmg"
+          base = f"https://archive.mozilla.org/pub/firefox/releases/{version}/"
+          sums_url = base + "SHA256SUMS"
+          with urllib.request.urlopen(sums_url) as response:
+              sums = response.read()
+          entries = []
+          for line in sums.decode().splitlines():
+              parts = line.split(maxsplit=1)
+              if len(parts) == 2 and parts[1] == relative:
+                  entries.append(parts[0])
+          if len(entries) != 1 or len(entries[0]) != 64 or any(c not in "0123456789abcdef" for c in entries[0]):
+              raise SystemExit("Mozilla SHA256SUMS must name exactly one valid selected DMG digest")
+          url = base + urllib.parse.quote(relative, safe="/")
+          dmg = root / "firefox.dmg"
+          with urllib.request.urlopen(url) as source, dmg.open("xb") as target:
+              shutil.copyfileobj(source, target)
+          with dmg.open("rb") as source:
+              digest = hashlib.file_digest(source, "sha256").hexdigest()
+          if digest != entries[0]:
+              raise SystemExit("selected Firefox DMG does not match Mozilla SHA256SUMS")
+          evidence = Path("proof/native-browser")
+          evidence.mkdir(parents=True, exist_ok=True)
+          (evidence / "FIREFOX_FIXTURE.json").write_text(json.dumps({
+              "version": version, "url": url, "sha256sums_url": sums_url,
+              "sha256sums_sha256": hashlib.sha256(sums).hexdigest(),
+              "expected_sha256": entries[0], "actual_sha256": digest,
+              "scope": "isolated official DMG verified against HTTPS release sums; no signature verification"
+          }, indent=2) + "\n")
+          PYCODE
+          fixture="$RUNNER_TEMP/browser-addon-firefox"
+          mount="$fixture/mount"
+          mkdir "$mount"
+          mounted=false
+          cleanup_mount() {
+            if [[ "$mounted" == true ]]; then
+              mounted=false
+              hdiutil detach "$mount" -quiet
+            fi
+          }
+          trap cleanup_mount EXIT
+          hdiutil attach "$fixture/firefox.dmg" -mountpoint "$mount" -readonly -nobrowse -quiet
+          mounted=true
+          ditto "$mount/Firefox.app" "$fixture/Firefox.app"
+          cleanup_mount
+          trap - EXIT
+          test -x "$fixture/Firefox.app/Contents/MacOS/firefox"
+          echo "FIREFOX_BINARY=$fixture/Firefox.app/Contents/MacOS/firefox" >> "$GITHUB_ENV"
 
       - name: Install the owned Gecko driver
         if: inputs.browser == 'gecko'
@@ -117,6 +179,9 @@ jobs:
           cp _build/default/bin/masc_browser_process_owner.exe proof/native-browser/binaries/
           cp _build/default/bin/masc_browser_addon_worker.exe proof/native-browser/binaries/
           (cd proof/native-browser && shasum -a 256 binaries/*.exe > SHA256SUMS)
+          if [[ "$PROOF_BROWSER" == firefox || "$PROOF_BROWSER" == gecko ]]; then
+            shasum -a 256 "$FIREFOX_BINARY" > proof/native-browser/FIREFOX_BINARY_SHA256
+          fi
 
       - name: Exercise the Stagehand lane in a real Chromium
         if: inputs.browser == 'chromium'
@@ -133,9 +198,9 @@ jobs:
       - name: Exercise owned Firefox input, retirement and reattachment
         if: inputs.browser == 'firefox'
         run: |
-          MOZ_HEADLESS=1 /Applications/Firefox.app/Contents/MacOS/firefox --version > proof/native-browser/BROWSER_VERSION
+          MOZ_HEADLESS=1 "$FIREFOX_BINARY" --version > proof/native-browser/BROWSER_VERSION
           python3 scripts/probe-browser-addon-firefox.py \
-            --firefox /Applications/Firefox.app/Contents/MacOS/firefox \
+            --firefox "$FIREFOX_BINARY" \
             --probe _build/default/test/browser_addon_firefox_probe.exe \
             --launcher _build/default/bin/masc_native_addon_launcher.exe \
             --guardian _build/default/bin/masc_browser_process_owner.exe \
@@ -145,10 +210,10 @@ jobs:
       - name: Exercise owned Gecko upload, download and artifact retention
         if: inputs.browser == 'gecko'
         run: |
-          MOZ_HEADLESS=1 /Applications/Firefox.app/Contents/MacOS/firefox --version > proof/native-browser/BROWSER_VERSION
+          MOZ_HEADLESS=1 "$FIREFOX_BINARY" --version > proof/native-browser/BROWSER_VERSION
           geckodriver --version > proof/native-browser/DRIVER_VERSION
           python3 scripts/probe-browser-addon-gecko-transfer.py \
-            --firefox /Applications/Firefox.app/Contents/MacOS/firefox \
+            --firefox "$FIREFOX_BINARY" \
             --driver "$(command -v geckodriver)" \
             --probe _build/default/test/browser_addon_gecko_transfer_probe.exe \
             --launcher _build/default/bin/masc_native_addon_launcher.exe \

@@ -1460,6 +1460,7 @@ let summarize_rows ~keeper_name rows =
   let latest_recorded_at = ref None in
   let latest_stimulus_id = ref None in
   let stimulus_seen = Hashtbl.create 16 in
+  let reacted_stimulus_ids = ref Event_id_set.empty in
   let board_stimulus_tokens = Hashtbl.create 16 in
   let stimulus_order = ref [] in
   let latest_board_cursor = ref None in
@@ -1470,11 +1471,17 @@ let summarize_rows ~keeper_name rows =
   in
   let remember_stimulus stimulus_id =
     if not (Hashtbl.mem stimulus_seen stimulus_id) then begin
-      Hashtbl.add stimulus_seen stimulus_id false;
+      Hashtbl.add stimulus_seen stimulus_id
+        (Event_id_set.mem stimulus_id !reacted_stimulus_ids);
       stimulus_order := stimulus_id :: !stimulus_order
     end
   in
   let mark_reacted stimulus_id =
+    (* Recovery may append a stimulus observation after its reaction receipt.
+       Both rows identify the same occurrence; append order cannot undo proof
+       that it reacted. Keep reaction-only identities until their stimulus is
+       encountered in this observation window. *)
+    reacted_stimulus_ids := Event_id_set.add stimulus_id !reacted_stimulus_ids;
     match Hashtbl.find_opt stimulus_seen stimulus_id with
     | Some _ -> Hashtbl.replace stimulus_seen stimulus_id true
     | None -> ()

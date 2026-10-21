@@ -393,6 +393,32 @@ let test_unknown_record_kind_is_quarantined_not_fatal () =
       (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
 ;;
 
+let test_summary_preserves_reaction_before_stimulus () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "out-of-order-summary" in
+  let reacted = board_stimulus ~post_id:"observed-after-reaction" () in
+  let pending = board_stimulus ~post_id:"still-needs-reaction" () in
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path ~keeper_name reacted;
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path ~keeper_name reacted;
+  let settled =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "reaction evidence survives later observation" "ok" "status" settled;
+  check int "the reacted occurrence is not pending" 0
+    (settled |> member "pending_stimulus_count" |> to_int);
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path ~keeper_name pending;
+  let mixed =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "unreacted occurrences still warn" "degraded" "status" mixed;
+  check (list string) "only the exact unreacted occurrence is pending"
+    [ "board:still-needs-reaction" ]
+    (mixed |> member "pending_stimulus_ids" |> to_list |> List.map to_string)
+;;
+
 let test_summary_marks_unreacted_and_reacted_stimuli () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "summary-keeper" in
@@ -1936,6 +1962,9 @@ let () =
             "summary marks unreacted and reacted stimuli"
             `Quick
             test_summary_marks_unreacted_and_reacted_stimuli
+        ; test_case
+            "summary preserves reaction before stimulus"
+            `Quick test_summary_preserves_reaction_before_stimulus
         ; test_case
             "fleet summary follows a degraded keeper"
             `Quick

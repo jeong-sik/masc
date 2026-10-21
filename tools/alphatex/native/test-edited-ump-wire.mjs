@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { Worker } from 'node:worker_threads'
 import { once } from 'node:events'
+import { fileURLToPath } from 'node:url'
 import JZZ from 'jzz'
 import { capturedMidiFixture, packet } from '../test/helpers/captured-midi-fixture.mjs'
 import { newUmpEditor, umpEditorCommand } from '../ump-editor.mjs'
@@ -128,7 +129,7 @@ import CoreMIDI
 }`
   await writeFile(join(directory, 'Probe.swift'), main)
   const built = spawnSync('xcrun', ['swiftc', '-parse-as-library', '-D', 'MIDI_LIBRARY',
-    ...['MidiTransport', 'UmpTransport', 'UmpOutput', 'UmpState'].map(name => new URL(`${name}.swift`, import.meta.url).pathname),
+    ...['MidiTransport', 'UmpTransport', 'UmpOutput', 'UmpState'].map(name => fileURLToPath(new URL(`${name}.swift`, import.meta.url))),
     join(directory, 'Probe.swift'), '-o', join(directory, 'probe'), '-framework', 'CoreMIDI'], { encoding: 'utf8' })
   assert.equal(built.status, 0, built.stderr)
   const rows = [

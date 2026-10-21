@@ -6755,10 +6755,10 @@ let row_list (state : state) : row_list option =
             ~set_scroll:(fun s -> state.runtime_surface_scroll <- s))
   | System_logs ->
       of_counted (fun count ->
-          scrolling ~count ~cursor:state.system_logs_cursor
-            ~scroll:state.system_logs_scroll
-            ~set_cursor:(fun i -> state.system_logs_cursor <- i)
-            ~set_scroll:(fun s -> state.system_logs_scroll <- s))
+          scrolling ~count ~cursor:(system_logs_page state).lp_cursor
+            ~scroll:(system_logs_page state).lp_scroll
+            ~set_cursor:(fun i -> edit_system_logs_page state (fun page -> {page with lp_cursor=i}))
+            ~set_scroll:(fun s -> edit_system_logs_page state (fun page -> {page with lp_scroll=s})))
   | Changes ->
       of_counted (fun count ->
           scrolling ~count ~cursor:state.changes_cursor
@@ -6993,7 +6993,7 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
        | Some _ -> pane (fun v -> Runtime_detail_scroll v)
        | None -> None)
   | System_logs ->
-      (match state.system_logs_detail_seq with
+      (match (system_logs_page state).lp_detail_seq with
        | Some _ -> pane (fun v -> System_log_detail_scroll v)
        | None -> None)
   | Lanes ->
@@ -12252,28 +12252,28 @@ let apply_approvals_summary_load state ~listing_ticket ~expected_workspace reque
    without holding the whole ring in memory. *)
 let system_log_page = 300
 
-let apply_system_logs_load state = function
-  | Ok snapshot ->
-      state.system_logs <- Some snapshot;
-      state.system_logs_error <- None;
-      let visible = Masc_tui_types.visible_system_log_entries state in
-      state.system_logs_cursor <-
-        max 0 (min state.system_logs_cursor (List.length visible - 1))
-  | Error detail ->
-      (* The previous page stays on screen; the error line says the count above
-         it is stale rather than letting it read as a fresh zero. *)
-      state.system_logs_error <- Some detail
+let apply_system_logs_load state result =
+  state.system_logs <- System_logs_view.apply System_logs_view.Server result state.system_logs
 
-(* Refetch the Logs page outside the surface tick — the level floor changes
-   what the server sends, so the page cannot be re-trimmed locally. Same
-   fiber-and-mailbox shape as the other one-surface loads. *)
+let refresh_client_system_logs state =
+  match System_logs_view.source state.system_logs with
+  | Server -> ()
+  | This_tui ->
+    let page=system_logs_page state in
+    let result=System_logs_view.client_snapshot ~limit:system_log_page ~min_level:page.lp_min_level in
+    state.system_logs <- System_logs_view.apply This_tui result state.system_logs
+
+(* Refresh the selected source. The server keeps its existing scoped request
+   and server-owned floor; the local page samples only this process's ring. *)
 let launch_system_logs_load state ~mailbox =
-  if server_authority_ready state then begin
+  match System_logs_view.source state.system_logs with
+  | This_tui -> refresh_client_system_logs state
+  | Server -> if server_authority_ready state then begin
   let host = server_peer_host in
   let port = state.port in
   let level =
     Option.map Masc.Tui_decode.system_log_level_query
-      state.system_logs_min_level
+      (System_logs_view.page System_logs_view.Server state.system_logs).lp_min_level
   in
   let reads, request = Surface_read_order.dispatch ~kind:Surface_read_order.Independent
     ~needs:(surface_needs_of_surface System_logs) ~started_ns:(Mtime_clock.elapsed_ns ())
@@ -13108,12 +13108,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_lane_notice <- None;
   state.runtime_lane_write <- Lane_write_idle;
   state.slot_editor <- None;
-  state.system_logs <- None;
-  state.system_logs_error <- None;
-  state.system_logs_cursor <- 0;
-  state.system_logs_scroll <- 0;
-  state.system_logs_detail_seq <- None;
-  state.system_logs_detail_scroll <- 0;
+  state.system_logs <- System_logs_view.clear_server state.system_logs;
   state.lane_addons_generation <- state.lane_addons_generation + 1;
   state.lane_addons <- None;
   state.lane_addons_cached <- Masc_tui_lane_addons.initial;
@@ -14123,10 +14118,11 @@ let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_aut
 ;;
 
 let current_surface_needs state =
-  Masc_tui_types.surface_needs ~about_open:state.about_open
-    ~keeper_pane_drawn:
-      (not (Masc_tui_render.acting_pane_suppressed state))
-    state.view
+  let needs=Masc_tui_types.surface_needs ~about_open:state.about_open
+    ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state)) state.view in
+  match System_logs_view.source state.system_logs with
+  | Server -> needs
+  | This_tui -> {needs with needs_system_logs=false}
 
 (* The reads a full refresh tick sends beside its surface bundle. They go out
    while the bundle is still on the wire, so a bundle that moves the read
@@ -14714,7 +14710,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let surface_context=Surface_read_context.capture ~needs ~board_query surface_request in
     let provider_history_days = state.provider_history_days in
     let system_log_level = Option.map Masc.Tui_decode.system_log_level_query
-      state.system_logs_min_level in
+      (System_logs_view.page System_logs_view.Server state.system_logs).lp_min_level in
     log_http_surface_read_started state ~full_refresh_running:true surface_context;
     (* The side reads -- the keeper turns behind the footer's answering item,
        the schedules behind the agenda strip's next wake, the open chat's
@@ -15230,7 +15226,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     let surface_context=Surface_read_context.capture ~needs ~board_query surface_request in
     let provider_history_days = state.provider_history_days in
     let system_log_level = Option.map Masc.Tui_decode.system_log_level_query
-      state.system_logs_min_level in
+      (System_logs_view.page System_logs_view.Server state.system_logs).lp_min_level in
     log_http_surface_read_started state ~full_refresh_running:!full_refresh_inflight surface_context;
     let approval_ticket =
       if not needs.needs_operator_approvals then None
@@ -16556,12 +16552,12 @@ let open_selected_system_log state =
   match
     List.nth_opt
       (Masc_tui_types.visible_system_log_entries state)
-      state.system_logs_cursor
+      (system_logs_page state).lp_cursor
   with
   | None -> ()
   | Some entry ->
-      state.system_logs_detail_seq <- Some entry.Tui_decode.sl_seq;
-      state.system_logs_detail_scroll <- 0
+      edit_system_logs_page state (fun page ->
+        {page with lp_detail_seq=Some entry.Tui_decode.sl_seq;lp_detail_scroll=0})
 (* One step through the list a detail was opened from, without closing it.
    Reading a queue meant Esc, move, Enter for every row -- three keys to do
    what one does on Changes and the Keeper detail tabs, both of which already
@@ -22572,9 +22568,7 @@ let main
      change, rather than asking each of the places that change it to remember. *)
   let drawn_needs =
     ref
-      (Masc_tui_types.surface_needs ~about_open:state.about_open
-         ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state))
-         state.view)
+      (current_surface_needs state)
   in
   let input_reader = create_input_reader () in
   at_exit (fun () -> report_startup_observations input_reader);
@@ -28676,13 +28670,13 @@ and is loaded on demand through keeper_skill.
              ~reopen:(fun () -> state.approval_detail_scroll <- 0)
        | Some (("[" | "]") as bracket)
          when state.view = System_logs
-              && Option.is_some state.system_logs_detail_seq ->
+              && Option.is_some (system_logs_page state).lp_detail_seq ->
            step_detail_cursor
              ~count:
                (List.length (Masc_tui_types.visible_system_log_entries state))
-             ~cursor:state.system_logs_cursor
+             ~cursor:(system_logs_page state).lp_cursor
              ~delta:(if bracket = "]" then 1 else -1)
-             ~set_cursor:(fun cursor -> state.system_logs_cursor <- cursor)
+             ~set_cursor:(fun cursor -> edit_system_logs_page state (fun page -> {page with lp_cursor=cursor}))
              ~reopen:(fun () -> open_selected_system_log state)
        | Some (("[" | "]") as bracket) when state.view = Board ->
            step_board_read state ~mailbox:async_messages
@@ -30231,11 +30225,11 @@ and is loaded on demand through keeper_skill.
                   (if direction > 0 then
                      Masc_tui_types.scroll_down_from state.runtime_detail_scroll ~by:page
                    else max 0 (state.runtime_detail_scroll + (direction * page)))
-            | System_logs when Option.is_some state.system_logs_detail_seq ->
-                state.system_logs_detail_scroll <-
+            | System_logs when Option.is_some (system_logs_page state).lp_detail_seq ->
+                edit_system_logs_page state (fun logs -> {logs with lp_detail_scroll=
                   (if direction > 0 then
-                     Masc_tui_types.scroll_down_from state.system_logs_detail_scroll ~by:page
-                   else max 0 (state.system_logs_detail_scroll + (direction * page)))
+                     Masc_tui_types.scroll_down_from logs.lp_detail_scroll ~by:page
+                   else max 0 (logs.lp_detail_scroll + (direction * page)))})
             (* The Runs tab is read by a cursor, so its page key names a run
                the way Home and End do. Scrolling it instead wrote a value the
                drawing pulled straight back to the selected run, which is the
@@ -30798,9 +30792,9 @@ and is loaded on demand through keeper_skill.
                 end
                 else goto_surface state ~mailbox:async_messages Config
             | System_logs ->
-                if Option.is_some state.system_logs_detail_seq then begin
-                  state.system_logs_detail_seq <- None;
-                  state.system_logs_detail_scroll <- 0
+                if Option.is_some (system_logs_page state).lp_detail_seq then begin
+                  edit_system_logs_page state (fun page -> {page with lp_detail_seq=None});
+                  edit_system_logs_page state (fun page -> {page with lp_detail_scroll=0})
                 end
                 else
                   (* Off-ring child: the way out of the list is Activity,
@@ -30921,8 +30915,8 @@ and is loaded on demand through keeper_skill.
                 state.runtime_detail_target <- None;
                 state.runtime_detail_scroll <- 0
             | System_logs ->
-                state.system_logs_detail_seq <- None;
-                state.system_logs_detail_scroll <- 0
+                edit_system_logs_page state (fun page -> {page with lp_detail_seq=None});
+                edit_system_logs_page state (fun page -> {page with lp_detail_scroll=0})
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
             | Keepers Keeper_list | Acting | Metrics | Approvals
              | Memory | Repositories | Connectors | Config | Tools | Clients -> ())
@@ -31267,17 +31261,16 @@ and is loaded on demand through keeper_skill.
                 state.metrics_scroll <-
                   Masc_tui_types.scroll_down_from state.metrics_scroll ~by:1
             | System_logs ->
-                if Option.is_some state.system_logs_detail_seq then
-                  state.system_logs_detail_scroll <-
-                    Masc_tui_types.scroll_down_from state.system_logs_detail_scroll ~by:1
+                if Option.is_some (system_logs_page state).lp_detail_seq then
+                  edit_system_logs_page state (fun page -> {page with lp_detail_scroll=
+                    Masc_tui_types.scroll_down_from page.lp_detail_scroll ~by:1})
                 else
                   (let cursor, scroll =
                      move_row_cursor state ~delta:1
-                       ~cursor:state.system_logs_cursor
-                       ~scroll:state.system_logs_scroll
+                       ~cursor:(system_logs_page state).lp_cursor
+                       ~scroll:(system_logs_page state).lp_scroll
                    in
-                   state.system_logs_cursor <- cursor;
-                   state.system_logs_scroll <- scroll)
+                   edit_system_logs_page state (fun page -> {page with lp_cursor=cursor;lp_scroll=scroll}))
             (* The picker's own arm takes these keys. *)
             | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
@@ -31587,17 +31580,16 @@ and is loaded on demand through keeper_skill.
                   if state.acting_scroll = 0 then state.acting_unseen <- 0
                 end
             | System_logs ->
-                if Option.is_some state.system_logs_detail_seq then
-                  state.system_logs_detail_scroll <-
-                    max 0 (state.system_logs_detail_scroll - 1)
+                if Option.is_some (system_logs_page state).lp_detail_seq then
+                  edit_system_logs_page state (fun page -> {page with lp_detail_scroll=
+                    max 0 (page.lp_detail_scroll - 1)})
                 else
                   (let cursor, scroll =
                      move_row_cursor state ~delta:(-1)
-                       ~cursor:state.system_logs_cursor
-                       ~scroll:state.system_logs_scroll
+                       ~cursor:(system_logs_page state).lp_cursor
+                       ~scroll:(system_logs_page state).lp_scroll
                    in
-                   state.system_logs_cursor <- cursor;
-                   state.system_logs_scroll <- scroll)
+                   edit_system_logs_page state (fun page -> {page with lp_cursor=cursor;lp_scroll=scroll}))
             (* The picker's own arm takes these keys. *)
             | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
@@ -32236,41 +32228,26 @@ and is loaded on demand through keeper_skill.
               names the schedule, the second cancels it. Whether the row is
               still cancellable is the server's store rules to say. *)
            handle_schedule_cancel_key state ~mailbox:async_messages
+       | Some ("o" | "O") when state.view = System_logs ->
+           let source=match System_logs_view.source state.system_logs with
+             | Server -> System_logs_view.This_tui | This_tui -> Server in
+           state.system_logs <- System_logs_view.select source state.system_logs;
+           refresh_client_system_logs state
        | Some ("l" | "L") when state.view = System_logs ->
-           (* The verbose ladder: each press raises the server-side level
-              floor, and after error it opens back up. The floor changes what
-              the page fetches, so the page is refetched rather than
-              re-trimmed locally. *)
-           state.system_logs_min_level <-
-             Masc.Tui_decode.next_system_log_min_level
-               state.system_logs_min_level;
-           state.system_logs_scroll <- 0;
-           state.system_logs_cursor <- 0;
+           edit_system_logs_page state (fun page -> {page with
+             lp_min_level=Masc.Tui_decode.next_system_log_min_level page.lp_min_level;
+             lp_scroll=0;lp_cursor=0});
            launch_system_logs_load state ~mailbox:async_messages
        | Some ("v" | "V") when state.view = System_logs ->
-           (* Unlike [l]'s four-step floor ladder, this answers the common
-              operational question directly: DEBUG rows on or off. Both
-              states refetch because the server owns level filtering. *)
-           state.system_logs_min_level <-
-             Masc.Tui_decode.toggle_system_log_verbose
-               state.system_logs_min_level;
-           state.system_logs_scroll <- 0;
-           state.system_logs_cursor <- 0;
+           edit_system_logs_page state (fun page -> {page with
+             lp_min_level=Masc.Tui_decode.toggle_system_log_verbose page.lp_min_level;
+             lp_scroll=0;lp_cursor=0});
            launch_system_logs_load state ~mailbox:async_messages
        | Some ("c" | "C") when state.view = System_logs ->
-           (* Category narrows what this page shows, not what it fetched.
-              The vocabulary is the categories the loaded rows carry, so the
-              cycle never offers a name the page cannot show. *)
-           let entries =
-             match state.system_logs with
-             | None -> []
-             | Some snapshot -> snapshot.sys_entries
-           in
-           state.system_logs_category <-
-             Masc.Tui_decode.next_system_log_category
-               ~current:state.system_logs_category entries;
-           state.system_logs_scroll <- 0;
-           state.system_logs_cursor <- 0
+           edit_system_logs_page state (fun page ->
+             let entries=match page.lp_snapshot with None -> [] | Some snapshot -> snapshot.sys_entries in
+             {page with lp_category=Masc.Tui_decode.next_system_log_category
+               ~current:page.lp_category entries;lp_scroll=0;lp_cursor=0})
        | Some "x" | Some "X"
          when state.view = Planning && state.planning_mode = Planning_list
               && Masc_tui_overview_tasks.is_focused state.task_focus
@@ -32854,11 +32831,10 @@ and is loaded on demand through keeper_skill.
          it for every Tab made an Overview -> Tools walk spend those requests
          once per distinct [surface_needs] record. A scoped refresh revalidates
          identity before its datasets but keeps aggregate connection status. *)
+      if state.view = System_logs && !drawn_needs <> current_surface_needs state then
+        refresh_client_system_logs state;
       let needed =
-        Masc_tui_types.surface_needs ~about_open:state.about_open
-          ~keeper_pane_drawn:
-            (not (Masc_tui_render.acting_pane_suppressed state))
-          state.view
+        current_surface_needs state
       in
       if
         needed <> !drawn_needs
@@ -33004,6 +32980,12 @@ and is loaded on demand through keeper_skill.
         (* The armed approval survives the tick: the snapshot apply already
            disarms it when its token leaves the list, so clearing here only
            made the second press race a two-second clock. *)
+        if state.view = System_logs then begin
+          refresh_client_system_logs state;
+          match System_logs_view.source state.system_logs with
+          | Server -> ()
+          | This_tui -> Render_schedule.request render_schedule Render_schedule.Background
+        end;
         launch_local_workspace_read state ~mailbox:async_messages ~intent:Snapshot_read.Poll base_path;
         let host = server_peer_host in
         let port = state.port in

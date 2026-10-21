@@ -335,9 +335,9 @@ val decode_keeper_calls_snapshot :
   requested_keeper:string -> Yojson.Safe.t -> (keeper_calls_snapshot, string) result
 
 type system_log_snapshot = {
-  sys_entries : system_log_entry list;  (** newest last, as the server returns *)
+  sys_entries : system_log_entry list;  (** Original producer row order. *)
   sys_total : int;  (** lines the ring has seen, not lines returned *)
-  sys_latest_seq : int;
+  sys_latest_seq : int option;  (** Producer's nullable latest returned row sequence. *)
 }
 
 (** One runtime row shared by the Keeper picker and Runtime surface.

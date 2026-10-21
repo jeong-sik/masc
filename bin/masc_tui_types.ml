@@ -2,6 +2,7 @@
 open Masc_tui_identity_model
 
 module Tui_decode = Masc.Tui_decode
+module System_logs_view = Masc_tui_system_logs
 module Memory_category = Masc.Keeper_memory_os_types
 module Metrics_tail = Masc_tui_metrics_tail
 module Rows = Masc_tui_rows
@@ -9579,17 +9580,7 @@ type state = {
      no arm -- its $EDITOR reason form is the confirmation step. *)
   mutable verification_verdict_armed: (string * string) option;
   mutable verification_verdict_error: string option;
-  mutable system_logs: system_log_snapshot option;
-  mutable system_logs_error: string option;
-  mutable system_logs_scroll: int;
-  mutable system_logs_cursor: int;
-  (* The Logs filters. The level floor travels to the server (it decides what
-     the page fetches); the category narrows what the fetched page shows, its
-     vocabulary being whatever categories the loaded rows carry. *)
-  mutable system_logs_min_level: Tui_decode.system_log_level option;
-  mutable system_logs_category: string option;
-  mutable system_logs_detail_seq: int option;
-  mutable system_logs_detail_scroll: int;
+  mutable system_logs: System_logs_view.t;
   msg_input: Masc_tui_message_input.t;
   mutable msg_command_menu: Masc_tui_command.menu_state;
   (* A draft restored from an unterminated terminal paste needs explicit
@@ -15557,8 +15548,7 @@ let create_state
   keeper_secrets = [];
   lanes_error = None;
   lanes_action_error = None;
-  system_logs = None;
-  system_logs_error = None;
+  system_logs = System_logs_view.empty;
   tools_inventory = None;
   tools_request_generation = 0;
   tools_read_inflight = None;
@@ -15769,12 +15759,6 @@ let create_state
   verification_detail_scroll = 0;
   verification_verdict_armed = None;
   verification_verdict_error = None;
-  system_logs_scroll = 0;
-  system_logs_cursor = 0;
-  system_logs_min_level = None;
-  system_logs_category = None;
-  system_logs_detail_seq = None;
-  system_logs_detail_scroll = 0;
   msg_input = Masc_tui_message_input.create ();
   msg_command_menu = Masc_tui_command.Menu_idle;
   msg_recovered_paste_keepers = [];
@@ -15845,19 +15829,10 @@ let create_state
   refresh_interval;
 }
 
-let visible_system_log_entries (state : state) =
-  match state.system_logs with
-  | None -> []
-  | Some snapshot -> (
-      match state.system_logs_category with
-      | None -> snapshot.Tui_decode.sys_entries
-      | Some wanted ->
-          List.filter
-            (fun entry ->
-               match entry.Tui_decode.sl_category with
-               | Some observed -> String.equal wanted observed
-               | None -> false)
-            snapshot.Tui_decode.sys_entries)
+let system_logs_page (state : state) = System_logs_view.current state.system_logs
+let edit_system_logs_page (state : state) change =
+  state.system_logs <- System_logs_view.update_current change state.system_logs
+let visible_system_log_entries (state : state) = System_logs_view.visible (system_logs_page state)
 
 (* The row the renderer draws and the row this counts have to come from one
    predicate. A roster that failed to load leaves stale entries behind, so
@@ -16812,7 +16787,7 @@ let apply_clamped_scroll (state : state) = function
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Runtime_detail_scroll value -> state.runtime_detail_scroll <- value
   | Runtime_params_scroll value -> state.config_scroll <- value
-  | System_log_detail_scroll value -> state.system_logs_detail_scroll <- value
+  | System_log_detail_scroll value -> edit_system_logs_page state (fun page -> {page with lp_detail_scroll=value})
   | Keeper_logs_scroll { scroll; cols } ->
       state.log_scroll <- scroll;
       state.log_wrap_cols <- Some cols
@@ -19442,13 +19417,13 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
   in
   function
   | System_logs ->
-      if Option.is_some state.system_logs_detail_seq then None
+      if Option.is_some (System_logs_view.current state.system_logs).lp_detail_seq then None
       else Some
         { sc_count =
-            (match state.system_logs with
+            (match (System_logs_view.current state.system_logs).lp_snapshot with
              | None -> 0
              | Some _ -> List.length (visible_system_log_entries state))
-        ; sc_chrome = listing_chrome ~error:state.system_logs_error
+        ; sc_chrome = listing_chrome ~error:(System_logs_view.current state.system_logs).lp_error
         ; sc_overflow_takes_row = true
         ; sc_preview_keep = None
         }

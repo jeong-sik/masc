@@ -597,7 +597,7 @@ let render_surface (state : state) =
   | Acting -> render_acting state
   | Metrics -> render_metrics state
   | System_logs ->
-      (match state.system_logs_detail_seq with
+      (match (system_logs_page state).lp_detail_seq with
        | None -> render_system_logs state
        | Some seq -> render_system_log_detail state seq)
   | Schedules -> Masc_tui_render_work.render_schedules state

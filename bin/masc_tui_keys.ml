@@ -1074,7 +1074,8 @@ let for_surface = function
       ]
       @ [ tools_refresh; listing_next; listing_quit ]
   | System_logs ->
-      [ b Navigate "e" "Events"
+      [ b Navigate "o" "log origin" ~help:"switch between server logs and this TUI's own observations"
+      ; b Navigate "e" "Events"
       ; b Navigate "j/k" "move / scroll"
       ; b Navigate "PgUp/PgDn" "detail page"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only

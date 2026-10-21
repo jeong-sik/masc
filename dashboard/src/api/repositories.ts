@@ -2,6 +2,48 @@ import { del, get, post, type GetOptions } from './core'
 
 export type RepoStatus = 'active' | 'paused' | 'error' | 'unknown'
 
+export type RepositoryAdvanceOutcome =
+  | { state: 'advanced'; behind: number }
+  | { state: 'already_current' }
+  | { state: 'skipped_dirty'; staged: number; unstaged: number; conflicted: number }
+  | { state: 'skipped_not_on_default_branch'; current_branch: string }
+  | { state: 'fast_forward_refused'; behind: number; reason: string }
+  | { state: 'advance_inspect_failed'; reason: string }
+
+/** Fetch success and worktree advancement are independent server outcomes. */
+export async function requestRepositorySync(id: string): Promise<RepositoryAdvanceOutcome> {
+  const raw = await post<unknown>(`/api/v1/repositories/${encodeURIComponent(id)}/sync`, {})
+  if (!isRecord(raw) || raw.id !== id || raw.status !== 'active' || !isRecord(raw.advance)) {
+    throw new Error('Malformed repository sync response')
+  }
+  const advance = raw.advance
+  const count = (value: unknown): value is number => typeof value === 'number'
+    && Number.isSafeInteger(value) && value >= 0
+  switch (advance.state) {
+    case 'advanced':
+      if (count(advance.behind)) return { state: advance.state, behind: advance.behind }
+      break
+    case 'already_current': return { state: advance.state }
+    case 'skipped_dirty':
+      if (count(advance.staged) && count(advance.unstaged) && count(advance.conflicted)) {
+        return { state: advance.state, staged: advance.staged, unstaged: advance.unstaged, conflicted: advance.conflicted }
+      }
+      break
+    case 'skipped_not_on_default_branch':
+      if (typeof advance.current_branch === 'string') return { state: advance.state, current_branch: advance.current_branch }
+      break
+    case 'fast_forward_refused':
+      if (count(advance.behind) && typeof advance.reason === 'string') {
+        return { state: advance.state, behind: advance.behind, reason: advance.reason }
+      }
+      break
+    case 'advance_inspect_failed':
+      if (typeof advance.reason === 'string') return { state: advance.state, reason: advance.reason }
+      break
+  }
+  throw new Error('Malformed repository advance outcome')
+}
+
 export type RepositoryGitStatus =
   | {
       state: 'available'

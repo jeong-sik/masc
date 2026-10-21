@@ -3,11 +3,12 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { post } from '../api/core'
 import {
   discoverRepositories,
   fetchRepositoriesList,
   removeRepository,
+  requestRepositorySync,
+  type RepositoryAdvanceOutcome,
   type Repository,
   type RepoStatus,
 } from '../api/repositories'
@@ -31,6 +32,18 @@ const reposState = reposResource.state
 export const selectedRepoId = signal<string | null>(null)
 export const showAddRepoDialog = signal(false)
 export const isScanningRepositories = signal(false)
+export const repositorySyncResults = signal<ReadonlyMap<string, RepositoryAdvanceOutcome>>(new Map())
+
+export function repositoryAdvanceSummary(outcome: RepositoryAdvanceOutcome): { message: string; tone: 'success' | 'warning' } {
+  switch (outcome.state) {
+    case 'advanced': return { message: `${outcome.behind}개 커밋을 작업 트리에 반영했습니다.`, tone: 'success' }
+    case 'already_current': return { message: '작업 트리가 이미 최신입니다.', tone: 'success' }
+    case 'skipped_dirty': return { message: `원격 갱신 완료. 로컬 변경으로 작업 트리 반영을 건너뛰었습니다. staged ${outcome.staged}, unstaged ${outcome.unstaged}, conflicted ${outcome.conflicted}`, tone: 'warning' }
+    case 'skipped_not_on_default_branch': return { message: `원격 갱신 완료. 현재 브랜치 ${outcome.current_branch}를 유지했습니다.`, tone: 'warning' }
+    case 'fast_forward_refused': return { message: `원격 갱신 완료. fast-forward 거절 (${outcome.behind}개 커밋): ${outcome.reason}`, tone: 'warning' }
+    case 'advance_inspect_failed': return { message: `원격 갱신 완료. 작업 트리 상태 확인 실패: ${outcome.reason}`, tone: 'warning' }
+  }
+}
 
 // ── API ──────────────────────────────────────────────────
 
@@ -40,10 +53,16 @@ export async function fetchRepositories(): Promise<void> {
   })
 }
 
-export async function syncRepository(id: string): Promise<void> {
+export async function syncRepository(id: string): Promise<RepositoryAdvanceOutcome> {
+  const nextResults = new Map(repositorySyncResults.value)
+  nextResults.delete(id)
+  repositorySyncResults.value = nextResults
   try {
-    await post(`/api/v1/repositories/${encodeURIComponent(id)}/sync`, {})
-    showToast('동기화 요청 완료', 'success')
+    const outcome = await requestRepositorySync(id)
+    repositorySyncResults.value = new Map(repositorySyncResults.value).set(id, outcome)
+    const summary = repositoryAdvanceSummary(outcome)
+    showToast(summary.message, summary.tone)
+    return outcome
   } catch (err) {
     const msg = err instanceof Error ? err.message : '동기화 실패'
     showToast(msg, 'error')

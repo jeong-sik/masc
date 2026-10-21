@@ -298,8 +298,17 @@ let start_managed_container
                          ]))
                   else (
                     let message =
-                      Printf.sprintf "docker_managed_container_start_failed: %s"
-                        (Exec_policy.truncate_for_log out)
+                      Keeper_sandbox_exec_failure.docker_run_failure_message
+                        ~prefix:"docker_managed_container_start_failed"
+                        ~base_path_hash:
+                          (Keeper_sandbox_runtime.base_path_hash config.base_path)
+                        ~keeper_name:meta.name
+                        ~container_kind:managed_kind
+                        ~network_label
+                        ~image
+                        ~status:st
+                        ~output:out
+                        ()
                     in
                     Keeper_registry_error_recording.record
                       ~base_path:config.base_path meta.name message;

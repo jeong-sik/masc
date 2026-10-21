@@ -601,6 +601,29 @@ Source review and actual selected execution remain separate.
 
 ## Completion evidence
 
+### External WebExtension lifecycle probe
+
+`browser_addon_webextension_probe` and
+`scripts/probe-browser-addon-webextension.py` exercise the real embedded
+extension, matching native host, authenticated production HTTP routes and the
+Addon command queues. The driver owns a separate Firefox session solely for
+fixture setup and cleanup. Before loading the unchanged extension, it points
+both process-local native-manifest directory keys at the fixture installation.
+It refuses a native lookup cache that is already initialized. It changes no
+HOME, user/global manifest, native lookup function or extension implementation.
+This follows [Mozilla's own native messaging fixture](https://github.com/mozilla-firefox/firefox/blob/main/toolkit/components/extensions/test/xpcshell/head_native_messaging.js).
+
+All content operations use public Addon tools with the observed client/tab and
+document/node identities: read, scene, fill, DOM click, scroll, browser zoom and
+scoped screenshot. The fixture witnesses the filled value and exactly one click.
+Trusted hover is explicitly refused; this transport does not claim BiDi input
+parity. Confirmed worker retirement must preserve the externally owned Firefox;
+reattachment must obtain a new worker and actual native-host client identity,
+refuse the old host/client and read the original tab without replaying input.
+The harness separately deletes its original WebDriver session and checks the
+browser ended. Setup, hashes, tool receipts, lifecycle and PNG evidence are
+retained. This new probe has not yet been compiled or executed.
+
 ### Real Gecko locate and transfer probe
 
 `browser_addon_gecko_transfer_probe` selects the package's `locate` Exact Output

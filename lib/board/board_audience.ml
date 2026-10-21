@@ -101,8 +101,14 @@ let audience_of_address ~visibility ~unaddressed = function
    nobody — the task leaves the backlog as Done, and the producer's current
    task was already cleared when it submitted. A stalled review stays
    Internal because the Board is its only path to the producer. *)
-let audience_for_post ~visibility ~title ~content =
-  explicit_address_of_text (address_text ~title ~content)
+let audience_for_post ~post_kind ~visibility ~title ~content =
+  (* A system post is written by platform code, which decides who it reaches
+     from its visibility. Its text carries evidence such as evaluator and
+     commit messages, so reading an address out of it would let that text
+     wake a keeper or reject the post. *)
+  (match post_kind with
+   | System_post -> No_explicit_address
+   | Human_post | Automation_post -> explicit_address_of_text (address_text ~title ~content))
   |> audience_of_address ~visibility ~unaddressed:(fun () ->
     match visibility with
     | Direct -> Error (Validation_error "Direct Board posts require explicit targets")

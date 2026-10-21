@@ -9,11 +9,14 @@ val direct_targets_of_text : string -> Agent_id.t list
     and unsupported double-at selectors are not direct targets. *)
 
 val audience_for_post
-  :  visibility:visibility
+  :  post_kind:post_kind
+  -> visibility:visibility
   -> title:string
   -> content:string
   -> (audience, board_error) result
-(** Parse the immutable audience of a new post. A [Direct] post requires exact
+(** Parse the immutable audience of a new post. A [System_post] reads no
+    address from its text: platform code decides whom it reaches, so its
+    audience follows its visibility alone. A [Direct] post requires exact
     targets; a targetless or broadcast Direct post is rejected before
     persistence. A target candidate {!Agent_id.of_string} rejects is read as
     prose, not as a failed address, so it neither becomes a target nor rejects

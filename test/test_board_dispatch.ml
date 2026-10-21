@@ -2207,6 +2207,7 @@ let test_malformed_target_is_read_as_prose () =
     "discoverable"
     (match
        Board.audience_for_post
+         ~post_kind:Board.Human_post
          ~visibility:Board.Public
          ~title:""
          ~content:"please inspect @!"
@@ -2260,7 +2261,7 @@ let test_prose_mentions_do_not_record_validation_rejections () =
    Internal post stays discoverable. *)
 let test_unlisted_post_is_not_discoverable () =
   let label ~visibility ~content =
-    match Board.audience_for_post ~visibility ~title:"" ~content with
+    match Board.audience_for_post ~post_kind:Board.Human_post ~visibility ~title:"" ~content with
     | Ok audience -> audience_label audience
     | Error error -> Board.show_board_error error
   in
@@ -2305,6 +2306,57 @@ let test_write_boundary_emits_typed_audience () =
          (Board.Agent_id.to_string target)
      | _ -> Alcotest.fail "expected one exact Board target")
 ;;
+
+(* A system post is written by platform code, and the text it carries is
+   evidence such as an evaluator message or a commit refusal. An address inside
+   that text neither wakes a keeper nor rejects the post, so its audience
+   follows its visibility alone. The same text on a human post still counts as
+   an address. *)
+let test_system_post_text_is_not_an_address () =
+  let evidence = "gate=evaluator: commit refused @keeper-a @@internal @@all" in
+  let audience ~post_kind ~visibility =
+    Board.audience_for_post ~post_kind ~visibility ~title:evidence ~content:evidence
+  in
+  let expect label expected ~visibility =
+    match audience ~post_kind:Board.System_post ~visibility with
+    | Ok found -> Alcotest.(check string) label expected (audience_label found)
+    | Error error -> Alcotest.fail (label ^ ": " ^ Board.show_board_error error)
+  in
+  expect "public system post is discoverable" "discoverable" ~visibility:Board.Public;
+  expect "internal system post is discoverable" "discoverable" ~visibility:Board.Internal;
+  expect "unlisted system post is thread activity" "thread_participants"
+    ~visibility:Board.Unlisted;
+  (match audience ~post_kind:Board.System_post ~visibility:Board.Direct with
+   | Error _ -> ()
+   | Ok found ->
+     Alcotest.fail ("a direct system post has no text to name its targets, got "
+                    ^ audience_label found));
+  (match audience ~post_kind:Board.Human_post ~visibility:Board.Internal with
+   | Error _ -> ()
+   | Ok found ->
+     Alcotest.fail ("a human post with an unsupported selector was accepted as "
+                    ^ audience_label found))
+
+let test_system_post_with_address_text_is_written_unaddressed () =
+  let seen = ref None in
+  Board_dispatch.set_board_signal_hook (fun addressed -> seen := Some addressed);
+  (match
+     Board_dispatch.create_post
+       ~author:"system"
+       ~content:"Stalled task task-1. gate=evaluator: refused @keeper-a @@internal"
+       ~post_kind:Board.System_post
+       ~visibility:Board.Internal
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  match !seen with
+  | None -> Alcotest.fail "typed Board signal was not emitted"
+  | Some addressed ->
+    Alcotest.(check string)
+      "the evidence text addressed nobody"
+      "discoverable"
+      (audience_label addressed.Board_dispatch.audience)
 
 let test_post_audience_survives_edit_and_restart () =
   let get = function
@@ -2361,7 +2413,7 @@ let test_target_case_is_identity_level () =
      while the Keeper boundary folds them into one canonical id (pinned in
      test_keeper_lane_mentions). *)
   match
-    Board.audience_for_post ~visibility:Board.Public ~title:""
+    Board.audience_for_post ~post_kind:Board.Human_post ~visibility:Board.Public ~title:""
       ~content:"@MiXeD-Agent and @mixed-agent"
   with
   | Ok (Board.Targets targets) ->
@@ -2850,6 +2902,10 @@ let () =
         (with_eio test_unlisted_post_is_not_discoverable);
       Alcotest.test_case "write emits typed audience" `Quick
         (with_eio test_write_boundary_emits_typed_audience);
+      Alcotest.test_case "system post text is not an address" `Quick
+        (with_eio test_system_post_text_is_not_an_address);
+      Alcotest.test_case "system post with address text is written unaddressed" `Quick
+        (with_eio test_system_post_with_address_text_is_written_unaddressed);
       Alcotest.test_case "post audience survives edit and restart" `Quick
         (with_eio test_post_audience_survives_edit_and_restart);
       Alcotest.test_case "target case is identity-level" `Quick

@@ -669,6 +669,7 @@ let create_post_with_audience
     else
       match
         Board_audience.audience_for_post
+          ~post_kind:normalized_kind
           ~visibility
           ~title:normalized_title
           ~content:normalized_body
@@ -963,7 +964,8 @@ let update_post_with_outcome
             | Ok (normalized_title, normalized_body, _kind, normalized_meta) ->
               if String.length normalized_body = 0
               then Error (Validation_error "Content cannot be empty")
-              else match Board_audience.audience_for_post ~visibility:existing.visibility
+              else match Board_audience.audience_for_post ~post_kind:existing.post_kind
+                  ~visibility:existing.visibility
                   ~title:normalized_title ~content:normalized_body with
               | Error error -> Error error
               | Ok audience -> (

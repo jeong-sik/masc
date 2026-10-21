@@ -1356,7 +1356,7 @@ let collect_board_events_with_cursor_policy
         && compare_board_cursor_token token (board_cursor_token_of_post p) <= 0
     in
     let route_signal (p : Board.post) (signal : Board_dispatch.board_signal) =
-      match Board_audience.classify ~visibility:p.visibility signal with
+      match Board_audience.classify ~post_kind:p.post_kind ~visibility:p.visibility signal with
       | Error error ->
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string ObservationQueryFailures)

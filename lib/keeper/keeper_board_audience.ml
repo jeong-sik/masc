@@ -39,11 +39,12 @@ let of_board_audience = function
   | Board.Discoverable -> Ok Discoverable
 ;;
 
-let classify ~visibility signal =
+let classify ~post_kind ~visibility signal =
   let board_audience =
     match signal.Board_dispatch.kind with
     | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
       Board.audience_for_post
+        ~post_kind
         ~visibility
         ~title:signal.title
         ~content:signal.content

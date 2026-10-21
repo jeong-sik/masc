@@ -207,7 +207,7 @@ activation_mode = "on_demand"
 instructions = "%s"
 |}
        name instructions);
-  Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
+  Keeper_types_profile.invalidate_keeper_profile_snapshots ()
 
 let write_empty_keeper_toml config_dir ~name =
   write_file
@@ -222,7 +222,7 @@ sandbox_image = "base"
 activation_mode = "on_demand"
 |}
        name);
-  Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
+  Keeper_types_profile.invalidate_keeper_profile_snapshots ()
 
 let with_restart_launch_noop f =
   Sup.with_restart_launch_noop_for_test f
@@ -329,7 +329,7 @@ let seed_durable_librarian_baseline
   =
   let config_dir = Filename.concat (Workspace.masc_dir config) "config" in
   write_keeper_toml config_dir ~name:meta.name;
-  Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+  Keeper_types_profile.invalidate_keeper_profile_snapshots ();
   (match Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error detail -> fail ("write Librarian fixture metadata: " ^ detail));
@@ -845,7 +845,7 @@ let test_declarative_boot_records_typed_invalid_config_failure () =
     Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml")
   in
   write_file keeper_path "[broken";
-  Keeper_types_profile.invalidate_keeper_profile_defaults_cache name;
+  Keeper_types_profile.invalidate_keeper_profile_snapshots ();
   Eio.Switch.on_release sw (fun () ->
       Reg.For_testing.clear ();
       KR.reset_test_state base_dir);
@@ -891,7 +891,7 @@ let test_declarative_boot_refuses_an_unbuilt_sandbox_image () =
     (Printf.sprintf
        "[keeper]\nname = \"%s\"\ninstructions = \"test keeper\"\nsandbox_profile = \"docker\"\nsandbox_image = \"ocaml\"\n"
        name);
-  Keeper_types_profile.invalidate_keeper_profile_defaults_cache name;
+  Keeper_types_profile.invalidate_keeper_profile_snapshots ();
   Eio.Switch.on_release sw (fun () ->
       Reg.For_testing.clear ();
       KR.reset_test_state base_dir);

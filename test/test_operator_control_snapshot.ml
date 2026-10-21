@@ -273,6 +273,11 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
         (match keeper with
          | `Assoc fields -> List.mem_assoc "agent" fields
          | _ -> true);
+      Alcotest.(check bool) "keeper row carries current_task_id, null when none is held" true
+        (match keeper with
+         | `Assoc fields ->
+           List.assoc_opt "current_task_id" fields = Some `Null
+         | _ -> false);
       Alcotest.(check bool) "unowned ratio is ignored" true
         Yojson.Safe.Util.(keeper |> member "context_ratio" = `Null);
       Alcotest.(check bool) "unowned tokens are ignored" true
@@ -676,6 +681,44 @@ let turn_row tools =
         @ [ "tools_used", `List (List.map (fun t -> `String t) tools) ]))
 ;;
 
+(* The briefing ([current_work]) and the execution surface ([focus]) read
+   [current_task_id] off a snapshot row; a row without the key showed every
+   keeper as holding nothing (#31726). *)
+let meta_holding ?current_task_id () =
+  let task_field =
+    match current_task_id with
+    | Some id -> [ "current_task_id", `String id ]
+    | None -> []
+  in
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        ([ "name", `String "holds-a-task"
+         ; "trace_id", `String "trace-holds-a-task"
+         ; "activation_mode", `String "autonomous"
+         ]
+         @ task_field))
+  with
+  | Ok meta -> meta
+  | Error error -> Alcotest.fail error
+
+let test_row_field_names_the_task_the_keeper_holds () =
+  let key, value =
+    Operator_control_snapshot_identity_fields.keeper_current_task_field
+      (meta_holding ~current_task_id:"task-1844" ())
+  in
+  Alcotest.(check string) "the key readers look up" "current_task_id" key;
+  Alcotest.(check string) "the held task" "task-1844"
+    Yojson.Safe.Util.(value |> to_string)
+
+let test_row_field_is_null_when_no_task_is_held () =
+  let key, value =
+    Operator_control_snapshot_identity_fields.keeper_current_task_field
+      (meta_holding ())
+  in
+  Alcotest.(check string) "the key is still present" "current_task_id" key;
+  Alcotest.(check bool) "null means none held" true (value = `Null)
+
 let test_recent_tool_names_take_the_newest_rows () =
   let lines =
     [ turn_row [ "oldest_a"; "oldest_b" ]
@@ -742,6 +785,16 @@ let () =
             "digest includes typed tool-host failure"
             `Quick
             test_digest_workspace_includes_tool_host_failure_attention
+        ] );
+      ( "current task"
+      , [ Alcotest.test_case
+            "the row names the task the keeper holds"
+            `Quick
+            test_row_field_names_the_task_the_keeper_holds
+        ; Alcotest.test_case
+            "the row field is null when no task is held"
+            `Quick
+            test_row_field_is_null_when_no_task_is_held
         ] );
       ( "recent tool names"
       , [ Alcotest.test_case

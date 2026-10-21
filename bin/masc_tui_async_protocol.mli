@@ -4,6 +4,11 @@
 
 open Masc_tui_types
 
+type task_cancel_outcome =
+  | Task_cancel_confirmed of string
+  | Task_cancel_refused of string
+  | Task_cancel_unconfirmed of string
+
 type approval_observation = {
   ao_ticket: Masc_tui_operator_projection.Listing_order.ticket;
   ao_result: (approval_snapshot, string) result;
@@ -590,7 +595,7 @@ type async_msg =
       string Masc_tui_fetched.request * (Masc.Tui_decode.goal_timeline, string) result
   | Task_history_loaded of
       string Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
-  | Task_cancel_done of string * Masc.Tui_decode.server_identity * (string, string) result
+  | Task_cancel_done of string * Masc.Tui_decode.server_identity * task_cancel_outcome
   | Verification_evidence_loaded of
       string * (Masc_tui_evidence_picture.evidence,
                 Masc_tui_types.Verification_evidence_read.failure) result

@@ -31,6 +31,13 @@ type task_terminal_delivery =
   | Task_terminal_delivered
   | Task_terminal_delivery_degraded of { kind : string; detail : string }
 
+type task_terminal_actor =
+  | Task_terminal_agent of string
+  | Task_terminal_operator of string
+  | Task_terminal_system of string
+(** Provenance authenticated by the transition caller, kept distinct even when
+    an operator or system identity has the same spelling as a Keeper lane. *)
+
 val activity_emit_fn : (Workspace_utils_backend_setup.config ->
             actor:activity_entity ->
             ?subject:activity_entity ->
@@ -157,7 +164,7 @@ val push_task_event_fn :
 
 val task_terminal_committed_fn :
   (Workspace_utils_backend_setup.config ->
-   agent_name:string ->
+   actor:task_terminal_actor ->
    task_id:string ->
    task_terminal_delivery) Atomic.t
 

@@ -561,13 +561,41 @@ let test_history_read_keeps_original_workspace_through_replacement () =
     expect_context "B independent handoff" (read ~send:send_b ()));
   expect_context "A original handoff" (Eio.Promise.await child)
 
+let test_operator_task_cancel_requires_token_bound_admin () =
+  with_temp_base_path @@ fun base_path ->
+  Auth.save_auth_config base_path
+    { Masc_domain.default_auth_config with enabled = true; require_token = true };
+  let authorize ?token () =
+    let headers = ("x-masc-agent", "forged-owner") ::
+      (match token with None -> [] | Some value -> ["authorization", "Bearer " ^ value]) in
+    let request = Httpun.Request.create ~headers:(Httpun.Headers.of_list headers)
+      `POST "/api/v1/dashboard/tasks/cancel" in
+    Server_auth.authorize_token_bound_permission_request ~base_path
+      ~permission:Masc_domain.CanAdmin request
+  in
+  let save role agent_name raw_token =
+    match Auth.save_raw_token_credential base_path ~agent_name ~role ~raw_token with
+    | Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error)
+  in
+  save Masc_domain.Worker "worker" "worker-token";
+  save Masc_domain.Admin "operator" "operator-token";
+  check bool "actor hint alone is refused" true (Result.is_error (authorize ()));
+  check bool "worker token is refused" true
+    (Result.is_error (authorize ~token:"worker-token" ()));
+  match authorize ~token:"operator-token" () with
+  | Ok actor -> check string "operator comes from token" "operator" actor
+  | Error error -> fail (Masc_domain.masc_error_to_string error)
+
 let () =
   Eio_main.run @@ fun _env ->
   Server_request_authority.with_current
     (loopback_request_authority ())
     (fun () ->
        run "server_auth_dashboard_actor_resolution"
-         [ ( "resolution"
+         [ ( "operator-task-cancel"
+           , [ test_case "requires token-bound admin" `Quick
+                 test_operator_task_cancel_requires_token_bound_admin ] )
+         ; ( "resolution"
            , [ test_case "workspace-bound reads preserve exact query authority" `Quick
                  test_workspace_bound_read_preconditions
              ; test_case "original history survives workspace replacement and parallel reads" `Quick

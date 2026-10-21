@@ -76,6 +76,15 @@ val transition_task_outcome_r :
   ?handoff_context:Masc_domain.task_handoff_context ->
   unit -> transition_outcome Masc_domain.masc_result
 
+(** Cancel a Task under an authenticated operator's authority. The HTTP caller
+    must require a token-bound CanAdmin identity and validate its workspace.
+    Commits through the normal backlog transaction, preserving evidence and
+    recording the operator separately from the former owner's cache cleanup.
+    Already-Cancelled is a no-op; Done and blank reasons are refused. *)
+val cancel_task_as_operator_r :
+  config -> operator_id:string -> task_id:string -> reason:string ->
+  ?expected_version:int -> unit -> transition_outcome Masc_domain.masc_result
+
 (** Commit a completion verdict issued by a [Masc_domain.completion_authority].
 
     Separate from {!transition_task_outcome_r} because a verdict is not an agent

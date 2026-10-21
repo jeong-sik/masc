@@ -40,12 +40,6 @@ let keeper_toml_load_error_to_string error =
       error.detail
 ;;
 
-let keeper_toml_load_error_paths error =
-  if String.equal error.keeper_path error.failing_path
-  then [ error.keeper_path ]
-  else [ error.keeper_path; error.failing_path ]
-;;
-
 (* The deny axis is by model-visible name, so the only names a deny entry can
    mean are the ones the descriptor spine projects to the model. Skipped when
    the profile denies nothing: the model-visible walk revalidates every
@@ -156,8 +150,7 @@ let log_toml_discovery_error_once ~file ~error =
 
 let logged_missing_keepers_dir : (string, unit) Hashtbl.t = Hashtbl.create 4
 
-let discover_keepers_toml_with_paths (dir : string)
-    : (string * keeper_toml_discovery) list =
+let keeper_toml_paths (dir : string) : string list =
   if not (Fs_compat.file_exists dir && Sys.is_directory dir)
   then (
     (* A missing keepers directory is a misconfiguration, not an empty
@@ -177,21 +170,27 @@ let discover_keepers_toml_with_paths (dir : string)
     |> Array.to_list
     |> List.filter (fun f -> Filename.check_suffix f ".toml")
     |> List.sort String.compare
-    |> List.map (fun f ->
-         let path = Filename.concat dir f in
-         let discovery = match load_keeper_toml path with
-         | Ok (keeper_name, defaults) -> Loaded { keeper_name; defaults }
-         | Error e ->
-           let _emitted =
-             log_toml_discovery_error_once
-               ~file:f
-               ~error:(keeper_toml_load_error_to_string e)
-           in
-           Invalid
-             { keeper_name = Filename.remove_extension f
-             ; error = e
-             }
-         in path, discovery)
+    |> List.map (Filename.concat dir)
+
+let discover_keeper_toml_path (path : string) : keeper_toml_discovery =
+  let file = Filename.basename path in
+  match load_keeper_toml path with
+  | Ok (keeper_name, defaults) -> Loaded { keeper_name; defaults }
+  | Error e ->
+    let _emitted =
+      log_toml_discovery_error_once
+        ~file
+        ~error:(keeper_toml_load_error_to_string e)
+    in
+    Invalid
+      { keeper_name = Filename.remove_extension file
+      ; error = e
+      }
+
+let discover_keepers_toml_with_paths (dir : string)
+    : (string * keeper_toml_discovery) list =
+  keeper_toml_paths dir
+  |> List.map (fun path -> path, discover_keeper_toml_path path)
 
 let discover_keepers_toml dir =
   discover_keepers_toml_with_paths dir |> List.map snd

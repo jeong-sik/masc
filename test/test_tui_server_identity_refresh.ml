@@ -731,7 +731,22 @@ let test_pending_nested_reader_intents_survive_repeated_suspension () =
   Alcotest.(check bool) "package catalog parameters survive" true
     (state.lane_installer_read_resume = Some (7, Masc_tui_lane_installer.Read_catalog (Some "packages")))
 
+let test_unconfirmed_cancellation_stays_unconfirmed_after_workspace_change () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+      ~port:0 ~refresh_interval:0. () in
+  let origin = identity "/workspace/a" in
+  state.server_identity <- Some origin;
+  state.workspace_identity <- Workspace_identity_match;
+  let action = Task_cancel_refresh {task_id="task-8"; certainty=Cancellation_unconfirmed} in
+  remember_task_followup state ~expected_workspace:origin action;
+  state.server_identity <- Some (identity "/workspace/b");
+  let run, withdrawn = take_task_followups state ~ready:(fun _ -> true) in
+  Alcotest.(check bool) "no foreign-workspace read" true (run = []);
+  Alcotest.(check bool) "withdrawal preserves unknown receipt" true (withdrawn = [action])
+
 let test_task_receipts_wait_for_identity_and_roster () =
+  test_unconfirmed_cancellation_stays_unconfirmed_after_workspace_change ();
   let open Masc_tui_types in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
       ~port:0 ~refresh_interval:0. () in
@@ -739,7 +754,7 @@ let test_task_receipts_wait_for_identity_and_roster () =
   state.server_identity <- Some origin;
   state.workspace_identity <- Workspace_identity_match_unconfirmed "health timed out";
   let handoff = Task_handoff {keeper="alpha"; task_id="task-9"; title="accepted"; body="body"} in
-  let cancelled = Task_cancel_refresh "task-8" in
+  let cancelled = Task_cancel_refresh {task_id="task-8"; certainty=Cancellation_confirmed} in
   remember_task_followup state ~expected_workspace:origin handoff;
   remember_task_followup state ~expected_workspace:origin cancelled;
   let run, withdrawn = take_task_followups state ~ready:(fun _ -> true) in

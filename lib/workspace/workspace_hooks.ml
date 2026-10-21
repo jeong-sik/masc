@@ -99,6 +99,11 @@ type task_terminal_delivery =
   | Task_terminal_delivered
   | Task_terminal_delivery_degraded of { kind : string; detail : string }
 
+type task_terminal_actor =
+  | Task_terminal_agent of string
+  | Task_terminal_operator of string
+  | Task_terminal_system of string
+
 let agent_lifecycle_event_to_string = function
   | Session_bound -> "session_bound"
   | Session_rebound -> "session_rebound"
@@ -281,12 +286,12 @@ let push_task_event_fn
 
 let task_terminal_committed_fn
   : (Workspace_utils_backend_setup.config ->
-     agent_name:string ->
+     actor:task_terminal_actor ->
      task_id:string ->
      task_terminal_delivery) Atomic.t
   =
   Atomic.make
-    (fun _config ~agent_name:_ ~task_id:_ -> Task_terminal_delivered)
+    (fun _config ~actor:_ ~task_id:_ -> Task_terminal_delivered)
 
 let verification_submit_request_fn
   : (Workspace_utils_backend_setup.config ->

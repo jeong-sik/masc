@@ -27,6 +27,20 @@ let cancelled_status ~agent_name ~now ~(reason : string option) =
   Masc_domain.Cancelled { cancelled_by = agent_name; cancelled_at = now; reason }
 ;;
 
+let decide_operator_cancel ~operator_id ~task_status ~now ~reason =
+  match task_status with
+  | Masc_domain.Cancelled _ -> ok task_status
+  | Masc_domain.Done _ -> Error Invalid_transition
+  | Masc_domain.Todo
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.AwaitingVerification _ ->
+    (match Option.map String.trim reason with
+     | None | Some "" -> Error Cancel_reason_required
+     | Some reason ->
+       ok (cancelled_status ~agent_name:operator_id ~now ~reason:(Some reason)))
+;;
+
 type claim_resolution =
   | Worker_claim of Masc_domain.task_status
   | Self_owned

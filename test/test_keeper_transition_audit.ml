@@ -463,6 +463,162 @@ let test_sync_fallback_appends_inline () =
                   check bool "store written inline" true
                     (Sys.file_exists (default_store_dir base_dir)))))
 
+let with_async_default_store f =
+  let base_dir = temp_dir () in
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fun.protect
+    ~finally:(fun () ->
+      Dated_jsonl.set_append_guard (fun append -> append ());
+      Audit.For_testing.reset_state ();
+      Fs_compat.reset_fd_cache_for_testing ();
+      (match previous_fs with
+       | Some fs -> Fs_compat.set_fs fs
+       | None -> Fs_compat.clear_fs ());
+      cleanup_dir base_dir)
+    (fun () ->
+      with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
+        with_env "MASC_BASE_PATH" base_dir (fun () ->
+          Eio_main.run (fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            Dated_jsonl.set_append_guard (fun append -> append ());
+            Audit.For_testing.reset_state ();
+            Audit.For_testing.set_async_append_active true;
+            f env base_dir))))
+
+let enqueue_audit_turn turn_id =
+  Audit.record_completed_turn ~keeper_name:"cancelled-audit-flush"
+    { Audit.turn_id
+    ; started_at = float_of_int turn_id
+    ; ended_at = float_of_int turn_id +. 0.5
+    ; outcome = Audit.Turn_failed
+    }
+
+(* Read the real store, rather than the live ring or an Audit reader that
+   would itself flush pending records before returning. *)
+let persisted_audit_turn_ids base_dir =
+  let location = Dated_jsonl.Store.at
+      (Dated_jsonl.Store.root_of_base_path ~base_path:base_dir)
+      Dated_jsonl.Store.Root.Transition_audit in
+  let turn_ids = ref [] in
+  Dated_jsonl.iter_all (Dated_jsonl.open_store location) (fun json ->
+    let open Yojson.Safe.Util in
+    let turn_id = json |> member "completed_turn" |> member "turn_id" |> to_int in
+    turn_ids := turn_id :: !turn_ids);
+  List.rev !turn_ids
+
+let test_cancelled_before_flush_preserves_queue () =
+  with_async_default_store (fun _env base_dir ->
+    List.iter enqueue_audit_turn [ 1; 2 ];
+    let append_attempts = ref 0 in
+    Dated_jsonl.set_append_guard (fun append ->
+      incr append_attempts;
+      append ());
+    let cancelled =
+      try
+        Eio.Cancel.sub (fun context ->
+          Eio.Cancel.cancel context Exit;
+          ignore (Audit.flush_pending () : int));
+        false
+      with Eio.Cancel.Cancelled _ -> true
+    in
+    check bool "cancelled caller is refused" true cancelled;
+    check int "no append was attempted" 0 !append_attempts;
+    check int "both records remain queued" 2 (Audit.For_testing.queued_count ());
+    check (list int) "no record reached the store" []
+      (persisted_audit_turn_ids base_dir);
+    Dated_jsonl.set_append_guard (fun append -> append ());
+    check int "fresh caller flushes the retained records" 2 (Audit.flush_pending ());
+    check (list int) "retained records persist once, in order" [ 1; 2 ]
+      (persisted_audit_turn_ids base_dir))
+
+type append_barrier = Before_write | After_write
+
+let test_cancelled_flush_preserves_suffix barrier =
+  with_async_default_store (fun _env base_dir ->
+    List.iter enqueue_audit_turn [ 1; 2; 3 ];
+    Eio.Switch.run (fun sw ->
+      let context, publish_context = Eio.Promise.create () in
+      let entered, publish_entered = Eio.Promise.create () in
+      let release, publish_release = Eio.Promise.create () in
+      let finished, publish_finished = Eio.Promise.create () in
+      let released = ref false in
+      let release_first_append () =
+        if not !released then (
+          released := true;
+          Eio.Promise.resolve publish_release ())
+      in
+      let first_append = ref true in
+      Dated_jsonl.set_append_guard (fun append ->
+        if !first_append then (
+          first_append := false;
+          (* Stop at a real append boundary without a scheduling delay. The
+             before-write case checks that cancellation cannot interrupt the
+             entered record; the after-write case checks that restoring the
+             suffix never replays a record already persisted by [append]. *)
+          (match barrier with Before_write -> () | After_write -> append ());
+          Eio.Promise.resolve publish_entered ();
+          Eio.Promise.await release;
+          match barrier with Before_write -> append () | After_write -> ())
+        else append ());
+      Eio.Fiber.fork ~sw (fun () ->
+        let cancelled =
+          try
+            Eio.Cancel.sub (fun cancel ->
+              Eio.Promise.resolve publish_context cancel;
+              ignore (Audit.flush_pending () : int));
+            false
+          with Eio.Cancel.Cancelled _ -> true
+        in
+        Eio.Promise.resolve publish_finished cancelled);
+      (* An assertion failure must also release a protected append; otherwise
+         Switch.run would wait for the fixture's own barrier during cleanup. *)
+      Fun.protect ~finally:release_first_append (fun () ->
+        let cancel = Eio.Promise.await context in
+        Eio.Promise.await entered;
+        (match barrier with
+         | Before_write ->
+           check (list int) "first record has not yet been written" []
+             (persisted_audit_turn_ids base_dir)
+         | After_write ->
+           check (list int) "first record has already been written" [ 1 ]
+             (persisted_audit_turn_ids base_dir));
+        enqueue_audit_turn 4;
+        check int "new arrival is queued behind the in-flight batch" 1
+          (Audit.For_testing.queued_count ());
+        Eio.Cancel.cancel cancel Exit;
+        release_first_append ();
+        check bool "cancellation propagates after the entered append" true
+          (Eio.Promise.await finished);
+        check (list int) "only the entered record committed" [ 1 ]
+          (persisted_audit_turn_ids base_dir);
+        check int "unwritten suffix and new arrival are retained" 3
+          (Audit.For_testing.queued_count ());
+        Dated_jsonl.set_append_guard (fun append -> append ());
+        check int "resumed flush writes only the remaining records" 3
+          (Audit.flush_pending ());
+        check (list int) "suffix precedes new arrival without replaying the first row"
+          [ 1; 2; 3; 4 ] (persisted_audit_turn_ids base_dir);
+        check int "queue drained" 0 (Audit.For_testing.queued_count ());
+        check int "cancellation dropped no record" 0 (Audit.For_testing.dropped_count ()))))
+
+let test_owner_switch_release_flushes_pending_records () =
+  with_async_default_store (fun env base_dir ->
+    let cancelled =
+      try
+        Eio.Switch.run (fun sw ->
+          Audit.start_flush_fiber ~sw ~clock:(Eio.Stdenv.clock env);
+          List.iter enqueue_audit_turn [ 1; 2; 3 ];
+          check (list int) "records are still queued before switch cancellation" []
+            (persisted_audit_turn_ids base_dir);
+          Eio.Switch.fail sw Exit);
+        false
+      with Exit -> true
+    in
+    check bool "owner switch propagates its original failure" true cancelled;
+    check (list int) "release flushes every queued record exactly once" [ 1; 2; 3 ]
+      (persisted_audit_turn_ids base_dir);
+    check int "release leaves no pending record" 0 (Audit.For_testing.queued_count ()))
+
 (* Ordering is a documented contract — keeper_transition_audit.mli:22 promises
    "recent transitions for a keeper, newest first" — and both read paths used to
    break it. Nothing asserted order before, only List.length, which is why the
@@ -696,6 +852,14 @@ let () =
             test_async_queue_defers_store_write_until_flush;
           test_case "sync fallback appends inline" `Quick
             test_sync_fallback_appends_inline;
+          test_case "cancelled caller leaves the append queue untouched" `Quick
+            test_cancelled_before_flush_preserves_queue;
+          test_case "cancellation before first write retains the suffix and newer arrival" `Quick
+            (fun () -> test_cancelled_flush_preserves_suffix Before_write);
+          test_case "cancellation after first write does not replay its committed row" `Quick
+            (fun () -> test_cancelled_flush_preserves_suffix After_write);
+          test_case "owner switch release flushes its pending records" `Quick
+            test_owner_switch_release_flushes_pending_records;
         ] );
       ( "ordering",
         [

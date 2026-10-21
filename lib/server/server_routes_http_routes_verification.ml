@@ -15,7 +15,9 @@
       authenticated operator.
     - [POST /api/v1/verification/verdict] — authenticated operator verdict.
 
-    The two authority routes require a token-bound [CanAdmin] credential. A
+    - [POST /api/v1/dashboard/tasks/cancel] — operator cancellation.
+
+    The authority routes require a token-bound [CanAdmin] credential. A
     Keeper task action cannot reach them. *)
 
 open Server_auth
@@ -200,6 +202,43 @@ let commit_goal_confirmation_json ~config ~operator_id json : (Yojson.Safe.t, co
 
 ;;
 
+(* Task cancellation is an operator lifecycle action, alongside the verdict
+   boundary. Neither path grants agent tools authority over another owner. *)
+let commit_operator_cancel_json ~config ~operator_id json =
+  let open Result.Syntax in
+  let invalid message =
+    Error (Masc_domain.System (Masc_domain.System_error.ValidationError message))
+  in
+  match json with
+  | `Assoc fields ->
+    let names = List.map fst fields in
+    let allowed = [ "task_id"; "reason"; "expected_workspace" ] in
+    if List.exists (fun name -> not (List.mem name allowed)) names
+       || List.length names <> List.length (List.sort_uniq String.compare names)
+    then invalid "unknown or duplicate cancellation fields"
+    else if not (List.mem_assoc "expected_workspace" fields)
+    then invalid "expected_workspace precondition is required"
+    else
+      let* _ =
+        match Workspace.validate_expected_workspace ~config json with
+        | Ok args -> Ok args
+        | Error Workspace.Invalid_workspace_precondition ->
+          invalid "invalid expected_workspace precondition"
+        | Error Workspace.Workspace_precondition_failed ->
+          Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState
+            "workspace precondition failed"))
+      in
+      let required key =
+        match non_empty_string_field fields key with
+        | Ok value -> Ok value
+        | Error message -> invalid message
+      in
+      let* task_id = required "task_id" in
+      let* reason = required "reason" in
+      Workspace.cancel_task_as_operator_r config ~operator_id ~task_id ~reason ()
+  | _ -> invalid "request body must be a JSON object"
+;;
+
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/goals/confirmation" (fun request reqd ->
@@ -354,6 +393,30 @@ let add_routes router =
                    (error_json message)))
          request
          reqd)
+  |> Http.Router.post "/api/v1/dashboard/tasks/cancel" (fun request reqd ->
+       with_token_permission_auth
+         ~permission:Masc_domain.CanAdmin
+         (fun state operator_id _req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let result =
+               try commit_operator_cancel_json
+                 ~config:(Mcp_server.workspace_config state) ~operator_id
+                 (Yojson.Safe.from_string body)
+               with Yojson.Json_error message ->
+                 Error (Masc_domain.System (Masc_domain.System_error.ValidationError
+                   ("invalid JSON: " ^ message)))
+             in
+             match result with
+             | Error error ->
+               respond_json_value_with_cors
+                 ~status:(Server_auth.http_status_of_auth_error error)
+                 request reqd (error_json (Masc_domain.masc_error_to_string error))
+             | Ok outcome ->
+               respond_json_value_with_cors request reqd
+                 (`Assoc [ "ok", `Bool true
+                         ; "message", `String outcome.Workspace.message
+                         ; "noop", `Bool outcome.noop ])))
+         request reqd)
   |> Http.Router.post "/api/v1/verification/verdict" (fun request reqd ->
        with_token_permission_auth
          ~permission:Masc_domain.CanAdmin
@@ -400,6 +463,7 @@ let add_routes router =
          reqd)
 
 module For_testing = struct
+  let commit_operator_cancel_json = commit_operator_cancel_json
   let commit_goal_confirmation_json = commit_goal_confirmation_json
   let confirmation_error_to_string = confirmation_error_to_string
   let parse_operator_verdict_json = parse_operator_verdict_json

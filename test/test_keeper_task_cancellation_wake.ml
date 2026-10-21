@@ -124,7 +124,7 @@ let test_cross_keeper_cancellation_is_delivered () =
     let outcome =
       Wake.notify_author
         ~config
-        ~cancelling_agent_name:"beta"
+        ~actor:(Workspace_hooks.Task_terminal_agent "beta")
         ~task_id:"task-161"
     in
     check string "delivered to the author's lane" "delivered" (Wake.outcome_label outcome);
@@ -152,7 +152,8 @@ let test_self_cancellation_is_silent () =
       ~created_by:(Some "alpha")
       ~status:(cancelled ~by:"alpha" ~reason:(Some "focus change"));
     let outcome =
-      Wake.notify_author ~config ~cancelling_agent_name:"alpha" ~task_id:"task-155"
+      Wake.notify_author ~config
+        ~actor:(Workspace_hooks.Task_terminal_agent "alpha") ~task_id:"task-155"
     in
     check string "recognised as self-cancellation" "self_cancelled"
       (Wake.outcome_label outcome);
@@ -187,7 +188,7 @@ let test_handoff_reason_reaches_the_author_when_the_status_carries_none () =
     let outcome =
       Wake.notify_author
         ~config
-        ~cancelling_agent_name:"beta"
+        ~actor:(Workspace_hooks.Task_terminal_agent "beta")
         ~task_id:"task-171"
     in
     check string "delivered" "delivered" (Wake.outcome_label outcome);
@@ -213,7 +214,7 @@ let test_author_without_a_keeper_lane_is_not_an_error () =
       (Wake.outcome_label
          (Wake.notify_author
             ~config
-            ~cancelling_agent_name:"beta"
+            ~actor:(Workspace_hooks.Task_terminal_agent "beta")
             ~task_id:"task-007")))
 ;;
 
@@ -229,7 +230,7 @@ let test_task_without_author_has_no_addressee () =
       (Wake.outcome_label
          (Wake.notify_author
             ~config
-            ~cancelling_agent_name:"beta"
+            ~actor:(Workspace_hooks.Task_terminal_agent "beta")
             ~task_id:"task-008")))
 ;;
 
@@ -248,10 +249,30 @@ let test_completion_is_not_a_cancellation () =
       (Wake.outcome_label
          (Wake.notify_author
             ~config
-            ~cancelling_agent_name:"beta"
+            ~actor:(Workspace_hooks.Task_terminal_agent "beta")
             ~task_id:"task-009"));
     check int "nothing queued" 0
       (List.length (queued_cancellations ~base_path:config.base_path ~keeper_name:"alpha")))
+;;
+
+let test_non_agent_name_collision_is_delivered actor =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:"alpha";
+    seed_task config ~task_id:"task-172" ~created_by:(Some "alpha")
+      ~status:(cancelled ~by:"alpha" ~reason:(Some "operator stopped the work"));
+    let first = Wake.notify_author ~config ~actor ~task_id:"task-172" in
+    let second = Wake.notify_author ~config ~actor ~task_id:"task-172" in
+    check string "non-agent is not the Keeper with the same name" "delivered"
+      (Wake.outcome_label first);
+    check string "repeat non-agent notification remains idempotent" "already_present"
+      (Wake.outcome_label second);
+    match queued_cancellations ~base_path:config.base_path ~keeper_name:"alpha" with
+    | [ cancellation ] ->
+      check string "committed canceller identity is preserved" "alpha"
+        cancellation.Event_queue.tc_cancelled_by;
+      check (option string) "committed reason is preserved"
+        (Some "operator stopped the work") cancellation.tc_reason
+    | queued -> failf "expected one queued cancellation, got %d" (List.length queued))
 ;;
 
 let test_repeat_delivery_dedups_on_task_identity () =
@@ -266,13 +287,13 @@ let test_repeat_delivery_dedups_on_task_identity () =
     let first =
       Wake.notify_author
         ~config
-        ~cancelling_agent_name:"beta"
+        ~actor:(Workspace_hooks.Task_terminal_agent "beta")
         ~task_id:"task-160"
     in
     let second =
       Wake.notify_author
         ~config
-        ~cancelling_agent_name:"beta"
+        ~actor:(Workspace_hooks.Task_terminal_agent "beta")
         ~task_id:"task-160"
     in
     check string "first delivers" "delivered" (Wake.outcome_label first);
@@ -327,6 +348,12 @@ let () =
             test_cross_keeper_cancellation_is_delivered
         ; test_case "self-cancellation is silent" `Quick
             test_self_cancellation_is_silent
+        ; test_case "operator name collision is delivered" `Quick
+            (fun () -> test_non_agent_name_collision_is_delivered
+                (Workspace_hooks.Task_terminal_operator "alpha"))
+        ; test_case "system name collision is delivered" `Quick
+            (fun () -> test_non_agent_name_collision_is_delivered
+                (Workspace_hooks.Task_terminal_system "alpha"))
         ; test_case "repeat delivery dedups on task identity" `Quick
             test_repeat_delivery_dedups_on_task_identity
         ] )

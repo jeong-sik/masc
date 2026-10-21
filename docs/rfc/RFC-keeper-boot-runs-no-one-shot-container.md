@@ -5,7 +5,7 @@ status: Draft
 created: 2026-10-21
 updated: 2026-10-21
 author: claude
-related: ["keeper-build-output-returns-to-a-disposable-volume"]
+related: ["keeper-build-output-returns-to-a-disposable-volume", "keeper-guest-survives-restart"]
 ---
 
 # RFC: Keeper 부팅 경로에서 일회용 컨테이너를 띄우지 않는다
@@ -35,7 +35,7 @@ Apple backend 의 Keeper 가 새로 부팅할 때마다 masc 는 일회용 helpe
 
 - D1. `Boot` 분기에서 일회용 컨테이너를 띄우지 않는다. 볼륨이 이미 `discard` 기본값을 가지고 있으면 게스트 자신의 `container run` 말고 다른 `container run` 은 없다.
 - D2. `discard` 기본값은 부팅 때마다 호스트에서 읽어 확인한다. `container volume inspect` 가 주는 `source` 파일의 ext4 superblock 을 읽는다. 컨테이너를 띄우지 않는다. 값이 없으면 `tune2fs -o discard` 만 하는 helper 를 띄운다. helper 가 실패하거나 superblock 을 못 읽어도 부팅은 계속한다. 그 볼륨은 `discard` 기본값 없이 뜨고, sandbox 상태가 그 사실을 보인다(§4.1).
-- D3. 진짜 `_build` 제거는 새로 부팅한 게스트 안에서 한다. `ensure_microvm_build_links` 의 scan 보다 먼저, Keeper 의 uid:gid 로, exec-shim runner 를 거쳐 실행한다. 먼저 이름을 바꾸고 그다음 지운다. `Adopt` 분기에서는 지우지 않는다(§4.2).
+- D3. 진짜 `_build` 제거는 이 서버 프로세스가 게스트를 처음 넘길 때 게스트 안에서 한다. `ensure_microvm_build_links` 의 scan 보다 먼저, Keeper 의 uid:gid 로, exec-shim runner 를 거쳐 실행한다. 먼저 이름을 바꾸고 그다음 지운다(§4.2). 자리는 RFC-keeper-guest-survives-restart §11 Q4 의 결정(2026-10-21)으로 "새로 부팅한 게스트"에서 옮겼다. 재시작해도 게스트를 이어 쓰면 새 부팅이 드물어지기 때문이다. 이 RFC 는 그 RFC 뒤에 구현한다.
 - D4. `fstrim` 과 `remount,nodiscard` 를 지운다. `CAP_DAC_OVERRIDE` 도 필요 없어진다(§4.3).
 - D5. 하드 컷이다. 기존 work volume 34개는 모두 `discard` 기본값을 이미 가지고 있다(§6). 옮기는 코드나 운영자가 한 번 돌릴 명령은 없다.
 - D6. 앞선 RFC 의 설명 가운데 helper 의 단계와 플래그를 적은 곳은 이 RFC 로 옮기고 그 자리에서 지운다(§8). 운영 가이드와 코드 주석은 구현 PR 에서 함께 바꾼다.
@@ -44,7 +44,7 @@ Apple backend 의 Keeper 가 새로 부팅할 때마다 masc 는 일회용 helpe
 
 `Keeper_turn_sandbox_runtime` 의 `Boot` 분기(`keeper_turn_sandbox_runtime.ml:1560-1592`)는 이 순서로 움직인다.
 
-1. 같은 이름의 옛 게스트를 `delete --force` 한다. 서버를 재시작하면 옛 서버의 게스트는 snapshot 을 잃어서 adopt 되지 않고 교체된다(`:1531-1536`). 그래서 재시작 뒤에는 Keeper 마다 이 분기를 탄다.
+1. 같은 이름의 옛 게스트를 `delete --force` 한다. 서버를 재시작하면 옛 서버의 게스트는 이 분기보다 먼저 startup sweep 이 모두 지운다. owner pid label 이 죽은 프로세스를 가리키기 때문이다(RFC-keeper-guest-survives-restart §2.1). 그래서 재시작 뒤에는 Keeper 마다 이 분기를 타고, 이 단계는 없는 이름에 대한 호출이 된다.
 2. `microvm_guest_provisions`: work volume 을 확인하거나 만들고(`microvm_work_volume`, `:1016`), build volume 을 지우고 새로 만든다(`microvm_build_volume`, `:1046`).
 3. `reclaim_work_volume_space`(`:1121`) → `Keeper_sandbox_microvm.reclaim_apple_work_volume`(`keeper_sandbox_microvm.ml:1267`):
    - 남은 helper 를 지우고 `container list --all` 로 없는지 확인한다(`remove_apple_work_volume_trim`, `:1224`).
@@ -97,7 +97,7 @@ helper 의 `-trim` 이름은 `Keeper_sandbox_container_name.Micro_vm_work_volume
 ### 3.4 모르는 것
 
 - U1. 3회차(플래그도 볼륨도 없음)만 5초로 짧았다. 이것만 보면 "플래그나 볼륨 둘 중 하나만 있어도 길게 막힌다" 로 읽힌다. 한 번뿐이라 운 좋게 짧았을 수도 있다. 둘을 가를 측정은 없다.
-- U2. Keeper 게스트 자신이 끝날 때(work volume 과 build volume 이 붙은 채 stop/delete)는 재지 않았다. 재시작 뒤 `Boot` 분기 1단계가 Keeper 마다 이 일을 한 번 한다. 10-20 의 실패가 모두 helper 가 끝난 초에 모인 것으로 보면 helper 보다는 짧은 것 같다. 직접 잰 값은 아니다. 이 RFC 는 이 종료를 없애지 않는다(§10 Q3).
+- U2. Keeper 게스트 자신이 끝날 때(work volume 과 build volume 이 붙은 채 delete)도 짧지 않다. 10-21 11:34 재시작에서 startup sweep 이 옛 게스트 20개를 하나씩 `delete --force` 했고 756.5초가 걸렸다. `ps` 표본에 잡힌 마지막 다섯 개는 71, 69, 59, 11, 15초였다. polisher 게스트를 지우는 동안(그때까지 helper 는 하나도 돌지 않았다) 호스트의 `container ls -a` 하나가 64.8초 걸린 뒤 `XPC timeout` 으로 실패했다. 삭제 중에 막힌 시간을 잰 표본은 이 하나다. 재시작 뒤 게스트를 지우는 것은 `Boot` 분기 1단계가 아니라 그보다 먼저 도는 startup sweep 이다(RFC-keeper-guest-survives-restart §3.2). 이 RFC 는 이 종료를 없애지 않는다(§10 Q3).
 - U3. apiserver 가 왜 멈추는지는 모른다. Apple 쪽 코드를 읽지 않았다.
 - U4. 게스트 안에서 `discard` 를 켠 채 많이 지울 때 apiserver 가 막히는지는 재지 않았다. Keeper 가 게스트 안에서 지우는 일은 지금도 `discard` 를 켠 채 일어나고, 그것과 맞춰진 막힘은 보지 못했다. 구현 전에 확인한다(§7 V4).
 
@@ -134,7 +134,7 @@ helper 의 `-trim` 이름은 `Keeper_sandbox_container_name.Micro_vm_work_volume
 
 새로 부팅한 게스트 안에서 첫 턴을 받기 전에 지우면 두 조건이 거의 다 맞는다.
 
-- 이 프로세스가 방금 `container run` 으로 띄운 게스트는 아직 어떤 턴에도 넘기지 않았다. 그래서 이 Keeper 의 빌드가 돌 수 없다. `Adopt` 분기의 게스트는 무엇이 도는지 모르므로 거기서는 지우지 않는다. scan 이 진짜 디렉토리를 거절하는 것도 그대로 둔다.
+- 이 서버 프로세스가 아직 어떤 턴에도 넘기지 않은 게스트에서만 지운다. 그 게스트에서는 이 프로세스의 빌드가 돌 수 없다. 앞선 서버 프로세스의 턴이 남긴 빌드가 게스트 안에서 아직 돌고 있으면 그 `_build` 를 잃는다(RFC-keeper-guest-survives-restart U3). 운영자가 Q4 에서 받아들였다. 이 프로세스가 이미 넘긴 게스트를 다시 adopt 할 때는 지우지 않는다. scan 이 진짜 디렉토리를 거절하는 것도 그대로 둔다.
 - 트리 주인은 서버 uid 이고, 게스트 안 exec 는 그 uid:gid(`t.uid`/`t.gid`, 라이브 argv 에서는 `--user 502:20`)로 돈다. 주인이 지우므로 `CAP_DAC_OVERRIDE` 가 필요 없다. 같은 사용자로 도는 idle build cleanup(`Server_keeper_build_maintenance` → `cleanup_attached_builds`, #40751)이 이미 게스트 안에서 `_build` 를 지운다.
 
 "거의" 인 이유가 하나 있다. 한 Keeper 의 두 턴이 같은 이름으로 동시에 부팅하려 하면, 진 쪽은 `run` 이 실패한 뒤 이긴 쪽 게스트를 adopt 한다(`keeper_turn_sandbox_runtime.ml:1807-1845`). 진 쪽은 work volume 이 마운트됐는지만 보고 넘어가므로, 이긴 쪽이 아직 지우는 동안 진 쪽 턴이 빌드를 시작할 수 있다. 그래서 지우기를 두 단계로 나눈다.
@@ -183,7 +183,7 @@ helper 의 `-trim` 이름은 `Keeper_sandbox_container_name.Micro_vm_work_volume
 
 테스트는 화면 글자나 로그 문장을 고정하지 않는다. argv 와 타입으로 본다.
 
-- V1. 부팅 argv(가짜 container CLI 를 주입한 테스트). 기본값이 있는 work volume 으로 새로 부팅하면 `run` argv 는 게스트의 것 하나뿐이다. helper 이름이 들어간 argv 가 없다. `fstrim` 을 실행하는 script 도 없다. 게스트 대상 `exec` 하나가 Keeper 의 uid:gid 로 제거 script 를 나른다. `Adopt` 분기는 제거 `exec` 를 보내지 않는다.
+- V1. 부팅 argv(가짜 container CLI 를 주입한 테스트). 기본값이 있는 work volume 으로 새로 부팅하면 `run` argv 는 게스트의 것 하나뿐이다. helper 이름이 들어간 argv 가 없다. `fstrim` 을 실행하는 script 도 없다. 게스트 대상 `exec` 하나가 Keeper 의 uid:gid 로 제거 script 를 나른다. 앞선 서버 프로세스가 띄운 게스트를 이 프로세스가 처음 넘길 때도 제거 `exec` 를 하나 보낸다. 이 프로세스가 이미 넘긴 게스트를 다시 adopt 하면 보내지 않는다.
 - V2. superblock 읽기. 실제 ext4 레이아웃 바이트로 만든 작은 파일로 `Discard_default_set`, `Discard_default_absent`, `Superblock_unreadable`(짧은 파일, magic 이 다른 파일)을 본다. `Discard_default_absent` 일 때만 helper argv 가 나가는지 본다. helper 가 실패한 뒤에도, `Superblock_unreadable` 일 때도 게스트의 `run` argv 가 나가는지, `Superblock_unreadable` 이면 helper argv 가 없는지 본다. 같은 게스트를 adopt 하는 다음 시작은 helper argv 를 내지 않는지, sandbox 상태 JSON 의 `work_volume_discard_default` 가 그때 읽은 superblock 결과와 같은지도 본다.
 - V3. 제거 script. 지금 있는 실제 임시 트리 테스트를 새 뿌리(`/masc-work/<keeper>`)로 옮긴다. 지우는 것과 남기는 것의 경우는 지금과 같다. 더할 것: 1단계 뒤 `_build` 자리가 비고 옮긴 트리가 `<keeper root>/.masc-build-removing/<mktemp 이름>/` 에 있는지, 2단계 뒤 `.masc-build-removing` 이 없어지는지, 앞선 부팅이 남긴 `.masc-build-removing/<이름>` 도 지우는지, 1단계 뒤에 새로 생긴 `_build` 는 건드리지 않는지, 같은 checkout 이름이 두 번 나와도 `mktemp` 이름이 겹치지 않는지.
 - V4. 구현 전에 한 번 잰다. 살아 있는 게스트 하나에서 `discard` 를 켠 채 큰 `_build` 를 지우는 동안 다른 컨테이너의 exec/ls 가 막히는지 본다(U4). 같은 때 그 트리에 Keeper uid 가 아닌 주인의 파일이나 쓸 수 없는 디렉토리가 있는지도 센다. `find <root> -name _build -prune ...` 를 읽기만 한다. 둘 중 하나라도 나쁘면 §4.2 를 다시 정한다.
@@ -195,6 +195,7 @@ helper 의 `-trim` 이름은 `Keeper_sandbox_container_name.Micro_vm_work_volume
     | 재시작(KST) | 새로 부팅한 게스트 N | 옛 게스트가 사라진 순간 수 | `ls` 가 20초 넘게 걸린 구간 수, 가장 긴 것 | 그 구간 가운데 끝 2초 안에 옛 게스트가 사라진 것 | 20초 넘고 exit≠0 인 dispatch | 그 가운데 끝난 초가 막힌 구간 끝과 같은 것 | `Process_eio` timeout |
     |---|---|---|---|---|---|---|---|
     | 10-20 23:28 (helper 있음, 비교용) | 18 (helper 줄 수) | 재지 않음 | 재지 않음 | 재지 않음 | 8 | 8 (helper 끝과 같은 초) | 3 |
+    | 10-21 11:34 (helper 있음, 비교용. sampler 는 11:51:33~12:11:31 의 부팅 구간만 봤다) | 12 (sampler 가 본 게스트 `run`) | 0 (sweep 이 그 앞 11:34:31~11:47:07 에 20개를 지웠다) | 7, 62.9초 | 0 (7개 모두 helper 가 끝나고 2.5초 안에 시작했다) | 세지 않음 | 세지 않음 | 세지 않음 |
 
     - N: 재시작 뒤 생성 시각이 바뀐 `masc-keeper-vm-*` 이름의 수.
     - 옛 게스트가 사라진 순간: 옛 생성 시각으로 마지막에 보인 sample 과, 그 이름이 처음 안 보인 sample 사이.
@@ -235,9 +236,9 @@ RFC-keeper-build-output-returns-to-a-disposable-volume 에서 이 커밋이 바�
 - Q1. `discard` 기본값 확인을 호스트에서 이미지 superblock 을 읽어서 할지(§4.1), 아니면 `Created` 일 때만 helper 를 띄울지. 앞쪽은 Apple 이 `inspect` 로 알려 주는 이미지 파일을 masc 가 읽는다. 뒤쪽은 만든 직후 서버가 죽은 볼륨을 고치지 못한다.
   - 결정(2026-10-21, 운영자): superblock 을 읽는다. 서버가 중간에 죽어도 다음 부팅이 flag 없는 볼륨을 고친다.
 - Q2. 새 Keeper 의 첫 부팅에서 생기는 한 번의 40~65초 막힘을 받아들일지. 받아들이지 않으면 남는 길은 호스트 e2fsprogs(A6)나 Apple 의 수정(A4)이다.
-  - 결정(2026-10-21, 운영자): 받아들인다. 재시작마다 약 25번이던 막힘이 새 볼륨마다 한 번으로 준다.
-- Q3. 서버를 재시작할 때마다 모든 게스트를 교체하는 일(§2 의 1단계, snapshot 을 잃어서)은 이 RFC 범위 밖이다. 그 교체도 컨테이너 종료다(U2). 따로 재고 따로 다룰지.
-  - 결정(2026-10-21, 운영자): 따로 재고 따로 다룬다. 이 RFC 는 helper 만 다룬다.
+  - 결정(2026-10-21, 운영자): 받아들인다. helper 가 만들던 막힘(재시작마다 18~22번)이 새 볼륨마다 한 번으로 준다. 재시작 때 옛 게스트를 지우면서 생기는 막힘(재시작마다 20~21번, U2)은 이 RFC 로 줄지 않는다.
+- Q3. 서버를 재시작할 때마다 모든 게스트를 교체하는 일(startup sweep 이 옛 서버의 게스트를 모두 지운다)은 이 RFC 범위 밖이다. 그 교체도 컨테이너 종료다(U2). 따로 재고 따로 다룰지.
+  - 결정(2026-10-21, 운영자): 따로 재고 따로 다룬다. 이 RFC 는 helper 만 다룬다. 게스트 교체는 RFC-keeper-guest-survives-restart 가 다룬다.
 - Q4. 큰 `_build` 를 30초 I/O 시간 안에 다 못 지우면, 이름을 바꾼 트리가 다음 새 부팅까지 공간을 잡고 있다(§4.2). 하루 두 번쯤의 부팅을 기다려도 될지, 아니면 이 트리도 idle cleanup 이 지우게 할지.
   - 결정(2026-10-21, 운영자): 다음 새 부팅까지 둔다. idle cleanup 은 이 트리를 지우지 않는다.
 - Q5. 이름 바꾸기 단계(§4.2)를 둘지. 빼면 script 는 지금처럼 `rm -rf` 하나로 단순해진다. 대신 같은 이름의 부팅 경합에서 진 쪽 턴의 빌드가 지워지는 `_build` 위에서 돌 수 있고, timeout 으로 끊기면 반쯤 지운 `_build` 가 dune 이 쓰는 자리에 남는다.

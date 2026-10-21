@@ -589,12 +589,14 @@ type workspace_identity =
       ; server_base_path : string
       }
 
-(* A task POST has already succeeded. Only its dependent handoff/reading
-   waits for identity recovery; creating or cancelling the task is never
-   repeated. Authority also prevents A -> B -> A from reviving a handoff. *)
+(* Follow-up reads retain whether the mutation was confirmed. Identity
+   recovery never repeats the POST or promotes an unknown result to success.
+   Authority also prevents A -> B -> A from reviving a handoff. *)
+type task_cancel_certainty = Cancellation_confirmed | Cancellation_unconfirmed
+
 type task_followup =
   | Task_handoff of { keeper : string; task_id : string; title : string; body : string }
-  | Task_cancel_refresh of string
+  | Task_cancel_refresh of { task_id : string; certainty : task_cancel_certainty }
 
 type pending_task_followup =
   { tf_workspace : Tui_decode.server_identity

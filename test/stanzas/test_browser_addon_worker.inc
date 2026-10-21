@@ -109,3 +109,9 @@
   masc.multimodal masc.skill_snapshot masc.skill_snapshot_service
   masc.lane_addon_call_context masc.tool_types exact_output_fixture
   httpun-eio httpun gluten eio eio_main eio.unix yojson unix mirage-crypto-rng.unix))
+
+(test
+ (name test_browser_addon_reply_policy)
+ (modules test_browser_addon_reply_policy)
+ (libraries masc masc.browser_lane masc.time_compat masc.lane_addon_call_context
+  masc.lane_addon_tool_result masc.tool_types mcp_protocol alcotest eio eio.mock yojson))

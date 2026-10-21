@@ -15,7 +15,8 @@ let parts = [blob;text raw;blob;text "<p>second\tpart</p>";text ""]
 let state () =
   let s=Types.create_state ~workspace:"copy" ~port:0 ~refresh_interval:0. () in
   s.server_identity <- Some {Tui_decode.sid_version="test";sid_binary_commit="test";
-    sid_binary_commit_age_s=None;sid_base_path="/workspace";sid_masc_root="/workspace/.masc";
+    sid_binary_commit_age_s=None;sid_base_path=Tui_decode.Canonical_path.of_path "/workspace";
+    sid_masc_root=Tui_decode.Canonical_path.of_path "/workspace/.masc";
     sid_executable_in_worktree=None;sid_state_ready=Some true;sid_uptime=None;
     sid_sse_clients=None;sid_gc=None;sid_scheduler=None};
   s.workspace_identity <- Types.Workspace_identity_match;

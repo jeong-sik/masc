@@ -167,11 +167,21 @@ let interrupted_reservation () = native_installation_with_slot (fun directory ->
   ignore (Native_addon_lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"unpublished"
     |> Result.map_error Native_addon_lease.error_to_string |> require);
   write (Filename.concat directory "intent.json") "") ()
-let browser_server = {|import argparse,hashlib,json,os,socket,sys,threading
+let browser_server = {|import argparse,hashlib,json,os,socket,subprocess,sys,threading
 p=argparse.ArgumentParser()
 p.add_argument("root");p.add_argument("mode")
 p.add_argument("--socket");p.add_argument("--incarnation");p.add_argument("--max-message-bytes")
 a=p.parse_args()
+environment_check='''import json,os
+print(json.dumps({"provider_absent":"OPENAI_API_KEY" not in os.environ,
+ "unlisted_absent":"MASC_BROWSER_UNLISTED_SECRET" not in os.environ,
+ "path_present":bool(os.getenv("PATH")),"locale_preserved":os.getenv("LANG")=="C"}))'''
+child_environment=json.loads(subprocess.check_output([sys.executable,"-c",environment_check]))
+worker_environment={"provider_absent":"OPENAI_API_KEY" not in os.environ,
+ "unlisted_absent":"MASC_BROWSER_UNLISTED_SECRET" not in os.environ,
+ "path_present":bool(os.getenv("PATH")),"locale_preserved":os.getenv("LANG")=="C"}
+with open(os.path.join(a.root,"environment-"+a.incarnation),"w") as out:
+    json.dump({"worker":worker_environment,"child":child_environment},out)
 s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.bind(a.socket);s.listen()
 with open(os.path.join(a.root,"endpoint-"+a.incarnation),"w") as out: out.write(a.socket)
 event=threading.Event();payload=None;running=False;clients={}
@@ -227,7 +237,14 @@ for line in sys.stdin:
     else: raise RuntimeError(method)
     print(json.dumps({"jsonrpc":"2.0","id":req["id"],"result":result}),flush=True)
 |}
-let browser_installation () = with_fixture (fun clock root config ->
+let with_browser_environment work =
+  let entries=["OPENAI_API_KEY","fake-host-provider-sentinel";
+    "MASC_BROWSER_UNLISTED_SECRET","fake-unlisted-sentinel";"LANG","C"] in
+  let previous=List.map (fun (key,_) -> key,Sys.getenv_opt key) entries in
+  Fun.protect ~finally:(fun () -> List.iter (fun (key,value) ->
+    match value with None -> Unix.unsetenv key | Some value -> Unix.putenv key value) previous)
+    (fun () -> List.iter (fun (key,value) -> Unix.putenv key value) entries;work ())
+let browser_installation () = with_browser_environment (fun () -> with_fixture (fun clock root config ->
   let script=Filename.concat root "browser.py" in write script browser_server;
   let tool=Browser_addon_tool.definition in
   write (Filename.concat root "browser-tool.json") (Yojson.Safe.to_string (`Assoc [
@@ -268,6 +285,14 @@ hooks = ["validate_input", "validate_output"]
     List.find (fun (service:R.browser_service) -> service.instance_id=id) (services ()) in
   let id=attach "normal" in
   let original=selected id in
+  let environment=In_channel.with_open_bin (Filename.concat root ("environment-"^id)) In_channel.input_all
+    |> Yojson.Safe.from_string in
+  List.iter (fun process -> List.iter (fun property ->
+    check bool (process ^ " " ^ property) true
+      (member property (member process environment) |> Yojson.Safe.Util.to_bool))
+    ["provider_absent";"unlisted_absent";"path_present";"locale_preserved"]) ["worker";"child"];
+  check bool "host retains its own provider credential" true
+    (Sys.getenv_opt "OPENAI_API_KEY"=Some "fake-host-provider-sentinel");
   let host=match Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated
       ~principal:(Lane_addon_call_context.Host_actor "dashboard-tester") ~reserved:[] with
     | Ok host -> host | Error _ -> fail "shared browser host must connect" in
@@ -447,7 +472,7 @@ hooks = ["validate_input", "validate_output"]
   wait clock (fun () -> match failed_pid () with `Int pid -> not (Posix_spawn_detached.group_id_has_members pid) | _ -> false);
   wait clock (fun () -> not (Sys.file_exists (Filename.dirname (socket_path refused))));
   check bool "readiness refusal never advertises service" false
-    (List.exists (fun (service:R.browser_service) -> service.instance_id=refused) (services ())))
+    (List.exists (fun (service:R.browser_service) -> service.instance_id=refused) (services ()))))
 let () =
   if Array.length Sys.argv<>2 then fail "expected native admission launcher path";
   launcher := Unix.realpath Sys.argv.(1);

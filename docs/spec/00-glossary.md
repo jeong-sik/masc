@@ -303,32 +303,35 @@ status: reference
     없으면 1로 본다.
   - 같은 거절을 두 계획기가 다른 문자열로 낸다. 코드를 찾을 때 한쪽 문자열만 grep 하면
     다른 쪽을 놓친다. `UmpLoopPlan`(`UmpLoopTransport.swift`)이 "loop"를 넣어 부르는 것을
-    `UmpRegionTransport.init(timeline:)`(`UmpRegions.swift`)은 "region"으로 부르거나,
-    여러 조건을 한 문자열에 묶은 자리를 둘로 나눠 낸다.
-    - `invalid captured region arrangement` — 루프 쪽 `invalid captured loop arrangement`와
-      조건이 같다(schemaVersion·duration·빈 `sources`·빈 `regions`·각각의 중복 `id`).
-    - `missing captured source identity` — 루프 쪽 `missing captured loop source identity`.
-    - `empty captured source span` — source의 `extent`가 0. 루프 쪽은 같은 조건을
-      `captured loop packet exceeds original source`에 묶어 낸다.
-    - `captured packet lies beyond its exclusive source end` — packet `ticks`가 `extent`에
-      닿거나 넘음. 루프 쪽에서는 위 packet 문자열이 이 조건까지 함께 맡는다.
-    - `invalid captured region source or repetition` — `id`가 빈 값·`component`가
-      `.audio`·`source`가 `timeline.sources`에 없음·`repeatCount`가 0 중 하나.
-      루프 쪽 `invalid captured loop region`과 조건이 같다.
-    - `invalid captured source divisor` — `sourceDivisor`가 0. 루프 쪽은 같은 조건을
-      `captured loop trim exceeds original source`에 묶는다.
-    - `captured region exceeds its source bounds` — `extent`가 0이거나 `offset+extent`가
-      `source.extent×sourceDivisor`를 넘음. 루프 쪽 trim 문자열이 이 둘을 함께 맡는다.
-    - `captured placement exceeds native host timeline`·`captured region exceeds arrangement
-      duration` — 자리 계산이 호스트 시각이나 어레인지먼트 길이를 넘음. 루프 쪽에는 이
-      자리가 없다.
-    - `overlapping captured regions share physical MIDI channels; select independent outputs` —
-      루프 쪽 `overlapping loop regions share physical MIDI channels`와 같은 조건인데,
-      문장 끝에 출력을 나누라는 조언이 더 붙는다.
-    - 재생 시점의 `invalid captured region owner`·`captured region seek exceeds duration`·
-      `captured regions missed the common host deadline`도 이 계획기가 내며, 루프 쪽의
-      `invalid captured loop seek`·`captured loop missed the common epoch`와 이름이 다르다.
-    어느 문자열로 실패했는지 보면 어느 계획기가 거절했는지도 함께 알 수 있다.
+    `UmpRegionTransport.init(timeline:)`(`UmpRegions.swift`)은 "region"으로 부르거나, 여러
+    조건을 한 문자열에 묶은 자리를 둘로 나눠 낸다. 그래서 실패 문자열을 보면 어느 계획기가
+    거절했는지도 함께 알 수 있다.
+    - `invalid captured region arrangement` = 루프의 `invalid captured loop arrangement`
+      (schemaVersion·duration·빈 `sources`·빈 `regions`·각각의 중복 `id`),
+      `missing captured source identity` = 루프의 `missing captured loop source identity`.
+    - `empty captured source span` — source의 `extent`가 0. 루프는 같은 조건을
+      `captured loop packet exceeds original source`에 묶고, `captured packet lies beyond
+      its exclusive source end`(packet `ticks`가 source `extent`에 닿거나 넘음)도 그
+      문자열이 함께 맡는다.
+    - `invalid captured region source or repetition` = 루프의 `invalid captured loop region`
+      (`id`가 빈 값·`component`가 `.audio`·`source`가 `timeline.sources`에 없음·
+      `repeatCount`가 0 중 하나).
+    - `invalid captured source divisor`(source `sourceDivisor`가 0)와 `captured region
+      exceeds its source bounds`(region `extent`가 0이거나 `offset+extent`가
+      `source.extent×sourceDivisor`를 넘음)는 루프에서 `captured loop trim exceeds original
+      source` 하나가 함께 맡는다.
+    - `captured placement exceeds native host timeline`·`captured region exceeds
+      arrangement duration` — 자리 계산이 호스트 시각이나 어레인지먼트 길이를 넘음.
+      루프에는 이 자리가 없다.
+    - `overlapping captured regions share physical MIDI channels; select independent
+      outputs` = 루프의 `overlapping loop regions share physical MIDI channels` + 출력을
+      나누라는 조언.
+    - 재생 시점도 갈린다 — `invalid captured region owner`·`captured region seek exceeds
+      duration`·`captured regions missed the common host deadline` 대 루프의
+      `invalid captured loop seek`·`captured loop missed the common epoch`.
+    이 목록은 코드가 소유한 문자열을 옮겨 적은 임시 해독표라 코드가 바뀌면 함께 낡는다.
+    갱신할 때는 각 문자열을 `git grep -F`로 다시 확인하고, 더 나은 수리는 두 계획기가 같은
+    조건에 같은 문자열을 내도록 코드 쪽을 통일하는 것이다.
     그래서 Region의 자격은 반복 횟수만이 아니라 원본
     `source`와 그 길이, 그리고 다른 Region과의 채널 점유에 함께 매인다. 브라우저 장면이
     문서 구조에서 갈라 읽는 구역은

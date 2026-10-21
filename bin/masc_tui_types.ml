@@ -19153,7 +19153,7 @@ let runtime_pick_column_widths ~cols items =
   in
   target, shared - target
 
-(* The three fleet totals, in one place. The Overview, the lane rows and the
+(* The fleet counts and reported cost, in one place. The Overview, the lane rows and the
    Runtime authority row all say them, and a screen that folds its own copy
    keeps compiling while the two answers drift. It lives here rather than in
    the renderer because the renderer is an executable module: a test cannot

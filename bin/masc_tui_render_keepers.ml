@@ -1310,7 +1310,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          than a size. *)
       add_row "Total Tokens:"
         (Masc_tui_message_layout.compact_count activity.k_total_tokens);
-      add_row "Total Cost:" (Tui_decode.keeper_cost_summary activity.k_total_cost_usd);
+      add_row "Lifetime Cost:" (Tui_decode.keeper_cost_summary activity.k_total_cost_usd);
       add_row "Last Turn:" (Terminal_text.short_timestamp activity.k_last_turn_ts));
       add_empty ();
 

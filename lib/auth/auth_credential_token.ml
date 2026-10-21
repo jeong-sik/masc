@@ -734,7 +734,12 @@ let verify_token_owner_alias config ~agent_name ~token =
      answer carries the file's current values and is not refused. Refusing it
      made a valid token read as invalid, and a client that clears a token on
      that answer lost a token that still worked.
-   - It could not be read: [Error], which the caller answers with a retry. *)
+   - It could not be read: [Error], which the caller answers with a retry.
+
+   Nothing ties this read to the use of the answer: the files are not locked,
+   so a token replaced after this read is judged by the next request, not this
+   one. The old check had the same window; it only sat after a read of the
+   same file instead of the owner's. *)
 let canonical_credential_of_token config (cred : agent_credential)
   : (agent_credential, masc_error) result
   =

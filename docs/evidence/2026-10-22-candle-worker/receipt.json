@@ -1,0 +1,52 @@
+{
+  "source_sha": "d35d2559c56814b38615545a5f4f081304bccc05",
+  "started_at": "2026-10-21T14:58:58.673285+00:00",
+  "finished_at": "2026-10-21T14:59:02.551174+00:00",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-m",
+    "unittest",
+    "-v",
+    "test_candle_appraiser"
+  ],
+  "exit_code": 0,
+  "files": [
+    {
+      "path": "addons/protocol.py",
+      "git_blob": "f38a14257d44ea250c03d29940bdf237000458c2",
+      "sha256": "a8a614c64ae672c799201395d24571bbc7c79f3b5c4682fdd3130a7d72bc79fa"
+    },
+    {
+      "path": "addons/tests/stdio_fixture.py",
+      "git_blob": "7101427a26457b804049c0d77d65e21ef97eb4d5",
+      "sha256": "054de35ee2cc40caf7f47ecc04ffc7ec4e5d4418b8a5697bf1d1cb3737be5377"
+    },
+    {
+      "path": "addons/tests/test_candle_appraiser.py",
+      "git_blob": "1acd3c8640df24e972593119b5232783bbc71e61",
+      "sha256": "864633652cd60faba49194647ba240b7e7571e9cc851e34329d4cfdd201374b6"
+    },
+    {
+      "path": "addons/candle-appraiser/server.py",
+      "git_blob": "d019a5490d2f17fa199d4f96d251f5cc540860e8",
+      "sha256": "93fc380ee8b61468389b31367b22c765bef6a0d1d7b35b2d0dcc54a557ad8c02"
+    },
+    {
+      "path": "addons/candle-appraiser/lane.toml",
+      "git_blob": "6ecc0b35f4f5eeef5fd7be3b9209c3a8805b711a",
+      "sha256": "14e496db22c7114bb92ec4e6d193b7ce4165a1071481883fbcab9fb1ac68426b"
+    }
+  ],
+  "python": "3.14.4 (main, Apr  7 2026, 13:13:20) [Clang 21.0.0 (clang-2100.0.123.102)]",
+  "scope": "Existing Python worker/MCP subprocess and persistent state boundaries; model answers scripted; fsync faults are injected in focused cases.",
+  "not_proven": [
+    "host OCaml adapter execution",
+    "actual model/provider",
+    "real Docker Off/reconnect",
+    "host ledger settlement/idempotence end to end",
+    "Dashboard/TUI",
+    "whole Browser67 integration",
+    "operator installation",
+    "full54 completion"
+  ]
+}

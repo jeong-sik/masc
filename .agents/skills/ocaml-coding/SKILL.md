@@ -1,6 +1,6 @@
 ---
 name: ocaml-coding
-description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 이미지 카탈로그 등 막히는 I/O, Task Skill 준비 쌍 연결과 Keeper별 Ask와 Composition 완료의 비동기 발견·오류 전달, owned-job·준비된 Composition 복구 child의 진입 양보·예약 해제, Goal·Broadcast maintenance와 transition outbox 페이지의 원래 전달·cursor 경계, 회차별 증거 공유, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
+description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 이미지 카탈로그 등 막히는 I/O, Task Skill 준비 쌍 연결과 Keeper별 Ask·Composition 완료·owned-job의 비동기 발견과 원래 오류 전달, owned-job·준비된 Composition 복구 child의 진입 양보·예약 해제, Goal·Broadcast maintenance와 transition outbox 페이지의 원래 전달·cursor 경계, 회차별 증거 공유, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
 ---
 
 # masc OCaml 점검표
@@ -111,7 +111,7 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   `Eio.Switch.check`를 한다. `Cancel.protect`도 취소된 switch를 다시 켜지 않는다.
   `fork`가 callback 없이 반환하면 active 예약만 남을 수 있다. 취소를 저장소/저널 오류나
   정상 접수로 바꾸지 않고, 다음 정상 scope가 원래 durable owner를 다시 읽을 수 있게 한다.
-  owned-job pending marker는 검증된 행부터 caller 문맥에서 예약하되, filesystem 오류
+  owned-job pending marker는 검증된 행부터 발견 child 문맥에서 예약하되, filesystem 오류
   변환 안에 예약 callback을 넣지 않는다. 뒤쪽 discovery 실패에도 먼저 예약한 worker의
   원래 owner 검증·취소 정리를 지키고, held hint는 전체 스캔 성공 뒤에만 정리한다.
   Composition은 원래 journal·종단 proof·의존 결과를 검증한 ready candidate부터
@@ -119,10 +119,19 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   수행하고, 캡처된 candidate를 실제 intake의 최신 권한 검사로 바꾸어 쓰지 않는다.
   선언 projection은 같은 pulse의 첫 실제 수요에서 공유하며 다음 pulse로 넘기지 않는다.
   두 controller의 child는 원래 `Fun.protect` 정리 안에서 먼저 yield한 뒤 owner 복구·held
-  증거 검사·선언 읽기에 들어간다. 진입 취소도 active 예약을 해제한다. discovery는 여전히
-  caller에서 끝까지 수행하고 중간 I/O가 child를 다시 실행할 수 있으므로 전체 발견 뒤
-  실행을 보장한다고 쓰지 않는다. owned-job 진입 취소로 제거된 process-local held hint는
+  증거 검사·선언 읽기에 들어간다. 진입 취소도 active 예약을 해제한다. owned-job의 발견은
+  예약된 발견 child에서, 준비된 Composition의 직접 pulse는 caller에서 끝까지 수행한다.
+  발견 중 I/O가 job/intake child를 실행할 수 있으므로 전체 발견 뒤 실행을 보장한다고
+  쓰지 않는다. owned-job 진입 취소로 제거된 process-local held hint는
   다음 회차에 전체 재검사를 요구할 수 있지만 원래 durable 결과와 전달 의무는 유지한다.
+
+- owned-job maintenance `pulse`는 같은 server switch의 발견 child를 예약하고 반환한다.
+  실제 marker 발견·job 예약 결과는 원래 base path와 typed `Store.error`를 유지한
+  `on_discovery`에서 관측한다. `Ok ()`도 일부 손상 marker를 숨기거나 전달 완료를 뜻하지
+  않는다. 발견 예약·시작·실제 반환·중단을 구분하고 observer·취소 정리까지 발견을 하나만
+  유지한다. 활성 중 pulse는 합쳐지며 새 의무는 다음 maintenance가 fresh하게 읽는다.
+  원래 marker 순서·부분 오류·완전 스캔 뒤 held hint 정리·회차별 backend presence를
+  보존하고, 발견 실패나 observer 실패로 이미 예약한 원래 job을 취소하지 않는다.
 
 - 원래 owned-job 결과가 durable해진 뒤의 Composition 알림은 controller의
   `notify_result_ready`로 요청한다. 알림 도착을 intake·Task 재개·효과 허가로 기록하지 않는다.

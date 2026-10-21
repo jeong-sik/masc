@@ -3450,7 +3450,7 @@ let test_completion_hint_resumes_original_dag () = with_fixture @@ fun env _init
   control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
   let backend_before = List.length (calls fixture) in
   let completion_started = Mtime_clock.counter () in
-  Completion_wake.pulse ~sw:context.sw jobs |> store_value "actual owned completion maintenance pulse";
+  Completion_wake.pulse ~sw:context.sw jobs;
   let resumed = Eio.Promise.await resumed |> Tool_result.data in
   let ok,completed,completed_entry = await_composition env fixture resumed in
   let completion_ms = Mtime.Span.to_float_ns (Mtime_clock.count completion_started) /. 1_000_000. in
@@ -3615,7 +3615,7 @@ let test_prepared_job_launch_and_continuation ~launch_after_result () = with_fix
   control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
   let backend_before = List.length (calls fixture) in
   let completion_started = Mtime_clock.counter () in
-  Completion_wake.pulse ~sw:context.sw jobs |> store_value "actual owned completion maintenance pulse";
+  Completion_wake.pulse ~sw:context.sw jobs;
   let resumed = Eio.Promise.await resumed |> Tool_result.data in
   let ok,completed,completed_entry = await_composition env fixture resumed in
   let completion_ms = Mtime.Span.to_float_ns (Mtime_clock.count completion_started) /. 1_000_000. in
@@ -5005,7 +5005,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
   let retained_wait_request = Fun.protect ~finally:(fun () -> write events original_events) (fun () ->
     if not fault_after_acceptance then write events "invalid-original-child-activation\n";
     control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
-    Completion_wake.pulse ~sw:context.sw jobs |> store_value "nested full result completion pulse";
+    Completion_wake.pulse ~sw:context.sw jobs;
     Eio.Promise.await ready;
     let expected_request = if not fault_after_acceptance then (
       (match Eio.Promise.await refused with
@@ -5622,6 +5622,112 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
 
 exception Fixture_result_observer_failed
 
+let test_completion_discovery_failure_preserves_original_result () =
+  let channel = Keeper_continuation_channel.dashboard ~thread_id:"discovery-original-thread"
+    |> require "original discovery completion channel" in
+  with_fixture ~continuation_channel:channel @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
+  ignore (with_bundle fixture (fun bundle ->
+    invoke fixture bundle ~tool_use_id:"collect-before-discovery-failure" ~turn:42
+      "keeper_job_status" (argument id)));
+  let original = load fixture id in
+  check bool "complete original output precedes discovery" true (Store.result_ready original);
+  let original_owner = read (owner_path fixture id) in
+  let directory = Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path:fixture.base_path) "keeper_msg_requests")
+      "owned_job_completion_pending" in
+  let marker_name = id ^ ".json" in
+  let marker_bytes = read (Filename.concat directory marker_name) in
+  let saved_directory = directory ^ ".fixture-saved" in
+  Unix.rename directory saved_directory;
+  write directory "original pending directory is unavailable\n";
+  let original_error = match Store.pending_deliveries ~base_path:fixture.base_path with
+    | Error error -> error
+    | Ok _ -> fail "actual pending directory fault did not reject discovery" in
+  let exception Discovery_observer_failed in
+  let discoveries = Eio.Stream.create 0 in
+  let supervisor = Completion_wake.create ~config:(Workspace.default_config fixture.base_path)
+      ~on_discovery:(fun ~base_path result ->
+        Eio.Stream.add discoveries (base_path,result);
+        match result with Ok () -> () | Error _ -> raise Discovery_observer_failed) () in
+  let independent : Keeper_event_queue.stimulus =
+    {post_id="independent-during-owned-job-discovery";urgency=Normal;
+     arrived_at=201.;payload=Bootstrap} in
+  let failed = Eio.Switch.run (fun sw ->
+    Completion_wake.pulse ~sw supervisor;
+    (* Commit actual independent queue work before joining the scan observer;
+       no replacement marker reader or manufactured owner is installed. *)
+    Event_registry.enqueue_durable_result ~base_path:fixture.base_path keeper independent
+      |> require "independent durable work during discovery";
+    Eio.Stream.take discoveries) in
+  (match failed with
+   | base_path, Error error ->
+       check string "failed discovery retains its workspace" fixture.base_path base_path;
+       check bool "async observation retains the actual typed directory error" true (error=original_error)
+   | _, Ok () -> fail "failed or unfinished discovery became success");
+  (match pending_completions fixture with
+   | [selection] -> check bool "only independent work committed during discovery failure" true
+       (Keeper_event_queue.stimulus_identity_equal independent selection.source)
+   | [] | _ :: _ -> fail "independent work was lost or a completion was invented");
+  check string "failed scan and failed observer preserve original owner bytes"
+    original_owner (read (owner_path fixture id));
+  check string "failed scan preserves original delivery obligation bytes"
+    marker_bytes (read (Filename.concat saved_directory marker_name));
+  Sys.remove directory;
+  Unix.rename saved_directory directory;
+  let damaged_name = Store.Job_id.to_string (Store.Job_id.fresh ()) ^ ".json" in
+  let damaged_path = Filename.concat directory damaged_name in
+  let damaged_bytes = "not-json\n" in
+  write damaged_path damaged_bytes;
+  Unix.chmod damaged_path 0o600;
+  let fresh_round () =
+    let base_path,result = Eio.Switch.run (fun sw ->
+      Completion_wake.pulse ~sw supervisor;
+      Eio.Stream.take discoveries) in
+    check string "fresh discovery retains original workspace" fixture.base_path base_path;
+    result |> store_value "fresh original discovery with partial marker damage" in
+  let expected : Keeper_event_queue.owned_job_completion =
+    {oj_job_id=original.job_id;oj_source=original.source;oj_channel=channel} in
+  let completion_post_id = Keeper_event_queue.owned_job_completion_post_id expected in
+  let require_original () =
+    let pending = pending_completions fixture in
+    check bool "independent durable source remains usable after recovery" true
+      (List.exists (fun (selection : Keeper_event_queue_state.pending_selection) ->
+        Keeper_event_queue.stimulus_identity_equal independent selection.source) pending);
+    match List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+        String.equal selection.source.post_id completion_post_id) pending with
+    | [selection] ->
+        let completion = completion_payload selection in
+        check string "only the original job is delivered" id (Store.Job_id.to_string completion.oj_job_id);
+        check_json "delivery preserves original Task and turn"
+          (Store.source_to_json original.source) (Store.source_to_json completion.oj_source);
+        check_json "delivery preserves original conversation"
+          (Keeper_continuation_channel.to_yojson channel)
+          (Keeper_continuation_channel.to_yojson completion.oj_channel)
+    | [] | _ :: _ -> fail "original notification was lost or duplicated" in
+  fresh_round ();
+  require_original ();
+  let delivered = load fixture id in
+  check bool "fresh recovery acknowledges original queue delivery" true delivered.completion_delivered;
+  check_json "delivery retains complete original result" (Store.result_json original) (Store.result_json delivered);
+  fresh_round ();
+  require_original ();
+  (match Store.pending_deliveries ~base_path:fixture.base_path |> store_value "partial final marker discovery" with
+   | {entries=[];failures=[name,Store.Corrupt _]} ->
+       check string "partial marker failure retains its original filename" damaged_name name
+   | _ -> fail "original cleanup did not retire its marker or partial damage was hidden");
+  check string "partial damaged marker bytes remain unchanged" damaged_bytes (read damaged_path);
+  let cleaned = load fixture id in
+  check bool "cleanup preserves original terminal output" true
+    (cleaned.phase=original.phase && cleaned.outputs=original.outputs);
+  (match cleaned.outputs with
+   | Some (Store.Outputs_complete (stdout,stderr)) ->
+       check_artifact_bytes fixture stdout_bytes (Tool_output.normalized_artifact_ref_to_json stdout);
+       check_artifact_bytes fixture stderr_bytes (Tool_output.normalized_artifact_ref_to_json stderr)
+   | None | Some (Store.Outputs_unavailable _) -> fail "original output bytes were lost")
+
 let test_completion_cancelled_round_preserves_original_result () =
   let module Fence = Masc.Keeper_shutdown_intake_fence in
   let channel = Keeper_continuation_channel.dashboard ~thread_id:"recovery-original-thread"
@@ -5650,7 +5756,11 @@ let test_completion_cancelled_round_preserves_original_result () =
         check_artifact_bytes fixture stderr_bytes (Tool_output.normalized_artifact_ref_to_json stderr)
     | None | Some (Store.Outputs_unavailable _) -> fail "complete original output was lost" in
   check_original_result original;
-  let supervisor = Completion_wake.create ~config:(Workspace.default_config fixture.base_path) () in
+  let discovered, publish_discovered = Eio.Promise.create () in
+  let supervisor = Completion_wake.create ~config:(Workspace.default_config fixture.base_path)
+      ~on_discovery:(fun ~base_path result ->
+        if not (Eio.Promise.is_resolved discovered) then
+          Eio.Promise.resolve publish_discovered (base_path,result)) () in
   Eio.Switch.run (fun hold_sw ->
     let entered, enter = Eio.Promise.create () in
     let released, release = Eio.Promise.create () in
@@ -5668,7 +5778,10 @@ let test_completion_cancelled_round_preserves_original_result () =
         let cancelled =
           try
             Eio.Switch.run (fun sw ->
-              Completion_wake.pulse ~sw supervisor |> store_value "admit original recovery";
+              Completion_wake.pulse ~sw supervisor;
+              let base_path,result = Eio.Promise.await discovered in
+              check string "cancelled round discovered the original workspace" fixture.base_path base_path;
+              result |> store_value "original jobs reserved before cancellation";
               Eio.Switch.fail sw Stop_recovery_round);
             false
           with Stop_recovery_round -> true in
@@ -5683,7 +5796,7 @@ let test_completion_cancelled_round_preserves_original_result () =
         | Fence.Intake_committed () -> ()
         | Fence.Intake_shutdown_reserved _ -> fail "admitted original intake holder changed"));
   let pulse () = Eio.Switch.run (fun sw ->
-    Completion_wake.pulse ~sw supervisor |> store_value "fresh original recovery round") in
+    Completion_wake.pulse ~sw supervisor) in
   pulse ();
   let selected = only_selection fixture in
   let completion = completion_payload selected in
@@ -5718,12 +5831,17 @@ let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun
   let blocked_id = job_id running in
   let config = Workspace.default_config fixture.base_path in
   let failed_observers = ref [] in
-  let supervisor = Completion_wake.create ~config ~on_result_ready:(fun (record : Store.record) ->
+  let discovered, publish_discovered = Eio.Promise.create () in
+  let supervisor = Completion_wake.create ~config
+      ~on_discovery:(fun ~base_path result ->
+        if not (Eio.Promise.is_resolved discovered) then
+          Eio.Promise.resolve publish_discovered (base_path,result))
+      ~on_result_ready:(fun (record : Store.record) ->
       failed_observers := record.job_id :: !failed_observers;
       raise Fixture_result_observer_failed) () in
   let authority_before = read (owner_path fixture blocked_id) in
   reject_cancelled_recovery_scope (fun sw ->
-    Completion_wake.pulse ~sw supervisor |> store_value "cancelled original job recovery scope");
+    Completion_wake.pulse ~sw supervisor);
   check string "rejected recovery leaves original owner journal unchanged"
     authority_before (read (owner_path fixture blocked_id));
   let entered = Filename.concat fixture.base_path "inspect-entered" in
@@ -5732,7 +5850,10 @@ let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun
   (* Fixture deadlock guard only. The production pulse has no deadline. *)
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15. @@ fun () ->
   Eio.Switch.run @@ fun job_sw ->
-  Completion_wake.pulse ~sw:job_sw supervisor |> store_value "actual nonblocking maintenance pulse";
+  Completion_wake.pulse ~sw:job_sw supervisor;
+  let base_path,result = Eio.Promise.await discovered in
+  check string "completed discovery precedes later independent admission" fixture.base_path base_path;
+  result |> store_value "first original discovery completed before independent job";
   let rec await_condition condition =
     if condition () then () else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; await_condition condition) in
   await_condition (fun () -> Sys.file_exists entered);
@@ -5754,7 +5875,7 @@ let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-independent" ~turn:53 "keeper_job_status" (argument later_id)));
   let calls_before = List.length (calls fixture) in
-  Completion_wake.pulse ~sw:job_sw supervisor |> store_value "next pulse admits independent recovery";
+  Completion_wake.pulse ~sw:job_sw supervisor;
   await_condition (fun () -> List.length (pending_completions fixture) = 1
       && (load fixture later_id).completion_delivered);
   let completion = only_selection fixture |> completion_payload in
@@ -5780,7 +5901,7 @@ let test_held_absent_presence_reactivates_only_original_authority () = with_fixt
   let config = Workspace.default_config fixture.base_path in
   let supervisor = Completion_wake.create ~config () in
   let pulse supervisor = Eio.Switch.run @@ fun sw ->
-    Completion_wake.pulse ~sw supervisor |> store_value "settle one actual maintenance round" in
+    Completion_wake.pulse ~sw supervisor in
   control fixture (`Assoc ["mode", `String "hide_owner_inventory"]);
   let before = List.length (calls fixture) in
   pulse supervisor;
@@ -5855,9 +5976,22 @@ let test_shared_held_presence_round ~different_endpoint () = with_fixture @@ fun
       | _::rest -> find rest
       | [] -> fail ("transport omitted " ^ name) in
     find args in
-  let supervisor = Completion_wake.create ~config:(Workspace.default_config fixture.base_path) () in
-  let pulse () = Eio.Switch.run @@ fun sw ->
-    Completion_wake.pulse ~sw supervisor |> store_value "actual shared maintenance pulse" in
+  let pending_discovery = ref None in
+  let supervisor = Completion_wake.create ~config:(Workspace.default_config fixture.base_path)
+      ~on_discovery:(fun ~base_path result ->
+        match !pending_discovery with
+        | None -> ()
+        | Some publish ->
+            pending_discovery := None;
+            Eio.Promise.resolve publish (base_path,result)) () in
+  let discover ~sw =
+    let observed,publish = Eio.Promise.create () in
+    pending_discovery := Some publish;
+    Completion_wake.pulse ~sw supervisor;
+    let base_path,result = Eio.Promise.await observed in
+    check string "shared backend scan retains original workspace" fixture.base_path base_path;
+    result |> store_value "actual shared maintenance discovery" in
+  let pulse () = Eio.Switch.run (fun sw -> discover ~sw) in
   control fixture (`Assoc ["mode",`String "hide_owner_inventory"]);
   let before = call_count () in
   pulse ();
@@ -5867,14 +6001,14 @@ let test_shared_held_presence_round ~different_endpoint () = with_fixture @@ fun
   if different_endpoint then pulse () else (
     control fixture (`Assoc ["mode",`String "hide_owner_inventory";"presence_blocked",`Bool true]);
     Eio.Switch.run (fun sw ->
-      Completion_wake.pulse ~sw supervisor |> store_value "pulse returns before shared backend release";
+      discover ~sw;
       let entered = Filename.concat fixture.base_path "presence-entered" in
       let rec await_shared () =
         if Sys.file_exists entered then ()
         else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01;await_shared ()) in
       await_shared ();
       let active_calls = call_count () in
-      Completion_wake.pulse ~sw supervisor |> store_value "active original workers remain reserved";
+      discover ~sw;
       check int "another pulse cannot duplicate the blocked original read" active_calls (call_count ());
       write (Filename.concat fixture.base_path "presence-release") "release original shared inventory\n");
     control fixture (`Assoc ["mode",`String "hide_owner_inventory"]));
@@ -5943,7 +6077,7 @@ let test_changed_cancel_intent_bypasses_held_presence () = with_fixture @@ fun _
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
   let supervisor = Completion_wake.create ~config:(Workspace.default_config fixture.base_path) () in
   let pulse () = Eio.Switch.run @@ fun sw ->
-    Completion_wake.pulse ~sw supervisor |> store_value "settle original cancellation recovery" in
+    Completion_wake.pulse ~sw supervisor in
   control fixture (`Assoc ["mode", `String "hide_owner_inventory"]);
   pulse ();
   let current = load fixture id in
@@ -6275,6 +6409,8 @@ let () = match Array.to_list Sys.argv with
       ; test_case "fresh supervisor retains upstream inline arguments and original child authority" `Quick
           (test_nested_skill_job_continuation ~dynamic_arguments:true)
       ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
+      ; test_case "async discovery failure retains original output and recovers beside partial marker damage" `Quick
+          test_completion_discovery_failure_preserves_original_result
       ; test_case "cancelled recovery retains original output and a fresh scope delivers once and cleans" `Quick
           test_completion_cancelled_round_preserves_original_result
       ; test_case "held absence uses a presence hint and reactivates only original authority" `Quick

@@ -442,7 +442,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         if (wave.vst) observe({ state: 'failed', selection: wave.selection, render: wave.vst, error: error.message }); draw() }
     }).finally(() => { players.delete(handle) })
     players.set(handle, settled)
-    status = wave.vst ? `VST: ${wave.selection.name}` : midiDestination !== undefined ? 'MIDI output' : wave.soundfont ? `FluidSynth ${wave.soundfont.engine.version}` : wave.clippedSamples > 0 ? 'Preview clipped; lower :level' : 'SoundFont preview'; draw()
+    const preview = wave.vst ? `VST: ${wave.selection.name}` : midiDestination !== undefined ? 'MIDI output' : wave.soundfont ? `FluidSynth ${wave.soundfont.engine.version}` : 'SoundFont preview'
+    status = `${preview}${wave.clippedSamples > 0 ? ` · ${wave.clippedSamples} samples exceed full scale` : ''}`; draw()
   }
   function play() {
     if (!accepting || suspended || childTask) return

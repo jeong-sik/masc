@@ -70,6 +70,7 @@ graph TB
 | `16-root-cause-rubric.md` | Root-Cause Rubric | Markers behind the `root/*` values declared in a `masc-triage` block | Reference |
 | `18-log-severity-taxonomy.md` | Log Severity Taxonomy | 4-level contract for `Log.{debug,info,warn,error}` callsites | Reference |
 | `lane-application-observation.md` | Lane Application Observation | Lane Add-on 선언 저장과 worker 실행 적용 관찰의 분리 | Reference |
+| [candle-requirements.md](candle-requirements.md) | Candle requirements | 보상·원장·감쇠·구매·선물·초상화의 전체 요구사항, 현재 구현/미구현/미검증 및 수용 조건 | Reference |
 
 ## Active Design Documents
 

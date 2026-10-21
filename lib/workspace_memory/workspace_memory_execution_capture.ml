@@ -138,7 +138,11 @@ let make ~request_id ~workspace ~destination ~prompt work =
   let* destination = destination_of_json (destination_json destination) in
   let* prompt = prompt_of_json (prompt_json prompt) in
   let input_text = Yojson.Safe.to_string (input work) in
-  let* work = work_of_json (work_json work) in
+  (* Preserve the parent's original substitution bytes separately. Its typed
+     work uses the same canonical snapshot before and after durable retention,
+     so narrowing cannot render a different child from reordered object keys. *)
+  let* snapshot = Lane_addon_action.canonical (work_json work) in
+  let* work = work_of_json snapshot in
   let* () = check ~prompt ~input_text work in
   Ok {id=request_id;predecessor=None;workspace;destination;prompt;work;input_text}
 let classification ~request_id ~workspace ~destination ~prompt ~ledger ~batch =

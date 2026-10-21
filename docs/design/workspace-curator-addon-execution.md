@@ -442,3 +442,14 @@ projection instead of `Runs.get`. Those assertions are corrected in the owning
 size layer at c18a1f8c5ab; the failed run is preserved separately and does not
 prove the correction or this successor layer. Parser checks are not typing or
 execution. A new selected compiled run remains separate evidence.
+
+
+Selected successor run39679636091 at062bea30 compiled and ran the selected
+suites, then failed three interrupted-link fixtures. A newly constructed capture
+kept noncanonical internal row key order, while a strict persisted restore read
+canonical rows. Narrowing re-rendered a different child's input_text/prompt from
+those equivalent rows. Capture.make now canonicalizes its internal whole-work
+snapshot while retaining the parent's original substitution bytes separately.
+This repairs deterministic fresh/restored narrowing rather than relaxing the
+exact child comparison. The failed run and earlier pre-MCP-dependency compile
+failure39679243670 remain historical; a new-head run is separate evidence.

@@ -125,7 +125,6 @@ export function openStepInput({ source, getEditor, adoptEditor, enqueue, onState
   audio, practice = false, recording, openTake = openPracticeTake, openMonitor = openStepMonitor, openInput = openMidiInput }) {
   if (practice && !audio) throw new Error('Practice input requires instrument monitoring')
   if (recording && !practice) throw new Error('Practice recording requires live practice mode')
-  if (recording && audio?.sound?.kind !== 'vst') throw new Error('SoundFont practice recording is not supported; select a VST or use :practice-input without recording')
   if (audio) audio = structuredClone(audio)
   const editor = getEditor(), { channel, track } = target(editor)
   if (audio?.sound?.engine?.kind === 'fluidsynth') {

@@ -1,6 +1,7 @@
 import { Worker } from 'node:worker_threads'
 import { randomUUID } from 'node:crypto'
-import { monitorPacket, monitorSoundIdentity, validateMonitorSound } from './step-monitor-session.mjs'
+import { soundIdentity } from './project-sound.mjs'
+import { monitorPacket, validateMonitorSound } from './step-monitor-session.mjs'
 export { monitorPacket } from './step-monitor-session.mjs'
 
 // The terminal owns note decisions; the worker owns every device demand and
@@ -24,7 +25,7 @@ export function openStepMonitor({ sound, output, channel, signal, backing, initi
   ready.catch(() => {}); completion.catch(() => {}); clock.catch(() => {})
   const diagnostics = () => structuredClone({
     ...(snapshot ?? { schemaVersion: 1, kind: 'step-monitor', id, channel,
-      sound: monitorSoundIdentity(sound), pcm: null }),
+      sound: soundIdentity(sound), pcm: null }),
     worker: { threadId, closed, terminalReceived: terminal !== null, failure: failure?.message ?? null },
   })
   const post = value => { if (!closed) worker.postMessage(value) }

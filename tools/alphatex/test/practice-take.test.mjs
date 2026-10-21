@@ -17,7 +17,7 @@ const input = {kind:'midi-input',schemaVersion:1,protocol:2,source:{id:'10',name
 const packet = {kind:'midi',protocol:2,source:'10',ordinal:'0',hostTime:'18446744073708999999',timestampOrigin:'packet',words:[0x43953c03,0x90012345]}
 const context = path => { const project={...newProject(),sound}; return {path,project,sound,track:'track-1',backing:phraseBacking(project,'track-1')} }
 const receipts = count => ({ inputFinal:{source:'10',success:true,admittedPackets:String(count),acknowledgedPackets:String(count),discardedPackets:'0'},
-  monitorFinal:{pcm:{clock,nativeClosed:true,settled:true,final:{success:true}},worker:{closed:true,terminalReceived:true}} })
+  monitorFinal:{sound:{identifier:sound.instrument.identifier,version:sound.instrument.version,presetSHA256:sound.preset.sha256},pcm:{clock,nativeClosed:true,settled:true,final:{success:true}},worker:{closed:true,terminalReceived:true}} })
 const json = async path => JSON.parse(await readFile(path,'utf8'))
 
 test('private take retains frozen context, original attributed MIDI2 and exact pre-anchor fractions with content hashes', async () => {

@@ -1,5 +1,5 @@
 import { unpackMidi } from './session-data.mjs'
-import { validateSound } from './project-sound.mjs'
+import { validateSound, soundIdentity } from './project-sound.mjs'
 import { openVstStream } from './vst-stream.mjs'
 import { openFluidStream } from './soundfont-stream.mjs'
 import { openPcmOutput } from './pcm-output.mjs'
@@ -54,12 +54,6 @@ export function monitorPacket(packet, channel, held = new Map()) {
   return { held: next, messages }
 }
 
-export function monitorSoundIdentity(sound) {
-  return sound.kind === 'vst' ? { name: sound.selection.name, identifier: sound.instrument.identifier,
-    version: sound.instrument.version, presetSHA256: sound.preset.sha256 }
-    : { kind: 'soundfont', name: sound.font.name, engine: { ...sound.engine },
-      bankStyle: sound.bankStyle, fontSHA256: sound.font.sha256, timing: 'control-block-ceil' }
-}
 export function validateMonitorSound(sound) {
   validateSound(sound)
   if (sound.kind !== 'vst' && sound.engine?.kind !== 'fluidsynth') throw new Error('Choose a VST or bound FluidSynth instrument before monitored step input')
@@ -165,7 +159,7 @@ export function openMonitorSession({ sound, output, channel, signal, backing, in
   return { ready, completion, clock: pcm.clock,
     diagnostics() {
       return { schemaVersion: 1, kind: 'step-monitor', id, channel,
-        sound: monitorSoundIdentity(sound),
+        sound: soundIdentity(sound),
         pcm: pcm.diagnostics(), ...(backing ? { backing: {
           ...(clock?.diagnostics() ?? { track: backing.track, channel: backing.channel, producedFrames: '0' }),
           channels: backing.channels, instances: voices.length, peak, clippedSamples: String(clippedSamples),

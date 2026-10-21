@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
+import { soundIdentity, soundIdentityMatches } from './project-sound.mjs'
 import { validateProject } from './sequencer-project.mjs'
 import { unpackMidi } from './session-data.mjs'
 import { nominalMidiFrame, validateRenderClock } from './render-midi-clock.mjs'
@@ -19,11 +20,12 @@ async function digest(path) {
 }
 
 // An owned fresh directory is a recoverable take even before finalization.
-// Only the final receipt certifies clean input/audio closure. Preset bytes stay
+// Only the final receipt certifies clean input/audio closure. Sound bytes stay
 // in its private context; diagnostic summaries never expose that context.
 export async function openPracticeTake({ path, project, track, sound, backing }) {
   project = structuredClone(validateProject(project)); backing = structuredClone(backing)
-  if (typeof path !== 'string' || !path || sound?.kind !== 'vst' || !isDeepStrictEqual(project.sound, sound)
+  soundIdentity(project.sound) // Reject unbound synthesis before creating a take.
+  if (typeof path !== 'string' || !path || !isDeepStrictEqual(project.sound, sound)
       || backing?.kind !== 'phrase-backing' || backing.track !== track
       || !project.tracks.some(value => value.id === track && value.channel === backing.channel)) throw new Error('Invalid practice recording context')
   path = resolve(path)
@@ -65,6 +67,7 @@ export async function openPracticeTake({ path, project, track, sound, backing })
         try { await events.close() } catch (cause) { error ??= cause }
         if (!error && armed && (inputFinal?.source !== armed.input.source.id || inputFinal?.success !== true || inputFinal.admittedPackets !== String(count)
             || inputFinal.acknowledgedPackets !== String(count) || inputFinal.discardedPackets !== '0'
+            || !soundIdentityMatches(project.sound, monitorFinal?.sound)
             || !isDeepStrictEqual(monitorFinal?.pcm?.clock, armed.renderClock) || monitorFinal?.pcm?.final?.success !== true || !monitorFinal.pcm.nativeClosed || !monitorFinal.pcm.settled
             || (monitorFinal.worker && (!monitorFinal.worker.closed || !monitorFinal.worker.terminalReceived)))) {
           error = new Error('Practice recording did not confirm input/audio retirement')

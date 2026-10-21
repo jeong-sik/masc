@@ -50,10 +50,3 @@ test('real FluidSynth plus owned MIDI/device children inserts one chord or prese
     }finally{owner.cancel();await owner.completion.catch(()=>{})}
   }
 })
-
-test('SoundFont recording is refused before take, monitor or MIDI IO',()=>{
-  const editor=newEditor();editor.project.sound=sound
-  const unexpected=()=>assert.fail('IO opened for unsupported SoundFont recording')
-  assert.throws(()=>openStepInput({getEditor:()=>editor,practice:true,recording:{path:'/unused'},
-    audio:{sound,backing:phraseBacking(editor.project,'track-1')},openTake:unexpected,openMonitor:unexpected,openInput:unexpected}),/SoundFont practice recording is not supported/)
-})

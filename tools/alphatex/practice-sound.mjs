@@ -49,10 +49,11 @@ export async function preparePracticeSound(project, asset, { sourceRoot, directo
   }
   if (!events.some(event => (event.bytes[0] & 0xf0) === 0x90 && event.bytes[2] > 0)) throw new Error('Practice instrument projection has no sounding notes')
   const id = randomUUID(), timelinePath = join(directory, id + '.json'), outputPath = join(directory, id + '.wav')
-  if (asset.sound !== undefined) {
+  const sound = asset.sound ?? context.project.sound
+  if (sound.kind === 'soundfont') {
     const track = context.project.tracks.find(track => track.id === context.track)
     const projected = [{ frame: '0', bytes: [0xc0 | context.backing.channel, track.program] }, ...events]
-    const quantum = BigInt(asset.sound.engine.controlFrames)
+    const quantum = BigInt(sound.engine.controlFrames)
     // A control-block guard is private render storage. Original region cuts
     // and repeat periods still use fullClock, never this longer buffer.
     for (const event of projected) {
@@ -67,7 +68,7 @@ export async function preparePracticeSound(project, asset, { sourceRoot, directo
     const plan = Buffer.from(JSON.stringify({ schemaVersion: 1, kind: 'soundfont-render', sampleRate: rate, frames: exact(frames),
       ports: [{ port: 0, events: projected.map(event => ({ ...event, frame: exact(event.frame) })) }] }))
     await writeFile(timelinePath, plan, { flag: 'wx', mode: 0o400, signal }); signal?.throwIfAborted()
-    return { id, kind: 'soundfont', sound: asset.sound, planPath: timelinePath, outputPath,
+    return { id, kind: 'soundfont', sound, planPath: timelinePath, outputPath,
       planHash: createHash('sha256').update(plan).digest('hex'), sampleRate: rate, frames: String(frames), fullClock }
   }
   const timeline = Buffer.from(JSON.stringify({ schemaVersion: 1, kind: 'practice-vst', sampleRate: rate, frames: String(frames), events }))

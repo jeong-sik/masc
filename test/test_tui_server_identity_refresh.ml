@@ -1741,11 +1741,10 @@ let test_created_keeper_waits_for_owned_metadata_without_work () =
     List.iteri (fun index (row : keeper) ->
       if String.equal row.k_name created.k_name then state.keeper_cursor <- index) state.keepers;
     state.composer_focused <- true;
-    let composer=Masc_tui_composer_projection.of_state state in
     Alcotest.(check bool) "observed created row cannot send before its own refresh coverage" true
       (keeper_message_availability state created.k_name
          = Message_unavailable Created_keeper_metadata_pending
-       && Masc_tui_composer.classify_key composer Masc_tui_composer.send_key
+       && Masc_tui_composer_projection.classify_key state Masc_tui_composer.send_key
          = Masc_tui_composer.Edit)
   end;
   Alcotest.(check bool) "older absence cannot close the pending created chat" true
@@ -1761,7 +1760,7 @@ let test_created_keeper_waits_for_owned_metadata_without_work () =
     Alcotest.(check bool) "covered metadata releases the retained original recipient draft" true
       (let composer=Masc_tui_composer_projection.of_state state in
        composer.target = Masc_tui_composer.Ready created.k_name
-       && Masc_tui_composer.classify_key composer Masc_tui_composer.send_key = Masc_tui_composer.Send)
+       && Masc_tui_composer_projection.classify_key state Masc_tui_composer.send_key = Masc_tui_composer.Send created.k_name)
   end;
   ignore (take_local_workspace_read state ~source:Local_work work (Error "optional work unavailable"));
   Alcotest.(check bool) "Work failure cannot revoke creation coverage" true
@@ -1991,6 +1990,8 @@ let test_keeper_metadata_admits_input_before_work_completes () =
 let test_local_source_failures_are_independent () =
   let open Masc_tui_types in
   let state, keeper, metadata = local_keeper_source_fixture () in
+  state.view <- Tools;
+  state.msg_target_keeper_name <- Some keeper.k_name;
   state.composer_focused <- true;
   Masc_tui_message_input.insert state.msg_input "original draft survives metadata failure";
   let work = local_workspace_request_exn state Local_work 5L in
@@ -2017,16 +2018,42 @@ let test_local_source_failures_are_independent () =
            status = Masc_tui_composer.Read_failed "metadata unavailable" && Option.is_some pending
        | Workspace_not_observed | Workspace_unconfirmed | Different_workspace -> false in
      retains_failure
-       && Masc_tui_composer.classify_key composer Masc_tui_composer.send_key = Masc_tui_composer.Edit
+       && Masc_tui_composer_projection.classify_key state Masc_tui_composer.send_key = Masc_tui_composer.Edit
        && String.equal composer.draft "original draft survives metadata failure");
   apply_metadata_observation state pending metadata;
   Alcotest.(check bool) "only owned metadata recovery restores the original recipient send" true
     (let composer=Masc_tui_composer_projection.of_state state in
      composer.target = Masc_tui_composer.Ready keeper.k_name
        && composer.reading = Masc_tui_composer.Metadata {status=Observed;pending=None}
-       && Masc_tui_composer.classify_key composer Masc_tui_composer.send_key = Masc_tui_composer.Send
+       && Masc_tui_composer_projection.classify_key state Masc_tui_composer.send_key = Masc_tui_composer.Send keeper.k_name
        && String.equal composer.draft "original draft survives metadata failure"
-       && state.local_workspace = Local_workspace_failed "archive unavailable")
+       && state.local_workspace = Local_workspace_failed "archive unavailable");
+  let other = {keeper with k_name="other"} in
+  let removed=local_workspace_request_exn state Local_keepers 9L in
+  apply_metadata_observation state removed {metadata with lkr_keepers=[other]};
+  Alcotest.(check bool) "roster replacement cannot authorize the bound draft for another Keeper" true
+    (let composer=Masc_tui_composer_projection.of_state state in
+     let bound_missing=match composer.target with
+       | Masc_tui_composer.Unreachable {keeper=bound;reason=_} -> String.equal bound keeper.k_name
+       | No_target | Ready _ -> false in
+     bound_missing
+       && Option.map (fun (k : keeper) -> k.k_name) (selected_keeper state) = Some other.k_name
+       && state.msg_target_keeper_name = Some keeper.k_name
+       && Masc_tui_composer_projection.classify_key state Masc_tui_composer.send_key = Masc_tui_composer.Edit
+       && Masc_tui_composer_projection.classify_key state Masc_tui_composer.listen_key = Masc_tui_composer.Edit
+       && Masc_tui_message_input.contents state.msg_input = "original draft survives metadata failure");
+  let restored=local_workspace_request_exn state Local_keepers 10L in
+  apply_metadata_observation state restored {metadata with lkr_keepers=[other;keeper]};
+  Alcotest.(check bool) "owned metadata recovery resolves actions to the original draft recipient" true
+    (let composer=Masc_tui_composer_projection.of_state state in
+     composer.target = Masc_tui_composer.Ready keeper.k_name
+       && Option.map (fun (k : keeper) -> k.k_name) (selected_keeper state) = Some other.k_name
+       && Masc_tui_composer_projection.classify_key state Masc_tui_composer.send_key = Masc_tui_composer.Send keeper.k_name
+       && Masc_tui_composer_projection.classify_key state Masc_tui_composer.listen_key = Masc_tui_composer.Start_listening keeper.k_name
+       && Masc_tui_composer_projection.classify_key state Masc_tui_composer.continuous_key = Masc_tui_composer.Toggle_continuous keeper.k_name
+       && state.msg_target_keeper_name = Some keeper.k_name
+       && state.local_workspace = Local_workspace_failed "archive unavailable"
+       && Masc_tui_message_input.contents state.msg_input = "original draft survives metadata failure")
 
 let test_local_source_tickets_cannot_cross_or_survive_suspension () =
   let open Masc_tui_types in

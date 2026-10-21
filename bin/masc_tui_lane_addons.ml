@@ -1497,7 +1497,7 @@ let host_request_lines item = match item.host_requests with
          else List.map (fun (request_id, wait) -> "  " ^ request_id ^ ": " ^ host_wait_text wait) hr_waiting)
       @ Option.fold ~none:[] ~some:(fun issue -> ["  stopped: " ^ host_issue_text issue]) hr_issue
 
-let connection_worker_lines snapshot item =
+let connection_worker_lines (snapshot : snapshot) (item : instance) =
   let workers = match item.installation_id with
     | None -> [item]
     | Some id -> List.filter (fun (worker : instance) ->

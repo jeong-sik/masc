@@ -71,7 +71,8 @@ materializing an owned edited snapshot for standalone or arrangement transport.
 `:export NEW_DIRECTORY` refuses an existing target. It writes the edited UMP
 JSONL, original WAV/audio blocks/session clock, original MIDI JSONL and
 `ump-source.json` with original hashes, overlay and edited-MIDI hash. The packet
-times stay integer host ticks; no clip-tempo conversion occurs. A failed or
+times stay integer host ticks; no clip-tempo conversion occurs. Export streams
+independent files to the chosen directory, including across volumes. A failed or
 cancelled unsealed export removes only its newly owned target. This bundle is
 an archival/native-take export; importing its edited session as a take treats
 those edited packets as a new source, rather than reconstructing editor history.

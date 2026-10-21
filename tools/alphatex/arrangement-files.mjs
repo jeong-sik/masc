@@ -308,7 +308,10 @@ export async function exportUmpCapture(project, assetID, target, options) {
       original: asset.parts, clock: asset.manifest.clock, ump: asset.ump ?? null, derivedMidiSha256: derived }) + '\n', { flag: 'wx', mode: 0o444, signal: options.signal })
     options.signal?.throwIfAborted()
     await mkdir(target, { mode: 0o700 }); created = true
-    for (const name of [...Object.values(capturePartNames), 'original-midi.ump.jsonl', 'ump-source.json']) await link(join(snapshot.directory, name), join(target, name))
+    for (const name of [...Object.values(capturePartNames), 'original-midi.ump.jsonl', 'ump-source.json']) {
+      await pipeline(createReadStream(join(snapshot.directory, name)),
+        createWriteStream(join(target, name), { flags: 'wx', mode: 0o444 }), { signal: options.signal })
+    }
     const folder = await open(target, 'r'); try { await folder.sync() } finally { await folder.close() }
     options.signal?.throwIfAborted(); sealed = true
     return { directory: target, derivedMidiSha256: derived }

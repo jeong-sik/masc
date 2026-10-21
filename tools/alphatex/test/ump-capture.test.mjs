@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { Worker } from 'node:worker_threads'
 import { once } from 'node:events'
-import { mkdir, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { capturedMidiFixture } from './helpers/captured-midi-fixture.mjs'
@@ -52,6 +52,9 @@ test('actual Worker native UMP edit/revoice → variant → both playback plans 
     assert.equal(createHash('sha256').update(editedBytes).digest('hex'), exported.derivedMidiSha256)
     assert.deepEqual(editedBytes.toString().trimEnd().split('\n').map(JSON.parse), packets)
     assert.deepEqual(await readFile(join(output, 'original-midi.ump.jsonl')), await readFile(join(dirname(path), variant.parts.midi.file)))
+    assert.notDeepEqual(
+      (({ dev, ino }) => [dev, ino])(await stat(join(output, 'original-midi.ump.jsonl'))),
+      (({ dev, ino }) => [dev, ino])(await stat(join(dirname(path), variant.parts.midi.file))))
     const provenance = JSON.parse(await readFile(join(output, 'ump-source.json')))
     assert.deepEqual(provenance.ump, variant.ump); assert.deepEqual(provenance.clock, variant.manifest.clock)
     const copy = join(root, 'portable/song.json')

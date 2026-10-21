@@ -2437,7 +2437,6 @@
   masc_tui_workspace_read
   masc_tui_workspace_job
   masc_tui_workspace_result
-  masc_tui_task_dispatch
   masc_tui_candle
   masc.masc_candle
   masc_cli_keeper_create

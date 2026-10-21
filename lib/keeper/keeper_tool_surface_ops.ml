@@ -823,7 +823,15 @@ let operation_target_arg args =
 ;;
 
 let owner_command_error_result error =
-  tool_result_error_data ~class_:Tool_result.Runtime_failure
+  let class_ =
+    match error with
+    | Keeper_owner_registry.Command_rejected (Keeper_owner.Operation_rejected error)
+      when Keeper_owner.operation_error_kind error = Keeper_owner.Operation_not_queued ->
+      Tool_result.Workflow_rejection
+    | Command_lookup_failed _ | Command_lifecycle_reserved _ | Command_rejected _ ->
+      Tool_result.Runtime_failure
+  in
+  tool_result_error_data ~class_
     (`Assoc
        [ "error", `String (owner_operation_error_code error)
        ; "message",

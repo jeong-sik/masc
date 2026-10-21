@@ -101,6 +101,56 @@ class TargetedStanzaIsolation(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.splitlines(), expected)
 
+    def write_tree(self, directory, files):
+        for relative, text in files.items():
+            path = directory / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+
+    def test_source_tree_dep_becomes_one_file_target_per_file(self):
+        # `dune build DIR` accepts a directory and exits 0 while copying
+        # nothing, so the runtest action's source tree is absent in a targeted
+        # run. A file target is copied, so DIR must arrive as its files.
+        tree = self.root / "test/tree"
+        self.write_tree(tree, {"b.txt": "b", "sub/a.txt": "a"})
+        self.inc.write_text("""
+(test (name test_browser_activity) (deps (source_tree tree))
+ (action (setenv ACTIVITY_MODE selected (run %{test}))))
+""")
+        result = self.read(deps=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(),
+                         ["test/tree/b.txt", "test/tree/sub/a.txt"])
+
+    def test_source_tree_under_a_root_variable_resolves_from_the_checkout_root(self):
+        # The stanza is written relative to test/, but the root variable names
+        # the checkout root. --deps speaks from the root, so no literal
+        # '%{workspace_root}' may reach `dune build`.
+        prompts = self.root / "config/prompts"
+        self.write_tree(prompts, {"agent_core.md": "a", "nested/grader.md": "g"})
+        self.inc.write_text("""
+(test (name test_browser_activity) (deps (source_tree %{workspace_root}/config/prompts))
+ (action (setenv ACTIVITY_MODE selected (run %{test}))))
+""")
+        result = self.read(deps=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        targets = result.stdout.splitlines()
+        self.assertEqual(targets, ["config/prompts/agent_core.md",
+                                   "config/prompts/nested/grader.md"])
+        for target in targets:
+            self.assertTrue((self.root / target).is_file(), target)
+            self.assertNotIn("%{", target)
+
+    def test_empty_source_tree_contributes_no_target_and_no_directory(self):
+        (self.root / "test/tree").mkdir(parents=True)
+        self.inc.write_text("""
+(test (name test_browser_activity) (deps (source_tree tree))
+ (action (setenv ACTIVITY_MODE selected (run %{test}))))
+""")
+        result = self.read(deps=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
     def executable(self, path, text):
         path.write_text(f"#!{sys.executable}\n" + text)
         path.chmod(0o755)

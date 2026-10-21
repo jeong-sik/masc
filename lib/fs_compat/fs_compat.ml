@@ -332,6 +332,10 @@ let atomic_replace_failure_to_string =
   Atomic_replace.atomic_replace_failure_to_string
 ;;
 
+let save_file_atomic_rename_only_staged path content =
+  Atomic_replace.save_file_atomic_rename_only_staged ~save_file:save_file_blocking path content
+;;
+
 let save_file_atomic_strict_staged path content =
   Atomic_replace.save_file_atomic_strict_staged ~save_file:save_file_blocking path content
 ;;

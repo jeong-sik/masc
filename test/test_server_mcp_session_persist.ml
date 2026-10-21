@@ -460,10 +460,47 @@ let test_registration_and_actual_snapshot_coherence () = with_temp_base @@ fun b
   check_original sid;
   check_original peer
 
+let test_shared_writer_failure_preserves_resources_and_recovers () = with_temp_base @@ fun base_path ->
+  let target = Filename.concat base_path "occupied-publication" in
+  Unix.mkdir target 0o700;
+  let marker = Filename.concat target "retained-evidence" in
+  let bytes = "original directory contents" and payload = "snapshot\000bytes\n한글\n" in
+  Out_channel.with_open_bin marker (fun output -> output_string output bytes);
+  let unrelated = Filename.concat base_path ".atomic_unrelated.tmp" in
+  Unix.mkfifo unrelated 0o600;
+  (match Fs_compat.save_file_atomic_rename_only_staged target payload with
+   | Ok () -> fail "actual directory collision was reported as publication"
+   | Error failure ->
+       (match failure.stage with
+        | Fs_compat.Before_rename -> ()
+        | Fs_compat.After_rename -> fail "directory collision was reported after publication");
+       (match failure.exception_ with
+        | Sys_error _ | Unix.Unix_error _ -> ()
+        | exn -> raise exn));
+  check string "failed publication retains actual destination contents" bytes
+    (In_channel.with_open_bin marker In_channel.input_all);
+  check bool "unowned canonical FIFO is never opened or removed" true
+    ((Unix.lstat unrelated).Unix.st_kind = Unix.S_FIFO);
+  check bool "failed real write leaves no owned temporary output" true
+    (Array.for_all (fun name -> name = Filename.basename target || name = Filename.basename unrelated)
+      (Sys.readdir base_path));
+  Unix.unlink marker;
+  Unix.rmdir target;
+  (match Fs_compat.save_file_atomic_rename_only_staged target payload with
+   | Ok () -> ()
+   | Error failure -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace);
+  check string "released destination receives exact binary payload" payload
+    (In_channel.with_open_bin target In_channel.input_all);
+  check bool "successful retry leaves no owned temporary output" true
+    (Array.for_all (fun name -> name = Filename.basename target || name = Filename.basename unrelated)
+      (Sys.readdir base_path))
+
 let () =
   run "server_mcp_session_persist"
     ["persistence",
-      [test_case "initialize, profile, persistence and re-registration retain authority" `Quick
+      [test_case "shared writer preserves occupied destination and retries after release" `Quick
+         test_shared_writer_failure_preserves_resources_and_recovers;
+       test_case "initialize, profile, persistence and re-registration retain authority" `Quick
          test_initialize_profile_lifecycle;
        test_case "native registration and real snapshots retain coherent session fields" `Quick
          test_registration_and_actual_snapshot_coherence;

@@ -112,12 +112,12 @@ val save_sessions_to_file : base_path:string -> unit -> save_result
 (** Serialize current session state and replace the file after flush/close.
     Called automatically by [reap_stale_sessions] after each cleanup.
     The common I/O executor owns the host work. Writers serialize before
-    capturing one immutable registry for all saved fields. Each write exclusively
-    creates a fresh private regular output in the original directory, closes it before rename,
-    and attempts to remove only its own output on failure. Existing temporary paths are not
-    opened or removed. A current nonregular destination is refused before
-    output creation. Callers await physical
-    completion; cancellation does not undo a completed file replacement.
+    capturing one immutable registry for all saved fields. The shared staged
+    rename-only writer uses canonical private temporary names, closes before
+    publication and cleans its own output on failure. Preexisting temporary
+    names are not opened or removed. A current nonregular destination is refused
+    before output creation. Cancellation does not undo completed replacement;
+    expected host failures retain typed outcomes and unexpected errors propagate.
     Live request updates stay independent of the worker mutex; each capture
     contains one committed state, including complete supported registration.
     Non-Eio callers perform the same work directly. A file present before its

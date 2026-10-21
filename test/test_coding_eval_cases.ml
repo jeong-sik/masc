@@ -270,6 +270,41 @@ let test_report_decodes_real_harness_rows () =
     check (float 0.0001) "one passing coding evaluation" (1.0 /. 6.0) report.suite.overall_pass_rate
 ;;
 
+let test_failed_admission_is_recorded_without_grading () =
+  let root = source_root () in
+  let fixture = Filename.concat root "test/fixtures/coding_eval_admission_failure.sh" in
+  List.iter
+    (fun prior_workspace ->
+       let proof_dir = temp_dir "coding_eval_admission_" in
+       let command =
+         "bash " ^ String.concat " "
+           (List.map Filename.quote [ fixture; root; proof_dir; prior_workspace ])
+       in
+       check int "actual episode driver records failure" 0 (Sys.command command);
+       let rows =
+         match Coding_eval_report.rows_of_jsonl_file (Filename.concat proof_dir "out/runs.jsonl") with
+         | Error message -> fail message
+         | Ok rows -> rows
+       in
+       (match rows with
+        | [ row ] ->
+          check bool "transport failure is retained" true
+            (row.status = Coding_eval_report.Run_transport_error);
+          check bool "failed admission cannot pass" false row.passed;
+          check (option int) "verification was not run" None row.verify_exit;
+          check (option string) "unobserved operation stays unknown" None
+            (Option.map Keeper_operation_id.to_string row.operation_id);
+          check (option string) "original failure is retained"
+            (Some "keeper_up: controlled admission failure") row.error
+        | _ -> fail "expected exactly one failed-episode row");
+       let marker =
+         Filename.concat proof_dir
+           "target/.masc/playground/docker/coding-eval-fixture-model-l1-calc-add-r1/workspace/unexpected-grading"
+       in
+       check bool "stale workspace was not graded" false (Sys.file_exists marker))
+    [ "fresh"; "stale" ]
+;;
+
 let test_admission_without_operation_identity_is_refused () =
   let helper = Filename.concat (source_root ()) "scripts/harness/lib/coding_eval_evidence.sh" in
   List.iter
@@ -564,6 +599,8 @@ let () =
     ; ( "report"
       , [ test_case "fixed rows pipeline" `Quick test_report_pipeline_on_fixed_rows
         ; test_case "real harness rows decode" `Quick test_report_decodes_real_harness_rows
+        ; test_case "failed admission records its episode without grading" `Quick
+            test_failed_admission_is_recorded_without_grading
         ; test_case "operation identity is observed, never inferred" `Quick
             test_report_rejects_invalid_operation_identity
         ; test_case "admission must return an operation identity" `Quick

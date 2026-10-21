@@ -654,6 +654,8 @@ run_one() {
   mkdir -p "${run_dir}"
 
   local keeper_name="coding-eval-${run_id}"
+  workspace="${TARGET_DIR}/.masc/playground/docker/${keeper_name}/workspace"
+  local workspace_prepared=false
   # Effectful tools (Execute/Edit/Write) are operator-gated by default, and an
   # eval run has no operator: every call sat in elicitation until its ~180s
   # expiry and the episode starved (#31640 measured exactly this). The
@@ -731,10 +733,10 @@ run_one() {
     # root (keeper_sandbox_config.host_root_rel_of_profile) — the profile
     # segment keeps lanes from finding each other's trees. The profile is
     # pinned to docker in the keeper TOML above.
-    workspace="${TARGET_DIR}/.masc/playground/docker/${keeper_name}/workspace"
     rm -rf "${workspace}"
     mkdir -p "${workspace}"
     cp -R "${case_dir}/workspace/." "${workspace}"
+    workspace_prepared=true
     if [[ "${MEMORY_MODE}" == "verified" || "${MEMORY_MODE}" == "filtered" ]]; then
       if ! apply_live_probe "${case_dir}" "${keeper_name}" "${run_dir}" "${workspace}"; then
         finish_status="transport_error"
@@ -823,11 +825,11 @@ run_one() {
     fi
   fi
 
-  # verify runs for every episode that had a workspace, timeouts included:
+  # verify runs for every episode that prepared its workspace, timeouts included:
   # the artifact state is diagnostic even when the episode never settled.
   # The pass verdict stays status=ok AND verify_exit=0 (an unsettled episode
   # is not a completed task), and the report CLI enforces that equation.
-  if [[ -d "${workspace}" ]]; then
+  if [[ "${workspace_prepared}" == true ]]; then
     # Deterministic trajectory signals for the D5 failure taxonomy: how many
     # pristine source files the candidate changed, and how many of them were the
     # reference-solution targets. Computed before the oracle restore below so a
@@ -965,4 +967,6 @@ main() {
   fi
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main
+fi

@@ -283,10 +283,17 @@ let retire t retirement =
       | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()) else (
     let snapshots,failure=locked t (fun () ->
       t.serving<-false;
-      let active ()=t.preparing>0 || Hashtbl.fold (fun _ grant active ->
-        match grant.state with Claimed|Committed _ -> true
-          | Pending|Settled _|Released -> active) t.grants false in
-      while active () do Condition.wait t.changed t.mutex done;
+      while t.preparing>0 do Condition.wait t.changed t.mutex done;
+      (* A remote holder may never settle. Observe deletion authority under the
+         grant lock rather than waiting for it; no files may be deleted unless
+         every existing claim has settled. Preserve grant states on refusal. *)
+      (match t.failure,retirement with
+      | Some _,(Remove_published|Preserve_files) | None,Preserve_files -> ()
+      | None,Remove_published ->
+          let held=Hashtbl.fold (fun _ grant held ->
+            match grant.state with Claimed|Committed _ -> true
+              | Pending|Settled _|Released -> held) t.grants false in
+          if held then t.failure<-Some "download cleanup has unsettled consumer claims");
       Hashtbl.fold (fun _ snapshot acc -> snapshot::acc) t.snapshots [],t.failure) in
     let result=ref (Error "download cleanup did not settle") in
     let ()=Fun.protect ~finally:(fun () ->

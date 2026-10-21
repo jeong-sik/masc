@@ -189,13 +189,18 @@ let resource_document entry
 let rows ~cols reading =
   let pane_cols = if cols >= Masc_tui_roster_pane.threshold_cols
     then cols - Masc_tui_roster_pane.pane_cols else cols in
+  (* A CR paired with LF belongs to the document's line terminator. Parse
+     those breaks before escaping controls, or the visible CR escape breaks
+     Markdown table delimiters. Retained parts and copy_source stay original. *)
+  let document =
+    resource_document reading.entry reading.contents ~error:reading.error
+      ~requested:reading.requested ~image_cursor:reading.image_cursor
+      ~text_cursor:reading.text_cursor ~revisions:reading.revisions
+    |> Masc_tui_text_block.lines |> String.concat "\n"
+  in
   Message_layout.wrap_body ~markdown:Masc_tui_markdown_theme.document
     ~max_cells:(max 1 (framed_inner_width pane_cols - 4))
-    ~sanitize:Terminal_text.single_line
-    (resource_document reading.entry reading.contents ~error:reading.error
-       ~requested:reading.requested ~image_cursor:reading.image_cursor
-       ~text_cursor:reading.text_cursor
-       ~revisions:reading.revisions)
+    ~sanitize:Terminal_text.single_line document
 
 let search_rows ~cols state =
   match current state with

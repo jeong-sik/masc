@@ -316,10 +316,14 @@ let retire t retirement =
           && stat.st_uid=Unix.geteuid () && stat.st_perm=0o600 && stat.st_nlink=1 -> Unix.unlink path;Ok ()
       | _ -> Error "download snapshot identity changed"
       | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok () in
-    let result=List.fold_left (fun result snapshot -> let* ()=result in cleanup_snapshot snapshot) (Ok ()) snapshots in
-    match result with
-    | Error detail -> Error detail
-    | Ok () ->
+    (* One snapshot's failure must not skip the rest: attempt each snapshot and
+       report the failures once, leaving only failed items behind. *)
+    let failures=List.fold_left (fun failures snapshot ->
+      match io (fun () -> cleanup_snapshot snapshot) with
+      | Ok () -> failures | Error detail -> detail::failures) [] snapshots in
+    match failures with
+    | _::_ -> Error (String.concat "; " (List.rev failures))
+    | [] ->
         let* ()=empty_downloads (Filename.concat t.directory "downloads") in
         if Sys.readdir t.root<>[||] then Error "download root contains unknown or partial files"
         else (Unix.rmdir t.root;Ok ()))) in

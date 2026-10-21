@@ -895,36 +895,6 @@ let test_autocomplete_subargument_cycling () =
   let step4 = Command.autocomplete (Option.get step3) in
   check (option string) "step 4: /thinking full wraps -> /thinking hidden" (Some "/thinking hidden") step4
 
-(* The cancel contract: exit-class on masc_transition, so the one typed
-   reason must arrive as both [reason] and the required non-empty
-   [handoff_context.summary]. A builder that dropped the summary would pass
-   the transport and be refused by the server's schema on every cancel. *)
-let test_cancel_arguments_carry_reason_as_summary () =
-  let expected_workspace : Masc.Tui_decode.server_identity =
-    { sid_version = "test"; sid_binary_commit = "test";
-      sid_binary_commit_age_s = None; sid_base_path = Masc.Tui_decode.Canonical_path.of_path "/fixture";
-      sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "/fixture/.masc";
-      sid_executable_in_worktree = None; sid_state_ready = Some true;
-      sid_uptime = None; sid_sse_clients = None; sid_gc = None;
-      sid_scheduler = None }
-  in
-  let arguments =
-    Masc_tui_mcp.task_cancel_arguments ~task_id:"task-9" ~reason:"wrong scope"
-      ~expected_workspace
-  in
-  let assoc key = List.assoc_opt key arguments in
-  Alcotest.(check bool) "task id" true (assoc "task_id" = Some (`String "task-9"));
-  Alcotest.(check bool) "action is cancel" true
-    (assoc "action" = Some (`String "cancel"));
-  Alcotest.(check bool) "reason rides" true
-    (assoc "reason" = Some (`String "wrong scope"));
-  Alcotest.(check bool) "summary equals the reason" true
-    (assoc "handoff_context"
-    = Some (`Assoc [ ("summary", `String "wrong scope") ]));
-  Alcotest.(check bool) "cancel is bound to observed workspace" true
-    (assoc "expected_workspace" = Some (`Assoc
-      [ "base_path", `String "/fixture"; "masc_root", `String "/fixture/.masc" ]))
-
 let test_resource_read_keeps_each_part_type () =
   let body =
     {|{"jsonrpc":"2.0","id":"resource-2","result":{"contents":[{"uri":"masc://events.json","mimeType":"application/json","text":"{\"ok\":true}"},{"uri":"masc://proof.bin","mimeType":"application/octet-stream","blob":"QUJDRA=="}]}}|}
@@ -1034,9 +1004,7 @@ let () =
             test_command_menu_keeps_selection_separate_from_draft
         ] )
     ; ( "tools/call"
-      , [ test_case "cancel arguments carry the reason as summary" `Quick
-            test_cancel_arguments_carry_reason_as_summary
-        ; test_case "a tool answer is read off the SSE body" `Quick
+      , [ test_case "a tool answer is read off the SSE body" `Quick
             test_a_tool_answer_is_read_off_the_sse_body
         ; test_case "a tool that failed is an outcome, not a transport error" `Quick
             test_a_tool_that_failed_is_an_outcome_not_a_transport_error

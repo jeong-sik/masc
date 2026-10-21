@@ -3785,23 +3785,20 @@ let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
   supersede_home_decision_receipt state;
   let host = server_peer_host in
   let port = state.port in
-  let request_id = Printf.sprintf "tui-cancel-%.6f" (Unix.gettimeofday ()) in
   let run () =
     let result =
       try
-      let ( let* ) = Result.bind in
-      let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
-      let* session_id = Masc_tui_http.open_mcp_session ~host ~port
-          ~client_version:Runtime_build_version.current in
-      let* () = check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity ~host ~port () in
-      let arguments = Masc_tui_mcp.task_cancel_arguments ~task_id ~reason ~expected_workspace in
-      let* outcome = Masc_tui_http.call_mcp_tool ~host ~port ~session_id ~request_id
-          ~tool:"masc_transition" ~arguments in
-      if outcome.Masc_tui_mcp.is_error then Error outcome.Masc_tui_mcp.text
-      else Ok outcome.Masc_tui_mcp.text
+      match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+      | Error detail -> Task_cancel_refused detail
+      | Ok () ->
+        (match Masc_tui_http.cancel_task ~host ~port ~task_id ~reason ~expected_workspace with
+         | Masc_tui_http.Post_answered json ->
+           Task_cancel_confirmed (Yojson.Safe.to_string json)
+         | Masc_tui_http.Post_refused detail -> Task_cancel_refused detail
+         | Masc_tui_http.Post_unanswered detail -> Task_cancel_unconfirmed detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Task_cancel_unconfirmed (Printexc.to_string exn)
     in
     enqueue_async mailbox (Task_cancel_done (task_id, expected_workspace, result))
   in
@@ -3813,7 +3810,7 @@ let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
       Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Task_cancel_done (task_id, expected_workspace, Error "Eio switch is unavailable"))
+        (Task_cancel_done (task_id, expected_workspace, Task_cancel_refused "Eio switch is unavailable"))
 
 
 let ensure_img_cache_dir () =
@@ -14702,8 +14699,13 @@ let resume_task_followups state ~mailbox ~refresh_inflight
   List.iter (function
     | Task_handoff {task_id; _} -> report_action state "task"
         (Printf.sprintf "%s created in the previous workspace; Keeper handoff withdrawn" task_id)
-    | Task_cancel_refresh task_id -> report_action state "system"
-        (Printf.sprintf "task %s cancelled in the previous workspace; current workspace unchanged" task_id)) withdrawn;
+    | Task_cancel_refresh { task_id; certainty } ->
+        let kind, outcome = match certainty with
+          | Cancellation_confirmed -> "system", "cancelled"
+          | Cancellation_unconfirmed -> "error", "cancellation remains unconfirmed" in
+        report_action state kind
+          (Printf.sprintf "task %s %s in the previous workspace; current workspace unchanged"
+             task_id outcome)) withdrawn;
   List.iter (function
     | Task_handoff {keeper; task_id; _}
       when not (keeper_available_for_new_message state keeper) ->
@@ -14745,7 +14747,7 @@ let resume_task_followups state ~mailbox ~refresh_inflight
                  open_message_for_keeper state keeper ~drain_queue:(fun () -> ())
              end;
              launch_waiting_keeper_input state ~mailbox ~keeper_name:keeper)
-    | Task_cancel_refresh task_id ->
+    | Task_cancel_refresh { task_id; certainty = _ } ->
         (* Only the detail that is still selected owns this follow-up read. *)
         if state.task_detail_id = Some task_id then begin
           launch_task_history_load state ~mailbox task_id
@@ -18637,13 +18639,21 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            state.verification_evidence <- Some (task_id, result)
        | _ -> ())
   | Task_cancel_done (task_id, expected_workspace, result) ->
+      let refresh certainty =
+        remember_task_followup state ~expected_workspace (Task_cancel_refresh { task_id; certainty });
+        resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
+      in
       (match result with
-       | Ok _ ->
+       | Task_cancel_confirmed _ ->
            report_action state "system" (Printf.sprintf "task %s cancelled" task_id);
-           remember_task_followup state ~expected_workspace (Task_cancel_refresh task_id);
-           resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight
-             ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
-       | Error err -> report_action state "error" ("task cancel failed: " ^ err))
+           refresh Cancellation_confirmed
+       | Task_cancel_refused err -> report_action state "error" ("task cancel refused: " ^ err)
+       | Task_cancel_unconfirmed detail ->
+           report_action state "error"
+             (Printf.sprintf "task %s cancellation unconfirmed; checking its workspace: %s"
+                task_id detail);
+           refresh Cancellation_unconfirmed)
   | Goal_timeline_loaded (request, result) ->
       complete_goal_timeline_read state request result
   | Task_history_loaded (request, result) ->

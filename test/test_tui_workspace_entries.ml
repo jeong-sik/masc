@@ -1444,7 +1444,9 @@ let test_source_copy_respects_read_ownership () =
       (Result.is_error (Code_results.copy_file_source state)))
     [ (fun state -> state.server_identity <- None)
     ; (fun state -> state.workspace_identity <- Workspace_identity_match_unconfirmed "reconnecting")
-    ; (fun state -> state.code_file <- Fetched.suspend state.code_file)
+    ; (fun state ->
+        let refreshing, _ = start_read ~equal:String.equal state.code_file "source.ml" in
+        state.code_file <- Fetched.suspend refreshing)
     ; (fun state -> set_code_scope state (Code_scope_keeper "different"))
     ; (fun state -> state.code_focus_file <- Left_pane)
     ; (fun state -> state.code_history_open <- true)
@@ -1457,6 +1459,10 @@ let test_source_copy_respects_read_ownership () =
         Code_results.apply_file ~intent:Refresh_code_file state request (Error "unavailable"))
     ];
   let state = fresh () in
+  state.code_file <- Fetched.suspend state.code_file;
+  Alcotest.(check (result (pair string string) string))
+    "suspending no pending work preserves the settled source"
+    (Ok ("source.ml", "original")) (Code_results.copy_file_source state);
   let next, request = start_read ~equal:String.equal state.code_file "empty.ml" in
   state.code_file <- next;
   Code_results.apply_file state request (Ok "");

@@ -14,6 +14,7 @@ on:
         options:
           - chromium
           - firefox
+          - gecko
         default: chromium
 permissions:
   contents: read
@@ -27,7 +28,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 60
     env:
-      PROBE_TARGET: ${{ inputs.browser == 'firefox' && 'browser_addon_firefox_probe' || 'stagehand_browser_probe' }}
+      PROBE_TARGET: ${{ inputs.browser == 'firefox' && 'browser_addon_firefox_probe' || inputs.browser == 'gecko' && 'browser_addon_gecko_transfer_probe' || 'stagehand_browser_probe' }}
     steps:
       - name: Require an exact browser source candidate
         env:
@@ -38,8 +39,8 @@ jobs:
           import os, re
           if not re.fullmatch(r"[0-9a-f]{40}", os.environ["CANDIDATE_SHA"]):
               raise SystemExit("candidate_sha must be a full 40-character source commit")
-          if os.environ["PROOF_BROWSER"] not in ("chromium", "firefox"):
-              raise SystemExit("browser must be chromium or firefox")
+          if os.environ["PROOF_BROWSER"] not in ("chromium", "firefox", "gecko"):
+              raise SystemExit("browser must be chromium, firefox or gecko")
           PYCODE
 
       - uses: actions/checkout@v7
@@ -92,11 +93,15 @@ jobs:
           echo "CHROME_FOR_TESTING=$(tail -1 "$RUNNER_TEMP/chrome-for-testing.txt" | sed 's/^[^ ]* //')" >> "$GITHUB_ENV"
 
       - name: Install Firefox
-        if: inputs.browser == 'firefox'
+        if: inputs.browser == 'firefox' || inputs.browser == 'gecko'
         run: |
           if [[ ! -x /Applications/Firefox.app/Contents/MacOS/firefox ]]; then
             brew install --cask firefox
           fi
+
+      - name: Install the owned Gecko driver
+        if: inputs.browser == 'gecko'
+        run: brew install geckodriver
 
       - name: Retain the exact proof inputs
         env:
@@ -132,6 +137,20 @@ jobs:
           python3 scripts/probe-browser-addon-firefox.py \
             --firefox /Applications/Firefox.app/Contents/MacOS/firefox \
             --probe _build/default/test/browser_addon_firefox_probe.exe \
+            --launcher _build/default/bin/masc_native_addon_launcher.exe \
+            --guardian _build/default/bin/masc_browser_process_owner.exe \
+            --worker _build/default/bin/masc_browser_addon_worker.exe \
+            --out proof/native-browser
+
+      - name: Exercise owned Gecko upload, download and artifact retention
+        if: inputs.browser == 'gecko'
+        run: |
+          MOZ_HEADLESS=1 /Applications/Firefox.app/Contents/MacOS/firefox --version > proof/native-browser/BROWSER_VERSION
+          geckodriver --version > proof/native-browser/DRIVER_VERSION
+          python3 scripts/probe-browser-addon-gecko-transfer.py \
+            --firefox /Applications/Firefox.app/Contents/MacOS/firefox \
+            --driver "$(command -v geckodriver)" \
+            --probe _build/default/test/browser_addon_gecko_transfer_probe.exe \
             --launcher _build/default/bin/masc_native_addon_launcher.exe \
             --guardian _build/default/bin/masc_browser_process_owner.exe \
             --worker _build/default/bin/masc_browser_addon_worker.exe \

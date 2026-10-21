@@ -97,7 +97,13 @@ val save_sessions_to_file : base_path:string -> unit -> unit
     capturing immutable registry maps, so a queued old capture cannot replace
     a newer write and the temporary file has one writer. Callers await physical
     completion; cancellation does not undo a completed file replacement.
-    Non-Eio callers perform the same work directly. *)
+    Each map is captured independently; this is not a cross-map transaction.
+    Non-Eio callers perform the same work directly. A file present before its
+    restore, a pending/cancelled restore, or a failed restore is preserved.
+    A restore failure disables replacement of that path for this process;
+    repair the original and restart to restore persistence. Other paths and
+    the live in-memory registry remain usable. A first save to a genuinely
+    missing path may create it without a preceding restore. *)
 
 val load_sessions_from_file : base_path:string -> unit -> unit
 (** Read/decode and prepare immutable per-field maps in the common I/O executor,

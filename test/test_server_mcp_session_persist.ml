@@ -128,8 +128,11 @@ let test_cancelled_read_does_not_apply_decoded_sessions () = with_temp_base @@ f
   (match Session.validate_mcp_session_delete_profile
       ~profile:Server_mcp_transport_http_types.Operator_remote sid with
    | Error _ -> () | Ok () -> fail "cancelled restore applied a transport profile");
-  (* A fresh, joined restore can consume the same original snapshot. *)
   let path = Session.sessions_file_path ~base_path () in
+  Session.save_sessions_to_file ~base_path ();
+  check bool "cancelled restore cannot replace its unread original" true
+    ((Unix.lstat path).Unix.st_kind = Unix.S_FIFO);
+  (* A fresh, joined restore can consume the same original snapshot. *)
   Sys.remove path;
   Out_channel.with_open_bin path (fun output -> output_string output bytes);
   Session.load_sessions_from_file ~base_path ();
@@ -168,7 +171,8 @@ let test_overlay_preserves_original_field_policies () = with_temp_base @@ fun ba
     Session.load_sessions_from_file ~base_path () in
   let persisted sid =
     Session.save_sessions_to_file ~base_path ();
-    Yojson.Basic.Util.(Yojson.Basic.from_file path |> member "sessions" |> member sid) in
+    let json = Yojson.Basic.from_file path in
+    Yojson.Basic.Util.(json |> member "sessions" |> member sid) in
   let string_field fields key expected =
     check string key expected Yojson.Basic.Util.(fields |> member key |> to_string) in
   load [existing,`Assoc ["protocol_version",`String original_version;
@@ -220,6 +224,62 @@ let test_overlay_preserves_original_field_policies () = with_temp_base @@ fun ba
   check_original duplicate;
   check_original peer
 
+let test_failed_restore_preserves_original () =
+  List.iter (fun original -> with_temp_base @@ fun base_path ->
+    let path = Session.sessions_file_path ~base_path () in
+    Unix.mkdir (Filename.dirname path) 0o700;
+    Out_channel.with_open_bin path (fun output -> output_string output original);
+    Session.load_sessions_from_file ~base_path ();
+    ignore (Session.reap_stale_sessions ~base_path ~is_active_session:(fun _ -> true));
+    Session.save_sessions_to_file ~base_path ();
+    check string "failed restore survives actual maintenance and direct save" original
+      (In_channel.with_open_bin path In_channel.input_all);
+    check bool "refused save never opens a temporary output" false
+      (Sys.file_exists (path ^ ".tmp")))
+    ["{unclosed"; "{\"not_sessions\":{}}"]
+
+let test_read_failure_is_path_local_and_latched () = with_temp_base @@ fun damaged ->
+  with_temp_base @@ fun independent ->
+  let path = Session.sessions_file_path ~base_path:damaged () in
+  Unix.mkdir (Filename.dirname path) 0o700;
+  Unix.mkdir path 0o700;
+  (* Opening a directory as JSON produces a real host read failure, without
+     depending on root/non-root permission behavior. *)
+  Session.load_sessions_from_file ~base_path:damaged ();
+  Unix.rmdir path;
+  let original = "{\"sessions\":{}}\n" in
+  Out_channel.with_open_bin path (fun output -> output_string output original);
+  let sid = "persist-independent-after-refusal" in
+  with_sessions [sid] @@ fun () ->
+  remember sid;
+  Session.load_sessions_from_file ~base_path:independent ();
+  Session.save_sessions_to_file ~base_path:independent ();
+  let peer_path = Session.sessions_file_path ~base_path:independent () in
+  check bool "independent missing path persists the live session" true
+    Yojson.Basic.Util.(Yojson.Basic.from_file peer_path |> member "sessions" |> member sid <> `Null);
+  Session.load_sessions_from_file ~base_path:damaged ();
+  Session.save_sessions_to_file ~base_path:damaged ();
+  check string "later readable replacement cannot clear this process refusal" original
+    (In_channel.with_open_bin path In_channel.input_all)
+
+let test_save_before_restore_preserves_existing () = with_temp_base @@ fun base_path ->
+  let path = Session.sessions_file_path ~base_path () in
+  Unix.mkdir (Filename.dirname path) 0o700;
+  let sid = "persist-unrestored-original" in
+  with_sessions [sid] @@ fun () ->
+  let original = session_bytes sid in
+  Out_channel.with_open_bin path (fun output -> output_string output original);
+  Session.save_sessions_to_file ~base_path ();
+  check string "save-first preserves an existing original" original
+    (In_channel.with_open_bin path In_channel.input_all);
+  Session.load_sessions_from_file ~base_path ();
+  check_original sid;
+  Session.forget_mcp_session sid;
+  Session.save_sessions_to_file ~base_path ();
+  let json = Yojson.Basic.from_file path in
+  check bool "successful restore permits later session removal to persist" true
+    Yojson.Basic.Util.(json |> member "sessions" |> member sid = `Null)
+
 let () =
   run "server_mcp_session_persist"
     ["persistence",
@@ -231,4 +291,10 @@ let () =
        test_case "connected restore preserves independent session created during physical read" `Quick
          test_connected_read_preserves_later_live_session;
        test_case "actual overlays retain duplicate and optional-field authority" `Quick
-         test_overlay_preserves_original_field_policies]]
+         test_overlay_preserves_original_field_policies;
+       test_case "failed JSON and root restore preserve actual snapshots" `Quick
+         test_failed_restore_preserves_original;
+       test_case "read refusal stays with its path and process" `Quick
+         test_read_failure_is_path_local_and_latched;
+       test_case "save-first preserves an existing unrestored file" `Quick
+         test_save_before_restore_preserves_existing]]

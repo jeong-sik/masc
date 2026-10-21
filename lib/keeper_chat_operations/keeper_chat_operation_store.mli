@@ -114,6 +114,14 @@ module Offline : sig
       never install or blindly retry it. Caller owns both handles and must hold
       the original BasePath lease before promoting any offline artifact; this
       copy primitive neither acquires authority nor replaces a live journal. *)
+
+  val verify_v2_copy : source:Sqlite3.db -> destination:Sqlite3.db ->
+    (prepared_copy, error) result
+  (** Read-only transactions over an exact v2 source and prepared v3 copy.
+      Revalidate all original cells and the sequence, mandatory unavailable
+      prior history, and the absence of imported input rows. This verifies
+      the relationship, not file durability, live-source freshness or input
+      authority. Both handles must have no active caller transaction. *)
 end
 
 val open_or_create : path:string -> (t, error) result
@@ -132,6 +140,8 @@ val take_released_checkpoints : t -> released_checkpoint list
     writes, no execution or input owner {!inspect_outstanding} would select still names that
     sha256; it computes this before its COMMIT and publishes it only when the
     COMMIT returns success. A failed or uncertain commit releases nothing.
+    Unavailable prior history discards release candidates without deleting
+    files; after reconciliation, startup sweeping must rediscover orphans.
     The caller removes the files; nothing here touches the filesystem. *)
 
 val released_reference : released_checkpoint -> Keeper_checkpoint_ref.t

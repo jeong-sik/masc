@@ -4285,16 +4285,25 @@ let workspace_upgrade_cmd =
     ~doc:"Require the exact configuration digest displayed during assessment.") in
   let restore = Arg.(value & opt (some string) None & info ["restore"] ~docv:"BACKUP_ID"
     ~doc:"Restore a selected backup only while its upgrade output remains unchanged.") in
-  let run base_path apply source_sha256 restore =
-    let action = match apply, source_sha256, restore with
-      | None, None, None -> Some Masc_cli_workspace_upgrade.Inspect
-      | Some keeper_name, Some source_sha256, None -> Some (Apply {keeper_name; source_sha256})
-      | None, None, Some backup_id -> Some (Restore {backup_id})
+  let journal = Arg.(value & opt (some string) None & info ["journal"] ~docv:"KEEPER"
+    ~doc:"Read the existing Keeper journal identity without creating or converting it.") in
+  let prepare_journal = Arg.(value & opt (some string) None & info ["prepare-journal"] ~docv:"KEEPER"
+    ~doc:"Preserve an offline journal and prepare a private recovery bundle; does not install it.") in
+  let journal_bundle = Arg.(value & opt (some string) None & info ["journal-bundle"] ~docv:"BUNDLE_ID"
+    ~doc:"Verify an existing private journal bundle without installation or source changes.") in
+  let run base_path apply source_sha256 restore journal prepare_journal journal_bundle =
+    let action = match apply, source_sha256, restore, journal, prepare_journal, journal_bundle with
+      | None, None, None, None, None, None -> Some Masc_cli_workspace_upgrade.Inspect
+      | Some keeper_name, Some source_sha256, None, None, None, None -> Some (Apply {keeper_name; source_sha256})
+      | None, None, Some backup_id, None, None, None -> Some (Restore {backup_id})
+      | None, None, None, Some keeper_name, None, None -> Some (Inspect_journal keeper_name)
+      | None, Some source_sha256, None, None, Some keeper_name, None -> Some (Prepare_journal {keeper_name;source_sha256})
+      | None, None, None, None, None, Some bundle_id -> Some (Inspect_journal_bundle bundle_id)
       | _ -> None in
     match action with Some action -> Masc_cli_workspace_upgrade.run ~base_path ~action
-    | None -> prerr_endline "Choose inspection, --apply KEEPER with --source-sha256, or --restore BACKUP_ID."; 1 in
-  Cmd.v (Cmd.info "workspace-upgrade" ~doc:"Inspect known configuration upgrades and private recovery backups.")
-    Term.(const run $ base_path $ apply $ source_sha256 $ restore)
+    | None -> prerr_endline "Choose one inspection, configuration upgrade/restore, or journal preparation with its assessed --source-sha256."; 1 in
+  Cmd.v (Cmd.info "workspace-upgrade" ~doc:"Inspect configuration upgrades and preserve offline journal recovery bundles.")
+    Term.(const run $ base_path $ apply $ source_sha256 $ restore $ journal $ prepare_journal $ journal_bundle)
 
 let antigravity_account_cmd =
   let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in

@@ -1287,6 +1287,35 @@ module Offline = struct
     in
     try prepare () with
     | Sqlite3.Error detail | Sqlite3.SqliteError detail -> Error (Store_unavailable detail)
+
+  let verify_v2_copy ~source ~destination =
+    let verify () =
+      let* () = if source != destination then Ok ()
+        else Error (Invalid_input "offline verification requires distinct source and copy") in
+      let* () = exec source ~operation:"begin original journal verification" "BEGIN" in
+      Fun.protect ~finally:(fun () -> rollback source) (fun () ->
+        let* () = validate_schema_with ~version:2L ~schema_identity:"masc.keeper_chat_operations.v2"
+          ~objects:v2_objects source in
+        let* () = validate_payloads source in
+        let* before = raw_snapshot source in
+        let* () = exec destination ~operation:"begin prepared journal verification" "BEGIN" in
+        Fun.protect ~finally:(fun () -> rollback destination) (fun () ->
+          let* () = validate_schema destination in
+          let* () = validate_payloads destination in
+          let* history = input_history_with_db destination in
+          let* inputs = input_checkpoint_rows destination in
+          let* () = match history, inputs with
+            | Prior_input_history_unavailable, [] -> Ok ()
+            | Fresh_input_history, (_::_ | [])
+            | Prior_input_history_unavailable, _::_ ->
+              Error (Integrity_error "prepared journal must preserve unavailable input without imported rows") in
+          let* (operations, semantics, batches, next_sequence) as after = raw_snapshot destination in
+          if before=after then
+            Ok {operation_count=List.length operations;semantic_count=List.length semantics;
+              batch_member_count=List.length batches;next_sequence}
+          else Error (Integrity_error "prepared journal changed original evidence"))) in
+    try verify () with
+    | Sqlite3.Error detail | Sqlite3.SqliteError detail -> Error (Store_unavailable detail)
 end
 
 let next_sequence db =

@@ -41,6 +41,14 @@
   경과 시간·추정 timeout으로 단계를 만들지 않고 마지막 정상 관측·오류와 함께 읽는다.
   상태 적용은 실제 apply 뒤 기록하며 worker 반환·등록 해제·상태 적용을 paint·입력 가능·
   Task 진척으로 올리지 않는다. 진단 로그/할당 비용도 실제 Before/After 분모에 포함한다.
+- 전역 입력창과 비활성 Overview 안내도 원래 메타데이터 source의 상태를 읽는다. 미조회·
+  실패·실패 뒤 재시도·이전 관측의 갱신을 구분하고 workspace 미확인 때 옛 로컬 실패를
+  빌리지 않는다. Overview는 `source_reading`만 읽고 대상 Keeper의 전체 projection을 하지
+  않는다. 비활성 cursor도 projection 전에 Hidden을 반환해 이 경로를 다시 무겁게 만들지 않는다.
+  관측 안내는 editable prompt 뒤에 붙여 원래 초안 window·cursor·행 예산을 바꾸지 않는다.
+- `keeper_message_availability`가 입력 허용과 설명의 같은 typed 판정이다. 생성 후 요청한
+  메타데이터 revision이 아직 관측되지 않은 Keeper를 삭제/부재로 표시하지 않는다. 읽기
+  단계나 안내 문자열로 focus·음성·send를 허가하지 않고 실패 동안 초안·대상을 보존한다.
 - Task 표시 준비는 원래 consumer/요청/run/Task·workspace·폭·ticket에 귀속해 시작, worker
   진입/반환, caller 관측, UI 적용/거절, 소유권 철회, 취소 요청과 실제 등록 해제를 별도로 남긴다.
   같은 요청의 원자적 사실만 준비 단계 안내에 쓰며, 미관측 단계는 null로 남긴다. worker 반환을

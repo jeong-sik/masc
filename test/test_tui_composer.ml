@@ -5,7 +5,7 @@ module Composer = Masc_tui_composer
 
 let make ?(target = Composer.Ready "analyst") ?(focus = Composer.Unfocused)
     ?(draft = "") ?(staged_images = 0) () : Composer.t =
-  { target; focus; draft; staged_images }
+  { target; focus; draft; staged_images; reading=Composer.Metadata {status=Observed;pending=None} }
 
 let outcome_testable =
   Alcotest.testable

@@ -1737,6 +1737,17 @@ let test_created_keeper_waits_for_owned_metadata_without_work () =
     (if include_created then {metadata with lkr_keepers = [keeper; created]} else metadata);
   Alcotest.(check bool) "older metadata cannot admit creation input" false
     (keeper_available_for_new_message state created.k_name);
+  if include_created then begin
+    List.iteri (fun index (row : keeper) ->
+      if String.equal row.k_name created.k_name then state.keeper_cursor <- index) state.keepers;
+    state.composer_focused <- true;
+    let composer=Masc_tui_composer_projection.of_state state in
+    Alcotest.(check bool) "observed created row cannot send before its own refresh coverage" true
+      (keeper_message_availability state created.k_name
+         = Message_unavailable Created_keeper_metadata_pending
+       && Masc_tui_composer.classify_key composer Masc_tui_composer.send_key
+         = Masc_tui_composer.Edit)
+  end;
   Alcotest.(check bool) "older absence cannot close the pending created chat" true
     (state.view = Keepers Keeper_message && state.msg_target_keeper_name = Some created.k_name);
   let after_creation = local_workspace_request_exn state Local_keepers 4L in
@@ -1746,6 +1757,12 @@ let test_created_keeper_waits_for_owned_metadata_without_work () =
      && Local_read_order.in_flight state.local_workspace_read_order);
   Alcotest.(check string) "creation refresh retained draft"
     "draft entered after creation" (Masc_tui_message_input.contents state.msg_input);
+  if include_created then begin
+    Alcotest.(check bool) "covered metadata releases the retained original recipient draft" true
+      (let composer=Masc_tui_composer_projection.of_state state in
+       composer.target = Masc_tui_composer.Ready created.k_name
+       && Masc_tui_composer.classify_key composer Masc_tui_composer.send_key = Masc_tui_composer.Send)
+  end;
   ignore (take_local_workspace_read state ~source:Local_work work (Error "optional work unavailable"));
   Alcotest.(check bool) "Work failure cannot revoke creation coverage" true
     (keeper_available_for_new_message state created.k_name)) [false; true]
@@ -1974,6 +1991,8 @@ let test_keeper_metadata_admits_input_before_work_completes () =
 let test_local_source_failures_are_independent () =
   let open Masc_tui_types in
   let state, keeper, metadata = local_keeper_source_fixture () in
+  state.composer_focused <- true;
+  Masc_tui_message_input.insert state.msg_input "original draft survives metadata failure";
   let work = local_workspace_request_exn state Local_work 5L in
   let required = local_workspace_request_exn state Local_keepers 6L in
   ignore (take_local_workspace_read state ~source:Local_work work (Error "archive unavailable"));
@@ -1989,7 +2008,25 @@ let test_local_source_failures_are_independent () =
   Alcotest.(check bool) "metadata failure withdraws input without rewriting work state" true
     (not (keeper_available_for_new_message state keeper.k_name)
      && state.local_workspace = Local_workspace_failed "archive unavailable"
-     && state.local_keepers = Local_workspace_failed "metadata unavailable")
+     && state.local_keepers = Local_workspace_failed "metadata unavailable");
+  let pending=local_workspace_request_exn state Local_keepers 8L in
+  let composer=Masc_tui_composer_projection.of_state state in
+  Alcotest.(check bool) "retry retains the admitted failure and cannot send the retained draft" true
+    (let retains_failure=match composer.reading with
+       | Masc_tui_composer.Metadata {status;pending} ->
+           status = Masc_tui_composer.Read_failed "metadata unavailable" && Option.is_some pending
+       | Workspace_not_observed | Workspace_unconfirmed | Different_workspace -> false in
+     retains_failure
+       && Masc_tui_composer.classify_key composer Masc_tui_composer.send_key = Masc_tui_composer.Edit
+       && String.equal composer.draft "original draft survives metadata failure");
+  apply_metadata_observation state pending metadata;
+  Alcotest.(check bool) "only owned metadata recovery restores the original recipient send" true
+    (let composer=Masc_tui_composer_projection.of_state state in
+     composer.target = Masc_tui_composer.Ready keeper.k_name
+       && composer.reading = Masc_tui_composer.Metadata {status=Observed;pending=None}
+       && Masc_tui_composer.classify_key composer Masc_tui_composer.send_key = Masc_tui_composer.Send
+       && String.equal composer.draft "original draft survives metadata failure"
+       && state.local_workspace = Local_workspace_failed "archive unavailable")
 
 let test_local_source_tickets_cannot_cross_or_survive_suspension () =
   let open Masc_tui_types in

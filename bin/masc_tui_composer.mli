@@ -30,8 +30,18 @@ type focus =
   | Unfocused
   | Focused
 
+(** Observation only: it never authorizes focus, capture, editing or send. *)
+type metadata_status = Not_observed | Read_failed of string | Observed
+type reading =
+  | Workspace_not_observed
+  | Workspace_unconfirmed
+  | Different_workspace
+  | Metadata of
+      { status:metadata_status; pending:Masc_tui_local_read_observation.pending option }
+
 type t = {
   target : target;
+  reading : reading;
   focus : focus;
   draft : string;
   staged_images : int;
@@ -75,6 +85,12 @@ val listen_key : string
 val prompt : t -> string
 (** The label before the draft: who the message would reach, or why it could
     not be sent. Plain text — the caller styles and fits it. *)
+
+val reading_note : reading -> string option
+(** Current source observation, including retained failure during retry. [None]
+    means locally observed metadata without a pending read. Plain text: terminal
+    callers must escape it. It is appended outside the editable prompt so the
+    observation does not change the draft window or cursor. *)
 
 val accepts_input : t -> bool
 (** Whether a keystroke should reach the draft. False when the row is

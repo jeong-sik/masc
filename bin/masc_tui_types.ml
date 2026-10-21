@@ -13962,20 +13962,44 @@ let wait_for_created_keeper_metadata (state : state) keeper_name =
 (** Local metadata may retain old rows during a failed read. Remote rows are
     available to HTTP observation and lifecycle controls; chat submission still
     requires the shared workspace for attachments and spilled paste files. *)
-let keeper_available_for_new_message (state : state) keeper_name =
+type keeper_message_unavailable =
+  | Keeper_missing | Remote_keeper_observation
+  | Message_workspace_unobserved | Message_workspace_unconfirmed | Message_workspace_differs
+  | Keeper_metadata_unobserved | Keeper_metadata_unavailable of string
+  | Created_keeper_metadata_pending
+
+type keeper_message_availability = Message_available | Message_unavailable of keeper_message_unavailable
+
+(* One authority decision feeds both input gating and its explanation. The
+   source observation attached to a composer cannot change this decision. *)
+let keeper_message_availability (state : state) keeper_name =
   match List.find_opt
     (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name) state.keepers with
-  | None -> false
-  | Some { k_origin = Tui_decode.Persisted_keeper | Declared_keeper _; _ } ->
-    state.workspace_identity = Workspace_identity_match
-    && state.local_keepers = Local_workspace_read
-    && Option.is_none state.keepers_error
-    && (match keeper_creation_wait_for state keeper_name with
-        | Some wait ->
-            Local_read_order.covers state.local_keeper_read_order wait.kcw_revision
-        | None -> true)
-  | Some { k_origin = Tui_decode.Remote_keeper; _ } ->
-    false
+  | None -> Message_unavailable Keeper_missing
+  | Some keeper ->
+      match state.workspace_identity with
+      | Workspace_identity_unread -> Message_unavailable Message_workspace_unobserved
+      | Workspace_identity_match_unconfirmed _ -> Message_unavailable Message_workspace_unconfirmed
+      | Workspace_identity_mismatch _ -> Message_unavailable Message_workspace_differs
+      | Workspace_identity_match ->
+          match keeper.k_origin with
+          | Tui_decode.Remote_keeper -> Message_unavailable Remote_keeper_observation
+          | Persisted_keeper | Declared_keeper _ ->
+              match state.local_keepers,state.keepers_error with
+              | Local_workspace_failed detail,_
+              | (Local_workspace_unread | Local_workspace_read),Some detail ->
+                  Message_unavailable (Keeper_metadata_unavailable detail)
+              | Local_workspace_unread,None -> Message_unavailable Keeper_metadata_unobserved
+              | Local_workspace_read,None ->
+                  match keeper_creation_wait_for state keeper_name with
+                  | Some wait when not (Local_read_order.covers state.local_keeper_read_order wait.kcw_revision) ->
+                      Message_unavailable Created_keeper_metadata_pending
+                  | Some _ | None -> Message_available
+
+let keeper_available_for_new_message state keeper_name =
+  match keeper_message_availability state keeper_name with
+  | Message_available -> true
+  | Message_unavailable _ -> false
 
 (* The composer is where the operator's keys go: the chat pane, whichever
    half of it has the cursor, or the composer row on another surface once it

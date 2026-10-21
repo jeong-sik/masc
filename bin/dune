@@ -1396,7 +1396,7 @@
  (name masc_tui_composer)
  (wrapped false)
  (modules masc_tui_composer)
- (libraries masc_tui_render_schedule))
+ (libraries masc_tui_local_read_observation masc_tui_render_schedule))
 
 (library
  (name masc_tui_audio_device)

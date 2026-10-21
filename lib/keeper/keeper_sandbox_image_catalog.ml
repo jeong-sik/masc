@@ -241,7 +241,11 @@ let read_snapshot path =
        Error detail)
 
 let read_snapshot_for_load path =
-  Result.map_error (fun detail -> Unreadable { path; detail }) (read_snapshot path)
+  (* Only the immutable file observation crosses this boundary. Keep parsing
+     and each caller's runtime/factory state on its original fiber. The save
+     transaction below still reads and compares under its existing lock. *)
+  Eio_guard.run_in_systhread ~label:"sandbox image catalog snapshot" (fun () ->
+    Result.map_error (fun detail -> Unreadable { path; detail }) (read_snapshot path))
 
 let catalog_path ~config_root = Filename.concat config_root file_name
 

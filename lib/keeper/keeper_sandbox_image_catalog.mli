@@ -109,7 +109,10 @@ val load_error_to_string : load_error -> string
 val load : config_root:string -> shipped:string -> (t, load_error) result
 (** Read names from [shipped] on every load, and promotions from the host
     file when it exists. Host builds for names no longer shipped are retained
-    as {!orphaned_builds}; builds in [shipped] fail. *)
+    as {!orphaned_builds}; builds in [shipped] fail. The host file's open/read/close
+    runs through the common systhread guard, so blocking Unix I/O does not occupy
+    an Eio caller's domain. Non-Eio callers read inline. Parsing and result
+    consumption stay with the caller; no new cache or image choice is introduced. *)
 
 type snapshot
 (** The catalog file's bytes as they were read, or its absence. {!save}
@@ -118,8 +121,9 @@ type snapshot
 val load_for_change :
   config_root:string -> shipped:string -> (t * snapshot, load_error) result
 (** Read shipped names and host builds together, returning the host-file
-    snapshot for compare-and-replace. If the host has not saved a build yet,
-    the snapshot is absent. *)
+    snapshot for compare-and-replace. Uses the same read boundary as {!load}.
+    If the host has not saved a build yet, the snapshot is absent. The later
+    save still compares current bytes under its original transaction lock. *)
 
 (** {1 Changing what a name means on this host} *)
 

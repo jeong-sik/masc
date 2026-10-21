@@ -1,6 +1,6 @@
 ---
 name: ocaml-coding
-description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 막히는 I/O, Task Skill 준비 쌍 연결과 Ask 복구의 회차별 증거 공유, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
+description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 이미지 카탈로그 등 막히는 I/O, Task Skill 준비 쌍 연결과 Ask 복구의 회차별 증거 공유, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
 ---
 
 # masc OCaml 점검표
@@ -60,6 +60,12 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   ```
 
 ## 3. 변경 검증
+
+- 준비 중 파일을 직접 여는 코드도 확인한다. 이미지 카탈로그의 load/load_for_change는
+  host 파일의 open/read/close만 공통 systhread guard로 보낸다. 순수 해석·factory 상태·
+  이미지 선택은 원래 caller가 소유하고, 저장의 최신 byte 비교와 durable lock은 그대로 둔다.
+  비동기 파일 관측을 권한 허가나 물리 실행 시작으로 바꾸어 쓰지 않는다. Non-Eio fallback과
+  보호된 factory lock의 대기는 유지되므로 전체 준비나 취소가 즉시 끝난다고 주장하지 않는다.
 
 - Ask 답변 복구의 사전 증거는 같은 회차·Keeper·canonical answer의 UTC-day window에서만
   공유한다. 실제 첫 수요에서 캡처하고 원본 답변 행이 하나뿐인 window의 큰 proof 집합은 보관하지 않는다.

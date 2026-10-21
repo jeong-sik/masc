@@ -160,7 +160,7 @@ let acknowledge_absent_owner_observing ~on_guards_acquired ~config ~keeper_name 
                 |> Result.map_error (fun error -> Chat_operations_unavailable error) in
               let* () = match chat_operations with
                 | Keeper_chat_operation_store.Missing_store -> Ok ()
-                | Keeper_chat_operation_store.Stored_operations { chat_operations; semantic_executions; input_checkpoints = _ } ->
+                | Keeper_chat_operation_store.Stored_operations { chat_operations; semantic_executions; input_checkpoints = _; input_history = _ } ->
                   if chat_operations <> [] then
                     Error (Outstanding_chat_operations (List.map
                       (fun (op : Keeper_chat_operation.t) -> op.operation_id) chat_operations))

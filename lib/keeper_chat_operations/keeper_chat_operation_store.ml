@@ -54,9 +54,17 @@ let path_for_keeper ~keepers_runtime_dir ~keeper_name =
   Filename.concat (Filename.concat keepers_runtime_dir keeper_name) database_file
 ;;
 
+type input_history = Fresh_input_history | Prior_input_history_unavailable
+(** A prior journal cannot prove that a missing trace row never had input.
+    This durable global floor also covers omitted historical traces. *)
+type input_checkpoint_observation =
+  | Input_unobserved
+  | Input_observed of Keeper_checkpoint_ref.t
+  | Prior_input_unavailable
+
 type outstanding_snapshot =
   | Missing_store
-  | Stored_operations of { chat_operations : Operation.t list; semantic_executions : Semantic.t list; input_checkpoints : Keeper_checkpoint_ref.t list }
+  | Stored_operations of { chat_operations : Operation.t list; semantic_executions : Semantic.t list; input_checkpoints : Keeper_checkpoint_ref.t list; input_history : input_history }
 
 type durable_snapshot =
   | Missing_durable_store
@@ -65,6 +73,7 @@ type durable_snapshot =
       ; batch_member_inputs : Yojson.Safe.t list
       ; semantic_executions : Semantic.t list
       ; input_checkpoints : Keeper_checkpoint_ref.t list
+      ; input_history : input_history
       }
 let database_schema = "masc.keeper_chat_operations.v3"
 let database_application_id = 0x4d4b4f50L
@@ -140,12 +149,15 @@ let batch_schema_objects =
   ; "trigger", "batch_members_delete_immutable", "CREATE TRIGGER batch_members_delete_immutable BEFORE DELETE ON operation_batch_members BEGIN SELECT RAISE(ABORT, 'batch membership is immutable'); END" ]
 let input_checkpoint_table_sql =
   "CREATE TABLE input_checkpoints (trace_id TEXT PRIMARY KEY, turn_count INTEGER NOT NULL CHECK (turn_count >= 0), sha256 TEXT NOT NULL CHECK (length(sha256) = 64)) STRICT"
+let input_history_table_sql =
+  "CREATE TABLE input_history (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), basis TEXT NOT NULL CHECK (basis IN ('fresh', 'prior_unavailable'))) STRICT"
 let expected_schema_objects =
   List.sort compare (chat_schema_objects @ semantic_schema_objects @ batch_schema_objects
-    @ ["table", "input_checkpoints", input_checkpoint_table_sql])
+    @ ["table", "input_checkpoints", input_checkpoint_table_sql;
+       "table", "input_history", input_history_table_sql])
 let table_column_counts =
   [ "metadata", 3; "operations", 13; "semantic_executions", 4
-  ; "operation_batch_members", 5; "input_checkpoints", 3 ]
+  ; "operation_batch_members", 5; "input_checkpoints", 3; "input_history", 2 ]
 
 type commit_fault =
   | Fail_before_commit
@@ -659,6 +671,9 @@ let initialize_schema db =
   let* () = List.fold_left (fun result (_, name, sql) ->
     let* () = result in exec db ~operation:("create " ^ name) sql) (Ok ()) batch_schema_objects in
   let* () = exec db ~operation:"create input checkpoint ownership" input_checkpoint_table_sql in
+  let* () = exec db ~operation:"create input history floor" input_history_table_sql in
+  let* () = exec db ~operation:"initialize fresh input history"
+    "INSERT INTO input_history(singleton, basis) VALUES (1, 'fresh')" in
   let* () =
     exec
       db
@@ -690,9 +705,19 @@ let validate_schema_with ~version ~schema_identity ~objects db =
       if observed = objects then Ok ()
       else Error (Integrity_error "operation store schema objects do not exactly match")
 ;;
+let input_history_with_db db =
+  let* basis = single_text db ~operation:"read input history floor"
+    "SELECT basis FROM input_history WHERE singleton=1" in
+  match basis with
+  | "fresh" -> Ok Fresh_input_history
+  | "prior_unavailable" -> Ok Prior_input_history_unavailable
+  | _ -> Error (Integrity_error "input history floor is unknown")
+
 let validate_schema db =
-  validate_schema_with ~version:database_user_version ~schema_identity:database_schema
-    ~objects:expected_schema_objects db
+  let* () = validate_schema_with ~version:database_user_version ~schema_identity:database_schema
+    ~objects:expected_schema_objects db in
+  let* _history = input_history_with_db db in
+  Ok ()
 ;;
 
 let configure db =
@@ -872,6 +897,19 @@ let input_checkpoint_with_db db ~trace_id =
         Ok (Some reference)
       else Error (Store_unavailable (sqlite_error db "read input checkpoint" rc)))
 
+let input_observation_with_db db ~trace_id =
+  let* reference = input_checkpoint_with_db db ~trace_id in
+  let* history = input_history_with_db db in
+  match reference, history with
+  | Some reference, (Fresh_input_history | Prior_input_history_unavailable) -> Ok (Input_observed reference)
+  | None, Fresh_input_history -> Ok Input_unobserved
+  | None, Prior_input_history_unavailable -> Ok Prior_input_unavailable
+
+let input_predecessor_matches observed = function
+  | Prior_input_unavailable -> false
+  | Input_unobserved -> Option.is_none observed
+  | Input_observed current -> Option.equal Keeper_checkpoint_ref.equal observed (Some current)
+
 let input_checkpoint_rows db =
   with_statement db ~operation:"inspect input checkpoints"
     "SELECT trace_id, turn_count, sha256 FROM input_checkpoints ORDER BY trace_id" (fun stmt ->
@@ -924,9 +962,12 @@ let record_dropped store ~before ~after =
    keeper's executions cannot name the same sha256. The agent name in the
    bytes does not separate keepers; it names the runtime. *)
 let released_by_transaction store =
-  match Atomic.exchange store.dropped [] with
-  | [] -> Ok []
-  | dropped ->
+  let* history = input_history_with_db store.db in
+  let dropped = Atomic.exchange store.dropped [] in
+  match history, dropped with
+  | Prior_input_history_unavailable, _ -> Ok []
+  | Fresh_input_history, [] -> Ok []
+  | Fresh_input_history, dropped ->
     let* rows = owning_semantic_rows store.db in
     let* input_checkpoints = input_checkpoint_rows store.db in
     let live = input_checkpoints @ List.concat_map Semantic.checkpoint_references rows
@@ -965,11 +1006,11 @@ let with_transaction store f =
 
 type input_checkpoint_update =
   | Input_checkpoint_updated
-  | Input_checkpoint_source_changed of Keeper_checkpoint_ref.t option
+  | Input_checkpoint_source_changed of input_checkpoint_observation
 
 let input_checkpoint store ~trace_id =
   let* () = ensure_open store in
-  input_checkpoint_with_db store.db ~trace_id
+  input_observation_with_db store.db ~trace_id
 
 let install_input_checkpoint_with_db store ~previous checkpoint =
   let* () = with_statement store.db ~operation:"install input checkpoint"
@@ -1002,10 +1043,13 @@ let update_input_checkpoint store ~observed ~checkpoint =
   let* () = ensure_open store in
   let* () = check_input_predecessor ~observed ~checkpoint in
   with_transaction store (fun () ->
-    let* previous = input_checkpoint_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
-    if not (Option.equal Keeper_checkpoint_ref.equal observed previous) then
+    let* previous = input_observation_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
+    if not (input_predecessor_matches observed previous) then
       Ok (Input_checkpoint_source_changed previous)
-    else let* () = install_input_checkpoint_with_db store ~previous checkpoint in
+    else
+      let previous = match previous with Input_observed ref -> Some ref
+        | Input_unobserved | Prior_input_unavailable -> None in
+      let* () = install_input_checkpoint_with_db store ~previous checkpoint in
       Ok Input_checkpoint_updated)
 
 type released_checkpoint = Keeper_checkpoint_ref.t
@@ -1074,11 +1118,12 @@ let inspect_store_with ~scope ~path =
       | All_durable_records -> semantic_rows db ~active_only:false
       | Outstanding_integrity_audit -> let* rows = semantic_rows db ~active_only:false in
         Ok (List.filter owns_checkpoint_references rows) in
+    let* input_history = input_history_with_db db in
     let* input_checkpoints = match scope with
       | Pending_inputs -> Ok []
       | All_durable_records | Outstanding_integrity_audit -> input_checkpoint_rows db in
     let* () = exec db ~operation:"end read-only inspection" "COMMIT" in
-    Ok (Some (chat_operations, batch_member_inputs, semantic_executions, input_checkpoints))
+    Ok (Some (chat_operations, batch_member_inputs, semantic_executions, input_checkpoints, input_history))
   in
   let inspect_existing () =
     match Sqlite3.db_open ~mode:`READONLY path with
@@ -1111,23 +1156,138 @@ let inspect_store_with ~scope ~path =
 let inspect_outstanding ~path =
   inspect_store_with ~scope:Outstanding_integrity_audit ~path |> Result.map (function
     | None -> Missing_store
-    | Some (chat_operations, _batch_member_inputs, semantic_executions, input_checkpoints) ->
-      Stored_operations { chat_operations; semantic_executions; input_checkpoints })
+    | Some (chat_operations, _batch_member_inputs, semantic_executions, input_checkpoints, input_history) ->
+      Stored_operations { chat_operations; semantic_executions; input_checkpoints; input_history })
 ;;
 
 let inspect_durable_records ~path =
   inspect_store_with ~scope:All_durable_records ~path |> Result.map (function
     | None -> Missing_durable_store
-    | Some (chat_operations, batch_member_inputs, semantic_executions, input_checkpoints) ->
-      Stored_durable_records { chat_operations; batch_member_inputs; semantic_executions; input_checkpoints })
+    | Some (chat_operations, batch_member_inputs, semantic_executions, input_checkpoints, input_history) ->
+      Stored_durable_records { chat_operations; batch_member_inputs; semantic_executions; input_checkpoints; input_history })
 ;;
 
 let inspect_pending_inputs ~path =
   inspect_store_with ~scope:Pending_inputs ~path |> Result.map (function
     | None -> None
-    | Some (chat_operations, _, _, _) -> Some chat_operations)
+    | Some (chat_operations, _, _, _, _) -> Some chat_operations)
 ;;
 
+
+module Offline = struct
+  type prepared_copy =
+    { operation_count : int; semantic_count : int; batch_member_count : int
+    ; next_sequence : int64 }
+
+  (* Legacy shape is accepted only at this explicit copy boundary. Runtime
+     open/inspection retain the mandatory current generation and history floor. *)
+  let v2_metadata_sql =
+    "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema TEXT NOT NULL CHECK (schema = 'masc.keeper_chat_operations.v2'), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0)) STRICT"
+  let v2_objects =
+    List.sort compare
+      (List.map (function
+         | "table", "metadata", _ -> "table", "metadata", v2_metadata_sql
+         | other -> other) chat_schema_objects @ semantic_schema_objects @ batch_schema_objects)
+
+  let raw_rows db table order =
+    with_statement db ~operation:("snapshot offline " ^ table)
+      ("SELECT * FROM " ^ table ^ " ORDER BY " ^ order) (fun stmt ->
+        let rec read acc =
+          let rc = Sqlite3.step stmt in
+          if rc=Sqlite3.Rc.DONE then Ok (List.rev acc)
+          else if rc=Sqlite3.Rc.ROW then
+            let row = List.init (Sqlite3.column_count stmt) (Sqlite3.column stmt) in
+            read (row::acc)
+          else Error (Store_unavailable (sqlite_error db "snapshot offline rows" rc)) in
+        read [])
+
+  let raw_snapshot db =
+    let* operations = raw_rows db "operations" "sequence" in
+    let* semantics = raw_rows db "semantic_executions" "scope_key" in
+    let* batches = raw_rows db "operation_batch_members" "operation_id" in
+    let* sequence = single_int64 db ~operation:"snapshot offline sequence"
+      "SELECT next_sequence FROM metadata WHERE singleton=1" in
+    Ok (operations, semantics, batches, sequence)
+
+  let validate_payloads db =
+    let* integrity = single_text db ~operation:"check offline integrity" "PRAGMA quick_check" in
+    let* () = if integrity = "ok" then Ok () else Error (Integrity_error integrity) in
+    let* () = with_statement db ~operation:"check offline foreign keys" "PRAGMA foreign_key_check"
+      (fun stmt -> let rc = Sqlite3.step stmt in
+       if rc=Sqlite3.Rc.DONE then Ok ()
+       else if rc=Sqlite3.Rc.ROW then Error (Integrity_error "offline journal has foreign key violations")
+       else Error (Store_unavailable (sqlite_error db "check offline foreign keys" rc))) in
+    let* () = with_statement db ~operation:"validate offline operation payloads"
+      ("SELECT " ^ select_columns ^ " FROM operations ORDER BY sequence") (fun stmt ->
+        let rec read () = let rc = Sqlite3.step stmt in
+          if rc=Sqlite3.Rc.DONE then Ok ()
+          else if rc=Sqlite3.Rc.ROW then let* operation = decode_operation stmt in
+            let* _ = project_batch_with_db db operation in read ()
+          else Error (Store_unavailable (sqlite_error db "validate offline operations" rc)) in
+        read ()) in
+    let* _ = read_batch_member_inputs db in
+    let* _ = semantic_rows db ~active_only:false in
+    let* next_sequence = single_int64 db ~operation:"validate offline next sequence"
+      "SELECT next_sequence FROM metadata WHERE singleton=1" in
+    let* last_sequence = single_int64 db ~operation:"validate offline existing sequences"
+      "SELECT COALESCE(MAX(sequence), -1) FROM operations" in
+    if Int64.compare next_sequence last_sequence > 0 then Ok ()
+    else Error (Integrity_error "offline next operation sequence overlaps existing evidence")
+
+  let backup ~source ~destination =
+    let backup = Sqlite3.Backup.init ~dst:destination ~dst_name:"main" ~src:source ~src_name:"main" in
+    let finished = ref Sqlite3.Rc.OK in
+    let result = Fun.protect
+      ~finally:(fun () -> finished := Sqlite3.Backup.finish backup)
+      (fun () -> let rc = Sqlite3.Backup.step backup (-1) in
+        if rc=Sqlite3.Rc.DONE then Ok ()
+        else Error (Store_unavailable (sqlite_error destination "copy offline journal" rc))) in
+    let* () = result in
+    if !finished = Sqlite3.Rc.OK then Ok ()
+    else Error (Store_unavailable (sqlite_error destination "finish offline journal copy" !finished))
+
+  let prepare_v2_copy ~source ~destination =
+    let prepare () =
+      let* objects = read_schema_objects destination in
+      let* application = single_int64 destination ~operation:"check empty copy application" "PRAGMA application_id" in
+      let* version = single_int64 destination ~operation:"check empty copy generation" "PRAGMA user_version" in
+      let* () = if source != destination && objects=[] && application=0L && version=0L then Ok ()
+        else Error (Invalid_input "offline destination must be a distinct reserved empty database") in
+      let* () = exec source ~operation:"begin offline source snapshot" "BEGIN" in
+      Fun.protect ~finally:(fun () -> rollback source) (fun () ->
+        let* () = validate_schema_with ~version:2L ~schema_identity:"masc.keeper_chat_operations.v2"
+          ~objects:v2_objects source in
+        let* () = validate_payloads source in
+        let* before = raw_snapshot source in
+        let* () = backup ~source ~destination in
+        let* () = configure destination in
+        let* () = exec destination ~operation:"begin offline copy transformation" "BEGIN IMMEDIATE" in
+        Fun.protect ~finally:(fun () -> rollback destination) (fun () ->
+          let* operations, semantics, batches, next_sequence = raw_snapshot destination in
+          let* () = if before=(operations,semantics,batches,next_sequence) then Ok ()
+            else Error (Integrity_error "offline backup changed journal evidence") in
+          let* () = exec destination ~operation:"replace offline metadata" "DROP TABLE metadata" in
+          let* () = exec destination ~operation:"create current offline metadata" metadata_table_sql in
+          let* () = with_statement destination ~operation:"preserve offline sequence"
+            "INSERT INTO metadata(singleton, schema, next_sequence) VALUES (1, 'masc.keeper_chat_operations.v3', ?)"
+            (fun stmt -> let* () = bind_int64 destination stmt ~operation:"bind offline sequence" 1 next_sequence in
+              expect_done destination stmt ~operation:"preserve offline sequence") in
+          let* () = exec destination ~operation:"create offline input ownership" input_checkpoint_table_sql in
+          let* () = exec destination ~operation:"create unavailable prior input history" input_history_table_sql in
+          let* () = exec destination ~operation:"preserve prior input uncertainty"
+            "INSERT INTO input_history(singleton, basis) VALUES (1, 'prior_unavailable')" in
+          let* () = exec destination ~operation:"set prepared journal generation" "PRAGMA user_version=3" in
+          let* () = validate_schema destination in
+          let* () = validate_payloads destination in
+          let* after = raw_snapshot destination in
+          let* () = if before=after then Ok () else Error (Integrity_error "offline preparation changed original evidence") in
+          let* () = commit destination in
+          Ok {operation_count=List.length operations;semantic_count=List.length semantics;
+            batch_member_count=List.length batches;next_sequence}))
+    in
+    try prepare () with
+    | Sqlite3.Error detail | Sqlite3.SqliteError detail -> Error (Store_unavailable detail)
+end
 
 let next_sequence db =
   let* sequence =
@@ -2404,12 +2564,14 @@ let update_direct_input_checkpoint store ~now ~operation_id ~execution_digest
      cannot replay an installed transition, and no files are released. *)
   let* () = check_input_predecessor ~observed:observed_input ~checkpoint in
   with_transaction store (fun () ->
-    let* previous = input_checkpoint_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
-    if not (Option.equal Keeper_checkpoint_ref.equal observed_input previous) then
+    let* previous = input_observation_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
+    if not (input_predecessor_matches observed_input previous) then
       Ok (Input_checkpoint_source_changed previous)
     else
       let* _next = apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest
         (Keeper_native_call.Checkpoint {call_id; observed; checkpoint}) in
+      let previous = match previous with Input_observed ref -> Some ref
+        | Input_unobserved | Prior_input_unavailable -> None in
       let* () = install_input_checkpoint_with_db store ~previous checkpoint in
       Ok Input_checkpoint_updated)
 

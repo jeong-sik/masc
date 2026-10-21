@@ -11,10 +11,13 @@ type report =
   }
 
 type error =
+  | Prior_input_history_unavailable of { path : string }
   | Store_unreadable of { path : string; detail : string }
   | Keeper_shares_store_directory of { keeper_name : string }
 
 let error_to_string = function
+  | Prior_input_history_unavailable {path} ->
+    "prior input history is unavailable; retain all checkpoint evidence: " ^ path
   | Store_unreadable { path; detail } ->
     Printf.sprintf "keeper operation store %s is unreadable: %s" path detail
   | Keeper_shares_store_directory { keeper_name } ->
@@ -51,7 +54,10 @@ let live_references_of_store path =
   | Error error ->
     Error (Store_unreadable { path; detail = Store.error_to_string error })
   | Ok Store.Missing_store -> Ok []
-  | Ok (Store.Stored_operations { semantic_executions; chat_operations = _; input_checkpoints }) ->
+  | Ok (Store.Stored_operations {input_history=Store.Prior_input_history_unavailable;_}) ->
+    Error (Prior_input_history_unavailable {path})
+  | Ok (Store.Stored_operations { semantic_executions; chat_operations = _; input_checkpoints;
+      input_history=Store.Fresh_input_history }) ->
     Ok
       (List.map (fun (reference : Keeper_checkpoint_ref.t) -> reference.sha256) input_checkpoints
        @ List.concat_map

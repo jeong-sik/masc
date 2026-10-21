@@ -204,7 +204,7 @@ type _ command =
   | Direct_checkpoint : Operation_id.t ->
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
   | Direct_native_call : Operation_id.t -> (Keeper_native_call.state, error) result command
-  | Input_checkpoint : Keeper_id.Trace_id.t -> (Keeper_checkpoint_ref.t option, error) result command
+  | Input_checkpoint : Keeper_id.Trace_id.t -> (Chat_operation_store.input_checkpoint_observation, error) result command
   | Begin_input_checkpoint : Keeper_id.Trace_id.t * Keeper_interrupt_token.t -> (input_checkpoint_writer, error) result command
   | Advance_input_checkpoint : input_checkpoint_writer * input_checkpoint_change ->
       (input_checkpoint_writer, error) result command
@@ -1770,8 +1770,15 @@ let start
                     && Keeper_interrupt_token.equal caller interrupt_token ->
                 run_operation_read t ~label:"capture input checkpoint predecessor" (fun () ->
                   Chat_operation_store.input_checkpoint t.operation_store ~trace_id)
-                |> Result.map (fun input_reference ->
-                  {input_trace=trace_id;input_child=interrupt_token;input_lane=lane;input_reference})
+                |> fun observation -> Result.bind observation (function
+                  | Chat_operation_store.Prior_input_unavailable ->
+                    Error (Operation_rejected (Chat_operation_store.Invalid_input
+                      "prior input history is unavailable; reconcile before dispatch"))
+                  | (Chat_operation_store.Input_unobserved | Chat_operation_store.Input_observed _) as observed ->
+                    let input_reference = match observed with
+                      | Chat_operation_store.Input_observed reference -> Some reference
+                      | Input_unobserved | Prior_input_unavailable -> None in
+                    Ok {input_trace=trace_id;input_child=interrupt_token;input_lane=lane;input_reference})
               | (Some _ | None),(Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),(Some _ | None) ->
                 Error (Operation_rejected (Chat_operation_store.Invalid_input
                   "input writer requires the current executing child and trace")))) in

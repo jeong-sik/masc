@@ -117,16 +117,15 @@ val load_keeper_profile_defaults_result_for_base_path :
 (** One projection's immutable declaration reads. Capture a new snapshot for
     each projection so edits, additions, removals, and parse/instruction errors
     are observed without a freshness interval. A capture lists the keepers
-    directory and fingerprints each listed file by path, mtime and size; when
-    the listing and every fingerprint equal the previous capture's for the same
-    base path and keepers directory, that capture is returned without parsing,
-    otherwise every file is parsed again. A capture in which a file failed to
-    read is returned but not held, so the next capture reads every file again;
-    errors that follow from a file's bytes are held. A capture cannot see an
-    edit that keeps the size and lands within the file system's mtime
-    resolution of the previous write, nor a permission change that makes a
-    held file unreadable; {!invalidate_keeper_profile_snapshots} drops every
-    held capture after an in-process write.
+    directory and reads each listed file once. When the ordered paths and exact
+    bytes equal the previous capture's for the same base path and keepers
+    directory, that capture is returned without parsing. Otherwise the captured
+    bytes are parsed without reopening the files. Read failures are returned
+    but not held; errors determined by readable bytes are held. Same-size edits,
+    replacements with preserved mtime, and newly unreadable files are observed
+    on the next capture. The files are read individually, so a capture is not
+    an atomic transaction across the directory. In-process writers can still
+    drop every held capture with {!invalidate_keeper_profile_snapshots}.
     A declaration is indexed by its file name and, when [keeper.name] differs,
     by that name too, refused under both. *)
 type keeper_profile_snapshot

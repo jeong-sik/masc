@@ -127,6 +127,7 @@ val unknown_deny_tools : string list -> string list
     descriptor. Loading refuses a profile for which this is non-empty; a
     later reader may assert on it, never warn. *)
 val keeper_toml_load_error_to_string : keeper_toml_load_error -> string
+val read_keeper_toml_content : string -> (string, keeper_toml_load_error) result
 val inspect_keeper_toml :
   string -> (string * keeper_profile_defaults, keeper_toml_load_error) result
 val inspect_keeper_toml_content :
@@ -150,5 +151,7 @@ type keeper_toml_discovery =
 val keeper_toml_discovery_name : keeper_toml_discovery -> string
 val keeper_toml_paths : string -> string list
 val discover_keeper_toml_path : string -> keeper_toml_discovery
+val discover_keeper_toml_read :
+  path:string -> (string, keeper_toml_load_error) result -> keeper_toml_discovery
 val discover_keepers_toml_with_paths : string -> (string * keeper_toml_discovery) list
 val discover_keepers_toml : string -> keeper_toml_discovery list

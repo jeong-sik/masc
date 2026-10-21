@@ -2144,11 +2144,9 @@ let test_projection_profile_snapshot_fleet_wiring () =
   check (list string) "next fleet projection sees removal" [] refreshed.bootable_names
 
 (* The light dashboard shell captures a profile snapshot on every 2-second
-   tick (#44549). A capture whose listed files and fingerprints are unchanged
-   is the held capture itself, so nothing is parsed again; on origin/main every
-   capture parsed every TOML into a fresh value. The mtimes below are set
-   explicitly so the cases do not depend on the file system's clock
-   resolution. *)
+   tick (#44549). Exact bytes preserve parse reuse while allowing edits and
+   permission changes with identical metadata. Set mtimes explicitly so these
+   cases do not depend on the file system's clock resolution. *)
 let set_mtime path seconds = Unix.utimes path seconds seconds
 
 let declaration_with_instructions text =
@@ -2175,12 +2173,39 @@ let test_projection_profile_snapshot_sees_same_size_edit () =
   set_mtime path 1_000_000.0;
   let before = KTP.read_keeper_profile_snapshot ~base_path in
   write_file path (declaration_with_instructions "later answer");
-  set_mtime path 1_000_001.0;
+  set_mtime path 1_000_000.0;
   let after = KTP.read_keeper_profile_snapshot ~base_path in
   check (option string) "next capture reads the edited bytes" (Some "later answer")
     (snapshot_defaults_exn after "edited").instructions;
   check (option string) "earlier capture keeps what it read" (Some "first answer")
     (snapshot_defaults_exn before "edited").instructions
+
+let test_projection_profile_snapshot_sees_atomic_replacement () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let path = Filename.concat keepers_dir "replaced.toml" in
+  write_file path (declaration_with_instructions "first answer");
+  set_mtime path 1_000_000.0;
+  let before = KTP.read_keeper_profile_snapshot ~base_path in
+  let replacement = path ^ ".replacement" in
+  write_file replacement (declaration_with_instructions "later answer");
+  set_mtime replacement 1_000_000.0;
+  Unix.rename replacement path;
+  let after = KTP.read_keeper_profile_snapshot ~base_path in
+  check (option string) "same metadata replacement supplies the next capture" (Some "later answer")
+    (snapshot_defaults_exn after "replaced").instructions;
+  check (option string) "replacement cannot change an earlier capture" (Some "first answer")
+    (snapshot_defaults_exn before "replaced").instructions
+
+let test_profile_discovery_consumes_captured_bytes () =
+  with_profile_base @@ fun ~base_path:_ ~config_dir:_ ~keepers_dir ->
+  let path = Filename.concat keepers_dir "captured.toml" in
+  write_file path (declaration_with_instructions "first answer");
+  let captured = Masc.Keeper_types_profile_toml.read_keeper_toml_content path in
+  write_file path (declaration_with_instructions "later answer");
+  match Masc.Keeper_types_profile_toml.discover_keeper_toml_read ~path captured with
+  | KTP.Invalid _ -> fail "captured declaration must load"
+  | KTP.Loaded { defaults; _ } ->
+      check (option string) "discovery never reopens the path" (Some "first answer") defaults.instructions
 
 let test_projection_profile_snapshot_sees_listing_changes () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
@@ -2252,14 +2277,14 @@ let test_projection_profile_snapshot_drops_held_capture_on_invalidate () =
       .instructions
 
 (* A read failure is an I/O event, not a function of the file's bytes, so it
-   must not be held under a fingerprint that stays the same once the read
-   works again. chmod changes neither mtime nor size, so the readable file has
-   the exact fingerprint the failed read saw. Root reads through mode 000. *)
+   must be retried on every capture. chmod changes neither mtime nor size;
+   capture must recheck readability even when metadata matches. Root reads
+   through mode 000. *)
 let with_unreadable path f =
   Unix.chmod path 0o000;
   Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) f
 
-let check_same_fingerprint_inputs path ~mtime ~size =
+let check_same_file_metadata path ~mtime ~size =
   let stats = Unix.stat path in
   check (float 0.0) "mode change keeps mtime" mtime stats.Unix.st_mtime;
   check int "mode change keeps size" size stats.Unix.st_size
@@ -2278,8 +2303,23 @@ let test_projection_profile_snapshot_read_failure_is_not_held () =
    | Ok _ -> fail "a declaration that cannot be read must not load"
    | Error error ->
      check bool "read failure is a read error" true (error.kind = KTP.Read_error));
-  check_same_fingerprint_inputs path ~mtime:1_000_000.0 ~size;
+  check_same_file_metadata path ~mtime:1_000_000.0 ~size;
   ignore (snapshot_defaults_exn (KTP.read_keeper_profile_snapshot ~base_path) "flaky")
+
+let test_projection_profile_snapshot_rechecks_held_readability () =
+  if Unix.geteuid () = 0 then skip ();
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let path = Filename.concat keepers_dir "readable.toml" in
+  write_file path (declaration_with_instructions "Answer the question.");
+  set_mtime path 1_000_000.0;
+  let size = (Unix.stat path).Unix.st_size in
+  ignore (snapshot_defaults_exn (KTP.read_keeper_profile_snapshot ~base_path) "readable");
+  let failed = with_unreadable path (fun () -> KTP.read_keeper_profile_snapshot ~base_path) in
+  (match KTP.snapshot_profile_defaults failed "readable" with
+   | Ok _ -> fail "a held success cannot hide a new read failure"
+   | Error error -> check bool "current readability is authoritative" true (error.kind = KTP.Read_error));
+  check_same_file_metadata path ~mtime:1_000_000.0 ~size;
+  ignore (snapshot_defaults_exn (KTP.read_keeper_profile_snapshot ~base_path) "readable")
 
 let () =
   run "Keeper TOML Loader"
@@ -2444,6 +2484,12 @@ let () =
             test_projection_profile_snapshot_reuses_unchanged_capture;
           test_case "projection snapshot sees a same-size edit" `Quick
             test_projection_profile_snapshot_sees_same_size_edit;
+          test_case "projection snapshot sees same metadata atomic replacement" `Quick
+            test_projection_profile_snapshot_sees_atomic_replacement;
+          test_case "profile discovery parses the captured bytes" `Quick
+            test_profile_discovery_consumes_captured_bytes;
+          test_case "held profile success does not hide unreadability" `Quick
+            test_projection_profile_snapshot_rechecks_held_readability;
           test_case "projection snapshot sees added and removed files" `Quick
             test_projection_profile_snapshot_sees_listing_changes;
           test_case "projection snapshot does not hold success for an unreadable file" `Quick

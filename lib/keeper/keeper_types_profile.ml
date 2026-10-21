@@ -514,36 +514,11 @@ let keeper_toml_config_errors_result () =
 let keeper_toml_unknown_keys () =
   keeper_toml_unknown_keys_in_dir (Config_dir_resolver.keepers_dir ())
 
-(* A read failure is an I/O event such as descriptor exhaustion, not a
-   function of the file's bytes, and nothing in a file fingerprint changes
-   when it clears. Every other load error follows from the bytes. *)
-let load_error_follows_from_bytes (error : keeper_toml_load_error) =
-  match error.kind with
-  | Read_error -> false
-  | Parse_error | Profile_error | Invalid_name | Declaration_not_found _
-  | Unknown_deny_tool _ -> true
-
-let file_fingerprint path =
-  match Fs_compat.file_mtime path, Fs_compat.file_size path with
-  | Some mtime, Some size -> Printf.sprintf "%s:%.6f:%d" path mtime size
-  | Some mtime, None -> Printf.sprintf "%s:%.6f:?" path mtime
-  | None, Some size -> Printf.sprintf "%s:missing:%d" path size
-  | None, None -> path ^ ":missing"
-
-let dependency_fingerprint paths =
-  paths |> List.map file_fingerprint |> String.concat "|"
-
-(* Profile snapshot holder — one capture per (base path, keepers dir), keyed by
-   the path, mtime and size of every listed [*.toml] file. TOML edits happen
-   outside the process, so the fingerprint is read on every capture. It covers
-   every listed path, so a file that appears or disappears changes it, and it
-   is taken before the files are parsed, so an edit that lands during a parse
-   leaves a capture the next listing no longer matches. A capture is held only
-   when every declaration loaded or failed for a reason that follows from its
-   bytes; a capture with a read failure is returned but not held, so the next
-   capture reads every file again. *)
+(* Read every source on each capture; reuse only exact captured bytes, never
+   filesystem metadata. Parsing consumes this same read, so an external replace
+   cannot bind the cache key to one generation and the profile to another. *)
 type profile_snapshot_entry =
-  { snapshot_fingerprint : string
+  { snapshot_sources : (string * (string, keeper_toml_load_error) result) list
   ; snapshot : keeper_profile_snapshot
   }
 
@@ -555,19 +530,21 @@ let read_keeper_profile_snapshot ~base_path =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let key = (base_path, keepers_dir) in
   let toml_paths = Keeper_types_profile_toml.keeper_toml_paths keepers_dir in
-  let snapshot_fingerprint = dependency_fingerprint toml_paths in
+  let snapshot_sources = List.map (fun path ->
+    path, Keeper_types_profile_toml.read_keeper_toml_content path) toml_paths in
   let cached =
     Stdlib.Mutex.protect profile_snapshot_mu (fun () ->
       Hashtbl.find_opt profile_snapshot_cache key)
   in
   match cached with
-  | Some entry when String.equal entry.snapshot_fingerprint snapshot_fingerprint ->
+  | Some entry when entry.snapshot_sources = snapshot_sources ->
     entry.snapshot
   | Some _ | None ->
     let declarations =
       List.map
-        (fun path -> path, Keeper_types_profile_toml.discover_keeper_toml_path path)
-        toml_paths
+        (fun (path, contents) ->
+          path, Keeper_types_profile_toml.discover_keeper_toml_read ~path contents)
+        snapshot_sources
     in
     let snapshot =
       { base_path
@@ -579,17 +556,12 @@ let read_keeper_profile_snapshot ~base_path =
       }
     in
     let holdable =
-      List.for_all
-        (fun (_, discovery) ->
-          match discovery with
-          | Loaded _ -> true
-          | Invalid { error; _ } -> load_error_follows_from_bytes error)
-        declarations
+      List.for_all (fun (_, contents) -> Result.is_ok contents) snapshot_sources
     in
     if holdable
     then
       Stdlib.Mutex.protect profile_snapshot_mu (fun () ->
-        Hashtbl.replace profile_snapshot_cache key { snapshot_fingerprint; snapshot });
+        Hashtbl.replace profile_snapshot_cache key { snapshot_sources; snapshot });
     snapshot
 ;;
 

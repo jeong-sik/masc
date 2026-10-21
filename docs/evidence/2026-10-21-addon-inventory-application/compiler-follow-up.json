@@ -1,0 +1,34 @@
+{
+  "failed_run": 39592343953,
+  "failed_job": 119196174666,
+  "failed_source": "5840bab469e8277194e405e6f2ec2cd712fc614e",
+  "failure": "Lane_addon_runtime.attach_entry configuration_application option inferred instead of configuration_owner option",
+  "repair_source": "c06acc2fa134286e61a6bdb570dc1aea3fdf3a3a",
+  "repair": "Reuse original typed configuration_owner as application.owner; source_revision and enabled remain separate; retain all five identity comparisons",
+  "parser": [
+    {
+      "file": "lib/lane_addon/lane_addon_runtime.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/lane_addon/lane_addon_runtime.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "lib/server/server_lane_inventory.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_server_lane_inventory.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    }
+  ],
+  "ocaml_typecheck": "not performed after repair",
+  "ocaml_behavior": "not performed after repair",
+  "native_run": 39592340135,
+  "native_observation": "last observed in_progress; no artifact or behavior pass claimed"
+}

@@ -5,9 +5,11 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 REPO = Path(__file__).resolve().parents[1]
@@ -120,7 +122,8 @@ def register(manifests, base, name):
 # answers, or None for no workspace. An [old] helper predates the check and
 # knows neither subcommand.
 def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False,
-                     resolve_failure=False, stores_exit=0):
+                     resolve_failure=False, stores_exit=0, resolve_failure_silent=False,
+                     resolve_notice=None, resolve_hang=False):
     path = build / "deployment_preflight_helper.exe"
     if unnamed_workspace is None:
         unnamed = "printf 'workspace=none\\n'"
@@ -129,11 +132,15 @@ def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False,
     else:
         root, source = unnamed_workspace
         unnamed = f"printf 'workspace=resolved\\nroot=%s\\nsource=%s\\n' '{root}' '{source}'"
+    notice = "" if resolve_notice is None else f"    echo '{resolve_notice}' >&2\n"
+    hang = "    sleep 30\n" if resolve_hang else ""
+    failure_message = "" if resolve_failure_silent else "echo 'fixture workspace lookup failed' >&2; "
     resolve = ("" if old else
                "  resolve-workspace) if [ \"$2\" = --help ]; then exit 0; fi; "
-               "echo 'fixture workspace lookup failed' >&2; exit 42 ;;\n"
-               if resolve_failure else
+               f"{failure_message}exit 42 ;;\n"
+               if resolve_failure or resolve_failure_silent else
                "  resolve-workspace)\n"
+               + notice + hang +
                "    if [ \"$2\" = --base-path ]; then\n"
                "      printf 'workspace=resolved\\nroot=%s\\nsource=explicit_cli\\n' \"$3\"\n"
                f"    else {unnamed}; fi ;;\n")
@@ -842,6 +849,8 @@ class LocalBuildInstall(unittest.TestCase):
             warnings = [line for line in result.stderr.splitlines() if "WARN" in line]
             self.assertEqual(len(warnings), 1, result.stderr)
             self.assertIn("predates the check", warnings[0])
+            # The old helper's "unexpected helper call" is expected noise.
+            self.assertNotIn("unexpected helper call", result.stderr)
             self.assertTrue((prefix / "masc").is_file())
 
     def test_new_helper_workspace_lookup_failure_installs_nothing(self):
@@ -862,6 +871,111 @@ class LocalBuildInstall(unittest.TestCase):
             # of reporting a missing workspace.
             self.assertIn("fixture workspace lookup failed", result.stderr)
             self.assertFalse(prefix.exists(), "a failed new helper skipped validation and installed binaries")
+
+    def run_with_private_tmpdir(self, root, build, *arguments):
+        scratch = root / "scratch"
+        scratch.mkdir()
+        env = dict(unnamed_env(root), TMPDIR=str(scratch))
+        result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                                 "--prefix", str(root / "prefix"), "--manifest-dir", str(root / "absent"),
+                                 *arguments],
+                                env=env, cwd=root, capture_output=True, text=True)
+        return result, sorted(path.name for path in scratch.glob("masc-resolve-workspace.*"))
+
+    def test_the_workspace_lookup_leaves_no_temporary_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            outcomes = {
+                "lookup succeeds": dict(),
+                "lookup fails": dict(resolve_failure=True),
+                "answer has no root": dict(
+                    unnamed_workspace="workspace=resolved\\nsource=persisted_default\\n"),
+                "answer is invalid": dict(unnamed_workspace="workspace=bogus\\n"),
+            }
+            for label, helper_arguments in outcomes.items():
+                with self.subTest(outcome=label):
+                    case = root / label.replace(" ", "-")
+                    case.mkdir()
+                    build = case / "build"
+                    build.mkdir()
+                    binaries(build)
+                    preflight_helper(build, **helper_arguments)
+                    named = ("--base-path", str(workspace(case))) if label in ("lookup succeeds", "lookup fails") else ()
+                    result, left = self.run_with_private_tmpdir(case, build, *named)
+                    self.assertEqual(left, [], result.stderr)
+
+    def test_a_signal_during_the_workspace_lookup_leaves_no_temporary_file(self):
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=signum.name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                build = root / "build"
+                build.mkdir()
+                binaries(build)
+                preflight_helper(build, resolve_hang=True)
+                scratch = root / "scratch"
+                scratch.mkdir()
+                env = dict(unnamed_env(root), TMPDIR=str(scratch))
+                # A signal ignored by the test runner is inherited and cannot be trapped.
+                restore = lambda: [signal.signal(name, signal.SIG_DFL)
+                                   for name in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)]
+                process = subprocess.Popen(
+                    ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                     "--prefix", str(root / "prefix"), "--manifest-dir", str(root / "absent"),
+                     "--base-path", str(workspace(root))],
+                    env=env, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    start_new_session=True, preexec_fn=restore)
+                try:
+                    # The helper records its call before it hangs, so the trap is set.
+                    deadline = time.monotonic() + 30
+                    while not any(call.startswith("resolve-workspace") for call in helper_calls(build)):
+                        self.assertIsNone(process.poll(), "the install ended before the lookup began")
+                        self.assertLess(time.monotonic(), deadline, "the lookup never began")
+                        time.sleep(0.05)
+                    os.killpg(process.pid, signum)
+                    # Returns once every process of the group has closed the pipes.
+                    process.communicate(timeout=30)
+                finally:
+                    if process.poll() is None:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.communicate()
+                self.assertEqual(sorted(path.name for path in scratch.glob("masc-resolve-workspace.*")), [])
+
+    def test_a_silent_helper_failure_says_there_was_no_error_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            preflight_helper(build, resolve_failure_silent=True)
+            result, _ = self.run_with_private_tmpdir(root, build, "--base-path", str(workspace(root)))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("resolve-workspace exited with status 42", result.stderr)
+            self.assertTrue(result.stderr.rstrip().endswith("Its error output:\n(none)"), result.stderr)
+
+    # The helper that answers badly may also say why on stderr.
+    def test_a_refused_workspace_answer_shows_the_helpers_error_output(self):
+        answers = {
+            "returned no root": "workspace=resolved\\nsource=persisted_default\\n",
+            "returned an invalid workspace answer": "workspace=bogus\\n",
+        }
+        shown = {
+            "a notice": ("fixture notice before the answer", "fixture notice before the answer"),
+            "no notice": (None, "(none)"),
+        }
+        for refusal, answer in answers.items():
+            for label, (notice, expected) in shown.items():
+                with self.subTest(refusal=refusal, helper_stderr=label), \
+                        tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary).resolve()
+                    build = root / "build"
+                    build.mkdir()
+                    binaries(build)
+                    preflight_helper(build, unnamed_workspace=answer, resolve_notice=notice)
+                    result, _ = self.run_with_private_tmpdir(root, build)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(refusal, result.stderr)
+                    self.assertTrue(result.stderr.rstrip().endswith(f"Its error output:\n{expected}"),
+                                    result.stderr)
 
     # A named workspace that does not exist yet has no runtime.toml to judge;
     # the server creates it on its first start.

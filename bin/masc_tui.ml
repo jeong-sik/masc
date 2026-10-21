@@ -13544,6 +13544,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resource_read_owner <- None;
   state.resource_revision_history <- [];
   state.resource_scroll <- Masc_tui_scroll.Position.first;
+  state.resource_search_position <- Masc_tui_resource_reading.first;
   state.resource_image_cursor <- 0;
   state.resource_text_cursor <- 0;
   state.observer_cursor <- None;

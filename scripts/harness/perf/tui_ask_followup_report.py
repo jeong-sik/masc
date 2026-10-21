@@ -1,0 +1,436 @@
+#!/usr/bin/env python3
+"""Offline descriptive Ask follow-up cohorts from supplied Log.Ring artifacts.
+
+Never starts TUI/server/provider processes. Declarations and hashed bytes do not
+prove execution, installation, useful Task progress or a performance verdict.
+"""
+from __future__ import annotations
+
+import argparse
+from collections import Counter
+from decimal import Decimal
+import hashlib
+import json
+import math
+import os
+from pathlib import Path, PurePosixPath
+import stat
+import sys
+
+
+class EvidenceError(ValueError):
+    pass
+
+
+def require(value, message):
+    if not value:
+        raise EvidenceError(message)
+
+
+def unique(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result, "duplicate JSON member")
+        result[key] = value
+    return result
+
+
+def load_json(value):
+    def nonfinite(_value):
+        raise EvidenceError("non-finite number")
+    def finite(raw):
+        result = float(raw)
+        require(math.isfinite(result), "non-finite number")
+        return result
+    def valid_strings(item):
+        if type(item) is str:
+            item.encode("utf-8")
+        elif type(item) is list:
+            for child in item:
+                valid_strings(child)
+        elif type(item) is dict:
+            for key, child in item.items():
+                valid_strings(key); valid_strings(child)
+    try:
+        result = json.loads(value, object_pairs_hook=unique, parse_constant=nonfinite, parse_float=finite)
+        valid_strings(result)
+        return result
+    except (ValueError, UnicodeError, RecursionError) as error:
+        raise EvidenceError("invalid JSON or UTF-8") from error
+
+
+def fields(value, names):
+    require(type(value) is dict and set(value) == set(names), "unsupported object fields")
+
+
+def text(value, nonempty=True):
+    require(type(value) is str and (value or not nonempty), "invalid string fact")
+    return value
+
+
+def integer(value, maximum=None):
+    require(type(value) is int and value >= 0 and (maximum is None or value <= maximum), "invalid integer fact")
+    return value
+
+
+def ns(value):
+    return integer(value, 2**63-1)  # Producer Int64 contract; JSON integer, not startup's string clock.
+
+
+def digest(value, length=64):
+    require(type(value) is str and len(value) == length and set(value) <= set("0123456789abcdef"), "invalid digest")
+    return value
+
+
+CONDITIONS = {"fixture_sha256", "workspace_snapshot_sha256", "action_sha256", "server_binary_sha256", "terminal_sha256"}
+ENVELOPE = {"seq", "ts", "level", "source", "module", "keeper_name", "turn_id", "message", "details", "category"}
+DETAILS = {"event", "keeper", "ask_id", "request", "origin", "read_admission_started_ns", "submission_started_ns",
+           "question_source_turn_ref", "phase", "source", "received_ns", "observed_ns", "ui_admitted", "source_applied",
+           "admitted_ns", "completion", "sources"}
+PHASES = {"started", "worker_entered", "producer_returned", "cancelled", "cancel_requested", "registration_released", "finished", "source_processed"}
+OUTCOMES = {"complete", "failed", "cancelled", "not_started", "withdrawn"}
+METRICS = {"admission_to_start_log_ns": (None, "started"), "admission_to_worker_ns": (None, "worker_entered"),
+           "worker_to_producer_ns": ("worker_entered", "producer"), "admission_to_ui_ns": (None, "finished"),
+           "producer_to_ui_ns": ("producer", "finished"), "admission_to_registration_release_ns": (None, "registration_released")}
+
+
+def artifact(root, declaration):
+    fields(declaration, {"path", "sha256"})
+    name = text(declaration["path"])
+    require("\x00" not in name, "artifact path contains NUL")
+    path = PurePosixPath(name)
+    require(not path.is_absolute() and path.parts and all(p not in {".", ".."} for p in path.parts)
+            and str(path) == name, "artifact path must be canonical and relative")
+    expected = digest(declaration["sha256"])
+    try:
+        directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as error:
+        raise EvidenceError("artifact root inaccessible") from error
+    try:
+        for part in path.parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        leaf = os.open(path.parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        with os.fdopen(leaf, "rb") as channel:
+            before = os.fstat(channel.fileno())
+            require(stat.S_ISREG(before.st_mode), "artifact is not a regular file")
+            data = channel.read()
+            after = os.fstat(channel.fileno())
+            require((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                    == (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns), "artifact changed while reading")
+    except OSError as error:
+        raise EvidenceError("artifact missing, inaccessible or symlinked") from error
+    finally:
+        os.close(directory)
+    require(hashlib.sha256(data).hexdigest() == expected, "artifact digest mismatch")
+    return data
+
+
+def identity(value):
+    fields(value, {"instance_id", "request", "read_admission_started_ns"})
+    return text(value["instance_id"]), integer(value["request"]), ns(value["read_admission_started_ns"])
+
+
+def origin(value):
+    fields(value, {"tui_instance_id", "client", "workspace", "server_identity_at_admission"})
+    text(value["tui_instance_id"])
+    for key, names in (("client", {"reported_version"}), ("workspace", {"base_path", "masc_root"}),
+                       ("server_identity_at_admission", {"reported_version", "reported_binary_commit"})):
+        fields(value[key], names)
+        for item in value[key].values():
+            text(item, nonempty=key == "workspace")
+    return value
+
+
+def completion(value):
+    if value is not None:
+        fields(value, {"state"})
+        require(value["state"] in OUTCOMES, "unsupported terminal cause")
+        return value["state"]
+    return None
+
+
+def record(entry):
+    fields(entry, ENVELOPE)
+    integer(entry["seq"]); text(entry["ts"]); text(entry["message"], False)
+    if entry["turn_id"] is not None:
+        integer(entry["turn_id"])
+    require((entry["level"], entry["source"], entry["module"], entry["category"])
+            == ("INFO", "structured", "Transport", "lifecycle"), "selected event has wrong logging channel")
+    value = entry["details"]
+    fields(value, DETAILS)
+    context = origin(value["origin"])
+    text(value["keeper"]); text(value["ask_id"])
+    require(entry["keeper_name"] == value["keeper"], "keeper metadata disagrees with original capsule")
+    key = context["tui_instance_id"], integer(value["request"]), ns(value["read_admission_started_ns"])
+    require(ns(value["submission_started_ns"]) <= key[2] <= ns(value["observed_ns"]), "invalid original clock order")
+    phase = value["phase"]
+    require(phase in PHASES, "unsupported phase")
+    terminal = completion(value["completion"])
+    require((phase in {"producer_returned", "cancelled", "finished"}) == (terminal is not None), "phase/terminal mismatch")
+    if phase == "cancelled":
+        require(terminal == "cancelled", "cancelled producer lost its cause")
+    ui = phase in {"source_processed", "finished"}
+    require(value["ui_admitted"] is (True if ui else None), "invalid UI admission fact")
+    if ui:
+        ns(value["admitted_ns"])
+    require(value["admitted_ns"] == (value["observed_ns"] if ui else None), "invalid UI admission clock")
+    if phase == "source_processed":
+        require(value["source"] in {"started", "complete", "reaction_evidence", "tool_actions", "linked_task"}, "unsupported source")
+        require(type(value["source_applied"]) is bool, "missing source decision")
+        require(key[2] <= ns(value["received_ns"]) <= value["observed_ns"], "invalid source receipt order")
+    else:
+        require(all(value[name] is None for name in ("source", "source_applied", "received_ns")), "non-source phase has source facts")
+    require(value["sources"] is None or type(value["sources"]) is dict, "invalid opaque source snapshot")
+    return key, value
+
+
+def attempt(key, records, declared):
+    errors = []
+    output = {"identity": dict(zip(("instance_id", "request", "read_admission_started_ns"), key)),
+              "declared": declared, "records": records, "errors": errors, "metrics": dict.fromkeys(METRICS)}
+    if not records:
+        return dict(output, outcome="unobserved", producer_outcome=None, missing_stages=sorted({"started", "worker_entered", "producer", "registration_released", "finished"}))
+    original = records[0]
+    immutable = DETAILS-{"phase", "source", "received_ns", "observed_ns", "ui_admitted", "source_applied", "admitted_ns", "completion", "sources"}
+    if any(any(row[k] != original[k] for k in immutable) for row in records):
+        errors.append("original capsule changed within one read")
+    stages = {}
+    for row in sorted(records, key=lambda row: row["observed_ns"]):
+        phase = row["phase"]
+        if phase in {"source_processed", "cancel_requested"}:
+            continue
+        if phase in stages:
+            errors.append("duplicate singleton stage: " + phase)
+        stages[phase] = row
+    if "cancelled" in stages and "producer_returned" in stages:
+        errors.append("conflicting producer terminals")
+    producer = stages.get("producer_returned", stages.get("cancelled"))
+    producer_outcome = completion(producer["completion"]) if producer else None
+    ui = stages.get("finished")
+    outcome = completion(ui["completion"]) if ui else "unfinished"
+    if outcome == "not_started" and "worker_entered" in stages:
+        errors.append("unstarted read has worker entry")
+    if producer_outcome == "not_started":
+        errors.append("producer cannot return a dispatch-not-started outcome")
+    clocks = {name: row["observed_ns"] for name, row in stages.items()}
+    clocks[None] = key[2]
+    if producer:
+        clocks["producer"] = producer["observed_ns"]
+    for name, (start, end) in METRICS.items():
+        if start in clocks and end in clocks:
+            interval = clocks[end]-clocks[start]
+            if interval < 0:
+                errors.append("negative interval: " + name)
+            else:
+                output["metrics"][name] = interval
+    if errors:
+        output["metrics"] = dict.fromkeys(METRICS)
+    return dict(output, outcome="invalid" if errors else outcome, producer_outcome=producer_outcome,
+                missing_stages=sorted({"started", "worker_entered", "producer", "registration_released", "finished"}-set(clocks)),
+                producer_ui_outcomes_differ=producer is not None and ui is not None and producer_outcome != outcome,
+                original_provenance=original["origin"])
+
+
+def analyze_arm(value, root):
+    output = {"errors": [], "attempts": [], "store_initializations": [], "unselected_rows": 0, "execution_verified": False}
+    errors = output["errors"]
+    output["log_artifacts"] = []
+    groups = {}
+    declared = set()
+    if type(value) is not dict:
+        value = {}
+    if set(value) != {"instances", "attempts", "conditions", "source_commit", "binary", "logs"}:
+        errors.append("unsupported cohort declaration fields")
+    instances = []
+    if type(value.get("instances")) is list:
+        for item in value["instances"]:
+            try:
+                instance = text(item)
+                require(instance not in instances, "duplicate selected instance")
+                instances.append(instance)
+            except EvidenceError as error:
+                errors.append(str(error))
+    if not instances:
+        errors.append("missing selected instances")
+    output["instances"] = instances
+    declarations = value.get("attempts")
+    if type(declarations) is not list:
+        errors.append("missing declared attempt denominator")
+        declarations = []
+    output["declared_attempt_entries"] = len(declarations)
+    for declaration in declarations:
+        try:
+            key = identity(declaration)
+            if key[0] not in instances or key in declared:
+                errors.append("foreign or duplicated declared attempt")
+            declared.add(key); groups.setdefault(key, [])
+        except EvidenceError as error:
+            errors.append(str(error))
+    try:
+        fields(value.get("conditions"), CONDITIONS)
+        output["declared_conditions"] = {k: None if v is None else digest(v) for k, v in value["conditions"].items()}
+        output["declared_source_commit"] = None if value.get("source_commit") is None else digest(value["source_commit"], 40)
+    except EvidenceError as error:
+        errors.append(str(error))
+    if value.get("binary") is not None:
+        try:
+            output["binary_artifact_sha256"] = hashlib.sha256(artifact(root, value["binary"])).hexdigest()
+        except EvidenceError as error:
+            errors.append(str(error))
+    log_declarations = value.get("logs")
+    if type(log_declarations) is not list:
+        errors.append("missing log artifact list")
+        log_declarations = []
+    seen_artifacts, seen_rows = set(), set()
+    for artifact_index, declaration in enumerate(log_declarations):
+        try:
+            blob = artifact(root, declaration)
+            output["log_artifacts"].append(dict(declaration, verified=True))
+            require(declaration["sha256"] not in seen_artifacts, "reused artifact in one cohort")
+            seen_artifacts.add(declaration["sha256"])
+            lines = blob.decode("utf-8").splitlines()
+        except (EvidenceError, UnicodeDecodeError) as error:
+            errors.append("artifact %d: %s" % (artifact_index, str(error))); continue
+        for index, line in enumerate(lines, 1):
+            try:
+                entry = load_json(line)
+                details = entry.get("details") if type(entry) is dict else None
+                event = details.get("event") if type(details) is dict else None
+                if event == "tui_observation_store":
+                    fields(details, {"event", "phase", "pid", "directory", "initialization_started_ns", "observed_ns"})
+                    require(details["phase"] in {"initialized", "unavailable"}, "invalid store outcome")
+                    fields(entry, ENVELOPE)
+                    require((entry["source"], entry["module"], entry["level"], entry["category"])
+                            == ("structured", "startup", "INFO" if details["phase"] == "initialized" else "WARN", None),
+                            "store initialization has wrong logging channel")
+                    integer(details["pid"])
+                    require(ns(details["observed_ns"]) >= ns(details["initialization_started_ns"]), "invalid store clock span")
+                    if details["phase"] == "initialized":
+                        text(details["directory"])
+                    else:
+                        require(details["directory"] is None, "unavailable store has a location")
+                    output["store_initializations"].append(dict(details, evidence={"artifact": declaration["path"],
+                        "sha256": declaration["sha256"], "line": index}))
+                    continue
+                if event != "tui_ask_followup":
+                    output["unselected_rows"] += 1; continue
+                context = origin(details["origin"])
+                if context["tui_instance_id"] not in instances:
+                    output["unselected_rows"] += 1; continue
+                key, row = record(entry)
+                group = groups.setdefault(key, [])
+                row_id = key[0], entry["seq"], entry["ts"]
+                require(row_id not in seen_rows, "duplicate selected log row")
+                seen_rows.add(row_id)
+                group.append(dict(row, evidence={"artifact": declaration["path"], "sha256": declaration["sha256"],
+                    "line": index, "seq": entry["seq"], "ts": entry["ts"]}))
+            except (EvidenceError, KeyError, TypeError) as error:
+                errors.append("artifact %d line %d: %s" % (artifact_index, index, str(error) if isinstance(error, EvidenceError) else "malformed selected evidence"))
+    output["attempts"] = [attempt(key, rows, key in declared) for key, rows in sorted(groups.items())]
+    for item in output["attempts"]:
+        errors.extend(item["errors"])
+        if not item["declared"]:
+            errors.append("observed attempt absent from declared denominator")
+    output["declared_attempts"] = len(declared)
+    output["summary"] = {"attempts": len(groups), "outcomes": dict(Counter(v["outcome"] for v in output["attempts"])), "metrics": {}}
+    for name in METRICS:
+        values = [v["metrics"][name] for v in output["attempts"] if v["metrics"][name] is not None]
+        output["summary"]["metrics"][name] = {"observed": len(values), "attempts": len(groups), "sum_ns": sum(values),
+                                               "min_ns": min(values, default=None), "max_ns": max(values, default=None)}
+    return output
+
+
+def analyze(packet, root):
+    fields(packet, {"schema_version", "cases"})
+    require(type(packet["schema_version"]) is int and packet["schema_version"] == 1, "unsupported packet version")
+    require(type(packet["cases"]) is list, "missing case denominator")
+    cases = []
+    labels = Counter(v.get("id") for v in packet["cases"] if type(v) is dict and type(v.get("id")) is str)
+    for index, declaration in enumerate(packet["cases"]):
+        errors = []
+        if type(declaration) is not dict or set(declaration) != {"id", "before", "after"}:
+            errors.append("invalid case declaration")
+            declaration = declaration if type(declaration) is dict else {}
+        label = declaration.get("id")
+        if type(label) is not str or not label or labels[label] != 1:
+            errors.append("absent or duplicated case identity")
+        arms = {arm: analyze_arm(declaration.get(arm), root) for arm in ("before", "after")}
+        cases.append(dict(case_index=index, case_id=label, errors=errors, **arms))
+    ownership = Counter(v for case in cases for arm in ("before", "after") for v in case[arm].get("instances", []))
+    for case in cases:
+        for arm in ("before", "after"):
+            if any(ownership[v] != 1 for v in case[arm].get("instances", [])):
+                case[arm]["errors"].append("instance reused across cohorts")
+        before, after = case["before"], case["after"]
+        matched = before.get("declared_conditions") is not None and all(v is not None for v in before["declared_conditions"].values()) and before.get("declared_conditions") == after.get("declared_conditions")
+        eligible = matched and not case["errors"] and not before["errors"] and not after["errors"]
+        deltas = {}
+        if eligible:
+            for name in METRICS:
+                a, b = before["summary"]["metrics"][name], after["summary"]["metrics"][name]
+                deltas[name] = None if not a["observed"] or not b["observed"] else {
+                    "observed_mean_after_minus_before_ns": {"numerator": b["sum_ns"]*a["observed"]-a["sum_ns"]*b["observed"],
+                                                            "denominator": a["observed"]*b["observed"]},
+                    "before_observed": a["observed"], "after_observed": b["observed"]}
+        case["comparison"] = {"declared_conditions_match": matched, "descriptive_delta_available": eligible,
+                              "execution_verified": False, "metrics": deltas}
+    return {"schema_version": 1, "kind": "descriptive_original_ask_followup", "cases": cases,
+            "limits": ["Declarations and artifact bytes do not prove execution/source/binary/install identity.",
+                       "Only declared and observed attempts are known; filtered or wholly unrecorded undeclared attempts are unknown.",
+                       "Durations describe observed subsets, with every attempt retained in denominators; no speed/readiness verdict.",
+                       "Store initialization spans precede input-reader timing; they are retained separately, not a full cold-start duration.",
+                       "Opaque source snapshots and read completion do not prove useful Task progress or visible UI."]}
+
+
+def markdown(report):
+    lines = ["# Original Ask follow-up comparison", "", "Descriptive artifact report; execution and speedup are unverified.", ""]
+    for case in report["cases"]:
+        lines += ["## Case %d" % (case["case_index"]+1), "", "| Cohort | Attempts | Read outcomes | Evidence errors |", "|---|---:|---|---:|"]
+        for name in ("before", "after"):
+            arm = case[name]; summary = arm["summary"]
+            outcomes = ", ".join("%s: %d" % pair for pair in sorted(summary["outcomes"].items())) or "none observed"
+            lines.append("| %s | %d | %s | %d |" % (name, summary["attempts"], outcomes, len(arm["errors"])))
+        lines += ["", "| Interval | Before mean ms (observed/all) | After mean ms (observed/all) | Observed mean delta ms |", "|---|---|---|---|"]
+        for name in sorted(METRICS):
+            values = [case[arm]["summary"]["metrics"][name] for arm in ("before", "after")]
+            displays = ["unobserved (0/%d)" % v["attempts"] if not v["observed"] else
+                        "%s (%d/%d)" % (format(Decimal(v["sum_ns"])/v["observed"]/1_000_000, ".3f"), v["observed"], v["attempts"]) for v in values]
+            delta = case["comparison"]["metrics"].get(name)
+            ratio = delta["observed_mean_after_minus_before_ns"] if delta else None
+            difference = "unavailable" if ratio is None else format(Decimal(ratio["numerator"])/ratio["denominator"]/1_000_000, "+.3f")
+            lines.append("| %s | %s | %s | %s |" % (name, *displays, difference))
+        lines += ["", "Case evidence errors: %d." % len(case["errors"]), "",
+                  "Declared conditions match: %s. Full identities, missing stages, raw facts and errors are in JSON." % case["comparison"]["declared_conditions_match"], ""]
+    lines += ["- "+limit for limit in report["limits"]]
+    return "\n".join(lines)+"\n"
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("packet", type=Path)
+    parser.add_argument("--json", type=Path, required=True)
+    parser.add_argument("--markdown", type=Path, required=True)
+    args = parser.parse_args()
+    if args.json.absolute() == args.markdown.absolute():
+        parser.error("JSON and Markdown outputs must be different new files")
+    try:
+        packet_bytes = args.packet.read_bytes()
+        report = analyze(load_json(packet_bytes), args.packet.resolve().parent)
+        report["packet_sha256"] = hashlib.sha256(packet_bytes).hexdigest()
+        report["analyzer_source_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    except (EvidenceError, OSError) as error:
+        report = {"schema_version": 1, "kind": "invalid_packet", "errors": [str(error)]}
+    try:
+        with args.json.open("x", encoding="utf-8") as json_file, args.markdown.open("x", encoding="utf-8") as markdown_file:
+            json_file.write(json.dumps(report, ensure_ascii=False, indent=2)+"\n")
+            markdown_file.write(markdown(report) if "cases" in report else "# Invalid comparison packet\n\nSee JSON errors.\n")
+    except OSError:
+        print("Report outputs must be writable new files; existing files were not overwritten.", file=sys.stderr)
+        return 2
+    return 2 if "cases" not in report or any(case["errors"] or case["before"]["errors"] or case["after"]["errors"] for case in report["cases"]) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

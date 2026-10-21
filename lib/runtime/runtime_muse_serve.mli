@@ -225,7 +225,14 @@ type stream_event =
   | Text_completed of { item_id : string; text : string }
       (** The full completed agent-message text, including items with no deltas. *)
   | Native_tool_started of Runtime_native_tools.observation
-  | Native_tool_finished of Runtime_native_tools.observation
+  | Native_tool_finished of
+      { observation : Runtime_native_tools.observation
+      ; completion : Runtime_native_tools.completion
+      ; args : string option
+      ; visible_output : string option
+      }
+      (** MSP's completed item, including its declared status and exact
+          argument/output text. These are vendor facts, not MASC receipts. *)
   | Approval_decided of
       { tool_name : string
       ; subject : Runtime_muse_msp.approval_subject_kind

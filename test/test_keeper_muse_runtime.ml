@@ -34,7 +34,7 @@ let test_stream_order () =
       ; Serve.Native_tool_started (native_observation "call-1")
       ; Serve.Approval_decided
           { tool_name = "read_file"; subject = Msp.Subject_file_access; decision = Msp.Denied }
-      ; Serve.Native_tool_finished (native_observation "call-1")
+      ; Serve.Native_tool_finished {observation=native_observation "call-1"; completion=Runtime_native_tools.end_observed; args=None; visible_output=None}
       ; Serve.Text_delta { item_id = "m-1"; text = "MUSE_OK" }
       ; Serve.Usage_reported { session_id; turn_id = "turn-1"; usage }
       ; Serve.Turn_finished { text = "MASC_MUSE_OK" }
@@ -62,9 +62,29 @@ let test_stream_order () =
 let test_native_tool_without_identity_does_not_open_a_block () =
   let observation = {(native_observation "ignored") with Runtime_native_tools.identity=None} in
   match Adapter.project_stream [turn_started; Serve.Native_tool_started observation;
-    Serve.Native_tool_finished observation; Serve.Turn_finished {text=""}] with
+    Serve.Native_tool_finished {observation; completion=Runtime_native_tools.end_observed; args=None; visible_output=None}; Serve.Turn_finished {text=""}] with
   | [MessageStart _; MessageDelta _; MessageStop] -> ()
   | _ -> fail "identity-less native observation opened an unclosable stream block"
+;;
+
+let test_native_failure_reaches_the_exact_stream_block () =
+  let completions = ref [] in
+  let completion : Runtime_native_tools.completion =
+    {outcome=Runtime_native_tools.Error_reported; exit_code=None} in
+  let events = Adapter.project_stream
+      ~on_native_tool_completion:(fun ~block_index ~tool_call_id value ->
+        completions := (block_index, tool_call_id, value) :: !completions)
+      [turn_started; Serve.Native_tool_started (native_observation "bad-call");
+       Serve.Native_tool_finished
+         {observation=native_observation "bad-call"; completion;
+          args=Some "{}"; visible_output=Some "unknown tool"};
+       Serve.Turn_finished {text=""}] in
+  (match !completions with
+   | [(1, Some "bad-call", observed)] ->
+     check bool "typed failure reached its native block" true (observed = completion)
+   | _ -> fail "native failure lost its stream occurrence binding");
+  check bool "the same block closes" true
+    (List.exists (function Agent_core.Types.ContentBlockStop {index=1} -> true | _ -> false) events)
 ;;
 
 let test_persistence_cause_survives_callback_protocol_projection () =
@@ -3061,7 +3081,9 @@ let () =
   run
     "keeper_muse_runtime"
     [ ( "stream"
-      , [ test_case "identity-less native tool leaves no open block" `Quick test_native_tool_without_identity_does_not_open_a_block
+      , [ test_case "native failure reaches its exact stream block" `Quick
+            test_native_failure_reaches_the_exact_stream_block
+        ; test_case "identity-less native tool leaves no open block" `Quick test_native_tool_without_identity_does_not_open_a_block
         ; test_case "projection order" `Quick test_stream_order
         ; test_case "unstreamed reply is forwarded at the end" `Quick
             test_unstreamed_reply_is_forwarded_at_the_end

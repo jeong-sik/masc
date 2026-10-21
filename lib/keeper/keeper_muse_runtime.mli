@@ -87,6 +87,8 @@ val run :
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
   ?on_native_action:(official_turn:int ->
     identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
+  ?on_native_tool_completion:
+    (block_index:int -> tool_call_id:string option -> Runtime_native_tools.completion -> unit) ->
   ?on_usage_report:(Keeper_client_usage_report.t -> unit) ->
   ?on_tool_execution:
     (block_index:int -> tool_call_id:string -> execution_id:Ids.Execution_id.t -> unit) ->
@@ -131,6 +133,8 @@ module For_testing : sig
       order, with no stream observer installed. *)
 
   val project_stream :
+    ?on_native_tool_completion:
+      (block_index:int -> tool_call_id:string option -> Runtime_native_tools.completion -> unit) ->
     Runtime_muse_serve.stream_event list -> Agent_core.Types.sse_event list
   (** The Keeper live-stream events the projection emits for [events], in
       order, with no MASC tool call between them. *)

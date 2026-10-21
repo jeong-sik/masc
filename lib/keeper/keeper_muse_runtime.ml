@@ -598,7 +598,7 @@ type mcp_blocks =
   | Streaming
 
 let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~raw_trace_run ~turn_count
-    ~on_native_action ~on_usage_report ~on_turn_started ~on_message_started ~position ~receipts on_event =
+    ~on_native_action ~on_native_tool_completion ~on_usage_report ~on_turn_started ~on_message_started ~position ~receipts on_event =
   let emit event = Option.iter (fun callback -> callback event) on_event in
   let next_tool_index = ref 1 in
   let tool_indexes = Hashtbl.create 8 in
@@ -700,12 +700,28 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
               {index; content_type=Runtime_native_tools.stream_content_type;
                tool_id=Runtime_native_tools.call_id observation;
                tool_name=observation.tool_name})) observation.identity
-        | Serve.Native_tool_finished observation ->
+        | Serve.Native_tool_finished {observation; completion; args; visible_output} ->
           Host.record_raw_native_tool ~keeper_name ~raw_trace_run ~phase:`Finished observation;
+          ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Native_tool_finish (fun () ->
+            match raw_trace_run with
+            | None -> Ok ()
+            | Some active ->
+              let optional = Option.fold ~none:`Null ~some:(fun value -> `String value) in
+              Agent_core.Raw_trace.record_hook_invoked active
+                ~hook_name:"muse_native_tool_completion" ~hook_decision:"observed"
+                ~hook_detail:(Yojson.Safe.to_string (`Assoc
+                  [ "tool_name", optional observation.tool_name
+                  ; "call_id", optional (Runtime_native_tools.call_id observation)
+                  ; "completion", Runtime_native_tools.completion_to_json completion
+                  ; "args", optional args
+                  ; "visible_output", optional visible_output ])) ()));
           Option.iter
             (fun identity ->
                Option.iter
                  (fun index ->
+                    Option.iter (fun finish -> finish ~block_index:index
+                      ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                      on_native_tool_completion;
                     Hashtbl.remove native_tool_indexes identity;
                     emit (Agent_core.Types.ContentBlockStop { index }))
                  (Hashtbl.find_opt native_tool_indexes identity))
@@ -823,7 +839,7 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
     ~initial_messages ~model_input_projection ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_transport_uncertain ~on_official_client_tool_boundary
-    ~on_official_client_result_handoff ~on_native_action ~on_usage_report ~on_tool_execution
+    ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_usage_report ~on_tool_execution
     ~(config : Serve.config) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -1308,6 +1324,7 @@ let run_without_lifecycle ~argument_source ~official_task_reference ~composed_co
         ~raw_trace_run
         ~turn_count
         ~on_native_action
+        ~on_native_tool_completion
         ~on_usage_report
         ~on_turn_started:(fun turn ->
           (* From here the host runs the turn, and MASC cannot prove what it
@@ -1792,7 +1809,7 @@ let run ?argument_source ?official_task_reference ?composed_context ~accepts_ima
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
     ~turn_start ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
-    ?on_native_action ?on_usage_report ?on_tool_execution ~event_bus ~raw_trace ~on_event ~config () =
+    ?on_native_action ?on_native_tool_completion ?on_usage_report ?on_tool_execution ~event_bus ~raw_trace ~on_event ~config () =
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition = Atomic.make Keeper_provider_attempt_effect.No_effect_observed in
@@ -1852,6 +1869,7 @@ let run ?argument_source ?official_task_reference ?composed_context ~accepts_ima
         ~on_official_client_tool_boundary
         ~on_official_client_result_handoff
         ~on_native_action
+        ~on_native_tool_completion
         ~on_usage_report
         ~on_tool_execution
         ~config)
@@ -1863,7 +1881,7 @@ let run ?argument_source ?official_task_reference ?composed_context ~accepts_ima
 ;;
 
 module For_testing = struct
-  let test_projection ?receipts ~turn_count ~position ~on_usage_report on_event =
+  let test_projection ?receipts ?on_native_tool_completion ~turn_count ~position ~on_usage_report on_event =
     stream_projection ~quota_scope:None
       ~keeper_name:"test"
       ~runtime_id:"muse.test"
@@ -1871,6 +1889,7 @@ module For_testing = struct
       ~raw_trace_run:None
       ~turn_count
       ~on_native_action:None
+      ~on_native_tool_completion
       ~on_usage_report
       ~on_turn_started:(fun (_ : observed_turn) -> ())
       ~on_message_started:(fun () -> ())
@@ -1892,10 +1911,11 @@ module For_testing = struct
     List.rev !reports
   ;;
 
-  let project_stream events =
+  let project_stream ?on_native_tool_completion events =
     let emitted = ref [] in
     let projection =
       test_projection
+        ?on_native_tool_completion
         ~turn_count:1
         ~position:Keeper_usage_resolution.Fresh
         ~on_usage_report:None

@@ -23399,7 +23399,7 @@ and is loaded on demand through keeper_skill.
                    (match kind with Notice_failure -> "error" | Notice_reply -> "system") text in
                  open_message_image ~skill_reference:profile.esp_reference state ~mailbox:async_messages
                    ~notice ~name:("Declared composition: " ^ profile.esp_name)
-                   (Masc_tui_image_requests.Generated (Masc_tui_image_preview.Inline_mermaid source)))
+                   (Masc_tui_image_requests.Generated (Masc_tui_image_preview.mermaid_source source)))
   in
   let handle_skill_evidence () =
     if not (server_authority_ready state) then

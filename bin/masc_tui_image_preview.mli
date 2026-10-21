@@ -32,6 +32,10 @@ val inline_svg : name:string -> string -> preview
 val mermaid : name:string -> string -> preview
 (** Exact source for the offline Pele renderer. No parsing or process work. *)
 
+val mermaid_source : string -> output_source
+(** The bare source for callers that build an image request source directly.
+    The type stays private; match on it, do not rebuild it. *)
+
 val in_message : text:string -> attachments:preview list -> preview
 (** The last image attachment, otherwise the last closed Mermaid fence, then
     the last path in the original text.

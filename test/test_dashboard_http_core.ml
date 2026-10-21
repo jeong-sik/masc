@@ -8006,7 +8006,15 @@ let test_skill_evidence_joins_activation_and_composition () =
             (Composition.Node_execution_origin.to_string Fresh_dispatch) )
       ; "tool_name", `String "keeper_lane_status"
       ; "input", `Assoc []
-      ; "schedule", Lib.Keeper_tool_composition_projection.schedule_to_json schedule
+      ; ( "schedule", `Assoc
+            [ "planned_index", `Int schedule.planned_index
+            ; "batch_index", `Int schedule.batch_index
+            ; "batch_size", `Int schedule.batch_size
+            ; ( "execution_mode", `String
+                  (match schedule.execution_mode with
+                   | Agent_core.Tool_contract.Serial -> "serial"
+                   | Concurrent -> "concurrent") )
+            ] )
       ; "result", Lib.Tool_result.to_json (completed "keeper_lane_status" (`Assoc []))
       ; "tool_use_id", `String "lane-status-1"
       ; "failure_effect_disposition", `Null

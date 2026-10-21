@@ -37,13 +37,17 @@ type stop_observation =
   ; owner_bind : (unit, Keeper_owner.error) result
   }
 
-(* The recovery decides the settlement. The outcome is not checked: when the
-   stop closes the provider connection under a read in progress, Core can
-   report the call as failed rather than cancelled. Both retire it. *)
+(* The recovery decides the settlement. *)
 let recovery_label (disposition : Agent.execution_terminal_disposition) =
   match disposition.recovery with
   | Agent.Retire -> "retire"
   | Agent.Operator_repair_required Agent.Effect_outcome_unknown -> "operator repair"
+
+let outcome_label (disposition : Agent.execution_terminal_disposition) =
+  match disposition.outcome with
+  | Agent.Terminal_succeeded -> "succeeded"
+  | Agent.Terminal_failed -> "failed"
+  | Agent.Terminal_cancelled -> "cancelled"
 
 let late_call (operation : Keeper_chat_operation.t) =
   let seed_checkpoint =
@@ -214,6 +218,9 @@ let test_stop_records_the_cancelled_terminal () =
       | Some (Error _) | None -> None in
     check bool "the cancelled child read back a terminal receipt during the stop" true
       (Option.is_some receipt);
+    check (option string) "the stop ended the provider call as cancelled"
+      (Some "cancelled")
+      (Option.map (fun (_, disposition) -> outcome_label disposition) receipt);
     check (option string) "the receipt retires the call, which attempted no tool"
       (Some "retire")
       (Option.map (fun (_, disposition) -> recovery_label disposition) receipt);

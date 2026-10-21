@@ -1,13 +1,30 @@
 type socket = [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
 
+(* The socket belongs to the attempt daemon below, not to the fiber that uses
+   it. A cancellation of [sw] reaches both: the daemon ends and its attempt
+   switch closes the descriptor, possibly while a user is running between two
+   reads and has not reached a cancellation point. Eio checks a descriptor's
+   closed state before the caller's cancellation, so that user's next read
+   would report a closed descriptor instead of the cancellation. Every user
+   inside [sw] is cancelled by the same cancellation, so each read and write
+   here observes the caller's cancellation before it touches the socket. *)
 module Owned_socket = struct
   type tag = [ `Generic ]
   type t = { socket : socket; close : unit -> unit }
 
   let read_methods = []
-  let single_read t = Eio.Flow.single_read t.socket
-  let single_write t = Eio.Flow.single_write t.socket
-  let copy t ~src = Eio.Flow.copy src t.socket
+
+  let single_read t buf =
+    Eio.Fiber.check ();
+    Eio.Flow.single_read t.socket buf
+
+  let single_write t bufs =
+    Eio.Fiber.check ();
+    Eio.Flow.single_write t.socket bufs
+
+  (* Every chunk goes through [single_write], so a copy cancelled between two
+     chunks observes the cancellation as well. *)
+  let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
   let shutdown t = Eio.Flow.shutdown t.socket
   let close t = t.close ()
 end

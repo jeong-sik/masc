@@ -1,6 +1,6 @@
 # Workspace Curator: accepted work and Addon execution
 
-This is the E02 implementation contract under the
+This is the proposed E02 implementation contract under the
 [Addon worklist](../../reports/addon-lane-full-worklist-20261021.md).
 It specifies the missing execution boundary; it does not claim a Curator package,
 consumer, completed extraction or a working replacement has been implemented.
@@ -90,7 +90,7 @@ different identity or changed request digest is rejected.
 | Valid answered result | Revalidate the captured schema and full domain decision, retain that judgment, then let the original host owner commit |
 | Invalid domain output / explicit refusal | Preserve the original result and typed refusal; no ledger mutation or synthetic success |
 | Unknown provider outcome | Retain uncertainty under the original request; never turn it into `absent` or automatically redispatch it |
-| Input-size refusal | Use the existing whole-row `Request.narrow` / `Briefing.narrow` rules and retain the new child batch plus its predecessor; never truncate prose |
+| Size refusal | Preserve current classification narrowing for input/output-size refusal and briefing narrowing for input-size refusal only; use whole-row `Request.narrow` / `Briefing.narrow`, retain the child batch and predecessor, and never truncate prose |
 | Failed or uncertain ledger/briefing save | Reload authoritative state before deciding whether the original commit happened; never interpret an I/O error as proof of no write |
 | Observer receipt failure | Preserve the judgment and domain commit truth separately; retry recording without replaying the model or domain effect |
 

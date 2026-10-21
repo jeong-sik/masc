@@ -601,6 +601,41 @@ Source review and actual selected execution remain separate.
 
 ## Completion evidence
 
+### Recorded execution scope
+
+These results prove their recorded source and scenarios, not deployment or
+whole-stack merge readiness. Model providers in the browser proofs are scripted
+loopback HTTP fixtures; they do not measure real-provider response quality.
+
+| Scenario | Source | Completed evidence |
+|---|---|---|
+| Owned Chrome, private and persistent profiles | `f9b02ae36f661d0584ad17c0e88626b4e18a2eba` | [39514006966](https://github.com/jeong-sik/masc/actions/runs/39514006966): 43/43 steps in each mode; trusted input, model consumers, cookies, delayed-model detach, stale identities and cleanup |
+| Owned live Firefox BiDi | `f9b02ae36f661d0584ad17c0e88626b4e18a2eba` | [39514000850](https://github.com/jeong-sik/masc/actions/runs/39514000850): 28/28 steps; trusted hover/click/double-click/drag, partial tab creation, retained uncertainty, reattachment and no replay |
+| Owned Gecko locate and transfers | `4f43c20bf9237616b75ff00bead7bf5d2dfb8c44` | [39522964504](https://github.com/jeong-sik/masc/actions/runs/39522964504): 26/26 steps; canonical-schema model request, observed node, upload/download and durable artifacts |
+| Independent Hook/Exact Output selection and retained native answer | Product `ed764a999ee637ceab9b49e5e547d72d0a12133d`; composition `86309539fa67b2b24fbbb3e20b3a0c2ae2946e57` adds two CI runner files | [39516409345](https://github.com/jeong-sik/masc/actions/runs/39516409345): configuration 23/23 and native Exact Output 1/1 |
+| Pinned download and failed-owner cleanup | Product `c492faf44d1ee836ae157da2acffb7da7dd424ce`; composition `3b5f93d48aeb0f320a5eddf378f0ef084f2ede1b` adds two CI runner files | [39518114697](https://github.com/jeong-sik/masc/actions/runs/39518114697): downloads 9/9 and owner cleanup 1/1 |
+
+Source/workflow identities and the retained native executable hashes were
+verified for the three actual browser rows. The source-installed three-helper
+[installation proof](https://github.com/jeong-sik/masc/pull/44607#issuecomment-6305040918)
+also passed 23/23 Gecko transfer/lifecycle steps using an isolated prefix. It
+does not establish a complete MASC/release installation or deployment.
+
+The later [environment boundary fix](https://github.com/jeong-sik/masc/pull/44631)
+at `f2d71690c8b0d1c63bad7e5e1abae2ae645fe53f` projects operational settings
+before the Browser_service launcher starts. Provider credentials stay with the
+host; the host environment and generic MCP worker policy are unchanged. The
+worker's browser/driver children inherit the projected environment. This is
+not a same-user filesystem sandbox. The older actual browser rows above do not
+prove execution after this change. Its selected checks are:
+
+- [Native runtime/Exact Output 39528969166](https://github.com/jeong-sik/masc/actions/runs/39528969166), composition `a18c0a80d4334fe7be95cb2b3ccf2ba79a139192`: environment sentinels in the actual worker and child, operational settings and retained host credentials; result pending.
+- [External WebExtension 39528932570](https://github.com/jeong-sik/masc/actions/runs/39528932570), exact source `f2d71690c8b0d1c63bad7e5e1abae2ae645fe53f`: result pending.
+- [Owned Gecko 39528937218](https://github.com/jeong-sik/masc/actions/runs/39528937218), the same exact source: model and transfer result pending.
+
+Full regression, personal-site sessions, installed TUI behavior, other browser
+families, formal whole-stack approval and merge remain separate claims.
+
 ### External WebExtension lifecycle probe
 
 `browser_addon_webextension_probe` and
@@ -622,7 +657,12 @@ reattachment must obtain a new worker and actual native-host client identity,
 refuse the old host/client and read the original tab without replaying input.
 The harness separately deletes its original WebDriver session and checks the
 browser ended. Setup, hashes, tool receipts, lifecycle and PNG evidence are
-retained. This new probe has not yet been compiled or executed.
+retained. The first explicit [run39527028175](https://github.com/jeong-sik/masc/actions/runs/39527028175)
+failed before browser execution on warning 21 in the HTTP daemon callback.
+The environment-boundary source above also replaces that callback with a
+tail-recursive accept loop while preserving its nested switch ownership. The
+replacement external run is listed separately; the compile failure is not
+external browser evidence.
 
 ### Real Gecko locate and transfer probe
 
@@ -650,8 +690,11 @@ above. The separately selected run 39497960619 on that composition failed two
 backend status cases because Closing hid the original ended reason. The frozen
 clean source verdict was withdrawn. The follow-up retains the original session's
 first reason through Closing and resets it only at the next successful open;
-its actual regression result remains pending. These runs do not include the new
-download artifact changes.
+the later [39502128384](https://github.com/jeong-sik/masc/actions/runs/39502128384)
+passed the selected backend suite's 25 cases, including retained end reasons.
+That whole run failed other download/cleanup cases; only the backend suite is
+passing evidence here. The later 43/43-per-mode Chrome result is listed above.
+The older real Chrome runs do not include the newer download artifact changes.
 
 The private-profile public Add-on proof passed all 38 recorded steps in
 [actual Chrome run 39488906467](https://github.com/jeong-sik/masc/actions/runs/39488906467).
@@ -723,5 +766,6 @@ The retained result reaches explicit close and Addon owner cleanup. Repeating
 close or opening a successor cannot replace that failure with a clean receipt.
 New focused backend scenarios cover parent-stop reader lifetime, cancellation of
 unfinished startup and failed shutdown without replay. These source changes and
-limited typing are not a linked scenario result or a repaired real-cookie proof;
-that execution must use a new explicit candidate.
+limited typing alone are not execution evidence. The later selected backend
+suite and real private/persistent Chrome results above record the observed
+follow-through; they do not replace the original failed-run record.

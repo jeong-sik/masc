@@ -300,8 +300,9 @@ P2 는 표의 한 줄이지만 한 번에 들어가지 않는다. 첫 조각은 
   그 네 갈래(`Api NetworkError`, `Api ContextOverflow`, `Api InputCapacity`,
   `Provider NetworkError`)를 생성자로 올렸고, 나머지는 `Core`(= `Keeper_request_failure_core`)
   와 `Masc` 로 간다. `Keeper_agent_error.user_message_of_core_error` 는 이제
-  `Keeper_request_failure.summary` 를 부르는 한 줄이다. §2.2 두 번째 표의 나머지
-  생성자(`Rate_limited`, `Payment_required` 등)는 아직 `Core` 에 남아 있다.
+  `Keeper_request_failure.summary` 를 부르는 한 줄이다. §2.2 두 번째 표의
+  `Rate_limited` 는 `Provider_rate_limited` 로 올렸고(#44304), 나머지 생성자(`Payment_required` 등)는
+  아직 `Core` 에 남아 있다.
 - 값은 dispatch 경계를 값으로 건넌다. `Keeper_turn.dispatch` 가
   `Turn_settled | Turn_failed { result; failure }` 두 생성자이고,
   `Keeper_tool_surface.dispatch_keeper_msg_stream_admitted` 가 그대로 돌려준다.

@@ -203,6 +203,20 @@ let provider_network_summary ~provider ~kind ~detail =
   | Llm_provider.Http_client.Unknown -> detail_speaks "could not be reached"
 ;;
 
+(* The wait is shown when the provider stated one and omitted when it did not;
+   it is never worked out from the provider's text. *)
+let provider_rate_limited_summary ~provider ~retry_after ~detail =
+  let who = runtime_provider_label provider in
+  let wait =
+    match retry_after with
+    | Some seconds -> Printf.sprintf " (retry after %.1fs)" seconds
+    | None -> ""
+  in
+  match String.trim detail with
+  | "" -> who ^ " rate-limited the request" ^ wait
+  | detail -> who ^ " rate-limited the request" ^ wait ^ ": " ^ one_line detail
+;;
+
 (* The raw provider diagnostic ("Context overflow: empty completion
    (stop_reason=model_context_window_exceeded): provider returned an empty
    assistant turn ...") reached dashboard chat verbatim, repeatedly, on
@@ -258,13 +272,7 @@ let summary_of_cause = function
   | Provider_network { provider; kind; detail } ->
     provider_network_summary ~provider ~kind ~detail
   | Provider_rate_limited { provider; retry_after; detail } ->
-    let wait =
-      match retry_after with
-      | Some seconds -> Printf.sprintf "provider wait hint: %g seconds" seconds
-      | None -> "provider did not state a wait time"
-    in
-    Printf.sprintf "%s is rate limited (%s): %s"
-      (runtime_provider_label provider) wait (one_line detail)
+    provider_rate_limited_summary ~provider ~retry_after ~detail
   | Context_overflow { limit } -> context_overflow_summary ~limit
   | Input_capacity ->
     "The runtime flow reported a typed input-capacity failure. MASC did not \

@@ -73,6 +73,86 @@ let test_context_overflow_carries_the_window () =
       .Krf.cause
 ;;
 
+let test_api_rate_limit_keeps_the_stated_wait () =
+  Alcotest.check
+    cause_testable
+    "an agent-core rate limit keeps the wait the provider stated and its own text"
+    (Krf.Provider_rate_limited
+       { provider = None; retry_after = Some 12.5; detail = "concurrent requests" })
+    (Krf.of_core_error
+       (Agent_core.Error.Api
+          (Agent_core.Retry.RateLimited
+             { message = "concurrent requests"; retry_after = Some 12.5 })))
+      .Krf.cause
+;;
+
+let test_rate_limit_without_a_stated_wait_stays_empty () =
+  Alcotest.check
+    cause_testable
+    "a rate limit that stated no wait carries none, whatever its text says"
+    (Krf.Provider_rate_limited
+       { provider = Some "glm"; retry_after = None; detail = "try again in 30 seconds" })
+    (Krf.of_core_error
+       (Agent_core.Error.Provider
+          (Llm_provider.Error.RateLimit
+             { provider = "glm"; retry_after = None; detail = "try again in 30 seconds" })))
+      .Krf.cause
+;;
+
+let test_provider_rate_limit_keeps_its_provider () =
+  Alcotest.check
+    cause_testable
+    "a provider rate limit keeps the provider and the wait"
+    (Krf.Provider_rate_limited
+       { provider = Some "ollama_cloud"; retry_after = Some 3.; detail = "slow down" })
+    (Krf.of_core_error
+       (Agent_core.Error.Provider
+          (Llm_provider.Error.RateLimit
+             { provider = "ollama_cloud"; retry_after = Some 3.; detail = "slow down" })))
+      .Krf.cause
+;;
+
+let test_rate_limit_keeps_integer_wire_wait () =
+  let encoded = `Assoc [ "cause", `Assoc [
+    "kind", `String "provider_rate_limited";
+    "provider", `Null; "retry_after", `Int 12; "detail", `String "x" ]] in
+  match Krf.of_yojson encoded with
+  | Error detail -> Alcotest.fail detail
+  | Ok failure ->
+    Alcotest.check cause_testable "integer wire waits use the canonical cause"
+      (Krf.Provider_rate_limited { provider = None; retry_after = Some 12.; detail = "x" })
+      failure.Krf.cause
+;;
+
+(* The wait appears in the sentence when one was reported and is left out when
+   none was; the provider's own text follows, joined to one line. The wording
+   itself is not pinned. *)
+let test_rate_limit_summary_shows_the_wait_only_when_reported () =
+  let contains text part = String_util.contains_substring text part in
+  let with_wait =
+    summary_of
+      (Krf.Provider_rate_limited
+         { provider = Some "glm"; retry_after = Some 12.5; detail = "slow\ndown" })
+  in
+  let without_wait =
+    summary_of
+      (Krf.Provider_rate_limited
+         { provider = Some "glm"; retry_after = None; detail = "slow\ndown" })
+  in
+  Alcotest.check Alcotest.bool "the stated wait is in the summary" true
+    (contains with_wait "12.5");
+  Alcotest.check Alcotest.bool "no wait is invented when none was stated" false
+    (contains without_wait "retry after");
+  Alcotest.check Alcotest.bool "the provider's text survives on one line" true
+    (contains with_wait "slow down" && contains without_wait "slow down");
+  Alcotest.check Alcotest.bool "a long wait is not written in exponent form" false
+    (contains
+       (summary_of
+          (Krf.Provider_rate_limited
+             { provider = None; retry_after = Some 2_592_000.; detail = "weekly limit" }))
+       "e+")
+;;
+
 let test_carried_masc_error_stays_a_masc_value () =
   let masc_error =
     Kie.Host_stopped_turn
@@ -166,6 +246,13 @@ let every_cause =
       { provider = Some "ollama_cloud"; retry_after = Some 12.5; detail = "concurrent requests" }
   ; Krf.Provider_rate_limited
       { provider = None; retry_after = None; detail = "no wait stated" }
+  ; Krf.Provider_rate_limited
+      { provider = Some "ollama_cloud"; retry_after = Some 12.5; detail = "slow down" }
+  ; Krf.Provider_rate_limited { provider = None; retry_after = None; detail = "" }
+  ; Krf.Provider_rate_limited
+      { provider = Some "glm"; retry_after = None; detail = "two\nlines" }
+  ; Krf.Provider_rate_limited
+      { provider = None; retry_after = Some 0.; detail = "limit resets now" }
   ; Krf.Context_overflow { limit = Some 128_000 }
   ; Krf.Context_overflow { limit = None }
   ; Krf.Input_capacity
@@ -277,6 +364,17 @@ let test_the_decoder_refuses_what_it_does_not_write () =
              ; "detail", `String "x"
              ] )
        ]);
+  refused
+    "a stated wait of the wrong type"
+    (`Assoc
+       [ ( "cause"
+         , `Assoc
+             [ "kind", `String "provider_rate_limited"
+             ; "provider", `Null
+             ; "retry_after", `String "12"
+             ; "detail", `String "x"
+             ] )
+       ]);
   refused "an extra top-level field"
     (`Assoc
        [ "cause", `Assoc [ "kind", `String "input_capacity" ]
@@ -315,6 +413,26 @@ let () =
             "a context overflow"
             `Quick
             test_context_overflow_carries_the_window
+        ; Alcotest.test_case
+            "an agent-core rate limit keeps the stated wait"
+            `Quick
+            test_api_rate_limit_keeps_the_stated_wait
+        ; Alcotest.test_case
+            "a rate limit with no stated wait carries none"
+            `Quick
+            test_rate_limit_without_a_stated_wait_stays_empty
+        ; Alcotest.test_case
+            "a provider rate limit keeps its provider and wait"
+            `Quick
+            test_provider_rate_limit_keeps_its_provider
+        ; Alcotest.test_case
+            "an integer wait on the canonical wire"
+            `Quick
+            test_rate_limit_keeps_integer_wire_wait
+        ; Alcotest.test_case
+            "a rate limit summary shows the wait only when reported"
+            `Quick
+            test_rate_limit_summary_shows_the_wait_only_when_reported
         ; Alcotest.test_case
             "a carried MASC error"
             `Quick

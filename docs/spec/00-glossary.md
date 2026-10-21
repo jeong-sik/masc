@@ -2650,7 +2650,20 @@ status: reference
   gRPC(`lib/server/masc_grpc_service.ml`)다. (2) SSE broadcast: 서버가 연결된 client
   전부의 stream에 event를 밀어 넣는 전송 동작(`09-server-transport.md`).
   (3) Board `audience`의 `Broadcast`: 글을 특정 대상 없이 모두에게 라우팅하는 값
-  (`lib/board_types/board_types.mli`). (4) 로그 분류 `Log.Broadcast`
+  (`lib/board_types/board_types.mli`). 이 값은 제목·본문의 `@@all` 주소에서 나온다
+  (`Board_addressing.parse`, `lib/board_addressing/board_addressing.ml`). `@@` 선택자를
+  대소문자 구분 없이 읽어 전부 `all`이면 `Broadcast_all`, `all`이 아닌 이름이 하나라도
+  있으면 `Unsupported_broadcast`로 판정하고 Board 는 후자를 `Validation_error`로
+  거절한다(`lib/board/board_audience.ml`). 글은 `Direct` 가시성에서 broadcast할 수
+  없고(`Direct Board posts cannot broadcast`), comment 의 `@@all`은 가시성과 무관하게
+  `Broadcast`가 된다. 배달은 워크스페이스 fleet 대화가 아니라 Board 신호 경로로,
+  레지스트리에서 신호를 받는 Keeper 전부에게 간다(`lib/keeper/keeper_keepalive_signal.ml`).
+  TUI Board 작성창은 `@@all`이면 `[Broadcast: @@all -> wakes all active keepers]`,
+  `all`이 아닌 선택자면 소문자로 정규화한 그 선택자를 `[Warning: unsupported broadcast
+  @@<selector> (use @@all)]`로 띄운다
+  (`bin/masc_tui_board_composer.ml`). 그래서 TUI 에서 운영자가 모든 Keeper 를 깨우는
+  확인된 경로는 Board 글의 `@@all`이고, (1) 워크스페이스 broadcast 와 다른 축이다.
+  (4) 로그 분류 `Log.Broadcast`
   (`lib/masc_log/log.ml`).
 
 **Board audience**

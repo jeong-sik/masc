@@ -1718,7 +1718,8 @@ let set_status_protected ~ops ?preserve_terminal key status =
 ;;
 
 let clear_active_switch key =
-  with_lock (fun () -> Request_table.remove active_switches key)
+  Eio.Cancel.protect (fun () ->
+    with_lock (fun () -> Request_table.remove active_switches key))
 ;;
 
 let cancelled_status ~cancelled_by reason =
@@ -2052,8 +2053,8 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
            request fail the server root switch. The switch-table release must
            still be exception-safe because cancellation cleanup below can be
            interrupted by unrelated bookkeeping failures.
-           [clear_active_switch] is a mutex-guarded [Request_table.remove] and cannot
-           itself raise, so the finally carries no [Finally_raised] risk. *)
+           [clear_active_switch] protects mutex acquisition as well as the
+           table removal from ambient cancellation; it performs no storage I/O. *)
         Fun.protect
           ~finally:(fun () -> clear_active_switch key)
           (fun () ->
@@ -2073,9 +2074,11 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
           ; data = None
           }
       in
-      set_status_protected ~ops ~preserve_terminal:true key result
-      |> Option.iter notify_settled;
-      clear_active_switch key;
+      Fun.protect
+        ~finally:(fun () -> clear_active_switch key)
+        (fun () ->
+          set_status_protected ~ops ~preserve_terminal:true key result
+          |> Option.iter notify_settled);
       `Stop_daemon)
         with
         | () ->

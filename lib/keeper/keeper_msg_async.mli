@@ -345,7 +345,12 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     carries the attempted entry beside the exact canonical lookup result; it
     has no fabricated callback status. This is the single projection boundary
     for SSE or other live terminal notifications. Projection exceptions are
-    observed and isolated from request truth. *)
+    observed and isolated from request truth. Structural cancellation still
+    propagates. After the physical request scope closes, terminal publication
+    and projection retire its switch registration even on exceptional exits.
+    Mutex acquisition for that bookkeeping cleanup is protected from ambient
+    cancellation; cleanup does not replace the canonical result, abort callback
+    or physical release boundary. *)
 val submit
   :  ?request_context:(string * Yojson.Safe.t) list
   -> ?on_accepted:(string -> (unit, string) result)

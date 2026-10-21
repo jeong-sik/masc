@@ -121,6 +121,11 @@ Eio 인터페이스(`eio_mutex.mli`)가 말하는 차이: `Stdlib.Mutex` 는 기
 
 - `Eio.Mutex.use_rw ~protect t fn`: `fn` 이 예외를 내면 mutex 가 못 쓰게 된다(`Poisoned`).
   `~protect:true` 는 잠근 구간을 취소에서 보호한다. 잠금을 기다리는 동안은 보호하지 않는다.
+- 취소 중에도 반드시 끝내야 하는 짧은 등록 해제는 mutex를 잡기 전부터 보호한다.
+  `keeper_msg_async`의 종료 경로는 terminal 저장·알림을 예외 안전한 정리로 감싸고,
+  닫힌 request switch 등록을 제거한다. 실제 switch 해제, canonical terminal 저장,
+  알림 callback의 취소와 등록 해제를 각각 구분한다. 알림 실패를 원래 결과의 실패나
+  worker 중단으로 바꾸지 않고, 이 bookkeeping 수정을 실행 시간 개선으로 기록하지 않는다.
 - `Eio.Mutex.use_ro t fn`: 읽기만 할 때. 예외가 나도 풀고 넘어간다.
 - 한 도메인 안에서만 도는 코드는 막히는 연산을 하기 전에는 fiber 가 바뀌지 않는다. mutex 가 필요 없을 수 있다.
 - mutex 로 감싸는 방식을 바꾸면 `rg -n '<함수 이름>' test/` 로 테스트 호출을 전부 센다.

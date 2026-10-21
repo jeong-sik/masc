@@ -1,0 +1,6 @@
+test suite	Test	2026-10-21T19:16:52.0581022Z [targeted] dune build test/test_lane_addon_request_discovery.exe test/test_lane_addon_request_progress.exe test/test_workspace_memory_capture.exe test/test_workspace_memory_execution_capture.exe test/test_lane_addon_host_cycle.exe test/test_candle_appraiser_transport.exe test/test_fs_compat.exe test/test_lane_addon_worker.exe config/prompts/candle_appraiser_grade.md config/prompts/candle_appraiser_relation.md config/prompts/candle_appraiser_weights.md bin/main_eio.exe test/fixtures/skill-ledger-async-actions.json
+test suite	Test	2026-10-21T19:19:08.2687649Z File "test/test_lane_addon_worker.ml", line 537, characters 19-82:
+test suite	Test	2026-10-21T19:19:08.2688321Z 537 |     exact_outputs=[{Types.name="author"; schema=`Assoc ["type", `String "object"]}]} in
+test suite	Test	2026-10-21T19:19:08.2688959Z                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test suite	Test	2026-10-21T19:19:08.2689463Z Error: Some record fields are undefined: request_schema
+test suite	Test	2026-10-21T19:19:39.4982814Z ##[error]Process completed with exit code 1.

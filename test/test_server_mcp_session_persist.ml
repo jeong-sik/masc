@@ -57,116 +57,117 @@ let test_roundtrip () = with_temp_base @@ fun base_path ->
   Session.load_sessions_from_file ~base_path ();
   check_original sid
 
-let test_blocked_writers_preserve_live_sessions () = with_temp_base @@ fun base_path ->
-  let first = "persist-blocked-original" and peer = "persist-independent-peer" in
+let test_concurrent_writers_leave_existing_fifo () = with_temp_base @@ fun base_path ->
+  let first = "persist-concurrent-original" and peer = "persist-concurrent-peer" in
   with_sessions [first;peer] @@ fun () ->
   let path = Session.sessions_file_path ~base_path () in
   Unix.mkdir (Filename.dirname path) 0o700;
-  let temporary = path ^ ".tmp" in
-  Unix.mkfifo temporary 0o600;
+  let unrelated = path ^ ".tmp" in
+  Unix.mkfifo unrelated 0o600;
+  remember first;
+  remember peer;
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
-  remember first;
-  let write () = save ~base_path () in
-  let original = Eio.Fiber.fork_promise ~sw write in
-  let queued = Eio.Fiber.fork_promise ~sw write in
-  (* Both real writes need the actual FIFO's reader. The live session registry
-     must remain usable before releasing that host resource. No I/O callback
-     or session store is substituted. *)
-  remember peer;
-  check_original peer;
-  ignore (Eio_guard.run_in_systhread ~label:"session-fixture-release-writer" (fun () ->
-    In_channel.with_open_bin temporary In_channel.input_all));
+  let original = Eio.Fiber.fork_promise ~sw (fun () -> save ~base_path ()) in
+  let queued = Eio.Fiber.fork_promise ~sw (fun () -> save ~base_path ()) in
   Eio.Promise.await_exn original;
   Eio.Promise.await_exn queued;
-  (match (Unix.lstat path).Unix.st_kind with
-   | Unix.S_REG -> ()
-   | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
-       fail "serialized final writer did not replace the temporary FIFO");
-  check bool "both actual writers released their temporary namespace" false (Sys.file_exists temporary);
+  check bool "completed snapshot is a regular file" true ((Unix.lstat path).Unix.st_kind = Unix.S_REG);
+  check bool "preexisting temporary FIFO remains in place" true ((Unix.lstat unrelated).Unix.st_kind = Unix.S_FIFO);
+  let names = Sys.readdir (Filename.dirname path) in
+  check bool "completed writers leave no private temporary residue" true
+    (Array.for_all (fun name -> name = Filename.basename path || name = Filename.basename unrelated) names);
   List.iter Session.forget_mcp_session [first;peer];
   Session.load_sessions_from_file ~base_path ();
   check_original first;
   check_original peer
 
-let with_held_read ~base_path bytes f =
-  let path = Session.sessions_file_path ~base_path () in
-  Unix.mkdir (Filename.dirname path) 0o700;
-  Unix.mkfifo path 0o600;
-  let mutex = Stdlib.Mutex.create () and condition = Condition.create () in
-  let opened = ref false and released = ref false in
-  let release () = Stdlib.Mutex.protect mutex (fun () ->
-    released := true; Condition.broadcast condition) in
-  let await_open () = Stdlib.Mutex.protect mutex (fun () ->
-    while not !opened do Condition.wait condition mutex done) in
-  Eio_main.run @@ fun _env ->
-  Eio.Switch.run @@ fun outer ->
-  Fun.protect ~finally:release @@ fun () ->
-  let writer = Eio.Fiber.fork_promise ~sw:outer (fun () ->
-    Eio_guard.run_in_systhread ~label:"session-fixture-held-read" (fun () ->
-      Out_channel.with_open_bin path (fun output ->
-        (* Opening the FIFO proves that the production reader has connected.
-           Keep actual JSON bytes withheld until the scenario releases them. *)
-        Stdlib.Mutex.protect mutex (fun () ->
-          opened := true; Condition.broadcast condition;
-          while not !released do Condition.wait condition mutex done);
-        output_string output bytes;
-        flush output))) in
-  f ~await_open:(fun () ->
-    Eio_guard.run_in_systhread ~label:"session-fixture-reader-connected" await_open) ~release;
-  Eio.Promise.await_exn writer
-
 let session_bytes sid = Yojson.Basic.to_string (`Assoc ["sessions",`Assoc [sid,`Assoc
     ["protocol_version",`String Session.mcp_protocol_version_default;
      "profile",`String "operator_remote";"last_active_sse",`Float (Unix.gettimeofday ())]]])
 
-let test_cancelled_read_does_not_apply_decoded_sessions () = with_temp_base @@ fun base_path ->
+let test_cancelled_restore_does_not_admit_or_apply () = with_temp_base @@ fun base_path ->
   let sid = "persist-cancelled-original" in
   with_sessions [sid] @@ fun () ->
+  let path = Session.sessions_file_path ~base_path () in
+  Unix.mkdir (Filename.dirname path) 0o700;
   let bytes = session_bytes sid in
-  with_held_read ~base_path bytes @@ fun ~await_open ~release ->
+  Out_channel.with_open_bin path (fun output -> output_string output bytes);
+  Eio_main.run @@ fun _env ->
   let exception Stop_restore in
-  let cancelled =
-    try
-      Eio.Switch.run (fun sw ->
-        Eio.Fiber.fork ~sw (fun () -> Session.load_sessions_from_file ~base_path ());
-        await_open ();
-        Eio.Switch.fail sw Stop_restore;
-        release ());
-      false
-    with Stop_restore -> true in
-  check bool "selected restore scope joins structural cancellation" true cancelled;
-  check bool "cancelled decode never publishes initialize authority" false (Session.is_known_session sid);
+  let cancelled = try
+    Eio.Switch.run (fun sw ->
+      Eio.Switch.fail sw Stop_restore;
+      Session.load_sessions_from_file ~base_path ());
+    false
+  with Stop_restore | Eio.Cancel.Cancelled _ -> true in
+  check bool "cancelled caller cannot enter restoration" true cancelled;
+  check bool "cancelled caller grants no initialize authority" false (Session.is_known_session sid);
   (match Session.validate_mcp_session_delete_profile
       ~profile:Server_mcp_transport_http_types.Operator_remote sid with
-   | Error _ -> () | Ok () -> fail "cancelled restore applied a transport profile");
-  let path = Session.sessions_file_path ~base_path () in
+   | Error _ -> () | Ok () -> fail "cancelled caller applied profile authority");
   skipped ~base_path (function
-    | Session.Restore_unsettled -> true
-    | Session.Restore_unobserved | Session.Restore_failed _ -> false);
-  check bool "cancelled restore cannot replace its unread original" true
-    ((Unix.lstat path).Unix.st_kind = Unix.S_FIFO);
-  (* A fresh, joined restore can consume the same original snapshot. *)
-  Sys.remove path;
-  Out_channel.with_open_bin path (fun output -> output_string output bytes);
+    | Session.Restore_unobserved -> true
+    | Session.Restore_unsettled | Session.Restore_failed _ -> false);
+  check string "unadmitted original retains its actual bytes" bytes
+    (In_channel.with_open_bin path In_channel.input_all);
+  Session.load_sessions_from_file ~base_path ();
+  check_original sid;
+  save ~base_path ()
+
+let test_preexisting_temporary_symlink_is_untouched () = with_temp_base @@ fun base_path ->
+  let sid = "persist-private-output" in
+  with_sessions [sid] @@ fun () ->
+  let path = Session.sessions_file_path ~base_path () in
+  Unix.mkdir (Filename.dirname path) 0o700;
+  let unrelated = path ^ ".tmp" and target = Filename.concat base_path "retained-target" in
+  let bytes = "preexisting symlink target evidence" in
+  Out_channel.with_open_bin target (fun output -> output_string output bytes);
+  Unix.symlink target unrelated;
+  remember sid;
+  save ~base_path ();
+  check string "save never truncates a preexisting symlink target" bytes
+    (In_channel.with_open_bin target In_channel.input_all);
+  check string "preexisting temporary symlink retains its target" target (Unix.readlink unrelated);
+  check bool "published snapshot is regular" true ((Unix.lstat path).Unix.st_kind = Unix.S_REG);
+  Session.forget_mcp_session sid;
   Session.load_sessions_from_file ~base_path ();
   check_original sid
 
-let test_connected_read_preserves_later_live_session () = with_temp_base @@ fun base_path ->
-  let original = "persist-read-original" and peer = "persist-during-read-peer" in
-  with_sessions [original;peer] @@ fun () ->
-  with_held_read ~base_path (session_bytes original) @@ fun ~await_open ~release ->
-  Eio.Switch.run @@ fun sw ->
-  let loading = Eio.Fiber.fork_promise ~sw (fun () -> Session.load_sessions_from_file ~base_path ()) in
-  await_open ();
-  (* The production read is connected but has not received any JSON. Changes
-     now must survive application; restoring a pre-read registry would lose them. *)
-  remember peer;
-  check_original peer;
-  release ();
-  Eio.Promise.await_exn loading;
-  check_original original;
-  check_original peer
+let test_nonregular_snapshot expected_kind create () = with_temp_base @@ fun base_path ->
+  let sid = "persist-nonregular-live" in
+  with_sessions [sid;"persist-unread-symlink-target"] @@ fun () ->
+  let path = Session.sessions_file_path ~base_path () in
+  Unix.mkdir (Filename.dirname path) 0o700;
+  let verify_resource = create path in
+  Session.load_sessions_from_file ~base_path ();
+  remember sid;
+  check_original sid;
+  skipped ~base_path (function
+    | Session.Restore_failed (Session.Non_regular_file kind) -> kind = expected_kind
+    | Session.Restore_failed (Session.Read_failed _ | Session.Json_failed _ | Session.Shape_rejected)
+    | Session.Restore_unobserved | Session.Restore_unsettled -> false);
+  ignore (Session.reap_stale_sessions ~base_path ~is_active_session:(fun _ -> true));
+  check bool "nonregular original remains in place" true ((Unix.lstat path).Unix.st_kind = expected_kind);
+  verify_resource ();
+  check_original sid
+
+let test_ready_destination_changed_to_fifo_is_preserved () = with_temp_base @@ fun base_path ->
+  let sid = "persist-changed-destination-live" in
+  with_sessions [sid] @@ fun () ->
+  let path = Session.sessions_file_path ~base_path () in
+  Unix.mkdir (Filename.dirname path) 0o700;
+  Session.load_sessions_from_file ~base_path ();
+  Unix.mkfifo path 0o600;
+  remember sid;
+  skipped ~base_path (function
+    | Session.Restore_failed (Session.Non_regular_file Unix.S_FIFO) -> true
+    | Session.Restore_failed (Session.Non_regular_file
+        (Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_SOCK)
+      | Session.Read_failed _ | Session.Json_failed _ | Session.Shape_rejected)
+    | Session.Restore_unobserved | Session.Restore_unsettled -> false);
+  check bool "earlier readiness does not authorize replacing a new FIFO" true ((Unix.lstat path).Unix.st_kind = Unix.S_FIFO);
+  check_original sid
 
 let test_overlay_preserves_original_field_policies () = with_temp_base @@ fun base_path ->
   let duplicate = "persist-duplicate" and existing = "persist-existing-optionals"
@@ -257,18 +258,19 @@ let test_failed_restore_preserves_original () =
     check bool "refused save never opens a temporary output" false
       (Sys.file_exists (path ^ ".tmp"));
     check_original sid)
-    ["{unclosed",(function Session.Json_failed _ -> true | Session.Read_failed _ | Session.Shape_rejected -> false);
-     "{\"not_sessions\":{}}",(function Session.Shape_rejected -> true | Session.Read_failed _ | Session.Json_failed _ -> false)]
+    ["{unclosed",(function Session.Json_failed _ -> true | Session.Read_failed _ | Session.Shape_rejected | Session.Non_regular_file _ -> false);
+     "{\"not_sessions\":{}}",(function Session.Shape_rejected -> true | Session.Read_failed _ | Session.Json_failed _ | Session.Non_regular_file _ -> false)]
 
 let test_read_failure_is_path_local_and_latched () = with_temp_base @@ fun damaged ->
   with_temp_base @@ fun independent ->
   let path = Session.sessions_file_path ~base_path:damaged () in
-  Unix.mkdir (Filename.dirname path) 0o700;
-  Unix.mkdir path 0o700;
-  (* Opening a directory as JSON produces a real host read failure, without
-     depending on root/non-root permission behavior. *)
+  let directory = Filename.dirname path in
+  (* A parent symlink loop is a real lookup failure, without using a
+     nonregular snapshot as if it were supported input. *)
+  Unix.symlink (Filename.basename directory) directory;
   Session.load_sessions_from_file ~base_path:damaged ();
-  Unix.rmdir path;
+  Unix.unlink directory;
+  Unix.mkdir directory 0o700;
   let original = "{\"sessions\":{}}\n" in
   Out_channel.with_open_bin path (fun output -> output_string output original);
   let sid = "persist-independent-after-refusal" in
@@ -282,7 +284,7 @@ let test_read_failure_is_path_local_and_latched () = with_temp_base @@ fun damag
   Session.load_sessions_from_file ~base_path:damaged ();
   let original_refusal = function
     | Session.Restore_failed (Session.Read_failed _) -> true
-    | Session.Restore_failed (Session.Json_failed _ | Session.Shape_rejected)
+    | Session.Restore_failed (Session.Json_failed _ | Session.Shape_rejected | Session.Non_regular_file _)
     | Session.Restore_unobserved | Session.Restore_unsettled -> false in
   skipped ~base_path:damaged original_refusal;
   check string "later readable replacement cannot clear this process refusal" original
@@ -320,10 +322,9 @@ let test_failed_write_can_retry_after_resource_release () = with_temp_base @@ fu
   let sid = "persist-write-error-live" in
   with_sessions [sid] @@ fun () ->
   let path = Session.sessions_file_path ~base_path () in
-  Unix.mkdir (Filename.dirname path) 0o700;
   Session.load_sessions_from_file ~base_path ();
-  let temporary = path ^ ".tmp" in
-  Unix.mkdir temporary 0o700;
+  let directory = Filename.dirname path in
+  Unix.symlink (Filename.concat base_path "absent-session-directory") directory;
   remember sid;
   (match Session.save_sessions_to_file ~base_path () with
    | Session.Save_failed _ -> ()
@@ -331,7 +332,8 @@ let test_failed_write_can_retry_after_resource_release () = with_temp_base @@ fu
    | Session.Skipped _ -> fail "write error was confused with a restore refusal");
   check bool "failed write did not create a completed snapshot" false (Sys.file_exists path);
   check_original sid;
-  Unix.rmdir temporary;
+  Unix.unlink directory;
+  Unix.mkdir directory 0o700;
   save ~base_path ();
   Session.forget_mcp_session sid;
   Session.load_sessions_from_file ~base_path ();
@@ -341,12 +343,32 @@ let () =
   run "server_mcp_session_persist"
     ["persistence",
       [test_case "save/forget/load retains original session and profile" `Quick test_roundtrip;
-       test_case "blocked serialized writers preserve independent live session work" `Quick
-         test_blocked_writers_preserve_live_sessions;
-       test_case "cancelled physical read does not apply decoded sessions" `Quick
-         test_cancelled_read_does_not_apply_decoded_sessions;
-       test_case "connected restore preserves independent session created during physical read" `Quick
-         test_connected_read_preserves_later_live_session;
+       test_case "concurrent regular outputs leave a preexisting FIFO untouched" `Quick
+         test_concurrent_writers_leave_existing_fifo;
+       test_case "cancelled caller cannot admit or apply a regular snapshot" `Quick
+         test_cancelled_restore_does_not_admit_or_apply;
+       test_case "private output never follows a preexisting temporary symlink" `Quick
+         test_preexisting_temporary_symlink_is_untouched;
+       test_case "FIFO snapshot is refused without a writer" `Quick
+         (test_nonregular_snapshot Unix.S_FIFO (fun path -> Unix.mkfifo path 0o600; fun () -> ()));
+       test_case "directory snapshot preserves child evidence" `Quick
+         (test_nonregular_snapshot Unix.S_DIR (fun path ->
+           Unix.mkdir path 0o700;
+           let child = Filename.concat path "retained-evidence" in
+           let bytes = "original directory evidence" in
+           Out_channel.with_open_bin child (fun output -> output_string output bytes);
+           fun () -> check string "original directory child survives" bytes (In_channel.with_open_bin child In_channel.input_all)));
+       test_case "snapshot symlink is refused without changing its target" `Quick
+         (test_nonregular_snapshot Unix.S_LNK (fun path ->
+           let target = path ^ ".target" in
+           let bytes = session_bytes "persist-unread-symlink-target" in
+           Out_channel.with_open_bin target (fun output -> output_string output bytes);
+           Unix.symlink target path;
+           fun () ->
+             check string "original symlink target survives" bytes (In_channel.with_open_bin target In_channel.input_all);
+             check bool "symlink target grants no initialize authority" false (Session.is_known_session "persist-unread-symlink-target")));
+       test_case "ready path changed to FIFO is preserved" `Quick
+         test_ready_destination_changed_to_fifo_is_preserved;
        test_case "actual overlays retain duplicate and optional-field authority" `Quick
          test_overlay_preserves_original_field_policies;
        test_case "failed JSON and root restore preserve actual snapshots" `Quick

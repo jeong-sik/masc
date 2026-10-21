@@ -89,6 +89,14 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   latch하지 않아 실제 자원이 풀린 뒤 다시 저장할 수 있다. 취소·예상 밖 예외는 전파한다.
   복원 실패의 새 세션은 메모리에만 남는다고 시작 경고에 밝히고, 반복 생략은 기존 routine
   로그로 남긴다. 저장 완료만 파일 교체 증거이며 생략·실패를 성공이나 지연 개선으로 세지 않는다.
+  snapshot 최종 경로는 일반 파일이어야 한다. 기존 `.tmp`를 열거나 지우지 않고 원래 디렉터리에
+  `Filename.open_temp_file`로 새 출력을 독점 생성한다. 정상 close 뒤 rename하고 실패하면 자신이
+  만든 출력만 정리한다. Ready였던 목적지도 저장 전에 종류를 다시 확인한다. 입력은 lstat 뒤
+  nonblocking·close-on-exec open과 fstat의 종류·dev/inode를 확인한 뒤 같은 descriptor에서 읽는다.
+  FIFO·symlink 등은 `Non_regular_file`로 보존하고 경로가 open 중 바뀌면 읽기 실패로 남긴다.
+  이미 취소된 caller는 복원 token 예약 전에 거절한다. 실제 host I/O가 즉시 취소되거나 외부의
+  디렉터리 변경이 잠긴다고 주장하지 않는다. FIFO를 정상 출력/입력처럼 쓰던 fixture는 지우고,
+  원본 자원 보존·일반 파일 동시 저장·취소된 진입·정상 복원을 검증하는 실제 자원 시나리오로 바꾼다.
 
 - Ask 답변 복구의 사전 증거는 같은 회차·Keeper·canonical answer의 UTC-day window에서만
   공유한다. 실제 첫 수요에서 캡처하고 원본 답변 행이 하나뿐인 window의 큰 proof 집합은 보관하지 않는다.

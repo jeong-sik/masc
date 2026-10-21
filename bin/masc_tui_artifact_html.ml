@@ -86,19 +86,20 @@ let image attributes =
        | None -> Unavailable "external image; use the original web report") in
   {label;source}
 
-let rec table_rows nodes =
+let rec table_parts nodes =
   List.concat_map (function
     | Html.Text _ -> []
     | Element {name;attributes;children;_} ->
       if element name = Suppressed || hidden attributes then []
+      else if name = "caption" then [`Caption children]
       else if name = "tr" then
         let cells = List.filter_map (function
           | Html.Element ({name=("th"|"td");attributes;_} as element)
               when not (hidden attributes) ->
             Some {text=words (text (Html.Element element));heading=element.name="th"}
           | Html.Text _ | Element _ -> None) children in
-        if cells=[] then [] else [cells]
-      else if name = "table" then [] else table_rows children) nodes
+        if cells=[] then [] else [`Row cells]
+      else if name = "table" then [] else table_parts children) nodes
 
 let rec flow depth nodes =
   let buffer = Buffer.create 64 in
@@ -138,7 +139,20 @@ let rec flow depth nodes =
                   else List_continuation (depth,value)
                 | (Heading _ | Preformatted _ | List_item _ | List_continuation _
                   | Table _ | Image _) as block -> block)
-            | Table_element -> [Table (table_rows children)]
+            | Table_element ->
+              let rows = ref [] in
+              let parts = ref [] in
+              let append block = parts := block :: !parts in
+              let flush_rows () = match !rows with
+                | [] -> ()
+                | pending -> rows := []; append (Table (List.rev pending)) in
+              table_parts children |> List.iter (function
+                | `Row cells -> rows := cells :: !rows
+                | `Caption children ->
+                  flush_rows ();
+                  List.iter append (flow depth children));
+              flush_rows ();
+              List.rev !parts
             | Block -> flow depth children
             | Suppressed | Inline | Link | Break -> [] in
           List.iter emit nested in

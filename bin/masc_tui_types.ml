@@ -8555,7 +8555,7 @@ type state = {
   mutable resource_pending_key: Masc_tui_resource_catalog.key option;
   mutable resource_read_owner: unit ref option;
   mutable resource_revision_history: Masc_tui_resource_catalog.report list;
-  mutable resource_scroll: int;
+  mutable resource_scroll: Masc_tui_scroll.Position.t;
   (* Logical search match is independent of last-page scroll clamping. *)
   mutable resource_search_cursor: int;
   mutable resource_focus: pane_focus;
@@ -11018,7 +11018,7 @@ let retain_resource_read state ~key =
   if not same_resource then begin
     state.resource_content <- None;
     state.resource_content_error <- None;
-    state.resource_scroll <- 0;
+    state.resource_scroll <- Masc_tui_scroll.Position.first;
     state.resource_search_cursor <- 0;
     state.resource_text_cursor <- 0
   end
@@ -15379,7 +15379,7 @@ let create_state
   resource_pending_key = None;
   resource_read_owner = None;
   resource_revision_history = [];
-  resource_scroll = 0;
+  resource_scroll = Masc_tui_scroll.Position.first;
   resource_search_cursor = 0;
   resource_focus = Left_pane;
   resource_image_cursor = 0;
@@ -16876,11 +16876,9 @@ type clamped_scroll =
      rows exist only once the drawing has read the tree, and the keypress
      stepped the stored value past them unbounded. *)
   | Repository_changes_diff_scroll of int
-  (* Both surfaces worked out the row they could actually draw and then threw
-     it away: the drawing clamped for display while the stored value kept
-     climbing, so coming back up took one keypress per step taken past the
-     end. Same report the diff already makes. *)
-  | Resource_scroll of int
+  (* The resource frame normalizes an absolute position while preserving a
+     selected end across reflow. Relative keys use the current pane extent. *)
+  | Resource_scroll of Masc_tui_scroll.Position.t
   (* The telemetry sections are lines the drawing formats out of the readings
      it holds, so their count is not knowable at the keypress either. This
      surface was the last one clamping for display without reporting: its
@@ -16923,15 +16921,8 @@ type clamped_scroll =
    cannot work the number out -- that is what a {!clamped_scroll} is -- and a
    value it can name has to be larger than any surface's rows.
 
-   [max_int] rather than a number someone judged large enough. An MCP resource
-   reading carries whatever text the server sent and the frame wraps it, so
-   the row count has no ceiling to sit above; a finite sentinel is a row the
-   reader can be left at, and it would be left there silently.
-
-   Arithmetic on this value is safe because it does not survive a frame. The
-   drawing clamps with [min state.resource_scroll max_scroll] and reports the
-   result back through [Resource_scroll], so by the time a page key adds to
-   [resource_scroll] it holds the real last row, not this. *)
+   [max_int] is above every representable row count. The frame normalizes the
+   request through that surface's own scroll report. *)
 let clamped_scroll_end = max_int
 
 (* Moving down from [clamped_scroll_end]. The sentinel waits for a frame to

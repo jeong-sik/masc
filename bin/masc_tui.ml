@@ -7145,10 +7145,6 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
       (match state.changes_diff_row with
        | Some _ -> pane (fun v -> Changes_diff_scroll v)
        | None -> None)
-  (* The resource reading beside the catalog. The catalog is a row list and
-     [row_list] has it. *)
-  | Resources when state.resource_focus = Right_pane ->
-      pane (fun v -> Resource_scroll v)
   (* Two panes read this way and still answer no, each for a reason of its
      own rather than for want of an arm.
 
@@ -7178,6 +7174,13 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
   (* A fixed summary that fits its frame: nothing on it scrolls. *)
   | Overview -> None
 
+
+let move_resource_document state movement =
+  let _, cols = get_terminal_size () in
+  let count, height = Masc_tui_render_resources.document_viewport state
+      ~rows:(surface_rows state) ~cols in
+  state.resource_scroll <- Masc_tui_scroll.Position.move ~count ~height
+      movement state.resource_scroll
 
 (* Move the active surface's row cursor to the next row whose search text
    contains [query], scanning from [after] and wrapping; [backwards] walks
@@ -13538,7 +13541,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resource_pending_key <- None;
   state.resource_read_owner <- None;
   state.resource_revision_history <- [];
-  state.resource_scroll <- 0;
+  state.resource_scroll <- Masc_tui_scroll.Position.first;
   state.resource_image_cursor <- 0;
   state.resource_text_cursor <- 0;
   state.observer_cursor <- None;
@@ -29050,7 +29053,7 @@ and is loaded on demand through keeper_skill.
            Masc_tui_resources_updates.toggle_presentation state
        | Some "i" when state.view = Resources && state.resource_focus = Right_pane ->
            state.resource_metadata_expanded <- not state.resource_metadata_expanded;
-           state.resource_scroll <- 0;
+           state.resource_scroll <- Masc_tui_scroll.Position.first;
            state.resource_search_cursor <- 0
        | Some "\015" when state.view = Resources && state.resource_focus = Right_pane ->
            open_resource_image state ~mailbox:async_messages
@@ -29226,10 +29229,9 @@ and is loaded on demand through keeper_skill.
        | Some "\r" when state.view = Resources ->
            Masc_tui_resources_updates.open_selected state ~read:(fun ~key -> Masc_tui_resources_requests.launch_read state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox:async_messages) ~key)
        | Some "J" when state.view = Resources ->
-           state.resource_scroll <-
-             Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
+           move_resource_document state (Masc_tui_scroll.Position.By 1)
        | Some "K" when state.view = Resources ->
-           state.resource_scroll <- max 0 (state.resource_scroll - 1)
+           move_resource_document state (Masc_tui_scroll.Position.By (-1))
        | Some "H" when state.view=Planning && state.planning_mode=Planning_list
            && Option.is_some state.task_detail_id ->
            Option.iter (launch_task_history_load ~older:true state ~mailbox:async_messages) state.task_detail_id
@@ -30491,6 +30493,11 @@ and is loaded on demand through keeper_skill.
               | "pageup" -> Masc_tui_scroll.page_up ~count ~height state.config_scroll
               | "pagedown" -> Masc_tui_scroll.page_down ~count ~height state.config_scroll
               | _ -> Masc_tui_scroll.normalize ~count ~height state.config_scroll)
+       (* Resources retains the selected edge through reflow. *)
+       | Some ("home" | "end")
+         when state.view = Resources && state.resource_focus = Right_pane ->
+           move_resource_document state
+             (if key = Some "end" then Masc_tui_scroll.Position.Last else First)
        (* A reading pane before the list behind it: a detail that is open owns
           the scroll keys, and moving the list under it would leave the cursor
           somewhere the reader cannot see. The pane reports its own clamp, so
@@ -30791,11 +30798,8 @@ and is loaded on demand through keeper_skill.
              | Resources ->
                  (match state.resource_focus with
                   | Right_pane ->
-                      state.resource_scroll <-
-                        (if direction > 0 then
-                          Masc_tui_types.scroll_down_from state.resource_scroll
-                            ~by:page
-                        else max 0 (state.resource_scroll + (direction * page)))
+                      move_resource_document state
+                        (Masc_tui_scroll.Position.By (direction * page))
                   | Left_pane ->
                       let entries = Masc_tui_render_resources.list_page_size state
                           ~rows:(surface_rows state) in
@@ -31700,8 +31704,7 @@ and is loaded on demand through keeper_skill.
                     ~current:state.config_scroll
             | Resources ->
                 if state.resource_focus = Right_pane then
-                  state.resource_scroll <-
-                    Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
+                  move_resource_document state (Masc_tui_scroll.Position.By 1)
                 else
                   let total =
                     match visible_resources state with
@@ -32023,7 +32026,7 @@ and is loaded on demand through keeper_skill.
                     ~current:state.config_scroll
             | Resources ->
                 if state.resource_focus = Right_pane then
-                  state.resource_scroll <- max 0 (state.resource_scroll - 1)
+                  move_resource_document state (Masc_tui_scroll.Position.By (-1))
                 else if state.resources_cursor > 0 then
                   state.resources_cursor <- state.resources_cursor - 1
             | Metrics ->

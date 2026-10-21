@@ -18,6 +18,22 @@ val normalize : count:int -> height:int -> int -> int
 (** A scroll held inside {!maximum}. Reading is safe on a stale value; it is
     the moving that has to be bounded. *)
 
+module Position : sig
+  (** A reading position with an explicit end selection. Normalizing a frame
+      preserves that selection; only navigation or a new reading releases it. *)
+  type t
+  type movement = First | Last | By of int
+  val first : t
+  val at : int -> t
+  (** An explicit source/search landing. Negative positions start at zero. *)
+  val offset : count:int -> height:int -> t -> int
+  val clamp : count:int -> height:int -> t -> t
+  (** Clamp an absolute offset while retaining an end selection. *)
+  val move : count:int -> height:int -> movement -> t -> t
+  (** Relative navigation starts at the current bounded position and releases
+      the end selection. [First] releases it; [Last] selects it. *)
+end
+
 val down : count:int -> height:int -> int -> int
 val up : count:int -> height:int -> int -> int
 

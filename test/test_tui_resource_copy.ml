@@ -36,9 +36,9 @@ let unchanged s original =
 
 let exact_source () =
   let s=state () in
-  s.resource_scroll <- 17;s.resource_search_cursor <- 23;
+  s.resource_scroll <- Masc_tui_scroll.Position.at 17;s.resource_search_cursor <- 23;
   check string "original source bytes, not a display projection" raw (source s);
-  check int "copy leaves scroll" 17 s.resource_scroll;
+  check int "copy leaves scroll" 17 (Masc_tui_scroll.Position.offset ~count:40 ~height:1 s.resource_scroll);
   check int "copy leaves logical match" 23 s.resource_search_cursor;
   check int "copy leaves catalog selection" 0 s.resources_cursor;
   unchanged s parts

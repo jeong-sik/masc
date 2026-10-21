@@ -18,6 +18,13 @@ let list_viewport state ~rows =
 
 let list_page_size state ~rows = snd (list_viewport state ~rows)
 
+let document_viewport state ~rows ~cols =
+  let pane_cols = if resource_split state ~cols then cols - keeper_roster_pane_cols else cols in
+  let count = match Masc_tui_resource_document.current state with
+    | None -> 0
+    | Some reading -> List.length (Masc_tui_resource_document.rows ~cols:pane_cols reading) in
+  count, pane_surface_content_height ~rows
+
 let render_resources (state : state) =
   let drawn_resource_scroll = ref state.resource_scroll in
   let terminal_rows, cols = get_terminal_size () in
@@ -130,12 +137,14 @@ let render_resources (state : state) =
      | Some reading ->
          let rendered = Masc_tui_resource_document.rows ~cols:pane_cols reading in
          let total_lines = List.length rendered in
-         let max_scroll = max 0 (total_lines - content_height) in
-         let scroll = max 0 (min state.resource_scroll max_scroll) in
+         let position = Masc_tui_scroll.Position.clamp ~count:total_lines
+             ~height:content_height state.resource_scroll in
+         let scroll = Masc_tui_scroll.Position.offset ~count:total_lines
+             ~height:content_height position in
          let rendered_window = Rows.of_list ~first:scroll ~height:content_height rendered in
          (* The pane is the only place that knows how many rows the text
             actually used, so it reports the row it could draw back out. *)
-         drawn_resource_scroll := scroll;
+         drawn_resource_scroll := position;
          for i = 0 to content_height - 1 do
            match Rows.at rendered_window (scroll + i) with
            | Some line -> box_line pane_buf pane_cols ("  " ^ line)

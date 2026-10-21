@@ -1874,7 +1874,7 @@
  (name masc_tui_resources_updates)
  (wrapped false)
  (modules masc_tui_resources_updates)
- (libraries masc_tui_artifact_check_action masc_tui_resource_document masc_tui_resource_catalog masc_tui_artifact_checks masc_tui_fetched masc_tui_types masc_tui_mcp masc))
+ (libraries masc_tui_scroll masc_tui_artifact_check_action masc_tui_resource_document masc_tui_resource_catalog masc_tui_artifact_checks masc_tui_fetched masc_tui_types masc_tui_mcp masc))
 
 (library
  (name masc_tui_board_updates)

@@ -164,6 +164,153 @@ let test_mixed_append_file_and_jsonl_share_mutex () =
     (n_threads * n_records_per_thread)
     (Hashtbl.length seen)
 
+(* A reader on this very scheduler can release a blocked FIFO open/write.
+   No elapsed-time threshold: success requires the original bytes to arrive. *)
+let test_eio_fifo_append append =
+  let dir = tmpdir "fs_compat_eio_fifo" in
+  let path = Filename.concat dir "out.jsonl" in
+  Unix.mkfifo path 0o600;
+  let rows = [ `String "한글 첫 기록"; `Assoc [ "second", `Bool true ] ] in
+  let expected =
+    String.concat "" (List.map (fun row -> Yojson.Safe.to_string row ^ "\n") rows)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Fs_compat.reset_fd_cache_for_testing ();
+      Unix.unlink path;
+      Unix.rmdir dir)
+    (fun () ->
+      Eio_main.run (fun _env ->
+        Eio.Fiber.both
+          (fun () -> append path rows)
+          (fun () ->
+            let received =
+              Eio_unix.run_in_systhread (fun () ->
+                let ic = open_in_bin path in
+                Fun.protect ~finally:(fun () -> close_in_noerr ic)
+                  (fun () -> really_input_string ic (String.length expected)))
+            in
+            check string "all original records received" expected received)))
+
+let test_eio_mixed_writers () =
+  let dir = tmpdir "fs_compat_eio_mixed" in
+  let path = Filename.concat dir "out.jsonl" in
+  let row writer index =
+    `Assoc [ "writer", `String writer; "index", `Int index;
+             "payload", `String (String.make 8192 'x' ^ "한글") ]
+  in
+  let expected =
+    [ row "single" 1; row "batch" 1; row "batch" 2; row "string" 1 ]
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Fs_compat.reset_fd_cache_for_testing ();
+      Unix.unlink path;
+      Unix.rmdir dir)
+    (fun () ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Fun.protect ~finally:Fs_compat.clear_fs (fun () ->
+          Eio.Fiber.all
+            [ (fun () -> Fs_compat.append_jsonl path (row "single" 1));
+              (fun () -> Fs_compat.append_jsonl_batch path
+                  [ row "batch" 1; row "batch" 2 ]);
+              (fun () -> Fs_compat.append_file path
+                  (Yojson.Safe.to_string (row "string" 1) ^ "\n")) ]));
+      let actual = read_lines path |> List.map Yojson.Safe.from_string in
+      let canonical rows = List.map Yojson.Safe.to_string rows |> List.sort String.compare in
+      check (list string) "complete records persisted exactly once"
+        (canonical expected) (canonical actual);
+      let batch_rows =
+        actual |> List.filter (fun value ->
+          Yojson.Safe.Util.(value |> member "writer" |> to_string) = "batch")
+      in
+      check (list int) "batch order retained" [ 1; 2 ]
+        (List.map (fun value -> Yojson.Safe.Util.(value |> member "index" |> to_int)) batch_rows))
+
+let test_eio_errors_and_empty_batch () =
+  let dir = tmpdir "fs_compat_eio_error" in
+  Fun.protect ~finally:(fun () -> Unix.rmdir dir) (fun () ->
+    Eio_main.run (fun _env ->
+      let refused append =
+        match append () with
+        | () -> fail "append to directory should fail"
+        | exception Sys_error _ -> ()
+        | exception Unix.Unix_error _ -> ()
+      in
+      refused (fun () -> Fs_compat.append_jsonl dir (`String "single"));
+      refused (fun () -> Fs_compat.append_jsonl_batch dir [ `String "batch" ]);
+      let absent = Filename.concat dir "absent/out.jsonl" in
+      Fs_compat.append_jsonl_batch absent [];
+      check bool "empty batch does not create parent" false
+        (Sys.file_exists (Filename.dirname absent))))
+
+let test_cancelled_before_append append =
+  let dir = tmpdir "fs_compat_cancel_before" in
+  let path = Filename.concat dir "absent/out.jsonl" in
+  Fun.protect ~finally:(fun () -> Unix.rmdir dir) (fun () ->
+    Eio_main.run (fun _env ->
+      let cancelled =
+        try
+          Eio.Cancel.sub (fun context ->
+            Eio.Cancel.cancel context Exit;
+            append path [ `String "must not be written" ]);
+          false
+        with Eio.Cancel.Cancelled _ -> true
+      in
+      check bool "dispatch refused cancellation" true cancelled;
+      check bool "no directory was created" false
+        (Sys.file_exists (Filename.dirname path))))
+
+let test_cancelled_during_append append =
+  let dir = tmpdir "fs_compat_cancel_entered" in
+  let path = Filename.concat dir "out.jsonl" in
+  Unix.mkfifo path 0o600;
+  (* Exceeds the FIFO buffer so opening the reader confirms that the writer
+     entered, while withholding reads keeps that original job outstanding. *)
+  let row = `String (String.make (4 * 1024 * 1024) 'x') in
+  let expected = Yojson.Safe.to_string row ^ "\n" in
+  let acknowledged = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      Fs_compat.reset_fd_cache_for_testing ();
+      Unix.unlink path;
+      Unix.rmdir dir)
+    (fun () ->
+      Eio_main.run (fun _env ->
+        Eio.Switch.run (fun sw ->
+          let context, publish_context = Eio.Promise.create () in
+          let settled, publish_settled = Eio.Promise.create () in
+          Eio.Fiber.fork ~sw (fun () ->
+            let result =
+              try
+                Eio.Cancel.sub (fun cancel ->
+                  Eio.Promise.resolve publish_context cancel;
+                  append path [ row ];
+                  acknowledged := true);
+                Ok ()
+              with
+              | Eio.Cancel.Cancelled _ -> Ok ()
+              | exn -> Error exn
+            in
+            Eio.Promise.resolve publish_settled result);
+          let cancel = Eio.Promise.await context in
+          let ic = Eio_unix.run_in_systhread (fun () -> open_in_bin path) in
+          Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+            Eio.Cancel.cancel cancel Exit;
+            let actual = Eio_unix.run_in_systhread (fun () ->
+              really_input_string ic (String.length expected)) in
+            (match Eio.Promise.await settled with
+             | Ok () -> ()
+             | Error exn -> raise exn);
+            check bool "commit acknowledgement after joined write" true !acknowledged;
+            check bool "original record completed" true (String.equal expected actual);
+            Unix.set_nonblock (Unix.descr_of_in_channel ic);
+            (match input_char ic with
+             | _ -> fail "unexpected bytes after the completed record"
+             | exception End_of_file -> ()
+             | exception Sys_blocked_io -> ())))))
+
 let () =
   Alcotest.run
     "fs_compat_append_jsonl_atomicity"
@@ -173,5 +320,24 @@ let () =
           test_concurrent_threads;
         test_case "append_file and append_jsonl share path mutex" `Quick
           test_mixed_append_file_and_jsonl_share_mutex;
+        test_case "Eio single appends yield to their FIFO reader" `Quick
+          (fun () -> test_eio_fifo_append (fun path rows ->
+            List.iter (Fs_compat.append_jsonl path) rows));
+        test_case "Eio batch append yields to its FIFO reader" `Quick
+          (fun () -> test_eio_fifo_append Fs_compat.append_jsonl_batch);
+        test_case "Eio mixed writers retain complete records" `Quick
+          test_eio_mixed_writers;
+        test_case "Eio writer errors and empty batches retain their result" `Quick
+          test_eio_errors_and_empty_batch;
+        test_case "single append cancelled before dispatch" `Quick
+          (fun () -> test_cancelled_before_append (fun path rows ->
+            List.iter (Fs_compat.append_jsonl path) rows));
+        test_case "batch append cancelled before dispatch" `Quick
+          (fun () -> test_cancelled_before_append Fs_compat.append_jsonl_batch);
+        test_case "single append cancellation waits for commit acknowledgement" `Quick
+          (fun () -> test_cancelled_during_append (fun path rows ->
+            List.iter (Fs_compat.append_jsonl path) rows));
+        test_case "batch append cancellation waits for commit acknowledgement" `Quick
+          (fun () -> test_cancelled_during_append Fs_compat.append_jsonl_batch);
       ]
     ]

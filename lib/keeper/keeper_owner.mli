@@ -383,6 +383,10 @@ val restart_interrupted_operations : t -> Chat_operation.t list
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
 val direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_native_call.state, error) result
+(** Admit a native call for dispatch: a fresh one, a replacement for a retired
+    one, or the same call again when its scope resumes. A stopping Owner refuses
+    it with [Owner_stopping]. Checkpoint and terminal receipts are still
+    accepted while it stops. *)
 val bind_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
   observed:Keeper_native_call.state -> call:Keeper_native_call.t -> (unit, error) result
 val checkpoint_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->

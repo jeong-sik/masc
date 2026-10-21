@@ -67,11 +67,19 @@ let render_resources (state : state) =
     let period = match state.resource_day with
       | None -> "all dates"
       | Some day -> Printf.sprintf "%04d-%02d-%02d local" day.year day.month day.day in
+    let today = Catalog.local_day (Unix.gettimeofday ()) in
+    let unchecked = match resource_unchecked_today state ~day:today with
+      | None -> "unknown"
+      | Some count -> string_of_int count in
+    let query = match Masc_tui_fetched.current state.artifact_checks with
+      | Some (_, (Ready inventory | Stale (inventory, _))) ->
+        let at = Unix.localtime inventory.received_at in
+        Printf.sprintf " · last check query %02d:%02d:%02d" at.tm_hour at.tm_min at.tm_sec
+      | Some (_, (Absent | Loading | Failed _)) | None -> " · checks not read" in
     framed_line pane_buf pane_cols (Ansi.dim ^ " " ^ period
-      ^ " · f: format · t: today · w: layout" ^ Ansi.reset);
+      ^ " · today unchecked: " ^ unchecked ^ query ^ Ansi.reset);
     let list_rows_budget, visible = list_viewport state ~rows in
     let first = max 0 (cursor - visible + 1) in
-    let today = Catalog.local_day (Unix.gettimeofday ()) in
     for i = 0 to list_rows_budget - 1 do
       let index = first + i / entry_rows in
       match List.nth_opt rows_list index with
@@ -80,6 +88,8 @@ let render_resources (state : state) =
           let metadata = Catalog.metadata resource in
           let line = match i mod entry_rows with
             | 0 -> (if selected then " ▸ " else "   ") ^ Catalog.display_name resource
+              ^ (match resource with Catalog.Mcp _ -> ""
+                | Report report -> " · " ^ Masc_tui_artifact_checks.label (resource_check_status state report))
               ^ (if Catalog.on_day today resource then " · today" else "")
             | 1 -> "   " ^ (match resource with
                 | Catalog.Report report -> report.revision.summary

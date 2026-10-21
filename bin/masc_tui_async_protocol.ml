@@ -681,6 +681,8 @@ type async_msg =
   | Play_invite_issued of Masc_tui_types.play_change_request * play_sink * Masc.Tui_decode.play_invite_issued play_mutation
   | Play_invite_revoked of Masc_tui_types.play_change_request * play_sink * string * play_revoke
   | Librarian_input_loaded of string * (string list, string) result
+  | Artifact_checks_loaded of unit Masc_tui_fetched.request
+      * (Masc_tui_artifact_checks.inventory, string) result
   | Resources_listed of
       (Masc_tui_resource_catalog.listing, string) result
   (* The scope travels with the directory. Without it a reply names a
@@ -987,7 +989,7 @@ let rec workspace_message_is_read = function
   | Preset_contents_shown _
   | Play_invites_listed _
   | Librarian_input_loaded _
-  | Resources_listed _
+  | (Resources_listed _ | Artifact_checks_loaded _)
   | Code_entries_loaded _
   | Code_catalog_loaded _ | Code_finder_file_loaded _
   | Code_file_loaded _
@@ -1194,7 +1196,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Preset_saved (_, _) | Preset_restored (_, _) | Preset_deleted (_, _)
     | Play_room_received (_, _) | Play_invites_listed (_, _)
     | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _)
-    | Librarian_input_loaded (_, _) | Resources_listed _
+    | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _)
     | Code_draft_saved _ | Code_catalog_loaded _ | Code_finder_file_loaded _
     | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
     | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
@@ -1331,7 +1333,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Preset_saved (_, _) | Preset_restored (_, _) | Preset_deleted (_, _)
   | Play_room_received (_, _) | Play_invites_listed (_, _)
   | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _)
-  | Librarian_input_loaded (_, _) | Resources_listed _
+  | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _)
   | Code_draft_saved _ | Code_catalog_loaded _ | Code_finder_file_loaded _
   | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
   | Code_history_loaded (_, _) | Code_diff_loaded (_, _)

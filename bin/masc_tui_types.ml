@@ -8537,6 +8537,8 @@ type state = {
   mutable voice_wizard_requests: int;
   mutable resources_list: Masc_tui_resource_catalog.t list option;
   mutable resources_error: string option;
+  mutable resources_reports_complete: bool;
+  mutable artifact_checks: (unit, Masc_tui_artifact_checks.inventory) Masc_tui_fetched.t;
   mutable resources_cursor: int;
   mutable resource_scope: Masc_tui_resource_catalog.scope;
   mutable resource_day: Masc_tui_resource_catalog.day option;
@@ -10977,6 +10979,16 @@ let visible_resources state =
   Option.map (Masc_tui_resource_catalog.select ~scope:state.resource_scope
     ~day:state.resource_day) state.resources_list
 
+let resource_check_status state report =
+  if server_authority_ready state then Masc_tui_artifact_checks.resolve state.artifact_checks report
+  else Masc_tui_artifact_checks.Unknown "workspace identity is unconfirmed"
+
+let resource_unchecked_today state ~day =
+  if not (server_authority_ready state) then None
+  else Option.bind state.resources_list (fun entries ->
+    Masc_tui_artifact_checks.unchecked_on_day
+      ~reports_complete:state.resources_reports_complete ~day ~entries state.artifact_checks)
+
 let resource_split state ~cols =
   state.resource_layout = Masc_tui_resource_catalog.Side_by_side
   && cols >= Masc_tui_roster_pane.threshold_cols
@@ -11813,6 +11825,7 @@ let suspend_workspace_readings state =
   state.preset_detail <- Masc_tui_fetched.suspend state.preset_detail;
   state.keeper_board_quarantines <- Masc_tui_fetched.suspend state.keeper_board_quarantines;
   state.workspace_activity <- Masc_tui_fetched.suspend state.workspace_activity;
+  state.artifact_checks <- Masc_tui_fetched.suspend state.artifact_checks;
   state.memory_input <- Masc_tui_fetched.suspend state.memory_input;
   state.memory_facts <- Masc_tui_fetched.suspend state.memory_facts;
   state.code_listing <- Masc_tui_fetched.suspend state.code_listing;
@@ -15325,6 +15338,8 @@ let create_state
   voice_wizard_requests = 0;
   resources_list = None;
   resources_error = None;
+  resources_reports_complete = false;
+  artifact_checks = Masc_tui_fetched.initial;
   resources_cursor = 0;
   resource_scope = Masc_tui_resource_catalog.All_resources;
   resource_day = None;

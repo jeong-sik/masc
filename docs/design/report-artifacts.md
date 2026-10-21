@@ -195,5 +195,16 @@ the same rule. Opening a report never checks it automatically.
 Successful, conflicting and failed writes all require an authoritative reread;
 the controls never optimistically confirm or automatically retry. Retiring the
 credential epoch or selected revision retires the local write owner, even when
-the server may already have committed its request. TUI controls and live
-cross-client verification remain separate work.
+the server may already have committed its request.
+
+The TUI library independently reads this inventory on entry and explicit
+refresh. Published report rows and the selected fixed revision show the shared
+confirmation state; a checked or explicitly unchecked record retains its actor
+and time. The list header shows today's unchecked current revisions and the last
+successful check-query time. These observations do not write a confirmation.
+Pending or failed refreshes, partial inventories, mismatched body digests and
+unconfirmed workspace identity leave the current confirmation/count unknown.
+Report inventory failure does not hide MCP resources, and MCP failure does not
+invalidate an otherwise complete report count. Superseded or withdrawn check
+responses cannot restore an older observation. Explicit TUI check/uncheck controls
+and live cross-client verification remain separate work.

@@ -31,11 +31,18 @@ let reconcile state =
 
 let listed state result =
   match result with
-  | Ok { Catalog.entries = rows; notes } ->
+  | Ok { Catalog.entries = rows; notes; reports_complete } ->
     state.resources_list <- Some rows;
+    state.resources_reports_complete <- reports_complete;
     state.resources_error <- (match notes with [] -> None | _ -> Some (String.concat " · " notes));
     reconcile state
-  | Error detail -> state.resources_error <- Some detail
+  | Error detail ->
+    state.resources_reports_complete <- false;
+    state.resources_error <- Some detail
+
+let checks_loaded state request result =
+  state.artifact_checks <- Masc_tui_fetched.complete ~equal:Unit.equal
+    state.artifact_checks request result
 
 let select_scope state scope =
   state.resource_scope <- scope;

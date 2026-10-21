@@ -668,6 +668,8 @@ type async_msg =
   | Play_invite_issued of Masc_tui_types.play_change_request * play_sink * Masc.Tui_decode.play_invite_issued play_mutation
   | Play_invite_revoked of Masc_tui_types.play_change_request * play_sink * string * play_revoke
   | Librarian_input_loaded of string * (string list, string) result
+  | Artifact_checks_loaded of unit Masc_tui_fetched.request
+      * (Masc_tui_artifact_checks.inventory, string) result
   | Resources_listed of
       (Masc_tui_resource_catalog.listing, string) result
   (* The scope travels with the directory. Without it a reply names a

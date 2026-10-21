@@ -13,6 +13,7 @@ type t = {
   revisions : Catalog.report list;
   presentation : Catalog.presentation;
   metadata_expanded : bool;
+  confirmation : Masc_tui_artifact_checks.status option;
 }
 
 let entry reading = reading.entry
@@ -40,7 +41,9 @@ let current (state : state) =
        text_cursor=state.resource_text_cursor;
        revisions=state.resource_revision_history;
        presentation=state.resource_presentation;
-       metadata_expanded=state.resource_metadata_expanded})
+       metadata_expanded=state.resource_metadata_expanded;
+       confirmation=(match entry with Catalog.Mcp _ -> None
+         | Report report -> Some (resource_check_status state report))})
       (Catalog.entry_for_key entries key))
 
 let text_parts parts =
@@ -127,7 +130,7 @@ let pretty_resource_text ~mime text =
 type piece = Markdown_text of string | Html_text of string
 
 let resource_document entry
-    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded =
+    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded ~confirmation =
   let resource = Catalog.metadata entry in
   let present = function
     | Some text when String.trim text <> "" -> text
@@ -201,7 +204,10 @@ let resource_document entry
         | None -> "" in
       [Markdown_text (text_selection ^ "\n\n" ^ selection)]
         @ List.concat (List.mapi (fun index part -> part_document (index + 1) part) parts) in
-  Markdown_text (metadata ^ "\n\n---") :: body
+  let confirmation = match confirmation with
+    | None -> ""
+    | Some status -> "\n\n**Confirmation:** " ^ Masc_tui_artifact_checks.description status in
+  Markdown_text (metadata ^ confirmation ^ "\n\n---") :: body
 
 let rows ~cols reading =
   let width = max 1 (framed_inner_width cols - 4) in
@@ -209,6 +215,7 @@ let rows ~cols reading =
     ~requested:reading.requested ~image_cursor:reading.image_cursor
     ~text_cursor:reading.text_cursor ~revisions:reading.revisions
     ~presentation:reading.presentation ~metadata_expanded:reading.metadata_expanded
+    ~confirmation:reading.confirmation
   |> List.concat_map (function
     | Markdown_text document ->
       Message_layout.wrap_body ~markdown:Masc_tui_markdown_theme.document

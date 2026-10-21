@@ -6375,6 +6375,12 @@
   masc_tui_resource_catalog masc_tui_resources_updates masc_tui_mcp))
 
 (test
+ (name test_tui_artifact_checks)
+ (modules test_tui_artifact_checks)
+ (libraries alcotest masc masc.tool_types masc.time_codec digestif
+  masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_fetched))
+
+(test
  (name test_tui_resource_copy)
  (modules test_tui_resource_copy)
  (libraries alcotest base64 masc masc_tui_link masc_tui_types masc_tui_resource_document

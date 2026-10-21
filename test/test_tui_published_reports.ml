@@ -102,7 +102,7 @@ let selection_and_withdrawal () =
   let first = entry (revision markdown) in
   let second = entry (revision ~number:2 "new revision") in
   let state = state () in
-  let list entry = Updates.listed state (Ok { Catalog.entries=[entry]; notes=[] }) in
+  let list entry = Updates.listed state (Ok { Catalog.entries=[entry]; notes=[]; reports_complete=true }) in
   list first;
   let opened = ref None in
   Updates.open_selected state ~read:(fun ~key:uri -> opened := Some uri);
@@ -170,13 +170,13 @@ let pinned_refresh () =
   let state = state () in
   state.resource_content <- Some (Catalog.Report_revision current, reading.parts);
   state.resource_revision_history <- reading.revisions;
-  Updates.listed state (Ok {Catalog.entries=[entry third];notes=[]});
+  Updates.listed state (Ok {Catalog.entries=[entry third];notes=[];reports_complete=true});
   check bool "latest refresh retains older original" true
     (match state.resource_content with Some (_,parts) -> parts==reading.parts | None -> false);
   (match Catalog.entry_for_key [entry third] (Catalog.Report_revision current) with
    | Some (Catalog.Report report) -> check int "detail remains selected revision" 2 report.revision.revision
    | Some (Catalog.Mcp _) | None -> fail "pinned detail lost");
-  Updates.listed state (Ok {Catalog.entries=[];notes=[]});
+  Updates.listed state (Ok {Catalog.entries=[];notes=[];reports_complete=true});
   check bool "withdrawal clears body and history" true
     (state.resource_content=None && state.resource_revision_history=[] && state.resource_read_owner=None)
 
@@ -216,7 +216,7 @@ let filtered_selection () =
     (revision ~format:Published.Html html) in
   let mcp = Catalog.Mcp { (Catalog.metadata doc) with name="status" } in
   let state = state () in
-  Updates.listed state (Ok {Catalog.entries=[mcp;page;doc];notes=[]});
+  Updates.listed state (Ok {Catalog.entries=[mcp;page;doc];notes=[];reports_complete=true});
   Updates.select_scope state Catalog.Markdown_reports;
   let requested = ref None in
   Updates.open_selected state ~read:(fun ~key -> requested := Some key);
@@ -247,12 +247,12 @@ let captured_local_day () =
   let equivalent = { current with created_at="2026-10-21T09:00:00+09:00" } in
   let older = { current with created_at="2026-10-19T00:00:00Z" } in
   let state = state () in
-  Updates.listed state (Ok {Catalog.entries=[entry older;entry equivalent];notes=[]});
+  Updates.listed state (Ok {Catalog.entries=[entry older;entry equivalent];notes=[];reports_complete=true});
   Updates.toggle_today state ~now;
   check bool "timezone offsets compare as instants" true
     (Masc_tui_types.visible_resources state=Some [entry equivalent]);
   let captured = state.resource_day in
-  Updates.listed state (Ok {Catalog.entries=[entry current;entry older];notes=[]});
+  Updates.listed state (Ok {Catalog.entries=[entry current;entry older];notes=[];reports_complete=true});
   check bool "refresh preserves captured day" true (state.resource_day=captured);
   check bool "refresh reselects metadata on captured day" true
     (Masc_tui_types.visible_resources state=Some [entry current]);

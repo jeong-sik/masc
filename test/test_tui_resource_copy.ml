@@ -100,7 +100,7 @@ let new_observation () =
   Updates.read_done s ~request:{Catalog.key;owner} (Ok (Catalog.mcp_reading parts));
   check int "new admitted observation starts at first text" 0 s.resource_text_cursor;
   s.resource_text_cursor<-2;
-  Updates.listed s (Ok {Catalog.entries=[];notes=[]});
+  Updates.listed s (Ok {Catalog.entries=[];notes=[];reports_complete=true});
   check int "withdrawal retires text selection" 0 s.resource_text_cursor;
   refused s
 

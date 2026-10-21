@@ -11,6 +11,11 @@ val listed :
     cursor and clear the reading that no longer has a listed resource. A failed
     listing retains the previous inventory and records its error. Partial inventory and per-report diagnostics stay visible in the status line. *)
 
+val checks_loaded : Masc_tui_types.state -> unit Masc_tui_fetched.request ->
+  (Masc_tui_artifact_checks.inventory, string) result -> unit
+(** Settle only the current shared-check read, independently of report bodies
+    and MCP inventory. Never creates a confirmation or changes selection. *)
+
 val read_done :
   Masc_tui_types.state -> request:Masc_tui_resource_catalog.read_request ->
   (Masc_tui_resource_catalog.reading, string) result -> unit

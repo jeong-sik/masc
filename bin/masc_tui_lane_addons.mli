@@ -125,6 +125,12 @@ type read_target =
       (** Started by a jump to this installation's Results. The jump is
           carried by the read that serves it, so it ends with that read. *)
 
+val request_read_target : t -> request -> read_target
+(** Inventory and history reads belong to the detail's original instance and
+    incarnation, including when a live worker becomes retained during the read.
+    Other requests keep their receipts independently of detail navigation.
+    Explicit installation-result jumps use their own target instead. *)
+
 val read_still_wanted : t -> showing:bool -> read_target -> bool
 (** Whether a read's answer still applies to the view. [showing] is whether
     the Add-ons screen is open: a jump answered after the operator left, or

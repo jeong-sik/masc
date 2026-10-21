@@ -5193,12 +5193,15 @@ let launch_lane_subscriptions state ~mailbox request =
           ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode)
   end
 
-let launch_lane_addons ?(target = Masc_tui_lane_addons.Read_screen) state ~mailbox request =
+let launch_lane_addons ?target state ~mailbox request =
   if not (server_authority_ready state) then
     report_action state "error" "Lane request was not sent while workspace identity is unconfirmed; retry after reconnecting"
   else begin
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
+  let target = match target with
+    | Some target -> target
+    | None -> Addons.request_read_target view request in
   if view.loading then
     (* The answer to the key just pressed goes at the top of the pane, so a
        reader scrolled into a draft would not see it. *)

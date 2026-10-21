@@ -1452,6 +1452,14 @@ type read_target =
   | Read_detail of string * string
   | Read_installation_results of string
 
+let request_read_target view = function
+  | Inspect | Slice _ ->
+      (match view.screen with
+       | Overview -> Read_screen
+       | Detail (id, incarnation) -> Read_detail (id, incarnation))
+  | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Action_status _
+  | Subscriptions _ -> Read_screen
+
 let read_still_wanted view ~showing target = match target with
   | Read_screen -> true
   | Read_detail (id, incarnation) -> view.screen = Detail (id, incarnation)

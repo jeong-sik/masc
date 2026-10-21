@@ -16,6 +16,9 @@ type step =
   | Stderr of string
   | Exit_with of int
   | Mark_spawned of string
+  | Trap_term of { marker : string; exit_delay_s : float }
+      (** On SIGTERM, touch [marker], take [exit_delay_s] to exit, then exit. *)
+  | Idle_until_killed
   | Sleep of float  (** Read nothing for this long. *)
   | Expect_launch of { home : string; native_read : bool }
 
@@ -125,6 +128,11 @@ let script_text ~capture steps =
       | Stderr text -> line (Printf.sprintf "printf '%%s\\n' %s >&2" (shell_quote text))
       | Exit_with code -> line (Printf.sprintf "exit %d" code)
       | Mark_spawned path -> line (Printf.sprintf "touch %s" (shell_quote path))
+      | Trap_term { marker; exit_delay_s } ->
+        line
+          (Printf.sprintf "trap 'touch %s; sleep %g; exit 0' TERM" (shell_quote marker)
+             exit_delay_s)
+      | Idle_until_killed -> line "while :; do sleep 0.05; done"
       | Sleep seconds -> line (Printf.sprintf "sleep %g" seconds)
       | Expect_launch { home; native_read } ->
         let home = Unix.realpath home in
@@ -1296,6 +1304,88 @@ let test_stream_callback_preserves_reserved_controls () =
   Serve.emit_stream_event None event
 ;;
 
+(* The owner is cancelled while the host is still exiting after its turn ended.
+   The cleanup is cancel-protected, so a [run_turn] that does not return cannot
+   be interrupted from inside the process: the alarm turns that hang into a
+   failed suite. It ends the whole test process with exit code 2 instead of an
+   alcotest report, which is why a hang here shows up as a suite that exits
+   quietly. *)
+let fail_if_blocked_for seconds f =
+  Sys.set_signal
+    Sys.sigalrm
+    (Sys.Signal_handle
+       (fun _ ->
+         prerr_endline "run_turn did not return after the owner was cancelled";
+         exit 2));
+  ignore (Unix.alarm seconds);
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (Unix.alarm 0);
+      Sys.set_signal Sys.sigalrm Sys.Signal_default)
+    f
+;;
+
+let host_exit_delay_s = 0.5
+let run_turn_return_deadline_s = 20
+let sigterm_wait_deadline_s = 15.
+let marker_poll_s = 0.01
+
+(* The host installs its trap before it ends the turn, and the owner is
+   cancelled once the trap has run: the cancel arrives while the host is
+   exiting, after the cleanup began, whatever the machine's speed. *)
+let test_run_turn_returns_when_the_owner_is_cancelled_while_the_host_exits () =
+  let marker = Filename.temp_file "masc-muse-term-" "" in
+  Sys.remove marker;
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists marker then Sys.remove marker)
+    (fun () ->
+      with_script
+        (handshake_and_session ~granted:[]
+         @ [ Write agent_started
+           ; Trap_term { marker; exit_delay_s = host_exit_delay_s }
+           ; Write agent_completed
+           ; Write turn_completed
+           ; Idle_until_killed
+           ])
+        (fun ~dir ~requests:_ ->
+          fail_if_blocked_for run_turn_return_deadline_s (fun () ->
+            Eio_main.run (fun env ->
+              let clock = Eio.Stdenv.clock env in
+              let rec wait_for_sigterm () =
+                if not (Sys.file_exists marker)
+                then (
+                  Eio.Time.sleep clock marker_poll_s;
+                  wait_for_sigterm ())
+              in
+              let cancelled_the_owner =
+                Eio.Fiber.first
+                  (fun () ->
+                    let (_ : (Serve.turn_result, Serve.error) result) =
+                      Serve.run_turn
+                        ~mgr:(Eio.Stdenv.process_mgr env)
+                        ~clock
+                        ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
+                        (config ())
+                        ~workspace_root:"/w"
+                        ~prompt:"say MASC_MUSE_OK"
+                        ~images:[]
+                    in
+                    false)
+                  (fun () ->
+                    match
+                      Eio.Time.with_timeout clock sigterm_wait_deadline_s (fun () ->
+                        wait_for_sigterm ();
+                        Ok ())
+                    with
+                    | Ok () -> true
+                    | Error `Timeout -> false)
+              in
+              check bool
+                "the owner was cancelled after the host received SIGTERM"
+                true
+                cancelled_the_owner))))
+;;
+
 (* A write inside the turn that outlasts its window: the host took the
    [turn/start] line before it answered, so it may be running the turn, and a
    caller that retries on [turn_accepted = false] would run it twice. The
@@ -1490,6 +1580,8 @@ let () =
             test_resume_admits_only_the_counts_its_expectation_names
         ; test_case "start requires an empty session" `Quick
             test_start_requires_an_empty_session
+        ; test_case "run_turn returns when the owner is cancelled while the host exits" `Quick
+            test_run_turn_returns_when_the_owner_is_cancelled_while_the_host_exits
         ; test_case "an approval write that times out with a tool item open reports the turn as accepted" `Quick
             (an_approval_write_that_times_out_reports_the_turn_as_accepted ~tool_item_open:true)
         ; test_case "an approval write that times out during the model turn reports the turn as accepted" `Quick

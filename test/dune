@@ -14,6 +14,11 @@
  (libraries masc_process eio eio.unix alcotest unix))
 
 (test
+ (name test_eio_process_capture_reap)
+ (modules test_eio_process_capture_reap)
+ (libraries masc_process eio eio.unix eio_main alcotest unix))
+
+(test
  (name test_tui_play_room)
  (modules test_tui_play_room)
  (libraries alcotest yojson masc masc_tui_play_room))

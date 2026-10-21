@@ -1059,11 +1059,15 @@ let instance_controls view (instance : instance) =
     | None -> "  d:remove worker" in
   match instance.phase with
   | Row.Attached | Row.Observing ->
-      "o:observe" ^ (if Option.is_some instance.action_schema then "  a:actions" else "") ^ removal
+      (if can_observe instance then
+         "o:observe" ^ (if Option.is_some instance.action_schema then "  a:actions" else "")
+       else "worker execution unavailable") ^ removal
   | Row.Detaching -> "worker cleanup pending"
   | Row.Detached -> "retained history · D:details"
-  | Row.Failed _ -> "o:retry observation" ^
-      (if Option.is_some instance.action_schema then "  a:actions" else "") ^ removal
+  | Row.Failed _ ->
+      (if can_observe instance then
+         "o:retry observation" ^ (if Option.is_some instance.action_schema then "  a:actions" else "")
+       else "worker execution unavailable") ^ removal
 
 (* [drop_hint_items] drops whole items from the back. Keep the way out at
    the front so it remains easy to find even when the other hints give way. *)

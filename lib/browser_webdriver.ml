@@ -535,38 +535,11 @@ let rec execute_unlocked t = function
         Ok (`Assoc ["tabId", `Int tab_id; "title", `String title; "url", `String url;
           "mimeType", `String "image/png"; "data", `String data; "viewport",viewport])
       | _ -> Error (Protocol "invalid screenshot response"))
-  | Browser_lane.Page_locate {tab_id;instruction} ->
-    let* locate=Option.to_result ~none:(Protocol "browser locate Exact Output is not selected") t.locate in
-    let* max_chars=Browser_page_script.text_cap None |> Result.map_error (fun detail -> Protocol detail) in
-    let read () =
-      let* json=execute_unlocked t (Browser_lane.Page_scene {tab_id;max_chars;view=Content;scope=None}) in
-      let* scene=Browser_scene.of_json json |> Result.map_error (fun detail -> Protocol detail) in
-      let ids=List.map (fun (node:Browser_scene.node) -> node.node_id) scene.nodes in
-      if List.length ids<>List.length (List.sort_uniq String.compare ids) then Error (Protocol "duplicate locate scene reference")
-      else Ok (json,scene) in
-    let* _,original=read () in
-    let* matches=locate ~scene:original ~instruction |> Result.map_error (fun detail -> Protocol detail) in
-    Eio.Fiber.check ();
-    let* json,current=read () in
-    let* ()=if original.document_id=current.document_id && original.url=current.url then Ok ()
-      else Error (Protocol "locate document changed while waiting for its model; read the original tab again") in
-    let* raw_nodes=match field "nodes" json with Some (`List nodes) -> Ok nodes
-      | None|Some _ -> Error (Protocol "missing current locate nodes") in
-    let* matches=List.fold_right (fun (matched:located_node) acc ->
-      let* rest=acc in
-      let find scene=List.find_opt (fun (node:Browser_scene.node) -> node.node_id=matched.node_id) scene.Browser_scene.nodes in
-      match find original,find current with
-      | Some before,Some now when before.kind=now.kind && before.tag=now.tag && before.text=now.text
-          && before.ancestor_region=now.ancestor_region && before.source_context=now.source_context ->
-          let* observation=List.find_opt (fun node -> field "nodeId" node=Some (`String matched.node_id)) raw_nodes
-            |> Option.to_result ~none:(Protocol "missing current locate node") in
-          Ok (`Assoc ["target",`Assoc ["documentId",`String current.document_id;"nodeId",`String matched.node_id];
-            "observation",observation;"inference",`Assoc ["description",`String matched.description]]::rest)
-      | (None|Some _),(None|Some _) -> Error (Protocol "locate target changed or was not observed; read the original tab again")) matches (Ok []) in
-    let* viewport=field "viewport" json |> Option.to_result ~none:(Protocol "missing current locate viewport") in
-    Ok (`Assoc ["tabId",`Int tab_id;"documentId",`String current.document_id;"url",`String current.url;
-      "title",`String current.title;"viewport",viewport;"truncated",`Bool current.truncated;
-      "matches",`List matches])
+  | Browser_lane.Page_locate _ ->
+    (* [execute] runs locate through [execute_locate], outside this lock
+       wrapper: its model wait must not hold the session mutex or the active
+       count. Reaching here would mean the dispatch was bypassed. *)
+    Error (Protocol "browser locate runs outside the session lock")
   | Browser_lane.Page_instruct _ | Browser_lane.Page_extract _ ->
     (* [execute] refuses these before browser I/O. *)
     Error (Protocol Browser_lane.sentence_verbs_refused)
@@ -609,15 +582,70 @@ let rec execute_unlocked t = function
        | Error error, _ | _, Error error -> Error error
        | Ok tabs, Ok _ -> Ok tabs)
     | _ -> Error (Protocol "invalid WebDriver windows response")
+(* [Page_locate] answers from two scene reads with a model call between them.
+   The model call can outlive the caller's patience, so it must not hold the
+   session lock: each read takes the lock for the read alone, and the model
+   wait runs with no lock and no active count held. *)
+let execute_locate t ~tab_id ~instruction =
+  let* locate=Option.to_result ~none:(Protocol "browser locate Exact Output is not selected") t.locate in
+  let* max_chars=Browser_page_script.text_cap None |> Result.map_error (fun detail -> Protocol detail) in
+  let read () =
+    with_session_lock t (fun () ->
+      let* json=execute_unlocked t (Browser_lane.Page_scene {tab_id;max_chars;view=Content;scope=None}) in
+      let* scene=Browser_scene.of_json json |> Result.map_error (fun detail -> Protocol detail) in
+      let ids=List.map (fun (node:Browser_scene.node) -> node.node_id) scene.nodes in
+      if List.length ids<>List.length (List.sort_uniq String.compare ids) then Error (Protocol "duplicate locate scene reference")
+      else Ok (json,scene)) in
+  let* _,original=read () in
+  let* matches=locate ~scene:original ~instruction |> Result.map_error (fun detail -> Protocol detail) in
+  Eio.Fiber.check ();
+  let* json,current=read () in
+  let* ()=if original.document_id=current.document_id && original.url=current.url then Ok ()
+    else Error (Protocol "locate document changed while waiting for its model; read the original tab again") in
+  let* raw_nodes=match field "nodes" json with Some (`List nodes) -> Ok nodes
+    | None|Some _ -> Error (Protocol "missing current locate nodes") in
+  let* matches=List.fold_right (fun (matched:located_node) acc ->
+    let* rest=acc in
+    let find scene=List.find_opt (fun (node:Browser_scene.node) -> node.node_id=matched.node_id) scene.Browser_scene.nodes in
+    match find original,find current with
+    | Some before,Some now when before.kind=now.kind && before.tag=now.tag && before.text=now.text
+        && before.ancestor_region=now.ancestor_region && before.source_context=now.source_context ->
+        let* observation=List.find_opt (fun node -> field "nodeId" node=Some (`String matched.node_id)) raw_nodes
+          |> Option.to_result ~none:(Protocol "missing current locate node") in
+        Ok (`Assoc ["target",`Assoc ["documentId",`String current.document_id;"nodeId",`String matched.node_id];
+          "observation",observation;"inference",`Assoc ["description",`String matched.description]]::rest)
+    | (None|Some _),(None|Some _) -> Error (Protocol "locate target changed or was not observed; read the original tab again")) matches (Ok []) in
+  let* viewport=field "viewport" json |> Option.to_result ~none:(Protocol "missing current locate viewport") in
+  Ok (`Assoc ["tabId",`Int tab_id;"documentId",`String current.document_id;"url",`String current.url;
+    "title",`String current.title;"viewport",viewport;"truncated",`Bool current.truncated;
+    "matches",`List matches])
 let execute t verb =
+  match verb with
+  | Browser_lane.Page_locate {tab_id;instruction} ->
+    (* A locate command may wait on its model until the caller cancels, so it
+       takes no session lock here: [execute_locate] locks each scene read
+       alone. Holding the lock across the wait stalled every other command on
+       this owned browser and made [observe_document_if_idle] report busy. *)
+    if Option.is_none t.locate then
+      Browser_lane.Rejected_before_effect "browser locate Exact Output is not selected"
+    else
+      (match execute_locate t ~tab_id ~instruction with
+       | Ok data -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
+       | Error error -> Browser_lane.Refused (error_message error))
+  | Browser_lane.Session_open _ | Browser_lane.Session_close
+  | Browser_lane.Session_status | Browser_lane.Tabs_list
+  | Browser_lane.Page_read _ | Browser_lane.Page_document _
+  | Browser_lane.Page_downloads _ | Browser_lane.Page_capture _
+  | Browser_lane.Page_scene _ | Browser_lane.Page_goto _
+  | Browser_lane.Page_elements _ | Browser_lane.Page_act _
+  | Browser_lane.Page_context _ | Browser_lane.Page_instruct _
+  | Browser_lane.Page_extract _ | Browser_lane.Page_interact _ ->
   with_session_lock t (fun () ->
     match verb with
     | Browser_lane.Page_interact {action=Browser_lane.Set_zoom _;_} ->
       Browser_lane.Rejected_before_effect "set_zoom requires a connected WebExtension browser"
     | Browser_lane.Page_interact {action=Browser_lane.Activate_tab;_} ->
       Browser_lane.Rejected_before_effect "activate_tab requires live lane; automation observations already select their explicit tab"
-    | Browser_lane.Page_locate _ when Option.is_none t.locate ->
-      Browser_lane.Rejected_before_effect "browser locate Exact Output is not selected"
     | Browser_lane.Page_instruct _ | Browser_lane.Page_extract _ ->
       Browser_lane.Rejected_before_effect Browser_lane.sentence_verbs_refused
     | Browser_lane.Page_act action ->

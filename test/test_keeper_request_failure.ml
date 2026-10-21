@@ -112,9 +112,6 @@ let test_provider_rate_limit_keeps_its_provider () =
       .Krf.cause
 ;;
 
-(* The wait appears in the sentence when one was reported and is left out when
-   none was; the provider's own text follows, joined to one line. The wording
-   itself is not pinned. *)
 let test_rate_limit_keeps_integer_wire_wait () =
   let encoded = `Assoc [ "cause", `Assoc [
     "kind", `String "provider_rate_limited";
@@ -127,6 +124,9 @@ let test_rate_limit_keeps_integer_wire_wait () =
       failure.Krf.cause
 ;;
 
+(* The wait appears in the sentence when one was reported and is left out when
+   none was; the provider's own text follows, joined to one line. The wording
+   itself is not pinned. *)
 let test_rate_limit_summary_shows_the_wait_only_when_reported () =
   let contains text part = String_util.contains_substring text part in
   let with_wait =

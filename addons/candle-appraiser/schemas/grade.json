@@ -1,0 +1,1 @@
+{"type":"object","properties":{"grade":{"type":"string"}},"required":["grade"],"additionalProperties":false}

@@ -1,0 +1,1 @@
+{"type":"object","properties":{"weights":{"type":"object","properties":{},"additionalProperties":true}},"required":["weights"],"additionalProperties":false}

@@ -14,7 +14,9 @@ The two errors are record inference failures in
 The six Security.framework deprecation warnings did not cause this failure.
 
 [PR #44864](https://github.com/jeong-sik/masc/pull/44864) subsequently supplied
-explicit journal/source types and fixture repairs. It merged as
+explicit journal/source types and fixture repairs after the frozen e6 source
+was selected. It merged at 14:50:18 UTC, before the already-running frozen
+check finished at 14:55:58 UTC; that run did not acquire the new source. It merged as
 `9e5fc114adc00c8a12878b55ee9c1523df86e6c7`; `pr-44864-merged.json` records
 its actual state. The current source contains that repair. We reuse it rather
 than writing another repair. Source inspection does not prove a successful build.

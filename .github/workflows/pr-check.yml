@@ -21,6 +21,7 @@ on:
           - original-tool-result
           - code-references
           - resource-reading
+          - addon-lifecycle
 
 permissions:
   contents: read

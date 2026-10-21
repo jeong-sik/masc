@@ -17,6 +17,7 @@ characters) and `native-tui-scenario`:
 | `original-tool-result` | TUI, server and the four test executables | `test_keeper_tool_result_source`, `test_tool_output_washing_e2e`, `test_server_dashboard_http_keeper_tool_lookup`, `test_tui_chat_call_reader` |
 | `code-references` | TUI, server and the five test executables | `test_lsp_workspace_pool`, `test_lsp_questions`, `test_lsp_message_router`, `test_lsp_process_manager`, `test_server_ide_lsp_proxy` |
 | `resource-reading` | TUI, server and the four test executables | `test_tui_published_reports`, `test_tui_resource_document_search`, `test_tui_resource_image_admission`, `test_tui_resource_images` |
+| `addon-lifecycle` | TUI, server and the two test executables | `test_tui_lane_addons`, `test_lane_addon_application` |
 
 The server target is `bin/main_eio.exe`; the TUI is `bin/masc_tui.exe`.
 Every scenario also builds `bin/masc_tui_keys_doc_cli.exe`, the canonical key
@@ -88,6 +89,19 @@ source; a missing target fails rather than reducing the scope.
 gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
   -f native-tui-source-sha=SOURCE_COMMIT_40_HEX \
   -f native-tui-scenario=resource-reading
+```
+
+Use `addon-lifecycle` for an Addon installation/worker observation candidate.
+The two suites check TUI request/state ownership and host application decisions;
+they do not assert screen wording, layout or row order. The matching server and
+TUI are packaged for separate actual On/Off/reconnect observations. Passing these
+suites does not prove that a container, real model or visible terminal executed.
+Both selected targets must exist; a missing target fails instead of reducing scope.
+
+```sh
+gh workflow run pr-check.yml --repo jeong-sik/masc --ref WORKFLOW_REF \
+  -f native-tui-source-sha=SOURCE_COMMIT_40_HEX \
+  -f native-tui-scenario=addon-lifecycle
 ```
 
 For a workspace file-finder candidate:

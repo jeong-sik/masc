@@ -978,8 +978,10 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
   let ok = function Ok value -> value | Error detail -> fail detail in
   let module Journal=Keeper_chat_operation_store in
   let module Native=Keeper_native_call in
-  let state=Mcp_server.For_testing.create_state ~base_path:dir in
-  let state={state with Mcp_server.net=Some env#net} in
+  let state=Mcp_server.create_state_eio ~sw
+      ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
+      ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+      ~net:(Eio.Stdenv.net env) ~base_path:dir in
   let config=Mcp_server.workspace_config state in
   let keeper_name="http-original-input-response" and trace_id="trace-http-original-response" in
   let meta=make_checkpoint_inventory_meta ~name:keeper_name ~trace_id in
@@ -1105,8 +1107,10 @@ let test_input_response_http_requires_explicit_exact_proof () =
   with_temp_dir @@ fun dir -> Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs env#fs;
-  let state=Mcp_server.For_testing.create_state ~base_path:dir in
-  let state={state with Mcp_server.net=Some env#net} in
+  let state=Mcp_server.create_state_eio ~sw
+      ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
+      ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+      ~net:(Eio.Stdenv.net env) ~base_path:dir in
   let checkpoint=Keeper_checkpoint_ref.create
       ~trace_id:(Keeper_id.Trace_id.of_string "original-http-response-trace" |> Result.get_ok)
       ~turn_count:2 ~canonical_checkpoint_bytes:"original input bytes" |> Result.get_ok in

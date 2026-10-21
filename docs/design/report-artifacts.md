@@ -155,6 +155,12 @@ multiple images inside one part and nested/table images. Base64 image data URIs
 are passed unchanged to the existing off-thread image decoder/converter only
 when selected for preview. External URLs, file paths, non-image and non-base64
 data remain explicitly unavailable; selecting them does not authorize a fetch.
+Inline SVG roots are serialized from the parsed HTML tree with element and
+attribute namespaces preserved, then offered to the existing offline SVG
+renderer on selection. This serialization is separate from the unchanged
+original HTML source. Renderer validation still rejects scripts, event
+handlers, foreign content, embedded images and external href references;
+canvas remains unavailable. Browser CSS layout is not evaluated.
 Scripts, metadata, templates, embedded frames and explicit hidden subtrees do
 not contribute reading/image candidates. This reading does not execute CSS or
 JavaScript, and does not reproduce a browser's page layout.

@@ -6363,6 +6363,11 @@
  (libraries alcotest yojson masc_tui_mcp masc_tui_resource_images masc_tui_image_preview))
 
 (test
+ (name test_tui_html_svg)
+ (modules test_tui_html_svg)
+ (libraries alcotest masc.markup_document masc_tui_artifact_html))
+
+(test
  (name test_tui_resource_image_admission)
  (modules test_tui_resource_image_admission)
  (libraries masc_tui_resource_catalog alcotest masc_tui_types masc_tui_mcp masc_tui_resource_images

@@ -5,7 +5,7 @@ type t =
   | Element of {
       namespace : string;
       name : string;
-      attributes : (string * string) list;
+      attributes : ((string * string) * string) list;
       children : t list;
     }
 
@@ -18,6 +18,12 @@ val parse_xml : string -> (t list, string) result
 
 val text_content : t -> string
 val attribute : string -> t -> string option
+(** Lookup an unqualified attribute, never an attribute in another namespace. *)
+val to_xml : t -> (string, string) result
+(** Serialize a parsed subtree with expanded element/attribute namespaces and
+    escaped values. Namespace declarations are reconstructed for the detached
+    subtree. This is a DOM serialization, not the original source bytes;
+    namespace prefixes and declaration placement may change. *)
 val elements_named : string -> t list -> t list
 val first_element_named : string -> t list -> t option
 val html_space_tokens : string -> string list

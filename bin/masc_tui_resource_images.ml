@@ -24,6 +24,7 @@ let images ~mime_type contents =
           match image.source with
           | Masc_tui_artifact_html.Embedded_base64 base64 ->
             Masc_tui_image_preview.inline_payload ~name ~base64
+          | Embedded_svg source -> Masc_tui_image_preview.inline_svg ~name source
           | Unavailable reason -> Masc_tui_image_preview.Unavailable_image {name;reason})
       | (Some _ | None), (Resource_text _ | Resource_blob _) -> [] in
     List.map (fun image -> index + 1, image) candidates) contents

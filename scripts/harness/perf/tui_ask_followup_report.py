@@ -523,6 +523,13 @@ def analyze_arm(value, root):
     return output
 
 
+def comparison_without_deltas(declared_conditions_match):
+    """Shared comparison schema for evidence and materialization failures."""
+    return {"declared_conditions_match": declared_conditions_match,
+            "descriptive_delta_available": False, "execution_verified": False,
+            "metrics": {}, "source_metrics": {}}
+
+
 def analyze(packet, root):
     fields(packet, {"schema_version", "cases"})
     require(type(packet["schema_version"]) is int and packet["schema_version"] == 2, "unsupported packet version")
@@ -547,19 +554,15 @@ def analyze(packet, root):
         before, after = case["before"], case["after"]
         matched = before.get("declared_conditions") is not None and all(v is not None for v in before["declared_conditions"].values()) and before.get("declared_conditions") == after.get("declared_conditions")
         eligible = matched and not case["errors"] and not before["errors"] and not after["errors"]
-        deltas = {}
+        comparison = comparison_without_deltas(matched)
         if eligible:
-            for name in METRICS:
-                a, b = before["summary"]["metrics"][name], after["summary"]["metrics"][name]
-                deltas[name] = mean_delta(a, b)
-        source_deltas = {source: {} for source in SOURCES}
-        if eligible:
-            for source in SOURCES:
-                for name in SOURCE_METRICS:
-                    source_deltas[source][name] = mean_delta(before["summary"]["sources"][source]["metrics"][name],
-                                                            after["summary"]["sources"][source]["metrics"][name])
-        case["comparison"] = {"declared_conditions_match": matched, "descriptive_delta_available": eligible,
-                              "execution_verified": False, "metrics": deltas, "source_metrics": source_deltas}
+            comparison.update(descriptive_delta_available=True,
+                metrics={name: mean_delta(before["summary"]["metrics"][name], after["summary"]["metrics"][name])
+                         for name in METRICS},
+                source_metrics={source: {name: mean_delta(before["summary"]["sources"][source]["metrics"][name],
+                                                        after["summary"]["sources"][source]["metrics"][name])
+                                         for name in SOURCE_METRICS} for source in SOURCES})
+        case["comparison"] = comparison
     return {"schema_version": 2, "kind": "descriptive_original_ask_followup", "cases": cases,
             "limits": ["Declarations and artifact bytes do not prove execution/source/binary/install identity.",
                        "Only declared, journaled and observed attempts are known; capture failure or an unflushed interruption can still leave unknown attempts.",
@@ -617,7 +620,7 @@ def markdown(report):
             for name, (_start, _end, interval) in SOURCE_METRICS.items():
                 values = [case[arm]["summary"]["sources"][source]["metrics"][name] for arm in ("before", "after")]
                 lines.append("| %s | %s | %s | %s | %s |" % (label, interval, *map(metric_display, values),
-                    delta_display(case["comparison"]["source_metrics"][source].get(name))))
+                    delta_display(case["comparison"]["source_metrics"].get(source, {}).get(name))))
         lines += ["", "Case evidence errors: %d." % len(case["errors"]), "",
                   "Declared conditions match: %s. Full identities, missing stages, raw facts and errors are in JSON." % case["comparison"]["declared_conditions_match"], ""]
     lines += ["- "+limit for limit in report["limits"]]

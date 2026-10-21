@@ -731,6 +731,20 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   Unix.rmdir blocked_admission;
   Out_channel.with_open_gen [Open_wronly;Open_creat;Open_excl;Open_binary]
     0o600 blocked_admission (fun _ -> ());
+  let complete_read state base ask resolution =
+    Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
+    let results=Results.create () in
+    Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+    let left,release=Eio.Promise.create () in
+    let request,submission=begin_read state in
+    launch state results request submission ~released:(fun () -> ignore (Eio.Promise.try_resolve release ()))
+      (actual_read base ask resolution ~parts:(ref []) ~before_source:(fun _ -> ()));
+    Eio.Promise.await left;
+    let batch=Results.take_ready results in
+    let read=first_read batch in
+    check bool "actual comparison source settles" true (apply_batch state (ref []) batch=Some (Ok ()));
+    read in
+  let before_completed=complete_read state base ask resolution in
   (* This original admitted read is never dispatched. Its Info observation is
      filtered, but the production admission journal must retain its identity. *)
   let admission_started_ns=Mtime_clock.elapsed_ns () in
@@ -752,18 +766,7 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   let after_store=Masc_tui_observation_store.initialize ~base_path:base2 |> require in
   state2.observation_store <- Some after_store;
   let after_dir=Masc_tui_observation_store.directory after_store in
-  let completed=Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
-    let results=Results.create () in
-    Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
-    let left,release=Eio.Promise.create () in
-    let request,submission=begin_read state2 in
-    launch state2 results request submission ~released:(fun () -> ignore (Eio.Promise.try_resolve release ()))
-      (actual_read base2 ask2 resolution2 ~parts:(ref []) ~before_source:(fun _ -> ()));
-    Eio.Promise.await left;
-    let batch=Results.take_ready results in
-    let read=first_read batch in
-    check bool "actual after source settles" true (apply_batch state2 (ref []) batch=Some (Ok ()));
-    read in
+  let completed=complete_read state2 base2 ask2 resolution2 in
   let after_logs=copy_logs "after" after_dir in
   let after_admissions=copy_admissions "after" after_store in
   let member=Yojson.Safe.Util.member in
@@ -779,7 +782,7 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
     "logs",`List (List.map (member "path") logs);
     "admissions",`List (List.map (member "path") admissions)] in
   let plan=`Assoc ["schema_version",`Int 1;"cases",`List [`Assoc ["id",`String "actual-protocol-resources";
-    "before",arm [unstarted] before_logs before_admissions;"after",arm [completed] after_logs after_admissions]]] in
+    "before",arm [unstarted;before_completed] before_logs before_admissions;"after",arm [completed] after_logs after_admissions]]] in
   let plan_bytes=Yojson.Safe.to_string plan in
   let plan_path=Filename.concat packet_dir "plan.json" in
   Out_channel.with_open_bin plan_path (fun channel -> output_string channel plan_bytes);
@@ -788,8 +791,9 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
     let argv=Array.of_list ("python3"::args) in
     let pid=Unix.create_process "python3" argv Unix.stdin Unix.stdout Unix.stderr in
     snd (Unix.waitpid [] pid) in
-  let materialize output=run [Filename.concat script_dir "tui_ask_followup_packet.py";plan_path;
+  let materialize_plan path output=run [Filename.concat script_dir "tui_ask_followup_packet.py";path;
     "--source-root";packet_dir;"--output";output] in
+  let materialize=materialize_plan plan_path in
   let output=Filename.concat packet_dir "materialized" in
   check bool "actual original artifacts materialize through public CLI" true (materialize output=Unix.WEXITED 0);
   let receipt=Yojson.Safe.from_file (Filename.concat output "materialization.json") in
@@ -842,6 +846,61 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   check bool "unknown conditions never become matching or execution proof" true
     (member "declared_conditions_match" (member "comparison" case)=`Bool false
      && member "execution_verified" (member "comparison" case)=`Bool false);
+  let set key value = function
+    | `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
+    | _ -> fail "expected actual report object" in
+  (* Reuse supplied bytes as declared-only condition inputs. Matching hashes
+     are required to reach the comparative path; they certify no execution. *)
+  let matching_conditions=match conditions with
+    | `Assoc fields -> `Assoc (List.map (fun (key,_) -> key,`String "plan.json") fields)
+    | _ -> fail "condition declaration missing" in
+  let matching_arm name original=set "condition_files" matching_conditions (member name original) in
+  let matching_case=match member "cases" plan with
+    | `List [original] -> set "after" (matching_arm "after" original)
+        (set "before" (matching_arm "before" original) original)
+    | _ -> fail "original materialization case missing" in
+  let write_plan name case =
+    let path=Filename.concat packet_dir name in
+    Out_channel.with_open_bin path (fun channel -> output_string channel
+      (Yojson.Safe.to_string (set "cases" (`List [case]) plan)));
+    path in
+  let matching_path=write_plan "matching-plan.json" matching_case in
+  let matching_output=Filename.concat packet_dir "matching-materialization" in
+  check bool "actual sources reach the declared matching comparison path" true
+    (materialize_plan matching_path matching_output=Unix.WEXITED 0);
+  let validation_case output=match member "cases"
+      (Yojson.Safe.from_file (Filename.concat output "validation.json")) with
+    | `List [case] -> case | _ -> fail "materialization lost the original case" in
+  let valid_case=validation_case matching_output in
+  let valid_comparison=member "comparison" valid_case in
+  check bool "original Task source contributes a numeric descriptive delta before capture failure" true
+    (member "declared_conditions_match" valid_comparison=`Bool true
+     && member "descriptive_delta_available" valid_comparison=`Bool true
+     && (match member "source_received_to_processed_ns"
+         (member "linked_task" (member "source_metrics" valid_comparison)) with
+       | `Assoc _ -> true | _ -> false)
+     && member "execution_verified" valid_comparison=`Bool false);
+  let after=member "after" matching_case in
+  let incomplete_logs=match member "logs" after with
+    | `List logs -> `List (`String "missing-extra-source.jsonl"::logs)
+    | _ -> fail "actual source artifact roster missing" in
+  let incomplete_path=write_plan "incomplete-plan.json"
+    (set "after" (set "logs" incomplete_logs after) matching_case) in
+  let incomplete_output=Filename.concat packet_dir "incomplete-materialization" in
+  check bool "one extra missing capture rejects otherwise comparable actual sources" true
+    (materialize_plan incomplete_path incomplete_output=Unix.WEXITED 2);
+  let incomplete_case=validation_case incomplete_output in
+  let incomplete_comparison=member "comparison" incomplete_case in
+  check bool "incomplete capture withdraws overall and source deltas together" true
+    (member "declared_conditions_match" incomplete_comparison=`Bool true
+     && member "descriptive_delta_available" incomplete_comparison=`Bool false
+     && member "metrics" incomplete_comparison=`Assoc []
+     && member "source_metrics" incomplete_comparison=`Assoc []
+     && member "execution_verified" incomplete_comparison=`Bool false);
+  check bool "failed publication retains observed sources and original attempt denominator" true
+    (member "summary" (member "before" incomplete_case)=member "summary" (member "before" valid_case)
+     && member "summary" (member "after" incomplete_case)=member "summary" (member "after" valid_case)
+     && not (Sys.file_exists (Filename.concat incomplete_output "packet.json")));
   (* The real producer finishes before this case admits its queued sources.
      Replacing receipt by UI-processing time is therefore a contradictory
      same-owner clock fact, even though each individual row remains ordered. *)
@@ -855,9 +914,6 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
     (match member "observations" (member "linked_task" (member "source_observations" completed_row)) with
      | `List [row] -> member "evidence" row=source_evidence
      | _ -> false);
-  let set key value = function
-    | `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
-    | _ -> fail "expected actual report object" in
   let source_path=member "artifact" source_evidence |> Yojson.Safe.Util.to_string in
   let source_line=member "line" source_evidence |> Yojson.Safe.Util.to_int in
   let bytes=In_channel.with_open_bin (Filename.concat output source_path) In_channel.input_all in
@@ -914,7 +970,7 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   let failed_validation=Yojson.Safe.from_file (Filename.concat failed "validation.json") in
   check bool "failed materialization retains known journaled attempts" true
     (match member "cases" failed_validation with
-     | `List [case] -> member "attempts" (member "summary" (member "before" case))=`Int 2
+     | `List [case] -> member "attempts" (member "summary" (member "before" case))=`Int 3
        && member "descriptive_delta_available" (member "comparison" case)=`Bool false
      | _ -> false);
   Out_channel.with_open_bin copied_path (fun channel -> output_string channel "interrupted artifact");
@@ -923,7 +979,7 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   check bool "mutated real artifact is reported as invalid" true (status=Unix.WEXITED 2);
   let case=match member "cases" damaged_report with `List [case] -> case | _ -> fail "invalid artifact erased the case" in
   check bool "artifact failure retains original declared attempts" true
-    (member "attempts" (member "summary" (member "before" case))=`Int 2);
+    (member "attempts" (member "summary" (member "before" case))=`Int 3);
   Ui.retire_ask_followup_read state;
   check bool "offline report leaves actual canonical resources unchanged" true
     (resources=Masc.Workspace.get_tasks_raw config && resources2=Masc.Workspace.get_tasks_raw config2)

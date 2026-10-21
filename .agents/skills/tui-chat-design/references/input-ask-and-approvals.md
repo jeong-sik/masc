@@ -164,3 +164,8 @@
 - 기본 footer는 전송·줄바꿈·중단/돌아가기·명령·도움말만 남긴다.
 - 슬래시 메뉴와 녹음 안내는 관련 상태에서 footer를 대체한다.
 - 메뉴가 실제로 표시될 때만 방향키·Tab·Enter·Esc를 가로챈다. 초안 보존과 전송 의미는 바꾸지 않는다.
+
+Packet materialization failure withdraws both overall and source comparison
+maps through the report's shared no-delta constructor. Preserve observed arm
+facts and full known denominators; matching declarations do not authorize
+comparative numbers when any planned artifact failed capture.

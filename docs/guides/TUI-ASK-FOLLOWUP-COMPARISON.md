@@ -268,3 +268,13 @@ the started observation/dispatch. They add synchronous preparation and storage
 work after `read_admission_started_ns`; observed admission-to-start, worker and
 UI intervals include it. Flush is not fsync, and no latency improvement is claimed.
 Failed capture leaves observation dispatch available; it grants no authority.
+
+### Incomplete materialization
+
+The analyzer and packet materializer use one no-delta comparison constructor.
+If any planned capture fails, `validation.json` preserves the observed arm
+facts and declared-condition match but sets `descriptive_delta_available` to
+false and clears both `metrics` and `source_metrics` to empty objects. No
+`packet.json` is published. Matching condition declarations alone do not
+restore comparative numbers after incomplete capture or certify execution.
+Markdown accepts the same empty source map and reports unavailable deltas.

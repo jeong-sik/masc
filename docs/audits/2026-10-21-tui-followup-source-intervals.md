@@ -28,7 +28,12 @@ artifact/hash/line reference. Neither opaque source snapshots nor protocol
 start/complete markers are reinterpreted as successful data-source reads.
 
 Packet materialization consumes the same analyzer and retains its new JSON
-fields. Markdown exposes each source's coverage and intervals. Each source
+fields. Review found that its existing capture-failure path withdrew overall
+metrics but left the newly added source deltas behind. Both consumers now use
+one no-delta constructor: any failed capture clears both comparative maps while
+retaining original arm facts, errors and declared-condition match. No packet
+is published for incomplete capture. Markdown also accepts an empty source map.
+Markdown exposes each source's coverage and intervals. Each source
 contributes at most one interval per original read; ambiguity withholds its
 metrics while retaining raw facts. Known lifecycle contradictions invalidate
 the attempt. A late capture contradiction also clears source metrics; retained
@@ -55,7 +60,13 @@ scenario now keeps source artifact provenance and corrupts a real receipt by
 substituting its later UI-processing clock. The row still has locally ordered
 clocks, but contradicts its actual producer-return endpoint; report admission
 must fail and withhold source intervals. This authored extension is unexecuted.
-Its identity comparison normalizes the existing JSON wire representation so an
+The same scenario now completes an actual read in each workspace, supplies
+matching condition declarations and requires a numeric source delta from their
+actual logs. An extra missing planned file must then fail materialization and
+withdraw all deltas while retaining the observed arms and journaled attempts.
+The reused condition-file bytes exercise declared matching only; no execution
+identity or real matched Before/After is certified. This extension is also
+unexecuted. Its identity comparison normalizes the existing JSON wire representation so an
 OCaml Intlit versus parsed Int cannot replace the original clock identity check.
 No helper-mirror, invocation-count, wording/layout/snapshot or PTY test is added.
 

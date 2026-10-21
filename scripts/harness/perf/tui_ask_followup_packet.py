@@ -111,7 +111,7 @@ def materialize(plan, source_root, output, receipt):
         validation["materialization_errors"] = list(errors)
         for case in validation["cases"]:
             case["errors"].append("packet materialization incomplete")
-            case["comparison"].update(descriptive_delta_available=False, metrics={})
+            case["comparison"] = report.comparison_without_deltas(case["comparison"]["declared_conditions_match"])
     for case in validation["cases"]:
         for scope in ("case", "before", "after"):
             for error in (case if scope == "case" else case[scope])["errors"]:

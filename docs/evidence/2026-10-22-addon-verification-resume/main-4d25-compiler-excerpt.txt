@@ -1,0 +1,24 @@
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:30.1841650Z File "bin/masc_tui_original_task_read.ml", lines 179-181, characters 23-27:
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:30.1905030Z 179 | .......................match observation t with
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:30.1943940Z 180 |     | Some (Fetched.Ready (Recorded {task_id;_})) when not (pending t) -> Some task_id
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:30.1944700Z 181 |     | Some _ | None -> None
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:30.1945240Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:30.1945990Z   It will remain exhaustive when constructors are added to type Masc_tui_fetched.observation.
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:30.2059600Z File "bin/masc_tui_original_task_read.ml", lines 179-181, characters 23-27:
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:30.2071540Z 179 | .......................match observation t with
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:30.2087000Z 180 |     | Some (Fetched.Ready (Recorded {task_id;_})) when not (pending t) -> Some task_id
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:30.2185670Z 181 |     | Some _ | None -> None
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:30.2244950Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:30.2245620Z   It will remain exhaustive when constructors are added to type receipt.
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:54.2430650Z File "bin/masc_tui_types.ml", lines 10658-10675, characters 7-44:
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:54.2431130Z 10658 | .......match answered_ask_anchor state,state.server_identity with
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:54.2431890Z 10659 |   | Some (({as_asker=Masc.Tui_decode_asks.Ask_keeper keeper;_} as submission),identity,task,task_id),Some workspace ->
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:54.2432570Z 10660 |     let original=match state.ask_task_inspection with
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:54.2433040Z 10661 |       | Some original when same_answered_ask_anchor original submission identity task_id
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:54.2433820Z 10662 |           && server_workspace_matches ~expected:(Masc_tui_original_task_read.workspace original.ati_source) (Ok workspace) -> Ok original
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:54.2434840Z 10672 |        state.ask_task_inspection <- Some original;
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:54.2435410Z 10673 |        state.task_inspection_reader <- Some {tci_original=owner;tci_authority=state.workspace_authority;
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:54.2436110Z 10674 |          tci_reading=state.workspace_read_authority;tci_surface=state.view;tci_target=state.msg_target_keeper_name};true)
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:54.2436700Z 10675 |   | (Some _ | None),(Some _ | None) -> false
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:54.2437160Z Error (warning 4 [fragile-match]): this pattern-matching is fragile.
+native-tui / macos-tui	UNKNOWN STEP	2026-10-21T15:19:54.2437680Z   It will remain exhaustive when constructors are added to type Masc__Tui_decode_asks.ask_asker.

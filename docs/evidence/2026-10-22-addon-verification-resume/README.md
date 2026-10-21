@@ -52,3 +52,32 @@ proof for this main source. The historical repaired-native evidence stack
 #44851 and the 67-layer Browser stack #44168 are still open in this resume
 snapshot. No operator process, profile, credentials or installation was changed.
 The original 54 item names and completion criteria remain unchanged.
+
+## Later publication boundary: 4d25 failed; existing TUI repairs reused
+
+The first result read for run39623698078 found completed failure. The original
+terminal API observation and timestamped compiler errors are retained as
+`main-4d25-native-failed.json` and `main-4d25-compiler-excerpt.txt`.
+The failures are three warning4 diagnostics: observation and receipt variants
+in `recorded_task`, and `ask_asker` in `open_ask_task_inspection`.
+The earlier Keeper errors did not recur in this log; this is still not a
+successful matching binary or behavior receipt.
+
+Two existing repairs independently landed while this work continued:
+#44874 at15:23:09Z (`e4c8e3f3`) and #44875 at15:23:10Z (`003f52e2`).
+Their merged states are preserved. Both modified functions were read directly
+at003f52. A separate approved alternative #44873 passed merge-guard but its
+actual merge request was rejected by GitHub as dirty after those repairs
+landed. It remains unmerged; no merge success is claimed and no duplicate
+repair was added. No `--auto` or `--admin` was used.
+
+`main-003f-native-dispatch.json` records the new addon-lifecycle request for
+exact source003f52. This new candidate includes the concrete compiler repairs;
+its result is not yet read. The existing two suites still do not cover the
+actual HTTP empty-query assembly or replace a manual corrected global Slice
+observation. Historical successful d9 proof is not execution of003f52.
+
+`browser-integration-census-summary.json` preserves the independent67-layer
+identity census and the queued whole-stack rebase request. A source-bound
+approval count is not a whole-stack source-review or merge verdict. The latest
+main moved after that census, and any rebase requires fresh identity checks.

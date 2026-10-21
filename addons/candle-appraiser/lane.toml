@@ -1,0 +1,39 @@
+id = "candle-appraiser"
+revision = "0.1.0"
+title = "Candle appraisal worker"
+contributions = ["derive"]
+image = "masc-lane-candle-appraiser:0.1.0"
+command = ["python3", "server.py", "--state", "/state"]
+
+[world.state]
+mode = "persistent"
+
+[world.tools]
+export = ["candle_appraise"]
+invocation = "host_context"
+hooks = ["validate_input", "validate_output"]
+
+[world.exact_outputs.grade]
+schema = "schemas/grade.json"
+request_schema = true
+
+[world.exact_outputs.relation]
+schema = "schemas/relation.json"
+request_schema = true
+
+[world.exact_outputs.weights]
+schema = "schemas/weights.json"
+request_schema = true
+
+[world.outputs.appraisals]
+lanes = ["candle/appraisals"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304
+
+[interface]
+binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","maxItems":0,"items":{"type":"object","properties":{},"additionalProperties":false}}},"required":["sources"],"additionalProperties":false}'''
+presentation = '''{"description":"Durable Candle judgments; settlement remains host-owned","readings":[{"lane_id":"candle/appraisals","path":["pending"],"label":"Pending judgments","unit":"requests","format":"number"},{"lane_id":"candle/appraisals","path":["finished"],"label":"Retained results","unit":"requests","format":"number"}]}'''

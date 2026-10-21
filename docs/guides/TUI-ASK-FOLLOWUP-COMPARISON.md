@@ -140,6 +140,56 @@ require complete equal declared conditions and error-free, disjoint cohorts.
 They describe observed subsets, not an overall speedup or readiness verdict.
 Every report explicitly keeps execution verification false.
 
+### Independent source receipt and UI handling
+
+The three data sources (`reaction_evidence`, `tool_actions`, `linked_task`)
+have separate `source_processed` observations under the original instance,
+request and read-admission clock. Protocol `started`/`complete` markers remain
+raw records, not additional data sources. Per-attempt `source_observations`
+retains each source's receipt clock, UI-processing clock, applicator result and
+original artifact/hash/line reference.
+
+| Source state | Meaning | Interval |
+|---|---|---|
+| `observed` | Exactly one processed source observation | Original read admission to receipt, admission to processing, receipt to processing |
+| `unobserved` | No processed observation was retained | Null, not zero or a source failure |
+| `ambiguous` | Multiple observations for the same source and read | Null; all observations remain, with no invented first/latest choice |
+| `invalid_attempt` | Original capsule, capture receipt or known clock facts conflict | Null; raw evidence remains |
+
+Receipt is the client worker's typed event callback, not a server timestamp or
+raw socket arrival. Processing is observed after the UI source applicator
+returns, and includes queue/handling wait. `source_applied: true` means that
+applicator accepted the event; an accepted unavailable source is still
+unavailable. It does not establish source success, a successful Tool effect,
+Task progress, paint or useful work. A rejected source retains its timing and
+rejection separately from an accepted source. Missing rows can result from
+filtering, interruption or no admission; their absence chooses none of those
+causes.
+
+When recorded, worker entry must precede source receipt, producer return must
+follow it, and UI settlement must follow source processing. A not-started read
+cannot have processed data sources. Missing singleton stages do not manufacture
+those endpoints. Contradictions invalidate the attempt and withhold both overall
+and source intervals, including contradictions discovered later in capture
+failure evidence.
+
+`summary.sources` gives each source the full known attempt denominator, its
+four state counts, unambiguous applied/rejected counts, raw processed-row count
+and exact metric summaries. Repeated observations do not weight a mean multiple
+times. Failed, cancelled, withdrawn, unfinished, unstarted and unobserved reads
+stay in the denominator; valid partial source intervals survive a later read
+failure. Markdown displays coverage and all three intervals separately per
+source. `comparison.source_metrics` uses the same complete declared conditions,
+disjoint cohorts and evidence-error refusal as overall descriptive deltas.
+Intervals include applied and rejected handling; inspect their coverage beside
+the means rather than treating the means as accepted-data latency.
+
+These are read-pipeline observations. Source snapshots remain opaque, and the
+report still cannot join them to verified original Task work or certify a real
+Before/After performance change. The additional grouping, validation, summaries
+and output add offline CPU/memory/serialization cost; no runtime instrumentation,
+HTTP read, worker, timer or capture cost is added by this report change.
+
 Admission-write failures use an explicit structured
 `tui_ask_followup_admission_failed` event at Startup Warn/Boundary, schema version
 1. It retains original `origin`, `request`, `read_admission_started_ns`,
@@ -218,3 +268,13 @@ the started observation/dispatch. They add synchronous preparation and storage
 work after `read_admission_started_ns`; observed admission-to-start, worker and
 UI intervals include it. Flush is not fsync, and no latency improvement is claimed.
 Failed capture leaves observation dispatch available; it grants no authority.
+
+### Incomplete materialization
+
+The analyzer and packet materializer use one no-delta comparison constructor.
+If any planned capture fails, `validation.json` preserves the observed arm
+facts and declared-condition match but sets `descriptive_delta_available` to
+false and clears both `metrics` and `source_metrics` to empty objects. No
+`packet.json` is published. Matching condition declarations alone do not
+restore comparative numbers after incomplete capture or certify execution.
+Markdown accepts the same empty source map and reports unavailable deltas.

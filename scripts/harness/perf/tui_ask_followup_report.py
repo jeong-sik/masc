@@ -93,6 +93,11 @@ OUTCOMES = {"complete", "failed", "cancelled", "not_started", "withdrawn"}
 METRICS = {"admission_capture_ns": ("capture_started", "capture_returned"), "admission_to_start_log_ns": (None, "started"), "admission_to_worker_ns": (None, "worker_entered"),
            "worker_to_producer_ns": ("worker_entered", "producer"), "admission_to_ui_ns": (None, "finished"),
            "producer_to_ui_ns": ("producer", "finished"), "admission_to_registration_release_ns": (None, "registration_released")}
+SOURCES = {"reaction_evidence": "Wake/turn observations", "tool_actions": "Tool result observations", "linked_task": "Original Task observation"}
+SOURCE_METRICS = {"admission_to_source_received_ns": ("read_admission_started_ns", "received_ns", "Read admission to source receipt"),
+                  "admission_to_source_processed_ns": ("read_admission_started_ns", "observed_ns", "Read admission to UI processing"),
+                  "source_received_to_processed_ns": ("received_ns", "observed_ns", "Source receipt to UI processing")}
+SOURCE_STATES = ("observed", "unobserved", "ambiguous", "invalid_attempt")
 
 
 def artifact_bytes(root, name):
@@ -199,7 +204,7 @@ def record(entry):
         ns(value["admitted_ns"])
     require(value["admitted_ns"] == (value["observed_ns"] if ui else None), "invalid UI admission clock")
     if phase == "source_processed":
-        require(value["source"] in {"started", "complete", "reaction_evidence", "tool_actions", "linked_task"}, "unsupported source")
+        require(value["source"] in {"started", "complete", *SOURCES}, "unsupported source")
         require(type(value["source_applied"]) is bool, "missing source decision")
         require(key[2] <= ns(value["received_ns"]) <= value["observed_ns"], "invalid source receipt order")
     else:
@@ -229,11 +234,51 @@ def capture_failure(entry):
     return key, dict(value, capture_duration_ns=value["observed_ns"]-value["capture_started_ns"])
 
 
+def source_observations(records):
+    result = {}
+    for source in SOURCES:
+        rows = [row for row in records if row["phase"] == "source_processed" and row["source"] == source]
+        metrics = dict.fromkeys(SOURCE_METRICS)
+        if len(rows) == 1:
+            metrics = {name: rows[0][end]-rows[0][start] for name, (start, end, _label) in SOURCE_METRICS.items()}
+        result[source] = {"state": "observed" if len(rows) == 1 else "unobserved" if not rows else "ambiguous",
+                          "observations": [{"received_ns": row["received_ns"], "processed_ns": row["observed_ns"],
+                                            "source_applied": row["source_applied"], "evidence": row["evidence"]} for row in rows],
+                          "metrics": metrics}
+    return result
+
+
+def invalidate_metrics(item):
+    item["metrics"] = dict.fromkeys(METRICS)
+    for source in item["source_observations"].values():
+        source["state"] = "invalid_attempt"
+        source["metrics"] = dict.fromkeys(SOURCE_METRICS)
+
+
+def metric_summary(metrics, names, total):
+    result = {}
+    for name in names:
+        values = [row[name] for row in metrics if row[name] is not None]
+        result[name] = {"observed": len(values), "attempts": total, "sum_ns": sum(values),
+                        "min_ns": min(values, default=None), "max_ns": max(values, default=None)}
+    return result
+
+
+def mean_delta(before, after):
+    if not before["observed"] or not after["observed"]:
+        return None
+    return {"observed_mean_after_minus_before_ns": {
+                "numerator": after["sum_ns"]*before["observed"]-before["sum_ns"]*after["observed"],
+                "denominator": before["observed"]*after["observed"]},
+            "before_observed": before["observed"], "after_observed": after["observed"]}
+
+
 def attempt(key, records, declared):
     errors = []
     output = {"identity": dict(zip(("instance_id", "request", "read_admission_started_ns"), key)),
               "declared": declared, "records": records, "errors": errors, "metrics": dict.fromkeys(METRICS),
-              "admission_capture": records[0]["admission_capture"] if records else {"state": "unobserved"}}
+              "admission_capture": records[0]["admission_capture"] if records else {"state": "unobserved"},
+              "source_observations": source_observations(records)}
     if not records:
         return dict(output, outcome="unobserved", producer_outcome=None, missing_stages=sorted({"started", "worker_entered", "producer", "registration_released", "finished"}))
     original = records[0]
@@ -266,6 +311,17 @@ def attempt(key, records, declared):
         clocks["capture_returned"] = receipt["capture_returned_ns"]
     if producer:
         clocks["producer"] = producer["observed_ns"]
+    for row in records:
+        if row["phase"] != "source_processed" or row["source"] not in SOURCES:
+            continue
+        if outcome == "not_started":
+            errors.append("unstarted read has a processed source")
+        if "worker_entered" in clocks and row["received_ns"] < clocks["worker_entered"]:
+            errors.append("source receipt precedes worker entry: " + row["source"])
+        if producer and row["received_ns"] > clocks["producer"]:
+            errors.append("source receipt follows producer return: " + row["source"])
+        if "finished" in clocks and row["observed_ns"] > clocks["finished"]:
+            errors.append("source processing follows UI settlement: " + row["source"])
     for name, (start, end) in METRICS.items():
         if start in clocks and end in clocks:
             interval = clocks[end]-clocks[start]
@@ -274,7 +330,7 @@ def attempt(key, records, declared):
             else:
                 output["metrics"][name] = interval
     if errors:
-        output["metrics"] = dict.fromkeys(METRICS)
+        invalidate_metrics(output)
     return dict(output, outcome="invalid" if errors else outcome, producer_outcome=producer_outcome,
                 missing_stages=sorted({"started", "worker_entered", "producer", "registration_released", "finished"}-set(clocks)),
                 producer_ui_outcomes_differ=producer is not None and ui is not None and producer_outcome != outcome,
@@ -440,7 +496,7 @@ def analyze_arm(value, root):
                 item["errors"].append("capture failure disagrees with original receipt")
             if item["errors"]:
                 item["outcome"] = "invalid"
-                item["metrics"] = dict.fromkeys(METRICS)
+                invalidate_metrics(item)
     for item in output["attempts"]:
         errors.extend(item["errors"])
         if not item["declared"]:
@@ -452,11 +508,26 @@ def analyze_arm(value, root):
         item["admission_capture"]["state"] for item in output["attempts"])), "observed_failures": len(failures),
         "attempts_with_observed_failures": sum(bool(item["capture_failures"]) for item in output["attempts"]),
         "observed_failed_capture_sum_ns": sum(row["capture_duration_ns"] for row in failures)}
-    for name in METRICS:
-        values = [v["metrics"][name] for v in output["attempts"] if v["metrics"][name] is not None]
-        output["summary"]["metrics"][name] = {"observed": len(values), "attempts": len(groups), "sum_ns": sum(values),
-                                               "min_ns": min(values, default=None), "max_ns": max(values, default=None)}
+    output["summary"]["metrics"] = metric_summary([item["metrics"] for item in output["attempts"]], METRICS, len(groups))
+    output["summary"]["sources"] = {}
+    for source in SOURCES:
+        readings = [item["source_observations"][source] for item in output["attempts"]]
+        states = Counter(reading["state"] for reading in readings)
+        observed = [reading["observations"][0] for reading in readings if reading["state"] == "observed"]
+        output["summary"]["sources"][source] = {
+            "attempts": len(groups), "states": {state: states[state] for state in SOURCE_STATES},
+            "processed_rows": sum(len(reading["observations"]) for reading in readings),
+            "applied_attempts": sum(row["source_applied"] for row in observed),
+            "rejected_attempts": sum(not row["source_applied"] for row in observed),
+            "metrics": metric_summary([reading["metrics"] for reading in readings], SOURCE_METRICS, len(groups))}
     return output
+
+
+def comparison_without_deltas(declared_conditions_match):
+    """Shared comparison schema for evidence and materialization failures."""
+    return {"declared_conditions_match": declared_conditions_match,
+            "descriptive_delta_available": False, "execution_verified": False,
+            "metrics": {}, "source_metrics": {}}
 
 
 def analyze(packet, root):
@@ -483,16 +554,15 @@ def analyze(packet, root):
         before, after = case["before"], case["after"]
         matched = before.get("declared_conditions") is not None and all(v is not None for v in before["declared_conditions"].values()) and before.get("declared_conditions") == after.get("declared_conditions")
         eligible = matched and not case["errors"] and not before["errors"] and not after["errors"]
-        deltas = {}
+        comparison = comparison_without_deltas(matched)
         if eligible:
-            for name in METRICS:
-                a, b = before["summary"]["metrics"][name], after["summary"]["metrics"][name]
-                deltas[name] = None if not a["observed"] or not b["observed"] else {
-                    "observed_mean_after_minus_before_ns": {"numerator": b["sum_ns"]*a["observed"]-a["sum_ns"]*b["observed"],
-                                                            "denominator": a["observed"]*b["observed"]},
-                    "before_observed": a["observed"], "after_observed": b["observed"]}
-        case["comparison"] = {"declared_conditions_match": matched, "descriptive_delta_available": eligible,
-                              "execution_verified": False, "metrics": deltas}
+            comparison.update(descriptive_delta_available=True,
+                metrics={name: mean_delta(before["summary"]["metrics"][name], after["summary"]["metrics"][name])
+                         for name in METRICS},
+                source_metrics={source: {name: mean_delta(before["summary"]["sources"][source]["metrics"][name],
+                                                        after["summary"]["sources"][source]["metrics"][name])
+                                         for name in SOURCE_METRICS} for source in SOURCES})
+        case["comparison"] = comparison
     return {"schema_version": 2, "kind": "descriptive_original_ask_followup", "cases": cases,
             "limits": ["Declarations and artifact bytes do not prove execution/source/binary/install identity.",
                        "Only declared, journaled and observed attempts are known; capture failure or an unflushed interruption can still leave unknown attempts.",
@@ -501,7 +571,23 @@ def analyze(packet, root):
                        "Durations describe observed subsets, with every attempt retained in denominators; no speed/readiness verdict.",
                        "Capture receipts cover one attempted append through return/error conversion before warning formatting, not fsync or complete capture; historical missing receipts remain unobserved.",
                        "Store initialization spans precede input-reader timing; they are retained separately, not a full cold-start duration.",
+                       "Source receipts are client worker callbacks; processed/applicator results are UI handling facts, not source success, paint, useful Task work or server execution counts.",
+                       "Each source contributes at most one interval per attempt; repeated source observations remain ambiguous with no invented first/latest timing.",
                        "Opaque source snapshots and read completion do not prove useful Task progress or visible UI."]}
+
+
+def metric_display(metric):
+    if not metric["observed"]:
+        return "unobserved (0/%d)" % metric["attempts"]
+    return "%s (%d/%d)" % (format(Decimal(metric["sum_ns"])/metric["observed"]/1_000_000, ".3f"),
+                             metric["observed"], metric["attempts"])
+
+
+def delta_display(delta):
+    if delta is None:
+        return "unavailable"
+    ratio = delta["observed_mean_after_minus_before_ns"]
+    return format(Decimal(ratio["numerator"])/ratio["denominator"]/1_000_000, "+.3f")
 
 
 def markdown(report):
@@ -516,12 +602,25 @@ def markdown(report):
         lines += ["", "| Interval | Before mean ms (observed/all) | After mean ms (observed/all) | Observed mean delta ms |", "|---|---|---|---|"]
         for name in sorted(METRICS):
             values = [case[arm]["summary"]["metrics"][name] for arm in ("before", "after")]
-            displays = ["unobserved (0/%d)" % v["attempts"] if not v["observed"] else
-                        "%s (%d/%d)" % (format(Decimal(v["sum_ns"])/v["observed"]/1_000_000, ".3f"), v["observed"], v["attempts"]) for v in values]
-            delta = case["comparison"]["metrics"].get(name)
-            ratio = delta["observed_mean_after_minus_before_ns"] if delta else None
-            difference = "unavailable" if ratio is None else format(Decimal(ratio["numerator"])/ratio["denominator"]/1_000_000, "+.3f")
-            lines.append("| %s | %s | %s | %s |" % (name, *displays, difference))
+            lines.append("| %s | %s | %s | %s |" % (name, *map(metric_display, values),
+                delta_display(case["comparison"]["metrics"].get(name))))
+        lines += ["", "Source handling is a client observation; applied does not mean a successful source or Task.", "",
+                  "| Source | Cohort | Observed/all | Applied / rejected | Unobserved | Ambiguous / invalid |",
+                  "|---|---|---:|---:|---:|---:|"]
+        for source, label in SOURCES.items():
+            for arm in ("before", "after"):
+                reading = case[arm]["summary"]["sources"][source]
+                states = reading["states"]
+                lines.append("| %s | %s | %d/%d | %d / %d | %d | %d / %d |" %
+                    (label, arm, states["observed"], reading["attempts"], reading["applied_attempts"],
+                     reading["rejected_attempts"], states["unobserved"], states["ambiguous"], states["invalid_attempt"]))
+        lines += ["", "| Source | Interval | Before mean ms (observed/all) | After mean ms (observed/all) | Observed mean delta ms |",
+                  "|---|---|---|---|---|"]
+        for source, label in SOURCES.items():
+            for name, (_start, _end, interval) in SOURCE_METRICS.items():
+                values = [case[arm]["summary"]["sources"][source]["metrics"][name] for arm in ("before", "after")]
+                lines.append("| %s | %s | %s | %s | %s |" % (label, interval, *map(metric_display, values),
+                    delta_display(case["comparison"]["source_metrics"].get(source, {}).get(name))))
         lines += ["", "Case evidence errors: %d." % len(case["errors"]), "",
                   "Declared conditions match: %s. Full identities, missing stages, raw facts and errors are in JSON." % case["comparison"]["declared_conditions_match"], ""]
     lines += ["- "+limit for limit in report["limits"]]

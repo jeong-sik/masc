@@ -151,8 +151,10 @@ let keeper_meta_store =
 let memory_os_current_store =
   { store = "memory OS current snapshot"
   ; on_refusal =
-      "recall injection, the librarian and keeper_memory_write all fail for \
-       that keeper, and neither writer repairs it because both read first"
+      "recall logs a warning, counts the read error, and tells the keeper that \
+       Memory is unavailable; the next Memory commit for that keeper \
+       (keeper_memory_write, supersede, Librarian admission) moves the \
+       unreadable snapshot aside, logs a warning, and continues from no snapshot"
   ; scan =
       (fun ~base_path ->
          let keepers_dir =
@@ -225,7 +227,11 @@ let memory_admission_queue_store =
 let memory_source_current_store =
   { store = "memory-source current claims"
   ; on_refusal =
-      "keeper_memory_write and recall both refuse the claim for that source        path, and neither writer repairs it because the upsert reads first"
+      "every Memory commit for that keeper refuses, keeper_memory_write, supersede \
+       and Librarian admission included, and so does memory search over current \
+       or all sources; no writer repairs the file because each reads it first; \
+       recall logs a warning, counts the read error, and tells the keeper that \
+       source-bound memory is unavailable"
   ; scan =
       (fun ~base_path ->
          let keepers_dir =
@@ -283,8 +289,10 @@ let disposition_receipt_store =
 let board_posts_store =
   { store = "board posts"
   ; on_refusal =
-      "the loader drops the row without a log or a counter, and the next \
-       full-snapshot write removes it from disk"
+      "the loader keeps the rows it can read and logs an ERROR naming the file; \
+       board_posts.jsonl is not rewritten, deleting a post is refused, and \
+       expired posts are not swept, until the line is fixed or removed and the \
+       server restarts"
   ; scan =
       (fun ~base_path ->
          let path =

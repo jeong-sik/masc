@@ -21,7 +21,7 @@ import time
 from urllib.parse import urlparse
 import uuid
 
-from contract import RESULT_FIELDS, validate_result
+from contract import InvalidResult, RESULT_FIELDS, SESSION_FIELDS, validate_result, validate_session
 
 
 class InvalidRequest(ValueError):
@@ -34,12 +34,14 @@ class Operation(str, Enum):
     OBSERVE = "observe"
     BATCH = "batch"
     FINISH = "finish"
+    RETIRE = "retire"
 
 
 class Status(str, Enum):
     OBSERVED = "observed"
     POSTCONDITION_MET = "postcondition_met"
     CLOSED = "closed"
+    RETIRED = "retired"
     REJECTED = "rejected_before_effect"
     UNKNOWN = "outcome_unknown"
 
@@ -105,7 +107,7 @@ def condition(value):
 
 
 def validate(request):
-    fields(request, ("request_id", "operation"), ("name", "expected_url", "steps", "expect", "screenshot", "scope"))
+    fields(request, ("request_id", "operation"), ("name", "expected_epoch", "expected_url", "steps", "expect", "screenshot", "scope"))
     text(request["request_id"], "request_id")
     try:
         operation = Operation(request["operation"])
@@ -115,7 +117,8 @@ def validate(request):
                Operation.RECOVER: {"screenshot", "scope"},
                Operation.OBSERVE: {"screenshot", "scope"},
                Operation.BATCH: {"expected_url", "steps", "expect", "screenshot", "scope"},
-               Operation.FINISH: set()}[operation]
+               Operation.FINISH: set(),
+               Operation.RETIRE: {"expected_epoch"}}[operation]
     if set(request) - {"request_id", "operation"} - allowed:
         raise InvalidRequest("Fields do not belong to this operation")
     if "screenshot" in request and type(request["screenshot"]) is not bool:
@@ -124,6 +127,8 @@ def validate(request):
         raise InvalidRequest("scope must be viewport or full_page")
     if operation is Operation.OPEN:
         text(request.get("name"), "name")
+    if operation is Operation.RETIRE:
+        text(request.get("expected_epoch"), "expected_epoch")
     if operation is Operation.BATCH:
         # Initial ego tabs use chrome://new-tab-page/. This is an equality
         # guard from a prior observation, not an allowed navigation target.
@@ -155,6 +160,14 @@ def validate(request):
     return operation
 
 
+def sync_directory(directory):
+    parent = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(parent)
+    finally:
+        os.close(parent)
+
+
 def atomic_json(path, value):
     """Publish and sync the exact bytes and parent directory before returning."""
     encoded = json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
@@ -165,11 +178,7 @@ def atomic_json(path, value):
             output.flush()
             os.fsync(output.fileno())
         os.replace(temporary, path)
-        parent = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(parent)
-        finally:
-            os.close(parent)
+        sync_directory(path.parent)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -199,11 +208,41 @@ def publish(directory, result, identity):
     session_id = session["epoch"] if session else identity
     envelope = {"source_id": "ego-browser", "incarnation": session_id,
         "cursor": result["request_id"],
-        "complete": result["status"] in (Status.OBSERVED.value, Status.POSTCONDITION_MET.value, Status.CLOSED.value),
+        "complete": result["status"] in (Status.OBSERVED.value, Status.POSTCONDITION_MET.value,
+                                         Status.CLOSED.value, Status.RETIRED.value),
         "detail": result["error"]["message"] if result["error"] else None,
         "observations": [{"id": result["request_id"], "kind": "ego_browser",
             "observed_at": observed, "actor": None, "evidence": [], "fields": result}]}
     atomic_json(directory / "snapshot.json", envelope)
+
+
+def retirement_path(directory, epoch):
+    return directory / "retirements" / (hashlib.sha256(epoch.encode()).hexdigest() + ".json")
+
+
+def validate_retirement(retirement, identity):
+    fields(retirement, ("epoch", "session", "intent", "request_id"))
+    text(retirement["epoch"], "retirement epoch")
+    text(retirement["request_id"], "retirement request_id")
+    session, intent = retirement["session"], retirement["intent"]
+    if session is None and intent is None:
+        raise InvalidRequest("Retirement has no original binding")
+    if session is not None:
+        try:
+            validate_session(session)
+        except InvalidResult as error:
+            raise InvalidRequest(str(error)) from error
+    intent_fields = SESSION_FIELDS - {"space_id", "page"}
+    if intent is not None:
+        fields(intent, intent_fields)
+        for key in intent_fields:
+            text(intent[key], "retirement intent " + key)
+    for binding in (session, intent):
+        if binding is not None and (binding["epoch"] != retirement["epoch"]
+                                    or binding["owner_identity"] != identity):
+            raise InvalidRequest("Retirement belongs to another binding owner or epoch")
+    if session is not None and intent is not None and any(session[key] != intent[key] for key in intent_fields):
+        raise InvalidRequest("Retirement session and open intent disagree")
 
 
 def invoke(command, request, session, intent, result_path, screenshot_path):
@@ -273,6 +312,44 @@ def run(directory, command, request):
         identity = decode(identity_path.read_text())["id"]
         receipts = directory / "receipts"
         receipts.mkdir(exist_ok=True, mode=0o700)
+        # This tombstone is durable before either binding file is cleared. A
+        # crash between the two clears cannot resurrect the retired epoch.
+        session_path = directory / "session.json"
+        session = decode(session_path.read_text()) if session_path.exists() else None
+        intent_path = directory / "open-intent.json"
+        intent = decode(intent_path.read_text()) if intent_path.exists() else None
+        retired_bindings = []
+        for path, binding in ((session_path, session), (intent_path, intent)):
+            if binding is None:
+                continue
+            tombstone = retirement_path(directory, binding["epoch"])
+            if tombstone.exists():
+                with tombstone.open("rb") as saved:
+                    encoded = saved.read()
+                    retirement = decode(encoded.decode("utf-8"))
+                    validate_retirement(retirement, identity)
+                    original = retirement["session" if path == session_path else "intent"]
+                    if original != binding:
+                        raise InvalidRequest("Retirement record does not match the retained binding")
+                    # A rename can be visible after its parent fsync failed.
+                    # Re-establish durability of these validated bytes before
+                    # consuming their authority to clear either binding file.
+                    observed = os.fstat(saved.fileno())
+                    os.fsync(saved.fileno())
+                    sync_directory(tombstone.parent)
+                    saved.seek(0)
+                    current = tombstone.stat()
+                    if saved.read() != encoded or (current.st_dev, current.st_ino) != (observed.st_dev, observed.st_ino):
+                        raise InvalidRequest("Retirement record changed during synchronization")
+                retired_bindings.append(path)
+        # Validate and synchronize every applicable record first. A failed
+        # sync must leave both binding files unchanged, including partial clears.
+        for path in retired_bindings:
+            atomic_json(path, None)
+            if path == session_path:
+                session = None
+            else:
+                intent = None
         receipt_path = receipts / (key + ".json")
         if receipt_path.exists():
             receipt = decode(receipt_path.read_text())
@@ -282,10 +359,30 @@ def run(directory, command, request):
                 return receipt["result"]
             return failure(request, Status.UNKNOWN,
                 "This request was already dispatched without a retained result; inspect before any new action")
-        session_path = directory / "session.json"
-        session = decode(session_path.read_text()) if session_path.exists() else None
-        intent_path = directory / "open-intent.json"
-        intent = decode(intent_path.read_text()) if intent_path.exists() else None
+        if operation is Operation.RETIRE:
+            binding = session if session is not None else intent
+            if binding is None or binding["epoch"] != request["expected_epoch"]:
+                raise InvalidRequest("Retirement requires the exact current binding epoch")
+            result = {"request_id": request["request_id"], "operation": operation.value,
+                      "status": Status.RETIRED.value, "session": session, "completed_steps": 0,
+                      "failed_step": None, "url": None, "title": None, "snapshot": None,
+                      "error": None, "screenshot": None}
+            validate_result(result)
+            # Host-only revocation, not an SDK absence/finish claim. Retain all
+            # old receipts and the exact retired binding for operator inspection.
+            retirements = directory / "retirements"
+            retirements.mkdir(exist_ok=True, mode=0o700)
+            sync_directory(directory)
+            retirement = {"epoch": binding["epoch"], "session": session,
+                          "intent": intent, "request_id": request["request_id"]}
+            validate_retirement(retirement, identity)
+            atomic_json(receipt_path, {"request_sha256": digest, "phase": "dispatching"})
+            atomic_json(retirement_path(directory, binding["epoch"]), retirement)
+            atomic_json(session_path, None)
+            atomic_json(intent_path, None)
+            publish(directory, result, identity)
+            atomic_json(receipt_path, {"request_sha256": digest, "phase": "settled", "result": result})
+            return result
         if operation not in (Operation.OPEN, Operation.RECOVER) and session is None:
             raise InvalidRequest("Open a task space first; use recover if the initial open reply was lost")
         if operation is Operation.OPEN and session and session["name"] != request["name"]:
@@ -299,8 +396,10 @@ def run(directory, command, request):
             result = failure(request, Status.REJECTED, "ego-browser executable is unavailable; install and complete onboarding", session)
         else:
             if operation is Operation.OPEN and session is None:
-                intent = {"name": request["name"], "epoch": str(uuid.uuid4()),
-                          "owner_identity": identity, "native_name": request["name"] + " [masc:" + identity + "]"}
+                epoch = str(uuid.uuid4())
+                intent = {"name": request["name"], "epoch": epoch,
+                          "owner_identity": identity,
+                          "native_name": request["name"] + " [masc:" + identity + ":" + epoch + "]"}
                 atomic_json(intent_path, intent)
             # Sync before process creation: crash/lost stdout must not replay.
             atomic_json(receipt_path, {"request_sha256": digest, "phase": "dispatching"})
@@ -339,7 +438,8 @@ def main():
         print(json.dumps({"status": Status.UNKNOWN.value, "error": str(error)}))
         return 1
     print(json.dumps(result, ensure_ascii=False))
-    return 0 if result["status"] in (Status.OBSERVED.value, Status.POSTCONDITION_MET.value, Status.CLOSED.value) else 1
+    return 0 if result["status"] in (Status.OBSERVED.value, Status.POSTCONDITION_MET.value,
+                                     Status.CLOSED.value, Status.RETIRED.value) else 1
 
 
 if __name__ == "__main__":

@@ -43,9 +43,10 @@ JSON
 ```
 
 The result contains the bound `session.space_id`, URL and snapshot. The native
-Space name includes this state directory's durable installation identity, so
-different installations using the same display name cannot accidentally share
-a Space. Opening the same name while it is active reuses that bound space. A
+Space name includes this state directory's durable installation identity and
+the opening epoch, so different installations or explicitly retired bindings
+using the same display name cannot accidentally share a Space. Opening the same
+name while it is active reuses that bound space. A
 different name requires finishing the current task first. Reading is explicit:
 
 ```json
@@ -112,6 +113,36 @@ the installation-owned name retained before dispatch. It creates no Space and
 never claims or takes over a user-owned Space. If that exact space is absent,
 ambiguous or under user control, it reports uncertainty and needs operator
 recovery. A new `open` is refused while that unresolved intent exists.
+
+If a previously bound Space is removed outside the companion, even `finish`
+or `recover` may fail at the bound SDK lookup. Lookup errors remain
+`outcome_unknown`; they do not prove absence, ownership transfer or cleanup.
+After inspecting the retained session/intent and obtaining an explicit operator
+decision to abandon that binding, retire its exact epoch locally:
+
+```json
+{"request_id":"retire-project-1","operation":"retire","expected_epoch":"<exact session.epoch or open-intent.json epoch>"}
+```
+
+`retire` never invokes ego, closes tabs, claims a Space or retries uncertain
+input. Its `retired` result confirms only local binding revocation, **not browser
+closure or task completion**. A Space that still exists must be inspected and
+managed separately in ego. This operation also works for an unresolved first
+open intent and when the ego executable is unavailable. An incorrect or stale
+epoch is refused without retiring a newer binding. Do not retire automatically
+after errors or use it to bypass user control.
+
+An epoch-specific record under `retirements/` is synced before clearing either
+binding file; an interrupted clear is completed under the same host lock on a
+later call. Recovery validates the saved owner, epoch and original binding,
+synchronizes that exact record and its directory again, then rechecks its bytes
+and identity before clearing bindings. A failed sync leaves both binding files
+unchanged. Existing receipts, including uncertain/dispatched requests, remain
+unchanged. A lost retirement reply can therefore remain uncertain while the
+durable local revocation still prevents resurrecting that binding. Retirement
+does not create a replacement: a later explicit `open` creates a new epoch and
+native name, so it cannot silently resume the possibly surviving retired Space.
+An old request ID returns only its retained result and never rebinds the host.
 
 `open-intent.json` retains first-open ownership; `session.json` retains the bound
 space; `snapshot.json` is the latest published

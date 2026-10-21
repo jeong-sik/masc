@@ -94,7 +94,8 @@ On macOS, run `node tools/alphatex/native/test-edited-ump-wire.mjs` from the
 repository root to check edited capture packets through the actual Worker and
 unchanged native source transport into private CoreMIDI MIDI2 destinations.
 It compares per-source received words against explicit pitch/velocity/index/
-controller/release values, observes owned-note/pedal cleanup on cancellation,
+controller/release values, observes both sources' active-note and pedal cleanup
+on cancellation after their receive acknowledgements,
 and emits a receipt with actual received words and retired owner state. It uses
 the Swift compiler and CoreMIDI, without opening an existing instrument or
 replacing the installed application. This is virtual-endpoint evidence; it does

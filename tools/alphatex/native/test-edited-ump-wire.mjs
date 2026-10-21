@@ -81,16 +81,14 @@ import CoreMIDI
   try cancelled.prepare();try cancelled.stageCoordinated(at:0)
   try cancelled.runCoordinated(anchorNanoseconds:DispatchTime.now().uptimeNanoseconds+100_000_000)
   // The first source packet contains PN state, pedal-down and four attacks
-  // (12 words). Cancel after their receive acknowledgement, not a fixed sleep.
-  try spin("admitted edited attacks") {observed("cancel/A").count >= 12 || cancelled.state == .stopped}
+  // (12 words). Wait for B's attack too, so cancellation proves cleanup of
+  // both source owners after receive acknowledgement, not a fixed sleep.
+  try spin("admitted edited attacks on both sources") {(observed("cancel/A").count >= 12 && observed("cancel/B").count >= 2) || cancelled.state == .stopped}
   try require(cancelled.state == .playing && cancelled.terminalFailure == nil,"cancel owner did not acquire edited attacks")
   let sent=Array(cancelled.events.prefix(cancelled.index))
   var held:[UmpOutput.Key:Int]=[:]
   for note:UInt32 in [60,64,67,71] {held[UmpOutput.Key(source:"A",prefix:0x43050000,number:note)]=1}
-  // Main-thread delay may also admit B. Its single fixture note's state is
-  // derived from the independently checked source prefix, never DUT held state.
-  let b=sent.filter {$0.source == "B"}.map {$0.words[0]}
-  if b.contains(0x49921103) && !b.contains(0x49821100) {held[UmpOutput.Key(source:"B",prefix:0x49020000,number:17)]=1}
+  held[UmpOutput.Key(source:"B",prefix:0x49020000,number:17)]=1
   let pedals:Set<UmpOutput.Key>=[UmpOutput.Key(source:"A",prefix:0x43050000,number:64)]
   try require(cancelled.output.held == held && cancelled.output.pedals == pedals,"fixture attacks (including velocity0) or pedal ownership missing")
   cancelled.finish(reason:"cancelled",error:nil,publish:false)

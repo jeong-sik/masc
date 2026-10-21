@@ -9439,6 +9439,7 @@ type state = {
   (* The last language-server answer (or refusal), shown beside the title
      until the next question or file replaces it. *)
   mutable code_lsp_note: string option;
+  (* Original admitted hover with its physical source owner and local viewport. *)
   mutable code_hover: code_hover_reading option;
   mutable code_lsp_query: (code_lsp_query, unit) Masc_tui_fetched.t;
   mutable code_location_offer: code_location_offer option;

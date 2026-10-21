@@ -410,6 +410,9 @@ let document_markdown ~width body =
    is computed from the prompt's width, does not have to know about it. *)
 let voice_meter_text (state : state) =
   match state.voice_capture, state.voice_level_db with
+  (* The old capture still occupies the slot until its terminal reply; a
+     retargeted draft must not advertise that it is recording new speech. *)
+  | Some _, _ when state.voice_capture_withdrawn -> "[이전 음성 종료 대기] "
   (* Continuous mode between utterances: no capture is running, but the row is
      still listening and the operator needs to know before speaking. *)
   | None, _ when state.voice_continuous <> None -> "[대기] "

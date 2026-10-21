@@ -3855,31 +3855,76 @@ let convert_evidence_image bytes =
   | exception ((Unix.Unix_error _ | Sys_error _) as failure) ->
       Error (Printexc.to_string failure)
 
-(* The operator evidence bundle for the verification detail, over HTTP.
-   Keyed by task id so a stale answer for a request the operator already
-   left is discarded, not drawn under another one. *)
-let launch_verification_evidence_load state ~mailbox task_id =
-  if server_authority_ready state then begin
-  let host = server_peer_host in
-  let port = state.port in
-  launch_workspace_request state ~mailbox
-    ~boundary_error:(fun detail ->
-      Masc_tui_types.Verification_evidence_read.Launch_failure detail)
-    ~deliver:(fun result -> Verification_evidence_loaded (task_id, result))
-    (fun () ->
-      Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id
-      |> Result.map (fun evidence ->
-             (* Decoding the bytes is done; making them drawable runs
-                converters, so it leaves the fiber the render loop shares. *)
-             Eio_guard.run_in_systhread ~label:"tui-evidence-pictures" (fun () ->
-                 Masc_tui_evidence_picture.prepare
-                   ~display:(Masc_tui_portrait_view.current_display ())
-                   ~convert:convert_evidence_image
-                   evidence)))
+let verification_evidence_outcome = function
+  | Ok _ -> "received"
+  | Error (Verification_evidence_read.Transport _) -> "transport_failed"
+  | Error (Http_error _) -> "http_refused"
+  | Error (Invalid_json _) -> "invalid_json"
+  | Error (Invalid_payload _) -> "invalid_payload"
+  | Error (Launch_failure _) -> "boundary_failed"
+  | Error (Workspace_unconfirmed _) -> "workspace_unconfirmed"
+  | Error (Interrupted _) -> "interrupted"
 
-(* The detail pane's two non-Info tabs. Same discipline as the call log:
-   the answer names the keeper it is for, so a stale load cannot be drawn
-   under another keeper's heading. *)
+let log_verification_evidence_read request ~phase ~outcome =
+  Log.Transport.routine_lazy (fun () ->
+    let key = Masc_tui_fetched.request_key request.ver_ticket in
+    let field get = match request.ver_workspace with None -> `Null | Some identity -> `String (Masc.Tui_decode.Canonical_path.to_string (get identity)) in
+    "tui_verification_evidence=" ^ Yojson.Safe.to_string (`Assoc [
+      "pid",`Int (Unix.getpid ());
+      "task_id",`String key.vek_task_id;"verification_id",`String key.vek_request_id;
+      "request",`Intlit (Int64.to_string (Masc_tui_fetched.request_id request.ver_ticket));
+      "base_path",field (fun identity -> identity.Tui_decode.sid_base_path);
+      "masc_root",field (fun identity -> identity.Tui_decode.sid_masc_root);
+      "observed_ns",`Intlit (Int64.to_string (Mtime_clock.elapsed_ns ()));
+      "phase",`String phase;"outcome",`String outcome]))
+
+(* Original detail request and Task own this observation. A later visit to the
+   same Task creates a fresh ticket; cancellation and reply admission are distinct. *)
+let cancel_verification_evidence_load state ~reason =
+  Option.iter (fun request ->
+    Masc_tui_workspace_job.cancel_observation state ~key:request.ver_job)
+    state.verification_evidence_request;
+  retire_verification_evidence_read state ~reason
+
+let launch_verification_evidence_load state ~mailbox key =
+  if server_authority_ready state then begin
+    Option.iter (fun request ->
+      Masc_tui_workspace_job.cancel_observation state ~key:request.ver_job)
+      state.verification_evidence_request;
+    match begin_verification_evidence_read state key with
+    | None -> ()
+    | Some request ->
+      log_verification_evidence_read request ~phase:"requested" ~outcome:"pending";
+      let host = server_peer_host and port = state.port in
+      let read = capture_workspace_json_read state (fun () ->
+        Ok (Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id:key.vek_task_id
+          ~verification_id:key.vek_request_id
+          |> Result.map (fun evidence ->
+            Eio_guard.run_in_systhread ~label:"tui-evidence-pictures" (fun () ->
+              Masc_tui_evidence_picture.prepare
+                ~display:(Masc_tui_portrait_view.current_display ())
+                ~convert:convert_evidence_image evidence)))) in
+      launch_workspace_result ~key:request.ver_job ~observation:true state ~mailbox
+        ~on_not_run:(fun () -> log_verification_evidence_read request ~phase:"not_run" ~outcome:"not_started")
+        ~observe_job:(fun event -> log_verification_evidence_read request
+          ~phase:(match event with Masc_tui_workspace_job.Cancellation_requested -> "cancellation_requested"
+            | Registration_released -> "registration_released") ~outcome:"observed")
+        ~boundary_error:(fun detail -> Verification_evidence_read.Launch_failure detail)
+        ~deliver:(fun result ->
+          log_verification_evidence_read request ~phase:"delivery_formed" ~outcome:(verification_evidence_outcome result);
+          Verification_evidence_loaded (request,result))
+        (fun () ->
+          log_verification_evidence_read request ~phase:"caller_entered" ~outcome:"pending";
+          try
+            let result = match read () with
+              | Ok result -> result
+              | Error detail -> Error (Verification_evidence_read.Workspace_unconfirmed detail) in
+            log_verification_evidence_read request ~phase:"caller_observed" ~outcome:(verification_evidence_outcome result);
+            result
+          with Eio.Cancel.Cancelled _ as exn ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            log_verification_evidence_read request ~phase:"caller_interrupted" ~outcome:"interrupted";
+            Printexc.raise_with_backtrace exn backtrace)
   end
 
 (* The MCP resource inventory, and one resource's text. Each operation
@@ -6526,6 +6571,8 @@ let open_measurement_artifact state ~mailbox ~sha256 =
 let reset_verification_rows state =
   state.verification_cursor <- 0;
   state.verification_scroll <- 0;
+  cancel_verification_evidence_load state
+    ~reason:(Verification_evidence_read.Interrupted "The original verification detail was closed.");
   state.verification_detail_request_id <- None;
   state.verification_detail_scroll <- 0;
   state.verification_verdict_armed <- None;
@@ -13026,7 +13073,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   reset_verification_rows state;
   state.verification <- None;
   state.verification_error <- None;
-  state.verification_evidence <- None;
+  state.verification_evidence <- Masc_tui_fetched.clear state.verification_evidence;
+  state.verification_evidence_request <- None;
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
   state.verification_offset <- 0;
@@ -13175,9 +13223,12 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.verification_cursor <- 0;
   state.verification_scroll <- 0;
   state.verification_offset <- 0;
+  cancel_verification_evidence_load state
+    ~reason:(Verification_evidence_read.Interrupted "The original verification detail was closed.");
   state.verification_detail_request_id <- None;
   state.verification_detail_scroll <- 0;
-  state.verification_evidence <- None;
+  state.verification_evidence <- Masc_tui_fetched.clear state.verification_evidence;
+  state.verification_evidence_request <- None;
   state.verification_verdict_armed <- None;
   state.verification_verdict_error <- None;
   state.runtime_params <- [];
@@ -15012,7 +15063,8 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
           | Some snapshot, Some request_id ->
               List.find_opt (fun row -> String.equal row.Tui_decode.vr_request_id request_id)
                 snapshot.Tui_decode.vs_requests
-              |> Option.iter (fun row -> launch_verification_evidence_load state ~mailbox row.Tui_decode.vr_task_id)
+              |> Option.iter (fun row -> launch_verification_evidence_load state ~mailbox
+                {vek_request_id=row.Tui_decode.vr_request_id;vek_task_id=row.vr_task_id})
           | _ -> ())
      | Schedules -> Option.iter (fun schedule_id ->
          launch_schedule_wake_history_load state ~mailbox ~schedule_id) state.schedule_detail_id
@@ -16427,9 +16479,8 @@ let open_verification_detail state ~mailbox =
       state.verification_detail_request_id <-
         Some row.Masc.Tui_decode.vr_request_id;
       state.verification_detail_scroll <- 0;
-      state.verification_evidence <- None;
       launch_verification_evidence_load state ~mailbox
-        row.Masc.Tui_decode.vr_task_id
+        {vek_request_id=row.Masc.Tui_decode.vr_request_id;vek_task_id=row.vr_task_id}
 
 let open_harness_detail state =
   match state.harness with
@@ -18680,11 +18731,12 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            state.goal_confirmation <- Goal_confirmation.Inspecting
              (Goal_confirmation_read.complete ~equal:String.equal read request result)
        | Goal_confirmation.Submitting _ -> ())
-  | Verification_evidence_loaded (task_id, result) ->
-      (match verification_cursor_row state, state.verification_detail_request_id with
-       | Some row, Some _ when String.equal row.Masc.Tui_decode.vr_task_id task_id ->
-           state.verification_evidence <- Some (task_id, result)
-       | _ -> ())
+  | Verification_evidence_loaded (request, result) ->
+      let key = Masc_tui_fetched.request_key request.ver_ticket in
+      let admitted = state.verification_detail_request_id = Some key.vek_request_id
+        && complete_verification_evidence_read state request result in
+      log_verification_evidence_read request
+        ~phase:(if admitted then "applied" else "discarded") ~outcome:(verification_evidence_outcome result)
   | Task_cancel_done (task_id, expected_workspace, result) ->
       let refresh certainty =
         remember_task_followup state ~expected_workspace (Task_cancel_refresh { task_id; certainty });
@@ -21536,6 +21588,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                           String.equal row.Masc.Tui_decode.vr_request_id
                             request_id)
                        requests) ->
+               cancel_verification_evidence_load state
+                 ~reason:(Verification_evidence_read.Interrupted "The original verification detail was closed.");
                state.verification_detail_request_id <- None;
                state.verification_detail_scroll <- 0
            | Some _ | None -> ())
@@ -30532,6 +30586,8 @@ and is loaded on demand through keeper_skill.
                 else goto_surface state ~mailbox:async_messages Planning
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then begin
+                  cancel_verification_evidence_load state
+                    ~reason:(Verification_evidence_read.Interrupted "The original verification detail was closed.");
                   state.verification_detail_request_id <- None;
                   state.verification_detail_scroll <- 0
                 end
@@ -30709,6 +30765,8 @@ and is loaded on demand through keeper_skill.
                 state.schedule_detail_id <- None;
                 state.schedule_scroll <- 0
             | Verification ->
+                cancel_verification_evidence_load state
+                  ~reason:(Verification_evidence_read.Interrupted "The original verification detail was closed.");
                 state.verification_detail_request_id <- None;
                 state.verification_detail_scroll <- 0
             | Harness ->

@@ -112,3 +112,24 @@
   포함하며 순수 CPU 시간·paint·Task 진척이 아니다. 명시적 정상 경로의 GET 6→3은
   실제 속도 50% 개선을 뜻하지 않는다. 비교와 미실행 시나리오는
   `docs/audits/2026-10-19-tui-tools-composed-workspace-reads.md`를 따른다.
+
+## Task 검증 증거
+
+- 증거 상세는 원래 verification request ID와 Task ID의 쌍 및 Fetched ticket에 묶는다.
+  같은 Task 재진입·명시 재조회도 새 ticket을 만들며 이전 callback/worker 정리가 새 소유자를
+  끝내지 않는다. 기존 source state machine은 typed 오류를 그대로 보관하고, 정상 증거는
+  재조회·실패 중에도 같은 키의 마지막 관측으로 남긴다. 미조회·실제 대기·값 없는 실패·
+  재시도·workspace 미확인을 구분하며, 현재 요청이 없다는 이유로 loading을 만들지 않는다.
+- 실제 evidence GET은 원래 workspace binding의 요청 사전조건과 단일 admission receipt를
+  확인한다. 원래 GET의 상태·본문 decode와 오류 분류를 유지하며 별도 health GET을 직렬로
+  먼저 붙이지 않는다. 응답의 Task와 verification ID도 유일한 원래 값이어야 한다. 같은 Task의
+  새 제출을 이전 상세에 빌려주지 않는다. 오류가 포함된 전송과 원문 JSON을 캐시하지 않는다.
+- 본문 JSON 해석은 공통 CPU worker에, 기존 이미지 준비는 원래 systhread에 둔다.
+  renderer와 keys는 파일·HTTP·변환을 실행하지 않는다. 상세 종료·workspace 철회는 ticket을
+  회수하고 원래 job의 취소만 요청한다. 취소 요청·등록 해제·caller 반환·UI 반영을 실제
+  converter/OS 종료·paint·검증 승인·Task 완료로 바꾸지 않는다.
+- routine 진단은 원래 process·workspace·Task·verification·request로 요청/진입/관측/
+  중단/미시작/전달 구성/반영/폐기를 연결한다. 꺼진 로그의 누락 단계를 추정하지 않고,
+  서로 다른 process의 monotonic 시각을 빼지 않는다. 추가 receipt/identity 검사·상태·
+  원문/이전 PNG 보관·CPU 제출·로그 비용과 실패·취소·미완료 표본을 Before/After에 남긴다.
+  protocol/resource 시나리오를 쓰고 문구·배치·행 순서·snapshot·PTY 검사를 추가하지 않는다.

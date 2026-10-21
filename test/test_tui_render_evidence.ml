@@ -67,7 +67,12 @@ let evidence items = Some ("task-1", Ok (Picture.Items items))
 
 let section ?(width = 80) ?(content_height = 40) ?(display = kitty) ?(task_id = "task-1")
     evidence =
-  Section.section ~evidence ~task_id ~width ~content_height ~display
+  let observation = match evidence with
+    | Some (id,Ok value) when String.equal id task_id -> Masc_tui_fetched.Ready value
+    | Some (id,Error error) when String.equal id task_id -> Masc_tui_fetched.Failed error
+    | Some _ | None -> Masc_tui_fetched.Absent in
+  Section.section ~evidence:observation ~in_flight:false ~workspace_confirmed:true
+    ~width ~content_height ~display
 
 let texts rows = List.map snd rows
 

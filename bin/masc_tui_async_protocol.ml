@@ -617,7 +617,7 @@ type async_msg =
       string Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
   | Task_cancel_done of string * Masc.Tui_decode.server_identity * task_cancel_outcome
   | Verification_evidence_loaded of
-      string * (Masc_tui_evidence_picture.evidence,
+      Masc_tui_types.verification_evidence_request * (Masc_tui_evidence_picture.evidence,
                 Masc_tui_types.Verification_evidence_read.failure) result
   | Keeper_settings_editor_loaded of Masc_tui_types.keeper_settings_request *
       (Masc_tui_types.keeper_settings_snapshot, string) result

@@ -1123,7 +1123,7 @@ let post_keeper_chat_streaming ?expected_workspace ?(admission_intent = Masc_tui
     awaiting_verification is a 400 whose body names why; that text becomes
     the error the pane draws. *)
 let fetch_verification_evidence ~(host : string) ~(port : int)
-    ~(task_id : string) :
+    ~(task_id : string) ~(verification_id : string) :
     (Masc.Tui_decode.verification_evidence,
      Masc_tui_types.Verification_evidence_read.failure) result =
   let module Failure = Masc_tui_types.Verification_evidence_read in
@@ -1131,17 +1131,20 @@ let fetch_verification_evidence ~(host : string) ~(port : int)
     Printf.sprintf "/api/v1/verification/evidence?task_id=%s"
       (percent_encode_path_segment task_id)
   in
-  match http_get ~host ~port ~path with
-  | Error detail -> Error (Failure.Transport detail)
-  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
-    ->
-      Error (Failure.Http_error (refusal ~status_code:status ~body))
-  | Ok (_, body) -> (
-      match Yojson.Safe.from_string body with
-      | json -> Masc.Tui_decode.decode_verification_evidence json
+  match Masc_tui_workspace_read.read_response
+      ~send:(fun ~path -> http_get_response ~host ~port ~path ~headers:[])
+      ~host ~port ~path with
+  | Error (Masc_tui_workspace_read.Transport_failed detail) -> Error (Failure.Transport detail)
+  | Error (Workspace_refused detail) -> Error (Failure.Workspace_unconfirmed detail)
+  | Ok response ->
+    Masc_tui_response_decode.run ~name:"verification.evidence.decode_wait" (fun () ->
+      if not (Masc.Tui_decode.is_success_http_status response.Masc_http_client.status)
+      then Error (Failure.Http_error (refusal ~status_code:response.status ~body:response.body))
+      else
+        match Yojson.Safe.from_string response.body with
+        | json -> Masc.Tui_decode.decode_verification_evidence_for_request ~task_id ~verification_id json
           |> Result.map_error (fun detail -> Failure.Invalid_payload detail)
-      | exception Yojson.Json_error detail ->
-          Error (Failure.Invalid_json detail))
+        | exception Yojson.Json_error detail -> Error (Failure.Invalid_json detail))
 
 (** Fetch one goal's merged event timeline
     ([GET /api/v1/dashboard/goals/detail]). Only the [timeline] (and the

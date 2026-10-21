@@ -509,7 +509,7 @@ let test_system_thread_waiter outcome () =
       | Preparation_succeeds | Preparation_invalidated -> () in
     Eio.Switch.run @@ fun sw ->
     with_blocking_hook_release hook @@ fun () ->
-    Eio.Time.with_timeout env#clock coordination_watchdog_seconds (fun () ->
+    Eio.Time.with_timeout_exn env#clock coordination_watchdog_seconds (fun () ->
       Eio.Fiber.fork ~sw (fun () ->
         let result = Eio_unix.run_in_systhread (fun () ->
           KDD.ensure ~before_prepare:(fun () -> block_once hook after_release base)

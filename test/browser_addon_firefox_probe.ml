@@ -54,9 +54,10 @@ let () =
       Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback,0));
       match Unix.getsockname socket with Unix.ADDR_INET (_,port) -> port
       | Unix.ADDR_UNIX _ -> failwith "expected loopback port") in
+  Unix.mkdir (Filename.concat base_path "fixture-skills") 0o700;
   let runtime_path=Filename.concat config_root "runtime.toml" in
   write runtime_path (Exact_output_fixture.official_client_runtime_fixture ^ Printf.sprintf
-    "\n[browser.automation]\nenabled=false\n[browser.stagehand]\nenabled=false\n[browser.live]\nenabled=true\n[browser.live.bidi]\nfirefox=%S\nprofile=%S\nport=%d\n"
+    "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.automation]\nenabled=false\n[browser.stagehand]\nenabled=false\n[browser.live]\nenabled=true\n[browser.live.bidi]\nfirefox=%S\nprofile=%S\nport=%d\n"
     firefox profile port);
   require (Runtime.init_default ~config_path:runtime_path);
   Mirage_crypto_rng_unix.use_default ();
@@ -72,6 +73,14 @@ let () =
     let declaration=Filename.concat directory "browser.toml" in
     let rec await work=match work () with Some result -> result
       | None -> Eio.Time.sleep clock 0.01;await work in
+    ignore (record "publish the isolated workspace Skill configuration"
+      (let* observation=Runtime.load_config_observation ~runtime_config_path:runtime_path () in
+       let* publication=Server_skill_snapshot_runtime.refresh_from_observation ~base_path observation
+         |> Result.map_error Server_skill_snapshot_runtime.error_to_string in
+       match publication with
+       | Skill_catalog_snapshot_service.Published _|Unchanged _ -> Ok `Null
+       | Workspace_retired -> Error "fixture Skill workspace was retired"));
+    R.register_skill_export_handler Server_skill_snapshot_runtime.publish_lane_skills;
     R.start_configuration_service ~config ~sw ~clock;
     let attach () =
       write declaration (Printf.sprintf

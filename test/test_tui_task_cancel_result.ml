@@ -495,8 +495,12 @@ let test_successful_creation_inspection_without_recovery env () = Eio.Switch.run
   let intent=creation_intent ~workspace ~original:"/task inspect successful\noriginal body"
     ~title:"inspect successful" ~body:"original body" in
   let original=begin_task_dispatch state intent in
+  let offered () = List.exists (function
+    | _, Masc_tui_palette.Palette_task_creation candidate -> candidate == original
+    | _ -> false) (Masc_tui_palette.palette_entries state) in
   check bool "unsettled creation is not inspectable" false
     (open_task_creation_inspection state ~keeper:intent.keeper);
+  check bool "unsettled original is not a palette read target" false (offered ());
   Dispatch.launch original.tdr_dispatch ~prepare:(fun () -> Ok "original-session")
     ~send:(send_creation call);
   await_task original;
@@ -505,6 +509,8 @@ let test_successful_creation_inspection_without_recovery env () = Eio.Switch.run
     | _ -> fail "actual successful creation was not received" in
   let before=Masc.Workspace.get_tasks_raw config in
   Input.insert state.msg_input "keep this new draft";
+  check bool "palette carries the exact successful original without consuming the draft" true
+    (offered ());
   check bool "successful creation cannot restore a resubmittable command" true
     (recover_task_dispatch_input state ~keeper:intent.keeper=None);
   check bool "successful original remains inspectable after receipt consumption" true
@@ -521,7 +527,13 @@ let test_successful_creation_inspection_without_recovery env () = Eio.Switch.run
     (before=Masc.Workspace.get_tasks_raw config && take_task_dispatch_completion state original=None);
   check bool "another Keeper cannot borrow this completed intent" false
     (open_task_creation_inspection state ~keeper:"another-keeper");
+  state.msg_target_keeper_name <- Some "another-keeper";
+  check bool "palette cannot offer another composer's original" false (offered ());
+  state.msg_target_keeper_name <- None;
+  check bool "unbound composer cannot offer the retained original" false (offered ());
+  state.msg_target_keeper_name <- Some intent.keeper;
   state.workspace_identity <- Workspace_identity_unread;
+  check bool "palette cannot offer an unconfirmed workspace's original" false (offered ());
   check bool "unconfirmed workspace cannot reopen completed inspection" false
     (open_task_creation_inspection state ~keeper:intent.keeper)
 

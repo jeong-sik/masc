@@ -27989,6 +27989,7 @@ and is loaded on demand through keeper_skill.
                         | Masc_tui_palette.Palette_gate_mode _
                         | Masc_tui_palette.Palette_chat _
                         | Masc_tui_palette.Palette_task _
+                        | Masc_tui_palette.Palette_task_creation _
                         | Masc_tui_palette.Palette_board_hearth _
                         | Masc_tui_palette.Palette_board_post _
                         | Masc_tui_palette.Palette_code_file _
@@ -28066,6 +28067,17 @@ and is loaded on demand through keeper_skill.
                      enter_keeper_chat ~return_to:Keeper_chat_return_list state ~mailbox:async_messages
                        ~keeper_name ~drain_queue:(fun () ->
                          drain_queued_message state ~base_path ~mailbox:async_messages)
+                 | Some (_, Masc_tui_palette.Palette_task_creation original) ->
+                     let keeper = (Masc_tui_task_dispatch.intent original.tdr_dispatch).keeper in
+                     if state.msg_target_keeper_name = Some keeper
+                        && List.exists ((==) original) (task_creation_inspectable state ~keeper)
+                     then begin
+                       close_task_inspection_reader state;
+                       if select_task_creation_inspection state original then
+                         launch_task_creation_read state ~mailbox:async_messages
+                     end else
+                       report_action state "error"
+                         "Original Task creation is unavailable for this Keeper and confirmed workspace"
                  | Some (_, Masc_tui_palette.Palette_task task_id) ->
                      (* The palette lands where Enter on the task list would:
                         Overview with the task's detail open and the cursor

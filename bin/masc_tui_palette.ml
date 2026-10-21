@@ -51,6 +51,7 @@ type palette_action =
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
   | Palette_chat of string
   | Palette_task of string
+  | Palette_task_creation of task_dispatch_request
   | Palette_board_hearth of string option
   | Palette_board_post of string
   (* (question, symbol): a language-server question about a name on the
@@ -253,6 +254,14 @@ let palette_entries (state : state) =
   @ List.map
       (fun (t : task) -> ("task " ^ t.id ^ " " ^ t.title, Palette_task t.id))
       state.tasks
+  @ (match state.msg_target_keeper_name with
+      | None -> []
+      | Some keeper ->
+          List.map (fun original ->
+            let intent = Masc_tui_task_dispatch.intent original.tdr_dispatch in
+            "inspect Task creation / " ^ keeper ^ " / " ^ intent.title,
+            Palette_task_creation original)
+            (task_creation_inspectable state ~keeper))
   @ [ "hearth all", Palette_board_hearth None ]
   @ (let retained=match Masc_tui_types.board_census_reading state with
        | Masc_tui_fetched.Ready _,false -> false
@@ -314,6 +323,7 @@ let palette_action_words = function
       Option.to_list (List.assoc_opt surface surface_ring) @ aliases
   | Palette_usage_scope (Some scope_id) -> [scope_id]
   | Palette_addon_results id -> [id]
+  | Palette_task_creation _ -> ["task-inspect"; "original Task"]
   | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
   | Palette_collab | Palette_msx | Palette_dos
   | Palette_lane_addons | Palette_usage_scope None | Palette_config _ | Palette_gate_mode _
@@ -339,7 +349,7 @@ let palette_matches (state : state) =
                    | Palette_connectors | Palette_collab | Palette_msx
                    | Palette_dos | Palette_lane_addons | Palette_addon_results _ | Palette_goto _
                    | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
-                   | Palette_task _ | Palette_board_hearth _
+                   | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _
                    | Palette_board_post _ | Palette_code_file _
                    | Palette_code_location _ ) ) -> false) entries
          | Some (_, Some _) -> [])
@@ -387,7 +397,7 @@ let selected_file state =
     | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_addon_results _
     | Palette_goto _
     | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
-    | Palette_task _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
+    | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
     | Palette_code_location _))
   | None -> None
 
@@ -400,6 +410,6 @@ let selected_location state =
     | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_addon_results _
     | Palette_goto _
     | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
-    | Palette_task _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
+    | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
     | Palette_code_file _))
   | None -> None

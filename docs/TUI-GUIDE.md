@@ -705,6 +705,11 @@ names. A line that starts with `/` is a command for the TUI instead:
   including successful creations, for this Keeper and the confirmed original
   workspace. Successful requests remain available for reading, while
   `/task-recover` continues to select only failed or unconfirmed commands.
+  To keep an existing chat draft, leave composer focus with Esc, open the `:`
+  command palette and search `task-inspect` or the original title. Choosing an
+  `inspect Task creation` entry opens that exact retained request without
+  consuming or restoring the draft. Entries follow the composer's Keeper and
+  confirmed original workspace; selection checks both again.
   `[` selects an older request, `]` a newer one,
   and `r` reads the displayed source again. The original title, body and
   transport outcome remain visible beside the lookup. A failed refresh keeps

@@ -594,9 +594,17 @@ type workspace_identity =
    Authority also prevents A -> B -> A from reviving a handoff. *)
 type task_cancel_certainty = Cancellation_confirmed | Cancellation_unconfirmed
 
+type task_handoff_editor = {
+  the_authority : workspace_authority;
+  the_revision : Masc_tui_message_input.revision;
+  the_target : string option;
+}
+
 type task_followup =
-  | Task_handoff of { keeper : string; task_id : string; title : string; body : string }
+  | Task_handoff of { keeper : string; task_id : string; title : string; body : string;
+      editor : task_handoff_editor option }
   | Task_cancel_refresh of { task_id : string; certainty : task_cancel_certainty }
+
 
 type pending_task_followup =
   { tf_workspace : Tui_decode.server_identity
@@ -7892,6 +7900,13 @@ type image_observation = {
         * Masc_tui_image_preview.preview) list) list;
 }
 
+type task_dispatch_request = {
+  tdr_dispatch : Masc_tui_task_dispatch.t;
+  tdr_authority : workspace_authority;
+  tdr_editor : Masc_tui_message_input.revision;
+  tdr_editor_keeper : string option;
+}
+
 type keeper_composer_draft = {
   kcd_text : string;
   kcd_attachments : Masc_tui_keeper_chat_projection.attachment list;
@@ -8324,6 +8339,8 @@ type state = {
   mutable workspace_authority: workspace_authority;
   mutable workspace_read_authority: unit ref;
   mutable pending_task_followups: pending_task_followup list;
+  mutable task_dispatch_requests: task_dispatch_request list;
+  mutable retained_task_dispatch_requests: task_dispatch_request list;
   mutable suspended_keeper_inputs: (workspace_input_identity option * suspended_keeper_input) list;
   mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
   mutable workspace_observation_cancellations: (unit ref * (unit -> unit)) list;
@@ -10459,6 +10476,75 @@ let complete_chat_call_read state request result =
       true
   | (Some _ | None), (Some _ | None) -> false
 
+let begin_task_dispatch state intent =
+  let request = {tdr_dispatch=Masc_tui_task_dispatch.create intent;
+    tdr_authority=state.workspace_authority;
+    tdr_editor=Masc_tui_message_input.revision state.msg_input;
+    tdr_editor_keeper=state.msg_target_keeper_name} in
+  state.task_dispatch_requests <- request :: state.task_dispatch_requests;
+  state.retained_task_dispatch_requests <- request :: state.retained_task_dispatch_requests;
+  request
+
+let pending_task_dispatch_completions state =
+  List.filter_map (fun request ->
+    match Masc_tui_task_dispatch.progress request.tdr_dispatch with
+    | Completed completion -> Some (request,completion)
+    | Not_started | Reserved | Preparing | Sending -> None) state.task_dispatch_requests
+  |> List.rev
+
+let take_task_dispatch_completion state request =
+  if not (List.exists ((==) request) state.task_dispatch_requests) then None
+  else match Masc_tui_task_dispatch.progress request.tdr_dispatch with
+    | Not_started | Reserved | Preparing | Sending -> None
+    | Completed completion ->
+      state.task_dispatch_requests <- List.filter ((!=) request) state.task_dispatch_requests;
+      (match completion.outcome with
+       | Created _ -> state.retained_task_dispatch_requests <- List.filter ((!=) request) state.retained_task_dispatch_requests
+       | Not_sent _ | Server_error _ | Unconfirmed _ -> ());
+      Some completion.outcome
+
+let restore_task_dispatch_input state request =
+  let not_sent = match Masc_tui_task_dispatch.progress request.tdr_dispatch with
+    | Completed {outcome=Not_sent _;_} -> true
+    | Not_started | Reserved | Preparing | Sending | Completed {outcome=(Created _ | Server_error _ | Unconfirmed _);_} -> false in
+  if not_sent && request.tdr_authority = state.workspace_authority
+     && request.tdr_editor_keeper = state.msg_target_keeper_name
+     && Masc_tui_message_input.has_revision state.msg_input request.tdr_editor then begin
+    state.msg_command_menu <- Masc_tui_command.Menu_idle;
+    Masc_tui_message_input.clear state.msg_input;
+    Masc_tui_message_input.insert state.msg_input (Masc_tui_task_dispatch.intent request.tdr_dispatch).original;
+    true
+  end else false
+
+let recover_task_dispatch_input state ~keeper =
+  let eligible request =
+    let intent = Masc_tui_task_dispatch.intent request.tdr_dispatch in
+    String.equal intent.keeper keeper
+    && (match intent.workspace with
+        | Some expected -> state.workspace_identity = Workspace_identity_match
+            && server_authority_ready state
+            && server_workspace_matches ~expected:(Some expected)
+              (match state.server_identity with Some id -> Ok id | None -> Error "unread")
+        | None -> request.tdr_authority = state.workspace_authority)
+    && match Masc_tui_task_dispatch.progress request.tdr_dispatch with
+       | Completed {outcome=(Not_sent _ | Server_error _ | Unconfirmed _);_} -> true
+       | Not_started | Reserved | Preparing | Sending | Completed {outcome=Created _;_} -> false in
+  match List.find_opt eligible state.retained_task_dispatch_requests with
+  | None -> None
+  | Some request ->
+    state.msg_command_menu <- Masc_tui_command.Menu_idle;
+    Masc_tui_message_input.clear state.msg_input;
+    Masc_tui_message_input.insert state.msg_input (Masc_tui_task_dispatch.intent request.tdr_dispatch).original;
+    Some request
+
+let task_handoff_may_focus state ~keeper = function
+  | None -> false
+  | Some editor ->
+      editor.the_authority = state.workspace_authority
+      && editor.the_target = state.msg_target_keeper_name
+      && (state.msg_target_keeper_name = None || state.msg_target_keeper_name = Some keeper)
+      && Masc_tui_message_input.has_revision state.msg_input editor.the_revision
+
 let remember_task_followup state ~expected_workspace action =
   state.pending_task_followups <- state.pending_task_followups @
     [{tf_workspace = expected_workspace; tf_authority = state.workspace_authority;
@@ -12082,7 +12168,7 @@ let withdraw_fusion_workspace (state : state) =
    every iteration rather than at the places that change the surface: there
    are 44 assignments to [view] in the key and message paths and one
    [goto_surface] among them, and the overlays that have to be torn down on
-   a jump are named by hand in some of them -- [Task_dispatched] closes the
+   a jump are named by hand in some of them -- the Task handoff closes the
    help sheet, the palette and the row search by name, and would have left
    this form open on a Keeper chat. A rule kept in one place cannot be the
    one an author forgets.
@@ -13150,8 +13236,8 @@ let retain_preflight_inputs (state : state) entries =
                  | Message_memory -> false))
           state.msg_history;
         Masc_tui_message_input.insert state.msg_input request.message;
-        state.msg_attachments <- request.attachments;
-        state.msg_references <- request.references;
+        (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- request.attachments);
+        (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- request.references);
         state.msg_attachments_since <- None
       end else begin
         state.msg_queued <- Masc_tui_keeper_chat_queue.restore_unsent state.msg_queued item;
@@ -14848,6 +14934,8 @@ let create_state
   workspace_cancellations = [];
   workspace_observation_cancellations = [];
   pending_task_followups = [];
+  task_dispatch_requests = [];
+  retained_task_dispatch_requests = [];
   suspended_keeper_inputs = [];
   workspace_identity =
     (if String.equal local_base_path ""

@@ -1,12 +1,17 @@
-type t = { mutable text : string; mutable cursor : int }
+type revision = unit ref
+type t = { mutable text : string; mutable cursor : int; mutable revision : revision }
+let revision t = t.revision
+let has_revision t revision = t.revision == revision
+let edited t = t.revision <- ref ()
+let invalidate_revision = edited
 
-let create () = { text = ""; cursor = 0 }
+let create () = { text = ""; cursor = 0; revision = ref () }
 let contents t = t.text
 let length t = String.length t.text
 let cursor t = t.cursor
 let before_cursor t = String.sub t.text 0 t.cursor
 let after_cursor t = String.sub t.text t.cursor (length t - t.cursor)
-let clear t = t.text <- ""; t.cursor <- 0
+let clear t = edited t; t.text <- ""; t.cursor <- 0
 
 let boundary_at_or_after t cursor =
   match List.find_opt (fun offset -> offset >= cursor)
@@ -15,12 +20,14 @@ let boundary_at_or_after t cursor =
   | None -> length t
 
 let insert t text =
+  edited t;
   t.text <- before_cursor t ^ text ^ after_cursor t;
   t.cursor <- boundary_at_or_after t (t.cursor + String.length text)
 
 let insert_char t char = insert t (String.make 1 char)
 
 let append t text =
+  edited t;
   t.text <- t.text ^ text;
   t.cursor <- length t
 
@@ -33,10 +40,12 @@ let move_right t =
   t.cursor <- boundary_at_or_after t (min (length t) (t.cursor + 1))
 
 let replace_prefix t prefix =
+  edited t;
   t.text <- prefix ^ after_cursor t;
   t.cursor <- boundary_at_or_after t (String.length prefix)
 
 let backspace t =
+  edited t;
   let after = after_cursor t in
   move_left t;
   t.text <- before_cursor t ^ after;

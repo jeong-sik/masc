@@ -653,8 +653,21 @@ names. A line that starts with `/` is a command for the TUI instead:
 - `/task <title>` — followed by any further lines as the body — creates a
   task over the server's `masc_add_task` tool and then messages the keeper
   the operator's own words with the new id in front: `[task-512] <title>`.
-  The keeper claims that exact task. The TUI session block records the creation;
-  a failure puts the typed text back into the input, unsent.
+  The keeper claims that exact task. The TUI records the original creation even
+  if workspace observations change before its reply. Follow-up handoff waits
+  for the matching workspace and current Keeper roster; a foreign workspace
+  does not receive it. New input also prevents an automatic chat jump; the
+  original Keeper handoff can still proceed. Only a failure before send restores the command
+  automatically, and only while its original input remains untouched.
+- `/task-recover` — restores the latest retained failed or unconfirmed Task
+  command for this Keeper and matching workspace. It only restores input;
+  it does not create or send a Task. A server error or missing reply does not
+  prove that creation failed: inspect Tasks before repeating the command.
+  While creation is active, the shared footer distinguishes preparation, awaiting
+  a reply, and a result awaiting UI application within its existing width rules.
+  New text, attachment and reference edits survive late replies, including
+  changing the draft and returning to empty.
+  Retained commands live in this TUI session; they are not restart recovery.
 - `/diff` — opens the working-tree Git changes directly in chat. Pressing
   `Enter`, `d`, or `Right` opens the file's Git diff inline with syntax
   highlighting and line numbers; `j`/`k` scrolls the diff, `v` opens the

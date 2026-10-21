@@ -193,6 +193,147 @@ let test_no_switch_closed_owner_and_real_workspace_refusal env () =
   claimed config "cancel-owner-original";
   claimed foreign_config "cancel-owner-foreign"
 
+module Dispatch = Masc_tui_task_dispatch
+module Input = Masc_tui_message_input
+let rec await_task request = match Dispatch.progress request.tdr_dispatch with
+  | Completed _ -> ()
+  | Not_started | Reserved | Preparing | Sending -> Eio.Fiber.yield (); await_task request
+let creation_intent ~workspace ~original ~title ~body : Dispatch.intent =
+  {request_id="original-task-create";keeper="creation-keeper";title;body;original;workspace=Some workspace}
+let send_creation call ~session_id:_ ~request_id ~arguments =
+  let response = call (Wire.request_body ~request_id ~tool:"masc_add_task" ~arguments) in
+  Wire.outcome_of_body ~request_id (Yojson.Safe.to_string response)
+let creation_reply state shared original =
+  let take round = Protocol.Delivery_round.take round ~can_take:(fun () -> true)
+    ~queued:(fun () -> Eio.Stream.length shared)
+    ~take_shared:(fun () -> Eio.Stream.take_nonblocking shared)
+    ~collect_owned:(fun () -> Protocol.collect_owned_results state) in
+  let first,round = take Protocol.Delivery_round.empty in
+  check bool "unrelated shared notification survives original Task completion" true (ready first == original);
+  let next,_ = take round in
+  match (ready next).message with
+  | Protocol.Task_dispatch_completed request -> request
+  | _ -> fail "Task creation acquired a foreign scope or lost its original request"
+
+let test_created_task_survives_workspace_withdrawal env () = Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  with_server ~clock ~sw ~owner:"creation-session-a" @@ fun base_a config_a expected_a _original call_a ->
+  with_server ~clock ~sw ~owner:"creation-session-b" @@ fun _base_b config_b expected_b _other _call_b ->
+  let before_b = Masc.Workspace.get_tasks_raw config_b in
+  let state = create_state ~workspace:"task-resource" ~local_base_path:base_a ~port:8935 ~refresh_interval:2. () in
+  state.server_identity <- Some expected_a;
+  state.workspace_identity <- Workspace_identity_match;
+  state.msg_target_keeper_name <- Some "creation-keeper";
+  let intent = creation_intent ~workspace:expected_a ~original:"/task original title\noriginal body"
+    ~title:"original title" ~body:"original body" in
+  Input.clear state.msg_input;
+  let request = begin_task_dispatch state intent in
+  let shared,notification = seed_shared () in
+  let committed,commit = Eio.Promise.create () and gate,release = Eio.Promise.create () in
+  Eio_context.with_turn_switch sw (fun () -> Dispatch.launch request.tdr_dispatch
+    ~prepare:(fun () -> Ok "original-session")
+    ~send:(fun ~session_id ~request_id ~arguments ->
+      let answer = send_creation call_a ~session_id ~request_id ~arguments in
+      Eio.Promise.resolve commit ();
+      Eio.Promise.await gate;
+      answer));
+  Eio.Promise.await committed;
+  List.iter (fun (_,cancel) -> cancel ()) state.workspace_cancellations;
+  state.workspace_authority <- Workspace_authority 1;
+  state.workspace_read_authority <- ref ();
+  state.server_identity <- Some expected_b;
+  Input.insert state.msg_input "new operator input";
+  Eio.Promise.resolve release ();
+  await_task request;
+  let delivered = creation_reply state shared notification in
+  check bool "original request wrapper remains the owner" true (delivered==request);
+  let task_id,workspace = match take_task_dispatch_completion state delivered with
+    | Some (Dispatch.Created {task_id;workspace}) -> task_id,workspace
+    | _ -> fail "actual created Task lost its original receipt" in
+  let created = match List.find_opt (fun (task : Masc_domain.task) -> task.id=task_id)
+      (Masc.Workspace.get_tasks_raw config_a) with Some task -> task | None -> fail "created Task resource absent" in
+  check string "original title persisted" intent.title created.title;
+  check string "original body persisted" intent.body created.description;
+  remember_task_followup state ~expected_workspace:workspace
+    (Task_handoff {keeper=intent.keeper;task_id;title=intent.title;body=intent.body;editor=None});
+  let run,withdrawn = take_task_followups state ~ready:(fun _ -> true) in
+  check bool "created Task cannot grant a foreign Keeper handoff" true (run=[] && withdrawn<>[]);
+  check string "new operator input remains" "new operator input" (Input.contents state.msg_input);
+  check bool "duplicate receipt cannot create a second handoff decision" true (take_task_dispatch_completion state request=None);
+  check bool "foreign Task resources remain unchanged" true (before_b=Masc.Workspace.get_tasks_raw config_b);
+  state.workspace_authority <- Workspace_authority 2;
+  state.server_identity <- Some expected_a;
+  state.msg_target_keeper_name <- None;
+  Input.clear state.msg_input;
+  let second_intent = {intent with request_id="original-task-create-second";title="same-workspace original"} in
+  let second = begin_task_dispatch state second_intent in
+  Eio_context.with_turn_switch sw (fun () -> Dispatch.launch second.tdr_dispatch
+    ~prepare:(fun () -> Ok "original-session") ~send:(send_creation call_a));
+  Input.insert state.msg_input "new unbound composer draft";
+  await_task second;
+  let task_id,workspace = match take_task_dispatch_completion state second with
+    | Some (Dispatch.Created {task_id;workspace}) -> task_id,workspace
+    | _ -> fail "same-workspace actual Task creation lost its receipt" in
+  check bool "same-workspace Task is an actual persistent resource" true
+    (List.exists (fun (task : Masc_domain.task) -> task.id=task_id && task.title=second_intent.title)
+      (Masc.Workspace.get_tasks_raw config_a));
+  let editor = Some {the_authority=second.tdr_authority;the_revision=second.tdr_editor;
+    the_target=second.tdr_editor_keeper} in
+  remember_task_followup state ~expected_workspace:workspace
+    (Task_handoff {keeper=second_intent.keeper;task_id;title=second_intent.title;body=second_intent.body;editor});
+  let run,withdrawn = take_task_followups state ~ready:(fun _ -> true) in
+  check bool "new input blocks only automatic focus, not the fresh original handoff" true
+    (run<>[] && withdrawn=[] && not (task_handoff_may_focus state ~keeper:second_intent.keeper editor));
+  check string "successful late creation keeps the unbound new draft" "new unbound composer draft" (Input.contents state.msg_input)
+
+let test_unknown_task_and_original_input_recovery env () = Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  with_server ~clock ~sw ~owner:"creation-session-original" @@ fun base config expected _original call ->
+  let state = create_state ~workspace:"task-resource" ~local_base_path:base ~port:8935 ~refresh_interval:2. () in
+  state.server_identity <- Some expected;
+  state.workspace_identity <- Workspace_identity_match;
+  state.msg_target_keeper_name <- Some "creation-keeper";
+  Input.clear state.msg_input;
+  let intent = creation_intent ~workspace:expected ~original:"/task uncertain original\noriginal body"
+    ~title:"uncertain original" ~body:"original body" in
+  let request = begin_task_dispatch state intent in
+  Eio_context.with_turn_switch sw (fun () -> Dispatch.launch request.tdr_dispatch
+    ~prepare:(fun () -> Ok "original-session")
+    ~send:(fun ~session_id ~request_id ~arguments ->
+      let answer = send_creation call ~session_id ~request_id ~arguments in
+      ignore (require_ok answer);
+      Error "controlled reply loss after actual resource commit"));
+  await_task request;
+  (match take_task_dispatch_completion state request with Some (Dispatch.Unconfirmed _) -> ()
+   | _ -> fail "lost actual creation response became not-created or success");
+  check bool "unconfirmed creation never automatically restores a resubmittable command" false
+    (restore_task_dispatch_input state request);
+  let actual_before_recovery = Masc.Workspace.get_tasks_raw config in
+  check bool "uncertain outcome still has its actual Task resource" true
+    (List.exists (fun (task : Masc_domain.task) -> task.title=intent.title) actual_before_recovery);
+  (match Masc_tui_command.parse "/task-recover" with Task_recover -> () | _ -> fail "explicit recovery intent was not parsed");
+  check bool "explicit original command recovery is available" true
+    (Option.is_some (recover_task_dispatch_input state ~keeper:intent.keeper));
+  check string "recovery retains exact original command" intent.original (Input.contents state.msg_input);
+  check bool "input recovery cannot replay Task creation" true (actual_before_recovery=Masc.Workspace.get_tasks_raw config);
+  Input.clear state.msg_input;
+  let unsent = begin_task_dispatch state {intent with original="/task unstarted";title="unstarted"} in
+  Input.insert state.msg_input "a newer edit";
+  Input.clear state.msg_input;
+  let snapshot = Eio_context.snapshot_state () in
+  Fun.protect ~finally:(fun () -> Eio_context.restore_state snapshot) (fun () ->
+    Eio_context.For_testing.clear_root_switch ();
+    Dispatch.launch unsent.tdr_dispatch ~prepare:(fun () -> Ok "original-session") ~send:(send_creation call));
+  (match take_task_dispatch_completion state unsent with Some (Dispatch.Not_sent _) -> ()
+   | _ -> fail "no-switch request became a sent operation");
+  check bool "editing back to empty cannot lend the original editor revision" false
+    (restore_task_dispatch_input state unsent);
+  check string "late failure keeps the newer empty editor" "" (Input.contents state.msg_input);
+  check bool "not-started intent cannot mutate the actual workspace" true
+    (actual_before_recovery=Masc.Workspace.get_tasks_raw config);
+  ignore (recover_task_dispatch_input state ~keeper:intent.keeper);
+  check string "explicit recovery selects latest original intent" "/task unstarted" (Input.contents state.msg_input)
+
 let () = Eio_main.run @@ fun env ->
   let snapshot = Eio_context.snapshot_state () in
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -204,4 +345,8 @@ let () = Eio_main.run @@ fun env ->
         test_case "accepted original cancel survives workspace withdrawal and full notifications" `Quick
           (test_accepted_cancel_outlives_workspace_withdrawal env);
         test_case "unstarted, ended-session and actual workspace refusal preserve Tasks" `Quick
-          (test_no_switch_closed_owner_and_real_workspace_refusal env)]])
+          (test_no_switch_closed_owner_and_real_workspace_refusal env);
+        test_case "created original Task survives workspace withdrawal and full notifications" `Quick
+          (test_created_task_survives_workspace_withdrawal env);
+        test_case "actual unknown creation and edited input retain explicit original recovery" `Quick
+          (test_unknown_task_and_original_input_recovery env)]])

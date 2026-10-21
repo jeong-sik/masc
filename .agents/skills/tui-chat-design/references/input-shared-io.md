@@ -57,6 +57,26 @@
   취소와 통신 실패 뒤 결과 미확인 문제는 결과 보관과 별개이며 성공으로 올리지 않는다.
   no-switch·동기 dispatch 실패도 같은 보관 경로를 쓰지만 종료된 세션에 새 메시지는 만들지
   않는다. 큐 공간 대기 제거를 취소 성공·입력 응답·화면 반영의 실측 개선으로 부르지 않는다.
+- `/task` 생성은 원래 intent·Task ID·Keeper·본문과 입력 revision에 묶인 세션 소유
+  요청으로 보관한다. workspace 철회는 수락된 생성 결과를 취소하지 않고, 원래 확인된
+  workspace/두 사전 검증·서버 expected workspace와 fresh Keeper handoff 판정은 유지한다.
+  전송 callback 진입 전 실패만 Not_sent이며 tool 오류는 Server_error, 진입 뒤 통신·해석·
+  예외·취소는 Unconfirmed다. callback 진입은 물리 전송 증거가 아니다. 취소 사실을 보관한
+  뒤 원래 취소를 전파하고 자동 재생성하지 않는다. 완료는 원래 wrapper의 UI 적용을 한 번만
+  허용하며 shared prefix 뒤 기존 owned 그룹의 다음 유한 그룹으로 받는다. 성공 intent는
+  제거하고 실패/미확인 원문은 세션에 남긴다. 매 frame은 active 요청만 읽고 원문 이력은
+  명시적 복구에서 찾는다. UI 전송 대기·반영·Task 생성·handoff·유용한 작업 완료를 혼동하지 않는다.
+  성공 뒤 자동 채팅 열기도 원래 editor authority·대상·revision이 맞을 때만 한다. 새 입력이
+  있으면 화면은 그대로 두고 fresh Keeper handoff는 자기 queue로 계속 전달한다.
+  자동 복원은 Not_sent와 원래 authority·Keeper 대상·불투명 입력 revision이 모두 맞을 때만
+  한다. content edit·clear·paste와 첨부/참조 list 변경은 같은 revision을 바꾸며 cursor 이동은 그대로 둔다. 빈 문자열로
+  돌아왔다는 이유로 같은 입력이라 추정하지 않는다. `/task-recover`는 같은 Keeper와 확인된
+  원래 workspace의 가장 최근 실패 intent를 입력에 복원할 뿐 전송하지 않는다. 미확인은
+  Tasks 확인 뒤 재제출하도록 안내하며 새 입력·외부 workspace에 늦은 실패를 덮지 않는다.
+  기존 HTTP 인증·precondition 알림과 물리 정리는 여전히 막힐 수 있다. intent/결과 보관,
+  입력 편집별 token 할당·active 순회·명시적 이력 탐색 비용을 실측에서 빼지 않는다. 새 cap·
+  timer·중복 생성 fallback·문구/행 순서 테스트를 만들지 않고 source 진척을 Loading/paint
+  개선 실측이나 재시작 복구로 바꾸지 않는다.
 - Keeper 생성은 editor가 반환한 뒤 workspace 확인과 create-only POST를 소유 fiber에서
   수행한다. 확인 중·전송 중·종료 상태는 원래 요청에 묶고, 전송 전 중단·서버 거절·
   생성 확인·결과 미확인을 구분한다. POST 진입 뒤 취소·연결 실패는 결과 미확인이며

@@ -519,15 +519,12 @@ type agent = Tui_decode.agent
 (** Task type (from Tui_decode) *)
 type task = Tui_decode.task
 
-(** Event for the event log *)
-(* The six states the refresh loop can put the TUI in. It was a string
-   with a catch-all at each of the five render sites, so a typo rendered
-   as [disconnected] and a new state would have too. *)
+(* HTTP contact observations. An in-flight refresh has progress of its own
+   and does not replace the last completed contact observation. *)
 type connection_status =
   | Disconnected
   | Connecting
   | Booting
-  | Reconnecting
   | Degraded
   | Connected
 
@@ -536,8 +533,18 @@ let connection_status_label = function
   | Degraded -> "degraded"
   | Connecting -> "connecting..."
   | Booting -> "server booting..."
-  | Reconnecting -> "reconnecting..."
   | Disconnected -> "disconnected"
+;;
+
+(* A successful identity probe is contact even when every requested surface
+   failed. Pending reads leave this last observation alone; their progress is
+   tracked by [http_refresh_started_ns] and [Http_refresh_progress]. *)
+let connection_status_of_refresh ~identity ~surfaces =
+  let results = identity :: surfaces in
+  match List.filter Result.is_ok results with
+  | [] -> Disconnected
+  | successes when List.length successes = List.length results -> Connected
+  | _ :: _ -> Degraded
 ;;
 
 (* A successful probe is the current server even when the peer address did not

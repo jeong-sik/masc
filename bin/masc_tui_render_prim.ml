@@ -1482,7 +1482,6 @@ let connection_status_badge (status : Masc_tui_types.connection_status) =
     | Connected -> Theme.ok (), "connected"
     | Degraded -> Theme.warn (), "partial"
     | Connecting -> Theme.warn (), "loading..."
-    | Reconnecting -> Theme.warn (), "refreshing..."
     | Booting -> Theme.warn (), "server booting..."
     | Disconnected -> Theme.bad (), "refresh failed"
   in
@@ -2768,7 +2767,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
              rather than shutting a keeper down, so the hint follows suit. *)
           ; "s", (match state.connection_status with
              | Disconnected -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "s" ^ Ansi.reset ^ ":start server"
-             | Connecting | Booting | Reconnecting | Degraded | Connected ->
+             | Connecting | Booting | Degraded | Connected ->
                  hint Keeper_control.Shutdown "shutdown")
             (* Delete is the only action a keeper whose configuration failed to
                read still offers, and [primary] deliberately withholds it from

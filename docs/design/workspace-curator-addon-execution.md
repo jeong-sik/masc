@@ -38,6 +38,25 @@ save. The briefing callback similarly validates `decode_output`/`accept` without
 saving. Preserve these full domain checks when moving the transport: a package
 schema success is not a ledger or briefing commit.
 
+There is another concrete gap before that commit: the current HTTP flow invokes
+these pure host checks **before candidate acceptance**, using
+`Reject_and_advance` for a schema-valid but domain-invalid answer. CLI candidates
+receive the same validation. The common Addon Exact runner currently validates
+package/request schemas; it does not supply Curator's captured domain validator.
+Checking only after the worker retains a terminal answer would silently lose
+this semantic fallback. The extraction must provide a shared host-owned
+validation port inside the original admitted flow, before terminal delivery,
+without creating a new request or restarting the candidate order.
+
+Bind that validator to the trusted captured classification/briefing request and
+its original selected facts/ledger or briefing batch. It is pure validation,
+not commit authority. A worker cannot select a privileged validator by naming
+one in its arguments, and optional input/output Hooks cannot disable it. Restore
+the same binding from strict host state after restart. Missing or conflicting
+semantic validation authority must refuse dispatch, rather than accept a
+schema-only result as a Curator judgment. This shared integration is required
+before production wiring; it is not implemented by this document.
+
 ## Two request kinds, one retained execution contract
 
 Classification and briefing use separate declared Exact outputs. They are not
@@ -88,7 +107,8 @@ different identity or changed request digest is rejected.
 | Not dispatched / worker unavailable | Keep the accepted host capture and pending facts; do not consume or replace them |
 | Retained pending result | Keep the same request and owner; a wake/read does not submit another model request |
 | Valid answered result | Revalidate the captured schema and full domain decision, retain that judgment, then let the original host owner commit |
-| Invalid domain output / explicit refusal | Preserve the original result and typed refusal; no ledger mutation or synthetic success |
+| Domain-invalid candidate output | Preserve rejection evidence and the existing original-flow semantic advance before terminal acceptance; no ledger mutation, fresh request or reset of candidate order |
+| Exhausted semantic candidates / terminal execution refusal | Preserve the original terminal and typed failure after the existing HTTP/CLI fallback policy; no ledger mutation or synthetic success |
 | Unknown provider outcome | Retain uncertainty under the original request; never turn it into `absent` or automatically redispatch it |
 | Size refusal | Preserve current classification narrowing for input/output-size refusal and briefing narrowing for input-size refusal only; use whole-row `Request.narrow` / `Briefing.narrow`, retain the child batch and predecessor, and never truncate prose |
 | Failed or uncertain ledger/briefing save | Reload authoritative state before deciding whether the original commit happened; never interpret an I/O error as proof of no write |
@@ -145,6 +165,9 @@ for HITL and Board Attention are unaffected.
 3. The actual serialized host owner applies classification exactly to its
    selected facts, publishes briefing only after the complete original pass,
    and preserves unrelated/deleted/source-bound facts under the existing rules.
+   A schema-valid but domain-invalid first candidate must still advance to the
+   next admitted HTTP/CLI candidate before terminal delivery, with the same
+   request identity, complete validation and rejection evidence.
 4. Off with accepted work, reconnect without a new memory commit, delayed/unknown
    result, malformed output and save failure leave explicit recoverable state.
    Reading an already committed result does not repeat its domain effect.
@@ -154,6 +177,7 @@ for HITL and Board Attention are unaffected.
    recorded separately from that end-to-end proof.
 
 Next coding boundary: retained host classification/briefing request types and
-strict durable recovery, then the shared package request store and consumer.
+strict durable recovery, then the shared package request store, host semantic
+validation before original-flow acceptance, and consumer.
 Keep domain authority on the host throughout these units; do not switch production
 to an incomplete transport adapter.

@@ -289,19 +289,29 @@ let draw_ask_answer_feedback buf cols (state : state) =
            ("g: open " ^ Terminal_text.single_line ai_title ^ " Results"));
     Option.iter (fun reading ->
       let observed = Ask_projection.followup_view reading in
-      let pending source = match source.Ask_projection.fo_state with
-        | Followup_pending -> " · reading latest"
-        | Followup_received | Followup_unconfirmed -> "" in
+      let source_notice source = match source.Ask_projection.fo_state with
+        | Followup_pending ->
+            (match source.fo_value with None -> "" | Some _ -> " · reading latest")
+        | Followup_received -> ""
+        | Followup_unconfirmed ->
+            (match source.fo_value with
+             | None -> ""
+             | Some _ -> " · earlier observation; latest source unconfirmed") in
+      let source_style source observed = match source.Ask_projection.fo_state with
+        | Followup_unconfirmed -> Theme.warn ()
+        | Followup_pending | Followup_received -> observed in
       let absent source label = match source.Ask_projection.fo_state with
         | Followup_pending -> label ^ ": reading", Theme.recede ()
-        | Followup_received | Followup_unconfirmed -> label ^ ": observation unavailable", Theme.warn () in
+        | Followup_received -> label ^ ": observation unavailable", Theme.warn ()
+        | Followup_unconfirmed -> label ^ ": latest source unconfirmed", Theme.warn () in
       (match observed.fv_reactions.fo_value with
        | None ->
          let text, style = absent observed.fv_reactions "Keeper wake/turn" in
          box_wrapped_field buf cols ~head:"  " ~style text
        | Some Decode.Ask_reactions_unavailable ->
          box_wrapped_field buf cols ~head:"  " ~style:(Theme.warn ())
-           "Keeper follow-up: wake/turn observation unavailable"
+           ("Keeper follow-up: wake/turn observation unavailable"
+             ^ source_notice observed.fv_reactions)
        | Some (Ask_reactions_observed reactions) ->
          let facts = List.filter_map Fun.id
            [Option.map (fun _ -> "turn entry observed") reactions.ar_turn_started_at;
@@ -313,9 +323,10 @@ let draw_ask_answer_feedback buf cols (state : state) =
          let facts = if reactions.ar_evidence_current then facts
            else facts @ ["some earlier observations remain unconfirmed"] in
          box_wrapped_field buf cols ~head:"  "
-           ~style:(if reactions.ar_evidence_complete && reactions.ar_evidence_current
-               then Theme.info () else Theme.warn ())
-           ("Keeper follow-up: " ^ String.concat " · " facts ^ pending observed.fv_reactions));
+           ~style:(source_style observed.fv_reactions
+             (if reactions.ar_evidence_complete && reactions.ar_evidence_current
+              then Theme.info () else Theme.warn ()))
+           ("Keeper follow-up: " ^ String.concat " · " facts ^ source_notice observed.fv_reactions));
       let action_text, action_style = match observed.fv_tools.fo_value with
         | None -> absent observed.fv_tools "Tool results"
         | Some Decode.Ask_tools_unavailable -> "Tool results: observation unavailable", Theme.warn ()
@@ -330,7 +341,9 @@ let draw_ask_answer_feedback buf cols (state : state) =
             let uncertain = at_outcomes.ato_failed>0 || at_outcomes.ato_unsettled>0 || at_outcomes.ato_malformed>0 in
             if at_evidence_current then text, (if uncertain then Theme.warn () else Theme.info ())
             else text ^ " · retained earlier evidence", Theme.warn () in
-      box_wrapped_field buf cols ~head:"  " ~style:action_style (action_text ^ pending observed.fv_tools);
+      box_wrapped_field buf cols ~head:"  "
+        ~style:(source_style observed.fv_tools action_style)
+        (action_text ^ source_notice observed.fv_tools);
       (match observed.fv_tools.fo_value with
        | Some (Decode.Ask_tools_observed {at_latest=Some latest;at_evidence_current;_}) ->
          let style = match latest.ata_outcome with
@@ -359,10 +372,12 @@ let draw_ask_answer_feedback buf cols (state : state) =
             let location = match akt_location with
               | Decode.Ask_task_backlog -> "" | Ask_task_archive -> " · archived" in
             let freshness = if akt_evidence_current then ""
-              else " · last observed; latest read did not confirm" in
+              else " · last observed; not freshly confirmed" in
             "Original Task " ^ akt_task_id ^ ": " ^ phase ^ location ^ freshness,
             (if akt_evidence_current then Theme.info () else Theme.warn ()) in
-      box_wrapped_field buf cols ~head:"  " ~style:task_style (task_text ^ pending observed.fv_task))
+      box_wrapped_field buf cols ~head:"  "
+        ~style:(source_style observed.fv_task task_style)
+        (task_text ^ source_notice observed.fv_task))
       followup;
     (match state.ask_followup_error with
      | None -> ()

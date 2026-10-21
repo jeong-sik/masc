@@ -848,7 +848,7 @@ let test_recovery_pulse_keeps_independent_owners_moving () =
         (List.sort String.compare [original.ask_id;later.ask_id])
         (List.sort String.compare (List.map
           (fun (_, payload) -> payload.Keeper_event_queue.ask_id) pending));
-      List.iter (fun (_, payload) ->
+      List.iter (fun (_, (payload : Keeper_event_queue.ask_answered)) ->
         check bool "original continuation survives recovery" true
           (Keeper_continuation_channel.same_route original.continuation payload.Keeper_event_queue.channel)) pending;
       (match Keeper_ask_store.rows_result ~base_path ~keeper_name:"alpha" with

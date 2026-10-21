@@ -1085,11 +1085,18 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
   check bool "server workspace retirement preserves process-local page" true (Logs.current state.system_logs=client_page);
   check bool "retired server detail cannot resolve a colliding client sequence" true
     ((Logs.page Server state.system_logs).lp_snapshot=None && (Logs.page Server state.system_logs).lp_detail_seq=None);
-  let disk=Array.to_list (Sys.readdir log_dir) |> List.concat_map (fun name ->
-    let path=Filename.concat log_dir name in
-    let channel=open_in path in
-    Fun.protect ~finally:(fun () -> close_in channel) @@ fun () ->
-    In_channel.input_lines channel |> List.map (fun line -> Log.Ring.entry_of_json (Yojson.Safe.from_string line))) in
+  (* The store directory holds the ring JSONL beside [admissions/], which is a
+     directory (masc_tui_observation_store.ml, [initialize]). Opening every entry
+     as a line file killed this case with [Sys_error "Is a directory"] before it
+     compared anything. [stored_files] above already skips directories for the
+     same reason. *)
+  let disk=Array.to_list (Sys.readdir log_dir)
+    |> List.filter (fun name -> not (Sys.is_directory (Filename.concat log_dir name)))
+    |> List.concat_map (fun name ->
+      let path=Filename.concat log_dir name in
+      let channel=open_in path in
+      Fun.protect ~finally:(fun () -> close_in channel) @@ fun () ->
+      In_channel.input_lines channel |> List.map (fun line -> Log.Ring.entry_of_json (Yojson.Safe.from_string line))) in
   let member key json=Yojson.Safe.Util.member key json in
   let originals=[completed;failed;unstarted] in
   let selected (entry : Masc.Tui_decode.system_log_entry) =

@@ -795,7 +795,12 @@ let test_original_history_and_historical_evidence env () = Eio.Switch.run @@ fun
   Eio_context.with_turn_switch sw @@ fun () ->
   let state=creation_state base workspace in
   let original,task_id=retained_actual_creation state call ~workspace ~request_id:"original-proof-history" in
-  let first,second=actual_proof_submissions config ~owner ~task_id in
+  (* [with_server] leaves its own Task claimed by [owner], and claiming refuses an
+     agent that already holds an active Task (workspace/workspace_task_claim.ml,
+     [held_tasks_refusal_message]). Working the created Task through a second
+     agent keeps the fixture on the allowed path instead of tripping that rule. *)
+  let proof_owner=owner ^ "-proof" in
+  let first,second=actual_proof_submissions config ~owner:proof_owner ~task_id in
   (* Archive the actually approved Task; only age its terminal fixture time. *)
   let backlog=Masc.Workspace.read_backlog_r config |> require_ok in
   let tasks=List.map (fun (task : Masc_domain.task) -> if task.id<>task_id then task else match task.task_status with
@@ -832,7 +837,10 @@ let test_original_proof_failure_reopen_and_scope env () = Eio.Switch.run @@ fun 
   Eio_context.with_turn_switch sw @@ fun () ->
   let state=creation_state base workspace in
   let original,task_id=retained_actual_creation state call ~workspace ~request_id:"original-proof-retention" in
-  ignore (actual_proof_submissions config ~owner ~task_id);
+  (* Same single-active-Task rule as the history case above: the fixture owner
+     already holds the Task [with_server] created for it. *)
+  let proof_owner=owner ^ "-proof" in
+  ignore (actual_proof_submissions config ~owner:proof_owner ~task_id);
   check bool "original inspector selected" true (open_task_creation_inspection state ~keeper:"creation-keeper");
   let results=Results.create () in Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
   creation_proof state call results;ignore (read_history_prefix results state config original ~earlier:false);

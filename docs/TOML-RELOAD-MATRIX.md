@@ -54,7 +54,7 @@ Operational meaning:
 - Parsed by
   [`Keeper_types_profile.load_keeper_toml`](../lib/keeper/keeper_types_profile.ml)
 - Resolved through
-  [`Config_dir_resolver.keeper_toml_path_opt`](../lib/config_dir_resolver/config_dir_resolver.ml)
+  [`Config_dir_resolver.keeper_toml_path_for_base_path`](../lib/config_dir_resolver/config_dir_resolver.ml)
 - Reconciled for running keepers by
   [`ensure_keeper_meta`](../lib/keeper/keeper_runtime.ml)
   inside the supervisor sweep

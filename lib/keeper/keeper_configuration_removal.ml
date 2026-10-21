@@ -278,7 +278,7 @@ let finish config receipt ~cleanup =
      | Error detail -> save config {receipt with updated_at=Masc_domain.now_iso ();
          last_error=Some detail}
      | Ok () ->
-       Keeper_types_profile.invalidate_keeper_profile_defaults_cache receipt.keeper_name;
+       Keeper_types_profile.invalidate_keeper_profile_snapshots ();
        advance config receipt Removed)
 
 let submit ~config ~keeper_name ~actor ~cleanup =

@@ -90,14 +90,6 @@ val mcp_dir : unit -> string
     ([Managed_asset_sync.Mcp]). Created on demand by the asset sync, like
     {!tools_dir}, and deliberately absent from the diagnostics record for the
     same reason. *)
-val keeper_toml_path : string -> string
-(** [keeper_toml_path name] is [keepers/<name>.toml] whether or not the file
-    exists: the one spelling of where a declaration is expected, so a
-    not-found error can name the path the loader looked at. *)
-
-val keeper_toml_path_opt : string -> string option
-(** [keeper_toml_path_opt name] checks for [keepers/<name>.toml]. *)
-
 val base_path_config_root : cwd:string -> string -> string
 (** [base_path_config_root ~cwd base_path] returns
     [<base_path>/.masc/config] after applying the same base-path normalization
@@ -143,11 +135,15 @@ val candle_toml_path_for_base_path : base_path:string -> string
     no file means the Candle reward currency is off. *)
 
 val keeper_toml_path_for_base_path : base_path:string -> string -> string
-(** Base-path-scoped variant of {!keeper_toml_path}. The file need not exist. *)
+(** [keeper_toml_path_for_base_path ~base_path name] is [keepers/<name>.toml]
+    under the base path's keepers directory whether or not the file exists:
+    the one spelling of where a declaration is expected, so a not-found error
+    can name the path the loader looked at. *)
 
 val keeper_toml_path_opt_for_base_path :
   base_path:string -> string -> string option
-(** Base-path-scoped variant of {!keeper_toml_path_opt}. *)
+(** [keeper_toml_path_opt_for_base_path ~base_path name] is
+    {!keeper_toml_path_for_base_path} when that file exists. *)
 
 (** {1 .masc/ root sub-directory accessors (RFC-0121)}
 

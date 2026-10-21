@@ -30,7 +30,7 @@ let write_keeper_declaration config =
          keeper_name
          "test durable Librarian"
          "docker");
-  Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name
+  Masc.Keeper_types_profile.invalidate_keeper_profile_snapshots ()
 ;;
 
 let with_workspace f =

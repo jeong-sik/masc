@@ -588,7 +588,7 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
       in
 
       let restore_publication_state () =
-        Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+        Keeper_types_profile.invalidate_keeper_profile_snapshots ();
         (* The original durable before-images remain authoritative throughout
            compensation. Recovery needs no additional phase write. *)
         let runtime_restore =
@@ -719,7 +719,7 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
              rollback (Io_error ("runtime assignment durability unconfirmed: " ^ detail))
            | None | Some (Lock_release_unconfirmed _)
            | Some (Runtime_config_lock_release_unconfirmed _) ->
-             Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+             Keeper_types_profile.invalidate_keeper_profile_snapshots ();
              let* () = clear_journal () in
              Ok { value = after_commit (); warnings = write_warnings @ publication_warnings }
          in

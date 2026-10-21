@@ -478,7 +478,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   Out_channel.with_open_bin (Filename.concat keepers_dir (keeper_name ^ ".toml")) (fun oc ->
     Printf.fprintf oc "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\nsandbox_image = \"base\"\n"
       keeper_name "Preserve evidence." "docker");
-  Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name;
+  Masc.Keeper_types_profile.invalidate_keeper_profile_snapshots ();
   let meta = Masc_test_deps.meta_of_json_fixture
     (`Assoc ["name", `String keeper_name; "trace_id", `String trace_id]) |> get in
   Masc.Keeper_meta_store.replace_snapshot config meta |> get;
@@ -799,7 +799,7 @@ let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner ?has_waiting
   Out_channel.with_open_bin (Filename.concat keepers_dir (keeper_name ^ ".toml")) (fun oc ->
     Printf.fprintf oc "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\nsandbox_image = \"base\"\n"
       keeper_name "Preserve evidence." "docker");
-  Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name;
+  Masc.Keeper_types_profile.invalidate_keeper_profile_snapshots ();
   let meta = Masc_test_deps.meta_of_json_fixture
     (`Assoc ["name", `String keeper_name; "trace_id", `String trace_id]) |> get in
   Masc.Keeper_meta_store.replace_snapshot config meta |> get;
@@ -888,7 +888,7 @@ let with_counterpart_turn ~counterpart f =
   Out_channel.with_open_bin (Filename.concat keepers_dir (keeper_name ^ ".toml")) (fun oc ->
     Printf.fprintf oc "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\nsandbox_image = \"base\"\n"
       keeper_name "Preserve evidence." "docker");
-  Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name;
+  Masc.Keeper_types_profile.invalidate_keeper_profile_snapshots ();
   let meta = Masc_test_deps.meta_of_json_fixture
     (`Assoc ["name", `String keeper_name; "trace_id", `String trace_id]) |> get in
   Masc.Keeper_meta_store.replace_snapshot config meta |> get;

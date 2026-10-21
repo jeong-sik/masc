@@ -774,6 +774,31 @@ val list_live_containers_for :
     [microvm_container_listing_unsupported] when this runtime's listing
     cannot be scoped, rather than an empty inventory that reads as "none". *)
 
+val guest_listing_argv_for : Keeper_microvm_backend.t -> string list
+(** The listing that settles a guest name after {!inspect_argv_for} ended any
+    way but exit 0: the {!container_listing_for} argv for Apple and nerdctl,
+    and [msb list --format json] for msb, whose rows carry the name and status
+    even though they carry no labels. *)
+
+val classify_guest_probe_for :
+  Keeper_microvm_backend.t ->
+  container_name:string ->
+  inspect:Unix.process_status * string ->
+  listing:(Unix.process_status * string * string) option ->
+  (Keeper_sandbox_runtime.docker_container_state, string) result
+(** A guest's state from its [inspect] and, when inspect did not exit 0, the
+    {!guest_listing_argv_for} listing as [(status, stdout, stderr)].
+
+    Inspect exit 0 is parsed by {!running_of_inspect_json_for} and the listing
+    is not read. Any other end of inspect is not an answer: a missing name and
+    a runtime that could not look exit alike. Then a listing that exited 0 and
+    does not name the guest is [Docker_container_absent], and one that names
+    it with a state is that state. Everything else is [Error] -- no listing, a
+    failed or unreadable listing, a row whose name cannot be read, the guest
+    named twice, or named by a runtime whose rows carry no state (nerdctl) --
+    because read as absent, an unanswered probe lets a caller delete a running
+    guest and release the snapshot it still mounts. *)
+
 type sweep_candidate =
   { container_id : string
   ; keeper_name : string option

@@ -826,22 +826,31 @@ let inspect_container_exists ?timeout_sec ~microvm_backend container_name =
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error inspect_out
 ;;
 
-(* [container] has no [--format] template; state comes back as JSON and a
-   missing container as a non-zero exit, which maps to absent. *)
+(* An inspect that exits 0 is the whole answer. Any other end -- a missing
+   name, an apiserver that stalled before it could look, a timeout -- is
+   followed by the runtime's own listing, so [Docker_container_absent] means
+   a listing was read and the name is not in it, and [Error] means nobody
+   could say (#44676). *)
 let probe_microvm_container_state ?timeout_sec ~backend container_name =
-  let st, out =
+  let inspect =
     run_argv_with_status
       ?timeout_sec
       (Keeper_sandbox_microvm.inspect_argv_for backend ~container_name)
   in
-  match st with
-  | Unix.WEXITED 0 ->
-    (match Keeper_sandbox_microvm.running_of_inspect_json_for backend out with
-     | Ok true -> Ok Keeper_sandbox_runtime.Docker_container_running
-     | Ok false -> Ok Keeper_sandbox_runtime.Docker_container_stopped
-     | Error _ as err -> err)
-  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-    Ok Keeper_sandbox_runtime.Docker_container_absent
+  let listing =
+    match inspect with
+    | Unix.WEXITED 0, _ -> None
+    | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
+      Some
+        (run_argv_with_status_split
+           ?timeout_sec
+           (Keeper_sandbox_microvm.guest_listing_argv_for backend))
+  in
+  Keeper_sandbox_microvm.classify_guest_probe_for
+    backend
+    ~container_name
+    ~inspect
+    ~listing
 ;;
 
 let inspect_container_running ?timeout_sec ~microvm_backend container_name =

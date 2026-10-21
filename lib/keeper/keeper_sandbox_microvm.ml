@@ -1221,6 +1221,21 @@ let apple_work_volume_trim_argv ~keeper_name ~volume_name ~image =
     ; image; "-eu"; "-c"; work_volume_reclaim_script ~keeper_name ]
 ;;
 
+(* The name of one row of Apple's [container list] JSON: the top-level [id],
+   else [configuration.id]. [None] for a row that names no container. *)
+let apple_listing_row_id fields =
+  match List.assoc_opt "id" fields with
+  | Some (`String id) when String.trim id <> "" -> Some id
+  | Some _ -> None
+  | None ->
+    (match List.assoc_opt "configuration" fields with
+     | Some (`Assoc config) ->
+       (match List.assoc_opt "id" config with
+        | Some (`String id) when String.trim id <> "" -> Some id
+        | Some _ | None -> None)
+     | Some _ | None -> None)
+;;
+
 let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name =
   let name = work_volume_trim_name ~keeper_name in
   let cli = command_argv_for Backend.Apple_container in
@@ -1234,19 +1249,7 @@ let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_
     let rec absent = function
       | [] -> Ok ()
       | `Assoc fields :: rest ->
-        let id =
-          match List.assoc_opt "id" fields with
-          | Some (`String id) when String.trim id <> "" -> Some id
-          | Some _ -> None
-          | None ->
-            (match List.assoc_opt "configuration" fields with
-             | Some (`Assoc config) ->
-               (match List.assoc_opt "id" config with
-                | Some (`String id) when String.trim id <> "" -> Some id
-                | Some _ | None -> None)
-             | Some _ | None -> None)
-        in
-        (match id with
+        (match apple_listing_row_id fields with
          | Some id when String.equal id name ->
            Error (Printf.sprintf "trim container %s remains after removal (%s): %s"
              name (Keeper_sandbox_exec_failure.status_label removal_status)
@@ -2030,8 +2033,9 @@ let keeper_work_root_write_probe_argv_for backend ~container_name ~uid ~gid ~kee
 let keeper_vm_container_kind = "keeper-vm"
 
 (** [container inspect] answers JSON; state lives at [.[0].status.state]
-    ("running" observed live). A missing container exits 1, which the
-    caller maps to absent before parsing. *)
+    ("running" observed live). A non-zero exit is not parsed here: a missing
+    container and a runtime that could not look both exit 1, and
+    {!classify_guest_probe_for} settles which from the listing. *)
 (* Two runtimes, two shapes, measured 2026-09-03:
 
      container inspect      [ { "status": { "state": "running" } } ]
@@ -2285,11 +2289,19 @@ type container_listing =
   | Nerdctl_labelled_json_lines of string list
   | Listing_not_established of string
 
+let apple_container_list_argv () =
+  command_argv_for Backend.Apple_container @ [ "list"; "-a"; "--format"; "json" ]
+;;
+
+let nerdctl_inventory_argv () =
+  command_argv_for Backend.Nerdctl_kata
+  @ [ "ps"; "-a"; "--no-trunc"; "--format";
+      {|{"id":{{json .ID}},"name":{{json .Names}},"image":{{json .Image}},"status":{{json .Status}},"created_at":{{json .CreatedAt}},"runtime":{{json .Runtime}},"labels":{{json .LabelsMap}}}|} ]
+;;
+
 let container_listing_for backend =
   match (backend : Backend.t) with
-  | Backend.Apple_container ->
-    Labelled_json_array
-      (command_argv_for backend @ [ "list"; "-a"; "--format"; "json" ])
+  | Backend.Apple_container -> Labelled_json_array (apple_container_list_argv ())
   | Backend.Microsandbox ->
     Listing_not_established
       "msb list can be scoped server-side with --label, but its --format \
@@ -2297,10 +2309,7 @@ let container_listing_for backend =
        label values, so the owner pid this sweep decides abandonment on \
        cannot be read back from the listing; msb keeps labels in `inspect` \
        under active_config.labels, one call per guest"
-  | Backend.Nerdctl_kata ->
-    Nerdctl_labelled_json_lines
-      (command_argv_for backend @ [ "ps"; "-a"; "--no-trunc"; "--format";
-        {|{"id":{{json .ID}},"name":{{json .Names}},"image":{{json .Image}},"status":{{json .Status}},"created_at":{{json .CreatedAt}},"runtime":{{json .Runtime}},"labels":{{json .LabelsMap}}}|} ])
+  | Backend.Nerdctl_kata -> Nerdctl_labelled_json_lines (nerdctl_inventory_argv ())
 ;;
 
 type nerdctl_inventory_entry =
@@ -2430,6 +2439,149 @@ let nerdctl_sweep_candidates_of_json_lines ~base_path ~is_pid_alive raw =
         Some { container_id = row.nerdctl_id; keeper_name; owner_pid = Some pid }
       | _ -> None) rows)
     (nerdctl_inventory_of_json_lines raw)
+;;
+
+(* ── Whether a guest name exists when inspect did not answer ────────── *)
+
+(* Measured 2026-10-21 on container 1.3.1: [container inspect] exits 1 for a
+   name that is not there ("container not found") and also exits 1 when the
+   apiserver stalls before it can look ("failed to list containers ... XPC
+   timeout", 31.5 s). msb 0.6.16 exits 1 for a missing name as well, and a
+   timed-out inspect ends on a signal. The exit code cannot tell "absent"
+   from "could not ask" (#44676), so the runtime's own listing settles it.
+
+   msb is listed with its plain [msb list --format json]: the sweep cannot
+   use those rows because they carry no labels, but they carry the name and
+   the status a lookup by name needs. Measured 2026-10-21 on 0.6.16: stopped
+   sandboxes are listed without a flag ([--running] and [--stopped] narrow
+   it), and a row reads [{created_at, image, name, status}]. *)
+let guest_listing_argv_for backend =
+  match (backend : Backend.t) with
+  | Backend.Apple_container -> apple_container_list_argv ()
+  | Backend.Microsandbox -> command_argv_for backend @ [ "list"; "--format"; "json" ]
+  | Backend.Nerdctl_kata -> nerdctl_inventory_argv ()
+;;
+
+(* What one listing row says about its guest. nerdctl's [ps] Status is
+   display text ("Up 5 minutes"), not a state, so its rows report none. *)
+type listed_state =
+  | Listed_running
+  | Listed_stopped
+  | Listed_state_unreported
+
+let apple_listing_rows raw =
+  match Yojson.Safe.from_string raw with
+  | exception Yojson.Json_error detail -> Error ("container list returned invalid JSON: " ^ detail)
+  | `List entries ->
+    List.fold_right
+      (fun entry acc ->
+         Result.bind acc (fun rows ->
+           match entry with
+           | `Assoc fields ->
+             (match apple_listing_row_id fields with
+              | None -> Error "container list has a row without a container id"
+              | Some id ->
+                let state =
+                  match List.assoc_opt "status" fields with
+                  | Some (`Assoc status) ->
+                    (match List.assoc_opt "state" status with
+                     | Some (`String state) ->
+                       if String.equal state "running" then Listed_running else Listed_stopped
+                     | Some _ | None -> Listed_state_unreported)
+                  | Some _ | None -> Listed_state_unreported
+                in
+                Ok ((id, state) :: rows))
+           | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
+             Error "container list has a row that is not an object"))
+      entries
+      (Ok [])
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) ->
+    Error "container list did not return a JSON array"
+;;
+
+let msb_listing_rows raw =
+  match Yojson.Safe.from_string raw with
+  | exception Yojson.Json_error detail -> Error ("msb list returned invalid JSON: " ^ detail)
+  | `List entries ->
+    List.fold_right
+      (fun entry acc ->
+         Result.bind acc (fun rows ->
+           match entry with
+           | `Assoc fields ->
+             (match List.assoc_opt "name" fields with
+              | Some (`String name) when String.trim name <> "" ->
+                let state =
+                  match List.assoc_opt "status" fields with
+                  | Some (`String status) ->
+                    if String.equal (String.lowercase_ascii status) "running"
+                    then Listed_running
+                    else Listed_stopped
+                  | Some _ | None -> Listed_state_unreported
+                in
+                Ok ((name, state) :: rows)
+              | Some _ | None -> Error "msb list has a row without a name")
+           | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
+             Error "msb list has a row that is not an object"))
+      entries
+      (Ok [])
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) ->
+    Error "msb list did not return a JSON array"
+;;
+
+let nerdctl_listing_rows raw =
+  Result.map
+    (List.map (fun row -> row.nerdctl_name, Listed_state_unreported))
+    (nerdctl_inventory_of_json_lines raw)
+;;
+
+(* Every row is decoded before the name is looked up: a row whose name cannot
+   be read might be the guest asked about, so it fails the listing instead of
+   being skipped. *)
+let listing_rows_for backend raw =
+  match (backend : Backend.t) with
+  | Backend.Apple_container -> apple_listing_rows raw
+  | Backend.Microsandbox -> msb_listing_rows raw
+  | Backend.Nerdctl_kata -> nerdctl_listing_rows raw
+;;
+
+let classify_guest_probe_for backend ~container_name ~inspect ~listing =
+  let inspect_status, inspect_output = inspect in
+  match inspect_status with
+  | Unix.WEXITED 0 ->
+    (match running_of_inspect_json_for backend inspect_output with
+     | Ok true -> Ok Keeper_sandbox_runtime.Docker_container_running
+     | Ok false -> Ok Keeper_sandbox_runtime.Docker_container_stopped
+     | Error _ as error -> error)
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+    let unknown reason =
+      Error
+        (Printf.sprintf
+           "microvm_guest_state_unknown: %s inspect %s did not answer (%s): %s; %s"
+           (Backend.cli_name backend)
+           container_name
+           (Keeper_sandbox_exec_failure.status_label inspect_status)
+           (Keeper_sandbox_runtime.docker_failure_output_for_log inspect_output)
+           reason)
+    in
+    (match listing with
+     | None -> unknown "no listing was taken to confirm the guest is absent"
+     | Some (Unix.WEXITED 0, stdout, _stderr) ->
+       (match listing_rows_for backend stdout with
+        | Error detail -> unknown ("the listing could not be read: " ^ detail)
+        | Ok rows ->
+          (match List.filter (fun (name, _) -> String.equal name container_name) rows with
+           | [] -> Ok Keeper_sandbox_runtime.Docker_container_absent
+           | [ (_, Listed_running) ] -> Ok Keeper_sandbox_runtime.Docker_container_running
+           | [ (_, Listed_stopped) ] -> Ok Keeper_sandbox_runtime.Docker_container_stopped
+           | [ (_, Listed_state_unreported) ] ->
+             unknown "the listing shows the guest and does not report its state"
+           | _ :: _ :: _ -> unknown "the listing names the guest more than once"))
+     | Some (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr) ->
+       unknown
+         (Printf.sprintf
+            "the listing failed too (%s): %s"
+            (Keeper_sandbox_exec_failure.status_label status)
+            (output_for_log ~stdout ~stderr)))
 ;;
 
 let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =

@@ -1186,7 +1186,7 @@ let test_startup_sweep_serializes_inventory_with_boot () =
   let cli = Filename.concat bin_dir "container" in
   let oc = open_out cli in
   output_string oc
-    "#!/bin/sh\ncase \"$1\" in\nstop|delete) exit 0;;\ninspect) exit 1;;\nimage) exit 2;;\n*) exit 99;;\nesac\n";
+    "#!/bin/sh\ncase \"$1\" in\nstop|delete) exit 0;;\ninspect) exit 1;;\nlist) printf '[]\\n';;\nimage) exit 2;;\n*) exit 99;;\nesac\n";
   close_out oc;
   Unix.chmod cli 0o755;
   let previous_path = Sys.getenv "PATH" in
@@ -2297,6 +2297,7 @@ case "$*" in
   "delete --force $trim") [ -e "$keep" ] || rm -f "$marker"; exit 1 ;;
   "list --all --format json")
     if [ -e "$marker" ]; then printf '[{"id":"%%s"}]\n' "$trim"; else printf '[]\n'; fi ;;
+  "list -a --format json") printf '[]\n' ;;
   inspect\ *) exit 1 ;;
   stop\ *|delete\ --force\ *) exit 0 ;;
   *) exit 99 ;;
@@ -2371,6 +2372,7 @@ stuck=%s
 printf '%%s\n' "$*" >> "$log"
 case "$*" in
   "list --all --format json") printf 'not json\n'; exit 0 ;;
+  "list -a --format json") printf '[]\n' ;;
   "inspect $stuck_guest")
     if [ -e "$stuck" ]; then printf '[{"status":{"state":"running"}}]\n'; exit 0; else exit 1; fi ;;
   inspect\ *) exit 1 ;;

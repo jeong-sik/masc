@@ -2522,6 +2522,7 @@
 (include stanzas/test_keeper_microvm_backend.inc)
 (include stanzas/test_keeper_microvm_guest_size.inc)
 (include stanzas/test_keeper_microvm_dns.inc)
+(include stanzas/test_keeper_microvm_guest_probe.inc)
 (include stanzas/test_keeper_paste_delivery.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 

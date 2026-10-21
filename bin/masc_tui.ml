@@ -1958,7 +1958,6 @@ let launch_artifact_checks_load state ~mailbox =
           Masc_tui_artifact_checks.of_json ~received_at:(Unix.gettimeofday ()) json)
 
 let launch_resources_load state ~mailbox =
-  state.resources_reports_complete <- false;
   Masc_tui_resources_requests.launch_list state ~host:server_peer_host
     ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
     ~check:(capture_workspace_check state ~mailbox);
@@ -13444,6 +13443,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resources_list <- None;
   state.resources_error <- None;
   state.resources_reports_complete <- false;
+  state.resources_list_owner <- None;
   state.artifact_checks <- Masc_tui_fetched.clear state.artifact_checks;
   state.resources_cursor <- 0;
   state.resource_content <- None;
@@ -19643,8 +19643,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
       Code_results.apply_diff state request result
   | Code_history_loaded (request, result) ->
       Code_results.apply_history state request result
-  | Resources_listed result ->
-      Masc_tui_resources_updates.listed state result
+  | Resources_listed (owner, result) ->
+      Masc_tui_resources_updates.listed state ~owner result
   | Artifact_checks_loaded (request, result) ->
       Masc_tui_resources_updates.checks_loaded state request result
   | Resource_read (request, result) ->

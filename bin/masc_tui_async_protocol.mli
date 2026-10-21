@@ -671,7 +671,7 @@ type async_msg =
   | Artifact_checks_loaded of unit Masc_tui_fetched.request
       * (Masc_tui_artifact_checks.inventory, string) result
   | Resources_listed of
-      (Masc_tui_resource_catalog.listing, string) result
+      unit ref * (Masc_tui_resource_catalog.listing, string) result
   (* The scope travels with the directory. Without it a reply names a
      relative path, which two scopes can both have, and the handler had no
      way to tell a late answer for the scope just left from an answer for the

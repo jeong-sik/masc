@@ -16,10 +16,11 @@ let session ~host ~port = function
 
 let launch_list state ~host ~launch ~check =
   if server_authority_ready state then begin
+    let owner = Masc_tui_resources_updates.begin_listing state in
     let port = state.port in
     let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
     let captured_session = state.mcp_session in
-    launch ~deliver:(fun result -> Resources_listed result) (fun () ->
+    launch ~deliver:(fun result -> Resources_listed (owner, result)) (fun () ->
       let mcp =
         let* session_id = session ~host ~port captured_session in
         let* () = check () in

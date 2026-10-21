@@ -8538,6 +8538,7 @@ type state = {
   mutable resources_list: Masc_tui_resource_catalog.t list option;
   mutable resources_error: string option;
   mutable resources_reports_complete: bool;
+  mutable resources_list_owner: unit ref option;
   mutable artifact_checks: (unit, Masc_tui_artifact_checks.inventory) Masc_tui_fetched.t;
   mutable resources_cursor: int;
   mutable resource_scope: Masc_tui_resource_catalog.scope;
@@ -11826,6 +11827,8 @@ let suspend_workspace_readings state =
   state.keeper_board_quarantines <- Masc_tui_fetched.suspend state.keeper_board_quarantines;
   state.workspace_activity <- Masc_tui_fetched.suspend state.workspace_activity;
   state.artifact_checks <- Masc_tui_fetched.suspend state.artifact_checks;
+  state.resources_list_owner <- None;
+  state.resources_reports_complete <- false;
   state.memory_input <- Masc_tui_fetched.suspend state.memory_input;
   state.memory_facts <- Masc_tui_fetched.suspend state.memory_facts;
   state.code_listing <- Masc_tui_fetched.suspend state.code_listing;
@@ -15339,6 +15342,7 @@ let create_state
   resources_list = None;
   resources_error = None;
   resources_reports_complete = false;
+  resources_list_owner = None;
   artifact_checks = Masc_tui_fetched.initial;
   resources_cursor = 0;
   resource_scope = Masc_tui_resource_catalog.All_resources;

@@ -594,6 +594,16 @@ let test_current_nonterminal_event_set () =
           ; "toolCallId", `String "tool-1"
           ; "executionId", `String "exec-1"
           ]
+      else if String.equal name "KEEPER_THINKING_DELTA" then
+        (* The shape the server projection writes for a thinking delta
+           (server_keeper_chat_agui_projection.ml: index, delta and an
+           optional response identity). The strict decoder rejects a Null
+           value because the reasoning block the delta belongs to is read
+           from [index], so the wire-only fixture carries it. *)
+        `Assoc
+          [ "index", `Int 0
+          ; "delta", `String "watching the tools settle"
+          ]
       else if String.equal name "KEEPER_TOOL_TRANSCRIPT_COMMITTED"
       then
         `Assoc

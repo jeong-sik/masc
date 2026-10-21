@@ -230,13 +230,17 @@ let test_raw_io_routes_require_admin () =
       "tool_use_id",`String "provider-original";
       "tool_observation",Tool_observation.to_yojson
         {attribution=Agent_observation.Pathless;turn_ref;declared_progress=None}]);
-    let original_target expected_base = Uri.make
+    let original_target expected_base expected_root = Uri.make
       ~path:"/api/v1/keepers/editor/tool-result"
       ~query:["execution_id",["protected-original"];
         "expected_base_path",[expected_base];
-        "expected_masc_root",[Filename.concat expected_base Common.masc_dirname]] ()
+        "expected_masc_root",[expected_root]] ()
       |> Uri.to_string in
-    let original_path=original_target config.base_path in
+    (* Match the canonical pair advertised by the server. macOS temporary
+       directories can be reached through /var while realpath uses /private/var. *)
+    let expected_base=Unix.realpath config.base_path in
+    let expected_root=Unix.realpath (Workspace.masc_dir config) in
+    let original_path=original_target expected_base expected_root in
     let anonymous,_=get ~router state original_path in
     let worker_status,_=get ~router ~token:worker state original_path in
     let admin_status,body=get ~router ~token:admin state original_path in
@@ -247,11 +251,13 @@ let test_raw_io_routes_require_admin () =
         ~execution_id:"protected-original" body with
      | Ok Pending -> ()
      | Ok (Unavailable _ | Page _) | Error _ -> Alcotest.fail "unpublished original turn must remain pending");
-    let wrong_status,wrong_body=get ~router ~token:admin state
-        (original_target (Filename.concat config.base_path "different-workspace")) in
-    Alcotest.(check int) "original read cannot cross workspace precondition" 409 wrong_status;
-    Alcotest.(check string) "workspace conflict comes from common middleware"
-      "workspace_precondition_failed" (wrong_body |> member "code" |> to_string);
+    List.iter (fun path ->
+      let wrong_status,wrong_body=get ~router ~token:admin state path in
+      Alcotest.(check int) "original read cannot cross workspace precondition" 409 wrong_status;
+      Alcotest.(check string) "workspace conflict comes from common middleware"
+        "workspace_precondition_failed" (wrong_body |> member "code" |> to_string))
+      [ original_target (Filename.concat expected_base "different-workspace") expected_root
+      ; original_target expected_base (Filename.concat expected_root "different-root") ];
     Alcotest.(check bool) "safe chat history does not acquire raw-record permission" true
       (Api.keeper_get_permission "/api/v1/keepers/editor/chat/history" = None);
     let safe_status, safe_body = get ~router ~token:worker state

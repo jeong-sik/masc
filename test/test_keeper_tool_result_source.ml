@@ -196,10 +196,12 @@ let test_owned_stream_and_pages () = with_record Direct (fun config record ->
   Alcotest.(check string) "all UTF8 and escapes reassembled from byte pages" content (Buffer.contents buffer))
 let test_changed_owned_source () = with_record Direct (fun config record ->
   let path,content=write_raw record (records (retained_output ())) in
+  let save_atomic path = match Fs_compat.save_file_atomic path content with
+    | Ok () -> () | Error detail -> Alcotest.fail detail in
   let original ()=match Keeper_tool_result_file.read ~config ~keeper (target record) with
     | Ok reading -> reading | Error detail -> Alcotest.fail detail in
   let first=original () in
-  Fs_compat.save_file_atomic path content;
+  save_atomic path;
   let second=original () in
   Alcotest.(check bool) "replacement changes source identity even for identical body" true
     (not (String.equal first.source_id second.source_id));
@@ -214,7 +216,7 @@ let test_changed_owned_source () = with_record Direct (fun config record ->
     Alcotest.(check bool) "mid-read mutation refuses complete result" true
       (Result.is_error (Keeper_tool_result_file.For_testing.read ~read_range:range
         ~config ~keeper (target record)))) [
-      (fun path -> Fs_compat.save_file_atomic path content);
+      save_atomic;
       (fun path -> Fs_compat.save_file path (content ^ "\n"));
       (fun path -> Fs_compat.save_file path "");
       (fun path -> Unix.unlink path)];
@@ -254,8 +256,8 @@ let test_server_exact_body () = with_record Direct (fun config record ->
   ignore (write_raw record (records "all original output"));
   let preconditions=Uri.encoded_of_query ["expected_base_path",[config.base_path];
     "expected_masc_root",[Filename.concat config.base_path Common.masc_dirname]] in
-  let request query=Httpun.Request.create ~target:("/api/v1/keepers/"^keeper^
-    "/tool-result?execution_id="^Ids.Execution_id.to_string id^"&"^preconditions^query) `GET in
+  let request query=Httpun.Request.create `GET ("/api/v1/keepers/"^keeper^
+    "/tool-result?execution_id="^Ids.Execution_id.to_string id^"&"^preconditions^query) in
   let status,json=Server_keeper_tool_result.response ~config ~keeper (request "&max_bytes=7") in
   Alcotest.(check bool) "exact endpoint page" true (status=`OK);
   let identity,page=match Keeper_tool_result_page.of_json ~keeper

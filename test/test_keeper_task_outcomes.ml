@@ -1671,10 +1671,10 @@ let test_release_sources_reach_the_next_owner () =
          | Error error -> fail error
        in
        List.iter
-         (fun (meta : Keeper_meta_contract.keeper_meta) ->
-            ignore (Masc.Workspace.bind_session config ~agent_name:meta.name
+         (fun name ->
+            ignore (Masc.Workspace.bind_session config ~agent_name:name
               ~capabilities:[ "test" ] ()))
-         [ owner; successor ];
+         [ owner.name; successor.name ];
        ignore (Masc.Workspace.add_task config ~title:"Finish the handoff report"
          ~priority:1 ~description:"Retain the outgoing owner's sources");
        let call meta name args =

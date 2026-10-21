@@ -603,6 +603,95 @@ let test_answered_ask_inspection_reopen_and_withdraw () = with_answer @@ fun bas
   check bool "withdrawal preserves actual resources" true (before=Masc.Workspace.get_tasks_raw config)
 
 
+let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
+  with_answer @@ fun base config ask resolution _task state ->
+  with_answer @@ fun base2 config2 ask2 resolution2 _task2 state2 ->
+  let resources=Masc.Workspace.get_tasks_raw config and resources2=Masc.Workspace.get_tasks_raw config2 in
+  Log.set_level Log.Info;
+  let packet_dir=Filename.temp_dir ~temp_dir:base "comparison-packet-" "" in
+  let sha bytes=Digestif.SHA256.(to_hex (digest_string bytes)) in
+  let copy_logs label directory=Array.to_list (Sys.readdir directory) |> List.mapi (fun index name ->
+    let body=In_channel.with_open_bin (Filename.concat directory name) In_channel.input_all in
+    let relative=Printf.sprintf "%s-%d.jsonl" label index in
+    Out_channel.with_open_bin (Filename.concat packet_dir relative) (fun channel -> output_string channel body);
+    `Assoc ["path",`String relative;"sha256",`String (sha body)]) in
+  let declaration (read : Protocol.ask_followup_read)=`Assoc [
+    "instance_id",`String (instance_id read);
+    "request",`Int (Ui.Snapshot_read.request_id read.afr_request);
+    "read_admission_started_ns",`Intlit (Int64.to_string read.afr_admission_started_ns)] in
+  let before_dir=Masc_tui_observation_store.initialize ~base_path:base |> require in
+  let results=Results.create () in
+  let request,submission=begin_read state in
+  launch state results request submission ~released:(fun () -> ())
+    (actual_read base ask resolution ~parts:(ref []) ~before_source:(fun _ -> ()));
+  let batch=Results.take_ready results in
+  let unstarted=first_read batch in
+  (match apply_batch state (ref []) batch with
+   | Some (Error (Projection.Followup_not_started _)) -> ()
+   | Some _ | None -> fail "actual missing-switch attempt did not settle");
+  Results.close results;
+  (* This original admitted read is deliberately never dispatched or logged.
+     Its independent declaration must stay unobserved in the packet. *)
+  let admission_started_ns=Mtime_clock.elapsed_ns () in
+  let request,submission=begin_read state in
+  let unobserved=Protocol.capture_ask_followup_read ~instance:state.observation_instance
+    ~request ~submission ~expected_workspace:(identity base) ~admission_started_ns in
+  let before_logs=copy_logs "before" before_dir in
+  let after_dir=Masc_tui_observation_store.initialize ~base_path:base2 |> require in
+  let completed=Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
+    let results=Results.create () in
+    Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+    let left,release=Eio.Promise.create () in
+    let request,submission=begin_read state2 in
+    launch state2 results request submission ~released:(fun () -> ignore (Eio.Promise.try_resolve release ()))
+      (actual_read base2 ask2 resolution2 ~parts:(ref []) ~before_source:(fun _ -> ()));
+    Eio.Promise.await left;
+    let batch=Results.take_ready results in
+    let read=first_read batch in
+    check bool "actual after source settles" true (apply_batch state2 (ref []) batch=Some (Ok ()));
+    read in
+  let after_logs=copy_logs "after" after_dir in
+  let conditions=`Assoc (List.map (fun key -> key,`Null)
+    ["fixture_sha256";"workspace_snapshot_sha256";"action_sha256";"server_binary_sha256";"terminal_sha256"]) in
+  let arm reads logs=`Assoc ["instances",`List [`String (instance_id (List.hd reads))];
+    "attempts",`List (List.map declaration reads);"conditions",conditions;
+    "source_commit",`Null;"binary",`Null;"logs",`List logs] in
+  let packet=`Assoc ["schema_version",`Int 1;"cases",`List [`Assoc ["id",`String "actual-protocol-resources";
+    "before",arm [unstarted;unobserved] before_logs;"after",arm [completed] after_logs]]] in
+  let packet_path=Filename.concat packet_dir "packet.json" in
+  Out_channel.with_open_bin packet_path (fun channel -> output_string channel (Yojson.Safe.to_string packet));
+  let json_path=Filename.concat packet_dir "report.json" and markdown_path=Filename.concat packet_dir "report.md" in
+  let script=Filename.concat (Filename.dirname Sys.executable_name) "../scripts/harness/perf/tui_ask_followup_report.py" in
+  let report () =
+    let pid=Unix.create_process "python3" [|"python3";script;packet_path;"--json";json_path;"--markdown";markdown_path|]
+      Unix.stdin Unix.stdout Unix.stderr in
+    let _,status=Unix.waitpid [] pid in
+    status,Yojson.Safe.from_file json_path in
+  let status,reported=report () in
+  check bool "actual artifacts yield a descriptive report" true (status=Unix.WEXITED 0);
+  let member=Yojson.Safe.Util.member in
+  let case=match member "cases" reported with `List [case] -> case | _ -> fail "report lost its original case" in
+  let outcomes arm=member "outcomes" (member "summary" (member arm case)) in
+  check bool "actual unstarted and declared unobserved reads stay in denominator" true
+    (member "not_started" (outcomes "before")=`Int 1 && member "unobserved" (outcomes "before")=`Int 1);
+  check bool "actual completed read remains its own outcome" true (member "complete" (outcomes "after")=`Int 1);
+  check bool "unknown conditions never become matching or execution proof" true
+    (member "declared_conditions_match" (member "comparison" case)=`Bool false
+     && member "execution_verified" (member "comparison" case)=`Bool false);
+  let damaged=match before_logs with
+    | `Assoc fields::_ -> (match List.assoc_opt "path" fields with Some (`String path) -> path | _ -> fail "artifact declaration lost path")
+    | _ -> fail "actual before store had no artifact" in
+  Out_channel.with_open_bin (Filename.concat packet_dir damaged) (fun channel -> output_string channel "interrupted artifact");
+  Sys.remove json_path;Sys.remove markdown_path;
+  let status,damaged_report=report () in
+  check bool "mutated real artifact is reported as invalid" true (status=Unix.WEXITED 2);
+  let case=match member "cases" damaged_report with `List [case] -> case | _ -> fail "invalid artifact erased the case" in
+  check bool "artifact failure retains original declared attempts" true
+    (member "attempts" (member "summary" (member "before" case))=`Int 2);
+  Ui.retire_ask_followup_read state;
+  check bool "offline report leaves actual canonical resources unchanged" true
+    (resources=Masc.Workspace.get_tasks_raw config && resources2=Masc.Workspace.get_tasks_raw config2)
+
 let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base config ask resolution task_id state ->
   (* Last case: the process-global production sink owns its channel until exit.
      This private directory is removed only after all sink reads have finished. *)
@@ -734,4 +823,5 @@ let () = Eio_main.run @@ fun env ->
       test_case "actual original read retains admission identity after health metadata changes" `Quick test_actual_read_keeps_admission_identity_after_health_changes;
       test_case "canonical answered Ask opens actual Task history and submitted evidence" `Quick test_answered_ask_opens_actual_task_history_evidence;
       test_case "answered Ask inspection preserves failed observations and rejects old visits" `Quick test_answered_ask_inspection_reopen_and_withdraw;
+      test_case "actual comparison artifacts retain missing attempts and corrupted input" `Quick test_actual_followup_report_keeps_unobserved_and_bad_artifacts;
       test_case "actual structured observations survive daily JSONL and dashboard decode" `Quick test_actual_followup_structured_sink_and_export]])

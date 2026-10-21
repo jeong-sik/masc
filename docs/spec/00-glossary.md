@@ -316,7 +316,7 @@ status: reference
     - `invalid captured region source or repetition` = 루프의 `invalid captured loop region`
       (`id`가 빈 값·`component`가 `.audio`·`source`가 `timeline.sources`에 없음·
       `repeatCount`가 0 중 하나).
-    - `invalid captured source divisor`(source `sourceDivisor`가 0)와 `captured region
+    - `invalid captured source divisor`(region `sourceDivisor`가 0)와 `captured region
       exceeds its source bounds`(region `extent`가 0이거나 `offset+extent`가
       `source.extent×sourceDivisor`를 넘음)는 루프에서 `captured loop trim exceeds original
       source` 하나가 함께 맡는다.
@@ -329,6 +329,10 @@ status: reference
     - 재생 시점도 갈린다 — `invalid captured region owner`·`captured region seek exceeds
       duration`·`captured regions missed the common host deadline` 대 루프의
       `invalid captured loop seek`·`captured loop missed the common epoch`.
+    - 같은 자리를 세 번째 계획기가 또 다른 이름으로 맡는다. `UmpRegionExtraction`은
+      `sourceDivisor`를 선택이 아닌 필수(`String`)로 받고 `invalid UMP extraction span`·
+      `UMP extraction exceeds source`·`UMP extraction packet exceeds source`를 낸다. 그래서
+      오프라인 편집 경로의 실패는 위 `captured …` 문자열을 하나도 남기지 않는다.
     이 목록은 코드가 소유한 문자열을 옮겨 적은 임시 해독표라 코드가 바뀌면 함께 낡는다.
     갱신할 때는 각 문자열을 `git grep -F`로 다시 확인하고, 더 나은 수리는 두 계획기가 같은
     조건에 같은 문자열을 내도록 코드 쪽을 통일하는 것이다.

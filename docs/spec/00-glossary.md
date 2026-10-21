@@ -288,10 +288,11 @@ status: reference
     original source"(자른 구간이 원본 길이를 넘거나 `extent`·`sourceDivisor`가 0),
     "missing captured loop source identity"(가리키는 source의 `id`가 빈 값),
     "captured loop packet exceeds original source"(source의 `extent`가 0 이하이거나
-    그 source의 packet `ticks`가 `extent`를 넘음), "overlapping loop regions share
-    physical MIDI channels"(두 Region의 주소 범위와 시간 범위가 모두 겹쳐 한 물리
-    채널을 함께 쓰게 됨)를 따로 낸다. `UmpLoopPlan`의 초기화가 자기 자리에서 직접
-    검사하는 거절은 이 여섯이고, 초기화가 안에서 부르는 `entry`·`phase`가 내는
+    그 source의 packet `ticks`가 `extent`에 닿거나 넘음 — 통과하는 것은 `ticks < extent`),
+    "overlapping loop regions share physical MIDI channels"(두 Region의 주소 범위와
+    시간 범위가 모두 겹쳐 한 물리 채널을 함께 쓰게 됨)를 따로 낸다.
+    `UmpLoopPlan`의 초기화가 자기 자리에서 직접 검사하는 거절은 이 여섯이고,
+    초기화가 안에서 부르는 `entry`·`phase`가 내는
     "historical UMP packet has no raw loop phase"·"UMP packet is outside its selected
     loop instance"와 재생·탐색 시점의 `MidiFailure` 문자열(`invalid captured loop seek`·
     `captured loop missed the common epoch`)은 이 목록에 들지 않는다.

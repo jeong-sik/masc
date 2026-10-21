@@ -23,13 +23,13 @@ let call config name fields =
   | Some result -> result
   | None -> fail "run tool was not dispatched"
 
-let require_success result =
+let require_success (result : Tool_result.result) =
   match result with
   | Tool_result.Completed output -> output.data
   | Tool_result.Deferred _ | Tool_result.Failed _ ->
     fail (Tool_result.message result)
 
-let require_failure expected_class expected_effect result =
+let require_failure expected_class expected_effect (result : Tool_result.result) =
   match result with
   | Tool_result.Failed failure ->
     check bool "failure class" true (failure.class_ = expected_class);

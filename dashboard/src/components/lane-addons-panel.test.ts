@@ -59,6 +59,36 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 describe('optional Lane Add-on surface', () => {
+  it('keeps provider waits and delivery failure attached to the original worker after replacement', async () => {
+    const original = { ...snapshot.instances[0], runtime_presence: 'retained',
+      host_requests: { cycles: 2,
+        waiting: [{ request_id: 'original-wait', reason: { reason: 'provider_unavailable', detail: 'quota closed' } }],
+        issue: { kind: 'result_delivery_failed', request_id: 'original-result', detail: 'owner disconnected' } } }
+    const replacement = { ...snapshot.instances[0], instance_id: 'instance-new', incarnation: 'incarnation-new',
+      host_requests: { cycles: 0, waiting: [], issue: null } }
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, instances: [original, replacement] }))
+    const view = render(html`<${LaneAddonsPanel} />`)
+    const oldCycle = await view.findByLabelText('Host requests for instance-1 · incarnation incarnation-1')
+    expect(oldCycle.textContent).toContain('original-wait')
+    expect(oldCycle.textContent).toContain('quota closed')
+    expect(oldCycle.textContent).toContain('original-result')
+    expect(oldCycle.textContent).toContain('owner disconnected')
+    const newCycle = view.getByLabelText('Host requests for instance-new · incarnation incarnation-new')
+    expect(newCycle.textContent).not.toContain('original-wait')
+    expect(newCycle.textContent).not.toContain('original-result')
+    expect(api.requestLaneAddonAction).not.toHaveBeenCalled()
+    expect(api.observeLaneAddon).not.toHaveBeenCalled()
+  })
+  it('shows an unreadable cycle while preserving the worker and completed rows', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot, instances: [
+      { ...snapshot.instances[0], host_requests: { cycles: 1, waiting: [{ request_id: 'original', reason: { reason: 'new' } }], issue: null } },
+    ] }))
+    const view = render(html`<${LaneAddonsPanel} />`)
+    const cycle = await view.findByLabelText('Host requests for instance-1 · incarnation incarnation-1')
+    expect(cycle.textContent).toContain('unreadable')
+    expect(view.getByLabelText('Worker instance-1 · incarnation incarnation-1')).toBeTruthy()
+    expect(view.getAllByText(row.title).length).toBeGreaterThan(0)
+  })
   it('offers the editor for the loader-supported suffix-only TOML filename', async () => {
     const sourcePath = '/config/.toml'
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,

@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 import { get, post } from './core'
+import { parseLaneAddonHostRequests, type LaneAddonHostRequestObservation } from './lane-addon-host-requests'
 
 const text = Schema.NonEmptyString
 const count = Schema.Int.pipe(Schema.nonNegative())
@@ -68,6 +69,7 @@ const instanceSchema = Schema.Struct({
     message: Schema.optional(Schema.String),
   }),
   observation_seq: count, rows_count: count, error: Schema.optional(Schema.NullOr(Schema.String)),
+  host_requests: Schema.optional(Schema.Unknown),
 })
 const snapshotSchema = Schema.Struct({
   configuration: Schema.NullOr(configurationSchema),
@@ -85,8 +87,13 @@ const actionReceiptSchema = Schema.Struct({
 })
 export type LaneAddonReading = Schema.Schema.Type<typeof readingSchema>
 export type LaneAddonRow = Schema.Schema.Type<typeof laneAddonRowSchema>
-export type LaneAddonInstance = Schema.Schema.Type<typeof instanceSchema>
-export type LaneAddonSnapshot = Schema.Schema.Type<typeof snapshotSchema>
+export type LaneAddonInstance = Omit<Schema.Schema.Type<typeof instanceSchema>, 'host_requests'> & {
+  /** Absent on retained records that have no host cycle observation. */
+  readonly host_requests?: LaneAddonHostRequestObservation
+}
+export type LaneAddonSnapshot = Omit<Schema.Schema.Type<typeof snapshotSchema>, 'instances'> & {
+  readonly instances: readonly LaneAddonInstance[]
+}
 export type LaneAddonApplication = Schema.Schema.Type<typeof applicationSchema>
 export type LaneAddonSlice = Schema.Schema.Type<typeof sliceSchema>
 export type LaneAddonActionReceipt = Schema.Schema.Type<typeof actionReceiptSchema>
@@ -94,7 +101,11 @@ export type LaneAddonActionRequest = {
   instance_id: string; expected_incarnation: string; request_id: string; action: Record<string, unknown>
 }
 export type LaneAddonQuery = { run_id?: string; lane_id?: string; since?: number; until?: number }
-export const parseLaneAddonSnapshot = Schema.decodeUnknownSync(snapshotSchema)
+export function parseLaneAddonSnapshot(value: unknown): LaneAddonSnapshot {
+  const snapshot = Schema.decodeUnknownSync(snapshotSchema)(value)
+  return { ...snapshot, instances: snapshot.instances.map(({ host_requests, ...instance }) =>
+    host_requests === undefined ? instance : { ...instance, host_requests: parseLaneAddonHostRequests(host_requests) }) }
+}
 export const parseLaneAddonSlice = Schema.decodeUnknownSync(sliceSchema)
 export const parseLaneAddonActionReceipt = Schema.decodeUnknownSync(actionReceiptSchema)
 

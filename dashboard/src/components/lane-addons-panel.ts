@@ -10,6 +10,7 @@ import {
 import { isRecord } from './common/normalize'
 import { LaneAddonsTimeline, formatLaneTime } from './lane-addons-timeline'
 import { LaneAddonReadings } from './lane-addon-readings'
+import { LaneAddonHostRequests } from './lane-addon-host-requests'
 import { LaneDeclarationEditor } from './lane-declaration-editor'
 import { LanePackageInstaller } from './lane-package-installer'
 import { LaneInstallationManager } from './lane-installation-manager'
@@ -564,7 +565,8 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
           </p>`)}
         </div></td>
       <td>${item.run_id}<div>${item.revision}</div></td>
-      <td>${item.phase.kind}${(item.phase.message || item.error) && html`<p role="status">${item.phase.message ?? item.error}</p>`}</td>
+      <td>${item.phase.kind}${(item.phase.message || item.error) && html`<p role="status">${item.phase.message ?? item.error}</p>`}
+        <${LaneAddonHostRequests} instance=${item} /></td>
       <td>${item.observation_seq} / ${item.rows_count}</td>
       <td class="space-x-2"><button class=${buttonClass} disabled=${item.runtime_presence !== 'live' || item.phase.kind === 'detached' || item.phase.kind === 'detaching' || item.phase.kind === 'observing'} onClick=${() => act(() => observeLaneAddon(item.instance_id))}>Observe</button>
       <button class=${buttonClass} disabled=${item.phase.kind === 'detached' || staleRemoval(configuration, item)} onClick=${() => { if (!staleRemoval(configuration, item)) act(() => detachLaneAddon(item.instance_id)) }}>${staleRemoval(configuration, item) ? 'Resolve TOML before removal' : item.configuration === null ? 'Remove worker' : 'Remove TOML + worker'}</button>

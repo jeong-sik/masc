@@ -261,16 +261,14 @@ module KeeperAutonomous = struct
 
   (** The wording used when neither the fleet nor a keeper configures one.
 
-      Read from the binary, not from [<config-root>/prompts]. That runtime
-      copy is derived distribution state: [Managed_asset_sync] converges it
-      onto this same embedded tree on every boot, and prompt customization
-      lives in [prompt_overrides.json] instead — so reading the copy only
-      adds a way to fail.
+      Read from the binary, not from [<config-root>/prompts]. That managed
+      copy is distribution state for inspection; [Managed_asset_sync]
+      converges it onto the embedded tree on boot. Fleet customization uses
+      the runtime setting [autonomous.wake_prompt] (environment key
+      [MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT]), not [prompt_overrides.json].
 
-      It added a real one. This binding is a value, so it runs at module load;
-      the sync that produces the copy runs later, inside [main]. An asset
-      newly added to the manifest therefore had no copy yet on any boot, and
-      the boot that would have created it died first. *)
+      This binding runs before startup asset sync, so reading the managed
+      copy here would also fail on the first boot containing a new asset. *)
   let default_wake_prompt =
     let asset = "prompts/keeper.autonomous.wake.txt" in
     match Embedded_config.read asset with

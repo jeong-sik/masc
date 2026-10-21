@@ -66,6 +66,15 @@ let validate_sources sources =
       else check (Set_util.StringSet.add source.id seen) rest in
   check Set_util.StringSet.empty sources
 
+let pass_is_current ~keys ~contract (building : building) =
+  String.equal building.contract contract && subset building.target keys
+let batch_is_current ~sources ~contract batch =
+  let* () = validate_sources sources in
+  match batch.state.building with
+  | None -> Error "briefing batch has no active pass"
+  | Some building ->
+    Ok (pass_is_current ~keys:(source_keys sources) ~contract building)
+
 let needs_refresh ~sources ~contract t =
   match sources with
   | [] -> false
@@ -113,7 +122,7 @@ let prepare ~sources ~contract ~render t =
     let sources = List.sort (fun (a : source) b -> String.compare a.id b.id) sources in
     let keys = source_keys sources in
     let building = match t.building with
-      | Some building when String.equal building.contract contract && subset building.target keys -> building
+      | Some building when pass_is_current ~keys ~contract building -> building
       | Some _ -> start_pass ~sources ~contract None
       | None -> start_pass ~sources ~contract t.published in
     let state = { t with building = Some building } in

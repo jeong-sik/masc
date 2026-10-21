@@ -4,6 +4,9 @@ module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
 module Runtime = Lane_addon_runtime
 module Binding = Server_workspace_memory_addon_validation
+module Ledger = Workspace_memory_ledger
+module Briefing = Workspace_memory_briefing
+module Context = Workspace_memory_context
 let ( let* ) = Result.bind
 
 type error = Unavailable of string | Rejected of string | Uncertain of string
@@ -46,6 +49,11 @@ let capture_classification ~config ~prompt ~ledger ~batch =
   capture ~config (fun ~request_id ~workspace ~destination ->
     Capture.classification ~request_id ~workspace ~destination ~prompt ~ledger ~batch)
 let capture_briefing ~config ~prompt ~batch =
+  let* current=Eio_unix.run_in_systhread (fun () ->
+    Briefing.load ~directory:(Ledger.directory ~base_path:config.Workspace.base_path))
+    |> Result.map_error (fun detail -> Unavailable detail) in
+  let* ()=if Yojson.Safe.equal (Briefing.to_json current) (Briefing.to_json (Briefing.prepared_state batch))
+    then Ok () else Error (Rejected "Confirm the original prepared briefing state before capturing model work") in
   capture ~config (fun ~request_id ~workspace ~destination ->
     Capture.briefing ~request_id ~workspace ~destination ~prompt ~batch)
 
@@ -203,4 +211,147 @@ let resume ~config ~request_id =
       ~config ~access:Lane_addon_sources.Operator_configuration ~reserved ~export ~arguments
       |> Result.map_error runtime_error in
   resume_with ~store ~base_path:config.Workspace.base_path ~request_id ~call
-module For_testing = struct let resume=resume_with end
+
+type commit_result = Commit_waiting of Owner.retained | Committed of Owner.retained
+  | Commit_conflict of Owner.retained
+type write_permission = Newly_stored | Recovering
+let domain_json kind state = `Assoc ["kind",`String kind;"state",state]
+let ledger_json ledger=domain_json "classification" (Ledger.to_json ledger)
+let briefing_json state=domain_json "briefing" (Briefing.to_json state)
+let commit_plan capture judgment =
+  let* final=rejected (Exact.final_of_json ~schema:(Capture.output_schema capture) judgment) in
+  let* expected=match final with
+    | Exact.Call_final (Exact.Answered {output;_}) -> rejected (Capture.validate_output capture (Exact.checked_json output))
+    | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _)
+    | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused ->
+      Error (Rejected "Domain commit requires the original answered judgment") in
+  let* change=match Capture.work capture,expected with
+    | Capture.Classification {ledger;_},Capture.Classification_commit after ->
+      Ok {Progress.before=ledger_json ledger;after=ledger_json after}
+    | Capture.Briefing batch,Capture.Briefing_commit after ->
+      Ok {Progress.before=briefing_json (Briefing.prepared_state batch);after=briefing_json after}
+    | Capture.Classification _,Capture.Briefing_commit _
+    | Capture.Briefing _,Capture.Classification_commit _ -> Error (Rejected "Original commit domain differs") in
+  Ok (expected,change)
+let load_domain ~base_path = function
+  | Capture.Classification_commit _ -> Ledger.load ~base_path |> Result.map ledger_json
+  | Capture.Briefing_commit _ -> Briefing.load ~directory:(Ledger.directory ~base_path) |> Result.map briefing_json
+let save_domain ~base_path = function
+  | Capture.Classification_commit ledger -> Ledger.save ~base_path ledger
+  | Capture.Briefing_commit state -> Briefing.save ~directory:(Ledger.directory ~base_path) state
+let classification_current ~base_path ~ledger ~selected =
+  let* context=Context.collect ~base_path |> Result.map_error (fun detail -> Unavailable detail) in
+  let keepers=Context.keepers context in
+  let unavailable observation=match observation with
+    | Context.Unavailable detail -> Some detail | Context.Missing | Context.Available _ -> None in
+  let rec readable = function
+    | [] -> Ok ()
+    | (pending : Ledger.pending_fact)::rest ->
+      let keeper_id,check=match pending.fact with
+        | Ledger.Ordinary {keeper_id;_} -> keeper_id,(fun (keeper : Context.keeper) -> unavailable keeper.ordinary)
+        | Ledger.Source_bound {keeper_id;_} -> keeper_id,(fun (keeper : Context.keeper) -> unavailable keeper.source_bound) in
+      let* ()=match List.find_opt (fun (keeper : Context.keeper) -> keeper.keeper_id=keeper_id) keepers with
+        | None -> Ok ()
+        | Some keeper -> (match check keeper with None -> Ok () | Some detail -> Error (Unavailable detail)) in
+      readable rest in
+  let* ()=readable selected in
+  let current=Ledger.reconcile ledger keepers in
+  Ok (Yojson.Safe.equal (Ledger.to_json current.ledger) (Ledger.to_json ledger)
+      && List.for_all (fun pending -> List.mem pending current.current_facts) selected)
+let eligible ~base_path ~briefing_contract capture = match Capture.work capture with
+  | Capture.Classification {ledger;batch} -> classification_current ~base_path ~ledger ~selected:batch.selected
+  | Capture.Briefing batch ->
+    let* ledger=Ledger.load ~base_path |> Result.map_error (fun detail -> Unavailable detail) in
+    Briefing.batch_is_current ~sources:(Ledger.briefing_sources ledger) ~contract:(briefing_contract ()) batch
+    |> rejected
+let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
+  let* original=Eio_unix.run_in_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
+  let* original=match original with Some record -> Ok record
+    | None -> Error (Unavailable "Original Curator commit is absent") in
+  let* workspace=Eio_unix.run_in_systhread (fun () -> Capture.observe_workspace ~base_path)
+    |> Result.map_error (fun detail -> Unavailable detail) in
+  let* capture=rejected (Capture.restore ~workspace original) in
+  let phase=Progress.phase original.progress in
+  let* judgment,stored=match phase with
+    | Progress.Judged judgment -> Ok (judgment,None)
+    | Progress.Committing commit | Progress.Commit_unknown (commit,_)
+    | Progress.Finished commit | Progress.Conflicted (commit,_) -> Ok (commit.judgment,Some commit)
+    | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Rejected _ ->
+      Error (Rejected "Original Curator request has no domain judgment to commit") in
+  let* expected,change=commit_plan capture judgment in
+  let* ()=match stored with
+    | None -> Ok ()
+    | Some commit -> if Yojson.Safe.equal commit.change.before change.before
+        && Yojson.Safe.equal commit.change.after change.after then Ok ()
+      else Error (Rejected "Recorded commit differs from its original captured domain states") in
+  let publish original event=Eio_unix.run_in_systhread (fun () -> advance ~store original event) in
+  let uncertain original detail =
+    let* _=publish original (Progress.Commit_uncertain (`Assoc ["detail",`String detail])) in
+    Error (Uncertain detail) in
+  let observe original event ctor =
+    let* published=publish original event in Ok (ctor (record published)) in
+  let fresh ()=Eio_unix.run_in_systhread (fun () -> load_domain ~base_path expected) in
+  let confirm original = match fresh () with
+    | Error detail -> uncertain original detail
+    | Ok current ->
+      if Yojson.Safe.equal current change.after then observe original (Progress.Commit_observed current) (fun r -> Committed r)
+      else if Yojson.Safe.equal current change.before then uncertain original "Domain save returned without a confirmed after-state"
+      else observe original (Progress.Commit_conflicted current) (fun r -> Commit_conflict r) in
+  let write original =
+    match Eio_unix.run_in_systhread (fun () -> save expected) with
+    | Error detail -> uncertain original detail
+    | Ok () -> confirm original
+    | exception ex ->
+      let backtrace=Printexc.get_raw_backtrace () in
+      Eio.Cancel.protect (fun () ->
+        match uncertain original "Domain save raised; publication remains uncertain" with
+        | Ok _ | Error _ -> () | exception _ -> ());
+      Printexc.raise_with_backtrace ex backtrace in
+  let rec recover ~permission original =
+    match fresh () with
+    | Error detail -> uncertain original detail
+    | Ok current ->
+      (* After first: even a no-op or an already-applied result never repeats a
+         write or borrows today's source/contract as a new model authority. *)
+      if Yojson.Safe.equal current change.after then observe original (Progress.Commit_observed current) (fun r -> Committed r)
+      else if not (Yojson.Safe.equal current change.before) then
+        observe original (Progress.Commit_conflicted current) (fun r -> Commit_conflict r)
+      else
+        let* current_sources=Eio_unix.run_in_systhread (fun () -> eligible ~base_path ~briefing_contract capture) in
+        if not current_sources then
+          observe original (Progress.Commit_conflicted (`Assoc ["state",current;"reason",`String "Original sources or contract changed"]))
+            (fun r -> Commit_conflict r)
+        else match permission with
+        | Newly_stored -> write original
+        | Recovering -> match Progress.phase original.progress with
+          | Progress.Committing _ ->
+            let* published=publish original (Progress.Commit_uncertain (`Assoc ["detail",`String "Recovered original commit intent"])) in
+            (match published with
+             | Acknowledged record -> Ok (Commit_waiting record)
+             | New record -> recover ~permission:Recovering record)
+          | Progress.Commit_unknown _ ->
+            let* published=publish original (Progress.Commit_retry_observed current) in
+            (match published with
+             | Acknowledged record -> Ok (Commit_waiting record)
+             | New record -> recover ~permission:Newly_stored record)
+          | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
+          | Progress.Finished _ | Progress.Conflicted _ | Progress.Rejected _ ->
+            Error (Rejected "Domain recovery lost its original commit intent") in
+  match phase with
+  | Progress.Finished _ -> Ok (Committed original)
+  | Progress.Conflicted _ -> Ok (Commit_conflict original)
+  | Progress.Judged _ ->
+    let* published=publish original (Progress.Commit_intended change) in
+    (match published with
+     | Acknowledged record -> Ok (Commit_waiting record)
+     | New record -> recover ~permission:Newly_stored record)
+  | Progress.Committing _ | Progress.Commit_unknown _ -> recover ~permission:Recovering original
+  | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Rejected _ ->
+    Error (Rejected "Original Curator request is not ready to commit")
+let settle ~config ~request_id =
+  let base_path=config.Workspace.base_path in
+  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let briefing_contract ()=let prompt=Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing in
+    Briefing.contract ~template:prompt.effective in
+  settle_with ~store ~base_path ~request_id ~briefing_contract ~save:(save_domain ~base_path)
+module For_testing = struct let resume=resume_with let settle=settle_with end

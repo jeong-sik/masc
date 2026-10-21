@@ -5,8 +5,9 @@ This is the proposed E02 implementation contract under the
 It specifies the execution boundary. The [Curator worker](../../addons/workspace-curator/README.md)
 and [shared host semantic port](workspace-curator-semantic-validation.md) are now
 implemented. The original admission consumer now captures actual Runtime
-provenance and reads/submits/restores the original worker result; production
-scheduler switching, domain commit recovery and wake integration remain.
+provenance and reads/submits/restores the original worker result. Its separate
+commit consumer now applies and recovers original Ledger/Briefing judgments;
+production scheduler switching and wake integration remain.
 This is not a claim of completed extraction or an installed replacement.
 
 Source baseline: `3145acf9fc32ab77c25d97ab7e5710194cd270cf`.
@@ -185,8 +186,8 @@ for HITL and Board Attention are unaffected.
    recorded separately from that end-to-end proof.
 
 Next coding boundary: switch the existing serialized production owner to the
-original admission consumer, preserve typed size refusal and whole-batch
-successors, recover actual domain commits and connect scoped result/export wakes.
+original admission and domain commit consumers, preserve typed size refusal and
+whole-batch successors, and connect scoped result/export wakes.
 Keep domain authority on the host throughout; the current scheduler has not
 switched to the incomplete extraction.
 
@@ -199,7 +200,7 @@ lifecycle integration. Subsequent [host capture](workspace-curator-host-capture.
 [semantic port](workspace-curator-semantic-validation.md) provide those distinct
 foundations. The admission consumer below now captures actual Runtime metadata
 and restores original worker results. None of these individual foundations
-establishes the remaining production scheduler, domain commit or wake integration.
+establishes the remaining production scheduler or wake integration.
 
 
 ## Original admission consumer implementation
@@ -224,9 +225,63 @@ worker; commit states are returned to the original owner without applying them.
 This adapter does not create another scheduler or model runner. The current
 production Curator scheduler has **not yet switched** to it. That switch must
 still prioritize accepted-work recovery even while Off, preserve input/output
-size refusal and whole-batch successor linkage, perform actual fresh
-before/expected-after domain commit recovery, and subscribe to original result
+size refusal and whole-batch successor linkage, call the original domain commit
+consumer under its existing workspace lease, and subscribe to original result
 and export events without replacing the existing MCP inventory callback.
 `capture_*` publication failure still requires original discovery, not another
 fresh request. No extraction, production recovery or Off/On completion follows
 from this source alone.
+
+## Original domain commit consumer
+
+`Server_workspace_memory_addon.settle` strictly reloads the original record and
+physical capture. It decodes the original Answered final and repeats full domain
+validation. Recorded commit before/after values must equal those derived from
+that capture; journal payloads cannot supply arbitrary replacement domain states.
+
+The owner retains the same workspace lease and serialization from this read
+through actual save, fresh confirmation and progress recording. The short Runtime
+capture mutex does not replace that owner boundary. The commit consumer uses no
+worker, provider or model route, so already accepted judgments remain recoverable
+while the installation is Off.
+
+| Fresh domain observation | Commit action |
+| --- | --- |
+| Exact expected after | Record confirmation without another save, including no-op results |
+| Exact original before with newly Stored intent | Recheck source eligibility, call existing domain save, then freshly confirm after |
+| Recovered intent and exact before | Record unknown, freshly read again, retain a new retry observation, recheck again before saving |
+| Unknown and exact before | Only a newly Stored retry observation can permit saving |
+| Other readable state | Record conflict and preserve the entire current domain state |
+| Unreadable or malformed state | Preserve original commit uncertainty; never interpret it as before, after or absence |
+| Already_stored or unconfirmed intent/retry | Recheck the original journal on a later owner pass; do not save |
+
+Save errors do not identify a filesystem stage. Errors or cancellation can
+follow publication. A returned save success also needs a fresh domain read;
+confirmation receipt failure does not undo or repeat the domain effect. Exceptions
+from the save edge retain uncertainty under cancellation protection and propagate
+the original exception/backtrace. An interrupted intent is not permission to
+write until recovery establishes a new retry fact.
+
+Classification checks selected source readability, exact current selected facts
+and reconciliation of existing captured ledger members. An unreadable selected
+store is unavailable, not an empty store. Other newly arrived facts can wait for
+the next batch; another owner's ledger update is never merged into the original
+answer or overwritten. Briefing checks the current ledger's source identities
+and effective prompt contract using the same pass-preservation rule as `prepare`.
+Added sources wait; removed/changed targets and changed contracts conflict.
+Partial `accept` changes only building progress and preserves the last complete
+publication. Only the final original chunk replaces it.
+
+`capture_briefing` requires a fresh complete match with `prepared_state` before
+retaining model work. The production owner must preserve its existing initial
+prepared-state save and confirmation before capture/submission. This adapter
+does not invent a pre-prepare state or create the prepared pass after inference.
+Initial-save/capture crash recovery, restart drain priority, observer receipts,
+successor linkage and result/export wakes must still be connected by that owner.
+
+`test_workspace_curator_addon_commit` uses actual Keeper snapshots, host record
+reopening, Ledger/Briefing writes and fresh domain reads. Save-edge refusal/lost
+receipt cases inject a boundary outcome around actual storage; they do not prove
+an actual pre/post-rename filesystem failure. These scenarios, source parsing,
+independent review and CI execution are separate evidence layers. They do not
+establish production scheduler, installed UI or real provider completion.

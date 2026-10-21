@@ -308,10 +308,11 @@ let palette_action_words = function
   | Palette_usage_scope (Some scope_id) -> [scope_id]
   | Palette_addon_results id -> [id]
   | Palette_goto
-      ( Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
-      | Approvals | Planning | Schedules | Verification | Harness | Fusion
-      | Repositories | Code | Changes | Connectors | Runtime | Config
-      | Tools | System_logs )
+      (( Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
+       | Approvals | Planning | Schedules | Verification | Harness | Fusion
+       | Repositories | Code | Changes | Connectors | Runtime | Config
+       | Tools | System_logs ) as surface) ->
+      Option.to_list (List.assoc_opt surface surface_ring)
   | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
   | Palette_collab | Palette_msx | Palette_dos
   | Palette_lane_addons | Palette_usage_scope None | Palette_config _ | Palette_gate_mode _

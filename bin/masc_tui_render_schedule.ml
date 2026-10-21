@@ -1229,10 +1229,12 @@ let fusion_age_width = 7
 
    The column is full. Three vocabularies share it, none of them written near
    here, and [Table.cell] fits what it is given without a word -- so the
-   widths are checked in [test/test_tui_fusion_state_width.ml], which reads
-   this number and all three sets out of the source. Naming today's longest
-   string here instead would be a copy, and the copy is what goes stale while
-   the screen quietly truncates. *)
+   budget below is kept by hand. A test used to read this number and all
+   three sets out of the source, and it went out with the source-shape gates
+   (#40987), so nothing fails when a set grows past the column; the longest
+   reading in each set has to be checked here instead. Naming today's longest
+   string instead of a budget would be a copy, and the copy is what goes stale
+   while the screen quietly truncates. *)
 let fusion_state_width = 20
 let fusion_preset_width = 10
 let fusion_minimum_run_width = 12

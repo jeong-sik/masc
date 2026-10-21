@@ -649,12 +649,12 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   let request,submission=begin_read state in
   let unobserved=Protocol.capture_ask_followup_read ~instance:state.observation_instance
     ~request ~submission ~expected_workspace:(identity base) ~admission_started_ns in
-  Log.set_level Log.Warn;
-  Masc_tui_observation_store.record_admission before_store
-    ~origin:unobserved.afr_origin ~request:(Ui.Snapshot_read.request_id request)
-    ~admission_started_ns |> require;
-  Observation.emit unobserved ~sources:None Observation.Followup_read_started;
-  Log.set_level Log.Info;
+  Fun.protect ~finally:(fun () -> Log.set_level Log.Info) (fun () ->
+    Log.set_level Log.Warn;
+    Masc_tui_observation_store.record_admission before_store
+      ~origin:unobserved.afr_origin ~request:(Ui.Snapshot_read.request_id request)
+      ~admission_started_ns |> require;
+    Observation.emit unobserved ~sources:None Observation.Followup_read_started);
   let before_admissions=copy_admissions "before" before_store in
   let before_logs=copy_logs "before" before_dir in
   let after_store=Masc_tui_observation_store.initialize ~base_path:base2 |> require in

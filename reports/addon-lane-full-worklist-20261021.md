@@ -132,7 +132,7 @@ Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현�
 | G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | 일부 구현; MASC 리뷰 P3: lane-inventory-panel의 instances.length 추측 표기를 host application으로 연결 필요 | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
 | G02 | 입력→Hook→worker→모델→출력/소비자의 연결 관계 표시 | 일부 Flow 있음 | 실제 연결 reference에 근거해 표시; 관측 그래프를 실행 허가로 사용하지 않음 |
 | G03 | 요청부터 종료·정리까지 원래 timeline/trace 연결 | 부분 구현 | request/run/instance/revision, 대기 이유·결과·실패·정리 증거를 같은 원래 작업으로 추적 |
-| G04 | 교체·경로/ID 변경·이전 소유자 이력 표시 | 동일 ID 이력 구현 | 새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근 |
+| G04 | 교체·경로/ID 변경·이전 소유자 이력 표시 | 후속 소스 구현: 같은 ID worker와 같은 TOML 경로의 다른 ID를 두 UI에서 분리. Dashboard 3파일62건·tsc PASS, TUI 관측 모델 parser PASS; 독립 리뷰·OCaml 실행·실제 UI 별도 | 새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근 |
 | G05 | 에이전트 작업 중 표시와 현재 포인터/입력 활동 표시 | 범위별 재확인 필요 | 실제 동작 이벤트 기반으로 작업자·활동·포인터 위치 표시; 완료·중단·해제 때 표시 정리 |
 | G06 | 두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화 | 기반/일부 검증 있음 | draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능 |
 
@@ -184,3 +184,12 @@ Dashboard·TUI의 원래 근거 표시를 각각 확인한다. Optional은 Off �
 - MSX/DOS의 소스·image 검증과 실사용 한계: `docs/guides/machine-addon-state.md`.
 
 PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값이다. 실행을 재개할 때 다시 읽는다.
+
+
+## G04 후속 · 다른 설치 ID의 같은 TOML 경로
+
+기존 connection detail은 같은 installation ID의 worker만 골랐다. TOML 파일에서 ID를 바꾸면 같은 경로의 예전 소유자와 정리 실패가 이 관련 상세에서 빠졌다. Dashboard는 같은 ID의 worker 목록을 유지하고, 같은 source_path에 있는 다른 설치 ID의 기록을 별도 펼침 영역으로 보여준다. TUI는 같은 read-only 분류 모델을 사용한다. 각 기록은 실제 installation ID·instance·incarnation·revision·phase·관측 sequence를 보존한다.
+
+같은 ID는 경로 이동 후에도 같은 그룹이고, 다른 ID는 source_path가 정확히 같을 때만 별도 관계로 남는다. 제목·run·package나 파일 basename으로 연결하지 않는다. Manual attachment는 같은 instance/incarnation만 읽으며 None 경로끼리 연결하지 않는다. 다른 ID의 기록은 현재 선언의 application이나 실행 권한을 대신하지 않는다. 생성 시각을 추정해 이전/이후라고 단정하지 않으며 별도 설치 소유자로 표시한다.
+
+실제 완료한 검사: Dashboard `lane-addon-connection`, `lane-installation-manager`, `lane-addons-panel` 3파일62건 PASS, `pnpm exec tsc --noEmit` PASS, 변경 ML/MLI3개 parser PASS. TUI 새 검사는 원래 관측 모델의 그룹 membership·incarnation·retained 실패를 확인하며 화면 문구·배치 assertion을 추가하지 않는다. 이 OCaml 테스트 실행과 실제 TUI/Dashboard 화면 검증은 아직 없다. 기존 G01 스택과 실행 후보를 이 G04 소스 증거로 대체하지 않는다.

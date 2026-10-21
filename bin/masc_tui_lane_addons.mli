@@ -43,6 +43,15 @@ type declaration = {
 type configuration = { directory : string; complete : bool; declarations : declaration list }
 type snapshot = { instances : instance list; output : Row.output; complete : bool option;
   configuration : configuration option }
+type connection_workers = {
+  installation_workers : instance list;
+  other_path_owners : instance list;
+}
+val connection_workers : snapshot -> instance -> connection_workers
+(** Observed workers sharing the selected installation ID, and separately other
+    installation IDs at its exact TOML path. Manual attachments match only the
+    original instance/incarnation. These read-only relations grant no actions,
+    infer no time order, and do not join by title, run or package. *)
 type action_request = { instance_id : string; incarnation : string; request_id : string; action : Yojson.Safe.t }
 type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of string
   | Slice of (string * string) list | Evidence of Yojson.Safe.t

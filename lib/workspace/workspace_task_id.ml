@@ -80,17 +80,28 @@ let archive_index config =
   | Memory _ -> decode ()
   | FileSystem _ -> File_version_cache.load archive_status_cache (archive_path config) ~decode
 
-let read_archived_task_status_r config ~task_id =
+let read_archived_task_row_r config ~task_id =
   let ( let* ) = Result.bind in
   let* index = archive_index config in
   match Archive_ids.find_opt task_id index.rows with
   | Some Duplicate -> Error "archive contains duplicate requested Task identities"
-  | Some (Unique row) ->
-      let* _task = task_of_yojson row in
-      Task_status_observation.of_yojson row
-      |> Result.map Option.some
+  | Some (Unique row) -> Ok (Some row)
   | None when index.unidentified -> Error "archive has unidentified rows; requested Task absence is unconfirmed"
   | None -> Ok None
+
+let read_archived_task_r config ~task_id =
+  Result.bind (read_archived_task_row_r config ~task_id) (function
+    | None -> Ok None
+    | Some row -> task_of_yojson row |> Result.map Option.some)
+
+let read_archived_task_status_r config ~task_id =
+  let ( let* ) = Result.bind in
+  let* row = read_archived_task_row_r config ~task_id in
+  match row with
+  | None -> Ok None
+  | Some row ->
+      let* _task = task_of_yojson row in
+      Task_status_observation.of_yojson row |> Result.map Option.some
 
 (** Append tasks to archive file (tasks-archive.json).
 

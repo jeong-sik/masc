@@ -30,3 +30,17 @@ val history_page : request:history_request -> Yojson.Safe.t -> (history, string)
 (** Validate exact Task, request-cursor echo, schema and page demand before
     appending to the captured immutable prefix. A missing next cursor ends only
     the observed stored prefix. Parsing/concatenation belongs on the CPU path. *)
+
+type deletion_cleanup = Cleanup_required | Cleanup_verified
+type deletion_observation = {
+  deletion_id : string; requested_at : string; cleanup : deletion_cleanup;
+}
+type observation =
+  | In_backlog of detail
+  | In_archive of detail
+  | Not_observed
+  | Deletion_recorded of deletion_observation
+val observation : task_id:string -> Yojson.Safe.t -> (observation, string) result
+(** Exact versioned original Task observation; no global-list/current-Keeper
+    fallback. A deletion record is historical evidence, not physical cleanup
+    or future absence proof. Not_observed is inconclusive. *)

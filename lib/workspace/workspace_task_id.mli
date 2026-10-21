@@ -21,6 +21,13 @@ val archive_entries_of_json : Yojson.Safe.t -> Yojson.Safe.t list
     file does not exist. *)
 val read_archive_task_ids : Workspace_utils_backend_setup.config -> int list
 
+val read_archived_task_r :
+  Workspace_utils_backend_setup.config -> task_id:string ->
+  (Masc_domain.task option, string) result
+(** Same exact immutable archive index and strict requested-row decoding as the
+    status lookup. A unique positive may survive unrelated unidentified rows;
+    a missing requested id with unidentified rows cannot prove absence. *)
+
 val read_archived_task_status_r :
   Workspace_utils_backend_setup.config -> task_id:string ->
   (Masc_domain.task_status option, string) result

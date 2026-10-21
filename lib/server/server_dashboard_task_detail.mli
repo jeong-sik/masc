@@ -5,3 +5,10 @@ val find : tasks:Masc_domain.task list -> goal_task_index:(string, string list) 
 val read : config:Workspace.config -> task_id:string option -> (Yojson.Safe.t, error) result
 type status = [ `OK | `Bad_request | `Not_found | `Service_unavailable ]
 val response : (Yojson.Safe.t, error) result -> status * Yojson.Safe.t
+
+val inspect : config:Workspace.config -> task_id:string option ->
+  (Yojson.Safe.t, error) result
+(** Independent original Task observation, including archive, unobserved and
+    retained deletion evidence. Storage errors remain unavailable; raw cleanup
+    diagnostics are not exposed. Existing live detail [read] remains separate. *)
+val inspection_response : (Yojson.Safe.t, error) result -> status * Yojson.Safe.t

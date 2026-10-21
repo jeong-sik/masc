@@ -571,6 +571,139 @@ let test_inspection_reopen_history_and_workspace_withdrawal env () = Eio.Switch.
   check bool "original Task resources unchanged by all reads" true (before=Masc.Workspace.get_tasks_raw config);
   check bool "foreign actual Task resources remain untouched" true (other_before=Masc.Workspace.get_tasks_raw other_config)
 
+module Task_inspection = Masc.Tui_decode_task_inspection
+let original_task_request state = match begin_original_task_inspection state with
+  | Some request -> request | None -> fail "original recorded Task inspection did not begin"
+let actual_task_snapshot config request =
+  let task_id=match request.tcr_query with
+    | Original_task_query ticket -> Creation_read.task_request_key ticket
+    | Creation_query _ -> fail "Task request changed kind" in
+  let status,json=Server_dashboard_task_detail.inspect ~config ~task_id:(Some task_id)
+    |> Server_dashboard_task_detail.inspection_response in
+  match status with
+  | `OK ->
+    let decoded=Task_inspection.observation ~task_id json
+      |> Result.map_error (fun detail -> Creation_read.Invalid_reply detail) in
+    Result.bind decoded (Creation_read.prepare_task ~task_id)
+  | `Bad_request | `Not_found | `Service_unavailable -> Error (Creation_read.Read_failed (Yojson.Safe.to_string json))
+let launch_original_inspection results state config request =
+  let envelope=Protocol.capture_workspace_message state in
+  Results.launch ~key:request.tcr_job ~observation:true state ~results
+    ~boundary_error:(fun detail -> Creation_read.Read_failed detail)
+    ~deliver:(fun result -> envelope (Protocol.Original_task_read_done (request,result)))
+    (fun () -> actual_task_snapshot config request)
+let admit_original_inspection state = function
+  | Protocol.Workspace_scoped (authority,reading,(Protocol.Original_task_read_done (request,result) as message)) ->
+    if Protocol.workspace_message_admitted state ~authority ~reading message then
+      complete_original_task_inspection state request result else false
+  | _ -> fail "original Task observation lost its read scope"
+let creation_proof state call results =
+  let request=begin_inspection state in
+  launch_inspection results state call request;
+  check bool "original creation proof admitted" true (admit_inspection state (owned_message results))
+
+let test_original_task_read_without_global_rows_and_archive env () = Eio.Switch.run @@ fun sw ->
+  let clock=Eio.Stdenv.clock env in
+  with_server ~clock ~sw ~owner:"original-task-live-archive" @@ fun base config workspace _initial call ->
+  Eio_context.with_turn_switch sw @@ fun () ->
+  let state=creation_state base workspace in
+  let original,task_id=retained_actual_creation state call ~workspace ~request_id:"task-independent-original" in
+  check bool "fixture has no global Task rows" true (task_domain_values state=[] && state.tasks=[]);
+  state.tasks_error <- Some "global Task listing remains unavailable";
+  check bool "original source opens without inventory" true (open_task_creation_inspection state ~keeper:"creation-keeper");
+  let results=Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  creation_proof state call results;
+  let request=original_task_request state in
+  launch_original_inspection results state config request;
+  Input.insert state.msg_input "new input while original Task is read";
+  check bool "live original Task admitted without global rows" true (admit_original_inspection state (owned_message results));
+  (match Creation_read.task_observation original.tdr_inspection with
+   | Masc_tui_fetched.Ready (Task_inspection.In_backlog detail) ->
+     check string "read exact actual original Task" task_id detail.task.id;
+     check string "full original Task description retained" "original body" detail.task.description
+   | _ -> fail "live original Task observation missing");
+  ignore (cancel ~call ~task_id ~expected_workspace:workspace ~reason:"archive original after actual cancel" |> require_ok);
+  (* Keep the actual cancellation and creation receipts. Only its timestamp is
+     aged in this private fixture so production GC can archive it without a
+     sleep or an invalid zero-day retention. *)
+  let backlog=Masc.Workspace.read_backlog_r config |> require_ok in
+  let tasks=List.map (fun (task : Masc_domain.task) ->
+    if task.id<>task_id then task else match task.task_status with
+    | Cancelled cancelled ->
+      {task with task_status=Cancelled {cancelled with cancelled_at="2000-01-01T00:00:00Z"}}
+    | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ -> fail "actual cancellation did not persist") backlog.tasks in
+  Masc.Workspace.write_backlog config {backlog with tasks};
+  ignore (Masc.Workspace.archive_terminal_tasks config ~days:1 ());
+  check bool "original was actually archived from live backlog" false
+    (List.exists (fun (task : Masc_domain.task) -> task.id=task_id) (Masc.Workspace.get_tasks_raw config));
+  let request=original_task_request state in
+  launch_original_inspection results state config request;
+  check bool "archive observation admitted" true (admit_original_inspection state (owned_message results));
+  (match Creation_read.task_observation original.tdr_inspection with
+   | Masc_tui_fetched.Ready (Task_inspection.In_archive detail) ->
+     check string "archive keeps exact original identity" task_id detail.task.id;
+     check string "archive keeps full original body" "original body" detail.task.description;
+     (match detail.task.task_status with Cancelled _ -> () | _ -> fail "archive invented terminal status")
+   | _ -> fail "archived Task became missing/failure or borrowed global rows");
+  check bool "lookup never fills global rows or clears listing failure" true
+    (task_domain_values state=[] && state.tasks=[] && state.tasks_error=Some "global Task listing remains unavailable");
+  check string "late Task read leaves input intact" "new input while original Task is read" (Input.contents state.msg_input);
+  original_unconfirmed original;
+  check bool "inspection does not hand work to a Keeper" true (state.pending_task_followups=[])
+
+let test_original_task_delete_failure_and_late_scope env () = Eio.Switch.run @@ fun sw ->
+  let clock=Eio.Stdenv.clock env in
+  with_server ~clock ~sw ~owner:"original-task-delete-a" @@ fun base config workspace _initial call ->
+  with_server ~clock ~sw ~owner:"original-task-delete-b" @@ fun _other other_config other_workspace _other_task _other_call ->
+  Eio_context.with_turn_switch sw @@ fun () ->
+  let state=creation_state base workspace in
+  let original,task_id=retained_actual_creation state call ~workspace ~request_id:"task-deletion-original" in
+  check bool "original source selected" true (open_task_creation_inspection state ~keeper:"creation-keeper");
+  let results=Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  creation_proof state call results;
+  let first=original_task_request state in
+  launch_original_inspection results state config first;
+  let late=owned_message results in
+  close_task_creation_inspection state ~reason:Creation_read.Interrupted;
+  check bool "same original reopens" true (open_task_creation_inspection state ~keeper:"creation-keeper");
+  creation_proof state call results;
+  let fresh=original_task_request state in
+  launch_original_inspection results state config fresh;
+  check bool "fresh original Task reply admitted" true (admit_original_inspection state (owned_message results));
+  check bool "old Task ticket cannot finish the reopened original" false (admit_original_inspection state late);
+  let status,json=Server_dashboard_task_detail.inspect ~config ~task_id:(Some "task-unobserved-original")
+    |> Server_dashboard_task_detail.inspection_response in
+  check bool "unknown is an actual observation response" true (status=`OK);
+  (match Task_inspection.observation ~task_id:"task-unobserved-original" json with
+   | Ok Task_inspection.Not_observed -> () | _ -> fail "unobserved Task became deleted/completed");
+  (match Masc.Workspace.delete_task_r config ~task_id with
+   | Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error));
+  let deleted=original_task_request state in
+  launch_original_inspection results state config deleted;
+  check bool "durable deletion observation admitted" true (admit_original_inspection state (owned_message results));
+  (match Creation_read.task_observation original.tdr_inspection with
+   | Masc_tui_fetched.Ready (Task_inspection.Deletion_recorded _) -> ()
+   | _ -> fail "actual deletion became unobserved or stayed live");
+  (* Archive storage failure cannot certify absence even with a deletion record. *)
+  Fs_compat.save_file (Masc.Workspace.archive_path config) "{invalid archive";
+  let failed=original_task_request state in
+  launch_original_inspection results state config failed;
+  check bool "failed current refresh settles" true (admit_original_inspection state (owned_message results));
+  (match Creation_read.task_observation original.tdr_inspection with
+   | Masc_tui_fetched.Stale (Task_inspection.Deletion_recorded _,Creation_read.Read_failed _) -> ()
+   | _ -> fail "archive failure lost prior deletion or invented absence");
+  let withdrawn=original_task_request state in
+  launch_original_inspection results state config withdrawn;
+  let late_foreign=owned_message results in
+  let other_before=Masc.Workspace.get_tasks_raw other_config in
+  suspend_workspace_readings state;state.workspace_authority <- Workspace_authority 1;
+  state.server_identity <- Some other_workspace;
+  check bool "original Task reply cannot borrow foreign workspace" false (admit_original_inspection state late_foreign);
+  check bool "foreign Task resources unchanged" true (other_before=Masc.Workspace.get_tasks_raw other_config);
+  original_unconfirmed original
+
 let () = Eio_main.run @@ fun env ->
   let snapshot = Eio_context.snapshot_state () in
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -594,4 +727,8 @@ let () = Eio_main.run @@ fun env ->
         test_case "original actual creation inspection and refused cross-request reply preserve input" `Quick
           (test_original_inspection_and_refused_actual_reply env);
         test_case "actual receipt inspection survives reopen/history and refuses foreign workspace" `Quick
-          (test_inspection_reopen_history_and_workspace_withdrawal env)]])
+          (test_inspection_reopen_history_and_workspace_withdrawal env);
+        test_case "actual original Task reads bypass unavailable global rows and observe archive" `Quick
+          (test_original_task_read_without_global_rows_and_archive env);
+        test_case "actual deletion, archive failure and late Task scopes retain original evidence" `Quick
+          (test_original_task_delete_failure_and_late_scope env)]])

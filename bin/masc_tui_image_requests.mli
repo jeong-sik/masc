@@ -1,7 +1,7 @@
 (** Chat image acquisition outside the render loop. The caller captures the
     endpoint and later checks its request generation before displaying bytes. *)
 type source =
-  | Draft of Masc_tui_image_payload.t
+  | Draft of Masc_tui_keeper_chat_projection.attachment
   | Retained of { reference : Tool_output.artifact_ref;
       format : Masc_tui_image_payload.format }
   | Generated of Masc_tui_image_preview.output_source

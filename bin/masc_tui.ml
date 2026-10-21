@@ -10850,17 +10850,10 @@ let image_notice (state : state) ~view ~keeper_name ~kind text =
     report_action state (match kind with Notice_failure -> "error" | Notice_reply -> "system") text
   else chat_notice state ~keeper_name ~kind text
 
-let resource_image_reading_is_current (state : state) (pending : sent_image_read) =
-  pending.sir_view <> Resources
-  || (Masc_tui_resource_images.same_reading ~equal:Masc_tui_resource_catalog.equal_key pending.sir_resource state.resource_content
-      && Option.is_none state.resource_pending_key
-      && Option.is_none state.resource_content_error)
-
 (* Settle the exact interrupted preview without replacing a newer selection. *)
 let settle_retired_sent_image state =
   match state.sent_image_read with
-  | Some pending when pending.sir_authority != state.workspace_read_authority
-      || not (resource_image_reading_is_current state pending) ->
+  | Some pending when not (image_reading_is_current state pending) ->
       state.sent_image_read <- None;
       if not state.msx_open && pending.sir_generation = state.image_request_generation
          && pending.sir_view = state.view
@@ -10872,15 +10865,18 @@ let settle_retired_sent_image state =
 
 (* Draft payloads are local even while disconnected. Peer readings retain
    their original authority envelope; both paths capture the UI generation
-   and physical workspace before forking and share completion admission. *)
+   and workspace/draft owner before forking and share completion admission. *)
 let open_preview_image ?skill_reference state ~mailbox ~notice ~name source =
   let dispatch = match source with
-    | Masc_tui_image_requests.Draft _ -> Some enqueue_async
+    | Masc_tui_image_requests.Draft attachment ->
+      Some (enqueue_async, Draft_image_read (state.workspace_authority, attachment))
     | Retained _ | Generated _ ->
-      if server_authority_ready state then Some (workspace_enqueue state) else None in
+      if server_authority_ready state then
+        Some (workspace_enqueue state, Peer_image_read state.workspace_read_authority)
+      else None in
   match dispatch with
   | None -> ()
-  | Some enqueue_async ->
+  | Some (enqueue_async, owner) ->
   let rows, columns = Masc_tui_ansi.get_terminal_size () in
   let display = match !active_graphics_protocol with
     | Masc_tui_graphics.Kitty_protocol | ITerm2_protocol -> Some Masc_tui_image_cache.Pixel_graphics
@@ -10896,7 +10892,7 @@ let open_preview_image ?skill_reference state ~mailbox ~notice ~name source =
     let generation = state.image_request_generation in
     let view = state.view in
     state.sent_image_read <- Some {sir_generation=generation; sir_view=view;
-      sir_keeper=keeper_name; sir_name=name; sir_authority=state.workspace_read_authority;
+      sir_keeper=keeper_name; sir_name=name; sir_owner=owner;
       sir_resource=(if view = Resources then state.resource_content else None)};
     (* When the terminal supplies no pixel geometry, use the half-em advance
        of Pele's 16px default font as a logical layout width. The existing
@@ -10955,10 +10951,9 @@ let open_selected_image state ~mailbox preview =
   match preview with
   | Masc_tui_image_preview.Named_path path -> open_image state ~notice path
   | Masc_tui_image_preview.Staged attachment ->
-      let payload = Masc_tui_image_payload.of_base64
-        ~mime_type:attachment.Masc_tui_keeper_chat_projection.mime_type attachment.data in
-      open_preview_image state ~mailbox ~notice ~name:attachment.name
-        (Masc_tui_image_requests.Draft payload)
+      open_preview_image state ~mailbox ~notice
+        ~name:attachment.Masc_tui_keeper_chat_projection.name
+        (Masc_tui_image_requests.Draft attachment)
   | Masc_tui_image_preview.Stored_attachment { name; reference; format } ->
       open_preview_image state ~mailbox ~notice ~name
         (Masc_tui_image_requests.Retained {reference;format})
@@ -20375,8 +20370,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            && pending.sir_view = view && pending.sir_keeper = keeper_name
            && pending.sir_name = name ->
          state.sent_image_read <- None;
-         pending.sir_authority == state.workspace_read_authority
-         && resource_image_reading_is_current state pending
+         image_reading_is_current state pending
        | Some _ | None -> false in
       let same_skill = match skill_reference with
         | None -> true

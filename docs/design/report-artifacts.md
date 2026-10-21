@@ -185,8 +185,9 @@ preview. Missing decoders and unsupported colour capabilities leave a visible
 refusal with the original reading intact. Staged attachments decode their
 captured local payload in the same worker without a peer request or verified
 server identity; previewing leaves the original encoded attachment intact.
-Their result still belongs to the original generation, view, Keeper and physical
-workspace reading. Named-file previews, browser layout and copied source bytes
+Their result still belongs to the original generation, view, Keeper, workspace
+authority and exact staged attachment object. Losing peer confirmation alone
+does not withdraw a local draft; replacement or removal of its attachment does. Named-file previews, browser layout and copied source bytes
 are unchanged.
 Acquisition progress is a temporary footer observation of the pending read,
 bound to its generation, view, Keeper, workspace and original resource reading.

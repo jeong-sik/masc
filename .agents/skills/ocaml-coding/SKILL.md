@@ -80,7 +80,11 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   descriptor identity, 복원 거절의 최초 원인·token·경로 보존은 저장 완료와 별개로 확인한다.
   agent 세션의 디렉터리 발견은 worker에서 불변 이름만 만들고 owner에 dispatch한다.
   조회 중 들어온 실제 연결·대기 알림은 현재 state에서 보존하며 없는 이름만 복원한다.
-  discovery 실패·dispatch 전 취소와 이미 수락한 message의 후속 취소를 구분한다.
+  조회마다 수명을 묶어 열려 있는 동안 처리된 삭제(일시 등록 후 삭제 포함)를 적용 때 보존한다.
+  성공·실패·취소에 정리하고 actor 종료는 미적용 조회도 무효화한다. 영구 tombstone은 두지 않는다.
+  caller 취소 전 owner가 claim했는지 구분하며, 이후 취소를 publication 취소나 물리 I/O 종료로 부르지 않는다.
+  실제 읽기 뒤 owner 적용 전의 테스트 경계는 실제 연결·삭제·알림·actor 수명만 순서 짓고
+  storage 대체·private state 관측·호출 횟수 검사로 바꾸지 않는다.
   현재 protocol/resource 시나리오와 한계는 해당 audit에 두고 Skill에는 재사용할 규율을 적는다.
 
 - Ask 답변 복구의 사전 증거는 같은 회차·Keeper·canonical answer의 UTC-day window에서만

@@ -478,8 +478,10 @@ let opening_cases =
               Eio_guard.enable ();
               Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1
                   (Eio.Stdenv.domain_mgr env));
+              let startup = Config.prepare_startup_read ~sw:(Some sw) ~base_path in
               let state = State.create_state ~workspace:"visits" ~local_base_path:base_path
                   ~port:0 ~refresh_interval:0. () in
+              let initial_settings = Eio.Promise.await_exn startup.result in
               let beta = match Keeper_id.Keeper_name.of_string "beta" with
                 | Ok keeper -> keeper | Error reason -> Alcotest.fail reason in
               let first = Visits.submit state.home_chat_writer ~sw:(Some sw) ~base_path target in
@@ -526,6 +528,17 @@ let opening_cases =
                | Ok Config.Overview -> ()
                | _ -> Alcotest.fail "queued visit overwrote the other editor's startup mode");
               check_opt "other editor's theme survives" (Some "gruvbox-dark") read.theme;
+              (* The original read remains its own immutable startup snapshot;
+                 it cannot borrow the intervening writer's current settings. *)
+              let original = Eio.Promise.await_exn startup.result in
+              Alcotest.(check bool) "original startup snapshot retained" true
+                (original == initial_settings);
+              check_opt "original startup did not acquire the later theme" None
+                original.settings.theme;
+              (match original.settings.opening with
+               | Ok (Config.Last (Some keeper)) when Keeper_id.Keeper_name.equal keeper target -> ()
+               | Ok (Config.Overview | Last None | Last (Some _) | Keeper _)
+               | Error _ -> Alcotest.fail "original startup acquired a later opening mode");
               (match read.last_chat_keeper with
                | Ok (Some keeper) when Keeper_id.Keeper_name.equal keeper target -> ()
                | _ -> Alcotest.fail "disk did not retain the last FIFO visit");

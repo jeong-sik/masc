@@ -47,6 +47,28 @@ val load : base_path:string -> t
     so unread history is not presented as missing. Explicit [false] stays
     [Some false]. *)
 
+type startup_snapshot = private {
+  settings : t;
+  reader_entered_ns : int64;
+  reader_returned_ns : int64;
+}
+type startup_read = private {
+  started_ns : int64;
+  result : startup_snapshot Eio.Promise.or_exn;
+}
+val prepare_startup_read :
+  sw:Eio.Switch.t option -> base_path:string -> startup_read
+(** Prepare the original immutable settings snapshot through the existing I/O
+    pool while the caller performs independent terminal initialization. The
+    caller still awaits this exact promise and applies settings before its
+    terminal ownership, first setting-dependent output or key handling. No late UI application,
+    cross-session cache, retry or second file read is introduced.
+    Reader times cover path resolution, metadata, file read and parsing; they
+    are not pure I/O intervals. A missing switch preserves synchronous load
+    behavior, including synchronous exceptions. A supplied switch owns the child
+    and physical pool settlement; its cancellation and exceptions remain failed
+    promise outcomes, not defaults. *)
+
 (* [tui].theme, given an already-parsed runtime.toml document. [None] when the
    key (or the [tui] table) is absent. Pure, so the caller's file read stays
    separate from the extraction. *)

@@ -457,10 +457,22 @@ val terminal_direct_native_call : t -> operation_id:Chat_operation.Operation_id.
   call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition -> (unit, error) result
 val defer_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Chat_operation.t, error) result
+type input_response_error =
+  | Response_owner_error of error
+  | Response_installation_error of Keeper_input_wait_response.installation_error
+  | Response_commit_unconfirmed of
+      { installed_checkpoint : Keeper_checkpoint_ref.t
+      ; cause : error
+      }
+(** Preserve the original typed failure. Owner lifecycle failure does not prove
+    physical effects were absent. Installation outcomes retain their original
+    evidence. A commit failure after a sealed installation receipt also retains
+    its exact consumed checkpoint, whether the journal committed or not. *)
+val input_response_error_to_string : input_response_error -> string
 val respond_direct_input_wait : t -> net:Eio_context.eio_net ->
   operation_id:Keeper_chat_operation.Operation_id.t -> observed:Keeper_semantic_execution.input_wait ->
   response:Agent_core.Hooks.elicitation_response ->
-  ([ `Accepted | `Busy of autonomous_block ], error) result
+  ([ `Accepted | `Busy of autonomous_block ], input_response_error) result
 (** Explicit response under an exclusive original Owner maintenance child. Busy
     means no response effects began. Acceptance consumes the exact wait/input
     witness and enables only the original operation continuation. Partial file

@@ -679,8 +679,8 @@ let test_owned_input_wait ?response fixture () =
           let invalid={waiting.pending with request={waiting.pending.request with question="another question"}} in
           let invalid=Keeper_semantic_execution.input_wait ~checkpoint:waiting.checkpoint ~pending:invalid |> Result.get_ok in
           (match Owner.respond_direct_input_wait owner ~net:env#net ~operation_id:id ~observed:invalid ~response with
-           | Error (Owner.Operation_rejected (Store.Invalid_input _)) -> ()
-           | Error error -> fail (Owner.error_to_string error) | Ok _ -> fail "foreign canonical question acquired response authority");
+           | Error (Owner.Response_owner_error (Owner.Operation_rejected (Store.Invalid_input _))) -> ()
+           | Error error -> fail (Owner.input_response_error_to_string error) | Ok _ -> fail "foreign canonical question acquired response authority");
           check bool "refused question preserves original wait" true
             (Option.equal Keeper_semantic_execution.equal_input_wait (Some waiting)
               (owner_ok (Owner.direct_input_wait owner ~operation_id:id)));
@@ -691,7 +691,7 @@ let test_owned_input_wait ?response fixture () =
            | `Ran (Ok `Accepted | Error _) | `Busy _ -> fail "busy response was not rejected before effects");
           (match Owner.respond_direct_input_wait owner ~net:env#net ~operation_id:id ~observed:waiting ~response with
            | Ok `Accepted -> () | Ok (`Busy _) -> fail "idle response was busy"
-           | Error error -> fail (Owner.error_to_string error));
+           | Error error -> fail (Owner.input_response_error_to_string error));
           let after=await_terminal ~clock:env#clock owner id in
           check bool "same original operation succeeds and redacts terminal input" true
             (after.input=None && Chat_operation.Operation_id.equal after.operation_id before.operation_id
@@ -706,8 +706,8 @@ let test_owned_input_wait ?response fixture () =
             | Declined | Timeout -> [Agent_core.Types.user_msg "original admitted input"] in
           check bool "response uses canonical question and does not append original prompt again" true (consumed.messages=expected);
           (match Owner.respond_direct_input_wait owner ~net:env#net ~operation_id:id ~observed:waiting ~response with
-           | Error (Owner.Operation_rejected (Store.Invalid_input _)) -> ()
-           | Error error -> fail (Owner.error_to_string error) | Ok _ -> fail "duplicate response was accepted");
+           | Error (Owner.Response_owner_error (Owner.Operation_rejected (Store.Invalid_input _))) -> ()
+           | Error error -> fail (Owner.input_response_error_to_string error) | Ok _ -> fail "duplicate response was accepted");
           let unchanged=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir
               ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) |> Result.get_ok in
           check bool "duplicate preserves exact consumed bytes" true

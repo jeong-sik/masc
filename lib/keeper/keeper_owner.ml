@@ -127,6 +127,14 @@ type error =
   | Owner_stopping
   | Owner_closed
 
+type input_response_error =
+  | Response_owner_error of error
+  | Response_installation_error of Keeper_input_wait_response.installation_error
+  | Response_commit_unconfirmed of
+      { installed_checkpoint : Keeper_checkpoint_ref.t
+      ; cause : error
+      }
+
 type operation_execution =
   | Operation_deferred
   | Operation_succeeded of { outcome_ref : string }
@@ -444,6 +452,14 @@ let error_to_string = function
   | Store_unavailable detail -> "keeper owner store unavailable: " ^ detail
   | Owner_stopping -> "keeper owner is stopping"
   | Owner_closed -> "keeper owner is closed"
+;;
+
+let input_response_error_to_string = function
+  | Response_owner_error error -> error_to_string error
+  | Response_installation_error error -> Keeper_input_wait_response.installation_error_to_string error
+  | Response_commit_unconfirmed {cause;_} ->
+    "input response files were installed but journal acknowledgement is unconfirmed; reconcile before retry: "
+    ^ error_to_string cause
 ;;
 
 let operation_error_kind = function
@@ -2900,18 +2916,20 @@ let run_maintenance_if_idle ?(defer_to_chat = false) t run =
 ;;
 
 let respond_direct_input_wait t ~net ~operation_id ~observed ~response =
-  let invalid detail = Error (Operation_rejected (Chat_operation_store.Invalid_input detail)) in
+  let invalid detail = Error (Response_owner_error (Operation_rejected (Chat_operation_store.Invalid_input detail))) in
   let run () =
     let ( let* ) = Result.bind in
     let* child = match Keeper_turn_preview_owner.current () with
       | Some child -> Ok child | None -> invalid "response has no inherited maintenance child" in
-    let* writer = request t (Begin_direct_input_response {operation_id;observed;child}) in
+    let* writer = request t (Begin_direct_input_response {operation_id;observed;child})
+      |> Result.map_error (fun error -> Response_owner_error error) in
     let* receipt = Keeper_input_wait_response.install ~net ~authority:writer.response_authority ~response
-      |> Result.map_error (fun error -> Operation_rejected (Chat_operation_store.Invalid_input
-        (Keeper_input_wait_response.installation_error_to_string error))) in
-    request t (Commit_direct_input_response (writer,receipt)) in
+      |> Result.map_error (fun error -> Response_installation_error error) in
+    request t (Commit_direct_input_response (writer,receipt))
+      |> Result.map_error (fun cause -> Response_commit_unconfirmed
+        {installed_checkpoint=Keeper_input_wait_response.installed_checkpoint receipt;cause}) in
   match run_maintenance_if_idle t run with
-  | Error _ as error -> error
+  | Error error -> Error (Response_owner_error error)
   | Ok (`Busy block) -> Ok (`Busy block)
   | Ok (`Ran (Error _ as error)) -> error
   | Ok (`Ran (Ok ())) -> Ok `Accepted

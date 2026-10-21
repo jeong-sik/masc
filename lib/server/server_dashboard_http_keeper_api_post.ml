@@ -14,6 +14,31 @@ let json_list_length = function
 let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
   Http.Response.json_value ?request ~status (error_json ?ok message) reqd
 
+let input_response_error_status =
+  let owner_status = function
+    | Keeper_owner.Operation_rejected
+        (Keeper_chat_operation_store.Invalid_input _ | Unknown_operation _
+        | Not_queued _ | Not_running _ | Idempotency_conflict _ | Native_call_unsettled) -> `Conflict
+    | Keeper_owner.Operation_rejected (Store_unavailable _ | Integrity_error _)
+    | Keeper_owner.Store_unavailable _ | Keeper_owner.Reducer_rejected _ -> `Internal_server_error
+    | Keeper_owner.Owner_stopping | Keeper_owner.Owner_closed -> `Service_unavailable in
+  function
+  | Keeper_owner_registry.Response_owner_lookup_failed (Owner_not_found _) -> `Conflict
+  | Keeper_owner_registry.Response_owner_lookup_failed
+      (Inventory_not_installed _ | Owner_unavailable _ | Owner_initialization_failed _ | Inventory_stopping) ->
+    `Service_unavailable
+  | Keeper_owner_registry.Response_owner_failed (Keeper_owner.Response_owner_error error) -> owner_status error
+  | Keeper_owner_registry.Response_owner_failed
+      (Keeper_owner.Response_installation_error
+        (Keeper_input_wait_response.Invalid_response _
+        | Response_refused (Source_changed _ | Input_not_current _))) -> `Conflict
+  | Keeper_owner_registry.Response_owner_failed
+      (Keeper_owner.Response_installation_error
+        (Keeper_input_wait_response.Retained_unavailable _ | Canonical_unavailable _
+        | Response_refused (Input_checkpoint_failed _) | Installation_unconfirmed _ | Installation_mismatch _)
+      | Keeper_owner.Response_commit_unconfirmed _) -> `Internal_server_error
+;;
+
 let github_login_stream_headers origin =
   Httpun.Headers.of_list
     ([ "content-type", "text/event-stream"
@@ -650,8 +675,8 @@ let handle_keeper_checkpoints_post state req reqd body_str =
          | Ok (operation_id,observed,response),Some net ->
            (match Keeper_owner_registry.respond_direct_input_wait ~base_path:config.base_path
                ~keeper_name:name ~net ~operation_id ~observed ~response with
-            | Error error -> respond_error ~status:`Conflict ~ok:false reqd
-                (Keeper_owner_registry.command_error_to_string error)
+            | Error error -> respond_error ~status:(input_response_error_status error) ~ok:false reqd
+                (Keeper_owner_registry.input_response_error_to_string error)
             | Ok (`Busy _) -> respond_error ~status:`Conflict ~ok:false reqd
                 "Keeper is busy; no input response effects began"
             | Ok `Accepted -> Http.Response.json_value ~request:req

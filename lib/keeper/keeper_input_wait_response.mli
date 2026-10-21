@@ -38,6 +38,10 @@ type installation_error =
   | Canonical_unavailable of Keeper_checkpoint_store.checkpoint_ref_load_error
   | Response_refused of refusal
   | Installation_unconfirmed of Keeper_checkpoint_store.checkpoint_installation
+  | Installation_mismatch of
+      { retained : Keeper_checkpoint_ref.t
+      ; canonical : Keeper_checkpoint_ref.t
+      }
 val authorize : session_root:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   waiting:Keeper_semantic_execution.input_wait -> authority
 (** A caller-created authority cannot match the one captured by its Owner. *)

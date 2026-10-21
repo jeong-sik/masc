@@ -213,10 +213,16 @@ val terminal_direct_native_call : base_path:string -> keeper_name:string -> oper
   call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition -> (unit, command_error) result
 val defer_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Keeper_owner.Chat_operation.t, command_error) result
+type input_response_error =
+  | Response_owner_lookup_failed of lookup_error
+  | Response_owner_failed of Keeper_owner.input_response_error
+val input_response_error_to_string : input_response_error -> string
+(** Lookup and Owner response failure remain distinct; installation/commit
+    uncertainty is never folded into a generic command rejection. *)
 val respond_direct_input_wait : base_path:string -> keeper_name:string -> net:Eio_context.eio_net ->
   operation_id:Keeper_chat_operation.Operation_id.t -> observed:Keeper_semantic_execution.input_wait ->
   response:Agent_core.Hooks.elicitation_response ->
-  ([ `Accepted | `Busy of Keeper_owner.autonomous_block ], command_error) result
+  ([ `Accepted | `Busy of Keeper_owner.autonomous_block ], input_response_error) result
 (** Explicit response under an exclusive original Owner maintenance child. Busy
     means no response effects began. Acceptance consumes the exact wait/input
     witness and enables only the original operation continuation. Partial file

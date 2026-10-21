@@ -967,7 +967,9 @@ let check_unavailable_inventory kind observed =
   check string "exact unavailable category" kind (observed |> member "error" |> member "kind" |> to_string)
 ;;
 
-let test_input_response_http_accepts_only_original_wait () =
+type response_commit_fault = No_response_fault | Before_response_commit | After_response_commit
+
+let test_input_response_http_accepts_only_original_wait ~commit_fault () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   with_temp_dir @@ fun dir -> Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
@@ -1029,21 +1031,80 @@ let test_input_response_http_accepts_only_original_wait () =
     "pending_input",Agent_core.Agent_input_request.pending_to_json pending;"response",`Assoc ["kind",`String "declined"]]) in
   let post ()=checkpoint_http_response ~meth:"POST" ~keeper_name ~body (fun reqd ->
     Server_dashboard_http_keeper_api_post.handle_keeper_checkpoints_post state (Httpun.Reqd.request reqd) reqd body) in
-  let status,_=post () in check int "actual HTTP Registry Owner response accepts original wait" 200 status;
-  let result=Keeper_owner_registry.direct_input_wait ~base_path:dir ~keeper_name ~operation_id
-    |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok in
-  check bool "HTTP acceptance consumes original durable wait" true (result=None);
-  let next=Keeper_owner_registry.direct_checkpoint ~base_path:dir ~keeper_name ~operation_id
-    |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok in
-  check bool "HTTP acceptance enables only original checkpoint continuation" true (Option.is_some next);
-  let status,json=get_checkpoint_inventory state ~keeper_name in check int "current input remains observable" 200 status;
-  check string "host snapshot agrees input consumed" "owned_none"
-    Yojson.Safe.Util.(json |> member "input_wait_observation" |> member "status" |> to_string);
-  let status,_=post () in check int "same HTTP response is not admitted twice" 409 status
+  (match commit_fault with
+   | No_response_fault ->
+     let canonical_path=Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+     let canonical_bytes=Fs_compat.load_file canonical_path in
+     let displaced=canonical_path ^ ".fixture-unavailable" in
+     Unix.rename canonical_path displaced;
+     Fun.protect ~finally:(fun () -> Unix.rename displaced canonical_path) (fun () ->
+       let status,_=post () in
+       check int "unavailable canonical is a server failure, not a stale response" 500 status;
+       check bool "failed response cannot recreate an unavailable canonical" false (Sys.file_exists canonical_path);
+       check bool "failed response preserves original input relation" true
+         (Keeper_owner_registry.input_checkpoint ~base_path:dir ~keeper_name ~trace_id:meta.runtime.trace_id
+           |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok
+           |> fun observed -> observed=Journal.Input_observed reference);
+       check bool "unavailable canonical preserves original wait" true
+         (Option.equal Keeper_semantic_execution.equal_input_wait (Some waiting)
+           (Keeper_owner_registry.direct_input_wait ~base_path:dir ~keeper_name ~operation_id
+             |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok)));
+     check string "failed response preserves canonical bytes" canonical_bytes (Fs_compat.load_file canonical_path)
+   | Before_response_commit | After_response_commit -> ());
+  let status,json=Fun.protect ~finally:Journal.For_testing.clear_commit_fault (fun () ->
+    (match commit_fault with
+     | No_response_fault -> ()
+     | Before_response_commit -> Journal.For_testing.fail_next_commit Fail_before_commit
+     | After_response_commit -> Journal.For_testing.fail_next_commit Fail_after_commit);
+    post ()) in
+  (match commit_fault with
+   | Before_response_commit | After_response_commit ->
+     check int "installed response with unconfirmed journal is a server failure" 500 status;
+     check bool "unconfirmed response is never reported accepted" false
+       Yojson.Safe.Util.(json |> member "ok" |> to_bool);
+     let consumed=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id |> Result.get_ok in
+     check bool "journal fault follows actual consumed canonical installation" true
+       ((Keeper_checkpoint_store.exact_snapshot_checkpoint consumed).pending_input=None);
+     let consumed_reference=Keeper_checkpoint_store.exact_snapshot_reference consumed in
+     ignore (Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:consumed_reference |> Result.get_ok);
+     let remaining=Keeper_owner_registry.direct_input_wait ~base_path:dir ~keeper_name ~operation_id
+       |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok in
+     let continuation=Keeper_owner_registry.direct_checkpoint ~base_path:dir ~keeper_name ~operation_id
+       |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok in
+     let observed=Keeper_owner_registry.input_checkpoint ~base_path:dir ~keeper_name ~trace_id:meta.runtime.trace_id
+       |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok in
+     (match commit_fault with
+      | Before_response_commit ->
+        check bool "precommit failure preserves original wait" true
+          (Option.equal Keeper_semantic_execution.equal_input_wait (Some waiting) remaining);
+        check bool "precommit failure enables no continuation" true (continuation=None);
+        check bool "precommit failure preserves input predecessor" true (observed=Journal.Input_observed reference)
+      | After_response_commit ->
+        check bool "uncertain postcommit has actually consumed original wait" true (remaining=None);
+        check bool "uncertain postcommit retains actual original continuation" true (Option.is_some continuation);
+        check bool "uncertain postcommit retains actual consumed input relation" true
+          (observed=Journal.Input_observed consumed_reference)
+      | No_response_fault -> fail "unreachable fault fixture")
+   | No_response_fault ->
+     check int "actual HTTP Registry Owner response accepts original wait" 200 status;
+     let result=Keeper_owner_registry.direct_input_wait ~base_path:dir ~keeper_name ~operation_id
+       |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok in
+     check bool "HTTP acceptance consumes original durable wait" true (result=None);
+     let next=Keeper_owner_registry.direct_checkpoint ~base_path:dir ~keeper_name ~operation_id
+       |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok in
+     check bool "HTTP acceptance enables only original checkpoint continuation" true (Option.is_some next);
+     let status,json=get_checkpoint_inventory state ~keeper_name in check int "current input remains observable" 200 status;
+     check string "host snapshot agrees input consumed" "owned_none"
+       Yojson.Safe.Util.(json |> member "input_wait_observation" |> member "status" |> to_string);
+     let status,_=post () in check int "same HTTP response is not admitted twice" 409 status)
 ;;
 
 let test_input_response_http_requires_explicit_exact_proof () =
-  with_temp_dir @@ fun dir -> Eio_main.run @@ fun env ->
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  with_temp_dir @@ fun dir -> Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs env#fs;
   let state=Mcp_server.For_testing.create_state ~base_path:dir in
   let state={state with Mcp_server.net=Some env#net} in
   let checkpoint=Keeper_checkpoint_ref.create
@@ -1061,7 +1122,12 @@ let test_input_response_http_requires_explicit_exact_proof () =
       Server_dashboard_http_keeper_api_post.handle_keeper_checkpoints_post
         state (Httpun.Reqd.request reqd) reqd body) in
   let status,_=post fields in
-  check int "valid explicit response cannot create a missing Owner or accept a wait" 409 status;
+  check int "unavailable Owner inventory is a service failure" 503 status;
+  Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None
+      (Mcp_server.workspace_config state)
+    |> Result.map_error Keeper_owner_registry.install_error_to_string |> Result.get_ok |> ignore;
+  let status,_=post fields in
+  check int "valid response cannot create a missing Owner in an available inventory" 409 status;
   List.iter (fun invalid -> let status,_=post invalid in
     check int "malformed response is rejected before Owner lookup" 400 status)
     [("operation_id",`String "duplicate")::fields;
@@ -1553,7 +1619,11 @@ let () =
             "input wait follows exact same-turn replacement and settlement"
             `Quick
             test_input_wait_inventory_tracks_exact_replacements
-        ; test_case "HTTP accepts only original durable wait and snapshot observes consumption" `Quick test_input_response_http_accepts_only_original_wait
+        ; test_case "HTTP accepts only original durable wait and snapshot observes consumption" `Quick (test_input_response_http_accepts_only_original_wait ~commit_fault:No_response_fault)
+        ; test_case "HTTP preserves physical installation before failed journal commit" `Quick
+            (test_input_response_http_accepts_only_original_wait ~commit_fault:Before_response_commit)
+        ; test_case "HTTP reports uncertain committed response as server failure" `Quick
+            (test_input_response_http_accepts_only_original_wait ~commit_fault:After_response_commit)
         ; test_case "input response requires exact explicit proof and an existing Owner" `Quick test_input_response_http_requires_explicit_exact_proof
         ; test_case "owned input ignores missing corrupt or stale canonical" `Quick test_input_wait_inventory_ignores_canonical_drift
         ; test_case "input wait never borrows unavailable retained or historical state" `Quick test_input_wait_inventory_refuses_unavailable_retained

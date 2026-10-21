@@ -22,8 +22,11 @@ Declined/Timeout consume the pending request without telling the model which of
 those two responses was selected. This does not guarantee the model will avoid
 asking again. Request schemas are preserved but Core currently does not validate
 Answer JSON against them; no schema-validation guarantee is made here. An old,
-foreign or repeated response returns a typed refusal and leaves the current request and messages
-unchanged. A Timeout response is not automatic wall-clock expiry.
+foreign or repeated response returns a typed refusal and leaves the current
+request and messages unchanged. A Timeout response is not automatic wall-clock
+expiry. Distinct model-visible Declined/Timeout observations in shared Core
+remain required before this response feature ships; all three response kinds
+must remain supported in both the live and restored continuation paths.
 
 Publishing Started is not an accepted resume: input/callback validation can
 still refuse the call. The shared input stage consumes only its captured
@@ -263,6 +266,30 @@ Duplicates refuse without consuming a different request. An uncertain journal
 acknowledgement stays Error even when the transaction actually committed; reread
 the actual original operation/input before reconciling, never blindly resubmit.
 
+Response errors retain their typed stage across Owner and Registry. An Owner
+failure keeps its original cause; a lifecycle failure alone does not prove that
+no physical effects occurred. Installation failure preserves the original file
+outcome, including uncertainty. If confirmed retention and canonical installation
+return different references, both references remain an installation mismatch.
+After a sealed physical receipt, any journal error remains commit-unconfirmed
+with the exact installed checkpoint and original Owner error. It is never
+converted to an input-rejection string.
+
+The administrative HTTP boundary maps these failures explicitly:
+
+| Outcome | HTTP status |
+| --- | --- |
+| Malformed request | 400 |
+| Busy, stale/duplicate proof, missing Keeper in an available inventory | 409 |
+| Unavailable inventory, stopping/closed Owner or missing server network context | 503 |
+| Retained/canonical input unavailable, internal store failure, unconfirmed/mismatched installation or journal acknowledgement | 500 |
+
+A server failure is neither acceptance nor evidence that no bytes changed. The
+client must read the actual original input/operation before reconciliation. No
+automatic retry, new operation, proof substitution or cleanup authority follows
+from the status code. These error distinctions do not implement the still-required
+physical/journal divergence recovery.
+
 Actual source scenarios cover three explicit Owner responses and same-operation
 continuation, stale question and busy/duplicate refusal, Store atomicity and
 pre/post-commit faults, physical stale nonhistory refusal and valid derived
@@ -280,6 +307,7 @@ Enabling official-client input later requires its own continuation authority.
 The existing unified success receipt precedes durable wait admission; a later
 admission error does not rewrite that earlier run receipt into operation success.
 
-All layers remain Draft. Autonomous waiting, dedicated input-wait classification,
+All layers remain Draft. Shared Core Declined/Timeout observations, autonomous
+waiting, dedicated input-wait classification,
 canonical/live/retained divergence reconciliation, snapshot/SSE invalidation and
 persistent/reconnected Acting/TUI are still required for #38005 acceptance.

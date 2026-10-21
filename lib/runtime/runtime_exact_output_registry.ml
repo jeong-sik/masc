@@ -8,7 +8,7 @@ type admitted_slot =
   }
 
 type admitted_lane =
-  { id : string
+  { owner : Runtime_schema.exact_lane_owner
   ; enabled : bool
   ; slots : admitted_slot list
   ; cli_slots : string list
@@ -81,7 +81,6 @@ type publication_error =
   | Registry_not_published
   | Publication_busy
   | Replacement_base_changed
-  | Blank_lane_id of { position : int }
   | Duplicate_lane_id of
       { position : int
       ; lane_id : string
@@ -125,7 +124,7 @@ type resolved_lane =
 
 type lane_resolution_error =
   | Exact_lane_unconfigured of { lane_id : string }
-  | Exact_lane_off of { lane_id : string }
+  | Exact_lane_off of { lane_id : string; owner : Runtime_schema.exact_lane_owner }
   | No_admitted_lane_slots of { lane_id : string }
 
 type prepared_replacement =
@@ -173,10 +172,12 @@ let lane_publication registry lane_id =
   | None -> None, []
   | Some registry ->
     let declaration = List.find_opt
-        (fun (lane : Runtime_schema.exact_output_lane_decl) -> String.equal lane.id lane_id)
+        (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+           String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
         registry.declared_lanes in
     let targets = match List.find_opt
-        (fun (lane : admitted_lane) -> String.equal lane.id lane_id)
+        (fun (lane : admitted_lane) ->
+           String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
         registry.exact_output_lanes with
       | None -> []
       | Some lane -> List.map (fun (slot : admitted_slot) ->
@@ -228,13 +229,14 @@ let ( let* ) = Result.bind
 
 let admit_lane_slots resolver_snapshot admitted_by_id
     (lane : Runtime_schema.exact_output_lane_decl) =
+  let lane_id = Runtime_schema.exact_lane_key lane.owner in
   let rec validate_cli position seen = function
     | [] -> Ok ()
     | slot_id :: rest ->
       if String.trim slot_id = "" then
-        Error (Blank_lane_slot {lane_id=lane.id;position})
+        Error (Blank_lane_slot {lane_id;position})
       else if String_set.mem slot_id seen then
-        Error (Duplicate_lane_slot {lane_id=lane.id;position;slot_id})
+        Error (Duplicate_lane_slot {lane_id;position;slot_id})
       else validate_cli (position + 1) (String_set.add slot_id seen) rest
   in
   let* () = validate_cli (List.length lane.slot_ids + 1)
@@ -244,13 +246,13 @@ let admit_lane_slots resolver_snapshot admitted_by_id
       Ok (List.rev admitted_slots, admitted_by_id, List.rev rejected_slots)
     | slot_id :: rest ->
       if String.equal (String.trim slot_id) ""
-      then Error (Blank_lane_slot { lane_id = lane.id; position })
+      then Error (Blank_lane_slot { lane_id; position })
       else if String_set.mem slot_id seen
-      then Error (Duplicate_lane_slot { lane_id = lane.id; position; slot_id })
+      then Error (Duplicate_lane_slot { lane_id; position; slot_id })
       else if not lane.enabled then
         (match Exact_output.admit_target_ref resolver_snapshot slot_id with
          | Error (Exact_output.Target_ref_rejected cause) ->
-             Error (Invalid_lane_slot {lane_id=lane.id;position;slot_id;cause})
+             Error (Invalid_lane_slot {lane_id;position;slot_id;cause})
          | Ok _ | Error (Exact_output.Target_not_in_catalog _) ->
              loop (position + 1) (String_set.add slot_id seen) admitted_by_id
                admitted_slots rejected_slots rest)
@@ -270,14 +272,14 @@ let admit_lane_slots resolver_snapshot admitted_by_id
             | Error (Exact_output.Target_ref_rejected cause) ->
               Error
                 (Invalid_lane_slot
-                   { lane_id = lane.id; position; slot_id; cause })
+                   { lane_id; position; slot_id; cause })
             | Error (Exact_output.Target_not_in_catalog _) ->
               loop
                 (position + 1)
                 (String_set.add slot_id seen)
                 admitted_by_id
                 admitted_slots
-                ({ lane_id = lane.id; position; slot_id } :: rejected_slots)
+                ({ lane_id; position; slot_id } :: rejected_slots)
                 rest
             | Ok admitted_target ->
               loop
@@ -289,7 +291,7 @@ let admit_lane_slots resolver_snapshot admitted_by_id
                 rest))
   in
   match lane.slot_ids, lane.cli_slot_ids with
-  | [], [] when lane.enabled -> Error (Empty_lane { lane_id = lane.id })
+  | [], [] when lane.enabled -> Error (Empty_lane { lane_id })
   | slot_ids, _ -> loop 1 String_set.empty admitted_by_id [] [] slot_ids
 ;;
 
@@ -320,7 +322,7 @@ let validate_lane_thinking (lane : Runtime_schema.exact_output_lane_decl) slots 
          | Some rejection ->
            Error
              (Lane_thinking_not_encodable
-                { lane_id = lane.id; slot_id = slot.slot_id; thinking; rejection }))
+                { lane_id = Runtime_schema.exact_lane_key lane.owner; slot_id = slot.slot_id; thinking; rejection }))
     in
     loop slots
 ;;
@@ -329,10 +331,9 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
   let rec loop position seen admitted_by_id admitted_lanes rejected_slots = function
     | [] -> Ok (List.rev admitted_lanes, List.rev rejected_slots)
     | (lane : Runtime_schema.exact_output_lane_decl) :: rest ->
-      if String.equal (String.trim lane.id) ""
-      then Error (Blank_lane_id { position })
-      else if String_set.mem lane.id seen
-      then Error (Duplicate_lane_id { position; lane_id = lane.id })
+      let lane_id = Runtime_schema.exact_lane_key lane.owner in
+      if String_set.mem lane_id seen
+      then Error (Duplicate_lane_id { position; lane_id })
       else
         let* slots, admitted_by_id, lane_rejected_slots =
           admit_lane_slots resolver_snapshot admitted_by_id lane
@@ -340,9 +341,9 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
         let* () = if lane.enabled then validate_lane_thinking lane slots else Ok () in
         loop
           (position + 1)
-          (String_set.add lane.id seen)
+          (String_set.add lane_id seen)
           admitted_by_id
-          ({ id = lane.id
+          ({ owner = lane.owner
            ; enabled = lane.enabled
            ; slots
            ; cli_slots = lane.cli_slot_ids
@@ -362,7 +363,8 @@ let validate_required_lanes required_lane_ids admitted_lanes =
     | lane_id :: rest ->
       (match
          List.find_opt
-           (fun (lane : admitted_lane) -> String.equal lane.id lane_id)
+           (fun (lane : admitted_lane) ->
+              String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
            admitted_lanes
        with
        | Some { slots = _ :: _; _ }
@@ -393,8 +395,8 @@ let required_less_excused required_lane_ids ~excused_lane_ids =
 let admit_publication ~required_lane_ids ~excused_lane_ids ~lanes resolver_snapshot =
   let* () =
     match List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-      not lane.enabled && List.mem lane.id required_lane_ids) lanes with
-    | Some lane -> Error (Required_lane_disabled { lane_id = lane.id })
+      not lane.enabled && List.mem (Runtime_schema.exact_lane_key lane.owner) required_lane_ids) lanes with
+    | Some lane -> Error (Required_lane_disabled { lane_id = Runtime_schema.exact_lane_key lane.owner })
     | None -> Ok ()
   in
   let* exact_output_lanes, rejected_slots =
@@ -604,9 +606,12 @@ let rejected_target_bindings registry =
   Exact_output.resolver_rejected_target_bindings registry.resolver_snapshot
 ;;
 
+let declared_lanes registry = registry.declared_lanes
+
 let declared_lane registry ~lane_id =
   List.find_opt
-    (fun (lane : Runtime_schema.exact_output_lane_decl) -> String.equal lane.id lane_id)
+    (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+       String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
     registry.declared_lanes
 ;;
 
@@ -640,11 +645,11 @@ let catalog_absent_assignments resolver_snapshot ~(assignments :
 let resolve_lane registry ~lane_id =
   match
     List.find_opt
-      (fun lane -> String.equal lane.id lane_id)
+      (fun lane -> String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
       registry.exact_output_lanes
   with
   | None -> Error (Exact_lane_unconfigured { lane_id })
-  | Some { enabled = false; _ } -> Error (Exact_lane_off { lane_id })
+  | Some { enabled = false; owner; _ } -> Error (Exact_lane_off { lane_id; owner })
   | Some lane ->
     (* A lane is empty only when it has NOTHING to run: cli fallbacks keep a
        lane alive even when every catalog slot was dropped (and a cli-only
@@ -736,8 +741,6 @@ let publication_error_to_string = function
   | Publication_busy -> "exact-output registry publication is reserved"
   | Replacement_base_changed ->
     "exact-output replacement base changed since it was prepared"
-  | Blank_lane_id { position } ->
-    Printf.sprintf "exact-output lane %d has a blank id" position
   | Duplicate_lane_id { position; lane_id } ->
     Printf.sprintf "exact-output lane %d duplicates lane id %S" position lane_id
   | Empty_lane { lane_id } ->
@@ -795,8 +798,9 @@ let publication_error_to_string = function
 ;;
 
 let lane_resolution_error_to_string = function
-  | Exact_lane_off { lane_id } ->
-    Printf.sprintf "exact-output lane %S is off; set runtime.exact_output_lanes.%s.enabled = true to accept new work" lane_id lane_id
+  | Exact_lane_off { lane_id; owner } ->
+    Printf.sprintf "exact-output lane %S is off; set %s.enabled = true to accept new work" lane_id
+      (Runtime_schema.exact_lane_table_name owner)
   | Exact_lane_unconfigured { lane_id } ->
     Printf.sprintf "exact-output lane %S is not configured" lane_id
   | No_admitted_lane_slots { lane_id } ->

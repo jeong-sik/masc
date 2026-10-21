@@ -5,6 +5,13 @@ module D = Masc_domain
 module Prune = Auth_token_prune
 
 let () = Mirage_crypto_rng_unix.use_default ()
+
+(* [check bool] on a substring hides the recovery detail that makes a failed
+   publication assertion actionable; [failf] prints both strings. *)
+let check_contains ~name ~needle detail =
+  if not (String_util.contains_substring detail needle) then
+    Alcotest.failf "%s: %S is missing from %S" name needle detail
+
 let auth_ok = function Ok value -> value | Error error -> fail (D.masc_error_to_string error)
 let with_workspace f =
   let base_path = Filename.temp_dir "file-backed-transaction-" "" in
@@ -216,10 +223,10 @@ let test_partial_publication_reported () = with_workspace @@ fun base_path ->
   Fun.protect ~finally:(fun () -> Unix.chmod directory 0o700) (fun () ->
     match set_admin base_path with
     | Error (D.System (D.System_error.IoError detail)) ->
-      check bool "failure reports restored raw token" true
-        (String_util.string_contains_substring ~needle:"raw token: not published" detail);
-      check bool "failure reports unpublished credential" true
-        (String_util.string_contains_substring ~needle:"credential: not published" detail)
+      check_contains ~name:"failure reports restored raw token"
+        ~needle:"raw token: not published" detail;
+      check_contains ~name:"failure reports unpublished credential"
+        ~needle:"credential: not published" detail
     | Error error -> fail (D.masc_error_to_string error)
     | Ok _ -> fail "readable but unwritable credential directory must refuse successful publication");
   check bool "credential remained unchanged" true (read named = before);

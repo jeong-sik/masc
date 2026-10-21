@@ -54,7 +54,7 @@ let make_backend () =
       let stopped = ref false in
       Hashtbl.add state.modes instance_id package.id;
       let connection : Runtime.For_testing.connection = {
-        container_id = Store.digest instance_id;
+        host = None; container_id = Store.digest instance_id;
         exported_tools = (fun () -> []);
         call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
         action_schema = (fun () -> None);

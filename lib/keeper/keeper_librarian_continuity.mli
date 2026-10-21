@@ -10,7 +10,10 @@ val read : config:Workspace.config -> keeper_name:string ->
   (Librarian_continuity_snapshot.t option, string) result
 type no_source =
   | Drained
-      (** Every completed turn the boundary log states has been read. *)
+      (** Nothing is left to read: every completed turn the boundary log
+          states has been read, or the checkpoint this trace names holds a
+          version this build supersedes, so none of it is readable
+          ({!Keeper_checkpoint_store.saved_history}). *)
   | Source_unreadable
       (** The checkpoint this trace names is absent, or the boundary lines do
           not cover its prefix. The backlog is unknown, not empty. *)

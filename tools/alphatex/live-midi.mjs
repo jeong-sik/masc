@@ -23,7 +23,11 @@ export function liveMidiScope(value) {
 }
 function claims(values) {
   if (!Array.isArray(values)) throw new Error('Missing backing MIDI ownership')
-  return values.map(value => ({ destination: uid(value?.destination), scope: liveMidiScope(value?.scope) }))
+  return values.map(value => {
+    if (value?.nativeProtocol !== undefined && ![1, 2].includes(value.nativeProtocol)) throw new Error('Invalid backing MIDI native protocol')
+    return { destination: uid(value?.destination), scope: liveMidiScope(value?.scope),
+      ...(value.nativeProtocol === undefined ? {} : { nativeProtocol: value.nativeProtocol }) }
+  })
 }
 export function liveMidiPlan(routes, reserved) {
   if (!Array.isArray(routes) || !routes.length) throw new Error('Select a live MIDI route')

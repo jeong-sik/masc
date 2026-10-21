@@ -434,8 +434,57 @@ type lane_decl =
   }
 [@@deriving show, eq]
 
+
+(* A declaration id may be any non-blank string, so it can hold a slash; an
+   output name cannot (it is a-z, 0-9 and _ only), so the key splits at its last slash.
+   No built-in id has a slash, so the two kinds never share a key. *)
+let addon_key_separator = '/'
+
+let exact_output_name_valid name =
+  name <> ""
+  && (match name.[0] with 'a' .. 'z' -> true | _ -> false)
+  && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' -> true | _ -> false) name
+
+type addon_lane = { declaration_id : string; output : string } [@@deriving show, eq]
+
+let addon_lane ~declaration_id ~output =
+  if String.trim declaration_id = "" then Error "a declaration id must not be blank"
+  else if not (exact_output_name_valid output)
+  then Error "an exact output name is a-z, 0-9 and _, starting with a letter"
+  else Ok { declaration_id; output }
+
+type exact_lane_owner =
+  | Builtin of
+      (Standalone_lane.t
+      [@printer fun fmt lane -> Format.pp_print_string fmt (Standalone_lane.to_id lane)]
+      [@equal Standalone_lane.equal])
+  | Addon of addon_lane
+[@@deriving show, eq]
+
+let exact_lane_key = function
+  | Builtin lane -> Standalone_lane.to_id lane
+  | Addon { declaration_id; output } ->
+    declaration_id ^ String.make 1 addon_key_separator ^ output
+
+let exact_lane_owner_of_key key =
+  match String.rindex_opt key addon_key_separator with
+  | None -> Option.map (fun lane -> Builtin lane) (Standalone_lane.of_id key)
+  | Some position ->
+    let declaration_id = String.sub key 0 position in
+    let output = String.sub key (position + 1) (String.length key - position - 1) in
+    Result.to_option (addon_lane ~declaration_id ~output) |> Option.map (fun lane -> Addon lane)
+
+let exact_lane_table_path = function
+  | Builtin lane ->
+    [ Runtime_toml_namespace.(key Runtime); "exact_output_lanes"; Standalone_lane.to_id lane ]
+  | Addon { declaration_id; output } ->
+    [ Runtime_toml_namespace.(key Runtime); "addon_exact_lanes"; declaration_id; output ]
+
+let exact_lane_table_name owner =
+  String.concat "." (List.map Toml_line_editor.render_key (exact_lane_table_path owner))
+
 type exact_output_lane_decl =
-  { id : string
+  { owner : exact_lane_owner
   ; enabled : bool
   ; slot_ids : string list
   ; cli_slot_ids : string list

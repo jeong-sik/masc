@@ -2135,12 +2135,12 @@ let test_projection_profile_snapshot_fleet_wiring () =
   let profile_snapshot = KTP.read_keeper_profile_snapshot ~base_path in
   Sys.remove path;
   let captured = Server_routes_http_runtime_fleet_scan.keeper_fleet_meta_scan
-      ~profile_snapshot config in
+      (Server_routes_http_runtime_fleet_scan.read_keeper_metas ~profile_snapshot config) in
   check (list string) "fleet uses captured lookup without reopening removed file"
     ["snapshot-fleet"] captured.bootable_names;
   let next = KTP.read_keeper_profile_snapshot ~base_path in
   let refreshed = Server_routes_http_runtime_fleet_scan.keeper_fleet_meta_scan
-      ~profile_snapshot:next config in
+      (Server_routes_http_runtime_fleet_scan.read_keeper_metas ~profile_snapshot:next config) in
   check (list string) "next fleet projection sees removal" [] refreshed.bootable_names
 
 let () =

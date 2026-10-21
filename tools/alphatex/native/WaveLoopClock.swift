@@ -47,11 +47,29 @@ struct WaveLoopClock: Decodable {
         guard !frames.overflow, frames.partialValue > 0 else { throw AudioFailure("audio loop source exceeds the native frame range") }
         let sourceEnd = try loopMultiply(UInt128(frames.partialValue), divisor)
         let signedMax = UInt128(Int128.max)
-        guard period >= divisor, period <= signedMax, distance <= signedMax, sourceEnd <= signedMax,
+        guard period > 0, period <= signedMax, distance <= signedMax, sourceEnd <= signedMax,
               start < projectTick || distance <= signedMax - period else { throw AudioFailure("audio loop is not representable at source sample precision") }
         return WaveLoopLayout(period: period, divisor: divisor,
             offset: start >= projectTick ? Int128(distance) : -Int128(distance), sourceEnd: sourceEnd,
             sourcePeriod: try loopMultiply(UInt128(frameCount), divisor), lead: 0, frameCount: frameCount)
+    }
+    func layout(rate: Double, projectTick: Int64, source: SourceAudioLayout) throws -> WaveLoopLayout {
+        let master = try layout(rate: rate, projectTick: projectTick, frameCount: 1, repetitions: 1)
+        let masterGCD = loopGCD(loopGCD(master.period, UInt128(master.offset.magnitude)), master.divisor)
+        let sourceGCD = loopGCD(loopGCD(source.period, source.lead), source.divisor)
+        let a = master.divisor / masterGCD, b = source.divisor / sourceGCD
+        let divisor = try loopMultiply(a / loopGCD(a, b), b)
+        let period = try loopMultiply(master.period / masterGCD, divisor / a)
+        let distance = try loopMultiply(UInt128(master.offset.magnitude) / masterGCD, divisor / a)
+        let sourcePeriod = try loopMultiply(source.period / sourceGCD, divisor / b)
+        let lead = try loopMultiply(source.lead / sourceGCD, divisor / b)
+        let sourceEnd = try loopMultiply(sourcePeriod, UInt128(source.repetitions))
+        let limit = UInt128(Int128.max)
+        guard period > 0, period <= limit, distance <= limit, sourceEnd <= limit,
+              master.offset < 0 || distance <= limit - period else { throw AudioFailure("source audio loop exceeds the native rational clock range") }
+        return WaveLoopLayout(period: period, divisor: divisor,
+            offset: master.offset < 0 ? -Int128(distance) : Int128(distance), sourceEnd: sourceEnd,
+            sourcePeriod: sourcePeriod, lead: lead, frameCount: source.frameCount)
     }
     func layout(rate: Double, start: ExactNanoseconds, startSeconds: Double, capture: CaptureAudioLayout) throws -> WaveLoopLayout {
         let master = try layout(rate: rate, projectTick: 0, frameCount: 1, repetitions: 1)
@@ -125,11 +143,11 @@ struct WaveLoopLayout {
         }
         let untilWrap = count(period - phase), position = Int128(phase) + offset
         if position < 0 { return (nil, min(untilWrap, count(UInt128(-position)))) }
-        if UInt128(position) >= sourceEnd { return (nil, untilWrap) }
+        if UInt128(position) >= sourceEnd || frameCount == 0 { return (nil, untilWrap) }
         let local = UInt128(position) % sourcePeriod
         if local < lead { return (nil, min(untilWrap, count(lead - local))) }
         let source = (local - lead) / divisor
         if source >= UInt128(frameCount) { return (nil, min(untilWrap, count(sourcePeriod - local))) }
-        return (Int64(source), min(untilWrap, frameCount - Int64(source)))
+        return (Int64(source), min(untilWrap, count(sourcePeriod - local), frameCount - Int64(source)))
     }
 }

@@ -11,6 +11,8 @@ import * as editor from '../sequencer-editor.mjs'
 import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo } from '../midi-source-editor.mjs'
 import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { harmonyAt, PPQ } from '../sequencer-project.mjs'
+import { MidiSourcePicker as SourcePicker } from '../midi-source-picker.mjs'
+import { sourceSecondsAtTick, sourceTickAtSeconds } from '../midi-source-playback.mjs'
 
 const frozenSound = selection => ({ kind: 'vst', selection, instrument: { identifier: 'Bass', version: '1' },
   preset: { data: Buffer.from('frozen state').toString('base64'), sha256: createHash('sha256').update('frozen state').digest('hex') } })
@@ -41,9 +43,14 @@ async function controller(options = {}) {
     async settled() {}
     async keypress(_text, key) { if (key.name === 'escape') this.close() }
   }
+  class MidiSourcePicker extends SourcePicker {
+    constructor(callbacks) {
+      super({ ...callbacks, discover: async () => { throw new Error('Unexpected MIDI source discovery') } })
+    }
+  }
   const slot = `sequencer-${randomUUID()}`
   globalThis[slot] = {
-    process, InstrumentPicker, defaultStateDirectory: () => '/synthetic-vst',
+    process, InstrumentPicker, MidiSourcePicker, defaultStateDirectory: () => '/synthetic-vst',
     snapshotWriter: () => async value => { observed.snapshots.push(value) },
     captureVstSound(selection) { observed.soundCaptures.push(selection); return options.capture?.(selection) ?? { promise: Promise.resolve(frozenSound(selection)), cancel() {} } },
     renderVstPhrase(value) { observed.native.push(value); return options.native(value) },
@@ -52,7 +59,7 @@ async function controller(options = {}) {
     copyFile: async (from, to) => { observed.copies.push([from, to]) },
     arrangementRoute, selectArrangementRoute, dirname, constants, join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
     openPlayback(value) { observed.players++; if (options.playback) return options.playback(value); throw new Error('Unexpected playback') }, Worker,
-    Note: { fromMidi: String }, ...editor, harmonyAt, PPQ, sourceExpressions, selectedExpression, sourceTempos, selectedTempo,
+    Note: { fromMidi: String }, ...editor, harmonyAt, PPQ, sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceSecondsAtTick, sourceTickAtSeconds,
     loadProject: async () => { throw new Error('Unexpected load') },
     saveProject: async (path, project) => { observed.saved.push(structuredClone(project)); return 'revision' },
     projectMidi() { throw new Error('Unexpected MIDI export') }, safeText: String,
@@ -76,6 +83,94 @@ async function controller(options = {}) {
 }
 const flush = () => new Promise(resolve => setImmediate(resolve))
 const pitches = value => value.observed.saved.at(-1).tracks[0].notes.map(note => note.pitch)
+
+test('terminal note selection shortcuts copy across tracks and move the whole selected phrase', async () => {
+  let initial = editor.newEditor()
+  for(const line of ['note C4 0 1','note E4 1 1'])initial=editor.editorCommand(initial,line).editor
+  const view=await controller({initialDocument:initial.project})
+  const modifiedKey=(name,modifiers)=>view.process.stdin.emit('keypress','',{name,...modifiers})
+  modifiedKey('a',{ctrl:true});modifiedKey('c',{meta:true})
+  view.command('track-add Variation');view.command('cursor 4 C4')
+  modifiedKey('v',{meta:true});modifiedKey('right',{shift:true})
+  await flush();view.key('q');await view.done
+  const saved=view.observed.saved.at(-1)
+  assert.deepEqual(saved.tracks[0],initial.project.tracks[0])
+  assert.deepEqual(saved.tracks[1].notes.map(note=>[note.pitch,note.start]),[[60,4.25*PPQ],[64,5.25*PPQ]])
+})
+
+test('admitted clipboard edits drain into close and Escape clears a selection without exiting the editor', async () => {
+  const initial=editor.editorCommand(editor.newEditor(),'note C4 0 1').editor.project
+  const view=await controller({initialDocument:initial})
+  view.command('select-all');await flush();view.key('escape');await flush()
+  view.key('return');await flush() // Selection was cleared; remove the cursor note.
+  view.command('undo');view.command('select-all');view.command('copy-notes');view.command('paste-notes 4')
+  view.signal.abort();await view.done
+  assert.deepEqual(view.observed.saved.at(-1).tracks[0].notes.map(note=>[note.pitch,note.start]),[[60,0],[60,4*PPQ]])
+})
+
+test('the x key removes the selected note group in one undoable decision', async () => {
+  let initial=editor.newEditor()
+  for(const line of ['note C4 0 1','note E4 1 1'])initial=editor.editorCommand(initial,line).editor
+  const view=await controller({initialDocument:initial.project})
+  view.command('select-all');view.key('x');await flush();view.key('q');await view.done
+  assert.deepEqual(view.observed.saved.at(-1).tracks[0].notes,[])
+})
+
+test('analysis owns note keys, then selecting an interval returns to the intended voicing edit', async () => {
+  let initial = editor.newEditor()
+  for (const line of ['chord Cmaj7 0 4','chord Dm7 4 4']) initial = editor.editorCommand(initial,line).editor
+  const view = await controller({initialDocument:initial.project})
+  view.command('harmony track'); view.key('delete'); await flush()
+  const worker = view.observed.workers[0], job = worker.requests[0]
+  assert.deepEqual(job.options.scope,{kind:'track',id:'track-1'})
+  worker.emit('message',{id:job.id,ok:true,result:{rows:[{kind:'span',start:0,end:4*PPQ,pitches:[60,64,67,71],notes:[],candidates:[]},
+    {kind:'span',start:4*PPQ,end:8*PPQ,pitches:[62,65,69,72],notes:[],candidates:[]}]}})
+  await flush();view.key('down');view.key('return');view.command('revoice Dm7 drop2 4');await flush()
+  view.key('q');await view.done
+  assert.deepEqual(pitches(view),[60,64,67,71,57,62,65,72])
+})
+
+test('a changed draft cancels analysis and its late result cannot take ownership of subsequent note input', async () => {
+  const initial = editor.editorCommand(editor.newEditor(),'note C4 0 1').editor.project
+  const view = await controller({initialDocument:initial})
+  view.command('harmony');await flush()
+  const worker = view.observed.workers[0], job = worker.requests[0]
+  view.command('transpose 12');await flush()
+  assert.equal(Atomics.load(new Int32Array(job.cancel),0),1)
+  worker.emit('message',{id:job.id,ok:true,result:{rows:[{kind:'span',start:0,end:PPQ,pitches:[60],notes:[],candidates:[]}]}})
+  await flush();view.key('return');view.key('q');await view.done
+  assert.deepEqual(pitches(view),[72,60])
+})
+
+test('closing a ready analysis does not reinterpret its queued Enter as a note insertion or removal', async () => {
+  const initial = editor.editorCommand(editor.newEditor(),'note C4 0 1').editor.project
+  const view = await controller({initialDocument:initial})
+  view.command('harmony');await flush()
+  const worker = view.observed.workers[0], job = worker.requests[0]
+  worker.emit('message',{id:job.id,ok:true,result:{rows:[{kind:'span',start:0,end:PPQ,pitches:[60],notes:[],candidates:[]}]}})
+  await flush();view.key('return');view.signal.abort();await view.done
+  assert.deepEqual(view.observed.saved.at(-1),initial)
+  assert.equal(worker.terminated,true)
+})
+
+test('closing before an admitted analysis starts retains ownership of its queued note keys', async () => {
+  const initial = editor.editorCommand(editor.newEditor(),'note C4 0 1').editor.project
+  const view = await controller({initialDocument:initial})
+  view.command('harmony');view.key('return');view.signal.abort();await view.done
+  assert.deepEqual(view.observed.saved.at(-1),initial)
+  assert.equal(view.observed.workers[0].requests.length,0)
+})
+
+test('an admitted analysis export drains on close while retaining the original musical document', async () => {
+  const initial = editor.editorCommand(editor.newEditor(),'note C4 0 1').editor.project
+  const view = await controller({initialDocument:initial})
+  view.command('harmony');await flush()
+  const worker = view.observed.workers[0], job = worker.requests[0]
+  worker.emit('message',{id:job.id,ok:true,result:{rows:[{kind:'span',start:0,end:PPQ,pitches:[60],notes:['C4'],candidates:[]}]}})
+  await flush();view.command('harmony-export /analysis.json');view.signal.abort();await view.done
+  assert.ok(view.observed.writes.includes('/analysis.json'))
+  assert.deepEqual(view.observed.saved.at(-1),initial)
+})
 
 test('reopened document auditions its frozen sound without consulting the picker', async () => {
   const selection = { plugin_path: '/synth.vst3', plugin_name: null, preset_path: '/removed.vstpreset', name: 'Bass' }
@@ -502,4 +597,59 @@ test('tempo keyboard decisions and an admitted tempo edit drain into close witho
   assert.deepEqual(after.notes.map(n=>[n.id,n.off,n.start,n.duration]),midiSourcePattern(source).notes.map(n=>[n.id,n.off,n.start,n.duration]))
  }finally{view.key('q');await view.done}
  assert.equal(view.process.stdin.isRaw,false)
+})
+
+test('source loop owns current range, routes region playback, seeks locally and retires obsolete preparations on toggle', async () => {
+ const {midiSourceFromEvents}=await import('../midi-source.mjs')
+ const project=midiSourceFromEvents([{tick:0,kind:'channel',bytes:[0x90,60,96]},
+  {tick:1920,kind:'channel',bytes:[0x80,60,47]},{tick:1920,kind:'meta',type:0x2f,data:[]}],{ppq:960})
+ let opened,finish;const commands=[]
+ const view=await controller({initialDocument:project,midiOutput:'42',playback(value){
+  opened=value
+  const handle={pause(){commands.push('pause')},resume(){commands.push('resume')},seek(seconds){commands.push(seconds)},stop(){commands.push('stop');finish()},
+   ready:Promise.resolve(),completion:new Promise(resolve=>{finish=resolve})}
+  return handle
+ }})
+ view.command('loop .5 1.5');view.command('play');await flush()
+ const worker=view.observed.workers[0],old=worker.requests.at(-1)
+ assert.deepEqual(old.options.sourceLoop,{start:480,end:1440});assert.equal(old.options.loop,true)
+ view.key('l');await flush();assert.equal(Atomics.load(new Int32Array(old.cancel),0),1)
+ worker.emit('message',{id:old.id,ok:true,result:{path:'/obsolete',format:'midi-arrangement'}});await flush()
+ assert.equal(view.observed.players,0)
+ view.command('loop .5 1.5');view.command('play');await flush()
+ const next=worker.requests.at(-1),sourceWindow={start:480,end:1440,startSeconds:.25,endSeconds:.75}
+ worker.emit('message',{id:next.id,ok:true,result:{path:'/owned/region',duration:.5,format:'midi-arrangement',midiOutput:'42',midiBindings:[{port:0,destination:'42'}],sourceWindow}});await flush()
+ assert.equal(opened.format,'midi-arrangement');assert.equal(opened.loop,true)
+ opened.onEvent({kind:'playing',currentTime:0,duration:.5});await flush()
+ view.command('seek 1');view.command('seek 0');view.command('seek 1.5');await flush()
+ assert.deepEqual(commands,[.25,.5])
+ view.key('space');await flush();assert.equal(commands.at(-1),'pause')
+ opened.onEvent({kind:'paused',currentTime:.1,duration:.5});view.key('space');await flush();assert.equal(commands.at(-1),'resume')
+ view.command('transpose 2');await flush();assert.equal(commands.at(-1),'stop')
+ view.key('q');await view.done
+ assert.deepEqual(midiSourcePattern(view.observed.saved.at(-1)).notes.map(note=>note.pitch),[62])
+})
+
+test('phrase loop command enables its range, retires old preparation and retains the range after toggling off',async()=>{
+ let opened,finish;const calls=[]
+ const view=await controller({midiOutput:'42',playback(value){
+  opened=value
+  return{ready:Promise.resolve(),completion:new Promise(resolve=>{finish=resolve}),stop(){calls.push('stop');finish()}}
+ }})
+ try{
+  view.command('loop 1 3');view.command('play');await flush()
+  const worker=view.observed.workers[0],old=worker.requests.at(-1)
+  assert.equal(old.options.loop,true);assert.deepEqual(old.project.loop,{start:PPQ,end:3*PPQ})
+  view.command('loop 2 4');view.command('loop 8 1');await flush()
+  assert.equal(Atomics.load(new Int32Array(old.cancel),0),1)
+  worker.emit('message',{id:old.id,ok:true,result:{path:'/obsolete',format:'midi'}});await flush()
+  assert.equal(view.observed.players,0)
+  view.command('play');await flush();const next=worker.requests.at(-1)
+  assert.equal(next.options.loop,true);assert.deepEqual(next.project.loop,{start:2*PPQ,end:4*PPQ})
+  worker.emit('message',{id:next.id,ok:true,result:{path:'/owned',duration:1.2,format:'midi',midiOutput:'42'}});await flush()
+  assert.equal(opened.loop,true);opened.onEvent({kind:'playing',currentTime:0,duration:1.2})
+  view.key('l');await flush();assert.deepEqual(calls,['stop'])
+  view.command('play');await flush();assert.equal(worker.requests.at(-1).options.loop,false)
+ }finally{view.key('q');await view.done}
+ assert.deepEqual(view.observed.saved.at(-1).loop,{start:2*PPQ,end:4*PPQ})
 })

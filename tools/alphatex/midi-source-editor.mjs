@@ -1,7 +1,7 @@
 import { Chord, Note } from 'tonal'
-import { midiSourceInfo, midiSourcePattern, editMidiSourceNotes, editMidiSourceExpressions, orderMidiSourceExpression, tempoEvent, editMidiSourceTempos } from './midi-source.mjs'
+import { midiSourceInfo, midiSourcePattern, editMidiSourceNotes, editMidiSourceExpressions, orderMidiSourceExpression, tempoEvent, editMidiSourceTempos, meterEvent, editMidiSourceMeters } from './midi-source.mjs'
 import { expressionEvent } from './midi-expression.mjs'
-import { pitch, chordVoicing } from './sequencer-project.mjs'
+import { pitch, chordVoicing, revoiceNotes } from './sequencer-project.mjs'
 
 export function sourceEditor(project, previous = {}, pattern = previous.pattern) {
   const info = midiSourceInfo(project)
@@ -20,21 +20,24 @@ export function sourceEditor(project, previous = {}, pattern = previous.pattern)
   if (!tracks.length) tracks.push({ id: 'pattern-choice', name: `Choose :pattern 1–${info.patterns}`, detail: 'Independent SMF patterns', notes: [], channels: [], muted: false, solo: false })
   const firstTempo = performance?.events.filter(e => e.kind === 'meta' && e.type === 0x51 && e.tick === 0).at(-1)
   const tempo = firstTempo ? tempoEvent(firstTempo).value : 120
-  const meter = performance?.events.find(e => e.kind === 'meta' && e.type === 0x58 && e.tick === 0 && e.data.length === 4)
+  const meter = performance?.events.filter(e => e.tick === 0 && meterEvent(e)).at(-1)
   const end = performance?.ticks ?? 0
+  const oldLoop = previous.sourceLoop
+  const sourceLoop = oldLoop && oldLoop.start < oldLoop.end && oldLoop.end <= end ? oldLoop : { start: 0, end }
   const length = end + 1 // include endpoint notes in the viewport, without extending the source performance
   const view = { title: project.name, tempo, meter: meter ? [meter.data[0], 2 ** meter.data[1]] : [4,4],
     timingLabel: info.timing.kind === 'ppq' ? 'MIDI tempo map' : `SMPTE ${info.timing.frameCode}`,
-    displayLength: end, length, loop: { start: 0, end }, tracks }
+    displayLength: end, length, loop: sourceLoop, tracks }
   const steps = [per/4,per/2,per,per*2,per*4].filter(n => Number.isSafeInteger(n) && n > 0)
   const track = Math.min(previous.track ?? Math.max(0, tracks.findIndex(t => t.notes.length)), tracks.length-1)
   const first = tracks[track].notes.reduce((first, note) =>
     first === null || note.start < first.start ? note : first, null)
   return { velocity: 96, duration: per, step: steps[0], undo: [], redo: [], ...previous,
-    project, pattern: chosen, performance, info, axis, view, steps,
+    project, pattern: chosen, performance, info, axis, view, steps, sourceLoop,
     selectedID: performance?.notes.some(n=>n.id===previous.selectedID) ? previous.selectedID : undefined,
     selectedExpressionID: performance?.events.some(event=>event.id===previous.selectedExpressionID && expressionEvent(event)) ? previous.selectedExpressionID : undefined,
     selectedTempoID: performance?.events.some(event=>event.id===previous.selectedTempoID && tempoEvent(event)) ? previous.selectedTempoID : undefined,
+    selectedMeterID: performance?.events.some(event=>event.id===previous.selectedMeterID && meterEvent(event)) ? previous.selectedMeterID : undefined,
     track,
     tick: Math.min(previous.tick ?? first?.start ?? 0, length-1),
     pitch: previous.pitch ?? first?.pitch ?? 60 }
@@ -65,6 +68,24 @@ export const sourceTempos = editor => (editor.performance?.events ?? []).flatMap
   return tempo ? [tempo] : []
 })
 export const selectedTempo = editor => sourceTempos(editor).find(event => event.id === editor.selectedTempoID)
+export const sourceMeters = editor => (editor.performance?.events ?? []).flatMap(event => {
+  const meter = meterEvent(event)
+  return meter ? [meter] : []
+})
+export const selectedMeter = editor => sourceMeters(editor).find(event => event.id === editor.selectedMeterID)
+export function sourceMeterAt(editor, tick = editor.tick) {
+  const value = sourceMeters(editor).filter(event => event.tick <= tick).at(-1)
+  return value ? [value.numerator, value.denominator] : [4, 4]
+}
+function applyMeters(editor, edits) {
+  const project = editMidiSourceMeters(editor.project, edits, { pattern: editor.pattern })
+  return sourceEditor(project, { ...editor, undo: [...editor.undo, editor.project], redo: [] })
+}
+function meterSelection(editor) {
+  const event = selectedMeter(editor)
+  if (!event) throw new Error('Select a time-signature event with :meters, Up/Down or :meter-event ID')
+  return event
+}
 function applyTempos(editor, edits) {
   const project = editMidiSourceTempos(editor.project, edits, { pattern: editor.pattern })
   return sourceEditor(project, { ...editor, undo: [...editor.undo, editor.project], redo: [] })
@@ -93,6 +114,22 @@ export function sourceAction(editor, action) {
   const note = sourceSelected(editor)
   if (['toggle-note','remove','move-note','duration','velocity'].includes(action.kind) && !note && atCursor(editor).length>1) throw new Error('Several source notes share the cursor; use :channel or :select event-ID')
   switch (action.kind) {
+    case 'meter-next': {
+      const events = sourceMeters(editor)
+      if (!events.length) return { ...editor, selectedMeterID: undefined }
+      const index = events.findIndex(event => event.id === editor.selectedMeterID)
+      const event = events[index < 0 ? action.direction > 0 ? 0 : events.length - 1 : (index + action.direction + events.length) % events.length]
+      return { ...editor, selectedMeterID: event.id, tick: event.tick, track: editor.view.tracks.findIndex(track => track.sourceTrack === event.track) }
+    }
+    case 'meter-remove': return applyMeters(editor, [{ kind: 'remove', id: meterSelection(editor).id }])
+    case 'meter-move': {
+      const event = meterSelection(editor), tick = event.tick + action.ticks
+      return { ...applyMeters(editor, [{ kind: 'change', id: event.id, tick }]), tick }
+    }
+    case 'meter-value': {
+      const event = meterSelection(editor)
+      return applyMeters(editor, [{ kind: 'change', id: event.id, value: action.value ?? { numerator: event.numerator + action.delta } }])
+    }
     case 'tempo-next': {
       const events = sourceTempos(editor)
       if (!events.length) return { ...editor, selectedTempoID: undefined }
@@ -126,7 +163,7 @@ export function sourceAction(editor, action) {
       return applyExpressions(editor, [{ kind: 'change', id: event.id, message: { ...event, value: action.value ?? event.value + action.delta } }])
     }
     case 'move': return { ...editor, selectedID:undefined, tick:Math.max(0,Math.min(editor.view.length-1,editor.tick+(action.ticks??0))),pitch:Math.max(0,Math.min(127,editor.pitch+(action.pitches??0))) }
-    case 'track': return { ...editor,track:(editor.track+1)%editor.view.tracks.length,channel:undefined,selectedID:undefined,selectedExpressionID:undefined,selectedTempoID:undefined }
+    case 'track': return { ...editor,track:(editor.track+1)%editor.view.tracks.length,channel:undefined,selectedID:undefined,selectedExpressionID:undefined,selectedTempoID:undefined,selectedMeterID:undefined }
     case 'toggle-note': return apply(editor,[note ? {id:note.id,kind:'remove'} : insertion(editor,{pitch:editor.pitch,start:editor.tick,duration:editor.duration,velocity:editor.velocity})])
     case 'remove': if (!note) throw new Error('No MIDI note at cursor'); return apply(editor,[{id:note.id,kind:'remove'}])
     case 'move-note': {
@@ -146,7 +183,13 @@ export function sourceAction(editor, action) {
     case 'undo': case 'redo': {
       const past=editor[action.kind];if(!past.length)return editor
       const other=action.kind==='undo'?'redo':'undo'
-      return sourceEditor(past.at(-1),{...editor,[action.kind]:past.slice(0,-1),[other]:[...editor[other],editor.project]})
+      const next = sourceEditor(past.at(-1),{...editor,[action.kind]:past.slice(0,-1),[other]:[...editor[other],editor.project]})
+      const restored = !editor.eventView && next.view.tracks[next.track].id === editor.view.tracks[editor.track].id
+        ? next.view.tracks[next.track].notes.find(value => value.id === note?.id) : undefined
+      if (!restored) return next
+      const inside = restored.duration === 0 ? next.tick === restored.start
+        : restored.start <= next.tick && next.tick < restored.start + restored.duration
+      return { ...next, selectedID: restored.id, pitch: restored.pitch, tick: inside ? next.tick : restored.start }
     }
     default: throw new Error('This source action needs the MIDI arrangement/event editor')
   }
@@ -163,6 +206,39 @@ export function sourceCommand(editor,line) {
       ...(kind === 'poly-pressure' ? { pitch: pitch(values[0]) } : {}) }
   }
   switch(command){
+    case 'meters': {
+      count(0); const next = { ...editor, eventView: editor.eventView === 'meter' ? undefined : 'meter' }
+      return { editor: next.eventView && !selectedMeter(next) ? sourceAction(next, { kind: 'meter-next', direction: 1 }) : next }
+    }
+    case 'meter-event': {
+      count(1); const event = editor.performance?.events.find(event => event.id === args[0]), value = meterEvent(event)
+      if (!value) throw new Error('Choose a time-signature event in the selected pattern')
+      return { editor: { ...editor, eventView: 'meter', selectedMeterID: value.id, tick: value.tick,
+        track: editor.view.tracks.findIndex(track => track.sourceTrack === value.track) } }
+    }
+    case 'meter-value': {
+      count(2,4); if (args.length === 3) throw new Error('Provide both clocks and notated 32nds, or neither')
+      const value = { numerator: Number(args[0]), denominator: Number(args[1]),
+        ...(args.length === 4 ? { clocks: Number(args[2]), notated32nds: Number(args[3]) } : {}) }
+      return { editor: sourceAction(editor, { kind: 'meter-value', value }) }
+    }
+    case 'meter-move': count(1); return { editor: sourceAction(editor, { kind: 'meter-move', ticks: units(args[0]) - meterSelection(editor).tick }) }
+    case 'meter-remove': count(0); return { editor: sourceAction(editor, { kind: 'meter-remove' }) }
+    case 'meter': {
+      count(2,5); if (args.length === 4) throw new Error('Use :meter NUM DEN [AT [CLOCKS NOTATED32NDS]]')
+      const tick = args[2] === undefined ? editor.tick : units(args[2]), existing = sourceMeters(editor).filter(event => event.tick === tick)
+      if (existing.length > 1) throw new Error('Several time signatures share this tick; select :meter-event ID and use :meter-value')
+      const value = { numerator: Number(args[0]), denominator: Number(args[1]),
+        ...(args.length === 5 ? { clocks: Number(args[3]), notated32nds: Number(args[4]) } : {}) }
+      const next = applyMeters(editor, [existing.length ? { kind: 'change', id: existing[0].id, value } : { kind: 'insert', tick, value }])
+      return { editor: { ...next, eventView: 'meter', selectedMeterID: existing[0]?.id ?? next.project.insertions.at(-1).id, tick } }
+    }
+    case 'loop': {
+      count(2); const start = units(args[0]), end = units(args[1])
+      if (!editor.performance || start >= end || end > editor.performance.ticks) throw new Error('Loop must be a positive range within the selected MIDI pattern')
+      const sourceLoop = { start, end }
+      return { editor: { ...editor, sourceLoop, view: { ...editor.view, loop: sourceLoop } }, effect: { kind: 'loop' } }
+    }
     case 'tempos': {
       count(0); const next = { ...editor, eventView: editor.eventView === 'tempo' ? undefined : 'tempo' }
       return { editor: next.eventView && !selectedTempo(next) ? sourceAction(next, { kind: 'tempo-next', direction: 1 }) : next }
@@ -228,7 +304,7 @@ export function sourceCommand(editor,line) {
     case 'pattern':{
       count(1);const pattern=Number(args[0])-1
       if(!Number.isSafeInteger(pattern)||pattern<0||pattern>=editor.info.patterns)throw new Error('Unknown MIDI pattern')
-      return {editor:sourceEditor(editor.project,{...editor,track:0,tick:undefined,pitch:undefined,selectedID:undefined,channel:undefined,selectedExpressionID:undefined,selectedTempoID:undefined},pattern)}
+      return {editor:sourceEditor(editor.project,{...editor,sourceLoop:undefined,track:0,tick:undefined,pitch:undefined,selectedID:undefined,channel:undefined,selectedExpressionID:undefined,selectedTempoID:undefined},pattern)}
     }
     case 'select':{
       count(1);const note=editor.performance?.notes.find(n=>n.id===args[0]);if(!note)throw new Error('Unknown MIDI note event ID')
@@ -253,6 +329,22 @@ export function sourceCommand(editor,line) {
       count(3,6)
       const values=chordVoicing(args[0],{mode:args[3]??'close',octave:args[4]===undefined?4:Number(args[4]),inversion:args[5]===undefined?0:Number(args[5])})
       return {editor:apply(editor,values.map(value=>insertion(editor,{pitch:value,start:units(args[1]),duration:units(args[2]),velocity:editor.velocity})))}
+    }
+    case 'revoice': {
+      count(2,4)
+      const anchor = editor.selectedID ? sourceSelected(editor) : undefined
+      const channel = anchor?.channel ?? editor.channel
+      const sounding = notes.filter(note => (channel === undefined || note.channel === channel)
+        && (anchor === undefined || note.port === anchor.port)
+        && (note.duration === 0 ? note.start === editor.tick : note.start <= editor.tick && editor.tick < note.start + note.duration))
+      if (new Set(sounding.map(note => note.channel)).size > 1) throw new Error('Choose :channel or :select event-ID before revoicing several MIDI channels')
+      if (new Set(sounding.map(note => note.port)).size > 1) throw new Error('Choose :select event-ID before revoicing several source ports')
+      const changes = revoiceNotes(sounding, editor.tick, args[0], { mode: args[1],
+        octave: args[2] === undefined ? 4 : Number(args[2]), inversion: args[3] === undefined ? 0 : Number(args[3]) })
+      const selected = sourceSelected(editor)
+      const next = apply(editor, changes)
+      const voice = changes.find(note => note.id === selected?.id)
+      return { editor: voice ? { ...next, pitch: voice.pitch } : next }
     }
     case 'progression':{
       count(4,Number.MAX_SAFE_INTEGER)
@@ -285,6 +377,11 @@ export function sourceCommand(editor,line) {
       count(2);const tick=units(args[0]);if(tick>=editor.view.length)throw new Error('Cursor outside MIDI source')
       return {editor:{...editor,tick,pitch:pitch(args[1]),selectedID:undefined}}
     }
+    case 'harmony':
+      count(0,1)
+      if (args[0] !== undefined && !['mix','track'].includes(args[0])) throw new Error('Use :harmony mix or :harmony track')
+      return {editor,effect:{kind:'harmony',scope:args[0]??'mix'}}
+    case 'harmony-export': count(1,Number.MAX_SAFE_INTEGER);return {editor,effect:{kind:'harmony-export',path:args.join(' ')}}
     case 'title':count(1,Number.MAX_SAFE_INTEGER);return {editor:sourceEditor({...editor.project,name:args.join(' ')},{...editor,undo:[...editor.undo,editor.project],redo:[]})}
     case 'undo':case 'redo':count(0);return {editor:sourceAction(editor,{kind:command})}
     case 'save':case 'play':case 'stop':case 'record':case 'help':case 'audio':case 'arrange':count(0);return {editor,effect:{kind:command}}
@@ -294,7 +391,7 @@ export function sourceCommand(editor,line) {
       return {editor,effect:{kind:'midi-port',port,destination:args[1]}}
     }
     case 'seek':count(1);return {editor,effect:{kind:'seek',tick:units(args[0])}}
-    default:throw new Error('Unsupported source command; use :help for source note, expression and tempo editing')
+    default:throw new Error('Unsupported source command; use :help for source note, expression, tempo and meter editing')
   }
 }
 export function sourceHarmony(editor) {

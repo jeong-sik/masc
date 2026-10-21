@@ -161,6 +161,23 @@ GNU `timeout` (or `gtimeout` on macOS), Python,
 ripgrep and the OCaml test dependencies must be available. A local result records
 its platform and candidate; it does not substitute for a different platform's RC.
 
+For targeted executable runs, `scripts/ci/stanza_env.py` selects the named
+`test`/`tests` stanza's environment and dependencies, even when its include file
+also declares sibling tests or alias actions. Alias actions run only when their
+alias is selected; their settings do not belong to the named executable. A
+per-suite file with no named test retains its rule-action handling. Unresolvable
+variables in a directly evaluated environment remain errors.
+If a named test declares a custom `action`, the targeted runner selects Dune's
+nonrecursive `@@DIRECTORY/runtest-NAME` alias instead of the bare executable.
+Dune owns that action's arguments, wrappers, variables and dependencies; the
+runner does not translate them. These per-test aliases have existed since Dune
+3.20, below this repository's 3.22 minimum. See the
+[Dune test reference](https://dune.readthedocs.io/en/latest/reference/dune/test.html).
+To check this runner boundary without an OCaml build, run
+`python3 -m unittest discover -s scripts/ci/tests -p test_targeted_stanza_isolation.py -v`.
+Its shell-runner fixture substitutes the build command; it is not a product
+test result. Keep this focused CI self-check separate from product behavior suites.
+
 The release selection covers Keeper turn interrupt, chat HTTP/delivery identity,
 MCP Task lifecycle and verification submission,
 durable chat storage, Goal verification,

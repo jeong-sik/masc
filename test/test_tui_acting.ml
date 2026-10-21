@@ -1022,6 +1022,33 @@ let test_call_key_prefers_the_provider_id () =
         (equal (Acting.call_key call) (Acting.Call_by_id "wire-1"))
   | calls -> failf "one call expected, %d folded" (List.length calls)
 
+(* An agent_core event that is not part of a turn (an agent starting) passes
+   through the Turns scope as its own row. That row names the keeper whose
+   trace the event's correlation carries, the way the flat scopes name it
+   (#38674). *)
+let test_turns_names_the_keeper_of_a_plain_correlated_event () =
+  let lane = "agent_core-glm-coding.glm-5-turbo" in
+  let traces = [ ("keeper-one", "trace-1") ] in
+  let started =
+    match agent_core ~kind:Observer.Agent_started lane with
+    | Observer.Agent_core e ->
+        Observer.Agent_core { e with Observer.correlation = Some "trace-1" }
+    | other -> other
+  in
+  let keepers rows = List.map (fun (row : Acting.row) -> row.Acting.keeper) rows in
+  check (list string) "Turns draws the row under the keeper the trace names"
+    [ "keeper-one" ]
+    (keepers (Acting.chunk_rows ~traces (entries_of [ started ])));
+  check (list string) "the flat scopes draw the same event under the same keeper"
+    [ "keeper-one" ]
+    (List.map
+       (fun entry ->
+          (Acting.keeper_row_of_entry ~traces ~duration_ms:None entry).Acting.keeper)
+       (entries_of [ started ]));
+  check (list string) "without a trace for it the agent name stays"
+    [ lane ]
+    (keepers (Acting.chunk_rows ~traces:[] (entries_of [ started ])))
+
 let test_measuring_reads_what_the_row_draws () =
   let traces = [ ("keeper-one", "trace-1") ] in
   let correlated =
@@ -1132,5 +1159,7 @@ let () =
             test_call_key_prefers_the_provider_id
         ; test_case "measuring reads what the row draws" `Quick
             test_measuring_reads_what_the_row_draws
+        ; test_case "Turns names the keeper of a plain correlated event" `Quick
+            test_turns_names_the_keeper_of_a_plain_correlated_event
         ;] )
     ]

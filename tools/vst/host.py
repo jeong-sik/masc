@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""One native VST3 job per process. The caller owns cancellation and playback.
+"""Native VST3 rendering, or --stream request-driven continuous synthesis.
 
-Input and output are single JSON objects; native plug-in diagnostics go to
-stderr, including diagnostics printed by plug-in destructors. No audio device
-or plug-in editor is opened here.
+Default input/output are single JSON objects; --stream uses NDJSON. Native
+diagnostics go to stderr, including plug-in destructors. Only the explicit edit
+job opens a plug-in editor. No operation opens an audio device.
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import struct
+from fractions import Fraction
 
 
 def nonempty(value, name):
@@ -29,19 +31,60 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def frame_timeline(data, expected_hash, sample_rate):
+    """Private synthesis projection; original UMP remains in the source asset."""
+    if digest(data) != nonempty(expected_hash, "expected_timeline_sha256"):
+        raise ValueError("VST frame timeline content changed")
+    value = json.loads(data)
+    if (not isinstance(value, dict) or set(value) != {"schemaVersion", "kind", "sampleRate", "frames", "events"}
+            or type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1
+            or value["kind"] != "practice-vst" or type(value["sampleRate"]) is not int
+            or value["sampleRate"] != sample_rate or not isinstance(value["events"], list)):
+        raise ValueError("invalid VST frame timeline")
+    def counter(text):
+        if (not isinstance(text, str) or not text.isascii() or not text.isdecimal()
+                or str(int(text)) != text or not 0 <= int(text) <= 0xFFFFFFFFFFFFFFFF):
+            raise ValueError("invalid VST frame counter")
+        return int(text)
+    frames = counter(value["frames"])
+    if frames == 0:
+        raise ValueError("VST frame timeline is empty")
+    previous, events = 0, []
+    for event in value["events"]:
+        if not isinstance(event, dict) or set(event) != {"frame", "bytes"}:
+            raise ValueError("invalid VST frame event")
+        frame, message = counter(event["frame"]), event["bytes"]
+        if (frame < previous or frame >= frames or not isinstance(message, list) or not message
+                or any(type(byte) is not int or not 0 <= byte <= 255 for byte in message)):
+            raise ValueError("invalid VST event frame or bytes")
+        status = message[0] >> 4
+        if (status not in (8, 9, 10, 11, 13, 14) or len(message) != (2 if status == 13 else 3)
+                or any(byte > 127 for byte in message[1:]) or status == 11 and message[1] in (0, 32)):
+            raise ValueError("VST frame event cannot replace the frozen preset or encode this message")
+        events.append((bytes(message), frame)); previous = frame
+    if not any(message[0] >> 4 == 9 and message[2] > 0 for message, _ in events):
+        raise ValueError("VST frame timeline contains no sounding notes")
+    return events, frames
+
+
 def midi_timeline(data):
-    """Mido merges SMF tracks and applies tempo changes to delta seconds."""
+    """Merge source ticks in stable track order; keep tempo integration exact."""
     import mido
 
     midi = mido.MidiFile(file=io.BytesIO(data))
     if midi.type == 2:
         raise ValueError("asynchronous SMF type 2 has no single phrase timeline")
-    elapsed = 0.0
+    if midi.ticks_per_beat <= 0:
+        raise ValueError("render a selected synchronous PPQ performance")
+    elapsed = Fraction(0)
+    tempo = 500000
     events = []
-    for message in midi:
-        elapsed += message.time
-        if not math.isfinite(elapsed) or elapsed < 0:
+    for message in mido.merge_tracks(midi.tracks):
+        elapsed += Fraction(message.time * tempo, midi.ticks_per_beat * 1000000)
+        if elapsed < 0:
             raise ValueError("MIDI contains an invalid event time")
+        if message.type == "set_tempo":
+            tempo = message.tempo
         if message.is_meta:
             continue
         # The chosen VST preset is authoritative. GM bank/program messages
@@ -53,6 +96,41 @@ def midi_timeline(data):
     if not any(event[0][0] & 0xF0 == 0x90 and event[0][2] > 0 for event in events):
         raise ValueError("MIDI phrase contains no sounding note-on events")
     return events, elapsed
+
+
+def frame_seconds(frame, sample_rate):
+    """Encode a sample index through Pedalboard 0.9.26's Float32 product.
+
+    Both MIDI timestamps and duration use trunc(float32(time)*float32(rate)).
+    Choosing time=frame/rate can lose a sample. Verify the native conversion;
+    search the positive Float32 ordering if the midpoint is not representable.
+    """
+    def f32(value):
+        return struct.unpack("f", struct.pack("f", value))[0]
+
+    rate = f32(sample_rate)
+    if rate != sample_rate:
+        raise ValueError("sample rate is not exact in the VST host Float32 API")
+
+    def index(value):
+        return int(f32(value * rate))
+
+    value = f32((frame + .5) / sample_rate) if frame else 0.0
+    if index(value) == frame:
+        return value
+    low = 0
+    high = struct.unpack("I", struct.pack("f", (frame + 1) / sample_rate))[0] + 1
+    while low < high:
+        middle = (low + high) // 2
+        value = struct.unpack("f", struct.pack("I", middle))[0]
+        if index(value) >= frame:
+            high = middle
+        else:
+            low = middle + 1
+    value = struct.unpack("f", struct.pack("I", low))[0]
+    if index(value) != frame:
+        raise ValueError("sample position is not representable by the VST host Float32 API")
+    return value
 
 
 def candidates():
@@ -133,18 +211,29 @@ def render(request):
     from pedalboard.io import AudioFile
     import numpy as np
 
-    midi_path = Path(nonempty(request.get("midi_path"), "midi_path"))
     output_path = Path(nonempty(request.get("output_path"), "output_path"))
     if output_path.exists():
         raise FileExistsError(f"output already exists: {output_path}")
-    midi_bytes = midi_path.read_bytes()
-    events, phrase_seconds = midi_timeline(midi_bytes)
     sample_rate = request.get("sample_rate", 44100)
     if type(sample_rate) is not int or not 0 < sample_rate <= 0xFFFFFFFF:
         raise ValueError("sample_rate must fit the WAV sample-rate field")
     tail = request.get("tail_seconds", 1.0)
     if isinstance(tail, bool) or not isinstance(tail, (int, float)) or not math.isfinite(tail) or tail < 0:
         raise ValueError("tail_seconds must be finite and nonnegative")
+    if (request.get("midi_path") is None) == (request.get("timeline_path") is None):
+        raise ValueError("choose one MIDI source or frame timeline")
+    if request.get("timeline_path") is not None:
+        if tail != 0:
+            raise ValueError("frame timeline owns its complete sample horizon")
+        timeline = Path(nonempty(request["timeline_path"], "timeline_path")).read_bytes()
+        events, frames = frame_timeline(timeline, request.get("expected_timeline_sha256"), sample_rate)
+        identity = {"timeline_sha256": digest(timeline)}
+    else:
+        midi_bytes = Path(nonempty(request["midi_path"], "midi_path")).read_bytes()
+        events, phrase_seconds = midi_timeline(midi_bytes)
+        frames = math.ceil((phrase_seconds + Fraction(tail)) * sample_rate)
+        events = [(message, math.ceil(timestamp * sample_rate)) for message, timestamp in events]
+        identity = {"midi_sha256": digest(midi_bytes)}
     plugin = load_instrument(request)
     expected = request.get("expected_instrument")
     if expected is not None:
@@ -158,7 +247,6 @@ def render(request):
         preset_hash = digest(preset.read_bytes())
         plugin.load_preset(str(preset))
     state_hash = digest(plugin.raw_state)
-    frames = math.ceil((phrase_seconds + tail) * sample_rate)
     # Float stereo WAV is streamed one second at a time. This bounds memory
     # without imposing any limit on phrase length. All MIDI timestamps are
     # relative to the block currently being rendered.
@@ -170,14 +258,15 @@ def render(request):
     try:
         with AudioFile(stage_name, "w", sample_rate, 2, bit_depth=32) as output:
             while rendered < frames:
-                count = min(sample_rate, frames - rendered)
-                start, end = rendered / sample_rate, (rendered + count) / sample_rate
+                # Float32 represents every integer only through 2**24. Keep
+                # relative event indices inside that native API boundary.
+                count = min(sample_rate, 1 << 24, frames - rendered)
                 block = []
-                while event_index < len(events) and events[event_index][1] < end:
-                    message, timestamp = events[event_index]
-                    block.append((message, max(0.0, timestamp - start)))
+                while event_index < len(events) and events[event_index][1] < rendered + count:
+                    message, sample = events[event_index]
+                    block.append((message, frame_seconds(sample - rendered, sample_rate)))
                     event_index += 1
-                audio = plugin(block, duration=count / sample_rate,
+                audio = plugin(block, duration=frame_seconds(count, sample_rate),
                                sample_rate=sample_rate, num_channels=2,
                                reset=rendered == 0)
                 if audio.shape != (2, count) or not np.isfinite(audio).all():
@@ -193,7 +282,7 @@ def render(request):
         os.link(stage_name, output_path)
     finally:
         os.unlink(stage_name)
-    return {"instrument": description(plugin), "midi_sha256": digest(midi_bytes),
+    return {"instrument": description(plugin), **identity,
             "preset_sha256": preset_hash, "state_sha256": state_hash,
             "sample_rate": sample_rate, "frames": frames,
             "duration_ms": frames / sample_rate * 1000, "peak": peak,
@@ -219,17 +308,117 @@ def run(request):
             raise ValueError("unknown VST job operation")
 
 
+def stream_synthesis(source, emit):
+    """One instrument, request-driven PCM blocks, no audio device or clock."""
+    import numpy as np
+    import mido
+
+    request = json.loads(source.readline())
+    if (not isinstance(request, dict) or request.get('kind') != 'open'
+            or type(request.get('schemaVersion')) is not int or request['schemaVersion'] != 1):
+        raise ValueError('expected VST stream open schemaVersion 1')
+    rate = request.get('sampleRate')
+    if type(rate) is not int or not 0 < rate <= 0xFFFFFFFF:
+        raise ValueError('invalid VST stream sample rate')
+    frame_seconds(1, rate)  # Pinned Float32 sample-rate ABI.
+    expected = request.get('instrument')
+    if not isinstance(expected, dict) or any(not isinstance(expected.get(k), str) or not expected[k]
+                                            for k in ('identifier', 'version')):
+        raise ValueError('missing project instrument identity/version')
+    preset = request.get('preset')
+    if not isinstance(preset, dict) or not isinstance(preset.get('data'), str):
+        raise ValueError('missing project preset bytes')
+    data = base64.b64decode(preset['data'], validate=True)
+    if not data or base64.b64encode(data).decode('ascii') != preset['data'] or digest(data) != preset.get('sha256'):
+        raise ValueError('project preset content changed')
+    plugin = load_instrument(request)
+    actual = description(plugin)
+    if any(actual[k] != expected[k] for k in ('identifier', 'version')):
+        raise ValueError('installed VST identity/version differs from the project sound')
+    # Load the exact owned bytes, never the mutable path saved as a label.
+    with tempfile.TemporaryDirectory(prefix='masc-vst-stream-') as folder:
+        frozen = Path(folder) / 'sound.vstpreset'
+        frozen.write_bytes(data)
+        plugin.load_preset(str(frozen))
+    emit({'kind': 'ready', 'schemaVersion': 1, 'sampleRate': rate, 'channels': 2,
+          'instrument': actual, 'preset_sha256': digest(data)})
+    sequence, total = 0, 0
+    try:
+        for line in source:
+            request = json.loads(line)
+            if not isinstance(request, dict):
+                raise ValueError('VST stream command must be an object')
+            if request.get('kind') == 'stop':
+                break
+            count, identifier = request.get('frames'), request.get('id')
+            # Float32 sample indices are contiguous only through 2**24. This
+            # is the native ABI boundary, not a session duration limit.
+            if (request.get('kind') != 'render' or type(identifier) is not int or identifier != sequence + 1
+                    or type(count) is not int or not 0 < count <= 2**24):
+                raise ValueError('invalid ordered VST block request')
+            messages = request.get('messages')
+            if not isinstance(messages, list):
+                raise ValueError('missing VST block MIDI messages')
+            block, previous = [], -1
+            for event in messages:
+                if not isinstance(event, dict):
+                    raise ValueError('invalid VST MIDI event')
+                offset, values = event.get('frame'), event.get('bytes')
+                if (type(offset) is not int or not previous <= offset < count or offset < 0
+                        or not isinstance(values, list) or not values
+                        or any(type(value) is not int or not 0 <= value <= 255 for value in values)):
+                    raise ValueError('invalid ordered VST MIDI sample offset/data')
+                message = mido.Message.from_bytes(values)
+                previous = offset
+                # The project preset owns timbre, as in offline rendering.
+                if message.type == 'program_change' or (message.type == 'control_change' and message.control in (0, 32)):
+                    continue
+                block.append((bytes(values), frame_seconds(offset, rate)))
+            audio = plugin(block, duration=frame_seconds(count, rate), sample_rate=rate,
+                           num_channels=2, reset=sequence == 0)
+            if audio.shape != (2, count) or not np.isfinite(audio).all():
+                raise ValueError('VST returned invalid streaming audio samples')
+            pcm = np.asarray(audio.T, dtype='<f4').tobytes(order='C')
+            if not np.isfinite(np.frombuffer(pcm, dtype='<f4')).all():
+                raise ValueError('VST returned samples outside Float32 PCM')
+            sequence = identifier
+            total += count
+            emit({'kind': 'block', 'id': identifier, 'frames': count,
+                  'pcm': base64.b64encode(pcm).decode('ascii')})
+        else:
+            raise ValueError('VST stream closed without stop')
+    finally:
+        # Process-local notes cannot survive a failed operation or successor.
+        plugin.reset()
+    emit({'kind': 'stopped', 'frames': str(total)})
+
+
 def main():
     # C++ plug-ins can print directly to fd 1; Python redirect_stdout alone
     # does not protect the JSON channel. Keep a private descriptor for replies.
     reply_fd = os.dup(sys.stdout.fileno())
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    def emit(value):
+        payload = memoryview((json.dumps(value, allow_nan=False) + '\n').encode())
+        while payload:
+            payload = payload[os.write(reply_fd, payload):]
     try:
+        if sys.argv[1:] == ['--stream']:
+            try:
+                stream_synthesis(sys.stdin, emit)
+                return 0
+            except Exception as error:
+                emit({'kind': 'error', 'message': f'{type(error).__name__}: {error}'})
+                return 1
+            finally:
+                os.close(reply_fd)
+        if sys.argv[1:]:
+            raise ValueError('unknown VST host arguments')
         request = json.load(sys.stdin)
         result = {"ok": True, "result": run(request)}
     except Exception as error:
         result = {"ok": False, "error": f"{type(error).__name__}: {error}"}
-    os.write(reply_fd, (json.dumps(result, allow_nan=False) + "\n").encode())
+    emit(result)
     os.close(reply_fd)
     return 0 if result["ok"] else 1
 

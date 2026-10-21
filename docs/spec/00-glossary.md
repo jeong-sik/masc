@@ -279,8 +279,16 @@ status: reference
     하나의 자리가 여러 번 이어지는 것이고, 복제된 자리와는 다르다. 그러므로 loop region은
     새 개념이 아니라 반복을 가진 Region, 곧 이 항목의 특수한 경우이고, 따로 표제어를
     세우지 않는다. 코드도 같다: UMP 루프 계획은 `timeline.regions`의 각 항목에서
-    `repeatCount`를 읽어 클립을 만들고, 0이면 "invalid captured loop region"으로
-    거절한다(`UmpLoopTransport.swift`).
+    `repeatCount`를 읽어 클립을 만든다. 거절 조건은 `repeatCount` 하나가 아니다 —
+    `repeatCount`가 0이거나, `id`가 비었거나, `source`가 `timeline.sources`에 없거나,
+    `component`가 `.audio`인 Region 중 하나만 걸려도 계획 전체가
+    "invalid captured loop region"으로 거절된다(`UmpLoopTransport.swift`의 `UmpLoopPlan`).
+    같은 파일이 계획 수준에서도 "invalid captured loop arrangement"(schemaVersion·duration·
+    빈 sources·빈 regions·sources·regions 각각의 중복 id)와 "captured loop trim exceeds
+    original source"(자른 구간이 원본 길이를 넘거나 `extent`·`sourceDivisor`가 0)를 따로
+    낸다. 그래서 Region의 자격은 반복 횟수만이 아니라 원본
+    `source`와 그 길이에 함께 매인다. 브라우저 장면이 문서 구조에서 갈라 읽는 구역은
+    이 낱말이 아니며 **Browser Scene Region** 항목이 맡는다.
   → [tools/alphatex/README.md](../../tools/alphatex/README.md) ·
   [tools/alphatex/CAPTURE-UMP-REGIONS.md](../../tools/alphatex/CAPTURE-UMP-REGIONS.md) ·
   [tools/alphatex/ARRANGEMENT.md](../../tools/alphatex/ARRANGEMENT.md)
@@ -300,20 +308,30 @@ status: reference
 
 **Audition (오디션, 미리 듣기)**
 : 소리를 내어 확인하는 행위를 통틀어 이르는 말. 같은 낱말이 서로 다른 대상을 가리키므로
-  문장에서는 무엇을 듣는지 반드시 함께 적는다. 지금 코드와 문서에서 확인되는 쓰임은 넷이다.
+  문장에서는 무엇을 듣는지 반드시 함께 적는다. 지금 코드와 문서에서 확인되는 쓰임은
+  아래 다섯이며, 그중 `solo/mute 확인`은 이 낱말 대신 다른 표현을 쓰는 자리다.
   - `Source audition` — 가져온 MIDI 소스의 순서 있는 원본 메시지 열을 명시한 MIDI 출력이나
     VST로 내보내는 재생. 처음부터 시작하고 pause/resume과 source-clock seek를 지원한다
-    (MIDI-SOURCE.md:90, README.md:311).
+    (MIDI-SOURCE.md "Ordered source audition", README.md "Imported performance audition").
   - `WAV-only audition` — 캡처 구간의 WAV만 `:play-audio`로 듣는 재생
-    (CAPTURE-AUDIO-CLOCK.md:1, README.md:334).
+    (CAPTURE-AUDIO-CLOCK.md "Captured-region WAV audition", README.md의 `:play-audio`).
   - `paired audition` — 저장한 take의 WAV와 UMP 스트림을 함께 듣는 재생
-    (CAPTURE-PLAYBACK.md:3).
-  - `solo/mute 확인` — 섞인 라우트에서 한 층만 남겨 들어 보는 확인(ARRANGEMENT.md:151).
+    (CAPTURE-PLAYBACK.md: "A saved take can audition its original WAV and UMP stream
+    together.").
+  - `solo/mute 확인` — 섞인 라우트에서 한 층만 남겨 들어 보는 확인(ARRANGEMENT.md "WAV
+    arrangement transport": "A mixed route also supports solo/mute audition of either
+    source kind.").
     들을 대상을 고르는 라우트 조작이지 재생 기능이 아니므로 "audition" 대신 이렇게 쓴다.
+  - `arrangement region audition` — 어레인지먼트의 Region 창을 trim·repeat·resume·seek
+    규칙대로 들려주는 재생. 원본 전체를 한 번에 보내는 full-source audition과 달리,
+    스케줄러가 밀린 복사를 건너뛰고 현재 위상만 되살린다(ARRANGEMENT.md "Expressive MIDI
+    arrangement transport"의 "This phase policy differs from the original full-source audition's
+    complete ordered-stream delivery.").
   - 이름 경계: `monitoring`은 `audition`이 아니다. `:monitor`는 오디오 입력을,
     `:midi-monitor`는 들어오는 MIDI를 다른 목적지로 계속 전달하는 상태다
-    (README.md:340, 353). 한 번 듣고 끝나는 재생과 달리 라우트가 열려 있는 동안 계속
-    흐르고 `off`로만 닫힌다. "audition monitoring"처럼 두 낱말을 겹쳐 쓰지 않는다.
+    (README.md의 `:monitor`·`:midi-monitor`). 한 번 듣고 끝나는 재생과 달리 라우트가 열려
+    있는 동안 계속 흐르고 `off`로만 닫힌다. "audition monitoring"처럼 두 낱말을 겹쳐 쓰지
+    않는다.
   - 이름 경계: 화면 낱말 `:play-audio`는 WAV-only audition만 가리킨다. MIDI 소스 전체를
     듣는 일에 이 명령을 인용하지 않는다.
   → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
@@ -331,13 +349,43 @@ status: reference
     직접 찍는 `Phrase`도 아니다. 파생한 피아노 롤이나 실수 시간표는 저장본이 아니다
     (MIDI-SOURCE.md: "Persist the source asset, not a derived piano roll or floating-point
     schedule").
-  - 아직 아닌 것: 일반 메타데이터 편집, 소스 loop 상태, 오버더브, MIDI 2.0 변환은 별도
-    작업으로 남아 있다. 시험 통과는 완전한 MIDI 지원이나 물리 장치 지원을 뜻하지 않는다
-    (MIDI-SOURCE.md: "Its tests do not establish full MIDI or physical-device support.
-    General metadata, source-loop state, overdub and MIDI 2.0 conversion remain separate
-    work.").
+  - 지금 고칠 수 있는 소스 메타데이터는 둘이다: tempo map(`editMidiSourceTempos`, Set Tempo
+    FF51)과 박자표 지도(**Source meter map**). 포트·끝 표식·불투명 메타데이터는 고치지 않고
+    원본 그대로 보존한다. 세션 국소 소스 구간 루프(`:loop START END`)는 생겼지만 그 선택은
+    문서에 저장되지 않는다(MIDI-SOURCE.md: "The loop selection does not change the source
+    document or MIDI/WAV export").
+  - 아직 아닌 것: 일반 메타데이터 편집, 오버더브, MIDI 2.0 편집은 별도 작업으로 남아 있다.
+    시험 통과는 완전한 MIDI 지원이나 물리 장치 지원을 뜻하지 않는다(MIDI-SOURCE.md: "Its
+    tests do not establish full MIDI or physical-device support. General metadata, overdub
+    and MIDI 2.0 editing remain separate work.").
   → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
   [tools/alphatex/README.md](../../tools/alphatex/README.md)
+
+**Source meter map (소스 박자표 지도)**
+: 들여온 SMF 소스가 이벤트로 적어 둔 박자표(FF58)를 읽고 고치는 편집 표면. 이벤트 하나는
+  분자·분모의 2의 거듭제곱·MIDI 클록/클릭·표기 32분음/4분음 네 값이고(`meterEvent`,
+  `meterBytes`), 소스 편집기는 `:meters` 목록에서 Up/Down 으로 고르고 Shift+Left/Right 로
+  옮기며 Enter 로 고치고 Delete 로 지운다. `:meter NUM DEN [AT [CLOCKS NOTATED32NDS]]` 는
+  커서나 지정한 소스 위치에 넣거나 바꾸고, `:meter-event ID`·`:meter-value`·`:meter-move`·
+  `:meter-remove` 는 골라 둔 이벤트를 다룬다(`sourceMeters`·`sourceMeterAt`·`selectedMeter`,
+  `editMidiSourceMeters`). 새 이벤트의 보조 두 값은 클릭당 24 MIDI 클록과 4분음당 8표기
+  32분음이 기본값이고, 분자·분모만 고치면 보조 값은 그대로 남는다.
+  - 위치 단위: 자리는 PPQ면 4분음표 박, SMPTE면 프레임이다. 박자표를 고쳐도 음의 tick,
+    tempo 적분, 재생 초는 바뀌지 않는다(MUSIC-SEQUENCER.md: "Positions remain quarter-note
+    beats for PPQ and frames for SMPTE, without changing note timestamps, tempo integration
+    or playback seconds").
+  - 이름 경계: tempo map(`editMidiSourceTempos`, Set Tempo FF51)은 다른 메타데이터 종류다.
+    alphaTex 악보의 `\ts` 헤더는 표기 텍스트 층이라 이 지도와 다른 층이다. 어레인지먼트의
+    `meter`(분자·분모 쌍, `editArrangement`의 `meter` 편집)는 프로젝트 값이고, 소스에서
+    넘겨받을 때 편집기와 같은 마지막 tick 0 박자표를 읽는다. 다만 count-in 같은 실제 클록
+    입장은 그 범위 밖 박자를 거절할 수 있다.
+  - 아직 아닌 것: 마디 기반 이동이나 메트로놈을 더하지 않는다(MUSIC-SEQUENCER.md: "This
+    edits SMF metadata; it does not add bar-based navigation or a metronome"). 같은 tick 에
+    박자표가 여럿이면 이벤트를 명시적으로 골라야 하고, 알아보지 못한 메타데이터는 불투명한
+    채로 남는다.
+  → [tools/alphatex/midi-source.mjs](../../tools/alphatex/midi-source.mjs) ·
+  [tools/alphatex/midi-source-editor.mjs](../../tools/alphatex/midi-source-editor.mjs) ·
+  [docs/design/tui/MUSIC-SEQUENCER.md](../../docs/design/tui/MUSIC-SEQUENCER.md)
 
 **Source port (소스 포트)**
 : 소스 파일 안에 적힌 0–127 번호의 MIDI 라우팅 정체성. 물리 출력 장치 UID가 아니고,
@@ -350,6 +398,13 @@ status: reference
   - 편집 경계: 노트를 다른 포트로 옮기는 편집은 거절된다(MIDI-SOURCE.md: "Moving either
     message across a MIDI Port change is rejected"). 포트는 음악 편집 대상이 아니라
     원본에 적힌 라우팅 정체성이다.
+  - 세 층 구분: `port`는 소스 파일이 정한 라우팅 번호이고, `midiOutput`은 사용자가 고른
+    하나의 출력 이름이며(포트가 여럿이면 거절된다: "Bind each source MIDI port explicitly
+    with :midi-port PORT ID"), `destination`은 그 선택이나 포트 결속에서 해석된 목적지다.
+    결속 결과는 `{ port, destination }` 쌍이다(sequencer-tui.mjs의 `portBindings`).
+    "output port"처럼 두 층을 붙인 이름은 쓰지 않는다. 출력 측 낱말은 `destination`이다
+    (midi-source-playback.mjs: "Distinct source ports require distinct destinations";
+    sequencer-tui.mjs: "Choose an audio output or a MIDI destination").
   - 이름 경계: 녹음 입력을 고르는 `--midi all|none|SOURCE_ID`의 `SOURCE_ID`는 CoreMIDI
     입력 소스 정체성이고, 이 소스 포트와 다른 층이다. 같은 모양의 낱말이 두 층에 쓰이므로
     문장에서 어느 쪽인지 밝힌다.
@@ -357,11 +412,11 @@ status: reference
   [tools/alphatex/sequencer-tui.mjs](../../tools/alphatex/sequencer-tui.mjs)
 
 **Source audition (소스 오디션)**
-: 들여온 MIDI 소스의 wire 스트림을 처음부터 정해진 순서대로 내보내는 재생. 소스
-  편집기에서 Space로 시작하고 `:stop`으로 끝낸다. 원본 tempo map이나 SMPTE 시계로
+: 들여온 MIDI 소스의 wire 스트림을 정해진 순서대로 내보내는 재생. 기본은 처음부터 한 번
+  끝까지이고, 세션 구간(`:loop START END`)을 골라 두면 그 구간을 반복한다. 소스 편집기에서
+  Space로 시작하고 `:stop`으로 끝낸다. 원본 tempo map이나 SMPTE 시계로
   시간을 잡고, 메타 이벤트는 소스 데이터로만 쓰며 status `FF`로 전송하지 않는다
-  (MIDI-SOURCE.md: "they are not sent as wire status FF"). 소스 clip loop은 거절된다
-  (midi-source-playback.mjs: "Source audition plays once from the beginning").
+  (MIDI-SOURCE.md: "they are not sent as wire status FF").
   - 멈출 때의 소유: 이 오디션이 소유한 key-off와 이 소스가 켠 hold pedal(64/66/69)만
     해제하고 all-notes-off를 방송하지 않는다. vendor SysEx의 기기별 부작용과 공유
     채널의 외부 노트는 보증하지 않는다.
@@ -371,14 +426,25 @@ status: reference
     (sequencer-tui.mjs: "Source audition requires a VST instrument or MIDI output").
   - 재생 경계: pause/resume와 소스 시계 기준 seek는 채널 상태 재구성 경계를 거쳐
     지원한다(MIDI-SOURCE.md: "Audition starts at the beginning and supports pause/resume
-    and source-clock seek"). 소스 looping은 여전히 불가능하고, 원본 앞부분에 없는 초기
-    채널값을 되돌려야 하는 seek는 거절된다(MidiTransport.swift:297, "source seek cannot
-    restore an initial channel value absent from the source prefix"). 알 수 없는 초기
-    필드와 기기 고유 부작용도 조용히 넘어가지 않고 명시적으로 실패한다.
+    and source-clock seek"). 소스 오디션은 세션 국소 소스 구간 루프를 함께 지원한다 —
+    `:loop START END`가 소스 박 또는 SMPTE 프레임 단위로 구간을 잡고 `l`이 구간을 그대로
+    둔 채 반복을 켜고 끈다(sequencer-tui.mjs: "Source :loop START END chooses a session-local
+    source range; l toggles MIDI / rendered VST window looping"). 그 선택은 소스 문서도
+    MIDI/WAV 내보내기도 바꾸지 않으므로 저장되는 loop 상태가 아니고(MIDI-SOURCE.md: "The
+    loop selection does not change the source document or MIDI/WAV export"), seek는 그 구간
+    안이어야 한다(sequencer-tui.mjs: "Seek must be within the source loop range"). 원본
+    앞부분에 없는 초기 채널값을 되돌려야 하는 seek는 거절된다(`MidiTransport.swift`의
+    "source seek cannot restore an initial channel value absent from the source prefix").
+    알 수 없는 초기 필드와 기기 고유 부작용도 조용히 넘어가지 않고 명시적으로 실패한다.
   - 서술 이력: #43769(`2fa99025a2`)의 MIDI-SOURCE.md는 "Pause, resume, seek and looping
-    are explicitly unavailable for source timelines"라고 적었고, #43792(`59d3653d3b`)가
-    같은 문장을 위 지원 문장으로 바꿨다. 옛 문장을 인용하면 현행 코드와 어긋나므로,
-    이 항목은 현행 main 문장만 근거로 쓴다.
+    are explicitly unavailable for source timelines"라고 적었고, #43792(`59d3653d3b`)가 그
+    문장을 pause/resume·seek 지원 문장으로 바꿨으며, #44513이 `:loop` 세션 구간 루프를
+    더했다. "It plays once from the beginning."과 "Source clip looping remains unfinished."
+    같은 옛 문장은 지금 MIDI-SOURCE.md와 README.md 어디에도 없고, MUSIC-SEQUENCER.md의
+    "Source looping, VST routing, overdubs, shared clock and practice workflows remain
+    separate unfinished units" 개요 문장도 #44572에서 "Source-window looping is available
+    but stays session-local"로 고쳐졌다. 옛 문장을 인용하면 현행 코드와 어긋나므로, 이
+    항목은 현행 main 문장만 근거로 쓴다.
   → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
   [tools/alphatex/native/MidiTransport.swift](../../tools/alphatex/native/MidiTransport.swift)
 
@@ -1722,7 +1788,8 @@ status: reference
   바뀌었으면 충돌로 거절해 새 순서를 덮어쓰지 않는다. 빈 후보 목록은 lane 제거와
   다른 편집이므로 거절되고, lane 제거는 별도 동작이다.
   `[runtime].media_failover`(vision runtimes, 이미지를 읽는 런타임 목록)와
-  exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
+  exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md`의
+  "8.x Keeper별 exact-output lane 우선순위")는
   런타임 후보 순서와 별개 축이다. 다만 후보 나열이 별개여도 rate-limit 증거 셀은
   공유한다 — exact lane은 `Runtime_candidate_backpressure.candidate`를 읽고 자기
   관측을 되돌려 써서, 쉬는 슬롯을 형제 뒤로 강등한다(`Demotion`의 후보 강등과 같은
@@ -2097,6 +2164,30 @@ status: reference
   [Browser_selection](../../lib/browser_selection.mli) ·
   [browser-action-catalog 설계](../../docs/design/browser-action-catalog.md)
 
+**Browser Scene Region (브라우저 장면 구역)**
+: 브라우저 장면(`Browser_scene`)이 문서 구조에서 갈라 읽는 의미 구역. 구역 역할
+  (`Browser_scene.region_role`)은 닫힌 열다섯 값이다 — `Main`·`Navigation`·`Complementary`·
+  `Named_region`·`Section`·`Article`·`Header`·`Footer`·`Search`·`Form`·`Log`·`Banner`·
+  `Content_info`·`Scroll_area`·`Unknown of string`. 역할 이름은 브라우저가 문자열로 보내고,
+  그 경계에서 한 번 분류한다(`region_role_of_string`). `Unknown`은 이름 붙지 않은 역할을
+  지우지 않고 그대로 들고 있되 암묵적 대상이 되지 않는다. 장면 view는 둘이고
+  (`Browser_lane.scene_view` = `Content`·`Regions`, 요청 JSON의 `view`는 `"content"`·
+  `"regions"`), 노드는 자기 조상 구역을 `ancestor_region`(`{node_id; role; label}`)으로
+  싣는다. 노드 종류 `Region of region_role`도 같은 역할 집합을 쓴다.
+  - 공개 동작 이름: `read_regions`(`Browser_capabilities`)가 `regions` view를 요청하는
+    조건부 동작이다(`conditional ~mode:"regions" Read`). 관측한 구역 참조를 그대로 받아
+    범위를 좁힌 읽기에 쓰라고 요구한다.
+  - 이름 경계: 이 구역은 어레인지먼트의 `Region`(구간)이 아니다 — 같은 낱말, 다른 축이다.
+    브라우저 쪽 region은 접근성 역할 이름(landmark role)에서 온 문서 구조 단위이고, 음악
+    쪽 `Region`은 시간축 위의 자리다. 문장에서 어느 쪽인지 정해지지 않으면 `region`만 쓰지
+    않고 "장면 구역"·"어레인지먼트 구간"으로 적는다.
+  - 이름 경계: 실시간 연결 역량(`Browser_lane.live_capability`)에는 `Scene_read` 하나만
+    있고 `read_regions`에 대응하는 별도 역량은 없다. 그 동작의 지원 여부는 동작 카탈로그의
+    조건부 항목이 말한다 — 두 축을 섞어 "`read_regions` 역량"이라고 부르지 않는다.
+  → [Browser_scene](../../lib/browser_scene.mli) ·
+  [Browser_lane](../../lib/browser_lane/browser_lane.ml) ·
+  [Browser_capabilities](../../lib/browser_capabilities.ml)
+
 **Keeper Firefox Start Record (Keeper Firefox 시작 기록)**
 : `runtime.toml`의 `[browser.live.bidi]`로 live lane이 켜져 있으면 MASC가 다음 서버 시작 또는 Keeper의 다음 hover·drag 때 Keeper Firefox와 그 BiDi host를 직접 시작한다. 이때 시작이 어떻게 끝났는지를 `<base>/.masc/browser-lane/keeper-firefox-start.json`에 한 entry로 통째로 갈아 쓰는 기록(RFC-browser-keeper-firefox §3.7, #42235·#42250). entry는 끝난 시각·포트·프로필·결과(`Attached`/`Not_attached`)를 담고, `Not_attached`의 사유는 한 줄짜리 인쇄 가능 문자열 최대 1024바이트(`message_limit_bytes`)로 잘린다. 경계가 세 군데 있다. (1) 이 기록은 상태 문장만 읽는다 — 시작을 막는 장치가 아니다. (2) MASC는 자기 기록이 "MASC가 시작했다"고 말하는 Firefox만 재시작을 약속한다. 다른 경로로 띄운 Firefox는 운영자가 먼저 종료한다. (3) 다른 포트의 Firefox는 이 시작을 막지 않는다. 상태 표의 `keeper` 행은 시작 주체를 `kind`로 말하고 `masc_starts`는 설정된 포트·프로필과 `last_start`(`absent`/`recorded`/`unreadable`)를 실는다.
   → [Browser_keeper_firefox_start_record](../../lib/browser_keeper_firefox_start_record.mli) ·
@@ -2181,7 +2272,7 @@ status: reference
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계·머신 호스팅 레이어. `msx-machine`·`dos-machine` Add-on worker가 호스팅하는 MSX·DOS 머신,
   Browser Lane의 세션, Keeper의 도구와 턴 소유권을 결합·재사용한다. 패키지 하나가 여러
   Lane 행을 제공할 수 있다. 패키지는 `lane.toml`의 `contributions`로 observe·derive·act
-  기여를 선언하며, act 기여 패키지(예: `dos-world`·`quiz-grader`)는 `masc_lane_act` 도구로
+  기여를 선언하며, act 기여 패키지(예: `dos-world`·`operator-quiz`)는 `masc_lane_act` 도구로
   조치를 출하한다 — 즉 이 레이어는 관측뿐 아니라 조치(act)까지 포함한다. 패키지 worker는
   그 계산을 격리한다. attach·detach와 Add-on 장애는 기존 Keeper의 권한·도구·진행 중
   작업을 축소하지 않으며, 추가 근거는 활용·보류·무시할 수 있다. 원천 어댑터는
@@ -2215,29 +2306,26 @@ status: reference
   [Lane_addon_config](../../lib/lane_addon/lane_addon_config.mli) ·
   [Declaration application observations](lane-application-observation.md)
 
-**Quiz Lane (퀴즈 레인)**
-: 저장된 기록(Board·기억 OS·GitHub)에서 인용한 사실 묶음(`deck.json`, `snapshot_file`)을
-  바탕으로 문제를 내고 답을 채점하는 Lane Add-on 패키지 쌍(`quiz-questions`·`quiz-grader`).
-  출제와 채점의 권한을 엄격히 분리하고, 기록 인용과 완전 단어 일치를 강제한다(#38433, task-1688).
-  - **출제·채점 분리**: 출제 패키지(`quiz-questions`, `derive` 기여)는 팩트 덱에서 문제를
-    뽑아 `quiz/questions`로 내보낼 뿐 채점할 수 없다. 채점 패키지(`quiz-grader`, `derive`·
-    `act` 기여)는 출제 결과(`lane_output`)와 같은 팩트 덱을 함께 받아, `masc_lane_act` 도구로
-    들어온 응답을 대조해 `quiz/grades` 판정과 `quiz/score` 누적 점수를 발행한다.
-  - **기록 인용 및 완전 단어 일치**: 문제는 임의의 요약이나 추정이 아니라 실제 저장된
-    기록 파일에 글자 그대로 존재하는 인용문(`quote`)이어야 하며, 정답(`answer`)은 그 인용문
-    안의 완전한 단어(whole-word)여야 한다(예: `"unmerged"` 속의 `"merged"` 매칭은 거절).
-    질문 대상 필드는 닫힌 6종(`author`·`claimant`·`status`·`merged_commit`·`cause`·
-    `decision`)이고, 필드마다 서로 다른 답을 가진 사실이 둘 이상 있어야 출제된다. 단 하나의
-    사실이라도 기록 인용 규칙을 어기면 덱 빌드(`build_deck.py`)는 덱 생성을 통째로 거절한다.
-  - **자칭 응답자 라벨 (Claimed Answerer)**: 채점 점수는 호스트가 인증한 호출자 정체성이
-    아니라 응답자가 액션 payload에 스스로 적어 낸 라벨(`answerer_basis = self_claimed_label`)을
-    기준으로 `by_claimed_label`에 집계한다. 호스트는 인증 요청자를 보존하되 워커에 넘기지
-    않는다. 응답자 자신에 관한 질문은 `excluding_claimed_about_answerer`로 가려진다.
-  - **덱 식별자 무효화**: 덱 빌드가 새 `deck-id`를 발급하면 이전 덱으로 출제된 질문들은
-    의도적으로 채점 불가(`ungradable`)가 되어 낡은 문제와 새 정답의 혼선을 막는다.
-  → [Quiz Deck Skill](../../addons/quiz-questions/skills/quiz-deck/SKILL.md),
-  [quiz-questions](../../addons/quiz-questions/lane.toml),
-  [quiz-grader](../../addons/quiz-grader/lane.toml)
+**Operator quiz (운영자 퀴즈)**
+: 이 워크스페이스의 기록(Board 글·댓글, `repository` 권한의 파일)으로 운영자에게 선택형·서술형 문제를
+  내는 Lane Add-on 패키지(`operator-quiz`). Schedule 이 보내는 `compose` action 이 세션을 열고,
+  패키지는 host 요청(`read_records`·`read_file`·`exact_output author`·`ask`)으로 기록을 읽고
+  문제를 받아 Approvals 에 질문한다. 선택지로 고른 답은 정답 key 로, 직접 쓴 답은
+  `exact_output grade` 의 판정(`Judged`)으로 채점한다. 운영자가 `dispute` action 으로
+  이의를 내면 다시 판정하고, 새 `Judged` 가 앞선 판정보다 앞선다. 정답과 풀이 기록은 패키지의 persistent volume 에 있는
+  로그(`/state/operator-quiz/log.jsonl`)에만 있고, 행(`quiz/sessions`·`quiz/questions`·
+  `quiz/topics`·`quiz/items`·`quiz/measures`)은 모두 그 로그에서 계산한 projection 이다.
+  - **세션**: `writing → asked → answered`, 또는 닫힌 이유 하나로 `failed`, 질문 전에 다음
+    `compose` 가 오면 `superseded`. 시간이나 횟수로 끝나는 상태는 없다.
+  - **인용 확인**: 문제의 출처마다 인용문이 host 가 보관한 기록 바이트에 글자 그대로 있어야
+    한다. 출처의 `sha256` 은 그 Lane store blob 의 이름이다.
+  - **R·P·G**: R 은 놓친 뒤 다른 날(운영자 `timezone` 기준) 다시 푼 항목 중 처음 다시 푼 날
+    맞힌 비율, P 는 채점된 풀이 수를 낸 문제 수로 나눈 값, G 는 이미 있던 판정을 바꾼
+    `Judged` 수를 채점된 풀이 수로 나눈 값이다. 모두 n/d 로만 보고하고, 어떤 상태도 이
+    숫자로 바뀌지 않는다.
+  → [operator-quiz](../../addons/operator-quiz/lane.toml) ·
+  [운영자 퀴즈 안내](../guides/operator-quiz.md) ·
+  [RFC](../rfc/RFC-operator-quiz-lane.md)
 
 **Lane Action Receipt & Uncertainty (Lane 액션 영수증과 불확실성 보존)**
 : Lane Add-on worker에 요청된 액션(`masc_lane_act`)의 진행 상태와 결과 영수증(`Lane Action Receipt`),
@@ -3956,7 +4044,7 @@ status: reference
 
 **Demand Retrieval across Revisions (리비전을 넘는 요청 시 검색)**
 : 과거 admission 관측이 확정된 리비전 계보를 따라 현재 후속 기억을 찾아내는 `keeper_memory_search`의 경로(#42029·#42054·#42055). 세 단계가 분리되어 있다.
-  1. **Admission Lookup Binding**: Librarian이 `incorporated`/`already_represented`로 판정한 미룬 명시 쓰기는 원본 관측·후보 식별자·선택된 대상의 조회 결속(`admission_recall_binding`)을 후보 소비와 같은 WAL 트랜잭션으로 커밋한다. `not_durable`·`deferred` 판정은 결속을 만들지 않는다. 결속 대상은 Librarian이 돌려준 claim과 글이 똑같은 선택된 기억으로 정해지고(`fact.claim = claim`), 같은 글의 기억이 둘이면 먼저 찾은 쪽이 대상이다(`keeper_librarian_runtime.ml:1022`). 결속은 Librarian이 선언한 관계를 기록할 뿐 그 관계를 독립 검증한 것이 아니다.
+  1. **Admission Lookup Binding**: Librarian이 `incorporated`/`already_represented`로 판정한 미룬 명시 쓰기는 원본 관측·후보 식별자·선택된 대상의 조회 결속(`admission_recall_binding`)을 후보 소비와 같은 WAL 트랜잭션으로 커밋한다. `not_durable`·`deferred` 판정은 결속을 만들지 않는다. 결속 대상은 Librarian이 돌려준 claim과 글이 똑같은 선택된 기억으로 정해지고(`fact.claim = claim`), 같은 글의 기억이 둘이면 먼저 찾은 쪽이 대상이다(`lib/keeper/keeper_librarian_runtime.ml`의 `validate_admission_answer` 안 `fact.claim = claim` 선택). 결속은 Librarian이 선언한 관계를 기록할 뿐 그 관계를 독립 검증한 것이 아니다.
   2. **구조적 후보 수집**: `read_successor_recall_for_keepers_dir`가 커밋된 스냅샷 전이와 리비전 링크만 리비전 순서로 깊이 제한 없이 따라간다. 전이 증거가 빠지면 미해결이고, 철회 뒤 무관하게 같은 글이 다시 추가돼도 끊긴 경로를 되살리지 않는다. 구조적 후보는 아직 답이 아니다.
   3. **범위 판정**: 후속 선택기(`Keeper_memory_successor_selection`)가 쿼리·원본 관측·대상·커밋된 경로를 보고 현재 대상이 같은 주제·사건·적용 범위를 다루는지 판정한다. 모델 실패·불확실한 범위·바뀐 증거는 미해결로 남기며 직접 일치 결과는 그대로 보존한다 — 권위 있는 "일치 없음" 답으로 바꾸지 않는다.
   결과의 본문과 Memory ID는 현재 대상 것이고 과거 조회 출처(`lookup_evidence`·`successor_lookup_evidence`)는 별도로 표시된다. 여러 관측이 같은 현재 대상을 가리켜도 결과는 하나다.

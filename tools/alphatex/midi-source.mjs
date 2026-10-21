@@ -35,6 +35,32 @@ function tempoBytes(value) {
   const micros = integer(Math.round(60e6 / value), 'tempo microseconds', 1, 0xffffff)
   return [micros >> 16, (micros >> 8) & 255, micros & 255]
 }
+const meterData = data => {
+  if (!Array.isArray(data) || data.length !== 4) throw new Error('MIDI time signature needs four bytes')
+  data.forEach(byte => integer(byte, 'time-signature byte', 0, 255))
+  integer(data[0], 'time-signature numerator', 1, 255)
+  return data
+}
+export function meterEvent(event) {
+  // Unrecognized original metadata remains opaque and round-trips unchanged.
+  if (event?.kind !== 'meta' || event.type !== 0x58 || !Array.isArray(event.data) || event.data.length !== 4
+      || event.data.some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255) || !event.data[0]) return null
+  const [numerator, power, clocks, notated32nds] = event.data
+  return { kind: 'meter', id: event.id, track: event.track, tick: event.tick,
+    numerator, denominator: 2 ** power, clocks, notated32nds }
+}
+function meterBytes({ numerator, denominator, clocks = 24, notated32nds = 8 }) {
+  const power = Math.log2(denominator)
+  if (!Number.isInteger(power) || power < 0 || power > 255 || 2 ** power !== denominator) throw new Error('Time-signature denominator must be a power of two')
+  return meterData([numerator, power, clocks, notated32nds])
+}
+function editableMetadata(type, data) {
+  switch (type) {
+    case 0x51: return tempoData(data)
+    case 0x58: return meterData(data)
+    default: throw new Error('Only Set Tempo and Time Signature metadata can be edited')
+  }
+}
 const tag = (bytes, offset) => bytes.toString('latin1', offset, offset + 4)
 function chunks(bytes, start, end, littleEndian = false, padded = false) {
   const result = []
@@ -168,14 +194,14 @@ function materialize(source) {
   const changed = new Map()
   for (const patch of source.changes) {
     const event = byID.get(patch?.id)
-    if (!event || !(event.kind === 'channel' || tempoEvent(event)) || changed.has(patch.id)) throw new Error('Invalid or duplicate MIDI source edit')
+    if (!event || !(event.kind === 'channel' || event.kind === 'meta' && [0x51, 0x58].includes(event.type)) || changed.has(patch.id)) throw new Error('Invalid or duplicate MIDI source edit')
     if (patch.removed === true) {
       if (Object.keys(patch).some(key => !['id', 'removed'].includes(key))) throw new Error('Removed MIDI event cannot also change')
       changed.set(patch.id, null)
     } else {
       const field = event.kind === 'channel' ? 'bytes' : 'data'
       if (Object.keys(patch).some(key => !['id', 'tick', field].includes(key))) throw new Error('Unknown MIDI source edit field')
-      const payload = event.kind === 'channel' ? channelBytes(patch.bytes) : tempoData(patch.data)
+      const payload = event.kind === 'channel' ? channelBytes(patch.bytes) : editableMetadata(event.type, patch.data)
       changed.set(patch.id, { ...event, tick: integer(patch.tick, 'edited MIDI tick'), [field]: [...payload] })
     }
   }
@@ -187,8 +213,7 @@ function materialize(source) {
         || Object.keys(event).some(key => !(meta ? ['id', 'track', 'tick', 'kind', 'type', 'data'] : ['id', 'track', 'tick', 'bytes']).includes(key))) throw new Error('Invalid inserted MIDI event')
     ids.add(event.id)
     integer(event.track, 'inserted MIDI track', 0, tracks.length - 1)
-    if (meta && event.type !== 0x51) throw new Error('Only Set Tempo metadata can be inserted')
-    const payload = meta ? { kind: 'meta', data: [...tempoData(event.data)] } : { kind: 'channel', bytes: [...channelBytes(event.bytes)] }
+    const payload = meta ? { kind: 'meta', data: [...editableMetadata(event.type, event.data)] } : { kind: 'channel', bytes: [...channelBytes(event.bytes)] }
     tracks[event.track].push({ ...event, ...payload, tick: integer(event.tick, 'inserted MIDI tick'), port: 0 })
   }
   // Stable ordering retains original same-tick controller/note order. Inserted
@@ -259,12 +284,33 @@ function encodeTrack(events) {
   let previous = 0
   const bytes = []
   for (const event of events) {
-    bytes.push(Buffer.from(vlq(event.tick - previous))); previous = event.tick
+    let delta = integer(event.tick - previous, 'MIDI delta')
+    // SMF deltas are 28-bit VLQs, not absolute tick limits. Empty sequencer
+    // metadata preserves longer gaps without a wire message or tempo change.
+    while (delta > MAX_DELTA) {
+      bytes.push(Buffer.from([...vlq(MAX_DELTA), 0xff, 0x7f, 0])); delta -= MAX_DELTA
+    }
+    bytes.push(Buffer.from(vlq(delta))); previous = event.tick
     if (event.kind === 'channel') bytes.push(Buffer.from(event.bytes))
     else if (event.kind === 'meta') bytes.push(Buffer.from([0xff, event.type, ...vlq(event.data.length)]), Buffer.from(event.data))
     else bytes.push(Buffer.from([event.status, ...vlq(event.data.length)]), Buffer.from(event.data))
   }
   return chunk('MTrk', Buffer.concat(bytes))
+}
+export function midiSourceFromEvents(events, { ppq, ...options } = {}) {
+  integer(ppq, 'MIDI PPQ', 1, 0x7fff)
+  if (!Array.isArray(events)) throw new Error('MIDI source needs ordered events')
+  for (const event of events) {
+    integer(event.tick, 'MIDI absolute tick')
+    if (event.kind === 'channel') channelBytes(event.bytes)
+    else if (event.kind === 'meta') {
+      integer(event.type, 'MIDI meta type', 0, 127)
+      if (!Array.isArray(event.data)) throw new Error('MIDI metadata needs bytes')
+      event.data.forEach(byte => integer(byte, 'MIDI meta byte', 0, 255))
+    } else throw new Error('MIDI source construction needs channel or meta events')
+  }
+  const header = Buffer.alloc(6); header.writeUInt16BE(1, 2); header.writeUInt16BE(ppq, 4)
+  return importMidiSource(Buffer.concat([chunk('MThd', header), encodeTrack(events)]), options)
 }
 export function exportMidiSource(source) {
   const parsed = materialize(source)
@@ -364,8 +410,15 @@ export function editMidiSourceNotes(source, edits, { pattern } = {}) {
       if (info.format === 2 && track !== performance.pattern) throw new Error('Insert into the selected MIDI pattern')
       const channel = integer(edit.channel, 'MIDI insertion channel', 0, 15)
       const key = integer(pitch, 'MIDI note pitch', 0, 127), vel = integer(velocity, 'MIDI note velocity', 1, 127)
-      const at = integer(start, 'MIDI note start'), end = integer(at + integer(duration, 'MIDI note duration', 1), 'MIDI note end')
-      const on = insert(track, at, [0x90 | channel, key, vel]), off = insert(track, end, [0x80 | channel, key, 0])
+      const at = integer(start, 'MIDI note start'), end = integer(at + integer(duration, 'MIDI note duration', 0), 'MIDI note end')
+      const release = edit.release ?? { kind: 'note-off', velocity: 0 }
+      let releaseBytes
+      switch (release.kind) {
+        case 'note-off': releaseBytes = [0x80 | channel, key, integer(release.velocity, 'MIDI release velocity', 0, 127)]; break
+        case 'note-on-zero': releaseBytes = [0x90 | channel, key, 0]; break
+        default: throw new Error('Unknown MIDI note release form')
+      }
+      const on = insert(track, at, [0x90 | channel, key, vel]), off = insert(track, end, releaseBytes)
       // Insertions follow existing same-tick metadata, so the active port at
       // their start is the source route they must retain through their note-off.
       const port = performance.events.filter(event => event.track === track && event.tick <= at
@@ -415,7 +468,7 @@ function sourcePatch(source) {
     next.insertions.push({ id, track, tick, ...payload }); append(id, track, tick); return id
   }
   const insert = (track, tick, bytes) => add(track, tick, { bytes })
-  const insertTempo = (track, tick, data) => add(track, tick, { kind: 'meta', type: 0x51, data })
+  const insertMeta = (track, tick, type, data) => add(track, tick, { kind: 'meta', type, data })
   const place = (event, value) => {
     if (value.removed || value.tick !== event.tick) {
       detach(event.id)
@@ -444,16 +497,16 @@ function sourcePatch(source) {
       order.events = order.events.map(id => expressionEvent(byID.get(id)) ? id : protectedIDs[index++])
     }
   }
-  return { next, insert, insertTempo, place, finish }
+  return { next, insert, insertMeta, place, finish }
 }
 
 export function editMidiSourceTempos(source, edits, { pattern } = {}) {
   const performance = midiSourcePattern(source, { pattern }), events = new Map(performance.events.map(event => [event.id, event]))
-  const { next, insertTempo, place, finish } = sourcePatch(source), used = new Set()
+  const { next, insertMeta, place, finish } = sourcePatch(source), used = new Set()
   for (const edit of edits) {
     if (edit.kind === 'insert') {
       const track = performance.format === 2 ? performance.pattern : 0
-      insertTempo(track, integer(edit.tick, 'tempo tick'), tempoBytes(edit.value))
+      insertMeta(track, integer(edit.tick, 'tempo tick'), 0x51, tempoBytes(edit.value))
       continue
     }
     const event = events.get(edit.id), value = tempoEvent(event)
@@ -462,6 +515,25 @@ export function editMidiSourceTempos(source, edits, { pattern } = {}) {
     if (edit.kind === 'remove') place(event, { removed: true })
     else if (edit.kind === 'change') place(event, { tick: integer(edit.tick ?? event.tick, 'tempo tick'), data: edit.value === undefined ? [...event.data] : tempoBytes(edit.value) })
     else throw new Error('Unknown MIDI tempo edit')
+  }
+  finish(); exportMidiSource(next); midiSourcePattern(next, { pattern })
+  return next
+}
+
+export function editMidiSourceMeters(source, edits, { pattern } = {}) {
+  const performance = midiSourcePattern(source, { pattern }), events = new Map(performance.events.map(event => [event.id, event]))
+  const { next, insertMeta, place, finish } = sourcePatch(source), used = new Set()
+  for (const edit of edits) {
+    if (edit.kind === 'insert') {
+      insertMeta(performance.format === 2 ? performance.pattern : 0, integer(edit.tick, 'meter tick'), 0x58, meterBytes(edit.value))
+      continue
+    }
+    const event = events.get(edit.id), value = meterEvent(event)
+    if (!value || used.has(edit.id)) throw new Error('Select a unique time-signature event in this pattern')
+    used.add(edit.id)
+    if (edit.kind === 'remove') place(event, { removed: true })
+    else if (edit.kind === 'change') place(event, { tick: integer(edit.tick ?? event.tick, 'meter tick'), data: meterBytes({ ...value, ...edit.value }) })
+    else throw new Error('Unknown MIDI time-signature edit')
   }
   finish(); exportMidiSource(next); midiSourcePattern(next, { pattern })
   return next

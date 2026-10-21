@@ -56,7 +56,7 @@ describe('CrossSignalReadout (design vocabulary)', () => {
       <${CrossSignalReadout}
         events=${[
           entry({ event_type: 'wake' }),
-          entry({ source: 'tool_call_io', tool_name: 'tool_read_file', success: false }),
+          entry({ source: 'tool_call_io', record_kind: 'tool_call', tool: 'tool_read_file', disposition: 'failed', wire_outcome: 'error' }),
         ]}
         hourlyTrend=${[{ hour: '2026-08-23T10', calls: 10, success: 9, success_rate: 90 }]}
         eventWindowMs=${120_000}
@@ -85,7 +85,7 @@ describe('DetailPane (design vocabulary)', () => {
   it('renders .ob-detail-body with a toned ai-b badge for a selection', () => {
     selectEntity({
       kind: 'tool_call',
-      entry: entry({ source: 'tool_call_io', tool_name: 'tool_execute', success: false, keeper: 'sangsu' }),
+      entry: entry({ source: 'tool_call_io', record_kind: 'tool_call', tool: 'tool_execute', disposition: 'failed', wire_outcome: 'error', keeper: 'sangsu' }),
       ts: START + 60_000,
       bucketCount: 1,
     })
@@ -94,6 +94,54 @@ describe('DetailPane (design vocabulary)', () => {
     expect(container.querySelector('.ob-detail-body .ai-b.bad')?.textContent).toBe('failure')
     expect(container.textContent).toContain('tool_execute')
     expect(container.textContent).toContain('sangsu')
+  })
+
+  it('gives every recorded outcome its own badge, and only a success is ok and only a failure bad', () => {
+    const seen: Array<{ label: string; classes: string[] }> = []
+    for (const fields of [
+      { disposition: 'completed' },
+      { disposition: 'failed' },
+      { disposition: 'deferred' },
+      { wire_outcome: 'unknown' },
+      { disposition: 'invented' },
+    ]) {
+      selectEntity({
+        kind: 'tool_call',
+        entry: entry({ source: 'tool_call_io', record_kind: 'tool_call', tool: 'tool_execute', ...fields }),
+        ts: START + 60_000,
+        bucketCount: 1,
+      })
+      const { container } = render(html`<${DetailPane} />`)
+      const badge = container.querySelector('.ob-detail-body .ai-b')
+      expect(badge).toBeTruthy()
+      seen.push({ label: badge!.textContent ?? '', classes: [...badge!.classList] })
+      cleanup()
+    }
+    expect(new Set(seen.map(b => b.label)).size).toBe(5)
+    const tones = seen.map(b => (['ok', 'bad', 'warn'] as const).find(t => b.classes.includes(t)))
+    expect(tones).toEqual(['ok', 'bad', 'warn', 'warn', 'bad'])
+  })
+
+  it('titles a call by the tool the log row names', () => {
+    selectEntity({
+      kind: 'tool_call',
+      entry: entry({ source: 'tool_call_io', record_kind: 'tool_call', tool: 'tool_execute', disposition: 'completed' }),
+      ts: START + 60_000,
+      bucketCount: 1,
+    })
+    const { container } = render(html`<${DetailPane} />`)
+    expect(container.textContent).toContain('tool_execute')
+  })
+
+  it('badges an event that reports an error and no outcome', () => {
+    selectEntity({
+      kind: 'event',
+      entry: entry({ source: 'agent_event', event_type: 'wake', error: 'boom' }),
+      ts: START + 60_000,
+      bucketCount: 1,
+    })
+    const { container } = render(html`<${DetailPane} />`)
+    expect(container.querySelector('.ob-detail-body .ai-b.bad')).toBeTruthy()
   })
 })
 

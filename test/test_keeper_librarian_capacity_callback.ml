@@ -45,7 +45,7 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~
     | Some (base_url, _) -> [{Fixture.id = "capacity-first"; base_url}; terminal] in
   let resolver = Fixture.resolver_snapshot ~source:"capacity-callback-fixture" targets in
   (match Runtime_exact_output_registry.publish
-      ~lanes:[{Runtime_schema.id = "librarian_exact";
+      ~lanes:[{Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian;
         enabled = true; slot_ids = List.map (fun (target : Fixture.target_fixture) -> target.id) targets;
         cli_slot_ids = List.map fst cli_errors;
         max_output_tokens = Some 4_096; thinking = None}] resolver with
@@ -148,7 +148,7 @@ let test_absorb_evidence_capacity_recovers ~base_path () =
   let resolver = Fixture.resolver_snapshot ~source:"absorb-capacity"
     [{Fixture.id="absorb-capacity-librarian"; base_url=librarian.base_url}] in
   (match Runtime_exact_output_registry.publish
-    ~lanes:[{Runtime_schema.id="librarian_exact"; enabled=true;
+    ~lanes:[{Runtime_schema.owner = Runtime_schema.Builtin Standalone_lane.Librarian; enabled=true;
       slot_ids=["absorb-capacity-librarian"]; cli_slot_ids=[];
       max_output_tokens=Some 4096; thinking=None}] resolver with
    | Ok _ -> () | Error error ->

@@ -55,7 +55,7 @@ test('source audition preserves SMPTE clock and zero-length messages, and refuse
   assert.equal(z.duration,0);assert.equal(z.events.length,2)
   assert.throws(()=>sourceMidiTimeline(zero),/every source MIDI port/)
   assert.throws(()=>sourceMidiTimeline(zero,{midiOutput:'01'}),/exact signed/)
-  assert.throws(()=>sourceMidiTimeline(zero,{midiOutput:'123',loop:true}),/once/)
+  assert.throws(()=>sourceMidiTimeline(zero,{midiOutput:'123',loop:true}),/trim/)
 })
 
 test('source seek converts original ticks through tempo and SMPTE clocks without phrase tempo defaults',()=>{

@@ -133,7 +133,7 @@ let mandatory_exact_output_lane_violations lanes =
        match
          List.find_opt
            (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-              String.equal lane.id lane_id)
+              String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
            lanes
        with
        | None -> Some (Mandatory_lane_missing { lane_id })
@@ -570,33 +570,22 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
   Mcp_server.set_sse_callback state Sse.broadcast
 
 
+type lazy_startup_task = Restore_sessions
+
 type lazy_startup_group = {
   group_name : string;
-  task_names : string list;
+  tasks : lazy_startup_task list;
 }
 
 let lazy_startup_plan () =
-  let initial_groups =
-    [
-      {
-        group_name = "initialize";
-        task_names = [ "restore_sessions" ];
-      };
-    ]
-  in
-  let cleanup_groups =
-    [
-      {
-        group_name = "cleanup";
-        task_names = [ "jsonl_prune" ];
-      };
-    ]
-  in
-  initial_groups @ cleanup_groups
+  [ { group_name = "initialize"; tasks = [ Restore_sessions ] } ]
+
+let lazy_startup_task_name = function
+  | Restore_sessions -> "restore_sessions"
 
 let lazy_startup_task_names () =
   lazy_startup_plan ()
-  |> List.concat_map (fun group -> group.task_names)
+  |> List.concat_map (fun group -> List.map lazy_startup_task_name group.tasks)
 
 type startup_failure_disposition =
   | Fatal_pre_ready
@@ -1272,18 +1261,13 @@ let start_owner_lazy_tasks ~sw state =
       Server_startup_state.fail_lazy_task ~task:task_name ~error
   in
   let task_fn = function
-    | "restore_sessions" -> fun () -> restore_persisted_sessions state
-    | "jsonl_prune" -> fun () -> startup_prune_jsonl state
-    | task_name ->
-      raise
-        (Invalid_argument
-           (Printf.sprintf "unknown lazy startup task: %s" task_name))
+    | Restore_sessions -> fun () -> restore_persisted_sessions state
   in
   let task_names = lazy_startup_task_names () in
   let task_groups =
     lazy_startup_plan ()
     |> List.map (fun group ->
-      group, List.map (fun name -> name, task_fn name) group.task_names)
+      group, List.map (fun task -> lazy_startup_task_name task, task_fn task) group.tasks)
   in
   let run_lazy_task_group (group, tasks) =
     Log.Server.info
@@ -1459,8 +1443,10 @@ let start_post_ready_owner_lanes
       start_authority ())
   else start_authority ();
 
-  start_microvm_guest_maintenance ~sw
-    ~sweep:(fun () -> startup_sweep_microvm_guests state);
+  start_maintenance ~sw ~task:Jsonl_retention
+    ~run:(fun () -> startup_prune_jsonl state);
+  start_maintenance ~sw ~task:Microvm_guest_sweep
+    ~run:(fun () -> startup_sweep_microvm_guests state);
   Server_runtime_startup_maintenance.report_unknown_typesafeai_exclusions
     ~base_path:(Mcp_server.workspace_config state).base_path;
   Server_runtime_startup_maintenance.report_unarmed_typesafeai_destinations ();

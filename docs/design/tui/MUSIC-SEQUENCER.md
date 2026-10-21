@@ -18,6 +18,13 @@ Undo/redo retains complete document revisions. Saving refuses an externally chan
 file; save-as retains edits without replacing it. Standard MIDI export and SoundFont
 preview consume the same schedule, including clipped notes spanning loop boundaries.
 
+In the phrase and source editors, `:loop START END` selects a range and enables
+repetition for the next playback. Selecting another range retires the old
+preparation/player before it can publish a replacement. `l` toggles repetition
+without erasing that range. Phrase ranges are saved in the document; source
+ranges belong to the editing session and leave the original performance/export
+unchanged. The arrangement editor retains its own saved playback-loop selection.
+
 Each save first writes and syncs a private local candidate and a separate publication
 inode in a sibling `.song.json.save-*` directory. Updating an existing project moves its current inode
 to that directory's `previous.json`, checks the claimed bytes against the loaded
@@ -46,6 +53,35 @@ voicings use Tonal's chord intervals. Rootless voicings use its left-hand dictio
 and its top-note voice-leading selection for chord progressions. Unsupported chords
 and registers are explicit errors, not fallback substitutions.
 
+`:revoice SYMBOL MODE [OCTAVE [INVERSION]]` changes existing sounding voices in
+the chosen track at the cursor, low to high, with one undo revision. It preserves
+note identities, onset/length and velocity rather than replacing a rhythmic phrase
+with a block chord. The requested voicing must have the same voice count.
+Imported MIDI uses the same decision in source ticks and preserves paired
+note-off identity and release velocity; explicit channel or note selection resolves
+multiple channels/ports. Other expression events retain their original keys and
+bytes, so polyphonic pressure is not retargeted by this note edit. Analysis remains
+candidate-based and uses key durations, not inferred pedal-extended sound.
+
+The harmonic timeline runs in the owned sequencer worker. It sweeps exact
+note-on/off boundaries, retains shared-key overlap counts and rests, and represents
+zero-duration source notes as points. Mix analysis uses audible phrase tracks or
+the chosen MIDI pattern; track analysis additionally uses the source channel
+selection. Original PPQ/SMPTE positions remain the analysis authority. Choosing a
+row returns to that tick for further edits; analysis itself never changes the
+musical document. Context changes cancel obsolete work, close joins the worker,
+and complete candidate data can be exported without overwriting an existing file.
+
+Piano-roll note selections belong to one track/pattern/channel and contain exact
+note IDs, with a copy anchor in native ticks. Range selection admits note onsets,
+not clipped tails; select-all includes point notes. Session-private clipboard
+snapshots preserve rhythm/dynamics and source NoteOff wire form/release velocity.
+Paste and group moves validate one whole candidate before a single undo revision;
+source port and note-off pairing checks remain authoritative. Non-note events stay
+in place. Context/history transitions clear selections while retaining independent
+clipboard contents. TUI commands and forwarded shortcuts share these decisions;
+admitted clipboard edits drain through close before saving.
+
 Native WAV preview uses AVAudioEngine/PlayerNode buffers with pause, seek and
 looping, pinned to a CoreAudio output. External MIDI preview uses a separately
 owned CoreMIDI sender and pins a destination by unique ID. It projects the same
@@ -68,7 +104,7 @@ This stack is one step toward the full destination. Further work remains:
   arrangement playback, and low-latency monitoring/recording.
 - Connect the independently developed VST instrument/preset host (#43684) to project
   playback without changing the selected instrument on an error.
-- Piano-roll selections, copy/paste, step/live recording, automation,
+- Step/live recording, automation,
   flexible tempo/meter maps, metronome/count-in and practice feedback.
 - Verify real MIDI and audio hardware and the actual Ghostty UI. Loopback/virtual
   sources, PCM files and terminal controller evidence prove narrower behaviors.
@@ -114,8 +150,10 @@ and supported RPN data, current notes, sustain/sostenuto membership and original
 release wire forms. Seek uses source tick/tempo-map or SMPTE timing. Unknown
 initial values and opaque device state fail explicitly; this is partial source
 reconstruction, with its boundaries documented in tools/alphatex/SOURCE-STATE.md.
-Source looping, VST routing, overdubs, shared clock and
-practice workflows remain separate unfinished units.
+Source-window looping is available but stays session-local: `:loop START END`
+chooses the range and `l` toggles repetition without changing the source
+document (tools/alphatex/MIDI-SOURCE.md §Source-window audition). VST routing,
+overdubs, shared clock and practice workflows remain separate unfinished units.
 
 ### Arrangement document boundary
 
@@ -136,3 +174,24 @@ explicit asset/port outputs and physical destination/channel ownership admission
 Finite repeat counts remain compressed; missed complete copies skip to the
 current phase. Mixed WAV/MIDI shared-clock playback and overdub remain unfinished.
 See [the core contract](../../../tools/alphatex/ARRANGEMENT.md).
+
+### Imported time-signature maps
+
+Imported SMF sources expose `:meters`, with Up/Down selection, Shift+Left/Right movement,
+Enter editing and Delete removal. `:meter NUM DEN [AT [CLOCKS NOTATED32NDS]]` inserts or
+changes a time signature at the cursor or an explicit source position. `:meter-event ID`,
+`:meter-value NUM DEN [CLOCKS NOTATED32NDS]`, `:meter-move AT` and `:meter-remove`
+address a selected event. A numerator/denominator edit preserves both auxiliary fields;
+a new event defaults to 24 MIDI clocks per click and eight notated 32nds per MIDI quarter.
+`+`/`-` change the numerator. Shared undo/redo includes the complete source document.
+
+The active signature follows the source cursor. Positions remain quarter-note beats for
+PPQ and frames for SMPTE, without changing note timestamps, tempo integration or playback
+seconds. This edits SMF metadata; it does not add bar-based navigation or a metronome.
+Format 0/1 insertion uses the conductor track; format 2 requires explicit pattern selection.
+Several signatures at one tick require explicit event selection. Original unknown or
+unrecognized metadata stays opaque, and untouched tracks/containers retain their bytes.
+The exported four-byte layout follows [JZZ's SMF time-signature contract](https://www.jazz-soft.net/doc/JZZ/jzzmidi.html).
+Arrangement handoff uses the same recognized, last-at-tick-zero signature as the editor.
+Its metadata admits every exact SMF denominator power; explicit practice/count-in still
+uses its existing native clock admission and may reject a meter outside that range.

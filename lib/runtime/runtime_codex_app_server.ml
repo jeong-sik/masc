@@ -1056,20 +1056,76 @@ let parse_turn_start result =
   required_string stage "id" turn_fields
 ;;
 
-let agent_message_content_of_item ~stage item =
+(* [MessagePhase] of an agentMessage item (codex-cli 0.163.0,
+   [codex app-server generate-json-schema], v2/ItemCompletedNotification.json):
+   [commentary] is mid-turn narration that tools or more output may follow,
+   [partial_answer] is answer text that more output may follow, and
+   [final_answer] is the turn's declared answer. The member is optional and
+   nullable; the schema says providers do not send it consistently, so an
+   absent or null phase reads as phase unknown and keeps the reading from
+   before the member existed. A value the schema does not name is kept whole. *)
+type message_phase =
+  | Commentary
+  | Partial_answer
+  | Final_answer
+  | Unrecognized_phase of string
+
+let message_phase_of_string = function
+  | "commentary" -> Commentary
+  | "partial_answer" -> Partial_answer
+  | "final_answer" -> Final_answer
+  | other -> Unrecognized_phase other
+;;
+
+(* What a message can be for the turn's reply. A final answer is the reply.
+   Commentary still streams but is never the reply, so a turn whose only
+   messages are commentary has none. A partial answer, an absent or null
+   phase and an unrecognized one are fallbacks, as every message was before
+   the member existed: {!terminal_result} takes the newest fallback when no
+   final answer came. *)
+type reply_candidacy =
+  | Final_reply
+  | Fallback_reply
+  | Not_a_reply
+
+let reply_candidacy = function
+  | Some Final_answer -> Final_reply
+  | Some Commentary -> Not_a_reply
+  | Some (Partial_answer | Unrecognized_phase _) | None -> Fallback_reply
+;;
+
+(* The id and declared phase of an agentMessage item. [item/started] reads
+   only these: the message's text is not final until it completes. *)
+let agent_message_phase_of_item ~stage item =
   let* fields = assoc_at stage item in
   match List.assoc_opt "type" fields with
   | Some (`String "agentMessage") ->
+    let* item_id = optional_string stage "id" fields in
+    let* phase = optional_string stage "phase" fields in
+    Ok (Some (item_id, Option.map message_phase_of_string phase))
+  | Some (`String _) -> Ok None
+  | Some _ -> protocol_error stage "item type must be a string"
+  | None -> protocol_error stage "item is missing type"
+;;
+
+type agent_message =
+  { message_id : string option
+  ; declared_phase : message_phase option
+  ; message_text : string
+  }
+
+let agent_message_content_of_item ~stage item =
+  let* identity = agent_message_phase_of_item ~stage item in
+  match identity with
+  | None -> Ok None
+  | Some (message_id, declared_phase) ->
+    let* fields = assoc_at stage item in
     (* The app-server schema requires [text] to be a string, not a non-empty
        string. In particular, a tool-only turn may complete an agent-message
        item with empty text after the tool result has been committed. Such an
        item is valid protocol but is not a visible assistant-message candidate. *)
-    let* text = required_string_any stage "text" fields in
-    let* phase = optional_string stage "phase" fields in
-    Ok (Some (phase, text))
-  | Some (`String _) -> Ok None
-  | Some _ -> protocol_error stage "item type must be a string"
-  | None -> protocol_error stage "item is missing type"
+    let* message_text = required_string_any stage "text" fields in
+    Ok (Some { message_id; declared_phase; message_text })
 ;;
 
 (* Model items and host-owned dynamic calls do not prove a native effect.
@@ -1186,19 +1242,34 @@ let native_completion_of_item ~stage ~kind item =
   Ok ({outcome; exit_code} : Runtime_native_tools.completion)
 ;;
 
-let messages_of_items ~stage = function
+(* The terminal list's newest final answer and newest fallback, whether it
+   lists an agent message, and whether it lists one that no [item/completed]
+   in [notified] reported: such a message completed at a point this client
+   never saw. *)
+let messages_of_items ~stage ~notified = function
   | `List items ->
-    let rec loop final fallback completed = function
-      | [] -> Ok (final, fallback, completed)
+    let rec loop final fallback completed unnotified = function
+      | [] -> Ok (final, fallback, completed, unnotified)
       | item :: rest ->
         let* message = agent_message_content_of_item ~stage item in
         (match message with
-         | Some (_, text) when String.trim text = "" -> loop final fallback true rest
-         | Some (Some "final_answer", text) -> loop (Some text) fallback true rest
-         | Some (_, text) -> loop final (Some text) true rest
-         | None -> loop final fallback completed rest)
+         | None -> loop final fallback completed unnotified rest
+         | Some { message_id; declared_phase; message_text } ->
+           let unnotified =
+             unnotified
+             || (match message_id with
+                 | Some item_id -> not (Hashtbl.mem notified item_id)
+                 | None -> true)
+           in
+           if String.trim message_text = ""
+           then loop final fallback true unnotified rest
+           else (
+             match reply_candidacy declared_phase with
+             | Final_reply -> loop (Some message_text) fallback true unnotified rest
+             | Fallback_reply -> loop final (Some message_text) true unnotified rest
+             | Not_a_reply -> loop final fallback true unnotified rest))
     in
-    loop None None false items
+    loop None None false false items
   | _ -> protocol_error stage "turn items must be an array"
 ;;
 
@@ -1315,8 +1386,59 @@ let turn_error ~tool_effect_attempted fields =
       { detail = "turn failed without an error object"; codex_error_info = None }
 ;;
 
-let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
-    ~assistant_message_completed
+type streamed_texts =
+  { buffers : (string option, Buffer.t) Hashtbl.t
+  ; reasoning_buffers : (string * reasoning_part, Buffer.t) Hashtbl.t
+  ; completed_texts : (string, unit) Hashtbl.t
+  ; completed_reasoning : (string * reasoning_part, unit) Hashtbl.t
+  ; completed_reasoning_items : (string, unit) Hashtbl.t
+  ; native_items : (string, item_kind) Hashtbl.t
+      (* Native start/completion lifetime, independent of [open_tool_call_ids]
+         which tracks the idle receive phase and clears when the model speaks. *)
+  ; declared_phases : (string, message_phase) Hashtbl.t
+      (* The phase [item/started] declared for an agent message, read while
+         the message has not completed. *)
+  ; mutable current_item : string option
+  ; mutable unfinished_messages : string option list
+      (* Agent messages that streamed since the last completed agent message,
+         newest delta first. A completed message empties it, so a message
+         that streamed before a later completion and never completed itself
+         is not read as the reply. *)
+  ; mutable assistant_message_completed : bool
+  }
+
+(* What an unfinished message offers as the reply: its streamed text, unless
+   [item/started] declared it commentary. It never completed, so it is a
+   fallback even when it was declared the final answer. *)
+let unfinished_message_text streamed_texts key =
+  let declared =
+    match key with
+    | Some item_id -> Hashtbl.find_opt streamed_texts.declared_phases item_id
+    | None -> None
+  in
+  match reply_candidacy declared with
+  | Not_a_reply -> None
+  | Final_reply | Fallback_reply ->
+    Option.map Buffer.contents (Hashtbl.find_opt streamed_texts.buffers key)
+;;
+
+(* The reply. A final answer comes first: the terminal list's newest, then
+   [seen_final], the newest [item/completed] one. Otherwise the newest message
+   that is not commentary and not blank is the reply, completed or not:
+   - an unfinished message, the newest delta first: it streamed after every
+     completion this turn saw;
+   - then the terminal list's newest fallback, which repeats or extends the
+     notified completions;
+   - then [seen_fallback], the newest notified one.
+   Two messages are never joined into one reply. A terminal list that names
+   a message no [item/completed] reported completed it at a point this client
+   never saw, which ends every unfinished message.
+
+   With no reply, a turn that ran a MASC tool, completed an agent message or
+   streamed visible text completes with empty text, and the Keeper's
+   acceptance decides it. A turn with none of them carried no assistant
+   message. *)
+let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback ~streamed_texts
     ~tool_calls_observed ~tool_effect_attempted params =
   let stage = "turn/completed" in
   let* fields = assoc_at stage params in
@@ -1337,27 +1459,41 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
       | "inProgress" -> protocol_error stage "terminal notification carried inProgress status"
       | "completed" ->
         let* items = required_member stage "items" turn_fields in
-        let* terminal_final, terminal_fallback, terminal_message_completed =
-          messages_of_items ~stage items in
+        let* terminal_final, terminal_fallback, terminal_message_completed,
+             terminal_completion_unnotified =
+          messages_of_items ~stage ~notified:streamed_texts.completed_texts items in
         let visible_text = function
           | Some text when String.trim text <> "" -> Some text
           | Some _ | None -> None
+        in
+        let unfinished =
+          if terminal_completion_unnotified then None
+          else
+            List.find_map
+              (fun key -> visible_text (unfinished_message_text streamed_texts key))
+              streamed_texts.unfinished_messages
         in
         let text =
           match
             visible_text terminal_final,
             visible_text seen_final,
+            unfinished,
             visible_text terminal_fallback,
             visible_text seen_fallback
           with
-          | Some text, _, _, _ | None, Some text, _, _
-          | None, None, Some text, _ | None, None, None, Some text -> Some text
-          | None, None, None, None -> None
+          | Some text, _, _, _, _ | None, Some text, _, _, _
+          | None, None, Some text, _, _ | None, None, None, Some text, _
+          | None, None, None, None, Some text -> Some text
+          | None, None, None, None, None -> None
+        in
+        let streamed_visible_text () =
+          Hashtbl.to_seq_values streamed_texts.buffers
+          |> Seq.exists (fun buffer -> String.trim (Buffer.contents buffer) <> "")
         in
         (match text with
          | Some text -> Ok text
-         | None when tool_calls_observed || assistant_message_completed
-                     || terminal_message_completed -> Ok ""
+         | None when tool_calls_observed || streamed_texts.assistant_message_completed
+                     || terminal_message_completed || streamed_visible_text () -> Ok ""
          | None -> protocol_error stage "completed turn has no assistant message")
       | other -> protocol_error stage (Printf.sprintf "unknown turn status %S" other)
 ;;
@@ -1574,19 +1710,6 @@ let with_scheduling_handoff io ~await_handoff ~handoff ~thread_id ~turn_id run =
       run { io with receive })
 ;;
 
-type streamed_texts =
-  { buffers : (string option, Buffer.t) Hashtbl.t
-  ; reasoning_buffers : (string * reasoning_part, Buffer.t) Hashtbl.t
-  ; completed_texts : (string, unit) Hashtbl.t
-  ; completed_reasoning : (string * reasoning_part, unit) Hashtbl.t
-  ; completed_reasoning_items : (string, unit) Hashtbl.t
-  ; native_items : (string, item_kind) Hashtbl.t
-      (* Native start/completion lifetime, independent of [open_tool_call_ids]
-         which tracks the idle receive phase and clears when the model speaks. *)
-  ; mutable current_item : string option
-  ; mutable assistant_message_completed : bool
-  }
-
 let complete_reasoning_item ~stage ~on_stream_event streamed_texts item =
   let* fields = assoc_at stage item in
   let* item_id = required_string stage "id" fields in
@@ -1718,13 +1841,12 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
             | _ -> Buffer.create 256 in
           Hashtbl.add streamed_texts.buffers key buffer; buffer in
     streamed_texts.current_item <- key;
+    streamed_texts.unfinished_messages <-
+      key
+      :: List.filter (fun other -> not (Option.equal String.equal other key))
+           streamed_texts.unfinished_messages;
     Buffer.add_string buffer delta;
     emit_stream_event on_stream_event (Text_delta {item_id; delta});
-    let seen_fallback =
-      match seen_fallback with
-      | None -> Some delta
-      | Some text -> Some (text ^ delta)
-    in
     (* The model is speaking: its window applies again, whatever tool items
        are still open in the background. *)
     io.set_receive_phase Model_turn;
@@ -1808,6 +1930,11 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
     let* tool_item = tool_item_of_item ~stage item in
     let* kind = item_kind_of_item ~stage item in
+    let* message = agent_message_phase_of_item ~stage item in
+    (match message with
+     | Some (Some item_id, Some phase) ->
+       Hashtbl.replace streamed_texts.declared_phases item_id phase
+     | Some (Some _, None) | Some (None, (Some _ | None)) | None -> ());
     let open_tool_call_ids =
       match tool_item with
       | None ->
@@ -1869,9 +1996,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
     let* message = agent_message_content_of_item ~stage item in
     let* () = match message with
       | None -> Ok ()
-      | Some (_, text) ->
-          let* item_fields = assoc_at stage item in
-          let* item_id = optional_string stage "id" item_fields in
+      | Some { message_id = item_id; message_text = text; declared_phase = _ } ->
           let key = match item_id with Some _ -> item_id | None -> streamed_texts.current_item in
           let prefix, source = match Hashtbl.find_opt streamed_texts.buffers key with
             | Some buffer -> Buffer.contents buffer, Item_content
@@ -1911,14 +2036,20 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
        progress. Keep it separate from deltas and final-answer selection so
        ordinary Keeper acceptance rejects the turn without discarding its
        resumable provider session. *)
-    if Option.is_some message then streamed_texts.assistant_message_completed <- true;
+    if Option.is_some message then begin
+      streamed_texts.assistant_message_completed <- true;
+      streamed_texts.unfinished_messages <- []
+    end;
     let message = match message with
-      | Some (_, text) when String.trim text = "" -> None
+      | Some { message_text; _ } when String.trim message_text = "" -> None
       | _ -> message in
     let seen_final, seen_fallback =
       match message with
-      | Some (Some "final_answer", text) -> Some text, seen_fallback
-      | Some (_, text) -> seen_final, Some text
+      | Some { declared_phase; message_text; message_id = _ } ->
+        (match reply_candidacy declared_phase with
+         | Final_reply -> Some message_text, seen_fallback
+         | Fallback_reply -> seen_final, Some message_text
+         | Not_a_reply -> seen_final, seen_fallback)
       | None -> seen_final, seen_fallback
     in
     await_turn_terminal
@@ -1974,7 +2105,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
         ~turn_id
         ~seen_final
         ~seen_fallback
-        ~assistant_message_completed:streamed_texts.assistant_message_completed
+        ~streamed_texts
         ~tool_calls_observed:(!tool_call_count > 0)
         ~tool_effect_attempted:!tool_effect_attempted
         params
@@ -2347,7 +2478,8 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
       ~streamed_texts:{buffers=Hashtbl.create 8; reasoning_buffers=Hashtbl.create 8;
         completed_texts=Hashtbl.create 8; completed_reasoning=Hashtbl.create 8;
         completed_reasoning_items=Hashtbl.create 8;
-        native_items=Hashtbl.create 8; current_item=None; assistant_message_completed=false}
+        native_items=Hashtbl.create 8; declared_phases=Hashtbl.create 8;
+        current_item=None; unfinished_messages=[]; assistant_message_completed=false}
       ~on_stream_event)
   in
   emit_stream_event on_stream_event (Turn_finished { text });

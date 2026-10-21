@@ -49,6 +49,10 @@ enum UmpLiveScope: Decodable, Equatable {
 struct UmpLiveClaim: Decodable {
     let destination: String
     let scope: UmpLiveScope
+    let nativeProtocol: Int32?
+    init(destination: String, scope: UmpLiveScope, nativeProtocol: Int32? = nil) {
+        self.destination = destination; self.scope = scope; self.nativeProtocol = nativeProtocol
+    }
     func conflicts(_ other: Self) -> Bool { destination == other.destination && scope.overlaps(other.scope) }
 }
 struct UmpLiveRoute: Decodable {
@@ -81,6 +85,7 @@ struct UmpLivePlan: Decodable {
             guard let value = Int32(uid), String(value) == uid else { throw MidiFailure("live MIDI requires exact source/destination UIDs") }
         }
         for claim in routes.map(\.claim) + reserved {
+            guard claim.nativeProtocol == nil || [1,2].contains(claim.nativeProtocol!) else { throw MidiFailure("invalid reserved native MIDI protocol") }
             if case .channels(let channels) = claim.scope {
                 guard !channels.isEmpty, channels.allSatisfy({ $0.group < 16 && $0.channel < 16 }) else { throw MidiFailure("invalid live MIDI channel lease") }
             }
@@ -165,6 +170,14 @@ final class UmpLiveInput {
         try checkFailure()
         for source in sources.values { try source.check() }
         for output in outputs { try output.checkDestinations() }
+        try checkReservations()
+    }
+    func checkReservations() throws {
+        for claim in reserved {
+            if let expected = claim.nativeProtocol {
+                guard try umpNativeProtocol(claim.destination).rawValue == expected else { throw MidiFailure("backing MIDI protocol changed after reservation inspection") }
+            }
+        }
     }
     func start() throws {
         guard Thread.isMainThread, state == .idle else { throw MidiFailure("invalid live MIDI startup owner") }
@@ -210,6 +223,7 @@ final class UmpLiveInput {
     func set(routes: [UmpLiveRoute], active: [String], reserved: [UmpLiveClaim]?) throws {
         guard Thread.isMainThread, state == .running else { throw MidiFailure("live MIDI set requires its running lifecycle") }
         if let reserved { self.reserved = reserved }
+        try checkReservations()
         var catalog: [String: UmpLiveRoute] = [:]
         for route in routes {
             guard !route.key.isEmpty, catalog.updateValue(route, forKey: route.key) == nil else {

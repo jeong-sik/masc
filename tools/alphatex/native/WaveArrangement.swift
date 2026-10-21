@@ -100,6 +100,7 @@ struct Region: Decodable {
     let frameCount: AVAudioFramePosition
     let repetitions: AVAudioFramePosition
     let captureClock: CaptureAudioClock?
+    var sourceClock: SourceAudioClock? = nil
     var pulseClock: PulseAudioClock? = nil
     var pulseLoopUnit: Int64? = nil
     var component: CaptureRegionComponent? = nil
@@ -107,7 +108,7 @@ struct Region: Decodable {
     var calibrationOutput: CalibrationOutput? = nil
     var projectTick: Int64? = nil
     var startNanoseconds: ExactNanoseconds? = nil
-    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, pulseClock, pulseLoopUnit, component, audioChannel, calibrationOutput, projectTick, startNanoseconds; case repetitions = "repeat" }
+    enum CodingKeys: String, CodingKey { case id, asset, startSeconds, offsetFrames, frameCount, captureClock, sourceClock, pulseClock, pulseLoopUnit, component, audioChannel, calibrationOutput, projectTick, startNanoseconds; case repetitions = "repeat" }
     func loopLayout(_ loop: WaveLoopClock, rate: Double) throws -> WaveLoopLayout {
         guard pulseClock == nil else { throw AudioFailure("practice pulse looping is not connected") }
         if let captureClock {
@@ -118,6 +119,10 @@ struct Region: Decodable {
         guard startNanoseconds == nil, let tick = projectTick, tick >= 0, tick <= 9_007_199_254_740_991,
               startSeconds == Double(tick) / Double(loop.ppq) * 60 / loop.tempo else {
             throw AudioFailure("audio loop placement differs from its project clock")
+        }
+        if let sourceClock {
+            return try loop.layout(rate: rate, projectTick: tick, source: sourceClock.layout(rate: rate,
+                offsetFrames: offsetFrames, frameCount: frameCount, repetitions: repetitions))
         }
         return try loop.layout(rate: rate, projectTick: tick, frameCount: frameCount, repetitions: repetitions)
     }
@@ -184,10 +189,13 @@ struct Plan: Decodable {
         var end: Double = 0
         for region in regions {
             guard !region.id.isEmpty, region.startSeconds.isFinite, region.startSeconds >= 0, region.offsetFrames >= 0,
-                  region.frameCount > 0, region.repetitions > 0,
+                  region.frameCount >= 0, region.frameCount > 0 || region.sourceClock != nil, region.repetitions > 0,
                   let asset = assets.first(where: { $0.id == region.asset }),
                   region.frameCount <= asset.frames, region.offsetFrames <= asset.frames - region.frameCount else { throw AudioFailure("invalid region source bounds") }
             guard region.captureClock == nil || capturedAudio || pairedRegions || hybrid else { throw AudioFailure("captured audio clock requires an explicit captured audio plan") }
+            guard region.sourceClock == nil || region.captureClock == nil && region.pulseClock == nil
+                && region.component == nil && region.audioChannel == nil && region.calibrationOutput == nil
+                && region.startNanoseconds == nil else { throw AudioFailure("source audio has conflicting clock authorities") }
             guard region.component == nil || region.component == .audio && region.captureClock != nil else { throw AudioFailure("invalid captured audio component") }
             if let channel = region.audioChannel {
                 guard region.component == .audio, channel.input > 0, channel.input <= asset.channels, channel.output > 0 else {
@@ -206,6 +214,9 @@ struct Plan: Decodable {
                       pulse.duration <= duration else { throw AudioFailure("invalid practice pulse region") }
                 guard practice?.loop != nil || pulse.beatCount == nil else { throw AudioFailure("exact count-in requires its loop practice clock") }
                 total = try pulse.layout(rate: asset.sampleRate, frameCount: region.frameCount).totalFrames
+            } else if let clock = region.sourceClock {
+                total = try clock.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
+                                        frameCount: region.frameCount, repetitions: region.repetitions).totalFrames
             } else if let clock = region.captureClock {
                 total = try clock.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
                                          frameCount: region.frameCount, repetitions: region.repetitions).totalFrames
@@ -293,6 +304,7 @@ final class Voice {
     let capacity: AVAudioFrameCount
     let total: AVAudioFramePosition
     let captureLayout: CaptureAudioLayout?
+    let sourceLayout: SourceAudioLayout?
     let pulseLayout: PulseAudioLayout?
     let loopLayout: WaveLoopLayout?
     let pulseLoopLayout: PulseLoopLayout?
@@ -305,6 +317,8 @@ final class Voice {
         queue = DispatchQueue(label: "music.arrangement.stream.\(region.id)", qos: .userInitiated)
         captureLayout = try region.captureClock?.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
                                                        frameCount: region.frameCount, repetitions: region.repetitions)
+        sourceLayout = try region.sourceClock?.layout(rate: asset.sampleRate, offsetFrames: region.offsetFrames,
+                                                     frameCount: region.frameCount, repetitions: region.repetitions)
         pulseLayout = try region.pulseClock?.layout(rate: asset.sampleRate, frameCount: region.frameCount)
         if let loop, let pulse = region.pulseClock, let unit = region.pulseLoopUnit {
             pulseLoopLayout = try PulseLoopLayout(loop: loop, pulse: pulse, unit: unit, rate: asset.sampleRate, frameCount: region.frameCount)
@@ -312,7 +326,7 @@ final class Voice {
         if let loop, region.pulseClock == nil {
             loopLayout = try region.loopLayout(loop, rate: asset.sampleRate)
         } else { loopLayout = nil }
-        total = try pulseLayout?.totalFrames ?? captureLayout?.totalFrames ?? region.totalFrames()
+        total = try pulseLayout?.totalFrames ?? sourceLayout?.totalFrames ?? captureLayout?.totalFrames ?? region.totalFrames()
         file = try AVAudioFile(forReading: URL(fileURLWithPath: asset.path), commonFormat: .pcmFormatFloat32, interleaved: false)
         let sourceFormat = file.processingFormat
         guard file.length == asset.frames, sourceFormat.sampleRate == asset.sampleRate, sourceFormat.channelCount == asset.channels,
@@ -341,7 +355,7 @@ final class Voice {
         }
         buffers = try [buffer(capacity, format: format), buffer(capacity, format: format)]
         scratch = try buffer(capacity, format: sourceFormat)
-        if region.frameCount <= AVAudioFramePosition(capacity) {
+        if region.frameCount > 0 && region.frameCount <= AVAudioFramePosition(capacity) {
             let period = try buffer(AVAudioFrameCount(region.frameCount), format: sourceFormat)
             file.framePosition = region.offsetFrames
             var written: AVAudioFrameCount = 0
@@ -364,7 +378,7 @@ final class Voice {
             let available = Int64(capacity - written)
             let remaining = repeating ? available : min(available, total - cursor)
             let loopSpan = try loopLayout?.span(at: cursor, maximum: remaining)
-            let base = loopSpan ?? captureLayout?.span(at: cursor, maximum: remaining)
+            let base = loopSpan ?? sourceLayout?.span(at: cursor, maximum: remaining) ?? captureLayout?.span(at: cursor, maximum: remaining)
                 ?? (source: cursor % region.frameCount, count: min(remaining, region.frameCount - cursor % region.frameCount))
             let span = try pulseLoopLayout?.span(at: cursor, maximum: remaining)
                 ?? loopSpan.map { (source: $0.source, count: $0.count, gain: Float(1)) }
@@ -867,6 +881,12 @@ struct Options {
 static func main() {
 _ = signal(SIGPIPE, SIG_IGN)
 do {
+    let extraction = Array(CommandLine.arguments.dropFirst())
+    if extraction.first == "extract-practice-region" {
+        guard extraction.count == 3, extraction[1] == "--file" else { throw MidiFailure("extract-practice-region requires --file PLAN") }
+        let plan = try JSONDecoder().decode(UmpRegionExtraction.self, from: Data(contentsOf: URL(fileURLWithPath: extraction[2])))
+        try audioEmit(plan.extract()); return
+    }
     let options = try Options()
     let plan = try JSONDecoder().decode(Plan.self, from: Data(contentsOf: URL(fileURLWithPath: options.file!)))
     let transport = try ArrangementTransport(plan: plan, output: options.output, loop: options.loop)

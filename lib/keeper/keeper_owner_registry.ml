@@ -449,17 +449,33 @@ let install_from_store ~sw ~operation_runner ~on_turn_slot_released config =
       start_all 0 metas)
 ;;
 
-let find_pool base_path =
+(* Why a caller looks the inventory up. [begin_stopping_all] raises the stop
+   flag before it asks each owner to stop, and from then on every [Admission]
+   lookup fails with [Inventory_stopping]. An installed owner still drains its
+   running child while it stops. Core hands that cancelled child the native
+   call's terminal disposition under cancellation protection, and
+   [Native_call_receipt] lets the child read its native call and record that
+   checkpoint and terminal in the owner it runs under. When the child ends,
+   the owner settles the operation from that receipt. The owner answers these
+   commands while it stops and refuses new work on its own. *)
+type lookup_purpose =
+  | Admission
+  | Native_call_receipt
+
+let find_pool ~purpose base_path =
   let base_path = pool_key base_path in
   Stdlib.Mutex.protect pools_mu (fun () ->
     match Hashtbl.find_opt pools base_path with
     | None -> Error (Inventory_not_installed base_path)
-    | Some pool when Atomic.get pool.stopping -> Error Inventory_stopping
+    | Some pool when Atomic.get pool.stopping ->
+      (match purpose with
+       | Admission -> Error Inventory_stopping
+       | Native_call_receipt -> Ok pool)
     | Some pool -> Ok pool)
 ;;
 
-let get ~base_path ~keeper_name =
-  match find_pool base_path with
+let find_owner ~purpose ~base_path ~keeper_name =
+  match find_pool ~purpose base_path with
   | Error _ as error -> error
   | Ok pool ->
     Eio.Mutex.use_ro pool.owners_mu (fun () ->
@@ -470,6 +486,8 @@ let get ~base_path ~keeper_name =
          | Some _ -> Error (Owner_unavailable keeper_name)
          | None -> Error (Owner_not_found keeper_name)))
 ;;
+
+let get ~base_path ~keeper_name = find_owner ~purpose:Admission ~base_path ~keeper_name
 
 let operation_projection ~base_path ~keeper_name =
   match get ~base_path ~keeper_name with
@@ -774,6 +792,13 @@ let with_owner_command ~base_path ~keeper_name f =
     f owner |> Result.map_error (fun error -> Command_rejected error)
 ;;
 
+let with_native_call_receipt_command ~base_path ~keeper_name f =
+  match find_owner ~purpose:Native_call_receipt ~base_path ~keeper_name with
+  | Error error -> Error (Command_lookup_failed error)
+  | Ok owner ->
+    f owner |> Result.map_error (fun error -> Command_rejected error)
+;;
+
 let direct_checkpoint ~base_path ~keeper_name ~operation_id =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.direct_checkpoint owner ~operation_id)
@@ -782,15 +807,17 @@ let defer_direct_checkpoint ~base_path ~keeper_name ~operation_id ~execution_dig
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.defer_direct_checkpoint owner ~operation_id ~execution_digest ~checkpoint)
 let direct_native_call ~base_path ~keeper_name ~operation_id =
-  with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.direct_native_call owner ~operation_id)
+  with_native_call_receipt_command ~base_path ~keeper_name (fun owner -> Keeper_owner.direct_native_call owner ~operation_id)
+(* Binding admits a native call for dispatch, fresh or resumed, so it stays
+   behind the stop fence; a stopping Owner refuses it as well. *)
 let bind_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~observed ~call =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.bind_direct_native_call owner ~operation_id ~execution_digest ~observed ~call)
 let checkpoint_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
-  with_owner_command ~base_path ~keeper_name (fun owner ->
+  with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.checkpoint_direct_native_call owner ~operation_id ~execution_digest ~call_id ~observed ~checkpoint)
 let terminal_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~call_id ~disposition =
-  with_owner_command ~base_path ~keeper_name (fun owner ->
+  with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.terminal_direct_native_call owner ~operation_id ~execution_digest ~call_id ~disposition)
 let resume_direct_checkpoint ~base_path ~keeper_name ~operation_id ~observed =
   with_owner_command ~base_path ~keeper_name (fun owner ->
@@ -880,7 +907,7 @@ let cancel_queued_operation ~base_path ~keeper_name operation_id =
 ;;
 
 let create_meta_unfenced ~base_path meta =
-  match find_pool base_path with
+  match find_pool ~purpose:Admission base_path with
   | Error error -> Error (Command_lookup_failed error)
   | Ok pool ->
     Keeper_lifecycle_reservation.with_key_lock
@@ -936,7 +963,7 @@ let create_meta ?intake_token ~base_path meta =
 ;;
 
 let all_projections ~base_path =
-  match find_pool base_path with
+  match find_pool ~purpose:Admission base_path with
   | Error _ as error -> error
   | Ok pool ->
     Ok (List.map Keeper_owner.projection (Atomic.get pool.owner_handles))
@@ -961,7 +988,7 @@ let begin_stopping_all ~base_path =
 
 module For_testing = struct
   let installed_owner_count ~base_path =
-    match find_pool base_path with
+    match find_pool ~purpose:Admission base_path with
     | Error _ -> 0
     | Ok pool -> Eio.Mutex.use_ro pool.owners_mu (fun () -> Hashtbl.length pool.owners)
   ;;

@@ -31,6 +31,30 @@ func umpNanoseconds(_ seconds: Double) throws -> UInt64 {
     guard seconds.isFinite, seconds >= 0, value < Double(UInt64.max) else { throw MidiFailure("captured region exceeds the native host timeline") }
     return UInt64(value)
 }
+// Exact-entry ordering contract: within the entry's same-tick batch, the
+// state a voice keeps must be established earlier in the source order than
+// each attack it follows. Events at one tick have no time order of their
+// own, so a state event that only follows an attack at the entry tick is
+// that attack's expression with an ambiguous baseline; admission refuses
+// such an entry instead of replaying an invented preamble. Voice lifecycle
+// pairs (Note Off, kill, release) stay with their attack, later ticks keep
+// playing as expression, and the baseline rules themselves remain UmpState's;
+// this checks only their order at the entry tick.
+func umpExactEntryOrder(_ clip: UmpRegionClip) throws {
+    let from = clip.prefix(at: clip.cut, inclusive: false), through = clip.prefix(at: clip.cut)
+    var attacks: Set<UmpAddress> = []
+    for ordinal in from..<through {
+        let message = UmpMessage(clip.events[ordinal])
+        switch message.action {
+        case .on: attacks.insert(message.address)
+        case .absolute, .pedal, .reset:
+            guard !attacks.contains(message.address) else {
+                throw UmpRefusal("captured UMP entry needs its same-tick baseline earlier than the attack it follows")
+            }
+        default: break
+        }
+    }
+}
 struct UmpRegionSource: Decodable {
     let id: String
     let extent: String
@@ -46,6 +70,7 @@ struct UmpRegion: Decodable {
     let repeatCount: UInt64
     var component: CaptureRegionComponent? = nil
     var startNanoseconds: ExactNanoseconds? = nil
+    var sourceDivisor: String? = nil
 }
 struct UmpArrangement: Decodable {
     let schemaVersion: Int
@@ -54,19 +79,73 @@ struct UmpArrangement: Decodable {
     let regions: [UmpRegion]
 }
 
+// Offline editing uses the same original-UMP reconstruction as playback.
+// Source IDs are state addresses only: no destination or device is opened.
+struct UmpRegionExtraction: Decodable {
+    let schemaVersion: Int
+    let source: UmpRegionSource
+    let offset: String
+    let extent: String
+    let sourceDivisor: String
+    func extract() throws -> [String: Any] {
+        let bound = try umpUnsigned(source.extent), cut = try umpUnsigned(offset)
+        let length = try umpUnsigned(extent), divisor = try umpUnsigned(sourceDivisor)
+        guard schemaVersion == 1, bound > 0, length > 0, divisor > 0 else { throw MidiFailure("invalid practice extraction span") }
+        let after = try umpAdd(cut, length)
+        guard !umpRationalLess(bound, 1, after, divisor) else { throw MidiFailure("practice extraction exceeds source") }
+        let timed = try source.timeline.timedEvents()
+        guard timed.allSatisfy({ UInt128($0.ticks) < bound }) else { throw MidiFailure("practice extraction packet exceeds source") }
+        let before = timed.firstIndex { !umpRationalLess(UInt128($0.ticks), 1, cut, divisor) } ?? timed.count
+        let through = timed.firstIndex { umpRationalLess(cut, divisor, UInt128($0.ticks), 1) } ?? timed.count
+        let end = timed.firstIndex { !umpRationalLess(UInt128($0.ticks), 1, after, divisor) } ?? timed.count
+        let events = timed.map(\.event)
+        let final = try umpRestoration(events, prefixCount: end, replacing: UmpFootprint())
+        // Historical voices expiring exactly at entry have no overlap with
+        // this cut. Genuine attacks at entry remain in the original due stream.
+        let expired = Set(final.expiredNotes.filter { $0.value < through }.map(\.key))
+        let entry = try umpRestoration(events, prefixCount: before, followingCount: through - before,
+                                       preambleEndIndex: end, excludingNotes: expired, replacing: UmpFootprint())
+        func row(_ event: UmpEvent, _ position: UInt128) -> [String: Any] {
+            ["offset": String(position), "source": event.source, "words": event.words]
+        }
+        var result = entry.events.map { row($0, 0) }, acquired = entry.heldNotes
+        for index in entry.nextIndex..<end {
+            let event = events[index]
+            switch UmpMessage(event).action {
+            case .on: acquired.insert(index)
+            case .off:
+                guard let owner = final.releaseOwners[index], acquired.contains(owner) else { continue }
+                acquired.remove(owner)
+            case .kill, .release:
+                acquired = acquired.filter { UmpChannel(events[$0]) != UmpChannel(event) }
+            default: break
+            }
+            // Subtract before multiplying so a large absolute cut does not
+            // overflow merely because the small relative window fits UInt128.
+            let delta = UInt128(timed[index].ticks) - cut / divisor, remainder = cut % divisor
+            let position = remainder == 0 ? try umpMultiply(delta, divisor)
+                : try umpAdd(umpMultiply(delta - 1, divisor), divisor - remainder)
+            result.append(row(event, position))
+        }
+        return ["schemaVersion": 1, "kind": "practice-region-events", "extent": extent,
+                "sourceDivisor": sourceDivisor, "events": result]
+    }
+}
+
 // A source packet keeps its original host ticks. This window places those
 // ticks on the authored master period without rounding either clock first.
 struct UmpLoopWindow {
     let cycle: MidiCycle
     let period: UInt128, divisor: UInt128, masterScale: UInt128
     let sourcePeriod: UInt128, sourceEnd: UInt128, tick: UInt128
+    let unit: UInt128, subdivision: UInt128
     let offset: Int128
     let repetitions: UInt64
 
     init(cycle: MidiCycle, start: (numerator: UInt128, divisor: UInt128),
-         numer: UInt32, denom: UInt32, extent: UInt128, repetitions: UInt64) throws {
+         numer: UInt32, denom: UInt32, extent: UInt128, repetitions: UInt64, subdivision: UInt128 = 1) throws {
         guard let authoredOrigin = cycle.exactStart, start.divisor > 0, numer > 0, denom > 0,
-              extent > 0, repetitions > 0 else { throw MidiFailure("captured looping requires exact original clocks") }
+              extent > 0, repetitions > 0, subdivision > 0 else { throw MidiFailure("captured looping requires exact original clocks") }
         func gcd(_ a: UInt128, _ b: UInt128) -> UInt128 {
             var a = a, b = b
             while b > 0 { let remainder = a % b; a = b; b = remainder }
@@ -78,15 +157,17 @@ struct UmpLoopWindow {
             return (value.numerator / factor, value.divisor / factor)
         }
         let origin = reduced(authoredOrigin), start = reduced(start)
-        let reduction = gcd(UInt128(numer), UInt128(denom))
-        let sourceD = UInt128(denom) / reduction
+        let sourceDenominator = try umpMultiply(UInt128(denom), subdivision)
+        let reduction = gcd(UInt128(numer), sourceDenominator)
+        let sourceD = sourceDenominator / reduction
         let first = try lcm(cycle.divisor, origin.divisor)
         let second = try lcm(first, start.divisor)
         let divisor = try lcm(second, sourceD)
         let masterScale = divisor / cycle.divisor
         let period = try umpMultiply(cycle.period, masterScale)
-        let tick = try umpMultiply(UInt128(numer) / reduction, divisor / sourceD)
-        let sourcePeriod = try umpMultiply(extent, tick)
+        let unit = try umpMultiply(UInt128(numer) / reduction, divisor / sourceD)
+        let tick = try umpMultiply(unit, subdivision)
+        let sourcePeriod = try umpMultiply(extent, unit)
         let sourceEnd = try umpMultiply(sourcePeriod, UInt128(repetitions))
         let a = origin.numerator / origin.divisor, b = start.numerator / start.divisor
         let ar = try umpMultiply(origin.numerator % origin.divisor, divisor / origin.divisor)
@@ -103,6 +184,7 @@ struct UmpLoopWindow {
         self.cycle = cycle; self.period = period; self.divisor = divisor; self.masterScale = masterScale
         self.sourcePeriod = sourcePeriod; self.sourceEnd = sourceEnd; self.tick = tick
         self.offset = positive ? Int128(distance) : -Int128(distance); self.repetitions = repetitions
+        self.unit = unit; self.subdivision = subdivision
     }
     // Return original finite source-copy phase at an exact master remainder.
     func phase(remainder: UInt128) throws -> (copy: UInt64, local: UInt128)? {
@@ -239,6 +321,26 @@ struct UmpRegionClip {
         return try umpRestoration(events, prefixCount: before, followingCount: through - before,
                                   preambleEndIndex: endIndex, excludingNotes: expired, replacing: previous)
     }
+    // Only effects reachable from the selected cut are projected. Fully expired
+    // historical voices are not replayed, even if their attributes need MIDI2.
+    func wireEffects() throws -> [UmpEvent] {
+        let entry = try restore(at: cut, replacing: UmpFootprint())
+        var acquired = entry.heldNotes, effects = entry.events
+        for ordinal in entry.nextIndex..<endIndex {
+            let event = events[ordinal]
+            switch UmpMessage(event).action {
+            case .on: acquired.insert(ordinal)
+            case .off:
+                guard let owner = releaseOwners[ordinal], acquired.contains(owner) else { continue }
+                acquired.remove(owner)
+            case .kill, .release:
+                acquired = acquired.filter { UmpChannel(events[$0]) != UmpChannel(event) }
+            default: break
+            }
+            effects.append(event)
+        }
+        return effects
+    }
     func phase(at position: UInt64) -> (copy: UInt64, time: UInt128)? {
         guard position >= start, position < end else { return nil }
         let value = UInt128(position - origin) * denom - phaseOffset
@@ -308,6 +410,11 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             }
             sources[source.id] = (source, timed)
         }
+        func gcd(_ a: UInt128, _ b: UInt128) -> UInt128 {
+            var a = a, b = b
+            while b > 0 { let remainder = a % b; a = b; b = remainder }
+            return a
+        }
         var admitted: [UmpRegionClip] = [], potential = UmpFootprint()
         for region in timeline.regions {
             guard !region.id.isEmpty, region.component != .audio, let (source, timed) = sources[region.source], region.repeatCount > 0 else { throw MidiFailure("invalid captured region source or repetition") }
@@ -317,22 +424,31 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             let (startN, startD) = startFraction
             guard startN / startD <= UInt128(UInt64.max) else { throw MidiFailure("captured placement exceeds native host timeline") }
             let origin = UInt64(startN / startD), cut = try umpUnsigned(region.offset), length = try umpUnsigned(region.extent)
-            let after = try umpAdd(cut, length), bound = try umpUnsigned(source.extent)
+            let subdivision = try region.sourceDivisor.map(umpUnsigned) ?? 1
+            let after = try umpAdd(cut, length), bound = try umpMultiply(umpUnsigned(source.extent), subdivision)
+            guard subdivision > 0 else { throw MidiFailure("invalid captured source divisor") }
             guard length > 0, after <= bound else { throw MidiFailure("captured region exceeds its source bounds") }
-            let numer = try umpMultiply(UInt128(source.timeline.clock.numer), startD)
-            let denom = try umpMultiply(UInt128(source.timeline.clock.denom), startD)
-            let phaseOffset = try umpMultiply(startN % startD, UInt128(source.timeline.clock.denom))
+            // Reduce the source tick fraction before finding its common clock
+            // with placement. Shared large denominators must be scaled once.
+            let sourceDenominator = try umpMultiply(UInt128(source.timeline.clock.denom), subdivision)
+            let reduction = gcd(UInt128(source.timeline.clock.numer), sourceDenominator)
+            let sourceD = sourceDenominator / reduction
+            let denom = try umpMultiply(startD / gcd(startD, sourceD), sourceD)
+            let unit = try umpMultiply(UInt128(source.timeline.clock.numer) / reduction, denom / sourceD)
+            let numer = try umpMultiply(unit, subdivision)
+            let phaseOffset = try umpMultiply(startN % startD, denom / startD)
             let lowerBound = try umpAdd(umpMultiply(UInt128(origin), denom), phaseOffset)
             let startWide = UInt128(origin) + (phaseOffset == 0 ? 0 : 1)
             guard startWide <= UInt128(UInt64.max) else { throw MidiFailure("captured placement exceeds native host timeline") }
             let start = UInt64(startWide)
-            let period = try umpMultiply(length, numer), scaledCut = try umpMultiply(cut, numer)
-            _ = try umpMultiply(after, numer)
+            let period = try umpMultiply(length, unit), scaledCut = try umpMultiply(cut, unit)
+            _ = try umpMultiply(after, unit)
             let total = try umpMultiply(period, UInt128(region.repeatCount))
             let upperBound = try umpAdd(lowerBound, total)
             let end = upperBound / denom + (upperBound % denom == 0 ? 0 : 1)
             guard end > UInt128(start), end <= UInt128(duration) else { throw MidiFailure("captured region exceeds arrangement duration") }
-            let endIndex = timed.firstIndex { UInt128($0.ticks) >= after } ?? timed.count
+            let afterTick = after / subdivision + (after % subdivision == 0 ? 0 : 1)
+            let endIndex = timed.firstIndex { UInt128($0.ticks) >= afterTick } ?? timed.count
             let events = timed.map(\.event), scope = Set(events.prefix(endIndex).compactMap(UmpChannel.init(voice:)))
             // Every replayed prefix is part of this physical scope, even when
             // its keys were originally acquired before the cut.
@@ -354,6 +470,12 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             for other in admitted where umpRationalLess(other.lowerBound, other.denom, clip.lowerBound, clip.denom) {
                 clip.entryPrior.formUnion(other.footprint.scoped(to: clip.scope))
             }
+            // Exact-entry ordering: within the entry's same-tick batch, the
+            // state a voice keeps must be established before each attack it
+            // follows. A state event that only follows an attack at the same
+            // tick cannot repair that attack without inventing a preamble the
+            // source never played at entry.
+            try umpExactEntryOrder(clip)
             // Entry events and silent preambles remain an original due stream.
             // Explicit baselines must precede each attack/relative use; they
             // cannot repair a historical live voice's patch or escape the cut.
@@ -361,7 +483,8 @@ final class UmpRegionTransport: CoordinatedMidiTransport {
             admitted[index] = clip
         }
         clips = admitted
-        output = UmpOutput(bindings: destinations.map { UmpBinding(source: $0, destination: $0) })
+        output = UmpOutput(bindings: destinations.map { UmpBinding(source: $0, destination: $0) },
+            compatibleEvents: try admitted.flatMap { try $0.wireEffects() })
     }
     func prepare() throws {
         output.onFailure = { [weak self] error in self?.finish(reason: "destination-unavailable", error: error, publish: false) }

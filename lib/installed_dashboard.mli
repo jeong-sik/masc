@@ -26,5 +26,8 @@ val assets_root : binding -> string
 val build_stamp_mtime : binding -> float option
 val asset_path : binding -> string -> string option
 val load : binding -> string -> (string, error) result
+(** Revalidate the receipt and requested asset on every read. Digest computation
+    uses the shared CPU pool when called from a server fiber; startup and
+    callers already in a worker retain the pool's inline policy. *)
 val evidence : selection -> Yojson.Safe.t
 val error_json : error -> Yojson.Safe.t

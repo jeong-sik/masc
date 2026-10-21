@@ -47,9 +47,8 @@ let output_ports world =
    package-relative like world.skills.directory and must stay inside the package
    after symlinks resolve. *)
 let exact_outputs ~directory world =
-  let valid_name name =
-    name <> "" && (match name.[0] with 'a' .. 'z' -> true | _ -> false)
-    && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' -> true | _ -> false) name in
+  (* The runtime lane key relies on this name rule, so both read it from one place. *)
+  let valid_name = Runtime_schema.exact_output_name_valid in
   let read_schema name path =
     let label = "world.exact_outputs." ^ name ^ ".schema" in
     let* relative = Skill_resource_path.of_string path
@@ -118,7 +117,7 @@ let load ~path =
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
           let names = List.map fst fields in
           if List.length names <> List.length (List.sort_uniq String.compare names)
-             || List.exists (fun key -> not (List.mem key ["skills"; "actions"; "outputs"; "tools"; "state"; "exact_outputs"])) names
+             || List.exists (fun key -> not (List.mem key ["skills"; "actions"; "outputs"; "tools"; "state"; "exact_outputs"; "asks"])) names
           then Error "world accepts skills, actions, outputs, tools, state and exact_outputs tables" else Ok fields
       | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
       | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
@@ -188,6 +187,15 @@ let load ~path =
       | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error "world.state requires only mode = persistent or ephemeral" in
     let* outputs = output_ports world in
     let* exact_outputs = exact_outputs ~directory:(Filename.dirname path) world in
+    let* operator_asks = match List.assoc_opt "asks" world with
+      | None -> Ok false
+      | Some (Otoml.TomlTable [("operator", Otoml.TomlBoolean operator)]
+             | Otoml.TomlInlineTable [("operator", Otoml.TomlBoolean operator)]) -> Ok operator
+      | Some ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+             | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+             | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+             | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+             | Otoml.TomlTableArray _ ) -> Error "world.asks requires only operator = true or false" in
     let* interface = match Otoml.find_opt document Fun.id ["interface"] with
       | None -> Ok []
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields)
@@ -281,7 +289,7 @@ let load ~path =
       | Error detail -> Error detail
       | Ok () -> Ok { id; revision; title; contributions = List.rev contributions; runtime; image; command;
           directory = Filename.dirname path; skills_directory; action_tool; state_storage; tool_invocation; exported_tools; outputs; refresh_policy; model_access; binding_schema; presentation;
-          exact_outputs; resources }
+          exact_outputs; operator_asks; resources }
   in
   try Result.map_error (fun detail -> Invalid_manifest detail) (parse ()) with
   | Sys_error message -> Error (Io_failure message)

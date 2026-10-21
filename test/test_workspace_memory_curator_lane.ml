@@ -257,7 +257,7 @@ let with_curator_lane_registry f =
   let snapshot = Exact_output_fixture.resolver_snapshot ~source:"curator-activity"
     [{ Exact_output_fixture.id = "curator-fixture"; base_url = "http://127.0.0.1:1" }] in
   let lane : Runtime_schema.exact_output_lane_decl =
-    { id = Standalone_lane.to_id Standalone_lane.Workspace_curator; enabled = true;
+    { owner = Runtime_schema.Builtin Standalone_lane.Workspace_curator; enabled = true;
       slot_ids = ["curator-fixture"]; cli_slot_ids = [];
       max_output_tokens = Some 4096; thinking = None } in
   let publish enabled = ignore (accept_registry (Registry.publish ~lanes:[{lane with enabled}] snapshot)) in
@@ -407,7 +407,7 @@ let test_cancelled_owner_does_not_consume_another_owners_wake () = with_base (fu
 let registry_ok result = result |> Result.map_error Registry.publication_error_to_string |> require
 
 let curator_lane : Runtime_schema.exact_output_lane_decl =
-  { id = "workspace_curator_exact"; enabled = true; slot_ids = ["curator-test"];
+  { owner = Runtime_schema.Builtin Standalone_lane.Workspace_curator; enabled = true; slot_ids = ["curator-test"];
     cli_slot_ids = []; max_output_tokens = None; thinking = None }
 
 let curator_snapshot base_url =
@@ -436,7 +436,7 @@ let test_enable_publication_resumes_existing_fact () = with_registry (fun () ->
       Alcotest.(check int) "rejected publication leaves the owner parked" 0 !calls;
       (* A subscriber can read the now-published registry: notifications must
          run after its mutex and private transaction fence are released. *)
-      let unsubscribe = Registry.subscribe_lane_changes ~lane_id:curator_lane.id (fun () ->
+      let unsubscribe = Registry.subscribe_lane_changes ~lane_id:(Runtime_schema.exact_lane_key curator_lane.owner) (fun () ->
         ignore (registry_ok (Registry.current ()))) in
       Fun.protect ~finally:unsubscribe (fun () ->
         registry_ok (Registry.publish ~lanes:[curator_lane] snapshot) |> ignore);
@@ -464,7 +464,7 @@ let test_transaction_recovery_is_relevant_and_committed () = with_registry (fun 
       await_idle ~base_path;
       Alcotest.(check int) "initial refused attempt" 1 !calls;
       registry_ok (Registry.publish ~lanes:[curator_lane] before) |> ignore;
-      let unrelated = { curator_lane with id = "unrelated_exact" } in
+      let unrelated = { curator_lane with owner = Runtime_schema.Builtin Standalone_lane.Librarian } in
       registry_ok (Registry.publish ~lanes:[curator_lane; unrelated] before) |> ignore;
       await_idle ~base_path;
       Alcotest.(check int) "unchanged and unrelated publication do not retry" 1 !calls;
@@ -473,7 +473,7 @@ let test_transaction_recovery_is_relevant_and_committed () = with_registry (fun 
         ~apply_write:(fun () -> Registry.Not_committed ())) |> ignore;
       await_idle ~base_path;
       Alcotest.(check int) "failed write does not retry" 1 !calls;
-      let unsubscribe = Registry.subscribe_lane_changes ~lane_id:curator_lane.id
+      let unsubscribe = Registry.subscribe_lane_changes ~lane_id:(Runtime_schema.exact_lane_key curator_lane.owner)
           (fun () -> failwith "injected subscriber failure") in
       Fun.protect ~finally:unsubscribe (fun () ->
         registry_ok (Registry.transact_replacement prepared
@@ -555,12 +555,12 @@ let test_missing_credential_publication_notifies () = with_registry (fun () ->
   let missing, missing_observations = credential_snapshot ~curator_key:None ~other_key:None in
   let available, available_observations = credential_snapshot ~curator_key:(Some "fixture-key") ~other_key:None in
   let registry = registry_ok (Registry.publish ~runtime_observations:missing_observations ~lanes:[curator_lane] missing) in
-  (match Registry.resolve_lane registry ~lane_id:curator_lane.id with
+  (match Registry.resolve_lane registry ~lane_id:(Runtime_schema.exact_lane_key curator_lane.owner) with
    | Ok lane -> Alcotest.(check int) "missing credential remains admitted" 1
        (List.length lane.selected_slots)
    | Error _ -> Alcotest.fail "credential failure removed an admitted slot");
   let calls = ref 0 in
-  let unsubscribe = Registry.subscribe_lane_changes ~lane_id:curator_lane.id (fun () -> incr calls) in
+  let unsubscribe = Registry.subscribe_lane_changes ~lane_id:(Runtime_schema.exact_lane_key curator_lane.owner) (fun () -> incr calls) in
   Fun.protect ~finally:unsubscribe (fun () ->
     registry_ok (Registry.publish ~runtime_observations:missing_observations ~lanes:[curator_lane] missing) |> ignore;
     Alcotest.(check int) "unchanged missing credential does not notify" 0 !calls;
@@ -576,11 +576,11 @@ let test_subscriber_cancellation_keeps_commit_receipt () = with_registry (fun ()
     registry_ok (Registry.prepare_replacement ~runtime_observations:[] ~lanes:[lane]
       ~excused_lane_ids:[] ~load_resolver_snapshot:(fun () -> Ok snapshot)) in
   let notified = ref 0 in
-  let unsubscribe = Registry.subscribe_lane_changes ~lane_id:curator_lane.id
+  let unsubscribe = Registry.subscribe_lane_changes ~lane_id:(Runtime_schema.exact_lane_key curator_lane.owner)
       (fun () -> incr notified) in
   (* Subscribers run newest first: cancellation must not skip the earlier
      subscriber or hide the write's committed result. *)
-  let unsubscribe_cancel = Registry.subscribe_lane_changes ~lane_id:curator_lane.id
+  let unsubscribe_cancel = Registry.subscribe_lane_changes ~lane_id:(Runtime_schema.exact_lane_key curator_lane.owner)
       (fun () -> raise (Eio.Cancel.Cancelled (Failure "cancelled subscriber"))) in
   Fun.protect ~finally:(fun () -> unsubscribe_cancel (); unsubscribe ()) (fun () ->
     let changed = { curator_lane with max_output_tokens = Some 100 } in
@@ -590,7 +590,7 @@ let test_subscriber_cancellation_keeps_commit_receipt () = with_registry (fun ()
      | Registry.Not_committed _ -> Alcotest.fail "notification hid a committed write");
     let current = Registry.current () |> registry_ok in
     Alcotest.(check bool) "replacement remains published" true
-      (Registry.declared_lane current ~lane_id:curator_lane.id = Some changed);
+      (Registry.declared_lane current ~lane_id:(Runtime_schema.exact_lane_key curator_lane.owner) = Some changed);
     Alcotest.(check int) "other subscriber receives committed change" 1 !notified;
     (* Cancellation at the write boundary is still pre-publication and must
        escape; only post-commit callback exceptions are isolated. *)

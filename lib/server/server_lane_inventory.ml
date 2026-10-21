@@ -8,7 +8,11 @@ type selection =
   | Machine of Machine_lane.t
   | Declaration of string
   | Manual_instance of { instance_id : string; incarnation : string }
-type declaration = Valid of Config.declaration | Invalid of string list | Absent | Unobserved
+type exact_output_source = Declared | Table_only
+type exact_output = { output : string; source : exact_output_source; configuration : Exact_projection.lane_configuration }
+type declaration =
+  | Valid of { declaration : Config.declaration; exact_outputs : exact_output list }
+  | Invalid of string list | Absent | Unobserved
 type machine_publication = No_screen | Stable | Running | Publication_unavailable
 type state =
   | Exact_state of Exact_projection.lane_configuration
@@ -23,7 +27,20 @@ type t = {
   issues : (string * string) list;
 }
 
-let package_rows ~(declarations : Config.snapshot) ~(instances : Addon.inventory_instance list) =
+(* An output runtime.toml cannot name has no table to read; it is unbound,
+   and the reason says why. *)
+let exact_outputs ~configuration ~tables (d : Config.declaration) =
+  let declared = List.map (fun (output : Lane_addon_types.exact_output) -> output.name) d.package.exact_outputs in
+  let entry source output =
+    let configuration = match Runtime_schema.addon_lane ~declaration_id:d.id ~output with
+      | Ok addon -> configuration addon
+      | Error reason -> Exact_projection.Unconfigured ("runtime.toml cannot name this output: " ^ reason) in
+    {output; source; configuration} in
+  List.map (entry Declared) declared
+  @ List.map (entry Table_only)
+      (List.filter (fun output -> not (List.mem output declared)) (tables ~declaration_id:d.id))
+
+let package_rows ~(declarations : Config.snapshot) ~(instances : Addon.inventory_instance list) ~exact_outputs =
   let declaration_paths = declarations.paths
     @ List.map (fun (d : Config.declaration) -> d.source_path) declarations.declarations in
   let unresolved (i : Addon.inventory_instance) = match i.phase with
@@ -39,7 +56,7 @@ let package_rows ~(declarations : Config.snapshot) ~(instances : Addon.inventory
     let installed = List.filter (fun (i : Addon.inventory_instance) ->
       unresolved i && Option.exists (fun (owner : Addon.configuration_owner) -> owner.source_path=source_path) i.configuration) instances in
     let declaration = match List.find_opt (fun (d : Config.declaration) -> d.source_path=source_path) declarations.declarations with
-      | Some d -> Valid d
+      | Some d -> Valid {declaration=d; exact_outputs=exact_outputs d}
       | None ->
           (match List.filter_map (fun (issue : Config.issue) ->
              if issue.source_path=source_path then Some issue.message else None) declarations.issues with
@@ -106,7 +123,9 @@ let snapshot ~config =
     | Ready | Warn | Missing_status ->
         Eio_unix.run_in_systhread (fun () -> Config.load ~directory) in
   let packages = Addon.inventory ~config in
-  {observed_at=Time_compat.now (); rows=builtin @ package_rows ~declarations ~instances:packages.instances;
+  let exact_outputs = exact_outputs ~configuration:(Exact_projection.addon_configuration exact)
+      ~tables:(Exact_projection.addon_tables exact) in
+  {observed_at=Time_compat.now (); rows=builtin @ package_rows ~declarations ~instances:packages.instances ~exact_outputs;
    exact;directory;complete=declarations.complete && packages.complete;
    owner_present=packages.owner_present;
    issues=List.map (fun (issue : Config.issue) -> issue.source_path,issue.message) declarations.issues
@@ -132,9 +151,13 @@ let configuration_json = function
       "dropped_slots",strings c.dropped_slots;"admission_error",optional str c.admission_error]
   | Exact_projection.Unconfigured detail -> `Assoc ["kind",str "unconfigured";"detail",str detail]
   | Exact_projection.Registry_unavailable detail -> `Assoc ["kind",str "unavailable";"detail",str detail]
+let exact_output_json {output;source;configuration} = `Assoc ["output",str output;
+  "source",str (match source with Declared -> "declared" | Table_only -> "table_only");
+  "configuration",configuration_json configuration]
 let declaration_json = function
-  | Valid d -> `Assoc ["kind",str "valid";"enabled",`Bool d.enabled;"installation_id",str d.id;"run_id",str d.run_id;
-      "package_id",str d.package.id;"title",str d.package.title;"desired_revision",str d.revision]
+  | Valid {declaration=d;exact_outputs} -> `Assoc ["kind",str "valid";"enabled",`Bool d.enabled;"installation_id",str d.id;
+      "run_id",str d.run_id;"package_id",str d.package.id;"title",str d.package.title;"desired_revision",str d.revision;
+      "exact_outputs",`List (List.map exact_output_json exact_outputs)]
   | Invalid messages -> `Assoc ["kind",str "invalid";"messages",strings messages]
   | Absent -> `Assoc ["kind",str "absent"]
   | Unobserved -> `Assoc ["kind",str "unobserved"]
@@ -167,5 +190,6 @@ let to_json t = `Assoc ["schema",str "masc.lane-inventory/v1";"observed_at",`Flo
 module For_testing = struct
   let machine_publication = machine_publication
   let package_rows = package_rows
+  let exact_outputs = exact_outputs
   let row_to_json = row_to_json
 end

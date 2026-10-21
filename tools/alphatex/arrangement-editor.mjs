@@ -1,6 +1,7 @@
 import { newArrangement, validateArrangement, editArrangement, arrangementSchedule, arrangementTakes } from './arrangement.mjs'
 import { midiSourcePattern } from './midi-source.mjs'
 import { captureRange, captureRegionFromSeconds } from './capture-time.mjs'
+import { practiceRange } from './practice-source.mjs'
 import { beats, PPQ } from './sequencer-project.mjs'
 import { calibrationSelection } from './audio-calibration.mjs'
 import { manualCapturePlacement } from './capture-placement.mjs'
@@ -36,6 +37,14 @@ export function arrangementImported(editor, { project, asset, pattern }) {
   }
   return { ...commit(editor, project), asset, pattern }
 }
+export function arrangementPracticePass(editor, target, selected) {
+  if (target.asset !== selected.asset || target.pass !== selected.pass || !selected.cut) throw new Error('Practice pass response changed its selection')
+  if (target.region === null) return place(editor, target.asset, target.tick, selected.cut)
+  const region = editor.project.clips.find(clip => clip.id === target.region && clip.asset === target.asset)
+  if (!region) throw new Error('Selected practice region is no longer available')
+  const next = edit(editor, { kind: 'region-change', id: region.id, ...selected.cut })
+  return { ...next, asset: target.asset, pattern: undefined, lane: region.lane, region: region.id, tick: region.position }
+}
 function edit(editor, value) { return commit(editor, editArrangement(editor.project, value)) }
 export function arrangementRecordingCorrection(editor, correction) { return edit(editor, { kind: 'recording-correction', correction }) }
 export function arrangementCalibrated(editor, { profile, match, output }) {
@@ -57,18 +66,19 @@ function position(value) {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid arrangement cursor position')
   return value
 }
-function place(editor, assetID, tick, { offset, extent, repeat = 1, pattern } = {}) {
+function place(editor, assetID, tick, { offset, extent, repeat = 1, pattern, sourceDivisor } = {}) {
   const asset = editor.project.assets.find(asset => asset.id === assetID)
   if (!asset) throw new Error('Select an imported asset')
-  offset ??= asset.kind === 'capture' ? '0' : 0
-  extent ??= asset.kind === 'capture' ? captureRange(asset).extent : asset.kind === 'wave' ? asset.metadata.frames : midiSourcePattern(asset.source, { pattern }).ticks
+  offset ??= ['capture', 'practice'].includes(asset.kind) ? '0' : 0
+  extent ??= asset.kind === 'practice' ? practiceRange(asset).extent : asset.kind === 'capture' ? captureRange(asset).extent : asset.kind === 'wave' ? asset.metadata.frames : midiSourcePattern(asset.source, { pattern }).ticks
   let project = editor.project, lane = project.lanes.find(lane => lane.id === editor.lane && lane.kind === asset.kind)
   if (!lane) {
     project = editArrangement(project, { kind: 'lane-add', sourceKind: asset.kind, name: asset.name })
     lane = project.lanes.at(-1)
   }
   project = editArrangement(project, { kind: 'region-add', asset: asset.id, lane: lane.id, name: asset.name,
-    position: tick, offset, extent, repeat, ...(pattern === undefined ? {} : { pattern }) })
+    position: tick, offset, extent, repeat, ...(pattern === undefined ? {} : { pattern }),
+    ...(sourceDivisor === undefined ? {} : { sourceDivisor }) })
   const next = commit(editor, project)
   return { ...next, asset: asset.id, pattern, lane: lane.id, region: project.clips.at(-1).id, tick }
 }
@@ -138,7 +148,8 @@ export function arrangementCommand(editor, line) {
   const sourceRange = (assetID, offset, extent) => {
     const asset = editor.project.assets.find(asset => asset.id === assetID)
     if (!asset) throw new Error('Select an imported asset')
-    return asset.kind === 'capture' ? { offset, extent } : { offset: Number(offset), extent: Number(extent) }
+    return asset.kind === 'practice' ? { offset, extent, sourceDivisor: undefined }
+      : asset.kind === 'capture' ? { offset, extent } : { offset: Number(offset), extent: Number(extent) }
   }
   const timeRange = (assetID, start, duration) => {
     const asset = editor.project.assets.find(asset => asset.id === assetID && asset.kind === 'capture')
@@ -172,6 +183,26 @@ export function arrangementCommand(editor, line) {
       if (!['on', 'off'].includes(args[1])) throw new Error('Choose metronome on or off')
       value = { kind: 'practice', practice: { countInBars: Number(args[0]), metronome: args[1] === 'on' } }; break
     case 'phrase': count(0); return { editor, effect: { kind: command } }
+    case 'practice-midi': case 'practice-backing': {
+      count(0, 1); const asset = args[0] ?? editor.asset
+      if (!editor.project.assets.some(item => item.id === asset && item.kind === 'practice')) throw new Error('Choose a raw practice take')
+      return { editor, effect: { kind: command, asset } }
+    }
+    case 'practice-midi-region': {
+      count(0); const clip = selectedRegion(editor)
+      if (!clip || !editor.project.assets.some(asset => asset.id === clip.asset && asset.kind === 'practice')) throw new Error('Select an original practice region first')
+      return { editor, effect: { kind: command, asset: clip.asset, tick: editor.tick,
+        cut: { offset: clip.offset, extent: clip.extent, ...(clip.sourceDivisor === undefined ? {} : { sourceDivisor: clip.sourceDivisor }) } } }
+    }
+    case 'practice-passes': case 'practice-pass': {
+      count(command === 'practice-pass' ? 1 : 0, command === 'practice-pass' ? 2 : 1)
+      const asset = args[command === 'practice-pass' ? 1 : 0] ?? editor.asset
+      if (!editor.project.assets.some(item => item.id === asset && item.kind === 'practice')) throw new Error('Choose a raw practice take for its original passes')
+      if (command === 'practice-passes') return { editor, effect: { kind: command, asset } }
+      if (!/^[1-9][0-9]*$/.test(args[0])) throw new Error('Choose a positive original practice pass number')
+      const region = selectedRegion(editor)
+      return { editor, effect: { kind: command, asset, pass: args[0], tick: editor.tick, region: region?.asset === asset ? region.id : null } }
+    }
     case 'edit-midi': {
       count(0, 2); const asset = args[0] ?? editor.asset
       if (!editor.project.assets.some(item => item.id === asset && item.kind === 'midi')) throw new Error('Choose a MIDI asset to edit')
@@ -209,7 +240,7 @@ export function arrangementCommand(editor, line) {
     case 'calibrate':
       count(4)
       return { editor, effect: { kind: command, ...calibrationSelection({ output: args[0], inputChannel: Number(args[1]), outputChannel: Number(args[2]), maxLagMs: Number(args[3]) }) } }
-    case 'import-wave': case 'import-midi': case 'import-take': case 'save-as':
+    case 'import-wave': case 'import-midi': case 'import-take': case 'import-practice': case 'save-as':
       if (!tail) throw new Error('Choose a file path')
       return { editor, effect: { kind: command, path: tail } }
     case 'open-take': {
@@ -237,8 +268,9 @@ export function arrangementCommand(editor, line) {
     case 'midi-output': count(1); return { editor, effect: { kind: command, destination: args[0] } }
     case 'midi-source': {
       count(3)
-      const asset = editor.project.assets.find(asset => asset.id === args[0] && asset.kind === 'capture')
-      if (!asset?.manifest.midiSources.some(source => source.id === args[1])) throw new Error('Choose a captured asset and its original MIDI source ID')
+      const asset = editor.project.assets.find(asset => asset.id === args[0])
+      const sources = asset?.kind === 'capture' ? asset.manifest.midiSources : asset?.kind === 'practice' ? [asset.metadata.input.source] : []
+      if (!sources.some(source => source.id === args[1])) throw new Error('Choose a raw asset and its original MIDI source ID')
       if (!/^-?(0|[1-9][0-9]*)$/.test(args[2]) || BigInt(args[2]) < -2147483648n || BigInt(args[2]) > 2147483647n || String(Number(args[2])) !== args[2]) throw new Error('Choose an exact MIDI destination UID')
       return { editor, effect: { kind: command, asset: args[0], source: args[1], destination: args[2] } }
     }
@@ -270,6 +302,16 @@ export function arrangementCommand(editor, line) {
       return { editor: { ...editor, step } }
     }
     case 'place': count(2, 3); return { editor: place(editor, args[0], beats(args[1]), { pattern: pattern(args[2]) }) }
+    case 'practice-region': {
+      count(5, 6)
+      if (!editor.project.assets.some(asset => asset.id === args[0] && asset.kind === 'practice')) throw new Error('Choose a raw practice source for fractional host cuts')
+      return { editor: place(editor, args[0], beats(args[1]), { offset: args[2], extent: args[3], sourceDivisor: args[4], repeat: args[5] === undefined ? 1 : Number(args[5]) }) }
+    }
+    case 'trim-fraction': {
+      count(3)
+      if (editor.project.assets.find(asset => asset.id === selectedRegion(editor)?.asset)?.kind !== 'practice') throw new Error('Choose a practice region for fractional host cuts')
+      value = { kind: 'region-change', id: regionID(editor), offset: args[0], extent: args[1], sourceDivisor: args[2] }; break
+    }
     case 'capture-region': count(4, 5); return { editor: place(editor, args[0], beats(args[1]), {
       ...timeRange(args[0], args[2], args[3]), repeat: args[4] === undefined ? 1 : Number(args[4]) }) }
     case 'region': count(4, 6); return { editor: place(editor, args[0], beats(args[1]), {

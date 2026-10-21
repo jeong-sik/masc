@@ -312,6 +312,16 @@ let explicit_metadata : (string * metadata) list =
          disables its approval gate until restart, which is not a \
          broadcast-level action."
         admin_tool );
+    (* An installation's question is asked of the operator (RFC operator-quiz
+       §4.6). A worker token carries [CanBroadcast]; a Keeper answering for the
+       operator would put its answer in the operator's record, so the answer
+       route sits at [CanAdmin] like the approval routes above. *)
+    ( "lane_addon_ask_answer_route",
+      hidden_runtime_tool
+        "Auth key for the installation-question answer HTTP route; no \
+         schema, no dispatch path, route-authority only. Admin tier: only \
+         the operator answers an installation's question."
+        admin_tool );
     (* Run schemas register from tool_run.ml; catalog still owns early auth metadata.
        RFC-0182: 7 dead admin tools (masc_execute_dry_run, masc_admin_cleanup,
        masc_admin_reset, masc_gc_force, masc_workspace_delete, masc_force_unbind,

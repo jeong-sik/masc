@@ -1,4 +1,5 @@
 import { validateCapturedSource } from './captured-source.mjs'
+import { validatePracticeSource, practiceRegionTime } from './practice-source.mjs'
 import { captureRegionTime } from './capture-time.mjs'
 import { validateMidiSource, midiSourcePattern, tempoEvent } from './midi-source.mjs'
 import { PPQ, validateProject } from './sequencer-project.mjs'
@@ -64,6 +65,7 @@ export function validateArrangementAsset(asset) {
       }
       break
     case 'capture': validateCapturedSource(asset); break
+    case 'practice': validatePracticeSource(asset); break
     case 'wave': {
       if (typeof asset.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(asset.sha256)
           || asset.file !== `assets/${asset.sha256}.wav`) throw new Error('Invalid portable WAV identity/path')
@@ -125,8 +127,17 @@ export function arrangementClipTime(project, clip) {
   if (!asset) throw new Error('Region source is missing')
   integer(clip.position, 'region project position')
   integer(clip.repeat, 'region repeat count', 1)
+  if (clip.sourceDivisor !== undefined && asset.kind !== 'practice') throw new Error('Fractional host cuts require a practice source')
   let sourceStart, sourceEnd, duration, capture, exact
   switch (asset.kind) {
+  case 'practice': {
+    if (clip.pattern !== undefined) throw new Error('Raw practice regions do not have SMF patterns')
+    capture = practiceRegionTime(asset, clip)
+    sourceStart = capture.sourceStartSeconds; sourceEnd = capture.sourceEndSeconds; duration = capture.durationSeconds
+    exact = { start: fraction(...projectNanoseconds(project, clip.position)),
+      period: fraction(BigInt(clip.extent) * BigInt(capture.sourceClock.numer), BigInt(capture.sourceClock.denom) * BigInt(clip.sourceDivisor ?? '1')) }
+    break
+  }
   case 'capture': {
     if (clip.pattern !== undefined) throw new Error('Captured regions do not have MIDI patterns')
     if (clip.component !== undefined && !['audio', 'midi'].includes(clip.component)) throw new Error('Unknown captured region component')
@@ -187,15 +198,17 @@ export function validateArrangement(project) {
   arrangementLoop(project)
   if (!Array.isArray(project.meter) || project.meter.length !== 2) throw new Error('Invalid arrangement meter')
   integer(project.meter[0], 'meter numerator', 1)
-  integer(project.meter[1], 'meter denominator', 1)
-  const denominator = BigInt(project.meter[1])
-  if ((denominator & (denominator - 1n)) !== 0n) throw new Error('Arrangement meter denominator must be a power of two')
+  // Every SMF denominator (2 to an unsigned-byte power) is exactly representable
+  // in binary64, including powers beyond the safe *consecutive* integer range.
+  const power = Math.log2(project.meter[1])
+  if (typeof project.meter[1] !== 'number' || !Number.isInteger(power) || power < 0 || power > 255
+      || 2 ** power !== project.meter[1]) throw new Error('Arrangement meter denominator must be an SMF power of two')
   unique(project.assets, 'asset'); unique(project.lanes, 'lane'); unique(project.clips, 'region')
   for (const asset of project.assets) validateArrangementAsset(asset)
   const assets = new Map(project.assets.map(asset => [asset.id, asset])), lanes = new Map(project.lanes.map(lane => [lane.id, lane]))
   for (const lane of project.lanes) {
     text(lane.name, 'lane name')
-    if (!['wave', 'midi', 'capture'].includes(lane.kind) || typeof lane.muted !== 'boolean' || typeof lane.solo !== 'boolean') throw new Error('Invalid arrangement lane')
+    if (!['wave', 'midi', 'capture', 'practice'].includes(lane.kind) || typeof lane.muted !== 'boolean' || typeof lane.solo !== 'boolean') throw new Error('Invalid arrangement lane')
   }
   const recordedCycles = new Map(project.assets.filter(asset => asset.selectedTake !== undefined).map(asset => [asset.id, new Set(asset.recording.passes.map(pass => pass.cycle))]))
   for (const clip of project.clips) {
@@ -241,6 +254,7 @@ export function editArrangement(project, edit) {
     case 'region-add': next.clips.push({ id: arrangementID(next.clips, 'region'), name: edit.name,
       asset: edit.asset, lane: edit.lane, position: edit.position, offset: edit.offset, extent: edit.extent,
       repeat: edit.repeat ?? 1, ...(edit.takeCycle === undefined ? {} : { takeCycle: edit.takeCycle }), ...(edit.pattern === undefined ? {} : { pattern: edit.pattern }),
+      ...(edit.sourceDivisor === undefined ? {} : { sourceDivisor: edit.sourceDivisor }),
       ...(edit.clockOffsetNanoseconds === undefined ? {} : { clockOffsetNanoseconds: structuredClone(edit.clockOffsetNanoseconds) }),
       ...(edit.audioChannel === undefined ? {} : { audioChannel: structuredClone(edit.audioChannel) }),
       ...(edit.component === undefined ? {} : { component: edit.component }), ...(edit.placement === undefined ? {} : { placement: structuredClone(edit.placement) }) }); break
@@ -258,8 +272,8 @@ export function editArrangement(project, edit) {
       const clip = region(edit.id)
       for (const key of Object.keys(edit)) {
         if (['kind', 'id'].includes(key)) continue
-        if (!['name', 'lane', 'position', 'offset', 'extent', 'repeat', 'pattern', 'component', 'placement', 'audioChannel', 'clockOffsetNanoseconds'].includes(key)) throw new Error('Unknown region edit field')
-        if (key === 'audioChannel' && edit[key] === undefined) delete clip[key]
+        if (!['name', 'lane', 'position', 'offset', 'extent', 'repeat', 'pattern', 'component', 'placement', 'audioChannel', 'clockOffsetNanoseconds', 'sourceDivisor'].includes(key)) throw new Error('Unknown region edit field')
+        if (['audioChannel', 'sourceDivisor'].includes(key) && edit[key] === undefined) delete clip[key]
         else clip[key] = structuredClone(edit[key])
       }
       break

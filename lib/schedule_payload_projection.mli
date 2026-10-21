@@ -4,7 +4,11 @@
     names the payload kinds MASC can understand, validates their objective
     schemas, and returns typed views for production dispatch. *)
 
-type known_kind = Keeper_wake
+type known_kind =
+  | Keeper_wake
+  | Lane_act
+      (** One action for a declared Lane Add-on installation's live worker
+          (RFC operator-quiz §4.7). Body: [installation_id], [action]. *)
 
 type support_status =
   | Supported
@@ -99,3 +103,6 @@ val body_required_string : payload_view -> string -> (string, string) result
 val body_optional_string : payload_view -> string -> (string option, string) result
 val body_result_delivery :
   payload_view -> (Keeper_continuation_channel.t option, string) result
+
+val lane_act_body : payload_view -> (string * Yojson.Safe.t, string) result
+(** A [masc.lane_act] body's installation id and action object. *)

@@ -519,15 +519,12 @@ type agent = Tui_decode.agent
 (** Task type (from Tui_decode) *)
 type task = Tui_decode.task
 
-(** Event for the event log *)
-(* The six states the refresh loop can put the TUI in. It was a string
-   with a catch-all at each of the five render sites, so a typo rendered
-   as [disconnected] and a new state would have too. *)
+(* HTTP contact observations. An in-flight refresh has progress of its own
+   and does not replace the last completed contact observation. *)
 type connection_status =
   | Disconnected
   | Connecting
   | Booting
-  | Reconnecting
   | Degraded
   | Connected
 
@@ -536,8 +533,18 @@ let connection_status_label = function
   | Degraded -> "degraded"
   | Connecting -> "connecting..."
   | Booting -> "server booting..."
-  | Reconnecting -> "reconnecting..."
   | Disconnected -> "disconnected"
+;;
+
+(* A successful identity probe is contact even when every requested surface
+   failed. Pending reads leave this last observation alone; their progress is
+   tracked by [http_refresh_started_ns] and [Http_refresh_progress]. *)
+let connection_status_of_refresh ~identity ~surfaces =
+  let results = identity :: surfaces in
+  match List.filter Result.is_ok results with
+  | [] -> Disconnected
+  | successes when List.length successes = List.length results -> Connected
+  | _ :: _ -> Degraded
 ;;
 
 (* A successful probe is the current server even when the peer address did not
@@ -3274,11 +3281,11 @@ type pending_approval_action = Masc_tui_operator_projection.pending_approval_act
    refreshes underneath cannot silently move the answer to another question. *)
 type ask_answer_mode =
   | Ask_browsing
-  | Ask_answering of { aam_ask_id: string }
+  | Ask_answering of { aam_ask: Masc.Tui_decode_asks.ask_key }
 
 module Ask_answer_receipt : sig
   type observation = private {
-    result: (Masc.Tui_decode_asks.ask_answer_receipt, string) result;
+    result: (Masc.Tui_decode_asks.answer_receipt, string) result;
     observed_ns: int64;
   }
   type reading = Waiting | Returned of observation | Closed_without_result
@@ -3286,13 +3293,13 @@ module Ask_answer_receipt : sig
   val create : unit -> t
   val read : t -> reading
   val publish : t -> observed_ns:int64 ->
-    (Masc.Tui_decode_asks.ask_answer_receipt, string) result -> bool
+    (Masc.Tui_decode_asks.answer_receipt, string) result -> bool
   val close : t -> unit
   (** One actual result survives worker closure. Closing without a result
       makes no claim about whether a POST was sent or applied. *)
 end = struct
   type observation = {
-    result: (Masc.Tui_decode_asks.ask_answer_receipt, string) result;
+    result: (Masc.Tui_decode_asks.answer_receipt, string) result;
     observed_ns: int64;
   }
   type reading = Waiting | Returned of observation | Closed_without_result
@@ -3306,7 +3313,7 @@ end
 
 module Ask_answer_completion : sig
   type observation = private {
-    receipt: (Masc.Tui_decode_asks.ask_answer_receipt, string) result;
+    receipt: (Masc.Tui_decode_asks.answer_receipt, string) result;
     asks: (Masc.Tui_decode_asks.asks_snapshot, string) result;
     observed_ns: int64;
   }
@@ -3315,14 +3322,14 @@ module Ask_answer_completion : sig
   val create : unit -> t
   val read : t -> reading
   val publish : t -> observed_ns:int64 ->
-    receipt:(Masc.Tui_decode_asks.ask_answer_receipt, string) result ->
+    receipt:(Masc.Tui_decode_asks.answer_receipt, string) result ->
     asks:(Masc.Tui_decode_asks.asks_snapshot, string) result -> bool
   val close : t -> unit
   (** The actual final pair, before UI authority projection. Closing without
       it does not invent a completed reread or an answer outcome. *)
 end = struct
   type observation = {
-    receipt: (Masc.Tui_decode_asks.ask_answer_receipt, string) result;
+    receipt: (Masc.Tui_decode_asks.answer_receipt, string) result;
     asks: (Masc.Tui_decode_asks.asks_snapshot, string) result;
     observed_ns: int64;
   }
@@ -3342,7 +3349,7 @@ type ask_submission = {
   as_completion: Ask_answer_completion.t;
   as_authority: workspace_authority;
   as_reading: unit ref option; (* Original workspace_enqueue read scope; None was unconfirmed. *)
-  as_keeper_name: string;
+  as_asker: Masc.Tui_decode_asks.ask_asker;
   as_ask_id: string;
   as_answered_label: string;
   as_source_turn_ref: Ids.Turn_ref.t option;
@@ -3392,7 +3399,7 @@ end = struct
            "call_wait_ns", ns (Int64.sub at_ns started_ns); "outcome", `String (outcome_name outcome)]
       | Reread_admitted outcome -> "reread_admitted", ["outcome", `String (outcome_name outcome)] in
     let Workspace_authority authority = submission.as_authority in
-    `Assoc (["phase", `String phase; "keeper", `String submission.as_keeper_name;
+    `Assoc (["phase", `String phase; "asker", Masc_tui_ask_projection.asker_to_json submission.as_asker;
       "ask_id", `String submission.as_ask_id; "workspace_authority", `Int authority;
       "source_turn_ref", (match submission.as_source_turn_ref with
         | None -> `Null | Some turn_ref -> `String (Ids.Turn_ref.to_string turn_ref));
@@ -7875,7 +7882,9 @@ type home_request =
   | Home_held_call of { keeper : string; call_id : string }
   | Home_gate_request of string
   | Home_operator_request of string
-  | Home_question of string
+  | Home_question of Masc.Tui_decode_asks.ask_key
+      (** An installation's ask id is unique only within that installation, so
+          the asker is part of which question a row opens. *)
   | Home_goal_confirmation of string
   | Home_operator_task of string
 
@@ -7887,6 +7896,31 @@ type home_action =
   | Home_read_last of string
   | Home_choose_keeper
   | Home_create_keeper
+
+(* Which request a Home row names. A question is compared by
+   [Masc.Tui_decode_asks.equal_ask_key], so a package that changes its
+   title keeps the row the operator chose. *)
+let equal_home_request left right =
+  match left, right with
+  | Home_held_call left, Home_held_call right ->
+      String.equal left.keeper right.keeper && String.equal left.call_id right.call_id
+  | Home_gate_request left, Home_gate_request right
+  | Home_operator_request left, Home_operator_request right
+  | Home_goal_confirmation left, Home_goal_confirmation right
+  | Home_operator_task left, Home_operator_task right -> String.equal left right
+  | Home_question left, Home_question right -> Masc.Tui_decode_asks.equal_ask_key left right
+  | ( Home_held_call _ | Home_gate_request _ | Home_operator_request _ | Home_question _
+    | Home_goal_confirmation _ | Home_operator_task _ ), _ -> false
+
+let equal_home_action left right =
+  match left, right with
+  | Home_request left, Home_request right -> equal_home_request left right
+  | Home_resume left, Home_resume right | Home_read_last left, Home_read_last right ->
+      String.equal left right
+  | Home_approvals, Home_approvals | Home_agenda, Home_agenda
+  | Home_choose_keeper, Home_choose_keeper | Home_create_keeper, Home_create_keeper -> true
+  | ( Home_approvals | Home_request _ | Home_agenda | Home_resume _ | Home_read_last _
+    | Home_choose_keeper | Home_create_keeper ), _ -> false
 
 type acting_pane_preference =
   | Default_acting_pane
@@ -8761,7 +8795,7 @@ type state = {
      until this existed the terminal drew "free text welcome" over a keyboard
      that had nowhere to put the text. *)
   mutable ask_text_entry: ask_text_entry option;
-  mutable pending_ask_submit: string option;
+  mutable pending_ask_submit: Masc.Tui_decode_asks.ask_key option;
   mutable ask_submit_inflight: bool;
   (* Owns receipt observations only; it does not settle the original POST or
      release its draft/action gate before the canonical reread returns. *)
@@ -9025,6 +9059,8 @@ type state = {
      per-run detail fetch, so the list never holds one. *)
   mutable lanes_mode: lanes_mode;
   mutable lanes_cursor: int;
+  mutable lanes_exact_output: (string * string) option;
+  (** The exact output last chosen in a package row: the row id and the output name. *)
   mutable lanes_scroll: int;
   mutable lane_runs: Tui_decode.lane_run_summary list option;
   mutable lane_runs_error: string option;
@@ -9764,7 +9800,7 @@ let retain_ask_answer_feedback (state : state) submission result =
   if not already_observed && owns_ask_submission state submission then begin
     let feedback = Masc_tui_ask_projection.answer_feedback
       ?source_turn_ref:submission.as_source_turn_ref
-      ~keeper_name:submission.as_keeper_name ~ask_id:submission.as_ask_id
+      ~asker:submission.as_asker ~ask_id:submission.as_ask_id
       ~submitted_label:submission.as_answered_label result in
     state.ask_answer_feedback <- Some (submission, feedback);
     Some feedback
@@ -9799,8 +9835,11 @@ let ask_followup_owner_current (state : state) submission =
 let begin_ask_followup_read (state : state) =
   match state.ask_answer_feedback with
   | Some (submission, feedback) when ask_followup_owner_current state submission ->
-      (match feedback.Masc_tui_ask_projection.af_receipt with
-       | Ok (Masc.Tui_decode_asks.Ask_answer_recorded _ | Ask_answer_already_recorded _) ->
+      (* Only a Keeper's answer has a follow-up to read: the wake it
+         starts. An installation's answer starts its host request cycle. *)
+      (match feedback.Masc_tui_ask_projection.af_asker, feedback.Masc_tui_ask_projection.af_receipt with
+       | Masc.Tui_decode_asks.Ask_keeper keeper_name,
+         Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_recorded _ | Ask_answer_already_recorded _)) ->
            let reading, request = Snapshot_read.start ~intent:Snapshot_read.Poll state.ask_followup_read in
            state.ask_followup_read <- reading;
            Option.map (fun request ->
@@ -9808,8 +9847,11 @@ let begin_ask_followup_read (state : state) =
                if owner.as_request == submission.as_request then Some reading else None) in
              state.ask_followup <- Some (submission, Masc_tui_ask_projection.begin_followup ~previous);
              state.ask_followup_error <- None;
-             request, submission) request
-       | Ok (Ask_answer_written_unconfirmed _ | Ask_answer_refused _) | Error _ -> None)
+             request, submission, keeper_name) request
+       | Masc.Tui_decode_asks.Ask_keeper _,
+         (Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_written_unconfirmed _ | Ask_answer_refused _)
+              | Masc.Tui_decode_asks.Installation_answer_receipt _) | Error _)
+       | Masc.Tui_decode_asks.Ask_installation _, (Ok _ | Error _) -> None)
   | Some _ | None -> None
 
 let current_ask_followup (state : state) =
@@ -9856,8 +9898,8 @@ let armed_ask_submit_notice answer_label =
 
 let ask_submit_is_armed (state : state) =
   match state.ask_answer_mode, state.ask_text_entry, state.pending_ask_submit with
-  | Ask_answering { aam_ask_id }, None, Some armed ->
-      String.equal armed aam_ask_id
+  | Ask_answering { aam_ask }, None, Some armed ->
+      Masc.Tui_decode_asks.equal_ask_key armed aam_ask
   | Ask_browsing, _, _
   | Ask_answering _, Some _, _
   | Ask_answering _, None, None -> false
@@ -13490,6 +13532,13 @@ let selected_standalone_lane (state : state) =
 
 let lanes_inventory_count state = List.length (lane_inventory_rows state)
 
+(* The exact output chosen in [row], by name, when the last choice was made in
+   that row; the cursor names rows by identity, never by position. *)
+let lanes_exact_output_name (state : state) (row : Masc.Tui_decode_lane_inventory.row) =
+  match state.lanes_exact_output with
+  | Some (row_id, name) when String.equal row_id row.id -> Some name
+  | Some _ | None -> None
+
 (** Whether a goal lifecycle arm targets this goal. Answered here rather
     than at the renderer so the renderer never reads [pg_id] outside
     [Terminal_text] -- the sanitize guard counts every access, comparison
@@ -14964,6 +15013,7 @@ let create_state
   clients_surface_generation = 0;
   lanes_mode = Lanes_overview;
   lanes_cursor = 0;
+  lanes_exact_output = None;
   lanes_scroll = 0;
   lane_runs = None;
   lane_runs_error = None;
@@ -16502,8 +16552,8 @@ let agenda (state : state) : Masc_tui_agenda.t =
       Masc_tui_agenda.Read
         (List.map
            (fun (row : Masc.Tui_decode_asks.ask_row) ->
-              { Masc_tui_agenda.ask_id = row.ar_id
-              ; keeper = row.ar_keeper
+              { Masc_tui_agenda.ask = Masc.Tui_decode_asks.ask_key row
+              ; asked_by = Masc.Tui_decode_asks.ask_asker_label row.ar_asker
               ; first_question =
                   (match row.ar_questions with
                    | question :: _ -> Some question.aq_prompt

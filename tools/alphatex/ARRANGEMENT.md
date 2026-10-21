@@ -11,6 +11,39 @@ editors retain their separate transports.
 ## Terminal workflow
 
 Import files with `:import-wave /path/take.wav` or `:import-midi /path/song.mid`.
+Use `:import-practice /path/take` for a completed raw MIDI practice recording.
+With `:output AUDIO_UID`, Space realizes that source through its captured VST
+preset. An explicit `:midi-source` override sends its original UMP externally
+instead. Derived audio keeps the original host-clock cuts and repeat periods;
+source files and saved project identity remain unchanged.
+`:practice-backing [ASSET]` restores the take's captured phrase as a new editable
+MIDI library asset. Its originally played track is muted; all notes, other track
+mute/solo decisions, controls, tempo, meter, loop range and frozen VST sound are
+retained. Enter places it at the cursor and `:edit-midi` opens it for chord or
+voicing experiments. Undo removes the imported variant without changing the take.
+The original full phrase is restored, including notes outside its retained loop;
+use `:region` with original MIDI ticks to place a loop excerpt explicitly.
+This is an editable musical backing, not recorded monitor PCM or automatic
+alignment to the take's host clock. Pass slicing and alignment remain separate.
+Use `:practice-midi [ASSET]` to derive what you played as a new expressive MIDI
+source. `:edit-midi` opens that selected variant for note/expression edits,
+`:harmony` analysis and `:revoice` experiments; Enter places it independently.
+This derives the **whole take**, including its initial silence, even when an
+original pass region is selected. Existing raw sources, pass cuts and clips
+remain unchanged; undo removes the new import. Use source MIDI ticks to trim
+the variant explicitly. Its captured VST sound and initial volume/pan are kept.
+
+The variant uses the monitoring path's declared MIDI1 projection onto the
+captured live channel. MIDI2 values become MIDI1 values, bank/program changes
+remain excluded under the captured preset, and unsupported attributes fail
+explicitly. Host times become nearest 960 PPQ ticks using the captured tempo
+rounded to SMF microseconds per quarter note. Equal-tick events keep their
+original time/order; very short notes can become point notes. The ending is
+at least one tick, with generated note/pedal releases at the source boundary.
+This is an editing projection; original UMP precision and fractional pass cuts
+remain available on the raw take. Long SMF event gaps use empty sequencer
+metadata to preserve their time across the 28-bit delta boundary; these padding
+events do not produce wire messages or change tempo.
 Paths retain internal spaces and are literal paths, without shell expansion.
 The imported asset is selected in the library. Enter places its complete source
 at the cursor, using the current compatible lane or adding a new one.
@@ -36,9 +69,41 @@ the grid. `:grid 0.25` sets a quarter-beat grid.
 :save-as /path/song.json
 ```
 
-Source offsets/extents use whole WAV frames or original MIDI ticks; project
+Source offsets/extents use whole WAV frames, original SMF ticks or decimal
+host-tick strings for raw practice recordings; project
 positions use quarter-note beats. Pattern numbers in commands start at 1.
 Trim rejects an out-of-bounds range rather than rounding or shortening it.
+For practice boundaries between whole host ticks, use
+`:practice-region ASSET BEAT OFFSET EXTENT DIVISOR [REPEAT]` or select a practice
+region and use `:trim-fraction OFFSET EXTENT DIVISOR`. Offset and extent are
+decimal integer numerators in original host ticks divided by the positive
+integer divisor. For example, `:trim-fraction 1 4 2` selects `[1/2, 5/2)` host
+ticks from the source origin. Normal `:trim` explicitly returns to whole ticks.
+These exact cuts survive move, duplicate, undo and save/reopen. They reach both
+external original-UMP playback and the captured VST's source-audio clock;
+repeats and common loops retain the fractional period without accumulating a
+rounded copy length. Packet timestamps/words remain unchanged. Update the
+installed AlphaTex/native companion together. Select original practice passes
+using the retained output clock:
+
+```
+:practice-passes asset-1
+:cursor 8
+:practice-pass 3 asset-1
+:practice-pass 4 asset-1
+```
+
+The first command selects that source and reports its available original pass-number range. Selecting a
+pass places its MIDI at the cursor; if the selected region uses that source, it
+replaces that region's source cut while keeping its position and repeats. Undo
+restores the previous performance. Duplicate a region first to retain several
+passes for comparison. The status distinguishes a partial first/final pass.
+Each boundary comes from the frozen backing's absolute output-frame rounding,
+then the retained render frame/host anchor. Original cycle numbers survive a
+late anchor; a final incomplete cycle ends at the consumed frame horizon.
+This is nominal clock alignment, not physical latency or drift compensation.
+The source keeps its original speed and captured tempo; project tempo changes
+placement, so choose matching musical positions when combining its backing.
 `x`/Delete removes a region, `d` duplicates at the cursor, `m`/`o` toggles lane
 mute/solo, and `u`/`y` undoes/redoes document edits. `:lane-remove` retains sources.
 `:title`, `:tempo`, `:meter`, `:lane-name` and `:region-name` edit their named fields.
@@ -47,7 +112,7 @@ mute/solo, and `u`/`y` undoes/redoes document edits. `:lane-remove` retains sour
 Import and save IO run in an owned worker. Accepted commands remain ordered;
 closing refuses new input, cancels an in-progress import, waits for cleanup and
 drains already accepted editor decisions. An import finishing after close cannot
-replace the document. Save-as materializes WAVs and captured takes retained by undo/redo history as
+replace the document. Save-as materializes WAVs, captured takes and raw practice sources retained by undo/redo history as
 well as the current document, so a later redo does not depend on the old folder.
 An uncertain/failed save is not automatically retried at the same path on close;
 edits are retained at a fresh recovery location. If source corruption prevents

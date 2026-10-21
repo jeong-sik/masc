@@ -2434,6 +2434,107 @@ let test_docker_mount_failure_message_preserves_path () =
   Alcotest.(check bool) "status emitted" true
     (String_util.contains_substring message "status=\"exit=125\"")
 
+(* A failed [docker run] that printed only a container id used to read as
+   "docker_container_start_failed: <hex>": no exit status, and nothing to say
+   whether a container of that name was left behind (#31363). *)
+let container_id_only = "49e2edb7faf9d6b3de3552a1273ca31e847c72f9b91af7e487c07836efe17610"
+let start_prefix = "docker_container_start_failed"
+
+let run_failure ?(output = container_id_only) ?container_state ~status () =
+  Keeper_sandbox_exec_failure.docker_run_failure_message
+    ~prefix:start_prefix
+    ~image:"masc-keeper-sandbox:local"
+    ?container_state
+    ~status
+    ~output
+    ()
+
+let contains = String_util.contains_substring
+
+(* Number of non-overlapping occurrences of [needle] in [haystack]. *)
+let occurrences haystack needle =
+  let n = String.length needle in
+  let rec go from count =
+    if from + n > String.length haystack
+    then count
+    else if String.equal (String.sub haystack from n) needle
+    then go (from + n) (count + 1)
+    else go (from + 1) count
+  in
+  go 0 0
+
+let test_run_failure_message_carries_status_and_container_state () =
+  let observed =
+    run_failure
+      ~status:(Unix.WEXITED 125)
+      ~container_state:(Ok Keeper_sandbox_runtime.Docker_container_stopped)
+      ()
+  in
+  Alcotest.(check bool) "keeps the prefix" true
+    (contains observed (start_prefix ^ ": status=exit=125"));
+  Alcotest.(check bool) "keeps the container id" true (contains observed container_id_only);
+  Alcotest.(check bool) "reports a container of that name that is not running" true
+    (contains observed "container_after_run=stopped");
+  let none_left =
+    run_failure
+      ~status:(Unix.WEXITED 125)
+      ~container_state:(Ok Keeper_sandbox_runtime.Docker_container_absent)
+      ()
+  in
+  Alcotest.(check bool) "reports no container of that name" true
+    (contains none_left "container_after_run=absent");
+  let unprobed =
+    run_failure
+      ~status:(Unix.WSIGNALED 9)
+      ~container_state:(Error "docker inspect timed out")
+      ()
+  in
+  Alcotest.(check bool) "a signal is named as a signal" true
+    (contains unprobed "status=signal=9");
+  Alcotest.(check bool) "a failed probe is unknown, not a guess" true
+    (contains unprobed "container_after_run=unknown")
+
+let test_run_failure_message_without_a_probe_names_no_container_state () =
+  let message = run_failure ~status:(Unix.WEXITED 125) () in
+  Alcotest.(check bool) "status still stated" true (contains message "status=exit=125");
+  Alcotest.(check bool) "a caller that did not probe does not claim a state" false
+    (contains message "container_after_run")
+
+let test_run_failure_message_names_empty_output () =
+  let message = run_failure ~output:"  \n" ~status:(Unix.WEXITED 1) () in
+  Alcotest.(check bool) "empty output is marked, not left blank" true
+    (contains message "output=<no output>");
+  Alcotest.(check bool) "a plain failure carries no mount marker" false
+    (contains message "docker_mount_failure=true")
+
+let test_run_failure_message_trims_output () =
+  let message = run_failure ~output:(container_id_only ^ "\n") ~status:(Unix.WEXITED 125) () in
+  Alcotest.(check bool) "no newline splits the line" false (String.contains message '\n')
+
+let test_run_failure_message_keeps_mount_context () =
+  let mount_path = "/host_mnt/Users/worker/ws/.masc/playground/docker/repos/masc" in
+  let output =
+    "docker: Error response from daemon: failed to create task for container: "
+    ^ "failed to create shim task: OCI runtime create failed: "
+    ^ "runc create failed: unable to start container process: "
+    ^ "error during container init: error mounting \""
+    ^ mount_path
+    ^ "\" to rootfs at \"/workspace\": stat "
+    ^ mount_path
+    ^ ": no such file or directory"
+  in
+  let message =
+    run_failure
+      ~output
+      ~status:(Unix.WEXITED 125)
+      ~container_state:(Ok Keeper_sandbox_runtime.Docker_container_stopped)
+      ()
+  in
+  Alcotest.(check bool) "mount marker kept" true
+    (contains message "docker_mount_failure=true");
+  Alcotest.(check bool) "mount path kept" true (contains message mount_path);
+  Alcotest.(check int) "status stated once" 1 (occurrences message "status=exit=125")
+
 let test_docker_mount_failure_structured_details () =
   let mount_path =
     "/host_mnt/Users/worker/ws/.masc/playground/docker/repos/agent_core/.worktrees/"
@@ -2592,6 +2693,21 @@ let () =
           Alcotest.test_case
             "docker mount failure preserves full path"
             `Quick test_docker_mount_failure_message_preserves_path;
+          Alcotest.test_case
+            "docker run failure carries status and container state"
+            `Quick test_run_failure_message_carries_status_and_container_state;
+          Alcotest.test_case
+            "docker run failure without a probe claims no container state"
+            `Quick test_run_failure_message_without_a_probe_names_no_container_state;
+          Alcotest.test_case
+            "docker run failure names empty output"
+            `Quick test_run_failure_message_names_empty_output;
+          Alcotest.test_case
+            "docker run failure trims its output"
+            `Quick test_run_failure_message_trims_output;
+          Alcotest.test_case
+            "docker run failure keeps mount context"
+            `Quick test_run_failure_message_keeps_mount_context;
           Alcotest.test_case
             "docker mount failure emits structured details"
             `Quick test_docker_mount_failure_structured_details;

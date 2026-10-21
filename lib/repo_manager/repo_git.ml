@@ -199,6 +199,8 @@ let run_git_raw ~cwd ?(env = []) ?timeout_sec args : (string, string) result =
 let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
   Result.map split_lines (run_git_raw ~cwd ~env ?timeout_sec args)
 
+let run_git_read_only_raw ~cwd args = run_git_raw ~cwd ~env:read_only_git_env args
+
 let clone ~repository =
   let env = non_interactive_git_env in
   let parent_dir = Filename.dirname repository.local_path in

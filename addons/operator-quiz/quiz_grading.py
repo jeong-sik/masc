@@ -1,0 +1,126 @@
+"""Verdicts and review items (RFC operator-quiz §6, §7).
+
+A choice verdict is a pure function of the key and the answer, so it is
+recomputed whenever it is needed and never stored. A written answer waits
+for a judgment, which the grade output brings; until then it is
+awaiting_judgment. The latest judgment of a question decides its verdict,
+over the key too, and a void one takes the question out of the attempts. A
+skip is a miss.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import quiz_log as q
+
+CORRECT = "correct"
+INCORRECT = "incorrect"
+SKIPPED = "skipped"
+AWAITING_JUDGMENT = "awaiting_judgment"
+VOID = "void"
+MISSES = {INCORRECT, SKIPPED}
+
+
+def by_key(posed: q.Posed, response: q.Response) -> str:
+    """The verdict before any judgment. A question asked with a rubric has no
+    choices, so the log never holds a choice answer to it."""
+    match response, posed.key:
+        case q.Chose(choice_ids), q.ChoiceKey(key):
+            return CORRECT if set(choice_ids) == set(key) else INCORRECT
+        case q.Chose(), q.Rubric():
+            raise q.LogError(f"{posed.ask_id}/{posed.question_id} has no choices to choose")
+        case q.Skipped(), _:
+            return SKIPPED
+        case q.Wrote(), _:
+            return AWAITING_JUDGMENT
+
+
+def judged(judgment: q.Judgment) -> str:
+    match judgment:
+        case q.Correct():
+            return CORRECT
+        case q.Incorrect():
+            return INCORRECT
+        case q.Void():
+            return VOID
+
+
+def verdict(posed: q.Posed, response: q.Response, judgments: tuple[q.Judged, ...] = ()) -> str:
+    return judged(judgments[-1].judgment) if judgments else by_key(posed, response)
+
+
+def changed_verdicts(posed: q.Posed, response: q.Response, judgments: tuple[q.Judged, ...]) -> int:
+    """How many judgments changed a verdict the question already had, from
+    its key or an earlier judgment (RFC §14 G). A first judgment of a written
+    answer replaces no verdict."""
+    current = by_key(posed, response)
+    changes = 0
+    for event in judgments:
+        new = judged(event.judgment)
+        if current != AWAITING_JUDGMENT and new != current:
+            changes += 1
+        current = new
+    return changes
+
+
+@dataclass(frozen=True, slots=True)
+class Attempt:
+    session_id: str
+    question_id: str
+    answered_at: float
+    verdict: str
+
+
+@dataclass(frozen=True, slots=True)
+class Item:
+    item_id: str
+    topic: str
+    sources: tuple[q.Source, ...]  # every source a question of this item was posed with
+    attempts: tuple[Attempt, ...]  # in the order answered
+
+    @property
+    def latest(self) -> str | None:
+        return self.attempts[-1].verdict if self.attempts else None
+
+    @property
+    def correct_streak(self) -> int:
+        """How many correct answers in a row end the history."""
+        streak = 0
+        for attempt in reversed(self.attempts):
+            if attempt.verdict != CORRECT:
+                break
+            streak += 1
+        return streak
+
+    @property
+    def open_debt(self) -> bool:
+        return self.latest in MISSES
+
+
+def items(sessions: list[q.Session]) -> list[Item]:
+    """Every item ever posed, in the order first posed, with the attempts its
+    answered questions made. A question judged void is no attempt."""
+    order: list[str] = []
+    topics: dict[str, str] = {}
+    sources: dict[str, list[q.Source]] = {}
+    attempts: dict[str, list[Attempt]] = {}
+    for session in sessions:
+        responses = ({answer.question_id: answer.response for answer in session.answer.answers}
+                     if session.answer else {})
+        for posed in session.posed:
+            if posed.item_id not in topics:
+                order.append(posed.item_id)
+                topics[posed.item_id] = posed.topic
+                sources[posed.item_id] = []
+                attempts[posed.item_id] = []
+            for source in posed.sources:
+                if source not in sources[posed.item_id]:
+                    sources[posed.item_id].append(source)
+            if posed.question_id in responses and session.answer is not None:
+                state = verdict(posed, responses[posed.question_id], session.judgments_of(posed.question_id))
+                if state != VOID:
+                    attempts[posed.item_id].append(
+                        Attempt(session.session_id, posed.question_id, session.answer.answered_at, state))
+    return [Item(item_id, topics[item_id], tuple(sources[item_id]),
+                 tuple(sorted(attempts[item_id], key=lambda attempt: attempt.answered_at)))
+            for item_id in order]

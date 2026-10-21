@@ -1482,7 +1482,6 @@ let connection_status_badge (status : Masc_tui_types.connection_status) =
     | Connected -> Theme.ok (), "connected"
     | Degraded -> Theme.warn (), "partial"
     | Connecting -> Theme.warn (), "loading..."
-    | Reconnecting -> Theme.warn (), "refreshing..."
     | Booting -> Theme.warn (), "server booting..."
     | Disconnected -> Theme.bad (), "refresh failed"
   in
@@ -2020,7 +2019,7 @@ let draw_ask_question buf cols ~text_entry ~(row : Masc.Tui_decode_asks.ask_row)
     ~head:
       (Printf.sprintf " %s%s%s%s%s  " caret
          (if selected_question then Ansi.bold else "")
-         (fit_width (Terminal_text.single_line row.Masc.Tui_decode_asks.ar_keeper) 16)
+         (fit_width (Terminal_text.single_line (Masc.Tui_decode_asks.ask_asker_label row.Masc.Tui_decode_asks.ar_asker)) 16)
          (if selected_question then Ansi.reset else "")
          Ansi.reset)
     ~style:(if selected_question then Ansi.bold else "")
@@ -2088,8 +2087,8 @@ let draw_ask_question buf cols ~text_entry ~(row : Masc.Tui_decode_asks.ask_row)
    | Some Ask_projection.Draft_skipped ->
        box_line buf cols (Printf.sprintf "      %sskipped%s" Ansi.dim Ansi.reset)
    | Some (Ask_projection.Draft_chose _) | None -> ());
-  let ask_id = row.Masc.Tui_decode_asks.ar_id in
-  let slot = Ask_projection.free_text_slot ~ask_id question in
+  let ask = Masc.Tui_decode_asks.ask_key row in
+  let slot = Ask_projection.free_text_slot ~ask question in
   let aft_hint = Ask_projection.free_text_hint slot in
   (
       (* The editor belongs to one question of one ask, and the slot it holds
@@ -2100,7 +2099,7 @@ let draw_ask_question buf cols ~text_entry ~(row : Masc.Tui_decode_asks.ask_row)
       let editing_here =
         match text_entry with
         | Some entry
-          when String.equal (Ask_projection.free_text_ask_id entry.ate_slot) ask_id
+          when Masc.Tui_decode_asks.equal_ask_key (Ask_projection.free_text_ask entry.ate_slot) ask
                && String.equal
                     (Ask_projection.free_text_question_id entry.ate_slot)
                     question.Masc.Tui_decode_asks.aq_id ->
@@ -2211,7 +2210,7 @@ let ask_question_viewport (state : state) =
              let text, _ = ask_block (fun b ->
                match text_entry with
                | Some entry
-                 when String.equal (Ask_projection.free_text_ask_id entry.ate_slot) row.ar_id
+                 when Masc.Tui_decode_asks.(equal_ask_key (Ask_projection.free_text_ask entry.ate_slot) (ask_key row))
                       && String.equal
                            (Ask_projection.free_text_question_id entry.ate_slot) question.aq_id ->
                    (* Typing owns the keys. Keep the editor separate from
@@ -2768,7 +2767,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
              rather than shutting a keeper down, so the hint follows suit. *)
           ; "s", (match state.connection_status with
              | Disconnected -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "s" ^ Ansi.reset ^ ":start server"
-             | Connecting | Booting | Reconnecting | Degraded | Connected ->
+             | Connecting | Booting | Degraded | Connected ->
                  hint Keeper_control.Shutdown "shutdown")
             (* Delete is the only action a keeper whose configuration failed to
                read still offers, and [primary] deliberately withholds it from

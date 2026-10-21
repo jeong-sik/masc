@@ -381,7 +381,10 @@ let approval_read =
            Home/End reach its ends, [ / ] step asks, Esc goes back"
 let approval_answer =
   b Act "a" "answer a question"
-    ~help:"open the selected Keeper question in its own mode; Esc leaves it"
+    ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
+let approval_installation_results =
+  b Act "g" "installation Results"
+    ~help:"after answering an installation's question, open that installation's Results in Add-ons, where the reveal appears"
 let approval_origin =
   b Act "o / O" "source / inspect"
     ~help:"o shows the question source; O opens that immutable turn's retained input. With no open question use the last answer's source. Esc returns to the question draft; a missing source is never replaced by the Keeper's latest turn"
@@ -665,6 +668,12 @@ let for_surface = function
              preview-checked runtime.toml editor; slots is a catalog-ref array \
              and cli_slots an official-client runtime-id array, either may be \
              left out, and an enabled lane needs one slot across the two"
+      ; b Navigate "[ / ]" "exact output"
+          ~help:
+            "on a Lane Add-on package row, choose one of its exact outputs; the \
+             preview lists each with its binding: bound, unbound, off, or a \
+             table the package does not declare. e then opens that output's \
+             runtime.addon_exact_lanes table, or says runtime.toml has none yet"
       ; b Navigate "p" "runtime"
           ~help:"open the Runtime surface"
       ; b Act "Esc" "dashboard" ~help:"back to Dashboard"
@@ -739,6 +748,7 @@ let for_surface = function
            owns this surface's arrows and its y/n, which is why answering
            opens as its own mode rather than as a key on the row. *)
       ; approval_answer
+      ; approval_installation_results
       ; approval_origin
       ; approval_walk
       ; approval_workspace

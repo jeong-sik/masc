@@ -6,6 +6,14 @@ val error_to_string : error -> string
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
+val register_exact_runner : Lane_addon_exact.runner -> unit
+(** Server-owned runner for packages' exact-output requests, registered before
+    configuration maintenance. Without it a declared installation's exact
+    request ends its host request cycle with [no_exact_runner]. *)
+val register_github_reader : Lane_addon_records.github -> unit
+(** Server-owned GitHub access for [github_pulls] record grants, registered
+    before configuration maintenance. Until then such a read waits as
+    [source_unavailable]. *)
 val register_sampling_factory :
   (sw:Eio.Switch.t -> store:Lane_addon_store.t -> instance_id:string ->
     package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
@@ -163,12 +171,73 @@ val save_declaration : ?access:Lane_addon_sources.access -> config:Workspace.con
 val start_configuration_service : config:Workspace.config -> sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock -> unit
 
+val answer_installation_question :
+  config:Workspace.config -> declaration_id:string -> ask_id:string ->
+  submissions:(string * Keeper_ask.response) list -> responder:Keeper_ask.responder ->
+  (Keeper_ask.answer list, Lane_addon_asks.answer_failure) result
+(** Records the operator's answer to an installation's question (RFC
+    operator-quiz §4.6) and, when it is recorded, starts a host request cycle
+    of the installation's live instance. A worker that is down receives the
+    answer when it lists the question again. *)
+
+(** Why a scheduled action was not handed over (RFC operator-quiz §4.7). *)
+type scheduled_act_refusal =
+  | Declarations_unread
+      (** This process has not read the declarations yet. *)
+  | Declarations_incomplete
+      (** A declaration, or a retained record that may be this declaration's,
+          could not be read, so an earlier receipt may be unseen. *)
+  | Declaration_missing
+  | Declaration_disabled
+  | No_live_instance
+      (** Declared and enabled, and no worker is running. *)
+  | Request_id_reused
+      (** A receipt with this request id holds another requester or action. *)
+  | Action_refused of string
+      (** The worker's action port, its schema or the caller's access refused it. *)
+type scheduled_act_error =
+  | Scheduled_act_refused of scheduled_act_refusal
+  | Scheduled_act_failed of string  (** A store read or write failed. *)
+val scheduled_act_refusal_label : scheduled_act_refusal -> string
+
+val scheduled_act :
+  config:Workspace.config -> access:Lane_addon_sources.access -> requester:string ->
+  declaration_id:string -> request_id:string -> action:Yojson.Safe.t ->
+  (Lane_addon_action.receipt, scheduled_act_error) result
+(** Hands [action] to the declaration's live worker through the [Act]
+    operation, with [request_id] as the receipt's request id. A receipt with
+    the same request id under any instance the declaration owned is returned
+    instead, after the read writes its terminal when no live worker owns it. *)
+
+val installation_questions :
+  config:Workspace.config -> ((string * Lane_addon_asks.row list) list, string) result
+(** Every declaration's questions, by declaration id, in the order asked. *)
+
+type host_issue =
+  | Listing_failed of string
+  | Listing_refused of string
+  | Relisted_delivered_request of string
+  | Result_delivery_failed of { request_id : string; detail : string }
+  | Exact_record_failed of { request_id : string; detail : string }
+  | Ask_record_failed of { request_id : string; detail : string }
+  | No_exact_runner
+(** What stopped an instance's last host request cycle (RFC operator-quiz
+    §4.4). A detail is the failure's own text and may be blank. *)
+
+val host_issue_to_json : host_issue -> Yojson.Safe.t
+(** The [issue] of an instance's [host_requests] in the inspect payload. *)
+
 module For_testing : sig
   val with_cleanup_writer :
     (store:Lane_addon_store.t -> instance_id:string -> Yojson.Safe.t option ->
       (unit, string) result) -> (unit -> 'a) -> 'a
   (** Terminal historical cleanup persistence. [None] removes a never-started
       binding; [Some json] persists its final phase. Captured before offload. *)
+  type host_port = {
+    list_requests : unit -> (Yojson.Safe.t, string) result;
+    deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
+  }
+  (** A worker's two private host request tools, answers undecoded. *)
   type connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
       (Lane_addon_types.output, string) result;
@@ -179,6 +248,8 @@ module For_testing : sig
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (unit, Lane_addon_lifecycle.failure) result;
     container_id : string;
+    host : host_port option;
+    (** [Some] for a package that waits on the host. *)
   }
   type backend = {
     start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:Lane_addon_types.package -> binding:Yojson.Safe.t ->

@@ -34,6 +34,26 @@ jobs:
           node-version: "22"
       - name: Swift toolchain
         run: xcrun swiftc --version
+      - name: Install the SoundFont synthesis library
+        run: |
+          brew install fluid-synth
+          python3 - <<'PY'
+          import ctypes
+          import ctypes.util
+          path = ctypes.util.find_library('fluidsynth')
+          if not path:
+              raise RuntimeError('FluidSynth library unavailable to Python')
+          library = ctypes.CDLL(path)
+          library.fluid_version_str.restype = ctypes.c_char_p
+          print('FluidSynth', library.fluid_version_str().decode())
+          PY
+      - name: Install the terminal package dependencies
+        working-directory: tools/alphatex
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.31.0 --activate
+          pnpm install --frozen-lockfile
       - name: Native Swift harnesses
         run: |
           set -euo pipefail
@@ -59,13 +79,6 @@ jobs:
             echo "::endgroup::"
           done
           exit "$status"
-      - name: Install the terminal package dependencies
-        working-directory: tools/alphatex
-        run: |
-          set -euo pipefail
-          corepack enable
-          corepack prepare pnpm@10.31.0 --activate
-          pnpm install --frozen-lockfile
       - name: Alphatex JavaScript suite
         working-directory: tools/alphatex
         run: node --test test/*.test.mjs

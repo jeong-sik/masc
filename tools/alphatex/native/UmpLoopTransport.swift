@@ -39,16 +39,16 @@ struct UmpLoopClip {
     func prefix(_ local: UInt128, inclusive: Bool = false) -> Int {
         var low = 0, high = timed.count
         while low < high {
-            let middle = low + (high - low) / 2, tick = UInt128(timed[middle].ticks)
+            let middle = low + (high - low) / 2, tick = UInt128(timed[middle].ticks) * window.subdivision
             let before: Bool
             if tick < cut { before = true }
             else {
                 let delta = tick - cut
                 // Compare first: packets beyond this finite trim need not
                 // fit its scaled native phase at all.
-                if delta >= window.sourcePeriod / window.tick { before = false }
+                if delta >= window.sourcePeriod / window.unit { before = false }
                 else {
-                    let value = delta * window.tick
+                    let value = delta * window.unit
                     before = value < local || inclusive && value == local
                 }
             }
@@ -57,9 +57,9 @@ struct UmpLoopClip {
         return low
     }
     func phase(_ ordinal: Int, in instance: UmpLoopInstance) throws -> UInt128 {
-        let tick = UInt128(timed[ordinal].ticks)
+        let tick = try umpMultiply(UInt128(timed[ordinal].ticks), window.subdivision)
         guard tick >= cut else { throw MidiFailure("historical UMP packet has no raw loop phase") }
-        let delta = try umpMultiply(tick - cut, window.tick)
+        let delta = try umpMultiply(tick - cut, window.unit)
         guard let phase = try window.packetPhase(copy: instance.copy, delta: delta), phase >= instance.entry, phase < instance.end else {
             throw MidiFailure("UMP packet is outside its selected loop instance")
         }
@@ -99,7 +99,7 @@ struct UmpLoopClip {
 // most first-partial/full-middle/last-partial shapes describe finite copies;
 // no repeated packet arrays or copy-count-sized state are constructed.
 struct UmpLoopPlan {
-    let cycle: MidiCycle, clips: [UmpLoopClip], bindings: [UmpBinding]
+    let cycle: MidiCycle, clips: [UmpLoopClip], bindings: [UmpBinding], compatibleEvents: [UmpEvent]
     init(timeline: UmpArrangement, cycle: MidiCycle) throws {
         guard timeline.schemaVersion == 1, timeline.duration.isFinite, timeline.duration > 0,
               !timeline.sources.isEmpty, !timeline.regions.isEmpty,
@@ -116,18 +116,19 @@ struct UmpLoopPlan {
             }
             sources[source.id] = (source, timed)
         }
-        var clips: [UmpLoopClip] = [], potential = UmpFootprint()
+        var clips: [UmpLoopClip] = [], potential = UmpFootprint(), wireEvents: [UmpEvent] = []
         for region in timeline.regions {
             guard !region.id.isEmpty, region.component != .audio, let (source, timed) = sources[region.source], region.repeatCount > 0 else {
                 throw MidiFailure("invalid captured loop region")
             }
             let cut = try umpUnsigned(region.offset), extent = try umpUnsigned(region.extent)
-            guard extent > 0, try umpAdd(cut, extent) <= umpUnsigned(source.extent) else { throw MidiFailure("captured loop trim exceeds original source") }
+            let subdivision = try region.sourceDivisor.map(umpUnsigned) ?? 1
+            guard subdivision > 0, extent > 0, try umpAdd(cut, extent) <= umpMultiply(umpUnsigned(source.extent), subdivision) else { throw MidiFailure("captured loop trim exceeds original source") }
             let nanos = try umpNanoseconds(region.startSeconds)
             let start = try region.startNanoseconds?.rational(displaySeconds: region.startSeconds)
                 ?? (UInt128(min(nanos, UInt64((region.startSeconds * 1e9).rounded(.down)))), 1)
             let window = try UmpLoopWindow(cycle: cycle, start: start, numer: source.timeline.clock.numer,
-                denom: source.timeline.clock.denom, extent: extent, repetitions: region.repeatCount)
+                denom: source.timeline.clock.denom, extent: extent, repetitions: region.repeatCount, subdivision: subdivision)
             var clip = UmpLoopClip(id: region.id, window: window, cut: cut, timed: timed)
             if let first = clip.first, let last = clip.last {
                 var spans: [(UInt64, UInt64)] = [(first, first)]
@@ -154,6 +155,7 @@ struct UmpLoopPlan {
                     }
                     let scope = Set(effects.compactMap(UmpChannel.init(voice:)))
                     for event in effects { potential.observe(UmpMessage(event)) }
+                    wireEvents.append(contentsOf: effects)
                     clip.shapes.append(UmpLoopShape(first: from, last: to, scope: scope))
                 }
             }
@@ -183,6 +185,7 @@ struct UmpLoopPlan {
         let destinations = Set(clips.flatMap { $0.shapes.flatMap { $0.scope.map(\.source) } })
         self.cycle = cycle; self.clips = clips
         self.bindings = destinations.sorted().map { UmpBinding(source: $0, destination: $0) }
+        self.compatibleEvents = wireEvents
     }
 }
 
@@ -201,7 +204,7 @@ final class UmpLoopTransport: CoordinatedMidiTransport {
         let clip: Int, instance: UmpLoopInstance, phase: UInt128, kind: Kind
     }
     init(timeline: UmpArrangement, cycle: MidiCycle) throws {
-        plan = try UmpLoopPlan(timeline: timeline, cycle: cycle); output = UmpOutput(bindings: plan.bindings)
+        plan = try UmpLoopPlan(timeline: timeline, cycle: cycle); output = UmpOutput(bindings: plan.bindings, compatibleEvents: plan.compatibleEvents)
     }
     func prepare() throws {
         output.onFailure = { [weak self] error in self?.finish(reason: "destination-unavailable", error: error, publish: false) }

@@ -12,11 +12,16 @@ import socket
 import secrets
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'lib'))
+
+from recorded_tool_outcome import RecordedCallOutcome, recorded_call_outcome  # noqa: E402
 
 
 def save(path, value):
@@ -217,7 +222,7 @@ def main():
             raise AssertionError('Actual filesystem bytes differ')
         rows = [json.loads(line) for path in (base / '.masc/tool_calls').rglob('*.jsonl') for line in path.read_text().splitlines()]
         writes = [row for row in rows if row.get('keeper') == keeper and row.get('tool') == 'Write']
-        if len(writes) != 1 or writes[0]['success'] is not True:
+        if len(writes) != 1 or recorded_call_outcome(writes[0]) is not RecordedCallOutcome.SUCCEEDED:
             raise AssertionError('Expected one successful durable Write execution')
         save(root / 'effect-execution.json', writes[0])
         transcript = [json.loads(line) for line in (base / '.masc/keeper_chat' / (keeper + '.jsonl')).read_text().splitlines()]

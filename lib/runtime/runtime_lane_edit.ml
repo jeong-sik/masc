@@ -45,9 +45,7 @@ type error =
   | Replacement_already_declared of string
   | Replacement_changes_group
 
-let exact_lane_table_path lane =
-  Runtime_toml_namespace.(path Runtime) "exact_output_lanes"
-  ^ "." ^ Standalone_lane.to_id lane
+let exact_lane_table_path lane = Runtime_schema.exact_lane_table_name (Runtime_schema.Builtin lane)
 
 let error_to_string = function
   | Invalid_input detail | Reference_edit_refused detail -> detail
@@ -204,7 +202,7 @@ let plan_remove ~content config ~lane_id =
 let exact_lane_decl (config : Runtime_schema.config) lane =
   List.find_opt
     (fun (decl : Runtime_schema.exact_output_lane_decl) ->
-       String.equal decl.id (Standalone_lane.to_id lane))
+       Runtime_schema.equal_exact_lane_owner decl.owner (Runtime_schema.Builtin lane))
     config.exact_output_lane_decls
 
 let declared_exact_slots config lane =

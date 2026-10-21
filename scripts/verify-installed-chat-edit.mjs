@@ -13,6 +13,31 @@ assert.ok(prefix && expectedCommit && baseUrl && outputDirectory && tokenFile &&
 const output = resolve(outputDirectory)
 await mkdir(output)
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
+// The recorded outcome of a tool-call log row, Tool_result.recorded_call_outcome:
+// `disposition` decides when present, else `wire_outcome`, else the row is
+// unsettled. The log row carries no top-level `success`, so a leftover boolean
+// decides nothing. Same rule as scripts/lib/recorded-tool-outcome.jq and
+// dashboard/src/lib/recorded-tool-outcome.ts.
+function recordedOutcome(row) {
+  if (row === null || typeof row !== 'object' || Array.isArray(row)) return 'malformed'
+  if (Object.hasOwn(row, 'disposition')) {
+    switch (row.disposition) {
+      case 'completed': return 'succeeded'
+      case 'failed': return 'failed'
+      case 'deferred': return 'deferred'
+      default: return 'malformed'
+    }
+  }
+  if (Object.hasOwn(row, 'wire_outcome')) {
+    switch (row.wire_outcome) {
+      case 'ok': return 'succeeded'
+      case 'error': return 'failed'
+      case 'unknown': return 'unsettled'
+      default: return 'malformed'
+    }
+  }
+  return 'unsettled'
+}
 async function readVerifiedBlob(ref) {
   assert.ok(ref && typeof ref === 'object', 'Expected an explicit blob reference')
   assert.match(ref.sha256, /^[0-9a-f]{64}$/)
@@ -68,7 +93,7 @@ try {
   assert.equal(health.build.executable_sha256, release.binary_sha256)
   assert.equal(await realpath(health.build.executable_path), binary)
   expected = JSON.parse(await readFile(editReceiptFile, 'utf8'))
-  assert.equal(expected.success, true)
+  assert.equal(recordedOutcome(expected), 'succeeded')
   assert.equal(expected.turn_kind, 'autonomous')
   assert.match(expected.execution_id, /^[A-Za-z0-9:_-]+$/)
   const editOriginals = await readEditOriginals(expected)
@@ -185,7 +210,7 @@ try {
   assert.ok(matchedReceipts.length > 0, 'Actual API must return the execution receipt')
   for (const receipt of matchedReceipts) {
     assert.equal(receipt.keeper, keeper)
-    assert.equal(receipt.success, true)
+    assert.equal(recordedOutcome(receipt), 'succeeded')
     assert.equal(receipt.route_evidence?.descriptor_id, 'agent.edit_file')
     for (const field of ['execution_id', 'tool_use_id', 'trace_id', 'session_id', 'turn', 'keeper_turn_id', 'turn_kind', 'task_id']) {
       assert.notEqual(expected[field], undefined, `Expected receipt lacks ${field}`)

@@ -1154,6 +1154,47 @@ let test_github_slug () =
     (Some "jeong-sik/masc")
     (Pulls.github_slug_of_remote "https://github.com/jeong-sik/masc.git")
 
+(* A Lane Add-on's github_pulls grant reads through the same reader: the
+   reader Keeper's token, the configured endpoint, and the [owner/repo] of
+   the registered remote. *)
+let test_lane_addon_github_posts_as_the_reader () =
+  let base_path = ready_base_path ~token:"gho_from_hosts" in
+  let config = Masc.Workspace.default_config base_path in
+  let http_post, calls, tokens = counting_stub (ok_response {|{"data":{"viewer":{"login":"reader"}}}|}) in
+  (match Pulls.lane_addon_github ~now ~http_post ~config ~repository_id:"masc" with
+   | Ok session ->
+     Alcotest.(check (pair string string))
+       "the registered remote's owner and name" ("jeong-sik", "masc")
+       (session.Masc.Lane_addon_records.owner, session.Masc.Lane_addon_records.name);
+     (match session.Masc.Lane_addon_records.post (`Assoc [ "query", `String "{ viewer { login } }" ]) with
+      | Ok json ->
+        Alcotest.(check bool) "the answer is the response JSON" true (Yojson.Safe.Util.member "data" json <> `Null)
+      | Error detail -> failf "a 200 answer must be read: %s" detail);
+     Alcotest.(check int) "one call" 1 !calls;
+     Alcotest.(check (list string)) "with the reader's token" [ "gho_from_hosts" ] !tokens
+   | Error detail -> failf "a ready reader must give a session: %s" detail);
+  let refused answer =
+    match Pulls.lane_addon_github ~now ~http_post:(fun ~url:_ ~token:_ ~body:_ -> answer) ~config ~repository_id:"masc" with
+    | Ok session -> Result.is_error (session.Masc.Lane_addon_records.post (`Assoc []))
+    | Error _ -> false
+  in
+  Alcotest.(check bool) "GraphQL errors are not an answer" true
+    (refused (ok_response {|{"errors":[{"message":"boom"}]}|}));
+  Alcotest.(check bool) "a refused token is not an answer" true
+    (refused (Ok { Pulls.status = 401; body = {|{"message":"Bad credentials"}|}; rate_limit_remaining = None
+                   ; rate_limit_reset = None; retry_after_s = None }));
+  Alcotest.(check bool) "a body that is not JSON is not an answer" true (refused (ok_response "<html>"));
+  Alcotest.(check bool) "an unregistered repository has no session" true
+    (Result.is_error (Pulls.lane_addon_github ~now ~http_post:never_called ~config ~repository_id:"nope"))
+
+let test_lane_addon_github_without_a_reader_has_no_session () =
+  let base_path = temp_base_path () in
+  register base_path;
+  Alcotest.(check bool) "no pr_reader, no session" true
+    (Result.is_error
+       (Pulls.lane_addon_github ~now ~http_post:never_called ~config:(Masc.Workspace.default_config base_path)
+          ~repository_id:"masc"))
+
 let () =
   Alcotest.run
     "server_repository_pulls"
@@ -1256,5 +1297,12 @@ let () =
             `Quick
             test_unlisted_keepers_join_nothing
         ; Alcotest.test_case "persisted keeper is joined" `Quick test_persisted_keeper_is_joined
+        ] )
+    ; ( "lane add-on reads"
+      , [ Alcotest.test_case "posts as the reader" `Quick test_lane_addon_github_posts_as_the_reader
+        ; Alcotest.test_case
+            "without a reader there is no session"
+            `Quick
+            test_lane_addon_github_without_a_reader_has_no_session
         ] )
     ]

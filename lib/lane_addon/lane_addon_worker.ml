@@ -455,6 +455,15 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
                     String.equal tool.name Lane_addon_call_context.tool_name) tools with
                   | [_] -> Ok ()
                   | _ -> Error (Protocol_failed "package must advertise exactly one lane_call control tool") in
+          let* () =
+            if not (uses_host_requests package) then Ok ()
+            else
+              let advertised_once name =
+                List.length (List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) ->
+                  String.equal tool.name name) tools) = 1 in
+              if advertised_once host_requests_tool && advertised_once host_result_tool then Ok ()
+              else Error (Protocol_failed
+                "a package that declares exact outputs must advertise lane_host_requests and lane_host_result once each") in
           let* exported = List.fold_left (fun result name ->
             let* selected = result in
             match List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) -> String.equal tool.name name) tools with
@@ -554,6 +563,31 @@ let act t ~arguments =
     | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
     | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _ | Invalid_argument _) as exn ->
         Error (Protocol_failed (Printexc.to_string exn)))
+
+(* The host request tools answer the host only; no Keeper reaches them. Their
+   answer is structured content, or the call failed. *)
+let call_host_tool t ~name ~arguments =
+  if t.stopping then Error Stopped
+  else Eio.Mutex.use_ro t.mutex (fun () ->
+    if t.stopping then Error Stopped
+    else try
+      let* client = match t.client with Some client -> Ok client
+        | None -> Error (Protocol_failed "worker initialization pending") in
+      let* result = Agent_core.Mcp.call_tool_full client ~name ~arguments
+        |> Result.map_error (fun error -> Protocol_failed (Agent_core.Error.to_string error)) in
+      match result.Mcp_protocol.Mcp_types.is_error with
+      | Some true -> Error (Protocol_failed (Agent_core.Mcp.text_of_tool_result result))
+      | None | Some false ->
+          (match result.structured_content with
+           | None -> Error (Protocol_failed (name ^ " must return structuredContent"))
+           | Some json -> Ok json)
+    with
+    | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
+    | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _ | Invalid_argument _) as exn ->
+        Error (Protocol_failed (Printexc.to_string exn)))
+
+let host_requests t = call_host_tool t ~name:host_requests_tool ~arguments:(`Assoc [])
+let host_result t ~arguments = call_host_tool t ~name:host_result_tool ~arguments
 
 let call_exported_tool ?(on_result = fun _ -> ()) ?authorize ?(principal = Lane_addon_call_context.Anonymous) t ~name ~arguments =
   if t.stopping then Error Stopped

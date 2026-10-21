@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto'
 import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from './arrangement-playback.mjs'
-import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
+import { startVstArrangement } from './arrangement-vst.mjs'
+import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementPracticePass, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
 import { safeText } from './terminal.mjs'
@@ -31,6 +32,13 @@ const help = [
   ':calibrate OUTPUT_UID IN_CH OUT_CH MAX_LAG_MS  audio loopback candidates; Esc/q cancels and returns',
   ':import-wave /path/take.wav     :import-midi /path/song.mid',
   ':import-take /path/session      :open-take [ASSET] (WAV + raw UMP)',
+  ':import-practice /path/take     import original MIDI from a completed practice take',
+  ':practice-backing [ASSET] restores its editable phrase backing; Enter places it, :edit-midi edits it',
+  ':practice-midi [ASSET] derives the whole performance as MIDI1 / 960 PPQ; :edit-midi edits the variant',
+  ':practice-midi-region derives only the selected original practice region, restoring entry notes and pedals',
+  ':practice-passes [ASSET] lists original passes; :practice-pass NUMBER [ASSET] places or replaces the selected source region',
+  ':practice-region ASSET BEAT OFFSET EXTENT DIVISOR [REPEAT] places an exact fractional host cut',
+  ':trim-fraction OFFSET EXTENT DIVISOR edits a practice cut; :trim returns to whole host ticks',
   ':place asset-1 0               full source at quarter-note beat 0',
   ':place asset-2 4 2             MIDI format-2 pattern 2 at beat 4',
   ':region asset-1 0 1200 4800 2   asset, beat, native offset/extent, repeats',
@@ -54,6 +62,7 @@ const help = [
   ':midi-output MIDI_UID    :midi-port asset-1 PORT MIDI_UID',
   ':midi-source asset-2 SOURCE_ID MIDI_UID overrides one captured input.',
   ':mixed-output AUDIO_UID enables audio plus the selected MIDI routes.',
+  'Stored VST sounds play through the audio output; explicit MIDI routes send those sources externally.',
   ':play-audio explicitly auditions WAV, including captured regions, silent gaps and saved loops.',
   ':inputs lists audio/MIDI inputs; :input AUDIO_UID; :midi-input all|none|UID',
   ':record starts simultaneous WAV + raw MIDI against playing backing; :record-stop',
@@ -291,7 +300,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     recording?.controller.abort(); recording?.handle?.stop()
     recordStart = null
     generation++; transportPending = false
-    if (preparing !== null && !workerFailure) worker.postMessage({ kind: 'cancel', request: preparing })
+    if (preparing?.kind === 'vst') preparing.handle.cancel()
+    else if (preparing?.kind === 'worker' && !workerFailure) worker.postMessage({ kind: 'cancel', request: preparing.id })
     preparing = null
     transport.handle?.stop()
     transport = { kind: 'stopped' }
@@ -314,7 +324,10 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     started.catch(() => {})
     const expected = ++generation, project = editor.project, output = selection.output
     transport = { kind: 'preparing' }; status = 'Preparing arrangement sources…'
-    const prepared = request({ ...selection, project, sourceRoot, directory }, id => { preparing = id })
+    const vst = selection.kind === 'prepare-vst' ? startVstArrangement({ project, route, sourceRoot, directory, request,
+      cancelRequest: id => { if (!workerFailure) worker.postMessage({ kind: 'cancel', request: id }) } }) : null
+    if (vst) preparing = { kind: 'vst', handle: vst }
+    const prepared = vst ? vst.promise : request({ ...selection, project, sourceRoot, directory }, id => { preparing = { kind: 'worker', id } })
     const preparation = (async () => {
       let result, playbackCompletion, playbackHandle
       try {
@@ -379,8 +392,9 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (playbackCompletion) await playbackCompletion
         if (result) {
           await Promise.allSettled([...(planInspections.get(result) ?? [])])
-          await rm(dirname(result.path), { recursive: true, force: true })
+          if (!vst) await rm(dirname(result.path), { recursive: true, force: true })
         }
+        if (vst) await vst.dispose()
       }
     })()
     preparations.add(preparation)
@@ -393,7 +407,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     stop()
     const expected = ++generation
     transport = { kind: 'preparing' }; status = 'Preparing captured source…'
-    const prepared = request({ kind: 'prepare-take', project: editor.project, asset, sourceRoot, directory }, id => { preparing = id })
+    const prepared = request({ kind: 'prepare-take', project: editor.project, asset, sourceRoot, directory }, id => { preparing = { kind: 'worker', id } })
     const preparation = (async () => {
       let result, controller
       try {
@@ -432,7 +446,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (!accepting || takeTask || phrasePreparation) return
     stop()
     const expected = generation, project = editor.project, clip = selectedRegion(editor)
-    const prepared = request({ kind: 'prepare-phrase', project, asset }, id => { preparing = id })
+    const prepared = request({ kind: 'prepare-phrase', project, asset }, id => { preparing = { kind: 'worker', id } })
     transport = { kind: 'preparing' }; status = 'Opening MIDI experiment'
     const preparation = (async () => {
       let controller
@@ -479,7 +493,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     const project = editor.project, nextRoot = dirname(target)
     const retained = new Map()
     if (nextRoot !== sourceRoot) for (const document of [project, ...editor.undo, ...editor.redo]) {
-      for (const asset of document.assets) if (asset.kind === 'wave' || asset.kind === 'capture') retained.set(asset.file ?? JSON.stringify(asset.parts), asset)
+      for (const asset of document.assets) if (['wave', 'capture', 'practice'].includes(asset.kind)) retained.set(asset.file ?? JSON.stringify(asset.parts), asset)
     }
     const retainedAssets = [...retained.values()].map((asset, index) => ({ ...asset, id: `retained-${index}` }))
     let nextRevision
@@ -673,11 +687,33 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         stop(); route = selectArrangementRoute(route, value); status = 'Playback outputs selected'; break
       case 'save': await save(); break
       case 'save-as': if (accepting) await save(value.path); break
-      case 'import-wave': case 'import-midi': case 'import-take': {
+      case 'import-wave': case 'import-midi': case 'import-take': case 'import-practice': {
         if (!accepting) return
         status = 'Importing source…'; draw()
         const result = await request({ ...value, project: editor.project, projectPath: path })
         if (accepting) { adopt(arrangementImported(editor, result)); status = value.kind === 'import-take' ? `Imported ${result.asset}; Enter opens WAV and MIDI` : `Imported ${result.asset}; Enter places it at the cursor` }
+        break
+      }
+      case 'practice-midi-region': case 'practice-midi': case 'practice-backing': {
+        if (!accepting) return
+        status = value.kind === 'practice-backing' ? 'Restoring captured phrase backing…' : 'Deriving performance as MIDI1 / 960 PPQ…'; draw()
+        const result = await request({ ...value, project: editor.project, sourceRoot })
+        if (accepting) {
+          adopt({ ...arrangementImported(editor, result), ...(value.kind === 'practice-midi-region' ? { tick: value.tick } : {}) })
+          status = `${value.kind === 'practice-backing' ? 'Restored backing' : value.kind === 'practice-midi-region' ? 'Derived selected region MIDI1 / 960 PPQ' : 'Derived whole performance MIDI1 / 960 PPQ'} ${result.asset}; Enter places it, :edit-midi edits it`
+        }
+        break
+      }
+      case 'practice-passes': case 'practice-pass': {
+        if (!accepting) return
+        status = 'Reading original practice passes…'; draw()
+        const result = await request({ ...value, project: editor.project, sourceRoot, directory })
+        if (accepting) {
+          if (value.kind === 'practice-pass') adopt(arrangementPracticePass(editor, value, result))
+          else adopt({ ...editor, asset: value.asset, pattern: undefined })
+          status = value.kind === 'practice-pass' ? `Practice pass ${result.pass}${result.full ? '' : ' (partial)'} selected; Space auditions`
+            : `${result.asset}: ${result.count} passes (${result.firstPass ?? 'none'}–${result.lastPass ?? 'none'}) · ${result.tempo} BPM · :practice-pass NUMBER`
+        }
         break
       }
       default: throw new Error('Unknown arrangement effect')
@@ -703,10 +739,11 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
           let result = arrangementCommand(editor, line)
           if (result.editor.project !== editor.project || result.effect && !['record', 'record-stop', 'inputs', 'input', 'midi-input', 'midi-monitor', 'help', 'takes'].includes(result.effect.kind)) {
             await settleRecording()
-            // Finalization may select a newly imported asset. Retain the take
+            // Finalization may select a newly imported asset. Retain the source
             // the user chose before waiting; never reinterpret it on that asset.
             result = result.selection?.kind === 'take-selection'
-              ? { editor: arrangementTakeSelected(editor, result.selection) } : arrangementCommand(editor, line)
+              ? { editor: arrangementTakeSelected(editor, result.selection) }
+              : ['practice-midi-region', 'practice-midi', 'practice-backing', 'practice-pass', 'practice-passes'].includes(result.effect?.kind) ? { editor, effect: result.effect } : arrangementCommand(editor, line)
           }
           adopt(result.editor); if (result.effect) await effect(result.effect); else status = 'Edited'
         })
@@ -803,8 +840,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         lines.push(`${lane.id === editor.lane ? '>' : ' '} ${index + start + 1} ${lane.name.slice(0, 12).padEnd(12)} ${lane.muted ? 'm' : '-'}${lane.solo ? 's' : '-'} ${cells.join('')}`)
       }
       if (!project.lanes.length) lines.push('Import a source, then Enter or :place to add its first lane and region.')
-      lines.push(clip ? `${clip.id} · ${clip.name}${clip.audioChannel ? ` [input ${clip.audioChannel.input} → output ${clip.audioChannel.output}]` : ''}${clip.component ? ` (${clip.component}${clip.placement ? `, ${clip.placement.kind === 'calibrated' ? 'measured' : 'manual'} advance ${Number(clip.placement.advanceNanoseconds.numerator) / Number(clip.placement.advanceNanoseconds.denominator) / 1e6} ms` : ''})` : ''} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} ${project.assets.find(asset => asset.id === clip.asset).kind === 'capture' ? 'host ticks' : ''} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
-      lines.push(asset ? `${asset.id} · ${asset.name}${asset.selectedTake === undefined ? '' : ` · take ${BigInt(asset.selectedTake) + 1n} (:takes)`} · ${asset.kind === 'wave' ? `${asset.metadata.frames} frames / ${asset.metadata.sampleRate} Hz / ${asset.metadata.channels} channels` : asset.kind === 'capture' ? `${asset.manifest.audioFrames} frames + ${asset.manifest.midiPacketCount} UMP packets; Enter opens the take` : 'original MIDI ticks; format-2 patterns require explicit selection'}` : 'No imported asset. :import-wave FILE or :import-midi FILE')
+      lines.push(clip ? `${clip.id} · ${clip.name}${clip.audioChannel ? ` [input ${clip.audioChannel.input} → output ${clip.audioChannel.output}]` : ''}${clip.component ? ` (${clip.component}${clip.placement ? `, ${clip.placement.kind === 'calibrated' ? 'measured' : 'manual'} advance ${Number(clip.placement.advanceNanoseconds.numerator) / Number(clip.placement.advanceNanoseconds.denominator) / 1e6} ms` : ''})` : ''} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} ${['capture', 'practice'].includes(project.assets.find(asset => asset.id === clip.asset).kind) ? `host ticks${clip.sourceDivisor === undefined ? '' : ' / ' + clip.sourceDivisor}` : ''} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
+      lines.push(asset ? `${asset.id} · ${asset.name}${asset.selectedTake === undefined ? '' : ` · take ${BigInt(asset.selectedTake) + 1n} (:takes)`} · ${asset.kind === 'wave' ? `${asset.metadata.frames} frames / ${asset.metadata.sampleRate} Hz / ${asset.metadata.channels} channels` : asset.kind === 'capture' ? `${asset.manifest.audioFrames} frames + ${asset.manifest.midiPacketCount} UMP packets; Enter opens the take` : asset.kind === 'practice' ? `${asset.metadata.packets} original UMP packets; Enter places a host-clock region` : 'original MIDI ticks; format-2 patterns require explicit selection'}` : 'No imported asset. :import-wave FILE or :import-midi FILE')
       lines.push(`Library ${project.assets.length} sources · ${project.clips.length} regions · a cycles sources · ? help`, path)
     }
     let output = '\x1b[H'

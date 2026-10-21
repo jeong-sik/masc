@@ -222,7 +222,7 @@ Read on 2026-10-20 for the previous revision and not re-read: `<base-path>/.masc
 
 ### 4.1 Flow
 
-1. A Schedule fires `masc.lane_act` with `{installation_id = "operator-quiz", action = {kind = "compose"}}` (K5).
+1. A Schedule fires `masc.lane_act` with `{installation_id = "operator-quiz", action = {kind = "compose", questions = 5}}` (K5). `questions` is required: the operator says how many to ask, and the package has no default.
 2. The host queues the action on the installation's live worker. The package records a new session in its log and returns `confirmed`.
 3. The action reaching a terminal receipt starts a host request cycle (K2). The package lists what it waits for: record reads first (K3).
 4. The host reads the records, retains the bytes, and delivers each page. The package stores its cursors and asks for an `author` call with the new material and the review items' histories.
@@ -342,8 +342,9 @@ Both join the list of control tools that cannot be exported (`lib/lane_addon/lan
 
 | Kind | Fields | Allowed when |
 |---|---|---|
-| `read_records` | `source_id`, `after` | the binding grants `source_id` (K3) |
+| `read_records` | `source_id`, `after` or `since` | the binding grants `source_id` (K3) |
 | `read_file` | `source_id`, `commit`, `path` | a `repository` grant whose `paths` cover `path` |
+| `read_result` | `original_request_id`, `source_id` (null for `exact_output`, `ask` or `withdraw_ask`), `sha256`, `offset` | this instance retained that original request under the same declaration/grant authority, source and digest |
 | `exact_output` | `output`, `system?`, `messages` | the manifest declares `output` (K1) |
 | `ask` | `questions`, `context?` | the manifest declares `[world.asks] operator = true` (K4) |
 | `withdraw_ask` | `ask_id`, `reason` | same |
@@ -372,7 +373,8 @@ A trigger that arrives during a cycle becomes one more cycle, as observation hin
 - A request the manifest or binding does not allow (an ungranted `source_id`, a path outside the grant, an undeclared output, `ask` without `[world.asks]`) gets the final result `not_allowed {reason}`. Only a change to the declaration or the package can make the same request pass, so waiting for a trigger would not help it.
 - `lane_host_result` answers `accepted = true` only after the package has durably written the log event that consumes the result (§4.9 Log). A package that dies before that write lists the same request again after restart and receives the same retained result.
 - A request id already delivered in this cycle and listed again ends the cycle and shows `relisted_delivered_request` on the instance. There is no attempt count.
-- A result that does not fit the frame the worker connection accepts is delivered as `result_exceeds_frame {retained_sha256; bytes}`. That frame limit is the transport limit `max_reply_bytes` is meant to be (`docs/rfc/RFC-0471-max-reply-bytes-bounds-one-thing.md`, row 1).
+- A result that does not fit the frame the worker connection accepts is durably saved as the exact original JSON bytes, with a private link to its original request, instance, source and declaration/grant authority. Only then is `result_exceeds_frame {original_request_id; source_id; retained_sha256; bytes; encoding = json-utf8; complete = false; next_cursor?}` delivered. Retention failure stops delivery with `result_delivery_failed`; a digest of unsaved bytes is never advertised. That frame limit bounds the complete result arguments (`docs/rfc/RFC-0471-max-reply-bytes-bounds-one-thing.md`, row 1).
+- `read_result` returns a base64 `result_chunk` with `offset`, `next_offset`, `eof`, total `bytes` and `sha256`. The complete chunk arguments fit the same frame. The package concatenates decoded bytes and verifies the full SHA-256 before interpreting the JSON and its original completion/cursor fields. The marker's cursor is preserved but is not proof that the original page has been consumed. Hash knowledge alone grants no access: instance, retained original request, source and current authority must all match, including a final authority check before dispatch. Unchanged files use snapshot-bound range reads; if content at the hash address is republished, the host verifies its full digest and durably refreshes the snapshot before resuming range reads. An original request ID retains its first result and cannot be reused for different request arguments.
 - The host keeps no list of pending requests. What the package waits for lives in the package. What happened lives in host records: retained pages, exact outcomes, questions and answers. This keeps the host a record of facts, not a workflow engine.
 
 **Recovery after a crash.** These cases use only the rules above: the request id, the digest, retention before the call, and relisting. R is an `author` request with digest D. The package writes R's full body to `/state` before it writes `Exact_requested` (§4.9 Log), so it can list R again with the same bytes.
@@ -417,14 +419,14 @@ repository_id = "masc"
 - **Where the posts go.** Every post in a granted visibility can reach the providers of every slot bound to the package's exact outputs (`author` and `grade`) in `runtime.toml`. The package's `binding_schema` therefore gives `visibilities` a `description` that says so and asks the operator to confirm, before adding `internal`, that each provider bound to those slots may receive internal posts. The same applies to `direct`, which is read only when named. The Dashboard binding form shows a schema `description` under its field (`dashboard/src/components/lane-binding-form.ts:112`), and the install step of `docs/guides/operator-quiz.md` repeats it for a declaration written by hand. The example above leaves `internal` out, so adding it is a deliberate choice.
 - This is guidance at the point of choice, not a new host check. The control is still the explicit `visibilities` grant. A host check that ties visibilities to named slots is §12 A11.
 
-**What `read_records` returns.** Records after the given cursor, oldest first, until the frame is full, with the next cursor and `complete`:
+**What `read_records` returns.** Records after the given cursor, oldest first, until the frame is full, with the next cursor and `complete`. A request with no cursor may send `since` (a Unix time) instead and gets only the records made at or after it: a Board post's or comment's creation time, a commit's commit time (for `github_pulls`, the commit that merged the PR), the minute stamped on a wiki page's latest `log.md` line (#44537). The log stamps only the minute, so a wiki read `since` a time also gets a page written up to a minute before it:
 
 | Kind | Records |
 |---|---|
 | `board` | posts and comments: id, author, created and updated time, title, body |
-| `wiki` | page versions: name, revision, updated time, body |
+| `wiki` | pages, each once at its latest `log.md` line: name, revision, title, summary, author, body as it is now. The wiki keeps one body per page and only a day for `updated`, so a record carries no time, and an older revision is readable only from a page retained earlier |
 | `repository` | first-parent commits on the default branch: SHA, author, commit time, subject, body, changed paths; the reply names the clone head it read |
-| `github_pulls` | merged PRs (number, title, body, merge commit, merge time, author) and review comments (PR, comment id, author, time, path, line, body), read with the `[repositories] pr_reader` token |
+| `github_pulls` | merged PRs (number, title, body, merge commit, merge time, author), each with its reviews (id, author, time, state, body) and their comments (comment id, author, time, path, line, body), read with the `[repositories] pr_reader` token. GitHub lists merged PRs by creation or update time, not by merge, so the order and the cursor come from the registered clone's first-parent commits, as for `repository`; each commit gives the PR whose merge commit it is, and a commit no PR merged gives no record |
 
 `read_file` returns one file's bytes at a commit, under the grant's `paths`.
 
@@ -501,12 +503,14 @@ pids = 16
 max_reply_bytes = 4194304
 
 [interface]
-binding_schema = '''{ … records grants (with the visibilities description of §4.5), language … }'''
+binding_schema = '''{ … sources (always empty), records grants (with the visibilities description of §4.5), language, timezone … }'''
 presentation = '''{ … readings for the five lanes … }'''
 ```
 
 **Actions** (the action schema's `kind` is a closed enum, so the TUI menu lists them):
-- `compose {questions?}`: start a session. `questions` is how many to write. The Schedule body or the operator sets it; nothing caps it.
+- `compose {questions}`: start a session. `questions` is how many to write and is required; the package has no default. The Schedule body or the operator sets it; nothing caps it.
+
+The binding also names `language` and `timezone`. The time zone is the operator's IANA zone; R (§14) counts a later local day in it. `binding.sources` is required by the host and is always empty here.
 - `dispute {ask_id, question_id, note}`: the operator's words about a grade (O5, D7).
 - `export {}`: return the whole log as an artifact. The host retains its bytes with a SHA-256 (`docs/guides/lane-world-actions.md:156-186`).
 
@@ -514,14 +518,15 @@ presentation = '''{ … readings for the five lanes … }'''
 
 | Event | Holds |
 |---|---|
-| `Session_opened` | session id, action request id, requested question count |
-| `Material_read` | session id, grant id, page SHA-256, cursor after |
+| `Session_opened` | session id, action request id, requested question count, grants, language, opened time |
+| `Material_read` | session id, request id, digest of the kept request and result under `/state/operator-quiz/pages/` (the page's cursor, completeness and SHA-256 are in it) |
 | `Exact_requested` | session id, request id, output name, request digest. The request body is already at `/state/operator-quiz/requests/<digest>.json` |
+| `Grade_requested` | ask id, question id, grade request id, request digest. Written with the answer for each written answer, and again at the next `compose` after a `Grade_failed`. The body is kept the same way |
 | `Posed` | ask request id, question id, item id, topic, key (`choices` ids or `points` rubric), sources |
 | `Draft_rejected` | author request id, question index, reason |
 | `Session_failed` | session id, reason (closed, see Sessions) |
 | `Answer_received` | host ask id, answers, responder, answered time |
-| `Judged` | ask id, question id, verdict (`correct`, `incorrect`, `void {reason}`), rationale, grade request id |
+| `Judged` | ask id, question id, verdict (`correct`, `incorrect`, `void`), rationale (for `void`, what is wrong with the question or key), grade request id |
 | `Grade_failed` | ask id, question id, grade request id, final result kind (§6.2) |
 | `Disputed` | ask id, question id, note, action request id |
 
@@ -530,11 +535,13 @@ If the log cannot be read, every write action fails before effect. An unreadable
 The request body file exists so a restarted worker can list the same request with the same digest (§4.4 Recovery after a crash). `Session_failed` and `Grade_failed` exist because a delivered final result must be consumed by a durable event. Without one, a restarted package would list the same request again and could not tell that it had already decided.
 
 **Compose, step by step.**
-1. List `read_records` from each grant's cursor until each reports `complete`. The cursor is the last one recorded by a session that reached `asked`; material read by a failed or superseded session is read again. List `read_file` for the files the new commits changed under the grant paths.
+1. List `read_records` from each grant's cursor until each reports `complete`. The cursor is the last one recorded by a session that reached `asked`; material read by a failed or superseded session is read again. With no such cursor the read starts `since` the first session the log holds, the time the operator turned the quiz on, not from the start of the history: the author only ever sees the newest material that fits one request, and reading a workspace's whole Board and history first ran the worker out of memory on its first live session (#44537). List `read_file` for the files the new commits changed under the grant paths. While reading, the worker keeps only each result's status, cursor and, for a repository page, the commit ids and covered paths; record bodies and file contents stay in the retained pages. A worker that kept every page it read, or read every kept page back after a restart, ran out of memory on that same first session (#44537).
 2. List `exact_output author` with:
-   - the material, each record with its retained SHA-256;
+   - the material, each record with its retained SHA-256, read back from the retained pages from the last read backwards and only as far as one request can hold, since the request keeps only the newer part that fits;
    - every review item's attempt history (§7);
    - the requested count and the language.
+
+   The material may be empty: with no new record, the history alone lets the `author` ask a missed item again, citing its earlier sources (§7).
 3. On the result, check each question:
    - every key choice id is one of its choices;
    - a `Single` question has exactly one key;
@@ -551,7 +558,7 @@ The only follow-up `author` requests inside one session are the reductions of §
 | State | Entered on | Left on |
 |---|---|---|
 | `writing` | `Session_opened` (the `compose` action) | its `Posed` rows → `asked`; `Session_failed` → `failed`; a later `Session_opened` → `superseded` |
-| `asked` | the session's `Posed` rows. From then on the package lists the session's `ask` until the answer is delivered | `Answer_received` → `answered` |
+| `asked` | the session's `Posed` rows. From then on the package lists the session's `ask` until the answer is delivered | `Answer_received` → `answered`; `Session_failed` when the host refuses the ask by rule (`not_allowed`, `request_id_reused`) → `failed` |
 | `answered` | `Answer_received` | every answered question has a verdict → `graded` |
 | `graded` | derived: each answer has a verdict, a choice by its key (§6.1) and free text by `Judged` | nothing. A later `Judged` after a dispute changes a verdict, not the state |
 | `failed {reason}` | `Session_failed` | nothing |
@@ -562,6 +569,9 @@ The only follow-up `author` requests inside one session are the reductions of §
 - `author_invalid_output {request_id}`;
 - `author_input_refused {request_id; kind}`: refused after the reductions of §7 had nothing left to drop;
 - `author_outcome_unknown {request_id}`;
+- `author_request_exceeds_frame {request_id}`: one material record alone made the author request larger than the package's reply frame, so it could not be listed (§7);
+- `result_exceeds_frame {request_id}`: an author or ask result was larger than the frame. Read results are read back in pieces instead;
+- `no_material`: every grant was read and held no new record, and no question was asked before, so nothing can be asked again either;
 - `no_question_passed`: every draft became `Draft_rejected`, each with its own reason.
 
 Every state ends on an event the package sees. None ends on elapsed time or on a count.
@@ -612,12 +622,13 @@ New host state is limited to the first three rows. Each one holds a fact that wo
 | `pr` | number + merge commit | `github_pulls` grant | retained page |
 | `pr_comment` | PR number + comment id | `github_pulls` grant | retained page |
 | `commit` | 40-hex SHA | `repository` grant | retained page |
-| `repo_file` | commit + path + line range | `repository` grant, `read_file` | retained file |
+| `repo_file` | commit + path | `repository` grant, `read_file` | retained file |
 | `board_post` | `p-…` | `board` grant | retained page |
 | `board_comment` | `p-…` + `c-…` | `board` grant | retained page |
 | `wiki_page` | name + revision | `wiki` grant | retained page |
 
-- O6's seven kinds stay the target. The first slice (§15) uses `board_post`, `board_comment` and `repo_file` under `changelog.d/` only.
+- O6's seven kinds stay the target. The first slice (§15) used `board_post`, `board_comment` and `repo_file` under `changelog.d/` only; L11 adds the other four.
+- Each kind's pin has one spelling, written by the package and read back strictly: `p-<hex>`, `p-<hex>/c-<hex>`, `<sha>:<path>`, `<sha>`, `<name>@<revision>`, `<number>@<merge sha>`, and `<number>/r<review id>` or `<number>/c<comment id>`. A record whose id would give another spelling is refused as a result, before any pin is written. A `repo_file` pin names no line range: the quote is checked by containment in the whole file.
 - Each source carries a verbatim `quote` with no whitespace or case normalisation, plus the SHA-256 of the retained bytes. The key must follow from the quoted text. The `author` prompt asks for that, and the dispute path checks it.
 - `repo_file` covers changelog fragments (cited by a commit that still has them), `CHANGELOG.md` release sections, RFCs, the constitution and code. ocaml-refactor-woman's review pitfalls fit `pr_comment`.
 - A source is never shown before the answer, because a citation like "PR #44081" can give the answer away.
@@ -648,10 +659,10 @@ New host state is limited to the first three rows. Each one holds a fact that wo
   - what was recorded before the answer: the rubric for a free-text question, or the label of the key choice for a choice question;
   - the sources with their quotes;
   - the answer.
-- Its schema allows `correct`, `incorrect` or `void` with a reason, and requires a rationale that names the missing point.
+- Its schema allows `correct`, `incorrect` or `void`, and requires a rationale that names the missing point, or for `void` what is wrong with the question or key. The schema has no nullable or conditional field, because the host's exact-output schemas allow neither.
 - The verdict is binary. A partial score would be a number standing in for a judgment.
 - While the `grade` lane is unavailable or a provider is rate-limited, the request stays listed and the answer stays waiting, visibly and with no expiry (§4.3, §4.4).
-- A final failure (`invalid_output`, `input_refused`, `outcome_unknown`, `not_allowed`) is written as `Grade_failed`. The answer stays `awaiting_judgment` and its row shows the failure. The package lists a new `grade` request for it at the next `compose`, or at a `dispute` on that question. It never lists one in reply to its own failure, so a lane that keeps failing cannot keep a cycle running.
+- A final failure (`invalid_output`, `input_refused`, `outcome_unknown`, `not_allowed`, `result_exceeds_frame`, or `request_exceeds_frame` when the grade request alone would not fit the package's frame) is written as `Grade_failed`. A rationale of only whitespace passes the schema's length rule and is `invalid_output` too. The answer stays `awaiting_judgment` and its row shows the failure. The package lists a new `grade` request for it at the next `compose`, or at a `dispute` on that question. It never lists one in reply to its own failure, so a lane that keeps failing cannot keep a cycle running.
 
 ### 6.3 Skips and unanswered questions
 
@@ -680,14 +691,14 @@ New host state is limited to the first three rows. Each one holds a fact that wo
   - leave longer gaps after each correct answer;
   - stop asking an item after several correct answers spread over time.
 - The package checks that every `reask_of` names a known item.
-- If the provider refuses the `author` request as too large, the package sends the open-debt items (latest attempt a miss) alone and marks the session `history_scope = open_debt_only`. If material is too large, it splits the material into two requests. These react to the provider's typed refusal. They are not size rules.
+- If the provider refuses the `author` request as too large, the package sends the open-debt items (latest attempt a miss) alone and marks the session `history_scope = open_debt_only`. If it is still too large, the package sends the newer half of the material, and halves again on each refusal. A request that would not fit the package's own reply frame is cut the same way before it is listed; the frame is the transport limit the worker already has. The older half is not asked about in this session; the next session reads from this session's cursors. When one record is left and the provider still refuses, the session fails with `author_input_refused`. These react to the provider's typed refusal. They are not size rules.
 - Trade-off: this is less predictable than a coded schedule. Every re-ask shows in the item history, and R (§14) shows whether it works. If R stays low, a coded schedule is the next RFC.
 
 ## 8. Projections: score, history, debt map
 
 The package computes these from its log and publishes them as rows on every observation. The host retains them as it retains any output. Nothing new is stored.
 
-- **Attempt state (closed):** `open | withdrawn | correct of by | incorrect of by | skipped | awaiting_judgment | void of reason`, where `by = key | judgment of judged_at`.
+- **Attempt state (closed):** `open | withdrawn | correct of by | incorrect of by | skipped | awaiting_judgment | void`, where `by = key | judgment of judged_at`.
 - **`quiz/sessions`:** one row per compose. It shows the session's state (§4.9 Sessions), counts of correct, incorrect, skipped, awaiting and void questions, and the session's history scope. A `failed` session shows its typed reason and request id; a `superseded` session names the session that replaced it. Every session that fails has a row, so a session that fails after its scheduled occurrence `Succeeded` is visible here. A compose that never ran has no session; its receipt says why (§4.7). The row is a projection; nothing reads it to decide anything.
 - **`quiz/questions`:** one row per answered question. This is the reveal: your answer, the expected answer, the verdict and its chain, and the sources with quotes and hashes. A question that is still open has no row, so the key never shows early.
 - **Score:** correct divided by (correct + incorrect + skipped), per session and over all attempts. It is always shown with its numerator and denominator. Rows carry timestamps; grouping by local day happens on display. The score is not used as a control or as the success signal.

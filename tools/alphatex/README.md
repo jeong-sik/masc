@@ -47,6 +47,12 @@ remains available on other terminals. In the score view:
 Install `scripts/install-vst-host.sh` with Python 3.12+ to use installed VST3
 instruments. The host runs natively so vendor libraries and licensing stay on
 the user's machine. The picker remembers the exact instrument and preset.
+
+The continuous VST synthesis and [device-clocked PCM output](native/PCM-OUTPUT.md)
+layers support live-audition integration. The PCM companion requires macOS15+
+and Swift6. It uses the selected output's sample rate and hardware buffer size,
+pins that device, and reports underrun rather than silently queuing late audio.
+The piano-roll UI uses these layers for explicit monitored step input.
 Loading, licensing, rendering and silent-output failures are reported without
 substituting another instrument. Cubase-bundled instruments such as Retrologue
 and HALion Sonic appear when installed; usable sounds still depend on the user's
@@ -96,6 +102,153 @@ pnpm test
 Exports refuse to overwrite an existing file. Rendering and synthesis in the
 interactive view run on workers. Only the active generation may replace the
 score or start audio, and workers stop before temporary files are removed.
+
+## MIDI keyboard step entry
+
+In the piano roll, `:step-input` opens a MIDI source picker. Choose with Up/Down
+and Enter; `r` refreshes, Esc/q cancels. Refresh retains the selected UID; if it
+disappears, choose again explicitly. Discovery opens no audio, capture or output
+route. `:step-input SOURCE_UID` still arms a known UID directly. Set the cursor
+and track before arming; source documents also need a selected pattern and an unambiguous
+channel (`:channel 1–16`). Press keys together, then release all of them: the
+chord is inserted in one undoable edit and the cursor advances by note length.
+This works in phrase tracks and original-tick PPQ/SMPTE MIDI source tracks.
+
+`:step-stop` drains admitted input; leaving the piano roll also joins input before
+the final save. An incomplete held chord is discarded. Manual cursor/track/
+channel/project edits stop input, so held notes cannot move into a new
+context. Use `:step-input` again after changing context. Stop step entry before
+playback, recording, instrument selection or opening the arrangement.
+
+Input groups/channels distinguish held keys and are mapped to the chosen target
+track/channel. MIDI2 velocity is explicitly reduced to seven bits; zero-velocity
+MIDI2 attacks become the quietest supported note, while MIDI1 note-on-zero is a
+release. Source notes retain projected release velocities. Sustain/controllers,
+expression and SysEx do not alter step notes. MIDI2 note attributes and repeated
+voices that would overlap the same target key fail explicitly. This mode has no
+live audio/MIDI echo unless `--monitor` is requested. Use the recorder for timed
+playing and raw MIDI2 capture.
+
+Use `:step-input --monitor` (or `:step-input SOURCE_UID --monitor`) to hear
+the keyboard through the selected project-bound VST and audio output. Select the
+instrument with `i` first; `:output DEVICE_UID` chooses audio hardware and
+`:audio` returns from a MIDI destination to audio. The source picker opens the
+same single MIDI input for note editing and listening. Input arms after the
+selected output has started with the VST's captured preset. No fallback sound
+or output is substituted on failure.
+
+A dedicated worker owns the VST stream and device-clocked PCM requests, so
+synchronous terminal editing or drawing does not have to answer each audio
+block. The terminal sends one admitted MIDI packet at a time; device demands
+continue independently while the terminal is busy. Stop and cancellation join
+the synth, output and worker before the input owner finishes. This separation
+does not guarantee that a plug-in or the operating system can always meet the
+device deadline.
+
+Monitoring maps supported MIDI1/MIDI2 channel notes, sustain/CC, pressure and
+pitch bend to the selected track/channel. MIDI2 values are reduced to MIDI1
+resolution for the VST; incoming bank/program changes are ignored so the saved
+preset remains authoritative. Unsupported SysEx/per-note data and colliding
+target keys fail explicitly. Unrelated releases do not cut another source key.
+Expression affects listening, not the inserted step notes. Events play in order
+at the next available device block; this mode does not preserve live performance
+timing. `:step-stop`, `:stop`, route changes and leaving the view retire audio;
+admitted step edits still drain before saving. Device underruns are errors.
+
+Use `:practice-record PATH [SOURCE_UID]` to record live MIDI over phrase backing.
+The source picker retains the requested new take path. Choose a project-bound
+VST first; the output starts and supplies an actual source-render clock before
+MIDI opens. Recording leaves phrase notes, cursor and undo history unchanged.
+`:step-stop`, a route change or leaving the view drains admitted input, closes
+the monitor and finalizes the take. The terminal reports the saved path; a
+recording failure retains its path and error for recovery.
+
+Each take uses a fresh directory with owner-only permissions. `context.json`
+freezes the project, target track and repeating backing plan, including private
+captured preset bytes. `armed.json` records the selected MIDI input header and
+source-render clock. Each `events.jsonl` row contains the original `packet`
+(UMP words, source, ordinal, hostTime and timestampOrigin) plus a signed exact
+`nominalFrame` fraction. Packets are written and synced before audition
+projection and native ACK; unsupported audition data is retained before the
+route fails. Original timestamps remain authoritative. Nominal placement does
+not measure physical latency or compensate hardware drift.
+
+`take.json` is the final receipt, with packet count, input/audio retirement,
+content hashes and `complete`, `cancelled` or `failed` status. Missing/invalid
+final metadata is an incomplete take, never success. Stop before arming leaves
+a cancelled empty take; input/audio/storage failures retain recoverable files.
+Cancellation remains owned while files close and hashes are computed. The final
+decision is then sealed before receipt publication; later cancellation cannot
+rewrite that decision, while publication errors still reject completion.
+Existing directories/files are never reused. Import the completed MIDI take in
+the arrangement editor with `:import-practice PATH`; simultaneous WAV input uses
+the separate audio/MIDI recorder.
+Diagnostics include the take path/status/count without exposing preset bytes.
+
+After stopping or a monitoring error, `:step-diagnostics PATH` exports the last
+owned monitor's JSON report without overwriting a file. During monitoring it
+exports a current snapshot. Reports retain the selected source, sound identity
+and preset hash (not preset bytes), output UID/format, first failure and validated
+native final receipt. `fault` distinguishes `none`, `underrun` and `render-format`;
+frame counters show rendered, discarded and missing audio. Device-side demand
+timing separates completed playing blocks from initial prefill, and reports the
+age of an outstanding request at teardown. These observations include IPC and
+scheduling delay; they do not by themselves prove which component caused a stall.
+If the native process dies without a valid final receipt, `final` stays null.
+Diagnostics never turn missing audio into successful playback.
+The report retains a source-render host/frame anchor when the output callback
+provided a valid timestamp. It is separate from the engine-start acknowledgement
+and does not imply physical latency calibration. Active export requests a fresh worker observation; its `observedAt` identifies
+the sampling instant. Internal synchronous diagnostics retain the last worker
+message. `worker.closed` and `terminalReceived` distinguish actual worker exit
+from an acknowledged cleanup. An unexpected exit without that receipt remains
+a failure and does not invent native closure or a successful final report.
+
+`:practice-input [SOURCE_UID]` opens free-play practice on the selected phrase
+track. The other audible tracks repeat through the chosen VST preset, honoring
+their mute/solo, level and pan. With loop enabled the selected loop range repeats;
+otherwise the whole phrase repeats. The selected track is replaced by live input.
+Playing does not insert notes, advance the cursor or create undo entries.
+`:step-stop` ends the session; route, instrument, loop or editor context changes
+retire it before another session. Input opens after audio starts, so an early
+backing note can sound before the MIDI ready acknowledgement.
+
+One worker and one PCM output clock every participating track. Live and backing
+tracks use separate persistent VST instances, retaining independent same-pitch
+voices and expression even with omni synths. All instances use the captured
+project preset; GM program changes do not select different sounds. Blocks are
+summed without automatic normalization or clipping. Diagnostics include the
+participating channels, instance count, produced frames, peak and count of
+samples above full scale; lower track levels if the mix is too loud. Synth or
+output failure stops the entire session. Absolute cycle ticks are rounded once
+at the output rate, preventing cumulative loop rounding drift. Notes or cycles
+shorter than one output frame are refused.
+
+This command currently uses editable phrase tracks. Original MIDI sources keep
+their existing arrangement transport and raw recorder; practice input does not
+record timestamps or replace an arrangement recording take.
+
+`:step-length VALUE` changes only the next input length, without editing an
+existing note or adding undo history. `:step-rest [VALUE]` advances the cursor
+without making notes; its default is the current input length (the grid step for
+source point notes). Both controls work between chords while input is armed;
+release all keys first. A manual `:step-stop` begins draining and refuses further
+step controls until it completes. Already queued controls remain owned at view
+close, before the final save.
+
+Values are exact nonnegative decimals or integer fractions in quarter-note beats,
+or frames for SMPTE sources: `:step-length 1/3` is a triplet at phrase PPQ960;
+`:step-length 1.5` is a dotted quarter. Values must resolve to whole original
+ticks; a PPQ1001 source accepts `1/7` (143 ticks) and refuses `1/2`. Phrase lengths
+and rests must be positive; source length `0` creates a point note. `[`/`]` still
+edit an existing note at the cursor and stop step input. At a phrase endpoint,
+extend the document or move the cursor before starting another chord.
+
+The installed source-only MIDI reader accepts one explicit CoreMIDI source
+without an audio input or output route. It retains complete delivered UMP words
+and integer host timestamps, acknowledges each asynchronous consumer decision,
+and drains admitted input on normal stop.
+See [source-only MIDI input](MIDI-INPUT.md) for the protocol, ownership and checks.
 
 ## Recording audio and MIDI
 
@@ -199,8 +352,16 @@ or moving the original preset file does not change the saved sound. A different
 installed instrument/version is refused. Plug-in binaries, sample libraries and
 licenses still need to be installed separately. Project files containing user
 presets are local musical documents; consider the preset license before sharing.
-Backing MIDI assets retain this sound for reopening in the phrase editor; VST
-audio projection alongside backing still needs source-clock integration.
+Backing MIDI assets retain this sound for reopening in the phrase editor. In an
+arrangement, select `:output AUDIO_UID` to play stored VST sounds alongside WAV
+backing, or `:mixed-output AUDIO_UID` when other sources use external MIDI.
+Explicit `:midi-port ASSET PORT MIDI_UID` bindings override the stored sound for
+that asset; `:midi-output MIDI_UID` sends all MIDI assets externally. Each source
+and selected SMF2 pattern renders separately with its frozen preset. Original
+tempo/SMPTE timing, source trims and repeat periods remain authoritative, including
+loop practice and count-in. Stop or exit cancels rendering and waits for the
+native process before removing its private files. Independent ports in one source
+still require explicit MIDI outputs.
 Subsequent Space starts, pauses or resumes the preview; `:stop` ends playback. `l` toggles
 repetition of the loop region inside one native AVAudioEngine/PlayerNode. `:seek 4` moves to
 quarter-note beat 4. Select an audio output with `--output UID` or `:output UID`;
@@ -259,11 +420,86 @@ and rootless, followed by octave and inversion. Tonal supplies chord candidates,
 intervals and the rootless dictionary. Candidates at the cursor include bass and
 inversions but do not assert a unique harmonic interpretation. `transpose -12`,
 `quantize 0.25` and `duplicate 8` operate on the selected track transactionally.
+
+For part of a phrase, `:select-notes START END [LOW HIGH]` selects complete notes
+whose onsets lie in `[START, END)` and whose keys lie in the inclusive pitch range
+(for example, `:select-notes 0 4 C3 B4`). It keeps their full lengths, including
+tails beyond END. `:select-all` selects the current track/channel, including
+zero-duration source notes. The piano roll marks selected notes and reports their
+count. Cursor movement retains the selection; changing track, source channel,
+pattern, entering an event view, or undo/redo clears it. Esc or `:clear-selection`
+clears it before further single-note insertion.
+
+`:copy-notes` snapshots the selection into this editor session's note clipboard.
+`:cut-notes` copies and removes it in one document revision; `:delete-notes`
+removes it. `:paste-notes [AT [SEMITONES]]` pastes at the cursor or explicit
+position, optionally transposed, and selects the new notes. A range selection's
+START anchors the copy, retaining leading silence; select-all anchors its first
+onset. Pasting across tracks uses the target phrase track's instrument/channel.
+`:move-notes OFFSET SEMITONES` moves all selected notes together. Every document
+operation is one undo step; overlap, register, timing or route errors leave the
+document and clipboard unchanged. The clipboard survives track/pattern changes
+and undo/redo but is not saved in the musical document or shared with other editor
+sessions or the operating system.
+
+Ctrl+A selects all; Alt+C/X/V copies/cuts/pastes when the terminal forwards Alt as
+Meta (the commands always work). Ctrl+C retains its exit action. Shift+arrows
+move the selected group using original integer ticks; x/Delete removes the group.
+Enter requires clearing a selection before toggling one cursor note. Length and
+velocity keys still edit the single cursor note; `:transpose`, `:quantize` and
+`:duplicate` still apply to the complete track.
+
+Imported MIDI uses its original PPQ/SMPTE units for selection and paste positions.
+Copies retain onset offsets, durations (including points), attack/release dynamics
+and NoteOff versus zero-velocity NoteOn release form. Without an explicit target
+`:channel`, source copies keep their channels; a selected channel remaps the
+copied notes together. Source-port changes at either pasted endpoint are refused.
+These commands select and copy **notes**: controller, pressure, program, tempo,
+SysEx and other original events remain in place, including keyed poly-pressure.
+Use the expression/tempo editor for those events. Copying notes does not claim to
+reproduce pedal-extended sound or an instrument's state at a new position.
+
+The note-versus-region distinction also appears in the
+[Ardour note selection manual](https://manual.ardour.org/editing-and-arranging/edit-midi/note-selection/).
 `tempo 120`, `length 32` and `meter 3 4` set project timing. MIDI/WAV export refuses
 existing files. `level 100` and `pan 64` set the selected track's MIDI volume and
 pan (0–127; pan 64 is center). Dense mixes can clip; lower track levels when the
 preview/export reports clipped samples. The broader destination and remaining work are recorded in
 [the sequencer design](../../docs/design/tui/MUSIC-SEQUENCER.md).
+
+To compare voicings of existing notes, put the cursor inside the chord and use
+`:revoice Cmaj7 drop2 4 0`: symbol, close/drop2/rootless, optional octave and
+inversion. It changes the selected track's sounding voices from low to high,
+retaining each note's identity, onset, duration and velocity. `u`/`y` compares
+the before/after versions. Other tracks and notes outside the cursor stay intact.
+The target must have the same number of voices; use `:chord` to compose a
+different voice count. Overlaps and unsupported voicings leave the draft intact.
+
+The same command edits imported MIDI in its source clock. Choose `:channel N`
+when several channels sound, or `:select event-ID` to anchor a source port and
+channel. Note-on/off pairs and release velocities survive export; tempo,
+controllers and other expression messages retain their original bytes. In
+particular, polyphonic pressure keeps its original key rather than being
+reassigned to the new pitches. Chord candidates remain analysis of sounding
+keys, not sustain-pedal voice durations or a unique harmonic interpretation.
+
+`:harmony` or `:harmony mix` opens a worker-produced timeline of key-set changes,
+including rests. Phrase mix analysis follows mute/solo; imported MIDI uses the
+chosen pattern's tracks. `:harmony track` inspects the current track, including
+a muted phrase track, and honors an imported MIDI channel selection. Different
+source ports in that scope contribute their keys together. Positions retain
+phrase beats or the original MIDI PPQ/SMPTE axis. Zero-duration source notes
+appear as point events rather than being stretched into sounding intervals.
+
+Up/Down selects an interval. Enter returns to the piano roll at its original
+tick and lowest key, keeping the current track so `:revoice` can compare a
+voicing there. Esc/q closes the analysis. Ordinary note-editing keys are owned
+by this read-only list; commands remain available. Document, pattern, track or
+channel changes cancel its result, and a late worker cannot reopen it. The
+analysis uses exact key durations and Tonal candidates; it does not infer pedal
+extension or resolve an ambiguous chord to one answer. No attack-window
+threshold is used to group nearby notes. `:harmony-export PATH` writes all rows,
+notes, candidates, scope and clock units as JSON, refusing an existing file.
 
 
 ## MIDI source experiments
@@ -309,11 +545,14 @@ must bind distinct destinations. Bindings are session selections, not musical
 edits saved into the original performance.
 
 Source audition sends ordered MIDI 1.0 channel expression and F0/F7 wire data
-using the source tempo map or SMPTE clock. It plays once from the beginning.
-Pause/resume and seek restore supported channel state; unknown initial values
-and opaque device effects report errors as described in [Source state](SOURCE-STATE.md).
-Source clip looping remains unfinished. The VST route instead pauses and seeks
-within its rendered audio; its `:wave` export uses the selected source pattern.
+using the source tempo map or SMPTE clock. Playback starts at the beginning;
+`:loop START END` narrows it to a session-local source range that repeats and `l`
+toggles that repetition. The selection never changes the source document or its
+MIDI/WAV export. Pause/resume and seek restore supported channel state; unknown
+initial values and opaque device effects report errors as described in
+[Source state](SOURCE-STATE.md). The VST route pauses and seeks within its
+rendered audio and loops the same window; its `:wave` export uses the selected
+source pattern.
 Editable phrase projects retain their loop and SoundFont routes. Stop
 closes an in-flight SysEx stream, releases each owned held key and disables hold
 controllers 64/66/69 that this source enabled. It never broadcasts all-notes-off.
@@ -335,6 +574,53 @@ regions. `:play-audio` explicitly auditions the WAV portions on the captured
 clock, including delayed starts, silent tails and compressed repeats; it sends
 no MIDI. Ordinary Space playback uses [paired MIDI2/WAV regions](CAPTURE-UMP-REGIONS.md)
 with selected audio/MIDI outputs and per-input `:midi-source` overrides.
+Completed phrase practice takes use `:import-practice DIRECTORY`. Enter places
+their original MIDI-only source; `:trim OFFSET EXTENT` uses decimal host-tick
+strings, and move/repeat/undo/redo work as for other regions.
+For a boundary between host ticks, `:trim-fraction OFFSET EXTENT DIVISOR`
+retains its rational cut for both raw external MIDI and VST playback.
+`:practice-region ASSET BEAT OFFSET EXTENT DIVISOR [REPEAT]` places one directly;
+normal `:trim` restores whole-tick units.
+`:practice-passes [ASSET]` reports original recorded passes from the retained
+output clock. `:practice-pass NUMBER [ASSET]` places one at the cursor or replaces
+the selected region of that source, retaining its position/repeats and undo.
+Partial first/final passes are identified; absolute sample boundaries prevent
+rounded cycle lengths from accumulating. This is nominal alignment, without
+physical latency/drift compensation or a change to original MIDI timestamps.
+`:practice-midi [ASSET]` derives the whole recorded performance as a new expressive
+MIDI1 / 960 PPQ variant for `:edit-midi`, chord analysis and revoicing. It retains
+the captured VST sound, uses nearest source ticks at the captured SMF tempo,
+and leaves original UMP takes/pass cuts untouched. This explicitly uses the
+monitor's channel/value projection rather than lossless MIDI2 editing.
+`:practice-midi-region` derives just the selected original practice region as a
+separate editable asset starting at zero. Exact fractional host cuts are applied
+before PPQ rounding. The native `music-arrangement` companion restores notes and
+sustain/sostenuto state at entry using the same reconstruction as raw playback;
+unsupported reconstruction or MIDI1 projection fails without changing the project.
+Key durations remain key durations: a pedal-held released note can appear as a
+zero-length key with its pedal events, rather than an extended acoustic duration.
+Repeats are not expanded. Original clips, cuts, repeats and source files remain
+intact. `:edit-midi` opens the selected derived asset; Enter places it separately
+at the admitted cursor. Reinstall the AlphaTex companion when updating this command.
+`:practice-backing [ASSET]` recovers their frozen phrase as a new editable MIDI
+asset with the originally played track muted. Enter places the full phrase and
+`:edit-midi` opens it for chord/voicing experiments. Its original loop stays in
+the phrase; automatic pass alignment and recorded monitor PCM are separate.
+Select
+`:output AUDIO_UID` for playback through the captured VST identity/version and
+frozen preset. Install the matching `scripts/install-vst-host.sh` companion
+alongside `scripts/install-alphatex.sh`. To send the original raw MIDI externally,
+select `:mixed-output AUDIO_UID` and
+`:midi-source ASSET ORIGINAL_SOURCE_UID MIDI_UID`. Private receipt/context/arm/events files travel with
+save-as, including undo/redo-retained sources. Packet words, receive order,
+UInt64 timestamps and exact signed nominal frames remain unchanged. Playback
+uses an origin that includes pre-anchor packets. Failed, incomplete, corrupt or
+empty takes are rejected. VST playback derives a private PCM realization using
+the same MIDI1 note/expression projection as practice monitoring, at exact
+ceiling sample positions on the source's retained rate. Original UMP and clocks
+remain unchanged. Unsupported or ambiguous messages fail explicitly; they are
+never silently replaced by SMF or another sound. Automatic phrase backing/pass
+alignment remains subsequent work.
 [Hybrid arrangements](HYBRID-ARRANGEMENT.md) combine SMF, captured MIDI2 and WAV
 under one clock. [Record audio and MIDI against backing](ARRANGEMENT-RECORDING.md)
 with `:input UID`, `:record`, and `:record-stop`. Use `:monitor AUDIO_OUTPUT_UID`

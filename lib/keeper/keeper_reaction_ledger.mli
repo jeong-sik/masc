@@ -277,7 +277,13 @@ val event_queue_delivery_seen_for_source_strict_result :
     day partitions at or after its UTC calendar day are opened: a source's
     evidence cannot predate the request that produced it, so an older
     partition's torn write is not this source's evidence and must not turn its
-    absence into an error. [0.] means no floor and scans the whole ledger. *)
+    absence into an error. [0.] means no floor and scans the whole ledger.
+
+    The owned file read, private cache lock and immutable evidence merge run
+    in a system thread on the shared CPU worker domain when available. The
+    caller retains queue ownership and applies the returned evidence. Before
+    pool installation, from a raw domain, or inside an existing worker, the
+    shared execution policy supplies the corresponding inline path. *)
 
 val summary_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t

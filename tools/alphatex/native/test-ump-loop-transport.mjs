@@ -150,6 +150,19 @@ func stop(_ owner:UmpLoopTransport){owner.finish(reason:"test",error:nil,publish
  let drained=sent.count;cancel.continueBatch(token);precondition(sent.count==drained && cancel.state == .staged)
  try cancel.runCoordinated(anchorNanoseconds:202);try observe(cancel,202);precondition(sent.count==drained);stop(cancel)
  print("UMP_LOOP_ORIGINAL_TICKS_CANCEL_PASS")
+ // Exact fractional source cuts retain raw words across copies and wraps.
+ let fractionalCycle=try MidiCycle(start:0,end:500e-9,duration:500e-9,period:500,divisor:1,exactStart:(0,1))
+ var fractionalRegion=region(cut:"1",extent:"4",repeats:2);fractionalRegion.sourceDivisor="2"
+ let fractionalSource=source([packet(1,on),packet(2,off)],numer:125,denom:3,extent:"10")
+ let fractional=try owner([fractionalSource],[fractionalRegion],cycle:fractionalCycle)
+ try start(fractional)
+ for (time,count) in [(UInt64(120),0),(121,1),(163,2),(205,3),(246,4),(620,4),(621,5),(663,6),(705,7),(746,8)] {
+  try observe(fractional,time);precondition(sent.filter{$0.1==on || $0.1==off}.count==count)
+ }
+ precondition(sent.filter{$0.1==on || $0.1==off}.map{$0.1}==[on,off,on,off,on,off,on,off]);stop(fractional)
+ var badFraction=fractionalRegion;badFraction.sourceDivisor="0"
+ do{_ = try owner([fractionalSource],[badFraction],cycle:fractionalCycle);preconditionFailure("zero fractional source divisor admitted")}catch{}
+ print("UMP_FRACTIONAL_LOOP_PASS")
  let silent=try owner([source([],numer:1,denom:6,extent:"2")],[region(extent:"2",repeats:2_000_000)],cycle:tiny)
  try start(silent);try observe(silent,100);try observe(silent,1_000_000_100)
  precondition(silent.state == .playing && sent.isEmpty && armed.last!>host)
@@ -161,7 +174,7 @@ func stop(_ owner:UmpLoopTransport){owner.finish(reason:"test",error:nil,publish
 }}
 `
  await writeFile(join(root,'Probe.swift'),swift)
- const files=['WaveArrangement.swift','WaveLoopClock.swift','CaptureAudioClock.swift','PulseAudioClock.swift','PulseLoopClock.swift','MidiTransport.swift','UmpTransport.swift','UmpRegions.swift','HybridMidiTransport.swift','UmpState.swift'].map(n=>new URL(n,import.meta.url).pathname)
+ const files=['WaveArrangement.swift','WaveLoopClock.swift','SourceAudioClock.swift','CaptureAudioClock.swift','PulseAudioClock.swift','PulseLoopClock.swift','MidiTransport.swift','UmpTransport.swift','UmpRegions.swift','HybridMidiTransport.swift','UmpState.swift'].map(n=>new URL(n,import.meta.url).pathname)
  let r=spawnSync('xcrun',['swiftc','-parse-as-library','-D','MIDI_LIBRARY','-D','ARRANGEMENT_LIBRARY',...files,join(root,'Output.swift'),join(root,'Loop.swift'),join(root,'Probe.swift'),'-o',join(root,'probe'),'-framework','AVFoundation','-framework','CoreAudio','-framework','CoreMIDI'],{encoding:'utf8'})
  assert.equal(r.status,0,r.stderr)
  r=spawnSync(join(root,'probe'),[],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);console.log(r.stdout.trim())

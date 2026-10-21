@@ -1,13 +1,20 @@
-import { verifyPhraseSnapshot } from './phrase-arrangement.mjs'
+import { verifyPhraseSnapshot, importPhraseDocument } from './phrase-arrangement.mjs'
 import { capturePartNames, validateCaptureManifest } from './captured-source.mjs'
 import { readCaptureFiles, readCapture } from './session-data.mjs'
 import { capturePaths, captureMatches, inspectCaptureAsset } from './captured-source-files.mjs'
+import { practicePartNames } from './practice-source.mjs'
+import { practicePasses } from './practice-passes.mjs'
+import { practiceMidi } from './practice-midi.mjs'
+import { extractPracticeRegion } from './practice-region-midi.mjs'
+import { practicePaths, readPracticeFiles, inspectPracticeAsset } from './practice-source-files.mjs'
 import { readFile, open, mkdir, mkdtemp, lstat, link, rm, chmod } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createHash } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { basename, dirname, join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import { importMidiSource } from './midi-source.mjs'
 import { readWaveMetadata } from './wave-file.mjs'
 import { arrangementID, editArrangement, validateArrangement } from './arrangement.mjs'
@@ -90,21 +97,23 @@ export async function importArrangementMidi(project, input, { name = basename(in
 }
 // The capture's JSONL and manifest bytes are source material too. Publish
 // private immutable copies with the same exclusive content identity as WAVs.
-async function copyCapturePart(input, root, { signal } = {}) {
+async function copyDataPart(input, root, { signal, kind = 'capture' } = {}) {
+  if (!['capture', 'practice'].includes(kind)) throw new Error('Unknown source part kind')
   signal?.throwIfAborted()
   const folder = join(root, 'assets'); await directory(folder)
-  const temporary = await mkdtemp(join(folder, '.import-')), candidate = join(temporary, 'source.capture')
+  const temporary = await mkdtemp(join(folder, '.import-')), candidate = join(temporary, `source.${kind}`)
   try {
     const hash = createHash('sha256')
     const observe = new Transform({ transform(bytes, _, done) { hash.update(bytes); done(null, bytes) } })
     await pipeline(createReadStream(input), observe, createWriteStream(candidate, { flags: 'wx', mode: 0o600 }), { signal })
-    const sha256 = hash.digest('hex'), file = `assets/${sha256}.capture`, target = join(root, file)
+    const sha256 = hash.digest('hex'), file = `assets/${sha256}.${kind}`, target = join(root, file)
     const handle = await open(candidate, 'r'); try { await handle.sync() } finally { await handle.close() }
-    await chmod(candidate, 0o444); signal?.throwIfAborted()
+    await chmod(candidate, kind === 'practice' ? 0o400 : 0o444); signal?.throwIfAborted()
     try { await link(candidate, target) }
     catch (error) {
       if (error.code !== 'EEXIST') throw error
-      if (!(await lstat(target)).isFile() || await digestFile(target, { signal }) !== sha256) throw new Error('Captured source content changed at publication')
+      const stat = await lstat(target)
+      if (!stat.isFile() || kind === 'practice' && (stat.mode & 0o077) || await digestFile(target, { signal }) !== sha256) throw new Error('Source content or privacy changed at publication')
     }
     const parent = await open(folder, 'r'); try { await parent.sync() } finally { await parent.close() }
     signal?.throwIfAborted()
@@ -117,7 +126,7 @@ export async function importArrangementCapture(project, input, { projectPath, na
   const root = dirname(resolve(projectPath)), parts = {}
   for (const [role, filename] of Object.entries(capturePartNames)) {
     const copied = role === 'audio' ? await copyWaveAsset(join(input, filename), root, { signal })
-      : await copyCapturePart(join(input, filename), root, { signal })
+      : await copyDataPart(join(input, filename), root, { signal })
     parts[role] = { file: copied.file, sha256: copied.sha256 }
   }
   const timeline = await readCaptureFiles(capturePaths(root, { parts }), { signal })
@@ -126,6 +135,83 @@ export async function importArrangementCapture(project, input, { projectPath, na
     manifest: structuredClone(validateCaptureManifest(timeline.manifest)) }
   captureMatches(asset, timeline); signal?.throwIfAborted()
   return { project: editArrangement(project, { kind: 'asset-add', asset }), asset: asset.id }
+}
+export async function importArrangementPractice(project, input, { projectPath, name = basename(input), signal } = {}) {
+  validateArrangement(project)
+  if (typeof projectPath !== 'string' || !projectPath) throw new Error('Choose a project path before importing a practice take')
+  const root = dirname(resolve(projectPath)), parts = {}
+  // Copy before decoding: the receipt, frozen preset and packets are validated
+  // from the private project-owned bytes that will actually survive save-as.
+  for (const [role, filename] of Object.entries(practicePartNames)) parts[role] = await copyDataPart(join(input, filename), root, { signal, kind: 'practice' })
+  const { metadata, identities } = await readPracticeFiles(practicePaths(root, { parts }), { signal })
+  if (metadata.packets === '0') throw new Error('Practice take contains no MIDI packets to arrange')
+  if (Object.keys(parts).some(role => parts[role].sha256 !== identities[role])) throw new Error('Practice source changed during import')
+  const asset = { kind: 'practice', id: arrangementID(project.assets, 'asset'), name, parts, metadata }
+  signal?.throwIfAborted()
+  return { project: editArrangement(project, { kind: 'asset-add', asset }), asset: asset.id }
+}
+export async function prepareArrangementPractice(project, assetID, { sourceRoot, directory: parent, signal } = {}) {
+  validateArrangement(project); signal?.throwIfAborted()
+  const asset = project.assets.find(asset => asset.id === assetID && asset.kind === 'practice')
+  if (!asset) throw new Error('Choose a raw practice take')
+  const files = await inspectPracticeAsset(sourceRoot, asset, { signal }), temporary = await mkdtemp(join(parent, 'practice-'))
+  try {
+    const parts = {}
+    for (const [role, filename] of Object.entries(practicePartNames)) {
+      const candidate = join(temporary, filename), hash = createHash('sha256')
+      const observe = new Transform({ transform(bytes, _, done) { hash.update(bytes); done(null, bytes) } })
+      await pipeline(createReadStream(files[role]), observe, createWriteStream(candidate, { flags: 'wx', mode: 0o600 }), { signal })
+      if (hash.digest('hex') !== asset.parts[role].sha256) throw new Error('Practice source changed during playback preparation')
+      await chmod(candidate, 0o400); parts[role] = candidate
+    }
+    const read = await readPracticeFiles(parts, { signal })
+    if (!isDeepStrictEqual(read.metadata, asset.metadata)) throw new Error('Practice clock provenance changed during playback preparation')
+    signal?.throwIfAborted()
+    return { directory: temporary }
+  } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error }
+}
+// Recover a draft from verified private bytes. The new MIDI variant can be
+// edited independently; raw take parts stay immutable. Cleanup precedes reply.
+export async function restorePracticeBacking(project, assetID, { sourceRoot, directory = tmpdir(), signal } = {}) {
+  const snapshot = await prepareArrangementPractice(project, assetID, { sourceRoot, directory, signal })
+  try {
+    const asset = project.assets.find(asset => asset.id === assetID)
+    const bytes = await readFile(join(snapshot.directory, 'context.json'), { signal })
+    if (createHash('sha256').update(bytes).digest('hex') !== asset.parts.context.sha256) throw new Error('Practice context changed during backing restoration')
+    const context = JSON.parse(bytes.toString('utf8')), phrase = context.project
+    phrase.title += ' backing'
+    phrase.tracks.find(track => track.id === context.track).muted = true
+    signal?.throwIfAborted()
+    return importPhraseDocument(project, phrase)
+  } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
+}
+// Read the verified frozen clock privately; return only its derived selection.
+export async function inspectPracticePasses(project, assetID, pass, { sourceRoot, directory = tmpdir(), signal } = {}) {
+  const snapshot = await prepareArrangementPractice(project, assetID, { sourceRoot, directory, signal })
+  try {
+    const asset = project.assets.find(asset => asset.id === assetID)
+    const bytes = await readFile(join(snapshot.directory, 'context.json'), { signal })
+    if (createHash('sha256').update(bytes).digest('hex') !== asset.parts.context.sha256) throw new Error('Practice context changed during pass inspection')
+    const context = JSON.parse(bytes.toString('utf8'))
+    const result = practicePasses(asset, context.backing, pass)
+    signal?.throwIfAborted()
+    return { asset: assetID, ...result }
+  } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
+}
+export async function importPracticeMidi(project, assetID, { sourceRoot, directory = tmpdir(), signal, cut, nativeExecutable } = {}) {
+  const snapshot = await prepareArrangementPractice(project, assetID, { sourceRoot, directory, signal })
+  try {
+    const asset = project.assets.find(asset => asset.id === assetID), values = {}
+    for (const role of ['context', 'events']) {
+      const bytes = await readFile(join(snapshot.directory, practicePartNames[role]), { signal })
+      if (createHash('sha256').update(bytes).digest('hex') !== asset.parts[role].sha256) throw new Error('Practice content changed during MIDI derivation')
+      values[role] = bytes.toString('utf8')
+    }
+    const packets = values.events.trimEnd().split('\n').map(line => JSON.parse(line).packet)
+    const region = cut ? await extractPracticeRegion(asset, packets, cut, { directory: snapshot.directory, signal, executable: nativeExecutable }) : undefined
+    const source = practiceMidi(asset, JSON.parse(values.context), packets, { signal, region })
+    return importPhraseDocument(project, source)
+  } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
 }
 // The viewer owns these snapshots until it drains WAV playback/export and
 // restores the terminal. A project asset mutation cannot change an open take.
@@ -154,6 +240,7 @@ export async function verifyArrangementAssets(project, root, options = {}) {
     verifyPhraseSnapshot(asset)
     if (asset.kind === 'wave') paths.set(asset.id, await inspectWaveAsset(resolve(root), asset, options))
     else if (asset.kind === 'capture') paths.set(asset.id, await inspectCaptureAsset(resolve(root), asset, options))
+    else if (asset.kind === 'practice') paths.set(asset.id, await inspectPracticeAsset(resolve(root), asset, options))
   }
   options.signal?.throwIfAborted()
   return paths
@@ -176,10 +263,16 @@ export async function materializeArrangementAssets(project, sourceRoot, targetRo
       if (copied.sha256 !== asset.sha256 || !equalMetadata(copied.metadata, asset.metadata)) throw new Error('WAV source changed during save-as')
     } else if (asset.kind === 'capture') {
       for (const [role, file] of Object.entries(paths.get(asset.id))) {
-        const copied = role === 'audio' ? await copyWaveAsset(file, targetRoot, { signal }) : await copyCapturePart(file, targetRoot, { signal })
+        const copied = role === 'audio' ? await copyWaveAsset(file, targetRoot, { signal }) : await copyDataPart(file, targetRoot, { signal })
         if (copied.sha256 !== asset.parts[role].sha256) throw new Error('Captured source changed during save-as')
       }
       await inspectCaptureAsset(targetRoot, asset, { signal })
+    } else if (asset.kind === 'practice') {
+      for (const [role, file] of Object.entries(paths.get(asset.id))) {
+        const copied = await copyDataPart(file, targetRoot, { signal, kind: 'practice' })
+        if (copied.sha256 !== asset.parts[role].sha256) throw new Error('Practice source changed during save-as')
+      }
+      await inspectPracticeAsset(targetRoot, asset, { signal })
     }
   }
   signal?.throwIfAborted()

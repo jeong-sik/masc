@@ -402,14 +402,6 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
   let server_state = current_server_state_opt () in
-  (* Single-pass fleet meta scan: reads each keeper meta file once,
-     shared by paused-keepers and fleet-safety sections. *)
-  let fleet_meta_scan =
-    match server_state with
-    | Some state ->
-      Some (keeper_fleet_meta_scan (Mcp_server.workspace_config state))
-    | None -> None
-  in
   let keeper_identity_drift_json =
     compute_section ~name:"keeper_identity_drift" ?section_timings_ref
       (fun () ->
@@ -454,16 +446,6 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
           |> Mcp_server.workspace_scope_publication_recovery_snapshot
           |> Mcp_server.publication_recovery_snapshot_to_health_yojson)
   in
-  let paused_keepers_json =
-    compute_section ~name:"paused_keepers" ?section_timings_ref
-      (fun () ->
-        match fleet_meta_scan with
-        | Some scan ->
-          paused_keepers_health_json_of_scan
-            ~registry_paused_names:(registry_paused_keeper_names ())
-            scan.paused_scan
-        | None -> paused_keepers_health_json ())
-  in
   let reaction_ledger_json =
     compute_section ~name:"keeper_reaction_ledger" ?section_timings_ref
       keeper_reaction_ledger_health_json
@@ -480,10 +462,37 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     compute_section ~name:"keeper_hitl_gate" ?section_timings_ref
       keeper_hitl_gate_health_json
   in
+  (* One read of each keeper meta file, shared by the paused-keepers,
+     execution and fleet-safety sections. It is taken right before the
+     event-queue section, which discovers the queue-holding Keepers again:
+     the owner set and that discovery stay adjacent. The paused and autoboot
+     answers are therefore read after the reaction-ledger, owner and
+     board-event sections above; a meta change in between shows in these
+     sections and not in those, for one response. Owner-set adjacency is
+     the reason for the order. *)
+  let fleet_reading =
+    Option.map
+      (fun state ->
+        let reading = read_keeper_metas (Mcp_server.workspace_config state) in
+        reading, keeper_fleet_meta_scan reading)
+      server_state
+  in
+  let meta_reading = Option.map fst fleet_reading in
+  let paused_scan, bootable_names, autoboot_scan =
+    match fleet_reading with
+    | Some (_, scan) -> scan.paused_scan, scan.bootable_names, scan.autoboot_scan
+    | None -> empty_paused_keeper_scan, [], empty_autoboot_keeper_scan
+  in
+  let paused_keepers_json =
+    compute_section ~name:"paused_keepers" ?section_timings_ref
+      (fun () ->
+        paused_keepers_health_json_of_scan
+          ~registry_paused_names:(registry_paused_keeper_names ())
+          paused_scan)
+  in
   let execution_snapshot =
-    match server_state with
-    | Some state ->
-      keeper_execution_snapshot (Mcp_server.workspace_config state)
+    match meta_reading with
+    | Some reading -> keeper_execution_snapshot reading
     | None -> empty_keeper_execution_snapshot
   in
   let keeper_event_queue_json =
@@ -513,25 +522,16 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let keeper_fleet_safety =
     compute_section ~name:"keeper_fleet_safety" ?section_timings_ref
       (fun () ->
-        match fleet_meta_scan with
-        | Some scan ->
-          keeper_fleet_safety_health_json
-            ~bootable_names:scan.bootable_names
-            ~autoboot_scan:scan.autoboot_scan
-            ~phase_snapshot
-            ~execution_snapshot
-            ?base_path
-            ~phase_counts
-            ~paused_keepers_json
-            ()
-        | None ->
-          keeper_fleet_safety_health_json
-            ~phase_snapshot
-            ~execution_snapshot
-            ?base_path
-            ~phase_counts
-            ~paused_keepers_json
-            ())
+        keeper_fleet_safety_health_json
+          ~meta_reading
+          ~bootable_names
+          ~autoboot_scan
+          ~phase_snapshot
+          ~execution_snapshot
+          ?base_path
+          ~phase_counts
+          ~paused_keepers_json
+          ())
   in
   let skill_catalog_json =
     compute_section ~name:"skill_catalog" ?section_timings_ref (fun () ->

@@ -15,19 +15,21 @@ final class HybridMidiTransport: CoordinatedMidiTransport {
     enum State { case prepared, staged, playing, ended, stopped }
     var state = State.prepared
     var ended = Set<Int>()
+    var physicalAdmission: (() throws -> Void)?
 
     convenience init(midi: Timeline, ump: UmpArrangement, cycle: MidiCycle? = nil) throws {
         try midi.validate(cycle: cycle)
         guard midi.arrangement, midi.duration == ump.duration,
               let uid = midi.bindings.first?.destination else { throw MidiFailure("invalid hybrid MIDI arrangement clock") }
         let captured: any CoordinatedMidiTransport
+        let capturedOutput: UmpOutput
         let capturedScopes: [Set<UmpChannel>]
         if let cycle {
             let owner = try UmpLoopTransport(timeline: ump, cycle: cycle)
-            captured = owner; capturedScopes = owner.plan.clips.flatMap { $0.shapes.map(\.scope) }
+            captured = owner; capturedOutput = owner.output; capturedScopes = owner.plan.clips.flatMap { $0.shapes.map(\.scope) }
         } else {
             let owner = try UmpRegionTransport(timeline: ump)
-            captured = owner; capturedScopes = owner.clips.map(\.scope)
+            captured = owner; capturedOutput = owner.output; capturedScopes = owner.clips.map(\.scope)
         }
         // Hybrid SMF sends MIDI1 UMP in explicit group zero. Compare complete
         // prefix state scopes, even for sequential clips: separate engines
@@ -47,6 +49,13 @@ final class HybridMidiTransport: CoordinatedMidiTransport {
         // The captured owner refuses an unsupported reconstruction before any
         // send, so it stages first; bindings keep their SMF-first order.
         self.init(owners: [source, captured], duration: cycle?.duration ?? midi.duration, cycle: cycle, stagingOrder: [1, 0])
+        physicalAdmission = {
+            for scope in capturedScopes {
+                let physical = Set(scope.map { address in UmpChannel(source: address.source,
+                    channel: capturedOutput.nativeProtocols[address.source] == .midi1 ? address.channel & 0x000f0000 : address.channel) })
+                guard physical.isDisjoint(with: channels) else { throw MidiFailure("SMF and captured MIDI collapse onto the same MIDI1 channel; select independent channels or outputs") }
+            }
+        }
     }
     init(owners: [any CoordinatedMidiTransport], duration: Double, cycle: MidiCycle? = nil, stagingOrder: [Int]? = nil) {
         let order = stagingOrder ?? Array(owners.indices)
@@ -62,7 +71,7 @@ final class HybridMidiTransport: CoordinatedMidiTransport {
         }
     }
     func prepare() throws {
-        do { for owner in owners { try owner.prepare() } }
+        do { for owner in owners { try owner.prepare() }; try physicalAdmission?() }
         catch { finish(reason: "hybrid-prepare-failed", error: error, publish: false); throw error }
     }
     func stageCoordinated(at seconds: Double) throws {

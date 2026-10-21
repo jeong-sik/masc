@@ -77,6 +77,58 @@ let before_reconcile () = with_fixture (fun _env _sw config root directory ->
   check int "same capture includes every exact detail" (List.length Standalone_lane.all)
     (List.length (values "lanes" (member "exact_snapshot" json))))
 
+(* A package row lists the exact outputs the package declares, in manifest
+   order, then the runtime.toml tables for outputs it does not declare, each
+   with the lane state the exact registry reads (RFC operator-quiz §4.8). *)
+let exact_outputs_follow_the_manifest_then_the_tables () = with_fixture (fun _env _sw _config root directory ->
+  write (Filename.concat root "out.json") {|{"type":"object","properties":{},"additionalProperties":false}|};
+  let manifest = Filename.concat root "quiz.toml" in
+  write manifest {|id = "quiz"
+revision = "1"
+title = "Quiz package"
+image = "fixture/quiz"
+command = ["quiz"]
+contributions = ["observe"]
+[resources]
+cpus = 0.5
+memory_bytes = 67108864
+pids = 16
+max_reply_bytes = 4096
+[world.exact_outputs.author]
+schema = "out.json"
+[world.exact_outputs.grade]
+schema = "out.json"
+|};
+  write (Filename.concat directory "quiz.toml") (declaration manifest "quiz");
+  let declarations = Config.load ~directory in
+  let d = match declarations.declarations with
+    | [d] -> d
+    | _ -> fail (String.concat "; " (List.map (fun (issue : Config.issue) -> issue.message) declarations.issues)) in
+  let configured = Server_standalone_lane_projection.Configured {admitted_slots=["a.m"];cli_slots=[];
+    declared_slots=["a.m"];declared_cli_slots=[];dropped_slots=[];admission_error=None} in
+  let configuration (addon : Runtime_schema.addon_lane) = match addon.output with
+    | "author" when addon.declaration_id = "quiz" -> configured
+    | "grade" -> Server_standalone_lane_projection.Unconfigured "no table"
+    | _ -> Server_standalone_lane_projection.Disabled {declared_slots=[];declared_cli_slots=[]} in
+  let tables ~declaration_id = if declaration_id = "quiz" then ["author"; "old"] else ["other"] in
+  let outputs = Inventory.For_testing.exact_outputs ~configuration ~tables d in
+  check (list string) "declared outputs, then a table the package does not declare"
+    ["author/declared/configured"; "grade/declared/unconfigured"; "old/table_only/off"]
+    (List.map (fun (o : Inventory.exact_output) -> Printf.sprintf "%s/%s/%s" o.output
+       (match o.source with Inventory.Declared -> "declared" | Table_only -> "table_only")
+       (match o.configuration with
+        | Server_standalone_lane_projection.Configured _ -> "configured" | Disabled _ -> "off"
+        | Unconfigured _ -> "unconfigured" | Registry_unavailable _ -> "unavailable")) outputs);
+  match Inventory.For_testing.package_rows ~declarations ~instances:[]
+          ~exact_outputs:(Inventory.For_testing.exact_outputs ~configuration ~tables) with
+  | [row] ->
+      let listed = values "exact_outputs" (member "declaration" (member "state" (Inventory.For_testing.row_to_json row))) in
+      check (list string) "the row carries them on the wire"
+        ["author:declared:configured"; "grade:declared:unconfigured"; "old:table_only:off"]
+        (List.map (fun entry -> String.concat ":" [text "output" entry; text "source" entry;
+           text "kind" (member "configuration" entry)]) listed)
+  | _ -> fail "one declaration row")
+
 let retained_metadata () = with_fixture (fun _env _sw config root directory ->
   let masc = Workspace.masc_dir config in Unix.mkdir masc 0o700;
   let store_root = Filename.concat masc "lane-addons" in
@@ -98,7 +150,8 @@ let retained_metadata () = with_fixture (fun _env _sw config root directory ->
   check bool "retained files do not create a manager" false owner.owner_present;
   check bool "bad sibling is partial" false owner.complete;
   check int "readable sibling metadata remains" 2 (List.length owner.instances);
-  let rows = Inventory.For_testing.package_rows ~declarations:(Config.load ~directory) ~instances:owner.instances in
+  let rows = Inventory.For_testing.package_rows ~declarations:(Config.load ~directory) ~instances:owner.instances
+    ~exact_outputs:(fun _ -> []) in
   check bool "manual selection keeps exact incarnation" true
     (List.exists (fun (row : Inventory.row) -> row.selection=Inventory.Manual_instance {instance_id="manual";incarnation="manual"}) rows);
   let removed = List.find (fun (row : Inventory.row) -> row.selection=Inventory.Declaration path) rows in
@@ -107,7 +160,8 @@ let retained_metadata () = with_fixture (fun _env _sw config root directory ->
        check bool "cleanup failure is retained" true (i.phase=Lane_addon_types.Failed "cleanup incomplete: refused")
    | _ -> fail "retained declaration owner disappeared");
   let incomplete : Config.snapshot = {declarations=[];paths=[];issues=[];complete=false} in
-  let rows = Inventory.For_testing.package_rows ~declarations:incomplete ~instances:owner.instances in
+  let rows = Inventory.For_testing.package_rows ~declarations:incomplete ~instances:owner.instances
+    ~exact_outputs:(fun _ -> []) in
   check bool "partial read cannot claim declaration deletion" true
     (List.exists (fun (r : Inventory.row) -> match r.state with
       | Inventory.Package_state {declaration=Some Unobserved;_} -> true | _ -> false) rows);
@@ -121,7 +175,8 @@ let detached_history () =
     presence=Retained;phase=Detached} in
   let manual = {detached with instance_id="manual-old";incarnation="manual-old";configuration=None} in
   let empty : Config.snapshot = {declarations=[];paths=[];issues=[];complete=true} in
-  let rows declarations = Inventory.For_testing.package_rows ~declarations ~instances:[detached;manual] in
+  let rows declarations = Inventory.For_testing.package_rows ~declarations ~instances:[detached;manual]
+    ~exact_outputs:(fun _ -> []) in
   check int "completed manual and absent declaration leave the active inventory" 0 (List.length (rows empty));
   (match rows {empty with complete=false} with
    | [{state=Inventory.Package_state {declaration=Some Unobserved;instances=[]};_}] -> ()
@@ -358,5 +413,6 @@ let () = run "operator lane inventory" ["read boundaries",[
   test_case "all builtin and invalid/duplicate declarations before reconcile" `Quick before_reconcile;
   test_case "retained manual/managed owners survive partial metadata" `Quick retained_metadata;
   test_case "confirmed cleanup leaves history without crowding active inventory" `Quick detached_history;
+  test_case "exact outputs follow the manifest, then the tables" `Quick exact_outputs_follow_the_manifest_then_the_tables;
   test_case "HTTP inventory requires operator authority and preserves files" `Quick operator_route;
   test_case "H2 inventory has the same admin gate and projection" `Quick h2_operator_route]]

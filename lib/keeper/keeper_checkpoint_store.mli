@@ -304,6 +304,57 @@ val checkpoint_ref_create_error_to_string : Keeper_checkpoint_ref.create_error -
 val checkpoint_identity_error_to_string : checkpoint_identity_error -> string
 val checkpoint_ref_load_error_to_string : checkpoint_ref_load_error -> string
 
+(** A load as a reader of the saved history takes it. A canonical an earlier
+    [checkpoint_version] wrote ([Superseded_version]) is the deliberate hard
+    cut: the turn path starts fresh on it and the next save replaces it. A
+    reader answers the same fresh state, so it settles on the file instead of
+    reporting it as unreadable at every pass. A keeper whose turns save no
+    checkpoint (an official client) never replaces it. *)
+module Saved_history : sig
+  type 'a t =
+    | Read of 'a
+    | Superseded of { expected : int; got : int }
+
+  (** {!checkpoint_load_error} without [Superseded_version]: that case is
+      {!Superseded}, never a failure. *)
+  type error =
+    | Not_found
+    | Store_error of string
+    | Parse_error of string
+    | Newer_version of { expected : int; got : int }
+    | Io_error of string
+    | Read_failed of { cause : checkpoint_read_failure; detail : string }
+    | Agent_core_error of string
+
+  (** {!checkpoint_ref_load_error} whose read failure is an {!error}. *)
+  type ref_error =
+    | Ref_not_found
+    | Ref_read_failed of error
+    | Ref_identity_invalid of checkpoint_identity_error
+    | Ref_session_mismatch of
+        { expected : Keeper_id.Trace_id.t
+        ; actual : Keeper_id.Trace_id.t
+        }
+    | Ref_lock_failed of string
+end
+
+(** The cut decision for a {!checkpoint_load_error} load. Every other error
+    keeps its constructor. *)
+val saved_history :
+  ('a, checkpoint_load_error) result -> ('a Saved_history.t, Saved_history.error) result
+
+(** {!saved_history} for a load that reports {!checkpoint_ref_load_error}: the
+    cut arrives as [Ref_read_failed (Superseded_version _)]. *)
+val saved_history_of_ref :
+  ('a, checkpoint_ref_load_error) result
+  -> ('a Saved_history.t, Saved_history.ref_error) result
+
+(** The text {!checkpoint_load_error_to_string} gives the same failure. *)
+val saved_history_error_to_string : Saved_history.error -> string
+
+(** The text {!checkpoint_ref_load_error_to_string} gives the same failure. *)
+val saved_history_ref_error_to_string : Saved_history.ref_error -> string
+
 (** Exact persisted bytes from one read, their reference, and a checkpoint
     value for them. The reference's digest is always taken over those bytes.
     The value, and the trace and turn of the reference, are the decode of

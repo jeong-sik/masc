@@ -150,9 +150,9 @@ let render_overview (state : state) =
           match state.connection_status, state.http_refresh_started_ns with
           | Connecting, _ -> "Connecting to workspace…"
           | Booting, _ -> "Workspace server is starting…"
-          | (Connected | Degraded | Reconnecting | Disconnected), Some _ ->
+          | (Connected | Degraded | Disconnected), Some _ ->
               "Loading Dashboard…"
-          | (Connected | Degraded | Reconnecting | Disconnected), None ->
+          | (Connected | Degraded | Disconnected), None ->
               "Health: not observed — press 'r' to refresh"
         in
         " " ^ status
@@ -200,7 +200,7 @@ let render_overview (state : state) =
       let budget = Masc_tui_home.home_requests_budget state ~chrome_budget in
       let draw_row (action, label) =
         let line = "  " ^ label in
-        if Some action = selected then c.push_selected line else c.push line
+        if Option.equal equal_home_action (Some action) selected then c.push_selected line else c.push line
       in
       let selection_changed =
         Option.is_some state.home_selected && Option.is_none selected

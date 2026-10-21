@@ -2690,7 +2690,7 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
            | "lanes" ->
              (* Parsed by [parse_lanes] after the runtime section is shaped. *)
              section, errs
-           | "exact_output_lanes" ->
+           | "exact_output_lanes" | "addon_exact_lanes" ->
              (* Parsed separately as raw AGENT_CORE target references. *)
              section, errs
            | _ when is_toml_table value ->
@@ -2705,8 +2705,8 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                    (Printf.sprintf
                       "unknown [runtime] key %S; expected default, \
                        media_failover, [runtime.lanes], \
-                       [runtime.exact_output_lanes], [runtime.assignments], or a \
-                       table-valued [runtime.<profile>]"
+                       [runtime.exact_output_lanes], [runtime.addon_exact_lanes], \
+                       [runtime.assignments], or a table-valued [runtime.<profile>]"
                       key) )
         )
         (empty_runtime_section, [])
@@ -2797,11 +2797,11 @@ let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error l
     Error (error (Ns.(path Runtime) "lanes") "[runtime.lanes] must be a table of lane tables")
 ;;
 
-let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
+let parse_exact_output_lane ~(owner : Runtime_schema.exact_lane_owner) (tbl : Otoml.t)
   : (Runtime_schema.exact_output_lane_decl, parse_error list) result
   =
   let ( let* ) = Result.bind in
-  let path = Ns.(path Runtime) ("exact_output_lanes." ^ id) in
+  let path = Runtime_schema.exact_lane_table_name owner in
   let unknown_key_errors =
     match tbl with
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
@@ -2906,10 +2906,12 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
   in
   let* enabled = enabled_result in
   let* () =
-    match Standalone_lane.of_id id with
-    | Some lane when not enabled && Standalone_lane.obligation lane = Standalone_lane.Required ->
+    match owner with
+    | Runtime_schema.Builtin lane
+      when not enabled && Standalone_lane.obligation lane = Standalone_lane.Required ->
       Error (error (path ^ ".enabled") "required exact-output lane cannot be disabled")
-    | Some _ | None -> Ok ()
+    (* An add-on lane is always Optional: no server start depends on it. *)
+    | Runtime_schema.Builtin _ | Runtime_schema.Addon _ -> Ok ()
   in
   match unknown_key_errors, slots_result with
   | _ :: _, Error slot_errors -> Error (slot_errors @ unknown_key_errors)
@@ -2940,7 +2942,7 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
         (match validate_cli 1 [] cli_slot_ids with
          | Error _ as error -> error
          | Ok () ->
-           Ok { Runtime_schema.id; enabled; slot_ids; cli_slot_ids; max_output_tokens; thinking })
+           Ok { Runtime_schema.owner; enabled; slot_ids; cli_slot_ids; max_output_tokens; thinking })
       | slot_id :: rest ->
         if String.equal (String.trim slot_id) ""
         then
@@ -2976,19 +2978,19 @@ let parse_exact_output_lanes (toml : Otoml.t)
                never be read: the standalone-lane projection draws one row per
                [Standalone_lane.t], so a misspelt lane vanished from every
                surface while the real lane read as unconfigured. *)
-            | (Otoml.TomlTable _ | Otoml.TomlInlineTable _)
-              when Option.is_none (Standalone_lane.of_id id) ->
-              Error
-                (error
-                   (Ns.(path Runtime) ("exact_output_lanes." ^ id))
-                   (Printf.sprintf
-                      "unknown exact-output lane %S; expected one of %s"
-                      id
-                      (String.concat
-                         ", "
-                         (List.map Standalone_lane.to_id Standalone_lane.all))))
             | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
-              parse_exact_output_lane ~id value
+              (match Standalone_lane.of_id id with
+               | Some lane -> parse_exact_output_lane ~owner:(Runtime_schema.Builtin lane) value
+               | None ->
+                 Error
+                   (error
+                      (Ns.(path Runtime) ("exact_output_lanes." ^ id))
+                      (Printf.sprintf
+                         "unknown exact-output lane %S; expected one of %s"
+                         id
+                         (String.concat
+                            ", "
+                            (List.map Standalone_lane.to_id Standalone_lane.all)))))
             | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
             | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
             | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> Error
@@ -3004,6 +3006,54 @@ let parse_exact_output_lanes (toml : Otoml.t)
       (error
          (Ns.(path Runtime) "exact_output_lanes")
          "[runtime.exact_output_lanes] must be a table of lane tables")
+;;
+
+(* [runtime.addon_exact_lanes.<declaration id>.<output>]: the operator binds
+   slots to a Lane Add-on installation's named exact output. Each table takes
+   the keys and rules of a built-in lane table. Declarations load after this
+   file, so a pair no installation declares still loads; nothing is checked
+   against them here. *)
+let parse_addon_exact_output_lanes (toml : Otoml.t)
+  : (Runtime_schema.exact_output_lane_decl list, parse_error list) result
+  =
+  let table_path = Ns.(path Runtime) "addon_exact_lanes" in
+  let not_a_table path what = Error (error path (what ^ " must be a table")) in
+  let parse_output declaration_id (output, value) =
+    let path =
+      String.concat "." [ table_path; Toml_line_editor.render_key declaration_id; Toml_line_editor.render_key output ]
+    in
+    match Runtime_schema.addon_lane ~declaration_id ~output with
+    | Error message -> Error (error path message)
+    | Ok lane ->
+      match value with
+      | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
+        parse_exact_output_lane ~owner:(Runtime_schema.Addon lane) value
+      | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+      | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->
+        not_a_table path "an add-on exact-output lane"
+  in
+  let parse_declaration (declaration_id, value) =
+    let path = table_path ^ "." ^ Toml_line_editor.render_key declaration_id in
+    match value with
+    | _ when String.trim declaration_id = "" -> Error (error path "a declaration id must not be blank")
+    | Otoml.TomlTable [] | Otoml.TomlInlineTable [] -> Error (error path "names no exact output")
+    | Otoml.TomlTable outputs | Otoml.TomlInlineTable outputs ->
+      partition_results (List.map (parse_output declaration_id) outputs)
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+    | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->
+      not_a_table path "a declaration's exact outputs"
+  in
+  match Otoml.find_opt toml Fun.id [ Ns.(key Runtime); "addon_exact_lanes" ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable declarations | Otoml.TomlInlineTable declarations) ->
+    partition_results (List.map parse_declaration declarations) |> Result.map List.concat
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
+  | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
+  | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) ->
+    not_a_table table_path "[runtime.addon_exact_lanes]"
 ;;
 
 (* [repeat-penalty] and [repeat-last-n] are fields of Ollama's own
@@ -3399,7 +3449,12 @@ let parse_table (toml : Otoml.t) : (Runtime_schema.config, parse_error list) res
   let assignments_result = parse_keeper_assignments toml in
   let bindings_result = parse_bindings toml in
   let lanes_result = parse_lanes toml in
-  let exact_output_lanes_result = parse_exact_output_lanes toml in
+  let exact_output_lanes_result =
+    match parse_exact_output_lanes toml, parse_addon_exact_output_lanes toml with
+    | Ok builtin, Ok addon -> Ok (builtin @ addon)
+    | Error errors, Ok _ | Ok _, Error errors -> Error errors
+    | Error builtin, Error addon -> Error (builtin @ addon)
+  in
   let exec_ssh_endpoints_result = parse_exec_endpoints toml in
   let egress_allowlists_result = parse_egress_allowlists toml in
   let lsp_servers_result = parse_lsp_servers toml in

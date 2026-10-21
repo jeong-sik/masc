@@ -192,7 +192,8 @@ let remove text ~id =
   in
   let* () =
     match List.find_opt (fun ((lane : S.exact_output_lane_decl), slots, cli, _) -> lane.enabled && slots = [] && cli = []) exact_lanes with
-    | Some ((lane : S.exact_output_lane_decl), _, _, _) -> Error (Exact_lane_emptied lane.id)
+    | Some ((lane : S.exact_output_lane_decl), _, _, _) ->
+      Error (Exact_lane_emptied (S.exact_lane_key lane.owner))
     | None -> Ok ()
   in
   let vision_gone = List.filter is_runtime config.media_failover in
@@ -240,8 +241,8 @@ let remove text ~id =
   let* edited =
     fold_result
       (fun text ((lane : S.exact_output_lane_decl), slots, cli, _) ->
-         let table = [ "runtime"; "exact_output_lanes"; lane.id ] in
-         let what = "exact-output lane " ^ lane.id in
+         let table = S.exact_lane_table_path lane.owner in
+         let what = "exact-output lane " ^ S.exact_lane_key lane.owner in
          let* text =
            if slots = lane.slot_ids then Ok text
            else edit_list text ~table ~key:"slots" ~values:slots ~what
@@ -273,7 +274,7 @@ let remove text ~id =
         lanes
     @ List.concat_map
         (fun ((lane : S.exact_output_lane_decl), _, _, gone) ->
-           List.map (fun runtime -> Exact_lane_slot { lane = lane.id; runtime }) gone)
+           List.map (fun runtime -> Exact_lane_slot { lane = S.exact_lane_key lane.owner; runtime }) gone)
         exact_lanes
     @ List.map (fun runtime -> Vision_runtime runtime) vision_gone
     @ List.map (fun (keeper, runtime) -> Assignment { keeper; runtime }) assignments

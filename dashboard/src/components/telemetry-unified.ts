@@ -35,7 +35,7 @@ import { StatTile } from './common/stat-tile'
 import { coverageGapDisplay } from './common/source-health'
 import { TimeAgo } from './common/time-ago'
 import { asNullableString, asRecord, asStringArray } from './common/normalize'
-import { recordedToolOutcome, type RecordedToolOutcome } from '../lib/recorded-tool-outcome'
+import { telemetryToolOutcome, type RecordedToolOutcome } from '../lib/recorded-tool-outcome'
 
 interface StoreSnapshot {
   keepers: number
@@ -882,10 +882,7 @@ function EntryRow({ entry, routeFocused = false }: { entry: TelemetryEntry; rout
   const expanded = useSignal(false)
   const meta = sourceMeta(entry.source)
   const ts = entryTimestamp(entry)
-  // Other telemetry producers retain their own boolean success contract.
-  const outcome = entry.source === 'tool_call_io'
-    ? recordedToolOutcome(entry)
-    : typeof entry.success === 'boolean' ? (entry.success ? 'succeeded' : 'failed') : null
+  const outcome = telemetryToolOutcome(entry)
   const badge = outcome === null ? null : OUTCOME_BADGES[outcome]
   const scopeBadges = telemetryScopeBadges(entry)
   const rawJson = useMemo(() => JSON.stringify(entry, null, 2), [entry])

@@ -233,7 +233,10 @@ let test_log_reads_the_lines_the_journal_writes () =
   check (list string) "pages" [ "alpha"; "alpha" ]
     (List.map (fun line -> line.Log.page) parsed.Log.lines);
   check (list int) "revisions" [ 1; 2 ]
-    (List.map (fun line -> line.Log.revision) parsed.Log.lines)
+    (List.map (fun line -> line.Log.revision) parsed.Log.lines);
+  check (list (float 0.)) "the stamp reads back as the minute it was written in"
+    [ fst (Unix.mktime time); fst (Unix.mktime time) ]
+    (List.map (fun line -> line.Log.written_at) parsed.Log.lines)
 ;;
 
 let test_log_counts_an_unknown_action_and_reads_the_rest () =
@@ -256,6 +259,20 @@ let test_log_counts_a_line_it_cannot_read () =
   check int "one readable line" 1 (List.length parsed.Log.lines);
   check int "two unreadable lines" 2 parsed.Log.unreadable_line;
   check int "nothing unknown" 0 parsed.Log.unknown_action
+;;
+
+(* The writer stamps a real minute. A stamp that names no minute would move
+   into the next field if it were read, so the line is not read at all. *)
+let test_log_counts_a_stamp_that_names_no_minute () =
+  let line stamp = "## [" ^ stamp ^ "] create r1 | alpha | someone | a note\n" in
+  let parsed =
+    Log.parse
+      (String.concat
+         ""
+         (List.map line [ "2026-02-30 10:00"; "2026-13-01 10:00"; "2026-10-13 24:00"; "yesterday" ]))
+  in
+  check int "no line reads" 0 (List.length parsed.Log.lines);
+  check int "each is unreadable" 4 parsed.Log.unreadable_line
 ;;
 
 (* The writer appends in place, so a read can catch a line half written. The
@@ -547,6 +564,8 @@ let () =
             test_log_counts_an_unknown_action_and_reads_the_rest
         ; test_case "a line that does not read is counted" `Quick
             test_log_counts_a_line_it_cannot_read
+        ; test_case "a stamp that names no minute is counted" `Quick
+            test_log_counts_a_stamp_that_names_no_minute
         ; test_case "the unfinished last piece is not a line" `Quick
             test_log_does_not_count_the_unfinished_last_piece
         ; test_case "empty log" `Quick test_log_empty_content_and_no_final_newline

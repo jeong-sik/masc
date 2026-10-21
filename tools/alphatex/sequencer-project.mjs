@@ -88,6 +88,52 @@ export function harmonyAt(project, tick, { all = false } = {}) {
   const pitches = [...new Set(notes.map(note => note.pitch))].sort((a, b) => a - b)
   return { pitches, notes: pitches.map(Note.fromMidi), candidates: Chord.detect(pitches.map(Note.fromMidi)) }
 }
+
+// Sweep exact key intervals, without grouping nearby attacks or inferring pedal
+// durations. Counts retain shared keys until their last overlapping voice ends.
+export function harmonyTimeline(notes, end, { cancelled = () => false } = {}) {
+  int(end, 'analysis end')
+  const boundaries = new Map([[0, { deltas: [], points: [] }], [end, { deltas: [], points: [] }]])
+  const edge = tick => {
+    if (!boundaries.has(tick)) boundaries.set(tick, { deltas: [], points: [] })
+    return boundaries.get(tick)
+  }
+  const check = () => { if (cancelled()) throw new Error('Harmony analysis cancelled') }
+  for (const note of notes) {
+    check()
+    int(note.pitch, 'analysis pitch', 0, 127)
+    int(note.start, 'analysis note start', 0, end)
+    int(note.duration, 'analysis note duration', 0, end - note.start)
+    if (note.duration === 0) edge(note.start).points.push(note.pitch)
+    else {
+      edge(note.start).deltas.push([note.pitch, 1])
+      edge(note.start + note.duration).deltas.push([note.pitch, -1])
+    }
+  }
+  const ticks = [...boundaries.keys()].sort((a, b) => a - b), held = new Map(), rows = []
+  const row = (kind, start, finish, pitches) => {
+    const names = pitches.map(Note.fromMidi)
+    return { kind, start, end: finish, pitches, notes: names, candidates: Chord.detect(names) }
+  }
+  for (const [index, tick] of ticks.entries()) {
+    check()
+    const { deltas, points } = boundaries.get(tick)
+    for (const [key, delta] of deltas) {
+      const count = (held.get(key) ?? 0) + delta
+      if (count === 0) held.delete(key)
+      else held.set(key, count)
+    }
+    const pitches = [...held.keys()].sort((a, b) => a - b)
+    if (points.length) rows.push(row('point', tick, tick, [...new Set([...pitches, ...points])].sort((a, b) => a - b)))
+    const finish = ticks[index + 1]
+    if (finish === undefined) continue
+    const previous = rows.at(-1)
+    if (previous?.kind === 'span' && previous.end === tick && previous.pitches.length === pitches.length
+      && previous.pitches.every((key, i) => key === pitches[i])) previous.end = finish
+    else rows.push(row('span', tick, finish, pitches))
+  }
+  return rows
+}
 // Tonal supplies chord spelling/intervals and rootless dictionaries. The explicit
 // register and inversion remain the musician's choices; candidates are not verdicts.
 export function chordVoicing(symbol, { mode = 'close', octave = 4, inversion = 0, previous = [] } = {}) {
@@ -122,6 +168,18 @@ export function chordVoicing(symbol, { mode = 'close', octave = 4, inversion = 0
   return notes
 }
 
+// Reassign existing voices, low to high, without replacing their identities,
+// rhythm or dynamics. A different voice count needs a separate composition edit.
+export function revoiceNotes(notes, tick, symbol, options) {
+  int(tick, 'voicing cursor')
+  const voices = notes.filter(note => note.duration === 0 ? note.start === tick
+    : note.start <= tick && tick < note.start + note.duration).sort((a, b) => a.pitch - b.pitch)
+  if (!voices.length) throw new Error('No notes sounding at the cursor in the selected track/channel')
+  const pitches = chordVoicing(symbol, { ...options, previous: voices.map(note => note.pitch) })
+  if (pitches.length !== voices.length) throw new Error(`Voicing has ${pitches.length} voices; the cursor has ${voices.length}. Use :chord to compose a different number of voices`)
+  return voices.map((note, index) => ({ id: note.id, pitch: pitches[index] }))
+}
+
 // Every edit is transactional: validate a private candidate before returning it.
 // Callers may retain immutable before/after documents for undo and redo.
 export function editProject(project, trackId, edit) {
@@ -130,23 +188,35 @@ export function editProject(project, trackId, edit) {
   const track = next.tracks.find(track => track.id === trackId)
   if (!track) throw new Error('Selected track no longer exists')
   const add = note => track.notes.push({ id: uniqueId('note', track.notes), ...note })
+  const noteEdit = change => {
+    switch (change.kind) {
+      case 'note': add({ pitch: pitch(change.pitch), start: change.start, duration: change.duration, velocity: change.velocity }); break
+      case 'remove': {
+        const index = track.notes.findIndex(note => note.id === change.id)
+        if (index < 0) throw new Error('No selected note')
+        track.notes.splice(index, 1); break
+      }
+      case 'change-note': {
+        const note = track.notes.find(note => note.id === change.id)
+        if (!note) throw new Error('No selected note')
+        if (change.pitch !== undefined) note.pitch = pitch(change.pitch)
+        for (const key of ['start', 'duration', 'velocity']) if (change[key] !== undefined) note[key] = change[key]
+        break
+      }
+      default: throw new Error('Unknown batch note edit')
+    }
+  }
   switch (edit.kind) {
-    case 'note': add({ pitch: pitch(edit.pitch), start: edit.start, duration: edit.duration, velocity: edit.velocity }); break
-    case 'remove': {
-      const index = track.notes.findIndex(note => note.id === edit.id)
-      if (index < 0) throw new Error('No selected note')
-      track.notes.splice(index, 1); break
-    }
-    case 'change-note': {
-      const note = track.notes.find(note => note.id === edit.id)
-      if (!note) throw new Error('No selected note')
-      if (edit.pitch !== undefined) note.pitch = pitch(edit.pitch)
-      for (const key of ['start', 'duration', 'velocity']) if (edit[key] !== undefined) note[key] = edit[key]
-      break
-    }
+    case 'note': case 'remove': case 'change-note': noteEdit(edit); break
+    case 'batch-notes': for (const change of edit.changes) noteEdit(change); break
     case 'chord': {
       const notes = chordVoicing(edit.symbol, edit)
       for (const value of notes) add({ pitch: value, start: edit.start, duration: edit.duration, velocity: edit.velocity })
+      break
+    }
+    case 'revoice': {
+      const changes = new Map(revoiceNotes(track.notes, edit.tick, edit.symbol, edit).map(note => [note.id, note.pitch]))
+      for (const note of track.notes) if (changes.has(note.id)) note.pitch = changes.get(note.id)
       break
     }
     case 'progression': {

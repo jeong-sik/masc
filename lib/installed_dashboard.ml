@@ -20,7 +20,9 @@ type binding =
 type selection = Not_installed | Unavailable of error | Bound of binding
 
 let ( let* ) = Result.bind
-let sha256 body = Digestif.SHA256.(digest_string body |> to_hex)
+let sha256 body =
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    Digestif.SHA256.(digest_string body |> to_hex))
 let hex length value =
   String.length value = length
   && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) value

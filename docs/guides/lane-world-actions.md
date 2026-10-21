@@ -153,6 +153,52 @@ automatically replayed against a replacement. Detachment retains receipts and
 committed observations. A slow action may occupy its own worker; other workers,
 Slice queries and Keeper work do not acquire that action's completion dependency.
 
+## Scheduled actions
+
+A Schedule with payload kind `masc.lane_act` hands one action to a declared
+installation's live worker at each due time:
+
+```json
+{"kind": "masc.lane_act",
+ "body": {"installation_id": "operator-quiz", "action": {"kind": "compose", "questions": 5}}}
+```
+
+Create one with `masc_schedule_create` (and change it with
+`masc_schedule_update`) by giving `installation_id` and `action` instead of
+`keeper_name` and `message`; the tool refuses a call that gives fields of both.
+The recurrence and due-time fields are the same as for a Keeper wake.
+
+`installation_id` is the declaration id. Creation checks only that it is not
+blank and that `action` is an object. Whether the action fits the package's
+schema is checked when the occurrence is dispatched, against the worker that
+will run it.
+
+Each due occurrence is queued through the same path as a direct action
+request:
+
+- The request id is the occurrence id. The requester is
+  `schedule:<schedule_id>:<scheduler id>`. The occurrence is checked with the
+  access a direct action request of the scheduler would have: an operator's
+  schedule as the operator, a Keeper's as that Keeper. Removing a Keeper
+  cancels the Lane action schedules it created.
+- The occurrence succeeds once the receipt is durable. Its schedule history
+  names the receipt (`installation_id`, `instance_id`, `request_id`). Whether
+  the worker ran the action is the receipt's to say.
+- There is no hold. Every due occurrence gets its own receipt, and the worker
+  runs them one at a time.
+- A redelivered occurrence returns the receipt it already has, even when that
+  receipt belongs to a worker that has since gone away. That read ends a
+  receipt no live worker owns, as a status read does. The action is never
+  queued twice.
+
+An occurrence fails, and a later recurrence tries again, when the declaration
+is missing (`declaration_missing`), disabled (`declaration_disabled`), has no
+running worker (`no_live_instance`), could not be read completely
+(`declarations_incomplete`), or when the worker's action port, its schema or
+the scheduler's access refuses the action (`action_refused`). Before this
+process has read the declarations once, the occurrence is retried on the next
+tick.
+
 ## Artifact output
 
 Any package may include artifact bytes in its observations. Action-result output

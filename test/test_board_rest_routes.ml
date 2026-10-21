@@ -1116,8 +1116,12 @@ let test_sub_board_routes_reject_unknown_access () =
       ~body:(Yojson.Safe.to_string (`Assoc fields)) ()
   in
   let open Yojson.Safe.Util in
-  let error_names_value body value =
-    String_util.contains_substring (body |> member "error" |> to_string) value
+  (* [check bool] on the substring reported only the label, so a regression in
+     the error text arrived without the text itself. *)
+  let assert_error_names_value body value =
+    let error = body |> member "error" |> to_string in
+    if not (String_util.contains_substring error value) then
+      Alcotest.failf "error %S does not name %S" error value
   in
   let status, body =
     request "/api/v1/board/sub-boards"
@@ -1127,8 +1131,7 @@ let test_sub_board_routes_reject_unknown_access () =
       ]
   in
   check int "unknown access on create is 400" 400 status;
-  check bool "create error names members_only" true
-    (error_names_value body "members_only");
+  assert_error_names_value body "members_only";
   check bool "no sub-board was created" true
     (Result.is_error
        (Masc.Board_dispatch.get_sub_board ~sub_board_id:"wrong-case"));
@@ -1140,7 +1143,7 @@ let test_sub_board_routes_reject_unknown_access () =
       ]
   in
   check int "non-string access on create is 400" 400 status;
-  check bool "non-string error names open" true (error_names_value body "open");
+  assert_error_names_value body "open";
   let status, created =
     request "/api/v1/board/sub-boards"
       [ "slug", `String "members-board"
@@ -1157,8 +1160,7 @@ let test_sub_board_routes_reject_unknown_access () =
       [ "access", `String "private" ]
   in
   check int "unknown access on update is 400" 400 status;
-  check bool "update error names owner_only" true
-    (error_names_value body "owner_only");
+  assert_error_names_value body "owner_only";
   match Masc.Board_dispatch.get_sub_board ~sub_board_id with
   | Error error -> fail (Board_tool.board_error_to_string error)
   | Ok sub_board ->

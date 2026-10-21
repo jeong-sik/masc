@@ -227,7 +227,7 @@ let ask_age_cells = 6
 let ask_summary_line ~now ~(row : Masc.Tui_decode_asks.ask_row) =
   let count = List.length row.Masc.Tui_decode_asks.ar_questions in
   Printf.sprintf " %s%s  %s  %d question%s waiting%s" Ansi.dim
-    (fit_width (Terminal_text.single_line row.Masc.Tui_decode_asks.ar_keeper) 16)
+    (fit_width (Terminal_text.single_line (Masc.Tui_decode_asks.ask_asker_label row.Masc.Tui_decode_asks.ar_asker)) 16)
     (fit_width
        (* [age_text], not a subtraction into [span_text]: the two ends are
           named, so the difference cannot be taken the wrong way round, and a
@@ -255,13 +255,20 @@ let draw_ask_answer_feedback buf cols (state : state) =
           (if already then "Answer receipt: existing answer retained · initial delivery pending"
            else "Answer receipt: saved · initial delivery pending"), Theme.warn (), Some detail in
     let status, style, detail = match feedback.Ask_projection.af_receipt with
-      | Ok (Decode.Ask_answer_recorded delivery) -> delivered ~already:false delivery
-      | Ok (Decode.Ask_answer_already_recorded { aar_delivery; _ }) ->
+      | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_recorded delivery)) -> delivered ~already:false delivery
+      | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_already_recorded { aar_delivery; _ })) ->
           delivered ~already:true aar_delivery
-      | Ok (Decode.Ask_answer_written_unconfirmed detail) ->
+      | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_written_unconfirmed detail)) ->
           "Last answer: log written · winning answer unconfirmed", Theme.warn (), Some detail
-      | Ok (Decode.Ask_answer_refused detail) ->
+      | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_refused detail))
+      | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_refused detail)) ->
           "Last answer: refused", Theme.bad (), Some detail
+      | Ok (Decode.Installation_answer_receipt Decode.Installation_answer_recorded) ->
+          "Answer receipt: saved · the installation reads it on its next host request cycle", Theme.info (), None
+      | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_already_answered _)) ->
+          "Answer receipt: an earlier answer stands", Theme.info (), None
+      | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_withdrawn _)) ->
+          "Last answer: the installation withdrew the question", Theme.warn (), None
       | Error detail ->
           "Last answer: recording unconfirmed", Theme.warn (), Some detail in
     box_divider buf cols;
@@ -269,12 +276,17 @@ let draw_ask_answer_feedback buf cols (state : state) =
        drawn block below determines the question and approval row budgets. *)
     box_wrapped_field buf cols ~head:"  " ~style status;
     let subject = match feedback.af_submitted_label with
-      | Some label -> label | None -> feedback.af_keeper_name in
+      | Some label -> label | None -> Decode.ask_asker_label feedback.af_asker in
     box_line buf cols ("  " ^ Ansi.dim ^ Terminal_text.single_line subject ^ Ansi.reset);
-    let source = match feedback.af_source_turn_ref with
-      | None -> "Original asking turn: not recorded"
-      | Some reference -> Printf.sprintf "Original asking turn: #%d" (Ids.Turn_ref.absolute_turn reference) in
-    box_wrapped_field buf cols ~head:"  " ~style:Ansi.dim source;
+    (match feedback.af_asker with
+     | Decode.Ask_keeper _ ->
+         let source = match feedback.af_source_turn_ref with
+           | None -> "Original asking turn: not recorded"
+           | Some reference -> Printf.sprintf "Original asking turn: #%d" (Ids.Turn_ref.absolute_turn reference) in
+         box_wrapped_field buf cols ~head:"  " ~style:Ansi.dim source
+     | Decode.Ask_installation { ai_title; _ } ->
+         box_wrapped_field buf cols ~head:"  " ~style:Ansi.dim
+           ("g: open " ^ Terminal_text.single_line ai_title ^ " Results"));
     Option.iter (fun reading ->
       let observed = Ask_projection.followup_view reading in
       let pending source = match source.Ask_projection.fo_state with
@@ -387,9 +399,9 @@ let draw_ask_questions buf cols (state : state) ~budget =
      in it. Nothing is held waiting on them -- the Keeper that asked kept
      working -- so they are not a queue of blocked calls, but an operator
      deciding things belongs in one place either way. *)
-  let answering_ask_id =
+  let answering_ask =
     match state.ask_answer_mode with
-    | Ask_answering { aam_ask_id } -> Some aam_ask_id
+    | Ask_answering { aam_ask } -> Some aam_ask
     | Ask_browsing -> None
   in
   match Masc_tui_approvals_model.approvals_open_questions state with
@@ -402,7 +414,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
       match open_rows with
       | [] ->
           box_line buf cols
-            (Printf.sprintf "  %snone -- no Keeper is waiting on a decision%s"
+            (Printf.sprintf "  %snone -- nobody is waiting on a decision%s"
                Ansi.dim Ansi.reset)
       | rows ->
           (* Only the ask under the cursor keeps its questions; every other one
@@ -433,8 +445,8 @@ let draw_ask_questions buf cols (state : state) ~budget =
           let selected = List.nth rows cursor in
           let draft = Ask_projection.draft_for state.ask_draft ~row:selected in
           let answering =
-            match answering_ask_id with
-            | Some ask_id -> String.equal ask_id selected.Masc.Tui_decode_asks.ar_id
+            match answering_ask with
+            | Some ask -> Masc.Tui_decode_asks.(equal_ask_key ask (ask_key selected))
             | None -> false
           in
           let questions = Array.of_list selected.Masc.Tui_decode_asks.ar_questions in
@@ -1145,7 +1157,7 @@ let render_question_reader (state : state) =
          let drafted = List.filter (fun question ->
              Option.is_some (Ask_projection.response_for draft ~question)) row.ar_questions |> List.length in
          Printf.sprintf "  %s%s · Ask %d/%d · Question %d/%d · %d drafted%s"
-           (Theme.warn ()) (Terminal_text.single_line row.ar_keeper)
+           (Theme.warn ()) (Terminal_text.single_line (Masc.Tui_decode_asks.ask_asker_label row.ar_asker))
            (Option.fold ~none:0 ~some:succ selected_index) (List.length asks) (state.ask_question_cursor + 1)
            (List.length row.ar_questions) drafted Ansi.reset);
   box_line buf cols

@@ -3,6 +3,11 @@
 
 val ask_row_is_open : Keeper_ask.resolution -> bool
 
+val ask_question_json : Keeper_ask.question -> Yojson.Safe.t
+val ask_resolution_json : Keeper_ask.resolution -> Yojson.Safe.t
+(** The question and resolution parts of {!ask_row_json}, for another asker's
+    rows: an installation's questions reach the operator in the same form. *)
+
 val ask_row_json :
   keeper_name:string ->
   string * (Keeper_ask.ask * Keeper_ask.resolution) -> Yojson.Safe.t

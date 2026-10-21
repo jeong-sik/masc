@@ -14,6 +14,35 @@ try {
  await writeFile(join(directory,'Output.swift'),output+'\nvar sent:[(String,[UInt32])]=[];var unavailable=false;var failNext=false;var host:UInt64=0\n')
  const regions=(await readFile(new URL('UmpRegions.swift',import.meta.url),'utf8')).replaceAll('DispatchTime.now().uptimeNanoseconds','host')
  await writeFile(join(directory,'Regions.swift'),regions)
+ // Compute each expected deadline directly with unbounded rational arithmetic,
+ // independently of the production common-clock representation.
+ const startN=703687441776640000000000n,startD=1408547695956241n,ceil=(n,d)=>n/d+(n%d?1n:0n)
+ const sharedFractions=[{divisor:startD,cut:0n,repeats:1},{divisor:startD,cut:2n*startD+1n,repeats:3},
+  {divisor:125n*startD,cut:250n*startD+1n,repeats:4}].map((value,index)=>{
+  const {divisor,cut,repeats}=value,length=48000n*divisor+1n
+  const deadline=delta=>ceil(startN*3n*divisor+delta*125n*startD,startD*3n*divisor)
+  const entries=Array.from({length:repeats},(_,copy)=>deadline(BigInt(copy)*length))
+  const attacks=Array.from({length:repeats},(_,copy)=>deadline(BigInt(copy)*length+3n*divisor-cut))
+  const releases=Array.from({length:repeats},(_,copy)=>deadline(BigInt(copy)*length+4n*divisor-cut))
+  return `do {
+ var region=clip("shared-${index}",start:display(${startN},${startD}),offset:"${cut}",extent:"${length}",repeatCount:${repeats})
+ region.startNanoseconds=ExactNanoseconds(numerator:"${startN}",denominator:"${startD}");region.sourceDivisor="${divisor}"
+ let scheduler:UmpRegionTransport
+ do{scheduler=try owner([sharedSource],[region])}catch{FileHandle.standardError.write(Data("shared fractional source falsely refused: \\(error)\\n".utf8));exit(1)}
+ let c=scheduler.clips[0],entries:[UInt64]=[${entries}],attacks:[UInt64]=[${attacks}],releases:[UInt64]=[${releases}]
+ precondition(c.start==${ceil(startN,startD)} && c.end==${deadline(BigInt(repeats)*length)},"shared-clock exact outer bounds")
+ host=0;sent=[];try scheduler.stageCoordinated(at:0);try scheduler.runCoordinated(anchorNanoseconds:10)
+ for copy in entries.indices {
+  precondition(c.deadline(copy:UInt64(copy),delta:0)==entries[copy],"copy entry rounded from independent rational")
+  precondition(c.next(copy:UInt64(copy),index:0)==attacks[copy] && c.next(copy:UInt64(copy),index:1)==releases[copy],"packet deadlines retain fractional source cut")
+  precondition(c.phase(at:attacks[copy])!.copy==UInt64(copy),"exact deadline remains in its source copy")
+  host=10+attacks[copy]-1;scheduler.tick();precondition(sent.count==copy*2,"fractional attack sent early")
+  host+=1;scheduler.tick();precondition(sent.last!.1==on && sent.count==copy*2+1)
+  host=10+releases[copy];scheduler.tick();precondition(sent.last!.1==off && sent.count==copy*2+2 && scheduler.output.held.isEmpty)
+ }
+ scheduler.finish(reason:"shared-fraction",error:nil,publish:false)
+}`
+ }).join('\n')
  const main=`import Foundation
 func refuses(_ action:()throws->Void){do{try action();preconditionFailure("invalid region admitted")}catch{}}
 let on:[UInt32]=[0x43953c03,0x80012345],off:[UInt32]=[0x43853c00,0x12340000],bend:[UInt32]=[0x43e50000,0x80000000]
@@ -23,6 +52,20 @@ func source(_ id:String,_ rows:[UmpPacket],numer:UInt32=1,denom:UInt32=1,extent:
 }
 func clip(_ id:String="clip",source:String="take",start:Double=0,offset:String="0",extent:String="1000000000",repeatCount:UInt64=1)->UmpRegion{UmpRegion(id:id,source:source,startSeconds:start,offset:offset,extent:extent,repeatCount:repeatCount)}
 func owner(_ sources:[UmpRegionSource],_ clips:[UmpRegion],duration:Double=1)throws->UmpRegionTransport{try UmpRegionTransport(timeline:UmpArrangement(schemaVersion:1,duration:duration,sources:sources,regions:clips))}
+// MIDI1 profiles include the selected wire/restoration domain, not expired
+// attribute-bearing history or an unreachable high-resolution suffix.
+let legacyHistory=source("take",[packet(0,on),packet(100_000_000,off),packet(200_000_000,[0x43953e00,0x80000000]),packet(300_000_000,[0x43853e00,0]),packet(900_000_000,bend)])
+let compatible=try owner([legacyHistory],[clip(offset:"150000000",extent:"250000000")])
+var profile=UmpMidi1Profile();for row in compatible.output.compatibleEvents! {profile.observe(row)}
+try profile.validate();precondition(compatible.output.compatibleEvents!.map{$0.words}==[[0x43953e00,0x80000000],[0x43853e00,0]])
+let heldHistory=try owner([legacyHistory],[clip(offset:"50000000",extent:"350000000")])
+var heldProfile=UmpMidi1Profile();for row in heldHistory.output.compatibleEvents! {heldProfile.observe(row)}
+refuses{try heldProfile.validate()}
+for offset in ["0","100000000"] {
+ let boundary=try owner([source("take",[packet(UInt64(offset)!,on),packet(200_000_000,off)])],[clip(offset:offset,extent:"300000000")])
+ var boundaryProfile=UmpMidi1Profile();for row in boundary.output.compatibleEvents! {boundaryProfile.observe(row)}
+ refuses{try boundaryProfile.validate()}
+}
 // Project-zero crops retain an exact absolute phase across a partial head and
 // a compressed tail. Each absolute deadline rounds once, including when the
 // first retained host tick is itself a fractional nanosecond after zero.
@@ -127,14 +170,14 @@ let attack=try owner([source("take",[packet(0,bend),packet(0,on),packet(0,off)])
 host=0;sent=[];try attack.stageCoordinated(at:0);try attack.runCoordinated(anchorNanoseconds:10);host=10;attack.tick()
 precondition(sent.map{$0.1}==[bend,on,off],"entry attack and original release survive the exact cut")
 attack.finish(reason:"test",error:nil,publish:false)
-// A first copy follows no earlier change on its channels: a take whose
-// expression follows its Note On is admitted and plays in original order.
+// A first copy follows no earlier change on its channels. The exact-entry
+// ordering contract makes the state a voice keep precede each attack: a state
+// event that only follows its Note On at the same tick is that attack's
+// expression and cannot repair it, so admission refuses the entry.
 let pressure:[UInt32]=[0x43d50000,0x80000000],cc:[UInt32]=[0x43b50100,0x80000000]
-let take=try owner([source("take",[packet(0,on),packet(0,bend),packet(10_000_000,pressure),packet(20_000_000,cc),packet(30_000_000,off)])],[clip(extent:"100000000")],duration:0.1)
-host=0;sent=[];try take.stageCoordinated(at:0);try take.runCoordinated(anchorNanoseconds:10);host=10;take.tick()
-precondition(sent.map{$0.1}==[on,bend],"entry attack with the expression that follows it")
-host=40_000_010;take.tick();precondition(sent.map{$0.1}==[on,bend,pressure,cc,off],"expression after the Note On plays")
-take.finish(reason:"test",error:nil,publish:false)
+refuses{_ = try owner([source("take",[packet(0,on),packet(0,bend),packet(10_000_000,pressure),packet(20_000_000,cc),packet(30_000_000,off)])],[clip(extent:"100000000")],duration:0.1)}
+_ = try owner([source("take",[packet(0,bend),packet(0,on),packet(10_000_000,pressure),packet(20_000_000,cc),packet(30_000_000,off)])],[clip(extent:"100000000")],duration:0.1)
+_ = try owner([source("take",[packet(0,on),packet(0,off)])],[clip(extent:"100000000")],duration:0.1)
 // A recorded silent preamble establishes state at its own original deadlines,
 // not eagerly at admission or at the region's first scheduler callback.
 let control:[UInt32]=[0x43b54a00,0xabcdef01]
@@ -266,7 +309,10 @@ refuses{_ = try owner([source("take",[packet(0,on),packet(1,bend)])],[clip(repea
 let pc1:[UInt32]=[0x23c50500],bank1:[UInt32]=[0x23b50001],on1:[UInt32]=[0x23953c7f]
 refuses{_ = try owner([source("take",[packet(0,pc1),packet(0,bank1),packet(0,on1)])],[clip(repeatCount:2)],duration:2)}
 _ = try owner([source("take",[packet(0,bank1),packet(0,pc1),packet(0,on1)])],[clip(repeatCount:2)],duration:2)
-_ = try owner([source("take",[packet(0,p0),packet(0,pitch),packet(0,on),packet(0,pn),packet(0,detach),packet(1,p1),packet(1,pitch),packet(1,pn)])],[clip(repeatCount:2)],duration:2)
+// A per-note bend after the entry attack is expression, not its baseline.
+// Keep that refusal and establish the admissible baseline before the attack.
+refuses{_ = try owner([source("take",[packet(0,p0),packet(0,pitch),packet(0,on),packet(0,pn),packet(0,detach),packet(1,p1),packet(1,pitch),packet(1,pn)])],[clip(repeatCount:2)],duration:2)}
+_ = try owner([source("take",[packet(0,p0),packet(0,pitch),packet(0,pn),packet(0,on),packet(0,detach),packet(1,p1),packet(1,pitch),packet(1,pn)])],[clip(repeatCount:2)],duration:2)
 // A later region on the same channel follows the earlier one's changes.
 refuses{_ = try owner([first,source("other",[packet(0,on),packet(1,p1)])],[clip(extent:"100000000"),clip("second",source:"other",start:0.1,extent:"100000000")],duration:0.2)}
 // Admission covers playback in order; a seek back that would bring a later
@@ -278,6 +324,28 @@ do {try later.stageCoordinated(at:0.05);preconditionFailure("admitted a seek bef
 precondition(later.state == .playing && later.timer != nil,"a refused seek leaves the playing owner unchanged")
 try later.stageCoordinated(at:0.15);precondition(later.state == .staged)
 later.finish(reason:"test",error:nil,publish:false)
+// Source window [1/2,5/2) ticks: both original packets stay inside. Each
+// deadline includes the original fractional cut and absolute repeat once.
+var fractional=clip(offset:"1",extent:"4",repeatCount:2);fractional.sourceDivisor="2"
+let fractionalSource=source("take",[packet(1,on),packet(2,off)],numer:125,denom:3,extent:"10")
+let fractionOwner=try owner([fractionalSource],[fractional])
+host=0;sent=[];try fractionOwner.stageCoordinated(at:0);try fractionOwner.runCoordinated(anchorNanoseconds:10)
+for (time,count) in [(UInt64(30),0),(31,1),(73,2),(115,3),(156,4)] {
+ host=time;fractionOwner.tick();precondition(sent.filter{$0.1==on || $0.1==off}.count==count)
+}
+precondition(fractionOwner.clips[0].end==167)
+fractionOwner.finish(reason:"fractional",error:nil,publish:false)
+var invalidFraction=fractional;invalidFraction.sourceDivisor="0"
+refuses{_ = try owner([fractionalSource],[invalidFraction])}
+print("UMP_FRACTIONAL_REGIONS_PASS")
+// Binary tempo placement and source subdivision share large factors. Admission
+// must not multiply those denominators twice or change cut/repeat deadlines.
+let sharedSource=source("take",[packet(3,on),packet(4,off)],numer:125,denom:3,extent:"2400001")
+var sharedWhole=clip(start:display(${startN},${startD}),extent:"48000")
+sharedWhole.startNanoseconds=ExactNanoseconds(numerator:"${startN}",denominator:"${startD}")
+_ = try owner([sharedSource],[sharedWhole])
+${sharedFractions}
+print("UMP_SHARED_FRACTIONAL_CLOCK_PASS: exact finite admission, nonzero fractional cuts, reduced source clocks, repeated deadlines and sends")
 refuses{_ = try owner([source("take",[packet(0,[0x30120102,0])])],[clip()])}
 let lost=try owner([a],[clip()]);host=0;try lost.stageCoordinated(at:0);try lost.runCoordinated(anchorNanoseconds:10);unavailable=true;host=10;lost.tick();precondition(lost.state == .stopped && lost.terminalFailure != nil)
 print("UMP_REGIONS_PASS: exact adjacent ticks and UInt64+1 end, original attributes/releases and active-copy FIFO drain, exact-entry attacks, silent staging, 2M compressed late-copy lookup, pause/seek/resume, independent overlapping scopes, sequential physical baselines, first-copy entry after earlier regions only, repeat and seek-back baselines, uncertain acquisition cleanup, unsupported/overlap admission and endpoint loss")

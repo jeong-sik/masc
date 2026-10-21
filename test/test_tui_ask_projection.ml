@@ -20,13 +20,16 @@ let question ?(mode = Masc.Tui_decode_asks.Ask_single) ?(free_text = Masc.Tui_de
 
 let row ?(resolution = Masc.Tui_decode_asks.Ask_open) ?(questions = [ question "q1" ]) id : Masc.Tui_decode_asks.ask_row =
   {
-    ar_keeper = "asker";
+    ar_asker = Ask_keeper "asker";
     ar_id = id;
     ar_asked_at = 1.0;
     ar_source_turn_ref = None; ar_context = None;
     ar_questions = questions;
     ar_resolution = resolution;
   }
+
+(* The rows here are asked by the Keeper "asker". *)
+let key id = { Masc.Tui_decode_asks.ak_asker = Ask_keeper "asker"; ak_id = id }
 
 let chosen draft q =
   match Ask.response_for draft ~question:q with
@@ -43,53 +46,53 @@ let yes = choice "yes" "Yes"
 let no = choice "no" "No"
 
 let test_draft_for_keeps_matching_ask () =
-  let d = Ask.toggle_choice (Ask.empty_draft ~ask_id:"a1") ~question:single ~choice:yes in
+  let d = Ask.toggle_choice (Ask.empty_draft ~ask:(key "a1")) ~question:single ~choice:yes in
   let kept = Ask.draft_for (Some d) ~row:(row "a1") in
   check_ids "selection survives" [ "yes" ] (chosen kept single)
 
 let test_draft_for_resets_on_other_ask () =
-  let d = Ask.toggle_choice (Ask.empty_draft ~ask_id:"a1") ~question:single ~choice:yes in
+  let d = Ask.toggle_choice (Ask.empty_draft ~ask:(key "a1")) ~question:single ~choice:yes in
   let fresh = Ask.draft_for (Some d) ~row:(row "a2") in
-  Alcotest.(check string) "adopts the new ask" "a2" (Ask.draft_ask_id fresh);
+  Alcotest.(check string) "adopts the new ask" "a2" (Ask.draft_ask fresh).ak_id;
   check_ids "nothing carried over" [] (chosen fresh single)
 
 let test_single_replaces () =
-  let d = Ask.empty_draft ~ask_id:"a1" in
+  let d = Ask.empty_draft ~ask:(key "a1") in
   let d = Ask.toggle_choice d ~question:single ~choice:yes in
   let d = Ask.toggle_choice d ~question:single ~choice:no in
   check_ids "one at a time" [ "no" ] (chosen d single)
 
 let test_single_repick_clears () =
-  let d = Ask.empty_draft ~ask_id:"a1" in
+  let d = Ask.empty_draft ~ask:(key "a1") in
   let d = Ask.toggle_choice d ~question:single ~choice:yes in
   let d = Ask.toggle_choice d ~question:single ~choice:yes in
   check_ids "a mis-press needs no second key" [] (chosen d single);
   Alcotest.(check bool) "back to unanswered" true (Ask.response_for d ~question:single = None)
 
 let test_multi_keeps_pick_order () =
-  let d = Ask.empty_draft ~ask_id:"a1" in
+  let d = Ask.empty_draft ~ask:(key "a1") in
   let d = Ask.toggle_choice d ~question:multi ~choice:no in
   let d = Ask.toggle_choice d ~question:multi ~choice:yes in
   check_ids "order the operator picked" [ "no"; "yes" ] (chosen d multi)
 
 let test_multi_removes () =
-  let d = Ask.empty_draft ~ask_id:"a1" in
+  let d = Ask.empty_draft ~ask:(key "a1") in
   let d = Ask.toggle_choice d ~question:multi ~choice:no in
   let d = Ask.toggle_choice d ~question:multi ~choice:yes in
   let d = Ask.toggle_choice d ~question:multi ~choice:no in
   check_ids "removed the first" [ "yes" ] (chosen d multi)
 
 let test_multi_emptied_is_unanswered () =
-  let d = Ask.empty_draft ~ask_id:"a1" in
+  let d = Ask.empty_draft ~ask:(key "a1") in
   let d = Ask.toggle_choice d ~question:multi ~choice:yes in
   let d = Ask.toggle_choice d ~question:multi ~choice:yes in
   Alcotest.(check bool) "empty selection is not an answer" true
     (Ask.response_for d ~question:multi = None)
 
 let test_free_text_slot_for_choices_only () =
-  let slot = Ask.free_text_slot ~ask_id:"a1" single in
+  let slot = Ask.free_text_slot ~ask:(key "a1") single in
   Alcotest.(check (option string)) "no author hint needed" None (Ask.free_text_hint slot);
-  let draft = Ask.set_text (Ask.empty_draft ~ask_id:"a1") ~slot ~text:"another route" in
+  let draft = Ask.set_text (Ask.empty_draft ~ask:(key "a1")) ~slot ~text:"another route" in
   match Ask.response_for draft ~question:single with
   | Some (Ask.Draft_wrote "another route") -> ()
   | _ -> Alcotest.fail "alternative was not drafted"
@@ -97,7 +100,7 @@ let test_free_text_slot_for_choices_only () =
 let test_free_text_slot_carries_hint () =
   let q = question ~free_text:(Masc.Tui_decode_asks.Ask_free_text_allowed { aft_hint = Some "one line" }) "q1" in
   Alcotest.(check (option string)) "hint reaches the editor" (Some "one line")
-    (Ask.free_text_hint (Ask.free_text_slot ~ask_id:"a1" q))
+    (Ask.free_text_hint (Ask.free_text_slot ~ask:(key "a1") q))
 
 let test_alternative_shortcut () =
   List.iter (fun (count, expected) ->
@@ -111,7 +114,7 @@ let text_question_named id =
 
 let text_question = text_question_named "q1"
 
-let slot_of = Ask.free_text_slot ~ask_id:"a1"
+let slot_of = Ask.free_text_slot ~ask:(key "a1")
 
 (* The panel draws the caret on a row, and the editor holds a slot rather than
    a row index; without a way back to the question id the surface would have to
@@ -124,33 +127,33 @@ let test_free_text_slot_names_its_question () =
    a q1. Text typed for one must not land in the other's draft when a
    snapshot moves the cursor while the operator types. *)
 let test_free_text_slot_writes_only_its_own_ask () =
-  let slot = Ask.free_text_slot ~ask_id:"a1" text_question in
-  Alcotest.(check string) "the slot names its ask" "a1" (Ask.free_text_ask_id slot);
-  let other = Ask.set_text (Ask.empty_draft ~ask_id:"a2") ~slot ~text:"meant for a1" in
+  let slot = Ask.free_text_slot ~ask:(key "a1") text_question in
+  Alcotest.(check string) "the slot names its ask" "a1" (Ask.free_text_ask slot).ak_id;
+  let other = Ask.set_text (Ask.empty_draft ~ask:(key "a2")) ~slot ~text:"meant for a1" in
   Alcotest.(check bool) "another ask's q1 stays unanswered" true
     (Ask.response_for other ~question:text_question = None);
-  match Ask.response_for (Ask.set_text (Ask.empty_draft ~ask_id:"a1") ~slot ~text:"meant for a1")
+  match Ask.response_for (Ask.set_text (Ask.empty_draft ~ask:(key "a1")) ~slot ~text:"meant for a1")
           ~question:text_question with
   | Some (Ask.Draft_wrote "meant for a1") -> ()
   | _ -> Alcotest.fail "the slot's own ask did not get the text"
 
 let test_set_text_records () =
-  let d = Ask.set_text (Ask.empty_draft ~ask_id:"a1") ~slot:(slot_of text_question) ~text:"ship it" in
+  let d = Ask.set_text (Ask.empty_draft ~ask:(key "a1")) ~slot:(slot_of text_question) ~text:"ship it" in
   check_ids "text is the answer" [ "wrote:ship it" ] (chosen d text_question)
 
 let test_blank_text_clears () =
   let slot = slot_of text_question in
-  let d = Ask.set_text (Ask.empty_draft ~ask_id:"a1") ~slot ~text:"draft" in
+  let d = Ask.set_text (Ask.empty_draft ~ask:(key "a1")) ~slot ~text:"draft" in
   let d = Ask.set_text d ~slot ~text:"   " in
   Alcotest.(check bool) "an emptied editor means unanswered" true
     (Ask.response_for d ~question:text_question = None)
 
 let test_skip_counts_as_answered () =
-  let d = Ask.skip (Ask.empty_draft ~ask_id:"a1") ~question:single in
+  let d = Ask.skip (Ask.empty_draft ~ask:(key "a1")) ~question:single in
   check_ids "declining is an answer" [ "skipped" ] (chosen d single)
 
 let test_clear_removes () =
-  let d = Ask.toggle_choice (Ask.empty_draft ~ask_id:"a1") ~question:single ~choice:yes in
+  let d = Ask.toggle_choice (Ask.empty_draft ~ask:(key "a1")) ~question:single ~choice:yes in
   let d = Ask.clear d ~question:single in
   Alcotest.(check bool) "cleared" true (Ask.response_for d ~question:single = None)
 
@@ -164,17 +167,17 @@ let two_questions = [ question "q1"; question "q2" ]
 
 let test_missing_lists_every_gap_at_once () =
   let r = row ~questions:two_questions "a1" in
-  let d = Ask.empty_draft ~ask_id:"a1" in
+  let d = Ask.empty_draft ~ask:(key "a1") in
   check_ids "one round trip, not two" [ "q1"; "q2" ] (missing_ids (Ask.readiness d ~row:r))
 
 let test_missing_shrinks_as_answered () =
   let r = row ~questions:two_questions "a1" in
-  let d = Ask.skip (Ask.empty_draft ~ask_id:"a1") ~question:(List.nth two_questions 0) in
+  let d = Ask.skip (Ask.empty_draft ~ask:(key "a1")) ~question:(List.nth two_questions 0) in
   check_ids "only the gap remains" [ "q2" ] (missing_ids (Ask.readiness d ~row:r))
 
 let test_ready_follows_ask_order_not_draft_order () =
   let r = row ~questions:two_questions "a1" in
-  let d = Ask.empty_draft ~ask_id:"a1" in
+  let d = Ask.empty_draft ~ask:(key "a1") in
   let d = Ask.skip d ~question:(List.nth two_questions 1) in
   let d = Ask.toggle_choice d ~question:(List.nth two_questions 0) ~choice:yes in
   match Ask.readiness d ~row:r with
@@ -198,7 +201,7 @@ let test_ready_follows_ask_order_not_draft_order () =
 let test_ready_encodes_each_shape () =
   let questions = [ question "q1"; question "q2"; text_question_named "q3" ] in
   let r = row ~questions "a1" in
-  let d = Ask.empty_draft ~ask_id:"a1" in
+  let d = Ask.empty_draft ~ask:(key "a1") in
   let d = Ask.toggle_choice d ~question:(List.nth questions 0) ~choice:yes in
   let d = Ask.skip d ~question:(List.nth questions 1) in
   let d = Ask.set_text d ~slot:(slot_of (List.nth questions 2)) ~text:"because" in
@@ -214,17 +217,17 @@ let test_answered_row_is_not_open () =
   let r =
     row ~resolution:(Masc.Tui_decode_asks.Ask_answered { aa_answered_at = 2.0; aa_question_ids = [ "q1" ] }) "a1"
   in
-  check_ids "first write settled it" [ "<not-open>" ] (missing_ids (Ask.readiness (Ask.empty_draft ~ask_id:"a1") ~row:r))
+  check_ids "first write settled it" [ "<not-open>" ] (missing_ids (Ask.readiness (Ask.empty_draft ~ask:(key "a1")) ~row:r))
 
 let test_withdrawn_row_is_not_open () =
   let r =
     row ~resolution:(Masc.Tui_decode_asks.Ask_withdrawn { aw_reason = "moot"; aw_withdrawn_at = 2.0 }) "a1"
   in
-  check_ids "withdrawn" [ "<not-open>" ] (missing_ids (Ask.readiness (Ask.empty_draft ~ask_id:"a1") ~row:r))
+  check_ids "withdrawn" [ "<not-open>" ] (missing_ids (Ask.readiness (Ask.empty_draft ~ask:(key "a1")) ~row:r))
 
 let test_foreign_draft_contributes_nothing () =
   let r = row ~questions:two_questions "a1" in
-  let d = Ask.skip (Ask.empty_draft ~ask_id:"OTHER") ~question:(List.nth two_questions 0) in
+  let d = Ask.skip (Ask.empty_draft ~ask:(key "OTHER")) ~question:(List.nth two_questions 0) in
   check_ids "everything missing, which is true" [ "q1"; "q2" ] (missing_ids (Ask.readiness d ~row:r))
 
 let test_request_body_omits_blank_session () =
@@ -239,24 +242,24 @@ let test_request_body_carries_session_and_no_identity () =
 
 let gate_name = function
   | Ask.Ask_gate_blocked_inflight -> "blocked"
-  | Ask.Ask_gate_arm id -> "arm:" ^ id
+  | Ask.Ask_gate_arm ask -> "arm:" ^ ask.ak_id
   | Ask.Ask_gate_submit -> "submit"
 
 let test_gate_blocks_while_inflight () =
   Alcotest.(check string) "one answer at a time" "blocked"
-    (gate_name (Ask.gate_transition ~inflight:true ~pending:(Some "a1") ~ask_id:"a1"))
+    (gate_name (Ask.gate_transition ~inflight:true ~pending:(Some (key "a1")) ~ask:(key "a1")))
 
 let test_gate_arms_first () =
   Alcotest.(check string) "first press arms" "arm:a1"
-    (gate_name (Ask.gate_transition ~inflight:false ~pending:None ~ask_id:"a1"))
+    (gate_name (Ask.gate_transition ~inflight:false ~pending:None ~ask:(key "a1")))
 
 let test_gate_submits_on_second_press () =
   Alcotest.(check string) "second press sends" "submit"
-    (gate_name (Ask.gate_transition ~inflight:false ~pending:(Some "a1") ~ask_id:"a1"))
+    (gate_name (Ask.gate_transition ~inflight:false ~pending:(Some (key "a1")) ~ask:(key "a1")))
 
 let test_gate_rearms_on_a_different_ask () =
   Alcotest.(check string) "moving the cursor disarms the old one" "arm:a2"
-    (gate_name (Ask.gate_transition ~inflight:false ~pending:(Some "a1") ~ask_id:"a2"))
+    (gate_name (Ask.gate_transition ~inflight:false ~pending:(Some (key "a1")) ~ask:(key "a2")))
 
 let rows ids = List.map (fun id -> row id) ids
 
@@ -343,40 +346,42 @@ let test_open_rows_keeps_only_what_is_waiting () =
        (fun (r : Masc.Tui_decode_asks.ask_row) -> r.Masc.Tui_decode_asks.ar_id)
        (Ask.open_rows (snapshot rows)))
 
+let arrived_ids = List.map (fun (ask : Masc.Tui_decode_asks.ask_key) -> ask.ak_id)
+
 let test_newly_opened_silent_on_first_read () =
   Alcotest.(check (list string)) "first read establishes a baseline silently" []
-    (Ask.newly_opened_ask_ids ~previous:None ~current:(snapshot [ row "a1" ]))
+    (arrived_ids (Ask.newly_opened_asks ~previous:None ~current:(snapshot [ row "a1" ])))
 
 let test_newly_opened_reports_arrival () =
   let before = snapshot [ row "a1" ] in
   let after = snapshot [ row "a1"; row "a2" ] in
   Alcotest.(check (list string)) "the ask that arrived" [ "a2" ]
-    (Ask.newly_opened_ask_ids ~previous:(Some before) ~current:after)
+    (arrived_ids (Ask.newly_opened_asks ~previous:(Some before) ~current:after))
 
 let test_newly_opened_silent_on_reread () =
   let s = snapshot [ row "a1" ] in
   Alcotest.(check (list string)) "the same open asks ring nothing" []
-    (Ask.newly_opened_ask_ids ~previous:(Some s) ~current:s)
+    (arrived_ids (Ask.newly_opened_asks ~previous:(Some s) ~current:s))
 
 let test_newly_opened_ignores_answered () =
   let before = snapshot [ row "a1" ] in
   let after = snapshot [ answered_row "a1"; row "a2" ] in
   Alcotest.(check (list string)) "a1 closing is not an arrival, a2 is" [ "a2" ]
-    (Ask.newly_opened_ask_ids ~previous:(Some before) ~current:after)
+    (arrived_ids (Ask.newly_opened_asks ~previous:(Some before) ~current:after))
 
 let test_ring_when_arrival_and_not_watching () =
   Alcotest.(check bool) "arrival off the asks surface rings" true
-    (Ask.should_ring_for_new_ask ~new_ids:[ "a1" ]
+    (Ask.should_ring_for_new_ask ~arrived:[ key "a1" ]
        ~operator_is_watching_asks:false)
 
 let test_silent_when_watching_asks () =
   Alcotest.(check bool) "on the asks surface it stays silent" false
-    (Ask.should_ring_for_new_ask ~new_ids:[ "a1" ]
+    (Ask.should_ring_for_new_ask ~arrived:[ key "a1" ]
        ~operator_is_watching_asks:true)
 
 let test_silent_when_nothing_arrived () =
   Alcotest.(check bool) "no arrival, no ring, even off the surface" false
-    (Ask.should_ring_for_new_ask ~new_ids:[] ~operator_is_watching_asks:false)
+    (Ask.should_ring_for_new_ask ~arrived:[] ~operator_is_watching_asks:false)
 
 (* The producer's real row encoder feeds the decoder and answer draft.
    This proves the module split preserves the operator's choice identities
@@ -408,12 +413,13 @@ let test_wire_question_reaches_the_answer_draft () =
        | [row] ->
            Alcotest.(check (option string)) "question source survives the canonical wire"
              (Some "original-question-trace#17") (Option.map Ids.Turn_ref.to_string row.ar_source_turn_ref);
-           let origin = Ask.origin_of_row row in
+           let origin = Ask.origin_of_row row |> Option.get in
            let feedback = Ask.answer_feedback ?source_turn_ref:row.ar_source_turn_ref
-               ~keeper_name:row.ar_keeper ~ask_id:row.ar_id ~submitted_label:"private answer"
-               (Ok (Masc.Tui_decode_asks.Ask_answer_recorded Masc.Tui_decode_asks.Ask_wake_stored)) in
+               ~asker:row.ar_asker ~ask_id:row.ar_id ~submitted_label:"private answer"
+               (Ok (Masc.Tui_decode_asks.Keeper_answer_receipt
+                      (Masc.Tui_decode_asks.Ask_answer_recorded Masc.Tui_decode_asks.Ask_wake_stored))) in
            Alcotest.(check bool) "answer origin is the same original question" true
-             (Ask.same_origin origin (Ask.origin_of_feedback feedback));
+             (Ask.same_origin origin (Ask.origin_of_feedback feedback |> Option.get));
            Alcotest.(check (option string)) "context survives the wire"
              (Some "Choose a deployment window") row.ar_context;
            (match row.ar_questions with
@@ -425,7 +431,7 @@ let test_wire_question_reaches_the_answer_draft () =
                 (match question.aq_choices with
                  | [choice] ->
                      let draft = Ask.toggle_choice
-                       (Ask.empty_draft ~ask_id:row.ar_id) ~question ~choice in
+                       (Ask.empty_draft ~ask:(Masc.Tui_decode_asks.ask_key row)) ~question ~choice in
                      check_ids "the answer names the stable wire id"
                        ["later"] (chosen draft question)
                  | _ -> Alcotest.fail "expected one wire choice")
@@ -588,7 +594,8 @@ let test_feedback_preserves_receipt_and_canonical_winner () =
     ; Ok (Decode.Ask_answer_refused "private refusal detail"), None, "refused", `Null
     ; Error "private transport detail", None, "unconfirmed", `Null ] in
   List.iter (fun (receipt, expected_label, recording, delivery) ->
-    let feedback = Ask.answer_feedback ~keeper_name:"reader" ~ask_id:"wire-ask"
+    let receipt = Result.map (fun receipt -> Decode.Keeper_answer_receipt receipt) receipt in
+    let feedback = Ask.answer_feedback ~asker:(Decode.Ask_keeper "reader") ~ask_id:"wire-ask"
       ~submitted_label:label receipt in
     Alcotest.(check (option string)) "only a new canonical answer owns its submitted labels"
       expected_label feedback.af_submitted_label;
@@ -596,13 +603,129 @@ let test_feedback_preserves_receipt_and_canonical_winner () =
       (feedback.af_receipt = receipt);
     let json = Ask.answer_feedback_to_json feedback in
     let open Yojson.Safe.Util in
-    Alcotest.(check string) "exact Keeper" "reader" (json |> member "keeper" |> to_string);
+    Alcotest.(check string) "exact Keeper" "reader" (json |> member "asker" |> member "keeper" |> to_string);
     Alcotest.(check string) "exact Ask" "wire-ask" (json |> member "ask_id" |> to_string);
     Alcotest.(check string) "recording fact" recording (json |> member "recording" |> to_string);
     Alcotest.(check bool) "delivery is not Keeper action" true ((json |> member "delivery") = delivery);
     Alcotest.(check (list string)) "receipt log contains metadata, no submitted/error bodies"
-      ["ask_id"; "delivery"; "keeper"; "recording"; "source_turn_ref"]
+      ["ask_id"; "asker"; "delivery"; "recording"; "source_turn_ref"]
       (json |> to_assoc |> List.map fst |> List.sort String.compare)) cases
+
+(* Installation questions, read and answered over the server's own wire:
+   the row encoder, the answer body decoder and the receipts. *)
+let installation_question () =
+  let valid = function Ok value -> value | Error _ -> Alcotest.fail "could not construct the question" in
+  let module Domain = Masc.Keeper_ask in
+  let choice id = valid (Domain.choice ~choice_id:id ~label:("label " ^ id) ()) in
+  valid (Domain.question ~question_id:"q1" ~header:"Ledger" ~prompt:"What does it hold?"
+    ~choices:[choice "a"; choice "b"] ~mode:Domain.Single ~free_text:Domain.Choices_only)
+
+let installation_wire ?(resolution = Masc.Keeper_ask.Open) () =
+  let ask = match Masc.Lane_addon_asks.ask ~ask_id:"s-1-ask" ~declaration_id:"operator-quiz"
+      ~title:"Operator quiz" ~questions:[installation_question ()] ~asked_at:7. () with
+    | Ok ask -> ask | Error detail -> Alcotest.fail detail in
+  Server_routes_http_routes_lane_addons.installation_ask_json ~declaration_id:"operator-quiz"
+    ("s-1-ask", (ask, resolution))
+
+let test_installation_rows_decode_from_the_server_encoder () =
+  let module Decode = Masc.Tui_decode_asks in
+  match Decode.decode_installation_asks (`Assoc ["asks", `List [installation_wire ()]]) with
+  | Ok [row] ->
+      Alcotest.(check bool) "the installation is the asker" true
+        (row.ar_asker = Decode.Ask_installation { ai_declaration_id = "operator-quiz"; ai_title = "Operator quiz" });
+      Alcotest.(check bool) "an installation question has no asking turn" true
+        (row.ar_source_turn_ref = None && Ask.origin_of_row row = None);
+      Alcotest.(check (list string)) "choice ids survive the wire" ["a"; "b"]
+        (List.concat_map (fun (q : Decode.ask_question) -> List.map (fun c -> c.Decode.ac_id) q.aq_choices)
+           row.ar_questions);
+      Alcotest.(check bool) "the row is open" true (row.ar_resolution = Decode.Ask_open)
+  | Ok _ -> Alcotest.fail "expected one row"
+  | Error detail -> Alcotest.fail detail
+
+let test_installation_rows_refuse_an_unknown_field_or_shape () =
+  let module Decode = Masc.Tui_decode_asks in
+  let extra = match installation_wire () with
+    | `Assoc fields -> `Assoc (("keeper", `String "someone") :: fields) | other -> other in
+  Alcotest.(check bool) "a row with a field the route does not write is refused" true
+    (Result.is_error (Decode.decode_installation_asks (`Assoc ["asks", `List [extra]])));
+  Alcotest.(check bool) "a response that is not exactly asks is refused" true
+    (Result.is_error (Decode.decode_installation_asks
+       (`Assoc ["asks", `List []; "open_count", `Int 0])))
+
+let test_installation_answer_body_is_what_the_route_accepts () =
+  let answers = `List [`Assoc ["question_id", `String "q1";
+    "response", `Assoc ["kind", `String "chose"; "choice_ids", `List [`String "a"]]]] in
+  let body = Ask.installation_request_body ~declaration_id:"operator-quiz" ~ask_id:"s-1-ask"
+      ~answers ~session_id:None in
+  match Server_routes_http_routes_lane_addons.decode_ask_answer (Yojson.Safe.to_string body) with
+  | Ok (declaration_id, ask_id, [("q1", _)], None) ->
+      Alcotest.(check (pair string string)) "the route reads the same declaration and ask"
+        ("operator-quiz", "s-1-ask") (declaration_id, ask_id)
+  | Ok _ -> Alcotest.fail "the route read a different answer"
+  | Error detail -> Alcotest.fail ("the route refused the TUI's body: " ^ detail)
+
+let test_installation_receipts_follow_the_route () =
+  let module Decode = Masc.Tui_decode_asks in
+  let module Route = Server_routes_http_routes_lane_addons in
+  let decode ?(ask_id = "s-1-ask") status json =
+    Decode.decode_installation_answer_receipt ~expected_declaration_id:"operator-quiz"
+      ~expected_ask_id:ask_id ~status_code:status json in
+  let failure failure = snd (Route.ask_answer_failure_response ~ask_id:"s-1-ask" failure) in
+  let recorded = Route.ask_answer_recorded_json ~declaration_id:"operator-quiz" ~ask_id:"s-1-ask" ~answer_count:1 in
+  Alcotest.(check bool) "a 200 for this ask is recorded" true
+    (decode 200 recorded = Ok Decode.Installation_answer_recorded);
+  Alcotest.(check bool) "a 200 for another ask is not evidence" true
+    (Result.is_error (decode ~ask_id:"other" 200 recorded));
+  Alcotest.(check bool) "an earlier answer is a conflict with its time" true
+    (decode 409 (failure (Masc.Lane_addon_asks.Already_answered { answered_at = 9. }))
+     = Ok (Decode.Installation_answer_already_answered { iaa_answered_at = 9. }));
+  Alcotest.(check bool) "a withdrawn question is a conflict with its time" true
+    (decode 409 (failure (Masc.Lane_addon_asks.Already_withdrawn { withdrawn_at = 8. }))
+     = Ok (Decode.Installation_answer_withdrawn { iaw_withdrawn_at = 8. }));
+  let refused = function Ok (Decode.Installation_answer_refused _) -> true | Ok _ | Error _ -> false in
+  Alcotest.(check bool) "an unknown question is refused" true
+    (refused (decode 404 (failure Masc.Lane_addon_asks.Ask_not_found)));
+  Alcotest.(check bool) "answers that do not fit are refused" true
+    (refused (decode 400 (failure (Masc.Lane_addon_asks.Rejected []))));
+  Alcotest.(check bool) "a refusal with a reason that is not text is not read" true
+    (Result.is_error
+       (decode 400 (`Assoc [ "error", `String "invalid answers"; "invalid_answers", `List [ `Int 1 ] ])));
+  Alcotest.(check bool) "a store failure leaves recording unconfirmed" true
+    (Result.is_error (decode 500 (failure (Masc.Lane_addon_asks.Store_failed "disk"))))
+
+let test_installation_rows_join_the_keeper_snapshot () =
+  let module Decode = Masc.Tui_decode_asks in
+  let keeper = { Decode.asn_keeper = None; asn_open_count = 1; asn_rows = [row "keeper-ask"] } in
+  let rows = match Decode.decode_installation_asks (`Assoc ["asks", `List [
+      installation_wire (); installation_wire ~resolution:(Masc.Keeper_ask.Withdrawn_because
+                                                             { reason = "gone"; withdrawn_at = 3. }) ()]]) with
+    | Ok rows -> rows | Error detail -> Alcotest.fail detail in
+  let joined = Decode.with_installation_asks keeper rows in
+  Alcotest.(check int) "only open installation rows raise the open count" 2 joined.asn_open_count;
+  Alcotest.(check int) "every row is kept" 3 (List.length joined.asn_rows);
+  Alcotest.(check bool) "the Keeper row is one of them" true
+    (List.exists (fun (row : Decode.ask_row) -> row.ar_id = "keeper-ask") joined.asn_rows)
+
+(* An installation's ask id is the request id its package chose, so two
+   installations can ask with the same id. The asker keeps their drafts, the
+   submit gate and the cursor apart. *)
+let test_two_installations_asking_with_one_id_stay_apart () =
+  let module Decode = Masc.Tui_decode_asks in
+  let installation id =
+    { (row "s-1-ask") with
+      ar_asker = Decode.Ask_installation { ai_declaration_id = id; ai_title = "Operator quiz" } } in
+  let first = installation "quiz-a" and second = installation "quiz-b" in
+  let draft = Ask.toggle_choice (Ask.draft_for None ~row:first) ~question:single ~choice:yes in
+  check_ids "the other installation starts a fresh draft" [] (chosen (Ask.draft_for (Some draft) ~row:second) single);
+  Alcotest.(check bool) "and the first one's draft does not answer it" true
+    (match Ask.readiness draft ~row:second with Ask.Missing _ -> true | Ask.Ready _ | Ask.Not_open -> false);
+  Alcotest.(check string) "a press armed on one does not submit the other" "arm:s-1-ask"
+    (gate_name (Ask.gate_transition ~inflight:false ~pending:(Some (Decode.ask_key first))
+                  ~ask:(Decode.ask_key second)));
+  let next_rows = [ first; second ] in
+  let cursor = Ask.reconcile_cursor ~current_rows:[ second; first ] ~cursor:(Ask.On 0) ~next_rows in
+  Alcotest.(check bool) "the cursor stays on the installation it was on" true
+    (Option.map Decode.ask_key (Ask.selected_row next_rows cursor) = Some (Decode.ask_key second))
 
 let test_followup_protocol_keeps_exact_identity_and_unknowns () =
   let module Decode = Masc.Tui_decode_asks in
@@ -900,5 +1023,20 @@ let () =
             test_silent_when_watching_asks;
           Alcotest.test_case "silent with no arrival" `Quick
             test_silent_when_nothing_arrived;
+        ] );
+      ( "installation questions",
+        [
+          Alcotest.test_case "rows decode from the server encoder" `Quick
+            test_installation_rows_decode_from_the_server_encoder;
+          Alcotest.test_case "an unknown field or shape is refused" `Quick
+            test_installation_rows_refuse_an_unknown_field_or_shape;
+          Alcotest.test_case "the answer body is what the route accepts" `Quick
+            test_installation_answer_body_is_what_the_route_accepts;
+          Alcotest.test_case "receipts follow the route" `Quick
+            test_installation_receipts_follow_the_route;
+          Alcotest.test_case "rows join the Keeper snapshot" `Quick
+            test_installation_rows_join_the_keeper_snapshot;
+          Alcotest.test_case "two installations asking with one id stay apart" `Quick
+            test_two_installations_asking_with_one_id_stay_apart;
         ] );
     ]

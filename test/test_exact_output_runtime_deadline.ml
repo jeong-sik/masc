@@ -210,6 +210,35 @@ let lane_unavailable registry lane =
    names only that slot and no cli_slots, so each is emptied: each is
    unavailable on its own, and the registry still publishes because an
    emptied mandatory lane is not required at publication. *)
+(* RFC operator-quiz §4.3 K1: an add-on lane takes the built-in lanes' body
+   deadline rule unchanged, and the boot record names the add-on table, not a
+   [runtime.exact_output_lanes] one. *)
+let test_an_addon_lane_slot_without_a_body_deadline_is_named () =
+  with_runtime_fixture @@ fun ~path ~boot:_ ~save:_ ->
+  let addon =
+    "\n[runtime.addon_exact_lanes.operator-quiz.author]\n\
+     slots = [\"openai-responses.probe\"]\nmax_output_tokens = 4096\n"
+  in
+  Fs_compat.save_file path (runtime_toml ~connect:(Some 17.5) ~body:None () ^ addon);
+  (match Runtime.init_default ~config_path:path with
+   | Ok () -> ()
+   | Error detail -> failf "boot must not refuse a connect-only provider: %s" detail);
+  let owner = Runtime_schema.Addon (Result.get_ok (Runtime_schema.addon_lane ~declaration_id:"operator-quiz" ~output:"author")) in
+  let degradation = Runtime.exact_slot_degradation () in
+  match
+    List.filter
+      (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) ->
+         Runtime_schema.equal_exact_lane_owner gap.owner owner)
+      degradation.gaps
+  with
+  | [ gap ] ->
+    check bool "the record names the add-on lane's own table" true
+      (contains ~needle:"[runtime.addon_exact_lanes.operator-quiz.author]"
+         (Runtime_config_error.exact_slot_body_deadline_gap_to_string gap));
+    check bool "the add-on lane is emptied like a built-in lane" true
+      (List.mem "operator-quiz/author" degradation.emptied_lane_ids)
+  | gaps -> failf "expected one gap for the add-on lane, found %d" (List.length gaps)
+
 let test_connect_only_declaration_is_left_out_at_boot () =
   with_runtime_fixture @@ fun ~path ~boot:_ ~save:_ ->
   Fs_compat.save_file path (runtime_toml ~connect:(Some 17.5) ~body:None ());
@@ -220,7 +249,7 @@ let test_connect_only_declaration_is_left_out_at_boot () =
   check (list string) "one gap per lane"
     expected_lane_ids
     (List.sort String.compare
-       (List.map (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) -> gap.lane_id)
+       (List.map (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) -> (Runtime_schema.exact_lane_key gap.owner))
           degradation.gaps));
   List.iter
     (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) ->
@@ -299,7 +328,7 @@ let test_a_lane_emptied_by_gaps_is_unavailable_alone () =
   check (list string) "both gap slots are recorded"
     (List.sort String.compare [ emptied; lane_id ])
     (List.sort String.compare
-       (List.map (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) -> gap.lane_id)
+       (List.map (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) -> (Runtime_schema.exact_lane_key gap.owner))
           degradation.gaps));
   Server_runtime_bootstrap.For_testing.configure_exact_output_registry
     ~config_root:(Filename.dirname path)
@@ -621,7 +650,7 @@ let test_an_unrelated_save_keeps_an_existing_gap () =
   boot (gap_beside_keyed_toml ());
   let gap_slots () =
     List.map
-      (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) -> gap.lane_id, gap.slot_id)
+      (fun (gap : Runtime_config_error.exact_slot_body_deadline_gap) -> (Runtime_schema.exact_lane_key gap.owner), gap.slot_id)
       (Runtime.exact_slot_body_deadline_gaps ())
   in
   check (list (pair string string)) "boot records the gap" [ lane_id, "nokey.other" ]
@@ -681,6 +710,8 @@ let () =
           test_deadlines_are_independent_and_frozen;
         test_case "connect-only declaration is left out at boot" `Quick
           test_connect_only_declaration_is_left_out_at_boot;
+        test_case "an add-on lane slot without a body deadline is named" `Quick
+          test_an_addon_lane_slot_without_a_body_deadline_is_named;
         test_case "a lane emptied by gaps is unavailable alone" `Quick
           test_a_lane_emptied_by_gaps_is_unavailable_alone;
         test_case "missing body deadline refusal names provider and key" `Quick

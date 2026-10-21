@@ -260,3 +260,15 @@ val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> config:Workspace.config
 (** Forks the refresh loop under [sw]: one {!refresh} immediately, then one
     every 60 seconds. A refresh that raises publishes {!refresh_raised}.
     Cancelled with [sw]. *)
+
+(** {1 Lane Add-on GitHub reads} *)
+
+val lane_addon_github :
+  now:(unit -> float) -> http_post:http_post -> config:Workspace.config -> Lane_addon_records.github
+(** GitHub access for a Lane Add-on's [github_pulls] grant. Each call
+    resolves the reader again, as {!refresh} does, finds the registered
+    repository and its [owner/repo] on the configured host, and returns a
+    [post] that sends one GraphQL request to the configured endpoint with the
+    reader Keeper's token. The token never leaves this module. A reader that
+    is not ready, an unregistered repository or a remote on another host is
+    [Error]; so is an answer that {!refresh} would read as a failure. *)

@@ -7,10 +7,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import base64
+from fractions import Fraction
 
 import mido
 
-from host import midi_timeline, snapshot
+from host import midi_timeline, frame_timeline, snapshot, render, digest
 
 
 def encode(midi):
@@ -20,6 +21,18 @@ def encode(midi):
 
 
 class MidiPhraseTests(unittest.TestCase):
+    def test_nonintegral_tempo_boundaries_keep_original_rational_horizon(self):
+        midi = mido.MidiFile(type=1, ticks_per_beat=997)
+        midi.tracks.append(mido.MidiTrack([
+            mido.MetaMessage('set_tempo', tempo=437956),
+            mido.Message('note_on', note=60, velocity=90),
+            mido.MetaMessage('set_tempo', tempo=500003, time=123),
+            mido.Message('control_change', control=11, value=80, time=101),
+            mido.Message('note_off', note=60, time=773)]))
+        events, duration = midi_timeline(encode(midi))
+        self.assertEqual(events[1][1], Fraction(123 * 437956 + 101 * 500003, 997000000))
+        self.assertEqual(duration, Fraction(123 * 437956 + 874 * 500003, 997000000))
+
     def test_tempo_tracks_and_note_positions_survive(self):
         midi = mido.MidiFile(type=1, ticks_per_beat=480)
         tempo = mido.MidiTrack([
@@ -61,6 +74,107 @@ class MidiPhraseTests(unittest.TestCase):
 
 
 class NativeBoundaryTests(unittest.TestCase):
+    def test_private_frame_timeline_preserves_equal_time_order_and_block_edge_samples(self):
+        import numpy as np
+        from pedalboard.io import AudioFile
+        class Plugin:
+            name = 'Fixture'
+            identifier = 'FixtureID'
+            manufacturer_name = 'Fixture'
+            version = '1'
+            is_instrument = True
+            raw_state = b'fixture'
+            def __init__(self):
+                self.calls = []
+            def __call__(self, events, *, duration, sample_rate, num_channels, reset):
+                count = int(np.float32(duration) * np.float32(sample_rate))
+                positions = [int(np.float32(time) * np.float32(sample_rate)) for _, time in events]
+                self.calls.append((count, positions, [bytes(message) for message, _ in events], reset))
+                return np.ones((num_channels, count), dtype=np.float32) * .01
+        value = {"schemaVersion": 1, "kind": "practice-vst", "sampleRate": 44100, "frames": "44107", "events": [
+            {"frame": "0", "bytes": [0x92, 60, 90]}, {"frame": "7", "bytes": [0xb2, 74, 85]},
+            {"frame": "7", "bytes": [0xe2, 0, 64]}, {"frame": "44100", "bytes": [0xb2, 74, 86]},
+            {"frame": "44106", "bytes": [0x82, 60, 9]}]}
+        data, plugin = json.dumps(value).encode(), Plugin()
+        with tempfile.TemporaryDirectory() as folder, patch('host.load_instrument', return_value=plugin):
+            source, target = Path(folder) / 'frames.json', Path(folder) / 'render.wav'
+            source.write_bytes(data)
+            result = render({'timeline_path': str(source), 'expected_timeline_sha256': digest(data),
+                             'output_path': str(target), 'sample_rate': 44100, 'tail_seconds': 0})
+            self.assertEqual([call[:2] for call in plugin.calls], [(44100, [0, 7, 7]), (7, [0, 6])])
+            self.assertEqual([call[3] for call in plugin.calls], [True, False])
+            self.assertEqual(result['timeline_sha256'], digest(data))
+            self.assertNotIn('midi_sha256', result)
+            with AudioFile(str(target)) as audio:
+                self.assertEqual(audio.frames, 44107)
+
+    def test_bad_frame_timeline_is_refused_before_plugin_load_or_output_publication(self):
+        base = {"schemaVersion": 1, "kind": "practice-vst", "sampleRate": 48000, "frames": "2",
+                "events": [{"frame": "0", "bytes": [0x92, 60, 90]}, {"frame": "1", "bytes": [0x82, 60, 0]}]}
+        cases = [
+            {**base, 'frames': '0'}, {**base, 'frames': '02'}, {**base, 'frames': '18446744073709551616'},
+            {**base, 'schemaVersion': True}, {**base, 'sampleRate': 44100}, {**base, 'events': []},
+            {**base, 'events': [base['events'][1], base['events'][0]]},
+            *[{**base, 'events': [{'frame': frame, 'bytes': message}]} for frame, message in [
+                ('-1', [0x92, 60, 90]), ('2', [0x92, 60, 90]), ('０', [0x92, 60, 90]),
+                ('0', [0xc2, 2]), ('0', [0xb2, 0, 2]), ('0', [0xb2, 32, 2]),
+                ('0', [0x92, 128, 90]), ('0', [0x92, 60, True]), ('0', [0x92, 60])]]]
+        with tempfile.TemporaryDirectory() as folder, patch('host.load_instrument') as load:
+            source, target = Path(folder) / 'frames.json', Path(folder) / 'render.wav'
+            for value in cases:
+                data = json.dumps(value).encode(); source.write_bytes(data)
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    render({'timeline_path': str(source), 'expected_timeline_sha256': digest(data),
+                            'output_path': str(target), 'sample_rate': 48000, 'tail_seconds': 0})
+                self.assertFalse(target.exists())
+            data = json.dumps(base).encode(); source.write_bytes(data)
+            with self.assertRaises(ValueError):
+                frame_timeline(data, digest(b'changed'), 48000)
+            load.assert_not_called()
+
+    def test_render_crosses_blocks_without_losing_event_or_final_output_samples(self):
+        # Pinned Pedalboard accepts Float32 timestamp, duration and sampleRate,
+        # then truncates their Float32 product. Exercise the full host render
+        # through that ABI seam and its actual AudioFile streaming/publishing.
+        import numpy as np
+        from pedalboard.io import AudioFile
+        class Plugin:
+            name = 'Fixture'
+            identifier = 'FixtureID'
+            manufacturer_name = 'Fixture'
+            version = '1'
+            is_instrument = True
+            raw_state = b'fixture'
+            calls = []
+
+            def __call__(self, events, *, duration, sample_rate, num_channels, reset):
+                count = int(np.float32(duration) * np.float32(sample_rate))
+                positions = [int(np.float32(time) * np.float32(sample_rate)) for _, time in events]
+                self.calls.append((count, positions, [bytes(message) for message, _ in events], reset))
+                return np.ones((num_channels, count), dtype=np.float32) * .01
+
+        midi = mido.MidiFile(type=0, ticks_per_beat=22050)
+        midi.tracks.append(mido.MidiTrack([
+            mido.Message('note_on', note=60, velocity=90),
+            mido.Message('control_change', control=11, value=80, time=7),
+            mido.Message('pitchwheel', pitch=10),
+            mido.Message('control_change', control=11, value=81, time=44093),
+            mido.Message('note_off', note=60, time=6),
+            mido.MetaMessage('end_of_track', time=1)]))
+        plugin = Plugin()
+        with tempfile.TemporaryDirectory() as folder, patch('host.load_instrument', return_value=plugin):
+            source, target = Path(folder) / 'source.mid', Path(folder) / 'render.wav'
+            source.write_bytes(encode(midi))
+            result = render({'midi_path': str(source), 'output_path': str(target), 'sample_rate': 44100, 'tail_seconds': 0})
+            self.assertEqual([call[:2] for call in plugin.calls], [(44100, [0, 7, 7]), (7, [0, 6])])
+            self.assertEqual([call[3] for call in plugin.calls], [True, False])
+            self.assertEqual(result['frames'], 44107)
+            self.assertEqual(plugin.calls[0][2][1][0], 0xb0)
+            self.assertEqual(plugin.calls[0][2][2][0], 0xe0)
+            with AudioFile(str(target)) as audio:
+                self.assertEqual(audio.frames, 44107)
+                self.assertTrue(np.all(audio.read(audio.frames) > 0))
+
     def test_default_and_external_preset_are_captured_without_editor_or_mutable_path(self):
         class Plugin:
             name = 'Bass'

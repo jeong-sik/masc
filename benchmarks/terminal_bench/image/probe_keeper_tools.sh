@@ -60,6 +60,8 @@ esac
 key="${!key_env:-}"
 [[ -n "${key}" ]] || { echo "${key_env} is not set" >&2; exit 2; }
 [[ -x "${DIST_DIR}/masc" ]] || { echo "run image/fetch_masc.sh first" >&2; exit 2; }
+# The wait reads the turn state with jq on the host (image/keeper_turn_wait.sh).
+command -v jq >/dev/null || { echo "jq is not installed on the host" >&2; exit 2; }
 
 cfg="${BENCH_DIR}/configs/out-probe"
 rm -rf "${cfg}"
@@ -148,21 +150,25 @@ msg="$(mcp 11 masc_keeper_msg "$(printf '{"name":"%s","message":"Run exactly one
   || { echo "STAGE_FAIL keeper_msg" >&2; exit 1; }
 echo "${msg}" | head -c 600; echo
 
-echo "== wait for the marker the keeper was asked to write"
-# Sleep on the host, not with `docker exec sleep`: a container that dies
-# mid-wait turned that into a hot loop printing "is not running" once per
-# iteration instead of stopping with a reason.
+op_id="$(printf '%s' "${msg}" | jq -r '.operation_id // empty' 2>/dev/null)" || op_id=""
+if [[ -z "${op_id}" ]]; then
+  echo "STAGE_FAIL keeper_msg returned no operation_id: $(printf '%s' "${msg}" | head -c 300)" >&2
+  exit 1
+fi
+
+echo "== wait for keeper turn ${op_id} to write ${MARKER}"
+# shellcheck source=keeper_turn_wait.sh
+source "${HERE}/keeper_turn_wait.sh"
 found=""
-for _ in $(seq 1 90); do
-  if ! docker inspect -f '{{.State.Running}}' "${NAME}" 2>/dev/null | grep -q true; then
-    echo "STAGE_FAIL container-died during the keeper turn" >&2
-    exit 1
-  fi
-  if docker exec "${NAME}" test -f "${MARKER}" 2>/dev/null; then found=1; break; fi
-  sleep 5
-done
+wait_for_keeper_turn "${op_id}"
+wait_status=$?
+[[ "${wait_status}" -eq 0 ]] && found=1
+# Every outcome without the marker lands here, so the server-log evidence below
+# is printed for a Succeeded turn that left no file as well, not only when the
+# wait ran out. The wait has already named its own failure on stderr (status 1);
+# only the ran-out case (status 2) is named here.
 if [[ -z "${found}" ]]; then
-  echo "STAGE_FAIL keeper-did-not-act" >&2
+  [[ "${wait_status}" -eq 2 ]] && echo "STAGE_FAIL keeper-did-not-act" >&2
   # The reason a turn did not act lives in the server log, not in the tool
   # result: masc_keeper_msg returns as soon as the turn is queued, so a
   # provider rejection lands minutes later and asynchronously. Surfacing it

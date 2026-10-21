@@ -1,0 +1,89 @@
+id = "operator-quiz"
+revision = "0.2.0"
+title = "Operator quiz"
+contributions = ["derive", "act"]
+image = "masc-lane-operator-quiz:0.1.0"
+command = ["python3", "server.py", "--state", "/state"]
+
+[world.actions]
+tool = "lane_act"
+
+[world.state]
+mode = "persistent"
+
+[world.asks]
+operator = true
+
+[world.exact_outputs.author]
+schema = "schemas/author.json"
+
+[world.exact_outputs.grade]
+schema = "schemas/grade.json"
+
+[world.outputs.quiz]
+lanes = ["quiz/sessions", "quiz/questions", "quiz/topics", "quiz/items", "quiz/measures"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304
+
+[interface]
+binding_schema = '''{
+  "type": "object",
+  "properties": {
+    "sources": {"type": "array", "maxItems": 0,
+      "items": {"type": "object", "properties": {}, "additionalProperties": false},
+      "description": "Always empty: the quiz reads records through binding.records."},
+    "language": {"type": "string", "minLength": 1,
+      "description": "The language every question is written in, such as ko"},
+    "timezone": {"type": "string", "minLength": 1,
+      "description": "The operator's IANA time zone, such as Asia/Seoul. A later local day in it is what makes a re-ask count for R."},
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "enum": ["board", "repository", "wiki", "github_pulls"]},
+          "visibilities": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "enum": ["public", "unlisted", "internal", "direct"]},
+            "description": "Board only. Every post in these visibilities can reach the provider of each slot bound to this installation's author output in runtime.toml. Before adding internal, or naming direct, confirm that each of those providers may receive such posts."
+          },
+          "repository_id": {"type": "string", "minLength": 1, "description": "Repository and github_pulls only: a registered repository"},
+          "paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1},
+            "description": "Repository only: files, or folders ending in /, such as changelog.d/"}
+        },
+        "required": ["source_id", "kind"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["sources", "language", "timezone", "records"],
+  "additionalProperties": false
+}'''
+presentation = '''{
+  "description": "Questions from the workspace's own records, answered in Approvals",
+  "readings": [
+    {"lane_id": "quiz/measures", "path": ["recovery"], "label": "R: right on a later-day re-ask", "unit": "items", "format": "json"},
+    {"lane_id": "quiz/measures", "path": ["participation"], "label": "P: answered of posed", "unit": "questions", "format": "json"},
+    {"lane_id": "quiz/measures", "path": ["score"], "label": "Correct of graded", "unit": "answers", "format": "json"},
+    {"lane_id": "quiz/measures", "path": ["changed_grades"], "label": "G: judgments that changed a verdict", "unit": "answers", "format": "json"},
+    {"lane_id": "quiz/sessions", "path": ["state"], "label": "Session", "unit": null, "format": "text"},
+    {"lane_id": "quiz/sessions", "path": ["failure"], "label": "Why it failed", "unit": null, "format": "json"},
+    {"lane_id": "quiz/questions", "path": ["verdict"], "label": "Verdict", "unit": null, "format": "text"},
+    {"lane_id": "quiz/questions", "path": ["by"], "label": "Graded by", "unit": null, "format": "text"},
+    {"lane_id": "quiz/questions", "path": ["judgments"], "label": "Judgments", "unit": null, "format": "json"},
+    {"lane_id": "quiz/questions", "path": ["grading"], "label": "Grading", "unit": null, "format": "json"},
+    {"lane_id": "quiz/questions", "path": ["disputes"], "label": "Disputes", "unit": null, "format": "json"},
+    {"lane_id": "quiz/questions", "path": ["response"], "label": "Your answer", "unit": null, "format": "json"},
+    {"lane_id": "quiz/questions", "path": ["key"], "label": "Expected", "unit": null, "format": "json"},
+    {"lane_id": "quiz/questions", "path": ["sources"], "label": "Sources", "unit": null, "format": "json"},
+    {"lane_id": "quiz/topics", "path": ["open_debt"], "label": "Open debt", "unit": "items", "format": "number"},
+    {"lane_id": "quiz/items", "path": ["latest"], "label": "Latest attempt", "unit": null, "format": "text"}
+  ]
+}'''

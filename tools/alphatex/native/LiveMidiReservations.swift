@@ -1,9 +1,9 @@
 import Foundation
 
 // Compile the same region/prefix ownership used by the actual MIDI transports.
-// This probe opens no device and never substitutes source-name/track heuristics
+// This probe opens no ports and never substitutes source-name/track heuristics
 // for physical destinations. The caller retains this private plan through play.
-func liveMidiReservations(_ data: Data, format: String) throws -> [UmpLiveClaim] {
+func liveMidiReservations(_ data: Data, format: String, nativeProtocol: (String) throws -> UmpNativeProtocol = umpNativeProtocol) throws -> [UmpLiveClaim] {
     struct Envelope: Decodable {
         let schemaVersion: Int
         let kind: String
@@ -48,6 +48,7 @@ func liveMidiReservations(_ data: Data, format: String) throws -> [UmpLiveClaim]
               && (captured == nil || captured!.duration == plan.duration) else { throw MidiFailure("backing MIDI clock differs from plan") }
     }
     var channels: [String: Set<UmpLiveChannel>] = [:]
+    var nativeProtocols: [String: UmpNativeProtocol] = [:]
     if let notes {
         try notes.validate(cycle: cycle)
         guard notes.arrangement else { throw MidiFailure("backing reservations require a MIDI region arrangement") }
@@ -64,9 +65,11 @@ func liveMidiReservations(_ data: Data, format: String) throws -> [UmpLiveClaim]
         else { scopes = try UmpRegionTransport(timeline: captured).clips.map(\.scope) }
         for scope in scopes {
             for address in scope {
-                channels[address.source, default: []].insert(UmpLiveChannel(group: UInt8((address.channel >> 24) & 15), channel: UInt8((address.channel >> 16) & 15)))
+                if nativeProtocols[address.source] == nil { nativeProtocols[address.source] = try nativeProtocol(address.source) }
+                let wire = nativeProtocols[address.source]!
+                channels[address.source, default: []].insert(UmpLiveChannel(group: wire == .midi1 ? 0 : UInt8((address.channel >> 24) & 15), channel: UInt8((address.channel >> 16) & 15)))
             }
         }
     }
-    return channels.keys.sorted().map { UmpLiveClaim(destination: $0, scope: .channels(channels[$0]!)) }
+    return channels.keys.sorted().map { UmpLiveClaim(destination: $0, scope: .channels(channels[$0]!), nativeProtocol: nativeProtocols[$0]?.rawValue) }
 }

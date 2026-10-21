@@ -1,13 +1,14 @@
 import { phraseDocument, importPhraseDocument } from './phrase-arrangement.mjs'
 import { parentPort } from 'node:worker_threads'
 import { dirname } from 'node:path'
-import { importArrangementWave, importArrangementMidi, importArrangementCapture, prepareArrangementCapture, saveArrangement, materializeArrangementAssets } from './arrangement-files.mjs'
+import { importArrangementWave, importArrangementMidi, importArrangementCapture, importArrangementPractice, restorePracticeBacking, inspectPracticePasses, importPracticeMidi, prepareArrangementCapture, saveArrangement, materializeArrangementAssets } from './arrangement-files.mjs'
 import { prepareArrangementWave, prepareArrangementMidi, prepareArrangementMixed, prepareArrangementAudio, prepareArrangementCaptureRegions } from './arrangement-playback.mjs'
 import { attachRecordedTake } from './arrangement-recording.mjs'
 import { analyzeCalibration } from './audio-calibration.mjs'
 import { inspectCalibration } from './calibration-files.mjs'
 
 import { preparePractice } from './arrangement-practice.mjs'
+import { prepareVstSources, finishVstPlan } from './arrangement-vst.mjs'
 
 const active = new Map()
 parentPort.on('message', async job => {
@@ -21,6 +22,8 @@ parentPort.on('message', async job => {
   try {
     let result
     switch (job.kind) {
+      case 'prepare-vst-sources': result = await prepareVstSources(job.project, { ...job, signal }); break
+      case 'prepare-vst-plan': result = await finishVstPlan(job.project, { ...job, signal }); break
       case 'prepare-phrase': result = phraseDocument(job.project, job.asset); break
       case 'import-phrase': result = importPhraseDocument(job.project, job.document); break
       case 'inspect-calibration': result = await inspectCalibration(job.path, { signal }); break
@@ -32,6 +35,13 @@ parentPort.on('message', async job => {
       case 'prepare-capture': result = await prepareArrangementCaptureRegions(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal, midiOutput: job.midiOutput, sourceBindings: job.sourceBindings, portBindings: job.portBindings }); break
       case 'prepare-take': result = await prepareArrangementCapture(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'import-take': result = await importArrangementCapture(job.project, job.path, { projectPath: job.projectPath, signal }); break
+      case 'import-practice': result = await importArrangementPractice(job.project, job.path, { projectPath: job.projectPath, signal }); break
+      case 'practice-backing': result = await restorePracticeBacking(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
+      case 'practice-midi': case 'practice-midi-region':
+        if (job.kind === 'practice-midi-region' && !job.cut) throw new Error('Select a practice MIDI region cut')
+        result = await importPracticeMidi(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal,
+          ...(job.kind === 'practice-midi-region' ? { cut: job.cut, nativeExecutable: job.nativeExecutable } : {}) }); break
+      case 'practice-passes': case 'practice-pass': result = await inspectPracticePasses(job.project, job.asset, job.pass, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'prepare-mixed': result = await prepareArrangementMixed(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal, midiOutput: job.midiOutput, portBindings: job.portBindings }); break
       case 'prepare-midi': result = await prepareArrangementMidi(job.project, { directory: job.directory, signal, midiOutput: job.midiOutput, portBindings: job.portBindings }); break
       case 'prepare-audio': result = await prepareArrangementAudio(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break

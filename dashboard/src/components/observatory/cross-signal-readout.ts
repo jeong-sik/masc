@@ -8,7 +8,7 @@
 import { html } from 'htm/preact'
 import type { TelemetryEntry, ToolQualityHourlyPoint } from '../../api/dashboard'
 import { cursorPosition } from './cursor-store'
-import { entryTimestampMs, hourToMs, isToolCall } from './observatory-utils'
+import { entryTimestampMs, hourToMs, isToolCall, isToolCallFailure } from './observatory-utils'
 
 interface Props {
   events: TelemetryEntry[]
@@ -63,7 +63,7 @@ export function CrossSignalReadout({ events, hourlyTrend, eventWindowMs }: Props
     events,
     cursor.ts,
     eventWindowMs,
-    entry => isToolCall(entry) && (entry.success === false || Boolean(entry.error)),
+    entry => isToolCall(entry) && isToolCallFailure(entry),
   )
   const trendPoint = nearestTrendPoint(hourlyTrend, cursor.ts)
 

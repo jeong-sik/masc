@@ -140,6 +140,12 @@ type invalid_answer =
   | Answered_twice of { question_id : string }
   | Unanswered of { question_id : string }
 
+val parse_question_answers :
+  questions:question list ->
+  submissions:(string * response) list ->
+  (answer list, invalid_answer list) result
+(** {!parse_answers} for a question list of any asker. *)
+
 val parse_answers :
   ask:ask ->
   submissions:(string * response) list ->
@@ -160,8 +166,10 @@ type responder = {
 
 (** {1 Events} *)
 
-type event =
-  | Asked of ask
+(** The lifecycle of any asker's question: a Keeper's here, an installation's
+    in the Lane store. Only the asked record differs. *)
+type 'ask lifecycle_event =
+  | Asked of 'ask
   | Answered of {
       ask_id : string;
       answers : answer list;
@@ -173,9 +181,11 @@ type event =
       reason : string;
       withdrawn_at : float;
     }
-      (** The asking Keeper no longer needs the answer. Withdrawal is the
-          Keeper's own act; nothing withdraws a question on its behalf after
-          some interval. *)
+      (** The asker no longer needs the answer. Withdrawal is the asker's own
+          act; nothing withdraws a question on its behalf after some
+          interval. *)
+
+type event = ask lifecycle_event
 
 (** {1 Projection} *)
 
@@ -187,6 +197,10 @@ type resolution =
       answered_at : float;
     }
   | Withdrawn_because of { reason : string; withdrawn_at : float }
+
+val fold_lifecycle :
+  ask_id:('ask -> string) -> 'ask lifecycle_event list -> (string * ('ask * resolution)) list
+(** {!fold_events} for any asker, reading each asked record's id with [ask_id]. *)
 
 val fold_events : event list -> (string * (ask * resolution)) list
 (** Folds an append-only event log into one row per [ask_id], in the order the
@@ -208,6 +222,17 @@ val answer_to_json : answer -> Yojson.Safe.t
 (** Read-only canonical projections, also used inside the durable event codec.
     Model-facing original-question input reuses these instead of maintaining a
     second choice, response or question schema. *)
+
+val question_of_json : Yojson.Safe.t -> (question, string) result
+val answer_of_json : Yojson.Safe.t -> (answer, string) result
+val responder_to_json : responder -> Yojson.Safe.t
+val responder_of_json : Yojson.Safe.t -> (responder, string) result
+(** The same codecs the event log uses, for another asker's log. *)
+
+val submissions_of_json : Yojson.Safe.t -> ((string * response) list, string) result
+(** An answer route's [answers] array, in the {!answer_to_json} form. Decoding
+    checks the shape only; {!parse_answers} checks the submissions against the
+    questions. *)
 
 val event_to_json : event -> Yojson.Safe.t
 val event_of_json : Yojson.Safe.t -> (event, string) result

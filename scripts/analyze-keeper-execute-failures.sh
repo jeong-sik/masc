@@ -16,6 +16,7 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BASE_PATH="${1:-${MASC_BASE_PATH:-}}"
 # A value of only spaces names nothing, and nothing is read from the cwd.
 if [ -z "${BASE_PATH//[[:space:]]/}" ]; then
@@ -72,6 +73,7 @@ if [ "${#FILES[@]}" -eq 0 ]; then
 fi
 
 JQ_FILTER='
+include "recorded-tool-outcome";
 def cmd:
   if (.input|type) == "object" then (.input.command // .input.cmd // "")
   elif (.input|type) == "string" then .input
@@ -81,7 +83,7 @@ def output_text:
   elif (.output|type) == "object" and (.output._blob.preview? != null) then .output._blob.preview
   else (.output|tostring) end;
 def combined: output_text + " " + (.action_radius.error // "") + " " + cmd;
-def failed: (.success == false);
+def failed: (recorded_call_outcome == "failed");
 def inferred_shape:
   if (cmd | test("gh pr checks"; "i")) then "repo_cli_pr_checks"
   elif (cmd | test("&&|\\|\\||;|\\n|\\r"; "i")) then "chaining"
@@ -107,11 +109,12 @@ def category:
   elif (combined | test("regex parse error|usage_error|ambiguous argument|unknown revision|Wrong arguments or flags|command not found"; "i")) then "command_usage_or_regex_error"
   elif (combined | test("tool call failed|general_error|exit_code.*1"; "i")) then "command_exit_nonzero"
   else "other" end;
-fromjson? | select(type == "object") | select((.ts // 0) >= $cutoff)
+fromjson? | select(type == "object") | select(.record_kind == "tool_call") | select((.ts // 0) >= $cutoff)
 | select(.tool == "Execute" or .tool == "tool_execute")
 '
 
 SURFACE_FILTER='
+include "recorded-tool-outcome";
 def cmd:
   if (.input|type) == "object" then (.input.command // .input.cmd // "")
   elif (.input|type) == "string" then .input
@@ -121,7 +124,7 @@ def output_text:
   elif (.output|type) == "object" and (.output._blob.preview? != null) then .output._blob.preview
   else (.output|tostring) end;
 def combined: output_text + " " + (.action_radius.error // "") + " " + cmd;
-def failed: (.success == false);
+def failed: (recorded_call_outcome == "failed");
 def inferred_shape:
   if (cmd | test("gh pr checks"; "i")) then "repo_cli_pr_checks"
   elif (cmd | test("&&|\\|\\||;|\\n|\\r"; "i")) then "chaining"
@@ -147,7 +150,7 @@ def category:
   elif (combined | test("regex parse error|usage_error|ambiguous argument|unknown revision|Wrong arguments or flags|command not found"; "i")) then "command_usage_or_regex_error"
   elif (combined | test("tool call failed|general_error|exit_code.*1"; "i")) then "command_exit_nonzero"
   else "other" end;
-fromjson? | select(type == "object") | select((.ts // 0) >= $cutoff)
+fromjson? | select(type == "object") | select(.record_kind == "tool_call") | select((.ts // 0) >= $cutoff)
 | . as $row
 | select(["Execute", "tool_execute", "tool_search_files", "tool_edit_file", "EditFile", "WriteFile"] | index($row.tool))
 '
@@ -159,44 +162,52 @@ echo "cutoff_unix=${CUTOFF}"
 echo "files=${#FILES[@]}"
 echo
 
-jq -Rr --argjson cutoff "$CUTOFF" "$JQ_FILTER | [.success] | @tsv" "${FILES[@]}" |
+jq -L "$SCRIPT_DIR/lib" -Rr --argjson cutoff "$CUTOFF" "$JQ_FILTER | [recorded_call_outcome] | @tsv" "${FILES[@]}" |
 awk '
-  BEGIN { total=0; fail=0; ok=0 }
-  { total++; if ($1 == "false") fail++; else ok++ }
+  BEGIN { total=0; fail=0; ok=0; deferred=0; unsettled=0; malformed=0 }
+  {
+    total++
+    if ($1 == "failed") fail++
+    else if ($1 == "succeeded") ok++
+    else if ($1 == "deferred") deferred++
+    else if ($1 == "unsettled") unsettled++
+    else malformed++
+  }
   END {
     pct = total > 0 ? fail * 100.0 / total : 0
-    printf "total\t%d\nfailed\t%d\nok\t%d\nfailure_pct\t%.2f\n\n", total, fail, ok, pct
+    printf "total\t%d\nfailed\t%d\nok\t%d\ndeferred\t%d\nunsettled\t%d\nmalformed\t%d\nfailure_pct\t%.2f\n\n", total, fail, ok, deferred, unsettled, malformed, pct
   }
 '
 
 echo "[failure categories]"
-jq -Rr --argjson cutoff "$CUTOFF" "$JQ_FILTER | select(failed) | category" "${FILES[@]}" |
+jq -L "$SCRIPT_DIR/lib" -Rr --argjson cutoff "$CUTOFF" "$JQ_FILTER | select(failed) | category" "${FILES[@]}" |
 sort | uniq -c | sort -nr
 echo
 
 echo "[top failed commands]"
-jq -Rr --argjson cutoff "$CUTOFF" "$JQ_FILTER | select(failed) | [category, cmd] | @tsv" "${FILES[@]}" |
+jq -L "$SCRIPT_DIR/lib" -Rr --argjson cutoff "$CUTOFF" "$JQ_FILTER | select(failed) | [category, cmd] | @tsv" "${FILES[@]}" |
 sort | uniq -c | sort -nr | awk 'NR <= 40 { print }'
 
 echo
 echo "[surface summary]"
-jq -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | [.tool, (if failed then \"failed\" else \"ok\" end)] | @tsv" "${FILES[@]}" |
+jq -L "$SCRIPT_DIR/lib" -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | [.tool, recorded_call_outcome] | @tsv" "${FILES[@]}" |
 awk '
   BEGIN {
     split("Execute tool_execute tool_search_files tool_edit_file EditFile WriteFile", order, " ")
-    print "tool\tfailed\tok\tfailure_pct"
+    print "tool\tfailed\tok\tother\tfailure_pct"
   }
   {
     total[$1]++
     if ($2 == "failed") fail[$1]++
-    else ok[$1]++
+    else if ($2 == "succeeded") ok[$1]++
+    else other[$1]++
   }
   END {
     for (i = 1; i <= length(order); i++) {
       tool = order[i]
       if (total[tool] > 0) {
         pct = fail[tool] * 100.0 / total[tool]
-        printf "%s\t%d\t%d\t%.2f\n", tool, fail[tool] + 0, ok[tool] + 0, pct
+        printf "%s\t%d\t%d\t%d\t%.2f\n", tool, fail[tool] + 0, ok[tool] + 0, other[tool] + 0, pct
       }
     }
   }
@@ -204,12 +215,12 @@ awk '
 
 echo
 echo "[surface failure categories]"
-jq -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | select(failed) | [.tool, category] | @tsv" "${FILES[@]}" |
+jq -L "$SCRIPT_DIR/lib" -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | select(failed) | [.tool, category] | @tsv" "${FILES[@]}" |
 sort | uniq -c | sort -nr | awk 'NR <= 80 { print }'
 
 echo
 echo "[top failed commands by surface]"
-jq -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | select(failed) | [.tool, category, cmd] | @tsv" "${FILES[@]}" |
+jq -L "$SCRIPT_DIR/lib" -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | select(failed) | [.tool, category, cmd] | @tsv" "${FILES[@]}" |
 sort | uniq -c | sort -nr | awk 'NR <= 80 { print }'
 
 echo

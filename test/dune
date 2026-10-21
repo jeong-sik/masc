@@ -1047,9 +1047,8 @@
   ;; test_keeper_chat_event_log replays provider retry observations; the wire
   ;; payloads live in the runtime library.
   masc.runtime
-  ;; test_keeper_model_input_demotion installs a one-worker Domain_pool to
-  ;; prove materialize addresses its bodies there.
-  masc.masc_core eio_main
+  ;; Model-input and delivery-evidence cases exercise a one-worker pool.
+  masc.masc_core eio eio_main
   masc.cost_ledger
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
   masc.skill_config masc.skill_reference masc.skill_snapshot masc.config
@@ -2638,6 +2637,8 @@
 (include stanzas/test_msx_routes.inc)
 
 (include stanzas/test_lane_addon_live_route.inc)
+(include stanzas/test_lane_addon_ask_routes.inc)
+(include stanzas/test_lane_addon_scheduled_act.inc)
 
 (include stanzas/test_lane_addon_lifecycle.inc)
 
@@ -3035,6 +3036,7 @@
 (include stanzas/test_keeper_native_result_retention.inc)
 (include stanzas/test_keeper_native_context_resume.inc)
 (include stanzas/test_keeper_native_reconcile_after_dispatch.inc)
+(include stanzas/test_keeper_native_receipt_during_stop.inc)
 (include stanzas/test_keeper_native_checkpoint_release.inc)
 (include stanzas/test_keeper_ingress_native_restart.inc)
 (include stanzas/test_keeper_native_repetition_recovery.inc)
@@ -3876,6 +3878,8 @@
  masc
  masc_workspace
  masc_tui_agenda
+ masc_tui_approvals_model
+ masc_tui_ask_projection
  masc_tui_home
  masc_tui_markdown_render_cache
  masc_tui_message_layout
@@ -5198,7 +5202,7 @@
 (test
  (name test_installed_dashboard)
  (modules test_installed_dashboard)
- (libraries masc_test_deps ptime masc.time_codec))
+ (libraries masc_test_deps ptime masc.time_codec masc_core eio eio_main))
 
 (include stanzas/test_keeper_repetition_scope.inc)
 
@@ -5558,7 +5562,7 @@
 (test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
- (libraries masc.lane_addon_call_context masc masc.string_util masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat))
+ (libraries masc.lane_addon_call_context masc masc.string_util masc_random_id mcp_protocol alcotest eio eio_main yojson unix digestif masc.fs_compat base64))
 
 (include stanzas/test_bedrock_sdk.inc)
 (test
@@ -5671,7 +5675,12 @@
        ../docs/examples/lane-addons/dos-statistics.toml
        ../docs/examples/lane-addons/output-statistics.toml
        ../addons/fusion-compute/lane.toml ../addons/fusion-report/lane.toml
-       (glob_files ../docs/examples/lane-addons/fusion-compute/*.toml))
+       (glob_files ../docs/examples/lane-addons/fusion-compute/*.toml)
+       ; The operator quiz case loads its declaration and runs its worker.
+       ../docs/examples/lane-addons/operator-quiz.toml ../addons/protocol.py
+       (glob_files ../addons/operator-quiz/*.py) ../addons/operator-quiz/lane.toml
+       (glob_files ../addons/operator-quiz/schemas/*.json)
+       (glob_files ../addons/operator-quiz/prompts/*.md))
  (libraries alcotest masc yojson unix))
 
 (test
@@ -5692,7 +5701,7 @@
  (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.msx_lane masc.msx_worker
   mcp_protocol mcp_protocol.eio eio eio.unix eio_main yojson unix))
 
-(include stanzas/test_lane_quiz_packages.inc)
+(include stanzas/test_operator_quiz_package.inc)
 (include stanzas/test_lane_fusion_compute_packages.inc)
 
 (test
@@ -5765,6 +5774,31 @@
  (name test_tui_browser_history_model)
  (modules test_tui_browser_history_model)
  (libraries masc_tui_types masc yojson masc.masc_tool_blob_store))
+
+(test
+ (name test_lane_addon_asks)
+ (modules test_lane_addon_asks)
+ (libraries masc_test_deps masc.fs_compat eio eio_main yojson unix))
+
+(test
+ (name test_lane_addon_records)
+ (modules test_lane_addon_records)
+ (libraries masc_test_deps yojson))
+
+(test
+ (name test_lane_addon_host_cycle)
+ (modules test_lane_addon_host_cycle)
+ (libraries masc_test_deps exact_output_fixture eio eio_main yojson unix base64))
+
+(test
+ (name test_lane_addon_host_request)
+ (modules test_lane_addon_host_request)
+ (libraries masc_test_deps yojson))
+
+(test
+ (name test_lane_addon_exact)
+ (modules test_lane_addon_exact)
+ (libraries masc_test_deps eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_actions)
@@ -5934,6 +5968,16 @@
 (include stanzas/test_candle_balance.inc)
 
 (include stanzas/test_candle_appraiser_transport.inc)
+
+(test
+ (name test_lane_addon_exact_runner)
+ (modules test_lane_addon_exact_runner)
+ (libraries masc_test_deps masc.server exact_output_fixture))
+
+(test
+ (name test_exact_lane_failure)
+ (modules test_exact_lane_failure)
+ (libraries masc_test_deps masc.server))
 
 (test
  (name test_lane_addon_broadcast_delivery)

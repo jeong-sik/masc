@@ -96,22 +96,16 @@ let prune_jsonl_at_resolved_window ~base_path =
     diagnostics }
 
 let startup_prune_jsonl (state : Mcp_server.server_state) =
-  (try
-     let config = Mcp_server.workspace_config state in
-     let outcome =
-       prune_jsonl_at_resolved_window ~base_path:config.base_path
-     in
-     List.iter
-       (fun diagnostic ->
-          Log.Misc.warn "startup prune: ignoring runtime.toml [maintenance]: %s"
-            (Server_maintenance_toml_config.diagnostic_to_string diagnostic))
-       outcome.diagnostics;
-     if outcome.pruned > 0 then
-         Log.Misc.info "startup prune: pruned %d old JSONL day-files (retention=%dd from %s)"
-         outcome.pruned outcome.days (retention_source_label outcome.source)
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn -> Log.Misc.warn "startup prune failed: %s (next boot retries; disk impact bounded by retention)" (Printexc.to_string exn))
+  let config = Mcp_server.workspace_config state in
+  let outcome = prune_jsonl_at_resolved_window ~base_path:config.base_path in
+  List.iter
+    (fun diagnostic ->
+       Log.Misc.warn "startup prune: ignoring runtime.toml [maintenance]: %s"
+         (Server_maintenance_toml_config.diagnostic_to_string diagnostic))
+    outcome.diagnostics;
+  if outcome.pruned > 0 then
+    Log.Misc.info "startup prune: pruned %d old JSONL day-files (retention=%dd from %s)"
+      outcome.pruned outcome.days (retention_source_label outcome.source)
 
 
 (** Collect abandoned guests without making unrelated Keeper readiness wait
@@ -214,21 +208,28 @@ let report_unarmed_typesafeai_destinations () =
     (Typesafeai_config.unarmed_destinations ())
 ;;
 
-let start_microvm_guest_maintenance ~sw ~sweep =
+type task = Jsonl_retention | Microvm_guest_sweep
+
+let task_name = function
+  | Jsonl_retention -> "jsonl_prune"
+  | Microvm_guest_sweep -> "microvm_guest_sweep"
+
+let start_maintenance ~sw ~task ~run =
   Eio.Fiber.fork ~sw (fun () ->
+    let name = task_name task in
     let started_at = Unix.gettimeofday () in
-    Log.Server.info "startup maintenance: starting microvm_guest_sweep";
+    Log.Server.info "startup maintenance: starting %s" name;
     try
-      sweep ();
+      run ();
       Eio.Fiber.check ();
       Log.Server.info
-        "startup maintenance: finished microvm_guest_sweep elapsed_s=%.3f"
+        "startup maintenance: finished %s elapsed_s=%.3f" name
         (Unix.gettimeofday () -. started_at)
     with
     | Eio.Cancel.Cancelled _ as exn ->
-      Log.Server.info "startup maintenance: cancelled microvm_guest_sweep";
+      Log.Server.info "startup maintenance: cancelled %s" name;
       raise exn
     | exn ->
-      Log.Server.warn "startup maintenance: microvm_guest_sweep failed: %s"
+      Log.Server.warn "startup maintenance: %s failed: %s" name
         (Printexc.to_string exn))
 ;;

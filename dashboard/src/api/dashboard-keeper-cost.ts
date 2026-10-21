@@ -45,8 +45,17 @@ function costMatrixModelLabel(value: string | undefined, index: number): string 
   return label === UNKNOWN_MODEL_LABEL ? `${UNKNOWN_MODEL_LABEL}_${index + 1}` : label
 }
 
+/** What the server could read of one keeper's metrics store. `failed` means the
+ *  store could not be read at all, so the sums are empty because nothing was
+ *  read, not because nothing happened. `read` with malformed rows or turn rows
+ *  it could not read means the sums count only what was readable. */
+export type KeeperMetricsRead =
+  | { state: 'read'; malformed_rows: number; unread_turn_rows: number }
+  | { state: 'failed'; reason: string }
+
 export interface KeeperCostMetric {
   keeper_name: string
+  metrics_read: KeeperMetricsRead
   // Sum over the samples whose runtime reported a cost. `null` when no sample
   // in the window reported one (subscription runtimes write `cost_usd: null`),
   // so an unknown cost never reads as $0.
@@ -83,10 +92,28 @@ function reportedSum(raw: unknown, reportedSamples: number): number | null | und
   return sum
 }
 
+// A state the producer does not write is a row this decoder cannot trust.
+function decodeMetricsRead(raw: unknown): KeeperMetricsRead | null {
+  if (!isRecord(raw)) return null
+  if (raw.state === 'read') {
+    const malformed = asInt(raw.malformed_rows)
+    const unreadTurns = asInt(raw.unread_turn_rows)
+    if (malformed === undefined || unreadTurns === undefined || malformed < 0 || unreadTurns < 0) return null
+    return { state: 'read', malformed_rows: malformed, unread_turn_rows: unreadTurns }
+  }
+  if (raw.state === 'failed') {
+    const reason = asString(raw.reason)
+    return reason ? { state: 'failed', reason } : null
+  }
+  return null
+}
+
 function decodeKeeperCostMetric(raw: unknown): KeeperCostMetric | null {
   if (!isRecord(raw)) return null
   const keeperName = asString(raw.keeper_name)
   if (!keeperName) return null
+  const metricsRead = decodeMetricsRead(raw.metrics_read)
+  if (metricsRead === null) return null
   const costReported = asInt(raw.cost_reported_samples)
   const costUnreported = asInt(raw.cost_unreported_samples)
   const costUnread = asInt(raw.cost_unread_samples)
@@ -107,6 +134,7 @@ function decodeKeeperCostMetric(raw: unknown): KeeperCostMetric | null {
   ) return null
   return {
     keeper_name: keeperName,
+    metrics_read: metricsRead,
     total_cost_usd: totalCost,
     cost_reported_samples: costReported,
     cost_unreported_samples: costUnreported,
@@ -137,12 +165,19 @@ function decodeKeeperCostMetricsResponse(raw: unknown): KeeperCostMetricsRespons
     return { state: 'pending', window_minutes: window }
   }
   if (raw.state !== undefined || !Array.isArray(raw.keepers)) return null
+  // A row this decoder cannot read fails the whole payload. Dropping it leaves
+  // the list a keeper short with nothing saying so, and a list that lost every
+  // row reads as "no cost recorded in this window".
+  const keepers: KeeperCostMetric[] = []
+  for (const row of raw.keepers) {
+    const metric = decodeKeeperCostMetric(row)
+    if (metric === null) return null
+    keepers.push(metric)
+  }
   return {
     state: 'ready',
     window_minutes: asNumber(raw.window_minutes),
-    keepers: asRecordArray(raw.keepers)
-      .map(decodeKeeperCostMetric)
-      .filter((metric): metric is KeeperCostMetric => metric !== null),
+    keepers,
     generated_at: asNumber(raw.generated_at) ?? null,
   }
 }

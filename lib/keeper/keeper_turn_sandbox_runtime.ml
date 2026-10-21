@@ -2219,35 +2219,24 @@ let start_container ?timeout_sec (t : t) =
                       name loss is the winner's, and this call adopts the
                       winner. *)
                    adopt_running ()
-                 | Ok (Keeper_sandbox_runtime.Docker_container_stopped | Keeper_sandbox_runtime.Docker_container_absent)
-                 | Error _ -> let status_label =
-                     match st with
-                     | Unix.WEXITED code -> Printf.sprintf "exit=%d" code
-                     | Unix.WSIGNALED signal ->
-                       Printf.sprintf "signal=%d" signal
-                     | Unix.WSTOPPED signal ->
-                       Printf.sprintf "stopped=%d" signal
-                   in
-                   let base_path_hash =
-                     Keeper_sandbox_runtime.base_path_hash t.config.base_path
-                   in
-                   let network_label = network_mode_to_string t.network_mode in
-                   let mount_context =
-                     Keeper_sandbox_runtime.docker_mount_failure_context_suffix
-                       ~base_path_hash
-                       ~keeper_name:t.meta.name
-                       ~image
-                       ~status_label
-                       ~container_kind:
-                         Keeper_sandbox_runtime.persistent_container_kind
-                       ~network_label
-                       out
-                   in
+                 | ( Ok
+                       ( Keeper_sandbox_runtime.Docker_container_stopped
+                       | Keeper_sandbox_runtime.Docker_container_absent )
+                   | Error _ ) as container_state ->
                    Error
-                     (Printf.sprintf
-                        "docker_container_start_failed: %s%s"
-                        (Keeper_sandbox_runtime.docker_failure_output_for_log out)
-                        mount_context)))))))
+                     (Keeper_sandbox_exec_failure.docker_run_failure_message
+                        ~prefix:"docker_container_start_failed"
+                        ~base_path_hash:
+                          (Keeper_sandbox_runtime.base_path_hash t.config.base_path)
+                        ~keeper_name:t.meta.name
+                        ~container_kind:
+                          Keeper_sandbox_runtime.persistent_container_kind
+                        ~network_label:(network_mode_to_string t.network_mode)
+                        ~image
+                        ~status:st
+                        ~container_state
+                        ~output:out
+                        ())))))))
   in
   match probe_state () with
   | Ok Keeper_sandbox_runtime.Docker_container_running -> adopt_running ()

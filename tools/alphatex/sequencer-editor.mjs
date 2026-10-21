@@ -1,6 +1,8 @@
 import { newProject, validateProject, editProject, beats, pitch, PPQ, harmonyAt } from './sequencer-project.mjs'
-import { sourceEditor, sourceSelected, sourceAction, sourceCommand, sourceHarmony } from './midi-source-editor.mjs'
+import { sourceEditor, sourceSelected, sourceAction, sourceCommand, sourceHarmony, sourceMeterAt } from './midi-source-editor.mjs'
 import { validateSound } from './project-sound.mjs'
+import { noteSelectionCommand, retainNoteSelection, selectedNotes, moveSelectedNotes } from './note-selection.mjs'
+export { selectedNotes } from './note-selection.mjs'
 
 export function editorSound(editor, sound) {
   validateSound(sound)
@@ -29,6 +31,17 @@ function apply(editor, edit) {
   return { ...editor, project, undo: [...editor.undo, editor.project], redo: [] }
 }
 export function editorAction(editor, action) {
+  const selection = selectedNotes(editor)
+  let next
+  if (selection.length && action.kind === 'remove') next = noteSelectionCommand(editor, 'delete-notes', [])
+  else if (selection.length && action.kind === 'move-note') {
+    // Typed raw-tick keyboard movement must not round-trip through decimal beats.
+    next = moveSelectedNotes(editor, action.ticks ?? 0, action.pitches ?? 0)
+  } else if (selection.length && action.kind === 'toggle-note') throw new Error('Clear the note selection before inserting or toggling one note')
+  else next = act(editor, action)
+  return retainNoteSelection(editor, next, { history: ['undo', 'redo'].includes(action.kind) })
+}
+function act(editor, action) {
   if (editor.project.kind === 'midi-source') return sourceAction(editor, action)
   const note = selectedNote(editor)
   switch (action.kind) {
@@ -61,8 +74,15 @@ export function editorAction(editor, action) {
       const source = editor[action.kind]
       if (!source.length) return editor
       const project = source.at(-1), other = action.kind === 'undo' ? 'redo' : 'undo'
+      const track = Math.min(editor.track, project.tracks.length - 1)
+      // Note IDs are scoped to a track. Follow the actual selected voice only
+      // when that same track survives; a deleted track must not select its peer.
+      const restored = project.tracks[track].id === editor.project.tracks[editor.track].id
+        ? project.tracks[track].notes.find(value => value.id === note?.id) : undefined
+      const inside = restored && restored.start <= editor.tick && editor.tick < restored.start + restored.duration
       return { ...editor, project, [action.kind]: source.slice(0, -1), [other]: [...editor[other], editor.project],
-        track: Math.min(editor.track, project.tracks.length - 1), tick: Math.min(editor.tick, project.length - 1) }
+        track, tick: restored && !inside ? restored.start : Math.min(editor.tick, project.length - 1),
+        pitch: restored?.pitch ?? editor.pitch }
     }
     case 'mute': case 'solo': {
       const track = editor.project.tracks[editor.track], field = action.kind === 'mute' ? 'muted' : 'solo'
@@ -73,7 +93,43 @@ export function editorAction(editor, action) {
 }
 
 // A small exact command grammar. Commands yield typed effects; the terminal owns IO.
+export function stepInputEffect(line) {
+  const [command, ...args] = line.trim().split(/\s+/)
+  if (command === 'practice-record') {
+    if (args.length < 1 || args.length > 2) throw new Error('Use :practice-record PATH [SOURCE_UID]')
+    return { kind: 'step-input', source: args[1], monitor: true, practice: true, recording: { path: args[0] } }
+  }
+  if (command === 'practice-input') {
+    if (args.length > 1) throw new Error('Use :practice-input [SOURCE_UID]')
+    return { kind: 'step-input', source: args[0], monitor: true, practice: true }
+  }
+  if (command === 'step-input') {
+    const sources = args.filter(arg => arg !== '--monitor')
+    if (sources.length > 1 || args.length - sources.length > 1) throw new Error('Use :step-input [SOURCE_UID] [--monitor]')
+    return { kind: 'step-input', source: sources[0], ...(args.includes('--monitor') ? { monitor: true } : {}) }
+  }
+  if (command === 'step-stop') {
+    if (args.length) throw new Error('Use :step-stop')
+    return { kind: 'step-stop' }
+  }
+  if (command === 'step-diagnostics') {
+    if (args.length !== 1) throw new Error('Use :step-diagnostics PATH')
+    return { kind: 'step-diagnostics', path: args[0] }
+  }
+  if (command === 'step-length' || command === 'step-rest') {
+    if (args.length > 1 || (command === 'step-length' && args.length !== 1)) throw new Error(`Use :${command} ${command === 'step-rest' ? '[VALUE]' : 'VALUE'}`)
+    return { kind: command, value: args[0] }
+  }
+}
 export function editorCommand(editor, line) {
+  const effect = stepInputEffect(line)
+  if (effect) return { editor, effect }
+  const [command, ...args] = line.trim().split(/\s+/)
+  const selected = noteSelectionCommand(editor, command, args)
+  const result = selected === undefined ? runCommand(editor, line) : { editor: selected }
+  return { ...result, editor: retainNoteSelection(editor, result.editor, { history: ['undo', 'redo'].includes(command) }) }
+}
+function runCommand(editor, line) {
   if (editor.project.kind === 'midi-source') return sourceCommand(editor, line)
   const [command, ...args] = line.trim().split(/\s+/)
   const count = (min, max = min) => {
@@ -83,6 +139,7 @@ export function editorCommand(editor, line) {
   switch (command) {
     case 'note': count(3, 4); edit = { kind: 'note', pitch: pitch(args[0]), start: beats(args[1]), duration: beats(args[2]), velocity: args[3] === undefined ? editor.velocity : Number(args[3]) }; break
     case 'chord': count(3, 6); edit = { kind: 'chord', symbol: args[0], start: beats(args[1]), duration: beats(args[2]), mode: args[3] ?? 'close', octave: args[4] === undefined ? 4 : Number(args[4]), inversion: args[5] === undefined ? 0 : Number(args[5]), velocity: editor.velocity }; break
+    case 'revoice': count(2, 4); edit = { kind: 'revoice', tick: editor.tick, symbol: args[0], mode: args[1], octave: args[2] === undefined ? 4 : Number(args[2]), inversion: args[3] === undefined ? 0 : Number(args[3]) }; break
     case 'progression': count(4, Number.MAX_SAFE_INTEGER); edit = { kind: 'progression', start: beats(args[0]), duration: beats(args[1]), mode: args[2], octave: 3, symbols: args.slice(3), velocity: editor.velocity }; break
     case 'tempo': count(1); edit = { kind: 'tempo', value: Number(args[0]) }; break
     case 'length': count(1); edit = { kind: 'length', value: beats(args[0]) }; break
@@ -106,6 +163,11 @@ export function editorCommand(editor, line) {
       if (tick >= editor.project.length) throw new Error('Cursor outside project')
       return { editor: { ...editor, tick, pitch: pitch(args[1]) } }
     }
+    case 'harmony':
+      count(0, 1)
+      if (args[0] !== undefined && !['mix', 'track'].includes(args[0])) throw new Error('Use :harmony mix or :harmony track')
+      return { editor, effect: { kind: 'harmony', scope: args[0] ?? 'mix' } }
+    case 'harmony-export': count(1, Number.MAX_SAFE_INTEGER); return { editor, effect: { kind: 'harmony-export', path: args.join(' ') } }
     case 'save': case 'play': case 'stop': case 'record': case 'help': case 'arrange':
       count(0); return { editor, effect: { kind: command } }
     case 'save-as': case 'export': case 'wave': case 'output': case 'midi-output':
@@ -117,9 +179,15 @@ export function editorCommand(editor, line) {
     default: throw new Error(`Unknown command: ${command}; use :help`)
   }
   const next = apply(editor, edit)
-  return { editor: command === 'track-add' ? { ...next, track: next.project.tracks.length - 1 } : next }
+  if (command === 'revoice') {
+    const selected = selectedNote(editor)
+    const voice = next.project.tracks[next.track].notes.find(note => note.id === selected?.id)
+    return { editor: voice ? { ...next, pitch: voice.pitch } : next }
+  }
+  return { editor: command === 'track-add' ? { ...next, track: next.project.tracks.length - 1 } : next,
+    ...(command === 'loop' ? { effect: { kind: 'loop' } } : {}) }
 }
 
-export const editorView = editor => editor.view ?? editor.project
+export const editorView = editor => editor.project.kind === 'midi-source' ? { ...editor.view, meter: sourceMeterAt(editor) } : editor.view ?? editor.project
 export const editorAxis = editor => editor.axis ?? { per: PPQ, label: 'beats' }
 export const editorHarmony = editor => editor.project.kind === 'midi-source' ? sourceHarmony(editor) : harmonyAt(editor.project, editor.tick)

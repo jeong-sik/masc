@@ -5,7 +5,6 @@ type publication_error =
   | Registry_not_published
   | Publication_busy
   | Replacement_base_changed
-  | Blank_lane_id of { position : int }
   | Duplicate_lane_id of
       { position : int
       ; lane_id : string
@@ -107,7 +106,7 @@ type resolved_lane =
 
 type lane_resolution_error =
   | Exact_lane_unconfigured of { lane_id : string }
-  | Exact_lane_off of { lane_id : string }
+  | Exact_lane_off of { lane_id : string; owner : Runtime_schema.exact_lane_owner }
   | No_admitted_lane_slots of { lane_id : string }
 
 val subscribe_lane_changes : lane_id:string -> (unit -> unit) -> (unit -> unit)
@@ -226,6 +225,10 @@ val rejected_target_bindings
   -> Agent_core.Exact_output.rejected_target_binding list
 (** Declared targets the resolver snapshot of [t] excluded because their
     provider or model has no catalog row. *)
+
+val declared_lanes : t -> Runtime_schema.exact_output_lane_decl list
+(** Every lane table runtime.toml declares, built-in and add-on, in file
+    order, before admission dropped anything. *)
 
 val declared_lane
   :  t

@@ -1344,6 +1344,222 @@ describe('ApprovalsSurface', () => {
     expect(main?.getAttribute('data-screen-label')).toBe('Gate HITL 큐')
   })
 
+  describe('input the preview cuts off', () => {
+    // The dangerous part sits past any plausible preview limit. The server's
+    // preview is only the head, so the screen has to carry the rest itself.
+    const dangerous = 'rm -rf /srv/data'
+    const longInput = { command: `echo ${'a'.repeat(400)} && ${dangerous}` }
+    const cutPreview = `${JSON.stringify(longInput).slice(0, 200)}…`
+
+    function cardButtons() {
+      return {
+        approve: container.querySelector<HTMLButtonElement>('.ap-card .ap-act.approve'),
+        always: container.querySelector<HTMLButtonElement>('.ap-card .ap-act.always'),
+        deny: container.querySelector<HTMLButtonElement>('.ap-card .ap-act.deny'),
+      }
+    }
+
+    function openFullInput() {
+      const details = container.querySelector<HTMLDetailsElement>('.ap-card [data-testid="approval-input-full"]')
+      expect(details).not.toBeNull()
+      details!.open = true
+      details!.dispatchEvent(new Event('toggle'))
+    }
+
+    it('carries the text past the preview in the card and holds Approve until it is opened', async () => {
+      const { ApprovalsSurface, resolveGateApproval } = await loadSurface([
+        queueItem({ id: 'appr-long', input: longInput, input_preview: cutPreview }),
+      ])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      expect(container.querySelector('.ap-card [data-testid="approval-input-full"]')?.textContent).toContain(dangerous)
+      const held = cardButtons()
+      expect(held.approve?.disabled).toBe(true)
+      expect(held.always?.disabled).toBe(true)
+      expect(held.deny?.disabled).toBe(false)
+
+      held.approve?.click()
+      await flushUi()
+      expect(resolveGateApproval).not.toHaveBeenCalled()
+
+      openFullInput()
+      await flushUi()
+      const released = cardButtons()
+      expect(released.approve?.disabled).toBe(false)
+      expect(released.always?.disabled).toBe(false)
+
+      released.approve?.click()
+      await flushUi()
+      expect(resolveGateApproval).toHaveBeenCalledWith('appr-long', { decision: 'approve', rememberRule: false })
+    })
+
+    it('keeps Approve held until the box has been scrolled to its end', async () => {
+      const { ApprovalsSurface, resolveGateApproval } = await loadSurface([
+        queueItem({ id: 'appr-scroll', input: longInput, input_preview: cutPreview }),
+      ])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      // happy-dom lays nothing out, so give the box the geometry of a text that
+      // overflows its frame: 1000px of text in a 320px box.
+      const box = container.querySelector<HTMLElement>('.ap-card .ap-input-pre')!
+      let scrollTop = 0
+      Object.defineProperty(box, 'scrollHeight', { configurable: true, get: () => 1000 })
+      Object.defineProperty(box, 'clientHeight', { configurable: true, get: () => 320 })
+      Object.defineProperty(box, 'scrollTop', { configurable: true, get: () => scrollTop, set: (v: number) => { scrollTop = v } })
+
+      openFullInput()
+      await flushUi()
+      expect(cardButtons().approve?.disabled).toBe(true)
+      expect(cardButtons().always?.disabled).toBe(true)
+
+      scrollTop = 300
+      box.dispatchEvent(new Event('scroll'))
+      await flushUi()
+      expect(cardButtons().approve?.disabled).toBe(true)
+
+      scrollTop = 680
+      box.dispatchEvent(new Event('scroll'))
+      await flushUi()
+      expect(cardButtons().approve?.disabled).toBe(false)
+      expect(cardButtons().always?.disabled).toBe(false)
+
+      cardButtons().approve?.click()
+      await flushUi()
+      expect(resolveGateApproval).toHaveBeenCalledWith('appr-scroll', { decision: 'approve', rememberRule: false })
+    })
+
+    it('holds a request again, and closes the box, when its input hash changes after it was read', async () => {
+      const first = queueItem({ id: 'appr-rehash', input: longInput, input_preview: cutPreview, input_hash: 'a'.repeat(64) })
+      const { ApprovalsSurface, gateSignals } = await loadSurface([first])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      openFullInput()
+      await flushUi()
+      expect(cardButtons().approve?.disabled).toBe(false)
+
+      // The same request id now stands for a different input.
+      const changed = queueItem({
+        id: 'appr-rehash',
+        input: { command: `echo changed && ${dangerous}` },
+        input_preview: cutPreview,
+        input_hash: 'b'.repeat(64),
+      })
+      gateSignals.gateResource.reset({ ...gateSignals.gateData.value!, approval_queue: [changed] })
+      await flushUi()
+
+      expect(cardButtons().approve?.disabled).toBe(true)
+      expect(cardButtons().always?.disabled).toBe(true)
+      const details = container.querySelector<HTMLDetailsElement>('.ap-card [data-testid="approval-input-full"]')
+      expect(details?.open).toBe(false)
+
+      // A browser also fires `toggle` when the box is closed from outside. That
+      // close is not a reading and must not release the new request.
+      details!.dispatchEvent(new Event('toggle'))
+      await flushUi()
+      expect(cardButtons().approve?.disabled).toBe(true)
+      expect(cardButtons().always?.disabled).toBe(true)
+    })
+
+    it('writes invisible and reordering characters out by code point', async () => {
+      const tricky = { command: `ls ${'a'.repeat(300)}‮ txt.sh` }
+      const { ApprovalsSurface } = await loadSurface([
+        queueItem({ id: 'appr-bidi', input: tricky, input_preview: cutPreview }),
+      ])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      const text = container.querySelector('.ap-card [data-testid="approval-input-full"]')?.textContent ?? ''
+      expect(text).toContain('U+202E')
+      expect(text).not.toContain('‮')
+    })
+
+    it.each([
+      { command: 'echo \u202Eevil\u200B' },
+      'echo \u202Eevil\u200B',
+    ])('shows code points in an exact short preview: %j', async input => {
+      const { ApprovalsSurface } = await loadSurface([
+        queueItem({ id: 'appr-short-invisible', input, input_preview: JSON.stringify(input) }),
+      ])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      const text = container.querySelector('.ap-card .ap-req-quote')?.textContent ?? ''
+      expect(text).toContain('⟦U+202E⟧')
+      expect(text).toContain('⟦U+200B⟧')
+      expect(text).not.toContain('\u202E')
+      expect(text).not.toContain('\u200B')
+      expect(container.querySelector('[data-testid="approval-input-full"]')).toBeNull()
+      expect(cardButtons().approve?.disabled).toBe(false)
+    })
+
+    it('shows code points when only a preview was sent', async () => {
+      const { ApprovalsSurface } = await loadSurface([
+        queueItem({ id: 'appr-preview-invisible', input_preview: 'echo \u202Eevil\u200B' }),
+      ])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      const text = container.querySelector('.ap-card .ap-req-quote')?.textContent ?? ''
+      expect(text).toContain('⟦U+202E⟧')
+      expect(text).toContain('⟦U+200B⟧')
+      expect(text).not.toContain('\u202E')
+      expect(text).not.toContain('\u200B')
+    })
+
+    it('does not hold Approve when the preview is the whole input', async () => {
+      const input = { path: 'a.txt', content: 'hello' }
+      const { ApprovalsSurface } = await loadSurface([
+        queueItem({ id: 'appr-short', input, input_preview: JSON.stringify(input) }),
+      ])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      expect(container.querySelector('[data-testid="approval-input-full"]')).toBeNull()
+      expect(cardButtons().approve?.disabled).toBe(false)
+    })
+
+    it('says so when the server sent only the preview, without holding the decision', async () => {
+      const { ApprovalsSurface } = await loadSurface([
+        queueItem({ id: 'appr-preview-only', input_preview: cutPreview }),
+      ])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      expect(container.querySelector('.ap-card [data-testid="approval-input-note"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="approval-input-full"]')).toBeNull()
+      expect(cardButtons().approve?.disabled).toBe(false)
+    })
+
+    it('shows the full input open in the detail panel', async () => {
+      const { ApprovalsSurface } = await loadSurface([
+        queueItem({ id: 'appr-detail', input: longInput, input_preview: cutPreview }),
+      ])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+      container.querySelector<HTMLButtonElement>('[data-approval-id="appr-detail"] .ap-detail-toggle')?.click()
+      await flushUi()
+
+      const panelInput = container.querySelector<HTMLDetailsElement>(
+        '[data-testid="approval-detail-panel"] [data-testid="approval-input-full"]',
+      )
+      expect(panelInput?.open).toBe(true)
+      expect(panelInput?.textContent).toContain(dangerous)
+    })
+
+    it('puts the input hash prefix beside the decision', async () => {
+      const { ApprovalsSurface } = await loadSurface([
+        queueItem({ id: 'appr-hash', input_hash: 'abcdef012345'.padEnd(64, '0') }),
+      ])
+      render(html`<${ApprovalsSurface} />`, container)
+      await flushUi()
+
+      expect(container.querySelector('.ap-card [data-testid="approval-input-hash"]')?.textContent?.trim()).toBe('#abcdef012345')
+    })
+  })
+
   it('routes the 승인 action through respondToKeeperApproval → resolveGateApproval', async () => {
     const { ApprovalsSurface, resolveGateApproval } = await loadSurface([
       queueItem({ id: 'appr-9', keeper_name: 'masc-improver' }),

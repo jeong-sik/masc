@@ -377,7 +377,9 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
           | P.Drained ->
             (* §4.3 releases the limit when the backlog is read to its end, and
                on no other outcome: one narrowed commit does not show that the
-               range which refused now fits. *)
+               range which refused now fits. A superseded checkpoint has no
+               backlog left, and the width was measured on atoms no pass
+               reads again. *)
             release_width ~config ~keeper_name;
             observe O.No_source
           | P.Source_unreadable | P.Empty_range ->

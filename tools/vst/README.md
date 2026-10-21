@@ -5,6 +5,12 @@ Pedalboard 0.9.26 for plug-in discovery/loading/audio rendering and Mido 1.3.3
 for SMF track merging and tempo changes. It does not open an audio device.
 The caller owns the child, cancellation, output directory and WAV playback.
 
+For continuous keyboard synthesis, `host.py --stream` keeps one project-bound
+instrument loaded across request-driven PCM blocks. It still opens no audio
+device. The consumer supplies the audio clock, MIDI sample offsets and output
+capacity; this is the synthesis layer for live audition, not a completed TUI
+monitoring feature. See [stream protocol](STREAM.md).
+
 This is the native rendering component of the MIDI phrase Lane. It is not a
 new MASC container runtime, and its direct local commands are not
 `masc_lane_act` receipts. A container cannot load a macOS VST binary. The TUI
@@ -72,6 +78,25 @@ destination is never overwritten. The result includes WAV, MIDI, preset and plug
 state hashes, the reported plug-in identity/version, sample rate, frame count,
 peak and output path. These identify a render, not proof that a device played it.
 Native plug-in diagnostics remain on stderr, outside the JSON reply channel.
+
+Raw practice arrangement realization uses `render` with `timeline_path` instead
+of `midi_path`, plus `expected_timeline_sha256`, `sample_rate` and
+`tail_seconds: 0`. The private hashed JSON input is
+`{schemaVersion:1, kind:"practice-vst", sampleRate, frames, events}`. `frames`
+and each event's `frame` are canonical unsigned decimal strings; events are
+nondecreasing `{frame, bytes}` records strictly inside the render horizon.
+The host validates identity, frame/message bounds and authoritative preset
+policy before opening a plugin, and returns `timeline_sha256` instead of
+`midi_sha256`. Supplying both source types is an error.
+
+The worker derives these MIDI1 events from verified raw UMP using the existing
+practice-monitor projection. High-resolution values are reduced for synthesis;
+the original source is never rewritten. A private final guard sample may realize
+an event rounded onto the after-frame boundary, while arrangement regions keep
+the original source interval and never play that padding. Rendering streams
+blocks with retained plugin state, as specified by
+[Pedalboard's instrument process API](https://spotify.github.io/pedalboard/reference/pedalboard.html).
+Use matching updated VST-host and AlphaTex installations for this protocol.
 
 Run the MIDI and process-boundary tests with the same environment:
 

@@ -124,6 +124,14 @@ let discard_open_scope t stream_scope =
       t.blocks;
 ;;
 
+let discard_scope_tools t stream_scope =
+  discard_open_scope t stream_scope;
+  t.finalized <-
+    List.filter
+      (fun (_, (block : finalized_block)) -> block.stream_scope <> stream_scope)
+      t.finalized
+;;
+
 let invalidate_current_scope t =
   if not (List.mem t.current_stream_scope t.invalid_scopes)
   then t.invalid_scopes <- t.current_stream_scope :: t.invalid_scopes
@@ -888,6 +896,13 @@ let on_event t (evt : Agent_core.Types.sse_event) =
   | Agent_core.Types.MessageDelta { stop_reason; _ } ->
     (match t.stream_phase, stop_reason with
      | Accepting_content, None -> ()
+     | Accepting_content, Some Agent_core.Types.MaxTokens ->
+       (* The canonical producer drops every ToolUse at MaxTokens, including
+          already closed blocks with parseable arguments. Keep the source-map
+          inventory aligned without certifying a cut-off call as executable. *)
+       discard_scope_tools t t.current_stream_scope;
+       t.stream_phase <- Stop_reason_seen Agent_core.Types.MaxTokens;
+       t.message_open <- false
      | Accepting_content, Some stop_reason ->
        finalize_open_blocks t;
        t.stream_phase <- Stop_reason_seen stop_reason;
@@ -1095,12 +1110,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
        poisoning the whole scope: remove every tool occurrence in this scope,
        so a subsequent source-free close remains valid. The live bridge emits
        the reader-facing quarantine diagnostic. *)
-    discard_open_scope t stream_scope;
-    t.finalized <-
-      List.filter
-        (fun (_, (block : finalized_block)) ->
-           block.stream_scope <> stream_scope)
-        t.finalized
+    discard_scope_tools t stream_scope
   | Agent_core.Types.Connected
   | Agent_core.Types.ResponsesOutputItems _ | Agent_core.Types.Ping -> ()
   end

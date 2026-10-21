@@ -26,7 +26,7 @@ import { MidiSourcePicker } from './midi-source-picker.mjs'
 const help = [
   ':soundfont-fluid [SF2_PATH] saves a FluidSynth SF2; its control-block timing is reported with the selected sound.',
   ':step-input chooses a MIDI keyboard; :step-input SOURCE_UID arms it directly; :step-stop drains.',
-  ':step-input [SOURCE_UID] --monitor also plays the selected VST through the audio output.',
+  ':step-input [SOURCE_UID] --monitor also plays the selected VST or bound FluidSynth sound through the audio output.',
   ':practice-input [SOURCE_UID] plays live on this track while the other audible phrase tracks repeat; no note edits.',
   ':practice-record PATH [SOURCE_UID] records original MIDI and exact timing into a new take folder; :step-stop saves.',
   ':step-diagnostics PATH exports the current/last monitor output counters and failure.',
@@ -302,7 +302,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.slice(0, rows - 2).forEach((line, row) => { output += `\x1b[${row + 1};1H${fit(line)}` })
     output += `\x1b[${rows - 1};1H${fit(sourcePicker.view ? '↑/↓:choose  Enter:arm keyboard  r:refresh  Esc/q:cancel' : picker.view ? '↑/↓:choose  Enter:select  /:search  e:native editor  p:preset path  Esc:return' : prompt !== null ? `:${prompt}` : harmony ? '↑/↓:choose interval  Enter:go to notes  :commands  Esc/q:return' : 'Space:play  i:instrument  Enter:note  arrows:cursor  Tab:track  :commands  ?:help')}`
-    output += `\x1b[${rows};1H${fit(sourcePicker.view ? openedSourceMenuOwner?.monitor ? 'Selection arms step input with the chosen VST and audio output.' : 'Selection opens MIDI input only; no audio or output route.' : harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 's:save  l:loop  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
+    output += `\x1b[${rows};1H${fit(sourcePicker.view ? openedSourceMenuOwner?.monitor ? 'Selection arms step input with the chosen instrument and audio output.' : 'Selection opens MIDI input only; no audio or output route.' : harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 's:save  l:loop  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
     process.stdout.write(output)
   }
   function stop(options) {
@@ -364,7 +364,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   function startStepInput(source, monitor = false, practice = false, recording) {
     if (!accepting || closed || suspended || childTask) return
     if (stepInput) throw new Error('Stop the previous step input before starting another')
-    if (monitor && (selectedMidiOutput !== undefined || portBindings.length)) throw new Error('Select :audio before VST input monitoring')
+    if (monitor && (selectedMidiOutput !== undefined || portBindings.length)) throw new Error('Select :audio before instrument input monitoring')
     const backing = practice ? phraseBacking(editor.project, editorView(editor).tracks[editor.track].id, loop) : undefined
     stop(); clearHarmony(); showHelp = false
     const owner = openStepInput({ source, getEditor: () => editor,
@@ -380,7 +380,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       onState(state) { stepHeld = state.held; draw() } })
     stepInput = owner; stepOwners.add(owner)
     status = practice ? 'Opening live practice input and backing' : 'Opening MIDI step input'
-    owner.ready.then(info => { if (stepInput === owner && accepting && !closed) { status = `${info.recording ? 'Recording' : info.practice ? 'Practice input' : 'Step input'}${info.monitoring ? ' · VST monitor' : ''}: ${info.source.name}${info.recording ? ` · ${info.recording.path}` : ''}`; draw() } }, () => {})
+    owner.ready.then(info => { if (stepInput === owner && accepting && !closed) { status = `${info.recording ? 'Recording' : info.practice ? 'Practice input' : 'Step input'}${info.monitoring ? ' · instrument monitor' : ''}: ${info.source.name}${info.recording ? ` · ${info.recording.path}` : ''}`; draw() } }, () => {})
     const inputName = practice ? 'Practice input' : 'Step input'
     owner.completion.then(() => { const take = owner.diagnostics?.()?.recording; status = take ? `Take ${take.status}: ${take.path}` : `${inputName} stopped` },
       error => { const take = owner.diagnostics?.()?.recording; status = `${take ? `Take failed: ${take.path}` : `${inputName} stopped`}: ${error.message}` }).finally(() => {

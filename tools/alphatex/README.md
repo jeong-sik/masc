@@ -130,14 +130,15 @@ live audio/MIDI echo unless `--monitor` is requested. Use the recorder for timed
 playing and raw MIDI2 capture.
 
 Use `:step-input --monitor` (or `:step-input SOURCE_UID --monitor`) to hear
-the keyboard through the selected project-bound VST and audio output. Select the
+the keyboard through the selected project-bound VST or bound FluidSynth sound
+and audio output. Use `:soundfont-fluid [SF2_PATH]` to select FluidSynth. Select the
 instrument with `i` first; `:output DEVICE_UID` chooses audio hardware and
 `:audio` returns from a MIDI destination to audio. The source picker opens the
 same single MIDI input for note editing and listening. Input arms after the
-selected output has started with the VST's captured preset. No fallback sound
+selected output has started with the captured VST preset or frozen SF2. No fallback sound
 or output is substituted on failure.
 
-A dedicated worker owns the VST stream and device-clocked PCM requests, so
+A dedicated worker owns the synth stream and device-clocked PCM requests, so
 synchronous terminal editing or drawing does not have to answer each audio
 block. The terminal sends one admitted MIDI packet at a time; device demands
 continue independently while the terminal is busy. Stop and cancellation join
@@ -147,12 +148,18 @@ device deadline.
 
 Monitoring maps supported MIDI1/MIDI2 channel notes, sustain/CC, pressure and
 pitch bend to the selected track/channel. MIDI2 values are reduced to MIDI1
-resolution for the VST; incoming bank/program changes are ignored so the saved
-preset remains authoritative. Unsupported SysEx/per-note data and colliding
+resolution for either synth; incoming bank/program changes are ignored. VST
+presets remain authoritative. FluidSynth initializes authored phrase channels
+with their program, level and pan; imported-source live input explicitly starts
+with program0, volume100 and pan64 on the selected channel. It does not restore
+arbitrary imported device state for the new live input. Unsupported SysEx/per-note data and colliding
 target keys fail explicitly. Unrelated releases do not cut another source key.
 Expression affects listening, not the inserted step notes. Events play in order
 at the next available device block; this mode does not preserve live performance
-timing. `:step-stop`, `:stop`, route changes and leaving the view retire audio;
+timing. FluidSynth additionally applies messages at the next absolute engine
+control boundary. Deferred events survive device-block cuts; distinct positive
+note boundaries that collapse at one engine boundary fail explicitly. No
+physical latency or sample-exact event application is promised. `:step-stop`, `:stop`, route changes and leaving the view retire audio;
 admitted step edits still drain before saving. Device underruns are errors.
 
 Use `:practice-record PATH [SOURCE_UID]` to record live MIDI over phrase backing.
@@ -1143,7 +1150,16 @@ event frames and quantized render frames remain distinct in the receipt. New
 selection failure leaves the previous choice intact; stop/edit/close cancels
 selection and rendering, joins native children and releases private fonts.
 
-Live SoundFont monitoring, newly recorded SoundFont practice takes,
-whole-arrangement SoundFont WAV export and paired-capture SoundFont realization
-remain integration work. Click/count-in and existing VST practice backing retain
+Bound FluidSynth also supports live `:step-input --monitor` and
+`:practice-input` with the existing phrase backing. One output demand clocks
+separate live/backing synth instances; each receives its phrase program before
+initial volume/pan. The font/engine identity and control timing appear in
+`:step-diagnostics PATH`. The Python synth opens no audio/MIDI driver; the
+existing output owner supplies PCM demands and the source owner supplies packets.
+Stop/cancel joins children before private font deletion, including preparation.
+
+New SoundFont practice recordings are refused before opening a take, monitor
+or input; choose a VST for `:practice-record` or use unrecorded
+`:practice-input`. Whole-arrangement SoundFont WAV export and paired-capture
+SoundFont realization remain integration work. Click/count-in and existing VST practice backing retain
 their owners.

@@ -708,13 +708,28 @@ let browser_read_output_schema = `Assoc ["type",`String "object";
   "properties",`Assoc [];"required",`List [];"additionalProperties",`Bool true]
 
 (* Browser_webdriver.page_summary observes the landing document after Page_goto.
-   Its URL can differ from the requested URL after a redirect. *)
+   Its URL can differ from the requested URL after a redirect. Tool_misc_browser_lane
+   wraps every owned-browser answer with the browser that served it (add_client:
+   [lane], [clientId], [browserSelection]) and with what that browser can do
+   (with_capabilities: [browserCapabilities], [requiredActions]); only the page
+   receipt is required, the wrapper fields are declared so the object stays
+   closed. [clientId] is null on an owned browser. *)
 let browser_goto_output_schema =
+  let object_value = `Assoc [ "type", `String "object" ] in
   `Assoc
     [ "type", `String "object"
     ; "properties", `Assoc
         [ "url", `Assoc [ "type", `String "string" ]
         ; "title", `Assoc [ "type", `String "string" ]
+        ; "lane", `Assoc [ "type", `String "string" ]
+        ; "clientId", `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+        ; "browserSelection", object_value
+        ; "browserCapabilities", object_value
+        ; ( "requiredActions"
+          , `Assoc
+              [ "type", `String "array"
+              ; "items", `Assoc [ "type", `String "string" ]
+              ] )
         ]
     ; "required", `List [ `String "url"; `String "title" ]
     ; "additionalProperties", `Bool false

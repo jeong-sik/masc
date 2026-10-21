@@ -1819,10 +1819,24 @@ let observe_named_result ~base_path ~keeper_name (binding : Dependency.compositi
     | Some (entry,resolution) -> Ok (journal,entry,Some resolution)
     | None -> Ok (journal,entry,None))
 
+type result_notification =
+  { base_path : string
+  ; keeper_name : string
+  ; dependency : Dependency.t
+  }
+type discovery_scope = All_pending | Result_notifications of result_notification list
+
+module Result_keys = Stdlib.Set.Make (struct
+  type t = string * string * Dependency.t
+  (* These closed immutable dependency values contain only original identities,
+     including exact Skill revisions. This ordering never drives marker order. *)
+  let compare = Stdlib.compare
+end)
+
 type pending_continuations =
-  { inspected : int; ready : continuation list; waiting : int; retired : int
+  { inspected : int; ready : continuation list; waiting : int; unselected : int; retired : int
   ; failures : (string * error) list }
-type discovery = Ready of continuation | Still_waiting | Retired | Lock_infrastructure
+type discovery = Ready of continuation | Still_waiting | Unselected | Retired | Lock_infrastructure
 
 let continuation_data_name name =
   let suffix = ".json" in
@@ -1835,7 +1849,7 @@ let continuation_lock_data_name name =
   let data_name = String.sub name 0 (String.length name - String.length suffix) in
   if continuation_data_name data_name then Some data_name else None
 
-let pending_continuations_with ~before_retire ~on_ready ~read_composition_result ~base_path =
+let pending_continuations_with ~scope ~before_retire ~on_ready ~read_composition_result ~base_path =
   let* base_path = filesystem (fun () -> Ok (Fs_compat.realpath base_path)) in
   let root = Common.masc_dir_from_base_path ~base_path in
   let directory = continuation_directory ~base_path in
@@ -1849,6 +1863,23 @@ let pending_continuations_with ~before_retire ~on_ready ~read_composition_result
           ~ownership_root:root directory
           |> Result.map_error (fun error -> Persistence_failed
               (Fs_compat.owned_regular_file_read_error_to_string error))) in
+  let result_keys = match scope with
+    | All_pending -> None
+    | Result_notifications notifications ->
+      Some (List.fold_left (fun keys (notification : result_notification) ->
+        Result_keys.add (notification.base_path,notification.keeper_name,notification.dependency) keys)
+        Result_keys.empty notifications) in
+  let selected (continuation : continuation) =
+    match result_keys with
+    | None -> true
+    | Some keys ->
+      (* Empty Lost waits need original recovery without a result binding.
+         The immutable per-pass index matches sealed typed dependencies only;
+         result readiness and intake authority are still read afresh. *)
+      continuation.dependencies = [] || List.exists (fun dependency ->
+        Result_keys.mem (continuation.journal.base_path,
+          continuation.journal.immutable_source.keeper_name,dependency) keys)
+        continuation.dependencies in
   let inspect name = filesystem (fun () ->
     let path = Filename.concat directory name in
     match continuation_lock_data_name name with
@@ -1920,6 +1951,7 @@ let pending_continuations_with ~before_retire ~on_ready ~read_composition_result
                    | Waiting_for_dependencies _ | Done _ -> false) -> retire ()
                | None -> Error Ownership_changed
                | Some continuation when continuation_request_id continuation <> marker.request_id -> Error Ownership_changed
+               | Some continuation when not (selected continuation) -> Ok Unselected
                | Some continuation ->
                  let* readiness = continuation_readiness ~read_composition_result continuation in
                  match readiness with
@@ -1927,7 +1959,7 @@ let pending_continuations_with ~before_retire ~on_ready ~read_composition_result
                  | Results_ready -> Ok (Ready continuation))
             | Cancelled _ | Persistence_failed _ | Done _ -> retire ()
             | Queued | Running | Cancelling _ -> Error (Invalid_continuation_marker "terminal proof has an active status")) in
-  let empty = {inspected=0;ready=[];waiting=0;retired=0;failures=[]} in
+  let empty = {inspected=0;ready=[];waiting=0;unselected=0;retired=0;failures=[]} in
   let report = List.fold_left (fun report name ->
     match inspect name with
     | Ok Lock_infrastructure -> report
@@ -1940,6 +1972,8 @@ let pending_continuations_with ~before_retire ~on_ready ~read_composition_result
     | Ok Still_waiting ->
       let report = {report with inspected=report.inspected+1} in
       {report with waiting=report.waiting+1}
+    | Ok Unselected ->
+      {report with inspected=report.inspected+1;unselected=report.unselected+1}
     | Ok Retired ->
       let report = {report with inspected=report.inspected+1} in
       {report with retired=report.retired+1}
@@ -1951,15 +1985,15 @@ let pending_continuations_with ~before_retire ~on_ready ~read_composition_result
       {report with failures=(name,error) :: report.failures}) empty names in
   Ok {report with ready=List.rev report.ready;failures=List.rev report.failures}
 
-let discover_pending_continuations ~on_ready ~read_composition_result ~base_path =
-  pending_continuations_with ~before_retire:(fun _ -> ()) ~on_ready ~read_composition_result ~base_path
+let discover_pending_continuations ~scope ~on_ready ~read_composition_result ~base_path =
+  pending_continuations_with ~scope ~before_retire:(fun _ -> ()) ~on_ready ~read_composition_result ~base_path
 
 let pending_continuations ~read_composition_result ~base_path =
-  discover_pending_continuations ~on_ready:ignore ~read_composition_result ~base_path
+  discover_pending_continuations ~scope:All_pending ~on_ready:ignore ~read_composition_result ~base_path
 
 module For_testing = struct
   let pending_continuations ~before_retire ~read_composition_result ~base_path =
-    pending_continuations_with ~before_retire ~on_ready:ignore ~read_composition_result ~base_path
+    pending_continuations_with ~scope:All_pending ~before_retire ~on_ready:ignore ~read_composition_result ~base_path
 end
 
 let check_worker (worker : worker) (state : state) =

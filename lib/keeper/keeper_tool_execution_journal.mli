@@ -303,16 +303,35 @@ val continuation_readiness :
 (** Strict owner reads only. No collection, backend call, launch or Task
     inference. The read does not reserve execution or replace admission. *)
 
+type result_notification =
+  { base_path : string
+  ; keeper_name : string
+  ; dependency : Keeper_composition_dependency.t
+  }
+(** Original canonical workspace, Keeper and typed result identity. This is
+    only a discovery hint, never evidence of readiness or effect permission. *)
+
+type discovery_scope = All_pending | Result_notifications of result_notification list
+(** Maintenance reads all result dependencies. A notification pass still checks
+    every marker and its original journal/terminal authority, but reads result
+    readiness only for continuations depending on a matching original result.
+    A recoverable Lost continuation with no result dependencies is conservatively
+    included. Unselected result dependencies are not probed; maintenance remains
+    the complete recovery/error-discovery path. Notification keys are indexed
+    only within this pass, deduplicating exact immutable coordinates/dependencies;
+    index order never replaces marker order. No durable reverse index or cache. *)
+
 type pending_continuations =
   { inspected : int
   ; ready : continuation list
   ; waiting : int
+  ; unselected : int
   ; retired : int
   ; failures : (string * error) list
   }
 
 val discover_pending_continuations :
-  on_ready:(continuation -> unit) -> read_composition_result:read_composition_result ->
+  scope:discovery_scope -> on_ready:(continuation -> unit) -> read_composition_result:read_composition_result ->
   base_path:string -> (pending_continuations, error) result
 (** Publish each originally validated ready candidate before inspecting later
     pending names. [on_ready] runs in the calling context after the original
@@ -321,7 +340,12 @@ val discover_pending_continuations :
     discovery failures cannot retract earlier callbacks. The final report
     records observations in original order, not callback admission or execution
     outcomes. Every intake must still validate the captured original authority.
-    Directory acquisition and exact terminal-bound retirement remain unchanged. *)
+    Directory acquisition and exact terminal-bound retirement remain unchanged.
+    [unselected] counts canonical waiting continuations outside the requested
+    result scope, not proven waiting results or missing/failed work. Matching
+    requires the original canonical workspace, Keeper and entire typed dependency.
+    Selected continuations still re-read all their dependencies and validate the
+    original owner; a notification never grants permission to use a result. *)
 
 val pending_continuations :
   read_composition_result:read_composition_result -> base_path:string -> (pending_continuations, error) result

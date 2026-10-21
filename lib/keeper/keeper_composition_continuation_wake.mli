@@ -65,7 +65,8 @@ val pulse : sw:Eio.Switch.t -> 'a t -> unit
     and return without joining discovery or intake. The discovery child yields
     before its first pass. Maintenance and result-ready notifications share one
     drain: demand before a pass shares it, demand during discovery or observation
-    requests a fresh subsequent pass. Each pass obtains its own lazy declarations.
+    requests a fresh subsequent pass. Maintenance promotes pending result hints
+    to a full pass. Each pass obtains its own lazy declarations.
     No cached discovery/profile or execution permission is introduced.
 
     Within a pass, schedule each validated ready-run intake before inspecting
@@ -97,12 +98,22 @@ val pulse : sw:Eio.Switch.t -> 'a t -> unit
     Physical I/O can still delay shutdown. Draining demand does not prove intake
     completion or physical DAG worker exit. *)
 
-val notify_result_ready : sw:Eio.Switch.t -> 'a t -> unit
-(** Nonblocking lifecycle hint after an original job result is durable. Uses
-    the same drain as maintenance [pulse]; callers only record demand. New
+val notify_result_ready :
+  sw:Eio.Switch.t -> 'a t -> Keeper_tool_execution_journal.result_notification -> unit
+(** Nonblocking lifecycle hint carrying the original canonical workspace,
+    Keeper and typed job/composition dependency after its result is durable.
+    Uses the same drain as maintenance [pulse]; callers only record demand. New
     workers yield back to producers before discovery. Notifications before the
-    first read share it; notifications during a read or its observation request
-    a fresh subsequent pass, including when another maintenance pulse arrives.
+    first read share their result scope; notifications during a read or its
+    observation request a fresh subsequent pass. A maintenance pulse promotes
+    pending hints to full discovery. Every pass retains marker/journal/terminal
+    checks; only selected continuations re-read result dependencies. Original
+    Lost work without dependencies remains included. Unrelated dependencies are
+    not probed until maintenance, and are reported as unselected, not waiting.
+    Hints are immutable pass demand, never a cached candidate or permission.
+    Duplicate hints share a pass but remain in its temporary demand list. A
+    local immutable key index deduplicates matching; its construction and lookups
+    remain preparation cost. No imposed cap or cross-pass index reuse.
     Cancellation/exception cleanup retires only this discovery drain;
     durable discovery and later maintenance remain the recovery source.
     Observations distinguish maintenance/result demand, actual starts/returns,
@@ -116,7 +127,7 @@ module For_testing : sig
       profiles:Keeper_types_profile.keeper_profile_snapshot ->
       context:'a Keeper_types_profile.context ->
       Keeper_tool_execution_journal.continuation -> (Tool_result.result, error) result) ->
-    sw:Eio.Switch.t -> 'a t -> unit
+    sw:Eio.Switch.t -> 'a t -> Keeper_tool_execution_journal.result_notification -> unit
   (** Same notification scheduling and canonical discovery as production,
       with only the original intake outcome controlled. *)
   val pulse :

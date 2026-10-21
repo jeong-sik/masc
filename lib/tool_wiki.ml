@@ -633,7 +633,7 @@ let lint_log ~base_path =
     match In_channel.with_open_text path In_channel.input_all with
     | exception Sys_error message ->
       Error (Printf.sprintf "log.md exists but could not be read: %s" message)
-    | content -> Ok (Wiki_log.parse content))
+    | content -> Ok (Wiki_log.parse ~minute_time:Wiki_log_clock.local_minute content))
 
 let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
   (* A value of the wrong type is refused, not read as "not given": a limit

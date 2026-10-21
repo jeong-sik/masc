@@ -668,7 +668,7 @@ let test_a_since_read_of_the_wiki_compares_log_minutes () =
     in
     Out_channel.with_open_text log (fun channel -> Out_channel.output_string channel restamped);
     let beta =
-      match List.find_opt (fun (line : Wiki_log.line) -> line.page = "beta") (Wiki_log.parse restamped).lines with
+      match List.find_opt (fun (line : Wiki_log.line) -> line.page = "beta") (Wiki_log.parse ~minute_time:Wiki_log_clock.local_minute restamped).lines with
       | Some line -> line.written_at
       | None -> fail "beta has a log line"
     in

@@ -351,7 +351,7 @@ let wiki_log ~root =
   match Fs_compat.load_file_opt (Filename.concat root Wiki_journal.log_file) with
   | exception Sys_error detail -> Error detail
   | None -> Ok [||]
-  | Some content -> Ok (Array.of_list (Wiki_log.parse content).Wiki_log.lines)
+  | Some content -> Ok (Array.of_list (Wiki_log.parse ~minute_time:Wiki_log_clock.local_minute content).Wiki_log.lines)
 
 (* The page as it is now, or [None] when no page by that name reads. *)
 let wiki_page ~root name =

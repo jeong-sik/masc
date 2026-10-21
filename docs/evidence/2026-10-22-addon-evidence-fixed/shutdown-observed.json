@@ -1,0 +1,23 @@
+{
+  "observed_at": "2026-10-21T16:22:00.051580+00:00",
+  "processes": {
+    "server": {
+      "pid": 27273,
+      "exit_code": 1,
+      "stdout": ""
+    },
+    "tui": {
+      "pid": 35331,
+      "exit_code": 1,
+      "stdout": ""
+    }
+  },
+  "ports": {
+    "49445": 61,
+    "49446": 61
+  },
+  "proxy_terminal": {
+    "session_id": 73198,
+    "exit_code": 130
+  }
+}

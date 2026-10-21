@@ -272,22 +272,22 @@ let save_sessions_to_file ~base_path () =
     Stdlib.Mutex.protect persistence_mutex (fun () -> write_sessions path));
   Eio_guard.check_if_ready ()
 
-type restored_session =
-  { session_id : string
-  ; version : string
-  ; profile : Server_mcp_transport_http_types.tool_profile option
-  ; last_active : float
-  ; started_at : float
-  ; transport : Otel_dispatch_hook.transport_context option }
+type restored_sessions =
+  { versions : string SMap.t
+  ; profiles : Server_mcp_transport_http_types.tool_profile SMap.t
+  ; timestamps : float SMap.t
+  ; started : float SMap.t
+  ; transports : Otel_dispatch_hook.transport_context SMap.t
+  ; decoded_entries : int }
 
 type session_restore =
   | Missing
   | Read_failed of string
   | Json_failed of string
   | Shape_rejected
-  | Restored of restored_session list
+  | Restored of restored_sessions
 
-let decode_sessions json =
+let decode_sessions (json : Yojson.Basic.t) =
   let float_field = function
     | Some (`Float value) -> Some value
     | Some (`Int value) -> Some (float_of_int value)
@@ -317,7 +317,9 @@ let decode_sessions json =
   in
   (match json with
    | `Assoc [("sessions", `Assoc entries)] ->
-       Restored (List.filter_map (fun (sid, entry) ->
+       let empty = {versions=SMap.empty;profiles=SMap.empty;timestamps=SMap.empty;
+                    started=SMap.empty;transports=SMap.empty;decoded_entries=0} in
+       Restored (List.fold_left (fun restored (sid, entry) ->
          match entry with
          | `Assoc fields ->
              let pv = List.assoc_opt "protocol_version" fields in
@@ -342,12 +344,18 @@ let decode_sessions json =
                       | Some (`String p) -> profile_of_string p
                       | _ -> None
                     in
-                    Some {session_id=sid;version=v;profile;last_active=t;started_at;
-                          transport=transport_context fields})
-                  else None
-              | _ -> None)
-         | _ -> None
-       ) entries)
+                    {versions=SMap.add sid v restored.versions;
+                     profiles=(match profile with None -> restored.profiles
+                       | Some profile -> SMap.add sid profile restored.profiles);
+                     timestamps=SMap.add sid t restored.timestamps;
+                     started=SMap.add sid started_at restored.started;
+                     transports=(match transport_context fields with None -> restored.transports
+                       | Some transport -> SMap.add sid transport restored.transports);
+                     decoded_entries=restored.decoded_entries + 1})
+                  else restored
+              | _ -> restored)
+         | _ -> restored
+       ) empty entries)
    | _ -> Shape_rejected)
 
 let read_sessions path =
@@ -361,6 +369,11 @@ let read_sessions path =
   | Stdlib.Sys_error detail -> Read_failed detail
   | Yojson.Json_error detail -> Json_failed detail
 
+let merge_restored values registry =
+  if not (SMap.is_empty values) then
+    Atomic_util.update registry (fun current ->
+      SMap.union (fun _ restored _ -> Some restored) values current)
+
 let load_sessions_from_file ~base_path () =
   let path = sessions_file_path ~base_path () in
   let restored = Eio_guard.run_in_systhread ~label:"mcp-session-load" (fun () -> read_sessions path) in
@@ -371,17 +384,12 @@ let load_sessions_from_file ~base_path () =
   | Json_failed detail -> Log.Server.warn "session restore invalid JSON path=%S error=%s" path detail
   | Shape_rejected -> Log.Server.warn "session restore rejected root path=%S" path
   | Restored sessions ->
-      List.iter (fun session ->
-        let sid = session.session_id in
-        Atomic_util.update protocol_version_by_session (fun map -> SMap.add sid session.version map);
-        Option.iter (fun profile ->
-          Atomic_util.update mcp_profile_by_session (fun map -> SMap.add sid profile map)) session.profile;
-        Atomic_util.update session_last_active_sse (fun map -> SMap.add sid session.last_active map);
-        Atomic_util.update session_started_at (fun map -> SMap.add sid session.started_at map);
-        Option.iter (fun transport ->
-          Atomic_util.update session_transport_context (fun map -> SMap.add sid transport map)) session.transport)
-        sessions;
-      Log.Server.debug "session restore applied path=%S entries=%d" path (List.length sessions)
+      merge_restored sessions.versions protocol_version_by_session;
+      merge_restored sessions.profiles mcp_profile_by_session;
+      merge_restored sessions.timestamps session_last_active_sse;
+      merge_restored sessions.started session_started_at;
+      merge_restored sessions.transports session_transport_context;
+      Log.Server.debug "session restore applied path=%S entries=%d" path sessions.decoded_entries
 
 (** Reap session entries whose session_id has no active SSE connection
     AND whose grace period has expired.

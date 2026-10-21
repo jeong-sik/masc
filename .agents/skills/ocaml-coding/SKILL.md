@@ -75,6 +75,12 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   Stdlib mutex를 기다리거나 오래된 선행 snapshot을 뒤늦게 쓰지 않는다. 실행 중 host I/O는
   취소로 강제 종료되지 않으며 이미 교체한 파일을 취소가 되돌리지 않는다. 누락·읽기 실패·
   JSON 실패·root 거절·실제 적용을 구분하고, 원래 protocol/profile/timestamp 정책을 유지한다.
+  해석 중 필드별 불변 map을 준비하고 취소 확인 뒤 비어 있지 않은 map만 현재 registry와
+  합친다. 중복 ID의 마지막 유효 필수값·마지막 존재 선택값을 유지하고, 선택값 부재를 삭제로
+  해석하지 않는다. transport가 존재하면 그 객체 전체를 교체한다. 적용 시점의 관련 없는
+  세션을 보존하며 restore 값의 원래 충돌 우선순위도 지킨다. 필드별 CAS는 전체 registry의
+  원자적 transaction이 아니고 재시도에서 병합이 반복될 수 있다. caller 갱신 호출 감소를
+  CPU·시작 준비·입력 지연의 실측 개선으로 환산하지 않는다.
 
 - Ask 답변 복구의 사전 증거는 같은 회차·Keeper·canonical answer의 UTC-day window에서만
   공유한다. 실제 첫 수요에서 캡처하고 원본 답변 행이 하나뿐인 window의 큰 proof 집합은 보관하지 않는다.

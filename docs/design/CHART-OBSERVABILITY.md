@@ -30,6 +30,18 @@ Skill outcome counts cover the retained runs for the selected exact revision,
 across Keepers. They are not lifetime coverage. Executor-duration means are a
 separate chart and exclude deferred results; they do not measure model latency.
 
+## Composition node evidence
+
+Node details expose retained executor settlements: node and execution identity,
+execution origin, schedule, observed input and the canonical result containing
+its disposition, duration and output. Dashboard expansion and TUI detail use that
+stored evidence. `result_bytes` carries the producer's output byte count, with
+an executor message-length fallback; `truncated_to` carries recorded truncation.
+A null truncation field means none was recorded. The displayed result remains
+the retained output, including any truncation. Dashboard node-duration bars
+share a zero origin and the largest retained node duration, separate from queue,
+dependency and model time.
+
 ## Retained Keeper time series
 
 Turn latency, per-observation cost, token usage, prompt bytes and inference
@@ -41,9 +53,11 @@ cadence or missing intermediate observations are invented.
 The vertical axis starts at zero and uses the actual largest positive observed
 value, including sub-dollar costs. An all-zero series stays at zero. Each chart
 states units, retained coverage, latest/minimum/maximum and its time range.
-The expandable source table preserves every supplied numeric value and missing
-reading; its rows are created on demand. Token input/output use solid/dashed
-lines as well as colours, with one common magnitude scale.
+Within the normalized series, the expandable source table preserves finite,
+nonnegative readings, including zero. Missing, negative and non-finite readings
+appear as unobserved; the table shows normalized chart observations. Its rows
+are created on demand. Token input/output use solid/dashed lines as well as
+colours, with one common magnitude scale.
 
 Costs are an observed subtotal of this loaded window, with partial coverage
 explicit. They are not lifetime spending. Token usage comes from the canonical

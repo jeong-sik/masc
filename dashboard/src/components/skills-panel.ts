@@ -4,6 +4,7 @@ import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { SkillSourceInspector } from './skill-source-inspector'
 import { SkillAsyncEvidenceView } from './skill-async-evidence-view'
+import { SkillNodeEvidenceView } from './skill-node-evidence-view'
 import {
   classifySkillEditorError,
   createSkill,
@@ -16,7 +17,6 @@ import {
   saveSkillSource,
   type SkillCreateReceipt,
   type SkillEvidenceResponse,
-  type SkillCompositionEvidence,
   type SkillEditorLoaded,
   type SkillEditorPreview,
   type AsyncRequestObservation,
@@ -300,10 +300,6 @@ function runOutput(value: unknown): string {
   }
 }
 
-function compositionNodes(composition: SkillCompositionEvidence): readonly Record<string, unknown>[] {
-  return composition.executor_settlements
-}
-
 function compositionCoverageLabel(scope: SkillEvidenceResponse['coverage']['composition_scope']): string {
   switch (scope) {
     case 'exact_reference_latest_completed':
@@ -331,7 +327,7 @@ function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null })
       ? [result.activation.evidence]
       : result.activation.evidence
   const composition = result.composition
-  const compositionNodeCount = composition ? compositionNodes(composition).length : 0
+  const compositionNodeCount = composition?.executor_settlements.length ?? 0
   const output = composition?.result.data
   return html`
     <div class="space-y-2" data-testid="skill-retained-evidence">
@@ -358,7 +354,9 @@ function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null })
             · ${composition.keeper}
           </div>
           <div class="ss-muted mono">${composition.composition_run_id} · ${compositionNodeCount} typed node settlements</div>
+          <div class="mt-2 font-semibold">Composition output</div>
           <pre class="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-raised)] p-2 text-3xs">${runOutput(output)}</pre>
+          <${SkillNodeEvidenceView} nodes=${composition.executor_settlements} />
         </div>
       ` : null}
       <div class="ss-muted text-3xs">

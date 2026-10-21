@@ -30,6 +30,22 @@ val wake_rejected_producer :
   authority:Masc_domain.completion_authority ->
   delivery
 
+val release_unroutable_task :
+  config:Workspace_utils_backend_setup.config ->
+  Masc_domain.pending_completion_rejection ->
+  ( [ `Already_moved of string
+    | `Release_refused
+    | `Released of string * int
+    | `Task_absent
+    ],
+    string )
+  result
+(** The step {!reconcile_pending} takes after {!wake_rejected_producer}
+    answered {!Unroutable_producer}: return the Task to the backlog, asking
+    the route again inside the backlog lock. [Error] is the answer
+    {!reconcile_pending} retains for the next interval: a Keeper queue or an
+    undecodable Keeper meta appeared at the producer's name before the lock,
+    or the release failed and can succeed later. *)
 
 type recovery_report = { delivered : int; unroutable : int; retained : int }
 

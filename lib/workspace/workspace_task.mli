@@ -159,6 +159,12 @@ type unroutable_rejection_release =
           decision and the lock this release takes. The verdict can be
           delivered after all, so the task is left where the delivery expects
           to find it and the obligation is kept. *)
+  | Producer_route_unread of { detail : string }
+      (** [still_unroutable] answered [Error]: the producer's route could not
+          be read inside the lock, for example a file at its Keeper meta path
+          that this binary does not decode. That may still be a Keeper, so the
+          task is left untouched and the obligation is kept. [detail] is the
+          read's own error. *)
   | Task_absent
 
 val release_unroutable_rejected_task_r :

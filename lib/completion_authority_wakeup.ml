@@ -136,8 +136,9 @@ let release_failure_is_permanent (error : Masc_domain.masc_error) =
 let release_unroutable_task ~config (item : Masc_domain.pending_completion_rejection) =
   (* Asked again inside the backlog lock: the routing answer above was read
      before it, and a Keeper meta can land at the producer's name in between.
-     A meta this binary does not decode is still a Keeper: its [Error] fails
-     the release, and the obligation stays for the next interval. *)
+     A meta this binary does not decode may still be a Keeper: [resolve]
+     answers [Error] for it, the release reports [Producer_route_unread], and
+     the obligation stays for the next interval. *)
   let still_unroutable () =
     Keeper_producer_route.resolve ~config item.producer
     |> Result.map (function
@@ -182,6 +183,13 @@ let release_unroutable_task ~config (item : Masc_domain.pending_completion_rejec
      to that Keeper and delivers what this one could not. *)
   | Ok Workspace_task.Producer_became_routable ->
     Error "a Keeper queue appeared at the producer's name; delivering next interval"
+  (* The producer's route could not be read under the lock. It may be a
+     Keeper, so the task is not released and the obligation is kept. *)
+  | Ok (Workspace_task.Producer_route_unread { detail }) ->
+    Error
+      ("the producer's route could not be read inside the backlog lock; \
+        retrying next interval: "
+       ^ detail)
   | Ok Workspace_task.Task_absent -> Ok `Task_absent
 ;;
 

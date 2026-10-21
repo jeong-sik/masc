@@ -394,7 +394,7 @@ let test_capture_factory_uses_actual_live_declaration_before_any_rpc () =
       (text "installation" captured);
     let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     (match Lane_addon_tool_request_owner.load ~store ~scope:"trusted-capture" ~request_id:"original" with
-     | Ok (Some record) -> check bool "factory output is durably retained before return" true (record.request=captured)
+     | Ok (Some record) -> check bool "factory output is durably retained before return" true (Yojson.Safe.equal record.request captured)
      | Ok None | Error _ -> fail "capture returned before retaining its original request");
     let forbidden _=fail "stale or conflicting export called the capture factory" in
     (match Runtime.capture_tool_request_owner ~config ~access ~reserved:["queue_question"] ~export

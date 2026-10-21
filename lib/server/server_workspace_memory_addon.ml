@@ -88,6 +88,13 @@ let advance ~store record event =
   | Ok (Owner.Unconfirmed detail) -> Error (Uncertain detail)
   | Error error -> Error (Unavailable (Owner.update_error_to_string error))
 let record = function New record | Acknowledged record -> record
+let same_observation left right=match left,right with
+  | Progress.Waiting left,Progress.Waiting right
+  | Progress.Outcome_unknown left,Progress.Outcome_unknown right
+  | Progress.Absent left,Progress.Absent right -> Yojson.Safe.equal left right
+  | Progress.Waiting _,(Progress.Outcome_unknown _ | Progress.Absent _)
+  | Progress.Outcome_unknown _,(Progress.Waiting _ | Progress.Absent _)
+  | Progress.Absent _,(Progress.Waiting _ | Progress.Outcome_unknown _) -> false
 let terminal ~capture ~record final =
   match final with
   | Exact.Call_final (Exact.Answered {output;_}) ->
@@ -104,8 +111,15 @@ let resume_with ~store ~base_path ~request_id ~call =
   let* capture=rejected (Capture.restore ~workspace original) in
   let publish original event=Eio_unix.run_in_systhread (fun () -> advance ~store original event) in
   let observe original reason observation evidence =
-    let* published=publish original (Progress.Execution_observed (observation evidence)) in
-    Ok (Awaiting (reason,record published)) in
+    let observation=observation evidence in
+    match Progress.phase original.progress with
+    | Progress.Dispatch_pending (Some previous) when same_observation previous observation ->
+      Ok (Awaiting (reason,original))
+    | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending (None | Some _)
+    | Progress.Judged _ | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _
+    | Progress.Conflicted _ | Progress.Rejected _ ->
+      let* published=publish original (Progress.Execution_observed observation) in
+      Ok (Awaiting (reason,record published)) in
   let finish original final =
     let* _=terminal ~capture ~record:original final in
     let event=match final with

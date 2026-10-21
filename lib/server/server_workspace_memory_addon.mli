@@ -26,6 +26,8 @@ val resume : config:Workspace.config -> request_id:string -> (result, error) Std
     published intent and authoritative absence; only an explicit capacity reply
     permits another admission of this same ID. Lost replies, journal uncertainty,
     Already_stored and absence after dispatch never permit another submission.
+    Consecutive equal observations reuse the current record without another
+    journal write; changed kind/evidence remains a new original fact.
     Full terminal/domain validation precedes Judgment_retained. This performs no
     domain save, observer completion or automatic successor/narrowing. Caller
     holds the original workspace lease and serializes this owner. *)

@@ -212,10 +212,17 @@ let with_original_consumer f =
         ~base_path ~request_id ~call in
       let reply state fields=Ok { (Mcp_protocol.Mcp_types.tool_result_of_text "original worker state") with
         structured_content=Some (`Assoc (["request_id",`String request_id;"state",`String state] @ fields)) } in
-      f ~resume ~reply ~request_id ~good ~bad))
+      let rec files path=let stat=Unix.lstat path in match stat.Unix.st_kind with
+        | Unix.S_DIR -> Sys.readdir path |> Array.to_list |> List.sort String.compare
+          |> List.concat_map (fun name -> files (Filename.concat path name))
+        | Unix.S_REG -> [path,stat.st_dev,stat.st_ino,stat.st_size,stat.st_mtime,
+            In_channel.with_open_bin path In_channel.input_all]
+        | Unix.(S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK) -> fail "unexpected original fixture store entry" in
+      let journal_snapshot ()=files (Store.root store) in
+      f ~resume ~reply ~request_id ~good ~bad ~journal_snapshot))
 
 let test_capacity_retries_original_but_lost_admission_never_submits_again () =
-  with_original_consumer (fun ~resume ~reply ~request_id ~good ~bad ->
+  with_original_consumer (fun ~resume ~reply ~request_id ~good ~bad ~journal_snapshot:_ ->
     let submitted=ref [] and reads=ref 0 in
     let call ~arguments =
       match member "kind" arguments with
@@ -249,7 +256,7 @@ let test_capacity_retries_original_but_lost_admission_never_submits_again () =
      | Consumer.Judgment _ -> () | _ -> fail "same host judgment must survive a fresh handle"))
 
 let test_terminal_unknown_survives_host_restart_without_worker_or_replacement () =
-  with_original_consumer (fun ~resume ~reply ~request_id:_ ~good:_ ~bad:_ ->
+  with_original_consumer (fun ~resume ~reply ~request_id:_ ~good:_ ~bad:_ ~journal_snapshot:_ ->
     let call ~arguments=match member "kind" arguments with
       | `String "read" -> reply "absent" []
       | `String "submit" -> reply "finished" ["result",`Assoc ["status",`String "outcome_unknown"]]
@@ -261,10 +268,49 @@ let test_terminal_unknown_survives_host_restart_without_worker_or_replacement ()
     assert_unknown (accepted (resume call));
     assert_unknown (accepted (resume (fun ~arguments:_ -> fail "terminal unknown was dispatched again"))))
 
+let test_repeated_observation_retains_original_history_without_another_fact () =
+  with_original_consumer (fun ~resume ~reply ~request_id:_ ~good:_ ~bad:_ ~journal_snapshot ->
+    let first ~arguments=match member "kind" arguments with
+      | `String "read" -> reply "absent" []
+      | `String "submit" -> reply "pending" []
+      | _ -> fail "unexpected admission command" in
+    let observation call=match resume call |> Result.map_error Consumer.error_to_string |> get with
+      | Consumer.Awaiting (_,record) -> Lane_addon_request_progress.to_json record.progress
+      | Consumer.Judgment _ | Consumer.Terminal _ | Consumer.Commit_pending _ | Consumer.Settled _ ->
+        fail "expected an original execution observation" in
+    let initial=observation first in
+    let initial_files=journal_snapshot () in
+    let pending ~arguments:_=reply "pending" [] in
+    List.iter (fun () -> check bool "unchanged pending does not append another fact" true
+      (Yojson.Safe.equal initial (observation pending));
+      check bool "equal pending preserves actual journal file identity and bytes" true
+        (initial_files=journal_snapshot ())) [();();()];
+    let unknown detail ~arguments:_=Error (Consumer.Uncertain detail) in
+    let lost=observation (unknown "original transport lost") in
+    let lost_files=journal_snapshot () in
+    check bool "changed observation is retained" false (Yojson.Safe.equal initial lost);
+    List.iter (fun () -> check bool "equal uncertainty retains its first evidence" true
+      (Yojson.Safe.equal lost (observation (unknown "original transport lost")));
+      check bool "equal uncertainty preserves actual journal file identity and bytes" true
+        (lost_files=journal_snapshot ())) [();();()];
+    let changed=observation (unknown "another transport failure") in
+    check bool "changed uncertainty evidence is not discarded" false (Yojson.Safe.equal lost changed);
+    let absent=observation (fun ~arguments:_ -> reply "absent" []) in
+    let absent_files=journal_snapshot () in
+    check bool "authoritative absence is a distinct fact" false (Yojson.Safe.equal absent changed);
+    check bool "repeated absence preserves the original dispatch uncertainty" true
+      (Yojson.Safe.equal absent (observation (fun ~arguments:_ -> reply "absent" [])));
+    check bool "equal absence preserves actual journal file identity and bytes" true
+      (absent_files=journal_snapshot ());
+    check bool "return to pending after uncertainty is another fact" false
+      (Yojson.Safe.equal absent (observation pending)))
+
 let () = run "Workspace Curator actual worker and common Exact contract" ["original requests",[
   test_case "classification survives worker restart and full semantic HTTP acceptance" `Quick (scenario Classification);
   test_case "briefing retains its original partial pass across worker and host reads" `Quick (scenario Briefing);
   test_case "only explicit capacity retries original admission; late result survives uncertainty" `Quick
     test_capacity_retries_original_but_lost_admission_never_submits_again;
   test_case "terminal unknown survives host restart without worker or replacement" `Quick
-    test_terminal_unknown_survives_host_restart_without_worker_or_replacement]]
+    test_terminal_unknown_survives_host_restart_without_worker_or_replacement;
+  test_case "equal pending unknown and absent observations do not grow original history" `Quick
+    test_repeated_observation_retains_original_history_without_another_fact]]

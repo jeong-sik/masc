@@ -76,12 +76,23 @@ val validate_settlement : waiting -> Candle_event.t list -> Candle_event.body ->
     eligibility within the confirmed window, durable candidate Task coverage,
     unique relation decisions and exactly the eligible related Keeper recipients.
     Payment arithmetic alone cannot prove recipient eligibility. Call before the
-    atomic append, or against the preceding ledger when validating a fold. *)
+    atomic append. *)
 
 val validate_record : Candle_event.t list -> Candle_event.body -> (unit, string) result
-(** Validate a settlement against preceding rows in file order. A settlement
-    requires an open obligation, its matching Snapshot, and durable Candidates.
-    Non-settlement records do not change this admission policy. *)
+(** Admit a new settlement against preceding rows in file order, under today's
+    rules. A settlement requires an open obligation, its matching Snapshot, and
+    durable Candidates whose candidate list equals today's eligible subset.
+    Non-settlement records do not change this admission policy. Call it when a
+    row is written. *)
+
+val validate_replay : Candle_event.t list -> Candle_event.body -> (unit, string) result
+(** Read a stored settlement back against preceding rows in file order. It
+    checks everything {!validate_record} checks except that the Candidates
+    row's candidate list equals today's eligibility rule: that list was decided
+    when the row was written, and re-deciding it under a later rule would make
+    one old row unreadable for every Goal. The list must still name observed,
+    Snapshot-linked tasks, and the open obligation, durable Candidates, relation
+    coverage, recipient eligibility and weights are checked as before. *)
 
 val decide_candidates :
   goal_created_at:Candle_time.t

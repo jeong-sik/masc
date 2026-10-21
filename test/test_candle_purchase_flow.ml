@@ -466,21 +466,34 @@ let test_settlement_replay_requires_durable_authority () =
           | E.Found task -> E.Found {task with status}
           | E.Deleted -> E.Deleted) c.tasks}}
     | _ -> fail "expected Candidates" in
+  (* A candidate id that no observed Snapshot-linked task backs. *)
+  let ghost_candidate = match candidates.body with
+    | E.Candidates c -> {candidates with body=E.Candidates
+        {c with candidate_task_ids = "ghost-task" :: c.candidate_task_ids}}
+    | _ -> fail "expected Candidates" in
   let unlinked = match snapshot.body with
     | E.Snapshot s -> {snapshot with body=E.Snapshot {s with linked_task_ids=[]}}
     | _ -> fail "expected Snapshot" in
-  List.iter (fun suffix ->
+  let with_healthy_ledger f =
     with_workspace (fun _ _ config ->
       credit config ~goal:"healthy-goal" ~keeper:"keeper-a" 1000;
-      let healthy = bytes config in
-      (* A writer cannot persist an arithmetic-valid settlement without its
-         authority. The whole proposed batch must remain unwritten. *)
-      (match Candle_ledger.update ~base_path:config.base_path (fun _ -> Ok (suffix, ())) with
-       | Error (Candle_ledger.Event_unwritable _) -> ()
-       | _ -> fail "invalid settlement reached the append boundary");
-      check string "refused append preserved every ledger byte" healthy (bytes config);
-      let lines = List.map (fun event -> ok (E.to_line event) ^ "\n") suffix in
-      let damaged = healthy ^ String.concat "" lines in
+      f config (bytes config)) in
+  let refuses_append (config : Workspace.config) healthy suffix =
+    (* A writer cannot persist an arithmetic-valid settlement without its
+       authority, or under a candidate list today's window would not make.
+       The whole proposed batch must remain unwritten. *)
+    (match Candle_ledger.update ~base_path:config.base_path (fun _ -> Ok (suffix, ())) with
+     | Error (Candle_ledger.Event_unwritable _) -> ()
+     | _ -> fail "invalid settlement reached the append boundary");
+    check string "refused append preserved every ledger byte" healthy (bytes config) in
+  let stored_text healthy suffix =
+    healthy ^ String.concat "" (List.map (fun event -> ok (E.to_line event) ^ "\n") suffix) in
+  (* A settlement without its authority is not a ledger anyone can pay or buy
+     from, however it got into the file. *)
+  List.iter (fun suffix ->
+    with_healthy_ledger (fun config healthy ->
+      refuses_append config healthy suffix;
+      let damaged = stored_text healthy suffix in
       Fs_compat.save_file (ledger_path config) damaged;
       rejected "ledger_unavailable" (call config "keeper-a" "keeper_candle_balance" (`Assoc []));
       rejected "ledger_unavailable" (buy config "keeper-a" "glasses");
@@ -494,10 +507,24 @@ let test_settlement_replay_requires_durable_authority () =
     ; [snapshot;owed;candidates;paid outsider]
     ; [snapshot;owed;candidates;paid wrong_run]
     ; [snapshot;owed;candidates;paid payment;paid payment]
-    ; [snapshot;owed;candidate_status E.Todo;paid payment]
+    ; [unlinked;owed;candidates;paid payment]
+    ; [snapshot;owed;ghost_candidate;paid payment]
+    ];
+  (* The candidate list of a stored Candidates row was decided under the window
+     of its time. A new settlement is held to today's window, but a stored one
+     is read back against the recorded list, so it neither blocks the ledger nor
+     disappears from the balance. *)
+  List.iter (fun suffix ->
+    with_healthy_ledger (fun config healthy ->
+      refuses_append config healthy suffix;
+      let stored = stored_text healthy suffix in
+      Fs_compat.save_file (ledger_path config) stored;
+      check string "the recorded candidate list is credited on read, on top of the healthy 1000" "2000"
+        U.(member "balance_milli" (balance config "keeper-a") |> to_string);
+      check string "reading does not rewrite the stored settlement" stored (bytes config)))
+    [ [snapshot;owed;candidate_status E.Todo;paid payment]
     ; [snapshot;owed;candidate_status (E.Done {completed_at=ok (Candle_time.of_rfc3339 "1970-01-01T00:00:00Z")});paid payment]
     ; [snapshot;owed;candidate_status (E.Done {completed_at=ok (Candle_time.of_rfc3339 "2026-09-30T00:00:00Z")});paid payment]
-    ; [unlinked;owed;candidates;paid payment]
     ]
 ;;
 

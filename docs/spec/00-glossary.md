@@ -3411,6 +3411,31 @@ status: reference
   자기 이름의 도구로 실행하므로, 앞 세 상태의 문구가 "읽음"과 "실행됨"으로 갈린다.
   → [Masc_tui_keeper_chat_transcript](../../bin/masc_tui_keeper_chat_transcript.mli)
 
+**Skill Performance (Skill 성능)**
+: Tools 탭에서 고른 Skill의 정확한 content revision에 결속된 보존 실행 집계 카드(#44781·#44784).
+  서버 읽기 `/api/v1/skills/evidence`를 `Tui_decode_skill_evidence`가 해석하고
+  (`composition_statistics`), 같은 참조의 보존된 executor 정산 기록을 전체 Keeper에 걸쳐
+  한 파티션으로 센다. 카드 제목은 `SKILL PERFORMANCE`이고 보존 실행 건수(`scst_records`)를
+  함께 적는다.
+  - **두 평균**: 완료(`completed`)와 실패(`failed`)의 executor 실행 시간 평균
+    (`duration_statistics.sds_mean_ms`)을 각 표본 수(`sds_samples`)와 함께 따로 적는다.
+    막대는 0에서 관측된 최대 평균까지의 공유 축이고, 한 실행 id가 한 표본이다.
+  - **결과 분포**: `completed`·`failed`·`deferred` 건수를 분포 막대로 따로 그린다.
+    `deferred`는 평균에서 제외한다(`bin/masc_tui_render_tools.ml`의 `skill_statistics_lines`).
+  - **미관측은 0ms가 아니다**: 표본이 없으면 값 자리에 `—`(미관측)를 적고 0으로 채우지
+    않는다. 관측된 0은 0ms로 남는다. 집계 자체가 없으면 "실행 시간 집계 없음 · 미관측은
+    0ms가 아닙니다"를 적는다.
+  - **이름 경계**: 이 카드는 시계열도 지연 백분위(latency percentile)도 아니고, 그 Skill의
+    수명 전체 coverage도 아니다. queue·의존 대기·continuation·모델 시간을 포함하지 않는다.
+    Normal Skill(Instruction Skill)은 선언된 실행 그래프가 없으므로 평균을 지어내지 않고
+    그 사실을 설명으로 적는다. **Skill State**는 로그 한 행의 생애 상태이고, 이 카드는
+    보존 실행의 집계다 — 한쪽으로 다른 쪽을 판정하지 않는다.
+  - Dashboard → Monitor → Skills도 같은 typed I/O와 보존 증거를 쓰며, Composition 행을
+    펼쳐 선언된 입력·출력 경로와 executor 성능·결과 막대를 같은 revision 결속으로 읽는다.
+  → [Tui_decode_skill_evidence](../../lib/tui_decode_skill_evidence.mli) ·
+  [Masc_tui_render_tools](../../bin/masc_tui_render_tools.ml) ·
+  [가이드: Tools에서 Skill 보기](../guides/TUI-SKILL-OBSERVABILITY.md)
+
 ## Repository Execution
 
 **Repository Catalog**

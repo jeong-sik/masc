@@ -152,6 +152,21 @@ relationship; it does not authenticate a wholly rewritten bundle from another
 same-UID process, certify past fsyncs, or prove that the live source remains
 unchanged. It grants no installation authority.
 
+The manifest records the canonical workspace location. Reading through a
+symlink to that same location is supported. Moving or copying the workspace
+to another location does not rebind its bundle: an internally valid bundle
+returns a workspace mismatch naming the recorded and current locations.
+Keep the original, prepared file and manifest together. Do not edit the
+manifest paths or replace the live journal to bypass this refusal; relocation
+requires an explicit reconciliation step that is not implemented yet. A damaged
+bundle remains invalid even when its workspace has also moved.
+
+Failed preparations can leave partial evidence directories. Keep these until
+their outcome is understood; the current commands do not distinguish evidence
+that is safe to delete and do not provide a cleanup operation. Repeating a
+failed or uncertain preparation creates another bundle, rather than repairing
+the first one or proving that the earlier attempt made no write.
+
 Both preparation and inspection report `ready_to_install=false`. Explicit
 prior-input reconciliation, source revalidation before any future installation,
 atomic installation and rollback remain to be implemented. This command cannot

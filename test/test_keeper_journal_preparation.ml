@@ -100,6 +100,51 @@ let test_stale_plan_and_active_owner () = with_workspace (fun ~base_path ~run_di
       check string "active original preserved" original (contents path))
   | Base_path_already_owned _ | Base_path_rejected _ -> fail "fixture lease unavailable")
 
+let test_workspace_location_is_preserved () = with_workspace (fun ~base_path ~run_dir ~path ->
+  let original = contents path in
+  let receipt = Journal.prepare ~run_dir (plan base_path) |> ok |> published in
+  let id = Journal.bundle_id receipt in
+  let files = ["original.sqlite3";"prepared.sqlite3";"manifest.json"] in
+  let before = List.map (fun file -> file,contents (Filename.concat (bundle_path base_path id) file)) files in
+  let alias = Filename.concat (Filename.dirname base_path) "workspace-alias" in
+  Unix.symlink base_path alias;
+  let through_alias = Journal.load_recovery ~base_path:alias ~bundle_id:id |> ok in
+  check bool "alias of the same physical workspace is accepted" true
+    (Yojson.Safe.equal (Journal.receipt_to_json receipt) (Journal.receipt_to_json through_alias));
+  Unix.unlink alias;
+  let manifest_path = Filename.concat (bundle_path base_path id) "manifest.json" in
+  let manifest_before = contents manifest_path in
+  let uncached_path = Filename.concat (Filename.dirname base_path) "never-open-recorded-path" in
+  let fields = match Yojson.Safe.from_string manifest_before with
+    | `Assoc fields -> fields | _ -> fail "manifest is not an object" in
+  let recorded_source = Store.path_for_keeper
+    ~keepers_runtime_dir:(Common.keepers_runtime_dir_of_base ~base_path:uncached_path) ~keeper_name:"imp" in
+  write manifest_path (Yojson.Safe.to_string (`Assoc
+    (("base_path",`String uncached_path)::("source_path",`String recorded_source)::
+     List.remove_assoc "source_path" (List.remove_assoc "base_path" fields))));
+  expect_failure (Journal.Bundle_workspace_mismatch
+    {recorded_base_path=uncached_path;current_base_path=base_path})
+    (Journal.load_recovery ~base_path ~bundle_id:id);
+  check bool "recorded path is never opened or initialized" false (Sys.file_exists uncached_path);
+  write manifest_path manifest_before;
+  let moved = Filename.concat (Filename.dirname base_path) "moved-workspace" in
+  Unix.rename base_path moved;
+  expect_failure (Journal.Bundle_workspace_mismatch
+    {recorded_base_path=base_path;current_base_path=moved})
+    (Journal.load_recovery ~base_path:moved ~bundle_id:id);
+  List.iter (fun (file,bytes) -> check string ("relocation preserves " ^ file) bytes
+    (contents (Filename.concat (bundle_path moved id) file))) before;
+  let moved_source = Store.path_for_keeper
+    ~keepers_runtime_dir:(Workspace.keepers_runtime_dir (Workspace.default_config moved)) ~keeper_name:"imp" in
+  check string "relocation refusal preserves source" original (contents moved_source);
+  (* A damaged relocated bundle is still invalid, not merely a location mismatch. *)
+  write (Filename.concat (bundle_path moved id) "prepared.sqlite3") "not a SQLite database";
+  (match Journal.load_recovery ~base_path:moved ~bundle_id:id with
+   | Error {Journal.failure=Bundle_workspace_mismatch _;_} | Ok _ ->
+     fail "damaged bundle was classified as internally valid relocation"
+   | Error {failure=(Invalid_keeper _ | Workspace_in_use | Unsafe_path _ | Source_absent
+       | Source_changed | Companion_present _ | Store_failed _ | Io_failed _ | Invalid_bundle);_} -> ()))
+
 let test_companions_are_evidence () = with_workspace (fun ~base_path ~run_dir ~path ->
   let observed = plan base_path in
   let companion = path ^ "-wal" in
@@ -179,6 +224,7 @@ let () = run "Keeper journal offline bundles"
   ["operator preparation",[
     test_case "publish private evidence and recover read-only" `Quick test_bundle_publication_and_readonly_recovery;
     test_case "stale plan and active Owner refuse preparation" `Quick test_stale_plan_and_active_owner;
+    test_case "workspace aliases resolve and relocation preserves evidence" `Quick test_workspace_location_is_preserved;
     test_case "SQLite companions remain evidence" `Quick test_companions_are_evidence;
     test_case "source edit after copy prevents publication" `Quick test_changed_source_after_copy_retains_unpublished_backup;
     test_case "manifest sync uncertainty preserves published evidence" `Quick test_manifest_sync_uncertainty_is_not_no_publication;

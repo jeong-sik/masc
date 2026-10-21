@@ -11,6 +11,7 @@ type t = {
   retire : unit Eio.Promise.u;
 }
 let process_claimed = Atomic.make false
+let incarnation t = t.incarnation
 let create ~incarnation =
   match B.client_id_of_string incarnation with
   | Error message -> Error message

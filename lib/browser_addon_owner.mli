@@ -9,6 +9,7 @@ val dispatch : t -> Browser_addon_wire.request -> Browser_addon_wire.reply
 (** Concurrent requests are allowed. Admission is serialized only while binding
     clients/targets, never while waiting for browser input or a poll result. *)
 val snapshot : t -> Yojson.Safe.t
+val incarnation : t -> string
 val revoke : t -> unit
 (** First retire admission, then wake pending work and retire the owner's client
     IDs. Interrupted issued work has an unknown outcome and is never replayed. *)

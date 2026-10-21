@@ -22,6 +22,9 @@ module Document = Browser_document
 module Lane_name = Browser_lane_name
 module Lane_token = Browser_lane_token
 
+(* Shared default for ordinary browser transport requests, in core and workers. *)
+let default_timeout_sec = 20.
+
 type node_ref = { document_id : string; node_id : string }
 type scene_view = Content | Regions
 type pointer_target = Selector of string | Scene_node of node_ref

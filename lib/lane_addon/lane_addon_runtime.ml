@@ -1326,14 +1326,14 @@ let backend ~store () = match !override with
                       ~incarnation:instance_id ~max_message_bytes:(Lane_addon_types.max_reply_bytes package)
                       ~control_timeout_sec ~available:(fun () -> Lane_addon_native_worker.phase worker=Lane_addon_native_worker.Serving) in
                     browser_client:=Some client;Ok (Some client) in
-              let check_browser ()=match browser with
-                | None -> Ok ()
+              let browser_snapshot ()=match browser with
+                | None -> Ok None
                 | Some client ->
                     (match Browser_addon_client.call client ~on_cancel_after_dispatch:(fun () -> ()) Browser_addon_wire.Snapshot with
-                     | Ok (Browser_addon_wire.Snapshot_result _) -> Ok ()
+                     | Ok (Browser_addon_wire.Snapshot_result snapshot) -> Ok (Some snapshot)
                      | Ok (Poll_result _|Receipt|Issue_result _|Service_refusal _) -> Error "browser service readiness was refused"
                      | Error (Browser_addon_client.Unavailable detail|Outcome_unknown detail) -> Error detail) in
-              let* ()=if ready then check_browser () else Ok () in
+              let* ()=if ready then browser_snapshot () |> Result.map (fun _ -> ()) else Ok () in
               let* resource = Option.to_result ~none:"native child identity is unavailable"
                 (Lane_addon_native_worker.process_identity worker) in
               Ok {
@@ -1351,8 +1351,11 @@ let backend ~store () = match !override with
                         Lane_addon_call_context.Transport_error (Lane_addon_native_worker.error_to_string error)));
                 act=(fun ~arguments -> Lane_addon_native_worker.act worker ~arguments |> Result.map_error Lane_addon_native_worker.error_to_string);
                 observe=(fun ~binding ~sources ->
-                  let* ()=check_browser () in
-                  Lane_addon_native_worker.observe worker ~binding ~sources |> Result.map_error Lane_addon_native_worker.error_to_string);
+                  let* snapshot=browser_snapshot () in
+                  match snapshot with
+                  | Some snapshot -> Browser_addon_observation.of_snapshot ~observed_at:(Time_compat.now ()) snapshot
+                  | None -> Lane_addon_native_worker.observe worker ~binding ~sources
+                      |> Result.map_error Lane_addon_native_worker.error_to_string);
                 host=(if not (uses_host_requests package) then None else Some {
                   list_requests=(fun () -> Lane_addon_native_worker.host_requests worker |> Result.map_error Lane_addon_native_worker.error_to_string);
                   deliver=(fun ~arguments -> Lane_addon_native_worker.host_result worker ~arguments |> Result.map_error Lane_addon_native_worker.error_to_string) });

@@ -713,6 +713,12 @@ max_reply_bytes = 4096
     (browser.worker_service=Lane_addon_types.Browser_service);
   check bool "browser selection survives revision serialization" true
     (Yojson.Safe.Util.member "service" (Lane_addon_types.package_to_json browser)=`String "browser");
+  let exported=match load "\"browser\"" "[world.tools]\nexport = [\"browser_command\"]\ninvocation = \"host_context\"\nhooks = [\"validate_input\", \"validate_output\"]" with
+    | Ok package -> package | Error error -> fail (Lane_addon_manifest.error_to_string error) in
+  check (list string) "browser exports require host caller context" ["browser_command"] exported.exported_tools;
+  check bool "browser selects independent input/output middleware" true
+    (exported.tool_invocation=Lane_addon_types.Host_context &&
+     exported.tool_hooks=[Lane_addon_types.Validate_input;Validate_output]);
   List.iter (fun (service,extra) -> check bool "unsupported service contract refused" true
     (Result.is_error (load service extra)))
     ["\"unknown\"","";"true","";"\"browser\"","[world.state]\nmode = \"persistent\"";

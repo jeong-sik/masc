@@ -65,6 +65,10 @@ the latest native acknowledgement. Paused and seek positions come from the
 acknowledged state, including refused operations. Follow mode tracks this playhead;
 with no playback reading it follows the recorded end. Left/Right turns following
 off so the displayed waveform can be inspected independently; `f` restores it.
+The displayed playback seconds retain their native origin. The playhead maps
+them into the recording's requested-start clock, preserving delayed first audio
+and MIDI pre-roll. Preparation checks that the take manifest still matches the
+displayed recording and refuses a changed take until it is reopened.
 
 On resume or seek, reconstruction preserves original control order and restores
 only keys still held or retained by sustain/sostenuto at the new position.

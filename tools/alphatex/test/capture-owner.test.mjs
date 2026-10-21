@@ -21,8 +21,8 @@ async function scenario(paired, defaultOutput = false) {
   mkdtemp:async()=>'/private-owned-play',mkdir:async()=>{},rm:async path=>observed.removed.push(path),
   devices:async()=>({audio:[],midi:[]}),midiDestinations:async()=>[],readCapture:async()=>timeline,
   CaptureTimeline:class{},waveform(){throw Error('No waveform expected')},exportMidiClips(){throw Error('No export expected')},record(){throw Error('No recording expected')},spawn(){throw Error('Selected output must use native playback')},
-  prepareCapturedPlayback:async(input,options)=>{observed.plans.push({input,options,kind:'paired'});return{path:'/private-owned-play/paired.json',format:'capture-session',midiOutput:'123',bindings:[{port:0,destination:'123'}]}},
-  prepareCapturedWave:async(input,options)=>{observed.plans.push({input,options,kind:'wave'});return{path:'/private-owned-play/audio.wav',format:'wave'}},
+  prepareCapturedPlayback:async(input,options)=>{observed.plans.push({input,options,kind:'paired'});return{path:'/private-owned-play/paired.json',format:'capture-session',midiOutput:'123',bindings:[{port:0,destination:'123'}],timelineOffsetSeconds:0}},
+  prepareCapturedWave:async(input,options)=>{observed.plans.push({input,options,kind:'wave'});return{path:'/private-owned-play/audio.wav',format:'wave',timelineOffsetSeconds:0}},
   openPlayback(options){
    observed.options.push(options)
    const child=Object.assign(new EventEmitter(),{stdout:new PassThrough(),stderr:new PassThrough(),stdin:new PassThrough(),kill(signal){observed.kills.push(signal)}})
@@ -40,6 +40,7 @@ async function scenario(paired, defaultOutput = false) {
   await flush();process.stdin.emit('keypress',' ',{name:'space'});await flush()
   assert.equal(observed.plans.length,1)
   assert.equal(observed.plans[0].kind,paired?'paired':'wave')
+  assert.deepEqual(observed.plans[0].options.expectedManifest,timeline.manifest)
   assert.equal(observed.options.length,1)
   assert.equal(observed.options[0].output,output)
   assert.deepEqual(observed.options[0].midiBindings,paired?[{port:0,destination:'123'}]:undefined)

@@ -53,9 +53,13 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
     if (reading !== null) { process.stdout.write(reading); return }
     const rows = process.stdout.rows || 24, width = Math.max(1, (process.stdout.columns || 80) - 9)
     const position = playbackPosition()
-    if (follow && timeline) start = position === null ? Math.max(0, timeline.duration - span)
-      : Math.min(Math.max(0, timeline.duration - span), Math.max(0, position - span / 2))
-    const playhead = position === null ? null : Math.floor((position - start) * width / span)
+    // Native seconds start at the prepared route's origin, while recorded
+    // waveform/MIDI seconds start at requestedStart. Keep those clocks distinct.
+    const timelinePosition = position === null ? null : position + pairedState.timelineOffsetSeconds
+    const first = Math.min(0, pairedState?.timelineOffsetSeconds ?? 0)
+    if (follow && timeline) start = timelinePosition === null ? Math.max(0, timeline.duration - span)
+      : Math.min(Math.max(first, timeline.duration - span), Math.max(first, timelinePosition - span / 2))
+    const playhead = timelinePosition === null ? null : Math.floor((timelinePosition - start) * width / span)
     const cursor = cells => cells.map((cell, index) => index === playhead ? '│' : cell).join('')
     const lines = [
       `Music session · ${phase} · ${timeline?.duration.toFixed(2) ?? '0.00'}s · ${status}`,
@@ -182,18 +186,18 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
     const abort = new AbortController(); playbackAbort = abort
     pairedState = null
     status = 'Preparing original WAV and UMP…'
-    const input = take, midiOutput = selectedMidi, sourceBindings = sourceOutputs, output = audioOutput
+    const input = take, midiOutput = selectedMidi, sourceBindings = sourceOutputs, output = audioOutput, expectedManifest = timeline.manifest
     playbackTask = (async () => {
       let directory
       try {
         directory = await mkdtemp(join(tmpdir(), 'masc-captured-play-'))
         const plan = midiOutput !== undefined || sourceBindings.length
-          ? await prepareCapturedPlayback(input, { directory, midiOutput, sourceBindings, signal: abort.signal })
-          : await prepareCapturedWave(input, { directory, signal: abort.signal })
+          ? await prepareCapturedPlayback(input, { directory, midiOutput, sourceBindings, expectedManifest, signal: abort.signal })
+          : await prepareCapturedWave(input, { directory, expectedManifest, signal: abort.signal })
         abort.signal.throwIfAborted()
         paired = openPlayback({ ...plan, midiBindings: plan.bindings, output, signal: abort.signal, onEvent(event) {
           if (closed || abort.signal.aborted) return
-          if (['playing', 'paused', 'stopped'].includes(event.kind)) pairedState = { ...event, since: performance.now() }
+          if (['playing', 'paused', 'stopped'].includes(event.kind)) pairedState = { ...event, timelineOffsetSeconds: plan.timelineOffsetSeconds, since: performance.now() }
           status = event.kind === 'error' ? event.message : event.refusal ?? `Capture ${event.kind}`; draw()
         } })
         await paired.completion
@@ -266,7 +270,7 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
       case 'space': playWave(); break
       case 'up': scroll -= 3; break
       case 'down': scroll += 3; break
-      case 'left': follow = false; start = Math.max(0, start - span / 2); break
+      case 'left': follow = false; start = Math.max(Math.min(0, pairedState?.timelineOffsetSeconds ?? 0), start - span / 2); break
       case 'right': follow = false; start += span / 2; break
       case 'f': follow = !follow; break
       case 'e':

@@ -990,6 +990,56 @@ class LocalBuildInstall(unittest.TestCase):
                     self.assertTrue(result.stderr.rstrip().endswith(f"Its error output:\n{expected}"),
                                     result.stderr)
 
+    def test_an_invalid_or_unobservable_workspace_preserves_installed_binaries(self):
+        kinds = ["file", "file_parent", "broken_link", "broken_link_parent"]
+        if os.geteuid() != 0:
+            kinds.append("unsearchable_parent")
+        for kind in kinds:
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                build = root / "build"
+                build.mkdir()
+                binaries(build)
+                preflight_helper(build)
+                prefix = root / "prefix"
+                prefix.mkdir()
+                installed = {name: ("installed " + name).encode() for name in
+                             ("masc", "masc-tui", "masc-browser-host",
+                              "masc-deployment-preflight-helper", "masc-check-runtime-deployment-preflight")}
+                for name, content in installed.items():
+                    (prefix / name).write_bytes(content)
+                selected = root / "selected"
+                inaccessible = None
+                if kind in ("file", "file_parent"):
+                    selected.write_text("existing operator file")
+                    if kind == "file_parent":
+                        selected = selected / "workspace"
+                elif kind in ("broken_link", "broken_link_parent"):
+                    selected.symlink_to(root / "missing target", target_is_directory=True)
+                    if kind == "broken_link_parent":
+                        selected = selected / "workspace"
+                else:
+                    inaccessible = root / "private"
+                    selected = inaccessible / "workspace"
+                    selected.mkdir(parents=True)
+                    inaccessible.chmod(0)
+                try:
+                    result = subprocess.run(
+                        ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                         "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                         "--base-path", str(selected), "--no-guest-shim"],
+                        capture_output=True, text=True)
+                finally:
+                    if inaccessible is not None:
+                        inaccessible.chmod(0o700)
+                self.assertEqual(
+                    {name: (prefix / name).read_bytes() for name in installed}, installed,
+                    f"{kind} replaced binaries without an observable workspace: {result.stdout}")
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("nothing installed", result.stderr)
+                self.assertFalse(any(call.startswith(("validate-runtime-config", "validate-stores"))
+                                     for call in helper_calls(build)))
+
     # A named workspace that does not exist yet has no runtime.toml to judge;
     # the server creates it on its first start.
     def test_a_named_workspace_not_created_yet_is_reported_and_installed(self):

@@ -292,7 +292,7 @@ let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
 
 (* Initial work-session selection shares the discovery policy. Once a tab
    is observed, its concrete lane/client must accompany every later action. *)
-let issue_on_server_lane ?(required_actions=[]) ~tool_name ~start_time args ~verb ~timeout_sec =
+let issue_on_server_lane ?(required_actions=[]) ~tool_name ~start_time args ~verb =
   match tool_request args with
   | Error detail -> make_input_err ~tool_name ~start_time detail
   | Ok request ->
@@ -320,7 +320,7 @@ let issue_on_server_lane ?(required_actions=[]) ~tool_name ~start_time args ~ver
         | Error error -> browser_choice_error ~tool_name ~start_time error
         | Ok () ->
           answer_to_result ~lane:(Browser_lane.server_lane_name lane) ~tool_name ~start_time
-            (Browser_lane.issue_server_lane lane ~verb ~timeout_sec |> add_client ~selection:selected target
+            (Browser_lane.issue_server_lane lane ~verb ~timeout_sec:(Browser_lane.reply_timeout_sec verb) |> add_client ~selection:selected target
               |> with_capabilities target required_actions)
 ;;
 
@@ -332,12 +332,12 @@ let handle_session ~tool_name ~start_time args : Tool_result.result =
       make_input_err ~tool_name ~start_time "requiredActions applies only to initial BrowserSession action=open."
   | "open", Ok required_actions ->
     let headless = Some (get_bool args "headless" false) in
-    issue_on_server_lane ~required_actions ~tool_name ~start_time args ~verb:(Browser_lane.Session_open { headless }) ~timeout_sec:60.0
-  | "close", Ok _ -> issue_on_server_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_close ~timeout_sec:60.0
+    issue_on_server_lane ~required_actions ~tool_name ~start_time args ~verb:(Browser_lane.Session_open { headless })
+  | "close", Ok _ -> issue_on_server_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_close
   | "status", Ok _ ->
     (* Reads the backend's record rather than the browser, so the short timeout
        is the lane round trip, not a page load. *)
-    issue_on_server_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_status ~timeout_sec:10.0
+    issue_on_server_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_status
   | _, Ok _ ->
     make_input_err ~tool_name ~start_time
       "action must be one of: open, close, status"
@@ -351,7 +351,7 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
       "url must be a valid http or https URL"
   else
     issue_on_server_lane ~tool_name ~start_time args
-      ~verb:(Browser_lane.Page_goto { url; tab_id = get_int_opt args "tabId" }) ~timeout_sec:45.0
+      ~verb:(Browser_lane.Page_goto { url; tab_id = get_int_opt args "tabId" })
 ;;
 
 (* The [mode] argument of [masc_browser_read], read once. The six top-level

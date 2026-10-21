@@ -69,6 +69,18 @@ type verb =
   | Page_locate of { tab_id : int; instruction : string option }
   | Page_extract of { tab_id : int; instruction : string; schema : Yojson.Safe.t option }
 
+(** Shared reply observation policy for built-in and Add-on callers. A timed-out
+    observation does not establish that the browser effect did not happen.
+    Model-backed Stagehand verbs retain their executor-owned wait policy. *)
+let reply_timeout_sec = function
+  | Session_open _ | Session_close -> 60.
+  | Session_status -> 10.
+  | Page_goto _ -> 45.
+  | Page_act action -> Action.reply_timeout_sec action
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
+  | Page_scene _ | Page_interact _ | Page_elements _ | Page_context _
+  | Page_instruct _ | Page_locate _ | Page_extract _ -> default_timeout_sec
+
 let verb_to_string = function
   | Tabs_list -> "tabs.list"
   | Page_read _ -> "page.read"

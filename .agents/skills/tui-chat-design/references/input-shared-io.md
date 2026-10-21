@@ -198,3 +198,11 @@
   유효한 비교나 준비 완료로 바꾸지 않는다. 파일별 안정성은 동시 workspace snapshot이 아니다.
 - 복사·해시·재검증 비용과 별도 process의 준비 span을 원래 TUI clock에 더하지 않는다.
   조건 파일·binary 바이트의 일치를 실행·설치·완전 수집 증명으로 올리지 않는다.
+
+- 접수 기록의 예상 I/O 실패는 원래 provenance·request·admission clock에 붙은
+  structured Warn/Boundary로 남긴다. 경고 문자열/시각 유사성으로 원래 시도를 추정하거나
+  현재 workspace/질문에서 identity를 빌리지 않는다. 실패 기록의 span은 실제 캡처 범위와
+  경고 출력 범위를 구분하며, 경고가 없다는 사실은 기록 성공이나 완전 수집 증거가 아니다.
+- 유효한 capture 실패는 관측 사실이다. producer/UI 종단 원인이나 증거 형식 오류로
+  합치지 않으며 독립 분모가 있는 표본을 성공만 남기려고 제외하지 않는다. 경고만 있는
+  시도도 알려진 identity로 보존하되 독립 roster·worker 진입·미시작 판정을 만들어내지 않는다.

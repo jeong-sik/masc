@@ -45,6 +45,7 @@ let initialize ~base_path =
   outcome
 
 let record_admission store ~origin ~request ~admission_started_ns =
+  let capture_started_ns=Mtime_clock.elapsed_ns () in
   let result=match Fs_compat.append_jsonl store.admissions (`Assoc [
     "schema_version",`Int 1;
     "event",`String "tui_ask_followup_admission";
@@ -55,5 +56,17 @@ let record_admission store ~origin ~request ~admission_started_ns =
     | exception (Unix.Unix_error _ | Sys_error _ as exn) -> Error (Printexc.to_string exn) in
   (match result with
    | Ok () -> ()
-   | Error detail -> Log.Startup.warn "Ask follow-up admission capture unavailable: %s" detail);
+   | Error detail ->
+     let observed_ns=Mtime_clock.elapsed_ns () in
+     Log.Startup.emit_lazy Log.Warn ~category:Log.Boundary (fun () ->
+       Printf.sprintf "Ask follow-up admission capture unavailable: request=%d: %s" request detail,
+       `Assoc [
+         "event",`String "tui_ask_followup_admission_failed";
+         "schema_version",`Int 1;
+         "origin",Masc_tui_observation_origin.to_json origin;
+         "request",`Int request;
+         "read_admission_started_ns",`Intlit (Int64.to_string admission_started_ns);
+         "capture_started_ns",`Intlit (Int64.to_string capture_started_ns);
+         "observed_ns",`Intlit (Int64.to_string observed_ns);
+         "error",`String detail]));
   result

@@ -825,10 +825,12 @@ let operation_target_arg args =
 let owner_command_error_result error =
   let class_ =
     match error with
-    | Keeper_owner_registry.Command_rejected (Keeper_owner.Operation_rejected error)
-      when Keeper_owner.operation_error_kind error = Keeper_owner.Operation_not_queued ->
-      Tool_result.Workflow_rejection
-    | Command_lookup_failed _ | Command_lifecycle_reserved _ | Command_rejected _ ->
+    | Keeper_owner_registry.Command_rejected (Keeper_owner.Operation_rejected error) ->
+      if Keeper_owner.operation_error_kind error = Keeper_owner.Operation_not_queued
+      then Tool_result.Workflow_rejection
+      else Tool_result.Runtime_failure
+    | Command_rejected (Owner_stopping | Owner_closed | Store_unavailable _ | Reducer_rejected _)
+    | Command_lookup_failed _ | Command_lifecycle_reserved _ ->
       Tool_result.Runtime_failure
   in
   tool_result_error_data ~class_

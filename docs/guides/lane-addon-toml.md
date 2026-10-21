@@ -80,6 +80,13 @@ observation sampling은 해당 호스트 계약을 연결하기 전까지 거절
 
 ## 도구 Hook 선택
 
+Browser native 패키지를 소스에서 설치할 때는 저장소에서 opam 환경과 의존성을
+준비한 뒤 `bash scripts/install-local-build.sh --with-browser-addon`을 실행한다.
+선택한 prefix를 서버 프로세스의 `PATH`에 포함하고, 패키지 파일이 남아 있는 실제
+checkout의 `addons/browser/lane.toml`을 선언에서 가리킨다. 실행 파일 설치와 Addon
+선언·backend 활성화는 별도 단계다. 이 옵션은 소스 설치 경로이며 release 다운로드에
+실행 파일을 추가하지 않는다. 자세한 절차는 [Browser 패키지 안내](../../addons/browser/README.md)를 따른다.
+
 패키지의 `[world.tools]`에 `hooks = ["validate_input", "validate_output"]`을
 선언하면 도구 호출 전 입력과 호출 후 성공 응답을 각각 검증한다. 설치 TOML의
 최상위 `tool_hooks` 배열로 그 설치만 덮어쓸 수 있다.

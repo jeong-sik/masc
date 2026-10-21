@@ -102,9 +102,13 @@ val match_signal
   -> match_result
 
 val match_observation
-  :  meta:Keeper_meta_contract.keeper_meta
+  :  post_kind:Board.post_kind
+  -> meta:Keeper_meta_contract.keeper_meta
   -> observation:board_observation
   -> match_result
+(** The text of a [System_post] carries evidence, not an address, so a created
+    or edited system post matches no lane. Comments, reactions and votes match
+    by their own text whatever the post's kind. *)
 
 val check_self_comment_status
   :  self_ids:Keeper_identity.Keeper_id.t list

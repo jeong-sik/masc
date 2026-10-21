@@ -615,6 +615,42 @@ let test_closed_board_audience_routes_only_its_authority () =
      | Ok KBA.Discoverable -> true
      | Error _ | Ok _ -> false)
 
+(* The text of a system post is evidence, so a lane whose name appears in it is
+   not addressed. An Unlisted system post is thread activity; the lane that the
+   same text names on a human post is delivered to. *)
+let test_system_post_text_does_not_wake_the_named_lane () =
+  let alpha =
+    { (make_board_resume_meta "alpha") with board_interests = [ "research" ] }
+  in
+  let signal =
+    audience_signal ~author:"platform" "Rejected task t (vrf:v): @alpha please redo"
+  in
+  let audience_of post_kind =
+    match KBA.classify ~post_kind ~visibility:Board.Unlisted signal with
+    | Ok audience -> audience
+    | Error error -> fail (KBA.classification_error_to_string error)
+  in
+  let system = audience_of Board.System_post in
+  check bool "an unlisted system post is thread activity" true
+    (match system with KBA.Thread_participants -> true | _ -> false);
+  check bool "the lane its text names is not woken" true
+    (match route ~audience:system ~meta:alpha signal with
+     | KBA.Ignore -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable -> false);
+  let human = audience_of Board.Human_post in
+  check bool "the same text on a human post addresses the lane" true
+    (match human with KBA.Targets _ -> true | _ -> false);
+  check bool "and the lane is delivered to" true
+    (match route ~audience:human ~meta:alpha signal with
+     | KBA.Deliver KWOBS.Explicit_mention -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable | KBA.Ignore -> false);
+  (* The edit of a system post is read the same way. *)
+  let edited = { signal with kind = Board_dispatch.Board_post_updated { content_updated_at = 1.0 } } in
+  check bool "an edited system post wakes no lane either" true
+    (match route ~audience:system ~meta:alpha edited with
+     | KBA.Ignore -> true
+     | KBA.Deliver _ | KBA.Judge_discoverable -> false)
+
 let write_board_lane_config config (meta : Keeper_meta_contract.keeper_meta) =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
@@ -1407,6 +1443,10 @@ let () =
             test_board_mentions_use_exact_typed_keeper_ids
         ; test_case "closed audience routes only its authority" `Quick
             test_closed_board_audience_routes_only_its_authority
+        ; test_case
+            "system post text does not wake the named lane"
+            `Quick
+            test_system_post_text_does_not_wake_the_named_lane
         ; test_case "exact mentions deliver and wake every lane" `Quick
             test_exact_mentions_deliver_and_wake_each_lane_independently
         ; test_case "mixed address signal is dropped at routing" `Quick

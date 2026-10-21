@@ -314,11 +314,22 @@ let match_signal
   match_authored_text ~meta ~author:signal.author ~address_text:(address_text signal)
 ;;
 
-let match_observation ~(meta : keeper_meta) ~(observation : board_observation) =
-  match_authored_text
-    ~meta
-    ~author:observation.author
-    ~address_text:(address_text_of_observation observation)
+let match_observation
+      ~(post_kind : Board.post_kind)
+      ~(meta : keeper_meta)
+      ~(observation : board_observation)
+  =
+  match observation.kind, post_kind with
+  | (Observed_post_created | Observed_post_updated _), Board.System_post ->
+    { explicit_mention = false; matched_targets = [] }
+  | ( (Observed_post_created | Observed_post_updated _)
+    , (Board.Human_post | Board.Automation_post) )
+  | ( (Observed_comment_added _ | Observed_reaction_changed _ | Observed_vote_cast _)
+    , (Board.System_post | Board.Human_post | Board.Automation_post) ) ->
+    match_authored_text
+      ~meta
+      ~author:observation.author
+      ~address_text:(address_text_of_observation observation)
 ;;
 
 (** Check whether this keeper has commented on a post, and which comments
@@ -488,7 +499,18 @@ let wake_reason
       ~(signal : Board_dispatch.board_signal)
   : wake_reason option board_read
   =
-  let matched = match_signal ~meta ~signal in
+  (* A post is read for an address once, when its audience is classified: a
+     post that names anyone is [Targets] and never reaches this function. The
+     text of a post that reaches it carries no address, so reading it again
+     would only turn evidence text in a system post into a wake. *)
+  let matched =
+    match signal.kind with
+    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
+      { explicit_mention = false; matched_targets = [] }
+    | Board_dispatch.Board_comment_added _
+    | Board_dispatch.Board_reaction_changed _
+    | Board_dispatch.Board_vote_cast _ -> match_signal ~meta ~signal
+  in
   if matched.explicit_mention
   then Available (Some Explicit_mention)
   else (

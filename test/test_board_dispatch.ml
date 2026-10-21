@@ -2310,32 +2310,46 @@ let test_write_boundary_emits_typed_audience () =
 (* A system post is written by platform code, and the text it carries is
    evidence such as an evaluator message or a commit refusal. An address inside
    that text neither wakes a keeper nor rejects the post, so its audience
-   follows its visibility alone. The same text on a human post still counts as
-   an address. *)
+   follows its visibility alone. Each address form is tried alone, because the
+   mixed text fails on the old behaviour only through its unsupported selector
+   and would leave the target and broadcast forms unpinned. The same text on a
+   human post still counts as an address. *)
 let test_system_post_text_is_not_an_address () =
-  let evidence = "gate=evaluator: commit refused @keeper-a @@internal @@all" in
-  let audience ~post_kind ~visibility =
-    Board.audience_for_post ~post_kind ~visibility ~title:evidence ~content:evidence
+  let audience ~post_kind ~visibility content =
+    Board.audience_for_post ~post_kind ~visibility ~title:content ~content
   in
-  let expect label expected ~visibility =
-    match audience ~post_kind:Board.System_post ~visibility with
-    | Ok found -> Alcotest.(check string) label expected (audience_label found)
-    | Error error -> Alcotest.fail (label ^ ": " ^ Board.show_board_error error)
+  let expected_for = function
+    | Board.Public | Board.Internal -> "discoverable"
+    | Board.Unlisted -> "thread_participants"
+    | Board.Direct -> "error"
   in
-  expect "public system post is discoverable" "discoverable" ~visibility:Board.Public;
-  expect "internal system post is discoverable" "discoverable" ~visibility:Board.Internal;
-  expect "unlisted system post is thread activity" "thread_participants"
-    ~visibility:Board.Unlisted;
-  (match audience ~post_kind:Board.System_post ~visibility:Board.Direct with
-   | Error _ -> ()
-   | Ok found ->
-     Alcotest.fail ("a direct system post has no text to name its targets, got "
-                    ^ audience_label found));
-  (match audience ~post_kind:Board.Human_post ~visibility:Board.Internal with
-   | Error _ -> ()
-   | Ok found ->
-     Alcotest.fail ("a human post with an unsupported selector was accepted as "
-                    ^ audience_label found))
+  List.iter
+    (fun content ->
+       List.iter
+         (fun visibility ->
+            let label = Printf.sprintf "%S" content in
+            match audience ~post_kind:Board.System_post ~visibility content with
+            | Ok found ->
+              Alcotest.(check string) label (expected_for visibility) (audience_label found)
+            | Error _ ->
+              Alcotest.(check string) label (expected_for visibility) "error")
+         [ Board.Public; Board.Internal; Board.Unlisted; Board.Direct ])
+    [ "gate=evaluator: commit refused @keeper-a"
+    ; "gate=evaluator: commit refused @@all"
+    ; "gate=evaluator: commit refused @@internal"
+    ; "gate=evaluator: commit refused @keeper-a @@internal @@all"
+    ];
+  let human content =
+    match audience ~post_kind:Board.Human_post ~visibility:Board.Internal content with
+    | Ok found -> audience_label found
+    | Error error -> "error: " ^ Board.show_board_error error
+  in
+  Alcotest.(check string) "human @name is an address" "targets" (human "refused @keeper-a");
+  Alcotest.(check string) "human @@all is a broadcast" "broadcast" (human "refused @@all");
+  Alcotest.(check bool) "human unsupported selector is refused" true
+    (match audience ~post_kind:Board.Human_post ~visibility:Board.Internal "refused @@internal" with
+     | Error (Board.Validation_error _) -> true
+     | Error _ | Ok _ -> false)
 
 let test_system_post_with_address_text_is_written_unaddressed () =
   let seen = ref None in

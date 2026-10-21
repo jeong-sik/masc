@@ -22,7 +22,7 @@ val classify
   -> visibility:Board.visibility
   -> Board_dispatch.board_signal
   -> (t, classification_error) result
-(** A newly-created [System_post] reads no address from its text: its audience
+(** A created or edited [System_post] reads no address from its text: its audience
     follows its visibility alone. Exact explicit address wins. Otherwise comments and reactions are scoped
     to structural thread participants, while a newly-created unaddressed post
     is discoverable — unless its visibility is [Unlisted], which keeps it out

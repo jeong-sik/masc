@@ -4,6 +4,15 @@
 
 ## 원본 비동기 요청 상세
 
+- Board의 저장 File/Score는 원래 post·digest·byte length·이름에 묶인 reader로 연다.
+  binary GET도 `Masc_tui_workspace_read`의 expected root와 단일 서버 영수증을 확인한다.
+  digest/길이를 CPU 경계에서 검증하고 전체 원문을 보관한다. Source가 기본이며 Markdown·HTML은
+  운영자가 고르는 해석이다. MIME이나 보고서 revision을 파일명/digest에서 추정하지 않는다.
+  전체 표시 행은 source 객체·해석·실제 pane 폭의 opaque ticket으로 CPU에서 준비한다.
+  resize/해석 변경·닫기·workspace/read epoch 철회는 원래 job만 취소 요청하고 늦은 결과를
+  거절한다. 완료된 원문이 없으면 복사·저장을 하지 않는다. UTF-8 복사는 원래 CRLF까지
+  유지하고 binary는 명시 저장으로 읽는다. 저장은 별도 효과이며 조회/준비 완료와 구분한다.
+
 - Work와 Tools의 Task 본문·이력은 원래 Task 객체/이벤트 목록·Goal 관측·실제 pane 폭에
   결속한 불변 입력을 기존 CPU 경로에서 준비한다. 동일 입력의 draw·scroll·count는 준비한
   전체 행을 재사용하며 프레임에서 전체 원문을 다시 줄바꿈하거나 해시하지 않는다.

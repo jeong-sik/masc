@@ -3773,6 +3773,67 @@ let launch_chat_call_read state ~mailbox =
         ~keeper_name:request.ccr_origin.cco_keeper ~execution_id))
     (begin_chat_call_read state)
 
+let cancel_board_preparation state =
+  Option.iter (fun request -> Masc_tui_workspace_job.cancel_observation state ~key:(Obj.repr request))
+    (Masc_tui_board_reader.pending_preparation state.board_reader)
+
+let close_board_reader state =
+  Option.iter (fun request -> Masc_tui_workspace_job.cancel_observation state ~key:(Obj.repr request))
+    (Masc_tui_board_reader.pending state.board_reader);
+  cancel_board_preparation state;
+  state.board_reader <- Masc_tui_board_reader.close state.board_reader;
+  state.board_reader_owner <- None
+
+let launch_board_read state ~mailbox key =
+  close_board_reader state;
+  if server_authority_ready state then begin
+    let reader,request=Masc_tui_board_reader.open_read ~key state.board_reader in
+    state.board_reader <- reader;
+    state.board_reader_owner <- Some (state.workspace_authority,state.workspace_read_authority);
+    let host=server_peer_host and port=state.port in
+    Option.iter (fun request ->
+      launch_workspace_json_read ~key:(Obj.repr request) state ~mailbox
+        ~deliver:(fun result -> Board_attachment_loaded (request,result))
+        (fun () ->
+          let ( let* ) = Result.bind in
+          let* bytes=Masc_tui_http.get_workspace_bytes ~host ~port
+            ~max_body_bytes:Masc_tui_board_upload.max_attachment_bytes
+            ~path:("/api/v1/artifact-bytes/" ^ key.Masc_tui_board_reader.sha256) in
+          Masc_tui_response_decode.run ~name:"board.attachment.decode_wait" (fun () ->
+            Masc_tui_board_reader.validate key bytes))) request
+  end
+
+let prepare_board_read state ~mailbox ~cols =
+  match current_board_reader state with
+  | None -> close_board_reader state
+  | Some current ->
+    let reader,request=Masc_tui_board_reader.start_preparation
+      ~width:(Masc_tui_render_overlays.detail_reading_width cols) current in
+    (match request with
+     | None -> ()
+     | Some request ->
+       cancel_board_preparation state;
+       state.board_reader <- reader;
+       launch_workspace_result ~observation:true ~key:(Obj.repr request) state ~mailbox
+         ~boundary_error:Fun.id ~deliver:(fun result -> Board_attachment_prepared (request,result))
+         (fun () -> Masc_tui_response_decode.run ~name:"board.attachment.prepare_wait"
+           (fun () -> Ok (Masc_tui_board_reader.prepare request))))
+
+let save_board_read state ~mailbox =
+  match Masc_tui_board_reader.saved_source state.board_reader with
+  | None -> ()
+  | Some (request,key,bytes) ->
+    launch_workspace_result ~operation:true state ~mailbox ~boundary_error:Fun.id
+      ~deliver:(fun result -> Board_attachment_saved (request,result))
+      (fun () -> Eio_unix.run_in_systhread (fun () ->
+        let attachment={ba_kind=Ak_file;ba_source=As_artifact {sha256=key.sha256;bytes=key.bytes};ba_name=key.name} in
+        let outcome=Masc_tui_attachment_action.run ~fetch:(fun ~sha256:_ -> Ok bytes)
+          attachment ~midi_soundfont:None in
+        let description=Masc_tui_attachment_action.describe_outcome outcome in
+        match outcome.result with
+        | Failed _ -> Error description
+        | Saved _ | Played | Opened -> Ok description))
+
 let open_chat_call_reader ?execution_id state ~mailbox keeper_name =
   if state.view = Keepers Keeper_message
      && Option.equal String.equal state.msg_target_keeper_name (Some keeper_name)
@@ -15631,7 +15692,7 @@ let board_attachment_digit_of_key = function
    entries included), and this resolves the same number to the same entry,
    then lets the action module save/play/open it. What happened, or why it
    could not, lands on the read pane's status line. *)
-let open_board_attachment state ~digit ~host ~port =
+let open_board_attachment state ~mailbox ~digit ~host ~port =
   match state.board_mode with
   | Board_list | Board_compose -> ()
   | Board_read post_id ->
@@ -15650,7 +15711,10 @@ let open_board_attachment state ~digit ~host ~port =
             | None -> ()
             | Some (Error reason) ->
                 state.board_attachment_status <- Some ("깨진 첨부: " ^ reason)
-            | Some (Ok attachment) ->
+            | Some (Ok ({ba_kind=(Ak_file|Ak_score);ba_source=As_artifact {sha256;bytes};ba_name} : board_attachment)) ->
+                launch_board_read state ~mailbox {Masc_tui_board_reader.post_id;sha256;bytes;name=ba_name}
+            | Some (Ok ({ba_kind=(Ak_file|Ak_score);ba_source=As_url _;_} as attachment))
+            | Some (Ok ({ba_kind=(Ak_image|Ak_video|Ak_youtube|Ak_external_link|Ak_audio|Ak_midi|Ak_unknown _);_} as attachment)) ->
                 let fetch ~sha256 =
                   match
                     Masc_tui_http.http_get_with_body_limit
@@ -17669,7 +17733,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
         | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
         | System_logs_loaded _ | Schedule_cancel_done (_, _) | Verification_verdict_done _
-        | Harness_label_done _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
+        | Harness_label_done _ | Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
         | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
         | Verification_evidence_loaded (_, _) | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
         | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
@@ -18961,7 +19025,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            state.goal_confirmation <- Goal_confirmation.Inspecting read
        | Runtime_form_save_changed _, _ | Keeper_settings_save_changed _, _ -> ()
        | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
-       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_logs_loaded _ | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( (Board_vote_done _ | Artifact_check_changed _) | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( (Resources_listed _ | Artifact_checks_loaded _) | ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
+       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_logs_loaded _ | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( (Board_vote_done _ | Artifact_check_changed _) | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( (Resources_listed _ | Artifact_checks_loaded _) | ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
       | Ok message ->
           state.goal_action_pending <- None;
@@ -19013,6 +19077,15 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
       complete_goal_timeline_read state request result
   | Task_history_loaded (request, result) ->
       complete_task_history_read state request result
+  | Board_attachment_loaded (request,result) ->
+      if Option.is_some (current_board_reader state) then
+        state.board_reader <- Masc_tui_board_reader.complete state.board_reader request result
+  | Board_attachment_prepared (request,result) ->
+      if Option.is_some (current_board_reader state) then
+        state.board_reader <- Masc_tui_board_reader.complete_preparation state.board_reader request result
+  | Board_attachment_saved (request,result) ->
+      if Option.is_some (current_board_reader state) && Masc_tui_board_reader.owns state.board_reader request then
+        (match result with Ok text -> report_action state "system" text | Error error -> report_action state "error" error)
   | Chat_call_loaded (request, result) ->
       ignore (complete_chat_call_read state request result)
   | Keeper_calls_loaded (generation, keeper_name, result) -> (
@@ -25104,6 +25177,8 @@ and is loaded on demand through keeper_skill.
          pasted text the way the palette, row search and the preset name
          each did. *)
       reconcile_detail_reading state;
+      let _,board_reader_cols=get_terminal_size () in
+      prepare_board_read state ~mailbox:async_messages ~cols:board_reader_cols;
       if Option.is_none (current_chat_call_reader state) then close_chat_call_reader state;
       if Option.is_none (current_task_inspector state) then close_task_inspection_reader state;
       let text_target = text_input_target state ~compact_viewport in
@@ -26897,6 +26972,31 @@ and is loaded on demand through keeper_skill.
                   | _ -> None in
                 Option.iter (fun movement -> set_task_inspection_source original
                   (Masc_tui_original_task_read.move ~count ~height movement source)) movement)
+       | Some k when Option.is_some (current_board_reader state) ->
+           let reader=state.board_reader in
+           let document=Masc_tui_board_reader.document reader in
+           let count,height=Masc_tui_render_overlays.detail_reading_viewport state document in
+           (match k with
+            | "esc" -> close_board_reader state
+            | "r" -> Option.iter (launch_board_read state ~mailbox:async_messages) (Masc_tui_board_reader.key reader)
+            | "u" | "m" | "h" ->
+                cancel_board_preparation state;
+                state.board_reader <- Masc_tui_board_reader.select
+                  (match k with "m" -> Markdown | "h" -> Html | _ -> Source) reader
+            | "y" -> (match Masc_tui_board_reader.source reader with
+                | Ok source -> copy_reference_to_terminal render_schedule source;
+                    report_action state "system" "Original attachment sent to terminal clipboard"
+                | Error error -> report_action state "error" error)
+            | "s" -> save_board_read state ~mailbox:async_messages
+            | "j" | "down" | "wheel-down" | "k" | "up" | "wheel-up"
+            | "pagedown" | "pageup" | "home" | "g" | "end" | "G" ->
+                let movement=match k with
+                  | "j" | "down" | "wheel-down" -> Masc_tui_detail_reading.By 1
+                  | "k" | "up" | "wheel-up" -> By (-1)
+                  | "pagedown" -> By height | "pageup" -> By (-height)
+                  | "home" | "g" -> First | _ -> Last in
+                state.board_reader <- Masc_tui_board_reader.move ~count ~height movement reader
+            | _ -> ())
        | Some k when Option.is_some (current_chat_call_reader state) ->
            (match state.chat_call_reader with
             | None -> ()
@@ -30082,7 +30182,7 @@ and is loaded on demand through keeper_skill.
            (* The ATTACHMENTS block numbers entries [1..9]; the number opens
               the same entry, whatever its kind wants done with it. *)
            Option.iter
-             (fun digit -> open_board_attachment state ~digit ~host ~port)
+             (fun digit -> open_board_attachment state ~mailbox:async_messages ~digit ~host ~port)
              (board_attachment_digit_of_key key)
        | Some "o" when state.view = Board ->
            (match state.board_mode with

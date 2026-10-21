@@ -35,3 +35,10 @@ val read_response
     response admission receipt. Status/body decoding stays with the typed
     consumer. Health-identity bindings refuse here because raw responses cannot
     establish the decoded health identity. Unbound callers retain raw reads. *)
+
+val read_bytes
+  : send:(path:string -> (Masc_http_client.response, string) result)
+  -> host:string -> port:int -> path:string -> (string, string) result
+(** Bind the actual binary GET and validate the same workspace admission
+    receipt as JSON reads. The transport caller enforces the body size bound.
+    No cache, content decoding or effect authorization is involved. *)

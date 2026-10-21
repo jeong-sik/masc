@@ -706,6 +706,8 @@ let for_surface = function
       ; b Act "w" "write" ~help:"write a post"
       ; board_vote_key
       ; board_reply_key
+      ; b Navigate "1–9" "attachment" ~detail:Detail_only
+          ~help:"read a stored File/Score here; u:source m:Markdown h:HTML y:copy s:save r:retry Esc:post. Other media use their existing action."
       (* Three keys below answer only while a post is open, and the table said
          so in prose the footer cannot read. The list footer named them and
          the dispatcher refused all three there: [[ / ]] steps the open post

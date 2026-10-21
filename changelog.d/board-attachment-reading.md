@@ -1,0 +1,5 @@
+### Added
+
+- Read stored Board File/Score attachments inside the TUI with source,
+  Markdown and inert HTML views, full scrolling, original-byte copy and explicit
+  save. Verify the selected blob and workspace before admitting its bytes.

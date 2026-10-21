@@ -273,8 +273,9 @@ let overlay_window_row ~scroll ~height count =
     (fun row -> Theme.recede () ^ row ^ Ansi.reset)
     (Masc_tui_scroll.position_row ~scroll ~height count)
 
+let detail_reading_width cols = max 1 (framed_inner_width cols - 2)
 let detail_reading_document reading ~cols =
-  Masc_tui_detail_reading.rows ~width:(max 1 (framed_inner_width cols - 2)) reading
+  Masc_tui_detail_reading.rows ~width:(detail_reading_width cols) reading
 
 let detail_reading_viewport (state : state) reading =
   let terminal_rows, cols = get_terminal_size () in
@@ -290,7 +291,8 @@ let render_detail_reading (state : state) reading =
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state
     ~terminal_rows ~cols ~surface_key:"detail-reading"
     ~title:(screen_title (" " ^ Terminal_text.single_line (Masc_tui_detail_reading.title reading)))
-    ~hints:"j/k:scroll  PgUp/PgDn:page  Home/End:edges  Esc:back"
+    ~hints:(Option.value (Masc_tui_detail_reading.hints reading)
+      ~default:"j/k:scroll  PgUp/PgDn:page  Home/End:edges  Esc:back")
     ~body:(fun ~budget:_ c ->
       List.iteri (fun index row ->
         if index >= scroll && index < scroll + height then

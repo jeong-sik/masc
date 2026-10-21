@@ -8208,6 +8208,8 @@ type state = {
   mutable task_inspection_reader : task_inspection_reader option;
   mutable ask_task_inspection : ask_task_inspection option;
   mutable detail_reading: (workspace_authority * surface * Masc_tui_detail_reading.t) option;
+  mutable board_reader_owner: (workspace_authority * unit ref) option;
+  mutable board_reader: Masc_tui_board_reader.t;
   mutable keeper_deletions_open: bool;
   mutable keeper_deletions_loading: bool;
   mutable keeper_deletions_retry_receipt: (int * string) option;
@@ -15013,6 +15015,20 @@ let current_detail_reading (state : state) =
     when authority = state.workspace_authority && surface = state.view -> Some reading
   | Some _ | None -> None
 
+let current_board_reader (state : state) =
+  match state.board_reader_owner, Masc_tui_board_reader.key state.board_reader,
+        board_post_on_screen state with
+  | Some (authority,reading),Some key,Some post
+    when authority=state.workspace_authority && reading==state.workspace_read_authority
+      && server_authority_ready state && post.bp_id=key.post_id ->
+    if List.exists (function
+      | Ok {ba_kind=(Ak_file|Ak_score);ba_source=As_artifact {sha256;bytes};ba_name} ->
+        sha256=key.sha256 && bytes=key.bytes && ba_name=key.name
+      | Ok {ba_kind=(Ak_file|Ak_score);ba_source=As_url _;_}
+      | Ok {ba_kind=(Ak_image|Ak_video|Ak_youtube|Ak_external_link|Ak_audio|Ak_midi|Ak_unknown _);_}
+      | Error _ -> false) post.bp_attachments then Some state.board_reader else None
+  | Some _,Some _,Some _ | None,_,_ | _,None,_ | _,_,None -> None
+
 let reconcile_detail_reading (state : state) =
   if Option.is_none (current_detail_reading state) then
     state.detail_reading <- None
@@ -15021,7 +15037,8 @@ let open_detail_reading (state : state) reading =
   state.detail_reading <- Some (state.workspace_authority, state.view, reading)
 
 let modal_owns_keys (state : state) =
-  Option.is_some (current_task_inspector state)
+  Option.is_some (current_board_reader state)
+  || Option.is_some (current_task_inspector state)
   || Option.is_some (current_chat_call_reader state)
   || Option.is_some (current_detail_reading state)
   || state.help_open || state.keeper_deletions_open || state.agenda_open
@@ -15204,6 +15221,8 @@ let create_state
   task_inspection_reader = None;
   ask_task_inspection = None;
   detail_reading = None;
+  board_reader_owner = None;
+  board_reader = Masc_tui_board_reader.initial;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;
   keeper_deletions_retry_receipt = None;

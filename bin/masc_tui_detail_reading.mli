@@ -14,6 +14,11 @@ val create_observation : title:string -> section list -> t
 val replace : title:string -> section list -> t -> t
 (** Replace the same source observation while retaining its independent scroll intent. *)
 val title : t -> string
+val replace_prepared : title:string -> hints:string -> width:int -> row list -> t -> t
+(** Already sanitized, complete rows prepared away from the UI thread.
+    Rows are usable only at their original width. Replacement retains scroll.
+    The caller owns preparation/source identity and re-prepares on resize. *)
+val hints : t -> string option
 val rows : width:int -> t -> row list
 val scroll : count:int -> height:int -> t -> int
 val move : count:int -> height:int -> movement -> t -> t

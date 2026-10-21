@@ -994,13 +994,19 @@ let handle_keeper_task_tool_with_outcome
             can start from it. Example: summary='reproduced on the merged-cell \
             table, fix not started'.")
     else (
+      let evidence_refs_field =
+        match Json_util.assoc_member "evidence_refs" args with
+        | None -> []
+        | Some refs -> [ "evidence_refs", refs ]
+      in
       let args_for_transition =
         [ "task_id", `String task_id
         ; "action", `String "release"
         ; ( "handoff_context"
           , `Assoc
               (("summary", `String summary)
-               :: (optional_field "reason" @ optional_field "next_step")) )
+               :: (optional_field "reason" @ optional_field "next_step"
+                   @ evidence_refs_field)) )
         ]
       in
       let transition_result =

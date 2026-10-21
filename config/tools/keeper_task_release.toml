@@ -46,6 +46,17 @@ name = "next_step"
 type = "string"
 description = "What the next owner should do first."
 
+[[params]]
+name = "evidence_refs"
+type = "array"
+items = { type = "string", min_length = 1 }
+description = """
+Optional sources to retain in the Task handoff for the next owner. Use \
+artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, or \
+fusion:<run-id>. These references preserve context; they do not copy a \
+peer's sandbox file. Export binary files with keeper_artifact_transfer \
+and pass the exported objects through masc_keeper_delegate artifacts."""
+
 [help]
 short_description = "Hand your claimed task back to the backlog with a summary."
 when_to_use = "Use when you hold a task you cannot finish and it should go back so someone else can take it."
@@ -54,6 +65,6 @@ key_constraints = [
   "summary is required; the next owner starts from it.",
   "The task returns to the backlog and can be reclaimed. It is not cancelled.",
 ]
-details_markdown = "Issues release. Holding a task you cannot finish also blocks you from claiming anything else, so hand it back rather than idling on it. Evidence you already submitted stays on the task."
+details_markdown = "Issues release. Holding a task you cannot finish also blocks you from claiming anything else, so hand it back rather than idling on it. Include evidence_refs to retain the current sources with your handoff; the next owner's claim preserves them and your attribution. Export files separately when the next owner needs their bytes."
 examples = ["task_id='task-384' summary='4 verification rejections, no path forward from this Keeper' reason='no completion authority accepted the evidence' next_step='re-read the rejection notes before re-claiming'"]
 alternatives = ["keeper_task_done"]

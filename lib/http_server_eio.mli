@@ -49,9 +49,10 @@ type request_handler = Httpun.Request.t -> Httpun.Reqd.t -> unit
     body except the 304 path in [html_cached]. *)
 module Response : sig
   val with_scoped_headers : (string * string) list -> (unit -> 'a) -> 'a
-  (** Bind additional JSON response headers to this request fiber and its
-      children, including conditional 304 replies. A nested scope replaces
-      the enclosing scope's list. Other request fibers retain their own list. *)
+  (** Bind additional JSON and {!bytes} response headers to this request fiber
+      and its children, including conditional JSON 304 replies. A nested scope
+      replaces the enclosing scope's list. Other request fibers retain their
+      own list. *)
 
   (** [#28400] Register the dashboard timeout-envelope recognizer (installed
       by [Dashboard_cache] at library init). Once registered, [json_value]
@@ -106,8 +107,9 @@ module Response : sig
     -> Httpun.Reqd.t
     -> unit
 
-  (** Arbitrary-content response with caller-supplied
-      [content_type]. *)
+  (** Arbitrary-content response with caller-supplied [content_type]. Scoped
+      headers precede caller headers after [content-type] / [content-length].
+      The body is sent unchanged. *)
   val bytes
     :  ?status:Httpun.Status.t
     -> ?headers:(string * string) list

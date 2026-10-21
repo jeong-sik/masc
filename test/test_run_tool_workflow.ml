@@ -83,8 +83,61 @@ let test_storage_failure_does_not_claim_pre_effect () =
   check string "failed write does not replace run metadata" previous_record
     (Fs_compat.load_file run_path)
 
+let test_init_metadata_failure_is_not_success () =
+  with_workspace @@ fun config ->
+  let task = "task-init-metadata" in
+  let run_path = Masc.Run_eio.run_json_path config task in
+  Workspace_utils.mkdir_p run_path;
+  require_failure Tool_result.Runtime_failure Tool_result.Effect_outcome_unknown
+    (call config "masc_run_init" [ "task_id", `String task ]);
+  check bool "unwritable metadata target is preserved" true (Sys.is_directory run_path);
+  let plan_path = Filename.concat (Filename.dirname run_path) "plan.md" in
+  check bool "partial initialization is not called pre-effect" true (Sys.file_exists plan_path)
+
+let test_plan_metadata_failure_preserves_partial_effect () =
+  with_workspace @@ fun config ->
+  let task = "task-plan-metadata" in
+  ignore (require_success (call config "masc_run_init" [ "task_id", `String task ]));
+  let run_path = Masc.Run_eio.run_json_path config task in
+  let previous_record = Fs_compat.load_file run_path in
+  let directory = Filename.dirname run_path in
+  let plan_path = Filename.concat directory "plan.md" in
+  Unix.chmod directory 0o555;
+  Fun.protect ~finally:(fun () -> Unix.chmod directory 0o700) (fun () ->
+    (* Existing plan.md remains writable, but creating an atomic metadata
+       replacement in its read-only parent must return a storage Error. *)
+    (match Workspace_utils.write_json_commit_result config run_path (`Assoc []) with
+     | Error _ -> ()
+     | Ok _ -> fail "fault injection did not prevent the authoritative write");
+    require_failure Tool_result.Runtime_failure Tool_result.Effect_outcome_unknown
+      (call config "masc_run_plan" [ "task_id", `String task; "plan", `String "replacement" ]);
+    check string "metadata retains the previous committed record" previous_record
+      (Fs_compat.load_file run_path);
+    check string "written plan is retained as a partial effect" "replacement"
+      (Fs_compat.load_file plan_path))
+
+let test_memory_commit_survives_metadata_mirror_failure () =
+  with_workspace @@ fun config ->
+  let config = { config with Workspace_utils.backend = Workspace_utils.Memory (Backend.Memory.create ()) } in
+  ignore (Masc.Workspace.init config ~agent_name:None);
+  let task = "task-memory-mirror" in
+  let run_path = Masc.Run_eio.run_json_path config task in
+  Workspace_utils.mkdir_p run_path;
+  ignore (require_success (call config "masc_run_init" [ "task_id", `String task ]));
+  ignore (require_success (call config "masc_run_plan"
+    [ "task_id", `String task; "plan", `String "committed plan" ]));
+  let actual = require_success (call config "masc_run_get" [ "task_id", `String task ]) in
+  let open Yojson.Safe.Util in
+  check string "authoritative metadata survives mirror failure" "committed plan"
+    (actual |> member "run" |> member "plan" |> to_string);
+  check string "plan remains readable" "committed plan" (actual |> member "plan" |> to_string);
+  check bool "metadata mirror remains unwritable" true (Sys.is_directory run_path)
+
 let () = run "Run tool workflow" [ "plan", [
   test_case "missing init then successful plan readback" `Quick test_initialize_after_missing_plan;
   test_case "invalid stored record remains a runtime failure" `Quick test_invalid_record_is_not_a_missing_precondition;
   test_case "storage failure remains uncertain" `Quick test_storage_failure_does_not_claim_pre_effect;
+  test_case "metadata init failure is not success" `Quick test_init_metadata_failure_is_not_success;
+  test_case "metadata plan failure preserves partial effect" `Quick test_plan_metadata_failure_preserves_partial_effect;
+  test_case "memory commit survives metadata mirror failure" `Quick test_memory_commit_survives_metadata_mirror_failure;
 ] ]

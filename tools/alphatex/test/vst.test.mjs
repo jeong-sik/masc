@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { nativeJob, saveSelection, loadSelection, retainRender, snapshotWriter } from '../vst.mjs'
+import { nativeJob, saveSelection, loadSelection, retainRender, snapshotWriter, presetDirectory } from '../vst.mjs'
 import { InstrumentPicker } from '../instruments.mjs'
 
 const selection = { plugin_path: '/synth.vst3', plugin_name: null, preset_path: null, name: 'Synth' }
@@ -146,7 +146,9 @@ test('rapid editor requests launch once and closing waits for that child', async
       } })
     picker.view = { kind: 'presets', instrument: selection,
       items: [{ name: 'Default', preset_path: null }], cursor: 0, query: '' }
-    const first = picker.edit(), second = picker.edit()
+    await picker.edit()
+    await picker.keypress('Bass', {})
+    const first = picker.keypress(undefined, { name: 'return' }), second = picker.keypress(undefined, { name: 'return' })
     await running
     assert.equal(edits, 1)
     picker.close()
@@ -174,5 +176,89 @@ test('a bundle restores the exact recent sub-instrument and preset', async () =>
     assert.equal(picker.items()[picker.view.cursor].preset_path, recent.preset_path)
     await picker.choose()
     assert.deepEqual(chosen, [recent])
+  })
+})
+
+
+test('named native sounds retain original input and can be explicitly selected after reopening', async () => {
+  await temporary(async directory => {
+    const requests = [], chosen = [], failures = []
+    const original = { ...selection, preset_path: '/original.vstpreset' }
+    const picker = new InstrumentPicker({ directory, notify() {}, selected: value => chosen.push(value),
+      soundfont() { assert.fail('unexpected fallback') }, failed: error => failures.push(error),
+      active: () => original,
+      run(request) {
+        requests.push(request)
+        return { cancel() {}, promise: writeFile(request.output_path, 'captured preset bytes', { flag: 'wx' })
+          .then(() => ({ preset_path: request.output_path })) }
+      } })
+    await picker.presets(selection, picker.epoch, original.preset_path)
+    await picker.edit()
+    assert.deepEqual(requests, [], 'naming does not start an editor')
+    await picker.keypress('밤섬 Bass 🎸', {})
+    await picker.keypress(undefined, { name: 'backspace' })
+    await picker.keypress('🎹.VSTPRESET', {})
+    await picker.keypress(undefined, { name: 'return' })
+    const path = join(presetDirectory(directory, selection.plugin_path, selection.plugin_name), '밤섬 Bass 🎹.vstpreset')
+    assert.deepEqual(requests, [{ operation: 'edit', ...selection, preset_path: original.preset_path, output_path: path }])
+    assert.equal(await readFile(path, 'utf8'), 'captured preset bytes')
+    assert.deepEqual(chosen, [], 'capturing does not replace the playing sound')
+    assert.equal(await loadSelection(directory), null)
+    await picker.presets(selection, picker.epoch, path)
+    await picker.choose()
+    assert.deepEqual(chosen, [{ ...selection, preset_path: path }])
+    assert.deepEqual(await loadSelection(directory), chosen[0])
+    assert.deepEqual(failures, [])
+  })
+})
+
+test('invalid sound names issue no native job and cancellation preserves the saved selection', async () => {
+  await temporary(async directory => {
+    await saveSelection(directory, selection)
+    const failures = [], requests = []
+    const picker = new InstrumentPicker({ directory, notify() {}, selected() { assert.fail('unexpected selection') },
+      soundfont() { assert.fail('unexpected fallback') }, failed: error => failures.push(error),
+      run(request) { requests.push(request); assert.fail('invalid name must not load native code') } })
+    for (const name of ['', '  ', '.', '..', '../outside', '/outside', 'C:\\outside', 'folder/name', 'bad\0name', '.vstpreset']) {
+      await picker.presets(selection, picker.epoch)
+      await picker.edit()
+      await picker.keypress(name, {})
+      await picker.keypress(undefined, { name: 'return' })
+    }
+    assert.equal(failures.length, 10)
+    assert.deepEqual(requests, [])
+    await picker.keypress(undefined, { name: 'escape' })
+    assert.equal(picker.view, null)
+    assert.deepEqual(await loadSelection(directory), selection)
+  })
+})
+
+test('a duplicate named sound preserves existing bytes and allows another save name', async () => {
+  await temporary(async directory => {
+    const failures = [], requests = []
+    const picker = new InstrumentPicker({ directory, notify() {}, selected() { assert.fail('unexpected selection') },
+      soundfont() { assert.fail('unexpected fallback') }, failed: error => failures.push(error),
+      run(request) {
+        requests.push(request)
+        return { cancel() {}, promise: writeFile(request.output_path, 'new captured sound', { flag: 'wx' })
+          .then(() => ({ preset_path: request.output_path })) }
+      } })
+    await picker.presets(selection, picker.epoch)
+    await picker.edit()
+    await picker.keypress('Bass', {})
+    await picker.keypress(undefined, { name: 'return' })
+    const first = requests[0].output_path
+    await writeFile(first, 'original captured sound')
+    await picker.edit()
+    await picker.keypress('Bass', {})
+    await picker.keypress(undefined, { name: 'return' })
+    assert.equal(failures.length, 1)
+    assert.equal(failures[0].code, 'EEXIST')
+    assert.equal(await readFile(first, 'utf8'), 'original captured sound')
+    await picker.keypress(' variation', {})
+    await picker.keypress(undefined, { name: 'return' })
+    assert.equal(await readFile(requests[2].output_path, 'utf8'), 'new captured sound')
+    assert.equal(await readFile(first, 'utf8'), 'original captured sound')
+    assert.equal(await loadSelection(directory), null)
   })
 })

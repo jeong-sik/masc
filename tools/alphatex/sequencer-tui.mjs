@@ -235,7 +235,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       const selectedSound = sound.kind === 'unselected' ? 'Choose an instrument'
         : selectionLabel(sound.kind === 'vst' ? sound.selection : null)
       lines.push(picker.view.title, `${selectedSound} · ${status}`)
-      if (picker.view.query !== undefined) lines.push(`${picker.view.searching ? 'Search' : 'Filter'}: ${picker.view.query}`)
+      if (picker.view.query !== undefined) lines.push(`${picker.view.kind === 'preset_name' ? 'Name' : picker.view.kind === 'preset_path' ? 'Path' : picker.view.searching ? 'Search' : 'Filter'}: ${picker.view.query}`)
       const items = picker.items(), height = Math.max(1, rows - 6)
       const start = Math.max(0, picker.view.cursor - height + 1)
       for (let i = start; i < Math.min(items.length, start + height); i++) {

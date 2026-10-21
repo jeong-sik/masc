@@ -163,8 +163,9 @@ handlers, foreign content, embedded images and external href references;
 canvas remains unavailable. Browser CSS layout is not evaluated.
 Base64 SVG resource parts and SVG image data URIs retain their declared
 format through off-thread decoding and use this same offline renderer.
-Verified retained images use the MIME from their recorded artifact reference
-after wire size and digest verification. Other declared image formats keep
+Retained attachments preserve the original image format separately from the
+encoded wire blob's MIME, and verify wire size and digest before rendering.
+Other declared image formats keep
 the existing image converter path. Percent-encoded SVG data URIs are not
 supported by the base64 image path.
 Scripts, metadata, templates, embedded frames and explicit hidden subtrees do

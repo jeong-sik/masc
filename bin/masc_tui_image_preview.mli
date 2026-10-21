@@ -13,7 +13,8 @@ type output_source = private
 type preview =
   | Named_path of string
   | Staged of Masc_tui_keeper_chat_projection.attachment
-  | Stored_attachment of { name : string; reference : Tool_output.artifact_ref }
+  | Stored_attachment of { name : string; reference : Tool_output.artifact_ref;
+      format : Masc_tui_image_payload.format }
   | Output_image of { name : string; source : output_source }
   | Unavailable_image of { name : string; reason : string }
   | No_image

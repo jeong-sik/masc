@@ -6360,7 +6360,7 @@
 (test
  (name test_tui_resource_images)
  (modules test_tui_resource_images)
- (libraries masc_tui_image_payload alcotest yojson masc_tui_mcp masc_tui_resource_images masc_tui_image_preview))
+ (libraries masc.masc_tool_blob_store masc_tui_image_payload alcotest yojson masc_tui_mcp masc_tui_resource_images masc_tui_image_preview))
 
 (test
  (name test_tui_html_svg)

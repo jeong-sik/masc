@@ -10926,8 +10926,9 @@ let open_selected_image state ~mailbox preview =
   match preview with
   | Masc_tui_image_preview.Named_path path -> open_image state ~notice path
   | Masc_tui_image_preview.Staged attachment -> open_staged_image state ~notice attachment
-  | Masc_tui_image_preview.Stored_attachment { name; reference } ->
-      open_message_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Retained reference)
+  | Masc_tui_image_preview.Stored_attachment { name; reference; format } ->
+      open_message_image state ~mailbox ~notice ~name
+        (Masc_tui_image_requests.Retained {reference;format})
   | Masc_tui_image_preview.Output_image { name; source } ->
       open_message_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
   | Masc_tui_image_preview.Unavailable_image { name; reason } ->

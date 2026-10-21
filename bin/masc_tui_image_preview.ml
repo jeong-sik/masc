@@ -10,7 +10,8 @@ type output_source =
 type preview =
   | Named_path of string
   | Staged of Masc_tui_keeper_chat_projection.attachment
-  | Stored_attachment of { name : string; reference : Tool_output.artifact_ref }
+  | Stored_attachment of { name : string; reference : Tool_output.artifact_ref;
+      format : Masc_tui_image_payload.format }
   | Output_image of { name : string; source : output_source }
   | Unavailable_image of { name : string; reason : string }
   | No_image
@@ -19,14 +20,16 @@ let persisted_attachment ~name ~mime ~data =
   if not (String.starts_with ~prefix:"image/" mime) then No_image
   else
     match Option.map Tool_output.decode_from_agent_core data with
-    | Some (Tool_output.Decoded reference) -> Stored_attachment { name; reference }
+    | Some (Tool_output.Decoded reference) -> Stored_attachment
+        { name; reference; format = Masc_tui_image_payload.format_of_mime mime }
     | Some (Tool_output.Not_marker | Tool_output.Invalid_marker _) | None ->
         Unavailable_image { name; reason = "image has no retained payload" }
 
 let output_image ~name ~src =
   let unavailable reason = Unavailable_image { name; reason } in
   match Tool_output.decode_from_agent_core src with
-  | Tool_output.Decoded reference -> Stored_attachment { name; reference }
+  | Tool_output.Decoded reference -> Stored_attachment
+      { name; reference; format = Masc_tui_image_payload.format_of_mime reference.mime }
   | Tool_output.Invalid_marker { detail } -> unavailable detail
   | Tool_output.Not_marker ->
     let uri = Uri.of_string src in

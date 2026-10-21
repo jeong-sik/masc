@@ -86,7 +86,7 @@ let test_sent_image_keeps_reference_not_filename () =
   let image = Preview.in_message ~text:"look"
       ~attachments:[stored "../../wrong.png"] in
   match Preview.choose_preview ~conversation:image ~staged:[] ~order:Preview.Unordered with
-  | Preview.Stored_attachment { name; reference } ->
+  | Preview.Stored_attachment { name; reference; _ } ->
       check string "name remains a label" "../../wrong.png" name;
       check string "only validated digest locates payload" (String.make 64 'a') reference.sha256
   | _ -> fail "sent image must keep its actual payload reference"

@@ -1,3 +1,0 @@
-### Fixed
-
-- Expose the detail reader's existing content-width calculation so native TUI attachment preparation compiles and uses the same width as rendering.

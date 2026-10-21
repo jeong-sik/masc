@@ -52,6 +52,7 @@
 # Usage: scripts/install-local-build.sh [--prefix DIR] [--manifest-dir DIR]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
 #                                       [--keep-build] [--no-guest-shim]
+#                                       [--with-browser-addon]
 #   --prefix        where masc, masc-tui, masc-browser-host and the deployment
 #                   preflight pair go (default ~/.local/bin)
 #   --manifest-dir  Firefox native messaging manifests (default: the per-user directory)
@@ -64,6 +65,9 @@
 #                   (default: the one masc would use -- MASC_BASE_PATH, a current
 #                   directory holding .masc/config, then the recorded default)
 #   --keep-build    retain build artifacts after a successful default build/install
+#   --with-browser-addon also build/install the native Addon launcher, browser
+#                   worker and browser process owner into the same prefix;
+#                   package assets remain in this checkout
 #   --no-guest-shim leave the workspace's guest exec shim as it is
 set -euo pipefail
 
@@ -73,6 +77,8 @@ build_dir="$repo/_build/default/bin"
 skip_build=false
 keep_build=false
 guest_shim=true
+browser_addon=false
+browser_addon_programs=(masc_native_addon_launcher masc_browser_addon_worker masc_browser_process_owner)
 custom_build_dir=false
 base_path=""
 workspace_root=""
@@ -91,6 +97,7 @@ while [ $# -gt 0 ]; do
     --build-dir) build_dir=${2:?--build-dir needs a directory}; custom_build_dir=true; shift 2 ;;
     --keep-build) keep_build=true; shift ;;
     --no-guest-shim) guest_shim=false; shift ;;
+    --with-browser-addon) browser_addon=true; shift ;;
     --skip-build) skip_build=true; shift ;;
     --base-path) base_path=${2:?--base-path needs a directory}; shift 2 ;;
     -h|--help) sed -n '/^# Usage:/,/^set -euo pipefail/p' "$0" | sed '$d'; exit 0 ;;
@@ -131,9 +138,25 @@ if [ "$skip_build" = false ]; then
   # went out on OCaml 5.5.0 after the repo moved to 5.5.1, and with an ocaml-dos
   # older than the pin. --root: a worktree under .worktrees sits inside the
   # parent checkout's dune project, which excludes that directory.
-  (cd "$repo" && scripts/dune-local.sh build --root "$repo" \
-    ./bin/main_eio.exe ./bin/masc_tui.exe ./bin/masc_browser_host.exe \
+  build_targets=(./bin/main_eio.exe ./bin/masc_tui.exe ./bin/masc_browser_host.exe
     ./bin/deployment_preflight_helper.exe)
+  if [ "$browser_addon" = true ]; then
+    for program in "${browser_addon_programs[@]}"; do
+      build_targets+=("./bin/$program.exe")
+    done
+  fi
+  (cd "$repo" && scripts/dune-local.sh build --root "$repo" "${build_targets[@]}")
+fi
+
+# Validate optional program inputs before preflight, guest-shim replacement or
+# any installed binary changes. --skip-build needs the same complete inputs.
+if [ "$browser_addon" = true ]; then
+  for program in "${browser_addon_programs[@]}"; do
+    if [ ! -f "$build_dir/$program.exe" ] || [ ! -x "$build_dir/$program.exe" ]; then
+      echo "install-local-build: browser Addon requires executable $build_dir/$program.exe; nothing installed" >&2
+      exit 1
+    fi
+  done
 fi
 
 # Nothing is replaced or restarted yet, so the running server's editor can
@@ -360,6 +383,12 @@ mkdir -p "$prefix"
 install -m 755 "$build_dir/main_eio.exe" "$prefix/masc"
 install -m 755 "$build_dir/masc_tui.exe" "$prefix/masc-tui"
 install -m 755 "$build_dir/masc_browser_host.exe" "$prefix/masc-browser-host"
+if [ "$browser_addon" = true ]; then
+  for program in "${browser_addon_programs[@]}"; do
+    install -m 755 "$build_dir/$program.exe" "$prefix/${program//_/-}"
+  done
+  echo "installed browser Addon programs into $prefix; package: $repo/addons/browser/lane.toml"
+fi
 if [ -x "$build_dir/deployment_preflight_helper.exe" ]; then
   install -m 755 "$build_dir/deployment_preflight_helper.exe" "$prefix/masc-deployment-preflight-helper"
   install -m 755 "$repo/scripts/check-runtime-deployment-preflight.sh" "$prefix/masc-check-runtime-deployment-preflight"

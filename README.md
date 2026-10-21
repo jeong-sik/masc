@@ -165,6 +165,19 @@ processes those workspaces started; the extension reconnects to the new copy.
 A workspace that holds a release guest shim for microVM Keepers gets the shim
 of the release the build names (`docs/MICROVM-REMOTE-RUNBOOK.md`).
 
+For the optional Browser Addon, use:
+
+```bash
+bash scripts/install-local-build.sh --with-browser-addon
+```
+
+This also builds and installs `masc-native-addon-launcher`,
+`masc-browser-addon-worker` and `masc-browser-process-owner` into the selected
+prefix. Keep that prefix on the server's `PATH` and retain this checkout for the
+package manifest, schemas and skill. Declare and enable the Addon separately;
+see [Browser Addon setup](addons/browser/README.md). This option belongs to the
+source installer; it does not add these programs to release downloads.
+
 `./quickstart.sh` seeds a workspace under `~/masc-quickstart`, starts the
 server, and writes an MCP bearer to `.masc/config/mcp-client.env`. It starts
 no Keeper and needs no provider key. `--team classic` seeds a Keeper preset

@@ -791,13 +791,19 @@ let test_partial_clear_requires_fresh_maintenance_authority () =
            "history clear receipt no longer belongs to its original maintenance child and trace" detail
        | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
        | Ok () -> fail "a fresh authority accepted another authority's receipt");
-     match Keeper_owner_registry.commit_history_clear ~base_path:config.base_path ~keeper_name:meta.name
+     check bool "foreign receipt refusal preserves owned input" true
+       (Keeper_checkpoint_ref.equal previous (observed_input ~config ~meta));
+     (* The old writer belongs to the previous child, so the inherited-child
+        wrapper refuses before the Owner's receipt/trace guard above. *)
+     (match Keeper_owner_registry.commit_history_clear ~base_path:config.base_path ~keeper_name:meta.name
        ~writer:(Option.get !old_writer) ~receipt:(Option.get !old_receipt) with
      | Error (Keeper_owner_registry.Command_rejected (Keeper_owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input detail))) ->
         check string "another maintenance child cannot reuse the old authority"
-          "history clear receipt no longer belongs to its original maintenance child and trace" detail
+          "history clear publication requires its inherited maintenance child" detail
       | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
-      | Ok () -> fail "another maintenance child reused the old clear authority") with
+      | Ok () -> fail "another maintenance child reused the old clear authority");
+     check bool "foreign child refusal preserves owned input" true
+       (Keeper_checkpoint_ref.equal previous (observed_input ~config ~meta))) with
    | Ok (`Ran ()) -> () | Ok (`Busy _) -> fail "second maintenance was busy"
    | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
   let result=clear () in

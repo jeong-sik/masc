@@ -1,7 +1,7 @@
 import { Chord, Note } from 'tonal'
 import { midiSourceInfo, midiSourcePattern, editMidiSourceNotes, editMidiSourceExpressions, orderMidiSourceExpression, tempoEvent, editMidiSourceTempos, meterEvent, editMidiSourceMeters } from './midi-source.mjs'
 import { expressionEvent } from './midi-expression.mjs'
-import { pitch, chordVoicing, revoiceNotes } from './sequencer-project.mjs'
+import { pitch, chordVoicing, revoiceNotes, revoiceProgressionNotes, GM_DRUM_CHANNEL } from './sequencer-project.mjs'
 
 export function sourceEditor(project, previous = {}, pattern = previous.pattern) {
   const info = midiSourceInfo(project)
@@ -343,6 +343,32 @@ export function sourceCommand(editor,line) {
         octave: args[2] === undefined ? 4 : Number(args[2]), inversion: args[3] === undefined ? 0 : Number(args[3]) })
       const selected = sourceSelected(editor)
       const next = apply(editor, changes)
+      const voice = changes.find(note => note.id === selected?.id)
+      return { editor: voice ? { ...next, pitch: voice.pitch } : next }
+    }
+    case 'revoice-led': {
+      count(6, Number.MAX_SAFE_INTEGER)
+      const start = units(args[0]), end = units(args[1])
+      if (end > (editor.performance?.ticks ?? -1) + 1) throw new Error('Revoicing range outside selected MIDI pattern')
+      const anchor = editor.selectedID ? sourceSelected(editor) : undefined
+      if (editor.selectedID && !anchor) throw new Error('Selected MIDI note is not at the cursor; select the source anchor again')
+      const channel = anchor?.channel ?? editor.channel
+      const scoped = notes.filter(note => (channel === undefined || note.channel === channel)
+        && (anchor === undefined || note.port === anchor.port) && note.start >= start && note.start < end)
+      if (new Set(scoped.map(note => note.channel)).size > 1) throw new Error('Choose :channel or :select event-ID before revoicing several MIDI channels')
+      if (new Set(scoped.map(note => note.port)).size > 1) throw new Error('Choose :select event-ID before revoicing several source ports')
+      if (scoped.some(note => note.channel === GM_DRUM_CHANNEL)) throw new Error('Chord voicings need a melodic MIDI channel')
+      const events = new Map((editor.performance?.events ?? []).map(event => [event.id, event]))
+      const track = editor.view.tracks[editor.track].sourceTrack
+      if (scoped.some(note => events.get(note.off)?.track !== track)) throw new Error('Revoicing note releases belong to another source track')
+      if ((editor.performance?.diagnostics ?? []).some(diagnostic => {
+        const event = events.get(diagnostic.event)
+        return event?.track === track && (channel === undefined || (event.bytes[0] & 15) === channel)
+          && (anchor === undefined || event.port === anchor.port)
+          && event.tick < end && (diagnostic.kind === 'unclosed-note' || event.tick >= start)
+      })) throw new Error('Revoicing range has unclosed, unmatched or overlapping MIDI keys')
+      const changes = revoiceProgressionNotes(scoped, { start, end, mode: args[2], low: pitch(args[3]), high: pitch(args[4]), symbols: args.slice(5) })
+      const selected = sourceSelected(editor), next = apply(editor, changes)
       const voice = changes.find(note => note.id === selected?.id)
       return { editor: voice ? { ...next, pitch: voice.pitch } : next }
     }

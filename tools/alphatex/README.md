@@ -521,7 +521,35 @@ the before/after versions. Other tracks and notes outside the cursor stay intact
 The target must have the same number of voices; use `:chord` to compose a
 different voice count. Overlaps and unsupported voicings leave the draft intact.
 
-The same command edits imported MIDI in its source clock. Choose `:channel N`
+For an existing rhythmic progression, use
+`:revoice-led 0 10 rootless C3 C5 G7 Em7 Cmaj7 G7#11`.
+Arguments are start, end, close/drop2/rootless, inclusive lowest/highest keys,
+and one explicit chord symbol per exact note-onset group in that half-open range.
+The current track is changed in one undo revision: each group's low-to-high
+note identities retain their original onset, individual length and velocity.
+Gaps and the final group's releases are preserved, including releases after
+the range end. Notes starting before the range or at its end stay unchanged.
+The complete path uses the same candidate rules and global adjacent-voice
+semitone movement metric as `:progression-led`, constrained to the existing
+constant voice count. `u`/`y` compares the original and changed performance.
+
+Attacks must share an exact tick to form a group; arpeggiated attacks are
+separate groups. Selected groups whose held keys cross the next selected onset
+are refused for an explicit per-cursor decision. Missing/extra symbols,
+incompatible voice counts or an unsafe resulting note overlap leave the whole
+draft and history unchanged. This is explicit revoicing, without automatic
+chord recognition or pedal-duration inference.
+
+The command also edits imported MIDI using its native beats (PPQ) or frames
+(SMPTE), chosen pattern and current track. Use `:channel N` or a selected source
+note to resolve channels; a source-note selection also anchors its port. A stale
+anchor, ambiguous ports, drum channel, unclosed notes or unmatched/overlapping
+keys in that scope are refused. Paired releases on another source track are
+refused to keep other tracks unchanged. Original data, non-note expression bytes, note-off
+forms and release velocities remain retained. Keyed poly-pressure keeps its
+original key, as with the single-cursor command.
+
+The single-cursor `:revoice` command also edits imported MIDI in its source clock. Choose `:channel N`
 when several channels sound, or `:select event-ID` to anchor a source port and
 channel. Note-on/off pairs and release velocities survive export; tempo,
 controllers and other expression messages retain their original bytes. In

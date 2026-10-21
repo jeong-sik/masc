@@ -1,0 +1,35 @@
+{
+  "source": "f4f55f5486edee82e060f51b8fe596978a4e29ef",
+  "base": "97468f95df78f35a35bb3fe14a9670240cced930",
+  "source_blobs": {
+    "dashboard/src/api/lane-addons.ts": "b1a7eea18b5271daa1308c6e95098f427d5d6599",
+    "dashboard/src/api/lane-addon-host-requests.ts": "42aeedb47a9be138d6b5311803ff424c4d191f03",
+    "dashboard/src/api/lane-addon-host-requests.test.ts": "8fd515276e5dc6e26c64e1e69113c3407f832ad2",
+    "dashboard/src/components/lane-addon-host-requests.ts": "e57a7a828a17480f26b27d01dc0369812933e8df",
+    "dashboard/src/components/lane-addons-panel.ts": "373d8dbfee256bcf8f1a9639af38be18f7b52299",
+    "dashboard/src/components/lane-addons-panel.test.ts": "2948ed987a7e72dc91c53dcafb9461a4d694397f"
+  },
+  "dashboard": {
+    "command": "pnpm exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 --reporter=verbose src/api/lane-addon-host-requests.test.ts src/components/lane-addons-panel.test.ts src/components/lane-addons-reads.test.ts src/components/lane-addons-workspace.test.ts src/components/lane-addon-connection.test.ts src/components/lane-installation-manager.test.ts",
+    "suite_files": [
+      "src/api/lane-addon-host-requests.test.ts",
+      "src/components/lane-addons-panel.test.ts",
+      "src/components/lane-addons-reads.test.ts",
+      "src/components/lane-addons-workspace.test.ts",
+      "src/components/lane-addon-connection.test.ts",
+      "src/components/lane-installation-manager.test.ts"
+    ],
+    "files": 6,
+    "tests": 98,
+    "vitest_exit": 0,
+    "tsc_command": "pnpm exec tsc --noEmit",
+    "tsc_exit": 0,
+    "log_sha256": "1dca7df8a1954d07b331bf489f61f9721a41ffc8226a41d40fdee1a712c0da04"
+  },
+  "ocaml": "unchanged; not built or tested for this Dashboard-only change",
+  "actual_server_protocol": "existing producer source compared; no new server process observation",
+  "actual_dashboard": "not performed",
+  "actual_provider": "not performed",
+  "integration": "not merged",
+  "installed_runtime": "unchanged"
+}

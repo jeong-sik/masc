@@ -874,7 +874,7 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
        for this Keeper, including their exact paging cursor. *)
     restore_keeper_chat_page state keeper_name;
   end;
-  state.msg_target_keeper_name <- Some keeper_name;
+  retarget_message state (Some keeper_name);
   if state.workspace_identity <> Workspace_identity_unread then
     state.msg_unconfirmed_workspace <- None;
   state.opening_notice <- None;
@@ -13270,7 +13270,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.code_notes_open <- false;
   state.keeper_action_serial <- state.keeper_action_serial + 1;
   state.keeper_action_inflight <- None;
-  state.msg_target_keeper_name <- None;
+  retarget_message state None;
   state.msg_live <- None;
   state.composer_focused <- false;
   (match state.view with
@@ -13610,7 +13610,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
     withdraw_keeper_workspace_presentation state ~previous:withdrawn_workspace
       ~keep_detail_navigation;
     if preserve_chat then begin
-      state.msg_target_keeper_name <- target;
+      retarget_message state target;
       state.view <- Keepers Keeper_message;
       state.composer_focused <- focused;
       Masc_tui_message_input.clear state.msg_input;

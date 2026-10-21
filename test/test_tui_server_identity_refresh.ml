@@ -2053,7 +2053,42 @@ let test_local_source_failures_are_independent () =
        && Masc_tui_composer_projection.classify_key state Masc_tui_composer.continuous_key = Masc_tui_composer.Toggle_continuous keeper.k_name
        && state.msg_target_keeper_name = Some keeper.k_name
        && state.local_workspace = Local_workspace_failed "archive unavailable"
-       && Masc_tui_message_input.contents state.msg_input = "original draft survives metadata failure")
+       && Masc_tui_message_input.contents state.msg_input = "original draft survives metadata failure");
+  let original_draft=Masc_tui_message_input.contents state.msg_input in
+  state.voice_capture <- Some keeper.k_name;
+  state.voice_continuous <- Some keeper.k_name;
+  state.voice_floor <- Some (-50.);
+  state.voice_stop_requested <- None;
+  retarget_message state (Some other.k_name);
+  Masc_tui_message_input.clear state.msg_input;
+  Masc_tui_message_input.insert state.msg_input "other Keeper draft";
+  Alcotest.(check bool) "draft transfer withdraws voice without releasing its occupied resource" true
+    (state.voice_capture = Some keeper.k_name
+       && state.voice_capture_withdrawn
+       && state.voice_stop_requested = Some Masc.Voice_bridge.Discard
+       && state.voice_continuous = None && state.voice_floor = None
+       && Masc_tui_composer_projection.classify_key state Masc_tui_composer.send_key = Masc_tui_composer.Send other.k_name);
+  retarget_message state (Some keeper.k_name);
+  Masc_tui_message_input.clear state.msg_input;
+  Masc_tui_message_input.insert state.msg_input original_draft;
+  request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
+  Alcotest.(check bool) "returning to the original name cannot revive its withdrawn transcription" true
+    (settle_voice_capture state ~keeper:keeper.k_name = Some Voice_withdrawn
+       && state.voice_capture = None
+       && state.voice_continuous = None
+       && Masc_tui_message_input.contents state.msg_input = original_draft
+       && state.local_workspace = Local_workspace_failed "archive unavailable");
+  retarget_message state (Some other.k_name);
+  Masc_tui_message_input.clear state.msg_input;
+  Masc_tui_message_input.insert state.msg_input "other Keeper draft";
+  state.voice_capture <- Some other.k_name;
+  state.voice_stop_requested <- None;
+  Alcotest.(check bool) "an older different Keeper completion cannot settle the replacement capture" true
+    (settle_voice_capture state ~keeper:keeper.k_name = None
+       && state.voice_capture = Some other.k_name
+       && Masc_tui_message_input.contents state.msg_input = "other Keeper draft"
+       && settle_voice_capture state ~keeper:other.k_name
+          = Some (Voice_current Masc.Voice_bridge.Keep_what_was_heard))
 
 let test_local_source_tickets_cannot_cross_or_survive_suspension () =
   let open Masc_tui_types in

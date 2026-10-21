@@ -56,6 +56,10 @@
   새로 읽는다. 목록 cursor 갱신으로 초안·음성·전송 대상을 바꾸지 않는다. 비활성 행만
   roster 선택을 따르고, key 판정은 필요한 대상/초안만 동기 조회한다. 결정에 담긴 같은
   Keeper 이름을 실제 동작에 넘기며 표시용 관측·attachment 수를 key마다 준비하지 않는다.
+- 대상 전환은 `retarget_message`를 통해 이전 음성 기여도 철회한다. 이미 저장된 텍스트
+  초안은 유지하고 진행 중인 녹음은 기존 Discard 정책을 따른다. 철회된 capture의 점유는
+  terminal 응답까지 남기며 A→B→A나 이후 Keep 요청으로 되살리지 않는다. 종료 대기
+  표시는 실제 철회·점유 사실을 읽고, 이전 callback이 새 대상의 초안·capture를 해제하지 않는다.
 - Task 표시 준비는 원래 consumer/요청/run/Task·workspace·폭·ticket에 귀속해 시작, worker
   진입/반환, caller 관측, UI 적용/거절, 소유권 철회, 취소 요청과 실제 등록 해제를 별도로 남긴다.
   같은 요청의 원자적 사실만 준비 단계 안내에 쓰며, 미관측 단계는 null로 남긴다. worker 반환을

@@ -448,6 +448,7 @@ let test_browser_reader_chrome_scope () =
 
 let test_reader_discards_active_and_queued_voice () =
   let state = fresh_state () in
+  state.Tui_types.msg_target_keeper_name <- Some "analyst";
   state.Tui_types.composer_focused <- true;
   state.Tui_types.voice_capture <- Some "analyst";
   state.Tui_types.voice_continuous <- Some "analyst";
@@ -491,6 +492,7 @@ let test_workspace_withdrawal_discards_queued_voice () =
   List.iter (fun return_to_local ->
     let state = fresh_state () in
     state.Tui_types.workspace_identity <- Tui_types.Workspace_identity_match;
+    state.Tui_types.msg_target_keeper_name <- Some "analyst";
     state.Tui_types.voice_capture <- Some "analyst";
     state.Tui_types.voice_continuous <- Some "analyst";
     state.Tui_types.voice_stop_requested <- Some Masc.Voice_bridge.Keep_what_was_heard;

@@ -11876,6 +11876,14 @@ let release_composer_for_browser_reader (state : state) =
   state.composer_focused <- false;
   withdraw_voice_capture state
 
+(* A draft target transfer also withdraws its pending voice contribution. Keep
+   the microphone occupied until the old terminal event settles, including an
+   A -> B -> A return before that event. Reopening the same target is not a transfer. *)
+let retarget_message (state : state) target =
+  (if not (Option.equal String.equal state.msg_target_keeper_name target) then
+     withdraw_voice_capture state);
+  state.msg_target_keeper_name <- target
+
 type voice_completion =
   | Voice_current of Masc.Voice_bridge.stop_request
   | Voice_withdrawn
@@ -11885,6 +11893,9 @@ type voice_completion =
 let settle_voice_capture (state : state) ~keeper =
   if state.voice_capture <> Some keeper then None
   else begin
+    (* Admission uses the bound draft, never a roster cursor or the callback's
+       name alone. A different active capture was excluded above. *)
+    (if state.msg_target_keeper_name <> Some keeper then withdraw_voice_capture state);
     let disposition =
       if state.voice_capture_withdrawn then Voice_withdrawn
       else Voice_current (Option.value state.voice_stop_requested

@@ -1,0 +1,27 @@
+{
+  "at": "2026-10-21T15:26:33.457185+00:00",
+  "stack": 44168,
+  "top_pr": 44702,
+  "top_head": "d35d2559c56814b38615545a5f4f081304bccc05",
+  "layers": 67,
+  "current_head_base_diff_bound_approval": 29,
+  "without_bound_approval": 38,
+  "no_latest_valid_approved": 24,
+  "only_old_head_approved": 14,
+  "current_structured_fail_hold": 0,
+  "latest_changes_requested": 0,
+  "draft": 0,
+  "unresolved_threads": 0,
+  "rest_dirty_prs": [
+    44192
+  ],
+  "observed_main_at_census": "4d25f9e175120740de2a0c254693c4bd73fbd534",
+  "new_main_after_census": "003f52e210d31abe087f0edeba335e5bb095f4af",
+  "caveat": "Read-only API census and canonical identity binding, not full source review or merge admission. Future whole restack changes scope and requires fresh approvals.",
+  "whole_rebase_request": {
+    "keeper": "pr-updater",
+    "operation_id": "kmsg-7f4585ddeacd43ac2a42f3e1b98cfc15",
+    "observed_request_state": "queued",
+    "actual_rebase_or_push": "not verified"
+  }
+}

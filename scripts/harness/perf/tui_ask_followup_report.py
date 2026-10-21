@@ -87,10 +87,10 @@ ARM_FIELDS = {"instances", "attempts", "admissions", "conditions", "source_commi
 ENVELOPE = {"seq", "ts", "level", "source", "module", "keeper_name", "turn_id", "message", "details", "category"}
 DETAILS = {"event", "keeper", "ask_id", "request", "origin", "read_admission_started_ns", "submission_started_ns",
            "question_source_turn_ref", "phase", "source", "received_ns", "observed_ns", "ui_admitted", "source_applied",
-           "admitted_ns", "completion", "sources"}
+           "admitted_ns", "completion", "sources", "admission_capture"}
 PHASES = {"started", "worker_entered", "producer_returned", "cancelled", "cancel_requested", "registration_released", "finished", "source_processed"}
 OUTCOMES = {"complete", "failed", "cancelled", "not_started", "withdrawn"}
-METRICS = {"admission_to_start_log_ns": (None, "started"), "admission_to_worker_ns": (None, "worker_entered"),
+METRICS = {"admission_capture_ns": ("capture_started", "capture_returned"), "admission_to_start_log_ns": (None, "started"), "admission_to_worker_ns": (None, "worker_entered"),
            "worker_to_producer_ns": ("worker_entered", "producer"), "admission_to_ui_ns": (None, "finished"),
            "producer_to_ui_ns": ("producer", "finished"), "admission_to_registration_release_ns": (None, "registration_released")}
 
@@ -157,6 +157,17 @@ def completion(value):
     return None
 
 
+def capture_receipt(value, admitted, observed):
+    require(type(value) is dict, "invalid admission capture receipt")
+    state = value.get("state")
+    require(state in {"unavailable", "returned", "failed"}, "unsupported admission capture state")
+    fields(value, {"state"} if state == "unavailable" else {"state", "capture_started_ns", "capture_returned_ns"})
+    if state != "unavailable":
+        require(admitted <= ns(value["capture_started_ns"]) <= ns(value["capture_returned_ns"]) <= observed,
+                "invalid admission capture receipt clocks")
+    return value
+
+
 def record(entry):
     fields(entry, ENVELOPE)
     integer(entry["seq"]); text(entry["ts"]); text(entry["message"], False)
@@ -165,12 +176,17 @@ def record(entry):
     require((entry["level"], entry["source"], entry["module"], entry["category"])
             == ("INFO", "structured", "Transport", "lifecycle"), "selected event has wrong logging channel")
     value = entry["details"]
-    fields(value, DETAILS)
+    # Historical artifacts have no receipt field. Absence is unobserved,
+    # whereas an explicit unavailable receipt says no store was attempted.
+    fields(value, DETAILS if "admission_capture" in value else DETAILS-{"admission_capture"})
     context = origin(value["origin"])
     text(value["keeper"]); text(value["ask_id"])
     require(entry["keeper_name"] == value["keeper"], "keeper metadata disagrees with original capsule")
     key = context["tui_instance_id"], integer(value["request"]), ns(value["read_admission_started_ns"])
     require(ns(value["submission_started_ns"]) <= key[2] <= ns(value["observed_ns"]), "invalid original clock order")
+    receipt = (capture_receipt(value["admission_capture"], key[2], value["observed_ns"])
+               if "admission_capture" in value else {"state": "unobserved"})
+    value = dict(value, admission_capture=receipt)
     phase = value["phase"]
     require(phase in PHASES, "unsupported phase")
     terminal = completion(value["completion"])
@@ -216,7 +232,8 @@ def capture_failure(entry):
 def attempt(key, records, declared):
     errors = []
     output = {"identity": dict(zip(("instance_id", "request", "read_admission_started_ns"), key)),
-              "declared": declared, "records": records, "errors": errors, "metrics": dict.fromkeys(METRICS)}
+              "declared": declared, "records": records, "errors": errors, "metrics": dict.fromkeys(METRICS),
+              "admission_capture": records[0]["admission_capture"] if records else {"state": "unobserved"}}
     if not records:
         return dict(output, outcome="unobserved", producer_outcome=None, missing_stages=sorted({"started", "worker_entered", "producer", "registration_released", "finished"}))
     original = records[0]
@@ -243,6 +260,10 @@ def attempt(key, records, declared):
         errors.append("producer cannot return a dispatch-not-started outcome")
     clocks = {name: row["observed_ns"] for name, row in stages.items()}
     clocks[None] = key[2]
+    receipt = original["admission_capture"]
+    if receipt["state"] in {"returned", "failed"}:
+        clocks["capture_started"] = receipt["capture_started_ns"]
+        clocks["capture_returned"] = receipt["capture_returned_ns"]
     if producer:
         clocks["producer"] = producer["observed_ns"]
     for name, (start, end) in METRICS.items():
@@ -412,6 +433,12 @@ def analyze_arm(value, root):
             item["original_provenance"] = original
             if any(row["origin"] != original for row in failures):
                 item["errors"].append("original provenance changed within admission capture evidence")
+            receipt = item["admission_capture"]
+            if receipt["state"] != "unobserved" and (receipt["state"] != "failed" or any(
+                    row["capture_started_ns"] != receipt["capture_started_ns"]
+                    or row["observed_ns"] != receipt["capture_returned_ns"] for row in failures)):
+                item["errors"].append("capture failure disagrees with original receipt")
+            if item["errors"]:
                 item["outcome"] = "invalid"
                 item["metrics"] = dict.fromkeys(METRICS)
     for item in output["attempts"]:
@@ -421,7 +448,8 @@ def analyze_arm(value, root):
     output["declared_attempts"] = len(declared)
     output["summary"] = {"attempts": len(groups), "outcomes": dict(Counter(v["outcome"] for v in output["attempts"])), "metrics": {}}
     failures = [row for item in output["attempts"] for row in item["capture_failures"]]
-    output["summary"]["admission_capture"] = {"observed_failures": len(failures),
+    output["summary"]["admission_capture"] = {"receipt_states": dict(Counter(
+        item["admission_capture"]["state"] for item in output["attempts"])), "observed_failures": len(failures),
         "attempts_with_observed_failures": sum(bool(item["capture_failures"]) for item in output["attempts"]),
         "observed_failed_capture_sum_ns": sum(row["capture_duration_ns"] for row in failures)}
     for name in METRICS:
@@ -471,6 +499,7 @@ def analyze(packet, root):
                        "Admission journals bypass log severity; their bytes are not proof of exhaustive capture, dispatch or execution.",
                        "Capture warnings are original observation facts, not producer/UI outcomes; missing warnings do not prove capture success.",
                        "Durations describe observed subsets, with every attempt retained in denominators; no speed/readiness verdict.",
+                       "Capture receipts cover one attempted append through return/error conversion before warning formatting, not fsync or complete capture; historical missing receipts remain unobserved.",
                        "Store initialization spans precede input-reader timing; they are retained separately, not a full cold-start duration.",
                        "Opaque source snapshots and read completion do not prove useful Task progress or visible UI."]}
 

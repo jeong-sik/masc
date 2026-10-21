@@ -47,6 +47,7 @@ let emit (read : Masc_tui_async_protocol.ask_followup_read) ~sources event =
         "keeper", `String keeper;"ask_id", `String submission.as_ask_id;
         "request", `Int (Snapshot_read.request_id request);
         "origin",Masc_tui_observation_origin.to_json read.afr_origin;
+        "admission_capture",Masc_tui_observation_store.admission_capture_to_json read.afr_admission_capture;
         "read_admission_started_ns",`Intlit (Int64.to_string read.afr_admission_started_ns);
         "submission_started_ns",`Intlit (Int64.to_string submission.as_started_ns);
         "question_source_turn_ref", (match submission.as_source_turn_ref with

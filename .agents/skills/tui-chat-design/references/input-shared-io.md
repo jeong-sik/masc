@@ -206,3 +206,9 @@
 - 유효한 capture 실패는 관측 사실이다. producer/UI 종단 원인이나 증거 형식 오류로
   합치지 않으며 독립 분모가 있는 표본을 성공만 남기려고 제외하지 않는다. 경고만 있는
   시도도 알려진 identity로 보존하되 독립 roster·worker 진입·미시작 판정을 만들어내지 않는다.
+
+- Ask follow-up의 원본 `admission_capture`는 접수 시 저장 시도의 반환/실패와
+  clocks를 보존한다. store 없음은 unavailable, 과거 로그에 필드 없음은 unobserved다.
+  이후 worker·UI·정리 관측에도 같은 capsule을 쓰며 현재 state에서 새로 추론하지 않는다.
+  성공 시 별도 이벤트/flush를 추가하지 않는다. span은 경고 포맷/출력 전에 끝나며
+  전체 admission 구간에 이미 포함된다. fsync·입력 가능·paint·Task 진척으로 승격하지 않는다.

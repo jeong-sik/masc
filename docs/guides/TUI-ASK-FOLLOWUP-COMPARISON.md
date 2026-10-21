@@ -159,10 +159,33 @@ because severity policy or sink/interruption failures can hide them.
 
 The span begins before the capture attempt and ends after error conversion,
 before lazy warning formatting/output. It does not prove write/flush was reached
-or completed. One entry clock is added to all admission writes;
-only failed captures have this additional observed span. Warning construction
-remains lazy under the existing Startup module threshold. It is not complete
-write-cost accounting or original Task progress.
+or completed. Warning construction remains lazy under the existing Startup
+module threshold. It is not complete write-cost accounting or original Task
+progress.
+
+Current routine Info facts also carry the original immutable `admission_capture`
+receipt: `state` is `returned`, `failed` or `unavailable`. Returned/failed receipts
+have numeric Int64 `capture_started_ns` and `capture_returned_ns`, bracketing the
+attempt through return/error conversion before warning output. Unavailable has
+no clocks and says no configured store was attempted. Filesystem explanations
+stay in the Warn fact. A normal return means the append/flush call returned;
+it does not prove fsync, exhaustive capture, worker exit or UI paint.
+
+The reader accepts the exact historical Info field set without a receipt as
+`unobserved`, never successful or unavailable. All observations of one read must
+retain the same receipt. Present failed receipts must agree with observed failure
+spans; contradiction invalidates metrics. Warning absence remains unknown.
+The `admission_capture_ns` metric uses a receipt once per original attempt,
+regardless of event count; it is not added to whole admission intervals, which
+already include it. JSON summary `receipt_states` retains unavailable/unobserved
+attempts in the denominator. Existing metric tables expose observed/all coverage
+and only allow descriptive matched-subset deltas under the original conditions.
+
+There are two clock reads per attempted capture (one more on successful writes
+than the earlier failure-only span), a retained receipt and repeated small Info
+fields. No extra successful-write event, backend, flush or retry is introduced.
+Severity filtering or interruption can still lose the receipt. These facts
+attribute observation overhead; no latency improvement has been measured.
 
 Declared attempts with no records remain `unobserved`; started/partial/producer-
 returned attempts without UI settlement remain `unfinished`. Complete, failed,

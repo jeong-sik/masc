@@ -14,10 +14,11 @@ type ask_followup_read = {
   afr_submission : ask_submission;
   afr_origin : Masc_tui_observation_origin.t;
   afr_admission_started_ns : int64;
+  afr_admission_capture : Masc_tui_observation_store.admission_capture option;
 }
-let capture_ask_followup_read ~instance ~request ~submission ~expected_workspace ~admission_started_ns =
+let capture_ask_followup_read ~origin ~request ~submission ~admission_started_ns ~admission_capture =
   {afr_request=request;afr_submission=submission;afr_admission_started_ns=admission_started_ns;
-   afr_origin=Masc_tui_observation_origin.capture instance ~expected_workspace}
+   afr_origin=origin;afr_admission_capture=admission_capture}
 
 type approval_observation = {
   ao_ticket: Masc_tui_operator_projection.Listing_order.ticket;

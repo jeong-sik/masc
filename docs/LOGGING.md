@@ -159,3 +159,10 @@ Inspect the This TUI Logs source for its structured details. A storage diagnosti
 is separate from the original read's producer/UI outcome; missing warnings do
 not establish capture success. The comparison reader retains these observed
 failures without discarding independently declared attempts.
+
+Routine Ask follow-up Info details carry `admission_capture` from the same
+original read: returned/failed with attempt clocks, or unavailable without them.
+The local Logs detail exposes this structured field through the existing decoder.
+No extra successful-write event is emitted. The receipt ends before warning
+formatting/output; it is not fsync, complete capture or worker/UI/Task progress.
+Historical missing receipts remain unobserved in the comparison reader.

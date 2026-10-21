@@ -6309,6 +6309,7 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
   let last_outcome =
     `Assoc
       [ "runtime_state", `String "done"
+      ; "selected_runtime_id", `String "claude_code.opus"
       ; "selected_model", `String "claude-opus-5-5"
       ]
   in
@@ -6335,6 +6336,8 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
             | Some outcome ->
                 Alcotest.(check string) "outcome" "done"
                   outcome.klo_runtime_state;
+                Alcotest.(check (option string)) "runtime id"
+                  (Some "claude_code.opus") outcome.klo_selected_runtime_id;
                 Alcotest.(check (option string)) "model"
                   (Some "claude-opus-5-5") outcome.klo_selected_model
             | None -> Alcotest.fail "alpha lost its last outcome");
@@ -6354,6 +6357,30 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
              beta.kl_conditions.Tui_decode.klc_heartbeat_healthy
        | lanes ->
            Alcotest.failf "expected two lane rows, got %d" (List.length lanes))
+
+(* A Keeper whose turn ended before any runtime was dispatched has a null
+   runtime id; a lane that omits the key is refused, so a server that stopped
+   sending it is not read as "no runtime was selected". *)
+let test_decode_keeper_lanes_last_outcome_runtime_id_is_required_nullable () =
+  let outcome fields = `Assoc ([ "runtime_state", `String "done" ] @ fields) in
+  let decode fields =
+    Tui_decode.decode_keeper_lanes_snapshot
+      (keeper_lanes_json
+         [ keeper_lane_json ~last_outcome:(outcome fields) "alpha" ])
+  in
+  (match
+     decode [ "selected_runtime_id", `Null; "selected_model", `Null ]
+   with
+   | Error err -> Alcotest.failf "a null runtime id was refused: %s" err
+   | Ok { Tui_decode.kls_lanes = [ { Tui_decode.kl_last_outcome = Some o; _ } ]; _ } ->
+       Alcotest.(check (option string)) "null runtime id" None
+         o.klo_selected_runtime_id
+   | Ok _ -> Alcotest.fail "expected one lane with an outcome");
+  match decode [ "selected_model", `Null ] with
+  | Ok _ -> Alcotest.fail "an outcome without selected_runtime_id decoded"
+  | Error detail ->
+      Alcotest.(check bool) "error names the missing field" true
+        (Astring.String.is_infix ~affix:"selected_runtime_id" detail)
 
 let test_decode_keeper_lanes_requires_the_table_fields () =
   let incomplete =
@@ -13571,6 +13598,9 @@ let () =
           test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values;
         Alcotest.test_case "requires the table fields" `Quick
           test_decode_keeper_lanes_requires_the_table_fields;
+        Alcotest.test_case "last outcome runtime id is required and nullable"
+          `Quick
+          test_decode_keeper_lanes_last_outcome_runtime_id_is_required_nullable;
         Alcotest.test_case "a lane without its phase conditions is refused" `Quick
           test_decode_keeper_lanes_requires_the_phase_conditions;
         Alcotest.test_case "every known phase decodes to its own constructor"

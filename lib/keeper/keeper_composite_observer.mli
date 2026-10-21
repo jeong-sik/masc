@@ -79,7 +79,7 @@ type last_outcome = {
   ended_at : float;
   decision_stage : Keeper_registry.packed_decision_stage;
   runtime_state : runtime_state;
-  selected_model : string option;
+  selected_runtime : Keeper_registry.selected_runtime option;
 }
 
 (** Live turn timing, surfaced separately from [last_outcome] so dashboard
@@ -94,10 +94,10 @@ type live_turn = {
   last_progress_kind : string option;
       (** Low-cardinality label for the signal that refreshed
           [last_progress_at]. *)
-  selected_model : string option;
-      (** Surface model selected for the live turn, mirrored from
-          [turn_observation.selected_model]. Exposed so the dashboard can
-          show what model a running turn is on, not only the post-turn
+  selected_runtime : Keeper_registry.selected_runtime option;
+      (** Runtime and model selected for the live turn, mirrored from
+          [turn_observation.selected_runtime]. Exposed so the dashboard can
+          show what a running turn is on, not only the post-turn
           [last_outcome]. [None] before runtime selection. *)
   active_tool_count : int;
       (** Tools issued but not yet completed on the live turn, mirrored

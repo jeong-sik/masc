@@ -257,7 +257,7 @@ val record_turn_tool_inflight :
     This function resets the in-turn FSM fields ([turn_phase],
     [decision_stage]) on the existing observation, the
     same way [mark_turn_started] bypasses the validator with a fresh
-    install. [turn_id], [started_at], [selected_model], [measurement],
+    install. [turn_id], [started_at], [selected_runtime], [measurement],
     [measurement_bind_count], and progress timestamp are preserved across
     agent-core turns inside one keeper turn (they are keeper-turn-scoped, not
     agent-core-turn-scoped).
@@ -301,10 +301,11 @@ val set_turn_phase :
   observation_token:Keeper_turn_observation_token.t option ->
   base_path:string -> string -> packed_turn_phase -> unit
 
-(** Record the surface model selected for the current turn. No-op if idle. *)
-val set_turn_selected_model :
+(** Record the runtime that produced the current turn's outcome. No-op if
+    idle. *)
+val set_turn_selected_runtime :
   observation_token:Keeper_turn_observation_token.t option ->
-  base_path:string -> string -> string option -> unit
+  base_path:string -> string -> selected_runtime option -> unit
 
 (** Mark the end of a keeper turn. Clears [current_turn_observation]
     so the composite observer reverts to idle and stamps

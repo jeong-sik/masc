@@ -715,8 +715,10 @@ omit the precondition entirely; the TUI always sends both components. On 409,
 refresh identity before issuing a new command; retained input stays local.
 
 Execution facts are not on the list. Open the selected Keeper's detail
-(`right`/`enter`); its Info tab shows `Lifecycle`, `Turn`, `Idle` and
-`Last outcome`, read from
+(`right`/`enter`); its Info tab shows `Lifecycle`, `Turn`, `Idle`,
+`Last outcome` and `Last runtime` (the runtime that produced the last
+outcome, which after a failover is not the runtime the Keeper is assigned),
+read from
 `GET /api/v1/keepers/composite`. When a refresh fails after an earlier
 reading, Info keeps that reading and puts `stale · refresh failed: <reason>`
 above it; when there was no earlier reading it says `unavailable` with the

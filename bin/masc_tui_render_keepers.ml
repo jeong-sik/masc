@@ -322,6 +322,26 @@ let keeper_operations_outcome_text = function
            state ^ " · " ^ Terminal_text.single_line model
        | Some _ | None -> state)
 
+(* The runtime that produced the last outcome, apart from the one the keeper
+   is assigned: after a failover they differ. An id the catalog does not list
+   (or a catalog not loaded yet) shows the raw id, never a guessed provider. *)
+let keeper_last_runtime_text (state : state) = function
+  | Some { Tui_decode.klo_selected_runtime_id = Some runtime_id; _ } ->
+      let id_text = Terminal_text.single_line runtime_id in
+      (match state.runtime_surface with
+       | None -> id_text
+       | Some snap ->
+           (match
+              Tui_decode.resolve_last_runtime
+                snap.rss_resolved.rrs_runtimes runtime_id
+            with
+            | Tui_decode.Last_runtime_cataloged ro ->
+                id_text ^ " \xc2\xb7 " ^ Terminal_text.single_line ro.ro_provider
+            | Tui_decode.Last_runtime_uncataloged _ ->
+                id_text ^ " \xc2\xb7 not in the runtime list"))
+  | Some { Tui_decode.klo_selected_runtime_id = None; _ } | None ->
+      Masc_tui_theme.Glyph.no_value
+
 (* Composite execution facts belong to this Keeper's Info pane. Separate
    fields use the pane's wrapped, scrollable rows; a long one-line preview
    beside the list footer silently lost its outcome and runtime target. *)
@@ -340,6 +360,7 @@ let keeper_operations_fields (state : state) ~keeper_name =
                (Tui_decode.keeper_lane_turn_phase_to_string lane.kl_turn_phase)
            ; "Idle:", keeper_lane_idle_text lane.kl_idle_seconds
            ; "Last outcome:", keeper_operations_outcome_text lane.kl_last_outcome
+           ; "Last runtime:", keeper_last_runtime_text state lane.kl_last_outcome
            ]
        | None ->
            [ "Execution:", Ansi.dim ^ "no composite row for "

@@ -30,7 +30,7 @@ type last_outcome = {
   ended_at : float;
   decision_stage : Keeper_registry.packed_decision_stage;
   runtime_state : runtime_state;
-  selected_model : string option;
+  selected_runtime : Keeper_registry.selected_runtime option;
 }
 
 type live_turn = {
@@ -38,7 +38,7 @@ type live_turn = {
   started_at : float;
   last_progress_at : float;
   last_progress_kind : string option;
-  selected_model : string option;
+  selected_runtime : Keeper_registry.selected_runtime option;
   active_tool_count : int;
   wake : Keeper_registry.wake_reason;
 }
@@ -384,7 +384,7 @@ let observe
              started_at = obs.started_at;
              last_progress_at = obs.last_progress_at;
              last_progress_kind = obs.last_progress_kind;
-             selected_model = obs.selected_model;
+             selected_runtime = obs.selected_runtime;
              active_tool_count = obs.active_tool_count;
              wake = obs.wake;
            }
@@ -398,7 +398,7 @@ let observe
            ended_at = lc.ct_ended_at;
            decision_stage = lc.ct_decision_stage;
            runtime_state = "done";
-           selected_model = lc.ct_selected_model;
+           selected_runtime = lc.ct_selected_runtime;
          }
        | None -> None);
     last_skip;
@@ -516,6 +516,12 @@ let phase_diagnosis_to_json
            rows);
   ]
 
+let selected_runtime_id_of =
+  Option.map (fun (r : Keeper_registry.selected_runtime) -> r.sr_runtime_id)
+
+let selected_model_of selected =
+  Option.bind selected (fun (r : Keeper_registry.selected_runtime) -> r.sr_model)
+
 let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
   `Assoc [
     "keeper", `String s.keeper_name;
@@ -550,8 +556,10 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
           "last_progress_at", `Float live.last_progress_at;
           "last_progress_kind",
             Json_util.string_opt_to_json live.last_progress_kind;
+          "selected_runtime_id",
+            Json_util.string_opt_to_json (selected_runtime_id_of live.selected_runtime);
           "selected_model",
-            Json_util.string_opt_to_json live.selected_model;
+            Json_util.string_opt_to_json (selected_model_of live.selected_runtime);
           "active_tool_count", `Int live.active_tool_count;
         ]
       | None -> `Null);
@@ -564,8 +572,10 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
             `String (decision_stage_to_string lo.decision_stage);
           "runtime_state",
             `String (runtime_state_to_string lo.runtime_state);
+          "selected_runtime_id",
+            Json_util.string_opt_to_json (selected_runtime_id_of lo.selected_runtime);
           "selected_model",
-            Json_util.string_opt_to_json lo.selected_model;
+            Json_util.string_opt_to_json (selected_model_of lo.selected_runtime);
         ]
       | None -> `Null);
     "last_skip", (match s.last_skip with

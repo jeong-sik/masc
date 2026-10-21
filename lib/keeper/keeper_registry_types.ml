@@ -132,8 +132,13 @@ and turn_observation =
   ; decision_stage : packed_decision_stage
   ; measurement : turn_measurement option
   ; measurement_bind_count : int
-  ; selected_model : string option
+  ; selected_runtime : selected_runtime option
   ; wake : wake_reason
+  }
+
+and selected_runtime =
+  { sr_runtime_id : string
+  ; sr_model : string option
   }
 
 and completed_turn_observation =
@@ -141,7 +146,7 @@ and completed_turn_observation =
   ; ct_started_at : float
   ; ct_ended_at : float
   ; ct_decision_stage : packed_decision_stage
-  ; ct_selected_model : string option
+  ; ct_selected_runtime : selected_runtime option
   ; ct_wake : wake_reason
   }
 

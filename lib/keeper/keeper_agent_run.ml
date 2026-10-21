@@ -938,6 +938,7 @@ let run_turn
       ?on_runtime_attempt_failed
       ?on_produced_checkpoint
       ?on_runtime_lane_terminal_error
+      ?on_runtime_selected
       ?on_deferred_runtime_consumed
       ?shared_context
       ?repetition_execution
@@ -2239,6 +2240,10 @@ let run_turn
                       detail);
                  Error e
                | Ok selected_run ->
+                 Option.iter
+                   (fun callback ->
+                      callback ~runtime_id:selected_run.Keeper_turn_driver.selected_runtime_id)
+                   on_runtime_selected;
                  let result = selected_run.Keeper_turn_driver.run_result in
                  Option.iter (record_produced_checkpoint ~runtime_id:selected_run.selected_runtime_id
                    ~attempt:selected_run.lane_attempt_index) result.checkpoint;

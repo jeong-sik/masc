@@ -96,7 +96,7 @@ The following direct registry mutation helpers update fields that the composite 
 - `mark_turn_measurement`
 - `set_turn_decision_stage`
 - `set_turn_phase`
-- `set_turn_selected_model`
+- `set_turn_selected_runtime`
 - `mark_turn_finished`
 
 Current code cross-check: `keeper_unified_turn.ml` still calls these helpers directly in the live turn path
@@ -108,7 +108,7 @@ Current code cross-check: `keeper_unified_turn.ml` still calls these helpers dir
 | `mark_turn_measurement` | live turn measurement bind | binds pending measurement into the current turn snapshot | Yes, when a pending measurement exists |
 | `set_turn_decision_stage` | live turn decision path | updates `decision_stage` to `guard_ok` when measurement is present | Yes, when a live turn exists |
 | `set_turn_phase` | terminal/error path, tool hook path, `mark_turn_provider_attempt_started` | updates `turn_phase` | Yes, when a live turn exists |
-| `set_turn_selected_model` | successful runtime attempt path | stores `selected_model` after a successful runtime attempt | Yes, when a live turn exists |
+| `set_turn_selected_runtime` | runtime attempt result path (success and terminal error) | stores `selected_runtime` (runtime id and model): the runtime that completed the turn, or the candidate whose error ended it | Yes, when a live turn exists |
 | `mark_turn_finished` | turn finally block | clears `current_turn_observation`, ending the live turn snapshot and freezing `last_completed_turn` | Yes, when a live turn exists |
 
 By contrast, the nearby `dispatch_keeper_phase_event` calls in the overflow-retry path

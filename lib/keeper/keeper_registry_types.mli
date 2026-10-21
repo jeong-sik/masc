@@ -434,10 +434,29 @@ and turn_observation = {
       (** Number of [Context_measured] snapshots bound to this live turn.
           The composite observer's [event_priority_monotone] invariant
           requires this to stay <= 1. *)
-  selected_model : string option;
+  selected_runtime : selected_runtime option;
+      (** The runtime that produced the turn's outcome. [None] until the turn
+          ends, and when no candidate was dispatched or none of them left an
+          outcome to name. *)
   wake : wake_reason;
       (** What triggered this turn (#16, 38-bug campaign PR-5). Installed
           once by [mark_turn_started] and frozen for the turn's lifetime. *)
+}
+
+(** The runtime that produced a turn's outcome: the candidate that completed
+    the turn, the candidate that answered before finalization rejected the
+    turn, or, when the walk itself failed, the candidate whose error the lane
+    returned. After a failover this is not the runtime the lane was assigned.
+    An earlier candidate's typed overflow can outrank a later candidate's
+    error, so on a failed walk it is not always the last candidate
+    dispatched. *)
+and selected_runtime = {
+  sr_runtime_id : string;
+      (** Exact runtime id; join it to the runtime catalog for provider and
+          model display. *)
+  sr_model : string option;
+      (** Model the runtime reported. [None] unless the turn completed and the
+          runtime observation carried one. *)
 }
 
 and completed_turn_observation = {
@@ -445,7 +464,7 @@ and completed_turn_observation = {
   ct_started_at : float;
   ct_ended_at : float;
   ct_decision_stage : packed_decision_stage;
-  ct_selected_model : string option;
+  ct_selected_runtime : selected_runtime option;
   ct_wake : wake_reason;
       (** Frozen copy of [turn_observation.wake] (#16, 38-bug campaign
           PR-5), so the "what just finished" surface can show why the

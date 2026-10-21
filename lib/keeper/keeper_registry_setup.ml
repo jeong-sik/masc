@@ -1158,7 +1158,7 @@ let mark_turn_started ~observation_token ~base_path ~wake name =
         ; decision_stage = Packed Decision_undecided
         ; measurement = None
         ; measurement_bind_count = 0
-        ; selected_model = None
+        ; selected_runtime = None
         ; wake
         }
       in

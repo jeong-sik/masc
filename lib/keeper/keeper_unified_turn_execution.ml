@@ -186,6 +186,9 @@ let run (ctx : ctx)
    let lane_terminal_error_ref : Keeper_turn_driver.lane_terminal_error option ref =
      ref None
    in
+   (* The candidate that produced the walk's result, written once when the
+      walk returns one. A turn can still fail after that, in finalization. *)
+   let answering_runtime_id_ref : string option ref = ref None in
   let do_run
         ~(execution : runtime_execution)
         ~run_meta
@@ -274,6 +277,8 @@ let run (ctx : ctx)
                          :: !runtime_attempt_errors_ref)
                  ~on_runtime_lane_terminal_error:
                    (fun terminal -> lane_terminal_error_ref := Some terminal)
+                 ~on_runtime_selected:
+                   (fun ~runtime_id -> answering_runtime_id_ref := Some runtime_id)
                  ?on_deferred_runtime_consumed
                  ~temperature:execution.temperature
                  ~trajectory_acc
@@ -369,17 +374,34 @@ let run (ctx : ctx)
         | Some observation -> observation.selected_model
         | None -> None
       in
-      Keeper_registry.set_turn_selected_model
+      Keeper_registry.set_turn_selected_runtime
         ~observation_token:(Some observation_token)
         ~base_path:config.base_path
         meta.name
-        selected_model;
+        (Keeper_turn_selected_runtime.selected_runtime
+           (Keeper_turn_selected_runtime.Completed
+              { runtime_id = result.Keeper_agent_result.runtime_id
+              ; selected_model
+              }));
       Keeper_registry.mark_turn_runtime_done
         ~observation_token:(Some observation_token)
         ~base_path:config.base_path
         meta.name;
       Ok result, turn_state
     | Error err ->
+      Keeper_registry.set_turn_selected_runtime
+        ~observation_token:(Some observation_token)
+        ~base_path:config.base_path
+        meta.name
+        (Keeper_turn_selected_runtime.selected_runtime
+           (Keeper_turn_selected_runtime.Failed
+              { answering_runtime_id = !answering_runtime_id_ref
+              ; terminal_origin_runtime_id =
+                  Option.map
+                    (fun (terminal : Keeper_turn_driver.lane_terminal_error) ->
+                       terminal.origin_runtime_id)
+                    !lane_terminal_error_ref
+              }));
       let turn_state =
         match !deferred_runtime_lane_ref with
         | Some hint ->

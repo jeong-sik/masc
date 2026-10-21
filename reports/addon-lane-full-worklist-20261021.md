@@ -136,6 +136,16 @@ Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현�
 | G05 | 에이전트 작업 중 표시와 현재 포인터/입력 활동 표시 | 범위별 재확인 필요 | 실제 동작 이벤트 기반으로 작업자·활동·포인터 위치 표시; 완료·중단·해제 때 표시 정리 |
 | G06 | 두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화 | 기반/일부 검증 있음 | draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능 |
 
+
+G04 후속 [#44807](https://github.com/jeong-sik/masc/pull/44807) · 다른 설치 ID의 같은 TOML 경로
+
+기존 connection detail은 같은 installation ID의 worker만 골랐다. TOML 파일에서 ID를 바꾸면 같은 경로의 예전 소유자와 정리 실패가 이 관련 상세에서 빠졌다. Dashboard는 같은 ID의 worker 목록을 유지하고, 같은 source_path에 있는 다른 설치 ID의 기록을 별도 펼침 영역으로 보여준다. TUI는 같은 read-only 분류 모델을 사용한다. 각 기록은 실제 installation ID·instance·incarnation·revision·phase·관측 sequence를 보존한다.
+
+같은 ID는 경로 이동 후에도 같은 그룹이고, 다른 ID는 source_path가 정확히 같을 때만 별도 관계로 남는다. 제목·run·package나 파일 basename으로 연결하지 않는다. Manual attachment는 같은 instance/incarnation만 읽으며 None 경로끼리 연결하지 않는다. 다른 ID의 기록은 현재 선언의 application이나 실행 권한을 대신하지 않는다. 생성 시각을 추정해 이전/이후라고 단정하지 않으며 별도 설치 소유자로 표시한다.
+
+실제 완료한 검사: Dashboard `lane-addon-connection`, `lane-installation-manager`, `lane-addons-panel` 3파일62건 PASS, `pnpm exec tsc --noEmit` PASS, 변경 ML/MLI3개 parser PASS. TUI 새 검사는 원래 관측 모델의 그룹 membership·incarnation·retained 실패를 확인하며 화면 문구·배치 assertion을 추가하지 않는다. 이 OCaml 테스트 실행과 실제 TUI/Dashboard 화면 검증은 아직 없다. 기존 G01 스택과 실행 후보를 이 G04 소스 증거로 대체하지 않는다.
+
+
 ## H. 실제 사용·운영·배포 검증 — 6개
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
@@ -184,12 +194,3 @@ Dashboard·TUI의 원래 근거 표시를 각각 확인한다. Optional은 Off �
 - MSX/DOS의 소스·image 검증과 실사용 한계: `docs/guides/machine-addon-state.md`.
 
 PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값이다. 실행을 재개할 때 다시 읽는다.
-
-
-## G04 후속 · 다른 설치 ID의 같은 TOML 경로
-
-기존 connection detail은 같은 installation ID의 worker만 골랐다. TOML 파일에서 ID를 바꾸면 같은 경로의 예전 소유자와 정리 실패가 이 관련 상세에서 빠졌다. Dashboard는 같은 ID의 worker 목록을 유지하고, 같은 source_path에 있는 다른 설치 ID의 기록을 별도 펼침 영역으로 보여준다. TUI는 같은 read-only 분류 모델을 사용한다. 각 기록은 실제 installation ID·instance·incarnation·revision·phase·관측 sequence를 보존한다.
-
-같은 ID는 경로 이동 후에도 같은 그룹이고, 다른 ID는 source_path가 정확히 같을 때만 별도 관계로 남는다. 제목·run·package나 파일 basename으로 연결하지 않는다. Manual attachment는 같은 instance/incarnation만 읽으며 None 경로끼리 연결하지 않는다. 다른 ID의 기록은 현재 선언의 application이나 실행 권한을 대신하지 않는다. 생성 시각을 추정해 이전/이후라고 단정하지 않으며 별도 설치 소유자로 표시한다.
-
-실제 완료한 검사: Dashboard `lane-addon-connection`, `lane-installation-manager`, `lane-addons-panel` 3파일62건 PASS, `pnpm exec tsc --noEmit` PASS, 변경 ML/MLI3개 parser PASS. TUI 새 검사는 원래 관측 모델의 그룹 membership·incarnation·retained 실패를 확인하며 화면 문구·배치 assertion을 추가하지 않는다. 이 OCaml 테스트 실행과 실제 TUI/Dashboard 화면 검증은 아직 없다. 기존 G01 스택과 실행 후보를 이 G04 소스 증거로 대체하지 않는다.

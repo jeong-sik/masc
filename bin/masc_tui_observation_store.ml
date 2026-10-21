@@ -44,6 +44,20 @@ let initialize ~base_path =
       "observed_ns",`Intlit (Int64.to_string observed_ns)]);
   outcome
 
+type admission_outcome = Capture_returned | Capture_failed of string
+type admission_capture = {
+  capture_started_ns : int64;
+  capture_returned_ns : int64;
+  capture_outcome : admission_outcome;
+}
+let admission_capture_to_json = function
+  | None -> `Assoc ["state",`String "unavailable"]
+  | Some capture -> `Assoc [
+      "state",`String (match capture.capture_outcome with
+        | Capture_returned -> "returned" | Capture_failed _ -> "failed");
+      "capture_started_ns",`Intlit (Int64.to_string capture.capture_started_ns);
+      "capture_returned_ns",`Intlit (Int64.to_string capture.capture_returned_ns)]
+
 let record_admission store ~origin ~request ~admission_started_ns =
   let capture_started_ns=Mtime_clock.elapsed_ns () in
   let result=match Fs_compat.append_jsonl store.admissions (`Assoc [
@@ -54,10 +68,10 @@ let record_admission store ~origin ~request ~admission_started_ns =
     "read_admission_started_ns",`Intlit (Int64.to_string admission_started_ns)]) with
     | () -> Ok ()
     | exception (Unix.Unix_error _ | Sys_error _ as exn) -> Error (Printexc.to_string exn) in
+  let capture_returned_ns=Mtime_clock.elapsed_ns () in
   (match result with
    | Ok () -> ()
    | Error detail ->
-     let observed_ns=Mtime_clock.elapsed_ns () in
      Log.Startup.emit_lazy Log.Warn ~category:Log.Boundary (fun () ->
        Printf.sprintf "Ask follow-up admission capture unavailable: request=%d: %s" request detail,
        `Assoc [
@@ -67,6 +81,7 @@ let record_admission store ~origin ~request ~admission_started_ns =
          "request",`Int request;
          "read_admission_started_ns",`Intlit (Int64.to_string admission_started_ns);
          "capture_started_ns",`Intlit (Int64.to_string capture_started_ns);
-         "observed_ns",`Intlit (Int64.to_string observed_ns);
+         "observed_ns",`Intlit (Int64.to_string capture_returned_ns);
          "error",`String detail]));
-  result
+  {capture_started_ns;capture_returned_ns;
+   capture_outcome=(match result with Ok () -> Capture_returned | Error detail -> Capture_failed detail)}

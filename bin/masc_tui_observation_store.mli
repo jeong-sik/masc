@@ -17,20 +17,32 @@ val initialize : base_path:string -> (t, string) result
     initialization evidence, not fsync, complete log coverage or runtime proof. *)
 val directory : t -> string
 val admissions_path : t -> string
+type admission_outcome = Capture_returned | Capture_failed of string
+type admission_capture = private {
+  capture_started_ns : int64;
+  capture_returned_ns : int64;
+  capture_outcome : admission_outcome;
+}
+val admission_capture_to_json : admission_capture option -> Yojson.Safe.t
+(** [None] means no configured store was attempted, not capture success. A
+    receipt exposes its outcome and clocks without copying filesystem error
+    text into routine Info events. The original Warn diagnostic retains it. *)
 val record_admission :
   t -> origin:Masc_tui_observation_origin.t -> request:int ->
-  admission_started_ns:int64 -> (unit, string) result
-(** Append the original admitted read identity before dispatch, independently of
-    logger severity. Reuses Fs_compat's serialized JSONL append/flush backend.
-    No outcome is inferred and no question/answer body is stored. Filesystem
-    failures return Error and emit a best-effort structured Warn/Boundary event
-    containing the original captured provenance, request and admission clock,
-    the failed capture span and opaque filesystem explanation. The event does
-    not describe a producer/UI outcome. One clock is captured before every
-    append; on failure the second is captured before lazy warning formatting,
-    so the span covers attempted capture through error conversion, not warning
-    output or proof that physical write/flush completed.
-    Existing module severity policy still applies. Cancellation and
-    unexpected exceptions propagate. This synchronous preparation cost belongs
-    after the original admission clock, before started/worker observations.
-    Flush is not fsync or proof of complete capture after failure/interruption. *)
+  admission_started_ns:int64 -> admission_capture
+(** Append the original admitted identity before dispatch, independently of
+    logger severity, through Fs_compat's serialized JSONL append/flush backend.
+    Return an immutable receipt for both normal return and expected filesystem
+    failure. No question/answer body or producer/UI outcome is stored.
+
+    Clocks bracket payload/append through expected error conversion, before
+    lazy warning formatting/output. A normal return means append/flush returned;
+    failure does not prove write/flush was reached or completed. Neither is fsync,
+    exhaustive capture, worker exit, visible UI or Task progress. These two
+    synchronous clock reads and capture/logging costs remain inside original
+    admission-to-start/worker/UI intervals.
+
+    Expected failures also emit the existing best-effort Startup Warn/Boundary
+    fact with original provenance, identity, failed span and opaque explanation.
+    Existing severity/redaction/sinks apply; no extra successful-write event or
+    flush is added. Cancellation and unexpected exceptions propagate. *)

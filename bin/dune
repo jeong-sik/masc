@@ -2347,7 +2347,7 @@
  (name masc_tui_async_protocol)
  (wrapped false)
  (modules masc_tui_async_protocol)
- (libraries masc_tui_observation_origin masc_tui_ask_projection masc_tui_original_task_read
+ (libraries masc_tui_observation_store masc_tui_observation_origin masc_tui_ask_projection masc_tui_original_task_read
   masc
   masc.keeper_chat_operations
   masc.runtime
@@ -3089,7 +3089,7 @@
  (modules masc_tui_ask_followup_observation)
  (libraries masc masc.masc_types masc.masc_log masc_tui_types
   masc_tui_async_protocol masc_tui_ask_projection masc_tui_workspace_job
-  masc_tui_observation_origin yojson mtime.clock.os))
+  masc_tui_observation_origin masc_tui_observation_store yojson mtime.clock.os))
 
 (library
  (name masc_tui_observation_store)

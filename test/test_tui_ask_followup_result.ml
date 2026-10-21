@@ -89,13 +89,12 @@ let actual_read base ask resolution ~before_source ~parts publish =
 let launch ?key state results request submission ~released perform =
   let admission_started_ns=Mtime_clock.elapsed_ns () in
   let expected_workspace=match state.Ui.server_identity with Some identity -> identity | None -> fail "fixture workspace identity is missing" in
-  let read=Protocol.capture_ask_followup_read ~instance:state.observation_instance
-    ~request ~submission ~expected_workspace ~admission_started_ns in
-  (match state.Ui.observation_store with
-   | None -> ()
-   | Some store -> ignore (Masc_tui_observation_store.record_admission store
-       ~origin:read.afr_origin ~request:(Ui.Snapshot_read.request_id request)
-       ~admission_started_ns));
+  let origin=Masc_tui_observation_origin.capture state.observation_instance ~expected_workspace in
+  let admission_capture=Option.map (fun store ->
+    Masc_tui_observation_store.record_admission store ~origin
+      ~request:(Ui.Snapshot_read.request_id request) ~admission_started_ns) state.Ui.observation_store in
+  let read=Protocol.capture_ask_followup_read ~origin ~request ~submission
+    ~admission_started_ns ~admission_capture in
   let envelope=Protocol.capture_workspace_message state in
   let stop,resolve=Eio.Promise.create () in
   Ui.supersede_ask_followup_worker state
@@ -379,6 +378,7 @@ let check_captured_batch expected batch =
     check bool "actual partial and terminal messages retain their original origin and clock" true
       (Origin.to_json actual.afr_origin=Origin.to_json expected.Protocol.afr_origin
        && actual.afr_admission_started_ns=expected.afr_admission_started_ns
+       && actual.afr_admission_capture==expected.afr_admission_capture
        && Ui.Snapshot_read.request_id actual.afr_request=Ui.Snapshot_read.request_id expected.afr_request
        && actual.afr_submission.as_request==expected.afr_submission.as_request)) batch
 let test_actual_workspaces_keep_distinct_original_provenance () =
@@ -653,14 +653,18 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
      filtered, but the production admission journal must retain its identity. *)
   let admission_started_ns=Mtime_clock.elapsed_ns () in
   let request,submission=begin_read state in
-  let unobserved=Protocol.capture_ask_followup_read ~instance:state.observation_instance
-    ~request ~submission ~expected_workspace:(identity base) ~admission_started_ns in
-  Fun.protect ~finally:(fun () -> Log.set_level Log.Info) (fun () ->
+  let origin=Origin.capture state.observation_instance ~expected_workspace:(identity base) in
+  let unobserved=Fun.protect ~finally:(fun () -> Log.set_level Log.Info) (fun () ->
     Log.set_level Log.Warn;
-    Masc_tui_observation_store.record_admission before_store
-      ~origin:unobserved.afr_origin ~request:(Ui.Snapshot_read.request_id request)
-      ~admission_started_ns |> require;
-    Observation.emit unobserved ~sources:None Observation.Followup_read_started);
+    let capture=Masc_tui_observation_store.record_admission before_store ~origin
+      ~request:(Ui.Snapshot_read.request_id request) ~admission_started_ns in
+    (match capture.capture_outcome with
+     | Masc_tui_observation_store.Capture_returned -> ()
+     | Capture_failed detail -> fail detail);
+    let read=Protocol.capture_ask_followup_read ~origin ~request ~submission
+      ~admission_started_ns ~admission_capture:(Some capture) in
+    Observation.emit read ~sources:None Observation.Followup_read_started;
+    read) in
   let before_admissions=copy_admissions "before" before_store in
   let before_logs=copy_logs "before" before_dir in
   let after_store=Masc_tui_observation_store.initialize ~base_path:base2 |> require in
@@ -729,6 +733,20 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
        && (match member "capture_failures" row with
            | `List [failure] -> member "origin" failure=Masc_tui_observation_origin.to_json unstarted.afr_origin
            | _ -> false)) before_attempts);
+  let after_attempts=match member "attempts" (member "after" case) with
+    | `List rows -> rows | _ -> fail "completed attempts lost" in
+  check bool "actual successful capture receipt reaches report exactly once per original read" true
+    (match after_attempts with
+     | [row] -> let receipt=member "admission_capture" row in
+       member "state" receipt=`String "returned"
+       && member "admission_capture_ns" (member "metrics" row)<>`Null
+       && member "observed" (member "admission_capture_ns" (member "metrics"
+         (member "summary" (member "after" case))))=`Int 1
+     | _ -> false);
+  check bool "actual failed capture receipt remains distinct from read not-started" true
+    (List.exists (fun row -> member "outcome" row=`String "not_started"
+       && member "state" (member "admission_capture" row)=`String "failed"
+       && member "admission_capture_ns" (member "metrics" row)<>`Null) before_attempts);
   check bool "filtered admission has original file evidence without a supplied declaration" true
     (List.exists (fun row ->
        List.for_all (fun key -> member key (member "identity" row)=member key (declaration unobserved))
@@ -933,10 +951,22 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
   (match Masc_tui_observation_store.record_admission replacement_store
      ~origin:completed.afr_origin ~request:(Ui.Snapshot_read.request_id completed.afr_request)
      ~admission_started_ns:completed.afr_admission_started_ns with
-   | Error _ -> () | Ok () -> fail "directory blocker accepted an admission record");
+   | {capture_outcome=Masc_tui_observation_store.Capture_failed _;_} -> ()
+   | {capture_outcome=Capture_returned;_} -> fail "directory blocker accepted an admission record");
   let capture_failed_read,result=run_read (fun _ -> ()) in
   check bool "actual original read completes despite capture failure" true (result=Some (Ok ()));
   let local_after_failure=Masc_tui_system_logs.client_snapshot ~limit:(Log.Ring.bounds ()).total ~min_level:None |> require in
+  let capture_entry=List.find_opt (fun entry ->
+    let details=entry.Masc.Tui_decode.sl_details in
+    member "event" details=`String "tui_ask_followup"
+    && member "request" details=`Int (Ui.Snapshot_read.request_id capture_failed_read.afr_request)
+    && member "origin" details=Origin.to_json capture_failed_read.afr_origin)
+    local_after_failure.sys_entries in
+  check bool "local decoder retains original failed receipt without filesystem text in Info" true
+    (match capture_entry with None -> false | Some entry ->
+       let receipt=member "admission_capture" entry.sl_details in
+       receipt=Masc_tui_observation_store.admission_capture_to_json capture_failed_read.afr_admission_capture
+       && member "state" receipt=`String "failed" && member "error" receipt=`Null);
   let failure_entry=List.find_opt (fun entry ->
     let details=entry.Masc.Tui_decode.sl_details in
     member "event" details=`String "tui_ask_followup_admission_failed"

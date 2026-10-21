@@ -14133,13 +14133,12 @@ let launch_ask_followup_load state ~mailbox =
     let admission_started_ns=Mtime_clock.elapsed_ns () in
     match state.server_identity, Masc_tui_types.begin_ask_followup_read state with
     | Some expected_workspace, Some (request, submission, keeper_name) ->
-        let read=capture_ask_followup_read ~instance:state.observation_instance
-          ~request ~submission ~expected_workspace ~admission_started_ns in
-        (match state.observation_store with
-         | None -> ()
-         | Some store -> ignore (Masc_tui_observation_store.record_admission store
-             ~origin:read.afr_origin ~request:(Snapshot_read.request_id request)
-             ~admission_started_ns));
+        let origin=Masc_tui_observation_origin.capture state.observation_instance ~expected_workspace in
+        let admission_capture=Option.map (fun store ->
+          Masc_tui_observation_store.record_admission store ~origin
+            ~request:(Snapshot_read.request_id request) ~admission_started_ns) state.observation_store in
+        let read=capture_ask_followup_read ~origin ~request ~submission
+          ~admission_started_ns ~admission_capture in
         let host=server_peer_host and port=state.port in
         let clock=Eio_context.get_clock_opt () in
         let envelope=capture_workspace_message state in

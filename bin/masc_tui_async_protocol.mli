@@ -14,13 +14,16 @@ type ask_followup_read = private {
   afr_submission : ask_submission;
   afr_origin : Masc_tui_observation_origin.t;
   afr_admission_started_ns : int64;
+  afr_admission_capture : Masc_tui_observation_store.admission_capture option;
 }
 val capture_ask_followup_read :
-  instance:Masc_tui_observation_origin.instance -> request:Snapshot_read.request ->
-  submission:ask_submission -> expected_workspace:Masc.Tui_decode.server_identity ->
-  admission_started_ns:int64 -> ask_followup_read
-(** Capture original immutable provenance before preparing/logging/dispatching
-    the read. UI and late cleanup consume this capsule, not replacement state. *)
+  origin:Masc_tui_observation_origin.t -> request:Snapshot_read.request ->
+  submission:ask_submission -> admission_started_ns:int64 ->
+  admission_capture:Masc_tui_observation_store.admission_capture option -> ask_followup_read
+(** Assemble original immutable provenance and its capture receipt after the
+    caller captures that origin and records this admission, before dispatch.
+    [None] retains that no configured store was attempted. UI, producers and late
+    cleanup consume the same capsule, not replacement state or a later receipt. *)
 
 type approval_observation = {
   ao_ticket: Masc_tui_operator_projection.Listing_order.ticket;

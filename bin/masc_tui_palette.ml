@@ -303,16 +303,17 @@ let palette_subsequence ~needle haystack =
    commands fold their aliases into one entry the same way
    (Masc_tui_command.spelled_catalog). *)
 let palette_action_words = function
-  | Palette_goto Resources -> [ "artifacts"; "reports"; "resources" ]
-  | Palette_goto Metrics -> [ "metrics"; "telemetry"; "charts"; "stats" ]
+  | Palette_goto surface ->
+      let aliases = match surface with
+        | Resources -> [ "artifacts"; "reports"; "resources" ]
+        | Metrics -> [ "metrics"; "telemetry"; "charts"; "stats" ]
+        | Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
+        | Approvals | Planning | Schedules | Verification | Harness | Fusion
+        | Repositories | Code | Changes | Connectors | Runtime | Config
+        | Tools | System_logs -> [] in
+      Option.to_list (List.assoc_opt surface surface_ring) @ aliases
   | Palette_usage_scope (Some scope_id) -> [scope_id]
   | Palette_addon_results id -> [id]
-  | Palette_goto
-      (( Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
-       | Approvals | Planning | Schedules | Verification | Harness | Fusion
-       | Repositories | Code | Changes | Connectors | Runtime | Config
-       | Tools | System_logs ) as surface) ->
-      Option.to_list (List.assoc_opt surface surface_ring)
   | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
   | Palette_collab | Palette_msx | Palette_dos
   | Palette_lane_addons | Palette_usage_scope None | Palette_config _ | Palette_gate_mode _

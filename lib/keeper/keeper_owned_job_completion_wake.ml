@@ -113,6 +113,9 @@ let pulse ~sw supervisor =
         Fun.protect
           ~finally:(fun () -> supervisor.active <- Job_set.remove marker.job_id supervisor.active)
           (fun () ->
+            (* Fork may enter the child first. Let discovery continue before
+               recovery I/O; cancellation here still releases this reservation. *)
+            Eio.Fiber.yield ();
             match recover ~presence_round ?held_absent ~on_result_ready:supervisor.on_result_ready ~base_path marker with
             | Error error -> Log.Server.warn "owned job completion retained job=%s error=%s"
                 (Store.Job_id.to_string marker.job_id) (Store.error_to_string error)

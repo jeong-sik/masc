@@ -49,7 +49,10 @@ val create :
     (Tool_result.result, error) result -> unit) -> unit -> 'a t
 val pulse : sw:Eio.Switch.t -> 'a t -> (unit, Keeper_tool_execution_journal.error) result
 (** Schedule each validated ready-run intake before inspecting later pending
-    names and return without joining the intake workers. Directory listing
+    names and return without joining the intake workers. Each child yields
+    inside its reservation cleanup before held-evidence probes, declaration
+    acquisition or original intake. Discovery still runs in the caller and
+    may yield to children before the full scan finishes; directory listing
     still completes first. A late discovery failure can coexist with earlier
     reserved workers; their exact admission and switch cleanup remain in force.
     Active intake and workers reporting held original authority suppress

@@ -172,6 +172,21 @@ let test_plain_t_and_explicit_command () =
     (Masc_tui_command.parse "t" = Masc_tui_command.Say "t");
   check bool "calls is an explicit local action" true
     (Masc_tui_command.parse "/calls" = Masc_tui_command.Open_calls)
+let test_captured_search_scope () =
+  let reader,request=start (Reader.create [choice "original"]) in
+  let reader=Reader.complete reader request (Ok (decode "original" "retained pitch")) in
+  let searched=match Reader.search_key ~width:80 ~height:10 ~key:"/" reader with
+    | Some reader -> Reader.search_insert ~width:80 ~height:10 ~text:"pitch" reader
+    | None -> fail "opened original did not own search" in
+  check (option string) "query belongs to the opened original" (Some "pitch")
+    (Reading.search_query (Reader.document searched));
+  let refreshed,_=start searched in
+  check (option string) "same execution refresh retains query" (Some "pitch")
+    (Reading.search_query (Reader.document refreshed));
+  check (option string) "return to chooser clears result query" None
+    (Reading.search_query (Reader.document (Reader.back refreshed)));
+  check (option string) "search does not change original output" (Some "retained pitch")
+    (Option.bind (value searched) (fun call -> call.Decode.kc_output))
 let () = run "original chat call reader"
  ["requests",[test_case "exact selection and request" `Quick test_original_request;
               test_case "exact response identity and full payload" `Quick test_exact_decode];
@@ -182,4 +197,5 @@ let () = run "original chat call reader"
                test_case "workspace and original conversation" `Quick test_workspace_and_draft;
                test_case "replacement authority" `Quick test_replacement_and_authority];
   "input",[test_case "actual CR/LF selects an original" `Quick test_actual_enter_bytes;
-           test_case "ordinary t and explicit calls" `Quick test_plain_t_and_explicit_command]]
+           test_case "ordinary t and explicit calls" `Quick test_plain_t_and_explicit_command;
+           test_case "captured document search scope" `Quick test_captured_search_scope]]

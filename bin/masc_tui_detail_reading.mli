@@ -26,3 +26,16 @@ val move : count:int -> height:int -> movement -> t -> t
     captured observation, including temporary preparation rows. [First] starts
     at zero. [By] leaves the anchor and moves from the current bounded position.
     A newly created reading always starts at zero. *)
+
+val search_editing : t -> bool
+val search_query : t -> string option
+val search_count : width:int -> t -> int
+(** Matches in the current sanitized row projection, without terminal styles.
+    A width awaiting preparation has no searchable document. *)
+val search_key : width:int -> height:int -> key:string -> t -> t option
+(** [/]: start a document-local query; Enter keeps it for [n]/[N], Esc drops
+    the query without closing the reading. While editing, printable keys and
+    backspace belong to the query. [None] leaves the key to reader navigation.
+    Search never filters rows, changes original content or starts a request. *)
+val search_insert : width:int -> height:int -> text:string -> t -> t
+(** Append a single-line paste only while this reading owns query input. *)

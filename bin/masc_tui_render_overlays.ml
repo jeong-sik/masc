@@ -288,11 +288,18 @@ let render_detail_reading (state : state) reading =
   let document = detail_reading_document reading ~cols in
   let count, height = detail_reading_viewport state reading in
   let scroll = Masc_tui_detail_reading.scroll ~count ~height reading in
+  let search_hint = match Masc_tui_detail_reading.search_query reading with
+    | None -> "/:find"
+    | Some query -> Printf.sprintf "/%s (%d) %s"
+        (Terminal_text.single_line query)
+        (Masc_tui_detail_reading.search_count ~width:(detail_reading_width cols) reading)
+        (if Masc_tui_detail_reading.search_editing reading then "Enter:keep Esc:cancel" else "n/N:next/previous /:find") in
+  let hints=Option.value (Masc_tui_detail_reading.hints reading)
+      ~default:"j/k:scroll  PgUp/PgDn:page  Home/End:edges  Esc:back" in
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state
     ~terminal_rows ~cols ~surface_key:"detail-reading"
     ~title:(screen_title (" " ^ Terminal_text.single_line (Masc_tui_detail_reading.title reading)))
-    ~hints:(Option.value (Masc_tui_detail_reading.hints reading)
-      ~default:"j/k:scroll  PgUp/PgDn:page  Home/End:edges  Esc:back")
+    ~hints:(search_hint ^ "  " ^ hints)
     ~body:(fun ~budget:_ c ->
       List.iteri (fun index row ->
         if index >= scroll && index < scroll + height then

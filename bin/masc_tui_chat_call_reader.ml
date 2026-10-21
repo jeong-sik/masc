@@ -138,3 +138,7 @@ let document t = t.document
 let move ~count ~height movement t =
   {t with document=Reading.move ~count ~height movement t.document}
 let pending t = Fetched.in_flight t.fetched
+let search_key ~width ~height ~key t=
+  Option.map (fun document -> {t with document}) (Reading.search_key ~width ~height ~key t.document)
+let search_insert ~width ~height ~text t=
+  {t with document=Reading.search_insert ~width ~height ~text t.document}

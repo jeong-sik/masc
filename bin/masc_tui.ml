@@ -25187,7 +25187,23 @@ and is loaded on demand through keeper_skill.
       prepare_board_read state ~mailbox:async_messages ~cols:board_reader_cols;
       if Option.is_none (current_chat_call_reader state) then close_chat_call_reader state;
       if Option.is_none (current_task_inspector state) then close_task_inspection_reader state;
-      let text_target = text_input_target state ~compact_viewport in
+      let reading_search_editing =
+        let editing=Masc_tui_detail_reading.search_editing in
+        match current_board_reader state with
+        | Some reader -> editing (Masc_tui_board_reader.document reader)
+        | None -> match current_chat_call_reader state with
+          | Some (_,reader) -> editing (Masc_tui_chat_call_reader.document reader)
+          | None -> Option.fold ~none:false ~some:editing (current_detail_reading state) in
+      let text_target =
+        if not compact_viewport && reading_search_editing then Some Text_row_search
+        else text_input_target state ~compact_viewport in
+      let insert_reading_search document insert text =
+        if not compact_viewport then begin
+          let _,cols=get_terminal_size () in
+          let _,height=Masc_tui_render_overlays.detail_reading_viewport state document in
+          insert ~width:(Masc_tui_render_overlays.detail_reading_width cols) ~height
+            ~text:(Masc_tui_identity_model.identity_field_paste text)
+        end in
       let recovered_paste = Option.is_some interrupted_paste in
       let machine_activity_on_screen () =
         state.view = Lanes && Option.is_some state.machine_activity_open
@@ -25243,9 +25259,24 @@ and is loaded on demand through keeper_skill.
           draft that goes to a Keeper on the next Enter. It is first, above the
           overlays the card is drawn over. *)
        | Some (Pasted _) when Option.is_some (current_task_inspector state) -> ()
-       | Some (Pasted _) when Option.is_some (current_chat_call_reader state) -> ()
-       | Some (Pasted _) when Option.is_some (current_board_reader state) -> ()
-       | Some (Pasted _) when Option.is_some (current_detail_reading state) -> ()
+       | Some (Pasted paste) when Option.is_some (current_board_reader state) ->
+           let reader=state.board_reader in
+           insert_reading_search (Masc_tui_board_reader.document reader)
+             (fun ~width ~height ~text -> state.board_reader <-
+               Masc_tui_board_reader.search_insert ~width ~height ~text reader) paste.Masc_tui_paste.text
+       | Some (Pasted paste) when Option.is_some (current_chat_call_reader state) ->
+           (match current_chat_call_reader state with
+            | Some (origin,reader) ->
+              insert_reading_search (Masc_tui_chat_call_reader.document reader)
+                (fun ~width ~height ~text -> state.chat_call_reader <- Some (origin,
+                  Masc_tui_chat_call_reader.search_insert ~width ~height ~text reader)) paste.Masc_tui_paste.text
+            | None -> ())
+       | Some (Pasted paste) when Option.is_some (current_detail_reading state) ->
+           Option.iter (fun reading ->
+             insert_reading_search reading
+               (fun ~width ~height ~text -> open_detail_reading state
+                 (Masc_tui_detail_reading.search_insert ~width ~height ~text reading)) paste.Masc_tui_paste.text)
+             (current_detail_reading state)
        | Some (Pasted _) when state.msx_open -> ()
        | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()
        | Some (Pasted paste) when Option.is_some state.collab ->
@@ -25560,7 +25591,7 @@ and is loaded on demand through keeper_skill.
             (not state.about_open)
             && Option.is_none state.collab
             && (compact_viewport
-               || quit_key_allowed_for (text_input_target state ~compact_viewport))
+               || quit_key_allowed_for text_target)
             && Render_schedule.Input_shortcut.is_quit ~message_mode k
         | None -> false
       in
@@ -26983,7 +27014,11 @@ and is loaded on demand through keeper_skill.
            let reader=state.board_reader in
            let document=Masc_tui_board_reader.document reader in
            let count,height=Masc_tui_render_overlays.detail_reading_viewport state document in
-           (match k with
+           let _,cols=get_terminal_size () in
+           (match Masc_tui_board_reader.search_key
+             ~width:(Masc_tui_render_overlays.detail_reading_width cols) ~height ~key:k reader with
+            | Some reader -> state.board_reader <- reader
+            | None -> match k with
             | "esc" -> close_board_reader state
             | "r" -> Option.iter (launch_board_read state ~mailbox:async_messages) (Masc_tui_board_reader.key reader)
             | "u" | "m" | "h" ->
@@ -27011,7 +27046,11 @@ and is loaded on demand through keeper_skill.
               let update reader = state.chat_call_reader <- Some (origin,reader) in
               let count,height = Masc_tui_render_overlays.detail_reading_viewport state
                 (Masc_tui_chat_call_reader.document reader) in
-              match Masc_tui_chat_call_reader.action ~key:k ~height reader with
+              let _,cols=get_terminal_size () in
+              match Masc_tui_chat_call_reader.search_key
+                ~width:(Masc_tui_render_overlays.detail_reading_width cols) ~height ~key:k reader with
+              | Some reader -> update reader
+              | None -> match Masc_tui_chat_call_reader.action ~key:k ~height reader with
               | Close ->
                   if Masc_tui_chat_call_reader.choosing reader then close_chat_call_reader state
                   else begin cancel_chat_call_pending state;
@@ -27024,9 +27063,14 @@ and is loaded on demand through keeper_skill.
            (match current_detail_reading state with
             | None -> ()
             | Some reading ->
-                if k="esc" || k="v" then state.detail_reading <- None
-                else
-                  let count, height = Masc_tui_render_overlays.detail_reading_viewport state reading in
+                let count, height = Masc_tui_render_overlays.detail_reading_viewport state reading in
+                let _,cols=get_terminal_size () in
+                match Masc_tui_detail_reading.search_key
+                  ~width:(Masc_tui_render_overlays.detail_reading_width cols) ~height ~key:k reading with
+                | Some reading -> open_detail_reading state reading
+                | None ->
+                  if k="esc" || k="v" then state.detail_reading <- None
+                  else
                   let movement = match k with
                     | "j" | "down" | "wheel-down" -> Some (Masc_tui_detail_reading.By 1)
                     | "k" | "up" | "wheel-up" -> Some (Masc_tui_detail_reading.By (-1))

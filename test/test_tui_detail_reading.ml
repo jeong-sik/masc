@@ -73,9 +73,41 @@ let test_end_intent_survives_repreparation () =
   check int "a new capture does not inherit another capture's anchor" 0
     (Reading.scroll ~count:200 ~height:10 (reading ()))
 
+let test_local_search_and_replacement () =
+  let width=80 and height=1 in
+  let prepared=Reading.replace_prepared ~title:"original" ~hints:"" ~width
+    [Reading.Content "Pi\027[31mtch\027[0m";Content "other";Content "PITCH"] (reading ()) in
+  let key key reading=match Reading.search_key ~width ~height ~key reading with
+    | Some reading -> reading | None -> fail "search key not owned" in
+  let held=key "/" prepared |> Reading.search_insert ~width ~height ~text:"pitch" in
+  check int "styles do not interrupt the searchable content" 2 (Reading.search_count ~width held);
+  check bool "query owns typed navigation letters" true (Reading.search_editing held);
+  let held=key "enter" held in
+  check bool "commit releases query input" false (Reading.search_editing held);
+  let first=Reading.scroll ~count:3 ~height held in
+  let next=key "n" held in
+  check bool "next reaches a later match" true (Reading.scroll ~count:3 ~height next>first);
+  let wrapped=key "n" next in
+  check int "next wraps within this capture" first (Reading.scroll ~count:3 ~height wrapped);
+  check int "previous reaches the last match" (Reading.scroll ~count:3 ~height next)
+    (Reading.scroll ~count:3 ~height (key "N" wrapped));
+  check int "old prepared rows are not searched at a new width" 0 (Reading.search_count ~width:40 held);
+  let held=Reading.replace_prepared ~title:"same" ~hints:"" ~width:40
+    [Reading.Content "pitch"] held in
+  check int "same-source replacement keeps the query" 1 (Reading.search_count ~width:40 held);
+  check (option string) "a new capture has no borrowed query" None (Reading.search_query (reading ()));
+  let editing=key "/" next |> Reading.search_insert ~width ~height ~text:"esc밤" in
+  let editing=key "backspace" editing in
+  check (option string) "paste is text and erase removes one UTF8 scalar" (Some "esc")
+    (Reading.search_query editing);
+  let cancelled=key "esc" editing in
+  check (option string) "cancel clears only the query" None (Reading.search_query cancelled);
+  check string "cancel keeps the capture" "original" (Reading.title cancelled)
+
 let () = run "detail reading ownership"
   [ "capture", [test_case "selection stays read-only" `Quick test_selection_does_not_retarget_capture;
                  test_case "workspace revoke" `Quick test_workspace_revoke_cannot_resurrect_capture;
                  test_case "surface revoke" `Quick test_surface_change_releases_capture];
     "navigation", [test_case "resize and edges" `Quick test_navigation_normalizes_before_moving;
-                   test_case "end intent survives re-preparation" `Quick test_end_intent_survives_repreparation] ]
+                   test_case "end intent survives re-preparation" `Quick test_end_intent_survives_repreparation;
+                   test_case "local search and replacement" `Quick test_local_search_and_replacement] ]

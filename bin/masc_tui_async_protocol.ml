@@ -497,6 +497,7 @@ type async_msg =
       view : surface;
       keeper_name : string option;
       name : string;
+      skill_reference : Skill_reference.t option;
       result : (string, string) result;
     }
   | Image_render_ready of {

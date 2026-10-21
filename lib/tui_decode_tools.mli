@@ -279,3 +279,9 @@ val decode_tool_snapshot : Yojson.Safe.t -> (tool_snapshot, string) result
 
 val decode_skills_catalog : Yojson.Safe.t -> (skills_catalog, string) result
 (** Reads the /api/v1/skills snapshot: per-skill usage rows and flows. *)
+
+val skill_flow_mermaid : skill_flow -> (string, string) result
+(** Pure declared topology for Pele. Diagram-local identifiers are generated;
+    original node ids and tool names appear only in escaped labels. Dangling
+    dependencies and duplicate node identities are refused. This graph carries
+    no execution, replay or effect authority. *)

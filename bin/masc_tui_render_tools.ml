@@ -543,6 +543,63 @@ let skill_usage_box ~cols rows =
     @ [border Ansi.box_bl Ansi.box_br; Ansi.dim, ""]
 ;;
 
+let skill_io_lines = function
+  | Masc.Tui_decode_tools.Model_orchestrated ->
+      [ Ansi.dim, "     Input: exact Skill reference / optional resource path";
+        Ansi.dim, "     Output: instruction body or resource; subsequent tools are model-orchestrated";
+        Ansi.dim, "     Average execution: not applicable to instruction text" ]
+  | Composition_io { input_schema; exports } ->
+      (Ansi.bold, "     Declared input schema (required parameters, types and enums)")
+      :: List.map (fun line -> Ansi.dim, "       " ^ Terminal_text.single_line line)
+          (String.split_on_char '\n' (Yojson.Safe.pretty_to_string input_schema))
+      @ (match exports with
+         | [] -> [Ansi.dim, "     Declared output: complete execution result (no selected exports)"]
+         | routes -> (Ansi.bold, "     Declared output routes") :: List.map (fun route ->
+             Ansi.dim, Printf.sprintf "       %s ← node %s · JSON pointer %s"
+               (Terminal_text.single_line route.Masc.Tui_decode_tools.sor_name)
+               (Terminal_text.single_line route.sor_node_id)
+               (if route.sor_pointer = "" then "(root)" else Terminal_text.single_line route.sor_pointer)) routes)
+;;
+
+let skill_statistics_lines = function
+  | None -> [Ansi.dim, "     Average executor duration: unavailable"]
+  | Some stats ->
+      let duration name (row : Masc.Tui_decode_skill_evidence.duration_statistics) =
+        Ansi.dim, Printf.sprintf "       %s: %s · samples=%d" name
+          (Option.fold ~none:"not observed" ~some:(Printf.sprintf "%.1fms") row.sds_mean_ms)
+          row.sds_samples in
+      [Ansi.bold, Printf.sprintf "     Average recorded executor duration · exact revision · all Keepers · retained runs=%d"
+          stats.Masc.Tui_decode_skill_evidence.scst_records;
+       duration "completed" stats.scst_completed;
+       duration "failed" stats.scst_failed;
+       Ansi.dim, Printf.sprintf "       deferred=%d (excluded from terminal means)" stats.scst_deferred;
+       Ansi.dim, "       Stored executor result only; asynchronous queue/dependency waits and model latency are not measured here"]
+;;
+
+let skill_settlement_lines composition =
+  match json_assoc_member_opt "executor_settlements" composition with
+  | Some (`List settlements) ->
+      List.concat_map (fun node ->
+        let field name = match json_assoc_member_opt name node with
+          | Some (`String value) -> value
+          | Some value -> Yojson.Safe.to_string value
+          | None -> "unavailable" in
+        let value name = match json_assoc_member_opt name node with
+          | Some value -> Yojson.Safe.pretty_to_string value
+          | None -> "unavailable" in
+        let content label text = (Ansi.bold, "       " ^ label) ::
+          List.map (fun line -> Ansi.dim, "         " ^ Terminal_text.single_line line)
+            (String.split_on_char '\n' text) in
+        [Ansi.bold, Printf.sprintf "     Observed node %s · %s · origin=%s"
+           (Terminal_text.single_line (field "node_id")) (Terminal_text.single_line (field "tool_name"))
+           (Terminal_text.single_line (field "execution_origin"));
+         Ansi.dim, Printf.sprintf "       output bytes=%s · truncated_to=%s"
+           (Terminal_text.single_line (field "result_bytes")) (Terminal_text.single_line (field "truncated_to"))]
+        @ content "Observed input" (value "input")
+        @ content "Observed result (disposition, duration, output)" (value "result")) settlements
+  | Some _ | None -> []
+;;
+
 let tools_selection_line ~cols state =
   if state.tools_pane=Tools_async then
     (match state.tools_async_selection with
@@ -711,10 +768,13 @@ let tools_display_lines ?(cols = 80) (state : state) =
                  ~origin:(Terminal_text.single_line source))
             ets_tools
         in
+        let ets_skill_profiles = tools_skill_profiles state in
+        let is_normal profile = match profile.Masc.Tui_decode_tools.esp_io with
+          | Model_orchestrated -> true | Composition_io _ -> false in
         let skill_profile_lines =
           List.mapi
             (fun index (profile : Masc.Tui_decode_tools.effective_skill_profile) ->
-               let instruction = String.equal profile.esp_kind "instruction" in
+               let instruction = is_normal profile in
                let execution =
                  if instruction then "on-demand" else profile.esp_execution
                in
@@ -741,7 +801,16 @@ let tools_display_lines ?(cols = 80) (state : state) =
                       | Masc.Tui_decode_tools.Skill_keeper_profile -> Some "Keeper profile"
                       | Masc.Tui_decode_tools.Skill_task task_id -> Some ("Task " ^ task_id))
                in
-               ( (if index = state.tools_skill_cursor
+               let heading =
+                 let first_in_group = index = 0 ||
+                   (match List.nth_opt ets_skill_profiles (index - 1) with
+                    | None -> true
+                    | Some previous -> is_normal previous <> instruction) in
+                 if not first_in_group then [] else
+                   [Ansi.bold, Printf.sprintf "   %s (%d)"
+                     (if instruction then "Normal Skills · instructions" else "Composition Skills · executable plans")
+                     (List.length (List.filter (fun value -> is_normal value = instruction) ets_skill_profiles))] in
+               heading @ [ ( (if index = state.tools_skill_cursor
                   then Theme.selection
                   else Ansi.dim)
                , Printf.sprintf " %s %-22s %-11s%s discovery=%dB body=%dB"
@@ -750,8 +819,8 @@ let tools_display_lines ?(cols = 80) (state : state) =
                    (Terminal_text.single_line execution)
                    flow
                    profile.esp_discovery_bytes
-                   profile.esp_body_bytes )
-               :: (match profile.esp_load_reasons, chosen with
+                   profile.esp_body_bytes ) ]
+               @ (match profile.esp_load_reasons, chosen with
                    | [], _ ->
                        [ ( Theme.warn ()
                          , "     why loaded: unattributed" ) ]
@@ -837,7 +906,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
               |> List.concat
             in
             ( Ansi.bold
-            , Printf.sprintf "     Flow  %d batches · %d nodes" batch_count
+            , Printf.sprintf "     Declared graph · Ctrl-O:Pele · %d batches · %d nodes" batch_count
                 (List.length flow.sf_nodes) )
             :: batch_lines
         in
@@ -1007,7 +1076,12 @@ let tools_display_lines ?(cols = 80) (state : state) =
                         "       composition unavailable: " ^ String.concat " · " values
                       ])
                in
-               evidence_lines @ coverage_lines)
+               let statistics_lines = match profile.esp_io with
+                 | Masc.Tui_decode_tools.Model_orchestrated -> []
+                 | Composition_io _ -> skill_statistics_lines evidence.se_composition_statistics in
+               statistics_lines @ evidence_lines
+               @ Option.fold ~none:[] ~some:skill_settlement_lines evidence.se_composition
+               @ coverage_lines)
              | Some _ | None ->
                [ Ansi.dim, "     Retained evidence: Enter to load this exact revision" ])
         in
@@ -1038,10 +1112,16 @@ let tools_display_lines ?(cols = 80) (state : state) =
             (byte_count ets_skill_tool_surface_bytes)
             (byte_count ets_tool_surface_bytes);
           Ansi.bold,
-          "   Skills — J/K select · Enter evidence · e edit · c new instruction · C new composition";
+          "   Skills — J/K select · Enter evidence · Ctrl-O graph · e edit · c normal · C composition";
           Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
         @ skill_profile_lines
+        @ (match selected_tools_skill_profile state with
+           | None -> [] | Some profile -> skill_io_lines profile.esp_io)
         @ selected_skill_flow_lines
+        @ (match state.tools_evidence_reference, state.tools_evidence_request, selected_tools_skill_profile state with
+           | Some reference, Some _, Some profile when Skill_reference.equal reference profile.esp_reference ->
+               [Ansi.dim, "     Retained evidence: loading exact revision · previous observation retained"]
+           | _ -> [])
         @ selected_skill_evidence_lines
         (* Said on this surface because this is the one that answers "what can
            this Keeper call". A document the catalog could not read is absent

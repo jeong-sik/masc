@@ -272,7 +272,7 @@ let test_probe_tells_a_missing_origin_from_a_configured_one () =
              "sh -c %s"
              (Filename.quote
                 (Printf.sprintf
-                   "cd %s && python3 -c %s %s 32 8192 %d > %s"
+                   "cd %s && python3 -c %s %s 32 8192 %d inspect > %s"
                    (Filename.quote tree)
                    (Filename.quote R.For_testing.probe_script)
                    (Filename.quote {|[{"url":"https://github.com/jeong-sik/masc.git","default_branch":"main"}]|})
@@ -349,10 +349,51 @@ let test_the_wrong_top_level_shapes_are_errors () =
     {|{"checkouts": {}, "scanned": 1, "limit": null}|}
 ;;
 
+let test_layout_probe_observes_paths_without_git () =
+  let root = Filename.temp_dir "masc-layout-" "" in
+  let tree = Filename.concat root "tree" in
+  let output = Filename.concat root "layout.json" in
+  let marker = Filename.concat root "git-was-run" in
+  let git = Filename.concat root "git" in
+  let rec mkdir path =
+    if not (Sys.file_exists path) then (mkdir (Filename.dirname path); Unix.mkdir path 0o700) in
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote root)))
+    (fun () ->
+      mkdir (Filename.concat tree "repo/.git");
+      mkdir (Filename.concat tree "elsewhere/deep/worktree");
+      Out_channel.with_open_text (Filename.concat tree "elsewhere/deep/worktree/.git")
+        (fun ch -> output_string ch "gitdir: /uninspected/pointer\n");
+      mkdir (Filename.concat root "outside/.git");
+      Unix.symlink (Filename.concat root "outside") (Filename.concat tree "linked");
+      Out_channel.with_open_text git (fun ch ->
+        Printf.fprintf ch "#!/bin/sh\ntouch %s\nexit 1\n" (Filename.quote marker));
+      Unix.chmod git 0o755;
+      let command = Printf.sprintf "cd %s && PATH=%s:$PATH python3 -c %s '[]' %d %d %d layout > %s"
+        (Filename.quote tree) (Filename.quote root)
+        (Filename.quote R.For_testing.probe_script)
+        C.max_reported_checkouts C.max_scanned_entries
+        R.target_ref_stale_after_s (Filename.quote output) in
+      check int "layout probe completes" 0 (Sys.command command);
+      check bool "layout does not execute producer git configuration" false
+        (Sys.file_exists marker);
+      let raw = In_channel.with_open_bin output In_channel.input_all in
+      match R.parse_layout_json ~root:tree raw with
+      | Error detail -> fail detail
+      | Ok { discovery = C.Partial _; _ } -> fail "unexpected partial layout"
+      | Ok { entries; discovery = C.Complete checkouts } ->
+        check (list string) "root entries include the endpoint's repository" ["elsewhere"; "linked"; "repo"] entries;
+        check (list string) "arbitrary nesting and pointer files; no symlink traversal"
+          ["elsewhere/deep/worktree"; "repo"]
+          (List.map (fun (checkout : C.checkout) -> checkout.relative_path) checkouts))
+;;
+
 let () =
   run
     "Keeper_sandbox_remote_checkouts"
-    [ ( "parse_probe_json"
+    [ ( "layout", [ test_case "endpoint layout avoids git and preserves traversal boundaries" `Quick
+        test_layout_probe_observes_paths_without_git ] )
+    ; ( "parse_probe_json"
       , [ test_case "complete discovery" `Quick test_parse_probe_json_complete
         ; test_case "checkout budget limit" `Quick test_parse_probe_json_limit_checkout_budget
         ; test_case "entry budget limit" `Quick test_parse_probe_json_limit_entry_budget

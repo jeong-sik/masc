@@ -405,6 +405,27 @@ let snapshot_submitted_evidence_json ?artifact_read ?request_id ~base_path ~work
        references)
 
 
+let submission_receipt ~base_path ~request_id ~task_id ~worker =
+  let open Result.Syntax in
+  let* request, items = load_request_for_evidence base_path request_id in
+  if not (String.equal request.id request_id
+          && String.equal request.task_id task_id
+          && String.equal request.worker worker)
+  then Error Request_scope_mismatch
+  else
+    let diagnostics = List.filter_map (function
+      | (Evidence_artifact_unreadable _ | Evidence_invalid_reference) as item ->
+        Some (submitted_evidence_item_to_yojson item)
+      | Evidence_artifact { reference; bytes; truncated = true; _ } ->
+        Some (`Assoc ["kind", `String "artifact_truncated";
+          "reference", `String reference; "bytes", `Int bytes])
+      | Evidence_artifact { truncated = false; _ }
+      | Evidence_artifact_binary _ | Evidence_note _ | Evidence_collaboration _ -> None)
+      items in
+    Ok (`Assoc ["verification_id", `String request_id;
+      "diagnostics", `List diagnostics])
+;;
+
 let inspect_submitted_evidence_for_authority ~base_path ~request_id ~task_id
     ~task_worker ~(authority : Masc_domain.completion_authority) =
   if not (Masc_domain.completion_authority_has_identity authority)

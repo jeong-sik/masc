@@ -18,6 +18,21 @@ must preserve the producer's submitted evidence without semantic inference:
 | Artifact | `artifact:<producer-root-relative-path>` | bounded UTF-8 snapshot read from the producer sandbox |
 | Narrative | `note:<text>` | submitter narrative context, not an independently inspected artifact |
 
+Artifact paths are relative to the producer workspace root, including any
+checkout prefix: a file at `repo/evidence/build.log` is submitted as
+`artifact:repo/evidence/build.log`, even when Execute ran with `cwd=repo`.
+For endpoint-owned Keepers, both verifier layout discovery and Read/Grep observe
+the attached endpoint; the host bookkeeping directory is not the working tree.
+An unreachable endpoint or incomplete scan is reported as unavailable, not empty.
+
+Successful submission responses include `evidence_capture.verification_id` and
+`evidence_capture.diagnostics` from that exact saved request. Unreadable references
+retain their reason code and saved backend detail; truncated artifacts report
+reference and source byte count. `diagnostics_unavailable` means the receipt could
+not be read, while the submission itself still succeeded. These diagnostics do
+not change acceptance or the verifier's verdict. Task Review also preserves saved
+read-error details rather than showing only `read_error`.
+
 The task contract's `required_evidence` and `verify_gate_evidence` are
 requirements, not submitted evidence. They are persisted separately as
 `required_artifacts`; the two lists must never be merged.

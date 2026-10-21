@@ -82,8 +82,7 @@ val truncated_snapshot_items : Yojson.Safe.t -> (string * int) list
     after a review stalls. *)
 
 val evidence_read_failure_code : evidence_read_failure -> string
-(** Stable bounded code for diagnostics and metadata. Error detail is carried
-    only by the structured durable reason object. *)
+(** Stable bounded code for diagnostics and metadata. *)
 val evidence_access_failure_to_string :
   request_id:string -> evidence_access_failure -> string
 val evidence_read_failure_of_owned_read_failure :
@@ -218,13 +217,22 @@ val submitted_evidence_identity_lines :
 (** Project a persisted [submitted_evidence] snapshot into one identity line
     per item, for surfaces that name evidence without reading its payload —
     artifacts project to their reference, notes to their prefixed text, and
-    unreadable items carry the typed reason code so an operator sees the
-    failure rather than a silent gap. Payloads are served separately by the
+    unreadable items carry the typed reason code and any saved read-error
+    detail, including the attempted path. Payloads are served separately by the
     authority-scoped evidence route.
 
     This module writes the snapshot, so it owns the shape: a caller must not
     re-derive it. Returns [Error] on any item this module did not write and
     never partially projects a malformed array. *)
+
+val submission_receipt :
+  base_path:string -> request_id:string -> task_id:string -> worker:string ->
+  (Yojson.Safe.t, evidence_access_failure) result
+(** Capture diagnostics from one exact persisted submission. Verifies the
+    request id, Task and producer; returns unreadable references and truncation
+    metadata only, never artifact contents. Internal submission adapters call
+    this before notifying the verifier, then publish it only after commit.
+    This does not reread the producer's files or decide submission acceptance. *)
 
 val inspect_submitted_evidence_for_authority :
   base_path:string ->

@@ -560,7 +560,8 @@ let test_requests_json_projects_every_snapshot_item_kind () =
           `Assoc [
             ("kind", `String "artifact_unreadable");
             ("reference", `String "artifact:repos/demo/gone.ml");
-            ("reason", `Assoc [("code", `String "missing")]);
+            ("reason", `Assoc [("code", `String "read_error");
+              ("detail", `String "cat: repo/evidence/gone.ml: No such file or directory")]);
           ];
         ]);
       ]
@@ -584,7 +585,7 @@ let test_requests_json_projects_every_snapshot_item_kind () =
     Alcotest.(check (list string)) "every item kind reaches the operator"
       [ "artifact:repos/demo/main.ml"
       ; "note:executor summary"
-      ; "artifact:repos/demo/gone.ml (unreadable: missing)"
+      ; "artifact:repos/demo/gone.ml (unreadable: read_error: cat: repo/evidence/gone.ml: No such file or directory)"
       ]
       (member "submitted_evidence" row |> Yojson.Safe.Util.to_list
        |> List.map Yojson.Safe.Util.to_string))

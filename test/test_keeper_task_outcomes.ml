@@ -1156,6 +1156,67 @@ let test_strict_done_submits_for_verification () =
        | tasks ->
          failf "expected exactly one persisted task, got %d" (List.length tasks))
 
+let test_done_receipt_is_bound_to_the_captured_request () =
+  let base_path = temp_dir () in
+  let previous = Atomic.get Workspace_hooks.verification_submit_request_fn in
+  let notify_previous = Atomic.get Workspace_hooks.verification_notify_submit_fn in
+  Fun.protect ~finally:(fun () ->
+    Atomic.set Workspace_hooks.verification_submit_request_fn previous;
+    Atomic.set Workspace_hooks.verification_notify_submit_fn notify_previous;
+    cleanup_dir base_path) (fun () ->
+    let config = Masc.Workspace.default_config base_path in
+    ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+    ignore (Masc.Workspace.add_task config ~title:"captured evidence" ~priority:1 ~description:"");
+    let meta = keeper_meta () in
+    let agent_name = "task-create-test" in
+    ignore (Masc.Workspace.bind_session config ~agent_name ~capabilities:[] ());
+    (match Masc.Workspace.claim_task_r config ~agent_name ~task_id:"task-001" () with
+     | Ok _ -> () | Error err -> fail (Masc_domain.masc_error_to_string err));
+    let prepared = ref [] in
+    Atomic.set Workspace_hooks.verification_submit_request_fn
+      (fun config ~(task : Masc_domain.task) ~assignee ~verification_id ~claim:_ ->
+        let open Workspace_verification_store in
+        let items = [Evidence_artifact { reference = "artifact:repo/present";
+            content = "private artifact body"; bytes = 21; truncated = false };
+          Evidence_artifact_unreadable { reference = "artifact:evidence/missing";
+            reason = Evidence_read_error ("No such file: " ^ verification_id) }] in
+        match Masc.Verification.create_request ~base_path:config.base_path
+          ~task_id:task.id ~request_id:verification_id ~worker:assignee ~criteria:[]
+          ~output:(`Assoc ["submitted_evidence", `List
+            (List.map submitted_evidence_item_to_yojson items)]) () with
+        | Error detail -> Error detail
+        | Ok _ -> prepared := verification_id :: !prepared; Ok ());
+    (* Notification removes the saved request. The receipt must already have
+       captured this request's metadata, independent of subsequent state. *)
+    Atomic.set Workspace_hooks.verification_notify_submit_fn
+      (fun _ ~task:_ ~assignee:_ ~verification_id ~claim:_ ->
+        ignore (Masc.Verification.delete_request base_path verification_id));
+    let submit () =
+      Task.handle_keeper_task_tool ~config ~meta ~name:"keeper_task_done"
+        ~args:(`Assoc ["task_id", `String "task-001";
+          "result", `String "ready for review";
+          "evidence_refs", `List [`String "artifact:evidence/missing"]])
+      |> Yojson.Safe.from_string in
+    let first = submit () in
+    let second = submit () in
+    let ids = List.map (fun receipt ->
+      check string "submission remains completed" "completed"
+        U.(receipt |> member "disposition" |> to_string);
+      let capture = U.member "evidence_capture" receipt in
+      let id = U.(capture |> member "verification_id" |> to_string) in
+      let diagnostics = U.(capture |> member "diagnostics" |> to_list) in
+      check int "only failed evidence metadata is returned" 1 (List.length diagnostics);
+      check string "saved detail belongs to this exact request"
+        ("No such file: " ^ id)
+        U.(List.hd diagnostics |> member "reason" |> member "detail" |> to_string);
+      check bool "artifact body never enters receipt" false
+        (Astring.String.is_infix ~affix:"private artifact body" (Yojson.Safe.to_string capture));
+      id) [first; second] in
+    check (list string) "each resubmission returns its own captured id"
+      (List.rev !prepared) ids;
+    check bool "resubmission creates a different request" true
+      (List.nth ids 0 <> List.nth ids 1))
+
 let test_default_done_is_terminal () =
   with_verification_persistence @@ fun () ->
   let base_path = temp_dir () in
@@ -1652,6 +1713,8 @@ let () =
             `Quick test_done_missing_evidence_refs_emits_typed_error
         ; test_case "rejected done (failed transition) emits typed Error (D1)"
             `Quick test_done_failed_transition_emits_typed_error
+        ; test_case "submission receipt stays bound across notifications and resubmissions" `Quick
+            test_done_receipt_is_bound_to_the_captured_request
         ; test_case "strict done submits for verification"
             `Quick test_strict_done_submits_for_verification
         ; test_case "default done submits for verification"

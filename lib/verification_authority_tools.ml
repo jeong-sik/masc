@@ -203,8 +203,8 @@ let children path =
     Error (Printf.sprintf "%s: %s" operation (Unix.error_message code))
 ;;
 
-let checkout_lines root =
-  match Keeper_playground_checkouts.discover ~root with
+let checkout_lines discovery =
+  match discovery with
   | Error error ->
     Error (Keeper_playground_checkouts.scan_error_to_string error)
   | Ok (Keeper_playground_checkouts.Partial { limit; _ }) ->
@@ -221,21 +221,20 @@ let checkout_lines root =
     Ok (List.map describe checkouts)
 ;;
 
-let entry_lines_of root ~cap =
-  let open Result.Syntax in
-  let* entries =
-    children root
-    |> Result.map_error (fun detail ->
-      Printf.sprintf "verification root unreadable: %s" detail)
-  in
+let entry_lines entries ~cap =
   let entries = List.sort String.compare entries in
   let shown = List.filteri (fun index _ -> index < cap) entries in
   let omitted = List.length entries - List.length shown in
   let lines = List.map (fun entry -> "  " ^ entry) shown in
-  Ok
-    (if omitted <= 0
-     then lines
-     else lines @ [ Printf.sprintf "  ... and %d more" omitted ])
+  if omitted <= 0 then lines
+  else lines @ [ Printf.sprintf "  ... and %d more" omitted ]
+;;
+
+let entry_lines_of root ~cap =
+  children root
+  |> Result.map_error (fun detail ->
+    Printf.sprintf "verification root unreadable: %s" detail)
+  |> Result.map (fun entries -> entry_lines entries ~cap)
 ;;
 
 let root_kind root =
@@ -258,15 +257,27 @@ let root_kind root =
    infrastructure and stays a deferral. *)
 let root_layout t =
   let open Result.Syntax in
-  match t.producer_scope, root_kind t.ownership_root with
-  | Workspace_producer, Ok Fs_compat.Exact_missing ->
-    Ok (Task.Anti_rationalization.Producer_root_absent { root = t.ownership_root })
-  | ( Workspace_producer
-    , (Ok (Fs_compat.Exact_unknown | Fs_compat.Exact_kind _) | Error _) )
-  | Keeper_producer _, _ ->
+  let host_layout () =
     let* entry_lines = entry_lines_of t.ownership_root ~cap:root_entry_cap in
-    let* checkout_lines = checkout_lines t.ownership_root in
+    let* checkout_lines = checkout_lines (Keeper_playground_checkouts.discover ~root:t.ownership_root) in
     Ok (Task.Anti_rationalization.Producer_tree (entry_lines @ checkout_lines))
+  in
+  match t.producer_scope with
+  | Keeper_producer meta ->
+    (match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+     | Keeper_types_profile_sandbox.Shared_mount -> host_layout ()
+     | Keeper_types_profile_sandbox.Endpoint_owned ->
+       let* layout = Keeper_sandbox_remote_checkouts.discover_layout
+         ~timeout_sec:Repo_git.inspection_timeout_sec ~config:t.config ~meta ()
+         |> Result.map_error Keeper_playground_checkouts.scan_error_to_string in
+       let* checkout_lines = checkout_lines (Ok layout.discovery) in
+       Ok (Task.Anti_rationalization.Producer_tree
+         (entry_lines layout.entries ~cap:root_entry_cap @ checkout_lines)))
+  | Workspace_producer ->
+  match root_kind t.ownership_root with
+  | Ok Fs_compat.Exact_missing ->
+    Ok (Task.Anti_rationalization.Producer_root_absent { root = t.ownership_root })
+  | Ok (Fs_compat.Exact_unknown | Fs_compat.Exact_kind _) | Error _ -> host_layout ()
 ;;
 
 (* The Goal proof root holds every producer, so the checkout scan that maps one

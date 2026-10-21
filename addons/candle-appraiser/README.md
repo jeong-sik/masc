@@ -5,10 +5,28 @@ It does not own the Candle ledger, payout policy, final settlement or provider
 credentials. The host must fully decode a returned answer against its original
 `Candle_appraisal.request` before deciding a ledger effect.
 
-This is the worker component of the extraction. Production Candle bootstrap is
-not connected to it in this implementation unit. Its consumer request-schema
-grant depends on the Browser Addon stack; use the declared dependency rather than
-assuming the inspected older main has that API.
+The server's Candle bootstrap consumes the unique visible `candle_appraise`
+export with host operator authority. It reads an original intent before submitting
+one that the worker authoritatively reports as absent. Rebuilding the same payout,
+stage, original Relation task, model input, schema and rendered prompt retains its
+request ID. Before any worker RPC, the host durably binds that original ID and
+captured input to the selected logical installation, package and tool. A fresh
+replacement cannot claim that an old unknown request is absent and run it again;
+reattach the original installation to read its retained result. Worker process
+restarts on the same installation keep that destination binding. Pending answers
+resume on the existing maintenance pulse. An absent
+or detached Add-on leaves the confirmed obligation in the host ledger.
+
+Each Grade, Relation and Weights result still passes full host domain decoding
+before settlement. The host records the original intent and answering slot in its
+existing Exact run history; that observer receipt does not grant dispatch or mint
+money. Provider credentials and execution stay in the common Add-on Exact host
+path. Configure the installation's `grade`, `relation` and `weights` Exact outputs;
+a standalone `candle_appraiser` model route does not attach the worker.
+
+The consumer request-schema grant depends on the Browser Addon stack. Source
+wiring and scripted fixtures do not establish an installed worker, live provider
+success, or a visible Dashboard/TUI result.
 
 The `candle_appraise` tool submits or reads a request without waiting for a model
 inside its RPC. Submission requires the admitted `operator` caller envelope;

@@ -206,6 +206,123 @@ let test_explicit_capacity_preserves_original_admission_without_replaying_unknow
   invalid store absent Progress.Dispatch_intended;
   check_events "capacity and uncertainty history survives another handle" (events absent) (load (Store.create ~root)))
 
+module Receipt = Lane_addon_request_receipt
+let receipt time payload = get (Receipt.make ~observed_at:time ~payload)
+let observe store record event = stored store record (Progress.Observer event)
+let test_observer_pending_receipts_survive_domain_completion_and_restart () = with_store (fun root store ->
+  owned (retain store);
+  let start=receipt 10. (`Assoc ["original_input",request;"actor",`String scope]) in
+  let started=observe store (load store) (Receipt.Intended (Receipt.Registration,start)) in
+  let pending=stored store started Progress.Dispatch_intended in
+  let judged=stored store pending (Progress.Judgment_retained judgment) in
+  let committing=stored store judged (Progress.Commit_intended {before;after}) in
+  let uncertain=stored store committing (Progress.Commit_uncertain (evidence "original save receipt lost")) in
+  let finished=stored store uncertain (Progress.Commit_observed after) in
+  let finish_phase=Progress.phase finished.progress in
+  let terminal=receipt 8. (`Assoc ["judgment",judgment;"after",after;"timing",`String "observer_only"]) in
+  (* Wall time may move backwards. It is neither a duration nor new authority. *)
+  let prepared=observe store finished (Receipt.Intended (Receipt.Completion,terminal)) in
+  invalid store prepared (Progress.Observer (Receipt.Recorded (Receipt.Completion,terminal.digest)));
+  let reopened=load (Store.create ~root) in
+  (match Progress.observer reopened.progress with
+   | {Receipt.registration=Pending original;completion=Pending last} ->
+     Alcotest.check json "first start survives failed observer registration" (Receipt.to_json start) (Receipt.to_json original);
+     Alcotest.check json "first terminal survives restart before registration ACK" (Receipt.to_json terminal) (Receipt.to_json last)
+   | _ -> Alcotest.fail "pending immutable observer evidence lost");
+  let registered=observe store reopened (Receipt.Recorded (Receipt.Registration,start.digest)) in
+  let recorded=observe store registered (Receipt.Recorded (Receipt.Completion,terminal.digest)) in
+  Alcotest.(check bool) "observer receipt retry preserves completed domain phase" true
+    (Progress.phase recorded.progress=finish_phase);
+  invalid store recorded Progress.Dispatch_intended;
+  invalid store recorded (Progress.Commit_retry_observed before);
+  (match Progress.observer (load (Store.create ~root)).progress with
+   | {Receipt.registration=Acknowledged original;completion=Acknowledged last} ->
+     Alcotest.(check (float 0.)) "original start is not restart time" 10. original.observed_at;
+     Alcotest.(check (float 0.)) "clock rollback remains evidence without invented elapsed time" 8. last.observed_at
+   | _ -> Alcotest.fail "observer acknowledgements did not survive actual store reopen"))
+
+let test_observer_lost_ack_never_republishes_or_changes_input () = with_store (fun root store ->
+  let pending=dispatch store in
+  let start=receipt 12. (`Assoc ["input",request]) in
+  let prepared=observe store pending (Receipt.Intended (Receipt.Registration,start)) in
+  let recorded=observe store prepared (Receipt.Recorded (Receipt.Registration,start.digest)) in
+  let path=Filename.concat (Filename.concat (Filename.concat root "tool-request-owners") (Store.digest scope))
+      (Store.digest request_id ^ ".json") in
+  let bytes=Fs_compat.load_file path and identity=Unix.stat path in
+  (match updated (advance store prepared (Progress.Observer (Receipt.Recorded (Receipt.Registration,start.digest)))) with
+   | Owner.Already_stored record -> check_events "lost original ACK is acknowledged" (events recorded) record
+   | Owner.Stored _ | Owner.Unconfirmed _ -> Alcotest.fail "retry republished original ACK");
+  let current=Unix.stat path in
+  Alcotest.(check string) "ACK retry keeps actual journal bytes" bytes (Fs_compat.load_file path);
+  Alcotest.(check bool) "ACK retry keeps actual journal identity" true
+    (identity.st_dev=current.st_dev && identity.st_ino=current.st_ino && identity.st_mtime=current.st_mtime);
+  let changed=receipt 99. (`Assoc ["input",request]) in
+  invalid store recorded (Progress.Observer (Receipt.Intended (Receipt.Registration,changed)));
+  invalid store recorded (Progress.Observer (Receipt.Recorded (Receipt.Registration,changed.digest)));
+  let waiting=stored store recorded (Progress.Execution_observed (Progress.Waiting (evidence "same accepted original"))) in
+  Alcotest.check json "observer retry cannot replace original captured input" request waiting.request;
+  Alcotest.(check bool) "normal execution preserves recorded observation" true
+    ((Progress.observer waiting.progress).registration=Receipt.Acknowledged start))
+
+let test_observer_completion_needs_original_terminal_and_keeps_refusal_chain () = with_store (fun _ store ->
+  let pending=dispatch store in
+  let start=receipt 1. (`Assoc ["input",request]) in
+  let pending=observe store pending (Receipt.Intended (Receipt.Registration,start)) in
+  let terminal=receipt 2. (`Assoc ["original_refusal",`String "size_refused"]) in
+  invalid store pending (Progress.Observer (Receipt.Intended (Receipt.Completion,terminal)));
+  let refused=stored store pending (Progress.Refused {stage=Progress.Execution;evidence=evidence "size_refused"}) in
+  let prepared=observe store refused (Receipt.Intended (Receipt.Completion,terminal)) in
+  let linked=stored store prepared (Progress.Successor_intended {request_id="original-child";request=`Assoc ["child",`Bool true]}) in
+  let linked=stored store linked (Progress.Successor_observed "original-child") in
+  let registered=observe store linked (Receipt.Recorded (Receipt.Registration,start.digest)) in
+  let complete=observe store registered (Receipt.Recorded (Receipt.Completion,terminal.digest)) in
+  Alcotest.(check bool) "linking a child preserves the parent's original refusal receipt" true
+    ((Progress.observer complete.progress).completion=Receipt.Acknowledged terminal);
+  invalid store complete (Progress.Observer (Receipt.Intended (Receipt.Completion,
+    receipt 3. (`Assoc ["replacement",`Bool true])))));
+  with_store (fun _ store ->
+    let judged=judge store in
+    let start=receipt 1. (`Assoc ["input",request]) in
+    let judged=observe store judged (Receipt.Intended (Receipt.Registration,start)) in
+    let terminal=receipt 2. (`Assoc ["output",judgment]) in
+    invalid store judged (Progress.Observer (Receipt.Intended (Receipt.Completion,terminal)));
+    let intent=stored store judged (Progress.Commit_intended {before;after}) in
+    invalid store intent (Progress.Observer (Receipt.Intended (Receipt.Completion,terminal)));
+    let unknown=stored store intent (Progress.Commit_uncertain (evidence "not confirmed")) in
+    invalid store unknown (Progress.Observer (Receipt.Intended (Receipt.Completion,terminal))))
+
+let test_observer_malformed_receipts_and_order_never_become_valid_history () = with_store (fun root store ->
+  let pending=dispatch store in
+  let start=receipt 1. (`Assoc ["input",request]) in
+  let event=Receipt.event_to_json (Receipt.Intended (Receipt.Registration,start)) in
+  let stored_receipt=Receipt.to_json start in
+  let invalid_receipts=[replace "digest" (`String "wrong") stored_receipt;
+    replace "observed_at" (`Float (-1.)) stored_receipt;
+    replace "payload" (`List []) stored_receipt;
+    replace "payload" (`Assoc ["input",request;"input",`Null]) stored_receipt;
+    `Assoc ["observed_at",`Int 1;"payload",request;"digest",`String start.digest;"extra",`Null]] in
+  List.iter (fun malformed ->
+    match Receipt.of_json malformed with Error _ -> () | Ok _ -> Alcotest.fail "malformed receipt accepted") invalid_receipts;
+  List.iter (fun value -> match Receipt.make ~observed_at:value ~payload:request with
+    | Error _ -> () | Ok _ -> Alcotest.fail "invalid observer wall time accepted") [nan;infinity;neg_infinity];
+  let wire=some (get (Store.load_tool_request_owner store ~scope ~request_id)) in
+  let histories=[`List [event;event];
+    `List [Receipt.event_to_json (Receipt.Recorded (Receipt.Registration,start.digest))];
+    `List [Receipt.event_to_json (Receipt.Intended (Receipt.Completion,start))];
+    `List [replace "receipt" (List.hd invalid_receipts) event];
+    `List [event;Receipt.event_to_json (Receipt.Recorded (Receipt.Registration,"wrong"))]] in
+  List.iter (fun history ->
+    get (Store.save_tool_request_owner store ~scope ~request_id (replace "progress" history wire));
+    (match Owner.load ~store:(Store.create ~root) ~scope ~request_id with
+     | Error (Owner.Store_unavailable _) -> ()
+     | Error (Owner.Invalid_identity _ | Owner.Invalid_request _ | Owner.Binding_conflict) | Ok _ ->
+       Alcotest.fail "malformed observer history became valid or absent");
+    (match advance store pending (Progress.Execution_observed (Progress.Waiting (`Assoc []))) with
+     | Error (Owner.Ownership_error (Owner.Store_unavailable _)) -> ()
+     | Error (Owner.Ownership_error (Owner.Invalid_identity _ | Owner.Invalid_request _ | Owner.Binding_conflict)
+         | Owner.State_conflict | Owner.Invalid_transition _)
+     | Ok _ -> Alcotest.fail "malformed original observer evidence was overwritten")) histories)
+
 let () = Alcotest.run "Original Add-on request progress" ["owner",[
   Alcotest.test_case "restart keeps unknown and late original result" `Quick test_restart_preserves_unknown_and_late_original_result;
   Alcotest.test_case "whole expected history and exact acknowledgement" `Quick test_expected_history_and_exact_uncertain_ack_are_distinct;
@@ -214,4 +331,12 @@ let () = Alcotest.run "Original Add-on request progress" ["owner",[
   Alcotest.test_case "malformed history is not absence or replacement" `Quick test_strict_load_rejects_invalid_or_tampered_history;
   Alcotest.test_case "missing original cannot be recreated" `Quick test_missing_original_cannot_be_recreated_by_update;
   Alcotest.test_case "only explicit capacity permits original admission retry" `Quick
-    test_explicit_capacity_preserves_original_admission_without_replaying_unknown]]
+    test_explicit_capacity_preserves_original_admission_without_replaying_unknown;
+  Alcotest.test_case "observer intents survive domain completion and restart" `Quick
+    test_observer_pending_receipts_survive_domain_completion_and_restart;
+  Alcotest.test_case "lost observer ACK preserves actual bytes and input" `Quick
+    test_observer_lost_ack_never_republishes_or_changes_input;
+  Alcotest.test_case "observer terminal preserves refusal and successor history" `Quick
+    test_observer_completion_needs_original_terminal_and_keeps_refusal_chain;
+  Alcotest.test_case "malformed observer evidence is neither absent nor replaceable" `Quick
+    test_observer_malformed_receipts_and_order_never_become_valid_history]]

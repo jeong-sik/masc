@@ -11,15 +11,17 @@ type event = Dispatch_intended | Admission_declined of Yojson.Safe.t | Execution
   | Commit_uncertain of Yojson.Safe.t | Commit_retry_observed of Yojson.Safe.t
   | Commit_observed of Yojson.Safe.t | Commit_conflicted of Yojson.Safe.t
   | Refused of refusal | Successor_intended of successor | Successor_observed of string
+  | Observer of Lane_addon_request_receipt.event
 type phase = Captured | Admission_wait of Yojson.Safe.t | Dispatch_pending of observation option
   | Judged of Yojson.Safe.t | Committing of commit
   | Commit_unknown of commit * Yojson.Safe.t | Finished of commit
   | Conflicted of commit * Yojson.Safe.t | Rejected of refusal
   | Subdividing of refusal * successor | Subdivided of refusal * successor
-type t = { events_rev : event list; phase : phase }
-let captured = {events_rev=[];phase=Captured}
+type t = { events_rev : event list; phase : phase; observer:Lane_addon_request_receipt.t }
+let captured = {events_rev=[];phase=Captured;observer=Lane_addon_request_receipt.empty}
 let phase t = t.phase
 let events t = List.rev t.events_rev
+let observer t = t.observer
 let object_fields names = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) =
       List.sort String.compare names -> Ok fields
@@ -27,6 +29,7 @@ let object_fields names = function
 let envelope kind fields = `Assoc (("event", `String kind) :: fields)
 let evidence_event kind evidence = envelope kind ["evidence",evidence]
 let event_to_json = function
+  | Observer event -> Lane_addon_request_receipt.event_to_json event
   | Dispatch_intended -> envelope "dispatch_intended" []
   | Admission_declined evidence -> evidence_event "admission_declined" evidence
   | Execution_observed (Waiting evidence) -> evidence_event "waiting" evidence
@@ -54,6 +57,9 @@ let event_of_json json =
   let evidence ctor = let* fields = fields ["evidence"] in Ok (ctor (List.assoc "evidence" fields)) in
   let value key ctor = let* fields = fields [key] in Ok (ctor (List.assoc key fields)) in
   match kind with
+  | "observer_registration_intended" | "observer_registration_recorded"
+  | "observer_completion_intended" | "observer_completion_recorded" ->
+    let* event = Lane_addon_request_receipt.event_of_json json in Ok (Observer event)
   | "dispatch_intended" -> let* _ = fields [] in Ok Dispatch_intended
   | "admission_declined" -> evidence (fun value -> Admission_declined value)
   | "waiting" -> evidence (fun value -> Execution_observed (Waiting value))
@@ -86,6 +92,12 @@ let event_of_json json =
   | _ -> Error "unknown request progress event"
 let invalid () = Error "event does not follow the original request progress"
 let step phase = function
+  | Observer (Lane_addon_request_receipt.Intended (Completion,_)) -> (match phase with
+      | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok phase
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+      | Commit_unknown _ -> Error "observer completion requires an original terminal domain fact")
+  | Observer (Lane_addon_request_receipt.Intended (Registration,_)
+      | Lane_addon_request_receipt.Recorded ((Registration | Completion),_)) -> Ok phase
   | Dispatch_intended -> (match phase with
       | Captured | Admission_wait _ -> Ok (Dispatch_pending None)
       | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
@@ -144,10 +156,16 @@ let step phase = function
       | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdivided _ -> invalid ())
 let append t event =
   let* event = event_of_json (event_to_json event) in
-  let* phase = step t.phase event in Ok {events_rev=event :: t.events_rev;phase}
+  let* phase = step t.phase event in
+  let* observer = match event with
+    | Observer event -> Lane_addon_request_receipt.append t.observer event
+    | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+    | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
+    | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _ -> Ok t.observer in
+  Ok {events_rev=event :: t.events_rev;phase;observer}
 let to_json t = `List (List.map event_to_json (events t))
 let of_json = function
   | `List events -> List.fold_left (fun state json ->
       let* state = state in let* event = event_of_json json in
-      let* phase = step state.phase event in Ok {events_rev=event :: state.events_rev;phase}) (Ok captured) events
+      append state event) (Ok captured) events
   | _ -> Error "request progress must be an ordered event array"

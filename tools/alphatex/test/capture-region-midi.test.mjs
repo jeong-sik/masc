@@ -109,6 +109,14 @@ const exclusiveRows = [
   packet(300000n, 'A', [JZZ.UMP([0x30, 0x31, 3, 0, 0, 0, 0, 0])]),
   packet(400000n, 'A', [JZZ.UMP.noteOn(0, 0, 60, 90)]), packet(800000n, 'A', [JZZ.UMP.noteOff(0, 0, 60, 20)]),
 ]
+test('a sub-tick cut closes held keys at its rounded boundary independently of the SMF container minimum', () => fixture(async ({ derive }) => {
+  const source = sourceOf(await derive({ offset: '1', extent: '1' })), pattern = midiSourcePattern(source)
+  assert.deepEqual(pattern.diagnostics, [])
+  assert.equal(pattern.ticks, 1)
+  assert.deepEqual(pattern.notes.map(note => [note.pitch, note.start, note.duration]), [[60, 0, 0]])
+  assert.ok(channelEvents(source).filter(event => event.bytes[0] === 0x80 || event.bytes[0] === 0xb0).every(event => event.tick === 0))
+}, [packet(0n, 'A', [JZZ.UMP.noteOn(0, 0, 60, 90)]), packet(100n, 'A', [JZZ.UMP.noteOff(0, 0, 60, 20)])]))
+
 test('complete in-cut SysEx7 and realtime retain original fragment timing while historical or cut-through opaque state refuses reconstruction', () => fixture(async ({ derive }) => {
   const source = sourceOf(await derive({ offset: '100000', extent: '800000' }))
   const sx = midiSourcePattern(source).events.filter(event => event.kind === 'sysex')

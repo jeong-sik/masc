@@ -31,6 +31,8 @@ controllers and sustain/sostenuto from their original order. Released keys held
 by pedals remain point keys with their original releases and pedal state; held
 keys are clipped with zero-velocity Note Offs at the region end, then hold pedals
 are switched off. These end releases are declared in the derived metadata.
+Releases use the rounded source boundary even when it is tick zero; the MIDI
+container's minimum positive length does not stretch a sub-tick cut into a note.
 Expired notes and unreachable suffix expression do not become part of the cut.
 Complete SysEx7/system messages within the cut retain their original times;
 an opaque historical prefix, incomplete exclusive stream or unsupported entry

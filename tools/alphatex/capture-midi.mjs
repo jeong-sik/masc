@@ -119,14 +119,15 @@ export async function captureMidi(asset, packets, { tempo, meter, signal, region
   } finally { await converter.close() }
   signal?.throwIfAborted()
   if ([...routes.values()].some(route => route.exclusive)) throw new Error('Captured SysEx7 stream has no final fragment')
-  const end = Math.max(1, tickAt(BigInt(extent)))
+  const boundary = tickAt(BigInt(extent)), end = Math.max(1, boundary)
   if (region) for (const route of routes.values()) {
     // These are explicit trim releases, not captured performance messages.
+    // The SMF container's positive minimum must not lengthen a sub-tick note.
     for (const note of route.held.values()) for (let count = 0; count < note.count; count++) {
-      route.events.push({ tick: end, kind: 'channel', bytes: [0x80 | note.channel, note.pitch, 0] })
+      route.events.push({ tick: boundary, kind: 'channel', bytes: [0x80 | note.channel, note.pitch, 0] })
     }
     for (const channel of route.dialects.keys()) for (const pedal of [64, 66, 69]) {
-      route.events.push({ tick: end, kind: 'channel', bytes: [0xb0 | channel, pedal, 0] })
+      route.events.push({ tick: boundary, kind: 'channel', bytes: [0xb0 | channel, pedal, 0] })
     }
   }
   const provenance = { schemaVersion: 1, kind: 'capture-midi1-variant', asset: asset.id, parts: asset.parts,

@@ -313,6 +313,27 @@ let test_read_by_page_name () =
     Alcotest.(check bool) "page name substring matches" true ok
   )
 
+(* The index shows a page by its file name and the prompt asks for it without
+   .md. A longer name that contains it sorts first here, and must not be
+   opened instead, whichever way the Keeper writes the name. *)
+let test_read_prefers_the_page_named_exactly () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx
+      (create_args ~page:"pm-setlist" ~title:"PM Setlist" ~body:"Body of the PM page." ());
+    create_ok ctx
+      (create_args ~page:"setlist" ~title:"Setlist" ~body:"Body of the plain page." ());
+    List.iter
+      (fun topic ->
+        let read_args = `Assoc [("topic", `String topic)] in
+        let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_read" ~args:read_args in
+        Alcotest.(check bool) (topic ^ ": read succeeds") true ok;
+        Alcotest.(check bool) (topic ^ ": opens the page of that name") true
+          (msg_contains ~needle:"Body of the plain page." msg);
+        Alcotest.(check bool) (topic ^ ": not the longer name") false
+          (msg_contains ~needle:"Body of the PM page." msg))
+      ["setlist"; "setlist.md"; "SETLIST.MD"]
+  )
+
 (* ============================================================
    wiki_create tests
    ============================================================ *)
@@ -1476,6 +1497,7 @@ let () =
       Alcotest.test_case "nonexistent topic" `Quick test_read_nonexistent_topic;
       Alcotest.test_case "read by exact title (list->read contract)" `Quick test_read_by_title_roundtrip;
       Alcotest.test_case "read by case-insensitive partial title" `Quick test_read_by_title_case_insensitive_partial;
+      Alcotest.test_case "read prefers the page named exactly" `Quick test_read_prefers_the_page_named_exactly;
       Alcotest.test_case "read by page name" `Quick test_read_by_page_name;
     ]);
     ("wiki_create", [

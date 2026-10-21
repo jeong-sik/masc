@@ -223,9 +223,13 @@ let send_on_stop_of_text text =
 
 (* The input device captures open, [tui].audio_input_device. Pure, so a test
    can hand it a parsed doc without a file; absent reads as "no stored pick",
-   the same way theme reads. *)
+   the same way theme reads, and so does a blank value: the changelog's "set
+   it to \"\"" turns the pick off, and a blank name passed on would reach the
+   recorder as an empty AUDIODEV. *)
 let audio_input_device_of_doc doc =
-  Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".audio_input_device")
+  match Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".audio_input_device") with
+  | Some device when String.trim device <> "" -> Some (String.trim device)
+  | Some _ | None -> None
 
 let load ~base_path =
   let path = runtime_toml_path ~base_path in

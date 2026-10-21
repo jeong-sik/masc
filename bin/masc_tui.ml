@@ -2903,6 +2903,35 @@ let launch_voice_agent_voice_save state ~mailbox
        enqueue_async mailbox (Voice_agent_voice_saved (Error "Eio switch is unavailable")))
 ;;
 
+(* The input device captures open, read at boot from [tui].audio_input_device
+   (the same load as the soundfont). The wizard lists it and every capture
+   launches with it; an AUDIODEV in the operator's environment still wins, so
+   an explicit export keeps meaning what sox reads it to mean. *)
+let boot_audio_input_device : string option ref = ref None
+
+(* One resolution for the panel and every capture: the environment wins when
+   it names a device (the way sox reads AUDIODEV), the stored pick is next,
+   and only a panel asked to name a device falls back to the probe. Both go
+   through {!Masc.Voice_bridge.resolved_audio_device}, so what the panel
+   names is what the recorder opens. *)
+let resolved_audio_input_device ~for_display =
+  match Masc.Voice_bridge.resolved_audio_device ~pick:!boot_audio_input_device () with
+  | Some device -> Some device
+  | None when not for_display -> None
+  | None ->
+    (match Masc_tui_audio_device.default_input () with
+     | Masc_tui_audio_device.Default_input name -> Some name
+     (* The panel shows "unknown" for each of these; the log keeps them
+        apart, because a machine with no input selected and a probe
+        that could not read the report call for different fixes. *)
+     | Masc_tui_audio_device.No_default_input ->
+       Log.Transport.info "voice: the audio report marks no device as the default input";
+       None
+     | Masc_tui_audio_device.Probe_failed reason ->
+       Log.Transport.warn "voice: the default input device could not be read: %s" reason;
+       None
+     | Masc_tui_audio_device.No_probe_on_this_platform -> None)
+
 let launch_voice_config_load state ~mailbox =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
@@ -10752,35 +10781,6 @@ let open_named_image state ~mailbox =
    and /listen answer from this snapshot instead of re-reading runtime.toml
    per request. *)
 let boot_midi_soundfont : string option ref = ref None
-
-(* The input device captures open, read at boot from [tui].audio_input_device
-   (the same load as the soundfont). The wizard lists it and every capture
-   launches with it; an AUDIODEV in the operator's environment still wins, so
-   an explicit export keeps meaning what sox reads it to mean. *)
-let boot_audio_input_device : string option ref = ref None
-
-(* One resolution for the panel and every capture: the environment wins when
-   it names a device (the way sox reads AUDIODEV), the stored pick is next,
-   and only a panel asked to name a device falls back to the probe. Both go
-   through {!Masc.Voice_bridge.resolved_audio_device}, so what the panel
-   names is what the recorder opens. *)
-let resolved_audio_input_device ~for_display =
-  match Masc.Voice_bridge.resolved_audio_device ~pick:!boot_audio_input_device () with
-  | Some device -> Some device
-  | None when not for_display -> None
-  | None ->
-    (match Masc_tui_audio_device.default_input () with
-     | Masc_tui_audio_device.Default_input name -> Some name
-     (* The panel shows "unknown" for each of these; the log keeps them
-        apart, because a machine with no input selected and a probe
-        that could not read the report call for different fixes. *)
-     | Masc_tui_audio_device.No_default_input ->
-       Log.Transport.info "voice: the audio report marks no device as the default input";
-       None
-     | Masc_tui_audio_device.Probe_failed reason ->
-       Log.Transport.warn "voice: the default input device could not be read: %s" reason;
-       None
-     | Masc_tui_audio_device.No_probe_on_this_platform -> None)
 
 (* /listen: play the newest playable attachment in this conversation — the
    same newest-wins rule Ctrl-O uses for images, extended to audio and MIDI.

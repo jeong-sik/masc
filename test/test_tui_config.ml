@@ -593,6 +593,9 @@ let device_cases =
         check_device "none" None (device_of "[tui]\ntheme = \"nord\"\n"))
   ; Alcotest.test_case "empty file -> None" `Quick (fun () ->
         check_device "none" None (device_of ""))
+  ; Alcotest.test_case "a blank value turns the pick off -> None" `Quick (fun () ->
+        check_device "empty" None (device_of "[tui]\naudio_input_device = \"\"\n");
+        check_device "spaces" None (device_of "[tui]\naudio_input_device = \"  \"\n"))
   ]
 
 let device_write_cases =

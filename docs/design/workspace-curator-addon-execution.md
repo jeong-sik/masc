@@ -188,4 +188,8 @@ The first [batch and known-request storage foundation](workspace-curator-request
 now retains complete request data and validates original classification rows and
 briefing partitions. It does not yet implement the trusted host provenance
 envelope, restart enumeration, accepted-work/commit lifecycle, semantic port or
-production Addon consumer. Those remain the next implementation boundaries above.
+production Addon consumer. The follow-up
+[typed host capture and original judgment](workspace-curator-host-capture.md)
+now defines the caller-supplied provenance envelope, physical-workspace binding
+and captured-template/input checks, but production metadata capture and the
+remaining lifecycle/semantic/consumer integration are still required above.

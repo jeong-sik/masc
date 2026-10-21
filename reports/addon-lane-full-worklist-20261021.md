@@ -111,7 +111,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
-| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | [#44924](https://github.com/jeong-sik/masc/pull/44924)에 [원래 batch·briefing pass 복원과 전체 요청 저장 기반](../docs/design/workspace-curator-request-capture.md) source 구현. parser12개 PASS, compiled 실행은 별도. 원래 ledger·fact/neighbor와 briefing ordered partition 검증, 기존 owner-store의 complete request·strict load·immutable destination 및 실제 저장소 검사 추가. known-ID 복원 범위이며 trusted host provenance·restart 발견·lifecycle/commit journal·typed pending/unknown·semantic fallback·실제 worker 연결은 구현 필요 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
+| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | [#44924](https://github.com/jeong-sik/masc/pull/44924)에 [원래 batch·briefing pass 복원과 전체 요청 저장 기반](../docs/design/workspace-curator-request-capture.md) source 구현. parser12개 PASS, compiled 실행은 별도. 원래 ledger·fact/neighbor와 briefing ordered partition 검증, 기존 owner-store의 complete request·strict load·immutable destination 및 실제 저장소 검사 추가. known-ID 복원 범위. 후속 host capture는 물리 workspace·원래 resolved prompt/input bytes·schema·owner/revision을 묶고 전체 domain expected state를 계산하는 source 구현. 실제 host metadata capture·restart 발견·lifecycle/commit journal·typed pending/unknown·semantic fallback·worker 연결은 구현 필요 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
 | E05 | Board Attention 실행의 Addon 경계 검토·추출 | 조사·설계, Required | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
@@ -329,3 +329,10 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - 분류 batch는 원래 selected/remaining과 전체 row·related ledger prose를 복원하며, 이미 처리한 fact와 같은 Keeper neighbor를 거절한다. Briefing은 원래 ordered unconsumed partition과 prior summary를 검증해 복원만 수행한다. 독립 초기 리뷰의 두 P2(처리 fact 복원·같은 Keeper neighbor 허용)를 수정하고 실제 저장소 재개 검사에 넣었다.
 - G03 선택 실행 [39646732161](https://github.com/jeong-sik/masc/actions/runs/39646732161)은 정확한 b8a16015e47f3ea355f434f3ce67d86d19fa57af에서 completed/success다. 실제 로그에서 transport10건(0.047s), contract2건(0.364s), flow24건(1.092s), 합36건을 직독했다. 새 E02 소스의 검사 결과나 실제 설치/UI 증거로 이월하지 않는다.
 - E02의 trusted host capture provenance·물리 workspace binding·restart enumeration·accepted-work/commit journal·semantic validation port·Addon wake·실제 worker/두 UI는 계속 남는다. 원래 A01–H06의 54개 작업과 완료 기준은 유지한다.
+
+### E02 host capture와 원래 판단 경계
+
+- host가 제공한 원래 설치·source/config revision, opaque request ID, descriptor로 관측한 physical workspace, resolved prompt와 분류/briefing snapshot을 typed capture로 묶었다. 정규화된 JSON에서 원래 prompt를 새로 만들지 않고 actual input substitution bytes를 별도로 보존·검증한다.
+- strict original-owner load 뒤 capture의 원래 scope/ID/destination·현재 관측 root identity·domain schema·당시 template/input/rendered bytes를 함께 확인한다. 기존 domain decode/apply 또는 decode/accept로 expected state만 계산하며 실제 저장·게시·observer 완료는 하지 않는다.
+- 새 5개 시나리오는 실제 owner-store 보관과 새 handle 읽기, override 변경 뒤 원래 입력/판단, 잘못된 provenance/owner/schema, physical root copy/replacement, briefing 조기 publication 거절과 enclosing descriptor scope의 최종 검사를 다룬다. parser7개 PASS와 초기 독립 source 검토는 compiled execution과 별도다.
+- host metadata를 실제 owner에서 수집해 이 factory에 연결하는 것, accepted-work 발견/수명·uncertain commit·semantic flow·Addon wake·worker/두 UI는 계속 구현해야 한다. 원래 54개 완료 기준은 유지한다.

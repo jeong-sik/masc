@@ -1,0 +1,178 @@
+module Ledger = Workspace_memory_ledger
+module Request = Workspace_memory_request
+module Brief = Workspace_memory_briefing
+module Decision = Workspace_memory_decision
+module Owner = Lane_addon_tool_request_owner
+let ( let* ) = Result.bind
+module Request_id = struct
+  type t = string
+  let fresh = Random_id.uuid_v7
+  let of_string = Random_id.parse_uuid_v7
+  let to_string value = value
+end
+type workspace = { path : string; device : int; inode : int }
+let observe_workspace ~base_path =
+  Fs_compat.with_owned_inventory_root base_path (fun root ->
+    let stat = Fs_compat.owned_inventory_root_stat root in
+    Ok {path=Fs_compat.owned_inventory_root_path root; device=stat.Unix.st_dev; inode=stat.Unix.st_ino})
+  |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string
+type destination = {
+  installation_id : string; package_id : string; tool : string;
+  source_revision : string; configuration_revision : string;
+}
+type work = Classification of {ledger : Ledger.t; batch : Request.batch} | Briefing of Brief.batch
+type t = {id : Request_id.t; workspace : workspace; destination : destination;
+  prompt : Prompt_registry.prompt_resolution; work : work; input_text : string}
+let scope = "workspace-curator"
+let request_id t = t.id
+let destination t = t.destination
+let work t = t.work
+let input_text t = t.input_text
+let input = function Classification {batch;_} -> batch.Request.input | Briefing batch -> Brief.input batch
+let rendered = function Classification {batch;_} -> batch.Request.rendered_prompt | Briefing batch -> Brief.rendered_prompt batch
+let rendered_prompt t = rendered t.work
+let schema = function Classification _ -> Decision.output_schema | Briefing _ -> Brief.output_schema
+let output_schema t = schema t.work
+let fields names = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare names -> Ok fields
+  | _ -> Error "captured Curator record has unknown, missing or repeated fields"
+let text = function
+  | `String value when String.trim value <> "" -> Ok value
+  | _ -> Error "captured Curator record expects nonblank text"
+let optional_text = function `Null -> Ok None | value -> Result.map Option.some (text value)
+let boolean = function `Bool value -> Ok value | _ -> Error "captured Curator record expects a boolean"
+let integer = function `Int value -> Ok value | _ -> Error "captured Curator workspace expects an integer"
+let parsed text = try Ok (Yojson.Safe.from_string text) with Yojson.Json_error detail -> Error detail
+let optional = Option.fold ~none:`Null ~some:(fun value -> `String value)
+let workspace_json w = `Assoc ["path",`String w.path;"device",`Int w.device;"inode",`Int w.inode]
+let workspace_of_json json =
+  let* f = fields ["path";"device";"inode"] json in
+  let* path = text (List.assoc "path" f) in
+  let* device = integer (List.assoc "device" f) in
+  let* inode = integer (List.assoc "inode" f) in
+  if Filename.is_relative path then Error "captured workspace path must be absolute"
+  else Ok {path;device;inode}
+let destination_json d = `Assoc ["installation_id",`String d.installation_id;
+  "package_id",`String d.package_id;"tool",`String d.tool;
+  "source_revision",`String d.source_revision;"configuration_revision",`String d.configuration_revision]
+let destination_of_json json =
+  let* f = fields ["installation_id";"package_id";"tool";"source_revision";"configuration_revision"] json in
+  let* installation_id = text (List.assoc "installation_id" f) in
+  let* package_id = text (List.assoc "package_id" f) in
+  let* tool = text (List.assoc "tool" f) in
+  let* source_revision = text (List.assoc "source_revision" f) in
+  let* configuration_revision = text (List.assoc "configuration_revision" f) in
+  Ok {installation_id;package_id;tool;source_revision;configuration_revision}
+let prompt_json (p : Prompt_registry.prompt_resolution) = `Assoc [
+  "effective",`String p.effective;"source",`String (Prompt_registry.prompt_source_to_string p.source);
+  "file_value",optional p.file_value;"override_value",optional p.override_value;
+  "file_path",optional p.file_path;"file_exists",`Bool p.file_exists;"has_override",`Bool p.has_override]
+let validate_prompt (p : Prompt_registry.prompt_resolution) =
+  let source, effective = match p.override_value,p.file_value with
+    | Some value, _ -> Prompt_registry.Override, value
+    | None, Some value -> Prompt_registry.File, value
+    | None, None -> Prompt_registry.Missing, "" in
+  if source <> p.source || not (String.equal effective p.effective)
+     || p.file_exists <> Option.is_some p.file_value
+     || p.has_override <> Option.is_some p.override_value
+  then Error "captured prompt resolution is internally inconsistent"
+  else if String.trim effective = "" then Error "captured Curator prompt is missing"
+  else Ok ()
+let prompt_of_json json =
+  let* f = fields ["effective";"source";"file_value";"override_value";"file_path";"file_exists";"has_override"] json in
+  let* effective = text (List.assoc "effective" f) in
+  let* source = match List.assoc "source" f with
+    | `String "override" -> Ok Prompt_registry.Override
+    | `String "file" -> Ok Prompt_registry.File
+    | `String "missing" -> Ok Prompt_registry.Missing
+    | _ -> Error "unknown captured prompt source" in
+  (* Inactive file text can be empty beneath an effective override. *)
+  let nullable_value = function `Null -> Ok None | `String value -> Ok (Some value)
+    | _ -> Error "captured prompt value expects text or null" in
+  let* file_value = nullable_value (List.assoc "file_value" f) in
+  let* override_value = nullable_value (List.assoc "override_value" f) in
+  let* file_path = optional_text (List.assoc "file_path" f) in
+  let* file_exists = boolean (List.assoc "file_exists" f) in
+  let* has_override = boolean (List.assoc "has_override" f) in
+  let p = {Prompt_registry.effective;source;file_value;override_value;file_path;file_exists;has_override} in
+  let* () = validate_prompt p in Ok p
+let work_json = function
+  | Classification {ledger;batch} -> `Assoc ["kind",`String "classification";
+      "ledger",Ledger.to_json ledger;"batch",Request.batch_to_json batch]
+  | Briefing batch -> `Assoc ["kind",`String "briefing";"batch",Brief.batch_to_json batch]
+let work_of_json json =
+  let kind = match json with `Assoc f -> List.assoc_opt "kind" f | _ -> None in
+  match kind with
+  | Some (`String "classification") ->
+    let* f = fields ["kind";"ledger";"batch"] json in
+    let* ledger = Ledger.of_json (List.assoc "ledger" f) in
+    let* batch = Request.batch_of_json ~ledger (List.assoc "batch" f)
+      |> Result.map_error Request.error_to_string in
+    Ok (Classification {ledger;batch})
+  | Some (`String "briefing") ->
+    let* f = fields ["kind";"batch"] json in
+    let* batch = Brief.batch_of_json (List.assoc "batch" f) in Ok (Briefing batch)
+  | _ -> Error "unknown captured Curator request kind"
+let check ~prompt ~input_text work =
+  let* () = validate_prompt prompt in
+  let* original_input = parsed input_text in
+  let* original_input = Lane_addon_action.canonical original_input in
+  let* () = if Yojson.Safe.equal original_input (input work) then Ok ()
+    else Error "captured substitution bytes differ from the original batch input" in
+  let key, variable = match work with
+    | Classification _ -> Prompt_names.workspace_memory_curator, "workspace_memory_changes"
+    | Briefing _ -> Prompt_names.workspace_memory_briefing, "workspace_memory_briefing" in
+  let* expected_prompt = Prompt_registry.render_resolved_prompt_template key prompt [variable,input_text] in
+  let* () = if String.equal expected_prompt (rendered work) then Ok ()
+    else Error "captured rendered prompt differs from its original template and input bytes" in
+  match work with
+  | Classification _ -> Ok ()
+  | Briefing batch ->
+    let* original_contract = Brief.batch_contract batch in
+    if String.equal original_contract (Brief.contract ~template:prompt.effective) then Ok ()
+    else Error "captured briefing pass has a different prompt/schema contract"
+let make ~request_id ~workspace ~destination ~prompt work =
+  let* destination = destination_of_json (destination_json destination) in
+  let* prompt = prompt_of_json (prompt_json prompt) in
+  let input_text = Yojson.Safe.to_string (input work) in
+  let* work = work_of_json (work_json work) in
+  let* () = check ~prompt ~input_text work in
+  Ok {id=request_id;workspace;destination;prompt;work;input_text}
+let classification ~request_id ~workspace ~destination ~prompt ~ledger ~batch =
+  make ~request_id ~workspace ~destination ~prompt (Classification {ledger;batch})
+let briefing ~request_id ~workspace ~destination ~prompt ~batch =
+  make ~request_id ~workspace ~destination ~prompt (Briefing batch)
+let to_json t = `Assoc ["schema",`String "workspace.memory.execution-capture.v1";
+  "request_id",`String (Request_id.to_string t.id);"workspace",workspace_json t.workspace;
+  "destination",destination_json t.destination;"prompt",prompt_json t.prompt;
+  "work",work_json t.work;"input_text",`String t.input_text;"output_schema",schema t.work]
+let restore ~workspace (retained : Owner.retained) =
+  let* f = fields ["schema";"request_id";"workspace";"destination";"prompt";"work";"input_text";"output_schema"] retained.request in
+  let* () = match List.assoc "schema" f with
+    | `String "workspace.memory.execution-capture.v1" -> Ok ()
+    | _ -> Error "unknown Curator execution capture schema" in
+  let* id_text = text (List.assoc "request_id" f) in
+  let* id = Request_id.of_string id_text in
+  let* original_workspace = workspace_of_json (List.assoc "workspace" f) in
+  let* () = if original_workspace = workspace then Ok () else Error "Curator request belongs to another physical workspace" in
+  let* destination = destination_of_json (List.assoc "destination" f) in
+  let* () = if String.equal retained.scope scope && String.equal retained.request_id id_text
+      && String.equal retained.installation_id destination.installation_id
+      && String.equal retained.package_id destination.package_id && String.equal retained.tool destination.tool
+    then Ok () else Error "Curator capture differs from its original request owner" in
+  let* prompt = prompt_of_json (List.assoc "prompt" f) in
+  let* work = work_of_json (List.assoc "work" f) in
+  let* () = if Yojson.Safe.equal (List.assoc "output_schema" f) (schema work) then Ok ()
+    else Error "Curator capture has a different domain output schema" in
+  let* input_text = text (List.assoc "input_text" f) in
+  let* () = check ~prompt ~input_text work in
+  Ok {id;workspace;destination;prompt;work;input_text}
+type expected_commit = Classification_commit of Ledger.t | Briefing_commit of Brief.t
+let validate_output t raw = match t.work with
+  | Classification {ledger;batch} ->
+    let* assignments = Decision.decode ~selected:batch.selected raw in
+    Ledger.apply ledger ~selected:batch.selected assignments
+    |> Result.map_error Ledger.apply_error_to_string |> Result.map (fun ledger -> Classification_commit ledger)
+  | Briefing batch ->
+    let* text = Brief.decode_output raw in
+    Brief.accept batch ~text |> Result.map (fun state -> Briefing_commit state)

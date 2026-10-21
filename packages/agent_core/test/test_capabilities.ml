@@ -828,6 +828,28 @@ let test_lookup_glm_ocr () =
   | None -> fail "should match glm-ocr"
 ;;
 
+(* The legacy GLM-4 rows state no capability base. A declared glm provider
+   supplies its own base to such a row, and that base reasons, so each row has
+   to state [supports_reasoning = false] for both references to agree. *)
+let test_legacy_glm4_rows_state_no_reasoning_on_every_reference () =
+  List.iter
+    (fun model_id ->
+       List.iter
+         (fun (label, provider) ->
+            match Capabilities.for_provider_model_id ~wire:None ~provider ~model_id with
+            | Some c ->
+              check
+                bool
+                (Printf.sprintf "%s via %s: reasoning" model_id label)
+                false
+                c.supports_reasoning
+            | None -> failf "%s via %s: no row" model_id label)
+         [ "declared glm", Model_catalog.Declared_provider "glm"
+         ; "anonymous glm wire", Model_catalog.Anonymous_wire Provider_kind.Glm
+         ])
+    [ "glm-4"; "glm-4v"; "glm-4-flash" ]
+;;
+
 let test_ollama_cloud_current_catalog_resolves () =
   let cases =
     [ "deepseek-v4-pro", 1_048_576, false
@@ -3328,6 +3350,10 @@ let () =
         ; test_case "glm-5v vision" `Quick test_lookup_glm5v_vision
         ; test_case "glm-4.6v vision" `Quick test_lookup_glm46v_vision
         ; test_case "glm-ocr vision" `Quick test_lookup_glm_ocr
+        ; test_case
+            "legacy glm-4 rows state no reasoning"
+            `Quick
+            test_legacy_glm4_rows_state_no_reasoning_on_every_reference
         ; test_case
             "ollama cloud current catalog"
             `Quick

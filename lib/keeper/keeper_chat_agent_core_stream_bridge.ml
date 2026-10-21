@@ -1009,22 +1009,18 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       (match bridge_state.stream_phase, stop_reason with
        | Accepting_content, None ->
          { bridge_state; chat_events = [ message_delta ] }
-       | Accepting_content, Some Agent_core.Types.MaxTokens ->
-         let cut = cut_tool_scope bridge_state ~reason:"provider_max_tokens" in
-         let closed = close_open_content_blocks ~redact_text ~base_dir cut.bridge_state in
-         { bridge_state =
-             { closed.bridge_state with
-               stream_phase = Stop_reason_seen Agent_core.Types.MaxTokens
-             }
-         ; chat_events = message_delta :: cut.chat_events @ closed.chat_events
-         }
        | Accepting_content, Some stop_reason ->
-         let closed = close_open_content_blocks ~redact_text ~base_dir bridge_state in
+         let cut =
+           if stop_reason = Agent_core.Types.MaxTokens
+           then cut_tool_scope bridge_state ~reason:"provider_max_tokens"
+           else { bridge_state; chat_events = [] }
+         in
+         let closed = close_open_content_blocks ~redact_text ~base_dir cut.bridge_state in
          { bridge_state =
              { closed.bridge_state with
                stream_phase = Stop_reason_seen stop_reason
              }
-         ; chat_events = message_delta :: closed.chat_events
+         ; chat_events = message_delta :: cut.chat_events @ closed.chat_events
          }
        | Stop_reason_seen _, None ->
          { bridge_state; chat_events = [ message_delta ] }

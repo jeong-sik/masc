@@ -896,15 +896,13 @@ let on_event t (evt : Agent_core.Types.sse_event) =
   | Agent_core.Types.MessageDelta { stop_reason; _ } ->
     (match t.stream_phase, stop_reason with
      | Accepting_content, None -> ()
-     | Accepting_content, Some Agent_core.Types.MaxTokens ->
+     | Accepting_content, Some stop_reason ->
        (* The canonical producer drops every ToolUse at MaxTokens, including
           already closed blocks with parseable arguments. Keep the source-map
           inventory aligned without certifying a cut-off call as executable. *)
-       discard_scope_tools t t.current_stream_scope;
-       t.stream_phase <- Stop_reason_seen Agent_core.Types.MaxTokens;
-       t.message_open <- false
-     | Accepting_content, Some stop_reason ->
-       finalize_open_blocks t;
+       (if stop_reason = Agent_core.Types.MaxTokens
+        then discard_scope_tools t t.current_stream_scope
+        else finalize_open_blocks t);
        t.stream_phase <- Stop_reason_seen stop_reason;
        t.message_open <- false
      | Stop_reason_seen _, None -> ()

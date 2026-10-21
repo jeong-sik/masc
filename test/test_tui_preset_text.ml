@@ -27,7 +27,7 @@ let report ~skipped ~runtime : D.preset_restore_report =
 let test_restore_classifies_commit_warnings () =
   let commit : D.preset_runtime_commit =
     { prc_source_revision = String.make 64 'a'; prc_order = "1"
-    ; prc_durability = Masc.Runtime.Durable; prc_lock_warnings = []
+    ; prc_durability = Runtime.Durable; prc_lock_warnings = []
     ; prc_registry = D.Preset_registry_applied D.Preset_registry_runtime_bindings }
   in
   let committed commit = report ~skipped:[] ~runtime:(D.Preset_runtime_committed commit) in
@@ -35,8 +35,8 @@ let test_restore_classifies_commit_warnings () =
     (Text.restore_is_clean (committed commit));
   List.iter (fun warning ->
     check bool "committed warning requires attention" false (Text.restore_is_clean (committed warning)))
-    [ { commit with prc_durability = Masc.Runtime.Durability_unconfirmed {detail="fsync EIO"} }
-    ; { commit with prc_lock_warnings = [Masc.Runtime.Config_lock_release_unconfirmed "unlock EIO"] }
+    [ { commit with prc_durability = Runtime.Durability_unconfirmed {detail="fsync EIO"} }
+    ; { commit with prc_lock_warnings = [Runtime.Config_lock_release_unconfirmed "unlock EIO"] }
     ; { commit with prc_registry = D.Preset_registry_unpublished }
     ; { commit with prc_registry = D.Preset_registry_kept "invalid target" }
     ];

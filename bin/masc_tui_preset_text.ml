@@ -82,13 +82,13 @@ let runtime_lines = function
   | D.Preset_runtime_committed commit ->
     [ "runtime: committed — runtime.toml rewritten, assignments applied" ]
     @ (match commit.D.prc_durability with
-       | Masc.Runtime.Durable -> []
-       | Masc.Runtime.Durability_unconfirmed { detail } ->
+       | Runtime.Durable -> []
+       | Runtime.Durability_unconfirmed { detail } ->
          [ "  ! 현재 적용됐지만 디스크 저장 내구성은 미확인 — " ^ detail
          ; "    다시 복원하기 전에 저장소 상태를 확인하세요. 재복원은 이전 상태 autosave를 덮어씁니다."
          ])
     @ List.map
-        (function Masc.Runtime.Config_lock_release_unconfirmed detail ->
+        (function Runtime.Config_lock_release_unconfirmed detail ->
           "  ! runtime lock release unconfirmed — " ^ detail)
         commit.D.prc_lock_warnings
     @ (match commit.D.prc_registry with

@@ -273,7 +273,7 @@ let copy_file_source (state : state) =
     Error "Confirm the workspace before copying file source"
   else if state.view <> Code || state.code_focus_file <> Right_pane
           || state.code_history_open || state.code_diff_open || state.code_notes_open
-          || state.code_draft_open then
+          || state.code_draft_open || Option.is_some (current_code_hover state) then
     Error "Focus file content to copy its source"
   else match Masc_tui_fetched.current state.code_file with
     | Some (path, Masc_tui_fetched.Ready document) -> Ok (path, document.cfd_source)

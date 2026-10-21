@@ -46,6 +46,7 @@ export function arrangementPracticePass(editor, target, selected) {
   return { ...next, asset: target.asset, pattern: undefined, lane: region.lane, region: region.id, tick: region.position }
 }
 function edit(editor, value) { return commit(editor, editArrangement(editor.project, value)) }
+export function arrangementPracticeSound(editor, asset, sound) { return edit(editor, { kind: 'practice-sound', asset, sound }) }
 export function arrangementRecordingCorrection(editor, correction) { return edit(editor, { kind: 'recording-correction', correction }) }
 export function arrangementCalibrated(editor, { profile, match, output }) {
   const clip = selectedRegion(editor), asset = editor.project.assets.find(asset => asset.id === clip?.asset)
@@ -158,6 +159,12 @@ export function arrangementCommand(editor, line) {
   }
   let value
   switch (command) {
+    case 'practice-soundfont':
+      count(1, Number.MAX_SAFE_INTEGER)
+      if (!editor.project.assets.some(asset => asset.id === args[0] && asset.kind === 'practice')) throw new Error('Choose a raw practice asset for SoundFont audition')
+      return { editor, effect: { kind: command, asset: args[0], ...(args.length > 1 ? { path: args.slice(1).join(' ') } : {}) } }
+    case 'practice-sound-original':
+      count(1); value = { kind: 'practice-sound', asset: args[0] }; break
     case 'takes': {
       count(0, 1); const asset = args[0] ?? editor.asset
       arrangementTakes(editor.project, asset)

@@ -8,7 +8,8 @@ import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from './arrangement-playback.mjs'
 import { startSoundArrangement } from './arrangement-sound.mjs'
-import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementPracticePass, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
+import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementPracticePass, arrangementPracticeSound, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
+import { captureFluidSound } from './soundfont.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
 import { safeText } from './terminal.mjs'
@@ -33,6 +34,7 @@ const help = [
   ':import-wave /path/take.wav     :import-midi /path/song.mid',
   ':import-take /path/session      :open-take [ASSET] (WAV + raw UMP)',
   ':import-practice /path/take     import original MIDI from a completed practice take',
+  ':practice-soundfont ASSET [SF2_PATH] binds a SoundFont for that raw take; :practice-sound-original ASSET restores its recorded sound',
   ':practice-backing [ASSET] restores its editable phrase backing; Enter places it, :edit-midi edits it',
   ':practice-midi [ASSET] derives the whole performance as MIDI1 / 960 PPQ; :edit-midi edits the variant',
   ':practice-midi-region derives only the selected original practice region, restoring entry notes and pedals',
@@ -62,7 +64,7 @@ const help = [
   ':midi-output MIDI_UID    :midi-port asset-1 PORT MIDI_UID',
   ':midi-source asset-2 SOURCE_ID MIDI_UID overrides one captured input.',
   ':mixed-output AUDIO_UID enables audio plus the selected MIDI routes.',
-  'Stored VST sounds play through the audio output; explicit MIDI routes send those sources externally.',
+  'Stored instruments play through the audio output; explicit MIDI routes send those sources externally.',
   ':play-audio explicitly auditions WAV, including captured regions, silent gaps and saved loops.',
   ':inputs lists audio/MIDI inputs; :input AUDIO_UID; :midi-input all|none|UID',
   ':record starts simultaneous WAV + raw MIDI against playing backing; :record-stop',
@@ -300,7 +302,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     recording?.controller.abort(); recording?.handle?.stop()
     recordStart = null
     generation++; transportPending = false
-    if (preparing?.kind === 'sound') preparing.handle.cancel()
+    if (preparing?.kind === 'sound' || preparing?.kind === 'sound-selection') preparing.handle.cancel()
     else if (preparing?.kind === 'worker' && !workerFailure) worker.postMessage({ kind: 'cancel', request: preparing.id })
     preparing = null
     transport.handle?.stop()
@@ -312,6 +314,30 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     if (next.project !== editor.project) stop()
     editor = next
     if (showTakes !== null && (editor.asset !== showTakes || !editor.project.assets.some(asset => asset.id === showTakes && asset.selectedTake !== undefined))) showTakes = null
+  }
+  function choosePracticeSoundfont(value) {
+    if (!accepting || suspended) return
+    stop()
+    const expected = generation, project = editor.project, selection = captureFluidSound(value.path)
+    preparing = { kind: 'sound-selection', handle: selection }
+    transport = { kind: 'preparing' }; status = 'Capturing practice SoundFont'
+    const pending = (async () => {
+      try {
+        const sound = await selection.promise
+        if (!accepting || generation !== expected || editor.project !== project) return
+        preparing = null; transport = { kind: 'stopped' }
+        adopt(arrangementPracticeSound(editor, value.asset, sound))
+        status = 'Practice SoundFont selected; original take and recorded sound retained'
+      } finally {
+        if (generation === expected && preparing?.handle === selection) {
+          preparing = null; transport = { kind: 'stopped' }
+        }
+      }
+    })()
+    preparations.add(pending)
+    pending.catch(error => { if (accepting && generation === expected) { status = error.message; draw() } })
+      .finally(() => { preparations.delete(pending); draw() })
+    draw()
   }
   function play(audioOnly = false) {
     if (!accepting) return
@@ -504,6 +530,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   async function effect(value) {
     switch (value.kind) {
+      case 'practice-soundfont': choosePracticeSoundfont(value); break
       case 'phrase': openPhrase(); break
       case 'edit-midi': openPhrase(value.asset, value.pattern); break
       case 'record-calibration': {

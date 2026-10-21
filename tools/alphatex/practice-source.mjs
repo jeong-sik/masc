@@ -1,5 +1,6 @@
 import { validateRenderClock } from './render-midi-clock.mjs'
 import { exactSeconds } from './exact-time.mjs'
+import { validateSound } from './project-sound.mjs'
 
 export const practicePartNames = Object.freeze({ receipt: 'take.json', context: 'context.json', arm: 'armed.json', events: 'events.jsonl' })
 export function practiceUnsigned(value, maximum = 0xffffffffffffffffn) {
@@ -50,6 +51,10 @@ export function practiceRegionTime(asset, { offset, extent, sourceDivisor }) {
 }
 export function validatePracticeSource(asset) {
   if (asset?.kind !== 'practice' || !asset.parts || Object.keys(asset.parts).length !== Object.keys(practicePartNames).length) throw new Error('Invalid practice source parts')
+  if (asset.sound !== undefined) {
+    validateSound(asset.sound)
+    if (asset.sound.kind !== 'soundfont' || asset.sound.engine?.kind !== 'fluidsynth') throw new Error('Choose a bound FluidSynth sound for the practice audition override')
+  }
   for (const role of Object.keys(practicePartNames)) {
     const part = asset.parts[role]
     if (typeof part?.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(part.sha256)

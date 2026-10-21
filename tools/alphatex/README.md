@@ -1120,6 +1120,30 @@ PCM sample remains silence with its original period; no sample or duration is
 invented. Stop/close joins the current child before disposing any earlier sealed
 render or private font, and late completion cannot start playback.
 
-Whole-arrangement WAV export and raw practice/capture SoundFont realization still
-need integration with this engine; their current routes are not replaced
-implicitly. Click/count-in and existing VST practice backing retain their owners.
+For a previously imported raw practice take, choose
+`:practice-soundfont asset-1 [SF2_PATH]` in the arrangement. Omit the path to
+capture the bundled SF2. This stores a separate bound audition choice on that
+asset; `:practice-sound-original asset-1` removes it and restores the originally
+recorded VST. Both decisions support undo/redo and portable save/reopen. The raw
+take's original context, receipt, packets, source hashes and clocks are unchanged.
+Restoring the take's phrase backing still uses its original captured context.
+
+Practice SoundFont playback uses the same declared MIDI1 projection as VST
+practice audition: supported notes/controllers/bend/pressure map to the captured
+track channel. The captured track's program precedes its initial volume/pan and
+then the projected raw events. Original raw bank/program messages remain stored
+but are ignored by that projection; it is not full MIDI2 or bank/program replay.
+Unsupported attributes and colliding voices are still refused. Explicit external
+raw routes take precedence over the local audition choice.
+
+The renderer keeps the practice take's original sample rate and full source
+history. A private end guard may extend through the last engine control block;
+the saved source clock, rational trims and repeat periods do not grow. Original
+event frames and quantized render frames remain distinct in the receipt. New
+selection failure leaves the previous choice intact; stop/edit/close cancels
+selection and rendering, joins native children and releases private fonts.
+
+Live SoundFont monitoring, newly recorded SoundFont practice takes,
+whole-arrangement SoundFont WAV export and paired-capture SoundFont realization
+remain integration work. Click/count-in and existing VST practice backing retain
+their owners.

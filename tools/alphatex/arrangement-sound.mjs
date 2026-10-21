@@ -14,7 +14,7 @@ import { readWaveMetadata } from './wave-file.mjs'
 import { preparePractice } from './arrangement-practice.mjs'
 import { renderBoundVst } from './project-sound-files.mjs'
 import { nativeJob } from './vst.mjs'
-import { preparePracticeVst, practiceAudioClock } from './practice-vst.mjs'
+import { preparePracticeSound, practiceAudioClock } from './practice-sound.mjs'
 import { fluidRenderPlan, isFluidSound, renderFluidSound } from './soundfont.mjs'
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -51,7 +51,7 @@ export async function prepareSoundSources(project, { route, sourceRoot, director
     const key = JSON.stringify([asset.id, clip.pattern ?? null])
     let render = renders.find(render => render.key === key)
     if (!render) {
-      if (asset.kind === 'practice') render = { ...await preparePracticeVst(project, asset, { sourceRoot, directory, signal }), key }
+      if (asset.kind === 'practice') render = { ...await preparePracticeSound(project, asset, { sourceRoot, directory, signal }), key }
       else {
         verifyPhraseSnapshot(asset)
         const performance = midiSourcePattern(asset.source, { pattern: clip.pattern })
@@ -106,7 +106,7 @@ export async function finishSoundPlan(project, { preparation, rendered, director
         || row.value.path !== source.outputPath || result?.path !== source.outputPath || result.planSha256 !== source.planHash
         || result.fontSha256 !== source.sound.font.sha256 || result.engine?.kind !== 'fluidsynth'
         || result.engine.version !== source.sound.engine.version || result.engine.controlFrames !== source.sound.engine.controlFrames
-        || result.bankStyle !== source.sound.bankStyle || result.channels !== 2 || result.sampleRate !== 44100) {
+        || result.bankStyle !== source.sound.bankStyle || result.channels !== 2 || result.sampleRate !== (source.sampleRate ?? 44100)) {
         throw new Error('SoundFont render differs from its frozen source plan')
       }
       outputPath = result.path; rate = result.sampleRate; frames = result.frames; expectedHash = result.wavSha256
@@ -124,7 +124,7 @@ export async function finishSoundPlan(project, { preparation, rendered, director
       outputPath = result.output_path; frames = result.frames; expectedHash = result.wav_sha256
     }
     const full = sourceAudioFrames(source.fullClock, rate)
-    if (!Number.isSafeInteger(frames) || frames <= 0 || (source.kind === 'practice' ? String(frames) !== source.frames : frames !== full.frameCount)) {
+    if (!Number.isSafeInteger(frames) || frames <= 0 || (source.frames !== undefined ? String(frames) !== source.frames : frames !== full.frameCount)) {
       throw new Error('Instrument render horizon differs from its original source')
     }
     const metadata = await readWaveMetadata(outputPath, { frames, channels: 2, sampleRate: rate }, { signal })

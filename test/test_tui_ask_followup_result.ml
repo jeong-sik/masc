@@ -86,6 +86,10 @@ let actual_read base ask resolution ~before_source ~parts publish =
     frame (Server.Followup_completed {answered_at=observed.answered_at;stimulus_id=observed.stimulus_id});
     Decode.finish_ask_followup_stream !stream
 let launch ?key state results request submission ~released perform =
+  let admission_started_ns=Mtime_clock.elapsed_ns () in
+  let expected_workspace=match state.Ui.server_identity with Some identity -> identity | None -> fail "fixture workspace identity is missing" in
+  let read=Protocol.capture_ask_followup_read ~instance:state.observation_instance
+    ~request ~submission ~expected_workspace ~admission_started_ns in
   let envelope=Protocol.capture_workspace_message state in
   let stop,resolve=Eio.Promise.create () in
   Ui.supersede_ask_followup_worker state
@@ -94,10 +98,10 @@ let launch ?key state results request submission ~released perform =
   Results.launch_observation ?key state ~results ~boundary_error:(fun detail -> Projection.Followup_read_failed detail)
     ~not_started:(fun detail -> Projection.Followup_not_started detail) ~on_not_run:finish
     ~observe_job:(function Masc_tui_workspace_job.Cancellation_requested -> () | Registration_released -> released ())
-    ~cancelled:(envelope (Protocol.Ask_followup_finished (request,submission,
+    ~cancelled:(envelope (Protocol.Ask_followup_finished (read,
       Error Projection.Followup_cancelled)))
-    ~progress:(fun (event,received_ns) -> envelope (Protocol.Ask_followup_observed (request,submission,event,received_ns)))
-    ~deliver:(fun result -> envelope (Protocol.Ask_followup_finished (request,submission,result)))
+    ~progress:(fun (event,received_ns) -> envelope (Protocol.Ask_followup_observed (read,event,received_ns)))
+    ~deliver:(fun result -> envelope (Protocol.Ask_followup_finished (read,result)))
     (fun publish -> Fun.protect ~finally:finish (fun () ->
       Eio.Fiber.first (fun () -> perform publish |> Result.map_error (fun detail -> Projection.Followup_read_failed detail))
         (fun () -> let _detail=Eio.Promise.await stop in Error Projection.Followup_withdrawn)))
@@ -106,20 +110,21 @@ let apply state message = match message with
   | Protocol.Workspace_scoped (authority,reading,inner) ->
     if not (Protocol.workspace_message_admitted state ~authority ~reading inner) then Refused else
       (match inner with
-       | Ask_followup_observed (request,submission,event,received_ns) ->
-         (match Ui.take_ask_followup_event state request submission event with
+       | Ask_followup_observed (read,event,received_ns) ->
+         (match Ui.take_ask_followup_event state read.afr_request read.afr_submission event with
           | Some (Ok _) -> Part (event,received_ns) | Some (Error detail) -> fail detail | None -> Refused)
-       | Ask_followup_finished (request,submission,result) ->
-         (match Ui.finish_ask_followup_read state request submission result with
+       | Ask_followup_finished (read,result) ->
+         (match Ui.finish_ask_followup_read state read.afr_request read.afr_submission result with
           | Some result -> Terminal result | None -> Refused)
        | _ -> fail "observation changed its original message kind")
   | _ -> fail "original follow-up lost its captured workspace envelope"
-let apply_ready state results seen =
+let apply_batch state seen batch =
   List.fold_left (fun terminal (ready : Protocol.async_msg Results.ready) ->
     match apply state ready.message with
     | Part (event,received_ns) -> seen:=(event,received_ns) :: !seen;terminal
     | Terminal result -> Some result
-    | Refused -> fail "current original follow-up was refused") None (Results.take_ready results)
+    | Refused -> fail "current original follow-up was refused") None batch
+let apply_ready state results seen = apply_batch state seen (Results.take_ready results)
 let rec terminal state results seen = match apply_ready state results seen with
   | Some result -> result | None -> Eio.Fiber.yield ();terminal state results seen
 let view state = match Ui.current_ask_followup state with
@@ -327,6 +332,102 @@ let test_cancelled_dispatch_retains_unstarted_original_observation () = with_ans
   exact_task state task_id;
   check bool "cancelled dispatch and fresh actual observation preserve Task resources" true (before=Masc.Workspace.get_tasks_raw config)
 
+module Origin = Masc_tui_observation_origin
+let captured_read = function
+  | Protocol.Workspace_scoped (_,_,(Protocol.Ask_followup_observed (read,_,_) | Ask_followup_finished (read,_))) -> read
+  | _ -> fail "actual original observation lost its provenance capsule"
+let first_read (batch : Protocol.async_msg Results.ready list) = match batch with
+  | ready::_ -> captured_read ready.message | [] -> fail "actual original observation produced no retained messages"
+let instance_id read = match Origin.to_json read.Protocol.afr_origin with
+  | `Assoc fields -> (match List.assoc_opt "tui_instance_id" fields with
+    | Some (`String value) -> value | Some _ | None -> fail "actual read has no instance provenance")
+  | _ -> fail "actual read provenance is not an object"
+let origin_field read ~section key =
+  let object_fields = function `Assoc fields -> fields | _ -> fail "original provenance field is not an object" in
+  let fields=Origin.to_json read.Protocol.afr_origin |> object_fields in
+  let nested=match List.assoc_opt section fields with Some value -> object_fields value | None -> fail "original provenance section missing" in
+  match List.assoc_opt key nested with Some (`String value) -> value
+  | Some _ | None -> fail "original provenance identity field missing"
+let check_captured_batch expected batch =
+  List.iter (fun (ready : Protocol.async_msg Results.ready) ->
+    let actual=captured_read ready.message in
+    check bool "actual partial and terminal messages retain their original origin and clock" true
+      (Origin.to_json actual.afr_origin=Origin.to_json expected.Protocol.afr_origin
+       && actual.afr_admission_started_ns=expected.afr_admission_started_ns
+       && Ui.Snapshot_read.request_id actual.afr_request=Ui.Snapshot_read.request_id expected.afr_request
+       && actual.afr_submission.as_request==expected.afr_submission.as_request)) batch
+let test_actual_workspaces_keep_distinct_original_provenance () =
+  with_answer @@ fun base_a config_a ask_a resolution_a _task_a state_a ->
+  with_answer @@ fun base_b config_b ask_b resolution_b task_b state_b ->
+  Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
+  let before_a=Masc.Workspace.get_tasks_raw config_a and before_b=Masc.Workspace.get_tasks_raw config_b in
+  let results_a=Results.create () and results_b=Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results_a;Results.close results_b) @@ fun () ->
+  let request_a,submission_a=begin_read state_a and request_b,submission_b=begin_read state_b in
+  let left_a,resolve_a=Eio.Promise.create () and left_b,resolve_b=Eio.Promise.create () in
+  launch state_a results_a request_a submission_a ~released:(fun () -> ignore (Eio.Promise.try_resolve resolve_a ()))
+    (actual_read base_a ask_a resolution_a ~parts:(ref []) ~before_source:(fun _ -> ()));
+  launch state_b results_b request_b submission_b ~released:(fun () -> ignore (Eio.Promise.try_resolve resolve_b ()))
+    (actual_read base_b ask_b resolution_b ~parts:(ref []) ~before_source:(fun _ -> ()));
+  Eio.Promise.await left_a;Eio.Promise.await left_b;
+  let batch_a=Results.take_ready results_a and batch_b=Results.take_ready results_b in
+  let original_a=first_read batch_a and original_b=first_read batch_b in
+  check_captured_batch original_a batch_a;check_captured_batch original_b batch_b;
+  check bool "independent actual TUI instances do not share a cohort identity" true
+    (instance_id original_a<>instance_id original_b);
+  check bool "per-source counters alone cannot identify these two actual reads" true
+    (Ui.Snapshot_read.request_id request_a=Ui.Snapshot_read.request_id request_b);
+  check string "first original read retains first real workspace" (Unix.realpath base_a)
+    (origin_field original_a ~section:"workspace" "base_path");
+  check string "second original read retains second real workspace" (Unix.realpath base_b)
+    (origin_field original_b ~section:"workspace" "base_path");
+  Ui.suspend_workspace_readings state_a;
+  state_a.workspace_authority <- Ui.Workspace_authority 1;
+  state_a.server_identity <- Some (identity base_b);
+  List.iter (fun (ready : Protocol.async_msg Results.ready) ->
+    check bool "old actual observations cannot borrow the replacement workspace" true (apply state_a ready.message=Refused)) batch_a;
+  check_captured_batch original_a batch_a;
+  check bool "second actual workspace admits only its own results" true
+    (apply_batch state_b (ref []) batch_b=Some (Ok ()));
+  exact_task state_b task_b;
+  check bool "both actual Task resources remain unchanged" true
+    (before_a=Masc.Workspace.get_tasks_raw config_a && before_b=Masc.Workspace.get_tasks_raw config_b)
+
+let test_actual_read_keeps_admission_identity_after_health_changes () = with_answer @@ fun base config ask resolution task_id state ->
+  Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
+  let before=Masc.Workspace.get_tasks_raw config and results=Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  let original_identity=match state.Ui.server_identity with Some value -> value | None -> fail "actual workspace identity missing" in
+  let request,submission=begin_read state and left,resolve=Eio.Promise.create () in
+  launch state results request submission ~released:(fun () -> ignore (Eio.Promise.try_resolve resolve ()))
+    (actual_read base ask resolution ~parts:(ref []) ~before_source:(fun _ -> ()));
+  Eio.Promise.await left;
+  let first_batch=Results.take_ready results in let first=first_read first_batch in
+  (* Protocol metadata changes, not an installed-binary or restart claim. *)
+  let refreshed={original_identity with sid_binary_commit="newly-reported-protocol-identity";
+    sid_version="newly-reported-protocol-version"} in
+  state.server_identity <- Some refreshed;
+  check string "held actual response retains identity observed at its admission" original_identity.sid_binary_commit
+    (origin_field first ~section:"server_identity_at_admission" "reported_binary_commit");
+  check_captured_batch first first_batch;
+  check bool "same-workspace health metadata refresh does not revoke the actual original result" true
+    (apply_batch state (ref []) first_batch=Some (Ok ()));
+  let request,submission=begin_read state and left,resolve=Eio.Promise.create () in
+  launch state results request submission ~released:(fun () -> ignore (Eio.Promise.try_resolve resolve ()))
+    (actual_read base ask resolution ~parts:(ref []) ~before_source:(fun _ -> ()));
+  Eio.Promise.await left;
+  let second_batch=Results.take_ready results in let second=first_read second_batch in
+  check string "same actual TUI instance persists across reads" (instance_id first) (instance_id second);
+  check string "next original read captures newly observed admission identity" refreshed.sid_binary_commit
+    (origin_field second ~section:"server_identity_at_admission" "reported_binary_commit");
+  check string "earlier read is never relabelled by later health data" original_identity.sid_binary_commit
+    (origin_field first ~section:"server_identity_at_admission" "reported_binary_commit");
+  check_captured_batch second second_batch;
+  check bool "next actual original result applies under its own ticket" true
+    (apply_batch state (ref []) second_batch=Some (Ok ()));
+  exact_task state task_id;
+  check bool "provenance never mutates actual Task resources" true (before=Masc.Workspace.get_tasks_raw config)
+
 module Task_read = Masc_tui_original_task_read
 module Task_decode = Masc.Tui_decode_task_inspection
 let require_inspection = function Some value -> value | None -> fail "original Task inspection did not begin"
@@ -491,5 +592,7 @@ let () = Eio_main.run @@ fun env ->
       test_case "session close and missing turn switch preserve actual resources" `Quick test_session_close_and_unstarted_preserve_resources;
       test_case "actual follow-up cancellation settles only after producer cleanup" `Quick test_actual_followup_cancellation_settles_after_cleanup;
       test_case "cancelled dispatch retains an unstarted original observation and still propagates" `Quick test_cancelled_dispatch_retains_unstarted_original_observation;
+      test_case "actual workspace reads preserve distinct original provenance across replacement" `Quick test_actual_workspaces_keep_distinct_original_provenance;
+      test_case "actual original read retains admission identity after health metadata changes" `Quick test_actual_read_keeps_admission_identity_after_health_changes;
       test_case "canonical answered Ask opens actual Task history and submitted evidence" `Quick test_answered_ask_opens_actual_task_history_evidence;
       test_case "answered Ask inspection preserves failed observations and rejects old visits" `Quick test_answered_ask_inspection_reopen_and_withdraw]])

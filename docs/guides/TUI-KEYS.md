@@ -506,6 +506,12 @@ state when its outcome is admitted, allowing the next read to start. Failed,
 cancelled, unstarted and withdrawn reads retain distinct outcomes; leaving a
 completed reading preserves that original outcome. Original Task status and stored evidence remain independently observed.
 
+Follow-up diagnostic records retain the original TUI instance and workspace,
+plus client version and server identity observed when that read was admitted.
+Later health refreshes preserve each earlier read's recorded origin. These
+metadata describe the observation context; installed-binary and response-serving
+identity require their own evidence when comparing runs.
+
 ## Work / Task Review
 
 | Keys | What it does |

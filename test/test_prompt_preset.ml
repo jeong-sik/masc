@@ -857,8 +857,7 @@ let test_saved_lane_activity_shape () =
     | Ok _ -> Alcotest.fail "mistyped activity was coerced")
 ;;
 
-let test_restore_preserves_lane_activity_and_autosave () =
-  let open Alcotest in
+let with_runtime_catalog f =
   let previous_catalog = Llm_provider.Model_catalog.global () in
   let previous_runtime = Runtime.For_testing.snapshot () in
   let catalog = or_fail (Llm_provider.Model_catalog.of_toml_string ~source:"preset activity fixture"
@@ -869,6 +868,12 @@ let test_restore_preserves_lane_activity_and_autosave () =
     | Some catalog -> Llm_provider.Model_catalog.set_global catalog
     | None -> Llm_provider.Model_catalog.clear_global ()) @@ fun () ->
   Llm_provider.Model_catalog.set_global catalog;
+  f ()
+;;
+
+let test_restore_preserves_lane_activity_and_autosave () =
+  let open Alcotest in
+  with_runtime_catalog @@ fun () ->
   List.iter (fun saved_enabled ->
     with_base (fun ~base_path ~keepers:_ ~config ->
       let path = Filename.concat config "runtime.toml" in
@@ -1092,8 +1097,7 @@ let test_default_baseline_missing_or_invalid () =
    neither that warning nor a decoder error may replay the restore. *)
 let test_restore_retains_visible_commit_observation ~sync_fails () =
   let open Alcotest in
-  let state = Runtime.For_testing.snapshot () in
-  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore state) @@ fun () ->
+  with_runtime_catalog @@ fun () ->
   with_base (fun ~base_path ~keepers:_ ~config ->
     let path = Filename.concat config "runtime.toml" in
     let baseline = runtime_fixture ^ "\n[runpod_mtp.qwen]\n\n[openai.gpt]\n" in

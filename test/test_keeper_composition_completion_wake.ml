@@ -744,6 +744,125 @@ let completion_delivery_recovers_without_replaying_or_reconsuming () =
       (Atomic.get dispatched) recovered.delivered)
 ;;
 
+let independent_completion_owners_keep_original_proofs () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:"alpha";
+    ensure_keeper config ~keeper_name:"beta";
+    let module Outbox = Masc.Keeper_composition_completion_outbox in
+    let module Fence = Masc.Keeper_shutdown_intake_fence in
+    let base_path = config.Workspace.base_path in
+    let produce keeper_name body =
+      Eio.Switch.run (fun background_sw ->
+        let done_, settled = Eio.Promise.create () in
+        let request = Async.submit_with_request_id
+            ~request_context:["composition_tool",`String composition_tool;
+              "source_task_id",`String (keeper_name ^ "-original-task")]
+            ~on_accepted:(fun request_id ->
+              Outbox.prepare ~base_path ~keeper_name ~request_id ~composition_tool
+              |> Result.map_error Outbox.error_to_string)
+            (* Leave actual durable completion obligations for recovery; the
+               producer switch joins its own physical worker before returning. *)
+            ~on_worker_settled:(fun _ -> Eio.Promise.resolve settled ())
+            ~background_sw ~base_path ~caller:keeper_name ~keeper_name
+            ~f:(fun ~request_id:_ _ ->
+              Tool_result.make_ok ~tool_name:composition_tool ~start_time:(Tool_timing.start ())
+                ~data:(`Assoc ["original_output",`String body]) ()) ()
+          |> Result.get_ok in
+        Eio.Promise.await done_;
+        request) in
+    let alpha = produce "alpha" "alpha output" in
+    let beta = produce "beta" "beta output" in
+    let discovered = Outbox.discover ~base_path |> Result.get_ok in
+    let beta_hint = List.find (fun (pending : Outbox.pending) ->
+        String.equal pending.request_id beta.request_id) discovered.entries in
+    let canonical request keeper_name =
+      match Async.load_canonical_durable_terminal ~base_path ~caller:keeper_name request with
+      | Ok proof -> Async.durable_terminal_entry proof
+      | Error error -> fail (Async.canonical_terminal_error_to_string error) in
+    let original_alpha = canonical alpha.request_id "alpha" in
+    let original_beta = canonical beta.request_id "beta" in
+    Eio.Switch.run (fun sw ->
+      let entered, enter = Eio.Promise.create () in
+      let released, release = Eio.Promise.create () in
+      let beta_done, publish_beta = Eio.Promise.create () in
+      let alpha_blocked, publish_blocked = Eio.Promise.create () in
+      let alpha_done, publish_alpha = Eio.Promise.create () in
+      let fence = ref None in
+      Fun.protect ~finally:(fun () ->
+        if not (Eio.Promise.is_resolved released) then Eio.Promise.resolve release ();
+        Option.iter (fun operation_id ->
+          ignore (Fence.rollback_shutdown ~base_path ~keeper_name:"alpha" ~operation_id)) !fence)
+        (fun () ->
+          let holder = Eio.Fiber.fork_promise ~sw (fun () ->
+            Fence.run_durable_intake_if_open ~base_path ~keeper_name:"alpha" (fun _ ->
+              Eio.Promise.resolve enter ();
+              Eio.Promise.await released)) in
+          Eio.Promise.await entered;
+          let recovery = Wake.create ~base_path ~on_report:(fun ~keeper_name report ->
+            if String.equal keeper_name "beta" then (
+              if not (Eio.Promise.is_resolved beta_done) then Eio.Promise.resolve publish_beta report)
+            else if String.equal keeper_name "alpha" then (
+              if not (Eio.Promise.is_resolved alpha_blocked) then Eio.Promise.resolve publish_blocked report
+              else if not (Eio.Promise.is_resolved alpha_done) then Eio.Promise.resolve publish_alpha report)
+            else fail "completion recovery changed original owner") () in
+          let pulse () = match Wake.pulse ~sw recovery with
+            | Ok () -> () | Error error -> fail (Outbox.error_to_string error) in
+          pulse ();
+          let beta_report = Eio.Promise.await beta_done in
+          (match beta_report.failures with [] -> () | _ -> fail "independent completion failed");
+          check bool "alpha remains behind its actual intake lock" false
+            (Eio.Promise.is_resolved alpha_blocked);
+          (match queued_results ~base_path ~keeper_name:"beta" with
+           | [_, completion] -> check string "independent original completion committed"
+               beta.request_id completion.Event_queue.cc_request_id
+           | _ -> fail "alpha's queue wait blocked beta");
+          let later = produce "alpha" "later alpha output" in
+          pulse ();
+          let operation_id = Masc.Keeper_shutdown_types.Operation_id.generate () in
+          fence := Some operation_id;
+          ignore (Fence.begin_shutdown ~base_path ~keeper_name:"alpha" ~operation_id);
+          Eio.Promise.resolve release ();
+          (match Eio.Promise.await_exn holder with
+           | Fence.Intake_committed () -> ()
+           | Intake_shutdown_reserved _ -> fail "the already admitted lock holder changed");
+          let blocked = Eio.Promise.await alpha_blocked in
+          (match blocked.failures with
+           | [id, error] ->
+               check string "active batch retains original request" alpha.request_id id;
+               (match error with
+                | Outbox.Storage_failed _ -> ()
+                | Invalid_obligation _ | Request_unavailable _ | Canonical_result_unavailable _ ->
+                    fail "fresh intake fence was not checked")
+           | [] | _ :: _ -> fail "active original batch was replaced or duplicated");
+          (match queued_results ~base_path ~keeper_name:"alpha" with
+           | [] -> () | _ :: _ -> fail "shutdown fence admitted a completion");
+          ignore (Fence.rollback_shutdown ~base_path ~keeper_name:"alpha" ~operation_id);
+          fence := None;
+          pulse ();
+          let recovered = Eio.Promise.await alpha_done in
+          (match recovered.failures with [] -> () | _ -> fail "original completions did not recover");
+          check (list string) "fresh batch delivers both exact original requests"
+            (List.sort String.compare [alpha.request_id;later.request_id])
+            (queued_results ~base_path ~keeper_name:"alpha"
+             |> List.map (fun (_, completion) -> completion.Event_queue.cc_request_id)
+             |> List.sort String.compare);
+          check bool "alpha canonical output and Task provenance retained" true
+            (canonical alpha.request_id "alpha" = original_alpha);
+          check bool "beta canonical output and Task provenance retained" true
+            (canonical beta.request_id "beta" = original_beta);
+          (* An already acknowledged original hint is not delivery authority. *)
+          (match Outbox.recover beta_hint ~deliver:(fun ~composition_tool (entry : Async.entry) ->
+             match Wake.terminal_of_status entry.status with
+             | None -> Error "no canonical terminal"
+             | Some terminal -> Wake.deliver ~base_path ~not_before:entry.submitted_at
+                 ~keeper_name:entry.submitted_by ~request_id:entry.request_id ~composition_tool ~terminal) with
+           | Ok Outbox.Retired -> ()
+           | Ok (Waiting | Delivered) | Error _ -> fail "acknowledged hint borrowed delivery authority");
+          (match queued_results ~base_path ~keeper_name:"beta" with
+           | [_, completion] when String.equal completion.Event_queue.cc_request_id beta.request_id -> ()
+           | [] | _ :: _ -> fail "repeated pulses changed beta's exact queued result"))))
+;;
+
 let rec mkdir_p path =
   if path = "" || path = "." || path = "/"
   then ()
@@ -797,6 +916,8 @@ let () =
             the_result_reaches_the_submitter
         ; test_case "delivery recovers without replay or repeated consumption" `Quick
             completion_delivery_recovers_without_replaying_or_reconsuming
+        ; test_case "independent completion owners retain original proof and fresh authority" `Quick
+            independent_completion_owners_keep_original_proofs
         ; test_case "a failure carries its detail" `Quick a_failure_carries_its_detail
         ; test_case "the same result arrives once" `Quick the_same_result_arrives_once
         ; test_case "conflicting results preserve the original" `Quick

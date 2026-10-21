@@ -793,17 +793,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       | Ok () -> ()
       | Error detail -> Log.Server.warn "goal effect outbox delivery deferred: %s" detail
     in
+    let composition_completions =
+      Keeper_composition_completion_wake.create ~base_path:config.base_path () in
     let reconcile_composition_completions () =
-      match Keeper_composition_completion_wake.reconcile ~base_path:config.base_path with
+      match Keeper_composition_completion_wake.pulse ~sw composition_completions with
       | Error error -> Log.Server.warn "composition completion outbox unavailable: %s"
           (Keeper_composition_completion_outbox.error_to_string error)
-      | Ok report ->
-        List.iter (fun (identity, error) ->
-          Log.Server.warn "composition completion delivery retained request=%s error=%s"
-            identity (Keeper_composition_completion_outbox.error_to_string error)) report.failures;
-        if report.delivered > 0 then Log.Server.info
-          "composition completion recovery inspected=%d delivered=%d waiting=%d failures=%d"
-          report.inspected report.delivered report.waiting (List.length report.failures)
+      | Ok () -> ()
     in
     let prepared_continuations = Keeper_composition_continuation_wake.create ~context:recovery_ctx () in
     let reconcile_prepared_continuations () =

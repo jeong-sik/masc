@@ -1,0 +1,8 @@
+{
+  "observed_at": "2026-10-21T12:35:13.758733+00:00",
+  "engine_id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7",
+  "container_id": "daabc0b0e7dc27732b9dae1f5be668097a3227cfe4c3ad6cd227461daf0e4ca1",
+  "inspect_exit": 1,
+  "state": null,
+  "detail": "error: no such object: daabc0b0e7dc27732b9dae1f5be668097a3227cfe4c3ad6cd227461daf0e4ca1\n"
+}

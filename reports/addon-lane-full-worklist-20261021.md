@@ -36,8 +36,8 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 완료 — 고정 G01 제품 `7b16a9175711aefe744c5c704e038a42fd5b6b7b`: native run `39595834943`의 TUI 20건·application 5건 PASS, artifact `12343798542` 확보. 실제 server/TUI build identity와 파일 해시를 대조; 후속 G04/G03·실제 화면은 별도 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
-| A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 미실행 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
-| A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 main 병합 완료; retained 실행 키 안내와 can_observe를 맞춘 소스·독립 검토 확보. 새 TUI 화면 미실행 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
+| A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 격리 native 제품 `7b16a917`에서 실제 TUI On→Off→On·새 incarnation/입력 결과·API 이력 보존·정리 관측. 원래 상세의 수동/자동 새로고침이 retained 결과를 지우는 P2 재현; #44838 소스 수리·새 후보 실행 필요 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
+| A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 main 병합. 고정 `7b16a917` 실제 TUI에서 retained 실행 키 미노출·수동 Observe 거절·이력 진입 확인; 전체 상세 새로고침 결함은 A02/G06에서 별도 추적 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
 | A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | 공통 Stack #44710 네 층 병합 완료. G01 후속 소스 독립 리뷰 P0–P2 없음; 최종 head의 MASC 재리뷰는 별도 필요 | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
 | A05 | Browser 스택의 후속 3개 층과 기존 증거 영향 검토 | 세 층의 전체 delta 직독; exact `76b741f` run `39555413943` 두 suite 14건 PASS, 독립 source delta 검토 PASS; 실제 앱·전체 스택 검증 별도 | #44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증 |
 | A06 | 두 스택의 전체 통합 준비 | 공통 Stack #44710은 main 병합. Browser Stack #44168은 67층 open, top #44702 `d35d2559`; 전체 현재 승인·충돌·통합 재확인 필요 | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
@@ -219,3 +219,10 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - `docs/evidence/2026-10-21-addon-native-artifact/`에 완료된 native 영수증·두 suite 로그·내려받은 바이너리 identity/hash 대조 및 직접 관련 3suite 실행 로그 발췌를 보존한다. 실행 제품은 `7b16a9175711aefe744c5c704e038a42fd5b6b7b`, workflow는 `97468f95df78f35a35bb3fe14a9670240cced930`다. 이 문서 층의 head를 실행 소스로 바꾸어 적지 않는다.
 - A01의 이전 실패·수리 후 미실행 표기는 당시 관측으로 남긴다. 새 native run `39595834943`은 완료 성공이고 실제 TUI/server의 build identity와 receipt 해시도 일치했다. `test_tui_lane_addons` 20건과 `test_lane_addon_application` 5건을 실행했다. 별도 direct run `39594048964`는 reconcile52·server inventory13·TUI inventory13건 PASS다. 전체 회귀는 이번 후보에서 미실행이다.
 - A02의 실제 화면·운영 설치본 변경은 미실행이다. G04 #44807/#44809와 G03 #44824/#44828은 별도 후보이므로 이 artifact가 해당 후속들을 검증했다고 세지 않는다. H01–H06과 전체 54개 완료는 남아 있다.
+
+
+## 2026-10-21 실제 native TUI 관측 · A02 후속
+
+- [실측·실패 영수증](../docs/evidence/2026-10-21-addon-native-ui/README.md): 고정 제품 `7b16a9175711aefe744c5c704e038a42fd5b6b7b`의 실제 TUI/서버와 Docker/MCP observer로 On → Off → On을 조작했다. 같은 설치의 이전/새 incarnation, 새 입력 결과, 원래 row/evidence 보존과 두 컨테이너 해제를 확인했다. 수동 PTY 원문/cell capture와 그로부터 렌더한 PNG이며 물리 데스크톱 스크린샷은 아니다. Synthetic phrase 입력이고 오디오·모델·action 실행 증거가 아니다.
+- A02는 완료가 아니다. 원래 상세에서 수동/visible cadence Inspect가 retained slice를 누락해 화면 결과를 지우는 P2를 재현했다. #44838은 조회 시 원래 instance/incarnation을 보존하고 effect/status 영수증은 기존대로 유지하는 소스 수리이며, 독립 source PASS·parser PASS와 새 native 실행을 구분한다.
+- G06에는 Inspect 성공+retained Slice 실패 시 이전 결과를 덮는 소스 경로도 남았다. 실패와 성공한 빈 결과를 구분해 보존하고 직접 검증해야 한다. 원래 54개 요구와 완료 기준, 같은 후보 Dashboard 조합·실제 모델/앱·장기/성능·운영 설치 검증은 유지한다.

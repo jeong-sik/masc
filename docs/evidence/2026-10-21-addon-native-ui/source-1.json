@@ -1,0 +1,17 @@
+{
+  "source_id": "vst-phrase",
+  "incarnation": "native-ui-source",
+  "cursor": "1",
+  "complete": true,
+  "detail": "Synthetic input for native TUI lifecycle qualification; no audio",
+  "observations": [
+    {
+      "id": "native-input-1",
+      "kind": "vst_phrase",
+      "observed_at": 1792585300.124148,
+      "fields": {
+        "state": "stop_requested"
+      }
+    }
+  ]
+}

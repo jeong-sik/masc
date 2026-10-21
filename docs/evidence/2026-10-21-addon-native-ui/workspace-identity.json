@@ -1,0 +1,20 @@
+{
+  "extraction": "Selected original /health?full=1 fields; full response kept only in isolated workspace",
+  "paths": {
+    "cwd": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-native-ui-20261021-at4jf4xn",
+    "effective_base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-native-ui-20261021-at4jf4xn",
+    "effective_masc_root": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-native-ui-20261021-at4jf4xn/.masc",
+    "current_task_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-native-ui-20261021-at4jf4xn/.masc/current_task",
+    "current_task_shape": "absent",
+    "effective_has_masc_dir": true,
+    "roots_diverge": false,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-native-ui-20261021-at4jf4xn",
+    "env_masc_base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-native-ui-20261021-at4jf4xn",
+    "resolution_source": "explicit_cli"
+  },
+  "status": "ok",
+  "captured_at": "2026-10-21T12:21:08.059665+00:00"
+}

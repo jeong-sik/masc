@@ -4615,6 +4615,15 @@ let test_postdispatch_outcomes_advance_once_to_successor () =
         1
         (EO.receipt_dispatch_count cause.receipt);
       check int (label ^ " both candidates own an attempt") 2 (List.length evidence.attempts);
+      (* The attempts are listed in the order the walk met them. *)
+      check
+        (list string)
+        (label ^ " attempts are listed in walk order")
+        [ label ^ "-a"; label ^ "-b" ]
+        (List.map
+           (fun (attempt : EO.flow_attempt_snapshot) ->
+              attempt.visit.identity.candidate_id)
+           evidence.attempts);
       check
         bool
         (label ^ " ends as an advanceable exhaustion")
@@ -4625,6 +4634,30 @@ let test_postdispatch_outcomes_advance_once_to_successor () =
   run ~abort_completion:true "partial" "unused";
   run "provider-parser" "not-provider-json";
   run "tool" tool_response
+;;
+
+(* The flow walk never republishes an earlier candidate, so the in-place
+   replacement of a value that is not at the head is only reachable here. *)
+let test_progress_lists_keep_first_seen_order () =
+  let progress = Exact_output_flow.create_progress () in
+  let same (id, _) (other, _) = String.equal id other in
+  List.iter (Exact_output_flow.publish_attempt progress ~same) [ "a", 1; "b", 1; "a", 2 ];
+  List.iter
+    (Exact_output_flow.publish_measurement progress ~same)
+    [ "a", 1; "b", 1; "b", 2 ];
+  let { Exact_output_flow.attempts; measurements; _ } =
+    Exact_output_flow.progress_snapshot progress
+  in
+  check
+    (list (pair string int))
+    "attempts keep first-seen order and a republished one replaces in place"
+    [ "a", 2; "b", 1 ]
+    attempts;
+  check
+    (list (pair string int))
+    "measurements keep first-seen order and a republished one replaces in place"
+    [ "a", 1; "b", 2 ]
+    measurements
 ;;
 
 let test_snapshot_preserves_caller_declared_order () =
@@ -5569,6 +5602,10 @@ let () =
             "postdispatch unknown and unreadable outcomes advance once"
             `Quick
             test_postdispatch_outcomes_advance_once_to_successor
+        ; test_case
+            "progress lists keep first seen order"
+            `Quick
+            test_progress_lists_keep_first_seen_order
         ; test_case
             "snapshot preserves caller declared order"
             `Quick

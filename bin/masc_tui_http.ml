@@ -896,6 +896,14 @@ let msx_write_body ~expected_workspace fields =
   Yojson.Safe.to_string (`Assoc (expected_workspace_field expected_workspace :: fields))
 ;;
 
+let post_artifact_check ~credential ~expected_workspace ~host ~port ~request =
+  let ( let* ) = Result.bind in
+  let body = Masc_tui_artifact_check_action.body ~expected_workspace request
+    |> Yojson.Safe.to_string in
+  let* json = post_json_bound ~credential ~host ~port
+    ~path:"/api/v1/published-artifact-checks" ~body in
+  Masc_tui_artifact_check_action.decode_response request json
+
 (* Press one or more keys on the shared MSX machine (RFC-0439 §3.3). Returns
    the new frame number on success, or an error string; the caller re-fetches
    the frame to see the result. Auth rides [post_json]'s operator bearer. *)

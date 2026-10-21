@@ -55,6 +55,24 @@ let checks_loaded state request result =
   state.artifact_checks <- Masc_tui_fetched.complete ~equal:Unit.equal
     state.artifact_checks request result
 
+let begin_check state ~report =
+  if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+  else match state.artifact_check_pending with
+  | Some _ -> Error "A confirmation change is still pending"
+  | None ->
+    let ( let* ) = Result.bind in
+    let* request = Masc_tui_artifact_check_action.prepare state.artifact_checks report in
+    state.artifact_check_pending <- Some request;
+    state.artifact_checks <- Masc_tui_fetched.suspend state.artifact_checks;
+    Ok request
+
+let check_changed state request = match state.artifact_check_pending with
+  | Some current when Masc_tui_artifact_check_action.same_request current request ->
+    state.artifact_check_pending <- None;
+    state.artifact_checks <- Masc_tui_fetched.suspend state.artifact_checks;
+    true
+  | Some _ | None -> false
+
 let select_scope state scope =
   state.resource_scope <- scope;
   state.resources_cursor <- 0;

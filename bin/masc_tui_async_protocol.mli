@@ -670,6 +670,8 @@ type async_msg =
   | Librarian_input_loaded of string * (string list, string) result
   | Artifact_checks_loaded of unit Masc_tui_fetched.request
       * (Masc_tui_artifact_checks.inventory, string) result
+  | Artifact_check_changed of Masc_tui_artifact_check_action.request
+      * (Masc.Published_artifact_check.t, string) result
   | Resources_listed of
       unit ref * (Masc_tui_resource_catalog.listing, string) result
   (* The scope travels with the directory. Without it a reply names a

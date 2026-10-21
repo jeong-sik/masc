@@ -969,6 +969,8 @@ let for_surface = function
          it on a match; with the text focused the same keys move the reading.
          Both ends answer to Home and End. *)
       [ b Act "f" "format" ~help:"cycle all resources, artifacts, Markdown and HTML"
+      ; b Act "c" "check / uncheck"
+          ~help:"explicitly toggle shared confirmation for the selected exact report revision"
       ; b Act "t" "today" ~help:"toggle the local publication day captured at this keypress"
       ; b Act "w" "layout" ~help:"switch full-width list/reader and side-by-side browsing"
       ; b Act "v" "document / source" ~detail:Detail_only

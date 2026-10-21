@@ -640,6 +640,12 @@
  (libraries masc_tui_resource_catalog masc_tui_fetched masc yojson))
 
 (library
+ (name masc_tui_artifact_check_action)
+ (wrapped false)
+ (modules masc_tui_artifact_check_action)
+ (libraries masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_fetched masc yojson))
+
+(library
  (name masc_tui_artifact_html)
  (wrapped false)
  (modules masc_tui_artifact_html)
@@ -1689,7 +1695,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_observation_store masc_tui_system_logs masc.build_version masc_tui_observation_origin masc_tui_original_task_read masc_tui_task_dispatch masc.keeper_cost_coverage masc_tui_chat_visit masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
+ (libraries masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_observation_store masc_tui_system_logs masc.build_version masc_tui_observation_origin masc_tui_original_task_read masc_tui_task_dispatch masc.keeper_cost_coverage masc_tui_chat_visit masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
    masc_tui_markdown
   masc_tui_chat_call_reader
   masc_tui_task_payloads
@@ -1866,7 +1872,7 @@
  (name masc_tui_resources_updates)
  (wrapped false)
  (modules masc_tui_resources_updates)
- (libraries masc_tui_resource_document masc_tui_resource_catalog masc_tui_artifact_checks masc_tui_fetched masc_tui_types masc_tui_mcp masc))
+ (libraries masc_tui_artifact_check_action masc_tui_resource_document masc_tui_resource_catalog masc_tui_artifact_checks masc_tui_fetched masc_tui_types masc_tui_mcp masc))
 
 (library
  (name masc_tui_board_updates)
@@ -2307,7 +2313,7 @@
  (name masc_tui_loader)
  (wrapped false)
  (modules masc_tui_loader masc_tui_http masc_tui_schedule_decode)
- (libraries masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
+ (libraries masc_tui_artifact_check_action masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
   masc_tui_chat_call_reader
   masc_tui_task_payloads
   masc
@@ -2393,7 +2399,7 @@
  (name masc_tui_async_protocol)
  (wrapped false)
  (modules masc_tui_async_protocol)
- (libraries masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_observation_store masc_tui_observation_origin masc_tui_ask_projection masc_tui_original_task_read masc_tui_code_draft
+ (libraries masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_observation_store masc_tui_observation_origin masc_tui_ask_projection masc_tui_original_task_read masc_tui_code_draft
   masc_tui_task_dispatch
   masc
   masc.keeper_chat_operations

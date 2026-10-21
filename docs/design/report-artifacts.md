@@ -173,6 +173,10 @@ unavailable or corrupt storage must remain unknown. `POST` accepts `id`,
 `revision`, `body_sha256`, `checked` and `expected_change_id` (null for an
 authoritatively absent record). Both routes use the existing Admin authority and
 private, no-store HTTP response. The actor comes from authentication, not JSON.
+The terminal also supplies `expected_workspace` with canonical base/runtime
+roots. The server validates and removes this envelope before strict operation
+decoding, refusing mismatched roots before store dispatch. Dashboard requests
+without this optional binding retain their existing contract.
 
 Each mutation verifies the published revision and body digest, then compares the
 opaque change ID from a stable-lock snapshot. The whole-record atomic replacement
@@ -206,5 +210,13 @@ Pending or failed refreshes, partial inventories, mismatched body digests and
 unconfirmed workspace identity leave the current confirmation/count unknown.
 Report inventory failure does not hide MCP resources, and MCP failure does not
 invalidate an otherwise complete report count. Superseded or withdrawn check
-responses cannot restore an older observation. Explicit TUI check/uncheck controls
-and live cross-client verification remain separate work.
+responses cannot restore an older observation. In the list or reader, `c`
+explicitly checks or unchecks that selected exact report revision. A pending
+change leaves confirmation/count unknown and does not affect source bytes.
+The request carries the observed change ID, a captured credential and workspace
+binding; it is sent once without credential replacement or automatic write retry.
+Success, conflict and uncertain transport all require a fresh shared-state read.
+An earlier read cannot certify a still-pending write, and its cached observation
+is retired again on settlement. Workspace withdrawal retires the local write
+owner even if the server may already have committed. Live cross-client and
+installed terminal verification remain separate evidence.

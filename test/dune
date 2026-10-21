@@ -6377,8 +6377,9 @@
 (test
  (name test_tui_artifact_checks)
  (modules test_tui_artifact_checks)
- (libraries alcotest masc masc.masc_tool_blob_store masc.tool_types masc.time_codec digestif
-  masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_fetched))
+ (libraries alcotest masc masc.server masc.masc_tool_blob_store masc.tool_types masc.time_codec digestif httpun unix yojson
+  masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog
+  masc_tui_resources_updates masc_tui_types masc_tui_fetched))
 
 (test
  (name test_tui_resource_copy)

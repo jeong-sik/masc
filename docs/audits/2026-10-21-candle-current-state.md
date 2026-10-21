@@ -27,7 +27,7 @@ RFC와 Dashboard 미사용 export 정리다. 아래 Candle 소스에 관한 판�
 | 영역 | 현재 상태 | 남은 한계 / 확인할 것 |
 |---|---|---|
 | Goal → 보상 | Snapshot·사람 확정·PayoutOwed·후보·모델 판정·Paid 구현. 재오픈·재시작 중복 방지 시나리오 존재 | 이번 head의 실행 미검증. 원장에 과거 Paid 1건 존재 |
-| 통화·감쇠 | 정수 milli, 원장 replay, 공급량, Q128 지수 감쇠, 정책 경계 구현 | 운영 설정 168시간과 경계 행은 관측. 현재 잔액을 별도 계산해 확정하지 않음 |
+| 통화·감쇠 | 정수 milli, 원장 replay, 공급량, Q128 지수 감쇠, 정책 경계 구현 | 관측 설정 파일 168시간과 경계 행은 관측. 현재 잔액을 별도 계산해 확정하지 않음 |
 | 가격 | 고정 가격과 선택적 supply_scaled 정책 구현 | 경제 효과·공정성·조작 저항성 검증과 정책 채택은 별도 |
 | 구매·착용 | Keeper 자신의 도구로 구매·착용·기본 모습 복원 구현 | 관측 구매는 무료 1건. 유료 구매·현재 UI 전체 경로 미검증 |
 | 선물 | Keeper 간 금액·아이템 이전 구현 | 운영 원장에 선물 기록 없음. 이번 실행 미검증 |
@@ -48,8 +48,8 @@ RFC와 Dashboard 미사용 export 정리다. 아래 Candle 소스에 관한 판�
 |---|---|
 | 서버 버전 / embedded commit | 0.59.0 / ad6ca89213d57c9ac978e1f3e5704292c4334cf6 |
 | health | liveness ok, full health degraded. Candle 장애로 귀속하지 않음 |
-| 반감기 | half_life = 168시간 |
-| 감액 | deduction_rate = 0, deduction_floor = 1000 — 운영상 지연 감액 없음 |
+| 반감기 | 관측 파일의 half_life = 168시간 |
+| 감액 | 관측 파일의 deduction_rate = 0, deduction_floor = 1000 — 이 파일 정책을 적용하면 지연 감액 없음 |
 | 지급 정책 | weight_max = 1; grades는 trivial/small/medium/large/epic, 금액 100/700/1000/1000/1000 milli |
 | 가격 정책 | shop.pricing 미지정 → 현재 구현의 Fixed; 카탈로그 가격 18개 |
 | 원장 | 40행, 10,709바이트; 모든 행의 JSON 구문 해석 성공 |

@@ -1,31 +1,12 @@
 import { html } from 'htm/preact'
-import { isFiniteMetricValue } from '../lib/format-number'
-import { SPARKLINE_W, SPARKLINE_H, SPARKLINE_PAD } from '../lib/sparkline-config'
+import { formatMsCompact, formatTokPerSec } from '../lib/format-number'
+import { summarizeMetricSeries } from '../lib/metric-series'
+import { ObservedMetricChart } from './common/observed-metric-chart'
 import { CopyIdButton } from './common/copy-id-button'
 import { Eyebrow } from './common/eyebrow'
 import type { Keeper, KeeperMetricPoint } from '../types'
 import { MutedSpan, DetailRow, DetailCard } from './keeper-detail-kpi'
 
-
-function miniSparkline(
-  data: Array<number | null | undefined>,
-  maxOverride?: number,
-): string {
-  const W = SPARKLINE_W, H = SPARKLINE_H, pad = SPARKLINE_PAD
-  const n = data.length
-  const points = data
-    .map((value, index) => ({ value, index }))
-    .filter((point): point is { value: number; index: number } =>
-      isFiniteMetricValue(point.value),
-    )
-  if (points.length < 2) return ''
-  const maxVal = maxOverride ?? Math.max(...points.map(point => point.value), 1)
-  return points.map(({ value, index }) => {
-    const x = pad + (index / Math.max(n - 1, 1)) * (W - 2 * pad)
-    const y = H - pad - (value / maxVal) * (H - 2 * pad)
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  }).join(' ')
-}
 
 function formatFingerprint(value: string | null | undefined): string {
   if (!value) return '-'
@@ -45,13 +26,11 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
   )
   if (promptPoints.length === 0) return null
 
-  const latest = promptPoints[promptPoints.length - 1] ?? null
+  const latest = series[series.length - 1] ?? null
   const latestPrompt = latest?.prompt_metrics ?? null
   const latestSegments = Object.entries(latestPrompt?.segments ?? {})
     .sort(([left], [right]) => left.localeCompare(right))
-  const promptBytes = promptPoints.map(
-    (p: KeeperMetricPoint) => p.prompt_metrics?.total_bytes ?? 0,
-  )
+  const promptReadings = series.map(p => ({ ts: p.ts, value: p.prompt_metrics?.total_bytes }))
   const latestTotal = latestPrompt?.total_bytes ?? null
   const latestCacheable = latestPrompt?.cacheable_bytes ?? null
   const cacheableRatio =
@@ -70,8 +49,6 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
     lastFingerprint = current
   }
 
-  const W = SPARKLINE_W, H = SPARKLINE_H
-  const totalLine = miniSparkline(promptBytes)
 
   return html`
     <div class="mb-5 v2-monitoring-panel">
@@ -91,9 +68,8 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>prompt bytes</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${latestTotal != null ? latestTotal.toLocaleString() : '-'}</span>
           </${DetailRow}>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="프롬프트 바이트 추이" style="background:var(--bg-deepest);">
-            ${totalLine ? html`<polyline points="${totalLine}" fill="none" stroke="var(--amber-bright)" stroke-width="1.5"/>` : null}
-          </svg>
+          <${ObservedMetricChart} label="프롬프트 바이트 추이" formatValue=${(n: number) => `${n.toLocaleString()} bytes`}
+            series=${[{ name: 'prompt bytes', color: 'var(--color-status-warn)', readings: promptReadings }]} />
           <div class="mt-1 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-disabled)]">
             <span>latest ${latestTotal != null ? `${latestTotal.toLocaleString()} bytes` : '-'}</span>
             <span>cacheable ${latestCacheable != null ? `${latestCacheable.toLocaleString()} bytes` : '-'}</span>
@@ -146,9 +122,9 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
 
 function healthStatusColor(status: string | undefined): string {
   switch (status) {
-    case 'healthy': return 'var(--good)'
-    case 'degraded': return 'var(--amber-bright)'
-    case 'unhealthy': return 'var(--color-status-bad)'
+    case 'healthy': return 'var(--color-status-ok)'
+    case 'degraded': return 'var(--color-status-warn)'
+    case 'unhealthy': return 'var(--color-status-err)'
     default: return 'var(--color-fg-disabled)'
   }
 }
@@ -160,53 +136,22 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
   )
   if (telemetryPoints.length === 0) return null
 
-  const wallTokPerSec = telemetryPoints
-    .map((p: KeeperMetricPoint) => p.wall_tokens_per_second)
-    .filter((value): value is number => value != null)
-  const hwTokPerSec = telemetryPoints
-    .map((p: KeeperMetricPoint) => p.inference_telemetry?.timings?.predicted_per_second)
-    .filter((value): value is number => value != null)
-  const latencySeries = telemetryPoints.map(
-    (p: KeeperMetricPoint) => p.inference_telemetry?.request_latency_ms ?? null,
-  )
-  const cacheNs = telemetryPoints.map(
-    (p: KeeperMetricPoint) => p.inference_telemetry?.timings?.cache_n ?? 0,
-  )
-  const reasoningTokens = telemetryPoints.map(
-    (p: KeeperMetricPoint) => p.inference_telemetry?.reasoning_tokens ?? 0,
-  )
-  const ttfrcSeries = telemetryPoints.map(
-    (p: KeeperMetricPoint) => p.inference_telemetry?.ttfrc_ms ?? null,
-  )
-  const prefillSeries = telemetryPoints.map(
-    (p: KeeperMetricPoint) => p.inference_telemetry?.prefill_ms ?? null,
-  )
+  const readings = (read: (point: KeeperMetricPoint) => number | null | undefined) =>
+    series.map(point => ({ ts: point.ts, value: read(point) }))
+  const wallReadings = readings(point => point.wall_tokens_per_second)
+  const hwReadings = readings(point => point.inference_telemetry?.timings?.predicted_per_second)
+  const latencyReadings = readings(point => point.inference_telemetry?.request_latency_ms)
+  const ttfrcReadings = readings(point => point.inference_telemetry?.ttfrc_ms)
+  const prefillReadings = readings(point => point.inference_telemetry?.prefill_ms)
+  const wallSummary = summarizeMetricSeries(wallReadings)
+  const hwSummary = summarizeMetricSeries(hwReadings)
+  const latencySummary = summarizeMetricSeries(latencyReadings)
+  const ttfrcSummary = summarizeMetricSeries(ttfrcReadings)
+  const prefillSummary = summarizeMetricSeries(prefillReadings)
+  const cacheSummary = summarizeMetricSeries(readings(point => point.inference_telemetry?.timings?.cache_n))
+  const reasoningSummary = summarizeMetricSeries(readings(point => point.inference_telemetry?.reasoning_tokens))
 
-  const W = SPARKLINE_W, H = SPARKLINE_H
-  const lastWallTps = wallTokPerSec[wallTokPerSec.length - 1] ?? 0
-  const avgWallTps =
-    wallTokPerSec.length > 0
-      ? wallTokPerSec.reduce((a, b) => a + b, 0) / wallTokPerSec.length
-      : 0
-  const lastHwTps = hwTokPerSec[hwTokPerSec.length - 1] ?? 0
-  const avgHwTps =
-    hwTokPerSec.length > 0
-      ? hwTokPerSec.reduce((a, b) => a + b, 0) / hwTokPerSec.length
-      : 0
-  const lastLatency = latencySeries[latencySeries.length - 1] ?? null
-  const totalCacheN = cacheNs.reduce((a, b) => a + b, 0)
-  const totalReasoning = reasoningTokens.reduce((a, b) => a + b, 0)
-
-  const wallTpsLine = wallTokPerSec.length > 1 ? miniSparkline(wallTokPerSec) : ''
-  const hwTpsLine = hwTokPerSec.length > 1 ? miniSparkline(hwTokPerSec) : ''
-  const latencyLine = miniSparkline(latencySeries)
-  const ttfrcLine = miniSparkline(ttfrcSeries)
-  const prefillLine = miniSparkline(prefillSeries)
-
-  const lastTtfrc = ttfrcSeries.filter(isFiniteMetricValue)[ttfrcSeries.filter(isFiniteMetricValue).length - 1] ?? null
-  const lastPrefill = prefillSeries.filter(isFiniteMetricValue)[prefillSeries.filter(isFiniteMetricValue).length - 1] ?? null
-
-  const lastFp = telemetryPoints[telemetryPoints.length - 1]?.inference_telemetry?.system_fingerprint
+  const lastFp = series[series.length - 1]?.inference_telemetry?.system_fingerprint
 
   const providerHealth = keeper.provider_health
 
@@ -223,30 +168,28 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
           </span>
         ` : null}
       </div>
-      <div class="grid grid-cols-2 md:grid-cols-7 gap-3 v2-monitoring-row">
-        ${wallTokPerSec.length > 0 ? html`
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 v2-monitoring-row">
+        ${wallSummary.observed > 0 ? html`
         <${DetailCard}>
           <${DetailRow}>
             <${Eyebrow}>wall tok/s</${Eyebrow}>
-            <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastWallTps.toFixed(1)}</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--color-status-ok)]">${formatTokPerSec(wallSummary.latest)}</span>
           </${DetailRow}>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="Wall TPS 추이" style="background:var(--bg-deepest);">
-            ${wallTpsLine ? html`<polyline points="${wallTpsLine}" fill="none" stroke="var(--color-status-ok)" stroke-width="1.5"/>` : null}
-          </svg>
-          <div class="text-3xs text-[var(--color-fg-disabled)] mt-1">avg ${avgWallTps.toFixed(1)}</div>
+          <${ObservedMetricChart} label="Wall TPS 추이" formatValue=${(n: number) => formatTokPerSec(n)}
+            series=${[{ name: 'wall tok/s', color: 'var(--color-status-ok)', readings: wallReadings }]} />
+          <div class="text-3xs text-[var(--color-fg-disabled)] mt-1">avg ${(wallSummary.sum! / wallSummary.observed).toFixed(1)}</div>
         <//>
         ` : null}
 
-        ${hwTokPerSec.length > 0 ? html`
+        ${hwSummary.observed > 0 ? html`
         <${DetailCard}>
           <${DetailRow}>
             <${Eyebrow}>hw tok/s</${Eyebrow}>
-            <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastHwTps.toFixed(1)}</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--color-status-ok)]">${formatTokPerSec(hwSummary.latest)}</span>
           </${DetailRow}>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="하드웨어 TPS 추이" style="background:var(--bg-deepest);">
-            ${hwTpsLine ? html`<polyline points="${hwTpsLine}" fill="none" stroke="var(--color-status-ok)" stroke-width="1.5"/>` : null}
-          </svg>
-          <div class="text-3xs text-[var(--color-fg-disabled)] mt-1">avg ${avgHwTps.toFixed(1)} · decode-only</div>
+          <${ObservedMetricChart} label="하드웨어 TPS 추이" formatValue=${(n: number) => formatTokPerSec(n)}
+            series=${[{ name: 'hw tok/s', color: 'var(--color-status-ok)', readings: hwReadings }]} />
+          <div class="text-3xs text-[var(--color-fg-disabled)] mt-1">avg ${(hwSummary.sum! / hwSummary.observed).toFixed(1)} · decode-only</div>
         <//>
         ` : null}
 
@@ -254,47 +197,44 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
         <${DetailCard}>
           <${DetailRow}>
             <${Eyebrow}>API latency</${Eyebrow}>
-            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${isFiniteMetricValue(lastLatency) && lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${formatMsCompact(latencySummary.latest, '미관측')}</span>
           </${DetailRow}>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="API 지연 시간 추이" style="background:var(--bg-deepest);">
-            ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="var(--sky-400)" stroke-width="1.5"/>` : null}
-          </svg>
+          <${ObservedMetricChart} label="API 지연 시간 추이" formatValue=${(n: number) => formatMsCompact(n)}
+            series=${[{ name: 'API latency', color: 'var(--color-accent-fg)', readings: latencyReadings }]} />
         <//>
 
         ${'' /* cache hits */}
         <${DetailCard} class="flex flex-col justify-between">
           <${Eyebrow}>KV Cache</${Eyebrow}>
-          <span class="text-lg font-mono tabular-nums text-[var(--purple)]">${totalCacheN > 0 ? totalCacheN.toLocaleString() : '-'}</span>
-          <${MutedSpan}>cumulative tokens</${MutedSpan}>
+          <span class="text-lg font-mono tabular-nums text-[var(--purple)]">${cacheSummary.sum === null ? '미관측' : cacheSummary.sum.toLocaleString()}</span>
+          <${MutedSpan}>보존 관측 합계 · ${cacheSummary.observed}/${series.length}건</${MutedSpan}>
         <//>
 
         ${'' /* reasoning tokens */}
         <${DetailCard} class="flex flex-col justify-between">
           <${Eyebrow}>추론</${Eyebrow}>
-          <span class="text-lg font-mono tabular-nums text-[var(--color-status-warn)]">${totalReasoning > 0 ? totalReasoning.toLocaleString() : '-'}</span>
-          <${MutedSpan}>total tokens</${MutedSpan}>
+          <span class="text-lg font-mono tabular-nums text-[var(--color-status-warn)]">${reasoningSummary.sum === null ? '미관측' : reasoningSummary.sum.toLocaleString()}</span>
+          <${MutedSpan}>보존 관측 합계 · ${reasoningSummary.observed}/${series.length}건</${MutedSpan}>
         <//>
 
         ${'' /* TTFT */}
         <${DetailCard}>
           <${DetailRow}>
             <${Eyebrow}>TTFT</${Eyebrow}>
-            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastTtfrc != null ? `${(lastTtfrc / 1000).toFixed(1)}s` : '-'}</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${formatMsCompact(ttfrcSummary.latest, '미관측')}</span>
           </${DetailRow}>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="TTFT 추이" style="background:var(--bg-deepest);">
-            ${ttfrcLine ? html`<polyline points="${ttfrcLine}" fill="none" stroke="var(--sky-400)" stroke-width="1.5"/>` : null}
-          </svg>
+          <${ObservedMetricChart} label="TTFT 추이" formatValue=${(n: number) => formatMsCompact(n)}
+            series=${[{ name: 'TTFT', color: 'var(--color-accent-fg)', readings: ttfrcReadings }]} />
         <//>
 
         ${'' /* prefill */}
         <${DetailCard}>
           <${DetailRow}>
             <${Eyebrow}>prefill</${Eyebrow}>
-            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastPrefill != null ? `${(lastPrefill / 1000).toFixed(1)}s` : '-'}</span>
+            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${formatMsCompact(prefillSummary.latest, '미관측')}</span>
           </${DetailRow}>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" role="img" aria-label="Prefill 추이" style="background:var(--bg-deepest);">
-            ${prefillLine ? html`<polyline points="${prefillLine}" fill="none" stroke="var(--sky-400)" stroke-width="1.5"/>` : null}
-          </svg>
+          <${ObservedMetricChart} label="Prefill 추이" formatValue=${(n: number) => formatMsCompact(n)}
+            series=${[{ name: 'prefill', color: 'var(--color-accent-fg)', readings: prefillReadings }]} />
         <//>
       </div>
     </div>

@@ -29,3 +29,24 @@ digit width so the value does not overrun the pane.
 Skill outcome counts cover the retained runs for the selected exact revision,
 across Keepers. They are not lifetime coverage. Executor-duration means are a
 separate chart and exclude deferred results; they do not measure model latency.
+
+## Retained Keeper time series
+
+Turn latency, per-observation cost, token usage, prompt bytes and inference
+telemetry use producer timestamps on the horizontal axis. A missing reading
+breaks the line; an isolated observed reading remains a point. Irregular
+observation intervals retain their actual elapsed spacing. No periodic sampling
+cadence or missing intermediate observations are invented.
+
+The vertical axis starts at zero and uses the actual largest positive observed
+value, including sub-dollar costs. An all-zero series stays at zero. Each chart
+states units, retained coverage, latest/minimum/maximum and its time range.
+The expandable source table preserves every supplied numeric value and missing
+reading; its rows are created on demand. Token input/output use solid/dashed
+lines as well as colours, with one common magnitude scale.
+
+Costs are an observed subtotal of this loaded window, with partial coverage
+explicit. They are not lifetime spending. Token usage comes from the canonical
+usage counters rather than hardware prompt/decode timing counters. The input to
+output ratio uses only paired observations; zero output and unobserved output
+are distinct, and no synthetic denominator or health threshold is introduced.

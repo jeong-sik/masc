@@ -93,7 +93,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | Browser d35d2559의 기존 package/host 적용은 open. 기존 Python worker/MCP 13건 PASS, source/hash·원본 log 공개. 모델은 scripted이며 실제 host Off obligation→재연결→중복 없는 정산·provider·두 UI는 미검증 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
+| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | Browser d35 기존 package/host는 open. Python worker13건 및 exact d35 compiled contract2+appraisal_flow24건 PASS·원본 증거 보존. 실제 host-managed Off/On·provider·원래 obligation 중복 없는 정산과 두 UI는 미검증 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
 | E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 설계 필요 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
@@ -258,3 +258,8 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - [새 native39625447860](https://github.com/jeong-sik/masc/actions/runs/39625447860)은 exact003f52의 addon-lifecycle 요청이다. 원래 실패와 별도 새 후보이며 결과·artifact·실제 corrected global Slice는 미확인이다.
 - 독립 Browser67층 census는 현재 head/base/canonical diff/footer 결속 승인29층, 유효 승인 부재24층·이전head만14층을 확인했다. 현재 structured FAIL/HOLD·정식 CR·draft·미해결 thread는0이지만 #44192가 REST dirty다. 이는 전체 소스 리뷰나 merge-guard PASS가 아니다. 조사 당시 main4d25 이후 main이003f52로 움직였으며 whole restack 뒤 다시 판정해야 한다. pr-updater 요청 `kmsg-7f4585ddeacd43ac2a42f3e1b98cfc15`는 queued이고 실제 rebase/push 완료는 확인하지 않았다.
 - E01 두 compiled suite는 요청39624635082에서 진행 중이었다. worker/host 계약과 payout 정산을 잇는 기존 통제된 검사를 실제 host-managed Off/On·실제 provider·원래 ledger 완주와 구분하며, 실제 격리 재연결 경계는 계속 남아 있다. 54개 요구와 완료 기준은 유지한다.
+
+### E01 compiled 소비자 완료 결과
+
+- 요청39624635082를 다음 publication 경계에서 처음 결과 확인했고, exact d35·minimal true·posix·선택된 두 suite의 실제 로그를 읽었다. `test_candle_appraiser_contract` 2건(0.527s), `test_candle_appraisal_flow` 24건(1.450s), 합26건 PASS다. [원본 실행 발췌·terminal API·해시 영수증](../docs/evidence/2026-10-22-candle-worker/README.md)을 보존한다.
+- 실제 Python stdio/restart+host Grade와 production payout worker+scripted Addon 정산의 각각을 검증했다. actual host-managed container Off/On, common Exact 실제 provider 및 원래 obligation 정산을 하나로 이은 증거는 아니다. 실제 provider·두 UI·운영 설치·전체67층 또는54개 완료로 세지 않는다.

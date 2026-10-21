@@ -61,3 +61,21 @@ The contract suite joins actual worker stdio/restart with host Grade decoding;
 the flow suite joins the production payout worker and all appraisal stages to
 host settlement with a scripted Addon port. Even their eventual success would
 not prove actual host-managed Addon Off/On followed by real-provider settlement.
+
+## Later result read: compiled host consumers passed
+
+At the next publication boundary the same run39624635082 was completed success.
+`host-check-completed-run.json` preserves that terminal API snapshot and
+`host-check-completed-excerpt.log` preserves the exact timestamped checkout,
+selected minimal/posix inputs and complete two suite output sections. The
+receipt records its excerpt hash and the original full CI log hash.
+The actual results are contract **2 tests,0.527s** and appraisal flow
+**24 tests,1.450s**, total **26 passed** on frozen d35.
+
+The contract suite exercises actual Python stdio/restart and the host Grade
+consumer; the appraisal flow exercises the production host payout worker and
+all stages to exactly-one Paid using a scripted Addon port. Neither joins the
+actual persistent-container installation Off/On, common Exact provider and
+host ledger in one scenario. This success is not a current-main build, real
+provider judgment, actual Dashboard/TUI or installation proof. The original
+13-case worker execution remains a separate earlier result.

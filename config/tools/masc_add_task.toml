@@ -145,3 +145,9 @@ required = true
 name = "masc_root"
 type = "string"
 required = true
+
+[[params]]
+name = "creation_request_id"
+type = "string"
+min_length = 1
+description = "Opaque original client request identity, committed with the Task for exact outcome lookup through masc_tasks. Never deduplicates: every successful call creates a new Task, including repeated identities. Do not retry creation to resolve an uncertain outcome."

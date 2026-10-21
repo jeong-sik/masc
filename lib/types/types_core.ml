@@ -1051,11 +1051,47 @@ type task_deletion_receipt =
   }
 [@@deriving show]
 
+type task_creation_request_id = string
+[@@deriving show, eq]
+
+let task_creation_request_id_of_string value =
+  if String.trim value = "" then Error "creation_request_id must be non-blank"
+  else Ok value
+let task_creation_request_id_to_string value = value
+
+type task_creation_receipt = {
+  creation_request_id : task_creation_request_id;
+  created_task_id : string;
+}
+[@@deriving show]
+
+let task_creation_receipt_to_yojson receipt =
+  `Assoc ["creation_request_id", `String receipt.creation_request_id;
+          "task_id", `String receipt.created_task_id]
+
+let task_creation_receipts_of_yojson = function
+  | `List values ->
+    let rec decode acc = function
+      | [] -> Ok (List.rev acc)
+      | `Assoc fields :: rest ->
+        (match List.sort (fun (a,_) (b,_) -> String.compare a b) fields with
+         | ["creation_request_id", `String raw; "task_id", `String created_task_id]
+             when String.trim created_task_id <> "" ->
+           (match task_creation_request_id_of_string raw with
+            | Error error -> Error error
+            | Ok creation_request_id ->
+              decode ({creation_request_id;created_task_id} :: acc) rest)
+         | _ -> Error "malformed task creation receipt")
+      | _ -> Error "task creation receipt must be an object" in
+    decode [] values
+  | _ -> Error "backlog.task_creation_receipts must be a list"
+
 type backlog = {
   tasks: task list;
   pending_completion_rejections: pending_completion_rejection list;
   pending_completion_approvals: pending_completion_approval list;
   task_deletion_receipts: task_deletion_receipt list;
+  task_creation_receipts: task_creation_receipt list;
   last_updated: string;
   version: int;
 } [@@deriving show]
@@ -1224,6 +1260,7 @@ let backlog_to_yojson b =
     ("pending_completion_approvals",
       `List (List.map pending_completion_approval_to_yojson b.pending_completion_approvals));
     ("task_deletion_receipts", `List (List.map task_deletion_receipt_to_yojson b.task_deletion_receipts));
+    ("task_creation_receipts", `List (List.map task_creation_receipt_to_yojson b.task_creation_receipts));
     ("last_updated", `String b.last_updated);
     ("version", `Int b.version);
   ]
@@ -1261,6 +1298,12 @@ let backlog_of_yojson_with_diagnostics = function
       | [] -> Ok []
       | [_, value] -> task_deletion_receipts_of_yojson value
       | _ -> Error "duplicate backlog.task_deletion_receipts field" in
+    let creation_fields, fields =
+      List.partition (fun (name,_) -> String.equal name "task_creation_receipts") fields in
+    let creation_result = match creation_fields with
+      | [] -> Ok []
+      | [_, value] -> task_creation_receipts_of_yojson value
+      | _ -> Error "duplicate backlog.task_creation_receipts field" in
     let fields =
       List.sort (fun (left, _) (right, _) -> String.compare left right) fields
     in
@@ -1306,13 +1349,17 @@ let backlog_of_yojson_with_diagnostics = function
                 "backlog.version corrupt: %s"
                 (Yojson.Safe.to_string other))
        in
-       (match decode_tasks 0 [] [] task_values, version_result, pending_result, approval_result, receipt_result with
-        | Ok (tasks, diagnostics), Ok version, Ok pending_completion_rejections, Ok pending_completion_approvals, Ok task_deletion_receipts ->
+       (match decode_tasks 0 [] [] task_values, version_result, pending_result,
+              approval_result, receipt_result, creation_result with
+        | Ok (tasks, diagnostics), Ok version, Ok pending_completion_rejections,
+          Ok pending_completion_approvals, Ok task_deletion_receipts, Ok task_creation_receipts ->
           Ok
-            ( { tasks; pending_completion_rejections; pending_completion_approvals; task_deletion_receipts; last_updated; version }
+            ( { tasks; pending_completion_rejections; pending_completion_approvals;
+                task_deletion_receipts; task_creation_receipts; last_updated; version }
             , diagnostics )
-        | Error error, _, _, _, _ | _, Error error, _, _, _ | _, _, Error error, _, _
-        | _, _, _, Error error, _ | _, _, _, _, Error error -> Error error)
+        | Error error, _, _, _, _, _ | _, Error error, _, _, _, _
+        | _, _, Error error, _, _, _ | _, _, _, Error error, _, _
+        | _, _, _, _, Error error, _ | _, _, _, _, _, Error error -> Error error)
      | [ "last_updated", `String _; "tasks", `List _; "version", _ ] ->
        Error "backlog.last_updated must be a non-blank string"
      | _ ->

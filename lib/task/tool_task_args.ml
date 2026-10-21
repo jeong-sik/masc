@@ -6,6 +6,15 @@
 
     @since God file decomposition — extracted from tool_task.ml *)
 
+let parse_task_creation_request_id = function
+  | `Assoc fields ->
+    (match List.filter (fun (key,_) -> String.equal key "creation_request_id") fields with
+     | [] -> Ok None
+     | [_, `String raw] ->
+       Masc_domain.task_creation_request_id_of_string raw |> Result.map Option.some
+     | _ -> Error "creation_request_id must be one non-blank string when present")
+  | _ -> Error "task arguments must be an object"
+
 let task_contract_keys =
   [ "strict"
   ; "completion_contract"

@@ -1,5 +1,10 @@
 (** Task-tool argument parsing helpers. *)
 
+val parse_task_creation_request_id :
+  Yojson.Safe.t -> (Masc_domain.task_creation_request_id option, string) result
+(** Omitted means uncorrelated. Present blank, non-string, null or duplicate
+    identities are rejected; opaque string bytes are preserved. *)
+
 val parse_task_contract :
   Yojson.Safe.t -> (Masc_domain.task_contract option, string) result
 

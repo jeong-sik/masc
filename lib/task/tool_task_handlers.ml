@@ -346,6 +346,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
     ; "goal_id"
     ; "contract"
     ; "predecessor_task_id"
+    ; "creation_request_id"
     ; "skills"
     ]
   in
@@ -379,6 +380,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
   in
   let skills_result = parse_task_skills args in
   let contract_result = parse_task_contract args in
+  let creation_result = Tool_task_args.parse_task_creation_request_id args in
   (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
   (* RFC-0189: title/priority/goal_id/contract validation — all
@@ -394,13 +396,15 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
       ~tool_name ~start_time
       (Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
   else
-    match contract_result, skills_result with
-    | Error error, _ ->
+    match contract_result, skills_result, creation_result with
+    | Error error, _, _ ->
         Tool_result.error
           ~failure_class:Tool_result.Workflow_rejection
           ~tool_name ~start_time error
-    | _, Error error -> task_skill_rejection ~tool_name ~start_time error
-    | Ok contract, Ok parsed_skills ->
+    | _, Error error, _ -> task_skill_rejection ~tool_name ~start_time error
+    | _, _, Error error ->
+      Tool_result.error ~failure_class:Tool_result.Workflow_rejection ~tool_name ~start_time error
+    | Ok contract, Ok parsed_skills, Ok creation_request_id ->
       (match resolve_task_skills ~base_path:ctx.config.base_path parsed_skills with
        | Error error -> task_skill_rejection ~tool_name ~start_time error
        | Ok skills ->
@@ -411,7 +415,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
             | None -> ctx.agent_name
           in
           Task_goal_assignment.add_task_with_result ?contract
-            ?goal_id
+            ?creation_request_id ?goal_id
             ?predecessor_task_id
             ~skills
             ~created_by ctx.config ~title:trimmed_title
@@ -426,6 +430,8 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
                (`Assoc
                   [ "ok", `Bool true
                   ; "task_id", `String created.task_id
+                  ; "creation_request_id", Json_util.string_opt_to_json
+                      (Option.map Masc_domain.task_creation_request_id_to_string creation_request_id)
                   ; "summary", `String created.summary
                   ; "title", `String trimmed_title
                   ; "priority", `Int priority

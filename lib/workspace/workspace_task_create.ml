@@ -125,6 +125,7 @@ let add_task_with_result
       ?contract
       ?goal_id
       ?created_by
+      ?creation_request_id
       ?predecessor_task_id
       ?(skills = [])
       config
@@ -192,7 +193,12 @@ let add_task_with_result
              }
            in
            (* [write_backlog] stamps version/last_updated at the commit point. *)
-           let new_backlog = { backlog with tasks = backlog.tasks @ [ new_task ] } in
+           let task_creation_receipts = match creation_request_id with
+             | None -> backlog.task_creation_receipts
+             | Some creation_request_id ->
+               backlog.task_creation_receipts @ [{creation_request_id;created_task_id=task_id}] in
+           let new_backlog =
+             { backlog with tasks = backlog.tasks @ [ new_task ]; task_creation_receipts } in
            (match
               match goal_id with
               | None -> Ok ()

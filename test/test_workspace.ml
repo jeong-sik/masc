@@ -981,7 +981,7 @@ let test_workspace_bootstrap_preserves_backend_state () =
     let backlog =
       {
         Masc_domain.tasks = [];
-        task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = [];
+        task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = [];
         last_updated = Masc_domain.now_iso ();
         version = 7;
       }
@@ -1009,7 +1009,7 @@ let test_read_backlog_r_rejects_non_authoritative_recovery () =
     let expected =
       {
         Masc_domain.tasks = [];
-        task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = [];
+        task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = [];
         last_updated = Masc_domain.now_iso ();
         version = 7;
       }
@@ -1067,7 +1067,7 @@ let test_write_backlog_result_rejects_revision_overflow () =
     let terminal =
       {
         Masc_domain.tasks = [];
-        task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = [];
+        task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = [];
         last_updated = Masc_domain.now_iso ();
         version = max_int;
       }
@@ -1093,7 +1093,7 @@ let test_read_backlog_r_rejects_recovery_after_invalid_primary_revision () =
     let expected =
       {
         Masc_domain.tasks = [];
-        task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = [];
+        task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = [];
         last_updated = Masc_domain.now_iso ();
         version = 7;
       }

@@ -56,11 +56,14 @@ val batch_add_tasks_error_to_string : batch_add_tasks_error -> string
 (** Creates one new task identity per successful call. Titles are opaque display
     content; equal titles are valid and receive distinct IDs. Semantic duplicate
     judgment belongs to an explicit LLM workflow before submission, not this
-    storage boundary. *)
+    storage boundary. [creation_request_id] records attribution atomically with
+    the Task; it never deduplicates or makes replay safe. Its receipt survives
+    Task archival/deletion and is not a statement about current Task status. *)
 val add_task_with_result :
   ?contract:Masc_domain.task_contract ->
   ?goal_id:string ->
   ?created_by:string ->
+  ?creation_request_id:Masc_domain.task_creation_request_id ->
   ?predecessor_task_id:string ->
   ?skills:Skill_reference.t list ->
   config ->

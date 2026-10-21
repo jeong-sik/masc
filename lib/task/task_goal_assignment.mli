@@ -65,6 +65,7 @@ val set_task_goal :
     Goalless creation never reads the Goal store. *)
 val add_task_with_result :
   ?contract:Masc_domain.task_contract -> ?goal_id:string -> ?created_by:string ->
+  ?creation_request_id:Masc_domain.task_creation_request_id ->
   ?predecessor_task_id:string -> ?skills:Skill_reference.t list ->
   Workspace_utils.config -> title:string -> priority:int -> description:string ->
   (Workspace_task.add_task_success, Workspace_task.add_task_error) result

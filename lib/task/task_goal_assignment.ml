@@ -87,11 +87,11 @@ let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result 
 (* Workspace is the persistence layer and Goal depends on it. This task-domain
    boundary joins Goal authority to that existing backlog/link transaction
    without introducing a workspace-to-Goal dependency cycle. *)
-let add_task_with_result ?contract ?goal_id ?created_by ?predecessor_task_id
+let add_task_with_result ?contract ?goal_id ?created_by ?creation_request_id ?predecessor_task_id
     ?skills config ~title ~priority ~description =
   let goal_id = Workspace_task_classify.trim_opt goal_id in
   match Goal_store.with_existing_goals config ~goal_ids:(Option.to_list goal_id) (fun () ->
-    Workspace_task.add_task_with_result ?contract ?goal_id ?created_by
+    Workspace_task.add_task_with_result ?contract ?goal_id ?created_by ?creation_request_id
       ?predecessor_task_id ?skills config ~title ~priority ~description) with
   | Ok result -> result
   | Error (Goal_store.Goal_missing id) -> Error (Workspace_task.Unknown_goal id)

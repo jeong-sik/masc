@@ -466,7 +466,7 @@ let handle_update_priority ~tool_name ~start_time ctx args =
       ~start_time
       (Printf.sprintf "Task priority update failed: %s" detail)
 
-let handle_tasks ~tool_name ~start_time ctx args =
+let list_tasks ~tool_name ~start_time ctx args =
   let include_done = get_bool args "include_done" false in
   let include_cancelled = get_bool args "include_cancelled" false in
   let list ?status () =
@@ -495,6 +495,38 @@ let handle_tasks ~tool_name ~start_time ctx args =
             (String.concat ", " Masc_domain.valid_task_status_strings)))
   | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
     refuse "status must be a string"
+
+
+let handle_tasks ~tool_name ~start_time ctx args =
+  let refuse detail = Tool_result.error
+    ~failure_class:Tool_result.Workflow_rejection ~tool_name ~start_time detail in
+  match Workspace.validate_expected_workspace ~config:ctx.config args with
+  | Error Workspace.Invalid_workspace_precondition -> refuse "invalid expected_workspace precondition"
+  | Error Workspace.Workspace_precondition_failed -> refuse "workspace precondition failed"
+  | Ok args ->
+    (match Tool_task_args.parse_task_creation_request_id args with
+     | Error detail -> refuse detail
+     | Ok None -> list_tasks ~tool_name ~start_time ctx args
+     | Ok (Some request_id) ->
+       let unknown = Tool_task_args.unknown_args ~valid_keys:["creation_request_id"] args in
+       if unknown <> [] then
+         refuse "creation_request_id lookup cannot be combined with task-list filters or other arguments"
+       else match Workspace.read_task_creation_r ctx.config ~request_id with
+         | Error detail -> Tool_result.error
+             ~failure_class:Tool_result.Runtime_failure ~tool_name ~start_time detail
+         | Ok reading ->
+           let state,ids = match reading.Workspace.creation_lookup with
+             | Creation_unobserved -> "not_observed",[]
+             | Creation_recorded id -> "recorded",[id]
+             | Creation_ambiguous ids -> "ambiguous",ids in
+           Tool_result.make_ok ~tool_name ~start_time ~data:(`Assoc [
+             "ok",`Bool true;
+             "creation_request_id",`String (Masc_domain.task_creation_request_id_to_string request_id);
+             "workspace",`Assoc ["base_path",`String (Unix.realpath ctx.config.base_path);
+                                    "masc_root",`String (Unix.realpath (Workspace.masc_dir ctx.config))];
+             "backlog_version",`Int reading.creation_backlog_version;
+             "creation_receipt",`Assoc ["state",`String state;
+               "task_ids",`List (List.map (fun id -> `String id) ids)]]) ())
 
 (* Walks newest-first and stops once [limit] events satisfy [keep], so [limit]
    counts the events a caller asked for. Counting raw lines instead made the

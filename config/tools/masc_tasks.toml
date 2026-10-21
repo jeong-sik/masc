@@ -27,3 +27,24 @@ name = "include_cancelled"
 type = "boolean"
 description = "Include cancelled tasks (default: false)"
 default = false
+
+[[params]]
+name = "creation_request_id"
+type = "string"
+min_length = 1
+description = "Read durable Task creation facts for this exact client request identity. Returns a structured creation_receipt with state recorded, not_observed, or ambiguous and matching task_ids, independent of task-list status filters. Cannot be combined with status/include_done/include_cancelled. not_observed does not prove non-creation; recorded is creation evidence, not current Task status or completion. No mutation or replay."
+
+[[params]]
+name = "expected_workspace"
+type = "object"
+description = "Optional observed base_path and masc_root precondition, checked before reading the backlog."
+
+[[params.params]]
+name = "base_path"
+type = "string"
+required = true
+
+[[params.params]]
+name = "masc_root"
+type = "string"
+required = true

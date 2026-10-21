@@ -36,6 +36,25 @@ val update_priority :
 
 (** {1 Raw Data Retrieval} *)
 
+type task_creation_lookup =
+  | Creation_unobserved
+  | Creation_recorded of string
+  | Creation_ambiguous of string list
+
+type task_creation_reading = {
+  creation_backlog_version : int;
+  creation_lookup : task_creation_lookup;
+}
+
+val read_task_creation_r :
+  config -> request_id:Masc_domain.task_creation_request_id ->
+  (task_creation_reading, string) result
+(** Read original creation facts from the strict primary backlog. No recovery
+    fallback, title inference, mutation or replay. Unobserved is not proof of
+    non-creation (a request may be in flight or never correlated); recorded is
+    creation evidence, not current existence/status/completion. Duplicate
+    request IDs are ambiguous, including after Task archival or deletion. *)
+
 type task_status_location = Task_backlog | Task_archive
 type task_status_reading = {
   location : task_status_location;

@@ -76,6 +76,25 @@ let update_priority config ~task_id ~priority =
     | Ok result -> result
     | Error error -> Error (Lock_error error)
 
+type task_creation_lookup =
+  | Creation_unobserved
+  | Creation_recorded of string
+  | Creation_ambiguous of string list
+type task_creation_reading = {
+  creation_backlog_version : int;
+  creation_lookup : task_creation_lookup;
+}
+let read_task_creation_r config ~request_id =
+  Result.map (fun backlog ->
+    let ids = List.filter_map (fun receipt ->
+      if Masc_domain.equal_task_creation_request_id receipt.creation_request_id request_id
+      then Some receipt.created_task_id else None) backlog.task_creation_receipts in
+    let creation_lookup = match ids with
+      | [] -> Creation_unobserved
+      | [task_id] -> Creation_recorded task_id
+      | _ -> Creation_ambiguous ids in
+    {creation_backlog_version=backlog.version;creation_lookup}) (read_backlog_r config)
+
 type task_status_location = Task_backlog | Task_archive
 type task_status_reading = { location : task_status_location; status : Masc_domain.task_status }
 

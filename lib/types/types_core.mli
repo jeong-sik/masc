@@ -447,6 +447,23 @@ type task_deletion_receipt =
 
 val task_deletion_receipt_to_yojson : task_deletion_receipt -> Yojson.Safe.t
 
+type task_creation_request_id = private string
+[@@deriving show, eq]
+
+val task_creation_request_id_of_string :
+  string -> (task_creation_request_id, string) result
+(** Non-blank opaque client identity. Preserves the original bytes; neither a
+    title nor a deduplication key, credential or authority to repeat an effect. *)
+val task_creation_request_id_to_string : task_creation_request_id -> string
+
+type task_creation_receipt = {
+  creation_request_id : task_creation_request_id;
+  created_task_id : string;
+}
+[@@deriving show]
+(** A creation fact committed in the same backlog replacement as its Task.
+    Repeated request identities remain separate facts, never suppress creation. *)
+
 (** Task backlog snapshot. [version] is the monotonic commit revision —
     stamped +1 per commit by [Workspace_backlog.write_backlog_result] (the
     single commit point; callers never hand-bump). It is the
@@ -463,6 +480,7 @@ type backlog =
     (** Optional empty delivery set on the wire; an explicitly malformed or
         duplicate field/identity is rejected, never interpreted as empty. *)
   ; task_deletion_receipts : task_deletion_receipt list
+  ; task_creation_receipts : task_creation_receipt list
   ; last_updated : string
   ; version : int
   }

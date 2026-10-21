@@ -77,6 +77,13 @@
   입력 편집별 token 할당·active 순회·명시적 이력 탐색 비용을 실측에서 빼지 않는다. 새 cap·
   timer·중복 생성 fallback·문구/행 순서 테스트를 만들지 않고 source 진척을 Loading/paint
   개선 실측이나 재시작 복구로 바꾸지 않는다.
+- 원래 Task 생성 요청 ID는 Task와 같은 backlog primary 커밋의 생성 사실에 기록한다.
+  `masc_tasks`의 정확한 `creation_request_id` 조회는 원래 workspace precondition과 엄격한
+  primary 읽기를 사용한다. 미관측은 미생성 증명이 아니고 복수 기록은 모호함으로 남긴다.
+  기록됨은 생성 사실이며 현재 Task 상태·존재·유용한 작업 완료가 아니다. 요청 ID는 자격
+  증명이나 재전송 권한이 아니고 동명 제목을 증거로 쓰지 않는다. 삭제·archive 뒤에도
+  사실을 유지하며 원래 ID 재사용을 막는다. TUI의 자동 재조회·재시작 후 입력 복구는 별개다.
+  기록 보관·backlog 직렬화/해석·ID 예약 순회와 명시적 조회 비용도 실측 분모에 포함한다.
 - Keeper 생성은 editor가 반환한 뒤 workspace 확인과 create-only POST를 소유 fiber에서
   수행한다. 확인 중·전송 중·종료 상태는 원래 요청에 묶고, 전송 전 중단·서버 거절·
   생성 확인·결과 미확인을 구분한다. POST 진입 뒤 취소·연결 실패는 결과 미확인이며

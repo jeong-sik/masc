@@ -349,7 +349,9 @@ type row_kind =
 type origin_display =
   | Origin_row  (** The origin keeps a row of its own, above the body. *)
   | Origin_inline
-      (** The origin folds into the body's left margin, clock included. *)
+      (** The origin folds into the body's left margin, clock included.
+          A narrow entry uses the existing origin heading instead, preserving
+          the readable body budget; the selected mode stays inline. *)
   | Origin_bare
       (** Conversation: a small speaker mark, no clock or turn rail.
           Other senders keep a name above their message. *)
@@ -671,7 +673,10 @@ val chat_title_row :
 
 val entry_body_cells : origin:origin_display -> inner_width:int -> entry -> int
 (** Available body cells after the entry's rail, origin and indentation. A
-    continued origin occupies the same padded width as its opening origin. *)
+    continued origin occupies the same padded width as its opening origin.
+    Inline metadata moves to the existing origin heading when its complete
+    rail, clock and aligned label would leave fewer than twenty body cells.
+    This includes inbound indentation and does not change the selected mode. *)
 
 val chat_role_label_width : pane_cells:int -> int
 (** The badge budget for a pane this wide. It does not read the labels: body
@@ -777,7 +782,10 @@ val rows_of_entry :
   ?origin:origin_display ->
   inner_width:int -> previous:entry option -> entry -> row list
 (** The exact physical rows of one entry, including its metadata and body.
-    Search uses these rows so a match inside a long entry is reachable. *)
+    Search uses these rows so a match inside a long entry is reachable.
+    Inline metadata uses the same responsive heading decision as
+    {!entry_body_cells}; widening restores inline placement. A transition from
+    an inline predecessor opens a heading even within the same turn. *)
 
 val visible_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->

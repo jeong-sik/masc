@@ -121,7 +121,7 @@ E03–E06은 무조건 모두 외부 프로세스로 옮긴다는 확정안이 �
 | F05 | 파일·클립보드·dialog·popup·권한 상호작용 범위 점검 | 파일 일부 실측 있음 | upload/download와 artifact 보존, clipboard, dialog, popup, browser 권한 화면의 지원/운영자 개입 경계 명시 |
 | F06 | Browser 읽기·진단·출력 기능의 능력별 점검 | 일부 구현 | screenshot/PDF, console/network, cookie/storage, history·성능 관측 등을 engine별로 검증; 미지원 기능은 성공으로 응답하지 않음 |
 
-Browser의 기존 완료 범위는 [기존 감사](browser-addon-final-audit-20261021.md)에 있다.
+Browser의 기존 완료 범위는 [기존 범위의 공개 증거 영수증](https://github.com/jeong-sik/masc/pull/44653#issuecomment-6308198140)에 있다.
 Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현을 피한다.
 위 목록은 모든 브라우저가 모든 프로토콜 기능을 동일하게 제공한다는 보장이 아니다.
 
@@ -173,7 +173,7 @@ Dashboard·TUI의 원래 근거 표시를 각각 확인한다. Optional은 Off �
 ## 재개할 때 읽을 자료
 
 - 공통 관측 소스/증거: #44707, #44709 / Native Stack #44710.
-- Browser 기존 완료 및 한계: `reports/browser-addon-final-audit-20261021.md`.
+- Browser 기존 완료 및 한계: [#44653 공개 영수증](https://github.com/jeong-sik/masc/pull/44653#issuecomment-6308198140). 이 영수증은 이전에 고정한 실행 범위이며 현재 67층 전체의 실행 증거가 아니다.
 - 현재 Browser 후속: #44695, #44698, #44702 / Native Stack #44168.
 - 실제 On/Off/재연결 기록: `docs/evidence/2026-10-21-addon-reconnect/` (공통 관측 worktree/PR).
 - 공통 계약: `lib/lane_addon/`, `docs/guides/lane-addon-toml.md`, `docs/design/lane-addon-model-boundary.md`.

@@ -47,10 +47,27 @@ val arm_cancel : paste_clock -> unit
 val read_input : ?timeout:float -> input_reader -> unit -> input_event option
 (** [None] means no decoded event is ready within this read, including a
     partial paste or sequence retained for the next read. *)
-val read_terminal_probe :
-  input_reader -> palette_requested:bool -> Masc_tui_terminal_probe.decoder
-(** Stops when replies complete or decided user replay is available, retaining
-    the existing capture deadline/byte cap and the same decoder/buffer. *)
+type terminal_probe_progress = Probe_pending | Probe_installed | Probe_unchanged
+val prepare_terminal_probe :
+  sw:Eio.Switch.t option -> clock:float Eio.Time.clock_ty Eio.Resource.t option ->
+  input_reader -> palette_requested:bool -> unit
+(** Start this fresh reader's original probe under [sw], after its query was
+    written and after authoritative settings/session setup. With a switch and
+    clock, return after scheduling: only the original child reads stdin/buffer
+    until {!poll_terminal_probe} installs its result. Normal input readiness and
+    reads never compete with it. A pending read waits for the original promise
+    or its caller's existing render deadline, without consuming stdin or spinning.
+
+    Without either runtime resource, preserve synchronous collection/installation.
+    A supplied switch is checked first. Existing reply/input early handoff,
+    capture deadline/byte cap, decoder, buffer and physical I/O settlement remain.
+    Exceptions/cancellation propagate, never defaults; releasing a wait does not
+    cancel the original switch-owned producer. Call only once on a fresh reader. *)
+val poll_terminal_probe : input_reader -> terminal_probe_progress
+(** Owning loop only: inspect without waiting, install the exact returned
+    decoder and publish its current immutable observation before normal input.
+    [Probe_installed] requests a repaint once; later calls are unchanged.
+    Failure propagates. Installation is not paint or useful input proof. *)
 val install_terminal_probe : input_reader -> Masc_tui_terminal_probe.decoder -> unit
 val install_terminal_probe_publisher :
   input_reader -> publish:(Masc_tui_terminal_probe.observation -> unit) -> unit

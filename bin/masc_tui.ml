@@ -22590,13 +22590,11 @@ let main
      NO_COLOR omits OSC 10/11; the independent graphics query still runs. *)
   let palette_requested = Masc_tui_theme.colors_enabled in
   write_to_terminal (Masc_tui_terminal_probe.query ~palette:palette_requested);
-  let terminal_probe_decoder =
-    read_terminal_probe input_reader ~palette_requested
-  in
-  (* Do not finish the decoder at early input handoff or the startup deadline.
-     A terminal may split OSC 10/11 across that boundary; the same reader continues this
-     exact state before serving its replay or unread terminal-buffer tail. *)
-  install_terminal_probe input_reader terminal_probe_decoder;
+  (* The original child owns stdin/buffer while collecting. The loop may draw
+     meanwhile; it installs this exact decoder before ordinary input consumes
+     replay or the unread terminal-buffer tail. No finish at early handoff. *)
+  prepare_terminal_probe ~sw:(Eio_context.get_switch_opt ())
+    ~clock:(Eio_context.get_clock_opt ()) input_reader ~palette_requested;
   let fallback_graphics_protocol = match Sys.getenv_opt "TERM_PROGRAM" with
     | Some "iTerm.app" -> Masc_tui_graphics.ITerm2_protocol
     | Some _ | None -> Masc_tui_graphics.Unsupported_protocol in
@@ -24061,6 +24059,9 @@ and is loaded on demand through keeper_skill.
   in
   let run_loop () =
     while true do
+      (match poll_terminal_probe input_reader with
+       | Probe_installed -> Render_schedule.request render_schedule Render_schedule.Background
+       | Probe_pending | Probe_unchanged -> ());
       request_console_write_repair render_schedule;
       consume_resize_request ();
       (* A second Ctrl-C while the first still stands ends the session; a lone

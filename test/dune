@@ -4690,6 +4690,7 @@
  (modules test_tui_terminal_probe)
  (libraries
   alcotest
+  masc_core masc_eio_context eio eio_main unix masc_tui_paste
   masc_tui_terminal_palette
   masc_tui_terminal_probe
   masc_tui_startup_observation

@@ -166,3 +166,15 @@ The local Logs detail exposes this structured field through the existing decoder
 No extra successful-write event is emitted. The receipt ends before warning
 formatting/output; it is not fsync, complete capture or worker/UI/Task progress.
 Historical missing receipts remain unobserved in the comparison reader.
+
+### TUI terminal preparation
+
+The original `tui_startup_observation` capture is now reserved before the probe
+child is scheduled. Dispatched-only and scheduling-failed/interrupted captures
+remain visible when no worker starts. The shared collector's caller observation
+belongs to its adapter child; the owning UI loop later installs the exact
+returned decoder and applies capabilities. Those boundaries can have a gap.
+Collection no longer precedes loop entry, but settings application still does.
+No new event schema, sink, polling cadence or capture deadline is introduced.
+A caller wait ending is not producer cancellation, physical cleanup or first
+paint/input proof; existing missing-stage and failed comparisons still apply.

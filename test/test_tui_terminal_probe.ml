@@ -672,9 +672,88 @@ let test_byte_cap_is_fixed () =
   check int "64 KiB" (64 * 1024) Masc_tui_terminal_probe.max_bytes
 ;;
 
+(* Actual pipe bytes exercise the production system-thread collector, ownership
+   handoff and normal decoder. No terminal/PTY, frame or timing threshold. *)
+let test_owned_probe_preserves_input_after_consumer_withdrawal () =
+  let module Reader = Masc_tui_input_reader in
+  let context=Eio_context.snapshot_state () and was_ready=Eio_guard.is_ready () in
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    if not was_ready then Eio_guard.disable ()) (fun () ->
+    Eio_main.run (fun env ->
+      let original_stdin=Unix.dup Unix.stdin in
+      let source,writer=Unix.pipe ~cloexec:true () in
+      Fun.protect ~finally:(fun () ->
+        Unix.dup2 original_stdin Unix.stdin;
+        Unix.close original_stdin;Unix.close source;Unix.close writer) (fun () ->
+        Unix.dup2 source Unix.stdin;
+        Eio.Switch.run (fun sw -> Eio_context.with_turn_switch sw (fun () ->
+          let clock=Eio.Stdenv.clock env in
+          Eio_context.set_clock clock;
+          Eio_guard.enable ();
+          let reader=Reader.create_input_reader () and observations=ref [] in
+          Reader.prepare_terminal_probe ~sw:(Some sw) ~clock:(Some clock) reader ~palette_requested:true;
+          Reader.install_terminal_probe_publisher reader
+            ~publish:(fun value -> observations := value :: !observations);
+          (* Withdraw only a consumer wait. The original root-owned producer
+             must still collect this original pipe, not prepare a replacement. *)
+          let exception Wait_withdrawn in
+          let entered,enter=Eio.Promise.create () in
+          (try
+             Eio.Fiber.first
+               (fun () -> Eio.Promise.resolve enter ();ignore (Reader.read_input reader ()))
+               (fun () -> Eio.Promise.await entered;raise Wait_withdrawn);
+             fail "consumer wait unexpectedly won"
+           with Wait_withdrawn -> ());
+          let text=foreground ^ "한" ^ background ^ graphics_ok ^ "\x1b[6;34;15t"
+            ^ "\x1b[200~원래 초안\r\n다음 줄\x1b[201~" in
+          let rec write offset =
+            if offset<String.length text then
+              let sent=Unix.write_substring writer text offset (String.length text-offset) in
+              if sent=0 then fail "fixture pipe accepted no bytes" else write (offset+sent) in
+          write 0;
+          (* Completion wakes the consumer, but buffer/replay ownership stays
+             with the original preparation until the loop explicitly installs. *)
+          check bool "pending consumer never decodes producer-owned pipe bytes" true
+            (Reader.read_input reader ()=None);
+          check bool "pending readiness cannot steal replay or buffer tail" true
+            (not (Reader.input_reader_has_ready_input reader) && not (Reader.input_byte_ready reader));
+          let rec install ()=match Reader.poll_terminal_probe reader with
+            | Reader.Probe_pending -> ignore (Reader.read_input reader ());install ()
+            | Probe_installed -> ()
+            | Probe_unchanged -> fail "original probe was not installed" in
+          install ();
+          let initial=match !observations with
+            | value::_ -> value | [] -> fail "original capability observation missing" in
+          let rec next_user ()=match Reader.read_input reader () with
+            | None | Some (Reader.Graphics_reply _) -> next_user ()
+            | Some ((Reader.Key _ | Reader.Pasted _) as event) -> event
+            | Some (Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
+              fail "fixture produced a mouse event" in
+          (match next_user () with
+           | Reader.Key text -> check string "original UTF-8 input survives handoff" "한" text
+           | Pasted _ | Graphics_reply _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _ ->
+             fail "original UTF-8 key missing");
+          (match next_user () with
+           | Reader.Pasted paste -> check string "original bracketed paste survives late replies"
+               "원래 초안\n다음 줄" paste.Masc_tui_paste.text
+           | Key _ | Graphics_reply _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _ ->
+             fail "original bracketed paste missing");
+          let latest=match !observations with value::_ -> value | [] -> fail "late replies missing" in
+          check bool "late replies update original capability owner" true
+            (Option.is_some latest.palette && latest.graphics=Some Masc_tui_graphics.Supported
+             && latest.cell_pixels=Some (15,34));
+          check bool "retained initial observation stays immutable" true
+            (Option.is_none initial.palette && Option.is_none initial.cell_pixels)
+        )))))
+;;
+
 let () =
   run "tui_terminal_probe"
-    [ ( "query"
+    [ ( "actual owned input"
+      , [test_case "consumer withdrawal preserves actual probe, UTF-8, paste and late replies"
+          `Quick test_owned_probe_preserves_input_after_consumer_withdrawal] )
+    ; ( "query"
       , [ test_case "NO_COLOR skips only palette" `Quick
             test_query_can_skip_only_palette
         ; test_case "the byte cap is fixed" `Quick test_byte_cap_is_fixed

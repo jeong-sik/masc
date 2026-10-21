@@ -92,12 +92,13 @@ type t = {
   snapshot : snapshot option; loading : bool; error : diagnostic option;
   application_reading : configuration Application.reading;
   snapshot_read_error : string option;
+  detail_read_error : (string * string * string) option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
   row_cursor : int; selected : string list; scroll : int; focus : focus;
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { installer=None;package_directory=None;subscription_panel=None;evidence_prompt=None; pending_broadcasts=[]; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; current_selection=Unvisited; history_selection=Unvisited; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; application_reading=Application.empty; receipt = None;
+let initial = { installer=None;package_directory=None;subscription_panel=None;evidence_prompt=None; pending_broadcasts=[]; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; current_selection=Unvisited; history_selection=Unvisited; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; detail_read_error=None; application_reading=Application.empty; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Instances; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -856,6 +857,14 @@ let diagnostic_text = function
   | Request_failure detail -> "Request: " ^ detail
   | Input_failure detail -> "Input: " ^ detail
 
+let detail_read_note view =
+  match view.screen, view.detail_read_error with
+  | Detail (id, incarnation), Some (owner, epoch, detail)
+      when id=owner && incarnation=epoch ->
+      Some ("Results read failed: " ^ detail
+        ^ " · previous rows, if any, retained · r:retry")
+  | (Overview | Detail _), (Some _ | None) -> None
+
 let previous_read_note (view : t) =
   match view.snapshot_read_error, view.error with
   | Some detail, Some (Detail_read_failure _ | Request_failure _ | Input_failure _) ->
@@ -868,6 +877,7 @@ let diagnostic_lines view =
      | Some detail, None -> ["Read: " ^ detail]
      | Some _, Some _ -> Option.to_list (previous_read_note view)
      | None, (Some _ | None) -> [])
+  @ Option.to_list (detail_read_note view)
 
 (* What the body says while the view holds no reading. It used to say
    [no_reading_yet_text] under a status row reading "Reading · nothing held
@@ -906,9 +916,9 @@ let status_text (view : t) =
   | false, None, None, None -> no_reading_yet_text
   | false, Some _, None, None -> "Recorded observations · r:refresh"
   in
-  match previous_read_note view with
-  | None -> current
-  | Some note -> current ^ " · " ^ note
+  String.concat " · "
+    (current :: Option.to_list (previous_read_note view)
+     @ Option.to_list (detail_read_note view))
 
 (* Enumerate only values explicitly closed by the package's schema. Required
    open-ended fields have no invented default and use the advanced command. *)
@@ -1465,6 +1475,52 @@ let read_still_wanted view ~showing target = match target with
   | Read_detail (id, incarnation) -> view.screen = Detail (id, incarnation)
   | Read_installation_results _ -> showing && view.screen = Overview
 
+let reconcile_read_snapshot view ~target ~diagnostic snapshot =
+  let detail_read_error = match target, diagnostic with
+    | Read_detail (id, incarnation), Some (Detail_read_failure detail) ->
+        Some (id, incarnation, detail)
+    | Read_detail _, None | Read_installation_results _, None -> None
+    | (Read_screen | Read_detail _ | Read_installation_results _),
+      (Some (Request_failure _ | Input_failure _ | Detail_read_failure _))
+    | Read_screen, None -> view.detail_read_error in
+  let detail_read_error = Option.bind detail_read_error (fun ((id, incarnation, _) as failure) ->
+    match view.screen with
+    | Detail (owner, epoch) when id=owner && incarnation=epoch -> Some failure
+    | Overview | Detail _ -> None) in
+  let same_binding (left : instance) (right : instance) =
+    left.id=right.id && left.incarnation=right.incarnation
+    && left.run_id=right.run_id && left.addon_id=right.addon_id
+    && left.revision=right.revision && left.installation_id=right.installation_id
+    && left.source_path=right.source_path
+    && left.configuration_revision=right.configuration_revision
+    && Yojson.Safe.equal left.binding right.binding in
+  let detail_read_error = Option.bind detail_read_error (fun ((id, incarnation, _) as failure) ->
+    let find instances = List.find_opt (fun (item : instance) ->
+      item.id=id && item.incarnation=incarnation) instances in
+    match find snapshot.instances, Option.bind view.snapshot (fun previous -> find previous.instances) with
+    | Some after, Some before when same_binding before after -> Some failure
+    | Some _, None -> Some failure
+    | (Some _ | None), (Some _ | None) -> None) in
+  let snapshot = match detail_read_error, view.snapshot with
+    | Some (id, incarnation, _), Some previous
+        when view.screen=Detail (id, incarnation) ->
+        let find instances = List.find_opt (fun (item : instance) ->
+          item.id=id && item.incarnation=incarnation) instances in
+        let previous_rows = match find previous.instances, find snapshot.instances with
+          | Some before, Some after when same_binding before after ->
+              List.filter (fun (row : Row.row) ->
+                let owned = match row_owner previous.instances row with
+                  | Some owner -> owner.id=id && owner.incarnation=incarnation
+                  | None -> false in
+                owned && not (List.exists (fun (fresh : Row.row) -> fresh.id=row.id)
+                  snapshot.output.rows)) previous.output.rows
+          | (Some _ | None), (Some _ | None) -> [] in
+        {snapshot with output={snapshot.output with rows=snapshot.output.rows @ previous_rows};
+          complete=None}
+    | (Some _ | None), (Some _ | None) -> snapshot in
+  let view = reconcile_snapshot view snapshot in
+  {view with detail_read_error}
+
 let installation_results view ~installation_id =
   let live = Option.bind view.snapshot (fun snapshot ->
     List.find_opt (fun (item : instance) -> item.installation_id = Some installation_id && live_entry item)
@@ -1832,6 +1888,7 @@ let flow_lines ?(embedded=false) view =
      | Some detail, Some _ -> ["Read: " ^ detail ^ " · previous graph retained"]
      | Some detail, None -> ["Read: " ^ detail]
      | None, (Some _ | None) -> [])
+  @ Option.to_list (detail_read_note view)
   @ (match view.snapshot with
      | None -> ["Connections unavailable: no snapshot read yet"]
      | Some snapshot ->

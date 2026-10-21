@@ -92,6 +92,10 @@ type t = {
   snapshot_read_error : string option;
       (** The last failed inventory read. Input and request diagnostics do
           not erase it; a successful inventory read does. *)
+  detail_read_error : (string * string * string) option;
+      (** Failed results read: original instance, incarnation, and failure.
+          [None] means no retained detail-read failure. Input diagnostics and
+          a retry in progress do not make previous results current. *)
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
   row_cursor : int; selected : string list; scroll : int; focus : focus;
   draft : string option; naming : bool; configuration_cursor : int;
@@ -177,6 +181,16 @@ val selected_row : t -> Row.row option
 val reconcile_snapshot : t -> snapshot -> t
 (** Preserve exact selected identities. A removed row, worker incarnation or
     declaration requires explicit reselection before acting on a replacement. *)
+val reconcile_read_snapshot :
+  t -> target:read_target -> diagnostic:diagnostic option -> snapshot -> t
+(** Apply a received inventory and its detail-read outcome after the caller's
+    request/workspace admission. On a failed pinned detail read, keep only that
+    unchanged worker's previous rows alongside fresh inventory metadata and
+    coverage; completeness becomes unknown. Never retain another owner's rows
+    or execution authority. A successful empty read replaces previous results.
+    Inventory-only effect replies preserve the same failed detail and its rows,
+    while accepting fresh metadata. A removed or changed owner clears them.
+    The detail failure remains observable independently of input diagnostics. *)
 val move_lane : t -> int -> t
 type value_row = { depth : int; key : string option; bullet : bool; text : string }
 val value_rows : depth:int -> Yojson.Safe.t -> value_row list

@@ -284,9 +284,12 @@ let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain
     let owned_input = Keeper_checkpoint_store.exact_snapshot_checkpoint input_snapshot in
     check bool "durable input owner agrees with native receipt" true
       (owned_input.pending_input = (retained_pending ()).pending_input);
-    if uncertain_consume then
-      check bool "stale original wait cannot dispatch after consumed owner"
-        true (Result.is_error (dispatch (Some checkpoint) [Agent_core.Types.Text "stale retry"]));
+    if uncertain_consume then (
+      let stale = Native.prepare ~binding ~runtime_id ~config
+          ~agent_core_checkpoint:(Some checkpoint)
+          ~input:(Native.New_input {blocks=[Agent_core.Types.Text "stale retry"];metadata=[]})
+          ~agent_ref:(ref None) () in
+      check bool "stale original wait cannot dispatch after consumed owner" true (Result.is_error stale));
     let canonical = Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id
         |> require "read canonical input checkpoint" in
     if fail_before_canonical then

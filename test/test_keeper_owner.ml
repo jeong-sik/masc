@@ -5608,7 +5608,7 @@ let test_input_writer_is_bound_to_child_and_predecessor () =
   (match Owner.run_maintenance_if_idle owner (fun () ->
      refused "maintenance captured an input writer" (Owner.begin_input_checkpoint owner ~trace_id)) with
    | Ok (`Ran ()) -> ()
-   | Ok (`Busy _ | `Interrupted) | Error _ -> fail "maintenance did not execute");
+   | Ok (`Busy _) | Error _ -> fail "maintenance did not execute");
   ignore (Owner.begin_stopping owner |> owner_ok)
 ;;
 

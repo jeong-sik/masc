@@ -365,3 +365,10 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - [설계와 명시적 한계](../docs/design/workspace-curator-semantic-validation.md): production Curator metadata/owner·worker·commit recovery·wake·실제 두 UI/Off/On은 남아 있다. 원래 A01–H06의54개 작업 이름과 완료 기준은 그대로다.
 
 - 발견 수리 exact `fab00b72a44b65a611bb97bddfa56c45f78e8a4e`의 [39661318402](https://github.com/jeong-sik/masc/actions/runs/39661318402)는 completed/success다. 실제 checkout·minimal/posix·8개 suite 원문과 성공행에서 발견7·progress6·request capture5·execution capture5·host cycle44·Candle transport10·fs_compat42·worker71, 합190건을 확인했다. [발췌·원문 해시](../docs/evidence/2026-10-22-curator-discovery/corrected-selected-execution.json)를 보존했다. 이 결과는 새 semantic port 소스나 production/실제 재시작/UI 성공으로 이월하지 않는다.
+
+
+### E02 semantic 선택 실행의 실제 실패와 fixture 수리
+
+- exact `8b7b57b580c083c8f89fa5143af205c2ece669cd`의 [39662676800](https://github.com/jeong-sik/masc/actions/runs/39662676800)은 completed/failure다. [원래 실패 발췌·해시](../docs/evidence/2026-10-22-curator-semantic/initial-selected-failure.json)를 보존한다. runner18건 중 roles1·Curator4가 실패했고, 별도로 worker71건 중 selected-hooks case5가 기존 Docker create 1초 timeout으로 실패했다. worker timeout의 원인은 아직 확정하지 않았다.
+- 실제 common Exact는 Json_syntax에서 원래 대화 뒤 schema instruction User를 붙인다. fixture가 원래 모든 role/text prefix와 정확한 지시문을 검사하도록 수정했다. Curator baseline도 fieldless object가 아닌 실제 Decision/Briefing 출력 스키마로 선언했다. schema-only terminal 사례는 seed가 실제 Answered임을 먼저 확인해 거짓 양성을 막는다. production validator·provider·timeout은 바꾸지 않는다.
+- 파싱·독립 소스 대조와 수정된 compiled 실행은 구분한다. 수정 후보 결과·production Curator owner/metadata/commit/wake·실제 두 UI와 54개 전체 완료는 남아 있다. 원래 A01–H06의 작업 이름·완료 기준은 유지한다.

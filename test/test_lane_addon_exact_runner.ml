@@ -235,9 +235,17 @@ let test_http_preserves_conversation_roles () =
     | [body] ->
         let open Yojson.Safe.Util in
         let messages = Yojson.Safe.from_string body |> member "messages" |> to_list in
-        check (list string) "HTTP roles remain in their original order"
-          ["system";"user";"assistant";"user"]
+        check (list string) "HTTP preserves original roles before the common schema instruction"
+          ["system";"user";"assistant";"user";"user"]
           (List.map (fun message -> message |> member "role" |> to_string) messages);
+        check (list string) "original conversation text is unchanged"
+          ["You write quiz questions.";"Find the menu.";"There are two menus.";"Choose the account menu."]
+          (List.take 4 messages |> List.map (fun message -> message |> member "content" |> to_string));
+        let requirement=Agent_core.Exact_output.make_output_requirement ~schema
+          ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
+        check string "the only appended turn is the common schema instruction"
+          (Agent_core.Exact_output.schema_instruction_text requirement)
+          (List.nth messages 4 |> member "content" |> to_string);
         check string "the assistant's text belongs to the assistant turn" "There are two menus."
           (List.nth messages 2 |> member "content" |> to_string)
     | bodies -> failf "expected one HTTP request, got %d" (List.length bodies))
@@ -299,8 +307,9 @@ let destination : Capture.destination =
     package_id=Curator.package_id; tool=Curator.tool;
     source_revision="original-source"; configuration_revision="original-selection" }
 let curator_package = {package with id=Curator.package_id; exact_outputs=List.map
-  (fun name -> {Types.name; schema=`Assoc ["type", `String "object"];
-    request_schema=Types.Consumer_request_schema}) ["classification";"briefing"]}
+  (fun (name,schema) -> {Types.name; schema;
+    request_schema=Types.Consumer_request_schema})
+  ["classification",Workspace_memory_decision.output_schema;"briefing",Briefing.output_schema]}
 let retain_capture ~store capture =
   Owner.retain ~store ~scope:Capture.scope
     ~request_id:(Capture.Request_id.to_string (Capture.request_id capture))
@@ -432,8 +441,12 @@ let test_retained_schema_only_curator_answer_is_not_a_domain_judgment () =
     let runner=Server_lane_addon_exact.runner ~base_path in
     (* Seed a real retained schema-only result as produced without the host
        semantic port. It must not gain domain authority when read later. *)
-    ignore (get (Exact.run ~store ~declaration_id ~package:curator_package ~runner
-      ~validate_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ -> Ok (fun _ -> Ok ())) request) : Exact.attempt);
+    (match get (Exact.run ~store ~declaration_id ~package:curator_package ~runner
+      ~validate_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ -> Ok (fun _ -> Ok ())) request) with
+     | Exact.Final (Exact.Call_final (Exact.Answered {output;_})) ->
+       check bool "schema-only seed really retained the domain-invalid answer" true
+         (Exact.checked_json output=bad)
+     | Exact.Final _ | Exact.Not_final _ -> fail "seed must be answered before semantic replay rejection");
     (match get (run_curator ~base_path ~store request) with
      | Exact.Final (Exact.Call_final (Exact.Invalid_output _)) -> ()
      | _ -> fail "schema-only terminal is not a complete captured decision");

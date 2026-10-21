@@ -402,7 +402,8 @@ resource and authorized published reports; `Enter` reads one beside the
 list. Reports use the existing admin API and pin the listed revision, with body
 digest and byte-length verification. A report API refusal leaves MCP resources
 available and records the refusal; per-report storage diagnostics remain visible.
-Report Markdown uses the shared document renderer; HTML is displayed as source.
+Report Markdown uses the shared document renderer; HTML has an inert document
+reading and a separate source presentation, selected with `v`.
 After reading a report, `{`/`}` opens the older/newer revision from its validated
 history. Each move fetches that exact revision and verifies the body again; it
 does not wrap at an end. The chosen revision stays open when the catalog refreshes
@@ -430,7 +431,15 @@ a slow older read cannot replace a newer selection. `Ctrl-W` switches between
 list and detail, and `j`/`k` move whichever pane has focus. With the text focused,
 `End` keeps the end selected as the terminal reflows the document. `Home`, relative
 movement, a search landing or opening another resource releases that selection.
-`/` searches the focused pane: resource names in the list, or the loaded document in detail. `n`/`N` moves between matching rows, wrapping at the ends. Detail search follows the same width and Markdown projection as drawing; an unread, failed or withdrawn resource offers no body search. Searching does not change the original resource bytes. The selected
+`/` searches the focused pane: resource names in the list, or the loaded document
+in detail. `n`/`N` moves between matching rows, wrapping at the ends. The last
+landed result has a `>` and reverse video; other matches have `*` and underline.
+The symbols remain available without color. Ordinary scrolling retains the last
+search result independently of the viewport. A changed document, presentation,
+selection, query or pane width cannot borrow its current-result mark. Detail
+search follows the same width and document projection as drawing; an unread,
+failed or withdrawn resource offers no body search. Searching does not change
+the original resource bytes. The selected
 Keeper's Channels tab shows transport status; `b` opens a binding form with
 that Keeper already named, and `U` `U` removes all of its bindings (see
 [Keeper detail](#keeper-detail)).

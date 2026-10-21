@@ -49,9 +49,11 @@ val step_revision :
 (** Request the adjacent validated revision of the open report. Does not admit
     a body, synthesize revisions or wrap at an end. MCP reads have no history. *)
 
-val place_search_match : Masc_tui_types.state -> count:int -> index:int -> unit
+val place_search_match : Masc_tui_types.state -> cols:int -> query:string -> count:int -> index:int -> unit
 (** Retain the logical match separately from the rendered scroll, whose last
-    page may clamp before that row. Invalid landings or list focus do nothing. *)
+    page may clamp before that row. Record the current reading, query and actual
+    pane width for its display mark. Missing or failed readings, invalid
+    landings, empty queries and list focus do nothing. *)
 
 val step_text_part : Masc_tui_types.state -> delta:int -> unit
 (** Select an original text part for copying. Only focused, admitted Resources

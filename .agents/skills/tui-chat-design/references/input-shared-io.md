@@ -34,6 +34,20 @@
   Work 반영은 입력·Task handoff wake를 대신하지 않는다. 로그에서 poll/refresh를 구분한다.
   cache lock은 실패·취소 전에 해제하고 원래 예외를 재전달한다. 실제 worker 정리는 공통
   executor 소유이며, 취소 요청 로그를 worker 종료 증거로 바꾸지 않는다.
+- 공용 workspace launcher의 종료 결과와 실제 미시작 오류는 세션 소유 저장소에 먼저
+  게시한다. 공용 알림 큐의 빈칸을 기다려 UI의 미시작 호출이나 완료 worker를 붙잡지 않는다.
+  원래 workspace/read epoch·source·ticket 검증과 admitted operation의 영수증/후속 조회
+  분리는 UI가 그대로 수행한다. 결과 게시와 pending 등록 해제는 한 불변 atomic 상태에서
+  이루어지고, worker 정리는 자기 미게시 등록만 제거한다. 함수 진입 전 철회도 그 등록을
+  정리하며 취소를 성공·실패로 합성하지 않는다. 세션 종료는 미수신 결과를 해제하고 늦은
+  게시를 거절하지만 worker의 물리 종료나 이미 회수한 결과의 취소를 뜻하지 않는다.
+  기존 drain의 유한 shared FIFO prefix 뒤, 기존 요청 소유 결과들 다음에 공용 종료 결과를
+  게시 순서로 받는다. 이후 알림은 그 prefix를 늘리지 않으며 중단된 round는 원래 나머지를
+  유지한다. 공용 종료 결과가 shared notification에서 owned batch로 옮겨간 만큼 소스 간
+  상대 순서는 달라진다. 모든 producer·callback·읽기·정리가 nonblocking인 것은 아니며
+  source 저장·로그·paint나 Task 완료를 이 보관과 혼동하지 않는다. 등록/제거의 pending
+  목록 탐색·CAS 경합·결과 보관/분리/역순 변환 비용도 Before/After에 포함한다. 새 한도·
+  timer·캐시·retry loop를 두거나 큐 대기 제거를 실제 입력/Loading 지연 감소로 환산하지 않는다.
 - Keeper 생성은 editor가 반환한 뒤 workspace 확인과 create-only POST를 소유 fiber에서
   수행한다. 확인 중·전송 중·종료 상태는 원래 요청에 묶고, 전송 전 중단·서버 거절·
   생성 확인·결과 미확인을 구분한다. POST 진입 뒤 취소·연결 실패는 결과 미확인이며

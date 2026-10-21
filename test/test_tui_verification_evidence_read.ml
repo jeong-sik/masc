@@ -9,6 +9,8 @@ module Store = Workspace_verification_store
 module Operator = Workspace_verification_operator_evidence
 module Picture = Masc_tui_evidence_picture
 module Failure = Verification_evidence_read
+module Results = Masc_tui_workspace_result
+module Protocol = Masc_tui_async_protocol
 
 let bytes = Base64.decode_exn
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jk1cAAAAASUVORK5CYII="
@@ -174,6 +176,129 @@ let test_workspace_and_receipt_cannot_borrow_filed_evidence () = with_root @@ fu
   (match view state key with Ready evidence -> expect_original key.vek_request_id evidence
    | Absent | Loading | Stale _ | Failed _ -> fail "successor original evidence missing")
 
+(* The production launcher and drain policy meet actual filed evidence. The
+   full stream is a fixture resource boundary, not a new product queue limit. *)
+let take_publication results shared round =
+  Protocol.Delivery_round.take round ~can_take:(fun () -> true)
+    ~queued:(fun () -> Eio.Stream.length shared)
+    ~take_shared:(fun () -> Eio.Stream.take_nonblocking shared)
+    ~collect_owned:(fun () -> Results.take_ready results |> List.map
+      (fun (ready : Protocol.async_msg Results.ready) ->
+        {Protocol.ready_at_ns=ready.ready_at_ns;message=ready.message}))
+let original_reply state = function
+  | Protocol.Workspace_scoped (authority,reading,(Verification_evidence_loaded (request,result) as message)) ->
+      if Protocol.workspace_message_admitted state ~authority ~reading message
+      then complete_verification_evidence_read state request result else false
+  | _ -> fail "original evidence envelope lost"
+let launch_evidence ?observe_job state results request perform =
+  let envelope = Protocol.capture_workspace_message state in
+  Results.launch ~key:request.ver_job ~observation:true ?observe_job state ~results
+    ~boundary_error:(fun detail -> Failure.Launch_failure detail)
+    ~deliver:(fun result -> envelope (Protocol.Verification_evidence_loaded (request,result))) perform
+let released () =
+  let promise,resolver = Eio.Promise.create () in
+  let observe = function
+    | Masc_tui_workspace_job.Registration_released -> Eio.Promise.resolve resolver ()
+    | Cancellation_requested -> () in
+  promise,observe
+let require_publication = function Some ready -> ready | None -> fail "original result was not retained"
+
+let test_launch_failure_with_full_notifications () = with_root @@ fun base ->
+  let snapshot = Eio_context.snapshot_state () in
+  Fun.protect ~finally:(fun () -> Eio_context.restore_state snapshot) @@ fun () ->
+  Eio_context.For_testing.clear_root_switch ();
+  check bool "fixture has no dispatch switch" true (Option.is_none (Eio_context.get_switch_opt ()));
+  let state = state base and expected = identity base and config = Masc.Workspace.default_config base in
+  let key = key "verification-no-switch" in
+  let wire = packet base key.vek_request_id in
+  ignore (complete_verification_evidence_read state (start state key) (read config expected key (frame wire)));
+  let original = match view state key with Ready value -> value | _ -> fail "filed original evidence missing" in
+  let request = start state key and results = Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  let shared = Eio.Stream.create 1 in
+  let notification = {Protocol.ready_at_ns=0L;message=Protocol.Harness_label_done (Ok "unrelated-original")} in
+  Eio.Stream.add shared notification;
+  let forbidden = Filename.concat base "unstarted-resource-effect" in
+  launch_evidence state results request (fun () ->
+    Fs_compat.save_file forbidden "must not run without its switch";
+    read config expected key (frame wire));
+  check bool "no-switch failure does not execute the resource effect" false (Sys.file_exists forbidden);
+  let shared_ready,round = take_publication results shared Protocol.Delivery_round.empty in
+  check bool "existing notification remains the original stream value" true
+    (require_publication shared_ready == notification);
+  let ready,_ = take_publication results shared round in
+  check bool "original launch failure settles its own request" true
+    (original_reply state (require_publication ready).message);
+  (match view state key with
+   | F.Stale (evidence,Failure.Launch_failure _) ->
+       check bool "launch failure preserves the original filed evidence" true (evidence == original)
+   | _ -> fail "launch failure became Loading, empty success or replacement evidence");
+  expect_original key.vek_request_id original
+
+let test_worker_cleanup_read_retirement_and_session_close () = with_root @@ fun base ->
+  let state = state base and expected = identity base and config = Masc.Workspace.default_config base in
+  let key = key "verification-cleanup" in
+  let wire = packet base key.vek_request_id in
+  let results = Results.create () and shared = Eio.Stream.create 1 in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
+  let first = start state key and finished,observe = released () in
+  launch_evidence ~observe_job:observe state results first (fun () -> read config expected key (frame wire));
+  Eio.Promise.await finished;
+  let ready,_ = take_publication results shared Protocol.Delivery_round.empty in
+  check bool "worker registration release does not discard original ready evidence" true
+    (original_reply state (require_publication ready).message);
+  (match view state key with Ready evidence -> expect_original key.vek_request_id evidence
+   | _ -> fail "released reader lost its filed evidence");
+  let old = start state key and finished,observe = released () in
+  launch_evidence ~observe_job:observe state results old (fun () -> read config expected key (frame wire));
+  Eio.Promise.await finished;
+  state.workspace_read_authority <- ref ();
+  suspend_verification_evidence_read state;
+  let current = start state key in
+  let stale,_ = take_publication results shared Protocol.Delivery_round.empty in
+  check bool "old read cannot borrow the reconfirmed read epoch or reopened request" false
+    (original_reply state (require_publication stale).message);
+  check bool "reopened original source retains settlement ownership" true (F.in_flight state.verification_evidence);
+  let finished,observe = released () in
+  launch_evidence ~observe_job:observe state results current (fun () -> read config expected key (frame wire));
+  Eio.Promise.await finished;
+  let ready,_ = take_publication results shared Protocol.Delivery_round.empty in
+  check bool "late cleanup cannot remove the successor resource result" true
+    (original_reply state (require_publication ready).message);
+  let cancelled = start state key and entered,enter = Eio.Promise.create () in
+  let gate,_release = Eio.Promise.create () and finished,observe = released () in
+  launch_evidence ~observe_job:observe state results cancelled (fun () ->
+    Eio.Promise.resolve enter ();
+    Eio.Promise.await gate;
+    read config expected key (frame wire));
+  Eio.Promise.await entered;
+  Masc_tui_workspace_job.cancel_observation state ~key:cancelled.ver_job;
+  Eio.Promise.await finished;
+  suspend_verification_evidence_read state;
+  check bool "cancelled read cannot synthesize a terminal reply" true (Results.take_ready results = []);
+  let late = start state key and entered,enter = Eio.Promise.create () in
+  let gate,release = Eio.Promise.create () and finished,observe = released () in
+  launch_evidence ~observe_job:observe state results late (fun () ->
+    Eio.Promise.resolve enter ();
+    Eio.Promise.await gate;
+    read config expected key (frame wire));
+  Eio.Promise.await entered;
+  Results.close results;
+  Eio.Promise.resolve release ();
+  Eio.Promise.await finished;
+  check bool "ended session does not retain a late resource reply" true (Results.take_ready results = []);
+  let successor = Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close successor) @@ fun () ->
+  let request = start state key and finished,observe = released () in
+  launch_evidence ~observe_job:observe state successor request (fun () -> read config expected key (frame wire));
+  Eio.Promise.await finished;
+  let ready,_ = take_publication successor shared Protocol.Delivery_round.empty in
+  check bool "successor session receives only its own resource reply" true
+    (original_reply state (require_publication ready).message);
+  (match view state key with Ready evidence -> expect_original key.vek_request_id evidence
+   | _ -> fail "successor session lost original filed evidence")
+
 let () = Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Fun.protect ~finally:Fs_compat.clear_fs (fun () ->
@@ -181,4 +306,8 @@ let () = Eio_main.run @@ fun env ->
       ["resources",[test_case "original submission and reopened detail retain exact evidence" `Quick
         test_original_request_survives_new_submission_and_late_reply;
         test_case "root replacement and admission receipts cannot borrow evidence" `Quick
-        test_workspace_and_receipt_cannot_borrow_filed_evidence]])
+        test_workspace_and_receipt_cannot_borrow_filed_evidence;
+        test_case "launch failure settles filed evidence despite full notifications" `Quick
+          test_launch_failure_with_full_notifications;
+        test_case "worker cleanup, read retirement and session close preserve evidence ownership" `Quick
+          test_worker_cleanup_read_retirement_and_session_close]])

@@ -746,6 +746,11 @@ type 'a mailed = {
   message : 'a;
 }
 
+val capture_workspace_message : state -> (async_msg -> async_msg)
+(** Capture the original workspace authority/read epoch now; envelope formation
+    later never borrows a successor workspace. Operation projection/admission
+    remains with the existing UI consumer. No enqueue or effect occurs here. *)
+
 val ask_answer_completion_message :
   ask_submission -> Ask_answer_completion.observation -> async_msg
 (** The outcome [collect_owned_results] mails for one finished Ask answer,

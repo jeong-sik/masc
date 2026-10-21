@@ -100,7 +100,7 @@ A의 이번 Addon 변경 닫기는 대상 범위가 다르며, 같은 수정이�
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | D01 | Addon별 모델 route와 기능 활성화의 독립 선택 검증 확장 | Browser broker 있음 | LLM 없는 동작은 독립 실행되고, 설치/출력별 선택 모델이 실제 호출에 반영 |
-| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | 기존 grant 재사용·완전 domain decode·단계별 ID·불확실 결과 계약 source/response 검토 PASS; 적용 구현 필요 | `Consumer_request_schema`의 권한·package baseline·요청 digest를 재사용; Grade enum·keeper 집합·weight 상한은 Candle의 완전한 domain decode로 검증 |
+| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | [#44768](https://github.com/jeong-sik/masc/pull/44768)·[#44769](https://github.com/jeong-sik/masc/pull/44769)에 원래 요청 identity·grant·완전 domain decode·terminal unknown 처리 source 구현. 독립 source/response 검토 PASS; OCaml 실행 검사는 아직 미완료 | `Consumer_request_schema` 권한·package baseline·요청 digest 재사용; Grade enum·keeper 집합·weight 상한은 Candle 완전 domain decode로 검증 |
 | D03 | 모델 호출 전 요청 보존 및 원래 identity 결속 | 기반 있음 | request·stage·input·schema·route·trace를 보존한 뒤 한 번 dispatch |
 | D04 | 오류·거절·불확실 결과의 typed 처리 일관화 | 도메인별 차이 있음 | transport 불가/잘못된 출력/실행 거절/효과 불확실의 재시도 의미를 유지 |
 | D05 | credential·provider admission·동시 실행 권한을 host에 유지 | Browser 검증 있음 | worker/child에 비밀 유출 없음; 실제 provider별 queue·취소·동시성 동작 확인 |
@@ -116,7 +116,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | worker [#44749](https://github.com/jeong-sik/masc/pull/44749)의 source `3487c707`에서 Python 13건 PASS, 독립 source 재검토 2건 PASS. 공통 host wake [#44750](https://github.com/jeong-sik/masc/pull/44750)의 source `50e9bcd6` 구현·구문 검사 PASS. 작업표 [#44751](https://github.com/jeong-sik/masc/pull/44751), Native Stack #44752. 실제 host contract 검사 추가·미실행; production bootstrap·provider·정산 미연결/미검증 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
+| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | worker #44749·host wake #44750·identity #44768·production adapter #44769, Native Stack #44752. bootstrap의 직접 HTTP/CLI 실행을 export/공통 Exact host로 교체하고 원래 설치 결속·unknown 재실행 방지 구현. Python 13건 PASS; OCaml fixture 실행·실제 provider·설치·화면·정산은 미완료 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
 | E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 설계 필요 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
@@ -278,3 +278,28 @@ PR head, 스택 크기, 실행·리뷰·설정 상태는 달라질 수 있다. �
 ## [정정: 스택 재배치 시점]
 
 재배치 시점에 확인한 main `c028621762b41108fb42af4c07892583174be273`에는 #44735가 병합되어 있다. Browser Native Stack #44168의 현재 top은 `8d79e51ac947522af7f3d8d4d7fc4fa6461cb0a3`이며, CI Native Stack #44732의 하위 #44727은 `afb4b5f1b380e00cc71d094940aadb6c5427d50a`, 상위 #44731은 `51ffefc85cb3729f562d93e9eae867a1d5180beb`이다. 위의 이전 head·run·승인은 작성 당시의 역사적 범위로 보존하며, 새 Candle head에서 재실행하거나 재승인한 근거로 이월하지 않는다. 이 재배치·정정은 두 스택의 병합이나 설치·실제 동작 확인을 뜻하지 않는다.
+
+
+## 후속 개발 — 원래 판단과 production Addon 소비자
+
+- [#44768](https://github.com/jeong-sik/masc/pull/44768)은 Relation의 원래 task ID를 감사 metadata로
+  보존한다. 모델에는 기존 Goal/title 입력만 보낸다. payout identity·stage·원래 task·input·schema·rendered
+  prompt가 같은 판단은 재구성해도 같은 intent ID를 쓴다.
+- [#44769](https://github.com/jeong-sik/masc/pull/44769)는 실제 bootstrap을 유일한 `candle_appraise`
+  export와 공통 host Exact 경로로 연결한다. observer와 독립적인 원래 설치·package·tool·request digest
+  결속을 첫 RPC 전에 영속화한다. 다른 빈 설치는 옛 unknown 판단의 absence를 주장할 수 없다.
+  같은 설치의 worker 재시작은 원래 결과를 읽는다. 원장과 최종 정산 authority는 host에 남는다.
+- 불확실한 submit RPC는 원래 intent를 읽어 복구하고, terminal `outcome_unknown`은 새 판단으로 바꾸지
+  않는다. pending/capacity wait는 기존 maintenance pulse를 쓰며 별도 timer나 executor를 추가하지 않는다.
+- 독립 source 리뷰가 잡은 JSON 필드 순서 비교, 실제 worker fixture state root 누락, 설치 교체 시
+  unknown 재제출 경계를 수리했다. `135cf32280356840191107ec50c6758f4b85cef2`에 source PASS;
+  후속 restack의 source 동일성과 문서 delta는 별도 확인한다. 정식 GitHub 승인과 구분한다.
+- 이전 host 검사 run `39562812131`은 `0f92b240778a8e88a31b0d23bbdbd0f0d0b7a507`에서 warning 21로
+  컴파일 실패했다. 해당 무한 대기 fixture의 도달 불가능한 후속 표현을 #44750에서 제거했다.
+  실패 run을 테스트 실행 성공으로 이월하지 않는다.
+- 현재 로컬 검사는 변경 ML/MLI parser·`git diff --check`와 실제 Python worker 13건 PASS다.
+  새 OCaml consumer·worker 재시작·실제 payout fixture는 작성됐지만 실행 성공을 아직 확인하지 않았다.
+  실제 Runtime A→B→A 설치 결속 fixture와 consumer unknown→B 거절 fixture는 서로 다른 시나리오다.
+- 다음은 관련 OCaml 검사 실행 결과 대응, 기존 standalone Candle route 설정 표면 정리,
+  실제 provider를 통한 Off→재연결→판단 완료→중복 없는 정산, Dashboard/TUI 관측이다.
+  E01·A02·G/H와 전체 60개 작업은 완료가 아니다.

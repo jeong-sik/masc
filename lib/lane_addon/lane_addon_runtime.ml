@@ -1701,6 +1701,28 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
            if not e.stopping then (failed m e (Lifecycle.Effect_outcome_unknown detail);wake e));
       result))
 
+let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) ~scope ~request_id ~request =
+  with_tool_call_owner (fun () ->
+    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    let* m = match Hashtbl.find_opt managers root with
+      | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
+    let snapshot = Lane_addon_tool_export.isolate ~reserved (live_exports m access) in
+    let* () = if List.exists (fun (current : tool_export) ->
+        Lane_addon_tool_export.equal_owner current.owner export.owner && current.tool = export.tool) snapshot.exports
+      then Ok () else Error (Unavailable "Add-on tool installation is no longer available") in
+    let* e = match Hashtbl.find_opt m.entries export.instance_id with
+      | Some e -> Ok e | None -> Error (Unavailable "Add-on tool connection is unavailable") in
+    let installation_id = Yojson.Safe.to_string (match e.configuration with
+      | Some owner -> `List [`String "configuration";`String owner.id]
+      | None -> `List [`String "manual";`String e.instance_id]) in
+    Eio.Mutex.use_rw ~protect:true m.action_mutex (fun () ->
+      offload (fun () -> Lane_addon_tool_request_owner.retain ~store:m.store ~scope ~request_id
+        ~installation_id ~package_id:e.package.id ~tool:export.tool.name ~request)
+      |> Result.map_error (function
+        | Lane_addon_tool_request_owner.Store_unavailable detail -> Unavailable detail
+        | (Binding_conflict | Invalid_identity _) as error ->
+          Host_refusal (Lane_addon_call_context.Rejected (Lane_addon_tool_request_owner.error_to_string error)))))
+
 let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
   with_tool_call_owner (fun () ->
     Fun.protect ~finally:on_complete (fun () ->

@@ -43,7 +43,7 @@ for line in sys.stdin:
 |}
 
 let require = function Ok value -> value | Error _ -> fail "native worker operation failed"
-let contract () = require (Protocol.contract ~action_tool:None
+let contract () = require (Protocol.contract ~host_requests:false ~action_tool:None
   ~tool_invocation:Lane_addon_types.Direct ~exported_tools:["increment"]
   ~tool_hooks:[Lane_addon_types.Validate_input;Validate_output] ~max_reply_bytes:4096)
 let command root mode : Native.command =

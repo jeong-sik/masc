@@ -147,6 +147,30 @@ describe('artifact library user flow', () => {
     expect(vi.mocked(post)).toHaveBeenCalledTimes(1)
   })
 
+  it('can leave the unchecked filter when confirmation reads become unavailable', async () => {
+    const fallback = vi.mocked(get).getMockImplementation()!
+    let unavailable = false
+    vi.mocked(get).mockImplementation(async (path, options) => {
+      if (path === '/api/v1/published-artifact-checks' && unavailable) throw new Error('checks unavailable')
+      return fallback(path, options)
+    })
+    const view = render(html`<${ArtifactsSurface} />`)
+    const filter = await view.findByRole('button', { name: '미확인만' }) as HTMLButtonElement
+    await waitFor(() => expect(filter.disabled).toBe(false))
+    fireEvent.click(filter)
+    expect(filter.getAttribute('aria-pressed')).toBe('true')
+    unavailable = true
+    fireEvent.click(view.getByRole('button', { name: '새로고침' }))
+    expect(await view.findByText(/checks unavailable/)).toBeTruthy()
+    expect(filter.disabled).toBe(false)
+    fireEvent.click(filter)
+    expect(await view.findByRole('button', { name: /주간 조사 보고서/ })).toBeTruthy()
+    expect(view.getByRole('button', { name: /동작하는 차트/ })).toBeTruthy()
+    expect(filter.getAttribute('aria-pressed')).toBe('false')
+    expect(filter.disabled).toBe(true)
+    expect(vi.mocked(post)).not.toHaveBeenCalled()
+  })
+
   it('lists, searches and opens a stored report, preserving source and revision links', async () => {
     const view = render(html`<${ArtifactsSurface} />`)
     fireEvent.click(await view.findByRole('button', { name: /주간 조사 보고서/ }))

@@ -115,7 +115,7 @@ export function ArtifactsSurface() {
             </select></label>
             <button type="button" aria-pressed=${todayOnly} onClick=${() => setTodayOnly(value => !value)}>오늘 게시·수정${todayCount === null ? '' : ` ${todayCount}개`}</button>
             <span>오늘 미확인 ${uncheckedToday === null ? '조회 필요' : `${uncheckedToday}개`}</span>
-            <button type="button" aria-pressed=${uncheckedOnly} disabled=${!canFilterChecks}
+            <button type="button" aria-pressed=${uncheckedOnly} disabled=${!uncheckedOnly && !canFilterChecks}
               onClick=${() => setUncheckedOnly(value => !value)}>미확인만</button>
             ${list?.kind === 'loaded' ? html`<span class="text-xs text-[var(--color-fg-muted)]">
               목록 조회 <time dateTime=${new Date(list.receivedAt).toISOString()}>${new Date(list.receivedAt).toLocaleTimeString()}</time>

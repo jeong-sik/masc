@@ -132,8 +132,8 @@
     "bytes": 9927
   },
   "README.md": {
-    "sha256": "f1e25f08dcbabb85288de9137852cff0f719fd678fa4e4edc231a9d70508cfc6",
-    "bytes": 7015
+    "sha256": "ce3ff70c3653b47dbbeb12acd9013f7cd0fcb189e08ac4c74d80b36e82154943",
+    "bytes": 7077
   },
   "container-final-off.json": {
     "sha256": "b48626db7368451ea0a5e87b7e42bf48e04ac8d5eb5fab66d6da4e81a8b65548",
@@ -188,12 +188,16 @@
     "bytes": 13474
   },
   "receipt.json": {
-    "sha256": "4e51d10007bb8a76a6f27024413bd3bd0413b5f39415f1ce2db5d4fc16c9b292",
-    "bytes": 8026
+    "sha256": "15b6a1f3dd99e2e4c092c0e653774caf3e64d75ff54a4d8536e4c25cf7b178eb",
+    "bytes": 8060
   },
   "repair-parser.json": {
     "sha256": "72609614ec0c3852c2ae70e1796bac8615f8eddfa60ed9d5ce803d3269d8053c",
     "bytes": 368
+  },
+  "shutdown-observed.json": {
+    "sha256": "a0f4bd522e0f1c679706d4461030fd7fdd17ce0c3c454ec135abd45df4acd99c",
+    "bytes": 442
   },
   "shutdown-request.json": {
     "sha256": "bb049eb6037b885590779df9ca28445df0041d6c1f054286a41597b21aa88162",

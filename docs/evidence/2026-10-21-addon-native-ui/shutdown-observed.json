@@ -1,0 +1,18 @@
+{
+  "observed_at": "2026-10-21T12:53:25.443701+00:00",
+  "command": [
+    "ps",
+    "-p",
+    "15634,19489",
+    "-o",
+    "pid,etime,command"
+  ],
+  "exit_code": 1,
+  "stdout": "  PID ELAPSED COMMAND\n",
+  "stderr": "",
+  "meaning": "No rows beyond the heading means neither original isolated PID exists at this observation.",
+  "port_probe": {
+    "error_type": "ConnectionRefusedError",
+    "detail": "[Errno 61] Connection refused"
+  }
+}

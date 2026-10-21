@@ -35,7 +35,7 @@ was not separately recorded. GET documents are separate authoritative owner read
 | On again: same installation/revision, new worker, new input result | [save](24-on-save.txt), [applied](25-reconnected-application.txt), [new result](31-on-new-result.txt) | [new incarnation](on-reconnected.json), [new container running](container-reconnected.json) |
 | Old result remains its own result after reconnect | [old detail](33-old-result-after-reconnect.txt) | [both original rows/evidence](on-reconnected-slice.json) |
 | Retained execution is unavailable | [retained controls](14-off-history-overview.txt), [manual Observe refused](34-retained-observe-refused.txt) | No action schema; old observation sequence remains `1` |
-| Teardown through the same TUI | [final durable Off](37-final-off-save.txt), [cleanup observed](39-final-cleanup-observed.txt) | [both released](final-off.json), [both exact containers absent](container-final-off.json), [isolated process stop](shutdown-request.json) |
+| Teardown through the same TUI | [final durable Off](37-final-off-save.txt), [cleanup observed](39-final-cleanup-observed.txt) | [both released](final-off.json), [both exact containers absent](container-final-off.json), [isolated process stop request](shutdown-request.json), [later PID/port observation](shutdown-observed.json) |
 
 Off keeps the TOML. This is not Remove TOML + worker followed by reinstall.
 The source revision changes with the enabled flag; the desired package/binding

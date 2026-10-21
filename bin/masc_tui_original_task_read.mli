@@ -78,11 +78,30 @@ val prepare_history : Masc.Tui_decode_task_inspection.history -> history_snapsho
 val complete_history : t -> history_request -> (history_snapshot,error) result -> t
 val history_observation : t -> (Masc.Tui_decode_task_inspection.history,error) Masc_tui_fetched.observation
 
+type evidence_source = From_task | From_history
+type selection_observation =
+  | Selection_observed
+  | Selection_refreshing
+  | Selection_retained of error
+  | Selection_retrying of error
+type evidence_basis = private {
+  eb_source : evidence_source;
+  eb_observation : selection_observation;
+}
+val evidence_basis : t -> evidence_basis option
+(** Immutable source/observation state when the exact submission was selected.
+    A retained or pending source can name a previously observed submission for
+    read-only inspection, not authorize effects or assert current Task status.
+    Refreshing Evidence keeps this original basis even if source state changes.
+    [None] means no selection bound to this original Task, not no stored proof. *)
 type evidence_request
 type evidence_snapshot
 val start_evidence : next:bool -> t -> t * evidence_request option
-(** Explicit next/first observed submission. A refresh in Evidence keeps that
-    exact submission; ids come only from ready Task/history observations. *)
+(** Explicit next/first observed submission. Ready and retained same-original
+    Task/history values supply ids; absent/loading/failed-without-value sources
+    do not. Capture their selection-time basis, preserving source order and
+    exact-id deduplication. Refresh in Evidence keeps its exact original
+    submission and basis; no current/freshness/execution authority is inferred. *)
 val evidence_task_id : evidence_request -> string
 val evidence_verification_id : evidence_request -> string
 val evidence_request_id : evidence_request -> int64

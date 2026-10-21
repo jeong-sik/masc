@@ -62,13 +62,12 @@ let list_agent_core_history_files ~(session_dir : string) : string list =
    which way to lean is theirs to say, so the window is the runtime setting
    [keeper.checkpoint_history_retained] rather than a number a deploy fixed.
 
-   This store does not read it. Reading a runtime setting takes the Eio read
-   mutex, which raises for a caller on a raw Domain
-   ([Eio_guard.with_mutex_ro]), and the store is reachable from one -- see the
-   stale-guard "raw Domain saves through Unix context" test. A read in here
-   would raise inside the best-effort archive wrapper that swallows it, and the
-   prune would stop without ever saying so. The caller reads the setting on its
-   own fiber and passes the answer in. *)
+   This store does not read it. A setting read can raise (its default is read
+   from the environment), and in here it would raise inside the best-effort
+   archive wrapper that swallows it, so the prune would stop without ever
+   saying so. The caller reads the setting and passes the answer in; the
+   stale-guard "raw Domain saves through Unix context" test saves from a raw
+   Domain that way. *)
 
 let agent_core_history_path ~(session_dir : string) ~(snapshot_id : string) =
   Filename.concat session_dir snapshot_id

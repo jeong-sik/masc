@@ -1107,8 +1107,8 @@ let test_ready_runtime_raw_domain_save () =
   Fun.protect ~finally:(fun () -> cleanup_dir base_dir) @@ fun () ->
   let session_id = "raw-domain-ready" in
   let session_dir = Filename.concat base_dir "new-session" in
-  (* Read on this fiber: a raw Domain cannot take the settings mutex, which is
-     why the store takes the window as an argument instead of reading it. *)
+  (* Read here and passed in: the store takes the window as an argument
+     instead of reading it. *)
   let history_retained = history_retained () in
   let result =
     Domain.spawn (fun () ->

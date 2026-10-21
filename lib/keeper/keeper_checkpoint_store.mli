@@ -65,9 +65,9 @@ type save_agent_core_outcome =
 
     [history_retained] is how many past checkpoints to leave beside the
     canonical one; zero writes no history at all. The caller reads it from
-    [Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained] on
-    its own fiber -- this store is also reachable from a raw Domain, where
-    taking the settings mutex raises, so it never reads the setting itself.
+    [Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained]
+    and passes it in. The store never reads the setting itself: a failing
+    read there would stop the best-effort history prune without saying so.
 
     RFC-0225 §3.2 checkpoint watermark: returns [Ok Stale_noop] when
     [ckpt.turn_count] is older than the canonical checkpoint currently on disk.

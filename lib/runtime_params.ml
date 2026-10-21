@@ -2,8 +2,9 @@
 
     Architecture:
     - Each parameter has a [default] thunk (reads env_config at call time),
-      an optional [override] ref, and [validate]/[serialize]/[deserialize] fns.
-    - A global Eio.Mutex protects [overrides] and the registry Hashtbl.
+      an optional [override] cell, and [validate]/[serialize]/[deserialize] fns.
+    - A global Eio.Mutex serializes writers and guards the registry Hashtbl.
+      Reading one parameter takes no lock.
     - Persistence: atomic write to [.masc/runtime_params.json].
     - Audit: append to [.masc/param_audit.jsonl].
 
@@ -34,7 +35,8 @@ type 'a param_entry = {
   validate : 'a -> (unit, string) result;
   serialize : 'a -> Yojson.Safe.t;
   deserialize : Yojson.Safe.t -> ('a, string) result;
-  mutable override : 'a option;
+  (* Writers serialize on [mu]; [get] reads this without the lock. *)
+  override : 'a option Atomic.t;
 }
 
 (** Type-erased wrapper for the registry.
@@ -69,7 +71,8 @@ let registry_tbl : (string, erased) Hashtbl.t = Hashtbl.create 64
     Set via [initialize]; optional [?base_path] overrides it per call. *)
 let global_base_path = Atomic.make None
 
-(** Eio.Mutex for all mutable state.
+(** Eio.Mutex that serializes writers and guards the registry Hashtbl. A
+    parameter's override is read without it.
     Falls back to lock-free when Eio scheduler is absent (tests, init). *)
 let mu = Eio.Mutex.create ()
 
@@ -84,16 +87,20 @@ let effective_base_path ?base_path () =
 (* ── registration ────────────────────────────────────────────── *)
 
 let register ~key ~default ~validate ~serialize ~deserialize ?meta () =
-  let entry = { key; default; validate; serialize; deserialize; override = None } in
+  let entry =
+    { key; default; validate; serialize; deserialize; override = Atomic.make None }
+  in
   let erased =
     {
       key;
       current_json =
         (fun () ->
-          let v = match entry.override with Some v -> v | None -> entry.default () in
+          let v =
+            match Atomic.get entry.override with Some v -> v | None -> entry.default ()
+          in
           entry.serialize v);
       default_json = (fun () -> entry.serialize (entry.default ()));
-      has_override = (fun () -> Option.is_some entry.override);
+      has_override = (fun () -> Option.is_some (Atomic.get entry.override));
       set_from_json =
         (fun json ->
           match entry.deserialize json with
@@ -102,9 +109,9 @@ let register ~key ~default ~validate ~serialize ~deserialize ?meta () =
               match entry.validate v with
               | Error msg -> Error msg
               | Ok () ->
-                  entry.override <- Some v;
+                  Atomic.set entry.override (Some v);
                   Ok ()));
-      clear_override = (fun () -> entry.override <- None);
+      clear_override = (fun () -> Atomic.set entry.override None);
       meta;
     }
   in
@@ -208,9 +215,12 @@ let recent_audit ~base_path n =
 
 (* ── read / write ────────────────────────────────────────────── *)
 
+(* A read takes no lock. The lock serializes writers; a reader needs one
+   published value, which [Atomic.get] gives from any execution context.
+   [default] is called with no lock held, so it must be callable from any
+   Domain (see {!register}). *)
 let get (entry : 'a param) =
-  with_ro (fun () ->
-    match entry.override with Some v -> v | None -> entry.default ())
+  match Atomic.get entry.override with Some v -> v | None -> entry.default ()
 
 let set ?base_path ?(actor = "system") (entry : 'a param) value =
   let result =
@@ -219,9 +229,10 @@ let set ?base_path ?(actor = "system") (entry : 'a param) value =
       | Error msg -> Error (sprintf "validation failed for %s: %s" entry.key msg)
       | Ok () ->
           let old_value =
-            entry.serialize (match entry.override with Some v -> v | None -> entry.default ())
+            entry.serialize
+              (match Atomic.get entry.override with Some v -> v | None -> entry.default ())
           in
-          entry.override <- Some value;
+          Atomic.set entry.override (Some value);
           Ok (entry.key, old_value, entry.serialize value))
   in
   match result with
@@ -265,9 +276,10 @@ let clear ?base_path ?(actor = "system") (entry : 'a param) =
   let key, old_value, new_value =
     with_rw (fun () ->
       let old_value =
-        entry.serialize (match entry.override with Some v -> v | None -> entry.default ())
+        entry.serialize
+          (match Atomic.get entry.override with Some v -> v | None -> entry.default ())
       in
-      entry.override <- None;
+      Atomic.set entry.override None;
       (entry.key, old_value, entry.serialize (entry.default ())))
   in
   match effective_base_path ?base_path () with

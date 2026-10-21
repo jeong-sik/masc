@@ -131,7 +131,7 @@ let child_output_to_json output =
    configures during startup is seen. *)
 let prompt_param () =
   { name = "prompt"
-  ; description = (Tool_guidance_text.current ()).agent_tool_prompt_param_description
+  ; description = (Tool_guidance_text.current ()).agent_tool_prompt_param_description ()
   ; param_type = String
   ; required = true
   }

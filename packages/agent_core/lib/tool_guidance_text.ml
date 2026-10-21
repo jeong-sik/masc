@@ -2,8 +2,9 @@
 
     agent_core is config-free by layering: it cannot read
     [config/prompts/agent_core.md] itself. The host (MASC prompt init)
-    renders the managed templates and installs the text here once at
-    startup; {!current} returns the last installed value.
+    installs render callbacks here during startup; {!current} returns the last
+    installed callbacks. Tool constructors snapshot descriptions into their
+    schemas, so later overrides affect newly constructed tools.
 
     The defaults are the last-resort copy of the same sentences so that
     agent_core's own tests and standalone consumers behave identically
@@ -16,10 +17,10 @@ type t =
   ; unknown_tool_closest_registered : name:string -> string
   ; unknown_tool_extra_characters : prefix:string -> string
   ; unknown_tool_not_bare_with_closest : name:string -> string
-  ; unknown_tool_not_bare : string
+  ; unknown_tool_not_bare : unit -> string
   ; handoff_description : name:string -> description:string -> string
-  ; handoff_prompt_param_description : string
-  ; agent_tool_prompt_param_description : string
+  ; handoff_prompt_param_description : unit -> string
+  ; agent_tool_prompt_param_description : unit -> string
   }
 
 let defaults =
@@ -43,18 +44,19 @@ let defaults =
            registered tool name alone and put arguments in the input object."
           name)
   ; unknown_tool_not_bare =
-      "The name is not a bare identifier; send the registered tool name alone and put \
-       arguments in the input object."
+      (fun () ->
+        "The name is not a bare identifier; send the registered tool name alone and put \
+         arguments in the input object.")
   ; handoff_description =
       (fun ~name ~description -> Printf.sprintf "Hand off to %s: %s" name description)
-  ; handoff_prompt_param_description = "Instructions for the sub-agent"
-  ; agent_tool_prompt_param_description = "The prompt to send to the agent"
+  ; handoff_prompt_param_description = (fun () -> "Instructions for the sub-agent")
+  ; agent_tool_prompt_param_description = (fun () -> "The prompt to send to the agent")
   }
 ;;
 
 let installed : t Atomic.t = Atomic.make defaults
 
-(** Install the host-rendered text. Called once from the host's prompt init;
+(** Install the host render callbacks. Called once from the host's prompt init;
     a later call replaces the earlier value. *)
 let configure t = Atomic.set installed t
 

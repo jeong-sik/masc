@@ -30,8 +30,8 @@ let resolve_prompt_markdown_dir ~base_path =
 let bootstrapped_signature : (string * string) option ref = ref None
 
 (** agent_core is config-free by layering: it cannot read
-    config/prompts/agent_core.md itself, so the host renders those managed
-    templates and installs them into [Agent_core.Tool_guidance_text] here.
+    config/prompts/agent_core.md itself, so the host installs render callbacks
+    for those managed templates into [Agent_core.Tool_guidance_text] here.
     When the slot set is incomplete the defaults stay installed — they are
     the last-resort copy of the same sentences — and the miss is logged
     once. A per-call render failure falls back to that field's default
@@ -102,10 +102,11 @@ let install_agent_core_tool_guidance () =
               [ "name", name ]
               ~fallback:(defaults.unknown_tool_not_bare_with_closest ~name))
       ; unknown_tool_not_bare =
-          render
-            Prompt_names.agent_core_unknown_tool_not_bare
-            []
-            ~fallback:defaults.unknown_tool_not_bare
+          (fun () ->
+            render
+              Prompt_names.agent_core_unknown_tool_not_bare
+              []
+              ~fallback:(defaults.unknown_tool_not_bare ()))
       ; handoff_description =
           (fun ~name ~description ->
             render
@@ -113,15 +114,17 @@ let install_agent_core_tool_guidance () =
               [ "name", name; "description", description ]
               ~fallback:(defaults.handoff_description ~name ~description))
       ; handoff_prompt_param_description =
-          render
-            Prompt_names.agent_core_handoff_prompt_param_description
-            []
-            ~fallback:defaults.handoff_prompt_param_description
+          (fun () ->
+            render
+              Prompt_names.agent_core_handoff_prompt_param_description
+              []
+              ~fallback:(defaults.handoff_prompt_param_description ()))
       ; agent_tool_prompt_param_description =
-          render
-            Prompt_names.agent_core_agent_tool_prompt_param_description
-            []
-            ~fallback:defaults.agent_tool_prompt_param_description
+          (fun () ->
+            render
+              Prompt_names.agent_core_agent_tool_prompt_param_description
+              []
+              ~fallback:(defaults.agent_tool_prompt_param_description ()))
       })
 ;;
 
@@ -146,10 +149,9 @@ let bootstrap_markdown_dir ~workspace_path ~prompt_markdown_dir =
      | exn ->
          Log.Misc.error "prompt override restore failed: %s"
            (Printexc.to_string exn));
-    (* Install after [restore_overrides]: the three string fields of
-       [Tool_guidance_text] render eagerly here, so they must see the
-       workspace overrides the six lazily-rendered function fields already
-       track at call time. *)
+    (* All installed callbacks resolve the registry at consumption time.
+       Tool descriptions are captured when a new tool schema is constructed;
+       existing schemas are not retroactively changed by an override. *)
     install_agent_core_tool_guidance ();
     bootstrapped_signature := Some signature)
 

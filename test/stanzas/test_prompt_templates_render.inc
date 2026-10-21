@@ -11,4 +11,4 @@
  (name test_prompt_templates_render)
  (modules test_prompt_templates_render)
  (deps (source_tree %{workspace_root}/config/prompts))
- (libraries masc_test_deps))
+ (libraries masc_test_deps masc.agent_core))

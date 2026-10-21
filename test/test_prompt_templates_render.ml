@@ -124,6 +124,70 @@ let test_no_template_uses_an_undeclared_variable () =
        |> String.concat ", ")
 ;;
 
+
+(* Overrides must reach consumers after bootstrap, while an existing tool keeps
+   the immutable schema with which it was constructed. This exercises registry
+   mutation and actual tool constructors, rather than pinning prompt wording. *)
+let test_agent_core_overrides_reach_new_consumers () =
+  load ();
+  let module Core = Agent_core in
+  let keys =
+    [ "agent_core.unknown_tool.not_bare"
+    ; "agent_core.handoff.prompt_param_description"
+    ; "agent_core.agent_tool.prompt_param_description"
+    ]
+  in
+  let prompt_description (tool : Core.Tool.t) =
+    match tool.schema.parameters with
+    | [ parameter ] -> parameter.Core.Types.description
+    | _ -> fail "expected one prompt parameter"
+  in
+  let make_handoff () =
+    Core.Handoff.make_handoff_tool
+      ~delegate:(fun _ -> Error { Core.Types.message = "not executed"; recoverable = false; error_class = None })
+      { Core.Handoff.name = "delegate"
+      ; description = "test target"
+      ; config = Core.Types.default_config ~model:"test-model"
+      ; tools = []
+      }
+  in
+  let make_agent_tool () =
+    Core.Agent_tool.create_simple ~name:"child" ~description:"test child"
+      (fun _ -> Error (Core.Error.Internal "not executed"))
+  in
+  let original_unknown = (Core.Tool_guidance_text.current ()).unknown_tool_not_bare () in
+  let old_handoff = make_handoff () in
+  let old_agent_tool = make_agent_tool () in
+  let original_handoff = prompt_description old_handoff in
+  let original_agent_tool = prompt_description old_agent_tool in
+  Fun.protect
+    ~finally:(fun () -> List.iter Prompt_registry.clear_prompt_override keys)
+    (fun () ->
+      List.iteri
+        (fun index key ->
+          match Prompt_registry.set_override key (Printf.sprintf "updated-%d" index) with
+          | Ok () -> ()
+          | Error detail -> failf "%s: %s" key detail)
+        keys;
+      check string "unknown-tool guidance resolves the new override"
+        "updated-0" ((Core.Tool_guidance_text.current ()).unknown_tool_not_bare ());
+      check string "new handoff resolves the new override"
+        "updated-1" (prompt_description (make_handoff ()));
+      check string "new agent tool resolves the new override"
+        "updated-2" (prompt_description (make_agent_tool ()));
+      check string "existing handoff schema stays unchanged"
+        original_handoff (prompt_description old_handoff);
+      check string "existing agent-tool schema stays unchanged"
+        original_agent_tool (prompt_description old_agent_tool);
+      List.iter Prompt_registry.clear_prompt_override keys;
+      check string "clearing an override restores unknown-tool guidance"
+        original_unknown ((Core.Tool_guidance_text.current ()).unknown_tool_not_bare ());
+      check string "clearing an override restores new handoff schemas"
+        original_handoff (prompt_description (make_handoff ()));
+      check string "clearing an override restores new agent-tool schemas"
+        original_agent_tool (prompt_description (make_agent_tool ())))
+;;
+
 let () =
   Alcotest.run
     "prompt_templates"
@@ -136,6 +200,10 @@ let () =
             "no template uses an undeclared variable"
             `Quick
             test_no_template_uses_an_undeclared_variable
+        ; test_case
+            "AgentCore overrides reach new consumers after bootstrap"
+            `Quick
+            test_agent_core_overrides_reach_new_consumers
         ; test_case
             "every prompt file registers as a key"
             `Quick

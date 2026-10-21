@@ -190,8 +190,9 @@ let unknown_tool_failure ~requested ~available =
      pressure was handed 170 KB more of it. What it cannot derive is which name
      failed and how that name was malformed; those stay. The sentences
      themselves are host-installed text ([Tool_guidance_text]): the host
-     renders them from config/prompts/agent_core.md at prompt-init time and
-     the defaults here are the last-resort copy. *)
+     installs render callbacks for config/prompts/agent_core.md at prompt-init
+     time, and each refusal resolves the current registry value. The defaults
+     here are the last-resort copy. *)
   let text = Tool_guidance_text.current () in
   let base =
     match available with
@@ -209,7 +210,7 @@ let unknown_tool_failure ~requested ~available =
     | Some prefix ->
       (match closest_registered ~requested:prefix ~available with
        | Some name -> [ text.unknown_tool_not_bare_with_closest ~name ]
-       | None -> [ text.unknown_tool_not_bare ])
+       | None -> [ text.unknown_tool_not_bare () ])
   in
   (* [base] carries no trailing period, so the sentence join supplies
      it; with no extras the legacy message stays byte-identical. *)

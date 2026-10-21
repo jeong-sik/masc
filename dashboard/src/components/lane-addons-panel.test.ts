@@ -329,7 +329,7 @@ describe('optional Lane Add-on surface', () => {
     expect(declarations.getByText('Waiting for worker startup')).toBeTruthy()
     expect(declarations.getByText('No instance')).toBeTruthy()
     expect(screen.getByText('failed')).toBeTruthy()
-    expect(screen.getByText('Browser owner is busy')).toBeTruthy()
+    expect(declarations.getByText('Browser owner is busy')).toBeTruthy()
     expect(within(screen.getByLabelText('Configuration for instance-1')).getByText('Installed configuration: configuration-1')).toBeTruthy()
     expect(api.attachLaneAddon).not.toHaveBeenCalled()
     expect(api.observeLaneAddon).not.toHaveBeenCalled()

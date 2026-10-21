@@ -44,3 +44,11 @@ The interaction reference was the installed extension search/filter and explicit
 management flow in [VS Code's official extension guide](https://code.visualstudio.com/docs/configure/extensions/extension-marketplace).
 Application/cleanup meanings come from MASC's existing
 `lib/lane_addon/lane_addon_application.ml`, not from revision equality.
+
+The files above retain the 2026-10-20 fixture run. They were not regenerated
+after the 2026-10-21 conflict repair. That repair preserves the current strict
+application decoder and includes the existing connection lifecycle and retained
+worker details in the unified installation table. The historical hashes,
+screenshots and fixture counts do not establish browser or live-runtime behavior
+for the rebased head; current focused checks are recorded separately by the PR
+repair report.

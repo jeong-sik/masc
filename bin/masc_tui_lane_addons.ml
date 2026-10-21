@@ -1462,13 +1462,62 @@ type read_target =
   | Read_detail of string * string
   | Read_installation_results of string
 
-let request_read_target view = function
-  | Inspect | Slice _ ->
-      (match view.screen with
-       | Overview -> Read_screen
-       | Detail (id, incarnation) -> Read_detail (id, incarnation))
-  | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Action_status _
-  | Subscriptions _ -> Read_screen
+type read_scope_error =
+  | Detail_owner_unavailable
+  | Slice_run_required
+  | Slice_run_blank
+  | Slice_run_ambiguous
+  | Slice_run_mismatch of { expected : string; requested : string }
+  | Slice_target_mismatch
+
+let request_read_target ?target view request =
+  let target = match target with
+    | Some target -> target
+    | None -> match request with
+      | Inspect | Slice _ ->
+          (match view.screen with
+           | Overview -> Read_screen
+           | Detail (id, incarnation) -> Read_detail (id, incarnation))
+      | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Action_status _
+      | Subscriptions _ -> Read_screen in
+  match request, view.screen with
+  | Slice _, Overview ->
+      (match target with
+       | Read_screen -> Ok target
+       | Read_detail _ | Read_installation_results _ -> Error Slice_target_mismatch)
+  | Slice query, Detail (id, incarnation) ->
+      let* owner = match view.snapshot with
+        | None -> Error Detail_owner_unavailable
+        | Some snapshot ->
+            (match List.filter (fun (item : instance) ->
+               item.id=id && item.incarnation=incarnation) snapshot.instances with
+             | [owner] -> Ok owner
+             | [] | _ :: _ :: _ -> Error Detail_owner_unavailable) in
+      let* run = match List.filter_map (fun (key, value) ->
+          if key="run_id" then Some value else None) query with
+        | [] -> Error Slice_run_required
+        | [run] when String.trim run="" -> Error Slice_run_blank
+        | [run] -> Ok run
+        | _ :: _ :: _ -> Error Slice_run_ambiguous in
+      if run<>owner.run_id then Error (Slice_run_mismatch {expected=owner.run_id;requested=run})
+      else (match target with
+        | Read_detail (target_id, target_incarnation)
+            when target_id=id && target_incarnation=incarnation -> Ok target
+        | Read_screen | Read_detail _ | Read_installation_results _ -> Error Slice_target_mismatch)
+  | (Inspect | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Action_status _
+    | Subscriptions _), (Overview | Detail _) -> Ok target
+
+let refuse_read_scope view refusal =
+  let detail = match refusal with
+    | Detail_owner_unavailable -> "The original detail owner is unavailable."
+    | Slice_run_required -> "A detail Slice requires its original run_id."
+    | Slice_run_blank -> "A detail Slice cannot use a blank run_id."
+    | Slice_run_ambiguous -> "A detail Slice requires exactly one run_id."
+    | Slice_run_mismatch {expected;requested} ->
+        Printf.sprintf "Slice run %s differs from the detail's original run %s." requested expected
+    | Slice_target_mismatch -> "The Slice target differs from its original detail." in
+  {view with error=Some (Input_failure (detail
+    ^ " Return to the list with Esc to query another run or all runs; existing results are retained."))}
 
 let read_still_wanted view ~showing target = match target with
   | Read_screen -> true

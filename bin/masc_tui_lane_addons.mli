@@ -129,11 +129,27 @@ type read_target =
       (** Started by a jump to this installation's Results. The jump is
           carried by the read that serves it, so it ends with that read. *)
 
-val request_read_target : t -> request -> read_target
+type read_scope_error =
+  | Detail_owner_unavailable
+  | Slice_run_required
+  | Slice_run_blank
+  | Slice_run_ambiguous
+  | Slice_run_mismatch of { expected : string; requested : string }
+  | Slice_target_mismatch
+
+val request_read_target :
+  ?target:read_target -> t -> request -> (read_target, read_scope_error) result
 (** Inventory and history reads belong to the detail's original instance and
     incarnation, including when a live worker becomes retained during the read.
+    Detail Slice requests require a single explicit run matching that owner;
+    omitted, blank, duplicate or other-run selections are refused. Explicit
+    targets pass the same check. Overview keeps arbitrary/global Slice reads.
     Other requests keep their receipts independently of detail navigation.
     Explicit installation-result jumps use their own target instead. *)
+
+val refuse_read_scope : t -> read_scope_error -> t
+(** Record an input refusal without starting a request or altering the original
+    rows, detail failure, receipt, draft, loading or generation. *)
 
 val read_still_wanted : t -> showing:bool -> read_target -> bool
 (** Whether a read's answer still applies to the view. [showing] is whether

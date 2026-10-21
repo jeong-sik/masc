@@ -5199,9 +5199,9 @@ let launch_lane_addons ?target state ~mailbox request =
   else begin
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
-  let target = match target with
-    | Some target -> target
-    | None -> Addons.request_read_target view request in
+  match Addons.request_read_target ?target view request with
+  | Error refusal -> state.lane_addons <- Some (Addons.refuse_read_scope view refusal)
+  | Ok target ->
   if view.loading then
     (* The answer to the key just pressed goes at the top of the pane, so a
        reader scrolled into a draft would not see it. *)

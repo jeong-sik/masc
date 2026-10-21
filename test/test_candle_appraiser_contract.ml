@@ -10,19 +10,19 @@ let call name arguments = `Assoc ["method", `String "tools/call";
   "params", `Assoc ["name", `String name; "arguments", arguments]]
 let admitted arguments = call "lane_call" (`Assoc ["tool", `String "candle_appraise";
   "arguments", arguments; "caller", `Assoc ["kind", `String "operator"]])
-let original = `Assoc [
-  "request_id", `String "grade-original";
-  "identity", `Assoc ["goal_id", `String "goal-original";
-    "request_id", `String "payout-original"; "verification_run_id", `String "proof-original"];
-  "stage", `String "grade"; "input", `Assoc ["goal", `Assoc ["title", `String "Original goal"]];
-  "schema", `Assoc ["type", `String "object";
-    "properties", `Assoc ["grade", `Assoc ["type", `String "string"; "enum", `List [`String "A"]]];
-    "required", `List [`String "grade"]; "additionalProperties", `Bool false];
-  "prompt", `String "Judge only the captured goal."]
-let submit = `Assoc ["kind", `String "submit"; "request", original]
-let read = `Assoc ["kind", `String "read"; "request_id", `String "grade-original"]
+let intent =
+  let grade = match Candle_grade.of_string "medium" with
+    | Some grade -> grade | None -> fail "the fixture grade is invalid" in
+  Candle_appraisal_intent.make
+    ~identity:{Candle_appraisal.goal_id="goal-original";
+      request_id="payout-original";verification_run_id="proof-original"}
+    ~prompt:"Judge only the captured goal."
+    (Candle_appraisal.Grade {goal={title="Original goal";metric=None;target_value=None};
+      grades=[grade,"Connected feature"]}) |> unwrap
+let submit = Candle_appraisal_intent.submit_arguments intent
+let read = Candle_appraisal_intent.read_arguments intent
 let answer = `Assoc ["status", `String "answered";
-  "output", `Assoc ["grade", `String "A"]; "slot", `String "scripted-original"]
+  "output", `Assoc ["grade", `String "medium"]; "slot", `String "scripted-original"]
 
 let test_real_package_contract () =
   Eio_main.run @@ fun env ->
@@ -38,7 +38,7 @@ let test_real_package_contract () =
         `Assoc ["method", `String "initialize"; "params", `Assoc []];
         `Assoc ["method", `String "tools/list"];
         admitted submit; call "lane_host_requests" (`Assoc []);
-        call "lane_host_result" (`Assoc ["request_id", `String "grade-original"; "result", answer]);
+        call "lane_host_result" (`Assoc ["request_id", `String (Candle_appraisal_intent.request_id intent); "result", answer]);
         admitted read; call "lane_host_requests" (`Assoc [])] in
       let stdin_content = List.mapi (fun index operation ->
         let fields = Json.to_assoc operation in
@@ -78,6 +78,8 @@ let test_real_package_contract () =
          ignore (Lane_addon_exact.schema_for_request ~output request |> unwrap);
          ignore (Lane_addon_exact.validate_answer ~output request (member "output" answer) |> unwrap)
        | _ -> fail "the original request must remain listed until terminal delivery");
+      ignore (Candle_appraisal.decode (Candle_appraisal_intent.request intent)
+        (member "output" answer) |> unwrap);
       check bool "the terminal answer is no longer dispatched" true
         (member "requests" (member "structuredContent" (result 6)) = `List [])))
 

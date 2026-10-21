@@ -164,7 +164,7 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
     draw()
   }
   function playWave() {
-    if (player || playbackTask) { stopPlayer(); status = 'Stopped'; return }
+    if (player || playbackTask) { stopPlayer(); status = 'Playback stop requested'; return }
     if (phase !== 'saved' || !take) return
     if (process.platform === 'darwin' || selectedMidi !== undefined || sourceOutputs.length || audioOutput !== undefined) { playCaptured(); return }
     pairedState = null
@@ -213,7 +213,7 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
   function outputCommand(line) {
     const [kind, ...args] = line.trim().split(/\s+/)
     if (['pause', 'resume', 'stop', 'seek'].includes(kind)) {
-      if (kind === 'stop' && args.length === 0) { stopPlayer(); return }
+      if (kind === 'stop' && args.length === 0) { stopPlayer(); status = 'Playback stop requested'; return }
       if (!paired) throw new Error('Start native playback with an audio or MIDI output selected')
       if (kind === 'seek' && args.length === 1 && args[0] !== '') paired.seek(Number(args[0]))
       else if (kind === 'pause' && args.length === 0) paired.pause()

@@ -3,6 +3,7 @@ import { ApiRequestError } from './core'
 import { RuntimeTomlRevisionConflict, saveRuntimeTomlConfig, fetchRuntimeTomlConfig,
   patchRuntimeRouting, patchRuntimeExactSlot, patchRuntimeAssignment, type RuntimeTomlRequestOptions } from './dashboard-runtime'
 import { ensureDevToken } from './dev-token'
+import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
 
 vi.mock('./dev-token', () => ({ ensureDevToken: vi.fn(async () => undefined) }))
 
@@ -19,9 +20,45 @@ function reply(body: unknown, status = 409) {
   return fetchMock
 }
 
+function committedResponse(durability: 'durable' | 'unconfirmed' = 'durable') {
+  const value = committedRuntimeTomlConfigFixture({
+    ok: true, path: saveOptions.expectedSourcePath, file_name: 'runtime.toml', source_text: '# saved',
+    provider_protocols: [{ protocol: 'openai-compatible-http', transport: 'endpoint',
+      semantics: 'http_provider', credential_policy: 'optional', requires_non_interactive: false,
+      provider_fields: [], required_provider_fields: [] }],
+  }, { durability, skills: {
+    state: 'published', input_source_revision: revision, snapshot_revision: 'snapshot',
+    catalog_revision: 'catalog', config_state: 'configured',
+  } })
+  return { ...value, source_revision: revision, commit: { ...value.commit, source_revision: revision } }
+}
+
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 describe('raw runtime.toml revision-checked write', () => {
+  it.each(['durable', 'unconfirmed'] as const)('retains %s commit observation without repeating the POST', async durability => {
+    const committed = committedResponse(durability)
+    const fetchMock = reply(committed, 200)
+    const result = await saveRuntimeTomlConfig('# draft', revision, saveOptions)
+    expect(result.commit).toEqual(committed.commit)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    { durability: 'unconfirmed', durability_detail: null },
+    { durability: 'durable', durability_detail: 'contradictory sync warning' },
+    { durability: 'future', durability_detail: null },
+    { durability: 'unconfirmed', durability_detail: '' },
+    { warnings: [null] },
+  ])('keeps an unreadable commit indeterminate without repeating the write', async invalid => {
+    const committed = committedResponse()
+    const fetchMock = reply({ ...committed, commit: { ...committed.commit, ...invalid } }, 200)
+    const outcome = await saveRuntimeTomlConfig('# draft', revision, saveOptions).catch(error => error)
+    expect(outcome).toBeInstanceOf(Error)
+    expect(outcome).not.toMatchObject({ name: 'RuntimeTomlSaveRejected' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it.each([401, 403])('classifies structured raw-save authorization status %s as pre-handler refusal', async status => {
     const fetchMock = reply({ error: 'authorization rejected', auth_error_code: status === 401 ? 'token_expired' : 'insufficient_role' }, status)
     await expect(saveRuntimeTomlConfig('# draft', revision, saveOptions)).rejects.toMatchObject({ name: 'RuntimeTomlSaveRejected' })

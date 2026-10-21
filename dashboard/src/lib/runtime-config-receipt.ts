@@ -51,7 +51,7 @@ export function runtimeConfigCommitReceiptNotice(receipt: CommittedRuntimeTomlCo
   )
   const durabilityNotice = receipt.commit.durability === 'durable'
     ? '파일 내구성 확인됨'
-    : '파일 교체됨 · 디렉터리 동기화 미확인'
+    : `파일 교체됨 · 디렉터리 동기화 미확인 — ${receipt.commit.durability_detail}`
 
   return [
     `커밋 #${receipt.commit.order}`,

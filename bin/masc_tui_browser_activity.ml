@@ -256,7 +256,7 @@ let finish_save request result t =
   | Save write,Saved receipt ->
     let draft = match t.draft,receipt.Masc_tui_runtime_config_receipt.durability with
       | Some draft, Durable -> Some {draft with base={draft.base with source_text=write.source_text;source_revision=receipt.source_revision}}
-      | (Some _ | None), Durability_unconfirmed | None, Durable -> t.draft in
+      | (Some _ | None), Durability_unconfirmed _ | None, Durable -> t.draft in
     {t with draft;current=None;receipt=Some receipt;
       message=Some "Write receipt received. Read current settings before editing again."}
   | Save _,Conflict current ->

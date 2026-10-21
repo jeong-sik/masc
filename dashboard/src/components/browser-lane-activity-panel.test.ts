@@ -380,7 +380,7 @@ describe('Browser activity operator flow', () => {
 
   it('keeps uncertain durability separate from the freshly observed file', async () => {
     const { session, authority } = await draft()
-    api.saveRuntimeTomlConfig.mockImplementationOnce(async text => { stored = text; const value = receipt(text); value.commit.durability = 'unconfirmed'; return value })
+    api.saveRuntimeTomlConfig.mockImplementationOnce(async text => { stored = text; const value = receipt(text); value.commit = { ...value.commit, durability: 'unconfirmed', durability_detail: 'fixture directory sync uncertainty' }; return value })
     expect(await session.save(authority)).toBe(true)
     expect(session.state.value.receipt?.commit.durability).toBe('unconfirmed')
     expect(session.state.value.draft?.base.source_text).toBe(source)

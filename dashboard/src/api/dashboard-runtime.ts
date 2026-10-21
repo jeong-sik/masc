@@ -1068,12 +1068,14 @@ export interface RuntimeTomlConfig {
   commit?: RuntimeConfigCommit
 }
 
-export interface RuntimeConfigCommit {
+export type RuntimeConfigCommit = {
   source_revision: string
   order: string
-  durability: 'durable' | 'unconfirmed'
   warnings: Array<{ code: string; detail: string }>
-}
+} & (
+  | { durability: 'durable'; durability_detail: null }
+  | { durability: 'unconfirmed'; durability_detail: string }
+)
 
 function decodeKeeperRuntimeAssignmentRevision(
   raw: unknown,
@@ -1909,20 +1911,27 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
 }
 
 function decodeRuntimeConfigCommit(raw: unknown): RuntimeConfigCommit | undefined {
-  if (!hasExactKeys(raw, ['source_revision', 'order', 'durability', 'warnings'])) return undefined
+  if (!hasExactKeys(raw, ['source_revision', 'order', 'durability', 'durability_detail', 'warnings'])) return undefined
   const sourceRevision = asString(raw.source_revision)
   const order = asString(raw.order)
-  const durability = asString(raw.durability)
-  const warnings = asRecordArray(raw.warnings)
-  const decodedWarnings = warnings.map((warning) => ({
-    code: asString(warning.code) ?? '',
-    detail: asString(warning.detail) ?? '',
-  }))
-  if (!sourceRevision || !order || (durability !== 'durable' && durability !== 'unconfirmed')) {
-    return undefined
+  if (!sourceRevision || !order || !Array.isArray(raw.warnings)) return undefined
+  const warnings: RuntimeConfigCommit['warnings'] = []
+  for (const warning of raw.warnings) {
+    if (!hasExactKeys(warning, ['code', 'detail'])) return undefined
+    const code = asString(warning.code)
+    const detail = asString(warning.detail)
+    if (!code?.trim() || !detail?.trim()) return undefined
+    warnings.push({ code, detail })
   }
-  if (decodedWarnings.some(warning => !warning.code || !warning.detail)) return undefined
-  return { source_revision: sourceRevision, order, durability, warnings: decodedWarnings }
+  const identity = { source_revision: sourceRevision, order, warnings }
+  if (raw.durability === 'durable' && raw.durability_detail === null) {
+    return { ...identity, durability: 'durable', durability_detail: null }
+  }
+  if (raw.durability === 'unconfirmed' && typeof raw.durability_detail === 'string'
+    && raw.durability_detail.trim() !== '') {
+    return { ...identity, durability: 'unconfirmed', durability_detail: raw.durability_detail }
+  }
+  return undefined
 }
 
 function decodeRuntimeSkillApplication(raw: unknown): RuntimeSkillApplication | undefined {

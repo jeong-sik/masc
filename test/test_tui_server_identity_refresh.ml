@@ -4390,7 +4390,7 @@ let () =
               (Masc_tui_types.Form_unconfirmed "connection ended after possible dispatch"))
         ; Alcotest.test_case "unknown document durability requires post-outcome read and explicit basis" `Quick
             (fun () -> test_runtime_document_uncertainty_requires_new_read
-              (Masc_tui_types.Form_saved (runtime_document_receipt Durability_unconfirmed)))
+              (Masc_tui_types.Form_saved (runtime_document_receipt (Durability_unconfirmed "fixture fsync uncertainty"))))
         ; Alcotest.test_case "runtime form transforms only its opening source" `Quick
             test_runtime_form_prepares_original_revision
         ; Alcotest.test_case "runtime form unknown save retains input and rejects duplicate" `Quick

@@ -18947,8 +18947,12 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            (* What was applied and what was skipped, line by line, is the
               answer to the restore even when a part failed: the lines say
               which, and a footer line could not hold them. *)
+           state.preset_report <- Some report;
            chat_notice state ~keeper_name:target ~kind:Notice_reply
-             (String.concat "\n" (Masc_tui_preset_text.restore_lines report))
+             (String.concat "\n" (Masc_tui_preset_text.restore_lines report));
+           if not (Masc_tui_preset_text.restore_is_clean report) then
+             report_action state "error"
+               "프리셋 복원 결과에 확인할 항목이 있습니다 · 상세 보고서를 확인하세요"
        | Preset_to_chat target, Error detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure detail
        | Preset_to_pane, Ok report ->

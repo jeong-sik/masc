@@ -46,4 +46,5 @@ val restore_lines : Masc.Tui_decode.preset_restore_report -> string list
     runtime.toml outcome. *)
 
 val restore_is_clean : Masc.Tui_decode.preset_restore_report -> bool
-(** No surface skipped anything and runtime.toml did not fail. *)
+(** No surface skipped anything, and runtime.toml has no failure, durability,
+    lock-release or exact-output application warning. *)

@@ -13636,9 +13636,9 @@ let begin_runtime_form_save state ~draft ~started_ns =
        | Form_finished (_, Form_unconfirmed _) -> uncertain_basis attempt
        | Form_finished (_, Form_saved receipt) ->
            (match draft, receipt.Masc_tui_runtime_config_receipt.durability with
-            | Config_document_draft _, Durability_unconfirmed -> uncertain_basis attempt
+            | Config_document_draft _, Durability_unconfirmed _ -> uncertain_basis attempt
             | Config_document_draft _, Durable
-            | (Model_form_draft _ | Account_form_draft _), (Durable | Durability_unconfirmed) -> false)
+            | (Model_form_draft _ | Account_form_draft _), (Durable | Durability_unconfirmed _) -> false)
        | Form_finished (_, (Form_not_sent _ | Form_invalid_account _
                            | Form_refused _ | Form_conflict _)) -> false)
       (Runtime_form_saves.all state.runtime_form_saves) in
@@ -13678,7 +13678,7 @@ let apply_runtime_form_save state request status =
           | Config_document_draft _, Form_finished (_, Form_unconfirmed _) -> Some state.runtime_config_generation
           | Config_document_draft _, Form_finished (_, Form_saved receipt) ->
               (match receipt.Masc_tui_runtime_config_receipt.durability with
-               | Durability_unconfirmed -> Some state.runtime_config_generation
+               | Durability_unconfirmed _ -> Some state.runtime_config_generation
                | Durable -> attempt.rfa_revalidation_floor)
           | Config_document_draft _, (Form_checking | Form_previewing _ | Form_posting _
               | Form_finished (_, (Form_not_sent _ | Form_invalid_account _
@@ -16816,7 +16816,8 @@ let apply_runtime_document_save state request status =
       let module Edit = Masc_tui_runtime_config_edit in
       let uncertain = match outcome with
         | Form_unconfirmed _ -> true
-        | Form_saved receipt -> receipt.Masc_tui_runtime_config_receipt.durability = Durability_unconfirmed
+        | Form_saved receipt -> (match receipt.Masc_tui_runtime_config_receipt.durability with
+           | Durable -> false | Durability_unconfirmed _ -> true)
         | Form_not_sent _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ -> false in
       (match List.find_opt (fun edit -> edit.rce_workspace=workspace
           && (Edit.same_draft edit.rce_session submitted
@@ -16826,7 +16827,7 @@ let apply_runtime_document_save state request status =
            (match outcome with
             | Form_saved {durability=Masc_tui_runtime_config_receipt.Durable;_} ->
                 discard_runtime_config_edit state ~workspace ~path:submitted.base.path
-            | Form_saved {durability=Masc_tui_runtime_config_receipt.Durability_unconfirmed;_} ->
+            | Form_saved {durability=Masc_tui_runtime_config_receipt.Durability_unconfirmed _;_} ->
                 put_runtime_config_edit ~preserve_view:true state ~workspace
                   (Edit.unconfirmed ~after_read:state.runtime_config_generation
                      "File commit acknowledged; durability unconfirmed. Read current with r, then explicitly choose its revision with u before retrying."

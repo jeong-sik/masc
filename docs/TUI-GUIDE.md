@@ -1346,7 +1346,17 @@ runtime.toml commit. `/preset restore _autosave` undoes the latest restore's
 prompt overrides and runtime assignments; a keeper that had no instructions,
 or a lane that restore added, stays as it left them. Every skipped key
 is listed with its reason, and a restore that skipped anything or whose
-commit failed is shown as an error. `/preset delete <name>` removes that
+commit failed is shown as an error. A visible runtime commit retains its
+source revision and commit order, directory-sync uncertainty, lock-release
+warnings, and the separate exact-lane registry application. Unpublished lanes
+require a restart; a retained stale registry instead needs its configuration
+repaired before a restart can publish it. A durability warning means the change
+is already applied, not that the restore should be repeated. Inspect current
+settings and `_autosave` first: repeating restore replaces the undo snapshot.
+An unreadable response also does not prove that nothing changed. The current
+server and TUI must both support these required commit fields; older incomplete
+commit reports are refused rather than assumed clean.
+`/preset delete <name>` removes that
 preset, including one listed with `!` because it does not load; typing the
 name is the confirmation. A directory whose name is not a valid preset name
 is refused.

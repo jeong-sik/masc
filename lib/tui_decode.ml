@@ -5064,9 +5064,28 @@ type preset_part =
   ; pp_skipped : (string * string) list
   }
 
+type preset_registry_targets =
+  | Preset_registry_runtime_bindings
+  | Preset_registry_replacement_catalog
+
+type preset_registry_application =
+  | Preset_registry_applied of preset_registry_targets
+  | Preset_registry_unpublished
+  | Preset_registry_kept of string
+
+type preset_runtime_commit = {
+  prc_source_revision : string;
+  prc_order : string;
+  prc_durability : Runtime.config_durability;
+  prc_lock_warnings : Runtime.config_lock_warning list;
+  prc_registry : preset_registry_application;
+}
+(** Observed visible commit, with its independent durability and registry
+    application. A warning does not mean the restore had no effects. *)
+
 type preset_runtime_status =
   | Preset_runtime_unchanged
-  | Preset_runtime_committed
+  | Preset_runtime_committed of preset_runtime_commit
   | Preset_runtime_failed of string
 
 type preset_restore_report =
@@ -5274,18 +5293,121 @@ let decode_preset_part json key =
     Ok { pp_effect; pp_applied; pp_skipped }
 ;;
 
+let preset_runtime_commit_needs_attention commit =
+  (match commit.prc_durability with
+   | Runtime.Durable -> false
+   | Runtime.Durability_unconfirmed _ -> true)
+  || commit.prc_lock_warnings <> []
+  || match commit.prc_registry with
+     | Preset_registry_applied _ -> false
+     | Preset_registry_unpublished | Preset_registry_kept _ -> true
+;;
+
+let preset_commit_detail json key =
+  let* detail = required_string_field json key in
+  if String.trim detail = "" then Error ("runtime commit " ^ key ^ " is empty")
+  else Ok detail
+;;
+
+let preset_receipt_object label expected = function
+  | `Assoc fields ->
+    if List.sort String.compare (List.map fst fields) = List.sort String.compare expected
+    then Ok ()
+    else Error (label ^ " has missing, duplicate or unexpected fields")
+  | _ -> Error (label ^ " must be an object")
+;;
+
+let decode_preset_registry json =
+  let* status = required_string_field json "status" in
+  let* requires_restart = required_bool_field json "requires_restart" in
+  match status, requires_restart with
+  | "applied", false ->
+    let* () = preset_receipt_object "applied preset registry"
+      ["status"; "requires_restart"; "targets"] json in
+    let* targets = required_string_field json "targets" in
+    (match targets with
+     | "runtime_bindings" -> Ok (Preset_registry_applied Preset_registry_runtime_bindings)
+     | "replacement_catalog" -> Ok (Preset_registry_applied Preset_registry_replacement_catalog)
+     | other -> Error (Printf.sprintf "unknown preset registry targets %S" other))
+  | "unpublished", true ->
+    let* () = preset_receipt_object "unpublished preset registry"
+      ["status"; "requires_restart"] json in
+    Ok Preset_registry_unpublished
+  | "kept", false ->
+    let* () = preset_receipt_object "kept preset registry"
+      ["status"; "requires_restart"; "next_boot_publishes"; "reason"] json in
+    let* next_boot_publishes = required_bool_field json "next_boot_publishes" in
+    let* reason = preset_commit_detail json "reason" in
+    if next_boot_publishes then Error "kept preset registry cannot publish at next boot"
+    else Ok (Preset_registry_kept reason)
+  | status, _ -> Error (Printf.sprintf "invalid preset registry application %S" status)
+;;
+
+let decode_preset_commit runtime =
+  let commit = member "commit" runtime in
+  let* () = preset_receipt_object "preset runtime commit"
+    ["source_revision"; "order"; "durability"; "durability_detail"; "warnings"] commit in
+  let* prc_source_revision = required_string_field commit "source_revision" in
+  let* () =
+    if String_util.is_lowercase_sha256_hex prc_source_revision then Ok ()
+    else Error "preset runtime source_revision must be lowercase SHA-256 hex"
+  in
+  let* prc_order = required_string_field commit "order" in
+  let* () =
+    match Int64.of_string_opt prc_order with
+    | Some order when Int64.compare order Int64.zero > 0 -> Ok ()
+    | Some _ | None -> Error "preset runtime commit order must be positive int64"
+  in
+  let* durability = required_string_field commit "durability" in
+  let* prc_durability =
+    match durability with
+    | "durable" ->
+      (match member "durability_detail" commit with
+       | `Null -> Ok Runtime.Durable
+       | _ -> Error "durable preset commit must have null durability_detail")
+    | "unconfirmed" ->
+      let* detail = preset_commit_detail commit "durability_detail" in
+      Ok (Runtime.Durability_unconfirmed { detail })
+    | other -> Error (Printf.sprintf "unknown preset durability %S" other)
+  in
+  let* warnings = required_list_field commit "warnings" in
+  let* prc_lock_warnings =
+    decode_list "runtime commit warnings"
+      (fun warning ->
+        let* () = preset_receipt_object "preset runtime warning" ["code"; "detail"] warning in
+        let* code = required_string_field warning "code" in
+        match code with
+        | "runtime_config_lock_release_unconfirmed" ->
+          let* detail = preset_commit_detail warning "detail" in
+          Ok (Runtime.Config_lock_release_unconfirmed detail)
+        | other -> Error (Printf.sprintf "unknown runtime commit warning %S" other))
+      warnings
+  in
+  let* prc_registry = decode_preset_registry (member "exact_output_registry" runtime) in
+  Ok { prc_source_revision; prc_order; prc_durability; prc_lock_warnings; prc_registry }
+;;
+
 let decode_preset_runtime json =
   match member "runtime" json with
   | `Null -> Error "restore report has no runtime part"
   | runtime ->
+    let* effect_name = required_string_field runtime "effect" in
+    let* () = if String.equal effect_name "runtime_commit" then Ok ()
+      else Error "invalid preset runtime effect" in
     let* status = required_string_field runtime "status" in
     (match status with
-     | "unchanged" -> Ok Preset_runtime_unchanged
-     | "committed" -> Ok Preset_runtime_committed
+     | "unchanged" ->
+       let* () = preset_receipt_object "unchanged preset runtime" ["effect"; "status"] runtime in
+       Ok Preset_runtime_unchanged
+     | "committed" ->
+       let* () = preset_receipt_object "committed preset runtime"
+         ["effect"; "status"; "commit"; "exact_output_registry"] runtime in
+       let* commit = decode_preset_commit runtime in
+       Ok (Preset_runtime_committed commit)
      | "failed" ->
-       (match member "error" runtime with
-        | `String message -> Ok (Preset_runtime_failed message)
-        | _ -> Ok (Preset_runtime_failed "runtime.toml commit failed without a reason"))
+       let* () = preset_receipt_object "failed preset runtime" ["effect"; "status"; "error"] runtime in
+       let* message = preset_commit_detail runtime "error" in
+       Ok (Preset_runtime_failed message)
      | other -> Error (Printf.sprintf "unknown runtime restore status %S" other))
 ;;
 

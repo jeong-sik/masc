@@ -55,7 +55,9 @@ type part_result =
 
 type runtime_result =
   | Runtime_unchanged  (** the parsed routing already matched; the file was not touched *)
-  | Runtime_committed  (** runtime.toml committed through [Runtime.save_config_text] *)
+  | Runtime_committed of Runtime.config_commit_receipt
+      (** The replacement is visible. Retains durability, lock warnings and
+          exact-output registry application; it is not a request to retry. *)
   | Runtime_failed of string
 
 type default_comparison =
@@ -110,6 +112,15 @@ val restore : base_path:string -> string -> (restore_report, string) result
     longer renders under the prompt's current contract is skipped with that
     reason, as the boot-time restore would refuse it. One written against an
     older default body is applied. *)
+
+module For_testing : sig
+  val restore_with_config_commit :
+    commit:(runtime_config_path:string -> string ->
+      (Runtime.config_commit_receipt, string) result) ->
+    base_path:string -> string -> (restore_report, string) result
+  (** The production restore path with an injected runtime writer. Tests use
+      the real writer with an injected parent-directory sync failure. *)
+end
 
 type delete_error =
   | Delete_invalid_name of string

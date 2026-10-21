@@ -94,7 +94,7 @@ let uncertain_drafts_require_explicit_reapply () =
     shows "File changed" reread; rejected (A.start_save ~generation:4 reread);
     rejected (A.start_save ~generation:5 (A.reapply reread)))
     [A.finish_save request (A.Unconfirmed "connection lost") pending;
-     A.finish_save request (A.Saved (receipt ~durability:R.Durability_unconfirmed ())) pending;
+     A.finish_save request (A.Saved (receipt ~durability:(R.Durability_unconfirmed "fixture fsync uncertainty") ())) pending;
      A.suspend pending]
 
 let clean_draft_does_not_adopt_different_path () =
@@ -146,7 +146,7 @@ let ambiguous_write_and_refusal () =
   let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
   let unanswered=A.finish_save request (A.Unconfirmed "connection lost") pending in
   shows "Activity draft: Off" unanswered; rejected (A.start_save ~generation:3 unanswered);
-  let uncertain=A.finish_save request (A.Saved (receipt ~durability:R.Durability_unconfirmed ())) pending in
+  let uncertain=A.finish_save request (A.Saved (receipt ~durability:(R.Durability_unconfirmed "fixture fsync uncertainty") ())) pending in
   shows "Activity draft: Off" uncertain; rejected (A.start_save ~generation:3 uncertain);
   let reread=read ~generation:4 (doc ~revision:"saved" off) uncertain in
   shows "File changed" reread;

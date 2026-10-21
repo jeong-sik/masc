@@ -68,6 +68,7 @@ let receipt
           [ "source_revision", `String "source-7"
           ; "order", `String "7"
           ; "durability", `String "durable"
+          ; "durability_detail", `Null
           ; "warnings", warnings
           ] )
     ; ( "application"
@@ -136,6 +137,24 @@ let test_rejects_incomplete_application_receipts () =
 (* The server always writes [commit.warnings] and, on a commit, the
    exact-output registry row; a decoder that refuses either refuses every
    real receipt. *)
+let test_durability_detail_is_required_and_retained () =
+  let replace key value = function
+    | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+    | _ -> fail "expected object" in
+  let wire = receipt () in
+  let commit = Yojson.Safe.Util.member "commit" wire in
+  let uncertain = replace "commit" (replace "durability" (`String "unconfirmed")
+    (replace "durability_detail" (`String "original fsync failure") commit)) wire in
+  check bool "decoder retains exact uncertainty detail" true
+    ((decoded uncertain).durability = Receipt.Durability_unconfirmed "original fsync failure");
+  List.iter (fun invalid -> rejected (replace "commit" invalid wire))
+    [ replace "durability" (`String "unconfirmed") commit
+    ; replace "durability_detail" (`String "contradictory") commit
+    ; (match commit with `Assoc fields -> `Assoc (List.remove_assoc "durability_detail" fields)
+       | _ -> fail "expected commit object")
+    ]
+;;
+
 let test_exact_output_registry_and_lock_warnings () =
   let lock_warning =
     `Assoc
@@ -281,11 +300,11 @@ let test_lane_notice_retains_application_and_durability () =
     "File saved · exact lanes unchanged: catalog read failed; correct configuration before restart · routing applied · Keeper settings await restart: turn.temperature"
     (Receipt.lane_summary kept);
   let unpublished = decode (receipt ~exact:(exact_output_registry ~status:"unpublished" ~requires_restart:true ()) ()) in
-  let unpublished = {unpublished with Receipt.durability = Receipt.Durability_unconfirmed} in
+  let unpublished = {unpublished with Receipt.durability = Receipt.Durability_unconfirmed "fsync fixture"} in
   check bool "unpublished warns" true (Receipt.lane_needs_attention unpublished);
-  check string "file uncertainty and missing registry are distinct"
-    "File written; durability unconfirmed · exact lanes unavailable; restart required · routing applied · Keeper settings await restart: turn.temperature"
-    (Receipt.lane_summary unpublished)
+  check bool "uncertainty keeps the original detail independently of the missing registry" true
+    (unpublished.durability = Receipt.Durability_unconfirmed "fsync fixture"
+     && unpublished.application.exact_output_registry = Receipt.Exact_output_registry_unpublished)
 ;;
 
 let test_lane_notice_reports_environment_preemption () =
@@ -340,7 +359,8 @@ let () =
   run
     "tui runtime config receipt"
     [ ( "decode"
-      , [ test_case "lane notices report every Skill application outcome" `Quick test_lane_notice_reports_skill_application;
+      , [ test_case "durability detail is required and retained" `Quick test_durability_detail_is_required_and_retained
+        ; test_case "lane notices report every Skill application outcome" `Quick test_lane_notice_reports_skill_application;
           test_case "lane preemption is visible without restart" `Quick test_lane_notice_reports_environment_preemption;
           test_case "lane notices preserve application and durability" `Quick
             test_lane_notice_retains_application_and_durability

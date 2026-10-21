@@ -24,32 +24,27 @@ let report ~skipped ~runtime : D.preset_restore_report =
   ; prr_default_prompts = Masc.Prompt_preset.Defaults_unknown
   }
 
-let test_restore_lines_show_skips_and_the_runtime_outcome () =
-  let clean = report ~skipped:[] ~runtime:D.Preset_runtime_committed in
-  check (list string) "clean restore"
-    [ "restored preset morning (the state before it is _autosave)"
-    ; "prompt overrides (immediate): applied 1, skipped 0"
-    ; "keeper instructions (keeper_restart): applied 2, skipped 0"
-    ; "runtime: committed — runtime.toml rewritten, assignments and exact lanes live"
-    ; "기본 프롬프트 · 저장된 비교 기준 없음"
-    ]
-    (Text.restore_lines clean);
-  check bool "clean is clean" true (Text.restore_is_clean clean);
-  let dirty =
-    report
-      ~skipped:[ "stale", "contract revision mismatch" ]
-      ~runtime:(D.Preset_runtime_failed "invalid runtime TOML")
+let test_restore_classifies_commit_warnings () =
+  let commit : D.preset_runtime_commit =
+    { prc_source_revision = String.make 64 'a'; prc_order = "1"
+    ; prc_durability = Masc.Runtime.Durable; prc_lock_warnings = []
+    ; prc_registry = D.Preset_registry_applied D.Preset_registry_runtime_bindings }
   in
-  check (list string) "a skip and a failed commit are each their own line"
-    [ "restored preset morning (the state before it is _autosave)"
-    ; "prompt overrides (immediate): applied 1, skipped 1"
-    ; "  - stale: contract revision mismatch"
-    ; "keeper instructions (keeper_restart): applied 2, skipped 0"
-    ; "runtime: failed — invalid runtime TOML"
-    ; "기본 프롬프트 · 저장된 비교 기준 없음"
-    ]
-    (Text.restore_lines dirty);
-  check bool "dirty is not clean" false (Text.restore_is_clean dirty);
+  let committed commit = report ~skipped:[] ~runtime:(D.Preset_runtime_committed commit) in
+  check bool "fully applied durable restore is clean" true
+    (Text.restore_is_clean (committed commit));
+  List.iter (fun warning ->
+    check bool "committed warning requires attention" false (Text.restore_is_clean (committed warning)))
+    [ { commit with prc_durability = Masc.Runtime.Durability_unconfirmed {detail="fsync EIO"} }
+    ; { commit with prc_lock_warnings = [Masc.Runtime.Config_lock_release_unconfirmed "unlock EIO"] }
+    ; { commit with prc_registry = D.Preset_registry_unpublished }
+    ; { commit with prc_registry = D.Preset_registry_kept "invalid target" }
+    ];
+  check bool "a skipped surface requires attention" false
+    (Text.restore_is_clean (report ~skipped:["keeper", "invalid override"]
+      ~runtime:(D.Preset_runtime_committed commit)));
+  check bool "failed runtime is not clean" false
+    (Text.restore_is_clean (report ~skipped:[] ~runtime:(D.Preset_runtime_failed "invalid TOML")));
   check bool "unchanged runtime is clean" true
     (Text.restore_is_clean (report ~skipped:[] ~runtime:D.Preset_runtime_unchanged))
 
@@ -97,7 +92,7 @@ let test_default_drift_is_visible_without_failing_restore () =
   let payload defaults = `Assoc ["ok", `Bool true; "report", `Assoc
     ["restored", `String "morning"; "autosave", `String "_autosave";
      "prompt_overrides", part; "instructions", part;
-     "runtime", `Assoc ["status", `String "unchanged"];
+     "runtime", `Assoc ["effect", `String "runtime_commit"; "status", `String "unchanged"];
      "default_prompts", defaults]] in
   (match D.decode_preset_restore (payload comparison) with
    | Error message -> fail message
@@ -124,8 +119,8 @@ let () =
     [ ( "preset text"
       , [ test_case "default drift is visible and does not fail restoration" `Quick
             test_default_drift_is_visible_without_failing_restore
-        ; test_case "restore lines show skips and the runtime outcome" `Quick
-            test_restore_lines_show_skips_and_the_runtime_outcome
+        ; test_case "restore classifies commit warnings" `Quick
+            test_restore_classifies_commit_warnings
         ; test_case "saved comparison and current effective source decode independently" `Quick
             test_decode_saved_settings_and_effective_prompt_sources
         ] )

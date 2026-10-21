@@ -1,6 +1,6 @@
 type durability =
   | Durable
-  | Durability_unconfirmed
+  | Durability_unconfirmed of string
 
 type config_state =
   | Configured
@@ -372,17 +372,19 @@ let decode = function
       (match commit with
        | `Assoc commit_fields ->
          let* () =
-           exact_fields [ "source_revision"; "order"; "durability"; "warnings" ] commit_fields
+           exact_fields [ "source_revision"; "order"; "durability"; "durability_detail"; "warnings" ] commit_fields
          in
          let* lock_warnings = field "warnings" commit_fields in
          let* lock_warnings = decode_lock_warnings lock_warnings in
          let* source_revision = string_field "source_revision" commit_fields in
          let* order = string_field "order" commit_fields in
+         let* durability_detail = field "durability_detail" commit_fields in
          let* durability =
-           match string_field "durability" commit_fields with
-           | Ok "durable" -> Ok Durable
-           | Ok "unconfirmed" -> Ok Durability_unconfirmed
-           | Ok _ | Error _ -> Error "runtime config durability is invalid"
+           match string_field "durability" commit_fields, durability_detail with
+           | Ok "durable", `Null -> Ok Durable
+           | Ok "unconfirmed", `String detail when String.trim detail <> "" ->
+             Ok (Durability_unconfirmed detail)
+           | (Ok _ | Error _), _ -> Error "runtime config durability or detail is invalid"
          in
          let* application = decode_application ~source_revision ~order application in
          Ok { source_revision; order; durability; lock_warnings; application }
@@ -400,7 +402,7 @@ let summary receipt =
   let durability =
     match receipt.durability with
     | Durable -> "durable"
-    | Durability_unconfirmed -> "durability-unconfirmed"
+    | Durability_unconfirmed detail -> "durability-unconfirmed: " ^ detail
   in
   let routing =
     match receipt.application.routing_status with
@@ -483,7 +485,7 @@ let skill_lane_warning = function
 ;;
 
 let lane_needs_attention receipt =
-  receipt.durability = Durability_unconfirmed
+  (match receipt.durability with Durable -> false | Durability_unconfirmed _ -> true)
   || receipt.lock_warnings <> []
   || receipt.application.routing_requires_restart
   || receipt.application.keeper_requires_restart
@@ -497,7 +499,7 @@ let lane_needs_attention receipt =
 let lane_summary receipt =
   let file = match receipt.durability with
     | Durable -> "File saved"
-    | Durability_unconfirmed -> "File written; durability unconfirmed" in
+    | Durability_unconfirmed detail -> "File written; durability unconfirmed — " ^ detail in
   let exact = match receipt.application.exact_output_registry with
     | Exact_output_registry_applied _ -> "exact lanes applied"
     | Exact_output_registry_unpublished -> "exact lanes unavailable; restart required"

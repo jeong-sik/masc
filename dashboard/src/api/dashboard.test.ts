@@ -4486,6 +4486,7 @@ describe('runtime.toml raw config API', () => {
         source_revision: sourceRevision,
         order: '7',
         durability: 'durable',
+        durability_detail: null,
         warnings: [],
       },
       application: {
@@ -4679,6 +4680,7 @@ describe('runtime.toml raw config API', () => {
       source_revision: 'a'.repeat(64),
       order: '7',
       durability: 'durable',
+        durability_detail: null,
       warnings: [],
     })
     expect(result.application.skills).toMatchObject({
@@ -4702,6 +4704,7 @@ describe('runtime.toml raw config API', () => {
         source_revision: 'runtime-source-revision',
         order: '8',
         durability: 'durable',
+        durability_detail: null,
         warnings: [],
       },
       application: {

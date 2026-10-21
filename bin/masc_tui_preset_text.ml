@@ -76,11 +76,31 @@ let part_lines ~label (part : D.preset_part) =
   :: List.map (fun (key, reason) -> Printf.sprintf "  - %s: %s" key reason) part.D.pp_skipped
 ;;
 
-let runtime_line = function
-  | D.Preset_runtime_unchanged -> "runtime: unchanged — assignments and exact lanes already matched"
-  | D.Preset_runtime_committed ->
-    "runtime: committed — runtime.toml rewritten, assignments and exact lanes live"
-  | D.Preset_runtime_failed reason -> "runtime: failed — " ^ reason
+let runtime_lines = function
+  | D.Preset_runtime_unchanged ->
+    [ "runtime: unchanged — saved assignments and lane declarations already match the file" ]
+  | D.Preset_runtime_committed commit ->
+    [ "runtime: committed — runtime.toml rewritten, assignments applied" ]
+    @ (match commit.D.prc_durability with
+       | Masc.Runtime.Durable -> []
+       | Masc.Runtime.Durability_unconfirmed { detail } ->
+         [ "  ! 현재 적용됐지만 디스크 저장 내구성은 미확인 — " ^ detail
+         ; "    다시 복원하기 전에 저장소 상태를 확인하세요. 재복원은 이전 상태 autosave를 덮어씁니다."
+         ])
+    @ List.map
+        (function Masc.Runtime.Config_lock_release_unconfirmed detail ->
+          "  ! runtime lock release unconfirmed — " ^ detail)
+        commit.D.prc_lock_warnings
+    @ (match commit.D.prc_registry with
+       | D.Preset_registry_applied D.Preset_registry_runtime_bindings ->
+         [ "exact lanes: applied from runtime bindings" ]
+       | D.Preset_registry_applied D.Preset_registry_replacement_catalog ->
+         [ "exact lanes: applied from replacement catalog" ]
+       | D.Preset_registry_unpublished ->
+         [ "  ! exact lanes: unpublished — restart required" ]
+       | D.Preset_registry_kept reason ->
+         [ "  ! exact lanes: previous registry retained; committed file cannot publish at next start — " ^ reason ])
+  | D.Preset_runtime_failed reason -> [ "runtime: failed — " ^ reason ]
 ;;
 
 let default_prompt_lines = function
@@ -106,7 +126,7 @@ let restore_lines (report : D.preset_restore_report) =
      report.D.prr_autosave
    :: part_lines ~label:"prompt overrides" report.D.prr_prompt_overrides)
   @ part_lines ~label:"keeper instructions" report.D.prr_instructions
-  @ [ runtime_line report.D.prr_runtime ]
+  @ runtime_lines report.D.prr_runtime
   @ default_prompt_lines report.D.prr_default_prompts
 ;;
 
@@ -216,7 +236,7 @@ let detail_lines ~(selected : D.preset_manifest option)
   | Some report -> preset @ contents @ [ "" ] @ restore_lines report
 ;;
 
-(* Clean means nothing was skipped and runtime.toml did not fail; the pane
+(* Clean means nothing was skipped and the commit has no warnings; the pane
    then shows the report as status rather than as an error. *)
 let restore_is_clean (report : D.preset_restore_report) =
   report.D.prr_prompt_overrides.D.pp_skipped = []
@@ -224,5 +244,6 @@ let restore_is_clean (report : D.preset_restore_report) =
   &&
   match report.D.prr_runtime with
   | D.Preset_runtime_failed _ -> false
-  | D.Preset_runtime_unchanged | D.Preset_runtime_committed -> true
+  | D.Preset_runtime_unchanged -> true
+  | D.Preset_runtime_committed commit -> not (D.preset_runtime_commit_needs_attention commit)
 ;;

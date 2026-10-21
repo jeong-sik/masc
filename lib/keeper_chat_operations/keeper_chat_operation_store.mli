@@ -110,8 +110,9 @@ module Offline : sig
 
       Success verifies a transaction in the private destination, not publication,
       installation, source freshness after return, or a file/parent fsync receipt.
-      A failed or uncertain result may leave a partial destination: discard it,
-      never install or blindly retry it. Caller owns both handles and must hold
+      A failed or uncertain result may leave a partial destination: retain it
+      only as failed evidence, never install or blindly retry it. Caller owns
+      both handles and must hold
       the original BasePath lease before promoting any offline artifact; this
       copy primitive neither acquires authority nor replaces a live journal. *)
 

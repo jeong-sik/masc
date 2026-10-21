@@ -8143,6 +8143,7 @@ type schedule_form_refusal =
   }
 
 type image_read_owner =
+  | Local_file_image_read of workspace_authority
   | Draft_image_read of workspace_authority * Masc_tui_keeper_chat_projection.attachment
   | Peer_image_read of unit ref
 
@@ -9806,6 +9807,7 @@ type state = {
    Completion, retirement and footer projection use this same admission. *)
 let image_reading_is_current (state : state) (pending : sent_image_read) =
   let owner_is_current = match pending.sir_owner with
+    | Local_file_image_read authority -> authority = state.workspace_authority
     | Draft_image_read (authority, attachment) ->
       authority = state.workspace_authority
       && List.exists (fun current -> current == attachment) state.msg_attachments

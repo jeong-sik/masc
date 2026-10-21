@@ -1,4 +1,5 @@
 type source =
+  | Local_file of string
   | Draft of Masc_tui_keeper_chat_projection.attachment
   | Retained of { reference : Tool_output.artifact_ref;
       format : Masc_tui_image_payload.format }
@@ -22,6 +23,10 @@ let load ~host ~port ~cache_dir ~diagram_width ~diagram_colors ~display source =
       Ok (status_code, body)
     | Ok (status_code, body) -> Error (Masc_tui_http.refusal ~status_code ~body) in
   match source with
+  | Local_file path ->
+    Eio_guard.run_in_systhread ~label:"tui-local-image-read" (fun () ->
+      present (Masc_tui_image_cache.prepare_file ~run:Unix.system
+        ~cache_dir:(cache_dir ()) path))
   | Draft attachment ->
     Eio_guard.run_in_systhread ~label:"tui-draft-image-decode" (fun () ->
       let data = Masc_tui_image_payload.of_base64

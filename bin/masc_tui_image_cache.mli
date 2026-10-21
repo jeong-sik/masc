@@ -126,6 +126,14 @@ val prepare_payload :
     other formats use the same converters as remote images. Cache publication
     is atomic and addressed by the payload, not its display label. *)
 
+val prepare_file :
+  run:(string -> Unix.process_status) -> cache_dir:string -> string ->
+  (string, string) result
+(** Read the selected local file and prepare PNG through the same byte-owned
+    converter as decoded payloads. Reads the file's length once and refuses
+    premature EOF or host read errors; never replaces the original file.
+    Blocking: call only from the image acquisition worker. *)
+
 type display = Pixel_graphics | Character_cells of { columns : int; rows : int }
 (** Captured presentation and available body box in terminal cells. *)
 

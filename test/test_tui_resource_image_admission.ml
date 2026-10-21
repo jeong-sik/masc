@@ -93,11 +93,15 @@ let test_local_peer_loss () =
   state.msg_attachments <- [original];
   let local = pending state (Types.Draft_image_read (state.workspace_authority, original)) in
   let peer = pending state (Types.Peer_image_read state.workspace_read_authority) in
+  let file = pending state (Types.Local_file_image_read state.workspace_authority) in
   Types.suspend_workspace_readings state;
+  check bool "local file survives peer withdrawal" true (Types.image_reading_is_current state file);
   check bool "local draft survives peer withdrawal" true (Types.image_reading_is_current state local);
   check bool "peer reply loses its read epoch" false (Types.image_reading_is_current state peer);
   check bool "original attachment retained" true (List.hd state.msg_attachments == original);
-  check string "encoded attachment preserved" "AAAA" original.data
+  check string "encoded attachment preserved" "AAAA" original.data;
+  state.workspace_authority <- Types.Workspace_authority 1;
+  check bool "file owner cannot cross workspaces" false (Types.image_reading_is_current state file)
 
 let test_local_draft_replacement () =
   let state = state () and original = attachment () in

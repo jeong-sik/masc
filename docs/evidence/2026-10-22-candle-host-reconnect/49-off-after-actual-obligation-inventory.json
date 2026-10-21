@@ -1,0 +1,32 @@
+{
+  "at": "2026-10-21T17:13:13.973609+00:00",
+  "identity": "local-admin",
+  "method": "GET",
+  "path": "/api/v1/lane-addons",
+  "request": null,
+  "http_status": 200,
+  "response": {
+    "configuration": {
+      "directory": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/lane-addons",
+      "complete": true,
+      "issues": [],
+      "declarations": [
+        {
+          "id": "candle-host-qual-eb484",
+          "source_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/lane-addons/candle-host.toml",
+          "enabled": false,
+          "source_revision": "177330dbc0cd80c76ed7b83448ec62a626e5566c39ff99f5a3878667b905ff27",
+          "desired_revision": "2417232f2fe23014fa3bb250f4a15805136d90312f8ec1bd8058376122d7800d",
+          "applied_revision": null,
+          "instance_id": null,
+          "application": {
+            "kind": "inactive"
+          }
+        }
+      ]
+    },
+    "instances": [],
+    "rows": [],
+    "coverage": []
+  }
+}

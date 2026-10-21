@@ -1,0 +1,90 @@
+{
+  "at": "2026-10-21T17:12:29.089521+00:00",
+  "identity": "local-admin",
+  "method": "POST",
+  "path": "/mcp",
+  "request": {
+    "jsonrpc": "2.0",
+    "id": "bd99cd3064734eb59ce594435f0c8836",
+    "method": "tools/call",
+    "params": {
+      "name": "masc_goal_transition",
+      "arguments": {
+        "goal_id": "goal-candle-host-eb484-source-qualification",
+        "action": "request_complete",
+        "note": "Inspect candle-host-qualifier/measurement.json under the shared playground; the measurable verified_count is 1. Independently inspect this Goal metric. Actual guest artifact was normally resubmitted as vrf-5ee2e4f6674a8ccda7adaa075d60da5b. Task completion was already committed by the normal judge before the attempted operator API verdict; that late attempt was correctly rejected because Task was done. This is a narrow source-byte qualification, not behavior or full54 completion."
+      }
+    }
+  },
+  "http_status": 200,
+  "response": {
+    "jsonrpc": "2.0",
+    "id": "bd99cd3064734eb59ce594435f0c8836",
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.60.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"status\":\"ok\",\"goal_id\":\"goal-candle-host-eb484-source-qualification\",\"action\":\"request_complete\",\"goal\":{\"id\":\"goal-candle-host-eb484-source-qualification\",\"criterion_revision\":\"06bdfd581567682dfb71d92acbe501de\",\"title\":\"Verify exact Candle host consumer source bytes and retain the measurement\",\"metric\":\"Read candle-host-qualifier/measurement.json under the shared playground. The measurable value is verified_count. The file records a comparison of the complete checkout bytes with the exact eb484b0aabe699b46740bcb787a935fb67bbfa8e Git blob for lib/server/server_candle_appraiser.ml.\",\"target_value\":\"1\",\"due_date\":null,\"priority\":3,\"phase\":\"verifying\",\"last_review_note\":null,\"last_review_at\":null,\"created_at\":\"2026-10-21T16:57:38Z\",\"updated_at\":\"2026-10-21T17:12:29Z\"},\"verification\":{\"goal_id\":\"goal-candle-host-eb484-source-qualification\",\"completion\":{\"state\":\"proof_pending\",\"requested_at\":\"2026-10-21T17:12:29Z\",\"request_id\":\"eb1b31232bf66ae2d1e677472024cfa6\",\"criterion\":{\"revision\":\"06bdfd581567682dfb71d92acbe501de\",\"title\":\"Verify exact Candle host consumer source bytes and retain the measurement\",\"metric\":\"Read candle-host-qualifier/measurement.json under the shared playground. The measurable value is verified_count. The file records a comparison of the complete checkout bytes with the exact eb484b0aabe699b46740bcb787a935fb67bbfa8e Git blob for lib/server/server_candle_appraiser.ml.\",\"target_value\":\"1\"}},\"submitted_evidence\":[],\"updated_at\":\"2026-10-21T17:12:29Z\"}}",
+            "status": "ok",
+            "tool": "masc_goal_transition"
+          },
+          "trace_id": "\"bd99cd3064734eb59ce594435f0c8836\"",
+          "agent_id": "local-admin",
+          "tool": "masc_goal_transition",
+          "duration_ms": 4,
+          "attempts": 1,
+          "timestamp": "2026-10-21T17:12:29Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"status\":\"ok\",\"goal_id\":\"goal-candle-host-eb484-source-qualification\",\"action\":\"request_complete\",\"goal\":{\"id\":\"goal-candle-host-eb484-source-qualification\",\"criterion_revision\":\"06bdfd581567682dfb71d92acbe501de\",\"title\":\"Verify exact Candle host consumer source bytes and retain the measurement\",\"metric\":\"Read candle-host-qualifier/measurement.json under the shared playground. The measurable value is verified_count. The file records a comparison of the complete checkout bytes with the exact eb484b0aabe699b46740bcb787a935fb67bbfa8e Git blob for lib/server/server_candle_appraiser.ml.\",\"target_value\":\"1\",\"due_date\":null,\"priority\":3,\"phase\":\"verifying\",\"last_review_note\":null,\"last_review_at\":null,\"created_at\":\"2026-10-21T16:57:38Z\",\"updated_at\":\"2026-10-21T17:12:29Z\"},\"verification\":{\"goal_id\":\"goal-candle-host-eb484-source-qualification\",\"completion\":{\"state\":\"proof_pending\",\"requested_at\":\"2026-10-21T17:12:29Z\",\"request_id\":\"eb1b31232bf66ae2d1e677472024cfa6\",\"criterion\":{\"revision\":\"06bdfd581567682dfb71d92acbe501de\",\"title\":\"Verify exact Candle host consumer source bytes and retain the measurement\",\"metric\":\"Read candle-host-qualifier/measurement.json under the shared playground. The measurable value is verified_count. The file records a comparison of the complete checkout bytes with the exact eb484b0aabe699b46740bcb787a935fb67bbfa8e Git blob for lib/server/server_candle_appraiser.ml.\",\"target_value\":\"1\"}},\"submitted_evidence\":[],\"updated_at\":\"2026-10-21T17:12:29Z\"}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "status": "ok",
+        "goal_id": "goal-candle-host-eb484-source-qualification",
+        "action": "request_complete",
+        "goal": {
+          "id": "goal-candle-host-eb484-source-qualification",
+          "criterion_revision": "06bdfd581567682dfb71d92acbe501de",
+          "title": "Verify exact Candle host consumer source bytes and retain the measurement",
+          "metric": "Read candle-host-qualifier/measurement.json under the shared playground. The measurable value is verified_count. The file records a comparison of the complete checkout bytes with the exact eb484b0aabe699b46740bcb787a935fb67bbfa8e Git blob for lib/server/server_candle_appraiser.ml.",
+          "target_value": "1",
+          "due_date": null,
+          "priority": 3,
+          "phase": "verifying",
+          "last_review_note": null,
+          "last_review_at": null,
+          "created_at": "2026-10-21T16:57:38Z",
+          "updated_at": "2026-10-21T17:12:29Z"
+        },
+        "verification": {
+          "goal_id": "goal-candle-host-eb484-source-qualification",
+          "completion": {
+            "state": "proof_pending",
+            "requested_at": "2026-10-21T17:12:29Z",
+            "request_id": "eb1b31232bf66ae2d1e677472024cfa6",
+            "criterion": {
+              "revision": "06bdfd581567682dfb71d92acbe501de",
+              "title": "Verify exact Candle host consumer source bytes and retain the measurement",
+              "metric": "Read candle-host-qualifier/measurement.json under the shared playground. The measurable value is verified_count. The file records a comparison of the complete checkout bytes with the exact eb484b0aabe699b46740bcb787a935fb67bbfa8e Git blob for lib/server/server_candle_appraiser.ml.",
+              "target_value": "1"
+            }
+          },
+          "submitted_evidence": [],
+          "updated_at": "2026-10-21T17:12:29Z"
+        }
+      }
+    }
+  }
+}

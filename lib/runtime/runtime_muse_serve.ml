@@ -619,6 +619,15 @@ let window_for_phase config = function
   | Tool_item_running -> None
 ;;
 
+(* Whether the complete [turn/start] request has left this process. The host
+   takes a command in durably before it acknowledges it, so from then on a
+   write or a wait that ran out of time leaves a turn the host may be running;
+   before it, the line was not complete and nothing started. *)
+let turn_written = function
+  | Awaiting_admission -> false
+  | Model_turn | Tool_item_running -> true
+;;
+
 type io =
   { send : Yojson.Safe.t -> unit
   ; send_context :
@@ -741,9 +750,10 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
                 (Process_exited
                    { status
                    ; detail = (if detail = "" then "stdout closed" else detail)
-                   ; turn_accepted = false
+                   ; turn_accepted = turn_written !receive_phase
                    }))
-          | Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false })
+          | Idle_timeout seconds ->
+            Error (Timeout { seconds; turn_accepted = turn_written !receive_phase })
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | Eio.Time.Timeout as exn -> raise exn
           | exn -> protocol_error "stdout read" (Printexc.to_string exn)
@@ -751,17 +761,23 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
       Fun.protect
         ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
         (fun () ->
-           run
-             { send
-             ; send_context
-             ; on_subscription_usage
-             ; receive
-             ; set_receive_phase = (fun phase -> receive_phase := phase)
-             ; next_id =
-                 (fun () ->
-                   incr last_id;
-                   !last_id)
-             }))
+           (* A write that outlasts its window raises where it is made, mid-turn
+              included, so the phase decides whether the turn was accepted. *)
+           try
+             run
+               { send
+               ; send_context
+               ; on_subscription_usage
+               ; receive
+               ; set_receive_phase = (fun phase -> receive_phase := phase)
+               ; next_id =
+                   (fun () ->
+                     incr last_id;
+                     !last_id)
+               }
+           with
+           | Idle_timeout seconds ->
+             Error (Timeout { seconds; turn_accepted = turn_written !receive_phase })))
 ;;
 
 (* ── Protocol ─────────────────────────────────────────────────────────── *)

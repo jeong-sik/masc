@@ -1,771 +1,195 @@
-(* The real declared HTTP walk and official-client admission feed the server
-   appraiser. Only the CLI process edge is injected; no live provider is used. *)
+(** Exercise the production Candle consumer over its Add-on port. The port is
+    scripted here; the separate package contract fixture starts the real worker. *)
 open Alcotest
 open Masc
 module A = Candle_appraisal
-module F = Exact_output_fixture
 module Runs = Exact_lane_run_registry
-module U = Yojson.Safe.Util
+module Json = Yojson.Safe.Util
+let () = Prompt_defaults.init (); Prompt_registry.set_markdown_dir "../config/prompts"
+let identity : A.identity = {goal_id="original-goal";request_id="original-payout";verification_run_id="original-proof"}
+let goal : A.goal = {title="Ship the connected feature";metric=Some "tests";target_value=Some "10"}
+let grade = A.Grade {goal;grades=[Option.get (Candle_grade.of_string "medium"),"Connected feature"]}
+let unwrap = function Ok value -> value | Error error -> fail (A.error_to_string error)
+let reply id state extra =
+  Ok {(Mcp_protocol.Mcp_types.tool_result_of_text "scripted Add-on reply") with
+    structured_content=Some (`Assoc (["request_id",`String id;"state",`String state] @ extra))}
+let operation arguments = Json.(to_string (member "kind" arguments))
+let request_id arguments =
+  match operation arguments with
+  | "submit" -> Json.(to_string (member "request_id" (member "request" arguments)))
+  | "read" -> Json.(to_string (member "request_id" arguments))
+  | _ -> fail "unexpected Add-on operation"
+let finished id output = reply id "finished" ["result", `Assoc [
+  "status",`String "answered";"slot",`String "original-slot";"output",output;
+  "usage",`Assoc ["input_tokens",`Int 12;"output_tokens",`Int 3]]]
+let with_workspace f =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Filename.temp_dir "candle-addon-consumer-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path; Fs_compat.clear_fs ())
+    (fun () -> f base_path)
+let runner ?(installation_id="original-installation") ~registry ~base_path ~call request =
+  let store = Lane_addon_store.create ~root:(Filename.concat base_path "request-ownership") in
+  let retain ~request_id ~request = Lane_addon_tool_request_owner.retain ~store
+    ~scope:"candle-appraisals" ~request_id ~installation_id ~package_id:"candle-appraiser" ~tool:"candle_appraise" ~request
+    |> Result.map_error (function
+      | Lane_addon_tool_request_owner.Store_unavailable detail -> Lane_addon_runtime.Unavailable detail
+      | (Binding_conflict | Invalid_identity _) as error -> Lane_addon_runtime.Host_refusal
+        (Lane_addon_call_context.Rejected (Lane_addon_tool_request_owner.error_to_string error))) in
+  Server_candle_appraiser.For_testing.run ~registry ~base_path ~retain ~call ~identity request
 
-let () =
-  Mirage_crypto_rng_unix.use_default ();
-  Prompt_defaults.init ();
-  Prompt_registry.set_markdown_dir "../config/prompts"
-;;
+let test_lost_submit_reply_reads_the_retained_original_after_restart () =
+  with_workspace @@ fun base_path ->
+  let path = Filename.concat base_path "runs.jsonl" in
+  let registry = Runs.create ~path () in
+  let retained = ref None and submitted = ref 0 and ids = ref [] in
+  let call ~arguments =
+    let id = request_id arguments in
+    ids := id :: !ids;
+    let registered = match Runs.get registry ~run_id:id with
+      | Some run -> run | None -> fail "the original request must be recorded before the worker RPC" in
+    check bool "registration precedes RPC" true (registered.status = Runs.Running);
+    let rows = In_channel.with_open_text path In_channel.input_lines |> List.map Yojson.Safe.from_string in
+    check bool "registration is durable before RPC" true
+      (List.exists (fun row -> Json.(member "event" row = `String "register" && member "id" row = `String id)) rows);
+    match operation arguments, !retained with
+    | "read", None -> reply id "absent" []
+    | "submit", None ->
+      incr submitted;
+      retained := Some (Json.member "request" arguments);
+      Error (Lane_addon_runtime.Outcome_unknown "worker reply was lost after retaining intent")
+    | "read", Some _ -> finished id (`Assoc ["grade",`String "medium"])
+    | _ -> fail "a retained intent must not be submitted again" in
+  (match runner ~registry ~base_path ~call grade with
+   | Error (A.Transport_unavailable _) -> ()
+   | Ok _ | Error (A.Invalid_response _ | A.Execution_rejected _) -> fail "lost RPC must await an authoritative read");
+  (* Reconstruct the consumer after a host restart. The worker's state is an
+     external durable source; the observer's restarted outcome is not authority. *)
+  let replayed = Runs.replay path in
+  let call ~arguments =
+    let id = request_id arguments in
+    ids := id :: !ids;
+    check string "recovery only reads the original" "read" (operation arguments);
+    finished id (`Assoc ["grade",`String "medium"]) in
+  let answer = runner ~registry:replayed ~base_path ~call grade |> unwrap in
+  check int "the original was submitted once" 1 !submitted;
+  check int "reconstruction retains one original ID" 1 (List.length (List.sort_uniq String.compare !ids));
+  check string "actual answering slot becomes trace" "original-slot" answer.trace.slot_id;
+  let stored = match Runs.get (Runs.replay path) ~run_id:answer.trace.run_id with
+    | Some run -> run | None -> fail "completed receipt vanished" in
+  let Runs.Exact_input input = stored.input in
+  check string "audit metadata retains the original proof" identity.verification_run_id
+    Json.(to_string (member "verification_run_id" (member "identity" input)));
+  check bool "model evidence remains the original input" true
+    (Yojson.Safe.equal (Json.member "input" input) (A.input grade));
+  match stored.status with
+  | Runs.Completed {outcome=Runs.Succeeded;selected_slot=Some "original-slot";usage=Some usage;_} ->
+    check int "original input usage is retained" 12 usage.input_tokens;
+    check int "original output usage is retained" 3 usage.output_tokens
+  | _ -> fail "the accepted original result was not durably observed"
 
-let request =
-  A.Grade {goal={title="Ship the ledger";metric=Some "tests";target_value=Some "10"};
-    grades=[Option.get (Candle_grade.of_string "medium"), "Connected feature"]}
-;;
+let test_unknown_judgment_is_terminal_even_after_an_event () =
+  with_workspace @@ fun base_path ->
+  let registry = Runs.create () in
+  let reads = ref 0 in
+  let call ~arguments =
+    incr reads;
+    check string "a terminal original is only read" "read" (operation arguments);
+    reply (request_id arguments) "finished" ["result", `Assoc ["status",`String "outcome_unknown"]] in
+  List.iter (fun () -> match runner ~registry ~base_path ~call grade with
+    | Error (A.Execution_rejected _) -> ()
+    | Ok _ | Error (A.Transport_unavailable _ | A.Invalid_response _) -> fail "unknown judgment became retryable or accepted") [();();()];
+  check int "events re-read without new submission" 3 !reads;
+  match Runs.list_runs registry with
+  | [run] -> (match run.status with
+      | Runs.Completed {outcome=Runs.Failed {code="candle_appraisal_outcome_unknown";_};_} -> ()
+      | _ -> fail "uncertainty lost its observer status")
+  | _ -> fail "one original judgment must retain one observer identity"
 
-let identity : A.identity =
-  { goal_id = "transport-goal"
-  ; request_id = "transport-request"
-  ; verification_run_id = "transport-verifier"
-  }
-;;
+let test_a_replacement_cannot_replay_an_unknown_original () =
+  with_workspace @@ fun base_path ->
+  let unknown ~arguments =
+    reply (request_id arguments) "finished" ["result", `Assoc ["status",`String "outcome_unknown"]] in
+  (match runner ~installation_id:"installation-a" ~registry:(Runs.create ()) ~base_path ~call:unknown grade with
+   | Error (A.Execution_rejected _) -> ()
+   | Ok _ | Error (A.Transport_unavailable _ | A.Invalid_response _) -> fail "original unknown must be terminal");
+  (* Drop all observer state and reconstruct the adapter. Durable original
+     ownership, not the old observer's terminal row, still fences dispatch. *)
+  let contacted_replacement = ref false in
+  let absent ~arguments = contacted_replacement := true; reply (request_id arguments) "absent" [] in
+  (match runner ~installation_id:"installation-b" ~registry:(Runs.create ()) ~base_path ~call:absent grade with
+   | Error (A.Execution_rejected _) -> ()
+   | Ok _ | Error (A.Transport_unavailable _ | A.Invalid_response _) -> fail "a fresh replacement claimed the original");
+  check bool "replacement is refused before any RPC" false !contacted_replacement;
+  (match runner ~installation_id:"installation-a" ~registry:(Runs.create ()) ~base_path ~call:unknown grade with
+   | Error (A.Execution_rejected _) -> ()
+   | Ok _ | Error (A.Transport_unavailable _ | A.Invalid_response _) -> fail "original installation lost its retained terminal")
 
-let valid_answer = `Assoc [ "grade", `String "medium" ]
-let json = testable Yojson.Safe.pp Yojson.Safe.equal
+let test_domain_decode_rejects_incomplete_recipient_weights () =
+  with_workspace @@ fun base_path ->
+  let registry = Runs.create () in
+  let request = A.Weights {goal;tasks=[];keepers=["keeper-a";"keeper-b"];weight_max=10} in
+  let call ~arguments = finished (request_id arguments)
+      (`Assoc ["weights",`Assoc ["keeper-a",`Int 1]]) in
+  match runner ~registry ~base_path ~call request with
+  | Error (A.Invalid_response _) -> ()
+  | Ok _ | Error (A.Transport_unavailable _ | A.Execution_rejected _) -> fail "partial weights escaped full Candle decoding"
 
-let with_case f =
-  let base_path = Filename.temp_dir "candle-appraiser-transport-" "" in
-  Fun.protect
-    ~finally:(fun () -> Fs_compat.remove_tree base_path)
-    (fun () ->
-       Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path)
-       @@ fun () ->
-       Masc_test_deps.with_process_env
-         Env_config_core.config_dir_env_key
-         (Some (Filename.concat base_path "config"))
-       @@ fun () ->
-       F.with_official_client_runtimes
-       @@ fun () ->
-       Eio_main.run
-       @@ fun env ->
-       Eio.Switch.run
-       @@ fun sw ->
-       let net = Eio.Stdenv.net env in
-       let clock = Eio.Stdenv.clock env in
-       Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
-       @@ fun () -> f ~sw ~net ~clock ~base_path)
-;;
+let test_capacity_wait_does_not_invent_a_retained_intent () =
+  with_workspace @@ fun base_path ->
+  let registry = Runs.create () in
+  let operations = ref [] in
+  let call ~arguments =
+    let kind = operation arguments in
+    operations := !operations @ [kind];
+    match kind with
+    | "read" -> reply (request_id arguments) "absent" []
+    | "submit" -> reply (request_id arguments) "capacity_wait" []
+    | _ -> fail "unexpected operation" in
+  List.iter (fun () -> match runner ~registry ~base_path ~call grade with
+    | Error (A.Transport_unavailable _) -> ()
+    | Ok _ | Error (A.Invalid_response _ | A.Execution_rejected _) -> fail "capacity must await admission") [();()];
+  check (list string) "every retry reads first" ["read";"submit";"read";"submit"] !operations
 
-let publish ~base_path ~cli_slots targets =
-  let snapshot = F.resolver_snapshot ~source:base_path targets in
-  ignore
-    (F.publish_registry
-       ~lane_id:"candle_appraiser"
-       ~slot_ids:(List.map (fun (target : F.target_fixture) -> target.id) targets)
-       ~cli_slot_ids:cli_slots
-       snapshot
-     : Runtime_exact_output_registry.t)
-;;
-
-(* The provider envelope is valid. Its model-authored content is not JSON,
-   which must reach Exact.Invalid_json_output rather than a connection error. *)
-let openai_text text =
-  Yojson.Safe.to_string
-    (`Assoc
-        [ "id", `String "candle-transport-fixture"
-        ; "model", `String "fixture"
-        ; ( "choices"
-          , `List
-              [ `Assoc
-                  [ "index", `Int 0
-                  ; ( "message"
-                    , `Assoc [ "role", `String "assistant"; "content", `String text ] )
-                  ; "finish_reason", `String "stop"
-                  ]
-              ] )
-        ; ( "usage"
-          , `Assoc
-              [ "prompt_tokens", `Int 1
-              ; "completion_tokens", `Int 1
-              ; "total_tokens", `Int 2
-              ] )
-        ])
-;;
-
-let malformed_body = openai_text (String.make 600 'x' ^ " not a JSON answer")
-
-let unavailable_body =
-  {|{"error":{"message":"fixture unavailable","type":"server_error"}}|}
-;;
-
-let recorded_run ~base_path =
-  let registry = Runs.global () in
-  let matches =
-    List.filter
-      (fun (run : Runs.run) -> run.lane = Runs.Candle_appraiser && run.actor = base_path)
-      (Runs.list_runs registry)
-  in
-  match matches with
-  | [ summary ] ->
-    (match Runs.get registry ~run_id:summary.run_id with
-     | Some run -> run
-     | None -> fail "registered appraisal disappeared")
-  | runs -> failf "expected one appraiser run, got %d" (List.length runs)
-;;
-
-let completed (run : Runs.run) =
-  match run.status with
-  | Runs.Completed { outcome; output; selected_slot; _ } -> outcome, output, selected_slot
-  | Runs.Running -> fail "appraisal run was left Running"
-  | Runs.Completion_persistence_failed _ -> fail "appraisal completion was not stored"
-;;
-
-let attempts output = U.(member "attempts" output |> to_list)
-
-let dispatched output =
-  attempts output
-  |> List.filter_map (fun event ->
-    if U.member "kind" event = `String "dispatch"
-    then Some U.(member "slot" event |> to_string)
-    else None)
-;;
-
-let check_http_failure ~slot ~body ~invalid output =
-  let matching =
-    attempts output
-    |> List.filter (fun event ->
-      U.member "kind" event = `String "http_failure"
-      && U.member "slot" event = `String slot)
-  in
-  match matching with
-  | [ event ] ->
-    check
-      string
-      "complete failed HTTP body survives in exact evidence"
-      body
-      U.(member "raw_response" event |> to_string);
-    check
-      bool
-      "response failure classification is retained"
-      invalid
-      U.(member "invalid_output" event |> to_bool)
-  | events -> failf "expected one HTTP failure for %s, got %d" slot (List.length events)
-;;
-
-let check_failure code run =
-  let outcome, output, selected_slot = completed run in
-  (match outcome with
-   | Runs.Failed failure -> check string "failure kind is observable" code failure.code
-   | Runs.Succeeded | Runs.Cancelled ->
-     fail "failed appraisal was recorded as another outcome");
-  output, selected_slot
-;;
-
-let unavailable_cli calls : Keeper_lane_cli_oneshot.runner =
-  fun ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
-  calls := runtime_id :: !calls;
-  Error (Fusion_official_client.Setup_failure "injected official client unavailable")
-;;
-
-let resting_cli calls : Keeper_lane_cli_oneshot.runner =
-  fun ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
-  calls := runtime_id :: !calls;
-  Error (Fusion_official_client.Claude_failure
-    (Runtime_claude_code.Quota_blocked
-      { api_error_status = Some 429; rate_limit = None
-      ; tool_effect_attempted = false; response_emitted = false }))
-;;
-
-let run_declared ~base_path cli_runner =
-  Server_candle_appraiser.For_testing.run_declared
-    ~base_path
-    ~cli_runner
-    ~identity
-    request
-;;
-
-let test_invalid_http_then_unavailable_cli_stays_rejected () =
-  with_case (fun ~sw ~net ~clock ~base_path ->
-    let server = F.start_server ~sw ~net ~clock (F.Reply malformed_body) in
-    let slot = "candle-malformed-json" in
-    publish
-      ~base_path
-      ~cli_slots:[ F.cli_primary_runtime ]
-      [ { F.id = slot; base_url = server.base_url } ];
-    let calls = ref [] in
-    (match run_declared ~base_path (unavailable_cli calls) with
+let test_malformed_worker_state_cannot_authorize_submission () =
+  with_workspace @@ fun base_path ->
+  let registry = Runs.create () in
+  List.iter (fun malformed ->
+    let calls = ref 0 in
+    let call ~arguments =
+      incr calls;
+      check string "malformed read cannot cause submit" "read" (operation arguments);
+      let id = request_id arguments in
+      let json = malformed id in
+      Ok {(Mcp_protocol.Mcp_types.tool_result_of_text "malformed") with structured_content=Some json} in
+    (match runner ~registry ~base_path ~call grade with
      | Error (A.Invalid_response _) -> ()
-     | Error (A.Transport_unavailable detail) ->
-       failf "invalid HTTP output became pulse-retryable: %s" detail
-     | Error (A.Execution_rejected detail) ->
-       failf "invalid HTTP output lost its semantic refusal: %s" detail
-     | Ok _ -> fail "malformed HTTP and unavailable CLI produced an appraisal");
-    check int "HTTP candidate dispatched once" 1 (F.post_count server);
-    check
-      (list string)
-      "declared CLI tail was attempted"
-      [ F.cli_primary_runtime ]
-      (List.rev !calls);
-    let output, selected =
-      check_failure "candle_appraisal_rejected" (recorded_run ~base_path)
-    in
-    check
-      (option string)
-      "last dispatched slot is the failed CLI"
-      (Some F.cli_primary_runtime)
-      selected;
-    check
-      (list string)
-      "recorded dispatch order"
-      [ slot; F.cli_primary_runtime ]
-      (dispatched output);
-    check_http_failure ~slot ~body:malformed_body ~invalid:true output)
-;;
+     | Ok _ | Error (A.Transport_unavailable _ | A.Execution_rejected _) -> fail "malformed state was accepted");
+    check int "exactly one read" 1 !calls)
+    [(fun _ -> `Assoc ["request_id",`String "other";"state",`String "absent"]);
+     (fun id -> `Assoc ["request_id",`String id;"state",`String "absent";"result",`Null]);
+     (fun id -> `Assoc ["request_id",`String id;"state",`String "absent";"state",`String "finished"]);
+     (fun id -> `Assoc ["request_id",`String id;"state",`String "future_state"])]
 
-let test_all_transport_failures_remain_retryable () =
-  List.iter (fun status ->
-  with_case (fun ~sw ~net ~clock ~base_path ->
-    let server =
-      F.start_server
-        ~sw
-        ~net
-        ~clock
-        (F.Reply_with (fun _ _ -> status, unavailable_body))
-    in
-    let slot = "candle-provider-unavailable" in
-    publish
-      ~base_path
-      ~cli_slots:[ F.cli_primary_runtime ]
-      [ { F.id = slot; base_url = server.base_url } ];
-    let calls = ref [] in
-    (match run_declared ~base_path (resting_cli calls) with
-     | Error (A.Transport_unavailable _) -> ()
-     | Error (A.Invalid_response detail) ->
-       failf "unavailable bindings became semantic rejection: %s" detail
-     | Error (A.Execution_rejected detail) ->
-       failf "resting bindings became permanent rejection: %s" detail
-     | Ok _ -> fail "unavailable transports produced an appraisal");
-    check int "unavailable HTTP candidate dispatched once" 1 (F.post_count server);
-    check
-      (list string)
-      "unavailable CLI was reached"
-      [ F.cli_primary_runtime ]
-      (List.rev !calls);
-    let output, selected =
-      check_failure "candle_appraisal_unavailable" (recorded_run ~base_path)
-    in
-    check
-      (option string)
-      "unavailable CLI is the actual last slot"
-      (Some F.cli_primary_runtime)
-      selected;
-    check_http_failure ~slot ~body:unavailable_body ~invalid:false output))
-    [`Service_unavailable; `Internal_server_error]
-;;
+let test_missing_prompt_never_calls_the_worker () =
+  with_workspace @@ fun base_path ->
+  let empty = Filename.concat base_path "prompts" in
+  Fs_compat.mkdir_p empty;
+  let called = ref false in
+  let call ~arguments:_ = called := true; fail "missing prompt reached worker" in
+  Fun.protect ~finally:(fun () -> Prompt_registry.set_markdown_dir "../config/prompts") (fun () ->
+    Prompt_registry.set_markdown_dir empty;
+    match runner ~registry:(Runs.create ()) ~base_path ~call grade with
+    | Error (A.Transport_unavailable _) -> check bool "no worker RPC" false !called
+    | Ok _ | Error (A.Invalid_response _ | A.Execution_rejected _) -> fail "missing prompt is a source failure")
 
-let test_transient_http_survives_permanent_cli_failure () =
-  with_case (fun ~sw ~net ~clock ~base_path ->
-    let server = F.start_server ~sw ~net ~clock
-      (F.Reply_with (fun _ _ -> `Service_unavailable, unavailable_body)) in
-    publish ~base_path ~cli_slots:[F.cli_primary_runtime]
-      [{F.id="http-recoverable";base_url=server.base_url}];
-    (match run_declared ~base_path (unavailable_cli (ref [])) with
-     | Error (A.Transport_unavailable _) -> ()
-     | _ -> fail "permanent CLI refusal suppressed recoverable HTTP");
-    check int "HTTP attempted once" 1 (F.post_count server);
-    ignore (check_failure "candle_appraisal_unavailable" (recorded_run ~base_path)))
-;;
-
-let test_mixed_http_candidates_remain_retryable () =
-  List.iter (fun reverse ->
-    with_case (fun ~sw ~net ~clock ~base_path ->
-      let unavailable = F.start_server ~sw ~net ~clock
-        (F.Reply_with (fun _ _ -> `Service_unavailable, unavailable_body)) in
-      let refused = F.start_server ~sw ~net ~clock
-        (F.Reply_with (fun _ _ -> `Bad_request, unavailable_body)) in
-      let slots = [{F.id="unavailable";base_url=unavailable.base_url};
-                   {F.id="refused";base_url=refused.base_url}] in
-      publish ~base_path ~cli_slots:[] (if reverse then List.rev slots else slots);
-      (match run_declared ~base_path (unavailable_cli (ref [])) with
-       | Error (A.Transport_unavailable _) -> ()
-       | _ -> fail "HTTP candidate ordering stranded a recovering route");
-      check int "recoverable candidate attempted" 1 (F.post_count unavailable);
-      check int "permanent candidate attempted" 1 (F.post_count refused))) [false;true]
-;;
-
-let test_opaque_provider_failure_remains_retryable () =
-  with_case (fun ~sw ~net ~clock ~base_path ->
-    let body = {|{"error":{"type":"provider_unavailable","message":"disconnected"}}|} in
-    let server = F.start_server ~sw ~net ~clock (F.Reply body) in
-    publish ~base_path ~cli_slots:[] [{F.id="opaque-provider";base_url=server.base_url}];
-    (match run_declared ~base_path (unavailable_cli (ref [])) with
-     | Error (A.Transport_unavailable _) -> ()
-     | _ -> fail "opaque provider envelope invented permanent refusal");
-    check int "provider was observed" 1 (F.post_count server);
-    ignore (check_failure "candle_appraisal_unavailable" (recorded_run ~base_path)))
-;;
-
-let test_http_bad_request_waits_for_change () =
-  List.iter (fun status -> with_case (fun ~sw ~net ~clock ~base_path ->
-    let body = {|{"error":{"message":"fixture bad request","type":"invalid_request_error"}}|} in
-    let server = F.start_server ~sw ~net ~clock
-      (F.Reply_with (fun _ _ -> status, body)) in
-    let slot = "candle-request-refused" in
-    publish ~base_path ~cli_slots:[] [{F.id=slot;base_url=server.base_url}];
-    let never_cli : Keeper_lane_cli_oneshot.runner =
-      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
-      fail "no CLI slot was declared" in
-    (match run_declared ~base_path never_cli with
-     | Error (A.Execution_rejected _) -> ()
-     | Error (A.Transport_unavailable detail | A.Invalid_response detail) ->
-       failf "HTTP request refusal lost its execution cause: %s" detail
-     | Ok _ -> fail "non-rest refusal produced an appraisal");
-    check int "refused request dispatches once" 1 (F.post_count server);
-    let output, selected = check_failure "candle_appraisal_execution_rejected"
-      (recorded_run ~base_path) in
-    check (option string) "receipt identifies refusing binding" (Some slot) selected;
-    check (list string) "actual HTTP dispatch survives" [slot] (dispatched output);
-    check_http_failure ~slot ~body ~invalid:false output)) [`Bad_request; `Payment_required]
-;;
-
-let test_rate_limit_without_cli_remains_retryable () =
-  with_case (fun ~sw ~net ~clock ~base_path ->
-    let body = {|{"error":{"message":"fixture rate limit","type":"rate_limit_error"}}|} in
-    let server = F.start_server ~sw ~net ~clock
-      (F.Reply_with (fun _ _ -> `Too_many_requests, body)) in
-    let slot = "candle-rate-rest" in
-    publish ~base_path ~cli_slots:[] [{F.id=slot;base_url=server.base_url}];
-    let never_cli : Keeper_lane_cli_oneshot.runner =
-      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
-      fail "no CLI slot was declared" in
-    (match run_declared ~base_path never_cli with
-     | Error (A.Transport_unavailable _) -> ()
-     | Error (A.Execution_rejected detail | A.Invalid_response detail) ->
-       failf "typed rate rest became a rejection: %s" detail
-     | Ok _ -> fail "rate refusal produced an appraisal");
-    check int "rate-limited HTTP dispatches once per run" 1 (F.post_count server);
-    let output, _ = check_failure "candle_appraisal_unavailable" (recorded_run ~base_path) in
-    check_http_failure ~slot ~body ~invalid:false output)
-;;
-
-let test_http_errored_choice_without_envelope_remains_retryable () =
-  with_case (fun ~sw ~net ~clock ~base_path ->
-    (* The content would be a valid grade if the provider had finished it.
-       [finish_reason:error] without an error envelope instead reaches
-       Complete_sync's typed Provider_interrupted branch. *)
-    let body =
-      {|{"id":"candle-interrupted","model":"fixture","choices":[{"index":0,"finish_reason":"error","message":{"role":"assistant","content":"{\"grade\":\"medium\"}"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|} in
-    let server = F.start_server ~sw ~net ~clock (F.Reply body) in
-    let slot = "candle-interrupted-choice" in
-    publish ~base_path ~cli_slots:[] [{F.id=slot;base_url=server.base_url}];
-    let never_cli : Keeper_lane_cli_oneshot.runner =
-      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
-      fail "no CLI slot was declared" in
-    (match run_declared ~base_path never_cli with
-     | Error (A.Transport_unavailable _) -> ()
-     | Error (A.Execution_rejected detail | A.Invalid_response detail) ->
-       failf "interrupted provider response became a permanent rejection: %s" detail
-     | Ok _ -> fail "errored choice was accepted as a completed grade");
-    check int "interrupted HTTP request dispatched once" 1 (F.post_count server);
-    let output, selected = check_failure "candle_appraisal_unavailable"
-      (recorded_run ~base_path) in
-    check (option string) "receipt identifies interrupted HTTP slot" (Some slot) selected;
-    check (list string) "only actual HTTP dispatch is recorded" [slot] (dispatched output);
-    check_http_failure ~slot ~body ~invalid:false output)
-;;
-
-let test_cli_setup_failure_is_not_binding_rest () =
-  with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
-    publish ~base_path ~cli_slots:[F.cli_primary_runtime] [];
-    let calls = ref [] in
-    (match run_declared ~base_path (unavailable_cli calls) with
-     | Error (A.Execution_rejected _) -> ()
-     | Error (A.Transport_unavailable detail | A.Invalid_response detail) ->
-       failf "CLI setup failure was flattened: %s" detail
-     | Ok _ -> fail "CLI setup failure produced an appraisal");
-    check (list string) "declared CLI attempted once" [F.cli_primary_runtime] (List.rev !calls);
-    let output, selected = check_failure "candle_appraisal_execution_rejected"
-      (recorded_run ~base_path) in
-    check (option string) "setup failure names the actual CLI" (Some F.cli_primary_runtime) selected;
-    check (list string) "setup dispatch remains observable" [F.cli_primary_runtime] (dispatched output))
-;;
-
-let test_hard_quota_requires_recovery_window () =
-  let module Exact = Agent_core.Exact_output in
-  let module Http = Agent_core.Llm_provider.Http_client in
-  List.iter (fun (retry_after, expected) ->
-    let cause = Exact.Completion_failed
-      {error=Http.ProviderFailure {kind=Http.Hard_quota {retry_after};message="quota"};
-       dispatch=Exact.Generation_dispatch_started} in
-    check bool "hard quota retries only a usable provider window" expected
-      (Exact_lane_failure.(is_transient (execution cause))))
-    [None,false; Some 0.,false; Some (-1.),false; Some nan,false;
-     Some infinity,false; Some 60.,true]
-;;
-
-let test_codex_rpc_refusal_disposition () =
-  List.iter (fun (code, retryable) ->
-    with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
-      publish ~base_path ~cli_slots:[F.cli_primary_runtime] [];
-      let runner : Keeper_lane_cli_oneshot.runner =
-        fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
-        Error (Fusion_official_client.Codex_failure (Runtime_codex_app_server.Rpc_error
-          {method_="turn/start";code=Some code;message="fixture RPC refusal";data=None})) in
-      (match run_declared ~base_path runner, retryable with
-       | Error (A.Execution_rejected _), false | Error (A.Transport_unavailable _), true -> ()
-       | _ -> fail "RPC refusal lost its typed retry disposition");
-      let code = if retryable then "candle_appraisal_unavailable" else "candle_appraisal_execution_rejected" in
-      ignore (check_failure code (recorded_run ~base_path))))
-    [-32700,false; -32600,false; -32601,false; -32602,false; -32603,true]
-;;
-
-let test_candidate_admission_refusal_waits_for_change () =
-  with_case (fun ~sw ~net ~clock ~base_path ->
-    let server = F.start_server ~sw ~net ~clock (F.Reply (openai_text (Yojson.Safe.to_string valid_answer))) in
-    let id = "candle-missing-credential" in
-    let snapshot = F.resolver_snapshot ~requires_api_key:true
-      ~source:base_path [{F.id; base_url=server.base_url}] in
-    ignore (F.publish_registry ~lane_id:"candle_appraiser" ~slot_ids:[id] ~cli_slot_ids:[] snapshot
-      : Runtime_exact_output_registry.t);
-    let never_cli : Keeper_lane_cli_oneshot.runner =
-      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ -> fail "no CLI declared" in
-    (match run_declared ~base_path never_cli with
-     | Error (A.Execution_rejected _) -> ()
-     | _ -> fail "permanent admission rejection became maintenance retry");
-    check int "missing frozen credential prevents generation" 0 (F.post_count server);
-    let output, selected = check_failure "candle_appraisal_execution_rejected" (recorded_run ~base_path) in
-    check (option string) "no candidate dispatched" None selected;
-    check (list string) "no dispatch invented" [] (dispatched output))
-;;
-
-let test_cli_timeout_remains_retryable () =
-  with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
-    publish ~base_path ~cli_slots:[F.cli_primary_runtime] [];
-    let calls = ref [] in
-    let timeout_cli : Keeper_lane_cli_oneshot.runner =
-      fun ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
-      calls := runtime_id :: !calls;
-      Error (Fusion_official_client.Claude_failure (Runtime_claude_code.Timeout 1.)) in
-    (match run_declared ~base_path timeout_cli with
-     | Error (A.Transport_unavailable _) -> ()
-     | Error (A.Execution_rejected detail | A.Invalid_response detail) ->
-       failf "known CLI timeout was stranded pending a change: %s" detail
-     | Ok _ -> fail "CLI timeout produced an appraisal");
-    check (list string) "timed out client attempted once" [F.cli_primary_runtime] (List.rev !calls);
-    let output, selected = check_failure "candle_appraisal_unavailable" (recorded_run ~base_path) in
-    check (option string) "timeout receipt names actual runtime" (Some F.cli_primary_runtime) selected;
-    check (list string) "timeout keeps its dispatch evidence" [F.cli_primary_runtime] (dispatched output))
-;;
-
-let test_codex_reasoning_admission_remains_retryable () =
-  with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
-    publish ~base_path ~cli_slots:[F.cli_primary_runtime] [];
-    let cli_runner : Keeper_lane_cli_oneshot.runner =
-      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
-      Error (Fusion_official_client.Codex_failure
-        (Runtime_codex_app_server.Reasoning_effort_admission_failed
-          {model = "fixture"; detail = "model/list timed out"})) in
-    (match run_declared ~base_path cli_runner with
-     | Error (A.Transport_unavailable _) -> ()
-     | Error (A.Execution_rejected detail | A.Invalid_response detail) ->
-       failf "reasoning admission failure stranded the payout: %s" detail
-     | Ok _ -> fail "failed reasoning admission produced an appraisal");
-    let output, selected = check_failure "candle_appraisal_unavailable"
-      (recorded_run ~base_path) in
-    check (option string) "admission receipt names actual runtime"
-      (Some F.cli_primary_runtime) selected;
-    check (list string) "admission failure keeps dispatch evidence"
-      [F.cli_primary_runtime] (dispatched output))
-;;
-
-let test_http_permanent_refusal_then_cli_rest_retries () =
-  with_case (fun ~sw ~net ~clock ~base_path ->
-    let body = {|{"error":{"message":"fixture refused input","type":"invalid_request_error"}}|} in
-    let server = F.start_server ~sw ~net ~clock
-      (F.Reply_with (fun _ _ -> `Bad_request, body)) in
-    let slot = "candle-permanent-before-cli-rest" in
-    publish ~base_path ~cli_slots:[F.cli_primary_runtime] [{F.id=slot;base_url=server.base_url}];
-    let calls = ref [] in
-    (match run_declared ~base_path (resting_cli calls) with
-     | Error (A.Transport_unavailable _) -> ()
-     | Error (A.Execution_rejected detail | A.Invalid_response detail) ->
-       failf "HTTP refusal suppressed recovering CLI: %s" detail
-     | Ok _ -> fail "two failed bindings produced an appraisal");
-    check int "refused HTTP tried once" 1 (F.post_count server);
-    check (list string) "resting fallback actually attempted" [F.cli_primary_runtime] (List.rev !calls);
-    let output, selected = check_failure "candle_appraisal_unavailable"
-      (recorded_run ~base_path) in
-    check (option string) "receipt retains last dispatched CLI" (Some F.cli_primary_runtime) selected;
-    check (list string) "both failed dispatches retained" [slot;F.cli_primary_runtime] (dispatched output);
-    check_http_failure ~slot ~body ~invalid:false output)
-;;
-
-(* Exercise the real HTTP refusal decoder and its durable appraiser receipt.
-   Pulse eligibility depends on this classification, not the HTTP status text. *)
-let test_provider_refusal ~status ~rejected () =
-  with_case (fun ~sw ~net ~clock ~base_path ->
-    let body = {|{"error":{"message":"fixture refusal"}}|} in
-    let server = F.start_server ~sw ~net ~clock
-      (F.Reply_with (fun _ _ -> status, body)) in
-    let slot = "candle-refused-request" in
-    publish ~base_path ~cli_slots:[]
-      [ { F.id = slot; base_url = server.base_url } ];
-    let calls = ref [] in
-    (* A typed provider refusal of the request is an execution rejection by
-       the variant's contract (Candle_appraisal.error): the declared
-       executions refuse to serve this request and the obligation waits for
-       a change event, not a pulse. *)
-    (match run_declared ~base_path (unavailable_cli calls) with
-     | Error (A.Execution_rejected _) | Error (A.Invalid_response _) ->
-       check bool "refusal parks until an explicit event" true rejected
-     | Error (A.Transport_unavailable _) ->
-       check bool "availability remains pulse retryable" false rejected
-     | Ok _ -> fail "provider refusal produced an appraisal");
-    check int "one HTTP request was dispatched" 1 (F.post_count server);
-    check (list string) "no undeclared CLI dispatch" [] !calls;
-    let code = if rejected then "candle_appraisal_execution_rejected"
-      else "candle_appraisal_unavailable" in
-    let output, selected = check_failure code (recorded_run ~base_path) in
-    check (option string) "receipt retains the refusing slot" (Some slot) selected;
-    (* The observation's invalid_output answers "was the model output
-       unusable"; a typed refusal of the request is not that, so the
-       refusal cases expect false here and carry their refusal through the
-       execution-rejection code above. *)
-    check_http_failure ~slot ~body ~invalid:false output)
-;;
-
-let test_invalid_http_then_valid_successor_keeps_both_slots () =
-  with_case (fun ~sw ~net ~clock ~base_path ->
-    let bad = F.start_server ~sw ~net ~clock (F.Reply malformed_body) in
-    let good =
-      F.start_server ~sw ~net ~clock (F.Reply (F.openai_response valid_answer))
-    in
-    let bad_slot = "candle-invalid-first"
-    and good_slot = "candle-valid-second" in
-    publish
-      ~base_path
-      ~cli_slots:[ F.cli_primary_runtime ]
-      [ { F.id = bad_slot; base_url = bad.base_url }
-      ; { F.id = good_slot; base_url = good.base_url }
-      ];
-    let cli_runner : Keeper_lane_cli_oneshot.runner =
-      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
-      fail "valid HTTP successor must finish before the CLI tail"
-    in
-    let answer =
-      match run_declared ~base_path cli_runner with
-      | Ok answer -> answer
-      | Error error -> fail (A.error_to_string error)
-    in
-    check
-      bool
-      "successor grade is accepted"
-      true
-      (answer.decision = A.Grade_decided (Option.get (Candle_grade.of_string "medium")));
-    check string "answer identifies its actual HTTP slot" good_slot answer.trace.slot_id;
-    check int "rejected predecessor dispatched once" 1 (F.post_count bad);
-    check int "valid successor dispatched once" 1 (F.post_count good);
-    let run = recorded_run ~base_path in
-    check
-      string
-      "answer and exact evidence share the run id"
-      run.run_id
-      answer.trace.run_id;
-    let outcome, output, selected = completed run in
-    check bool "run succeeded" true (outcome = Runs.Succeeded);
-    check (option string) "recorded answering slot" (Some good_slot) selected;
-    check
-      (list string)
-      "both actual HTTP dispatches are retained"
-      [ bad_slot; good_slot ]
-      (dispatched output);
-    check json "accepted answer is retained" valid_answer (U.member "result" output);
-    check int "one successful HTTP attempt records one parsed response" 1
-      (attempts output |> List.filter (fun event ->
-        U.member "kind" event = `String "response"
-        && U.member "slot" event = `String good_slot
-        && U.member "output" event = valid_answer) |> List.length);
-    check_http_failure ~slot:bad_slot ~body:malformed_body ~invalid:true output;
-    let (Runs.Exact_input input) = run.input in
-    check
-      json
-      "grade request keeps its exact domain input"
-      (A.input request)
-      (U.member "actual_input" input))
-;;
-
-let test_declared_cli_success_after_http_failure () =
-  List.iter (fun status ->
-  with_case (fun ~sw ~net ~clock ~base_path ->
-    let server =
-      F.start_server
-        ~sw
-        ~net
-        ~clock
-        (F.Reply_with (fun _ _ -> status, unavailable_body))
-    in
-    let slot = "candle-http-before-cli" in
-    publish
-      ~base_path
-      ~cli_slots:[ F.cli_primary_runtime ]
-      [ { F.id = slot; base_url = server.base_url } ];
-    let raw_text = Yojson.Safe.to_string valid_answer in
-    let calls = ref [] in
-    let cli_runner : Keeper_lane_cli_oneshot.runner =
-      fun ~runtime_id ~system_prompt ~output_schema ~prompt ->
-      calls := runtime_id :: !calls;
-      check string "CLI gets the standalone prompt as user input" "" system_prompt;
-      check json "CLI uses the same closed domain schema" (A.schema request) output_schema;
-      check
-        bool
-        "CLI receives the actual Goal input"
-        true
-        (Astring.String.is_infix ~affix:"Ship the ledger" prompt);
-      Ok raw_text
-    in
-    let answer =
-      match run_declared ~base_path cli_runner with
-      | Ok answer -> answer
-      | Error error -> fail (A.error_to_string error)
-    in
-    check int "HTTP was tried before CLI" 1 (F.post_count server);
-    check
-      (list string)
-      "one official client dispatch"
-      [ F.cli_primary_runtime ]
-      (List.rev !calls);
-    check
-      string
-      "answer trace uses the CLI runtime"
-      F.cli_primary_runtime
-      answer.trace.slot_id;
-    let outcome, output, selected = completed (recorded_run ~base_path) in
-    check bool "CLI answer completed the run" true (outcome = Runs.Succeeded);
-    check
-      (option string)
-      "registry identifies the CLI answer"
-      (Some F.cli_primary_runtime)
-      selected;
-    check
-      (list string)
-      "HTTP then CLI dispatches are recorded"
-      [ slot; F.cli_primary_runtime ]
-      (dispatched output);
-    check json "CLI answer is retained" valid_answer (U.member "result" output);
-    check int "CLI success retains one parsed response alongside its raw response" 1
-      (attempts output |> List.filter (fun event ->
-        U.member "kind" event = `String "response"
-        && U.member "slot" event = `String F.cli_primary_runtime
-        && U.member "output" event = valid_answer) |> List.length);
-    check
-      bool
-      "CLI raw answer is retained under the actual slot"
-      true
-      (List.exists
-         (fun event ->
-            U.member "slot" event = `String F.cli_primary_runtime
-            && U.member "raw_text" event = `String raw_text)
-         (attempts output));
-    check_http_failure ~slot ~body:unavailable_body ~invalid:false output))
-    [`Service_unavailable; `Bad_request]
-;;
-
-let test_bookkeeping_terminal_remains_retryable () =
-  with_case (fun ~sw ~net ~clock ~base_path:_ ->
-    let module Exact = Agent_core.Exact_output in
-    let server = F.start_server ~sw ~net ~clock (F.Reply {|{"input_tokens":1}|}) in
-    let id = "candle-bookkeeping" in
-    let snapshot = F.resolver_snapshot ~requires_token_measurement:true
-      ~source:"Candle bookkeeping retry" [{F.id; base_url=server.base_url}] in
-    let admitted_target = Exact.admit_target_ref snapshot id |> Result.get_ok in
-    let first = Exact.make_flow_candidate ~id ~admitted_target |> Result.get_ok in
-    let requirement = Exact.make_output_requirement ~schema:(A.schema request)
-      ~minimum_guarantee:Exact.Json_syntax in
-    let attempt = Exact.snapshot_flow ~first ~rest:[]
-      ~messages:[Agent_core.Types.user_msg "appraise"] requirement
-      |> Result.get_ok |> Exact.start_flow ~admission_class:Llm_provider.Admission_class.Standard |> Result.get_ok in
-    let measurement = ref None in
-    let result = Exact.execute_flow_once ~net ~clock
-      ~before_measurement_dispatch:(fun receipt -> measurement := Some receipt; Ok ())
-      ~on_measurement_terminal:(fun _ -> Ok ())
-      ~before_dispatch:(fun _ -> Error "bookkeeping unavailable")
-      ~before_advance:(fun ~failed:_ ~next:_ -> fail "terminal bookkeeping must not advance")
-      ~validate:(fun _ -> fail "failed dispatch must not validate") attempt in
-    match result, !measurement with
-    | Error (Exact.Flow_execution_terminal
-        {cause=Exact.Flow_before_dispatch_callback_failed {candidate;evidence;_} as cause;_}),
-        Some measurement ->
-        let failures = [cause;
-          Exact.Flow_attempt_start_failed {candidate=candidate.visit;
-            cause=Exact.Call_id_generation_failed "entropy unavailable";evidence};
-          Exact.Flow_measurement_start_failed {candidate=candidate.visit;
-            cause=Exact.Measurement_operation_id_generation_failed "entropy unavailable";evidence};
-          Exact.Flow_before_measurement_dispatch_callback_failed
-            {measurement;cause="measurement intent unavailable";evidence};
-          Exact.Flow_measurement_terminal_callback_failed
-            {measurement;cause="receipt unavailable";evidence}] in
-        List.iter (fun cause ->
-          check bool "same flow remains terminal" true
-            (Exact.flow_execution_terminal_kind cause = Exact.Non_advanceable_terminal);
-          List.iter (fun rejected ->
-            match Server_candle_appraiser.For_testing.terminal_error
-              ~rejected ~refused:false ~retryable:false cause with
-            | A.Transport_unavailable _ -> ()
-            | A.Invalid_response _ | A.Execution_rejected _ ->
-                fail "bookkeeping failure permanently rejected a payout") [false;true]) failures
-    | _ -> fail "fixture did not capture terminal bookkeeping evidence")
-;;
-
-let () =
-  run
-    "candle_appraiser_transport"
-    [ ( "declared transports"
-      , [ test_case "Codex reasoning admission remains retryable" `Quick
-            test_codex_reasoning_admission_remains_retryable
-        ; test_case "recoverable HTTP survives permanent CLI" `Quick test_transient_http_survives_permanent_cli_failure
-        ; test_case "mixed HTTP candidates recover in either order" `Quick test_mixed_http_candidates_remain_retryable
-        ; test_case "opaque provider failure remains retryable" `Quick test_opaque_provider_failure_remains_retryable
-        ; test_case "hard quota requires a recovery window" `Quick test_hard_quota_requires_recovery_window
-        ; test_case "RPC refusals retain typed retry disposition" `Quick test_codex_rpc_refusal_disposition
-        ; test_case "permanent admission refusal waits for change" `Quick test_candidate_admission_refusal_waits_for_change
-        ; test_case "bookkeeping terminal remains retryable" `Quick test_bookkeeping_terminal_remains_retryable
-        ; test_case
-            "HTTP bad request waits for a change"
-            `Quick test_http_bad_request_waits_for_change
-        ; test_case
-            "HTTP rate limit remains binding rest"
-            `Quick test_rate_limit_without_cli_remains_retryable
-        ; test_case
-            "HTTP errored choice without envelope remains retryable"
-            `Quick test_http_errored_choice_without_envelope_remains_retryable
-        ; test_case
-            "CLI setup failure is not binding rest"
-            `Quick test_cli_setup_failure_is_not_binding_rest
-        ; test_case
-            "known CLI timeout remains retryable"
-            `Quick test_cli_timeout_remains_retryable
-        ; test_case
-            "HTTP refusal preserves resting CLI recovery"
-            `Quick test_http_permanent_refusal_then_cli_rest_retries
-        ; test_case
-            "invalid HTTP then unavailable CLI remains rejected"
-            `Quick
-            test_invalid_http_then_unavailable_cli_stays_rejected
-        ; test_case
-            "all unavailable transports remain retryable"
-            `Quick
-            test_all_transport_failures_remain_retryable
-        ; test_case
-            "valid HTTP successor preserves failed predecessor evidence"
-            `Quick
-            test_invalid_http_then_valid_successor_keeps_both_slots
-        ; test_case "provider rejects unchanged request" `Quick
-            (test_provider_refusal ~status:`Bad_request ~rejected:true)
-        ; test_case "provider refuses authorization" `Quick
-            (test_provider_refusal ~status:`Forbidden ~rejected:true)
-        ; test_case "provider payment refusal parks until a payment change" `Quick
-            (test_provider_refusal ~status:`Payment_required ~rejected:true)
-        ; test_case "provider rate limit remains retryable" `Quick
-            (test_provider_refusal ~status:`Too_many_requests ~rejected:false)
-        ; test_case
-            "declared official CLI can answer after HTTP failure"
-            `Quick
-            test_declared_cli_success_after_http_failure
-        ] )
-    ]
-;;
+let () = run "Candle Add-on consumer"
+  ["original judgment", [
+    test_case "lost submit reply resumes original after restart" `Quick test_lost_submit_reply_reads_the_retained_original_after_restart;
+    test_case "unknown judgment stays terminal" `Quick test_unknown_judgment_is_terminal_even_after_an_event;
+    test_case "replacement cannot replay an unknown original" `Quick test_a_replacement_cannot_replay_an_unknown_original;
+    test_case "full Candle decoding checks every recipient" `Quick test_domain_decode_rejects_incomplete_recipient_weights;
+    test_case "capacity admission always reads first" `Quick test_capacity_wait_does_not_invent_a_retained_intent;
+    test_case "malformed state cannot authorize submit" `Quick test_malformed_worker_state_cannot_authorize_submission;
+    test_case "missing prompt never reaches worker" `Quick test_missing_prompt_never_calls_the_worker]]

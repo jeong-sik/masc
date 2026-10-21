@@ -100,9 +100,13 @@ val save_sessions_to_file : base_path:string -> unit -> unit
     Non-Eio callers perform the same work directly. *)
 
 val load_sessions_from_file : base_path:string -> unit -> unit
-(** Read/decode in the common I/O executor, then apply the immutable decoded
-    entries in the caller after checking cancellation. Call once in owner
-    activation before publishing the state/readiness capability to HTTP/stdio.
+(** Read/decode and prepare immutable per-field maps in the common I/O executor,
+    then merge each nonempty map into its current registry in the caller after
+    checking cancellation. Duplicate rows retain their original last-valid
+    mandatory/last-present optional values; unrelated current keys survive.
+    No individual decoded-row list or all-registry transaction is introduced.
+    Call once in owner activation before publishing the state/readiness
+    capability to HTTP/stdio.
     Startup health remains independent. Missing files restore nothing; unreadable,
     corrupt or invalid-root files restore nothing and retain a diagnostic.
     Original per-entry protocol/profile/timestamp handling remains unchanged.

@@ -181,6 +181,10 @@ type terminal_class =
   | Provider_integration
       (** provider response unparseable / unknown variant / provider-terminal
           / a non-transient server error whose code is outside the 5xx class *)
+  | Unmodeled_empty_completion
+      (** The provider answered with an empty turn and an unknown stop token.
+          The response was observed, but its recovery contract is unknown: no
+          same-path retry or candidate rotation is inferred. *)
   | Terminal_effect_dependency_unavailable
   | Terminal_effect_policy_rejection
   | Terminal_effect_runtime_failure
@@ -268,6 +272,10 @@ val response_observed : route -> bool
     terminal class, and the two
     effect fences with
     [Fenced_observation_unavailable], which the lanes set before any answer.
+    [Unmodeled_empty_completion] is [false]: an empty wire reply with an unknown
+    stop reason does not prove that the model observed the turn's input or its
+    replay evidence. It may be an unmodeled overflow or request refusal, so its
+    continuation must remain unsettled.
     [Internal_opaque] is [false] although it also holds an accept rejection
     without a no-progress hint: the route cannot tell that apart from an
     unhandled exception, so the evidence keeps its wake. *)

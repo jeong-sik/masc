@@ -6241,6 +6241,24 @@ let test_guarded_empty_truncation_requires_owner_carrier_at_core_boundary () =
     true (Keeper_runtime_failure_route.route_resumes_on_same_path persisted_route)
 ;;
 
+let test_unmodeled_empty_response_does_not_replay_candidates () =
+  let error = Agent_core.Provider_failure_attribution.core_error_of_http_error ~provider:"fixture"
+    (Llm_provider.Http_client.ProviderFailure
+      {kind=Llm_provider.Http_client.Empty_completion {stop_reason=Llm_provider.Types.Unknown "future_stop"};
+       message="original diagnostic"}) in
+  let attempts = ref [] in
+  let result, hints, rows = same_path_walk ~continuation:resume_chat_operation ["first";"next"]
+    (fun ~save candidate ->
+      attempts := candidate :: !attempts;
+      save Agent_core.Agent.After_tool_results_appended Wrote;
+      error) in
+  Alcotest.(check (list string)) "one provider attempt" ["first"] (List.rev !attempts);
+  Alcotest.(check int) "no deferred whole-runtime retry" 0 (List.length hints);
+  Alcotest.(check (list string)) "no same-path resume decision" [] rows;
+  Alcotest.(check (result string string)) "original failure is retained"
+    (Error (Agent_core.Error.to_string error)) (Result.map_error Agent_core.Error.to_string result)
+;;
+
 let test_deterministic_empty_stops_do_not_resume_after_saved_tool_results () =
   List.iter
     (fun stop_reason ->
@@ -7365,6 +7383,8 @@ let () =
             "a chat operation resumes after an attributed empty completion"
             `Quick
             test_a_chat_operation_resumes_after_attributed_empty_completion;
+          Alcotest.test_case "unmodeled response does not replay candidates" `Quick
+            test_unmodeled_empty_response_does_not_replay_candidates;
           Alcotest.test_case
             "guarded empty MaxTokens resumes the saved operation"
             `Quick

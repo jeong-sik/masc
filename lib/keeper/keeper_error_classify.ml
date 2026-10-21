@@ -186,21 +186,15 @@ let is_provider_wire_error (err : Agent_core.Error.t) : bool =
     (agent_core [Retry.verdict_of_empty_completion], [Empty_attributed]),
     with the typed stop_reason still on the value.
 
-    Deliberately excluded:
-
-    - [Api (InvalidRequest _)] — AGENT_CORE flattens only the unmodeled-stop_reason
-      and the context-overflow empty completions into [InvalidRequest].  The
-      first is intentionally non-retryable (agent_core
-      provider_failure_attribution.ml: retrying replays the identical prompt
-      and never terminates); the second replays the same oversized prompt.
-      Neither is recoverable by retry or failover, so no [InvalidRequest]
-      message text is matched here — free-form provider bodies are not a
-      classification source (see [is_provider_rejected_parse_error]).
-    - ["Context overflow: empty completion"] — a context-overflow diagnostic,
-      already classified by [is_context_overflow] on the typed path. *)
+    Unknown stop tokens retain the same typed EmptyCompletion shape but are
+    not evidence of model unavailability or an invalid request. The central
+    verdict excludes them and known overflows from ordinary empty recovery. *)
 let is_empty_completion_error (err : Agent_core.Error.t) : bool =
   match err with
-  | Agent_core.Error.Provider (Llm_provider.Error.EmptyCompletion _) -> true
+  | Agent_core.Error.Provider (Llm_provider.Error.EmptyCompletion {stop_reason; detail; _}) ->
+    (match Llm_provider.Retry.verdict_of_empty_completion ~stop_reason ~message:detail with
+     | Empty_attributed -> true
+     | Empty_overflow _ | Empty_unattributed _ -> false)
   (* [ParseError] is not an empty-completion shape: no producer renders the
      old "empty completion (no thinking" marker into a production
      [ParseError] at the pinned Agent Core (the renderer's callers are
@@ -478,10 +472,10 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
          | Agent_core.Error.Provider
              (Llm_provider.Error.ServerError { transient = true; _ }) ->
              Some Server_error
-         | Agent_core.Error.Provider
-             ( Llm_provider.Error.ProviderUnavailable _
-             | Llm_provider.Error.EmptyCompletion _ ) ->
+         | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
              Some Server_error
+         | Agent_core.Error.Provider (Llm_provider.Error.EmptyCompletion _) ->
+             if is_empty_completion_error err then Some Server_error else None
          | Agent_core.Error.Provider
              ( Llm_provider.Error.AuthError _
              | Llm_provider.Error.AuthorizationError _

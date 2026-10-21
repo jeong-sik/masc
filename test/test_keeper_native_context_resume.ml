@@ -246,12 +246,14 @@ let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain
         if !resume then Error "canonical write committed; acknowledgement uncertain" else Ok () in
     let config = Runtime_agent.default_config ~name:keeper_name ~provider_cfg
         ~system_prompt:"Ask before proceeding." ~tools:[] in
-    let config = {config with context=Some context;hooks=Some hooks;checkpoint_sink=Some sink} in
+    let config = {config with context=Some context;hooks=Some hooks;checkpoint_sink=Some sink;
+      session_id=Some session_id} in
     let dispatch checkpoint blocks =
       let agent_ref = ref None in
       let prepared = Native.prepare ~binding ~runtime_id ~config
           ~agent_core_checkpoint:checkpoint ~input:(Native.New_input {blocks;metadata=[]})
-          ~agent_ref () |> require "prepare owned input call" in
+          ~agent_ref () |> (function Ok prepared -> prepared
+            | Error detail -> failf "prepare owned input call failed: %s" detail) in
       Runtime_agent.run_blocks ~sw:turn_sw ~net:env#net ~config:(Native.config prepared)
         ~agent_ref ?agent_core_checkpoint:(Native.prepared_checkpoint prepared) blocks in
     let first = dispatch None [Agent_core.Types.Text goal] |> require "first input pause" in

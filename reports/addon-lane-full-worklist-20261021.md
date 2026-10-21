@@ -489,3 +489,16 @@ PR #44979 c4f796a5aa6670f95aad986f4ba4d8052ee4443f의 실제 선택 CI
 
 A01–H06의 원래 54개 작업명과 완료 기준은 변경하지 않았다. 이 foundation만으로
 E02·G03 또는 전체 목표의 완료를 선언하지 않는다.
+
+추가 관측: 위 새 production run39693756145는 컴파일 후 실행에서 실패했다.
+public owner 11건 중 9건 통과·2건 실패이며, 두 fixture의 대기 predicate가 owner idle 확인보다
+먼저 엄격한 original inventory를 읽다 directory-change 거절을 받았다. 나머지 host-cycle
+51건·commit 58건·worker-contract 6건은 실제 통과했다. 실패 원문을 보존하며 조사·수리하고,
+이 결과를 전체 production 성공으로 합산하지 않는다.
+
+관측 foundation [#44985](https://github.com/jeong-sik/masc/pull/44985)는 Native Stack44922의
+19번째 층이다. Dashboard 직접 관련 3파일94건과 TypeScript 검사는 실제 PASS이며 공개
+[검사 영수증](../docs/evidence/2026-10-22-exact-observation-timing/dashboard-verification.json)에
+범위와 source hash가 있다. OCaml parser/source 확인은 컴파일·실행과 구분한다.
+독립 draft 리뷰에서 발견한 세대 간 payload 정리, 재시작 뒤 합성 duration, 불가능한 failed
+overlay fixture는 수리했으며 frozen-head 재검토와 선택 실행 증거가 필요하다.

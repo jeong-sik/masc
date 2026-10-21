@@ -572,8 +572,12 @@ let test_registry_rows_reach_tui_without_synthetic_duration () =
     ~elapsed_s:2. ~selected_slot:None ~output:`Null () with
    | Ok () -> () | Error e -> fail (Exact.completion_error_to_string e));
   let measured=Exact.get registry ~run_id:"tui-original" |> Option.get in
-  let unknown={measured with status=Exact.Completed {origin=Exact.Producer;outcome=Exact.Succeeded;
-    elapsed_s=None;output=`Null;selected_slot=None;usage=None}} in
+  Exact.register_running registry ~run_id:"tui-unmeasured-original" ~lane:Exact.Workspace_curator
+    ~actor:"curator" ~started_at:20. ~input:(Exact.Exact_input `Null);
+  (match Exact.mark_completed_unmeasured registry ~run_id:"tui-unmeasured-original"
+    ~outcome:Exact.Succeeded ~selected_slot:None ~output:`Null () with
+   | Ok () -> () | Error e -> fail (Exact.completion_error_to_string e));
+  let unknown=Exact.get registry ~run_id:"tui-unmeasured-original" |> Option.get in
   List.iter (fun (run,expected) ->
     let summary=Exact.run_summary_to_yojson run in
     let listing=`Assoc ["has_more",`Bool false;"runs",`List [summary]] in

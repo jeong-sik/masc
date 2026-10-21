@@ -36,6 +36,8 @@ val history_page : request:history_request -> Yojson.Safe.t -> (history, string)
     appending to the captured immutable prefix. A missing next cursor ends only
     the observed stored prefix. Exact verification ids retain first-observed
     order across the prefix; malformed ids fail rather than disappear.
+    Identities come from the audit event or canonical activity payload inside
+    the validated physical observation, never from its transport envelope.
     Original records remain available for explicit full evidence reading;
     display summaries do not erase verdict reasons or authority metadata.
     Parsing/concatenation belongs on the CPU path. *)

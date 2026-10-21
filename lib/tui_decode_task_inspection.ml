@@ -99,11 +99,33 @@ let history ~task_id json =
   ) (Ok []) rows in
   Ok (List.rev reversed)
 
+let history_verification_id row =
+  let* envelope=Agent_core.Execution_json.object_fields ~context:"Task verification observation"
+    ~required:["source";"file";"offset";"event"] ~optional:[] row in
+  let* source=source (List.assoc "source" envelope) in
+  let* event=match List.assoc "event" envelope with
+    | `Assoc fields -> Ok fields
+    | _ -> Error "Task history event is not an object" in
+  let fields=match source with
+    | Tui_decode.Task_audit -> event
+    | Tui_decode.Task_activity ->
+      (match List.assoc_opt "payload" event with
+       | Some (`Assoc fields) -> fields
+       | Some _ | None -> []) in
+  match List.filter (fun (name,_) -> name="verification_id") fields with
+  | [] | [_,`Null] -> Ok None
+  | [_,json] -> Result.map Option.some (nonblank json)
+  | _ -> Error "Task history has duplicate verification identities"
+
 type history_source_state = Source_observed | Source_not_created
 type history =
-  { history_task_id : string; history_events : Tui_decode.task_history_event list
+  { history_task_id : string
   ; history_sources : (Tui_decode.task_history_source * history_source_state) list
-  ; history_records : Yojson.Safe.t list; history_verifications : string list; history_next_cursor : string option; history_cursors : string list }
+  ; history_events : Tui_decode.task_history_event list
+  ; history_records : Yojson.Safe.t list
+  ; history_verifications : string list
+  ; history_next_cursor : string option
+  ; history_cursors : string list }
 type history_request =
   { hr_task_id : string; hr_limit : int; hr_cursor : string option; hr_prefix : history option }
 let history_first ~task_id ~limit =
@@ -155,13 +177,7 @@ let history_page ~request json =
   let* _,rev_ids=match raw_events with
     | `List rows -> List.fold_left (fun prior row ->
       let* seen,ids=prior in
-      let* value=match row with
-        | `Assoc fields ->
-          (match List.filter (fun (name,_) -> name="verification_id") fields with
-           | [] | [_,`Null] -> Ok None
-           | [_,json] -> Result.map Option.some (nonblank json)
-           | _ -> Error "Task history has duplicate verification identities")
-        | _ -> Error "Task history event is not an object" in
+      let* value=history_verification_id row in
       match value with
       | None -> Ok (seen,ids)
       | Some id when Verification_ids.mem id seen -> Ok (seen,ids)

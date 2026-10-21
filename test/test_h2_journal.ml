@@ -1774,17 +1774,20 @@ let test_task_history_current_sources () = with_workspace (fun _env _sw base_pat
   let original=List.find (fun row -> Json_util.get_string row "source"=Some "activity-events") first.events in
   let original_file=Json_util.get_string original "file" |> Option.get in
   refuse_metadata_at (Filename.dirname original_file ^ "/_seq");
-  let emit kind = ignore (Activity_graph.emit config ~kind
+  let emit ?verification_id kind = ignore (Activity_graph.emit config ~kind
     ~actor:(Activity_graph.entity ~kind:"agent" keeper)
     ~subject:(Activity_graph.entity ~kind:"task" task_id)
-    ~payload:(`Assoc ["task_id",`String task_id]) ~tags:["task"] ()) in
-  emit "task.started";
+    ~payload:(`Assoc (["task_id",`String task_id]
+      @ Option.to_list (Option.map (fun id -> "verification_id",`String id) verification_id)))
+    ~tags:["task"] ()) in
+  emit ~verification_id:"canonical-verification" "task.started";
   let first=History.read ~config ~task_id ~max_events:1 () |> page in
   let cursor=first.next_cursor |> Option.get in
   let audit=Filename.concat (Workspace.masc_dir config) "events" in
   let absent=not (Sys.file_exists audit) in
   Workspace_utils_ops.log_event config (`Assoc ["task_id",`String task_id;"type",`String "task_transition";
     "ts",`String "2026-10-21T00:00:00Z";"actor",`String keeper;
+    "verification_id",`String "audit-verification";
     "handoff_context",`Assoc ["summary",`String "audit original handoff"]]);
   refuse_metadata_at "events/_seq";
   if absent then (match History.read ~config ~task_id ~max_events:1 ~cursor () with
@@ -1792,12 +1795,21 @@ let test_task_history_current_sources () = with_workspace (fun _env _sw base_pat
   let first=History.read ~config ~task_id ~max_events:1 () |> page in
   let cursor=first.next_cursor |> Option.get in
   let cursor=History.cursor_of_string (History.cursor_to_string cursor) |> require "two-source cursor" in
+  let prefix=Decode.history_page ~request:(Decode.history_first ~task_id ~limit:1)
+    (History.to_json first) |> require "captured two-source prefix" in
   emit "task.after-capture";
   Workspace_utils_ops.log_event config (`Assoc ["task_id",`String task_id;"type",`String "audit-after-capture"]);
-  let rec earlier cursor acc =
+  let rec earlier cursor prefix acc =
     let next=History.read ~config ~task_id ~max_events:1 ~cursor () |> page in
-    let acc=acc @ next.events in match next.next_cursor with None -> acc | Some cursor -> earlier cursor acc in
-  let all=first.events @ earlier cursor [] in
+    let request=Decode.history_earlier ~task_id ~limit:1 prefix |> Option.get in
+    let prefix=Decode.history_page ~request (History.to_json next) |> require "actual original continuation" in
+    let acc=acc @ next.events in match next.next_cursor with
+      | None -> acc,prefix | Some cursor -> earlier cursor prefix acc in
+  let older,decoded_prefix=earlier cursor prefix [] in
+  let all=first.events @ older in
+  check (list string) "original verification identities survive both physical source envelopes"
+    ["audit-verification";"canonical-verification"]
+    (List.sort String.compare decoded_prefix.history_verifications);
   let rows=Decode.history ~task_id (`List all) |> require "two-source original decode" in
   check bool "both original active stores retained" true
     (List.exists (fun row -> Json_util.get_string row "source"=Some "events") all

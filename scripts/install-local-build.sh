@@ -35,7 +35,8 @@
 # with exit status 2: no workspace found, no helper in --build-dir, or a helper
 # that predates the check. A workspace that does not exist yet has no
 # runtime.toml to judge (the server creates it on its first start), so the
-# install says so and goes on.
+# install says so and goes on. A non-directory path, a broken symlink or an
+# unobservable path is not a new workspace and stops the install.
 #
 # The guest exec shim of a microVM workspace goes with the server too. The
 # release installer places it (RFC-0427 B-2); a workspace deployed from local
@@ -193,7 +194,50 @@ else
         printf '%s\n' "${resolve_errors:-(none)}" >&2
         exit 1
       fi
-      if [ -d "$workspace_root" ]; then
+      # A failed shell directory test also means ENOTDIR, EACCES or a broken
+      # symlink. Only actual absence below an existing directory permits a
+      # new workspace; every other failed observation stops before replacement.
+      if ! workspace_kind=$(python3 - "$workspace_root" <<'PY'
+import errno
+import os
+import stat
+import sys
+
+def classify(path):
+    try:
+        status = os.stat(path)
+    except FileNotFoundError:
+        ancestor = path
+        while True:
+            try:
+                os.lstat(ancestor)
+            except FileNotFoundError:
+                parent = os.path.dirname(ancestor)
+                if parent == ancestor:
+                    raise
+                ancestor = parent
+                continue
+            # Follow a discovered symlink only after lstat established it is
+            # present: a dangling link must not become permission to install.
+            status = os.stat(ancestor)
+            if not stat.S_ISDIR(status.st_mode):
+                raise NotADirectoryError(errno.ENOTDIR, "workspace ancestor is not a directory", ancestor)
+            return "absent"
+    if not stat.S_ISDIR(status.st_mode):
+        raise NotADirectoryError(errno.ENOTDIR, "workspace is not a directory", path)
+    return "directory"
+
+try:
+    print(classify(sys.argv[1]))
+except OSError as error:
+    print(f"install-local-build: cannot observe workspace: {error}", file=sys.stderr)
+    sys.exit(2)
+PY
+      ); then
+        echo "install-local-build: workspace $workspace_root could not be checked; nothing installed." >&2
+        exit 2
+      fi
+      if [ "$workspace_kind" = directory ]; then
         echo "install-local-build: checking runtime.toml of $workspace_root (workspace from $workspace_source)"
         MASC_DEPLOYMENT_PREFLIGHT_HELPER="$preflight_helper" \
           "$repo/scripts/check-runtime-deployment-preflight.sh" \

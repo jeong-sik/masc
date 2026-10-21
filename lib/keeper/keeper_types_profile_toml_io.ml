@@ -103,7 +103,7 @@ let inspect_keeper_toml_content ~(path : string) content
           { defaults with manifest_path = Some path
                         ; id = Some id })
 
-let inspect_keeper_toml (path : string) =
+let read_keeper_toml_content (path : string) =
   match Safe_ops.read_file_safe path with
   | Error detail ->
     Error
@@ -112,7 +112,10 @@ let inspect_keeper_toml (path : string) =
       ; kind = Read_error
       ; detail
       }
-  | Ok content -> inspect_keeper_toml_content ~path content
+  | Ok content -> Ok content
+
+let inspect_keeper_toml (path : string) =
+  Result.bind (read_keeper_toml_content path) (inspect_keeper_toml_content ~path)
 
 let load_keeper_toml = inspect_keeper_toml
 
@@ -172,9 +175,9 @@ let keeper_toml_paths (dir : string) : string list =
     |> List.sort String.compare
     |> List.map (Filename.concat dir)
 
-let discover_keeper_toml_path (path : string) : keeper_toml_discovery =
+let discover_keeper_toml_read ~(path : string) contents : keeper_toml_discovery =
   let file = Filename.basename path in
-  match load_keeper_toml path with
+  match Result.bind contents (inspect_keeper_toml_content ~path) with
   | Ok (keeper_name, defaults) -> Loaded { keeper_name; defaults }
   | Error e ->
     let _emitted =
@@ -186,6 +189,9 @@ let discover_keeper_toml_path (path : string) : keeper_toml_discovery =
       { keeper_name = Filename.remove_extension file
       ; error = e
       }
+
+let discover_keeper_toml_path path =
+  discover_keeper_toml_read ~path (read_keeper_toml_content path)
 
 let discover_keepers_toml_with_paths (dir : string)
     : (string * keeper_toml_discovery) list =

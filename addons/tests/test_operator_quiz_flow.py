@@ -65,6 +65,14 @@ def review_comment(comment_id: int, body: str) -> dict:
             "path": "lib/x.ml", "line": 3, "body": body}
 
 
+def exact_payload(request: dict) -> dict:
+    (message,) = request["messages"]
+    if (not isinstance(message, dict) or set(message) != {"role", "text"}
+            or message["role"] != "user" or not isinstance(message["text"], str)):
+        raise AssertionError("the quiz must send the Exact Output user/text contract")
+    return json.loads(message["text"])
+
+
 class FakeHost:
     def __init__(self, *, page_size: int = 2, frame: int | None = None):
         self.board: list[dict] = []
@@ -125,7 +133,7 @@ class FakeHost:
                         "content": base64.b64encode(piece).decode()}
             case "exact_output":
                 answer = self.author if request["output"] == "author" else self.grade
-                return answer(json.loads(request["messages"][0]))
+                return answer(exact_payload(request))
             case "ask":
                 return self.answers.get(request["request_id"])
             case other:
@@ -309,7 +317,7 @@ class Judging(Base):
     def test_a_written_answer_lists_one_grade_request_with_the_key_labels(self):
         self.wrote("facts")
         (request,) = self.grade_requests()
-        payload = json.loads(request["messages"][0])
+        payload = exact_payload(request)
         self.assertEqual(request["system"], PROMPTS.grade)
         self.assertEqual(payload["expected"], {"kind": "choices", "labels": ["Facts"]})
         self.assertEqual(payload["answer"], {"kind": "wrote", "text": "facts"})
@@ -448,7 +456,7 @@ class Rubrics(Base):
         self.assertNotIn("the ledger records facts", json.dumps(ask))
         self.answer(session_id, q.Wrote("it keeps facts"))
         (request,) = [r for r in self.flow.listing() if r["kind"] == "exact_output"]
-        self.assertEqual(json.loads(request["messages"][0])["expected"],
+        self.assertEqual(exact_payload(request)["expected"],
                          {"kind": "rubric", "points": ["the ledger records facts"]})
         self.host.grade = judging("correct")
         self.host.run(self.flow)
@@ -509,7 +517,7 @@ class Disputes(Base):
         request_id = self.flow.dispute("d-1", ask_id, "q1", "the post says plans too")
         (request,) = self.grade_requests()
         self.assertEqual(request["request_id"], request_id)
-        dispute = json.loads(request["messages"][0])["dispute"]
+        dispute = exact_payload(request)["dispute"]
         self.assertEqual((dispute["note"], dispute["prior_verdict"]), ("the post says plans too", g.CORRECT))
         self.assertEqual([r["text"] for r in dispute["records"]], ["the ledger records facts"])
         self.host.grade = judging("incorrect", "facts only; the key was right but the answer missed plans")
@@ -913,7 +921,7 @@ class Frame(Base):
 
         # A frame that holds three records and not five.
         def fits(body):
-            return len(json.loads(body["messages"][0])["material"]) <= 3
+            return len(exact_payload(body)["material"]) <= 3
         self.flow = f.Flow(self.state, PROMPTS, fits)
         session_id = self.compose()
         seen = []
@@ -981,7 +989,7 @@ class Memory(Base):
 
         # A frame that holds two records and not four.
         def fits(body):
-            return len(json.loads(body["messages"][0])["material"]) <= 2
+            return len(exact_payload(body)["material"]) <= 2
         self.flow = f.Flow(self.state, PROMPTS, fits)
         seen = []
         self.host.author = lambda payload: seen.append(payload) or {"status": "invalid_output", "detail": "x"}

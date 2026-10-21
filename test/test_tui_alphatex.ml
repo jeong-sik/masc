@@ -7,6 +7,11 @@
 module Score = Masc_tui_alphatex_score
 module Alphatex = Masc_tui_alphatex
 
+let read_score source =
+  match Score.read source with
+  | Ok score -> score
+  | Error failure -> Alcotest.fail (Score.failure_text failure)
+
 let failure : Score.failure Alcotest.testable =
   Alcotest.testable
     (fun ppf failure -> Format.pp_print_string ppf (Score.failure_text failure))
@@ -390,8 +395,40 @@ let test_counts_at_their_edges () =
 
    Where the measures break and how wide a cell is are not compared: those
    are looked at on the screen. What a drawn tab owes whatever its cells look
-   like is that no line passes the pane, and that a measure the pane cannot
-   hold is the failure rather than a cut line. *)
+   like is that no line passes the pane. The reading decision must preserve
+   every original beat and bar, including its signs, even when a bar needs
+   several display fragments. *)
+
+let reading ~max_width score =
+  match Alphatex.layout ~max_width score with
+  | Ok systems -> List.concat systems
+  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+
+(* This checks original musical objects and edge decisions, not row shape,
+   spacing, text, or the number of fragments used to display a measure. *)
+let check_preserved (score : Score.t) fragments =
+  let expected = List.concat (List.mapi
+    (fun index (bar : Score.measure) ->
+      List.map (fun beat -> index + 1, beat) bar.beats) score.measures) in
+  let actual = List.concat_map (fun (part : Alphatex.fragment) ->
+    List.map (fun beat -> part.bar, beat) part.beats) fragments in
+  Alcotest.(check int) "every original beat occurs once"
+    (List.length expected) (List.length actual);
+  Alcotest.(check bool) "bar identity, order and original beat objects survive" true
+    (List.for_all2 (fun (bar, beat) (other_bar, other_beat) ->
+      bar = other_bar && beat == other_beat) expected actual);
+  List.iteri (fun index (source : Score.measure) ->
+    let parts = List.filter (fun (part : Alphatex.fragment) ->
+      part.bar = index + 1) fragments in
+    Alcotest.(check bool) "original bar with its ticks and signs is retained" true
+      (not (List.is_empty parts) && List.for_all
+        (fun (part : Alphatex.fragment) -> part.source == source) parts);
+    List.iteri (fun i (part : Alphatex.fragment) ->
+      Alcotest.(check bool) "left original edge occurs only before the first beat" true
+        (part.left = if i = 0 then Alphatex.Barline else Alphatex.Continuation);
+      Alcotest.(check bool) "right original edge occurs only after the last beat" true
+        (part.right = if i + 1 = List.length parts then Alphatex.Barline else Alphatex.Continuation)) parts)
+    score.measures
 
 let test_a_drawn_tab_stays_inside_the_pane () =
   match Alphatex.render_tab ~max_width:40 spike_riff with
@@ -402,10 +439,28 @@ let test_a_drawn_tab_stays_inside_the_pane () =
         (List.for_all (fun line -> String.length line <= 40) lines)
 
 let test_a_measure_the_pane_cannot_hold () =
-  match Alphatex.render_tab ~max_width:20 ":1 0.6 0.6" with
-  | Error (Too_wide _) -> ()
-  | Error (Unreadable _ as other) -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)
-  | Ok _ -> Alcotest.fail "a measure wider than the pane was drawn"
+  let score = read_score ":1 0.6 0.6" in
+  check_preserved score (reading ~max_width:20 score)
+
+let test_parallel_chords_remain_readable () =
+  let score = read_score (":16 " ^ String.concat " "
+    (List.init 16 (fun _ -> "(12.6 14.5 14.4 13.3 12.2 12.1)"))) in
+  (* Each simultaneous chord can fit this pane; adding the widths of notes
+     on different strings would refuse it as an indivisible beat. *)
+  check_preserved score (reading ~max_width:12 score)
+
+let test_continuation_keeps_music_and_signs () =
+  let score = read_score
+    "\\ro \\ae (1 2) :4 (12.6 14.5) -.6 r 10.1{gr} 5.1{d} \\rc 12 | :1 3.6 5.6" in
+  let fragments = reading ~max_width:20 score in
+  check_preserved score fragments;
+  Alcotest.(check bool) "reading continues instead of discarding an oversized bar" true
+    (List.exists (fun (part : Alphatex.fragment) ->
+      part.left = Alphatex.Continuation || part.right = Alphatex.Continuation) fragments)
+
+let test_long_score_keeps_original_bars () =
+  let score = read_score (String.concat " | " (List.init 1000 (fun _ -> ":16 r"))) in
+  check_preserved score (reading ~max_width:8 score)
 
 (* Two beats whose texts are wider than the ticks they hold (two-letter
    frets on sixteenths, a grace note ahead of a full beat) must not overwrite
@@ -514,10 +569,11 @@ let test_a_repeated_tab_stays_inside_the_pane () =
         (List.for_all (fun line -> String.length line <= 40) lines)
 
 let test_a_repeated_measure_the_pane_cannot_hold () =
-  match Alphatex.render_tab ~max_width:20 "\\ro :1 0.6 0.6 \\rc 12" with
+  match Alphatex.layout ~max_width:20
+    (read_score "\\ro :1 0.6 0.6 \\rc 12") with
   | Error (Too_wide _) -> ()
   | Error (Unreadable _ as other) -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)
-  | Ok _ -> Alcotest.fail "a measure wider than the pane was drawn"
+  | Ok _ -> Alcotest.fail "an indivisible beat with its original repeat close cannot fit"
 
 (* {1 The header}
 
@@ -532,11 +588,6 @@ let contains_substring haystack needle =
     && (String.sub haystack index needle_len = needle || go (index + 1))
   in
   needle_len = 0 || go 0
-
-let read_score source =
-  match Score.read source with
-  | Ok score -> score
-  | Error failure -> Alcotest.fail (Score.failure_text failure)
 
 (* %S-style quoting escapes every byte past ASCII into decimal escapes, so
    a Korean title would render as numbers: the rendered lines must carry the
@@ -817,13 +868,19 @@ let () =
     ; ( "the pane"
       , [ Alcotest.test_case "a drawn tab stays inside the pane" `Quick
             test_a_drawn_tab_stays_inside_the_pane
-        ; Alcotest.test_case "a measure the pane cannot hold" `Quick
+        ; Alcotest.test_case "a long measure retains every original beat" `Quick
             test_a_measure_the_pane_cannot_hold
+        ; Alcotest.test_case "parallel chords remain readable" `Quick
+            test_parallel_chords_remain_readable
+        ; Alcotest.test_case "continuation keeps music and signs" `Quick
+            test_continuation_keeps_music_and_signs
+        ; Alcotest.test_case "long score keeps original bars" `Quick
+            test_long_score_keeps_original_bars
         ; Alcotest.test_case "wide note text does not overwrite the next beat" `Quick
             test_wide_note_text_does_not_overwrite_the_next_beat
         ; Alcotest.test_case "a repeated tab stays inside the pane" `Quick
             test_a_repeated_tab_stays_inside_the_pane
-        ; Alcotest.test_case "a repeated measure the pane cannot hold" `Quick
+        ; Alcotest.test_case "indivisible beat with repeat close cannot fit" `Quick
             test_a_repeated_measure_the_pane_cannot_hold
         ; Alcotest.test_case "the rhythm line names each beat" `Quick
             test_the_rhythm_line_names_each_beat

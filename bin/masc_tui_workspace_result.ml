@@ -50,6 +50,18 @@ let publish results token message =
          if not (Atomic.compare_and_set results before after) then commit ()) in
   commit ()
 
+let publish_progress results token message =
+  let ready={ready_at_ns=Mtime_clock.elapsed_ns ();message} in
+  let rec commit () =
+    let before=Atomic.get results in
+    match before with
+    | Closed -> ()
+    | Open state ->
+      if List.exists (fun held -> held==token) state.pending then
+        let after=Open {state with ready_rev=ready::state.ready_rev} in
+        if not (Atomic.compare_and_set results before after) then commit () in
+  commit ()
+
 let take_ready results =
   let rec take () =
     let before = Atomic.get results in
@@ -69,7 +81,7 @@ let launch_registered ~dispatch ~on_not_run ~results ~boundary_error ~deliver pe
   | Some token ->
     let deliver_result result = publish results token (deliver result) in
     let run () = Fun.protect ~finally:(fun () -> retire_pending results token) (fun () ->
-      let result = try perform () with
+      let result = try perform (publish_progress results token) with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (boundary_error (Printexc.to_string exn)) in
       deliver_result result) in
@@ -90,9 +102,18 @@ let launch ?key ?(observation = false) ?observe_job ?(on_not_run = fun () -> ())
   launch_registered ~results ~on_not_run ~boundary_error ~deliver
     ~dispatch:(fun ~sw ~on_withdrawn run ->
       Masc_tui_workspace_job.fork ?key ~observation ?observe:observe_job
-        ~on_withdrawn state ~sw run) perform
+        ~on_withdrawn state ~sw run) (fun _publish -> perform ())
 
 let launch_session ~results ~boundary_error ~deliver perform =
   launch_registered ~results ~on_not_run:(fun () -> ()) ~boundary_error ~deliver
     ~dispatch:(fun ~sw ~on_withdrawn:_ run ->
-      Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)) perform
+      Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)) (fun _publish -> perform ())
+
+let launch_observation ?key ?observe_job ?(on_not_run=fun () -> ())
+    state ~results ~boundary_error ~progress ~deliver perform =
+  launch_registered ~results ~on_not_run ~boundary_error ~deliver
+    ~dispatch:(fun ~sw ~on_withdrawn run ->
+      Masc_tui_workspace_job.fork ?key ~observation:true ?observe:observe_job
+        ~on_withdrawn:(fun () -> Fun.protect ~finally:on_withdrawn on_not_run)
+        state ~sw run)
+    (fun publish -> perform (fun part -> publish (progress part)))

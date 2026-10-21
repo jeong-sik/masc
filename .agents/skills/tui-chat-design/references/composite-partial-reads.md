@@ -18,6 +18,11 @@
   소유하고 늦은 worker는 이전 수신함만 쓴다. ticket·authority 검증은 UI 반영 시 유지한다.
   child 시간은 관측 구간이며 unfinished의 끝은 UI 종료 경계다. 실제 worker 종료·순수 HTTP
   시간·paint·입력 가능·작업 완료 증거로 확대하지 않는다.
+- 공용 workspace 결과 수신함의 streaming observation도 같은 원칙을 따른다. 원래 등록을
+  가진 publisher만 부분 사실을 FIFO로 발행하고 종단에서 등록을 소비한다. 부분·종단은
+  같은 FIFO를 쓰며 먼저 주장한 유한 batch와 다음 발행 batch를 섞어 재정렬하지 않는다.
+  취소·세션 종료 뒤 발행을 막아도 이미 주장한 batch의 UI 권한은 별도로 확인한다.
+  producer의 실제 프로토콜 검증·부분 수신 시각·미도착 의미를 수신함이 대신 만들지 않는다.
 - header는 실패한 구성과 받은 구성을 함께 보인다. JSON/log에는 구성별 결과를 남기되 현재
   workspace/read owner·dataset 반영·후속 조회 판단을 바꾸지 않는다. 화면 문구나 배치 검사 대신
   receipt·구성·소유권·종단 상태의 연결을 확인한다.

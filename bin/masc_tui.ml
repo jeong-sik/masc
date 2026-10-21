@@ -14144,44 +14144,33 @@ let launch_ask_followup_load state ~mailbox =
   if state.view = Approvals && server_authority_ready state then
     match state.server_identity, Masc_tui_types.begin_ask_followup_read state with
     | Some expected_workspace, Some (request, submission, keeper_name) ->
-        let host = server_peer_host and port = state.port in
-        let enqueue_async = workspace_enqueue state in
-        let deliver result = enqueue_async mailbox (Ask_followup_finished (request, submission, result)) in
+        let host=server_peer_host and port=state.port in
+        let clock=Eio_context.get_clock_opt () in
+        let envelope=capture_workspace_message state in
+        let superseded,resolve=Eio.Promise.create () in
+        Masc_tui_types.supersede_ask_followup_worker state
+          (Some (request,fun detail -> ignore (Eio.Promise.try_resolve resolve detail)))
+          ~detail:"answer follow-up observation superseded";
+        let finish ()=Masc_tui_types.finish_ask_followup_worker state request in
         log_ask_followup request submission ~sources:(Masc_tui_types.current_ask_followup state)
-          ~phase:"started" ~source:None
-          ~received_ns:None ~outcome:"pending";
-        (match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
-         | Some sw, Some clock ->
-           let superseded, resolve = Eio.Promise.create () in
-           Masc_tui_types.supersede_ask_followup_worker state
-             (Some (request, fun detail -> ignore (Eio.Promise.try_resolve resolve detail)))
-             ~detail:"answer follow-up observation superseded";
-           let run () = Fun.protect
-             ~finally:(fun () -> Masc_tui_types.finish_ask_followup_worker state request)
-             (fun () ->
-               let result = try Eio.Fiber.first
-                 (fun () -> Masc_tui_http.observe_keeper_ask_followup ~clock ~expected_workspace
-                   ~keeper_name ~ask_id:submission.as_ask_id ~host ~port
-                   ~on_event:(fun event ->
-                     let received_ns = Mtime_clock.elapsed_ns () in
-                     enqueue_async mailbox (Ask_followup_observed (request, submission, event, received_ns))))
-                 (fun () -> Error (Eio.Promise.await superseded))
-                 with
-                 | Eio.Cancel.Cancelled _ as exn ->
-                     log_ask_followup request submission ~sources:None ~phase:"cancelled" ~source:None
-                       ~received_ns:None ~outcome:"cancelled";
-                     raise exn
-                 | exn -> Error (Printexc.to_string exn) in
-               Masc_tui_types.finish_ask_followup_worker state request;
-               deliver result) in
-           (match fork_workspace_job ~observation:true state ~sw run with
-            | () -> ()
-            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-            | exception exn ->
-                Masc_tui_types.finish_ask_followup_worker state request;
-                deliver (Error (Printexc.to_string exn)))
-         | None, (Some _ | None) | Some _, None ->
-             deliver (Error "Eio switch or clock is unavailable for answer follow-up observation"))
+          ~phase:"started" ~source:None ~received_ns:None ~outcome:"pending";
+        Masc_tui_workspace_result.launch_observation state ~results:mailbox.workspace_results
+          ~on_not_run:finish ~boundary_error:Fun.id
+          ~progress:(fun (event,received_ns) -> envelope (Ask_followup_observed (request,submission,event,received_ns)))
+          ~deliver:(fun result -> envelope (Ask_followup_finished (request,submission,result)))
+          (fun publish -> Fun.protect ~finally:finish (fun () ->
+            match clock with
+            | None -> Error "Eio clock is unavailable for answer follow-up observation"
+            | Some clock ->
+              try Eio.Fiber.first
+                (fun () -> Masc_tui_http.observe_keeper_ask_followup ~clock ~expected_workspace
+                  ~keeper_name ~ask_id:submission.as_ask_id ~host ~port
+                  ~on_event:(fun event -> publish (event,Mtime_clock.elapsed_ns ())))
+                (fun () -> Error (Eio.Promise.await superseded))
+              with Eio.Cancel.Cancelled _ as exn ->
+                log_ask_followup request submission ~sources:None ~phase:"cancelled" ~source:None
+                  ~received_ns:None ~outcome:"cancelled";
+                raise exn))
     | None, _ | Some _, None -> ()
 
 let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =

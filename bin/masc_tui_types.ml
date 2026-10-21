@@ -7912,9 +7912,13 @@ and task_creation_read_request = {
   tcr_original : task_dispatch_request;
   tcr_authority : workspace_authority;
   tcr_reading : unit ref;
-  tcr_ticket : Masc_tui_task_creation_read.request;
+  tcr_query : task_creation_query;
   tcr_job : unit ref;
 }
+and task_creation_query =
+  | Creation_query of Masc_tui_task_creation_read.request
+  | Original_task_query of Masc_tui_task_creation_read.task_request
+
 type task_creation_reader = {
   tci_original : task_dispatch_request;
   tci_authority : workspace_authority;
@@ -10623,26 +10627,54 @@ let begin_task_creation_inspection state =
     original.tdr_inspection <- source;
     Option.map (fun tcr_ticket ->
       let request={tcr_original=original;tcr_authority=state.workspace_authority;
-        tcr_reading=state.workspace_read_authority;tcr_ticket;tcr_job=ref ()} in
+        tcr_reading=state.workspace_read_authority;tcr_query=Creation_query tcr_ticket;tcr_job=ref ()} in
       original.tdr_inspection_pending <- Some request;request) ticket
+
+let task_creation_request_owned state request =
+  request.tcr_authority=state.workspace_authority
+  && request.tcr_reading==state.workspace_read_authority
+  && (match current_task_creation_reader state with
+      | Some reader -> reader.tci_original==request.tcr_original | None -> false)
 
 let complete_task_creation_inspection state request result =
   let original=request.tcr_original in
-  match original.tdr_inspection_pending with
-  | Some pending when pending==request ->
-    let admitted = request.tcr_authority=state.workspace_authority
-      && request.tcr_reading==state.workspace_read_authority
-      && (match current_task_creation_reader state with
-          | Some reader -> reader.tci_original==original | None -> false)
-      && Masc_tui_task_creation_read.is_current original.tdr_inspection request.tcr_ticket in
+  match original.tdr_inspection_pending,request.tcr_query with
+  | Some pending,Creation_query ticket when pending==request ->
+    let admitted=task_creation_request_owned state request
+      && Masc_tui_task_creation_read.is_current original.tdr_inspection ticket in
     if admitted then begin
-      original.tdr_inspection <- Masc_tui_task_creation_read.complete
-        original.tdr_inspection request.tcr_ticket result;
+      original.tdr_inspection <- Masc_tui_task_creation_read.complete original.tdr_inspection ticket result;
       original.tdr_inspection_pending <- None
     end else retire_task_creation_request original
       ~reason:(Masc_tui_task_creation_read.Workspace_unconfirmed "Original inspection ownership changed.");
     admitted
-  | Some _ | None -> false
+  | (Some _ | None),(Creation_query _ | Original_task_query _) -> false
+
+let begin_original_task_inspection state =
+  match current_task_creation_reader state with
+  | None -> None
+  | Some reader ->
+    let original=reader.tci_original in
+    let source,ticket=Masc_tui_task_creation_read.start_task original.tdr_inspection in
+    original.tdr_inspection <- source;
+    Option.map (fun ticket ->
+      let request={tcr_original=original;tcr_authority=state.workspace_authority;
+        tcr_reading=state.workspace_read_authority;tcr_query=Original_task_query ticket;tcr_job=ref ()} in
+      original.tdr_inspection_pending <- Some request;request) ticket
+
+let complete_original_task_inspection state request result =
+  let original=request.tcr_original in
+  match original.tdr_inspection_pending,request.tcr_query with
+  | Some pending,Original_task_query ticket when pending==request ->
+    let admitted=task_creation_request_owned state request
+      && Masc_tui_task_creation_read.task_is_current original.tdr_inspection ticket in
+    if admitted then begin
+      original.tdr_inspection <- Masc_tui_task_creation_read.complete_task original.tdr_inspection ticket result;
+      original.tdr_inspection_pending <- None
+    end else retire_task_creation_request original
+      ~reason:(Masc_tui_task_creation_read.Workspace_unconfirmed "Original Task reading ownership changed.");
+    admitted
+  | (Some _ | None),(Creation_query _ | Original_task_query _) -> false
 
 let task_handoff_may_focus state ~keeper = function
   | None -> false

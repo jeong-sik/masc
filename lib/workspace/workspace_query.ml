@@ -98,6 +98,38 @@ let read_task_creation_r config ~request_id =
 type task_status_location = Task_backlog | Task_archive
 type task_status_reading = { location : task_status_location; status : Masc_domain.task_status }
 
+type task_inspection =
+  | Inspected_task of { task : Masc_domain.task; location : task_status_location }
+  | Task_unobserved
+  | Task_deletion_recorded of Masc_domain.task_deletion_receipt
+
+let read_task_inspection_r config ~task_id =
+  let ( let* ) = Result.bind in
+  let primary () =
+    let* backlog=read_backlog_r config in
+    match List.filter (fun (task : task) -> task.id=task_id) backlog.tasks with
+    | [] -> Ok (backlog,None)
+    | [task] -> Ok (backlog,Some task)
+    | _ -> Error "backlog contains duplicate requested Task identities" in
+  if String.trim task_id="" then Error "requested Task identity is blank"
+  else
+    let* _,found=primary () in
+    match found with
+    | Some task -> Ok (Inspected_task {task;location=Task_backlog})
+    | None ->
+      let* archived=Workspace_task_id.read_archived_task_r config ~task_id in
+      (match archived with
+       | Some task -> Ok (Inspected_task {task;location=Task_archive})
+       | None ->
+         let* backlog,found=primary () in
+         match found with
+         | Some task -> Ok (Inspected_task {task;location=Task_backlog})
+         | None ->
+           match List.filter (fun receipt -> receipt.deleted_task_id=task_id) backlog.task_deletion_receipts with
+           | [] -> Ok Task_unobserved
+           | [receipt] -> Ok (Task_deletion_recorded receipt)
+           | _ -> Error "backlog contains duplicate requested Task deletion records")
+
 let read_task_status_r config ~task_id =
   let ( let* ) = Result.bind in
   let primary () =

@@ -1177,6 +1177,16 @@ let fetch_original_task_detail ~host ~port ~task_id ~previous =
     Masc_tui_response_decode.run ~name:"tools.original_task.decode_wait" (fun () ->
       Masc.Tui_decode_task_inspection.detail ?previous ~task_id json))
 
+(** Keep transport/workspace failures outside typed interpretation failures.
+    The caller binds the actual GET to its original workspace before flattening. *)
+let fetch_original_task_inspection ~host ~port ~task_id =
+  let path=Uri.make ~path:"/api/v1/dashboard/tasks/inspection" ~query:["task_id",[task_id]] () |> Uri.to_string in
+  Result.map (fun json -> Masc_tui_response_decode.run ~name:"task.original_inspection.decode_wait" (fun () ->
+    let decoded=Masc.Tui_decode_task_inspection.observation ~task_id json
+      |> Result.map_error (fun detail -> Masc_tui_task_creation_read.Invalid_reply detail) in
+    Result.bind decoded (Masc_tui_task_creation_read.prepare_task ~task_id)))
+    (get_json ~host ~port ~path)
+
 (** Fetch a keeper's durable tool-call log
     ([GET /api/v1/keepers/:name/tool-calls]). *)
 let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)

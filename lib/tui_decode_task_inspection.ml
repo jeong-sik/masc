@@ -70,3 +70,36 @@ let history_page ~request json =
   let* ()=if List.length events<=request.hr_limit then Ok () else Error "Task history page exceeds its requested demand" in
   let events=match request.hr_prefix with None -> events | Some prefix -> prefix.history_events @ events in
   Ok {history_task_id=id;history_events=events;history_next_cursor=next;history_cursors=seen}
+
+type deletion_cleanup = Cleanup_required | Cleanup_verified
+type deletion_observation = {
+  deletion_id : string; requested_at : string; cleanup : deletion_cleanup;
+}
+type observation = In_backlog of detail | In_archive of detail | Not_observed
+  | Deletion_recorded of deletion_observation
+let observation ~task_id json =
+  let* ()=validate json in
+  let* fields=Agent_core.Execution_json.object_fields ~context:"original Task observation"
+    ~required:["schema";"task_id";"observation";"task";"deletion"] ~optional:[] json in
+  let* ()=match List.assoc "schema" fields with
+    | `String "masc.task-inspection/v1" -> Ok () | _ -> Error "Unsupported original Task observation schema" in
+  let* id=nonblank (List.assoc "task_id" fields) in
+  let* ()=if id=task_id then Ok () else Error "Task observation names another original Task" in
+  let task=List.assoc "task" fields and deletion=List.assoc "deletion" fields in
+  match List.assoc "observation" fields,task,deletion with
+  | `String "backlog",(`Assoc _ as task),`Null ->
+    detail ~task_id (`Assoc ["task",task]) |> Result.map (fun task -> In_backlog task)
+  | `String "archive",(`Assoc _ as task),`Null ->
+    detail ~task_id (`Assoc ["task",task]) |> Result.map (fun task -> In_archive task)
+  | `String "not_observed",`Null,`Null -> Ok Not_observed
+  | `String "deletion_recorded",`Null,(`Assoc _ as deletion) ->
+    let* fields=Agent_core.Execution_json.object_fields ~context:"original Task deletion observation"
+      ~required:["deletion_id";"requested_at";"cleanup"] ~optional:[] deletion in
+    let* deletion_id=nonblank (List.assoc "deletion_id" fields) in
+    let* requested_at=nonblank (List.assoc "requested_at" fields) in
+    let* cleanup=match List.assoc "cleanup" fields with
+      | `String "required" -> Ok Cleanup_required
+      | `String "verified" -> Ok Cleanup_verified
+      | _ -> Error "Invalid original Task deletion cleanup observation" in
+    Ok (Deletion_recorded {deletion_id;requested_at;cleanup})
+  | _ -> Error "Invalid original Task observation shape or state"

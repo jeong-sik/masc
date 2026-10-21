@@ -56,6 +56,18 @@ val read_task_creation_r :
     request IDs are ambiguous, including after Task archival or deletion. *)
 
 type task_status_location = Task_backlog | Task_archive
+
+type task_inspection =
+  | Inspected_task of { task : Masc_domain.task; location : task_status_location }
+  | Task_unobserved
+  | Task_deletion_recorded of Masc_domain.task_deletion_receipt
+
+val read_task_inspection_r :
+  config -> task_id:string -> (task_inspection, string) result
+(** Strict primary, then exact archive, then primary recheck to cover restore.
+    Retained deletion evidence is reported only after both stores have no
+    observed Task. No fallback, repair or mutation. These are observations,
+    not an atomic cross-store snapshot or completion verdict. *)
 type task_status_reading = {
   location : task_status_location;
   status : Masc_domain.task_status;

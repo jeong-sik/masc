@@ -670,14 +670,18 @@ names. A line that starts with `/` is a command for the TUI instead:
   Retained commands live in this TUI session; they are not restart recovery.
 - `/task-inspect` — opens retained Task creations for this Keeper and the
   confirmed original workspace. `[` selects an older request, `]` a newer one,
-  and `r` reads its exact creation fact again. The original title, body and
+  and `r` reads the displayed source again. The original title, body and
   transport outcome remain visible beside the lookup. A failed refresh keeps
   the last fact and its failure. “Not observed” does not prove that creation
   failed; multiple records remain ambiguous. After a single ready creation
-  fact, `o` opens its matching loaded Task through the usual Tasks view. If no
-  matching row is loaded, the inspector stays open and reports that current
-  presence is unconfirmed. The creation fact itself does not prove current
-  status or completion. Esc closes the inspector.
+  fact, `o` reads that exact original Task inside the inspector, independently
+  of the global Task list. It distinguishes live backlog, archive, not observed,
+  retained deletion evidence and read failure. Full decoded Task fields remain
+  scrollable; `r` refreshes that Task and `b` returns to the creation facts.
+  A failed Task refresh keeps its last observation and the failure. Not observed
+  is inconclusive; a deletion record reports historical evidence and its cleanup
+  phase. The creation fact itself does not prove current status or completion.
+  Esc closes the inspector.
   Inspection never repeats creation, restores input or hands work to a Keeper.
   New input survives late replies. Closing/reopening or changing workspace
   retires old reply admission; retained observations belong to this TUI session.

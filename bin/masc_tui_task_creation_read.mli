@@ -33,3 +33,22 @@ val recorded_task : t -> string option
 val capture_transport : Masc_tui_task_dispatch.progress -> t -> t
 val document : t -> Masc_tui_detail_reading.t
 val move : count:int -> height:int -> Masc_tui_detail_reading.movement -> t -> t
+
+type task_request
+type task_snapshot
+val prepare_task : task_id:string -> Masc.Tui_decode_task_inspection.observation ->
+  (task_snapshot, error) result
+(** Pure full Task formatting; run with response decoding on the CPU worker. *)
+val start_task : t -> t * task_request option
+val task_request_id : task_request -> int64
+val task_request_key : task_request -> string
+val task_is_current : t -> task_request -> bool
+val task_observation : t ->
+  (Masc.Tui_decode_task_inspection.observation, error) Masc_tui_fetched.observation
+val task_pending : t -> bool
+val complete_task : t -> task_request ->
+  (task_snapshot, error) result -> t
+val task_on_screen : t -> bool
+val back_to_creation : t -> t
+(** A Task read remains attached to its original single ready creation ticket.
+    Closing/suspending/history selection retires it independently of transport. *)

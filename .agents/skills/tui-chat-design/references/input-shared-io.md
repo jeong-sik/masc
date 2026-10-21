@@ -89,10 +89,15 @@
   생성 transport 종단 사실과 조회 source는 별개다. 조회는 원래 request ID·두 workspace
   경로·양의 backlog revision·상태/Task ID cardinality를 검증하고, 미관측·단일 기록·복수
   기록·실패/중단을 typed 상태로 유지한다. 재조회는 명시적 `r`에서만 시작하며 실패해도
-  마지막 원래 사실을 남긴다. 단일 ready 기록의 `o`만 기존 Task 조회를 여는 명시적 의도다.
-  현재 loaded Task 행이 없으면 inspector를 유지하고 현재 존재 미확인을 알린다. 생성
-  사실을 global Task 목록의 존재로 추정하거나 일반 목록으로 조용히 보내지 않는다.
-  조회가 입력 복구·생성 replay·Keeper handoff·현재 Task 상태나 유용한 작업 완료를 허가하지 않는다.
+  마지막 원래 사실을 남긴다. 단일 ready 기록의 `o`는 global Task 행과 독립적으로 원래
+  Task를 직접 읽는다. 같은 inspector에서 live·archive·미관측·과거 삭제 기록을 typed
+  상태로 구분하고 읽기 실패로 존재나 부재를 추정하지 않는다. `r`은 표시 중인 source를
+  재조회하고 `b`는 생성 사실로 돌아간다. 전체 decoded Task 문서는 해석과 함께 CPU
+  worker에서 준비하며 마지막 Task 관측과 실패를 함께 보관한다. 생성과 Task ticket을
+  함께 결속하고 목록·현재 Keeper Task로 대체하거나 일반 목록으로 조용히 보내지 않는다.
+  primary 오류는 복구본으로 덮지 않고 archive 오류·식별 불가 행은 부재를 확정하지 않는다.
+  삭제 기록의 cleanup은 과거 관측이며 현재 물리 정리 성공이나 완료 판정이 아니다.
+  조회가 입력 복구·생성 replay·Keeper handoff·상태 변경이나 유용한 작업 완료를 허가하지 않는다.
   viewer·원래 wrapper·workspace authority/read epoch·ticket과 pending 객체가 함께 맞아야
   적용한다. 닫기·이력 이동·workspace 철회는 응답 권한을 먼저 retire하고 기존 관측 job만
   취소 요청한다. 실제 worker 정리와 pending UI source 종료는 별개다. 늦은 원래 응답을

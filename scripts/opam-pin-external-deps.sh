@@ -135,9 +135,11 @@ readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
 # clean checkout. The top-level lib source digest is unchanged.
 # cec423387 = ocaml-msx #52: the plain-CALL trap serves SNSMAT 0x0141,
 # GTSTCK 0x00D5 and GTTRIG 0x00D8, and the served-vector ledger records
-# whether the caller returned into ROM or RAM. Sangokushi II's second-unit
-# deploy and battle-direction prompts read those vectors, so before this pin
-# the shared machine could not see arrow keys at all. The top-level lib
+# whether the caller returned into ROM or RAM. Before this pin the same trap
+# admitted only CHSNS 0x009C, CHGET 0x009F, CHPUT 0x00A2 and 0x0156
+# (ocaml-msx 7cc5836 lib/msx.ml:1444), so a plain CALL to any of the three
+# newly served vectors, made while page 0 is RAM, got no served answer.
+# Which game paths issue those calls is not verified here. The top-level lib
 # source digest moves cc6489f2ddae4a48596b4879b3c0e368 -> 78f5ad93c70d726594517af5e0f4c57b.
 readonly OCAML_MSX_SHA="cec423387a7335f7d095e3a3489ec3e7272581fa"
 # DOS emulator core (8086 + BIOS/DOS interrupt surface + CGA/EGA/VGA video).

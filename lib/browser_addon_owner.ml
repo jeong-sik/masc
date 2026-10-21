@@ -208,7 +208,14 @@ let dispatch_upload t ~id ~actor ~route ~verb =
   | Ok uploads ->
     match Browser_addon_uploads.with_claim uploads ~id ~actor ~route ~verb (fun verb ->
       issue t ~incarnation:t.incarnation ~upload_admission:Scoped_upload ~route ~verb
-        ~actor:(Some actor) ~timeout_sec:B.default_timeout_sec ~only_if_idle:false) with
+        ~actor:(Some actor)
+        ~timeout_sec:(match verb with
+          | B.Page_act action -> B.Action.reply_timeout_sec action
+          | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
+          | Page_scene _ | Page_interact _ | Session_open _ | Session_close | Session_status
+          | Page_goto _ | Page_elements _ | Page_context _ | Page_instruct _ | Page_locate _
+          | Page_extract _ -> B.default_timeout_sec)
+        ~only_if_idle:false) with
     | Ok reply -> reply | Error detail -> refusal detail
 
 let model_port t incarnation run =

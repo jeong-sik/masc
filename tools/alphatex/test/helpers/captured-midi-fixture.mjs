@@ -40,4 +40,3 @@ export async function capturedMidiFixture(run, rows = captureMessages()) {
     await run({ root, input, path, files, rows, imported })
   } finally { await rm(root, { recursive: true, force: true }) }
 }
-

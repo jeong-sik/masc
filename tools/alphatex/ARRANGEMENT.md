@@ -10,6 +10,34 @@ editors retain their separate transports.
 
 ## Terminal workflow
 
+After simultaneous audio/MIDI recording, use `:capture-midi [ASSET]` on the
+captured take. It selects a new **whole-take MIDI1 variant**; `:edit-midi` opens
+it for note/expression editing, `:harmony` and `:revoice`. Return with `q`, then
+Enter places the edited asset independently. The original WAV, UMP, host-clock
+regions, loop takes and audio/MIDI placement corrections remain unchanged.
+Undo removes the derived asset, and save-as carries the raw take and variant.
+
+The variant uses the current arrangement tempo/meter, with nearest 960 PPQ ticks
+computed from the same integer microseconds-per-quarter stored in its SMF tempo.
+Initial silence uses the complete capture span, including MIDI before the
+recording request. Source/group pairs receive separate tracks and numbered
+MIDI ports; channels retain their original numbers. Track names identify the
+input and group. Bind those ports explicitly for external playback; independent
+ports do not collapse into one synth or destination. Recorded bank/program,
+controllers, pressure, bend and release velocities remain in the variant.
+SysEx7 fragments keep their individual times; system messages use SMF escapes.
+
+This is an explicit MIDI1 projection: MIDI2 channel values lose precision,
+sub-tick times round, and transport utility UMP stays only in the raw take.
+MIDI2 zero-velocity Note On remains an attack. Per-note/registered expression,
+note attributes, compound MIDI2 controllers and unsupported UMP refuse the
+conversion rather than being silently omitted. Mixed MIDI1/MIDI2 state on one
+source/group/channel, incomplete SysEx and ambiguous or unclosed notes also
+refuse it. No synthetic note-off or missing device state is invented. The SMF
+retains derivation metadata with source-part hashes, original clock, route map
+and projection policy. It does not inherit the audio recording's sound, trim,
+take selection or placement correction. Trim/place the new MIDI explicitly.
+
 Import files with `:import-wave /path/take.wav` or `:import-midi /path/song.mid`.
 Use `:import-practice /path/take` for a completed raw MIDI practice recording.
 With `:output AUDIO_UID`, Space realizes that source through its captured VST

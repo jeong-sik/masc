@@ -341,6 +341,11 @@ or a verified VST instrument.
 Projects save under `./music-projects` by default (`--project-root` changes this).
 An existing recording remains a separate take; the editor's **r** opens the capture
 screen and returns to the same phrase. It does not yet overdub into the project.
+For simultaneous takes recorded/imported in an arrangement, `:capture-midi`
+derives an editable MIDI1 variant without replacing the WAV or raw UMP. Use
+`:edit-midi` for note, chord and voicing experiments, then place the returned
+variant independently. Inputs/groups retain separate MIDI ports. See the
+[capture conversion workflow and expression boundaries](ARRANGEMENT.md#terminal-workflow).
 
 Move the cursor with arrows; Enter inserts or removes a note. Shift+arrows moves
 the selected note. `[`/`]` changes its length, `+`/`-` changes velocity, and `g`

@@ -1,10 +1,11 @@
 import { verifyPhraseSnapshot, importPhraseDocument } from './phrase-arrangement.mjs'
 import { capturePartNames, validateCaptureManifest } from './captured-source.mjs'
-import { readCaptureFiles, readCapture } from './session-data.mjs'
+import { readCaptureFiles, readCapture, jsonLines } from './session-data.mjs'
 import { capturePaths, captureMatches, inspectCaptureAsset } from './captured-source-files.mjs'
 import { practicePartNames } from './practice-source.mjs'
 import { practicePasses } from './practice-passes.mjs'
 import { practiceMidi } from './practice-midi.mjs'
+import { captureMidi } from './capture-midi.mjs'
 import { extractPracticeRegion } from './practice-region-midi.mjs'
 import { practicePaths, readPracticeFiles, inspectPracticeAsset } from './practice-source-files.mjs'
 import { readFile, open, mkdir, mkdtemp, lstat, link, rm, chmod } from 'node:fs/promises'
@@ -210,6 +211,17 @@ export async function importPracticeMidi(project, assetID, { sourceRoot, directo
     const packets = values.events.trimEnd().split('\n').map(line => JSON.parse(line).packet)
     const region = cut ? await extractPracticeRegion(asset, packets, cut, { directory: snapshot.directory, signal, executable: nativeExecutable }) : undefined
     const source = practiceMidi(asset, JSON.parse(values.context), packets, { signal, region })
+    return importPhraseDocument(project, source)
+  } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
+}
+export async function importCaptureMidi(project, assetID, { sourceRoot, directory = tmpdir(), signal } = {}) {
+  const snapshot = await prepareArrangementCapture(project, assetID, { sourceRoot, directory, signal })
+  try {
+    const asset = project.assets.find(asset => asset.id === assetID)
+    const packets = []
+    for await (const packet of jsonLines(join(snapshot.directory, capturePartNames.midi), { signal })) packets.push(packet)
+    const source = await captureMidi(asset, packets, { tempo: project.tempo, meter: project.meter, signal })
+    signal?.throwIfAborted()
     return importPhraseDocument(project, source)
   } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
 }

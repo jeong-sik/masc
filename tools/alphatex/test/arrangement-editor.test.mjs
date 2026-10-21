@@ -413,6 +413,33 @@ async function primeCapture(view, assemble = (project, asset) => ({ project, ass
   view.worker.emit('message',{id:job.id,ok:true,result:assemble(editArrangement(job.project,{kind:'asset-add',asset}),asset)});await flush()
   return asset
 }
+test('Stop retires an issued capture derivation before a late successful result can enter the document', async () => {
+  const view = await controller()
+  try {
+    await primeWave(view); await primeCapture(view)
+    view.command('capture-midi capture-1'); await flush()
+    const job = view.observed.requests.find(job => job.kind === 'capture-midi')
+    assert.ok(job)
+    view.command('stop'); await flush()
+    assert.ok(view.observed.requests.some(value => value.kind === 'cancel' && value.request === job.id))
+    view.worker.emit('message', { id: job.id, ok: true, result: importPhraseDocument(job.project, importMidiSource(midi())) })
+    await flush()
+    view.command('save'); await flush()
+    assert.deepEqual(view.observed.saved.at(-1).project, job.project)
+  } finally { await closeController(view) }
+})
+
+test('Stop in the same admitted input batch prevents a queued capture derivation from opening', async () => {
+  const view = await controller()
+  try {
+    await primeWave(view); await primeCapture(view)
+    view.command('capture-midi capture-1'); view.command('stop'); await flush()
+    assert.equal(view.observed.requests.some(job => job.kind === 'capture-midi'), false)
+    view.command('save'); await flush()
+    assert.equal(view.observed.saved.at(-1).project.assets.some(asset => asset.kind === 'midi'), false)
+  } finally { await closeController(view) }
+})
+
 test('captured-region commands persist typed bounds and select paired preparation with complete project ownership',async()=>{
   const view=await controller()
   try {

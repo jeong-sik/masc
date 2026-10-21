@@ -8,7 +8,7 @@ import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from './arrangement-playback.mjs'
 import { startSoundArrangement } from './arrangement-sound.mjs'
-import { arrangementEditor, arrangementAction, arrangementCommand, arrangementImported, arrangementPracticePass, arrangementPracticeSound, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
+import { arrangementEditor, arrangementAction, arrangementCommand, arrangementCommandAdmission, arrangementImported, arrangementPracticePass, arrangementPracticeSound, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
 import { captureFluidSound } from './soundfont.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
@@ -33,6 +33,7 @@ const help = [
   ':calibrate OUTPUT_UID IN_CH OUT_CH MAX_LAG_MS  audio loopback candidates; Esc/q cancels and returns',
   ':import-wave /path/take.wav     :import-midi /path/song.mid',
   ':import-take /path/session      :open-take [ASSET] (WAV + raw UMP)',
+  ':capture-midi [ASSET] derives the complete captured take as MIDI1 / 960 PPQ; :edit-midi edits it; raw WAV/UMP stays intact',
   ':import-practice /path/take     import original MIDI from a completed practice take',
   ':practice-soundfont ASSET [SF2_PATH] binds a SoundFont for that raw take; :practice-sound-original ASSET restores its recorded sound',
   ':practice-backing [ASSET] restores its editable phrase backing; Enter places it, :edit-midi edits it',
@@ -102,6 +103,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   const playerPlans = new Map(), planInspections = new Map()
   let recordStart = null, recording = null, input = null, midiInput = 'all', transportPending = false, inputDevices = null, discoveryTicket = 0
   let showTakes = null
+  let derivationAdmission = 0
   let calibration = null
   let calibrationInspection = null, recordingInspection = null
   const discovery = new AbortController()
@@ -721,13 +723,25 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
         if (accepting) { adopt(arrangementImported(editor, result)); status = value.kind === 'import-take' ? `Imported ${result.asset}; Enter opens WAV and MIDI` : `Imported ${result.asset}; Enter places it at the cursor` }
         break
       }
-      case 'practice-midi-region': case 'practice-midi': case 'practice-backing': {
+      case 'capture-midi': case 'practice-midi-region': case 'practice-midi': case 'practice-backing': {
         if (!accepting) return
+        stop()
+        const project = editor.project, expected = generation
+        let owned
         status = value.kind === 'practice-backing' ? 'Restoring captured phrase backing…' : 'Deriving performance as MIDI1 / 960 PPQ…'; draw()
-        const result = await request({ ...value, project: editor.project, sourceRoot })
-        if (accepting) {
-          adopt({ ...arrangementImported(editor, result), ...(value.kind === 'practice-midi-region' ? { tick: value.tick } : {}) })
-          status = `${value.kind === 'practice-backing' ? 'Restored backing' : value.kind === 'practice-midi-region' ? 'Derived selected region MIDI1 / 960 PPQ' : 'Derived whole performance MIDI1 / 960 PPQ'} ${result.asset}; Enter places it, :edit-midi edits it`
+        transport = { kind: 'preparing' }
+        try {
+          const result = await request({ ...value, project, sourceRoot }, id => { owned = preparing = { kind: 'worker', operation: 'derivation', id } })
+          if (accepting && generation === expected && editor.project === project) {
+            preparing = null
+            adopt({ ...arrangementImported(editor, result), ...(value.kind === 'practice-midi-region' ? { tick: value.tick } : {}) })
+            status = `${value.kind === 'practice-backing' ? 'Restored backing' : value.kind === 'practice-midi-region' ? 'Derived selected region MIDI1 / 960 PPQ' : 'Derived whole performance MIDI1 / 960 PPQ'} ${result.asset}; Enter places it, :edit-midi edits it`
+          }
+        } finally {
+          if (generation === expected) {
+            if (preparing === owned) preparing = null
+            transport = { kind: 'stopped' }
+          }
         }
         break
       }
@@ -762,15 +776,25 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       else if (key.name === 'backspace') prompt = [...prompt].slice(0, -1).join('')
       else if (key.name === 'return') {
         const line = prompt; prompt = null
+        if (arrangementCommandAdmission(line).kind === 'stop') {
+          derivationAdmission++
+          // Also invalidate derivations admitted in this same input batch,
+          // whose serialized command has not issued its worker request yet.
+          if (preparing?.operation === 'derivation') { stop(); status = 'Cancelling MIDI derivation'; draw(); return }
+        }
+        const admission = derivationAdmission
         enqueue(async () => {
           let result = arrangementCommand(editor, line)
+          const derivation = ['capture-midi', 'practice-midi-region', 'practice-midi', 'practice-backing'].includes(result.effect?.kind)
+          if (derivation && admission !== derivationAdmission) return
           if (result.editor.project !== editor.project || result.effect && !['record', 'record-stop', 'inputs', 'input', 'midi-input', 'midi-monitor', 'help', 'takes'].includes(result.effect.kind)) {
             await settleRecording()
+            if (derivation && admission !== derivationAdmission) return
             // Finalization may select a newly imported asset. Retain the source
             // the user chose before waiting; never reinterpret it on that asset.
             result = result.selection?.kind === 'take-selection'
               ? { editor: arrangementTakeSelected(editor, result.selection) }
-              : ['practice-midi-region', 'practice-midi', 'practice-backing', 'practice-pass', 'practice-passes'].includes(result.effect?.kind) ? { editor, effect: result.effect } : arrangementCommand(editor, line)
+              : ['capture-midi', 'practice-midi-region', 'practice-midi', 'practice-backing', 'practice-pass', 'practice-passes'].includes(result.effect?.kind) ? { editor, effect: result.effect } : arrangementCommand(editor, line)
           }
           adopt(result.editor); if (result.effect) await effect(result.effect); else status = 'Edited'
         })

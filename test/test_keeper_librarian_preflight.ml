@@ -29,12 +29,55 @@ let generated = Yojson.Safe.to_string (`Assoc
    execution basis, neither of which the prompt shows. *)
 type context_shape = No_context | Pending_source | Unavailable_source | Live_nothing_pending
 
+(* How the stored memory stands against the facts budget when the pass runs.
+   The budget is lowered after the fixture is stored, as an operator lowers it
+   under a Keeper that already holds more. *)
+type budget =
+  | Within_budget
+  | Ordinary_fact_over_budget
+      (** The one stored fact alone is over: dropping it is the way back. *)
+  | Source_memory_pushes_over_budget
+      (** The stored fact fits and the source memory fits; both together do
+          not. The commit counts both. *)
+
+(* Under one rendered ordinary fact (127 bytes) and over the empty set. *)
+let facts_budget_below_one_fact = "10"
+
+(* Over one rendered ordinary fact (127 bytes) and under one rendered source
+   fact with its 100-byte claim (over 250 bytes), so a fact of each kind is
+   within the budget alone and the two are not. *)
+let facts_budget_between_one_fact_and_both = "200"
+
+let source_claim_bytes = 100
+
+(* The source memory store as the Keeper's earlier [source_path] write left it. *)
+let write_source_memory ~keepers_dir ~keeper_id =
+  let module Source = Keeper_memory_source_current in
+  let snapshot : Source.t =
+    { revision = 1
+    ; updated_at = 1000.
+    ; trace_id = keeper_id
+    ; facts =
+        [ { claim = String.make source_claim_bytes 's'
+          ; first_seen = 1000.
+          ; source = { path = "notes.txt"; sha256 = "sha256:" ^ String.make 64 'a' }
+          } ]
+    ; invalidations = []
+    } in
+  let path = Source.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  match Fs_compat.save_file_atomic path (Yojson.Safe.to_string (Source.to_json snapshot)) with
+  | Ok () -> ()
+  | Error detail -> Alcotest.fail detail
+
+let drop_first_fact = {|{"new_claims":[],"dropped":[{"memory_id":"m1","reason":"This constraint is no longer applicable."}],"working_contexts":[],"working_state":null}|}
+
 let consumed_source =
   {Keeper_librarian_context.reference="consumed"; content=`String "An answered question"}
 
 let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
     ?(context_only = false) ?(context = No_context) ?(lane_enabled = true)
-    ?(maintenance = false)
+    ?(maintenance = false) ?(budget = Within_budget)
     ?(disable_during_preflight = false) ~name ~status ~body
     ~expected_jev ~expected_llm () =
   Fixture.with_official_client_runtimes @@ fun () ->
@@ -120,16 +163,24 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
      end_boundary_line=2;boundary_lines_seen=2} in
   let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr llm_calls;
-    Ok (if maintenance then
-      {|{"new_claims":[],"dropped":[{"memory_id":"m1","reason":"This constraint is no longer applicable."}],"working_contexts":[],"working_state":null}|}
+    Ok (if maintenance || budget <> Within_budget then drop_first_fact
       else if context_only then {|{"working_contexts":[]}|} else generated) in
   let committed = ref false in
-  Keeper_librarian_runtime.run_best_effort
+  let run_pass () = Keeper_librarian_runtime.run_best_effort
     ~write_scope:(if maintenance then Keeper_librarian_runtime.Memory_maintenance
       else if context_only then Context_only else Context_and_memory)
     ?durable_range_id:(if context_only || maintenance then None else Some range)
     ~cli_runner:runner ~on_memory_committed:(fun () -> committed := true)
-    ~base_path ~keepers_dir ~keeper_id:name ~expected_revision:(Some stored.revision) input;
+    ~base_path ~keepers_dir ~keeper_id:name ~expected_revision:(Some stored.revision) input in
+  let with_facts_budget bytes =
+    Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key
+      (Some bytes) run_pass in
+  (match budget with
+   | Within_budget -> run_pass ()
+   | Ordinary_fact_over_budget -> with_facts_budget facts_budget_below_one_fact
+   | Source_memory_pushes_over_budget ->
+     write_source_memory ~keepers_dir ~keeper_id:name;
+     with_facts_budget facts_budget_between_one_fact_and_both);
   Alcotest.(check int) "actual JEV dispatches" expected_jev !jev_calls;
   Alcotest.(check int) "actual generation dispatches" expected_llm !llm_calls;
   if not lane_enabled then (
@@ -161,8 +212,9 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
      | Ok None -> Alcotest.fail "no receipt" | Error detail -> Alcotest.fail detail);
     (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:name with
      | Ok (Some snapshot) ->
-       Alcotest.(check int) "current facts retained, or generation applied"
-         (if expected_llm = 0 then 1 else 2) (List.length snapshot.facts);
+       Alcotest.(check int) "current facts retained, dropped, or generation applied"
+         (if budget <> Within_budget then 0 else if expected_llm = 0 then 1 else 2)
+         (List.length snapshot.facts);
        if expected_llm = 0 then Alcotest.(check int) "no-change keeps revision"
          stored.revision snapshot.revision
      | Ok None -> Alcotest.fail "snapshot missing" | Error detail -> Alcotest.fail detail));
@@ -221,9 +273,9 @@ let () =
   let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
   Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Prompt_defaults.init ();
-  let case ?enabled ?excluded ?context_only ?context ?lane_enabled ?disable_during_preflight ?maintenance name status body jev llm =
+  let case ?enabled ?excluded ?context_only ?context ?lane_enabled ?disable_during_preflight ?maintenance ?budget name status body jev llm =
     Alcotest.test_case name `Quick
-      (run_case ~base_path ~registry ?enabled ?excluded ?context_only ?context ?lane_enabled ?disable_during_preflight ?maintenance
+      (run_case ~base_path ~registry ?enabled ?excluded ?context_only ?context ?lane_enabled ?disable_during_preflight ?maintenance ?budget
         ~name ~status ~body ~expected_jev:jev ~expected_llm:llm) in
   let prompt_shape name input expected =
     Alcotest.test_case name `Quick (fun () ->
@@ -248,6 +300,11 @@ let () =
         {Keeper_librarian_context.empty with unavailable=["events: fixture"]} false];
      "real dispatch and commit", [
       case ~maintenance:true "maintenance-reviews-excess-without-no-change-shortcut"
+        `OK (answer "keep_current") 0 1;
+      case ~budget:Ordinary_fact_over_budget "over-budget-memory-skips-the-no-change-shortcut"
+        `OK (answer "keep_current") 0 1;
+      case ~budget:Source_memory_pushes_over_budget
+        "over-budget-with-source-memory-skips-the-no-change-shortcut"
         `OK (answer "keep_current") 0 1;
       case ~lane_enabled:false "off-skips-jev-and-consumption" `OK (answer "keep_current") 0 0;
       case ~disable_during_preflight:true "accepted-pass-keeps-cli-after-off" `OK (answer "needs_generation") 1 1;

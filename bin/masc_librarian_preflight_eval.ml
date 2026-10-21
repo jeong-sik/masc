@@ -166,7 +166,7 @@ let run () =
         | (case, prompt) :: rest ->
           let observe observation = match save case.id observation with
             | Ok () -> () | Error detail -> raise (Sys_error detail) in
-          let observation = P.assess ~observe ~clock:env#clock ~keeper_id ~eligible:true ~prompt () in
+          let observation = P.assess ~observe ~clock:env#clock ~keeper_id ~eligible:(fun () -> true) ~prompt () in
           let* () = save case.id observation in loop rest in
       let* () = loop requests in
       let classifications = List.map (fun (case, _) ->

@@ -172,4 +172,10 @@ val render_fact : ?verified:bool -> fact -> string
 (** [~verified:false] marks a fact whose source could not be re-read this
     turn. *)
 val render_invalidation : invalidation -> string
+
+val budget_lines : t option -> string list
+(** The lines this store adds to the Memory OS facts payload that the commit
+    budget measures: every fact reserved as unverified, then every pending
+    invalidation. *)
+
 val to_json : t -> Yojson.Safe.t

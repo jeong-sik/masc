@@ -490,6 +490,68 @@ let test_pressure_observer_failure_preserves_post_unlink_error () =
          | Ok () -> fail "injected post-unlink ENOSPC unexpectedly succeeded"))
 ;;
 
+type system_wait_outcome = Preparation_succeeds | Preparation_fails | Preparation_invalidated
+
+let test_system_thread_waiter outcome () =
+  Eio_main.run @@ fun env ->
+  with_eio_guard @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let target = Filename.concat base "system-thread-waiter" in
+    let hook = blocking_hook base in
+    let waiting, resolve_waiting = Eio.Promise.create () in
+    let owner_result, resolve_owner = Eio.Promise.create () in
+    let waiter_result, resolve_waiter = Eio.Promise.create () in
+    let waiter_preparations = Atomic.make 0 in
+    let after_release () = match outcome with
+      | Preparation_fails -> raise Synthetic_owner_failure
+      | Preparation_succeeds | Preparation_invalidated -> () in
+    Eio.Switch.run @@ fun sw ->
+    with_blocking_hook_release hook @@ fun () ->
+    Eio.Time.with_timeout env#clock coordination_watchdog_seconds (fun () ->
+      Eio.Fiber.fork ~sw (fun () ->
+        let result = Eio_unix.run_in_systhread (fun () ->
+          KDD.ensure ~before_prepare:(fun () -> block_once hook after_release base)
+            ~before_directory_fsync:(fun _ -> ()) ~ownership_root:base target) in
+        Eio.Promise.resolve resolve_owner result);
+      Eio.Promise.await hook.entered;
+      Eio.Fiber.fork ~sw (fun () ->
+        let result = Eio_unix.run_in_systhread (fun () ->
+          KDD.For_testing.ensure ~after_validation:(fun () -> ())
+            ~before_claim:(fun () -> ())
+            ~before_wait:(fun () -> ignore (Eio.Promise.try_resolve resolve_waiting ()))
+            ~before_prepare:(fun () -> ignore (Atomic.fetch_and_add waiter_preparations 1 : int))
+            ~before_directory_fsync:(fun _ -> ()) ~ownership_root:base target) in
+        Eio.Promise.resolve resolve_waiter result);
+      Eio.Promise.await waiting;
+      (* The signal is sent under the completion mutex. Completion must acquire
+         that same mutex, so it cannot overtake the waiter's park operation. *)
+      (match outcome with
+       | Preparation_invalidated -> KDD.invalidate base
+       | Preparation_succeeds | Preparation_fails -> release_blocking_hook hook);
+      let waiter = Eio.Promise.await waiter_result in
+      (match outcome, waiter with
+       | Preparation_fails, Error (KDD.Operation_failed (Synthetic_owner_failure, _)) -> ()
+       | Preparation_fails, (Ok _ | Error _) -> fail "system-thread waiter lost owner's failure"
+       | (Preparation_succeeds | Preparation_invalidated), result ->
+         require_directory_lease "system-thread waiter" result);
+      release_blocking_hook hook;
+      let owner = Eio.Promise.await owner_result in
+      (match outcome, owner with
+       | Preparation_fails, Error (KDD.Operation_failed (Synthetic_owner_failure, _)) -> ()
+       | Preparation_fails, (Ok _ | Error _) -> fail "owner lost its ordinary failure"
+       | (Preparation_succeeds | Preparation_invalidated), result ->
+         require_directory_lease "system-thread owner" result);
+      match outcome with
+      | Preparation_succeeds | Preparation_fails ->
+        check int "waiter consumes owner's outcome without preparing again" 0
+          (Atomic.get waiter_preparations)
+      | Preparation_invalidated ->
+        check bool "invalidation lets the waiting system thread prepare again" true
+          (Atomic.get waiter_preparations > 0)))
+;;
+
 let test_concurrent_owned_writers_share_uncached_preparation () =
   Eio_main.run
   @@ fun env ->
@@ -1350,6 +1412,18 @@ let () =
         ] )
     ; ( "coordination"
       , [ test_case
+            "system-thread waiter shares preparation success"
+            `Quick
+            (test_system_thread_waiter Preparation_succeeds)
+        ; test_case
+            "system-thread waiter shares preparation failure"
+            `Quick
+            (test_system_thread_waiter Preparation_fails)
+        ; test_case
+            "invalidation wakes a system-thread waiter"
+            `Quick
+            (test_system_thread_waiter Preparation_invalidated)
+        ; test_case
             "concurrent owned writers share uncached preparation"
             `Quick
             test_concurrent_owned_writers_share_uncached_preparation

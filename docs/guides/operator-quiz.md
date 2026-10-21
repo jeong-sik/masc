@@ -113,6 +113,8 @@ max_output_tokens = 2048
 
 ## 결과 읽기
 
+TUI 에서는 `:` 팔레트에서 `go Operator quiz Results` 를 고르면 Results 가 바로 열린다. 이 항목은 TUI 가 이 설치를 본 뒤에 나온다. 설치가 Approvals 에 질문을 냈거나, Lanes 나 Lane Add-ons 화면을 한 번 연 뒤다. Results 는 왼쪽에 lane 별 목록, 오른쪽에 고른 행을 보여 준다. j/k 로 행을, Left/Right 로 lane 을 옮긴다.
+
 Results 에 다섯 lane 이 나온다.
 
 | lane | 한 행 | 보는 것 |

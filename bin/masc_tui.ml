@@ -14250,19 +14250,24 @@ let choose_keeper_row state index = state.keeper_cursor <- index
    The live worker is found in a fresh inventory read, not in the last one:
    a worker the cached snapshot names may since have been replaced. The jump
    travels with that read and ends with it. *)
-let open_answered_installation_results state ~mailbox =
+(* Opens one installation's Results: Approvals [g] after an answer, and the
+   palette's per-installation entries. *)
+let open_installation_results state ~mailbox declaration_id =
   let module Addons = Masc_tui_lane_addons in
+  let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
+  if view.loading then
+    report_action state "system" "A Lane request is pending; open the Results again when it finishes"
+  else begin
+    state.lane_addons <- Some {view with screen=Addons.Overview};
+    launch_lane_addons ~target:(Addons.Read_installation_results declaration_id)
+      state ~mailbox Addons.Inspect
+  end
+
+let open_answered_installation_results state ~mailbox =
   match Option.map (fun (feedback : Masc_tui_ask_projection.answer_feedback) -> feedback.af_asker)
           (current_ask_answer_feedback state) with
   | Some (Masc.Tui_decode_asks.Ask_installation { ai_declaration_id; _ }) ->
-      let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
-      if view.loading then
-        report_action state "system" "A Lane request is pending; press g again when it finishes"
-      else begin
-        state.lane_addons <- Some {view with screen=Addons.Overview};
-        launch_lane_addons ~target:(Addons.Read_installation_results ai_declaration_id)
-          state ~mailbox Addons.Inspect
-      end
+      open_installation_results state ~mailbox ai_declaration_id
   | Some (Masc.Tui_decode_asks.Ask_keeper _) | None ->
       report_action state "system" "The last answer was not to an installation"
 
@@ -27284,6 +27289,7 @@ and is loaded on demand through keeper_skill.
                         | Masc_tui_palette.Palette_collab | Masc_tui_palette.Palette_msx
                         | Masc_tui_palette.Palette_dos
                         | Masc_tui_palette.Palette_lane_addons
+                        | Masc_tui_palette.Palette_addon_results _
                         | Masc_tui_palette.Palette_goto _
                         | Masc_tui_palette.Palette_usage_scope _
                         | Masc_tui_palette.Palette_config _
@@ -27332,6 +27338,8 @@ and is loaded on demand through keeper_skill.
                  | Some (_, Masc_tui_palette.Palette_lane_addons) ->
                      launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect
+                 | Some (_, Masc_tui_palette.Palette_addon_results declaration_id) ->
+                     open_installation_results state ~mailbox:async_messages declaration_id
                  | Some (_, Masc_tui_palette.Palette_browser_lane) ->
                      open_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_connectors) ->

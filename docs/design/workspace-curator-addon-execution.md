@@ -184,21 +184,22 @@ for HITL and Board Attention are unaffected.
    briefing bytes. Package-only fixtures, parser success and source review are
    recorded separately from that end-to-end proof.
 
-Next coding boundary: retained host classification/briefing request types and
-strict durable recovery, then the shared package request store, host semantic
-validation before original-flow acceptance, and consumer.
-Keep domain authority on the host throughout these units; do not switch production
-to an incomplete transport adapter.
+Next coding boundary: switch the existing serialized production owner to the
+original admission consumer, preserve typed size refusal and whole-batch
+successors, recover actual domain commits and connect scoped result/export wakes.
+Keep domain authority on the host throughout; the current scheduler has not
+switched to the incomplete extraction.
 
 The first [batch and known-request storage foundation](workspace-curator-request-capture.md)
-now retains complete request data and validates original classification rows and
-briefing partitions. It does not yet implement the trusted host provenance
-envelope, restart enumeration, accepted-work/commit lifecycle, semantic port or
-production Addon consumer. The follow-up
-[typed host capture and original judgment](workspace-curator-host-capture.md)
-now defines the caller-supplied provenance envelope, physical-workspace binding
-and captured-template/input checks, but production metadata capture and the
-remaining lifecycle/semantic/consumer integration are still required above.
+retains complete request data and validates original classification rows and
+briefing partitions. Its original scope did not include host provenance or
+lifecycle integration. Subsequent [host capture](workspace-curator-host-capture.md),
+[progress](addon-original-request-progress.md),
+[discovery](addon-original-request-discovery.md) and
+[semantic port](workspace-curator-semantic-validation.md) provide those distinct
+foundations. The admission consumer below now captures actual Runtime metadata
+and restores original worker results. None of these individual foundations
+establishes the remaining production scheduler, domain commit or wake integration.
 
 
 ## Original admission consumer implementation

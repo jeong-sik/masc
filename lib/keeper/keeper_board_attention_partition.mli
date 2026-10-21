@@ -177,6 +177,12 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 val load : base_path:string -> keeper_name:string -> (t list, string) result
 
+val directory : base_path:string -> string
+(** The runtime-owned partition ledger directory. *)
+val validate_serialized : keeper_name:string -> string -> (unit, string) result
+(** Strict framing, production wire decode, root/keeper identity and transition
+    replay for preflight. Pure: no cache publication, file repair or recovery. *)
+
 val ensure_roots :
   base_path:string ->
   keeper_name:string ->

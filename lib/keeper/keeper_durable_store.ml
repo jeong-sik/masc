@@ -36,6 +36,19 @@ type store_scan =
 
 let empty_report = { rows = 0; refused = 0; first_refusal = None }
 
+let read_optional_regular_file path =
+  try
+    match Unix.lstat path with
+    | stat when stat.Unix.st_kind = Unix.S_REG ->
+      Ok (Some (Fs_compat.load_file path))
+    | _ -> Error (path ^ ": not a regular file")
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | (Sys_error _ | Unix.Unix_error _) as exn ->
+    Error (path ^ ": " ^ Printexc.to_string exn)
+;;
+
 let count_row report = function
   | Ok () -> { report with rows = report.rows + 1 }
   | Error detail ->
@@ -103,7 +116,7 @@ let files_under dir ~keep =
 
 (* A missing chat directory is an empty store. Once it exists, an inventory
    failure means the preflight has not read the transcripts the server uses. *)
-let transcript_files_under dir =
+let jsonl_files_under dir =
   let error detail = Error (dir ^ ": " ^ detail) in
   match Unix.lstat dir with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
@@ -768,18 +781,6 @@ let gate_pending_store =
       (fun ~base_path ->
          let path = Keeper_gate_path.pending ~base_path in
          let log_path = Keeper_gate_path.pending_log ~base_path in
-         let read path =
-           try
-             match Unix.lstat path with
-             | stat when stat.Unix.st_kind = Unix.S_REG ->
-               Ok (Some (Fs_compat.load_file path))
-             | _ -> Error (path ^ ": not a regular file")
-           with
-           | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
-           | Eio.Cancel.Cancelled _ as exn -> raise exn
-           | (Sys_error _ | Unix.Unix_error _) as exn ->
-             Error (path ^ ": " ^ Printexc.to_string exn)
-         in
          let validate contents =
            let module Codec = Keeper_approval_queue_codec in
            let* json =
@@ -790,7 +791,7 @@ let gate_pending_store =
            let* pending_map, delivery_map, next_sequence, snapshot_generation, _ =
              Codec.snapshot_of_yojson ~base_path json
            in
-           let* log = read log_path in
+           let* log = read_optional_regular_file log_path in
            let bytes = match log with Some bytes -> bytes | None -> "" in
            (* Preflight preserves incomplete tails for owner recovery. The
               runtime's read-and-recover path must not run in this scanner. *)
@@ -804,10 +805,33 @@ let gate_pending_store =
          in
          (* An absent snapshot is a reset store: the production loader ignores
             an orphan log, so the scanner does too. Never reset either file. *)
-         Ok (match read path with
+         Ok (match read_optional_regular_file path with
            | Ok None -> empty_report
            | Error detail -> count_row empty_report (Error detail)
            | Ok (Some contents) -> count_row empty_report (validate contents)))
+  }
+;;
+
+let board_attention_partition_store =
+  { store = "board attention partitions"
+  ; on_refusal =
+      "Board attention process-start recovery refuses the partition ledger; \
+       preserve its bytes and repair it while the owner is stopped"
+  ; scan =
+      (fun ~base_path ->
+         let module Partition = Keeper_board_attention_partition in
+         let* paths = jsonl_files_under (Partition.directory ~base_path) in
+         Ok (List.fold_left (fun report path ->
+           let verdict =
+             let* contents = read_optional_regular_file path in
+             match contents with
+             | None -> Error (path ^ ": disappeared during partition inventory")
+             | Some contents ->
+               let keeper_name = Filename.basename path |> Filename.chop_extension in
+               Partition.validate_serialized ~keeper_name contents
+               |> Result.map_error (fun detail -> path ^ ": " ^ detail)
+           in
+           count_row report verdict) empty_report paths))
   }
 ;;
 
@@ -819,7 +843,7 @@ let keeper_chat_transcript_store =
        server stopped, back up the file and repair or remove the named line"
   ; scan =
       (fun ~base_path ->
-         let* paths = transcript_files_under (Keeper_chat_store.chat_dir base_path) in
+         let* paths = jsonl_files_under (Keeper_chat_store.chat_dir base_path) in
          Ok
            (scan_files ~paths
               ~decode:(fun ~path:_ contents ->
@@ -839,6 +863,7 @@ module Id = struct
     | Memory_source_current
     | Disposition_receipts
     | Board_posts
+    | Board_attention_partitions
     | Provider_inputs
     | Turn_records
     | Turn_boundaries
@@ -887,6 +912,7 @@ let reader : Id.t -> reader = function
   | Id.Memory_source_current -> Preflight_only memory_source_current_store
   | Id.Disposition_receipts -> Preflight_only disposition_receipt_store
   | Id.Board_posts -> Preflight_only board_posts_store
+  | Id.Board_attention_partitions -> Preflight_only board_attention_partition_store
   | Id.Provider_inputs -> Preflight_only provider_input_store
   | Id.Turn_records -> Preflight_only turn_record_store
   | Id.Turn_boundaries -> Preflight_only turn_boundary_store

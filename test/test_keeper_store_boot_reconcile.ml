@@ -1455,6 +1455,66 @@ let test_gate_preflight_preserves_orphan_wal () =
     check string "orphan WAL remains untouched" "unread orphan WAL" (Fs_compat.load_file path))
 ;;
 
+let test_board_partition_preflight_uses_production_replay () =
+  with_workspace (fun config ->
+    let module Partition = Keeper_board_attention_partition in
+    let module Candidate = Partition.Candidate in
+    let base_path = config.Workspace.base_path in
+    let keeper_name = "preflight-keeper" in
+    let signal : Board_dispatch.board_signal =
+      { kind = Board_dispatch.Board_post_created; post_id = "preflight-post"
+      ; author = "external"; title = "Preflight"; content = "Retained evidence"
+      ; hearth = None; updated_at = Some 1.0 } in
+    let candidate : Candidate.candidate =
+      { candidate_id = Candidate.candidate_id_of_signal ~keeper_name signal
+      ; keeper_name; signal; keeper_context = `Assoc ["keeper", `String keeper_name]
+      ; recorded_at = 1.0; status = Candidate.Pending {last_delivery_failure=None} } in
+    (match Partition.ensure_roots ~base_path ~keeper_name [candidate] with
+     | Error detail -> fail detail | Ok _ -> ());
+    let partition = match Partition.load ~base_path ~keeper_name with
+      | Ok [partition] -> partition
+      | Ok _ -> fail "fixture must create one production partition"
+      | Error detail -> fail detail in
+    let path = Filename.concat (Partition.directory ~base_path) (keeper_name ^ ".jsonl") in
+    let current = Partition.to_yojson partition in
+    let replace name value = match current with
+      | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
+      | _ -> fail "production partition must encode an object" in
+    let row json = Yojson.Safe.to_string json ^ "\n" in
+    List.iter (fun (label, bytes, refused) ->
+      write_bytes path bytes;
+      let before = Array.to_list (Sys.readdir (Filename.dirname path)) |> List.sort String.compare in
+      (match D.preflight_scan D.Id.Board_attention_partitions with
+       | None -> fail "partitions must have a preflight scan"
+       | Some scan -> match D.run scan ~base_path with
+         | Error detail -> fail detail
+         | Ok report ->
+           check int (label ^ ": one ledger") 1 report.rows;
+           check int (label ^ ": refusal") refused report.refused);
+      check string (label ^ ": bytes retained") bytes (Fs_compat.load_file path);
+      check (list string) (label ^ ": no recovery files") before
+        (Array.to_list (Sys.readdir (Filename.dirname path)) |> List.sort String.compare))
+      [ "current production row", row current, 0
+      ; "old schema", row (replace "schema_version" (`Int 0)), 1
+      ; "foreign keeper", row (replace "keeper_name" (`String "another")), 1
+      ; "forged root", row (replace "partition_id" (`String "forged")), 1
+      ; "changed immutable identity", row current ^ row (replace "created_at" (`Float 2.0)), 1
+      ; "incomplete tail", Yojson.Safe.to_string current, 1
+      ])
+;;
+
+let test_board_partition_preflight_refuses_failed_inventory () =
+  with_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let directory = Keeper_board_attention_partition.directory ~base_path in
+    write_bytes directory "a file is not a partition inventory";
+    match D.preflight_scan D.Id.Board_attention_partitions with
+    | None -> fail "partitions must have a preflight scan"
+    | Some scan -> match D.run scan ~base_path with
+      | Error _ -> ()
+      | Ok _ -> fail "failed partition inventory was accepted as empty")
+;;
+
 let () =
   run
     "keeper store boot reconcile"
@@ -1497,6 +1557,10 @@ let () =
             test_gate_preflight_replays_wal_without_repair
         ; test_case "Gate preflight preserves an orphan WAL" `Quick
             test_gate_preflight_preserves_orphan_wal
+        ; test_case "partition preflight uses production decode and replay" `Quick
+            test_board_partition_preflight_uses_production_replay
+        ; test_case "partition preflight refuses failed inventory" `Quick
+            test_board_partition_preflight_refuses_failed_inventory
         ; test_case "admission preflight decodes and preserves pending input" `Quick
             test_preflight_reads_admission_queue_without_consuming
         ; test_case "the preflight names the transcript line appends refuse" `Quick

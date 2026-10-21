@@ -270,6 +270,7 @@ const coverage = {
 const compositionNode = {
   node_id: 'lane',
   execution_id: 'exec-1',
+  execution_origin: 'fresh_dispatch',
   tool_name: 'keeper_lane_status',
   input: {},
   schedule: {
@@ -345,6 +346,26 @@ const activationEvidence = {
   async_result_deliveries: [],
   async_actions: [],
 }
+
+describe('current composition evidence wire fields', () => {
+  it('retains physical execution identity and typed node origin from the server', () => {
+    const invocation = { kind: 'composition', origin: { kind: 'session_composition' },
+      execution_id: 'exec-root', tool_name: 'keeper_compose_proof' }
+    for (const execution_origin of ['fresh_dispatch', 'retained_completion', 'dispatch_refused']) {
+      const response = { schema: 'masc.skill-evidence/v7', status: 'observed', reference,
+        activation: { selection: 'most_recent_observed', evidence: { ...activationEvidence,
+          activation: { ...activationPayload, invocation } } },
+        composition: { ...compositionEvidence, executor_settlements: [{ ...compositionNode, execution_origin }] },
+        composition_statistics: null, coverage: { ...coverage, composition_records_read: 1 } }
+      const decoded = decodeSkillEvidenceResponse(response)
+      expect(decoded.composition?.executor_settlements[0]?.execution_origin).toBe(execution_origin)
+      expect(decoded.activation?.selection === 'most_recent_observed'
+        && decoded.activation.evidence.activation.invocation).toEqual(invocation)
+      expect(() => decodeSkillEvidenceResponse({ ...response, composition: { ...response.composition,
+        executor_settlements: [{ ...compositionNode, execution_origin: 'invented' }] } })).toThrow()
+    }
+  })
+})
 
 function sharedAsyncSkillEvidence() {
   const activation = sharedAsyncActionLedger.activations[0]!

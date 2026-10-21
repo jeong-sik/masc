@@ -3850,6 +3850,20 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
          | [ Masc.Tui_decode_tools.Skill_task "task-001"; Masc.Tui_decode_tools.Skill_keeper_profile ] -> true
          | _ -> false);
       (match profile.esp_flow with
+       | None -> Alcotest.fail "missing declared graph"
+       | Some flow ->
+           Alcotest.(check bool) "declared graph is renderable" true
+             (Result.is_ok (Tui_decode_tools.skill_flow_mermaid flow));
+           (match flow.sf_nodes with
+            | [] -> Alcotest.fail "missing nodes"
+            | node :: _ ->
+                Alcotest.(check bool) "duplicate identity is refused" true
+                  (Result.is_error (Tui_decode_tools.skill_flow_mermaid {flow with sf_nodes = node :: flow.sf_nodes}));
+                let missing = {Tui_decode_tools.sfd_node_id = "absent"; sfd_kind = "data"} in
+                let changed = {node with sfn_dependencies = [missing]} in
+                Alcotest.(check bool) "dangling data dependency is refused" true
+                  (Result.is_error (Tui_decode_tools.skill_flow_mermaid {flow with sf_nodes = [changed]}))));
+      (match profile.esp_flow with
        | Some { sf_nodes = [ node ]; sf_batches = [ batch ] } ->
          Alcotest.(check string) "flow node tool" "keeper_lane_status" node.sfn_tool_name;
          Alcotest.(check string) "flow batch mode" "concurrent" batch.sfb_execution_mode

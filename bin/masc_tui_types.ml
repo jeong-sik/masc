@@ -11700,7 +11700,11 @@ let tools_skill_profiles (state : state) =
   match state.tools_inventory with
   | Some { Masc.Tui_decode_tools.ts_effective =
              Some (Masc.Tui_decode_tools.Effective_surface_available { ets_skill_profiles; _ }); _ } ->
-      ets_skill_profiles
+      let normal, compositions = List.partition (fun profile ->
+        match profile.Masc.Tui_decode_tools.esp_io with
+        | Masc.Tui_decode_tools.Model_orchestrated -> true
+        | Composition_io _ -> false) ets_skill_profiles in
+      normal @ compositions
   | Some
       { Masc.Tui_decode_tools.ts_effective =
           ( None

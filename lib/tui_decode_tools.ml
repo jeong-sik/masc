@@ -1180,3 +1180,34 @@ let decode_tool_snapshot json =
     ; ts_effective
     ; ts_skill_activations
     }
+
+let skill_flow_mermaid flow =
+  let module Nodes = Map.Make (String) in
+  let label value =
+    let output = Buffer.create (String.length value) in
+    String.iter (fun char -> match char with
+      | '"' | '<' | '>' | '&' | '#' | '\\' | '|' ->
+          Buffer.add_string output (Printf.sprintf "#%d;" (Char.code char))
+      | '\n' | '\r' | '\t' -> Buffer.add_char output ' '
+      | char when Char.code char < 32 || Char.code char = 127 -> ()
+      | char -> Buffer.add_char output char) value;
+    Buffer.contents output
+  in
+  let indexed = List.mapi (fun index node -> node, "n" ^ string_of_int index) flow.sf_nodes in
+  let* index = List.fold_left (fun result (node, id) ->
+    let* index = result in
+    if Nodes.mem node.sfn_id index then Error "Duplicate declared Skill node identity"
+    else Ok (Nodes.add node.sfn_id id index)) (Ok Nodes.empty) indexed in
+  let nodes = List.map (fun (node, id) ->
+    Printf.sprintf "  %s[\"%s: %s (batch %d, %s)\"]" id
+      (label node.sfn_id) (label node.sfn_tool_name) node.sfn_batch_index (label node.sfn_execution_mode)) indexed in
+  let* edges = List.fold_left (fun result (node, target) ->
+    let* edges = result in
+    List.fold_left (fun result dependency ->
+      let* edges = result in
+      match Nodes.find_opt dependency.sfd_node_id index with
+      | None -> Error "Declared Skill graph contains a dangling dependency"
+      | Some source -> Ok (Printf.sprintf "  %s -->|%s| %s" source (label dependency.sfd_kind) target :: edges))
+      (Ok edges) node.sfn_dependencies) (Ok []) indexed in
+  Ok (String.concat "\n" ("flowchart TD" :: nodes @ List.rev edges))
+;;

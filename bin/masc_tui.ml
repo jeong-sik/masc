@@ -10605,7 +10605,7 @@ let settle_retired_sent_image state =
 
 (* Image acquisition has no terminal effects. Capture the endpoint and UI
    generation before forking; the mailbox consumer owns stale-result rejection. *)
-let open_message_image state ~mailbox ~notice ~name source =
+let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   if !terminal_draws_images = Some false then
@@ -10639,7 +10639,7 @@ let open_message_image state ~mailbox ~notice ~name source =
     let run () =
       let result = Masc_tui_image_requests.load ~host:server_peer_host ~port
         ~cache_dir:ensure_img_cache_dir ~diagram_width ~diagram_colors source in
-      enqueue_async mailbox (Sent_image_ready { generation; view; keeper_name; name; result })
+      enqueue_async mailbox (Sent_image_ready { generation; view; keeper_name; name; skill_reference; result })
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
@@ -19890,15 +19890,23 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
-  | Sent_image_ready { generation; view; keeper_name; name; result } ->
+  | Sent_image_ready { generation; view; keeper_name; name; skill_reference; result } ->
       (match state.sent_image_read with
        | Some pending when pending.sir_generation = generation
            && pending.sir_view = view && pending.sir_keeper = keeper_name
            && pending.sir_name = name -> state.sent_image_read <- None
        | Some _ | None -> ());
+      let same_skill = match skill_reference with
+        | None -> true
+        | Some reference ->
+            (match selected_tools_skill_profile state with
+             | Some profile -> Skill_reference.equal reference profile.esp_reference
+             | None -> false) in
       if not state.msx_open && generation = state.image_request_generation
-         && view = state.view && keeper_name = state.msg_target_keeper_name then begin
-        let notice = chat_notice state ~keeper_name in
+         && view = state.view && keeper_name = state.msg_target_keeper_name && same_skill then begin
+        let notice = if view = Tools then
+            (fun ~kind text -> report_action state (match kind with Notice_failure -> "error" | Notice_reply -> "system") text)
+          else chat_notice state ~keeper_name in
         let refuse reason =
           notice ~kind:Notice_failure (Printf.sprintf "sent image %s: %s" name reason)
         in
@@ -20832,8 +20840,15 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
          && Option.equal String.equal keeper_name selected_name then (
       match result with
       | Ok snapshot ->
+          let selected = selected_tools_skill_profile state in
           state.tools_inventory <- Some snapshot;
           state.tools_error <- None;
+          (match selected with
+           | None -> ()
+           | Some selected ->
+               List.find_index (fun profile -> Skill_reference.equal profile.Masc.Tui_decode_tools.esp_reference selected.esp_reference)
+                 (tools_skill_profiles state)
+               |> Option.iter (fun index -> state.tools_skill_cursor <- index));
           normalize_tools_skill_cursor state
       | Error detail -> state.tools_error <- Some detail)
   | Skill_evidence_loaded (request, key, result) ->
@@ -23367,6 +23382,24 @@ and is loaded on demand through keeper_skill.
          state.tools_async_selection <- Some target;
          state.tools_async_detail_open <- true;
          launch_tools_async_detail state ~mailbox:async_messages)
+  in
+  let handle_skill_diagram () =
+    match selected_tools_skill_profile state with
+    | None -> report_action state "error" "No published Skill selected"
+    | Some { esp_flow = None; _ } ->
+        report_action state "system" "Normal Skill: the model orchestrates tools; no declared execution graph"
+    | Some profile ->
+        (match profile.esp_flow with
+         | None -> ()
+         | Some flow ->
+             match Masc.Tui_decode_tools.skill_flow_mermaid flow with
+             | Error detail -> report_action state "error" detail
+             | Ok source ->
+                 let notice ~kind text = report_action state
+                   (match kind with Notice_failure -> "error" | Notice_reply -> "system") text in
+                 open_message_image ~skill_reference:profile.esp_reference state ~mailbox:async_messages
+                   ~notice ~name:("Declared composition: " ^ profile.esp_name)
+                   (Masc_tui_image_requests.Generated (Masc_tui_image_preview.Inline_mermaid source)))
   in
   let handle_skill_evidence () =
     if not (server_authority_ready state) then
@@ -28575,6 +28608,7 @@ and is loaded on demand through keeper_skill.
            handle_async_request_lookup ()
        | Some ("t" | "T") when state.view = Tools && state.tools_pane = Tools_async && state.tools_async_detail_open ->
            open_tools_async_source_task state ~mailbox:async_messages
+       | Some "\x0f" when state.view = Tools && state.tools_pane <> Tools_async -> handle_skill_diagram ()
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
        | Some "\r" when state.view = Tools && state.tools_pane = Tools_async ->

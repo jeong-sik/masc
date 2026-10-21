@@ -588,7 +588,8 @@ let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
           ; _ }, (None | Some _) -> action in
     let verb = Browser_lane.Page_act action in
     let issued = Result.bind (Browser_lane.resolve_target ~verb route) (fun target ->
-      Browser_lane.issue_for ~target ~verb ~timeout_sec:60.
+      Browser_lane.issue_for ~target ~verb
+        ~timeout_sec:(Browser_lane.Action.reply_timeout_sec action)
       |> Result.map (fun answer -> target,answer)) in
     match issued with
     | Error error ->

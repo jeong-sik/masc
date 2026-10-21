@@ -186,6 +186,60 @@ export function stateMessage(state: Exclude<SkillsResponse['state'], 'ready'>): 
   }
 }
 
+function SkillIoView({ profile }: { profile: SkillSurfaceProfile }) {
+  if (profile.io.kind === 'model_orchestrated') {
+    return html`<div class="ss-muted">Normal Skill · instruction/resource input → model-orchestrated tools</div>`
+  }
+  return html`
+    <div class="mt-2 space-y-2">
+      <strong>Declared input</strong>
+      <pre class="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-bg-elevated)] p-2 text-3xs">${JSON.stringify(profile.io.input_schema, null, 2)}</pre>
+      <strong>Declared output</strong>
+      ${profile.io.exports.length === 0
+        ? html`<div class="ss-muted">Complete execution result (no selected exports)</div>`
+        : profile.io.exports.map(route => html`<div class="mono text-3xs" key=${route.name}>${route.name} ← ${route.node_id} · ${route.pointer || '(root)'}</div>`)}
+    </div>
+  `
+}
+
+function SkillPerformanceView({ statistics }: {
+  statistics: SkillEvidenceResponse['composition_statistics']
+}) {
+  if (!statistics) return null
+  const durations = [
+    { label: 'Completed', ...statistics.completed, color: 'var(--color-status-ok)' },
+    { label: 'Failed', ...statistics.failed, color: 'var(--color-status-err)' },
+  ]
+  const peak = Math.max(0, ...durations.map(row => row.mean_ms ?? 0))
+  const outcomes = [
+    { label: 'Completed', count: statistics.completed.samples, color: 'var(--color-status-ok)' },
+    { label: 'Failed', count: statistics.failed.samples, color: 'var(--color-status-err)' },
+    { label: 'Deferred', count: statistics.deferred, color: 'var(--color-status-warn)' },
+  ]
+  return html`
+    <section class="space-y-3 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3" aria-label="Skill performance">
+      <div class="flex flex-wrap justify-between gap-2"><strong>Executor performance</strong><span>${statistics.records} retained runs</span></div>
+      <div class="ss-muted text-3xs">Mean executor duration · same revision · all Keepers · shared 0 → ${peak.toFixed(1)}ms axis</div>
+      ${durations.map(row => html`
+        <div class="grid grid-cols-[6rem_minmax(0,1fr)_auto] items-center gap-2" key=${row.label}>
+          <span>${row.label}</span>
+          <div class="h-2 overflow-hidden rounded bg-[var(--color-border-default)]" aria-hidden="true"><div class="h-full rounded" style=${{ width: `${row.mean_ms !== null && peak > 0 ? row.mean_ms / peak * 100 : 0}%`, backgroundColor: row.color }} /></div>
+          <span class="mono text-3xs">${row.mean_ms === null ? 'unobserved' : `${row.mean_ms.toFixed(1)}ms`} · n=${row.samples}</span>
+        </div>
+      `)}
+      <div class="ss-muted text-3xs">Outcome distribution · retained runs</div>
+      ${outcomes.map(row => html`
+        <div class="grid grid-cols-[6rem_minmax(0,1fr)_auto] items-center gap-2" key=${row.label}>
+          <span>${row.label}</span>
+          <div class="h-2 overflow-hidden rounded bg-[var(--color-border-default)]" aria-hidden="true"><div class="h-full rounded" style=${{ width: `${statistics.records > 0 ? row.count / statistics.records * 100 : 0}%`, backgroundColor: row.color }} /></div>
+          <span class="mono text-3xs">${row.count} · ${statistics.records > 0 ? (row.count / statistics.records * 100).toFixed(1) : '0'}%</span>
+        </div>
+      `)}
+      <div class="ss-muted text-3xs">Stored executor results; deferred excluded from means. Queue/dependency waits and model latency are separate.</div>
+    </section>
+  `
+}
+
 function SkillFlowView({ profile }: { profile: SkillSurfaceProfile }) {
   const flow = profile.flow
   if (!flow) {
@@ -265,6 +319,7 @@ function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null })
   const coverageSummary = html`${result.coverage.activation_sessions_inspected} retained sessions inspected · ${result.coverage.activation_ledgers_loaded} activation ledgers loaded · ${activationGapCount} activation gaps · ${result.coverage.activation_owner_gap_count} owner gaps · ${result.coverage.composition_records_read} composition records read · ${compositionCoverageLabel(result.coverage.composition_scope)}`
   if (result.status === 'not_observed_in_retained_coverage') {
     return html`
+      <${SkillPerformanceView} statistics=${result.composition_statistics} />
       <div class="text-[var(--color-status-warn)]">No exact-revision run was found in the retained coverage. This is not proof that it never ran.</div>
       <div class="ss-muted text-3xs">${coverageSummary} · ${result.coverage.activation_scope}</div>
       ${result.coverage.composition_unavailable.length > 0 ? html`<div class="text-[var(--color-status-warn)] text-3xs">Composition unavailable: ${result.coverage.composition_unavailable.join(' · ')}</div>` : null}
@@ -280,6 +335,7 @@ function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null })
   const output = composition?.result.data
   return html`
     <div class="space-y-2" data-testid="skill-retained-evidence">
+      <${SkillPerformanceView} statistics=${result.composition_statistics} />
       ${activationEvidence.map((item, index) => {
         const activation = item.activation
         const actions = Array.isArray(activation.actions) ? activation.actions.length : 0
@@ -625,6 +681,7 @@ export function SkillsPanel() {
   const asyncObservationError = useSignal<string | null>(null)
   const expanded = useSignal<string | null>(null)
   const evidence = useSignal<Record<string, SkillEvidenceResponse>>({})
+  const evidenceErrors = useSignal<Record<string, string>>({})
   const evidenceLoading = useSignal<string | null>(null)
   const createOpen = useSignal(false)
   const createKind = useSignal<'instruction' | 'composition'>('instruction')
@@ -781,14 +838,17 @@ export function SkillsPanel() {
                   ${row.surface ? html`<${SkillSourceInspector} reference=${row.surface.reference} />`
                     : html`<p role="status">Exact source unavailable: this Skill has no published source reference.</p>`}
                   <div class="grid gap-3 p-2 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-                    <div><strong>Execution flow</strong>${row.surface && row.surface.kind !== 'unavailable' ? html`<${SkillFlowView} profile=${row.surface.profile} />` : html`<div class="ss-muted">No profile</div>`}</div>
+                    <div><strong>Execution flow</strong>${row.surface && row.surface.kind !== 'unavailable' ? html`<${SkillFlowView} profile=${row.surface.profile} /><${SkillIoView} profile=${row.surface.profile} />` : html`<div class="ss-muted">No profile</div>`}</div>
                     <div>
                       <div class="mb-2 flex items-center justify-between"><strong>Retained evidence</strong><button class="ss-btn" type="button" disabled=${evidenceLoading.value === rowKey} onClick=${async () => {
                         if (!row.surface) return
                         evidenceLoading.value = rowKey
+                        evidenceErrors.value = { ...evidenceErrors.value, [rowKey]: '' }
                         try { evidence.value = { ...evidence.value, [rowKey]: await fetchSkillEvidence(row.surface.reference) } }
+                        catch (cause) { evidenceErrors.value = { ...evidenceErrors.value, [rowKey]: cause instanceof Error ? cause.message : String(cause) } }
                         finally { evidenceLoading.value = null }
                       }}>${evidenceLoading.value === rowKey ? 'Loading…' : 'Load'}</button></div>
+                      ${evidenceErrors.value[rowKey] ? html`<div role="alert" class="text-[var(--color-status-err)]">${evidenceErrors.value[rowKey]}</div>` : null}
                       <${SkillEvidenceView} result=${evidence.value[rowKey] ?? null} />
                     </div>
                   </div>

@@ -79,6 +79,7 @@ const editorProfile = {
   reference,
   kind: 'instruction',
   activation_tool: 'keeper_skill',
+  io: { kind: 'model_orchestrated' as const },
   execution: 'model_orchestrated',
   capabilities: {
     as_skill: true,
@@ -116,6 +117,30 @@ const editorPreview = {
 }
 
 describe('existing Skill editor contract', () => {
+  it('accepts the declared I/O shipped by the server and rejects malformed contracts', () => {
+    const compositionIo = {
+      kind: 'composition',
+      input_schema: { type: 'object', required: ['task'], properties: { task: { type: 'string' } } },
+      exports: [{ name: 'answer', node_id: 'result', pointer: '/data/answer' }],
+    }
+    for (const io of [{ kind: 'model_orchestrated' }, compositionIo]) {
+      const response = { ok: true, status: 'valid', preview: {
+        ...editorPreview, profile: { ...editorProfile, io },
+      } }
+      expect(decodeSkillEditorPreview(response).profile.io).toEqual(io)
+    }
+    for (const io of [
+      { kind: 'unknown' },
+      { ...compositionIo, input_schema: 'not an object' },
+      { ...compositionIo, exports: [{ name: 'answer', node_id: 'result' }] },
+      { kind: 'model_orchestrated', invented: true },
+    ]) {
+      expect(() => decodeSkillEditorPreview({ ok: true, status: 'valid', preview: {
+        ...editorPreview, profile: { ...editorProfile, io },
+      } })).toThrow()
+    }
+  })
+
   it('strictly decodes loaded, preview, and save receipts', () => {
     expect(decodeSkillEditorLoaded({
       status: 'ready',
@@ -245,6 +270,7 @@ const coverage = {
 const compositionNode = {
   node_id: 'lane',
   execution_id: 'exec-1',
+  execution_origin: 'fresh_dispatch',
   tool_name: 'keeper_lane_status',
   input: {},
   schedule: {
@@ -320,6 +346,49 @@ const activationEvidence = {
   async_result_deliveries: [],
   async_actions: [],
 }
+
+describe('current composition evidence wire fields', () => {
+  it('accepts failed settlements and later serial batches from the canonical executor', () => {
+    for (const effect_disposition of ['proven_pre_effect', 'proven_post_effect', 'effect_outcome_unknown']) {
+      const failure = { disposition: 'failed', effect_disposition, failure_class: 'runtime_failure',
+        message: 'failed original execution', data: { error: 'failed original execution' },
+        tool_name: compositionNode.tool_name, duration_ms: 5 }
+      const response = { schema: 'masc.skill-evidence/v7', status: 'observed', reference,
+        activation: null, composition_statistics: null,
+        coverage: { ...coverage, composition_records_read: 1 },
+        composition: { ...compositionEvidence,
+          result: { ...failure, tool_name: compositionEvidence.composition_tool },
+          executor_settlements: [{ ...compositionNode, result: failure,
+            schedule: { ...compositionNode.schedule, batch_index: 4, batch_size: 1, execution_mode: 'serial' } }] } }
+      expect(decodeSkillEvidenceResponse(response).composition?.result.effect_disposition).toBe(effect_disposition)
+      const { effect_disposition: _omitted, ...missingEffect } = failure
+      expect(() => decodeSkillEvidenceResponse({ ...response, composition: { ...response.composition,
+        result: { ...missingEffect, tool_name: compositionEvidence.composition_tool } } })).toThrow()
+    }
+  })
+
+  it('retains physical execution identity and typed node origin from the server', () => {
+    const invocation = { kind: 'composition', origin: { kind: 'session_composition' },
+      execution_id: 'exec-root', tool_name: 'keeper_compose_proof' }
+    for (const execution_origin of ['fresh_dispatch', 'retained_completion', 'dispatch_refused']) {
+      const response = { schema: 'masc.skill-evidence/v7', status: 'observed', reference,
+        activation: { selection: 'most_recent_observed', evidence: { ...activationEvidence,
+          activation: { ...activationPayload, invocation } } },
+        composition: { ...compositionEvidence, executor_settlements: [{ ...compositionNode, execution_origin }] },
+        composition_statistics: null, coverage: { ...coverage, composition_records_read: 1 } }
+      const decoded = decodeSkillEvidenceResponse(response)
+      expect(decoded.composition?.executor_settlements[0]?.execution_origin).toBe(execution_origin)
+      const waiting = decodeSkillEvidenceResponse({ ...response, composition: { ...response.composition,
+        executor_settlements: [{ ...compositionNode, execution_origin,
+          deferred_kind: 'owned_job_result_wait', result: { ...compositionNode.result, disposition: 'deferred' } }] } })
+      expect(waiting.composition?.executor_settlements[0]?.deferred_kind).toBe('owned_job_result_wait')
+      expect(decoded.activation?.selection === 'most_recent_observed'
+        && decoded.activation.evidence.activation.invocation).toEqual(invocation)
+      expect(() => decodeSkillEvidenceResponse({ ...response, composition: { ...response.composition,
+        executor_settlements: [{ ...compositionNode, execution_origin: 'invented' }] } })).toThrow()
+    }
+  })
+})
 
 function sharedAsyncSkillEvidence() {
   const activation = sharedAsyncActionLedger.activations[0]!
@@ -501,7 +570,7 @@ describe('skill evidence contract', () => {
     })).toThrow(SkillsContractError)
   })
 
-  it('rejects impossible node batch and truncation invariants', () => {
+  it('rejects impossible node batch size and truncation invariants', () => {
     expect(() => decodeSkillEvidenceResponse({
       schema: 'masc.skill-evidence/v7',
       composition_statistics: null,
@@ -512,7 +581,7 @@ describe('skill evidence contract', () => {
         ...compositionEvidence,
         executor_settlements: [{
           ...compositionNode,
-          schedule: { ...compositionNode.schedule, batch_index: 1 },
+          schedule: { ...compositionNode.schedule, batch_size: 0 },
           truncated_to: 3,
         }],
       },

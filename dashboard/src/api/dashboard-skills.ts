@@ -141,11 +141,20 @@ export interface SkillFlow {
   batches: readonly SkillFlowBatch[]
 }
 
+export type SkillIo =
+  | { kind: 'model_orchestrated' }
+  | {
+    kind: 'composition'
+    input_schema: Readonly<Record<string, unknown>>
+    exports: readonly { name: string; node_id: string; pointer: string }[]
+  }
+
 export interface SkillProfile {
   reference: SkillReference
   kind: string
   activation_tool: string
   execution: string
+  io: SkillIo
   capabilities: {
     as_skill: boolean
     as_tool: boolean
@@ -455,6 +464,7 @@ const ToolOutputResultSchema = Schema.Struct({
 
 const ToolFailedResultSchema = Schema.Struct({
   disposition: Schema.Literal('failed'),
+  effect_disposition: Schema.Literal('proven_pre_effect', 'proven_post_effect', 'effect_outcome_unknown'),
   data: Schema.Unknown,
   tool_name: Schema.NonEmptyString,
   duration_ms: Schema.Number,
@@ -474,6 +484,7 @@ const ToolResultSchema = Schema.Union(ToolOutputResultSchema, ToolFailedResultSc
 const CompositionNodeSchema = Schema.Struct({
   node_id: Schema.NonEmptyString,
   execution_id: Schema.NonEmptyString,
+  execution_origin: Schema.Literal('fresh_dispatch', 'retained_completion', 'dispatch_refused'),
   tool_name: Schema.NonEmptyString,
   input: Schema.Unknown,
   schedule: Schema.Struct({
@@ -492,6 +503,7 @@ const CompositionNodeSchema = Schema.Struct({
   deferred_kind: Schema.NullOr(Schema.Literal(
     'generic_deferred',
     'external_effect_deferred',
+    'owned_job_result_wait',
   )),
   result_bytes: NonNegativeSafeIntegerSchema,
   truncated_to: Schema.NullOr(NonNegativeSafeIntegerSchema),
@@ -533,6 +545,7 @@ const SkillInvocationSchema = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal('composition'),
     origin: Schema.Union(TaskCompositionOriginSchema, SessionCompositionOriginSchema),
+    execution_id: Schema.NonEmptyString,
     tool_name: Schema.NonEmptyString,
   }),
   Schema.Struct({
@@ -735,6 +748,18 @@ const AsyncRequestObservationSchema = Schema.Union(
 const SkillProfileDetailsFields = {
   activation_tool: Schema.NonEmptyString,
   execution: Schema.NonEmptyString,
+  io: Schema.Union(
+    Schema.Struct({ kind: Schema.Literal('model_orchestrated') }),
+    Schema.Struct({
+      kind: Schema.Literal('composition'),
+      input_schema: UnknownRecordSchema,
+      exports: Schema.Array(Schema.Struct({
+        name: Schema.NonEmptyString,
+        node_id: Schema.NonEmptyString,
+        pointer: Schema.String,
+      })),
+    }),
+  ),
   capabilities: Schema.Struct({
     as_skill: Schema.Boolean,
     as_tool: Schema.Boolean,
@@ -1437,7 +1462,6 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
       Number.isFinite(node.result.duration_ms)
       && node.result.duration_ms >= 0
       && node.result.tool_name === node.tool_name
-      && node.schedule.batch_index < node.schedule.batch_size
       && (node.truncated_to === null
         || (node.truncated_to >= 0 && node.truncated_to <= node.result_bytes)))
     if (!validResultDuration || !validNodes) {

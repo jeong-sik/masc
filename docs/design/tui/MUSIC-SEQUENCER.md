@@ -105,6 +105,20 @@ in place. Context/history transitions clear selections while retaining independe
 clipboard contents. TUI commands and forwarded shortcuts share these decisions;
 admitted clipboard edits drain through close before saving.
 
+`:capture-midi [ASSET]` connects simultaneous WAV/UMP takes to these experiments.
+An owned worker verifies and snapshots the complete raw take, then imports an
+independent SMF1 source at 960 PPQ. Original source/group pairs own separate
+tracks/ports; channels, bank/program and supported expression retain their
+identities. Timing uses integer host-clock differences and the encoded SMF
+tempo. The whole take is projected regardless of selected clip/take, without
+changing raw regions or borrowing their latency correction. MIDI2 precision is
+explicitly reduced for this MIDI1 variant; unsupported expression, incomplete
+exclusive streams and ambiguous note pairing refuse conversion. Source hashes,
+clock and route/projection metadata travel with the derived MIDI. Existing
+source editing, harmony, voicing, undo/redo, arrangement placement and portable
+save/export consume the same source document. This does not establish native
+MIDI2 event editing or real-device/UI verification.
+
 Native WAV preview uses AVAudioEngine/PlayerNode buffers with pause, seek and
 looping, pinned to a CoreAudio output. External MIDI preview uses a separately
 owned CoreMIDI sender and pins a destination by unique ID. It projects the same

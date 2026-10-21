@@ -298,19 +298,29 @@ function encodeTrack(events) {
   return chunk('MTrk', Buffer.concat(bytes))
 }
 export function midiSourceFromEvents(events, { ppq, ...options } = {}) {
+  return midiSourceFromTracks([events], { ppq, ...options })
+}
+export function midiSourceFromTracks(tracks, { ppq, ...options } = {}) {
   integer(ppq, 'MIDI PPQ', 1, 0x7fff)
-  if (!Array.isArray(events)) throw new Error('MIDI source needs ordered events')
-  for (const event of events) {
-    integer(event.tick, 'MIDI absolute tick')
-    if (event.kind === 'channel') channelBytes(event.bytes)
-    else if (event.kind === 'meta') {
-      integer(event.type, 'MIDI meta type', 0, 127)
-      if (!Array.isArray(event.data)) throw new Error('MIDI metadata needs bytes')
-      event.data.forEach(byte => integer(byte, 'MIDI meta byte', 0, 255))
-    } else throw new Error('MIDI source construction needs channel or meta events')
+  if (!Array.isArray(tracks)) throw new Error('MIDI source needs tracks')
+  integer(tracks.length, 'MIDI track count', 1, 0xffff)
+  for (const events of tracks) {
+    if (!Array.isArray(events)) throw new Error('MIDI source needs ordered events')
+    for (const event of events) {
+      integer(event.tick, 'MIDI absolute tick')
+      if (event.kind === 'channel') channelBytes(event.bytes)
+      else if (event.kind === 'meta') {
+        integer(event.type, 'MIDI meta type', 0, 127)
+        if (!Array.isArray(event.data)) throw new Error('MIDI metadata needs bytes')
+        event.data.forEach(byte => integer(byte, 'MIDI meta byte', 0, 255))
+      } else if (event.kind === 'sysex') {
+        if (![0xf0, 0xf7].includes(event.status) || !Array.isArray(event.data)) throw new Error('Invalid MIDI exclusive event')
+        event.data.forEach(byte => integer(byte, 'MIDI exclusive byte', 0, 255))
+      } else throw new Error('Unknown MIDI source event')
+    }
   }
-  const header = Buffer.alloc(6); header.writeUInt16BE(1, 2); header.writeUInt16BE(ppq, 4)
-  return importMidiSource(Buffer.concat([chunk('MThd', header), encodeTrack(events)]), options)
+  const header = Buffer.alloc(6); header.writeUInt16BE(tracks.length === 1 ? 0 : 1); header.writeUInt16BE(tracks.length, 2); header.writeUInt16BE(ppq, 4)
+  return importMidiSource(Buffer.concat([chunk('MThd', header), ...tracks.map(encodeTrack)]), options)
 }
 export function exportMidiSource(source) {
   const parsed = materialize(source)

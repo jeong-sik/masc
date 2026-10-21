@@ -1,7 +1,7 @@
 import { phraseDocument, importPhraseDocument } from './phrase-arrangement.mjs'
 import { parentPort } from 'node:worker_threads'
 import { dirname } from 'node:path'
-import { importArrangementWave, importArrangementMidi, importArrangementCapture, importArrangementPractice, restorePracticeBacking, inspectPracticePasses, importPracticeMidi, prepareArrangementCapture, saveArrangement, materializeArrangementAssets } from './arrangement-files.mjs'
+import { importArrangementWave, importArrangementMidi, importArrangementCapture, importCaptureMidi, importArrangementPractice, restorePracticeBacking, inspectPracticePasses, importPracticeMidi, prepareArrangementCapture, saveArrangement, materializeArrangementAssets } from './arrangement-files.mjs'
 import { prepareArrangementWave, prepareArrangementMidi, prepareArrangementMixed, prepareArrangementAudio, prepareArrangementCaptureRegions } from './arrangement-playback.mjs'
 import { attachRecordedTake } from './arrangement-recording.mjs'
 import { analyzeCalibration } from './audio-calibration.mjs'
@@ -36,6 +36,7 @@ parentPort.on('message', async job => {
       case 'prepare-take': result = await prepareArrangementCapture(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'import-take': result = await importArrangementCapture(job.project, job.path, { projectPath: job.projectPath, signal }); break
       case 'import-practice': result = await importArrangementPractice(job.project, job.path, { projectPath: job.projectPath, signal }); break
+      case 'capture-midi': result = await importCaptureMidi(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'practice-backing': result = await restorePracticeBacking(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'practice-midi': case 'practice-midi-region':
         if (job.kind === 'practice-midi-region' && !job.cut) throw new Error('Select a practice MIDI region cut')

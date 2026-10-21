@@ -1,13 +1,12 @@
 (** Server_mcp_transport_http_session — MCP HTTP session state +
     header / cookie / query-param helpers.
 
-    Per-session protocol-version and tool-profile registries
+    Per-session protocol-version and tool-profile state
     plus a small library of header / cookie / query parsing
     helpers used by the MCP HTTP transport.
 
-    `include`'d / `open`'d by sibling modules
-    (`server_mcp_transport_http_protocol`, etc.) — every top-
-    level binding flows through.
+    The public helper surface is re-exported by sibling modules
+    such as [server_mcp_transport_http_protocol].
 
     {1 Protocol versioning} *)
 
@@ -23,9 +22,10 @@ val is_valid_protocol_version : string -> bool
 
 (** {1 Per-session state}
 
-    Two atomic [SMap.t] registries keyed by session id store
-    per-session protocol version and tool profile.  All
-    accessors below are thread-safe via internal CAS loops. *)
+    One atomic immutable registry contains the protocol/profile/activity/start/
+    transport maps. Each supported update commits its related fields together;
+    accessors read a committed registry. Separate API calls remain separate
+    transitions, and profile-only entries are not initialized-session authority. *)
 
 val remember_protocol_version :
   ?otel_transport_context:Otel_dispatch_hook.transport_context ->
@@ -33,7 +33,8 @@ val remember_protocol_version :
 (** [remember_protocol_version session_id version] records the
     version when [is_valid_protocol_version version] is [true];
     silently no-ops on unknown versions (the upstream caller is
-    expected to have validated first). *)
+    expected to have validated first). Valid registration publishes version,
+    initial activity/start and any transport context in one CAS transition. *)
 
 val remember_protocol_version_if_initialize_succeeded :
   ?otel_transport_context:Otel_dispatch_hook.transport_context ->
@@ -50,9 +51,8 @@ val is_known_session : string -> bool
 (** RFC-0100 PR-3 — Q3 default. [true] iff the server has previously
     recorded a protocol version for [session_id] (i.e., an
     [initialize] request has succeeded). The complementary
-    {!mcp_profile_by_session} registry is not consulted because it
-    is populated on every POST regardless of [initialize]
-    completion. *)
+    profile map is not consulted because it is populated on every POST
+    regardless of [initialize] completion. *)
 
 val ensure_sse_backing_session_for_known_transport_session :
   transport_session_id:string -> sse_session_id:string -> unit
@@ -67,11 +67,12 @@ val remember_mcp_profile :
 (** [remember_mcp_profile session_id profile] records the transport
     profile.  For sessions that have completed initialize, it also
     refreshes activity/transport telemetry; uninitialized profile-only
-    ids do not start session-duration state. *)
+    ids do not start session-duration state. Profile and any known-session
+    activity refresh commit together; the clock is sampled before the pure CAS. *)
 
 val forget_mcp_session : string -> unit
-(** Removes both the protocol-version and tool-profile entries
-    for [session_id]. *)
+(** Removes all local fields for [session_id] in one transition after the
+    existing duration/unregister lifecycle effects. *)
 
 (** {1 Grace period}
 
@@ -111,13 +112,14 @@ val save_sessions_to_file : base_path:string -> unit -> save_result
 (** Serialize current session state and replace the file after flush/close.
     Called automatically by [reap_stale_sessions] after each cleanup.
     The common I/O executor owns the host work. Writers serialize before
-    capturing immutable registry maps. Each write exclusively creates a fresh
-    private regular output in the original directory, closes it before rename,
+    capturing one immutable registry for all saved fields. Each write exclusively
+    creates a fresh private regular output in the original directory, closes it before rename,
     and attempts to remove only its own output on failure. Existing temporary paths are not
     opened or removed. A current nonregular destination is refused before
     output creation. Callers await physical
     completion; cancellation does not undo a completed file replacement.
-    Each map is captured independently; this is not a cross-map transaction.
+    Live request updates stay independent of the worker mutex; each capture
+    contains one committed state, including complete supported registration.
     Non-Eio callers perform the same work directly. A file present before its
     restore, a pending/cancelled restore, or a failed restore is preserved.
     A restore failure disables replacement of that path for this process;
@@ -136,10 +138,12 @@ val save_sessions_to_file : base_path:string -> unit -> save_result
 
 val load_sessions_from_file : base_path:string -> unit -> unit
 (** Read/decode and prepare immutable per-field maps in the common I/O executor,
-    then merge each nonempty map into its current registry in the caller after
-    checking cancellation. Duplicate rows retain their original last-valid
+    then merge the patch into the current live registry in one caller CAS after
+    checking cancellation. An empty patch does not publish a new state.
+    Duplicate rows retain their original last-valid
     mandatory/last-present optional values; unrelated current keys survive.
-    No individual decoded-row list or all-registry transaction is introduced.
+    No individual decoded-row list is introduced; all restored fields publish
+    together, preserving unrelated current keys on each CAS retry.
     Call once in owner activation before publishing the state/readiness
     capability to HTTP/stdio.
     Startup health remains independent. Missing files restore nothing; unreadable,

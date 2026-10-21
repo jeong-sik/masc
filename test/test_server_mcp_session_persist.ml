@@ -339,10 +339,135 @@ let test_failed_write_can_retry_after_resource_release () = with_temp_base @@ fu
   Session.load_sessions_from_file ~base_path ();
   check_original sid
 
+let initialize_body version =
+  Yojson.Basic.to_string (`Assoc
+    ["jsonrpc",`String "2.0";"id",`Int 1;"method",`String "initialize";
+     "params",`Assoc ["protocolVersion",`String version]])
+
+let initialize_response =
+  `Assoc ["jsonrpc",`String "2.0";"id",`Int 1;"result",`Assoc []]
+
+let saved_session ~base_path sid =
+  save ~base_path ();
+  let path = Session.sessions_file_path ~base_path () in
+  let json = Yojson.Basic.from_file path in
+  Yojson.Basic.Util.(json |> member "sessions" |> member sid)
+
+let test_initialize_profile_lifecycle () = with_temp_base @@ fun base_path ->
+  let sid = "persist-initialize-lifecycle" in
+  with_sessions [sid] @@ fun () ->
+  let profile = Server_mcp_transport_http_types.Seat in
+  let version = Session.mcp_protocol_version_default in
+  let first = Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1" in
+  let second = Otel_dispatch_hook.http_transport_context ~protocol_version:"2" in
+  Session.remember_mcp_profile ~otel_transport_context:first sid profile;
+  check bool "profile alone grants no initialize authority" false (Session.is_known_session sid);
+  (match Session.validate_mcp_session_profile ~profile sid with
+   | Ok () -> () | Error detail -> fail detail);
+  (match Session.validate_mcp_session_delete_profile ~profile sid with
+   | Ok () -> () | Error detail -> fail detail);
+  (match Session.validate_mcp_session_delete_profile
+      ~profile:Server_mcp_transport_http_types.Operator_remote sid with
+   | Error _ -> () | Ok () -> fail "profile-only seat crossed its narrow door");
+  check bool "profile-only session is absent from actual snapshot" true
+    (saved_session ~base_path sid = `Null);
+  Session.remember_protocol_version_if_initialize_succeeded ~otel_transport_context:first sid
+    ~request_body:(initialize_body version)
+    ~response_json:(`Assoc ["jsonrpc",`String "2.0";"id",`Int 1;
+      "error",`Assoc ["code",`Int (-32602);"message",`String "Rejected initialize"]]);
+  check bool "rejected initialize remains unknown" false (Session.is_known_session sid);
+  check bool "rejected initialize remains absent from actual snapshot" true
+    (saved_session ~base_path sid = `Null);
+  Session.remember_protocol_version_if_initialize_succeeded ~otel_transport_context:first sid
+    ~request_body:(initialize_body version) ~response_json:initialize_response;
+  check bool "accepted initialize grants known-session authority" true (Session.is_known_session sid);
+  let row = saved_session ~base_path sid in
+  let open Yojson.Basic.Util in
+  check string "accepted wire version persisted" version (row |> member "protocol_version" |> to_string);
+  check string "pre-initialize seat profile retained" "seat" (row |> member "profile" |> to_string);
+  let started = row |> member "started_at" |> to_float in
+  check bool "initialized session has a real start time, not missing-field zero" true (started > 0.0);
+  check bool "initialized session has real activity" true (row |> member "last_active_sse" |> to_float > 0.0);
+  check string "initialize transport accompanies the accepted version" "1.1"
+    (row |> member "network_protocol_version" |> to_string);
+  Session.remember_mcp_profile ~otel_transport_context:second sid profile;
+  let refreshed = saved_session ~base_path sid in
+  check (float 0.0) "profile refresh retains the first start time" started
+    (refreshed |> member "started_at" |> to_float);
+  check string "known profile refresh publishes its current transport" "2"
+    (refreshed |> member "network_protocol_version" |> to_string);
+  Session.forget_mcp_session sid;
+  check bool "forgotten session leaves the actual snapshot" true (saved_session ~base_path sid = `Null);
+  Session.remember_protocol_version sid version;
+  (match Session.validate_mcp_session_profile ~profile sid with
+   | Ok () -> () | Error detail -> fail detail);
+  (match Session.validate_mcp_session_delete_profile ~profile sid with
+   | Error _ -> () | Ok () -> fail "re-registration inherited the deleted seat profile");
+  let recreated = saved_session ~base_path sid in
+  List.iter (fun key -> check bool "re-registration inherits no old transport labels" true
+      (recreated |> member key = `Null))
+    ["network_protocol_name";"network_protocol_version";"network_transport"];
+  Session.remember_mcp_profile sid Server_mcp_transport_http_types.Operator_remote;
+  save ~base_path ();
+  Session.forget_mcp_session sid;
+  Session.load_sessions_from_file ~base_path ();
+  check_original sid
+
+let test_registration_and_actual_snapshot_coherence () = with_temp_base @@ fun base_path ->
+  let sid = "persist-domain-initialize" and peer = "persist-domain-peer" in
+  with_sessions [sid;peer] @@ fun () ->
+  remember peer;
+  let first_version = Session.mcp_protocol_version_default in
+  let second_version = match List.find_opt ((<>) first_version) Session.mcp_protocol_versions with
+    | Some version -> version
+    | None -> fail "session transition scenario requires two supported versions" in
+  let finished = Atomic.make false in
+  let writer = Domain.spawn (fun () ->
+    Fun.protect ~finally:(fun () -> Atomic.set finished true) (fun () ->
+      Session.remember_mcp_profile sid Server_mcp_transport_http_types.Operator_remote;
+      let first = Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1" in
+      Session.remember_protocol_version_if_initialize_succeeded ~otel_transport_context:first sid
+        ~request_body:(initialize_body first_version) ~response_json:initialize_response;
+      let second = Otel_dispatch_hook.http_transport_context ~protocol_version:"2" in
+      Session.remember_protocol_version ~otel_transport_context:second sid second_version)) in
+  let inspect () =
+    let row = saved_session ~base_path sid in
+    match row with
+    | `Null -> () (* A save may capture the valid pre-initialize state. *)
+    | row ->
+        let open Yojson.Basic.Util in
+        let version = row |> member "protocol_version" |> to_string in
+        let network = row |> member "network_protocol_version" |> to_string in
+        check bool "saved protocol and transport belong to one registration"
+          true ((version = first_version && network = "1.1")
+            || (version = second_version && network = "2"));
+        check string "profile prepared before initialize is retained" "operator_remote"
+          (row |> member "profile" |> to_string);
+        check bool "published known session has its activity" true
+          (row |> member "last_active_sse" |> to_float > 0.0);
+        check bool "published known session has its start time" true
+          (row |> member "started_at" |> to_float > 0.0) in
+  (* The producer owns no Eio/native resource. Join exactly once even if an
+     actual save/inspection fails. No stress count, timer or overlap assertion. *)
+  Fun.protect ~finally:(fun () -> Domain.join writer) (fun () ->
+    while not (Atomic.get finished) do inspect () done);
+  inspect ();
+  let final = saved_session ~base_path sid in
+  check string "completed registration persists its final version" second_version
+    Yojson.Basic.Util.(final |> member "protocol_version" |> to_string);
+  List.iter Session.forget_mcp_session [sid;peer];
+  Session.load_sessions_from_file ~base_path ();
+  check_original sid;
+  check_original peer
+
 let () =
   run "server_mcp_session_persist"
     ["persistence",
-      [test_case "save/forget/load retains original session and profile" `Quick test_roundtrip;
+      [test_case "initialize, profile, persistence and re-registration retain authority" `Quick
+         test_initialize_profile_lifecycle;
+       test_case "native registration and real snapshots retain coherent session fields" `Quick
+         test_registration_and_actual_snapshot_coherence;
+       test_case "save/forget/load retains original session and profile" `Quick test_roundtrip;
        test_case "concurrent regular outputs leave a preexisting FIFO untouched" `Quick
          test_concurrent_writers_leave_existing_fifo;
        test_case "cancelled caller cannot admit or apply a regular snapshot" `Quick

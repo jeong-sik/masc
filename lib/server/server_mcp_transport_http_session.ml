@@ -6,25 +6,23 @@ let mcp_protocol_versions = Mcp_transport_protocol.supported_protocol_versions
 
 let mcp_protocol_version_default = Mcp_transport_protocol.default_protocol_version
 
-let protocol_version_by_session : string SMap.t Atomic.t = Atomic.make SMap.empty
+type registry =
+  { versions : string SMap.t
+  ; profiles : Server_mcp_transport_http_types.tool_profile SMap.t
+  ; timestamps : float SMap.t
+  ; started : float SMap.t
+  ; transports : Otel_dispatch_hook.transport_context SMap.t }
 
-let mcp_profile_by_session : Server_mcp_transport_http_types.tool_profile SMap.t Atomic.t = Atomic.make SMap.empty
+let empty_registry : registry =
+  { versions=SMap.empty;profiles=SMap.empty;timestamps=SMap.empty
+  ; started=SMap.empty;transports=SMap.empty }
 
-let session_started_at : float SMap.t Atomic.t = Atomic.make SMap.empty
-
-let session_transport_context :
-  Otel_dispatch_hook.transport_context SMap.t Atomic.t =
-  Atomic.make SMap.empty
+let session_registry : registry Atomic.t = Atomic.make empty_registry
 
 (** Grace period: seconds to keep a session after SSE disconnect before reaping.
     Prevents immediate reap on brief SSE interruptions or server restart.
     Configurable via [MASC_SESSION_SSE_GRACE_PERIOD_SEC] env var (default 300 = 5 min). *)
 let grace_period_seconds = Env_config_runtime.Session.sse_grace_period_seconds
-
-(** Per-session timestamp of last active SSE connection.
-    Used by [reap_stale_sessions] to implement the grace period:
-    sessions without active SSE are kept until [now - last_active > grace_period]. *)
-let session_last_active_sse : float SMap.t Atomic.t = Atomic.make SMap.empty
 
 let default_base_path () =
   (* Match the launcher guard: a direct binary launch from a checkout with its
@@ -55,7 +53,8 @@ let transport_context_labels = function
           transport.Otel_dispatch_hook.network_transport
 
 let record_mcp_server_session_duration ?error_type session_id =
-  match SMap.find_opt session_id (Atomic.get session_started_at) with
+  let state = Atomic.get session_registry in
+  match SMap.find_opt session_id state.started with
   | None -> ()
   | Some started_at ->
     (* NDT-OK: session duration is emitted as OTel telemetry only. *)
@@ -63,9 +62,9 @@ let record_mcp_server_session_duration ?error_type session_id =
     let labels =
       option_label
         Otel_genai.Mcp_attr_key.mcp_protocol_version
-        (SMap.find_opt session_id (Atomic.get protocol_version_by_session))
+        (SMap.find_opt session_id state.versions)
       @ transport_context_labels
-          (SMap.find_opt session_id (Atomic.get session_transport_context))
+          (SMap.find_opt session_id state.transports)
       @ option_label Otel_genai.Mcp_attr_key.error_type error_type
     in
     Otel_metric_store.observe_histogram
@@ -73,21 +72,21 @@ let record_mcp_server_session_duration ?error_type session_id =
       ~labels
       duration_s
 
-let remember_session_activity ?otel_transport_context session_id =
-  let now = Unix.gettimeofday () in
-  Atomic_util.update session_started_at (fun map ->
-    if SMap.mem session_id map then map else SMap.add session_id now map);
-  Atomic_util.update session_last_active_sse (fun map -> SMap.add session_id now map);
-  match otel_transport_context with
-  | None -> ()
-  | Some transport ->
-    Atomic_util.update session_transport_context (fun map ->
-      SMap.add session_id transport map)
+let with_session_activity ?otel_transport_context ~now session_id (state : registry) =
+  { state with
+    started=(if SMap.mem session_id state.started then state.started
+      else SMap.add session_id now state.started);
+    timestamps=SMap.add session_id now state.timestamps;
+    transports=(match otel_transport_context with
+      | None -> state.transports
+      | Some transport -> SMap.add session_id transport state.transports) }
 
 let remember_protocol_version ?otel_transport_context session_id version =
   if is_valid_protocol_version version then begin
-    Atomic_util.update protocol_version_by_session (fun map -> SMap.add session_id version map);
-    remember_session_activity ?otel_transport_context session_id
+    let now = Unix.gettimeofday () in
+    Atomic_util.update session_registry (fun state ->
+      with_session_activity ?otel_transport_context ~now session_id
+        {state with versions=SMap.add session_id version state.versions})
   end
 
 let jsonrpc_response_succeeded = function
@@ -122,11 +121,11 @@ let remember_protocol_version_if_initialize_succeeded
     is rejected with [404 Not Found] so the client must re-handshake
     instead of silently riding on a phantom session.
 
-    [mcp_profile_by_session] is not consulted because it is populated on
+    The profile map is not consulted because it is populated on
     every POST regardless of whether [initialize] has succeeded, so it
     cannot distinguish the handshake transition. *)
 let is_known_session session_id =
-  SMap.mem session_id (Atomic.get protocol_version_by_session)
+  SMap.mem session_id (Atomic.get session_registry).versions
 
 let ensure_sse_backing_session_for_known_transport_session
     ~transport_session_id ~sse_session_id =
@@ -137,18 +136,22 @@ let ensure_sse_backing_session_for_known_transport_session
     ()
 
 let remember_mcp_profile ?otel_transport_context session_id profile =
-  Atomic_util.update mcp_profile_by_session (fun map -> SMap.add session_id profile map);
-  if is_known_session session_id then
-    remember_session_activity ?otel_transport_context session_id
+  let now = Unix.gettimeofday () in
+  Atomic_util.update session_registry (fun state ->
+    let state = {state with profiles=SMap.add session_id profile state.profiles} in
+    if SMap.mem session_id state.versions then
+      with_session_activity ?otel_transport_context ~now session_id state
+    else state)
 
 let forget_mcp_session session_id =
   record_mcp_server_session_duration session_id;
   Client_registry_eio.unregister_mcp_session session_id;
-  Atomic_util.update protocol_version_by_session (fun map -> SMap.remove session_id map);
-  Atomic_util.update mcp_profile_by_session (fun map -> SMap.remove session_id map);
-  Atomic_util.update session_last_active_sse (fun map -> SMap.remove session_id map);
-  Atomic_util.update session_started_at (fun map -> SMap.remove session_id map);
-  Atomic_util.update session_transport_context (fun map -> SMap.remove session_id map)
+  Atomic_util.update session_registry (fun state ->
+    { versions=SMap.remove session_id state.versions
+    ; profiles=SMap.remove session_id state.profiles
+    ; timestamps=SMap.remove session_id state.timestamps
+    ; started=SMap.remove session_id state.started
+    ; transports=SMap.remove session_id state.transports })
 
 (* ===== File persistence ===== *)
 
@@ -182,11 +185,12 @@ let write_sessions path =
   if not (Stdlib.Sys.file_exists dir) then begin
     try Unix.mkdir dir 0o755 with Unix.Unix_error _ -> ()
   end;
-  let versions = Atomic.get protocol_version_by_session in
-  let profiles = Atomic.get mcp_profile_by_session in
-  let timestamps = Atomic.get session_last_active_sse in
-  let started_at = Atomic.get session_started_at in
-  let transports = Atomic.get session_transport_context in
+  let snapshot = Atomic.get session_registry in
+  let versions = snapshot.versions in
+  let profiles = snapshot.profiles in
+  let timestamps = snapshot.timestamps in
+  let started_at = snapshot.started in
+  let transports = snapshot.transports in
   let all_ids = SMap.fold (fun sid _ acc -> sid :: acc) versions [] in
   let string_field key = function
     | Some value when String.trim value <> "" -> [ key, `String value ]
@@ -394,11 +398,7 @@ let save_sessions_to_file ~base_path () =
   saved
 
 type restored_sessions =
-  { versions : string SMap.t
-  ; profiles : Server_mcp_transport_http_types.tool_profile SMap.t
-  ; timestamps : float SMap.t
-  ; started : float SMap.t
-  ; transports : Otel_dispatch_hook.transport_context SMap.t
+  { patch : registry
   ; decoded_entries : int }
 
 type session_restore =
@@ -436,11 +436,11 @@ let decode_sessions (json : Yojson.Basic.t) =
   in
   (match json with
    | `Assoc [("sessions", `Assoc entries)] ->
-       let empty = {versions=SMap.empty;profiles=SMap.empty;timestamps=SMap.empty;
-                    started=SMap.empty;transports=SMap.empty;decoded_entries=0} in
+       let empty = {patch=empty_registry;decoded_entries=0} in
        Restored (List.fold_left (fun restored (sid, entry) ->
          match entry with
          | `Assoc fields ->
+             let patch = restored.patch in
              let pv = List.assoc_opt "protocol_version" fields in
              let profile_str = List.assoc_opt "profile" fields in
              let ts = List.assoc_opt "last_active_sse" fields in
@@ -463,13 +463,13 @@ let decode_sessions (json : Yojson.Basic.t) =
                       | Some (`String p) -> profile_of_string p
                       | _ -> None
                     in
-                    {versions=SMap.add sid v restored.versions;
-                     profiles=(match profile with None -> restored.profiles
-                       | Some profile -> SMap.add sid profile restored.profiles);
-                     timestamps=SMap.add sid t restored.timestamps;
-                     started=SMap.add sid started_at restored.started;
-                     transports=(match transport_context fields with None -> restored.transports
-                       | Some transport -> SMap.add sid transport restored.transports);
+                    {patch={versions=SMap.add sid v patch.versions;
+                     profiles=(match profile with None -> patch.profiles
+                       | Some profile -> SMap.add sid profile patch.profiles);
+                     timestamps=SMap.add sid t patch.timestamps;
+                     started=SMap.add sid started_at patch.started;
+                     transports=(match transport_context fields with None -> patch.transports
+                       | Some transport -> SMap.add sid transport patch.transports)};
                      decoded_entries=restored.decoded_entries + 1})
                   else restored
               | _ -> restored)
@@ -509,10 +509,9 @@ let read_sessions path =
   | Stdlib.Sys_error detail -> Unavailable (Read_failed detail)
   | Yojson.Json_error detail -> Unavailable (Json_failed detail)
 
-let merge_restored values registry =
-  if not (SMap.is_empty values) then
-    Atomic_util.update registry (fun current ->
-      SMap.union (fun _ restored _ -> Some restored) values current)
+let merge_restored values current =
+  if SMap.is_empty values then current
+  else SMap.union (fun _ restored _ -> Some restored) values current
 
 let load_sessions_from_file ~base_path () =
   let path = sessions_file_path ~base_path () in
@@ -539,11 +538,15 @@ let load_sessions_from_file ~base_path () =
       (* Owner activation publishes these maps without yielding after the
          cancellation/ownership checks; an older suspended load cannot apply
          after a newer load has claimed this path on the owner domain. *)
-      merge_restored sessions.versions protocol_version_by_session;
-      merge_restored sessions.profiles mcp_profile_by_session;
-      merge_restored sessions.timestamps session_last_active_sse;
-      merge_restored sessions.started session_started_at;
-      merge_restored sessions.transports session_transport_context;
+      let patch = sessions.patch in
+      if not (SMap.is_empty patch.versions) then begin
+        Atomic_util.update session_registry (fun current ->
+          { versions=merge_restored patch.versions current.versions
+          ; profiles=merge_restored patch.profiles current.profiles
+          ; timestamps=merge_restored patch.timestamps current.timestamps
+          ; started=merge_restored patch.started current.started
+          ; transports=merge_restored patch.transports current.transports })
+      end;
       finish_restore path token;
       Log.Server.debug "session restore applied path=%S entries=%d" path sessions.decoded_entries
   | Missing | Restored _ ->
@@ -553,7 +556,7 @@ let load_sessions_from_file ~base_path () =
     AND whose grace period has expired.
 
     Grace period logic: when a session's SSE goes inactive, we record the
-    timestamp in [session_last_active_sse]. The session is kept for
+    timestamp in the registry's [timestamps] map. The session is kept for
     [grace_period_seconds] after that point, giving the client time to
     reconnect without triggering "Unknown Mcp-Session-Id" errors.
 
@@ -564,12 +567,12 @@ let reap_stale_sessions ~base_path ~is_active_session =
     SMap.fold (fun sid _ (stale_acc, grace_acc) ->
       if is_active_session sid then begin
         (* Active right now — refresh timestamp, keep session *)
-        Atomic_util.update session_last_active_sse
-          (fun map -> SMap.add sid now map);
+        Atomic_util.update session_registry
+          (fun state -> {state with timestamps=SMap.add sid now state.timestamps});
         (stale_acc, grace_acc)
       end else begin
         (* Not active — check grace period *)
-        match SMap.find_opt sid (Atomic.get session_last_active_sse) with
+        match SMap.find_opt sid ((Atomic.get session_registry).timestamps) with
         | Some last_active when now -. last_active < grace_period_seconds ->
             (* Within grace period — keep *)
             (stale_acc, grace_acc + 1)
@@ -577,7 +580,7 @@ let reap_stale_sessions ~base_path ~is_active_session =
             (* Grace expired or never tracked — reap *)
             (sid :: stale_acc, grace_acc)
       end
-    ) (Atomic.get protocol_version_by_session) ([], 0)
+    ) ((Atomic.get session_registry).versions) ([], 0)
   in
   if stale <> [] then begin
     (* Reaping is a transport-driven session termination, so it must pass
@@ -601,7 +604,7 @@ let profile_label = function
   | Server_mcp_transport_http_types.Seat -> "/mcp/play"
 
 let validate_mcp_session_profile ~profile session_id =
-  match SMap.find_opt session_id (Atomic.get mcp_profile_by_session) with
+  match SMap.find_opt session_id ((Atomic.get session_registry).profiles) with
   | None -> Ok ()
   | Some existing when existing = profile -> Ok ()
   | Some existing ->
@@ -615,7 +618,7 @@ let validate_mcp_session_delete_profile ~profile session_id =
      not be able to open any other door. *)
   | Server_mcp_transport_http_types.Operator_remote
   | Server_mcp_transport_http_types.Seat ->
-      (match SMap.find_opt session_id (Atomic.get mcp_profile_by_session) with
+      (match SMap.find_opt session_id ((Atomic.get session_registry).profiles) with
        | Some existing when existing = profile -> Ok ()
        | Some existing ->
            Error
@@ -734,7 +737,7 @@ let validate_protocol_version_continuity ~session_id request =
       Error (Unsupported_version { requested = version })
   in
   let provided = get_protocol_version_header_opt request in
-  match SMap.find_opt session_id (Atomic.get protocol_version_by_session) with
+  match SMap.find_opt session_id ((Atomic.get session_registry).versions) with
   | Some expected -> (
       match provided with
       | None -> Ok ()
@@ -754,7 +757,7 @@ let validate_protocol_version_continuity ~session_id request =
 let get_protocol_version_for_session ?session_id request =
   match session_id with
   | Some id ->
-      (match SMap.find_opt id (Atomic.get protocol_version_by_session) with
+      (match SMap.find_opt id ((Atomic.get session_registry).versions) with
        | Some v -> v
        | None -> get_protocol_version request)
   | None -> get_protocol_version request

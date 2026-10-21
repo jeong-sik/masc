@@ -19,6 +19,7 @@ type t = {
   name : string;
   instance_id : string;
   package : package;
+  image : Engine.image_identity;
   artifact_store : Lane_addon_store.t option;
   input_history : Lane_addon_machine_history.t;
   sampling_broker : Lane_addon_sampling.t option;
@@ -70,6 +71,7 @@ let cleanup_failure = function
 
 let ( let* ) = Result.bind
 let container_id t = t.id
+let image_identity t = t.image
 let container_name t = t.name
 let action_schema t = t.action_schema
 let exported_tools t = if t.stopping then [] else t.exported_tools
@@ -161,7 +163,7 @@ let inspect_image ~clock ~control_timeout_sec ~mgr ~(package : package)
   let command = command_for runtime ~docker_command ~container_command in
   let* raw = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command
       ~operation:"image inspect" (Engine.image_arguments runtime package.image) in
-  Engine.image_digest runtime raw |> Result.map_error (engine_error runtime ~operation:"image inspect")
+  Engine.image_of_inspect runtime raw |> Result.map_error (engine_error runtime ~operation:"image inspect")
 
 let validate_package (package : package) =
   match Lane_addon_types.check_resources ~runtime:package.runtime package.resources with
@@ -309,14 +311,11 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
   (* No create is attempted against an engine that cannot name itself. *)
   let* engine = read_engine_with ~run runtime
     |> Result.map_error (fun fault -> Engine_fault { runtime; fault }) in
-  (* Apple resolves local tags during create. Record the descriptor first and
-     verify the created configuration before starting any package process. *)
-  let* image_digest = match runtime with
-    | Docker -> Ok None
-    | Apple_container ->
-        let* raw = run ~operation:"image inspect" (Engine.image_arguments runtime package.image) in
-        Engine.image_digest runtime raw |> Result.map Option.some
-        |> Result.map_error (engine_error runtime ~operation:"image inspect") in
+  (* Resolve the image for this generation. Docker creates by this immutable
+     ID; Apple verifies its resolved descriptor before starting the process. *)
+  let* raw_image = run ~operation:"image inspect" (Engine.image_arguments runtime package.image) in
+  let* image = Engine.image_of_inspect runtime raw_image
+    |> Result.map_error (engine_error runtime ~operation:"image inspect") in
   let* () = match state_owner with
     | Some owner when not (Lane_addon_worker_state.belongs_to owner ~package_id:package.id) ->
         Error (Invalid_package "persistent state owner names a different package")
@@ -385,7 +384,8 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
     let* () = Lane_addon_slot.claim port ~name ~instance_id ~mine ~is_live_instance
       |> Result.map_error (fun failure -> Lifecycle failure) in
     run ~operation:"create"
-      (Engine.create_arguments package ~name ~instance_id ~state_owner:mine ~image:package.image
+      (Engine.create_arguments package ~name ~instance_id ~state_owner:mine
+         ~image:(Engine.image_create_reference image ~requested:package.image)
          ~scope ~package_mount ~mounts:mounted ~state_mounts:state_mount) in
   let* created = match Lane_addon_slot.proven port ~expected:engine
       ~lift:(fun failure -> Lifecycle failure) create_on_engine with
@@ -404,14 +404,14 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
         try Eio.Flow.close source with Eio.Io _ | Unix.Unix_error _ -> ()) !stderr_source;
       stderr_source := None;
       Ok () in
-    let worker = { id; name; instance_id; package; artifact_store; input_history=Lane_addon_machine_history.create (); sampling_broker; action_schema = None; exported_tools = [];
+    let worker = { id; name; instance_id; package; image; artifact_store; input_history=Lane_addon_machine_history.create (); sampling_broker; action_schema = None; exported_tools = [];
                    client = None; cleanup = worker_cleanup;
                    mutex = Eio.Mutex.create (); stopping = false; removed = false } in
     let result = try
       on_created worker;
       let* () = if worker.stopping then Error Stopped else Ok () in
       let* inspected = run ~operation:"inspect" (Engine.inspect_arguments runtime id) in
-      let* inspected_id = Engine.verify_container runtime ~name ~resources:package.resources ~image_digest inspected
+      let* inspected_id = Engine.verify_container runtime ~name ~resources:package.resources ~image inspected
         |> Result.map_error (engine_error runtime ~operation:"inspect") in
       if not (String.equal inspected_id id) then
         Error (engine_error runtime ~operation:"inspect" "container ID changed")

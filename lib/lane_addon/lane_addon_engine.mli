@@ -1,6 +1,14 @@
 (** Runtime-specific CLI and inspection contracts. This module does no I/O. *)
 type mount = { source : string; destination : string }
 type lookup = Name of string | Id of string
+type image_identity
+(** Validated local Docker image ID or Apple manifest digest, bound to its
+    runtime. This observation belongs to one start, not to a mutable tag. *)
+val image_of_inspect : Lane_addon_types.runtime -> string -> (image_identity, string) result
+val image_digest : image_identity -> string
+val image_create_reference : image_identity -> requested:string -> string
+(** Docker creates by the observed immutable ID. Apple retains its requested
+    reference and must prove the same manifest digest before process start. *)
 
 val instance_label : string
 val state_owner_label : string
@@ -30,7 +38,7 @@ val list_arguments : Lane_addon_types.runtime -> lookup -> string list
 val listed_id : Lane_addon_types.runtime -> lookup -> string -> (string option, string) result
 val verify_container :
   Lane_addon_types.runtime -> name:string -> resources:Lane_addon_types.resources ->
-  image_digest:string option -> string -> (string, string) result
+  image:image_identity -> string -> (string, string) result
 val held_of_inspect : Lane_addon_types.runtime -> string -> (held, string) result
 val scoped_list_arguments : Lane_addon_types.runtime -> string -> string list
 val listed_scoped_ids : Lane_addon_types.runtime -> scope:string -> string -> (string list, string) result
@@ -41,7 +49,6 @@ val engine_of_info :
   Lane_addon_types.runtime -> string ->
   (Lane_addon_lifecycle.engine, Lane_addon_lifecycle.engine_fault) result
 val image_arguments : Lane_addon_types.runtime -> string -> string list
-val image_digest : Lane_addon_types.runtime -> string -> (string, string) result
 val volume_list_arguments : Lane_addon_types.runtime -> string -> string list
 val listed_volume : Lane_addon_types.runtime -> name:string -> string -> (bool, string) result
 val verify_volume :

@@ -1190,7 +1190,7 @@ let backend ~store () = match !override with
         | Some clock ->
             Lane_addon_worker.inspect_image ~clock ~control_timeout_sec
               ~mgr:Posix_spawn_process_mgr.mgr ~package ()
-            |> Result.map (fun (_ : string) -> ())
+            |> Result.map (fun (_ : Lane_addon_engine.image_identity) -> ())
             |> Result.map_error Lane_addon_worker.error_to_string);
       recover_stop = (fun ~runtime ~state_owner ~instance_id ~engine ~container_id ->
         match clock with

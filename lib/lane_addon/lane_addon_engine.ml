@@ -2,6 +2,11 @@ open Lane_addon_types
 
 type mount = { source : string; destination : string }
 type lookup = Name of string | Id of string
+type image_identity = Docker_image_id of string | Apple_manifest_digest of string
+let image_digest = function Docker_image_id value | Apple_manifest_digest value -> value
+let image_create_reference image ~requested = match image with
+  | Docker_image_id id -> id
+  | Apple_manifest_digest _ -> requested
 
 (* Every container this host creates carries the worker incarnation that made
    it; a container for persistent state also carries the state owner. *)
@@ -124,10 +129,10 @@ let listed_id runtime lookup raw = match runtime with
             | _ -> Error "container list has duplicate identities")
        | _ -> Error "expected an Apple container list")
 
-let verify_container runtime ~name ~resources ~image_digest raw =
+let verify_container runtime ~name ~resources ~image raw =
   let* entry = one raw in
-  match runtime with
-  | Docker ->
+  match runtime, image with
+  | Docker, Docker_image_id expected_image ->
       (match member "Id" entry, member "Name" entry, member "HostConfig" entry with
        | Some (`String id), Some (`String actual), Some host
          when valid_id id && String.equal actual ("/" ^ name) ->
@@ -137,9 +142,11 @@ let verify_container runtime ~name ~resources ~image_digest raw =
               || integer ["MemorySwap"] host <> Some resources.memory_bytes
               || integer ["PidsLimit"] host <> Option.map Int64.of_int resources.pids
            then Error "Docker did not apply requested CPU, memory, swap and PID limits"
+           else if member "Image" entry <> Some (`String expected_image)
+           then Error "Docker container image ID differs from the inspected local image"
            else Ok id
        | _ -> Error "container identity or resource settings are absent")
-  | Apple_container ->
+  | Apple_container, Apple_manifest_digest expected ->
       (match member "id" entry, member "configuration" entry with
        | Some (`String id), Some config when String.equal id name
            && path ["id"] config = Some (`String id) ->
@@ -153,10 +160,12 @@ let verify_container runtime ~name ~resources ~image_digest raw =
               || path ["publishedPorts"] config <> Some (`List [])
               || path ["publishedSockets"] config <> Some (`List [])
            then Error "Apple container did not apply read-only, capability and network isolation"
-           else (match image_digest, path ["image"; "descriptor"; "digest"] config with
-             | Some expected, Some (`String actual) when String.equal actual expected -> Ok id
+           else (match path ["image"; "descriptor"; "digest"] config with
+             | Some (`String actual) when String.equal actual expected -> Ok id
              | _ -> Error "Apple container image digest differs from the inspected local image")
        | _ -> Error "Apple container identity or resource settings are absent")
+  | Docker, Apple_manifest_digest _ | Apple_container, Docker_image_id _ ->
+      Error "image identity belongs to a different container runtime"
 
 (* A blank label names nobody, the same as an absent one. It is read as absent
    here so that a record naming the holder never carries a blank, which the
@@ -249,14 +258,17 @@ let engine_of_info runtime raw : (Lane_addon_lifecycle.engine, Lane_addon_lifecy
 let image_arguments runtime image = match runtime with
   | Docker -> ["image"; "inspect"; "--format"; "{{.Id}}"; image]
   | Apple_container -> ["image"; "inspect"; image]
-let image_digest runtime raw = match runtime with
+let image_of_inspect runtime raw =
+  let sha256 value = String.length value = 71
+    && String.sub value 0 7 = "sha256:" && valid_id (String.sub value 7 64) in
+  match runtime with
   | Docker -> let value = String.trim raw in
-      if value = "" then Error "empty image identity" else Ok value
+      if sha256 value then Ok (Docker_image_id value)
+      else Error "local Docker image has no SHA-256 image ID"
   | Apple_container ->
       let* entry = one raw in
       (match path ["configuration"; "descriptor"; "digest"] entry with
-       | Some (`String digest) when String.length digest = 71
-          && String.sub digest 0 7 = "sha256:" && valid_id (String.sub digest 7 64) -> Ok digest
+       | Some (`String digest) when sha256 digest -> Ok (Apple_manifest_digest digest)
        | _ -> Error "local Apple image has no SHA-256 descriptor")
 
 let volume_list_arguments runtime name = match runtime with

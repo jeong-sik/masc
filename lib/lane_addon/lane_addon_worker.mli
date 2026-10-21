@@ -2,6 +2,11 @@
     Keeper or environment-owner lock. The caller owns the background fiber and
     passes a switch whose lifetime spans the binding, not a Keeper turn. *)
 type t
+val image_identity : t -> Lane_addon_engine.image_identity
+(** The local image identity resolved for this worker generation. A handle
+    passed to [on_created] exposes this identity before the created container
+    is verified. An [Ok] handle returned by [start] has passed that verification
+    before package process start. This accessor performs no new inspection. *)
 
 type error =
   | Invalid_package of string
@@ -143,4 +148,5 @@ val read_engine :
 val inspect_image :
   clock:_ Eio.Time.clock -> control_timeout_sec:float ->
   mgr:_ Eio.Process.mgr -> package:Lane_addon_types.package ->
-  ?docker_command:string -> ?container_command:string -> unit -> (string, error) result
+  ?docker_command:string -> ?container_command:string -> unit ->
+  (Lane_addon_engine.image_identity, error) result

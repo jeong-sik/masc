@@ -23,6 +23,7 @@
  (modules test_tui_play_room)
  (libraries alcotest yojson masc masc_tui_play_room))
 (include stanzas/test_runtime_blocker_classification.inc)
+(include stanzas/test_keeper_sandbox_observation.inc)
 (include stanzas/test_published_artifact.inc)
 (include stanzas/test_structured_response_evidence.inc)
 (include stanzas/test_fusion_judge_response_evidence_walk.inc)

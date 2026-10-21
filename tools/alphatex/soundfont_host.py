@@ -197,7 +197,7 @@ def render(engine, plan):
         # boundaries. Original sample positions remain separately in receipt.
         events.sort(key=lambda event: event[0])
         output = plan['output']
-        peak, cursor, event_index = 0.0, 0, 0
+        peak, clipped_samples, cursor, event_index = 0.0, 0, 0, 0
         with open(output, 'xb') as stream:
             created = True
             os.chmod(output, 0o600)
@@ -222,13 +222,20 @@ def render(engine, plan):
                         mixed[index] += sample
                 if any(not math.isfinite(sample) for sample in mixed):
                     raise ValueError('SoundFont renderer produced non-finite samples')
-                peak = max(peak, max(map(abs, mixed), default=0))
-                stream.write(struct.pack('<%df' % len(mixed), *mixed))
+                pcm = struct.pack('<%df' % len(mixed), *mixed)
+                # Measure the final float32 file, after mixing and rounding.
+                # Preserve over-range output; this is a warning, not a limiter.
+                for (sample,) in struct.iter_unpack('<f', pcm):
+                    magnitude = abs(sample)
+                    peak = max(peak, magnitude)
+                    clipped_samples += int(magnitude > 1)
+                stream.write(pcm)
                 cursor = after
             stream.flush(); os.fsync(stream.fileno())
         if digest(font['path']) != font['sha256']:
             raise ValueError('Bound SF2 changed during rendering')
         return {'path': output, 'frames': frames, 'sampleRate': rate, 'channels': 2, 'peak': peak,
+                'clippedSamples': clipped_samples,
                 'wavSha256': digest(output), 'fontSha256': font['sha256'], 'engine': engine.identity,
                 'ports': sorted(ports), 'events': len(events), 'bankStyle': plan['bankStyle'], 'timing': timing}
     except BaseException:

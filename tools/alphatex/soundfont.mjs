@@ -75,7 +75,9 @@ export function renderFluidSound(sound, { preparation, outputPath, run = runHost
       if (result.path !== renderedPath || result.fontSha256 !== sound.font.sha256 || result.engine?.kind !== 'fluidsynth'
         || result.engine.version !== sound.engine.version || result.frames !== plan.frames || result.sampleRate !== plan.sampleRate
         || result.engine.controlFrames !== sound.engine.controlFrames
-        || result.channels !== 2 || result.bankStyle !== sound.bankStyle || !Number.isFinite(result.peak)
+        || result.channels !== 2 || result.bankStyle !== sound.bankStyle || !Number.isFinite(result.peak) || result.peak < 0
+        || !Number.isSafeInteger(result.clippedSamples) || result.clippedSamples < 0 || result.clippedSamples > plan.frames * 2
+        || (result.clippedSamples > 0) !== (result.peak > 1)
         || JSON.stringify(result.ports) !== JSON.stringify(plan.ports.map(port => port.port).sort((a, b) => a - b))
         || result.events !== plan.ports.reduce((count, port) => count + port.events.length, 0)) throw new Error('SoundFont receipt differs from its bound source')
       const quantum = sound.engine.controlFrames, timing = { kind: 'control-block-ceil', quantumFrames: quantum,
@@ -96,7 +98,7 @@ export function renderFluidSound(sound, { preparation, outputPath, run = runHost
       // playback through the TUI generation; it does not undo a sealed file.
       sealed = true
       await link(renderedPath, outputPath)
-      return { path: outputPath, duration: plan.frames / plan.sampleRate, clippedSamples: 0, format: 'wav', soundfont: { ...result, path: outputPath, planSha256: prepared.sha256 },
+      return { path: outputPath, duration: plan.frames / plan.sampleRate, clippedSamples: result.clippedSamples, format: 'wav', soundfont: { ...result, path: outputPath, planSha256: prepared.sha256 },
         ...(plan.sourceWindow ? { sourceWindow: plan.sourceWindow,
           frameRange } : {}) }
     } finally { if (root) await rm(root, { recursive: true, force: true }) }

@@ -3767,13 +3767,9 @@ let launch_task_history_load ?(older=false) state ~mailbox task_id =
         (fun () -> Masc_tui_http.fetch_task_history_page ~host ~port ~request:request.thr_page)
   end
 
-(* Cancel one task through the same MCP tool the keepers use
-   (masc_transition action=cancel). Cancel is an exit-class action, so the
-   contract wants both [reason] and a non-empty [handoff_context.summary];
-   the one operator-typed reason serves as both. Opens its own MCP session,
-   like the resource browser: a human-cadence action does not earn a held
-   connection. The server's task FSM stays the judge of whether this task
-   can still be cancelled. *)
+(* Cancel through the authenticated operator route with the captured workspace
+   precondition. The server remains the authority for the Task transition;
+   transport uncertainty must not be reported as a refusal or a success. *)
 
 let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
   if state.workspace_identity <> Workspace_identity_match
@@ -3785,32 +3781,24 @@ let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
   supersede_home_decision_receipt state;
   let host = server_peer_host in
   let port = state.port in
-  let run () =
-    let result =
-      try
+  (* Keep the original operation switch and unscoped receipt: workspace
+     withdrawal must not cancel an accepted Task cancellation or grant its
+     follow-up read authority over the successor workspace. *)
+  Masc_tui_workspace_result.launch_session ~results:mailbox.workspace_results
+    ~boundary_error:(fun detail -> Task_cancel_unconfirmed detail)
+    ~deliver:(fun result ->
+      let outcome = match result with Ok outcome | Error outcome -> outcome in
+      Task_cancel_done (task_id, expected_workspace, outcome))
+    (fun () ->
       match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
-      | Error detail -> Task_cancel_refused detail
+      | Error detail -> Ok (Task_cancel_refused detail)
       | Ok () ->
-        (match Masc_tui_http.cancel_task ~host ~port ~task_id ~reason ~expected_workspace with
-         | Masc_tui_http.Post_answered json ->
-           Task_cancel_confirmed (Yojson.Safe.to_string json)
-         | Masc_tui_http.Post_refused detail -> Task_cancel_refused detail
-         | Masc_tui_http.Post_unanswered detail -> Task_cancel_unconfirmed detail)
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Task_cancel_unconfirmed (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Task_cancel_done (task_id, expected_workspace, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      (* Admission is bound to [expected_workspace]. Keep its response alive
-         after withdrawal: an accepted cancellation is reported against that
-         workspace, without refreshing or mutating the current workspace. *)
-      Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Task_cancel_done (task_id, expected_workspace, Task_cancel_refused "Eio switch is unavailable"))
+        Ok (match Masc_tui_http.cancel_task ~host ~port ~task_id ~reason ~expected_workspace with
+          | Masc_tui_http.Post_answered json ->
+              Task_cancel_confirmed (Yojson.Safe.to_string json)
+          | Masc_tui_http.Post_refused detail -> Task_cancel_refused detail
+          | Masc_tui_http.Post_unanswered detail -> Task_cancel_unconfirmed detail))
+
 
 
 let ensure_img_cache_dir () =

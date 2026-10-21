@@ -63,8 +63,7 @@ let take_ready results =
 
 let close results = Atomic.set results Closed
 
-let launch ?key ?(observation = false) ?observe_job ?(on_not_run = fun () -> ())
-    state ~results ~boundary_error ~deliver perform =
+let launch_registered ~dispatch ~on_not_run ~results ~boundary_error ~deliver perform =
   match register results with
   | None -> on_not_run ()
   | Some token ->
@@ -81,8 +80,19 @@ let launch ?key ?(observation = false) ?observe_job ?(on_not_run = fun () -> ())
     | None -> not_run "Eio switch is unavailable"
     | Some sw ->
       (match (Eio.Switch.check sw;
-        Masc_tui_workspace_job.fork ?key ~observation ?observe:observe_job
-          ~on_withdrawn:(fun () -> retire_pending results token) state ~sw run) with
+        dispatch ~sw ~on_withdrawn:(fun () -> retire_pending results token) run) with
        | () -> ()
        | exception (Eio.Cancel.Cancelled _ as exn) -> retire_pending results token; raise exn
        | exception exn -> not_run (Printexc.to_string exn))
+
+let launch ?key ?(observation = false) ?observe_job ?(on_not_run = fun () -> ())
+    state ~results ~boundary_error ~deliver perform =
+  launch_registered ~results ~on_not_run ~boundary_error ~deliver
+    ~dispatch:(fun ~sw ~on_withdrawn run ->
+      Masc_tui_workspace_job.fork ?key ~observation ?observe:observe_job
+        ~on_withdrawn state ~sw run) perform
+
+let launch_session ~results ~boundary_error ~deliver perform =
+  launch_registered ~results ~on_not_run:(fun () -> ()) ~boundary_error ~deliver
+    ~dispatch:(fun ~sw ~on_withdrawn:_ run ->
+      Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)) perform

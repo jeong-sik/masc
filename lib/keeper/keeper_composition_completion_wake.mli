@@ -76,7 +76,13 @@ val create :
     that owner delivery finished or every pending record was readable. Partial
     malformed/unreadable records retain their original diagnostics while
     healthy owners can recover. The default observer logs whole-discovery
-    failure. No obligation or canonical result body reaches this observer. *)
+    failure. No obligation or canonical result body reaches this observer.
+
+    Default supervisor discovery/recovery diagnostics include the original
+    workspace base path, including existing failure/interruption records.
+    Routine phase formatting remains lazy; existing other logging levels and
+    frequency remain. Added quoted-path bytes/formatting are observation cost,
+    not delivery authority or measured execution progress. *)
 
 val pulse : sw:Eio.Switch.t -> t -> unit
 (** Reserve a switch-owned discovery child and return without joining outbox

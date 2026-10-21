@@ -104,6 +104,8 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   discovery 예약이며 원래 outbox 발견·owner 예약의 실제 결과만 `on_discovery`로 전달한다.
   전체 읽기 실패와 일부 손상 의무의 진단을 구분하고, discovery는 observer·정리까지 하나만
   활성화하며 읽기 전에 yield한다. 예약을 성공·전달·물리 종료로 바꾸어 기록하지 않는다.
+  기본 복구 경고와 기존 단계·중단 관측에는 원래 supervisor 경로를 함께 남긴다.
+  routine의 lazy 정책을 유지하고 추가 경로 바이트와 eager 로그의 형식화 비용도 센다.
   outbox에서 검증한 원래 root·요청·수신자를 Keeper별 worker로 전달하고,
   실제 전달 전 obligation을 다시 읽어
   identity 변경을 거절한다. 기존 canonical terminal·journal·waiting proof와 durable ACK는

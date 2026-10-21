@@ -53,7 +53,13 @@ val create :
     its original base path. [Ok ()] means the pass returned, not that every
     marker was readable, intake finished or its DAG completed. Partial failures
     keep their original diagnostics. The default observer logs whole-pass errors.
-    Ordinary observer failure cannot undo admission or consume new demand. *)
+    Ordinary observer failure cannot undo admission or consume new demand.
+
+    Default supervisor discovery/recovery diagnostics include the original
+    workspace base path, including existing failure/interruption records.
+    Routine phase formatting remains lazy; existing other logging levels and
+    frequency remain. Added quoted-path bytes/formatting are observation cost,
+    not delivery authority or measured execution progress. *)
 val pulse : sw:Eio.Switch.t -> 'a t -> unit
 (** Record maintenance demand in the controller's switch-owned discovery drain
     and return without joining discovery or intake. The discovery child yields

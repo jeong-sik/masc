@@ -16,7 +16,13 @@ val create :
     result with its base path. [Ok ()] means the pass returned, not that all
     markers were readable or job results delivered. Per-marker failures retain
     their original diagnostics. The default observer logs whole-pass failure.
-    Observation is not delivery, Task progress or physical worker-exit proof. *)
+    Observation is not delivery, Task progress or physical worker-exit proof.
+
+    Default supervisor discovery/recovery diagnostics include the original
+    workspace base path, including existing failure/interruption records.
+    Routine phase formatting remains lazy; existing other logging levels and
+    frequency remain. Added quoted-path bytes/formatting are observation cost,
+    not delivery authority or measured execution progress. *)
 val pulse : sw:Eio.Switch.t -> t -> unit
 (** Server startup/maintenance entrypoint. Reserve one switch-owned discovery
     child and return without joining the scan. Return is scheduling only; the

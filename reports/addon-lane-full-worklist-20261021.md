@@ -1,8 +1,25 @@
-# Lane Addon 전체 작업 목록 · 2026-10-21
+# 전체 후속 작업 목록 · 2026-10-21
+
+총 **60개**: 기존 Addon/Lane·Browser 작업 **54개(A–H)** + 이전 대화의 공통 후속 **6개(X)**.
+기존 A01–H06 식별자는 유지한다. 이 수는 완료 건수나 완료율이 아니라 추적할 작업 범위다.
 
 범위: 기존 Lane의 Addon 분리, 공통 연결 구조, Browser 기능, 에이전트 도구·Skill 접근,
-Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 무관한 기능 개발이나 저장소 전체 PR 정리는 포함하지 않는다.
-아래 54개는 남은 구현·설계·검증·통합 작업이다. 이미 구현된 기능은 다시 만드는 대신 남은 적용·검증 범위를 적었다.
+Dashboard·TUI 관측, 실제 사용·복구·설치 검증과 이전 대화의 Pele·빌드·성능·Ollama·PR 운영 후속.
+이미 구현된 기능은 다시 만드는 대신 남은 적용·검증 범위를 적었다. X의 저장소 전체 후속과
+A의 이번 Addon 변경 닫기는 대상 범위가 다르며, 같은 수정이나 실측은 두 번 완료로 집계하지 않는다.
+
+| 영역 | ID | 작업 수 |
+| --- | --- | ---: |
+| 현재 Addon 변경·검증·통합 | A01–A06 | 6 |
+| 공통 연결·소유권·수명 | B01–B06 | 6 |
+| Plugin·Deferred Tools·Skill·Hook | C01–C06 | 6 |
+| 모델 route·Exact Output | D01–D06 | 6 |
+| 기존 Lane·패키지별 추출·실사용 | E01–E12 | 12 |
+| Browser 전체 행동군·engine 선택 | F01–F06 | 6 |
+| Dashboard·TUI 관측·조작 | G01–G06 | 6 |
+| 실제 앱·실패 복구·연속 사용·설치 | H01–H06 | 6 |
+| Pele·빌드·성능·Ollama·PR 운영 | X01–X06 | 6 |
+| **합계** | | **60** |
 
 ## 최초 기록의 기준점 (아래 재개 체크포인트에서 상태 갱신)
 
@@ -157,16 +174,41 @@ G04 후속 [#44807](https://github.com/jeong-sik/masc/pull/44807) · 다른 설�
 | H05 | 반응 속도·자원·동시 작업 영향 측정 | 후속 실측 | 동일 작업 조건의 전후 latency·queue·CPU·memory 및 TUI/Dashboard 반응을 측정; 다른 Keeper 영향 확인 |
 | H06 | 사용 안내·최종 통합·설치 후 확인 | PR 단계 | manifest/예제/운영·개발 가이드 갱신, 승인된 스택 통합, 선택된 실제 설치본의 identity 및 UI 재확인; Release/Tag라면 해당 전체 검증 별도 수행 |
 
+## X. 이전 대화의 공통 후속 — 6개
+
+이 영역의 오래된 보고서는 당시 기록이다. 이번 목록 작성에서 live 설정·현재 main 빌드·전체 PR을
+새로 전수 검증하지 않았다. 현재 확인하지 않은 증상을 진행 중인 확정 장애로 표시하지 않는다.
+
+| ID | 남은 작업 | 현재 확인 범위 | 완료 기준 |
+| --- | --- | --- | --- |
+| X01 | Pele 기반 TUI diagram/chart 도입 범위와 실제 사용 완성 | 현재 로컬 main 소스에 `masc_tui_pele.ml`, `Ctrl-O` preview와 설치 안내가 있음. 최초 도입을 다시 하는 작업은 아님 | 설치본의 renderer/helper identity, 실제 Mermaid 입력→이미지 표시, terminal 폭·theme·오류 처리, 지원 diagram/chart 종류와 미지원 경계를 확인. 속도·bundle 수치는 실제 동일 조건 측정 후 기록 |
+| X02 | 현재 main의 빌드 고장 및 후속 인터페이스·의존성 오류 수리 | 과거 컴파일 오류 수리 보고서 존재. A01은 이번 Addon TUI 후보에 한정; 현재 main 전체 빌드 성공은 이번에 미확인 | 최신 main 최소 빌드의 실제 실패 로그를 기준으로 수리하고 직접 소비자를 확인. source/parser, 최소 실행 파일 빌드, Release 전체 검증을 구분하고 설치본에서도 대상 명령 시작 확인 |
+| X03 | TUI·Dashboard 공통 로딩·채팅·새로고침 지연 개선 | 이전 관련 조사 있음. 새 후보의 설치·동일 조건 실측은 별도 | 같은 서버에서 HTTP refresh·observer SSE·Dashboard 경로, queue와 처리 시간을 함께 측정하고 병목별 전후 결과를 비교. UI 한쪽의 성공을 다른 쪽의 복구로 간주하지 않음 |
+| X04 | Ollama Cloud 동시성 4 및 foreground/background 공정성의 실제 효과 확인 | 10/19 보고서에 2→4 적용과 queue 지배 지연 기록. fairness 구현 PR 기록은 있으나 이번 live 설정·설치 여부는 미확인 | 현재 설정·실행본을 읽고 Keeper의 대기/첫 응답/도구 후속/최종 응답과 Librarian 진행을 함께 측정. tool-only 응답과 진짜 빈 completion, provider 오류를 구분. 동시성 상향만으로 복구 완료 판정하지 않음 |
+| X05 | pr-updater·assignee·reviewer 요청의 실제 처리 상태 관측과 복구 | 사용자가 반응 지연을 제보. 이번에는 worker별 live 상태 미조사 | 원래 요청 ID로 queued→실행→응답/실패를 추적하고 미배달·정지·권한·용량 대기를 구분. 처리 주체·다음 조치·응답이 Dashboard/TUI에서 보이고 중복 재요청 없이 회복 |
+| X06 | 저장소 전체 PR의 리뷰 대응·충돌·Ready 재점검 | 과거 전체 sweep 보고서 다수. 이번 REST 확인은 Addon 관련 지정 PR에 한정 | 현재 open PR 전수 목록과 REST stack을 읽고 최신 head/base/diff, 미해결 리뷰·충돌·draft 상태를 정리. 필요한 대응과 독립 재리뷰를 수행하고 Native Stack 전체 단위로 통합 가능 상태 기록; 병합·배포는 별도 결과로 기록 |
+
+참조(로컬 전용·Git 미추적 자료이며 이 PR의 공개 artifact가 아님):
+
+- 과거 빌드·TUI 대응: `/Users/dancer/me/workspace/yousleepwhen/masc/reports/tui-build-ux-response-20261019.md`
+- Ollama 동시성 변경: `/Users/dancer/me/workspace/yousleepwhen/masc/reports/ollama-concurrency-4-20261019.md`
+- DeepSeek 지연 분석: `/Users/dancer/me/workspace/yousleepwhen/masc/reports/ollama-deepseek-contention-analysis-20261019.md`
+- Fairness 구현·검증 한계: `/Users/dancer/me/workspace/yousleepwhen/masc/reports/ollama-admission-fairness-implementation-20261019.md`
+
+외부 검토에서 읽을 수 없는 로컬 기록을 공개 실행 증거로 취급하지 않는다. X 항목을 실제로 수행할 때
+현재 상태를 다시 확인하고 필요한 근거를 비밀정보가 없는 공개 PR 자료로 연결한다.
+
 ## 권장 순서와 완료 정의
 
-1. A01–A06으로 현재 관측 변경과 Browser 추가 범위를 닫는다. 검사 대기 중에는 독립 작업을 진행한다.
+1. X02에서 실제 확인된 main 빌드 장애가 있으면 먼저 좁혀 수리한다. A01–A06으로 현재 관측 변경의 실행·Browser 추가 범위·통합을 닫는다. 검사 대기 중에는 독립 작업을 진행한다.
 2. B01–B06에서 host authority와 실제 실행의 경계를 확정하고, C/D의 기존 공통 경로를 재사용한다.
 3. 첫 실제 추출은 E01 Candle Appraiser를 기준 사례로 삼는다. D02에서 기존 요청별 schema grant를
    재사용할 범위와 Candle의 host decode·실행 추적 계약을 먼저 확정한다. 필요한 Browser 공통 기반의
    통합 또는 명시적인 스택 의존성을 기록하고 새 중복 broker를 만들지 않는다.
 4. Candle에서 On/Off/재연결/새 판단/중복 없는 정산을 G/H 화면·증거까지 완주한 뒤 E02 Curator로 확장한다.
 5. E03–E12는 의존성과 효과 소유권에 따라 별도 작은 스택으로 진행한다. Browser F와 공통 G는 독립적으로 병행 가능하다.
-6. 각 대상을 `구현 → 독립 리뷰 → 최소 실행 → 실제 화면/결과 → 통합 → 설치본 확인`으로 나누어 기록한다.
+6. X01/X03–X06은 별도 변경 단위로 진행한다. 이 목록 작성만으로 live 설정 변경, 서버 교체, browser profile 재생성, 전체 PR 병합을 실행한 것으로 보지 않는다.
+7. 각 대상을 `구현 → 독립 리뷰 → 최소 실행 → 실제 화면/결과 → 통합 → 설치본 확인`으로 나누어 기록한다.
 
 **대상별 완료:** 설정 저장, 실제 적용, worker 준비, 새 작업 성공, 원래 결과 보존,
 Dashboard·TUI의 원래 근거 표시를 각각 확인한다. Optional은 Off 후 정리와 On 후 새 incarnation의
@@ -176,8 +218,8 @@ Dashboard·TUI의 원래 근거 표시를 각각 확인한다. Optional은 Off �
 
 ## 2026-10-21 구현 후속
 
-- A03: #44721, head `7f9e34bab08484124bb18a477ecb5e5ba0fb5769`, base `cc4529a905bb66db977785ee61894bea00d16ac1`. retained/unknown worker의 실행 키 안내에 handlers와 같은 `can_observe`를 사용한다. 이력·정리·원래 receipt 조회를 보존했다. OCaml parser와 diff 검사 PASS; 독립 source/response 리뷰 PASS. 새 실행 바이너리·화면 증거는 아직 없다.
-- B01/D02 경계 문서: [lane-addon-extraction-boundaries.md](../docs/design/lane-addon-extraction-boundaries.md). 현재 소스와 unmerged Browser 의존성, 옮길 실행/host authority, Candle의 단계별 요청 identity 및 typed 불확실 결과의 빈 경계를 명시했다. 문서가 실제 추출 완료를 뜻하지 않는다.
+- A03: #44721, head `7f9e34bab08484124bb18a477ecb5e5ba0fb5769`, base `cc4529a905bb66db977785ee61894bea00d16ac1`. retained/unknown worker의 실행 키 안내에 handlers와 같은 `can_observe`를 사용한다. 이력·정리·원래 receipt 조회를 보존했다. OCaml parser와 diff 검사 PASS; 독립 source/response 리뷰 PASS. 후속 native artifact 게시를 확인했지만 새 TUI 실제 화면 증거는 아직 없다.
+- B01/D02 경계 문서: [lane-addon-extraction-boundaries.md](https://github.com/jeong-sik/masc/blob/959eda39beb54bd1111e3d71aa2520822545bd82/docs/design/lane-addon-extraction-boundaries.md). 현재 소스와 unmerged Browser 의존성, 옮길 실행/host authority, Candle의 단계별 요청 identity 및 typed 불확실 결과의 빈 경계를 명시했다. 문서가 실제 추출 완료를 뜻하지 않는다.
 - #44707 코드 리뷰의 추가 P3는 G01에 보존한다. 단일 PR 승인을 전체 Native Stack 승인으로 확대하지 않는다.
 - A01: [native run 39555509454](https://github.com/jeong-sik/masc/actions/runs/39555509454), source `7f9e34bab08484124bb18a477ecb5e5ba0fb5769`, workflow `cccb1fc4808435ed06ece3e586095f37d8dd449c`, scenario `addon-lifecycle`. 별도 CI PR #44727의 두 독립 source 검토는 최종 head PASS다. 두 기존 suite와 matching server/TUI/key generator를 선택했으며 초기 조회에서는 syntax job 성공·native job 실행 중이었다. 재개 시 완료 로그와 artifact를 직독한 결과 native job `119074243862`는 컴파일 FAIL이며 artifact `12325452640`에는 `build-targets.txt`·`build.log`만 있다. 실행 바이너리·성공 receipt는 없다. 기존 TUI suite는 presentation assertion도 포함하는 mixed suite다. artifact 생성은 실제 화면 검증과 구분한다.
 - A05: #44695 전체 delta는 built-in/Addon action reply 정책 공유, #44698은 session/navigation 정책까지 같은 `Browser_lane.reply_timeout_sec`로 연결한다. #44702는 download의 remote claim 보유자를 무한히 기다리지 않고 local preparation만 join하며, 남은 claim이 있으면 파일·grant 상태를 보존한 sticky cleanup 실패를 남긴다. 입력 행동군이나 Safari 지원을 추가한 변경은 아니다.

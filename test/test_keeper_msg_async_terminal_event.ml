@@ -26,6 +26,7 @@ module Keeper_types_profile = Masc.Keeper_types_profile
 let () = Mirage_crypto_rng_unix.use_default ()
 let caller = "terminal-event-test-caller"
 exception Synthetic_background_switch_closed
+exception Synthetic_settlement_switch_closed
 
 let accepted_request_id = function
   | Ok
@@ -243,6 +244,99 @@ let test_abort_callback_failure_does_not_fail_server_switch () =
           released)))
 ;;
 
+let test_settlement_cancellation_preserves_completed_request_and_retires_switch () =
+  with_temp_base (fun base_path ->
+    Eio_main.run (fun _env ->
+      let accepted = ref None in
+      let settled = ref None in
+      let aborted = ref None in
+      let physical_scope_released = ref false in
+      let released_before_notification = ref false in
+      let background_cancelled = ref false in
+      let keeper_name = "terminal-event-settlement-cancellation" in
+      (try
+         Eio.Switch.run (fun sw ->
+           let release_worker, resolve_worker = Eio.Promise.create () in
+           let never, _resolve_never = Eio.Promise.create () in
+           let request_id =
+             Keeper_msg_async.submit
+               ~on_worker_aborted:(fun reason ->
+                 aborted := Some reason;
+                 Ok ())
+               ~on_worker_settled:(fun settlement ->
+                 settled := Some settlement;
+                 released_before_notification := !physical_scope_released;
+                 Eio.Switch.fail sw Synthetic_settlement_switch_closed;
+                 (* Explicitly check the owning switch: the callback itself
+                    is protected from ambient cancellation. *)
+                 Eio.Switch.check sw)
+               ~background_sw:sw
+               ~base_path
+               ~caller
+               ~keeper_name
+               ~f:(fun request_sw ->
+                 Eio.Switch.on_release request_sw (fun () ->
+                   physical_scope_released := true);
+                 Eio.Promise.await release_worker;
+                 Keeper_types_profile.tool_result_ok "original-completed")
+               ()
+             |> accepted_request_id
+           in
+           accepted := Some request_id;
+           Eio.Promise.resolve resolve_worker ();
+           Eio.Promise.await never)
+       with
+       | Synthetic_settlement_switch_closed
+       | Eio.Cancel.Cancelled Synthetic_settlement_switch_closed ->
+         background_cancelled := true);
+      check bool "structural cancellation propagates" true !background_cancelled;
+      check bool "request scope physically released" true !physical_scope_released;
+      check bool "release precedes terminal notification" true !released_before_notification;
+      (match !aborted with
+       | None -> ()
+       | Some _ -> fail "completed worker was reclassified as aborted");
+      let request_id =
+        match !accepted with
+        | Some request_id -> request_id
+        | None -> fail "original request was not durably accepted"
+      in
+      let canonical =
+        match Keeper_msg_async.load_canonical_durable_terminal ~base_path ~caller request_id with
+        | Ok proof -> Keeper_msg_async.durable_terminal_entry proof
+        | Error error ->
+          fail (Keeper_msg_async.canonical_terminal_error_to_string error)
+      in
+      check string "canonical original request" request_id canonical.request_id;
+      check string "canonical original Keeper" keeper_name canonical.keeper_name;
+      check string "canonical original BasePath" base_path canonical.base_path;
+      check string "canonical original caller" caller canonical.submitted_by;
+      (match canonical.status with
+       | Keeper_msg_async.Done { ok; body; _ } ->
+         check bool "original result remains successful" true ok;
+         check string "completed result survives notification cancellation"
+           "original-completed" body
+       | (Keeper_msg_async.Queued | Running | Cancelling _ | Lost _ | Cancelled _
+         | Persistence_failed _ | Waiting_for_dependencies _) as status ->
+         failf "canonical result changed to %s"
+           (Keeper_msg_async.status_to_string status));
+      (match !settled with
+       | Some (Keeper_msg_async.Status_settlement
+           { entry; durability; _ }) ->
+         (match durability with
+          | Keeper_msg_async.Durable -> ()
+          | Keeper_msg_async.Volatile_persistence_failure ->
+            fail "original settlement lost durable truth");
+         check bool "notification retains exact durable result" true
+           (Keeper_msg_async.same_entry_record canonical entry)
+       | Some (Keeper_msg_async.Settlement_projection_error _)
+       | None -> fail "missing original durable terminal notification");
+      (* This is physical request-switch registry occupancy after its owning
+         scope joined, alongside the original durable result and release
+         boundary above; it is not a callback invocation counter. *)
+      check int "closed request has no active switch registration" 0
+        (Keeper_msg_async.For_testing.active_switch_count ())))
+;;
+
 let test_normal_completion_never_invokes_on_worker_aborted () =
   with_temp_base (fun base_path ->
     Eio_main.run (fun env ->
@@ -431,6 +525,8 @@ let () =
             test_abort_callback_failure_does_not_fail_server_switch
         ; test_case "normal completion never invokes on_worker_aborted" `Quick
             test_normal_completion_never_invokes_on_worker_aborted
+        ; test_case "settlement cancellation preserves result and retires switch" `Quick
+            test_settlement_cancellation_preserves_completed_request_and_retires_switch
         ; test_case
             "acceptance failure prevents worker start"
             `Quick

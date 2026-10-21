@@ -448,11 +448,13 @@ let test_catalog_distinguishes_empty_from_unavailable () =
 
 (* Use the production router and file reader: a surviving project file must
    never stand in for the selected scope after its catalog was accepted. *)
-let workspace_http_response ~router target =
+let workspace_http_response ?(meth = "GET") ?(body = "") ?token ~router target =
   let output = Buffer.create 1024 in
   let connection = Httpun.Server_connection.create (fun reqd ->
     Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
-  let raw = Printf.sprintf "GET %s HTTP/1.0\r\nHost: localhost\r\n\r\n" target in
+  let authorization = match token with None -> "" | Some token -> "Authorization: Bearer " ^ token ^ "\r\n" in
+  let raw = Printf.sprintf "%s %s HTTP/1.0\r\nHost: localhost\r\n%sContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s"
+      meth target authorization (String.length body) body in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
   ignore (Httpun.Server_connection.read_eof connection input ~off:0
             ~len:(Bigstringaf.length input));
@@ -508,9 +510,21 @@ let test_file_read_rejects_lost_scope lost () =
           ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
           (fun () -> with_temp_dir (fun base_path ->
             let valid = function Ok value -> value | Error detail -> fail detail in
-            let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+            let state = Masc.Mcp_server.create_state_eio ~sw
+              ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
+              ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+              ~net:(Eio.Stdenv.net env) ~base_path in
             let config = Masc.Mcp_server.workspace_config state in
             ignore (Masc.Workspace.init config ~agent_name:None);
+          Masc.Mcp_server.For_testing.await_publication_recovery_initialization state;
+            Auth.save_auth_config base_path
+              { Masc_domain.default_auth_config with enabled = true; require_token = true };
+            let token =
+              match Auth.create_token base_path ~agent_name:"selected-file-editor"
+                      ~role:Masc_domain.Admin with
+              | Ok (raw, _) -> raw
+              | Error _ -> fail "could not create selected scope fixture token"
+            in
             Server_auth.For_testing.restore_server_state (Some state);
             (match Masc.Server_startup_state.mark_state_ready () with
              | Ok () -> ()
@@ -560,7 +574,7 @@ let test_file_read_rejects_lost_scope lost () =
             let binding = "expected_base_path=" ^ encode (Unix.realpath base_path)
               ^ "&expected_masc_root=" ^ encode (Unix.realpath (Masc.Workspace.masc_dir config)) in
             let router = W.add_routes (Masc.Http_server_eio.Router.create ()) in
-            let request route path = workspace_http_response ~router
+            let request route path = workspace_http_response ~token ~router
                 (route ^ "?path=" ^ encode path ^ "&" ^ scope ^ "&" ^ binding) in
             let status, catalog = request "/api/v1/workspace/files" "" in
             check_workspace_http_status "selected scope catalog succeeds" 200 status catalog;
@@ -570,18 +584,243 @@ let test_file_read_rejects_lost_scope lost () =
             check_workspace_http_status "selected scope file succeeds" 200 status body;
             check string "reads the selected scope, not its project namesake" selected_content
               Yojson.Safe.Util.(body |> member "content" |> to_string);
+            let expected_revision = Yojson.Safe.Util.(body |> member "revision" |> to_string) in
+            let save content expected_revision =
+              let body = Yojson.Safe.to_string (`Assoc ["path", `String path;
+                "expected_revision", `String expected_revision; "content", `String content;
+                "expected_workspace", `Assoc ["base_path", `String (Unix.realpath base_path);
+                  "masc_root", `String (Unix.realpath (Masc.Workspace.masc_dir config))]]) in
+              workspace_http_response ~meth:"POST" ~body ~token ~router ("/api/v1/workspace/file?" ^ scope) in
+            let edited_content = "let selected_scope = \"edited\"\n" in
+            let status, saved = save edited_content expected_revision in
+            check_workspace_http_status "selected scope save succeeds" 200 status saved;
+            let status, edited = request "/api/v1/workspace/file" path in
+            check_workspace_http_status "saved selected file rereads" 200 status edited;
+            check string "write reaches the selected scope" edited_content
+              Yojson.Safe.Util.(edited |> member "content" |> to_string);
             withdraw ();
+            let status, refused = save "must not reach project\n"
+                Yojson.Safe.Util.(saved |> member "revision" |> to_string) in
+            check_workspace_http_status "lost scope cannot write its project namesake" 404 status refused;
             let status, body = request "/api/v1/workspace/file" path in
             check_workspace_http_status "lost scope cannot read its project namesake" 404 status body;
             check bool "scope refusal carries no file content" true
               (Yojson.Safe.Util.member "content" body = `Null);
             let status, body = request "/api/v1/workspace/files" "" in
             check_workspace_http_status "catalog and selected file agree on unavailable scope" 404 status body;
-            let status, body = workspace_http_response ~router
+            let status, body = workspace_http_response ~token ~router
                 ("/api/v1/workspace/file?path=" ^ encode path ^ "&" ^ binding) in
             check_workspace_http_status "explicit project reading remains available" 200 status body;
             check string "the same-named project file really exists" project_content
               Yojson.Safe.Util.(body |> member "content" |> to_string)))))
+
+let with_save_files f =
+  let old_fs = Fs_compat.get_fs_opt () in
+  Fun.protect ~finally:(fun () -> match old_fs with
+    | Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ())
+    (fun () -> Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_temp_dir (fun recovery_root ->
+        Eio.Switch.run @@ fun sw ->
+        let registry =
+          match Fs_compat.Publication_recovery.open_registry ~sw
+              ~fs:(Eio.Stdenv.fs env)
+              ~registry_root:Eio.Path.(Eio.Stdenv.fs env / recovery_root) with
+          | Ok registry -> registry
+          | Error error -> fail (Fs_compat.Publication_recovery.registry_error_to_string error)
+        in
+        let publication_recovery = Masc_test_deps.publication_recovery_provider registry in
+        with_temp_dir (f ~publication_recovery)))
+
+let observed_file ~base path =
+  match W.For_testing.resolve_workspace_file base path with
+  | Error _ -> fail "fixture file cannot be resolved"
+  | Ok file -> match W.For_testing.load_workspace_file_content file with
+    | Error _ -> fail "fixture file cannot be read"
+    | Ok content -> content, W.For_testing.workspace_file_revision ~base file content
+
+let save_ok = function
+  | Ok revision -> revision
+  | Error _ -> fail "expected an admitted file save"
+
+let test_file_save_revision_and_exact_bytes () = with_save_files (fun ~publication_recovery base ->
+  let path = "src/program.ml" in
+  let full = Filename.concat base path in
+  let original = "\tlet text = \"e\204\129\"\r\n" in
+  write_file full original;
+  Unix.chmod full 0o755;
+  let content, revision = observed_file ~base path in
+  check string "original bytes remain exact" original content;
+  let edited = "\tlet text = \"한글🙂\"\r\n" in
+  let saved = save_ok (W.For_testing.save_workspace_file ~publication_recovery ~base ~path ~expected_revision:revision ~content:edited) in
+  let actual, observed = observed_file ~base path in
+  check string "committed bytes, not displayed rows" edited actual;
+  check string "returned revision describes committed bytes" saved observed;
+  check int "ordinary executable permissions survive" 0o755 (Unix.stat full).Unix.st_perm;
+  (match W.For_testing.save_workspace_file ~publication_recovery ~base ~path ~expected_revision:revision ~content:"stale" with
+   | Error W.Save_conflict -> () | Ok _ | Error _ -> fail "stale revision must conflict");
+  check string "conflict preserves current file" edited (fst (observed_file ~base path));
+  check string "unchanged source is idempotent" saved
+    (save_ok (W.For_testing.save_workspace_file ~publication_recovery ~base ~path ~expected_revision:saved ~content:edited));
+  ignore (save_ok (W.For_testing.save_workspace_file ~publication_recovery ~base ~path ~expected_revision:saved ~content:""));
+  check string "an intentionally empty file saves" "" (fst (observed_file ~base path)))
+
+let test_file_save_scope_and_path_guards () = with_save_files (fun ~publication_recovery base ->
+  with_temp_dir (fun other ->
+    let path = "source.ml" in
+    write_file (Filename.concat base path) "original";
+    write_file (Filename.concat other path) "original";
+    let _, revision = observed_file ~base path in
+    (match W.For_testing.save_workspace_file ~publication_recovery ~base:other ~path ~expected_revision:revision ~content:"wrong workspace" with
+     | Error W.Save_conflict -> () | Ok _ | Error _ -> fail "revision cannot move between roots");
+    Unix.symlink (Filename.concat other path) (Filename.concat base "escape.ml");
+    write_file (Filename.concat base ".env") "secret";
+    List.iter (fun path ->
+      match W.For_testing.save_workspace_file ~publication_recovery ~base ~path ~expected_revision:revision ~content:"forbidden" with
+      | Error W.Save_invalid_path -> () | Ok _ | Error _ -> fail "read path guards must also reject writes")
+      ["escape.ml"; ".env"; "../source.ml"];
+    check string "other workspace remains intact" "original" (fst (observed_file ~base:other path));
+    Unix.symlink path (Filename.concat base "alias.ml");
+    ignore (save_ok (W.For_testing.save_workspace_file ~publication_recovery ~base ~path:"alias.ml" ~expected_revision:revision ~content:"through alias"));
+    check string "internal alias retains link identity" path (Unix.readlink (Filename.concat base "alias.ml"));
+    check string "internal alias updates its permitted target" "through alias" (fst (observed_file ~base path))))
+
+let test_file_save_competing_revisions () = with_save_files (fun ~publication_recovery base ->
+  let path = "source.ml" in
+  write_file (Filename.concat base path) "initial";
+  let _, expected_revision = observed_file ~base path in
+  let save content = W.For_testing.save_workspace_file ~publication_recovery ~base ~path ~expected_revision ~content in
+  let first, second = Eio.Fiber.pair (fun () -> save "first") (fun () -> save "second") in
+  let winner = match first, second with
+    | Ok _, Error W.Save_conflict -> "first"
+    | Error W.Save_conflict, Ok _ -> "second"
+    | (Ok _ | Error _), (Ok _ | Error _) -> fail "one revision can commit only once" in
+  check string "the admitted writer owns the file" winner (fst (observed_file ~base path)))
+
+let read_test_file path =
+  let channel = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+
+let check_save_after_directory_swap ~publication_recovery ~base ~path
+    ~original_path ~replacement_path ~outside =
+  let content = "original permitted bytes" in
+  let sentinel = "outside sentinel must survive" in
+  let edited = "edited permitted bytes" in
+  write_file (Filename.concat base path) content;
+  let outside_target = Filename.concat outside (Filename.basename path) in
+  write_file outside_target sentinel;
+  let outside_names () = Array.to_list (Sys.readdir outside) |> List.sort String.compare in
+  let initial_outside_names = outside_names () in
+  let _, expected_revision = observed_file ~base path in
+  let displaced = original_path ^ ".held" in
+  let before_publication_called = ref false in
+  let original_moved = ref false in
+  let link_installed = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      if !link_installed then Unix.unlink original_path;
+      if !original_moved then Unix.rename displaced original_path)
+    (fun () ->
+      let result = W.For_testing.save_workspace_file_before_publication
+          ~before_publication:(fun () ->
+            check bool "publication boundary occurs once" false !before_publication_called;
+            before_publication_called := true;
+            Unix.rename original_path displaced;
+            original_moved := true;
+            Unix.symlink replacement_path original_path;
+            link_installed := true)
+          ~publication_recovery ~base ~path ~expected_revision ~content:edited in
+      check bool "swap occurs after the genuine revision comparison" true !before_publication_called;
+      check string "outside target is unchanged" sentinel (read_test_file outside_target);
+      check (list string) "no staging entry appears outside the permitted root"
+        initial_outside_names (outside_names ());
+      let original_target =
+        if String.equal original_path base then Filename.concat displaced path
+        else Filename.concat displaced (Filename.basename path) in
+      Result.fold
+        ~ok:(fun _ -> check string "success updates only the held original parent"
+          edited (read_test_file original_target))
+        ~error:(fun _ ->
+          let actual = read_test_file original_target in
+          check bool "refusal or uncertainty retains complete original or edited bytes"
+            true (String.equal actual content || String.equal actual edited))
+        result)
+
+let test_file_save_parent_swap_confined () =
+  with_save_files (fun ~publication_recovery base ->
+    with_temp_dir (fun outside ->
+      check_save_after_directory_swap ~publication_recovery ~base
+        ~path:"src/source.ml" ~original_path:(Filename.concat base "src")
+        ~replacement_path:outside ~outside))
+
+let test_file_save_root_swap_confined () =
+  with_save_files (fun ~publication_recovery base ->
+    with_temp_dir (fun outside ->
+      check_save_after_directory_swap ~publication_recovery ~base
+        ~path:"source.ml" ~original_path:base ~replacement_path:outside ~outside))
+
+let test_file_save_http_authority () =
+  let old_state = Server_auth.For_testing.snapshot_server_state () in
+  let old_startup = Masc.Server_startup_state.snapshot () in
+  let old_fs = Fs_compat.get_fs_opt () in
+  Fun.protect ~finally:(fun () ->
+    Server_auth.For_testing.restore_server_state old_state;
+    Masc.Server_startup_state.For_testing.restore old_startup;
+    match old_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ())
+    (fun () -> Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "0") (fun () ->
+      Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+        (fun () -> with_temp_dir (fun base_path ->
+          let state = Masc.Mcp_server.create_state_eio ~sw
+              ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
+              ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+              ~net:(Eio.Stdenv.net env) ~base_path in
+          let config = Masc.Mcp_server.workspace_config state in
+          ignore (Masc.Workspace.init config ~agent_name:None);
+          Masc.Mcp_server.For_testing.await_publication_recovery_initialization state;
+          Auth.save_auth_config base_path
+            { Masc_domain.default_auth_config with enabled = true; require_token = true };
+          let token agent_name role = match Auth.create_token base_path ~agent_name ~role with
+            | Ok (raw, _) -> raw | Error _ -> fail "could not create fixture token" in
+          let admin = token "file-editor" Masc_domain.Admin in
+          let worker = token "file-worker" Masc_domain.Worker in
+          Server_auth.publish_server_state state;
+          (match Masc.Server_startup_state.mark_state_ready () with
+           | Ok () -> () | Error _ -> fail "fixture server not ready");
+          let path = "program.ml" in
+          write_file (Filename.concat base_path path) "initial";
+          let router = W.add_routes (Masc.Http_server_eio.Router.create ()) in
+          let status, document = workspace_http_response ~token:admin ~router
+              ("/api/v1/workspace/file?path=" ^ path) in
+          check_workspace_http_status "Admin reads revision" 200 status document;
+          let revision = Yojson.Safe.Util.(document |> member "revision" |> to_string) in
+          let expected_workspace = `Assoc ["base_path", `String (Unix.realpath base_path);
+            "masc_root", `String (Unix.realpath (Masc.Workspace.masc_dir config))] in
+          let fields = ["path", `String path; "content", `String "edited";
+            "expected_revision", `String revision; "expected_workspace", expected_workspace] in
+          let send ?token fields = workspace_http_response ?token ~router ~meth:"POST"
+              ~body:(Yojson.Safe.to_string (`Assoc fields)) "/api/v1/workspace/file" in
+          List.iter (fun (token, expected) ->
+            let status, body = send ?token fields in
+            check_workspace_http_status "unauthorized save is refused" expected status body;
+            check string "denied writes preserve original" "initial" (fst (observed_file ~base:base_path path)))
+            [None, 401; Some worker, 403];
+          let status, body = send ~token:admin (List.remove_assoc "expected_workspace" fields) in
+          check_workspace_http_status "save requires confirmed workspace" 400 status body;
+          let wrong = `Assoc ["base_path", `String (Filename.concat (Unix.realpath base_path) "other");
+            "masc_root", `String (Unix.realpath (Masc.Workspace.masc_dir config))] in
+          let status, body = send ~token:admin (("expected_workspace", wrong) :: List.remove_assoc "expected_workspace" fields) in
+          check_workspace_http_status "another workspace cannot write" 409 status body;
+          let status, body = send ~token:admin fields in
+          check_workspace_http_status "Admin saves observed revision" 200 status body;
+          check string "routed write publishes candidate" "edited" (fst (observed_file ~base:base_path path));
+          let status, body = send ~token:admin fields in
+          check_workspace_http_status "old revision is not silently retried" 409 status body;
+          check string "file conflict has typed wire code" "workspace_file_changed"
+            Yojson.Safe.Util.(body |> member "code" |> to_string)))))
 
 let () =
   run
@@ -649,5 +888,13 @@ let () =
             `Quick
             test_tree_seed_reaches_every_top_level_directory
         ] )
+    ; ( "revision-bound file writes"
+      , [ test_case "exact bytes, executable mode, stale revision and empty save" `Quick test_file_save_revision_and_exact_bytes
+        ; test_case "workspace roots, path guards and internal aliases" `Quick test_file_save_scope_and_path_guards
+        ; test_case "competing same-revision writers" `Quick test_file_save_competing_revisions
+        ; test_case "parent replaced by outside symlink after comparison" `Quick test_file_save_parent_swap_confined
+        ; test_case "root replaced by outside symlink after comparison" `Quick test_file_save_root_swap_confined ] )
+    ; ( "file write HTTP authority"
+      , [test_case "Admin, canonical workspace and observed revision" `Quick test_file_save_http_authority] )
     ]
 ;;

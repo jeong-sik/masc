@@ -393,6 +393,7 @@ function instrumentFixture() {
 test('arrangement picker captures the selected asset sound and sends it to audio preparation; undo restores MIDI unchanged',async()=>{
   const fixture=instrumentFixture(),before=exportMidiSource(fixture.project.assets[0].source),view=await controller(fixture)
   try {
+    view.command('output explicit-audio');await flush()
     view.key('i');await flush();view.key('return');await flush()
     assert.deepEqual(view.observed.sounds[0].selection,fixture.selection)
     view.observed.sounds[0].finish(fixture.sound);await flush();await flush()

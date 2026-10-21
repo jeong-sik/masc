@@ -637,6 +637,30 @@ let () =
     Fun.protect ~finally:Eio_guard.disable f
   in
 
+  (* A read works from any execution context: with the guard ready, a raw
+     Domain gets the default, the override and the default again after
+     [clear]. *)
+  let test_get_from_raw_domain_with_ready_runtime () =
+    let p =
+      Runtime_params.register
+        ~key:"test.raw_domain_read"
+        ~default:(fun () -> 7)
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun v -> `Int v)
+        ~deserialize:(function `Int i -> Ok i | _ -> Error "expected int")
+        ()
+    in
+    let read_in_raw_domain () = Domain.join (Domain.spawn (fun () -> Runtime_params.get p)) in
+    with_eio_guard (fun () ->
+      Alcotest.(check int) "default from a raw Domain" 7 (read_in_raw_domain ());
+      (match Runtime_params.set p 9 with
+       | Ok () -> ()
+       | Error msg -> Alcotest.fail msg);
+      Alcotest.(check int) "override from a raw Domain" 9 (read_in_raw_domain ());
+      Runtime_params.clear p;
+      Alcotest.(check int) "default again after clear" 7 (read_in_raw_domain ()))
+  in
+
   (* The bounds are written twice -- [register_int]'s ~min/~max validate, and
      the [meta] a settings screen draws its picker from -- so a test that reads
      one of them would not notice the other moving. These assert the behaviour:
@@ -797,6 +821,8 @@ let () =
           Alcotest.test_case "clear" `Quick test_clear;
           Alcotest.test_case "clear_by_key" `Quick test_clear_by_key;
           Alcotest.test_case "clear_by_key_unknown" `Quick test_clear_by_key_unknown;
+          Alcotest.test_case "get from a raw Domain with a ready runtime" `Quick
+            test_get_from_raw_domain_with_ready_runtime;
         ] );
       ( "persistence",
         [

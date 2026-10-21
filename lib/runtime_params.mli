@@ -1,8 +1,8 @@
 (** Runtime_params — Typed runtime parameter store.
 
     Provides a layer above env_config defaults that can be changed at runtime
-    through the authenticated runtime-settings API. All access is
-    Eio.Mutex-protected.
+    through the authenticated runtime-settings API. Writes, {!persist} and
+    {!registry} hold one Eio.Mutex; {!get} takes no lock.
 
     Override values persist to [.masc/runtime_params.json] via atomic rename.
     Changes are logged to [.masc/param_audit.jsonl].
@@ -47,6 +47,9 @@ val initialize : base_path:string -> unit
 (** Register a named parameter with default thunk, validation, and serialization.
     Optional [meta] provides UI hints (description, type, bounds).
     [?meta] is placed before [~deserialize] so existing callers need no change.
+    [default] is called from any Domain, with or without the registry lock, so
+    it must be safe to call concurrently and must not perform Eio operations;
+    reading the environment is the intended use.
     Raises [Invalid_argument] if [key] is already registered. *)
 val register :
   key:string ->
@@ -68,7 +71,9 @@ type json_change =
     mutation. Callers must use this snapshot for ordered side effects instead
     of re-reading the registry after the write. *)
 
-(** Get current value.  Returns the override if set, otherwise the default. *)
+(** Get current value.  Returns the override if set, otherwise the default.
+    Takes no lock, so it can be called from any execution context, including a
+    raw Domain after [Eio_guard.enable]. It raises only what [default] raises. *)
 val get : 'a param -> 'a
 
 (** Set override.  Runs validation; persists and audits on success when a
@@ -114,7 +119,8 @@ val registry : unit -> (string * Yojson.Safe.t * Yojson.Safe.t * bool * param_me
 val persist : base_path:string -> unit
 
 (** Restore overrides from [.masc/runtime_params.json].
-    Call once during server startup. *)
+    Call once during server startup. Readers do not wait for it, so a [get]
+    from another Domain can see some restored keys and not others. *)
 val restore : base_path:string -> unit
 
 (** {1 Audit} *)

@@ -94,6 +94,7 @@ type restore_failure =
   | Read_failed of string
   | Json_failed of string
   | Shape_rejected
+  | Non_regular_file of Unix.file_kind
 
 type save_skip_reason =
   | Restore_unobserved
@@ -110,8 +111,11 @@ val save_sessions_to_file : base_path:string -> unit -> save_result
 (** Serialize current session state and replace the file after flush/close.
     Called automatically by [reap_stale_sessions] after each cleanup.
     The common I/O executor owns the host work. Writers serialize before
-    capturing immutable registry maps, so a queued old capture cannot replace
-    a newer write and the temporary file has one writer. Callers await physical
+    capturing immutable registry maps. Each write exclusively creates a fresh
+    private regular output in the original directory, closes it before rename,
+    and attempts to remove only its own output on failure. Existing temporary paths are not
+    opened or removed. A current nonregular destination is refused before
+    output creation. Callers await physical
     completion; cancellation does not undo a completed file replacement.
     Each map is captured independently; this is not a cross-map transaction.
     Non-Eio callers perform the same work directly. A file present before its
@@ -140,6 +144,12 @@ val load_sessions_from_file : base_path:string -> unit -> unit
     capability to HTTP/stdio.
     Startup health remains independent. Missing files restore nothing; unreadable,
     corrupt or invalid-root files restore nothing and retain a diagnostic.
+    Snapshot leaves must be regular files; FIFO, symlink and other nonregular
+    leaves are refused without reading or replacing them. A nonblocking open
+    followed by descriptor-kind/identity checks protects the regular-file read
+    boundary against a leaf changed between lookup and open. This does not make
+    host storage I/O instantaneous or lock out external directory mutation.
+    Cancellation is checked before restore admission and after physical I/O.
     Original per-entry protocol/profile/timestamp handling remains unchanged.
     Return joins read/decode and application, not background work. *)
 

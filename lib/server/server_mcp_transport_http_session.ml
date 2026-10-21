@@ -238,29 +238,24 @@ let write_sessions path =
     ) all_ids
   in
   let json = `Assoc [ "sessions", `Assoc json_entries ] in
-  let tmp_path = path ^ ".tmp" in
-  let oc = open_out tmp_path in
-  (* Release the fd on every exit path. A mid-write/flush [Sys_error] (disk
-     full, I/O error) previously skipped [close_out] and leaked [oc]; this
-     runs once per reap cycle and the sole caller swallows the error, so the
-     leak accumulated across cycles until fd exhaustion. [flush] stays inside
-     the body so a flush failure still surfaces (caught below, tmp removed,
-     re-raised) rather than renaming a truncated file; [close_out_noerr] in
-     the finally only releases the fd. Mirrors [atomic_write_file] in
-     server_routes_http_routes_sidecar.ml. *)
-  (try
-     Fun.protect
+  let tmp_path, oc = Filename.open_temp_file ~mode:[Open_binary] ~temp_dir:dir
+    (Filename.basename path ^ ".") ".tmp" in
+  (* Only this fresh exclusive regular output belongs to the writer. Preserve
+     every preexisting name and close successfully before publishing it. *)
+  match Fun.protect
        ~finally:(fun () -> close_out_noerr oc)
        (fun () ->
          output_string oc (Yojson.Basic.to_string json);
          output_char oc '\n';
-         flush oc)
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     (try Sys.remove tmp_path with Sys_error _ -> ());
-     raise exn);
-  Unix.rename tmp_path path
+         flush oc;
+         close_out oc;
+         Unix.rename tmp_path path)
+  with
+  | () -> ()
+  | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      (try Sys.remove tmp_path with Sys_error _ -> ());
+      Printexc.raise_with_backtrace exn backtrace
 
 (* The process owns one session registry. Lock only in the blocking worker,
    before capturing its immutable maps, and retain the lock through rename. *)
@@ -270,6 +265,7 @@ type restore_failure =
   | Read_failed of string
   | Json_failed of string
   | Shape_rejected
+  | Non_regular_file of Unix.file_kind
 
 type save_skip_reason =
   | Restore_unobserved
@@ -286,6 +282,7 @@ let restore_failure_to_string = function
   | Read_failed detail -> "unreadable: " ^ detail
   | Json_failed detail -> "invalid JSON: " ^ detail
   | Shape_rejected -> "rejected root"
+  | Non_regular_file kind -> "nonregular snapshot: " ^ Fs_compat.file_kind_to_string kind
 
 let save_skip_reason_to_string = function
   | Restore_unobserved -> "original has not been restored"
@@ -338,9 +335,21 @@ let owns_restore path token =
 
 (* Called only under [persistence_mutex] in the host worker. A save-first
    caller may create a missing file, but cannot overwrite an unrestored one. *)
+let check_snapshot_destination path =
+  match Unix.lstat path with
+  | {Unix.st_kind=Unix.S_REG;_} -> Ok ()
+  | {Unix.st_kind=(Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK) as kind;_} ->
+      Error (Non_regular_file kind)
+  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
+  | exception Unix.Unix_error (code,operation,file) ->
+      Error (Read_failed (Printf.sprintf "%s %s: %s" operation file (Unix.error_message code)))
+
 let can_save_sessions path =
   match SMap.find_opt path (Atomic.get persistence_by_path) with
-  | Some Ready -> Ok ()
+  | Some Ready ->
+      (match check_snapshot_destination path with
+       | Ok () -> Ok ()
+       | Error failure -> Error (Restore_failed (refuse_restore path failure)))
   | Some (Restore_pending _) -> Error Restore_unsettled
   | Some (Restore_refused failure) -> Error (Restore_failed failure)
   | None ->
@@ -470,8 +479,29 @@ let decode_sessions (json : Yojson.Basic.t) =
 
 let read_sessions path =
   try
-    ignore (Unix.stat path);
-    decode_sessions (Yojson.Basic.from_file path)
+    let expected = Unix.lstat path in
+    match expected.Unix.st_kind with
+    | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK as kind ->
+        Unavailable (Non_regular_file kind)
+    | Unix.S_REG ->
+        (* NONBLOCK prevents a FIFO substituted after lstat from waiting for
+           a writer. Validate the actual descriptor before reading any JSON. *)
+        let descriptor = Unix.openfile path [Unix.O_RDONLY;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0 in
+        let input = match Unix.in_channel_of_descr descriptor with
+          | input -> input
+          | exception exn ->
+              let backtrace = Printexc.get_raw_backtrace () in
+              Unix.close descriptor;
+              Printexc.raise_with_backtrace exn backtrace in
+        Fun.protect ~finally:(fun () -> close_in_noerr input) (fun () ->
+          let opened = Unix.fstat descriptor in
+          match opened.Unix.st_kind with
+          | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK as kind ->
+              Unavailable (Non_regular_file kind)
+          | Unix.S_REG ->
+              if expected.Unix.st_dev <> opened.Unix.st_dev || expected.Unix.st_ino <> opened.Unix.st_ino then
+                Unavailable (Read_failed "snapshot identity changed during open")
+              else decode_sessions (Yojson.Basic.from_channel input))
   with
   | Unix.Unix_error (Unix.ENOENT,_,_) -> Missing
   | Unix.Unix_error (error,operation,path) ->
@@ -486,6 +516,7 @@ let merge_restored values registry =
 
 let load_sessions_from_file ~base_path () =
   let path = sessions_file_path ~base_path () in
+  Eio_guard.check_if_ready ();
   let token = ref () in
   begin_restore path token;
   let restored = Eio_guard.run_in_systhread ~label:"mcp-session-load" (fun () ->

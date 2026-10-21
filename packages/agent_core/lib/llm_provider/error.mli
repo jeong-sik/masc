@@ -42,11 +42,12 @@ type provider_error =
       ; stop_reason : Types.stop_reason
       ; detail : string
       }
-  (** The provider answered with an empty assistant turn and a recognized,
-      non-overflow [stop_reason] ([Retry.Empty_attributed]). The reason stays
-      typed across the boundary so MASC classifies it by variant; an
-      overflow is [ContextOverflow] on the [Api] side and an unmodeled
-      stop_reason is [InvalidRequest]. *)
+  (** The provider answered with an empty assistant turn. Both recognized
+      non-overflow reasons and unmodeled tokens retain provider, typed reason
+      and diagnostic detail. Consumers use [Retry.verdict_of_empty_completion]
+      to distinguish recoverable model output from an unknown provider contract;
+      an unknown token is not an invalid request or evidence of overflow.
+      The core boundary promotes a known overflow to [Api ContextOverflow]. *)
   | RepeatingGeneration of
       { provider : string
       ; shape : Types.repeating_shape

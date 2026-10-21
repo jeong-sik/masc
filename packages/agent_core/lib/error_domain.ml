@@ -9,6 +9,7 @@ type provider_error =
   | `Authorization_error of string
   | `Server_error of int * string
   | `Network_error of string
+  | `Empty_completion of string * Llm_provider.Types.stop_reason * string
   | `Provider_timeout of Http_client.timeout_phase option * string
   | `Streaming_timeout of Http_client.timeout_phase * string * string option
   | `Overloaded
@@ -143,11 +144,7 @@ let of_provider_error (err : Llm_provider.Error.provider_error) : provider_error
       , Printf.sprintf "unknown %s variant: %s" r.type_name r.value )
   | Llm_provider.Error.ProviderUnavailable r -> `Network_error r.detail
   | Llm_provider.Error.EmptyCompletion r ->
-    `Network_error
-      (Printf.sprintf
-         "empty completion (stop_reason=%s): %s"
-         (Llm_provider.Types.stop_reason_to_string r.stop_reason)
-         r.detail)
+    `Empty_completion (r.provider, r.stop_reason, r.detail)
   | Llm_provider.Error.RepeatingGeneration r ->
     `Repeating_generation (r.provider, r.shape, r.occurrences, r.unit_bytes, r.detail)
   | Llm_provider.Error.ProviderTerminal r ->
@@ -202,6 +199,8 @@ let provider_to_error : provider_error -> Error.t = function
   | `Authorization_error msg -> Error.Api (Retry.AuthorizationError { message = msg })
   | `Server_error (status, msg) -> Error.Api (Retry.ServerError { status; message = msg })
   | `Network_error msg -> Error.Api (Retry.NetworkError { message = msg; kind = Unknown })
+  | `Empty_completion (provider, stop_reason, detail) ->
+    Error.Provider (Llm_provider.Error.EmptyCompletion { provider; stop_reason; detail })
   | `Provider_timeout (phase, msg) -> Error.Api (Retry.Timeout { message = msg; phase })
   (* The provider rides along so the round trip does not have to invent one.
      It used to be dropped here and reconstructed as the literal "unknown",
@@ -327,6 +326,7 @@ let is_retryable (err : [< core_error_poly ]) : bool =
   | `Auth_error _
   | `Authorization_error _
   | `Invalid_request _
+  | `Empty_completion _
   | `Not_found _
   | `Context_overflow _
   | `Input_capacity _

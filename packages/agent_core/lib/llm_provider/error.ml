@@ -172,11 +172,19 @@ let to_string = function
       r.occurrences
       r.detail
   | EmptyCompletion r ->
-    Printf.sprintf
-      "Provider '%s' unavailable: empty completion (stop_reason=%s): %s"
-      r.provider
-      (Types.stop_reason_to_string r.stop_reason)
-      r.detail
+    (match Retry.verdict_of_empty_completion ~stop_reason:r.stop_reason ~message:r.detail with
+     | Retry.Empty_unattributed { token } ->
+       Printf.sprintf
+         "Provider '%s' returned an empty completion with unmodeled stop_reason=%S: %s"
+         r.provider
+         token
+         r.detail
+     | Retry.Empty_attributed | Retry.Empty_overflow _ ->
+       Printf.sprintf
+         "Provider '%s' unavailable: empty completion (stop_reason=%s): %s"
+         r.provider
+         (Types.stop_reason_to_string r.stop_reason)
+         r.detail)
   | RateLimit r ->
     Printf.sprintf
       "Provider '%s' rate limited: %s%s"
@@ -356,22 +364,7 @@ let of_provider_failure ?provider kind message =
           [Retry.error_message] into [InvalidRequest], preserving the typed →
           string boundary that keeps the public surface source-compatible. *)
        InvalidRequest { provider; reason = Retry.error_message overflow }
-     | Retry.Empty_unattributed { token } ->
-       (* An empty turn whose stop_reason token agent core does not model is not
-          evidence of provider unavailability, and rendering it as such invites
-          the caller to retry the identical prompt — which never terminates when
-          the real condition was an overflow reported with an unmodeled token.
-          Flattened to the same [InvalidRequest] surface as the overflow case,
-          naming the token so it can be modelled. *)
-       InvalidRequest
-         { provider
-         ; reason =
-             Printf.sprintf
-               "empty completion with unmodeled stop_reason=%S: %s"
-               token
-               message
-         }
-     | Retry.Empty_attributed ->
+     | Retry.Empty_unattributed _ | Retry.Empty_attributed ->
        (* The typed [stop_reason] crosses the boundary as a field: the one
           MASC classifier that needs to tell an empty completion from the
           other unavailability producers matches this variant instead of a

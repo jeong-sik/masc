@@ -134,6 +134,7 @@ val commit_turn_runtime
 
 val create_meta
   :  ?intake_token:Keeper_shutdown_intake_fence.intake_token
+  -> ?initial_input:Keeper_input_birth.seed
   -> base_path:string
   -> Keeper_meta_contract.keeper_meta
   -> (Keeper_meta_contract.keeper_meta option, command_error) result
@@ -143,7 +144,8 @@ val create_meta
     mailbox-linearized. An active shutdown reservation rejects creation before
     an empty actor is installed. When [intake_token] is supplied, the caller's
     already-open exact-name intake transaction is reused instead of reacquiring
-    the same fence. *)
+    the same fence. [initial_input] uses the Owner's creation-only command;
+    ordinary metadata creation never infers a new-trace input authority. *)
 
 val batch_operations : base_path:string -> keeper_name:string ->
   Keeper_chat_operation.Operation_id.t ->

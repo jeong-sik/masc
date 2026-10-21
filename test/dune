@@ -165,6 +165,7 @@
 
 (include stanzas/test_keeper_runtime_walk_evidence.inc)
 (include stanzas/test_keeper_input_wait_response.inc)
+(include stanzas/test_keeper_input_birth.inc)
 
 (test
  (name test_keeper_tool_execute_script_paths)

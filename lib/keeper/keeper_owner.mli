@@ -358,6 +358,14 @@ val apply_meta
   -> Keeper_owner_reducer.meta_command
   -> (Keeper_meta_contract.keeper_meta option, error) result
 
+val create_from_input_birth : t -> Keeper_meta_contract.keeper_meta ->
+  Keeper_input_birth.seed -> (Keeper_meta_contract.keeper_meta option, error) result
+(** Empty-actor creation only. Validates the exact live creation seed, registers
+    its retained input predecessor without changing the prior-history floor,
+    then publishes metadata before allowing a child to start. A registration
+    followed by metadata failure remains durable evidence, never success or
+    dispatch. Uncertain store outcomes are returned without replay. *)
+
 val exact_operation
   :  t
   -> Chat_operation.Operation_id.t

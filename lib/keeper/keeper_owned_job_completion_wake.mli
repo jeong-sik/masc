@@ -9,9 +9,12 @@ val create : config:Workspace.config -> ?on_result_ready:(Keeper_owned_job_store
     authority. Observer failures cannot discard the notification or result. *)
 val pulse : sw:Eio.Switch.t -> t -> (unit, Keeper_owned_job_store.error) result
 (** Server startup/maintenance entrypoint. Reserve independent lifecycle fibers
-    for each validated pending marker before reading later markers; the pulse
-    does not wait for backend I/O. A late discovery error retains already
-    reserved workers and their switch-owned cleanup. Held hints absent from
+    for each validated pending marker before reading later markers. Each child
+    yields inside its reservation cleanup before canonical recovery or backend
+    I/O. Discovery still runs in the caller and may yield to admitted children;
+    the pulse does not join them or guarantee that the full scan precedes their
+    work. A late discovery error retains already reserved workers and their
+    switch-owned cleanup. Held hints absent from
     discovery are pruned only after a successful complete scan. A live worker is
     reserved once until it settles or is cancelled. No timer or timeout is added.
     Unchanged previously absent owners use an exact-label presence hint until

@@ -268,6 +268,9 @@ let pulse_with_resume ~resume ~sw supervisor =
         let outcome = Fun.protect
             ~finally:(fun () -> supervisor.active <- Run_set.remove key supervisor.active)
             (fun () ->
+              (* Return fork control before evidence/profile I/O. The original
+                 finally also releases a child cancelled at this entry point. *)
+              Eio.Fiber.yield ();
               let on_recovery_held ~request_id ~cause =
                 supervisor.held <- Run_map.add key {request_id; cause} supervisor.held;
                 Log.Keeper.warn ~keeper_name:source.keeper_name

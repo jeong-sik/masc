@@ -5622,6 +5622,96 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
 
 exception Fixture_result_observer_failed
 
+let test_completion_cancelled_round_preserves_original_result () =
+  let module Fence = Masc.Keeper_shutdown_intake_fence in
+  let channel = Keeper_continuation_channel.dashboard ~thread_id:"recovery-original-thread"
+    |> require "original recovery channel" in
+  with_fixture ~continuation_channel:channel @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
+  ignore (with_bundle fixture (fun bundle ->
+    invoke fixture bundle ~tool_use_id:"collect-before-recovery-cancellation" ~turn:42
+      "keeper_job_status" (argument id)));
+  let original = load fixture id in
+  check bool "original complete result is durable before recovery" true (Store.result_ready original);
+  let check_original_result (record : Store.record) =
+    check string "original job is retained" id (Store.Job_id.to_string record.job_id);
+    check_json "original Task and turn survive recovery" (Store.source_to_json original.source)
+      (Store.source_to_json record.source);
+    check_json "original completion channel survives recovery"
+      (Keeper_continuation_channel.to_yojson channel)
+      (Keeper_continuation_channel.to_yojson record.completion_channel);
+    check bool "original terminal phase survives recovery" true (original.phase = record.phase);
+    check bool "original outputs survive recovery" true (original.outputs = record.outputs);
+    match record.outputs with
+    | Some (Store.Outputs_complete (stdout, stderr)) ->
+        check_artifact_bytes fixture stdout_bytes (Tool_output.normalized_artifact_ref_to_json stdout);
+        check_artifact_bytes fixture stderr_bytes (Tool_output.normalized_artifact_ref_to_json stderr)
+    | None | Some (Store.Outputs_unavailable _) -> fail "complete original output was lost" in
+  check_original_result original;
+  let supervisor = Completion_wake.create ~config:(Workspace.default_config fixture.base_path) () in
+  Eio.Switch.run (fun hold_sw ->
+    let entered, enter = Eio.Promise.create () in
+    let released, release = Eio.Promise.create () in
+    Fun.protect
+      ~finally:(fun () ->
+        if not (Eio.Promise.is_resolved released) then Eio.Promise.resolve release ())
+      (fun () ->
+        (* Hold the real Keeper intake mutex. Any admitted recovery child must
+           wait here before queue commit, even if discovery yields to it. *)
+        let holder = Eio.Fiber.fork_promise ~sw:hold_sw (fun () ->
+          Fence.run_durable_intake_if_open ~base_path:fixture.base_path ~keeper_name:keeper
+            (fun _ -> Eio.Promise.resolve enter (); Eio.Promise.await released)) in
+        Eio.Promise.await entered;
+        let exception Stop_recovery_round in
+        let cancelled =
+          try
+            Eio.Switch.run (fun sw ->
+              Completion_wake.pulse ~sw supervisor |> store_value "admit original recovery";
+              Eio.Switch.fail sw Stop_recovery_round);
+            false
+          with Stop_recovery_round -> true in
+        check bool "selected recovery scope joins its cancelled children" true cancelled;
+        (match pending_completions fixture with
+         | [] -> () | _ :: _ -> fail "cancelled recovery committed through held intake");
+        let retained = load fixture id in
+        check_original_result retained;
+        check bool "undelivered original result remains recoverable" false retained.completion_delivered;
+        Eio.Promise.resolve release ();
+        match Eio.Promise.await_exn holder with
+        | Fence.Intake_committed () -> ()
+        | Fence.Intake_shutdown_reserved _ -> fail "admitted original intake holder changed"));
+  let pulse () = Eio.Switch.run (fun sw ->
+    Completion_wake.pulse ~sw supervisor |> store_value "fresh original recovery round") in
+  pulse ();
+  let selected = only_selection fixture in
+  let completion = completion_payload selected in
+  check string "fresh round delivers the original job" id (Store.Job_id.to_string completion.oj_job_id);
+  check_json "delivered source retains original Task and turn"
+    (Store.source_to_json original.source) (Store.source_to_json completion.oj_source);
+  check_json "delivered notification retains original route"
+    (Keeper_continuation_channel.to_yojson channel)
+    (Keeper_continuation_channel.to_yojson completion.oj_channel);
+  let delivered = load fixture id in
+  check_original_result delivered;
+  check bool "durable queue delivery acknowledges original owner" true delivered.completion_delivered;
+  pulse ();
+  let cleaned = load fixture id in
+  check_original_result cleaned;
+  (match cleaned.cleanup with
+   | Store.Resources_removed -> ()
+   | Store.Resources_retained | Store.Container_removal_requested | Store.Container_removed
+   | Store.Data_removal_requested -> fail "later recovery did not clean original resources");
+  let pending = Store.pending_deliveries ~base_path:fixture.base_path
+    |> store_value "original delivery marker after cleanup" in
+  (match pending.entries, pending.failures with
+   | [], [] -> () | _ -> fail "cleaned original owner retained a delivery marker or discovery failure");
+  pulse ();
+  let repeated = only_selection fixture in
+  check string "cleanup and later recovery preserve the single original notification"
+    selected.source.post_id repeated.source.post_id
+
 let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
   let running = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
@@ -6185,6 +6275,8 @@ let () = match Array.to_list Sys.argv with
       ; test_case "fresh supervisor retains upstream inline arguments and original child authority" `Quick
           (test_nested_skill_job_continuation ~dynamic_arguments:true)
       ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
+      ; test_case "cancelled recovery retains original output and a fresh scope delivers once and cleans" `Quick
+          test_completion_cancelled_round_preserves_original_result
       ; test_case "held absence uses a presence hint and reactivates only original authority" `Quick
           test_held_absent_presence_reactivates_only_original_authority
       ; test_case "changed cancellation bypasses process-local held absence" `Quick

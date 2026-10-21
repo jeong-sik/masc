@@ -49,7 +49,7 @@ let with_answer f =
     ~submissions:["q1",Masc.Keeper_ask.Chose {choice_ids=["c1"]}] ~responder ~now:200.
     |> Result.map_error Masc.Keeper_ask_store.answer_failure_to_string |> require);
   let resolution=match Masc.Keeper_ask_store.rows_result ~base_path:base ~keeper_name:keeper with
-    | Ok (Stored_rows rows) -> List.assoc ask.ask_id rows
+    | Ok (Stored_rows rows) -> snd (List.assoc ask.ask_id rows)
     | Ok Missing_log | Error _ -> fail "canonical answer did not persist" in
   ignore (Wake.deliver ~base_path:base ~keeper_name:keeper ~ask_id:ask.ask_id
     |> Result.map_error Wake.error_to_string |> require);
@@ -523,7 +523,7 @@ let actual_evidence_read config request =
     |> Result.map_error (fun detail -> Task_read.Invalid_reply detail)
     |> fun result -> Result.bind result (Task_read.prepare_evidence ~task_id ~verification_id))
 let submit_original_inspection_task config task_id =
-  let transition action notes = match Masc.Workspace.transition_r config ~agent_name:"proof-worker" ~task_id ~action ~notes
+  let transition action notes = match Masc.Workspace.transition_task_r config ~agent_name:"proof-worker" ~task_id ~action ~notes
     ~prepare_verification_request:(fun ~task ~assignee ~verification_id ~claim ->
       Masc.Verification_protocol.create_submit_request ~config ~task ~assignee ~verification_id ~claim) () with
     | Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error) in

@@ -146,6 +146,15 @@ result receipt, not browser action completion. Identical duplicate deliveries
 are acknowledged and conflicting results are refused. The worker has no model
 credentials or provider route resolution.
 
+The host passes an explicit operational environment to the browser launcher,
+worker and its browser/driver children: process paths and temporary directories,
+locale, desktop display/session settings, font configuration and certificate
+paths. Other host environment entries, including provider API keys, are omitted.
+Allowed values are preserved; `HOME` is not rewritten. Browser configuration
+still comes from the private admission. This prevents unnecessary environment
+inheritance; the native worker runs as the same OS user and is not a sandbox
+against reading that user's files.
+
 A package can explicitly grant `request_schema = true` for a selected model
 output. The model requirement then uses the original canonical request schema;
 the package baseline remains mandatory. The shared broker and worker receipt

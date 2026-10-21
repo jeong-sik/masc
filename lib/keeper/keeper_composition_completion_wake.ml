@@ -254,13 +254,20 @@ let log_report ~keeper_name (report : Outbox.report) =
     "composition completion recovery keeper=%s inspected=%d delivered=%d waiting=%d failures=%d"
     keeper_name report.inspected report.delivered report.waiting (List.length report.failures)
 
+let log_discovery ~base_path:_ = function
+  | Ok () -> ()
+  | Error error -> Log.Server.warn "composition completion outbox unavailable: %s"
+      (Outbox.error_to_string error)
+
 type t =
   { base_path : string
   ; on_report : keeper_name:string -> Outbox.report -> unit
-  ; mutable active : Set_util.StringSet.t }
+  ; on_discovery : base_path:string -> (unit, Outbox.error) result -> unit
+  ; mutable active : Set_util.StringSet.t
+  ; mutable discovery_active : bool }
 
-let create ~base_path ?(on_report=log_report) () =
-  {base_path;on_report;active=Set_util.StringSet.empty}
+let create ~base_path ?(on_report=log_report) ?(on_discovery=log_discovery) () =
+  {base_path;on_report;on_discovery;active=Set_util.StringSet.empty;discovery_active=false}
 
 let recover_owner pending =
   let empty : Outbox.report = {inspected=0;waiting=0;delivered=0;failures=[]} in
@@ -273,7 +280,7 @@ let recover_owner pending =
     | Error error -> {report with failures=(pending.request_id,error)::report.failures}) empty pending in
   {report with failures=List.rev report.failures}
 
-let pulse ~sw supervisor =
+let discover_and_schedule ~sw supervisor =
   Eio.Switch.check sw;
   let ( let* ) = Result.bind in
   let* discovery = Outbox.discover ~base_path:supervisor.base_path in
@@ -321,3 +328,56 @@ let pulse ~sw supervisor =
         release ();
         Printexc.raise_with_backtrace exn bt)) owners;
   Ok ()
+
+type discovery_phase =
+  | Discovery_reserved | Discovery_started
+  | Discovery_settled of (unit, Outbox.error) result
+  | Discovery_interrupted | Discovery_raised
+
+let observe_discovery ~base_path ~reserved_ns phase =
+  let emit () = try Log.Server.routine_lazy (fun () ->
+      let phase, detail = match phase with
+        | Discovery_reserved -> "reserved", Printf.sprintf " base_path=%S" base_path
+        | Discovery_started -> "started", ""
+        | Discovery_settled result -> "settled",
+            (match result with Ok () -> " outcome=returned" | Error _ -> " outcome=failed")
+        | Discovery_interrupted -> "interrupted", ""
+        | Discovery_raised -> "raised", "" in
+      Printf.sprintf "composition_completion_discovery reserved_ns=%Ld phase=%s at_ns=%Ld%s"
+        reserved_ns phase (Mtime_clock.elapsed_ns ()) detail)
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | _ -> () in
+  Eio.Cancel.protect emit
+
+let pulse ~sw supervisor =
+  Eio.Switch.check sw;
+  if not supervisor.discovery_active then (
+    let reserved_ns = Mtime_clock.elapsed_ns () in
+    let observe = observe_discovery ~base_path:supervisor.base_path ~reserved_ns in
+    supervisor.discovery_active <- true;
+    let release () = supervisor.discovery_active <- false in
+    try
+      observe Discovery_reserved;
+      Eio.Switch.check sw;
+      Eio.Fiber.fork ~sw (fun () ->
+        Fun.protect ~finally:release (fun () ->
+          try
+            Eio.Fiber.yield ();
+            observe Discovery_started;
+            let result = discover_and_schedule ~sw supervisor in
+            observe (Discovery_settled result);
+            (try supervisor.on_discovery ~base_path:supervisor.base_path result with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn -> Log.Server.warn "composition completion discovery observer failed: %s"
+                 (Printexc.to_string exn))
+          with
+          | Eio.Cancel.Cancelled _ as exn -> observe Discovery_interrupted; raise exn
+          | exn ->
+              observe Discovery_raised;
+              Log.Server.warn "composition completion discovery worker retained: %s"
+                (Printexc.to_string exn)))
+    with exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      release ();
+      Printexc.raise_with_backtrace exn bt)

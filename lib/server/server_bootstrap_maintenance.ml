@@ -672,10 +672,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     let composition_completions =
       Keeper_composition_completion_wake.create ~base_path:config.base_path () in
     let reconcile_composition_completions () =
-      match Keeper_composition_completion_wake.pulse ~sw composition_completions with
-      | Error error -> Log.Server.warn "composition completion outbox unavailable: %s"
-          (Keeper_composition_completion_outbox.error_to_string error)
-      | Ok () -> ()
+      Keeper_composition_completion_wake.pulse ~sw composition_completions
     in
     let prepared_continuations = Keeper_composition_continuation_wake.create ~context:recovery_ctx () in
     let reconcile_prepared_continuations () =

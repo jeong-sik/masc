@@ -1,6 +1,6 @@
 ---
 name: ocaml-coding
-description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 이미지 카탈로그 등 막히는 I/O, Task Skill 준비 쌍 연결과 Keeper별 비동기 Ask 발견·오류 전달 및 Composition 완료 복구, Goal·Broadcast maintenance와 transition outbox 페이지의 원래 전달·cursor 경계, 회차별 증거 공유, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
+description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, executor의 실제 worker 정리와 실패 재실행 금지, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 이미지 카탈로그 등 막히는 I/O, Task Skill 준비 쌍 연결과 Keeper별 Ask와 Composition 완료의 비동기 발견·오류 전달, Goal·Broadcast maintenance와 transition outbox 페이지의 원래 전달·cursor 경계, 회차별 증거 공유, .mli 먼저 고치기, 결정론 게이트와 CI lint 가 새 줄에서 잡는 모양을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
 ---
 
 # masc OCaml 점검표
@@ -84,8 +84,12 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   예약·시작·batch 결과·중단을 구분하며, 취소 정리 전 active를 해제하거나 전달을 Task 진척으로
   부르지 않는다. discovery 자체·같은 Keeper의 직렬 대기·보호된 물리 I/O 정리는 여전히 남는다.
 
-- Composition 완료 복구도 원래 server switch의 supervisor를 사용한다. outbox에서 검증한
-  원래 root·요청·수신자를 Keeper별 worker로 전달하고, 실제 전달 전 obligation을 다시 읽어
+- Composition 완료 복구도 원래 server switch의 supervisor를 사용한다. `pulse` 반환은
+  discovery 예약이며 원래 outbox 발견·owner 예약의 실제 결과만 `on_discovery`로 전달한다.
+  전체 읽기 실패와 일부 손상 의무의 진단을 구분하고, discovery는 observer·정리까지 하나만
+  활성화하며 읽기 전에 yield한다. 예약을 성공·전달·물리 종료로 바꾸어 기록하지 않는다.
+  outbox에서 검증한 원래 root·요청·수신자를 Keeper별 worker로 전달하고,
+  실제 전달 전 obligation을 다시 읽어
   identity 변경을 거절한다. 기존 canonical terminal·journal·waiting proof와 durable ACK는
   같은 core를 사용한다. 이미 ACK된 힌트는 권한이 아니며 active 중의 새 의무는 후속 pulse가
   다시 발견한다. 발견/재읽기 비용을 포함하고, batch 결과·observer·worker 정리를 구분한다.

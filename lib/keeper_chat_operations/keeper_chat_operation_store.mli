@@ -105,6 +105,23 @@ val register_created_input_checkpoint : t -> checkpoint:Keeper_checkpoint_ref.t 
     metadata or dispatch. This low-level storage function cannot validate the
     creation capability or filesystem evidence; the Owner must do so first. *)
 
+val history_clear_input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
+  (Keeper_checkpoint_ref.t option, error) result
+(** Maintenance admission in a journal transaction. Refuse unavailable prior
+    input, running operations, nonterminal semantic executions and any active or
+    unacknowledged native call, including calls attached to terminal executions.
+    None is a genuinely unobserved input, never a forgotten consumed request. *)
+
+val commit_history_clear_input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
+  observed:Keeper_checkpoint_ref.t option -> checkpoint:Keeper_checkpoint_ref.t option ->
+  (input_checkpoint_update, error) result
+(** Recheck the same unsettled-state guard and exact input predecessor in one
+    transaction before publishing a confirmed operator clear. None revalidates
+    genuinely fresh no-payload clears only; it cannot remove an observed input.
+    The Owner must validate its original maintenance capability and the actual
+    retained/canonical installation receipt. Filesystem and journal commits are
+    separate. An uncertain commit remains Error and does not authorize replay. *)
+
 module Offline : sig
   type prepared_copy =
     { operation_count : int; semantic_count : int; batch_member_count : int

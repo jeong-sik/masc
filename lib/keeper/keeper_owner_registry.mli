@@ -175,6 +175,13 @@ val direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:K
     with [Owner_stopping]. *)
 val direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   (Keeper_native_call.state, command_error) result
+val begin_history_clear : base_path:string -> keeper_name:string ->
+  (Keeper_owner.history_clear_writer, command_error) result
+val commit_history_clear : base_path:string -> keeper_name:string ->
+  writer:Keeper_owner.history_clear_writer -> receipt:Keeper_history_clear.receipt ->
+  (unit, command_error) result
+(** Fresh admission uses the normal lifecycle fence; an already installed clear
+    receipt reaches its original draining Owner through the receipt lookup. *)
 val begin_input_checkpoint : base_path:string -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
   (Keeper_owner.input_checkpoint_writer, command_error) result
 val input_checkpoint : base_path:string -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->

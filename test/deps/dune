@@ -27,6 +27,7 @@
   (re_export cohttp)
   (re_export cohttp-eio)
   (re_export masc.browser_configuration)
+  (re_export masc.keeper_checkpoint_ref)
   (re_export masc.machine_configuration)
   (re_export masc.monotonic_deadline)
   (re_export masc.machine_pad_layout)

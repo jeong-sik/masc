@@ -178,6 +178,10 @@ type child_completion =
       }
       -> child_completion
 
+type history_clear_writer =
+  { clear_child : Keeper_interrupt_token.t
+  ; clear_authority : Keeper_history_clear.authority }
+
 type input_checkpoint_writer =
   { input_trace : Keeper_id.Trace_id.t
   ; input_child : Keeper_interrupt_token.t
@@ -210,6 +214,8 @@ type _ command =
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
   | Direct_native_call : Operation_id.t -> (Keeper_native_call.state, error) result command
   | Input_checkpoint : Keeper_id.Trace_id.t -> (Chat_operation_store.input_checkpoint_observation, error) result command
+  | Begin_history_clear : Keeper_interrupt_token.t -> (history_clear_writer, error) result command
+  | Commit_history_clear : history_clear_writer * Keeper_history_clear.receipt -> (unit, error) result command
   | Begin_input_checkpoint : Keeper_id.Trace_id.t * Keeper_interrupt_token.t -> (input_checkpoint_writer, error) result command
   | Advance_input_checkpoint : input_checkpoint_writer * input_checkpoint_change ->
       (input_checkpoint_writer, error) result command
@@ -608,7 +614,8 @@ let answer : type response. response command -> answer = function
   | Has_newer_original_queued _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
   | Direct_native_call _ -> In_its_drain_step
-  | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _ -> In_its_drain_step
+  | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _
+  | Begin_history_clear _ | Commit_history_clear _ -> In_its_drain_step
   | Update_direct_native_call _ | Bind_retired_input_cut _ -> In_its_drain_step
   | Defer_direct_checkpoint _ -> In_its_drain_step
   | Resume_direct_checkpoint _ -> In_its_drain_step
@@ -1791,6 +1798,45 @@ let start
             Chat_operation_store.input_checkpoint t.operation_store ~trace_id) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Begin_history_clear caller, resolve) ->
+          let response = reject_if_stopping state (fun () ->
+            reject_if_shutdown shutdown_operation_id (fun () ->
+              match (Keeper_owner_reducer.projection state).meta,
+                  Atomic.get t.turn_in_flight, Atomic.get t.child_cancel with
+              | Some meta, Some {lane=Maintenance;interrupt_token;_}, Some _
+                  when Keeper_interrupt_token.equal caller interrupt_token ->
+                (match run_operation_command t ~label:"admit operator history clear" (fun () ->
+                   Chat_operation_store.history_clear_input_checkpoint t.operation_store ~trace_id:meta.runtime.trace_id) with
+                 | Ok (observed,_) -> Ok {clear_child=interrupt_token;
+                     clear_authority=Keeper_history_clear.authorize ~session_root:t.session_root ~trace_id:meta.runtime.trace_id ~observed}
+                 | Error _ as error -> error)
+              | (Some _ | None),(Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),(Some _ | None) ->
+                Error (Operation_rejected (Chat_operation_store.Invalid_input
+                  "history clear admission requires the original maintenance child")))) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Commit_history_clear (writer,receipt), resolve) ->
+          let authority=writer.clear_authority in
+          let response = match (Keeper_owner_reducer.projection state).meta,
+              Atomic.get t.turn_in_flight, Atomic.get t.child_cancel with
+            | Some meta,Some {lane=Maintenance;interrupt_token;_},Some _
+                when Keeper_interrupt_token.equal interrupt_token writer.clear_child
+                  && Keeper_id.Trace_id.equal meta.runtime.trace_id (Keeper_history_clear.trace_id authority)
+                  && Keeper_history_clear.belongs_to receipt authority ->
+              (match run_operation_command t ~label:"commit operator history input clear" (fun () ->
+                 Chat_operation_store.commit_history_clear_input_checkpoint t.operation_store
+                   ~trace_id:meta.runtime.trace_id ~observed:(Keeper_history_clear.predecessor authority)
+                   ~checkpoint:(Keeper_history_clear.checkpoint receipt)) with
+               | Ok (Chat_operation_store.Input_checkpoint_updated,_) -> Ok ()
+               | Ok (Chat_operation_store.Input_checkpoint_source_changed _,_) ->
+                 Error (Operation_rejected (Chat_operation_store.Invalid_input
+                   "history clear input predecessor changed; reconcile both stores before a fresh clear"))
+               | Error _ as error -> error)
+            | (Some _ | None),(Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),(Some _ | None) ->
+              Error (Operation_rejected (Chat_operation_store.Invalid_input
+                "history clear receipt no longer belongs to its original maintenance child and trace")) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Begin_input_checkpoint (trace_id, caller), resolve) ->
           let response = reject_if_stopping state (fun () ->
             reject_if_shutdown shutdown_operation_id (fun () ->
@@ -2534,6 +2580,18 @@ let input_child_request t writer change =
     request t (Advance_input_checkpoint (writer, change))
   | Some _ | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
       "input publication caller does not own the captured child"))
+let begin_history_clear t =
+  match Keeper_turn_preview_owner.current () with
+  | Some caller -> request t (Begin_history_clear caller)
+  | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "history clear admission requires an inherited maintenance child"))
+let history_clear_authority writer = writer.clear_authority
+let commit_history_clear t ~writer ~receipt =
+  match Keeper_turn_preview_owner.current () with
+  | Some caller when Keeper_interrupt_token.equal caller writer.clear_child ->
+    request t (Commit_history_clear (writer,receipt))
+  | Some _ | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "history clear publication requires its inherited maintenance child"))
 let begin_input_checkpoint t ~trace_id =
   match Keeper_turn_preview_owner.current () with
   | Some caller -> request t (Begin_input_checkpoint (trace_id, caller))

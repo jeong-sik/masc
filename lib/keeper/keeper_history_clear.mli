@@ -1,58 +1,49 @@
-(** Emptying a keeper's saved history ([masc_keeper_clear]).
+(** Operator history clearing under an original Owner maintenance capability.
+    Planning reads exact canonical and retained input bytes before any official
+    session effect. Execution retains the cleared payload before canonical CAS.
+    This module does not publish input ownership; the Owner must consume its
+    receipt with the same original authority, then append the restart marker.
+    Filesystem and SQLite commits are separate and partial evidence survives. *)
+type authority
+type plan
+type receipt
 
-    The clear saves the checkpoint of one trace with its conversation messages
-    removed, and then says so in the keeper's turn-boundary store (RFC
-    librarian-lifecycle §4.6). The order is the contract: the
-    [History_restarted] line is appended only after the store reports the emptied
-    checkpoint as saved, so a reader that sees the line knows the history was
-    already emptied. A clear the store refused, or could not write, leaves no
-    line.
+type error =
+  | Invalid_clear of string
+  | Canonical_unreadable of Keeper_checkpoint_store.checkpoint_ref_load_error
+  | Retained_unavailable of Keeper_checkpoint_store.checkpoint_cas_error
+  | Installation_unconfirmed of Keeper_checkpoint_store.checkpoint_installation
+  | Removal_unconfirmed of Keeper_checkpoint_store.undecodable_removal_error
 
-    The line is not written first because a reader could then confirm its
-    position against the still-full history with the line already in view,
-    and have nothing left to explain the mismatch once the save lands. *)
+type history =
+  | Emptied of { cleared_message_count : int; checkpoint_found : bool }
+  | Removed of { checkpoint_path : string;
+                 undecodable : Keeper_checkpoint_store.checkpoint_load_error }
 
-type outcome =
-  | Cleared of
-      { cleared_message_count : int
-      ; marker : (unit, string) result
-            (** Whether the [History_restarted] line was written. [Error] does
-                not undo or fail the clear, as a turn's line does not fail the
-                turn. The keeper's next turn loads the emptied history and
-                writes the same line when it starts; until then nothing in
-                the store explains why the history started over. *)
-      }
-      (** The emptied checkpoint is the canonical one on disk. *)
-  | Superseded of
-      { incoming_turn_count : int
-      ; known_turn_count : int
-      }
-      (** A newer writer owns the canonical checkpoint: the store's stale
-          no-op. Nothing was written. *)
-  | Save_unconfirmed of { detail : string }
-      (** The save failed or raised, and no line was written. Whether the
-          history was emptied is unknown, which is why the name does not
-          claim it was not: the store reports a save only once the payload,
-          the rename and the directory fsync all succeeded, so a failure
-          before the last of those still leaves the emptied checkpoint as the
-          canonical one. The tool surface answers with
-          [Effect_outcome_unknown] and asks the operator to run the clear
-          again, which is safe either way. *)
-
-(** Empty the history [ctx] holds and save it as the checkpoint of [session].
-    [preserve_system] keeps the [System] messages, which are not atoms, so
-    either way the saved history holds no atom. The trace the line names is
-    [session.session_id], the value the checkpoint is saved under.
-
-    Nothing but a cancellation is raised: a save that raises is [Save_unconfirmed],
-    and a line that cannot be written is [marker]. A cancellation the store
-    re-raises after it has written the checkpoint leaves an emptied history
-    with no line, the one state this module cannot report. *)
-val clear
-  :  keepers_dir:string
-  -> runtime_id:string
-  -> keeper_name:string
-  -> session:Keeper_context_core.session_context
-  -> preserve_system:bool
-  -> Keeper_context_core.working_context
-  -> outcome
+val authorize : session_root:string -> trace_id:Keeper_id.Trace_id.t ->
+  observed:Keeper_checkpoint_ref.t option -> authority
+(** The Owner captures this fresh opaque identity with its original maintenance
+    child and original workspace session root. A caller-created authority cannot match that captured identity. *)
+val trace_id : authority -> Keeper_id.Trace_id.t
+val predecessor : authority -> Keeper_checkpoint_ref.t option
+val prepare : authority:authority -> session_dir:string -> preserve_system:bool ->
+  (plan, error) result
+(** Both canonical and retained input must have pending_input=None. An observed
+    input remains authoritative when canonical is absent or undecodable; clear
+    recovers from its retained payload. Fresh absent/superseded canonical remains
+    without a payload; fresh undecodable canonical is removed under its lock.
+    Newer/unreadable bytes and unavailable retained input are refused. The plan
+    freezes its candidate bytes and exact canonical predecessor. *)
+val execute : plan -> (receipt, error) result
+(** Run only after confirmed official-session clearing. Retention and exact
+    canonical installation must both be confirmed. Actual cancellation propagates,
+    including post-commit auxiliary cancellation. Failure never mints a receipt.
+    Retry requires a fresh explicit operator clear and a newly prepared plan. *)
+val belongs_to : receipt -> authority -> bool
+val checkpoint : receipt -> Keeper_checkpoint_ref.t option
+val history : receipt -> history
+val append_marker : receipt -> keepers_dir:string -> keeper_name:string ->
+  (unit, string) result
+(** Call only after the Owner confirms input publication. No-payload clears need
+    no restart marker. Marker failure does not undo either confirmed commit. *)
+val error_to_string : error -> string

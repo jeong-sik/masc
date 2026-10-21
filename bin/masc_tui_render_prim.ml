@@ -682,30 +682,35 @@ let slash_hint_text ~restore draft =
   | [] -> None
   | spans -> Some (String.concat "" (List.map paint spans))
 
-let composer_draft_window state ~cols ~prompt =
-  let draft = Terminal_text.single_line (Masc_tui_message_input.contents state.msg_input) in
-  (* Editing stops at whole grapheme boundaries, so this prefix cannot end
-     inside a ZWJ/variation-selector sequence whose escaping needs its suffix. *)
-  let before = Terminal_text.single_line (Masc_tui_message_input.before_cursor state.msg_input) in
-  Message_layout.input_window
-    ~max_cells:(max 0 (cols - Message_layout.display_width prompt))
-    ~cursor:(String.length before) draft
-
-let composer_line state ~cols =
+(* One synchronous frame owns the recipient, prompt and fitted draft used by
+   both its row and caret. Nothing survives to the next frame or key handler. *)
+let composer_row state ~rows ~cols =
   if state.view = Overview && not state.composer_focused then
     let note=match Composer.reading_note (Composer_projection.source_reading state) with
       | None -> "Choose a Keeper before writing"
       | Some note -> Terminal_text.single_line note in
-    Theme.recede () ^ fit_width (" " ^ note ^ " · i:choose") cols ^ Ansi.reset
+    (Theme.recede () ^ fit_width (" " ^ note ^ " · i:choose") cols ^ Ansi.reset,
+     Frame_presenter.Hidden)
   else match browser_lane_on_screen state with
   (* The page reader owns the keys here, so there is no composer to draw. The
      row it would take stays empty: the title already names the lane, its
      source and its browser, and a second copy down here is a state the reader
      has to match up by position. *)
-  | Some _ -> Theme.recede () ^ fit_width "" cols ^ Ansi.reset
+  | Some _ -> (Theme.recede () ^ fit_width "" cols ^ Ansi.reset, Frame_presenter.Hidden)
   | None ->
   let composer = Composer_projection.of_state state in
   let prompt = composer_prompt_text ~voice:(voice_meter_text state) composer in
+  (* The caret uses exactly the prompt the row draws, including the voice
+     meter, and exactly the escaped, grapheme-aligned draft window below. *)
+  let prompt_cells = Message_layout.display_width prompt in
+  let draft, draft_cells =
+    let draft = Terminal_text.single_line composer.Composer.draft in
+    (* Editing stops at whole grapheme boundaries, so this prefix cannot end
+       inside a ZWJ/variation-selector sequence whose escaping needs its suffix. *)
+    let before = Terminal_text.single_line (Masc_tui_message_input.before_cursor state.msg_input) in
+    Message_layout.input_window ~max_cells:(max 0 (cols - prompt_cells))
+      ~cursor:(String.length before) draft
+  in
   let tone =
     match (composer.Composer.focus, composer.Composer.target) with
     | Composer.Focused, _ -> Ansi.default_fg
@@ -713,7 +718,6 @@ let composer_line state ~cols =
     | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) ->
         Ansi.dim
   in
-  let draft, _ = composer_draft_window state ~cols ~prompt in
   let hint =
     match (composer.Composer.focus, composer.Composer.target) with
     (* A focused row draws the draft alone; the voice keys are on the key
@@ -748,35 +752,19 @@ let composer_line state ~cols =
      call without ever seeing that it was waiting. This line says a keeper is
      waiting and where to answer; the answer itself stays in the chat pane,
      where it is unambiguous which keeper and which call it is for. *)
-  match awaiting_approval_notice state with
-  | Some notice -> (Theme.warn ()) ^ fit_width notice cols ^ Ansi.reset
-  | None -> tone ^ fit_width body cols ^ Ansi.reset
-
-
-let composer_cursor state ~rows ~cols =
-  (* An unfocused row has no cursor, including the source-only Overview row.
-     Do not resolve a recipient or project its draft merely to hide it. *)
-  if not state.composer_focused then Frame_presenter.Hidden
-  else
-  match browser_lane_on_screen state with
-  | Some _ -> Frame_presenter.Hidden
-  | None ->
-  let composer = Composer_projection.of_state state in
-  match composer.Composer.focus with
-  | Composer.Unfocused -> Frame_presenter.Hidden
-  | Composer.Focused ->
-      let prompt_cells =
-        (* The same string the row draws: a meter that widened the prompt
-           without widening this would put the cursor inside the draft. *)
-        Message_layout.display_width
-          (composer_prompt_text ~voice:(voice_meter_text state) composer)
-      in
-      let _, draft_cells = composer_draft_window state ~cols
-        ~prompt:(composer_prompt_text ~voice:(voice_meter_text state) composer) in
-      Frame_presenter.Visible_at
-        { row = rows
-        ; column = Composer.cursor_column ~prompt_cells ~draft_cells ~terminal_cols:cols
-        }
+  let line = match awaiting_approval_notice state with
+    | Some notice -> (Theme.warn ()) ^ fit_width notice cols ^ Ansi.reset
+    | None -> tone ^ fit_width body cols ^ Ansi.reset
+  in
+  let cursor = match composer.Composer.focus with
+    | Composer.Unfocused -> Frame_presenter.Hidden
+    | Composer.Focused ->
+        Frame_presenter.Visible_at
+          { row = rows
+          ; column = Composer.cursor_column ~prompt_cells ~draft_cells ~terminal_cols:cols
+          }
+  in
+  (line, cursor)
 
 ;;
 
@@ -1278,10 +1266,10 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
      match agenda_line (Masc_tui_types.agenda state) ~cols:full_cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")
      | None -> ());
-  Buffer.add_string framed
-    ((if state.keeper_navigation_open then "" else composer_line state ~cols:full_cols) ^ "\n");
-  let cursor = if state.keeper_navigation_open then Frame_presenter.Hidden
-    else composer_cursor state ~rows ~cols:full_cols in
+  let composer, cursor =
+    if state.keeper_navigation_open then ("", Frame_presenter.Hidden)
+    else composer_row state ~rows ~cols:full_cols in
+  Buffer.add_string framed (composer ^ "\n");
   Masc_tui_frame_timing.finish_stage ~name:"surface.chrome" chrome_started;
   Masc_tui_frame_timing.time_stage ~name:"surface.strip_frame" (fun () ->
     finish_frame_with_strip state ?clamped ~surface_key

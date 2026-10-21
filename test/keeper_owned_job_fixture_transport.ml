@@ -13,8 +13,15 @@ transport_event("entered")
 atexit.register(transport_event, "exiting")
 state_path = root / "daemon.json"
 control_path = root / "control.json"
-state = json.loads(state_path.read_text()) if state_path.exists() else {"calls": [], "container": None}
-control = json.loads(control_path.read_text()) if control_path.exists() else {}
+state = json.loads(state_path.read_text()) if state_path.exists() else {"calls": [], "containers": {}, "original_ids": {}}
+control = json.loads(control_path.read_text()) if control_path.exists() else {"shared": {}, "jobs": {}, "armed": []}
+assert set(state) == {"calls", "containers", "original_ids"}
+assert set(control) == {"shared", "jobs", "armed"}
+shared_control = control["shared"]
+for entry in control["armed"]:
+    assert set(entry) == {"base_path", "keeper_name", "source", "request_sha256", "fault"}
+    assert set(entry["source"]) == {"task_id", "turn_ref", "tool_use_id", "trace_id", "keeper_turn_id"}
+    assert all(entry["source"][key] is not None for key in ("turn_ref", "tool_use_id", "trace_id"))
 argv = sys.argv[1:]
 state["calls"].append(argv)
 def save():
@@ -25,18 +32,40 @@ save()
 args = list(argv)
 while args and args[0] in ("--config", "--host"):
     del args[:2]
-if control.get("state") == "exited" and state["container"]:
-    state["container"]["State"].update(Status="exited", Running=False, ExitCode=control.get("exit_code", 0))
-    save()
-if control.get("state") == "running" and state["container"]:
-    state["container"]["State"].update(Status="running", Running=True, ExitCode=0)
-    save()
-if control.get("replacement") and state["container"]:
-    state["container"]["Id"] = "c" * 64
-    save()
-if control.get("restore_identity") and state["container"]:
-    state["container"]["Id"] = "a" * 64
-    save()
+# Resource mutations name the original job, never every retained container.
+for job_id, fault in control["jobs"].items():
+    container = state["containers"].get(job_id)
+    if container is None:
+        continue
+    if fault.get("state") == "exited":
+        container["State"].update(Status="exited", Running=False, ExitCode=fault.get("exit_code", 0))
+    if fault.get("state") == "running":
+        container["State"].update(Status="running", Running=True, ExitCode=0)
+    if fault.get("replacement"):
+        container["Id"] = hashlib.sha256(("replacement:" + state["original_ids"][job_id]).encode()).hexdigest()
+    if fault.get("restore_identity"):
+        container["Id"] = state["original_ids"][job_id]
+save()
+def exact_container(container_id):
+    matches = [(job_id, value) for job_id, value in state["containers"].items() if value["Id"] == container_id]
+    assert len(matches) == 1, "exact container identity is absent or ambiguous"
+    return matches[0]
+def job_fault(job_id):
+    return control["jobs"].get(job_id, {})
+def bind_armed(job_id, record, binding):
+    matches = [entry for entry in control["armed"] if
+        entry["base_path"] == str(root) and entry["keeper_name"] == record["keeper_name"]
+        and entry["source"] == record["source"] and entry["request_sha256"] == binding["request_sha256"]]
+    assert len(matches) <= 1, "ambiguous armed original invocation"
+    if matches:
+        assert job_id not in control["jobs"], "resource has two fault authorities"
+        entry = matches[0]
+        control["jobs"][job_id] = entry["fault"]
+        control["armed"].remove(entry)
+        scratch = control_path.with_name("control.json.%d" % os.getpid())
+        scratch.write_text(json.dumps(control))
+        os.replace(scratch, control_path)
+    return job_fault(job_id)
 def emit(value):
     print(json.dumps(value))
 def option(name, values):
@@ -50,7 +79,9 @@ def require_intent(job_id, phase, expected_container=None):
     assert record["job_id"] == job_id and record["phase"]["kind"] == phase
     bindings = [json.loads(path.read_text()) for path in
         (root / ".masc" / "keeper_msg_requests" / "owned_job_invocations").glob("*.json")]
-    binding = next(value for value in bindings if value["job_id"] == job_id)
+    matches = [value for value in bindings if value["job_id"] == job_id]
+    assert len(matches) == 1
+    binding = matches[0]
     assert binding["base_path"] == str(root) and binding["keeper_name"] == record["keeper_name"]
     assert binding["source"] == record["source"]
     request = {"argv": record["preparation"]["spec"]["argv"], "inputs": record["inputs"]}
@@ -58,14 +89,14 @@ def require_intent(job_id, phase, expected_container=None):
     assert binding["request_sha256"] == digest
     if expected_container is not None:
         assert record["phase"]["container_id"] == expected_container
+    return record, binding
 image_id = "sha256:" + "b" * 64
-container_id = "a" * 64
 if args == ["context", "show"]:
     print("owned-job-fixture")
 elif args[:2] == ["context", "inspect"]:
     emit([{"Name": "owned-job-fixture", "Endpoints": {"docker": {"Host": "unix:///fixture/docker.sock"}}}])
 elif args[:1] == ["info"]:
-    emit({"ID": control.get("daemon_id", "fixture-daemon"), "OSType": "linux", "SecurityOptions": ["name=rootless", "name=userns"]})
+    emit({"ID": shared_control.get("daemon_id", "fixture-daemon"), "OSType": "linux", "SecurityOptions": ["name=rootless", "name=userns"]})
 elif args[:2] == ["image", "inspect"]:
     emit([{"Id": image_id, "Os": "linux", "Config": {"Env": [], "Volumes": {"/tmp/keeper-creds": {}}}}])
 elif args[:2] == ["container", "ls"]:
@@ -75,22 +106,22 @@ elif args[:2] == ["container", "ls"]:
         cli = pathlib.Path(option("--config", argv))
         assert cli.is_dir() and not list(cli.iterdir())
         assert cli.stat().st_mode & 0o777 == 0o700
-        if control.get("presence_blocked"):
+        if shared_control.get("presence_blocked"):
             (root / "presence-entered").write_text(str(cli))
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             while not (root / "presence-release").exists():
                 time.sleep(0.01)
             fcntl.flock(lock_fd, fcntl.LOCK_EX)
-    if shared and control.get("presence_unavailable"):
+    if shared and shared_control.get("presence_unavailable"):
         print("synthetic shared presence transport failure", file=sys.stderr)
         sys.exit(26)
-    container = state["container"]
-    if container:
+    for job_id, container in state["containers"].items():
+        fault = job_fault(job_id)
         filters = many("--filter", args)
         assert all(value.startswith("label=") or value.startswith("id=") for value in filters)
         wanted = dict(value[len("label="):].split("=", 1) for value in filters if value.startswith("label="))
         exact_ids = [value[len("id="):] for value in filters if value.startswith("id=")]
-        visible = not (wanted and control.get("mode") == "hide_owner_inventory")
+        visible = not (wanted and fault.get("mode") == "hide_owner_inventory")
         if visible and all(container["Config"]["Labels"].get(key) == value for key, value in wanted.items()) and all(value == container["Id"] for value in exact_ids):
             if not shared:
                 emit(container["Id"])
@@ -102,14 +133,14 @@ elif args[:2] == ["container", "ls"]:
                     "base_path_hash": labels["masc.mcp.base_path_hash"],
                     "keeper_name": labels["masc.mcp.keeper"],
                     "job_id": labels["masc.mcp.owned_job"]}
-                if control.get("presence_wrong_scope"):
+                if shared_control.get("presence_wrong_scope"):
                     projected["base_path_hash"] = "other-workspace"
                 padding = None
                 padding_rows = 0
-                if control.get("presence_padding_bytes"):
+                if shared_control.get("presence_padding_bytes"):
                     padding = dict(projected, keeper_name="unrelated-owner", job_id="unrelated-original-job")
                     row_bytes = len(json.dumps(padding).encode()) + 1
-                    padding_rows = (control["presence_padding_bytes"] + row_bytes - 1) // row_bytes
+                    padding_rows = (shared_control["presence_padding_bytes"] + row_bytes - 1) // row_bytes
                     for _ in range(padding_rows):
                         emit(padding)
                 emit(projected)
@@ -118,18 +149,25 @@ elif args[:2] == ["container", "ls"]:
                         emit(padding)
 elif args[:2] == ["container", "create"]:
     labels = dict(value.split("=", 1) for value in many("--label", args))
-    require_intent(labels["masc.mcp.owned_job"], "create_requested")
-    if control.get("mode") == "create_unknown_absent":
+    job_id = labels["masc.mcp.owned_job"]
+    record, binding = require_intent(job_id, "create_requested")
+    fault = bind_armed(job_id, record, binding)
+    if fault.get("mode") == "create_unknown_absent":
         print("synthetic create transport lost its receipt", file=sys.stderr)
         sys.exit(17)
-    assert state["container"] is None
+    assert job_id not in state["original_ids"]
+    name = "/" + option("--name", args)
+    assert all(value["Name"] != name for value in state["containers"].values())
+    container_id = hashlib.sha256(("owned-job:" + job_id + ":" + name).encode()).hexdigest()
+    assert all(value["Id"] != container_id for value in state["containers"].values())
+    state["original_ids"][job_id] = container_id
     tmpfs = dict(value.split(":", 1) for value in many("--tmpfs", args))
     mount = dict(value.split("=", 1) for value in next(csv.reader([option("--mount", args)])))
     image_index = args.index(image_id)
     memory = option("--memory", args)
     assert memory == "2g"
     limit = option("--ulimit", args).split("=", 1)[1].split(":")
-    state["container"] = {
+    state["containers"][job_id] = {
       "Id": container_id, "Name": "/"+option("--name", args), "Image": image_id,
       "Config": {"Labels": labels, "Image": image_id, "Entrypoint": [option("--entrypoint", args)],
         "Cmd": args[image_index+1:], "WorkingDir": option("--workdir", args), "User": option("--user", args),
@@ -148,72 +186,76 @@ elif args[:2] == ["container", "create"]:
         + [{"Type": "tmpfs", "Destination": target, "RW": True} for target in tmpfs],
       "State": {"Status": "created", "Running": False, "Paused": False, "Restarting": False, "Dead": False, "ExitCode": 0}}
     save()
-    if control.get("mode") == "create_unknown_created":
+    if fault.get("mode") == "create_unknown_created":
         print("synthetic create receipt lost after creation", file=sys.stderr)
         sys.exit(24)
     print(container_id)
 elif args[:2] == ["container", "inspect"]:
-    assert state["container"] is not None and args[2] == state["container"]["Id"]
-    container = json.loads(json.dumps(state["container"]))
-    if (control.get("mode") == "inspect_blocked"
-            and container["Config"]["Labels"]["masc.mcp.owned_job"] == control.get("blocked_job_id")):
+    job_id, selected = exact_container(args[2])
+    fault = job_fault(job_id)
+    container = json.loads(json.dumps(selected))
+    if fault.get("mode") == "inspect_blocked":
         (root / "inspect-entered").write_text(args[2])
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         while not (root / "inspect-release").exists():
             time.sleep(0.01)
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
-    if control.get("corrupt") == "mount":
+    if fault.get("corrupt") == "mount":
         container["Mounts"][0]["Source"] = "/different/unowned/workspace"
-    elif control.get("corrupt") == "label":
+    elif fault.get("corrupt") == "label":
         container["Config"]["Labels"]["masc.mcp.owned_job"] = "different-job"
     emit([container])
 elif args[:2] == ["container", "start"]:
-    assert state["container"] is not None and args[2] == state["container"]["Id"]
-    require_intent(state["container"]["Config"]["Labels"]["masc.mcp.owned_job"], "start_requested", args[2])
-    if control.get("mode") == "start_unknown_absent":
-        state["container"] = None
+    job_id, selected = exact_container(args[2])
+    fault = job_fault(job_id)
+    require_intent(job_id, "start_requested", args[2])
+    if fault.get("mode") == "start_unknown_absent":
+        del state["containers"][job_id]
         save()
         print("synthetic start transport lost its receipt", file=sys.stderr)
         sys.exit(18)
-    state["container"]["State"].update(Status="running", Running=True)
+    selected["State"].update(Status="running", Running=True)
     save()
-    if control.get("mode") == "start_blocked":
+    if fault.get("mode") == "start_blocked":
         (root / "start-entered").write_text(args[2])
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         while True:
             time.sleep(1)
-    print(container_id)
+    print(args[2])
 elif args[:2] == ["container", "rm"]:
-    assert len(args) == 3 and state["container"] is not None and args[2] == state["container"]["Id"]
-    container = state["container"]
+    assert len(args) == 3
+    job_id, container = exact_container(args[2])
+    fault = job_fault(job_id)
     owner = root / ".masc" / "keeper_msg_requests" / "owned_jobs" / container["Config"]["Labels"]["masc.mcp.owned_job"] / "owner.jsonl"
     record = json.loads(owner.read_text().splitlines()[-1])
     assert record["cleanup"] == "container_removal_requested" and record["completion_delivered"] is True
     assert record["phase"]["kind"] in ("exited", "cancelled_before_start") and record["phase"]["container_id"] == args[2]
     assert container["State"]["Status"] in ("created", "exited") and container["State"]["Running"] is False
-    state["container"] = None
+    del state["containers"][job_id]
     save()
-    if control.get("mode") == "remove_unknown_removed":
+    if fault.get("mode") == "remove_unknown_removed":
         print("synthetic removal transport lost its receipt", file=sys.stderr)
         sys.exit(23)
     print(args[2])
 elif args[:2] == ["container", "kill"]:
-    assert state["container"] is not None and args[2] == state["container"]["Id"]
-    if control.get("mode") == "kill_blocked":
+    job_id, selected = exact_container(args[2])
+    fault = job_fault(job_id)
+    if fault.get("mode") == "kill_blocked":
         (root / "kill-entered").write_text(args[2])
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         while True:
             time.sleep(1)
-    state["container"]["State"].update(Status="exited", Running=False, ExitCode=137)
+    selected["State"].update(Status="exited", Running=False, ExitCode=137)
     save()
-    print(container_id)
+    print(args[2])
 elif args[:2] == ["container", "logs"]:
-    assert state["container"] is not None and args[2] == state["container"]["Id"]
-    if control.get("mode") == "logs_unknown":
+    job_id, selected = exact_container(args[2])
+    fault = job_fault(job_id)
+    if fault.get("mode") == "logs_unknown":
         print("synthetic output transport refused", file=sys.stderr)
         sys.exit(19)
-    if control.get("large_logs"):
-        sizes = control["large_logs"]
+    if fault.get("large_logs"):
+        sizes = fault["large_logs"]
         head, tail = sizes["head"], sizes["tail"]
         assert head > 0 and tail > 0
         for stream, output, fill, remainder in (("stdout", sys.stdout, "O", "o"), ("stderr", sys.stderr, "E", "e")):
@@ -222,7 +264,7 @@ elif args[:2] == ["container", "logs"]:
             output.write(stream.upper() + "_DEEP_MIDDLE\n")
             output.write(remainder * tail)
             output.write(stream.upper() + "_TERMINAL\n")
-    elif state["container"]["Id"] == container_id:
+    elif selected["Id"] == state["original_ids"][job_id]:
         sys.stdout.write("original job stdout\n")
         sys.stderr.write("original job stderr\n")
     else:

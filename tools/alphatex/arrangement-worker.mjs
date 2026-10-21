@@ -36,7 +36,10 @@ parentPort.on('message', async job => {
       case 'prepare-take': result = await prepareArrangementCapture(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'import-take': result = await importArrangementCapture(job.project, job.path, { projectPath: job.projectPath, signal }); break
       case 'import-practice': result = await importArrangementPractice(job.project, job.path, { projectPath: job.projectPath, signal }); break
-      case 'capture-midi': result = await importCaptureMidi(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
+      case 'capture-midi': case 'capture-midi-region':
+        if (job.kind === 'capture-midi-region' && !job.cut) throw new Error('Select a captured MIDI region cut')
+        result = await importCaptureMidi(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal,
+          ...(job.kind === 'capture-midi-region' ? { cut: job.cut, nativeExecutable: job.nativeExecutable } : {}) }); break
       case 'practice-backing': result = await restorePracticeBacking(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'practice-midi': case 'practice-midi-region':
         if (job.kind === 'practice-midi-region' && !job.cut) throw new Error('Select a practice MIDI region cut')

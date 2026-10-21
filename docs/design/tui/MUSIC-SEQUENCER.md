@@ -119,6 +119,17 @@ source editing, harmony, voicing, undo/redo, arrangement placement and portable
 save/export consume the same source document. This does not establish native
 MIDI2 event editing or real-device/UI verification.
 
+`:capture-midi-region` narrows that explicit editing projection to the selected
+original capture's host-clock span. Offline extraction shares the UMP lifecycle
+and historical-prefix restoration used by playback, with independent source
+identities even for opaque input names or selected idle inputs. Original due
+messages remain timed in the cut; transport reconstruction keeps its stricter
+admission policy. Sustained released keys remain point notes plus pedal state;
+unreleased keys/pedals get declared trim-end releases. The imported source is
+independent of original regions, repetitions, take selection and latency
+correction. Existing practice cuts retain their reconstruction policy through
+the same owned native extraction process. All original bytes remain available.
+
 Native WAV preview uses AVAudioEngine/PlayerNode buffers with pause, seek and
 looping, pinned to a CoreAudio output. External MIDI preview uses a separately
 owned CoreMIDI sender and pins a destination by unique ID. It projects the same

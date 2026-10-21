@@ -17,6 +17,26 @@ Enter places the edited asset independently. The original WAV, UMP, host-clock
 regions, loop takes and audio/MIDI placement corrections remain unchanged.
 Undo removes the derived asset, and save-as carries the raw take and variant.
 
+To work on one original captured region instead, select its paired or MIDI
+component and use `:capture-midi-region`. Its exact host-clock source offset and
+extent choose one span, even when the library selection points elsewhere or the
+region repeats. The new MIDI starts at zero and stays selected for `:edit-midi`;
+the project cursor stays where you chose to place it. An audio-only component
+is not a MIDI cut. Existing source regions, repeats, take selections and placement
+corrections are retained separately; this does not automatically replace or align
+the recording.
+
+The offline UMP state reader restores entry notes and supported bank/program,
+controllers and sustain/sostenuto from their original order. Released keys held
+by pedals remain point keys with their original releases and pedal state; held
+keys are clipped with zero-velocity Note Offs at the region end, then hold pedals
+are switched off. These end releases are declared in the derived metadata.
+Expired notes and unreachable suffix expression do not become part of the cut.
+Complete SysEx7/system messages within the cut retain their original times;
+an opaque historical prefix, incomplete exclusive stream or unsupported entry
+state refuses reconstruction. Playback/seek/loop admission retains its existing
+state requirements. Native extraction opens no MIDI/audio devices.
+
 The variant uses the current arrangement tempo/meter, with nearest 960 PPQ ticks
 computed from the same integer microseconds-per-quarter stored in its SMF tempo.
 Initial silence uses the complete capture span, including MIDI before the

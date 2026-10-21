@@ -2,11 +2,12 @@ import { verifyPhraseSnapshot, importPhraseDocument } from './phrase-arrangement
 import { capturePartNames, validateCaptureManifest } from './captured-source.mjs'
 import { readCaptureFiles, readCapture, jsonLines } from './session-data.mjs'
 import { capturePaths, captureMatches, inspectCaptureAsset } from './captured-source-files.mjs'
-import { practicePartNames } from './practice-source.mjs'
+import { practicePartNames, practiceRange, practiceRegionTime } from './practice-source.mjs'
 import { practicePasses } from './practice-passes.mjs'
 import { practiceMidi } from './practice-midi.mjs'
 import { captureMidi } from './capture-midi.mjs'
-import { extractPracticeRegion } from './practice-region-midi.mjs'
+import { extractUmpRegion } from './ump-region-midi.mjs'
+import { captureRange, captureRegionTime } from './capture-time.mjs'
 import { practicePaths, readPracticeFiles, inspectPracticeAsset } from './practice-source-files.mjs'
 import { readFile, open, mkdir, mkdtemp, lstat, link, rm, chmod } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
@@ -209,18 +210,40 @@ export async function importPracticeMidi(project, assetID, { sourceRoot, directo
       values[role] = bytes.toString('utf8')
     }
     const packets = values.events.trimEnd().split('\n').map(line => JSON.parse(line).packet)
-    const region = cut ? await extractPracticeRegion(asset, packets, cut, { directory: snapshot.directory, signal, executable: nativeExecutable }) : undefined
+    let region
+    if (cut) {
+      const range = practiceRange(asset), full = practiceRegionTime(asset, { offset: '0', extent: range.extent })
+      practiceRegionTime(asset, cut)
+      region = await extractUmpRegion({ id: asset.id, extent: range.extent,
+        timeline: { schemaVersion: 4, duration: full.durationSeconds, clock: { origin: range.origin, ...asset.metadata.input.clock },
+          bindings: [{ source: asset.metadata.input.source.id, destination: asset.metadata.input.source.id }], packets } }, cut,
+      { directory: snapshot.directory, signal, executable: nativeExecutable })
+    }
     const source = practiceMidi(asset, JSON.parse(values.context), packets, { signal, region })
     return importPhraseDocument(project, source)
   } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
 }
-export async function importCaptureMidi(project, assetID, { sourceRoot, directory = tmpdir(), signal } = {}) {
+export async function importCaptureMidi(project, assetID, { sourceRoot, directory = tmpdir(), signal, cut, nativeExecutable } = {}) {
   const snapshot = await prepareArrangementCapture(project, assetID, { sourceRoot, directory, signal })
   try {
     const asset = project.assets.find(asset => asset.id === assetID)
     const packets = []
     for await (const packet of jsonLines(join(snapshot.directory, capturePartNames.midi), { signal })) packets.push(packet)
-    const source = await captureMidi(asset, packets, { tempo: project.tempo, meter: project.meter, signal })
+    let region
+    if (cut) {
+      captureRegionTime(asset, cut)
+      const range = captureRange(asset), full = captureRegionTime(asset, { offset: '0', extent: range.extent })
+      const used = new Set(packets.map(packet => packet.source))
+      // Offline state identities only. CoreMIDI destinations are never opened;
+      // preserve opaque input IDs and omit selected inputs with no packets.
+      const bindings = asset.manifest.midiSources.filter(source => used.has(source.id))
+        .map((source, index) => ({ source: source.id, destination: String(index) }))
+      region = await extractUmpRegion({ id: asset.id, extent: range.extent,
+        timeline: { schemaVersion: 4, duration: full.durationSeconds,
+          clock: { origin: range.origin, numer: asset.manifest.clock.numer, denom: asset.manifest.clock.denom }, bindings, packets } },
+      { offset: cut.offset, extent: cut.extent }, { directory: snapshot.directory, signal, executable: nativeExecutable, dueAdmission: 'original' })
+    }
+    const source = await captureMidi(asset, packets, { tempo: project.tempo, meter: project.meter, signal, region })
     signal?.throwIfAborted()
     return importPhraseDocument(project, source)
   } finally { await rm(snapshot.directory, { recursive: true, force: true }) }

@@ -166,14 +166,14 @@ test('native failure and cancellation leave no adopted asset or private snapshot
 
 test('offline native extraction retains sub-tick offsets even when absolute cross products overflow', async () => {
   const base = 1000000000000000000n, divisor = 100000000000000000000n
-  const plan = { schemaVersion: 1, offset: String(base * divisor + 1n), extent: String(3n * divisor), sourceDivisor: String(divisor),
+  const plan = { schemaVersion: 1, dueAdmission: 'reconstructed', offset: String(base * divisor + 1n), extent: String(3n * divisor), sourceDivisor: String(divisor),
     source: { id: 'take', extent: String(base + 5n), timeline: { schemaVersion: 4, duration: 1000000001,
       clock: { origin: '0', numer: 1, denom: 1 }, bindings: [{ source: '10', destination: '10' }],
       packets: [[base, word(0x95, 60, 100)], [base + 1n, word(0x85, 60, 40)],
         [base + 3n, word(0x95, 62, 90)], [base + 4n, word(0x85, 62, 0)]].map(([at, value]) => ({
           kind: 'midi', protocol: 2, hostTime: String(at), source: '10', timestampOrigin: 'packet', words: [value] })) } } }
   const path = join(build, 'large-region.json'); await writeFile(path, JSON.stringify(plan), { mode: 0o600 })
-  const { stdout } = await execute(nativeExecutable, ['extract-practice-region', '--file', path])
+  const { stdout } = await execute(nativeExecutable, ['extract-ump-region', '--file', path])
   const result = JSON.parse(stdout)
   assert.deepEqual(result.events.map(row => [row.offset, row.words]), [
     ['0', [word(0x95, 60, 100)]], [String(divisor - 1n), [word(0x85, 60, 40)]],

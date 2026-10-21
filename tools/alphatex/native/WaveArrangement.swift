@@ -882,8 +882,8 @@ static func main() {
 _ = signal(SIGPIPE, SIG_IGN)
 do {
     let extraction = Array(CommandLine.arguments.dropFirst())
-    if extraction.first == "extract-practice-region" {
-        guard extraction.count == 3, extraction[1] == "--file" else { throw MidiFailure("extract-practice-region requires --file PLAN") }
+    if extraction.first == "extract-ump-region" {
+        guard extraction.count == 3, extraction[1] == "--file" else { throw MidiFailure("extract-ump-region requires --file PLAN") }
         let plan = try JSONDecoder().decode(UmpRegionExtraction.self, from: Data(contentsOf: URL(fileURLWithPath: extraction[2])))
         try audioEmit(plan.extract()); return
     }

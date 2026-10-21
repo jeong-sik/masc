@@ -183,6 +183,53 @@ struct UmpChannelState {
     var sustain = false, sostenuto = false
     mutating func prune() { voices.removeAll { !$0.held && !sustain && !(sostenuto && $0.captured) } }
 }
+// Pure original-event lifecycle, independent of whether device state can be
+// reconstructed. Offline cuts use its original ordinals to retain note pairs;
+// playback restoration additionally admits the complete retained state below.
+struct UmpVoiceHistory {
+    var footprint = UmpFootprint(), known = Set<UmpField>()
+    var channels: [UmpAddress: UmpChannelState] = [:]
+    var notes = Set<Int>(), releaseOwners: [Int: Int] = [:], expiredNotes: [Int: Int] = [:]
+    init(_ events: [UmpEvent], prefixCount: Int) throws {
+        for (ordinal, event) in events.enumerated() {
+            guard ordinal < prefixCount else { break }
+            let message = UmpMessage(event), address = message.address
+            footprint.observe(message)
+            if case .relative(let kind) = message.action, !UmpField(address: address, kind: kind).covered(by: known) {
+                throw UmpRefusal("captured UMP relative parameter needs an absolute source baseline")
+            }
+            if case .relative = message.action {} else { known.formUnion(message.fields) }
+            var channel = channels[address] ?? UmpChannelState()
+            switch message.action {
+            case .on(let number): channel.voices.append(UmpVoice(number: number, on: ordinal)); notes.insert(ordinal)
+            case .off(let number):
+                notes.insert(ordinal)
+                if let index = channel.voices.firstIndex(where: { $0.number == number && $0.held }) {
+                    releaseOwners[ordinal] = channel.voices[index].on
+                    channel.voices[index].held = false; channel.voices[index].off = ordinal
+                }
+            case .pedal(let number, let on):
+                if number == 64 { channel.sustain = on }
+                else {
+                    if on && !channel.sostenuto { for index in channel.voices.indices where channel.voices[index].held { channel.voices[index].captured = true } }
+                    channel.sostenuto = on
+                    if !on { for index in channel.voices.indices { channel.voices[index].captured = false } }
+                }
+            case .release: for index in channel.voices.indices { channel.voices[index].held = false }
+            case .kill:
+                for voice in channel.voices { expiredNotes[voice.on] = ordinal }
+                channel.voices.removeAll()
+            case .reset:
+                channel.sustain = false; channel.sostenuto = false
+                for index in channel.voices.indices { channel.voices[index].captured = false }
+            default: break
+            }
+            for voice in channel.voices where !voice.held && !channel.sustain && !(channel.sostenuto && voice.captured) { expiredNotes[voice.on] = ordinal }
+            channel.prune(); channels[address] = channel
+        }
+    }
+}
+enum UmpDueAdmission: String, Decodable { case reconstructed, original }
 struct UmpRestoration {
     let events: [UmpEvent]
     let nextIndex: Int
@@ -194,51 +241,15 @@ func umpRestoration(_ events: [UmpEvent], before seconds: Double, replacing prev
     let count = events.firstIndex(where: { $0.seconds >= seconds }) ?? events.count
     return try umpRestoration(events, prefixCount: count, replacing: previous)
 }
-func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int = 0, preambleEndIndex: Int? = nil, excludingNotes: Set<Int> = [], replacing previous: UmpFootprint) throws -> UmpRestoration {
+func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int = 0, preambleEndIndex: Int? = nil, dueAdmission: UmpDueAdmission = .reconstructed, excludingNotes: Set<Int> = [], replacing previous: UmpFootprint) throws -> UmpRestoration {
     guard prefixCount >= 0, prefixCount <= events.count, followingCount >= 0, followingCount <= events.count - prefixCount else { throw MidiFailure("invalid captured UMP prefix") }
     let admissionEnd = preambleEndIndex ?? (prefixCount + followingCount)
     guard admissionEnd >= prefixCount + followingCount, admissionEnd <= events.count else { throw MidiFailure("invalid captured UMP preamble boundary") }
     try previous.requireSupported()
-    var footprint = UmpFootprint(), known = Set<UmpField>(), channels: [UmpAddress: UmpChannelState] = [:]
-    var notes = Set<Int>(), next = 0
-    var releaseOwners: [Int: Int] = [:], expiredNotes: [Int: Int] = [:]
-    for (ordinal, event) in events.enumerated() {
-        guard ordinal < prefixCount else { break }
-        next = ordinal + 1
-        let message = UmpMessage(event), address = message.address
-        footprint.observe(message)
-        if case .relative(let kind) = message.action, !UmpField(address: address, kind: kind).covered(by: known) {
-            throw UmpRefusal("captured UMP relative parameter needs an absolute source baseline")
-        }
-        if case .relative = message.action {} else { known.formUnion(message.fields) }
-        var channel = channels[address] ?? UmpChannelState()
-        switch message.action {
-        case .on(let number): channel.voices.append(UmpVoice(number: number, on: ordinal)); notes.insert(ordinal)
-        case .off(let number):
-            notes.insert(ordinal)
-            if let index = channel.voices.firstIndex(where: { $0.number == number && $0.held }) {
-                releaseOwners[ordinal] = channel.voices[index].on
-                channel.voices[index].held = false; channel.voices[index].off = ordinal
-            }
-        case .pedal(let number, let on):
-            if number == 64 { channel.sustain = on }
-            else {
-                if on && !channel.sostenuto { for index in channel.voices.indices where channel.voices[index].held { channel.voices[index].captured = true } }
-                channel.sostenuto = on
-                if !on { for index in channel.voices.indices { channel.voices[index].captured = false } }
-            }
-        case .release: for index in channel.voices.indices { channel.voices[index].held = false }
-        case .kill:
-            for voice in channel.voices { expiredNotes[voice.on] = ordinal }
-            channel.voices.removeAll()
-        case .reset:
-            channel.sustain = false; channel.sostenuto = false
-            for index in channel.voices.indices { channel.voices[index].captured = false }
-        default: break
-        }
-        for voice in channel.voices where !voice.held && !channel.sustain && !(channel.sostenuto && voice.captured) { expiredNotes[voice.on] = ordinal }
-        channel.prune(); channels[address] = channel
-    }
+    let history = try UmpVoiceHistory(events, prefixCount: prefixCount)
+    var footprint = history.footprint, known = history.known
+    let channels = history.channels, notes = history.notes, next = prefixCount
+    let releaseOwners = history.releaseOwners, expiredNotes = history.expiredNotes
     var live = Set<Int>(), entrySounding: [UmpAddress: Set<UInt32>] = [:]
     for (address, channel) in channels {
         for voice in channel.voices where !excludingNotes.contains(voice.on) {
@@ -267,7 +278,10 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int 
     for (ordinal, event) in zip(prefixCount..<admissionEnd, events[prefixCount..<admissionEnd]) {
         if ordinal == batchEnd { try requireSoundingBaselines() }
         let message = UmpMessage(event)
-        footprint.observe(message)
+        // An offline export preserves the original due bytes at their original
+        // deadlines. Only its historical prefix is reconstructed. Playback,
+        // seek and loop admission retain the stricter reconstructed default.
+        if dueAdmission == .reconstructed { footprint.observe(message) }
         var required = umpKeptFields(message, sounding: entrySounding[message.address] ?? [], changed: previous)
         if case .on(let number) = message.action, ordinal >= batchEnd {
             required = previous.touched.filter { $0.address == message.address && ($0.kind.note == nil || $0.kind.note == number) }

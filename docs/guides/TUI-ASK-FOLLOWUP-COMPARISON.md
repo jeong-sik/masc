@@ -157,8 +157,9 @@ as unobserved; it still does not supply an independent roster declaration, worke
 entry, dispatch-not-started or terminal outcome. Missing warnings are unknown
 because severity policy or sink/interruption failures can hide them.
 
-The span begins before capture payload/append/error conversion and ends before
-lazy warning formatting/output. One entry clock is added to all admission writes;
+The span begins before the capture attempt and ends after error conversion,
+before lazy warning formatting/output. It does not prove write/flush was reached
+or completed. One entry clock is added to all admission writes;
 only failed captures have this additional observed span. Warning construction
 remains lazy under the existing Startup module threshold. It is not complete
 write-cost accounting or original Task progress.

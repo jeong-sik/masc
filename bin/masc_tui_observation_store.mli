@@ -28,7 +28,8 @@ val record_admission :
     the failed capture span and opaque filesystem explanation. The event does
     not describe a producer/UI outcome. One clock is captured before every
     append; on failure the second is captured before lazy warning formatting,
-    so the span includes payload/append/error conversion, not warning output.
+    so the span covers attempted capture through error conversion, not warning
+    output or proof that physical write/flush completed.
     Existing module severity policy still applies. Cancellation and
     unexpected exceptions propagate. This synchronous preparation cost belongs
     after the original admission clock, before started/worker observations.

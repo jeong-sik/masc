@@ -17,8 +17,9 @@ retained, with no question/answer body added.
 
 One clock is captured before every admission payload/append. On expected failure,
 the end clock is captured after error conversion and before lazy logging. Failed
-capture spans therefore include payload/append/lock/flush/error conversion and
-exclude warning formatting/output. Happy-path writes add one clock and have no
+capture spans cover the work that actually ran through error conversion; they
+exclude warning formatting/output and do not prove write/flush was reached or
+completed. Happy-path writes add one clock and have no
 new event/span. Original admission-to-start/worker/UI intervals still include all
 preparation and logging costs. No CPU, Loading, input or latency gain is measured.
 

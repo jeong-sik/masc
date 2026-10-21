@@ -110,7 +110,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. 정식 스택 편입·승인·운영 설치와 나머지 오류 경계는 별도 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
+| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
 | E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 설계 필요 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
@@ -346,5 +346,5 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - [원본 실행·실패·복구·두 UI 증거](../docs/evidence/2026-10-22-candle-host-reconnect/README.md)를 공개했다. eb484 native run39636870206의 실제 server/TUI identity와 matching Dashboard, 실제 guest artifact·Task/Goal model 검증, test-only 관리자 confirmation API, Off의 원래 Owed, 실제 provider 3단계와 Paid 1건을 하나의 격리 workspace에서 연결했다. confirmation API의 human_confirmed라는 상태명을 실제 사람 확인이나 전체54 완료로 바꾸어 쓰지 않는다.
 - On 첫 연결은 worker가 derive-only host 관측 입력에 없는 action context를 요구해 실패했다. #44911은 공통 schema로 수리하며 수정 전 실제 입력 검사 1FAIL, 수정 후13PASS다. 동일 설치의 Off→교체→On 후 정산, 정산 후 다시 Off→On에서도 원래3개 결과·같은 원장과 Paid1건을 확인했다. runtime은 native eb484+worker b427의 명시된 혼합 조건이며 새 전체 native build라고 부르지 않는다.
 - G03 후속 결함: 원래 성공한 Grade를 다음 단계에서 다시 읽으면 관측 elapsed_s가 60.03초(공개 영수증 68)에서 180.05초(72)로 덮였다. 모델 중복 실행 근거는 없고, 원래 종단 시각을 보존하는 수리가 필요하다. 이 항목을 현재 잔여 작업으로 유지한다.
-- Browser #44168 67층 eb484의 이전 독립 census는 모든 층 mergeable·현재 범위 결속 승인0/67이었다. 이 과거 census를 현재 승인으로 이월하지 않는다. #44911은 기존 top #44702를 base로 생성됐지만 installed gh stack link의 append가 실패해 아직 정식 native membership이 없다. pr-updater에 편입을 요청했으며, queued/진행을 통합 완료로 세지 않는다. 기존67층을 개별 병합하거나 기존 top을 retarget하지 않는다.
+- Browser #44168 67층 eb484의 이전 독립 census는 모든 층 mergeable·현재 범위 결속 승인0/67이었다. 이 과거 census를 현재 승인으로 이월하지 않는다. #44911의 첫 게시에서는 installed gh stack link의 append가 실패해 기존 top #44702를 base로 둔 일반 branch였다. pr-updater의 후속 처리 뒤 현재 REST census에서 native #44168의 68/68 membership을 확인했다. 편입은 각 층의 현재 승인이나 병합 완료가 아니다. 기존67층을 개별 병합하거나 기존 top을 retarget하지 않는다.
 - 54개 항목·완료 기준은 유지한다. E02–E12, 넓은 Browser 능력·실제 Agent 접근·모든 실패 경계·운영 설치·현재 head의 전체 통합/승인은 이 제한된 E01 실측의 성공 범위 밖이다.

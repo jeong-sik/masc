@@ -1,5 +1,11 @@
 # MIDI/audio region arrangements
 
+`:edit-ump [ASSET]` opens a captured take for native MIDI2 absolute-pitch,
+16-bit velocity and exact-onset voicing experiments. Original UMP indices,
+expression and clocks remain intact. Return an independent overlay asset,
+audition through the same native source preparation, and save/reopen or export
+its original/edited packets. See [the native UMP workflow](UMP-SOURCE.md).
+
 The terminal arrangement editor opens with `masc-alphatex --arrange`, the score
 view's `a` key, or `--project song.json` for a saved arrangement. It arranges
 retained WAV/MIDI sources independently of the phrase piano roll. WAV regions have

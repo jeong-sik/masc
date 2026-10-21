@@ -78,7 +78,7 @@ test('actual IO worker preserves sources in redo history when saving to a differ
 
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function controller(options={}){
-  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],liveAttempts:[],claims:[],calibrations:[],writes:[],phrases:[],soundSelections:[]},process=new EventEmitter()
+  const observed={requests:[],saved:[],recovered:[],terminated:false,players:[],removed:[],takes:[],captures:[],monitors:[],live:[],liveAttempts:[],claims:[],calibrations:[],writes:[],phrases:[],umpEditors:[],soundSelections:[]},process=new EventEmitter()
   const admitLive=options.admitLive, heldPlaybackReady=options.playbackReady
   process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
   process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:100,rows:24,write(){}});process.stderr={write(){}}
@@ -141,6 +141,10 @@ async function controller(options={}){
       let finish;const result=new Promise(resolve=>{finish=resolve})
       observed.phrases.push({options,finish});return result
     },
+    openUmpEditor(options){
+      let finish;const result=new Promise(resolve=>{finish=resolve})
+      observed.umpEditors.push({options,finish});return result
+    },
     viewSession(options){
       let finish
       const completion=new Promise(resolve=>{finish=resolve})
@@ -163,6 +167,7 @@ async function controller(options={}){
   const source=(await readFile(new URL('../arrangement-tui.mjs',import.meta.url),'utf8')).replace(/^import .*$/gm,'')
     .replace("new URL('./arrangement-worker.mjs', import.meta.url)","new URL('file:///worker')")
     .replace("await import('./sequencer-tui.mjs')",'await Promise.resolve({viewSequencer:openSequencer})')
+    .replace("await import('./ump-tui.mjs')",'await Promise.resolve({viewUmpEditor:openUmpEditor})')
   const prefix=`const {${Object.keys(globalThis[slot]).join(',')}}=globalThis[${JSON.stringify(slot)}];\n`
   const {viewArrangement}=await import('data:text/javascript;base64,'+Buffer.from(prefix+source).toString('base64'))
   const abort=new AbortController(),done=viewArrangement({root:'/synthetic',initialDocument:options.project,signal:abort.signal}).finally(()=>{delete globalThis[slot]})
@@ -319,12 +324,13 @@ test('document mutation stops the admitted playback revision while cursor motion
 
 async function closeController(view) {
   view.abort.abort()
-  for (const job of view.observed.requests.filter(job=>['prepare-wave','prepare-midi','prepare-mixed','prepare-take','prepare-phrase','import-wave','import-midi','import-take'].includes(job.kind))) {
+  for (const job of view.observed.requests.filter(job=>['prepare-wave','prepare-midi','prepare-mixed','prepare-take','prepare-phrase','prepare-ump','import-ump','import-wave','import-midi','import-take'].includes(job.kind))) {
     view.worker.emit('message',{id:job.id,ok:false,cancelled:true,error:'Cancelled'})
   }
   for (const player of view.observed.players) player.finish()
   for (const take of view.observed.takes) take.finish()
   for (const phrase of view.observed.phrases) phrase.finish({changed:false})
+  for (const ump of view.observed.umpEditors) ump.finish({changed:false})
   await view.done
 }
 test('explicit MIDI selection cannot route a WAV arrangement to default audio; choosing audio clears MIDI bindings',async()=>{
@@ -456,6 +462,74 @@ test('selected capture cut remains bound to its region and cursor through deriva
     assert.deepEqual(saved.clips[0], job.project.clips[0])
     assert.equal(saved.clips.at(-1).position, 6720)
     assert.equal(saved.clips.at(-1).asset, result.asset)
+  } finally { await closeController(view) }
+})
+
+test('native UMP child returns only its overlay and creates an independently selected capture asset', async () => {
+  const view = await controller()
+  try {
+    const asset = await primeCapture(view)
+    view.command('edit-ump'); await flush()
+    const job = view.observed.requests.find(job => job.kind === 'prepare-ump')
+    view.worker.emit('message', { id: job.id, ok: true, result: { asset, packets: [] } }); await flush()
+    const child = view.observed.umpEditors[0]
+    const ump = { schemaVersion: 1, midiSha256: asset.parts.midi.sha256, notes: [{ packet: 0, word: 0, pitch: 30976, velocity: 0 }] }
+    child.finish({ changed: true, asset: { ...asset, ump } }); await flush()
+    const imported = view.observed.requests.find(job => job.kind === 'import-ump')
+    assert.deepEqual(imported.ump, ump); assert.equal(imported.asset, asset.id)
+    const variant = { ...asset, id: 'capture-2', name: 'Native variant', ump }
+    view.worker.emit('message', { id: imported.id, ok: true, result: { project: editArrangement(imported.project, { kind: 'asset-add', asset: variant }), asset: variant.id } }); await flush()
+    view.command('place capture-2 4'); view.command('save'); await flush()
+    const saved = view.observed.saved.at(-1).project
+    assert.deepEqual(saved.assets[0], asset); assert.deepEqual(saved.assets[1].ump, ump)
+    assert.equal(saved.clips.at(-1).position, 3840); assert.equal(saved.clips.at(-1).asset, 'capture-2')
+  } finally { await closeController(view) }
+})
+
+test('implicit native UMP editing retains its admitted source through recording attachment', async () => {
+  const view = await controller()
+  try {
+    await primeWave(view)
+    const original = await primeCapture(view)
+    view.command('input audio'); view.command('play'); await flush()
+    const prep = view.observed.requests.find(job => job.kind === 'prepare-wave')
+    view.worker.emit('message', { id: prep.id, ok: true, result: { path: '/owned/backing/plan.json', format: 'wave-arrangement' } }); await flush()
+    view.observed.players[0].handle.recordingEpoch = async () => ({ kind: 'playing', loop: false, duration: 10,
+      device: { id: 'audio', outputs: 2 }, clock: { kind: 'mach-host-time', anchor: '100', position: 0, numer: 1, denom: 1 } })
+    view.command('record'); await flush()
+    const capture = view.observed.captures[0]; assert.ok(capture)
+    view.command('edit-ump'); await flush(); assert.ok(capture.stops > 0)
+    capture.finish({ manifest: original.manifest }); await flush()
+    const job = view.observed.requests.find(job => job.kind === 'attach-recording')
+    const asset = { ...original, id: 'capture-2', name: 'New recording' }
+    const attached = attachRecordedTake(job.project, { project: editArrangement(job.project, { kind: 'asset-add', asset }), asset: asset.id }, job.epoch)
+    view.worker.emit('message', { id: job.id, ok: true, result: attached }); await flush()
+    const prepared = view.observed.requests.find(job => job.kind === 'prepare-ump')
+    assert.equal(prepared.asset, original.id)
+    assert.deepEqual(prepared.project, attached.project)
+    view.observed.players[0].finish()
+    view.worker.emit('message', { id: prepared.id, ok: true, result: { asset: original, packets: [] } }); await flush()
+    assert.equal(view.observed.umpEditors[0].options.asset.id, original.id)
+    view.observed.umpEditors[0].finish({ changed: false }); await flush()
+  } finally {
+    for (const capture of view.observed.captures) capture.finish()
+    for (const job of view.observed.requests.filter(job => job.kind === 'attach-recording')) view.worker.emit('message', { id: job.id, ok: false, error: 'Fixture closed' })
+    await closeController(view)
+  }
+})
+
+test('closing during monitor retirement prevents a late native UMP child from opening', async () => {
+  const view = await controller()
+  try {
+    const asset = await primeCapture(view)
+    view.command('input input'); view.command('monitor output'); await flush()
+    const monitor = view.observed.monitors.at(-1)
+    view.command('edit-ump'); await flush()
+    const job = view.observed.requests.find(job => job.kind === 'prepare-ump')
+    view.worker.emit('message', { id: job.id, ok: true, result: { asset, packets: [] } }); await flush()
+    view.key('q'); monitor.finish({ state: 'monitored' }); await view.done
+    assert.equal(view.observed.umpEditors.length, 0)
+    assert.equal(view.observed.requests.filter(job => job.kind === 'import-ump').length, 0)
   } finally { await closeController(view) }
 })
 
@@ -1057,7 +1131,7 @@ test('loop decisions preserve project range and source ticks, map global seek to
   const player=view.observed.players[0];assert.equal(player.options.loop,true)
   view.key('space');await flush();view.command('seek 2');await flush();view.key('space');await flush()
   assert.deepEqual(player.commands.slice(0,3),['pause',['seek',.6],'resume'])
-  view.command('seek 3');await flush();assert.deepEqual(player.commands.at(-1),['seek',0])
+  view.command('seek 3');await flush();assert.deepEqual(player.commands.findLast(command=>Array.isArray(command)&&command[0]==='seek'),['seek',0])
   view.command('input audio-in');view.command('record');await flush();assert.equal(view.observed.captures.length,0)
   view.command('loop off');await flush();assert.ok(player.commands.includes('stop'))
   view.command('undo');view.key('q');player.finish();await view.done

@@ -1,7 +1,7 @@
 import { phraseDocument, importPhraseDocument } from './phrase-arrangement.mjs'
 import { parentPort } from 'node:worker_threads'
 import { dirname } from 'node:path'
-import { importArrangementWave, importArrangementMidi, importArrangementCapture, importCaptureMidi, importArrangementPractice, restorePracticeBacking, inspectPracticePasses, importPracticeMidi, prepareArrangementCapture, saveArrangement, materializeArrangementAssets } from './arrangement-files.mjs'
+import { importArrangementWave, importArrangementMidi, importArrangementCapture, importCaptureMidi, importArrangementPractice, restorePracticeBacking, inspectPracticePasses, importPracticeMidi, prepareArrangementCapture, readUmpCapture, importUmpVariant, exportUmpCapture, saveArrangement, materializeArrangementAssets } from './arrangement-files.mjs'
 import { prepareArrangementWave, prepareArrangementMidi, prepareArrangementMixed, prepareArrangementAudio, prepareArrangementCaptureRegions } from './arrangement-playback.mjs'
 import { attachRecordedTake } from './arrangement-recording.mjs'
 import { analyzeCalibration } from './audio-calibration.mjs'
@@ -34,6 +34,9 @@ parentPort.on('message', async job => {
       }
       case 'prepare-capture': result = await prepareArrangementCaptureRegions(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal, midiOutput: job.midiOutput, sourceBindings: job.sourceBindings, portBindings: job.portBindings }); break
       case 'prepare-take': result = await prepareArrangementCapture(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
+      case 'prepare-ump': result = await readUmpCapture(job.project, job.asset, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
+      case 'import-ump': result = await importUmpVariant(job.project, job.asset, job.ump, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
+      case 'export-ump': result = await exportUmpCapture(job.project, job.asset, job.path, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'import-take': result = await importArrangementCapture(job.project, job.path, { projectPath: job.projectPath, signal }); break
       case 'import-practice': result = await importArrangementPractice(job.project, job.path, { projectPath: job.projectPath, signal }); break
       case 'capture-midi': case 'capture-midi-region':

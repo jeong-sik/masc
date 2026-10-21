@@ -7,9 +7,10 @@ import { practicePasses } from './practice-passes.mjs'
 import { practiceMidi } from './practice-midi.mjs'
 import { captureMidi } from './capture-midi.mjs'
 import { extractUmpRegion } from './ump-region-midi.mjs'
+import { materializeUmp } from './ump-source.mjs'
 import { captureRange, captureRegionTime } from './capture-time.mjs'
 import { practicePaths, readPracticeFiles, inspectPracticeAsset } from './practice-source-files.mjs'
-import { readFile, open, mkdir, mkdtemp, lstat, link, rm, chmod } from 'node:fs/promises'
+import { readFile, writeFile, rename, open, mkdir, mkdtemp, lstat, link, rm, chmod } from 'node:fs/promises'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -250,7 +251,7 @@ export async function importCaptureMidi(project, assetID, { sourceRoot, director
 }
 // The viewer owns these snapshots until it drains WAV playback/export and
 // restores the terminal. A project asset mutation cannot change an open take.
-export async function prepareArrangementCapture(project, assetID, { sourceRoot, directory: parent, signal } = {}) {
+export async function prepareArrangementCapture(project, assetID, { sourceRoot, directory: parent, signal, original = false } = {}) {
   validateArrangement(project); signal?.throwIfAborted()
   const asset = project.assets.find(asset => asset.id === assetID && asset.kind === 'capture')
   if (!asset) throw new Error('Choose a captured take')
@@ -264,8 +265,57 @@ export async function prepareArrangementCapture(project, assetID, { sourceRoot, 
       await chmod(candidate, 0o444)
     }
     captureMatches(asset, await readCapture(temporary, { signal })); signal?.throwIfAborted()
+    if (asset.ump && !original) {
+      const packets = []
+      for await (const packet of jsonLines(join(temporary, capturePartNames.midi), { signal })) packets.push(packet)
+      const edited = materializeUmp(packets, asset.ump, asset.parts.midi.sha256), candidate = join(temporary, 'edited-midi.jsonl')
+      await writeFile(candidate, edited.map(packet => JSON.stringify(packet)).join('\n') + '\n', { flag: 'wx', mode: 0o444, signal })
+      signal?.throwIfAborted()
+      await rename(candidate, join(temporary, capturePartNames.midi))
+    }
     return { directory: temporary }
   } catch (error) { await rm(temporary, { recursive: true, force: true }); throw error }
+}
+
+export async function readUmpCapture(project, assetID, options) {
+  const snapshot = await prepareArrangementCapture(project, assetID, { ...options, original: true })
+  try {
+    const packets = []
+    for await (const packet of jsonLines(join(snapshot.directory, capturePartNames.midi), { signal: options?.signal })) packets.push(packet)
+    return { asset: structuredClone(project.assets.find(asset => asset.id === assetID)), packets }
+  } finally { await rm(snapshot.directory, { recursive: true, force: true }) }
+}
+export async function importUmpVariant(project, assetID, ump, options) {
+  const { asset, packets } = await readUmpCapture(project, assetID, options)
+  materializeUmp(packets, ump, asset.parts.midi.sha256)
+  const variant = { ...asset, id: arrangementID(project.assets, 'asset'), name: `${asset.name} UMP variant` }
+  if (ump === undefined) delete variant.ump
+  else variant.ump = structuredClone(ump)
+  delete variant.selectedTake
+  options?.signal?.throwIfAborted()
+  return { project: editArrangement(project, { kind: 'asset-add', asset: variant }), asset: variant.id }
+}
+export async function exportUmpCapture(project, assetID, target, options) {
+  const snapshot = await prepareArrangementCapture(project, assetID, options)
+  let created = false, sealed = false
+  try {
+    const asset = project.assets.find(asset => asset.id === assetID)
+    const derived = await digestFile(join(snapshot.directory, capturePartNames.midi), options)
+    const original = await readFile(join(options.sourceRoot, asset.parts.midi.file), { signal: options.signal })
+    if (createHash('sha256').update(original).digest('hex') !== asset.parts.midi.sha256) throw new Error('Original UMP changed during export')
+    await writeFile(join(snapshot.directory, 'original-midi.ump.jsonl'), original, { flag: 'wx', mode: 0o444, signal: options.signal })
+    await writeFile(join(snapshot.directory, 'ump-source.json'), JSON.stringify({ schemaVersion: 1, kind: 'capture-ump-variant',
+      original: asset.parts, clock: asset.manifest.clock, ump: asset.ump ?? null, derivedMidiSha256: derived }) + '\n', { flag: 'wx', mode: 0o444, signal: options.signal })
+    options.signal?.throwIfAborted()
+    await mkdir(target, { mode: 0o700 }); created = true
+    for (const name of [...Object.values(capturePartNames), 'original-midi.ump.jsonl', 'ump-source.json']) await link(join(snapshot.directory, name), join(target, name))
+    const folder = await open(target, 'r'); try { await folder.sync() } finally { await folder.close() }
+    options.signal?.throwIfAborted(); sealed = true
+    return { directory: target, derivedMidiSha256: derived }
+  } finally {
+    if (created && !sealed) await rm(target, { recursive: true, force: true })
+    await rm(snapshot.directory, { recursive: true, force: true })
+  }
 }
 
 export async function verifyArrangementAssets(project, root, options = {}) {

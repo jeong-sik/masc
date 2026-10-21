@@ -25192,7 +25192,7 @@ and is loaded on demand through keeper_skill.
         match current_board_reader state with
         | Some reader -> editing (Masc_tui_board_reader.document reader)
         | None -> match current_chat_call_reader state with
-          | Some (_,reader) -> editing (Masc_tui_chat_call_reader.document reader)
+          | Some reader -> editing (Masc_tui_chat_call_reader.document reader)
           | None -> Option.fold ~none:false ~some:editing (current_detail_reading state) in
       let text_target =
         if not compact_viewport && reading_search_editing then Some Text_row_search
@@ -25265,7 +25265,7 @@ and is loaded on demand through keeper_skill.
              (fun ~width ~height ~text -> state.board_reader <-
                Masc_tui_board_reader.search_insert ~width ~height ~text reader) paste.Masc_tui_paste.text
        | Some (Pasted paste) when Option.is_some (current_chat_call_reader state) ->
-           (match current_chat_call_reader state with
+           (match state.chat_call_reader with
             | Some (origin,reader) ->
               insert_reading_search (Masc_tui_chat_call_reader.document reader)
                 (fun ~width ~height ~text -> state.chat_call_reader <- Some (origin,

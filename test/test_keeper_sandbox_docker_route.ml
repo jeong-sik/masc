@@ -1568,6 +1568,95 @@ esac
     (List.exists (fun line -> String.starts_with ~prefix:"rm " line
                           || String.starts_with ~prefix:"stop " line) lines)
 
+(* [docker run] exits 0 and the daemon is then asked about the container it
+   made. The fake's [run] creates nothing it can later inspect; with the
+   stall file present it also makes every later inspect and [ps] fail, as a
+   daemon that stopped answering does. *)
+let fake_docker_after_run_script = {|#!/bin/sh
+state_dir="$(dirname "$0")"
+printf '%s\n' "$*" >> "$MASC_KEEPER_TEST_DOCKER_LOG"
+if [ -f "$state_dir/stalled" ]; then
+  case "$1" in
+    inspect|ps)
+      printf 'Cannot connect to the Docker daemon: context deadline exceeded\n' >&2
+      exit 1 ;;
+  esac
+fi
+case "$1" in
+  info) printf '[]\n'; exit 0 ;;
+  image) printf '[]\n'; exit 0 ;;
+  inspect) printf 'no such container\n' >&2; exit 1 ;;
+  run)
+    if [ -f "$state_dir/stall-after-run" ]; then touch "$state_dir/stalled"; fi
+    printf 'fixture-id\n'; exit 0 ;;
+  ps) exit 0 ;;
+  rm) exit 0 ;;
+  *) printf 'unexpected fixture command\n' >&2; exit 2 ;;
+esac
+|}
+
+let start_after_run ~stall_after_run =
+  with_fake_docker fake_docker_after_run_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "after-run.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  if stall_after_run
+  then
+    write_file
+      (Filename.concat
+         (Filename.dirname (Sys.getenv "MASC_TEST_FAKE_DOCKER_PATH"))
+         "stall-after-run")
+      "";
+  let runtime =
+    Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok "fixture:after-run") ()
+  in
+  let result =
+    Keeper_turn_sandbox_runtime.exec_argv ~validate_cached_container:true runtime
+      ~cwd:playground ~command_argv:[ "printf"; "probe" ]
+  in
+  let started =
+    match Keeper_turn_sandbox_runtime.For_testing.get_state runtime with
+    | Running _ -> true
+    | Not_started -> false
+  in
+  result, started, String.split_on_char '\n' (read_file log_path)
+;;
+
+let ran_and_removed lines =
+  ( List.exists (String.starts_with ~prefix:"run ") lines
+  , List.exists (String.starts_with ~prefix:"rm ") lines )
+;;
+
+(* The daemon stalled after the run, so nobody can say whether the container
+   is up. It is not removed; the next start probes the stable name again. *)
+let test_a_stall_after_docker_run_does_not_remove_the_container () =
+  let result, started, lines = start_after_run ~stall_after_run:true in
+  (match result with
+   | Ok _ -> Alcotest.fail "a container nobody could ask about was used"
+   | Error _ -> ());
+  let ran, removed = ran_and_removed lines in
+  Alcotest.(check bool) "the container was created" true ran;
+  Alcotest.(check bool) "no rm after the run" false removed;
+  Alcotest.(check bool) "the start is not recorded as running" false started
+;;
+
+(* The daemon answered and does not list the container: removed, as before. *)
+let test_a_container_missing_after_docker_run_is_removed () =
+  let result, started, lines = start_after_run ~stall_after_run:false in
+  (match result with
+   | Ok _ -> Alcotest.fail "a container the daemon does not list was used"
+   | Error _ -> ());
+  let ran, removed = ran_and_removed lines in
+  Alcotest.(check bool) "the container was created" true ran;
+  Alcotest.(check bool) "the name is removed" true removed;
+  Alcotest.(check bool) "the start is not recorded as running" false started
+;;
+
 (* A sandboxed spawn is the Execute argv handed to a spawner instead of run,
    so what has to hold is that the argv is the container's: an [exec] against
    the running container, as the keeper's uid, with the container cwd. If this
@@ -2804,6 +2893,12 @@ let () =
           Alcotest.test_case
             "image change preserves old container and adopts matching image"
             `Quick test_image_change_selects_distinct_persistent_container;
+          Alcotest.test_case
+            "a stall after docker run does not remove the container"
+            `Quick test_a_stall_after_docker_run_does_not_remove_the_container;
+          Alcotest.test_case
+            "a container missing after docker run is removed"
+            `Quick test_a_container_missing_after_docker_run_is_removed;
           Alcotest.test_case
             "exec_argv is the container argv"
             `Quick

@@ -2203,16 +2203,18 @@ let start_container ?timeout_sec (t : t) =
               let st, out = run_argv_with_status ?timeout_sec argv in
               match st with
               | Unix.WEXITED 0 ->
-                (match inspect_container_exists ?timeout_sec container_name with
-                 | Ok () ->
+                (* The same probe the start began with. Listed in any state,
+                   it is the container this run made. *)
+                (match probe_state () with
+                 | Ok
+                     ( Keeper_sandbox_runtime.Docker_container_running
+                     | Keeper_sandbox_runtime.Docker_container_stopped ) ->
                    set_state t (Running { container_name });
                    Ok container_name
-                 | Error inspect_out ->
-                   (* Inspect failed after a successful `docker run`. Without
-                      an explicit cleanup the container would leak: t.state
-                      stays Not_started, so nothing of ours removes it later --
-                      the sweep only takes stopped containers. Best-effort
-                      remove it before returning Error. *)
+                 | Ok Keeper_sandbox_runtime.Docker_container_absent ->
+                   (* The daemon does not list the container its run reported.
+                      t.state stays Not_started, so the name is removed here,
+                      best effort, rather than left for nothing to reclaim. *)
                    let rm_argv =
                      Keeper_sandbox_runtime.docker_remove_argv container_name
                    in
@@ -2221,8 +2223,17 @@ let start_container ?timeout_sec (t : t) =
                    in
                    Error
                      (Printf.sprintf
-                        "docker_container_inspect_failed (existence check): %s"
-                        (Exec_policy.truncate_for_log inspect_out)))
+                        "docker_container_absent_after_run: docker run exited 0 \
+                         and the daemon does not list %s"
+                        container_name)
+                 | Error probe_error ->
+                   (* The daemon could not be asked. The container this run
+                      made may be up, so it is not removed: the next start
+                      probes the stable name again and adopts it. *)
+                   Error
+                     (Printf.sprintf
+                        "docker_container_state_unknown_after_run: %s"
+                        (Exec_policy.truncate_for_log probe_error)))
               | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
                 (match probe_state () with
                  | Ok Keeper_sandbox_runtime.Docker_container_running ->

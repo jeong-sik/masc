@@ -26,8 +26,10 @@ included; it retains one physical-origin entry per observed event. The existing
 immutable event-list append, JSON validation/decoding, cursor-list checks,
 physical store scans, HTTP waits and display preparation still have costs.
 
-No real execution material is available, as confirmed by the operator. A future
-comparison must use the same Task, both original source inventories and captured
+No matched execution material for this indexing change is available. The earlier
+operator reply reported no retained runs; the later #44798 records its author's
+real-producer failure on an earlier candidate, not an indexing Before/After pair.
+A future comparison must use the same Task, both original source inventories and captured
 ceilings, page demand, page sequence, workspace and installed runtime identity.
 Include initial/cold index creation, later pages, empty/exhausted pages,
 duplicates, malformed pages and failed/cancelled/interrupted/unfinished reads in

@@ -807,51 +807,6 @@ type ('accepted, 'rejection) validated_flow_success = private
   ; prior_rejections : 'rejection semantic_rejection_receipt list
   }
 
-(** Immutable, current-only evidence for one successfully validated flow.
-    Decoding reconstructs only this durable snapshot, never a live flow or its
-    domain values. *)
-type validated_flow_evidence_snapshot
-
-type validated_flow_evidence_source_error
-type validated_flow_evidence_invariant_error
-type validated_flow_evidence_decode_error
-
-type ('accepted_error, 'rejection_error) validated_flow_evidence_projection_error =
-  | Accepted_evidence_projection_failed of 'accepted_error
-  | Rejection_evidence_projection_failed of
-      { ordinal : int
-      ; cause : 'rejection_error
-      }
-  | Validated_flow_source_evidence_invalid of validated_flow_evidence_source_error
-  | Validated_flow_evidence_invariant_failed of validated_flow_evidence_invariant_error
-
-(** Project domain values exactly once in declared visit order and freeze the
-    complete successful transcript. Transport/output digests are taken from
-    the same typed [flow_success] that produced each semantic verdict. *)
-val snapshot_validated_flow_evidence
-  :  project_accepted:('accepted -> (Yojson.Safe.t, 'accepted_error) result)
-  -> project_rejection:('rejection -> (Yojson.Safe.t, 'rejection_error) result)
-  -> ('accepted, 'rejection) validated_flow_success
-  -> ( validated_flow_evidence_snapshot
-       , ('accepted_error, 'rejection_error) validated_flow_evidence_projection_error )
-       result
-
-val validated_flow_evidence_to_string : validated_flow_evidence_snapshot -> string
-
-val validated_flow_evidence_of_string
-  :  string
-  -> (validated_flow_evidence_snapshot, validated_flow_evidence_decode_error) result
-
-val validated_flow_evidence_sha256 : validated_flow_evidence_snapshot -> string
-
-val validated_flow_evidence_accepted_domain_sha256
-  :  validated_flow_evidence_snapshot
-  -> string
-
-val validated_flow_evidence_decode_error_to_string
-  :  validated_flow_evidence_decode_error
-  -> string
-
 type flow_candidate_failure =
   | Flow_candidate_rejected of candidate_rejection_receipt
   | Flow_candidate_execution_failed of

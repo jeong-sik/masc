@@ -33,12 +33,6 @@
   exact_output_generation_receipt
   exact_output_provider_trace
   exact_output_ready_admission
-  exact_output_validated_flow_evidence_types
-  exact_output_validated_flow_evidence_canonical_json
-  exact_output_validated_flow_evidence_validation_primitives
-  exact_output_validated_flow_evidence_validation
-  exact_output_validated_flow_evidence_codec
-  exact_output_validated_flow_evidence
   exact_output_plan)
  (libraries
   agent_core_strings

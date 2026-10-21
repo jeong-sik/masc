@@ -4225,6 +4225,24 @@ let test_window_stopped_empty_answer_advances_once_to_successor () =
     ()
 ;;
 
+(* An answer the provider cut at its output limit (finish_reason "length")
+   advances once to the declared successor with its own typed cause, whether
+   the cut answer carries JSON text or is empty. *)
+let test_output_limit_advances_once_to_successor ~content () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"openai_compat"
+    ~label:("output-limit-" ^ if String.equal content "" then "empty" else "text")
+    ~first_response:
+      ( Cohttp.Code.status_of_code 200
+      , Printf.sprintf
+          {|{"id":"resp-limit","model":"flow","choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"length"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
+          content )
+    ~assert_cause:(function
+      | EO.Output_limit_reached -> ()
+      | _ -> fail "an output-limited answer lost its output-limit cause")
+    ()
+;;
+
 (* Which of its own deadlines the first candidate misses: the header deadline
    ([connect_timeout_s]) or the total deadline ([body_timeout_s]), which ends
    a request with no headers when it is the earlier one. *)
@@ -4322,69 +4340,6 @@ let test_sent_timeout_advances_once_to_successor deadline () =
   | Error _ -> fail "the flow ended on the first candidate's deadline"
 ;;
 
-let check_body_deadline_transcript success =
-  let durable =
-    match EO.snapshot_validated_flow_evidence
-      ~project_accepted:(fun id -> Ok (`String id))
-      ~project_rejection:(fun _ -> Ok `Null) success with
-    | Ok durable -> durable
-    | Error _ -> fail "body deadline advance did not produce truthful durable evidence"
-  in
-  let encoded = EO.validated_flow_evidence_to_string durable in
-  (match EO.validated_flow_evidence_of_string encoded with
-   | Ok decoded -> check string "body deadline evidence round trip"
-       (EO.validated_flow_evidence_sha256 durable)
-       (EO.validated_flow_evidence_sha256 decoded)
-   | Error error -> fail (EO.validated_flow_evidence_decode_error_to_string error));
-  let open Yojson.Safe.Util in
-  let document = Yojson.Safe.from_string encoded in
-  let steps = document |> member "steps" |> to_list in
-  check int "transcript retains the deadline and its accepted successor" 2
-    (List.length steps);
-  let first, rest = match steps with
-    | first :: rest -> first, rest
-    | [] -> fail "body deadline transcript has no steps"
-  in
-  check string "deadline has its own evidence kind" "response_body_deadline_exceeded"
-    (first |> member "outcome" |> member "failure" |> member "kind" |> to_string);
-  check bool "deadline invents no raw body hash" true
-    ((first |> member "attempt" |> member "raw_response_sha256") = `Null);
-  check bool "deadline invents no provider trace" true
-    ((first |> member "attempt" |> member "provider_trace_sha256") = `Null);
-  let replace key replacement = function
-    | `Assoc fields -> `Assoc (List.map (fun (name, value) ->
-        name, if String.equal name key then replacement else value) fields)
-    | _ -> fail "expected evidence object"
-  in
-  let encode_with_integrity value =
-    let payload = match value with
-      | `Assoc fields -> List.filter (fun (key, _) -> key <> "integrity_sha256") fields
-      | _ -> fail "expected evidence document"
-    in
-    let digest = `Assoc payload |> Yojson.Safe.to_string
-      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
-    `Assoc (payload @ ["integrity_sha256", `String digest]) |> Yojson.Safe.to_string
-  in
-  check string "mutation helper preserves valid canonical evidence"
-    encoded (encode_with_integrity document);
-  List.iter (fun (label, field, value) ->
-    let mutated_step = replace "attempt"
-      (replace field value (member "attempt" first)) first in
-    let encoded = replace "steps" (`List (mutated_step :: rest)) document
-      |> encode_with_integrity in
-    match EO.validated_flow_evidence_of_string encoded with
-    | Error _ -> ()
-    | Ok _ -> fail ("accepted contradictory body deadline evidence: " ^ label))
-    [ "missing status", "http_status", `Null
-    ; "refusing status", "http_status", `Int 503
-    ; "not dispatched", "dispatch_count", `Int 0
-    ; "multiple dispatches", "dispatch_count", `Int 2
-    ; "no response headers", "phase", `String "before_dispatch"
-    ; "completed response", "phase", `String "terminal"
-    ; "invented body hash", "raw_response_sha256", `String (String.make 64 'a')
-    ; "invented provider trace", "provider_trace_sha256", `String (String.make 64 'b') ]
-;;
-
 let test_body_deadline_advances_after_settlement ~http_status ~settle () =
   let first_id = "body-deadline" in
   let next_id = "body-deadline-successor" in
@@ -4442,8 +4397,7 @@ let test_body_deadline_advances_after_settlement ~http_status ~settle () =
    | Ok _ | Error _ -> fail "body deadline flow was replayable");
   match settle, result with
   | true, Ok success ->
-    check string "configured successor supplies the accepted output" next_id success.accepted;
-    check_body_deadline_transcript success
+    check string "configured successor supplies the accepted output" next_id success.accepted
   | false, Error (EO.Flow_execution_terminal
       { cause = EO.Flow_before_advance_callback_failed _; _ }) -> ()
   | _, (Ok _ | Error _) -> fail "body deadline did not respect durable settlement"
@@ -5578,6 +5532,10 @@ let () =
             test_glm_rate_limit_code_stays_a_rate_limit
         ; test_case "an empty answer stopped at the window advances once" `Quick
             test_window_stopped_empty_answer_advances_once_to_successor
+        ; test_case "an output-limited text answer advances once" `Quick
+            (test_output_limit_advances_once_to_successor ~content:"{}")
+        ; test_case "an output-limited empty answer advances once" `Quick
+            (test_output_limit_advances_once_to_successor ~content:"")
         ; test_case "HTTP 500 advances once to the declared successor" `Quick
             (fun () -> test_server_refusal_advances_once_to_successor 500)
         ; test_case "HTTP 503 advances once to the declared successor" `Quick

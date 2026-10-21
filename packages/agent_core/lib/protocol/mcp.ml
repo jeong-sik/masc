@@ -49,6 +49,8 @@ module Sdk_client = Mcp_protocol_eio.Generic_client.Make (Stdio_transport)
 type t =
   { client : Sdk_client.t
   ; kill : unit -> unit
+  ; process_id : int
+  ; await_exit : unit -> Eio.Process.exit_status
   }
 
 type sampling_handler = Mcp_protocol.Sampling.create_message_params ->
@@ -69,7 +71,7 @@ let text_of_tool_result (r : Sdk_types.tool_result) =
     [sw] controls the process lifetime.  [mgr] spawns the child.
     [command] is the executable path, [args] are command-line arguments.
     [env] optionally overrides the process environment. *)
-let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env
+let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env ?cwd
     ?max_response_bytes ?stderr ?sampling_handler () =
   if Option.fold ~none:false ~some:(fun bytes -> bytes <= 0) max_response_bytes then
     Error (Error.Mcp (ServerStartFailed
@@ -86,6 +88,7 @@ let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env
         ~stdout:(w_child_stdout :> Eio.Flow.sink_ty Eio.Resource.t)
         ?stderr
         ?env
+        ?cwd
         (command :: args)
     in
     Eio.Flow.close r_child_stdin;
@@ -110,7 +113,8 @@ let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env
       try Eio.Process.signal proc Sys.sigterm with
       | Unix.Unix_error _ | Eio.Io _ | Sys_error _ -> ()
     in
-    Ok { client; kill }
+    Ok { client; kill; process_id = Eio.Process.pid proc;
+         await_exit = (fun () -> Eio.Process.await proc) }
   with
   | Eio.Io _ as exn ->
     Error (Error.Mcp (ServerStartFailed { command; detail = Printexc.to_string exn }))
@@ -118,6 +122,9 @@ let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env
     Error (Error.Mcp (ServerStartFailed { command; detail = Printexc.to_string exn }))
   | Failure msg -> Error (Error.Mcp (ServerStartFailed { command; detail = msg }))
 ;;
+
+let process_id t = t.process_id
+let await_exit t = t.await_exit ()
 
 let mcp_tool_of_json = function
   | `Assoc fields ->

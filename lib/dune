@@ -252,6 +252,7 @@
   masc.masc_webmcp
   masc.masc_tool_blob_store
   masc.activity_graph
+  masc.dated_jsonl
   masc.prompt_registry
   masc.mcp_transport_protocol
   masc.tool_invocation_ref

@@ -3,22 +3,13 @@ import { SectionHeader } from './common/section-header'
 import { CollapsibleSection } from './common/collapsible'
 import { PanelCard } from './common/panel-card'
 import { StatusDot } from './common/status-dot'
-import {
-  ContextChart,
-  MetricsCharts,
-  TokenTrendChart,
-} from './keeper-detail-charts'
-import { CtxCompositionPanel } from './keeper-detail-ctx-composition'
+import { KeeperMetricsPanel } from './keeper-metrics-panel'
 import { RawDataDebug } from './keeper-detail-debug'
 import { KpiGrid } from './keeper-detail-kpi'
 import {
   EquipmentList,
   RelationshipList,
 } from './keeper-detail-lists'
-import {
-  InferenceTelemetryPanel,
-  PromptTelemetryPanel,
-} from './keeper-detail-telemetry'
 import {
   KeeperLiveTruthPanel,
   KeeperSecretProjectionPanel,
@@ -163,26 +154,9 @@ export function KeeperDetailBody({
       ${'' /* ── KPIs ── */}
       <${KpiGrid} keeper=${keeper} />
 
-      ${'' /* ── Context chart (sparkline only — single-point is covered by KpiGrid) ── */}
-      ${(keeper.metrics_series ?? []).length >= 2 ? html`<${ContextChart} keeper=${keeper} />` : null}
+      <${KeeperMetricsPanel} key=${keeper.name} keeper=${keeper} />
 
-      ${'' /* ── Latency / Cost / Model charts ── */}
-      <${MetricsCharts} keeper=${keeper} />
-
-      ${'' /* ── Runtime activity summary (promoted from profile) ── */}
       <${KeeperActivitySummary} keeper=${keeper} />
-
-      ${'' /* ── Per-turn token trend (input vs output) ── */}
-      <${TokenTrendChart} keeper=${keeper} />
-
-      ${'' /* ── CTX composition by category ── */}
-      <${CtxCompositionPanel} keeper=${keeper} />
-
-      ${'' /* ── Prompt fingerprint / segment telemetry ── */}
-      <${PromptTelemetryPanel} keeper=${keeper} />
-
-      ${'' /* ── Inference Telemetry (tok/s, cache, reasoning) ── */}
-      <${InferenceTelemetryPanel} keeper=${keeper} />
         <//>
 
         <${KeeperDetailSection}

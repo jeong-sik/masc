@@ -472,7 +472,7 @@ function normalizeCtxAttribution(raw: Record<string, unknown> | null): CtxAttrib
   return null
 }
 
-function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
+export function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
   if (!Array.isArray(raw)) return []
   return raw
     .map((item): KeeperMetricPoint | null => {

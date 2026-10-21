@@ -1,4 +1,5 @@
 type source =
+  | Draft of Masc_tui_image_payload.t
   | Retained of { reference : Tool_output.artifact_ref;
       format : Masc_tui_image_payload.format }
   | Generated of Masc_tui_image_preview.output_source
@@ -21,6 +22,10 @@ let load ~host ~port ~cache_dir ~diagram_width ~diagram_colors ~display source =
       Ok (status_code, body)
     | Ok (status_code, body) -> Error (Masc_tui_http.refusal ~status_code ~body) in
   match source with
+  | Draft data ->
+    Eio_guard.run_in_systhread ~label:"tui-draft-image-decode" (fun () ->
+      present (Result.bind (Masc_tui_image_payload.decode data)
+        (prepare_declared (Masc_tui_image_payload.format data))))
   | Retained {reference;format} ->
     Result.bind (peer ("/api/v1/artifacts/" ^ reference.Tool_output.sha256))
       (fun (status_code, body) ->

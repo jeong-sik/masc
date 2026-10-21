@@ -170,7 +170,8 @@ Retained attachments preserve the original image format separately from the
 encoded wire blob's MIME, and verify wire size and digest before rendering.
 Other declared image formats keep the existing image converter path.
 
-Selected Resources images and generated/retained chat images use pixel graphics
+Selected Resources images, generated/retained chat images and staged composer
+attachments use pixel graphics
 when the terminal supports them. A truecolour or 256-colour terminal without
 those graphics protocols receives a colour character-cell preview instead.
 PNG-to-RGBA decoding runs in the same acquisition worker with an aspect-preserving
@@ -181,8 +182,12 @@ The owner applies the existing generation, resource-reading and physical
 workspace checks before painting either representation. A smaller terminal at
 completion refuses the old grid and asks to reopen it; any key dismisses the
 preview. Missing decoders and unsupported colour capabilities leave a visible
-refusal with the original reading intact. This path does not change local named
-file or staged-attachment image previews, browser layout or copied source bytes.
+refusal with the original reading intact. Staged attachments decode their
+captured local payload in the same worker without a peer request or verified
+server identity; previewing leaves the original encoded attachment intact.
+Their result still belongs to the original generation, view, Keeper and physical
+workspace reading. Named-file previews, browser layout and copied source bytes
+are unchanged.
 Acquisition progress is a temporary footer observation of the pending read,
 bound to its generation, view, Keeper, workspace and original resource reading.
 It disappears when that read completes or loses ownership; it is not appended

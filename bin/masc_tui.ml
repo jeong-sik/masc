@@ -10772,23 +10772,6 @@ let launch_image_render _state ~mailbox ~notice ~title ~caption ~page_url image_
                result = Error "Eio switch unavailable" })
   end
 
-(* The staged door. Ctrl-V leaves the image in the attachment as base64 for
-   the wire to the endpoint; the terminal wants the PNG's own bytes, so they
-   are decoded back and drawn by the same tail a named file gets. The
-   attachment's name titles the screen: a staged image has no path, and the
-   name is the label the draft marker already knows it by. *)
-let open_staged_image state ~notice attachment =
-  let title = attachment.Masc_tui_keeper_chat_projection.name in
-  let refuse reason =
-    notice ~kind:Notice_failure (Printf.sprintf "Ctrl-O %s: %s" title reason)
-  in
-  match !terminal_draws_images with
-  | Some false -> refuse terminal_draws_no_images
-  | Some true | None -> (
-      match Base64.decode attachment.Masc_tui_keeper_chat_projection.data with
-      | Error (`Msg detail) -> refuse detail
-      | Ok data -> draw_image state ~refuse ~title data)
-
 let image_request_is_active state entry =
   let matches request =
     String.equal request.Keeper_chat.keeper_name entry.me_keeper_name
@@ -10887,11 +10870,17 @@ let settle_retired_sent_image state =
              pending.sir_name)
   | Some _ | None -> ()
 
-(* Image acquisition has no terminal effects. Capture the endpoint and UI
-   generation before forking; the mailbox consumer owns stale-result rejection. *)
-let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
-  if server_authority_ready state then begin
-  let enqueue_async = workspace_enqueue state in
+(* Draft payloads are local even while disconnected. Peer readings retain
+   their original authority envelope; both paths capture the UI generation
+   and physical workspace before forking and share completion admission. *)
+let open_preview_image ?skill_reference state ~mailbox ~notice ~name source =
+  let dispatch = match source with
+    | Masc_tui_image_requests.Draft _ -> Some enqueue_async
+    | Retained _ | Generated _ ->
+      if server_authority_ready state then Some (workspace_enqueue state) else None in
+  match dispatch with
+  | None -> ()
+  | Some enqueue_async ->
   let rows, columns = Masc_tui_ansi.get_terminal_size () in
   let display = match !active_graphics_protocol with
     | Masc_tui_graphics.Kitty_protocol | ITerm2_protocol -> Some Masc_tui_image_cache.Pixel_graphics
@@ -10935,8 +10924,7 @@ let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
     | None ->
         state.sent_image_read <- None;
-        notice ~kind:Notice_failure "image preview requires an active connection"
-  end
+        notice ~kind:Notice_failure "image preview requires an active background session"
 
 let current_resource_images (state : state) =
   match state.resource_content, state.resource_pending_key, state.resource_content_error with
@@ -10956,7 +10944,7 @@ let open_resource_image (state : state) ~mailbox =
   let images = current_resource_images state in
   match List.nth_opt images state.resource_image_cursor with
   | Some (_, Masc_tui_image_preview.Output_image {name;source}) ->
-    open_message_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
+    open_preview_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
   | Some (_, Unavailable_image {name;reason}) ->
     notice ~kind:Notice_failure (name ^ ": " ^ reason)
   | Some (_, (Named_path _ | Staged _ | Stored_attachment _ | No_image))
@@ -10966,12 +10954,16 @@ let open_selected_image state ~mailbox preview =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
   match preview with
   | Masc_tui_image_preview.Named_path path -> open_image state ~notice path
-  | Masc_tui_image_preview.Staged attachment -> open_staged_image state ~notice attachment
+  | Masc_tui_image_preview.Staged attachment ->
+      let payload = Masc_tui_image_payload.of_base64
+        ~mime_type:attachment.Masc_tui_keeper_chat_projection.mime_type attachment.data in
+      open_preview_image state ~mailbox ~notice ~name:attachment.name
+        (Masc_tui_image_requests.Draft payload)
   | Masc_tui_image_preview.Stored_attachment { name; reference; format } ->
-      open_message_image state ~mailbox ~notice ~name
+      open_preview_image state ~mailbox ~notice ~name
         (Masc_tui_image_requests.Retained {reference;format})
   | Masc_tui_image_preview.Output_image { name; source } ->
-      open_message_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
+      open_preview_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
   | Masc_tui_image_preview.Unavailable_image { name; reason } ->
       notice ~kind:Notice_failure
         (Printf.sprintf "Ctrl-O %s: %s" name reason)
@@ -23947,7 +23939,7 @@ and is loaded on demand through keeper_skill.
              | Ok source ->
                  let notice ~kind text = report_action state
                    (match kind with Notice_failure -> "error" | Notice_reply -> "system") text in
-                 open_message_image ~skill_reference:profile.esp_reference state ~mailbox:async_messages
+                 open_preview_image ~skill_reference:profile.esp_reference state ~mailbox:async_messages
                    ~notice ~name:("Declared composition: " ^ profile.esp_name)
                    (Masc_tui_image_requests.Generated (Masc_tui_image_preview.mermaid_source source)))
   in

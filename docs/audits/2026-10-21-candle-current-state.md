@@ -91,6 +91,16 @@ RFC와 Dashboard 미사용 export 정리다. 아래 Candle 소스에 관한 판�
 | GAP-07 | appraiser 가용성이 잔액·가격·구매·장착·선물에도 영향을 줌. grant만 우회하는 현재 정책은 명시되어 있으나 경제 조회/소비와 지급을 분리할지는 미결정 | CND-CFG-06 |
 | GAP-08 | 시간 경과만으로 고정 가격 계정 revision이 바뀌지 않음. 정확한 실시간 잔액 표시 요구를 채택한다면 경과 시간에 따른 관측 신선도 계약이 필요 | CND-UI-06 |
 | GAP-09 | 원장은 서명·hash chain이 없는 로컬 파일. 금전 정확성은 trusted host/file access에 의존하며, 호스트 쓰기 권한 공격에 대한 무결성 보장 미제공 | CND-SEC-04 |
+| GAP-10 | gift 중복 키는 구현/테스트가 from/to/reason/amount 네 항목, event/balance/gift mli 설명은 세 항목이다. 같은 사유·다른 금액은 실제 허용되므로 정책/문서 정리 필요 | CND-GIFT-02 |
+
+장비 읽기에도 경계 차이가 있다. `Candle_equipment.read_persisted`는 config/appraiser
+gate 없이 원장의 장비를 읽지만, roster/TUI의 `Candle_observe`는 Off에서 이름 기본값,
+Disabled에서 불가용을 반환한다. 모든 표면이 Off/Disabled에서 같은 외형을 보장한다고
+쓰지 않는다. source로 확인한 차이이며 이번에 화면 불일치를 실행 재현한 것은 아니다.
+
+GAP-10의 직접 근거는 `candle_balance.ml:287–312`의 네 항목 key와
+`test_candle_gift.ml:109–140`의 같은 사유·다른 금액 허용이다. interface 설명만 읽으면
+이 경계를 잘못 명세할 수 있다.
 
 operator 구매 버튼·Candle 전용 설정 편집기·환불·재판매·미귀속 판정 재개는 현재 제공되지
 않는다. 앞의 둘은 확장 후보이며 기존 확정 요구가 아니다. 뒤의 기능도 새 정책 없이

@@ -21,6 +21,7 @@ type t =
       title : string;  (** The rest of the first line after [/task]. *)
       body : string;  (** Every line after the first, as typed. *)
     }
+  | Task_recover  (** Restore the latest retained command for this Keeper/workspace; never sends it. *)
   | Task_missing_title  (** [/task] with nothing after it on the line. *)
   | Help  (** [/help] — draw the command list into the pane. *)
   | Features

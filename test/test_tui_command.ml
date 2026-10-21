@@ -5,6 +5,7 @@ module Mcp = Masc_tui_mcp
 
 let describe = function
   | Command.Say text -> "say:" ^ text
+  | Command.Task_recover -> "task-recover"
   | Command.Task_for_keeper { title; body } -> Printf.sprintf "task:%s|%s" title body
   | Command.Task_missing_title -> "task-missing-title"
   | Command.Help -> "help"

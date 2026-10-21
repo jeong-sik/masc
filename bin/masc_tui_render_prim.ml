@@ -573,6 +573,18 @@ let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
   | None, None -> []
 
 
+let task_creation_status (state : state) =
+  List.rev state.task_dispatch_requests |> List.filter_map (fun request ->
+    if request.tdr_authority <> state.workspace_authority then None else
+    let intent = Masc_tui_task_dispatch.intent request.tdr_dispatch in
+    let phase = match Masc_tui_task_dispatch.progress request.tdr_dispatch with
+      | Not_started -> Masc_tui_footer.Task_not_started
+      | Reserved -> Task_reserved
+      | Preparing -> Task_preparing | Sending -> Task_awaiting_reply
+      | Completed _ -> Task_awaiting_application in
+    Some (Masc_tui_footer.Task_creation {keeper=Terminal_text.single_line intent.keeper;phase}))
+
+
 let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
@@ -669,7 +681,7 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
     | Masc_tui_types.Workspace_identity_match -> []
   in
   Masc_tui_footer.line ?literal_prefix ?action_text ?position
-    ~status:(keeper_action_status state
+    ~status:(keeper_action_status state @ task_creation_status state
       @ List.filter (fun item -> Masc_tui_footer.needs_operator item
           && not (List.mem item (keeper_action_status state))) status
       @ identity @ conflict)

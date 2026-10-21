@@ -581,7 +581,7 @@ let test_the_account_form_claims_only_on_the_runtime_pane () =
 
 (* The form outlives nothing. The loop asks this every iteration rather than
    the places that move the surface: the Activity pane's mouse handler and
-   the async [Task_dispatched] jump both change [view] without passing any
+   the async Task handoff both change [view] without passing any
    teardown this form is named in, and the second one tears down the help
    sheet, the palette and the row search by hand -- a list this would have
    been the fourth entry in, and the fifth overlay would be missed again. *)

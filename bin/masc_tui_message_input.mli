@@ -3,6 +3,14 @@
     their end, while typed and pasted text is inserted at the current cursor. *)
 type t
 
+type revision
+(** Opaque draft-edit identity, also unique to its input object. *)
+val revision : t -> revision
+val has_revision : t -> revision -> bool
+val invalidate_revision : t -> unit
+(** A draft owner calls this when attachments/references change without text.
+    Content mutators already invalidate the same revision; cursor moves do not. *)
+
 val create : unit -> t
 val contents : t -> string
 val length : t -> int

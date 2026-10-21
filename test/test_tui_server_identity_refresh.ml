@@ -753,8 +753,9 @@ let test_task_receipts_wait_for_identity_and_roster () =
   let origin = identity "/workspace/a" in
   state.server_identity <- Some origin;
   state.workspace_identity <- Workspace_identity_match_unconfirmed "health timed out";
-  let handoff = Task_handoff {keeper="alpha"; task_id="task-9"; title="accepted"; body="body"} in
+  let handoff = Task_handoff {keeper="alpha"; task_id="task-9"; title="accepted"; body="body"; editor=None} in
   let cancelled = Task_cancel_refresh {task_id="task-8"; certainty=Cancellation_confirmed} in
+
   remember_task_followup state ~expected_workspace:origin handoff;
   remember_task_followup state ~expected_workspace:origin cancelled;
   let run, withdrawn = take_task_followups state ~ready:(fun _ -> true) in

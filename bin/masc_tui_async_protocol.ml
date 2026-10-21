@@ -740,18 +740,7 @@ type async_msg =
     }
   | Observer_received of string option * Masc_tui_observer.delivery list
   | Observer_closed of (unit, Masc_tui_http.observer_error) result
-  | Task_dispatched of {
-      expected_workspace : Masc.Tui_decode.server_identity;
-      keeper : string;
-      task_id : string;
-      title : string;
-      body : string;
-    }
-  | Task_dispatch_failed of {
-      keeper : string;
-      detail : string;
-      original : string;
-    }
+  | Task_dispatch_completed of Masc_tui_types.task_dispatch_request
 
 (* Every async result carries the instant it was ready, so the loop can say
    how long it awaited UI application, whether queued or request-owned.
@@ -822,7 +811,10 @@ let collect_owned_results state =
   let creations = List.map (fun (request,status,ready_at_ns) ->
     {ready_at_ns;message=Keeper_creation_changed (request,status)})
       (pending_keeper_creation_receipts state) in
-  List.concat [receipts;completions;runtime_forms;settings;assignments;creations;history]
+  let tasks = List.map (fun (request, (completion : Masc_tui_task_dispatch.completion)) ->
+    {ready_at_ns=completion.ready_at_ns;message=Task_dispatch_completed request})
+      (pending_task_dispatch_completions state) in
+  List.concat [receipts;completions;runtime_forms;settings;assignments;creations;tasks;history]
 
 module Delivery_round : sig
   type 'a t
@@ -1068,8 +1060,7 @@ let rec workspace_message_is_read = function
   | Github_login_lines _
   | Github_login_finished _
   | Github_token_saved _
-  | Task_dispatched _
-  | Task_dispatch_failed _
+  | Task_dispatch_completed _
   | Image_render_ready _
     -> false
 
@@ -1196,7 +1187,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
     | Github_login_finished (_, _) | Github_token_saved (_, _)
     | Observer_opened _ | Observer_received (_, _) | Observer_closed _
-    | Task_dispatched _ | Task_dispatch_failed _ -> None in
+    | Task_dispatch_completed _ -> None in
   if workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation
   then None else inspect message
 
@@ -1332,5 +1323,4 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
   | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
   | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_opened _
-  | Observer_received (_, _) | Observer_closed _ | Task_dispatched _
-  | Task_dispatch_failed _ -> message
+  | Observer_received (_, _) | Observer_closed _ | Task_dispatch_completed _ -> message

@@ -147,10 +147,13 @@ let apply t apply value =
     Printexc.raise_with_backtrace exn bt
 type pending = Awaiting_start | Io_queued | Io_running | Io_returning | Preparing
   | Comparison_queued | Comparison_running | Comparison_returning | Awaiting_ui
+  | Read_failed of failure | Read_not_started
 let pending t =
   let f=facts t in
   match f.caller_observed with
-  | Some _ -> Awaiting_ui
+  | Some (_,Returned) -> Awaiting_ui
+  | Some (_,Caller_failed failure) -> Read_failed failure
+  | Some (_,Not_started) -> Read_not_started
   | None ->
     if Option.is_some f.comparison.caller_observed then Preparing
     else if Option.is_some f.comparison.worker_returned then Comparison_returning

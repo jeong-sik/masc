@@ -421,6 +421,28 @@ intervals and the rootless dictionary. Candidates at the cursor include bass and
 inversions but do not assert a unique harmonic interpretation. `transpose -12`,
 `quantize 0.25` and `duplicate 8` operate on the selected track transactionally.
 
+For a whole-progression voice-leading comparison, use
+`:progression-led 0 4 drop2 C3 C5 Dm7 G7 Cmaj7` on a melodic phrase track.
+After start, duration and mode, give the inclusive lowest/highest MIDI keys
+(note names or numbers), then the chord symbols. Close candidates contain one
+instance of each chord pitch class within an octave; drop2 lowers the
+second-highest voice of each close inversion by an octave. Compound extensions
+are pitch classes here. Rootless candidates come from Tonal's left-hand
+dictionary. Explicit slash basses remain the lowest pitch class; rootless slash
+chords are refused. These candidate rules do not change `:chord`, `:revoice`
+or the existing `:progression` command.
+
+The complete path minimizes the sum of absolute semitone moves between sorted
+low-to-high voices at adjacent chords, with a constant voice count. This is a
+declared movement metric, not a stylistic or harmonic verdict. Ties follow
+stable candidate order. A register that cannot fit a chord, incompatible voice
+counts, drum tracks and overlapping same-key notes fail without editing the
+draft. The generated notes retain the requested timing and current velocity;
+one undo removes the progression, and redo restores it. Save, MIDI/WAV export,
+the harmony timeline and editable arrangement handoff use those ordinary notes.
+This command composes authored phrases; imported original MIDI keeps its
+existing source-editing commands.
+
 Add a rhythm part with `:drum-track Drums`. It creates and selects the single
 General MIDI percussion track on channel 10; ordinary `:track-add` continues to
 allocate the other 15 melodic channels. Drum rows show MIDI key numbers. For

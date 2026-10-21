@@ -134,10 +134,11 @@ let () =
     ["--launcher","masc-native-addon-launcher";"--guardian","masc-browser-process-owner";
      "--worker","masc-browser-addon-worker"];
   Unix.putenv "PATH" (bin ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH"));
+  Unix.mkdir (Filename.concat base_path "fixture-skills") 0o700;
   let runtime_path=Filename.concat config_root "runtime.toml" in
   Out_channel.with_open_bin runtime_path (fun channel ->
     output_string channel (F.official_client_runtime_fixture ^ Printf.sprintf
-      "\n[browser.live]\nenabled=false\n[browser.automation]\nenabled=false\n[browser.stagehand]\nenabled=true\nchrome=%S\nextension=%S\n" chrome extension));
+      "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.live]\nenabled=false\n[browser.automation]\nenabled=false\n[browser.stagehand]\nenabled=true\nchrome=%S\nextension=%S\n" chrome extension));
   (match Runtime.init_default ~config_path:runtime_path with Ok () -> () | Error detail -> failwith detail);
   Mirage_crypto_rng_unix.use_default ();
   let failed = Eio_main.run
@@ -162,6 +163,13 @@ let () =
   let require = function Ok value -> value | Error detail -> failwith detail in
   let inventory ()=R.inventory ~config in
   let rec await f=match f () with Some value -> value | None -> Eio.Time.sleep clock 0.01;await f in
+  let observation=Runtime.load_config_observation ~runtime_config_path:runtime_path () |> require in
+  let publication=Server_skill_snapshot_runtime.refresh_from_observation ~base_path observation
+    |> Result.map_error Server_skill_snapshot_runtime.error_to_string |> require in
+  (match publication with
+   | Skill_catalog_snapshot_service.Published _|Unchanged _ -> ()
+   | Workspace_retired -> failwith "fixture Skill workspace was retired");
+  R.register_skill_export_handler Server_skill_snapshot_runtime.publish_lane_skills;
   R.start_configuration_service ~config ~sw ~clock;
   let attach () =
     Out_channel.with_open_bin declaration (fun channel -> output_string channel (Printf.sprintf

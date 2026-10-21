@@ -472,6 +472,21 @@ let test_input_retention_shares_native_liveness () = with_store @@ fun _path sto
   check bool "superseded input ref releases after confirmed commit" true
     (List.exists (Keeper_checkpoint_ref.equal (checkpoint 1)) released)
 
+let test_input_writes_on_closed_store_are_typed () = with_store @@ fun _path store operation ->
+  bind store operation (make_call operation);
+  ignore (Store.close store |> ok);
+  let closed label = function
+    | Error (Store.Store_unavailable detail) ->
+      check string label "database handle is closed" detail
+    | Ok _ | Error _ -> fail (label ^ ": closed handle was not refused") in
+  closed "native update" (Store.update_direct_native_call store ~now:4. ~operation_id
+    ~execution_digest:operation.Operation.execution_digest
+    (Native.Checkpoint {call_id;observed=checkpoint 1;checkpoint=checkpoint 2}));
+  closed "autonomous input update"
+    (Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 2));
+  closed "atomic direct input update"
+    (advance_input store operation ~observed:(checkpoint 1) ~observed_input:None (checkpoint 2))
+
 let test_input_identity_is_not_an_ordinal () = with_store @@ fun _path store _operation ->
   let first = checkpoint_of_bytes ~turn_count:4 40 in
   let same_turn = checkpoint_of_bytes ~turn_count:4 41 in
@@ -495,6 +510,7 @@ let test_input_identity_is_not_an_ordinal () = with_store @@ fun _path store _op
   check_input "identity refusals preserve actual current owner" (Some same_turn) store
 
 let () = run "native-call-owner-store" ["input ownership", [
+  test_case "closed stores refuse each input writer with a typed error" `Quick test_input_writes_on_closed_store_are_typed;
   test_case "same turn bytes, trace and source turn are exact" `Quick test_input_identity_is_not_an_ordinal;
   test_case "input owner survives retirement and reopen" `Quick test_input_owner_survives_retirement_and_reopen;
   test_case "input and native checkpoint commit atomically" `Quick test_input_and_native_checkpoint_commit_atomically;

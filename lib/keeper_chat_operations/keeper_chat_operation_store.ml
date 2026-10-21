@@ -851,7 +851,13 @@ let decode_input_checkpoint stmt =
     Error (Integrity_error "input checkpoint turn is outside the host integer range")
   else Keeper_checkpoint_ref.of_persisted ~trace_id ~turn_count:(Int64.to_int turn_count)
     ~sha256:(Sqlite3.column_text stmt 2)
-    |> Result.map_error (fun _ -> Integrity_error "invalid input checkpoint reference")
+    |> Result.map_error (function
+      | Keeper_checkpoint_ref.Negative_turn_count turn ->
+        Integrity_error (Printf.sprintf "input checkpoint trace %s has negative turn %d"
+          (Keeper_id.Trace_id.to_string trace_id) turn)
+      | Keeper_checkpoint_ref.Invalid_sha256 digest ->
+        Integrity_error (Printf.sprintf "input checkpoint trace %s has invalid SHA-256 %S"
+          (Keeper_id.Trace_id.to_string trace_id) digest))
 
 let input_checkpoint_with_db db ~trace_id =
   with_statement db ~operation:"read current input checkpoint"
@@ -978,6 +984,8 @@ let install_input_checkpoint_with_db store ~previous checkpoint =
   | None -> Ok ()
   | Some reference when Keeper_checkpoint_ref.equal reference checkpoint -> Ok ()
   | Some reference ->
+    (* This non-yielding append belongs to the serialized write transaction,
+       like [record_dropped]. Atomic storage does not grant concurrent writers. *)
     Atomic.set store.dropped (Atomic.get store.dropped @ [reference]);
     Ok ()
 
@@ -991,6 +999,7 @@ let check_input_predecessor ~observed ~checkpoint =
   | Some _ | None -> Ok ()
 
 let update_input_checkpoint store ~observed ~checkpoint =
+  let* () = ensure_open store in
   let* () = check_input_predecessor ~observed ~checkpoint in
   with_transaction store (fun () ->
     let* previous = input_checkpoint_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
@@ -2379,6 +2388,7 @@ let apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest 
       Ok next
 
 let update_direct_native_call store ~now ~operation_id ~execution_digest change =
+  let* () = ensure_open store in
   let expected_commit = ref None in
   let result = with_transaction store (fun () ->
     let* next = apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest change in
@@ -2387,6 +2397,11 @@ let update_direct_native_call store ~now ~operation_id ~execution_digest change 
 
 let update_direct_input_checkpoint store ~now ~operation_id ~execution_digest
     ~call_id ~observed ~observed_input ~checkpoint =
+  let* () = ensure_open store in
+  (* Unlike the legacy native-only update, an uncertain commit stays Error.
+     Semantic readback alone cannot certify the input-owner relation. The
+     caller must reread both authorities before reconciling; its old input CAS
+     cannot replay an installed transition, and no files are released. *)
   let* () = check_input_predecessor ~observed:observed_input ~checkpoint in
   with_transaction store (fun () ->
     let* previous = input_checkpoint_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in

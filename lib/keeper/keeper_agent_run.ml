@@ -1842,6 +1842,14 @@ let run_turn
             repair the call next turn; a surviving turn already carries
             the round-trip through its own history. *)
          let pre_tool_rejects = ref [] in
+         (* Capture before dispatch, never from a later input-change callback:
+            a stale Agent must not borrow a newer predecessor to overwrite it. *)
+         let input_producer = match native_binding with
+           | Some _ -> Ok None
+           | None -> Keeper_input_checkpoint_producer.prepare ~base_path:config.base_path
+               ~keeper_name:meta.name ~session_dir:session.session_dir ~trace_id:meta.runtime.trace_id
+               ~source:resume_agent_core_checkpoint |> Result.map Option.some in
+         let input_producer = ref input_producer in
          let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
                 Option.iter (fun observe -> observe snapshot.stage) on_checkpoint_stage;
                 (* AGENT_CORE's per-turn pipeline builds checkpoints with an empty
@@ -1860,6 +1868,20 @@ let run_turn
                        | None -> snapshot.checkpoint.working_context)
                   }
                 in
+                let publication = match snapshot.stage, !input_producer with
+                  | Agent_core.Agent.After_input_wait_changed, Ok (Some producer) ->
+                    (match Keeper_input_checkpoint_producer.publish_autonomous producer checkpoint with
+                     | Ok producer -> input_producer := Ok (Some producer); Ok ()
+                     | Error error -> input_producer := Error error;
+                       Error (Keeper_input_checkpoint_producer.error_to_string error))
+                  | Agent_core.Agent.After_input_wait_changed, Error error ->
+                    Error (Keeper_input_checkpoint_producer.error_to_string error)
+                  | Agent_core.Agent.After_input_wait_changed, Ok None
+                  | (After_assistant_collected | After_tool_results_appended
+                    | After_context_injection | After_rejected_response_dropped), (Ok _ | Error _) -> Ok () in
+                match publication with
+                | Error _ as error -> error
+                | Ok () ->
                 let save_started_at = Time_compat.now () in
                 let save_started_mono = Mtime_clock.now () in
                 let save_result =
@@ -1918,6 +1940,10 @@ let run_turn
                 | Error _ as error -> error
          in
          let call_run_named ~raw_trace ~initial_messages () =
+                match !input_producer with
+                | Error error -> Error (Agent_core.Error.Internal
+                    (Keeper_input_checkpoint_producer.error_to_string error))
+                | Ok _ ->
                 let dispatch_input ~dispatch = match native_resume with
                   | Some resumed ->
                     (* Core's journal owns completion of an interrupted tool

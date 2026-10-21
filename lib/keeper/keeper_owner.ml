@@ -178,6 +178,19 @@ type child_completion =
       }
       -> child_completion
 
+type input_checkpoint_writer =
+  { input_trace : Keeper_id.Trace_id.t
+  ; input_child : Keeper_interrupt_token.t
+  ; input_lane : turn_lane
+  ; input_reference : Keeper_checkpoint_ref.t option
+  }
+
+type input_checkpoint_change =
+  | Autonomous_input of Keeper_checkpoint_ref.t
+  | Direct_input of
+      { operation_id : Operation_id.t; execution_digest : string; call_id : string
+      ; observed : Keeper_checkpoint_ref.t; checkpoint : Keeper_checkpoint_ref.t }
+
 type _ command =
   | Exact_projection :
       (Keeper_owner_reducer.projection, error) result command
@@ -191,6 +204,10 @@ type _ command =
   | Direct_checkpoint : Operation_id.t ->
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
   | Direct_native_call : Operation_id.t -> (Keeper_native_call.state, error) result command
+  | Input_checkpoint : Keeper_id.Trace_id.t -> (Keeper_checkpoint_ref.t option, error) result command
+  | Begin_input_checkpoint : Keeper_id.Trace_id.t * Keeper_interrupt_token.t -> (input_checkpoint_writer, error) result command
+  | Advance_input_checkpoint : input_checkpoint_writer * input_checkpoint_change ->
+      (input_checkpoint_writer, error) result command
   | Update_direct_native_call :
       {operation_id:Operation_id.t; execution_digest:string; change:Keeper_native_call.change} -> (unit, error) result command
   | Defer_direct_checkpoint :
@@ -584,6 +601,7 @@ let answer : type response. response command -> answer = function
   | Has_newer_original_queued _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
   | Direct_native_call _ -> In_its_drain_step
+  | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _ -> In_its_drain_step
   | Update_direct_native_call _ -> In_its_drain_step
   | Defer_direct_checkpoint _ -> In_its_drain_step
   | Resume_direct_checkpoint _ -> In_its_drain_step
@@ -1737,6 +1755,59 @@ let start
             Chat_operation_store.direct_native_call t.operation_store ~operation_id) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Input_checkpoint trace_id, resolve) ->
+          let response = run_operation_read t ~label:"read input checkpoint owner" (fun () ->
+            Chat_operation_store.input_checkpoint t.operation_store ~trace_id) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Begin_input_checkpoint (trace_id, caller), resolve) ->
+          let response = reject_if_stopping state (fun () ->
+            reject_if_shutdown shutdown_operation_id (fun () ->
+              match (Keeper_owner_reducer.projection state).meta,
+                    Atomic.get t.turn_in_flight, Atomic.get t.child_cancel with
+              | Some meta, Some {lane=(Autonomous | Chat_operation) as lane; interrupt_token;_}, Some _
+                  when Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id
+                    && Keeper_interrupt_token.equal caller interrupt_token ->
+                run_operation_read t ~label:"capture input checkpoint predecessor" (fun () ->
+                  Chat_operation_store.input_checkpoint t.operation_store ~trace_id)
+                |> Result.map (fun input_reference ->
+                  {input_trace=trace_id;input_child=interrupt_token;input_lane=lane;input_reference})
+              | (Some _ | None),(Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),(Some _ | None) ->
+                Error (Operation_rejected (Chat_operation_store.Invalid_input
+                  "input writer requires the current executing child and trace")))) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Advance_input_checkpoint (writer, change), resolve) ->
+          let checkpoint, lane = match change with
+            | Autonomous_input checkpoint -> checkpoint, Autonomous
+            | Direct_input {checkpoint;_} -> checkpoint, Chat_operation in
+          let response = match (Keeper_owner_reducer.projection state).meta,
+              Atomic.get t.turn_in_flight, Atomic.get t.child_cancel with
+            | Some meta, Some flight, Some _
+                when Keeper_id.Trace_id.equal meta.runtime.trace_id writer.input_trace
+                  && Keeper_id.Trace_id.equal checkpoint.trace_id writer.input_trace
+                  && Keeper_interrupt_token.equal flight.interrupt_token writer.input_child
+                  && flight.lane = writer.input_lane && flight.lane = lane ->
+              let persist () = match change with
+                | Autonomous_input checkpoint ->
+                  Chat_operation_store.update_input_checkpoint t.operation_store
+                    ~observed:writer.input_reference ~checkpoint
+                | Direct_input {operation_id;execution_digest;call_id;observed;checkpoint} ->
+                  Chat_operation_store.update_direct_input_checkpoint t.operation_store ~now:(t.now ())
+                    ~operation_id ~execution_digest ~call_id ~observed
+                    ~observed_input:writer.input_reference ~checkpoint in
+              (match run_operation_command t ~label:"publish exact input checkpoint" persist with
+               | Ok (Chat_operation_store.Input_checkpoint_updated,_) ->
+                 Ok {writer with input_reference=Some checkpoint}
+               | Ok (Chat_operation_store.Input_checkpoint_source_changed _,_) ->
+                 Error (Operation_rejected (Chat_operation_store.Invalid_input
+                   "input checkpoint predecessor changed; reconcile actual owner"))
+               | Error _ as error -> error)
+            | (Some _ | None),(Some _ | None),(Some _ | None) ->
+              Error (Operation_rejected (Chat_operation_store.Invalid_input
+                "input checkpoint writer no longer owns this executing child and trace")) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Update_direct_native_call {operation_id; execution_digest; change}, resolve) ->
           let persist () = run_operation_command t ~label:"persist direct native execution" (fun () ->
             Chat_operation_store.update_direct_native_call t.operation_store ~now:(t.now ())
@@ -2388,6 +2459,23 @@ let direct_checkpoint t ~operation_id = request t (Direct_checkpoint operation_i
 let defer_direct_checkpoint t ~operation_id ~execution_digest ~checkpoint =
   request t (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint})
 let direct_native_call t ~operation_id = request t (Direct_native_call operation_id)
+let input_child_request t writer change =
+  match Keeper_turn_preview_owner.current () with
+  | Some caller when Keeper_interrupt_token.equal caller writer.input_child ->
+    request t (Advance_input_checkpoint (writer, change))
+  | Some _ | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "input publication caller does not own the captured child"))
+let begin_input_checkpoint t ~trace_id =
+  match Keeper_turn_preview_owner.current () with
+  | Some caller -> request t (Begin_input_checkpoint (trace_id, caller))
+  | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "input writer capture requires an inherited executing child"))
+let input_checkpoint_reference writer = writer.input_reference
+let input_checkpoint t ~trace_id = request t (Input_checkpoint trace_id)
+let advance_autonomous_input_checkpoint t ~writer ~checkpoint =
+  input_child_request t writer (Autonomous_input checkpoint)
+let advance_direct_input_checkpoint t ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
+  input_child_request t writer (Direct_input {operation_id;execution_digest;call_id;observed;checkpoint})
 let bind_direct_native_call t ~operation_id ~execution_digest ~observed ~call =
   request t (Update_direct_native_call {operation_id; execution_digest; change=Keeper_native_call.Bind {observed; call}})
 let checkpoint_direct_native_call t ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =

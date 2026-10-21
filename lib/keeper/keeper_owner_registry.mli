@@ -173,6 +173,19 @@ val direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:K
     with [Owner_stopping]. *)
 val direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   (Keeper_native_call.state, command_error) result
+val begin_input_checkpoint : base_path:string -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
+  (Keeper_owner.input_checkpoint_writer, command_error) result
+val input_checkpoint : base_path:string -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
+  (Keeper_checkpoint_ref.t option, command_error) result
+val advance_autonomous_input_checkpoint : base_path:string -> keeper_name:string ->
+  writer:Keeper_owner.input_checkpoint_writer -> checkpoint:Keeper_checkpoint_ref.t ->
+  (Keeper_owner.input_checkpoint_writer, command_error) result
+val advance_direct_input_checkpoint : base_path:string -> keeper_name:string ->
+  writer:Keeper_owner.input_checkpoint_writer -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  execution_digest:string -> call_id:string -> observed:Keeper_checkpoint_ref.t ->
+  checkpoint:Keeper_checkpoint_ref.t -> (Keeper_owner.input_checkpoint_writer, command_error) result
+(** Writer capture uses admission lookup; durable reads and publication reach
+    an existing stopping Owner so its draining child can record actual input. *)
 val bind_direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
   observed:Keeper_native_call.state -> call:Keeper_native_call.t -> (unit, command_error) result
 val checkpoint_direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->

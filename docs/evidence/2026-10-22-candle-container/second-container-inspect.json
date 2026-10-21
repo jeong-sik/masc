@@ -1,0 +1,240 @@
+{
+  "Id": "a7eba40ee92bfd141f59883c6dfab2bc68ebe2f2edb79c9ceb41a4f91a866033",
+  "Created": "2026-10-21T15:45:37.964844346Z",
+  "Path": "python3",
+  "Args": [
+    "server.py",
+    "--state",
+    "/state"
+  ],
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-10-21T15:45:38.094715055Z",
+    "FinishedAt": "2026-10-21T15:45:38.544400888Z"
+  },
+  "Image": "sha256:dfa4491a3c5c6ffac467e2e2ac2aa58cd46109d38fafea0f2ec0b492ce6ee00a",
+  "ResolvConfPath": "/var/lib/docker/containers/a7eba40ee92bfd141f59883c6dfab2bc68ebe2f2edb79c9ceb41a4f91a866033/resolv.conf",
+  "HostnamePath": "/var/lib/docker/containers/a7eba40ee92bfd141f59883c6dfab2bc68ebe2f2edb79c9ceb41a4f91a866033/hostname",
+  "HostsPath": "/var/lib/docker/containers/a7eba40ee92bfd141f59883c6dfab2bc68ebe2f2edb79c9ceb41a4f91a866033/hosts",
+  "LogPath": "/var/lib/docker/containers/a7eba40ee92bfd141f59883c6dfab2bc68ebe2f2edb79c9ceb41a4f91a866033/a7eba40ee92bfd141f59883c6dfab2bc68ebe2f2edb79c9ceb41a4f91a866033-json.log",
+  "Name": "/candle-container-proof-0c67b092c532-second",
+  "RestartCount": 0,
+  "Driver": "overlayfs",
+  "Platform": "linux",
+  "MountLabel": "",
+  "ProcessLabel": "",
+  "AppArmorProfile": "",
+  "ExecIDs": null,
+  "HostConfig": {
+    "Binds": null,
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "json-file",
+      "Config": {}
+    },
+    "NetworkMode": "none",
+    "PortBindings": {},
+    "RestartPolicy": {
+      "Name": "no",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "CapAdd": null,
+    "CapDrop": [
+      "ALL"
+    ],
+    "CgroupnsMode": "private",
+    "Dns": null,
+    "DnsOptions": [],
+    "DnsSearch": [],
+    "ExtraHosts": null,
+    "GroupAdd": null,
+    "IpcMode": "private",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": true,
+    "SecurityOpt": [
+      "no-new-privileges"
+    ],
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 134217728,
+    "NanoCpus": 500000000,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": [],
+    "BlkioDeviceReadBps": [],
+    "BlkioDeviceWriteBps": [],
+    "BlkioDeviceReadIOps": [],
+    "BlkioDeviceWriteIOps": [],
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": [],
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 0,
+    "MemorySwap": 134217728,
+    "MemorySwappiness": null,
+    "OomKillDisable": null,
+    "PidsLimit": 16,
+    "Ulimits": [],
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "Mounts": [
+      {
+        "Type": "bind",
+        "Source": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-container-qualification-20261022-gwrm03w4/addons/candle-appraiser",
+        "Target": "/addon",
+        "ReadOnly": true
+      },
+      {
+        "Type": "volume",
+        "Source": "masc-candle-proof-state-0c67b092c532",
+        "Target": "/state"
+      }
+    ],
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "Storage": {
+    "RootFS": {
+      "Snapshot": {
+        "Name": "overlayfs"
+      }
+    }
+  },
+  "Mounts": [
+    {
+      "Type": "bind",
+      "Source": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-container-qualification-20261022-gwrm03w4/addons/candle-appraiser",
+      "Destination": "/addon",
+      "Mode": "",
+      "RW": false,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "volume",
+      "Name": "masc-candle-proof-state-0c67b092c532",
+      "Source": "/var/lib/docker/volumes/masc-candle-proof-state-0c67b092c532/_data",
+      "Destination": "/state",
+      "Driver": "local",
+      "Mode": "z",
+      "RW": true,
+      "Propagation": ""
+    }
+  ],
+  "Config": {
+    "Hostname": "a7eba40ee92b",
+    "Domainname": "",
+    "User": "",
+    "AttachStdin": true,
+    "AttachStdout": true,
+    "AttachStderr": true,
+    "Tty": false,
+    "OpenStdin": true,
+    "StdinOnce": true,
+    "Env": [
+      "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "LANG=C.UTF-8",
+      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+      "PYTHON_VERSION=3.12.15",
+      "PYTHON_SHA256=c2c4321961fab0fb999d66e0cecf521c2ab3994c7992873ea99e306c1094fd5a"
+    ],
+    "Cmd": [
+      "python3",
+      "server.py",
+      "--state",
+      "/state"
+    ],
+    "Image": "masc-candle-proof:d35d2559-0c67b092c532",
+    "Volumes": null,
+    "WorkingDir": "/addon",
+    "Entrypoint": null,
+    "Labels": {
+      "masc.proof-incarnation": "second",
+      "masc.proof-owner": "candle-container-proof-0c67b092c532",
+      "org.opencontainers.image.revision": "d35d2559c56814b38615545a5f4f081304bccc05"
+    },
+    "StopTimeout": 1
+  },
+  "NetworkSettings": {
+    "SandboxID": "",
+    "SandboxKey": "",
+    "Ports": {},
+    "Networks": {
+      "none": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": null,
+        "DriverOpts": null,
+        "GwPriority": 0,
+        "NetworkID": "dc8d1bdfd37bfa2a32789bb1c4094fbd7cdac16df8641b1f216b46ba158d3fb5",
+        "EndpointID": "",
+        "Gateway": "",
+        "IPAddress": "",
+        "MacAddress": "",
+        "IPPrefixLen": 0,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": null
+      }
+    }
+  },
+  "ImageManifestDescriptor": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:a3f5f9c408fc256960349e1aca233a936bfb91f82d5f291b05e035800bc14645",
+    "size": 1431,
+    "platform": {
+      "architecture": "arm64",
+      "os": "linux"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "outcome": "passed",
+  "image_id": "sha256:dfa4491a3c5c6ffac467e2e2ac2aa58cd46109d38fafea0f2ec0b492ce6ee00a",
+  "pending_intents_across_container_replacement": 2,
+  "original_answer_retained": true,
+  "terminal_unknown_retained": true,
+  "same_terminal_redelivery_accepted": true,
+  "different_terminal_and_input_reuse_refused": true,
+  "terminal_requests_not_relisted": true,
+  "volume": "same named volume survived first/second container removals; original state exported before final owned volume cleanup",
+  "provider": "scripted; none invoked",
+  "scope": "Direct Docker worker/persistent volume only. No host Runtime Off/On, common Exact provider, host payout ledger, TUI or Dashboard.",
+  "started_at": "2026-10-21T15:45:36.845085+00:00",
+  "finished_at": "2026-10-21T15:45:39.364359+00:00",
+  "source": "d35d2559c56814b38615545a5f4f081304bccc05",
+  "owned_containers_remaining": []
+}

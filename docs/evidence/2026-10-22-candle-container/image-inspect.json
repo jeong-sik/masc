@@ -1,0 +1,62 @@
+{
+  "Id": "sha256:dfa4491a3c5c6ffac467e2e2ac2aa58cd46109d38fafea0f2ec0b492ce6ee00a",
+  "RepoTags": [
+    "masc-candle-proof:d35d2559-0c67b092c532"
+  ],
+  "RepoDigests": [
+    "masc-candle-proof@sha256:dfa4491a3c5c6ffac467e2e2ac2aa58cd46109d38fafea0f2ec0b492ce6ee00a"
+  ],
+  "Comment": "buildkit.dockerfile.v0",
+  "Created": "2026-10-20T15:24:38.083380417Z",
+  "Config": {
+    "Env": [
+      "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "LANG=C.UTF-8",
+      "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+      "PYTHON_VERSION=3.12.15",
+      "PYTHON_SHA256=c2c4321961fab0fb999d66e0cecf521c2ab3994c7992873ea99e306c1094fd5a"
+    ],
+    "Cmd": [
+      "python3",
+      "server.py",
+      "--state",
+      "/state"
+    ],
+    "WorkingDir": "/addon",
+    "Labels": {
+      "masc.proof-owner": "candle-container-proof-0c67b092c532",
+      "org.opencontainers.image.revision": "d35d2559c56814b38615545a5f4f081304bccc05"
+    },
+    "ArgsEscaped": true
+  },
+  "Architecture": "arm64",
+  "Os": "linux",
+  "Size": 43547368,
+  "RootFS": {
+    "Type": "layers",
+    "Layers": [
+      "sha256:258ba1f62b513e7bb7492d3cc8ce445e4ef176a14980f193f789b6d7270ae61c",
+      "sha256:373ce1c1778b9a35fa1db898d648974a737e314bb3503ac5c988fa42ca1f63d5",
+      "sha256:11d89b6e886fe5bea9177eb50df86009b68b75957e4605f2bb472bbb4a76751b",
+      "sha256:84dd5a4db43e5a9bfe3a50e18c5b5ad0a8789ea9b894392200ad8a95388a745e",
+      "sha256:94a83506218b0deb4de75744a5667a9d4dd2fd692e070247c922dc4fd9c516fc",
+      "sha256:0ccb87e9ba387b45781bda56ab5e4104dfc6833c7e5ec8c9a55e3247000d67a7"
+    ]
+  },
+  "Metadata": {
+    "LastTagTime": "2026-10-21T15:43:56.611432174Z"
+  },
+  "Descriptor": {
+    "mediaType": "application/vnd.oci.image.index.v1+json",
+    "digest": "sha256:dfa4491a3c5c6ffac467e2e2ac2aa58cd46109d38fafea0f2ec0b492ce6ee00a",
+    "size": 856
+  },
+  "Identity": {
+    "Build": [
+      {
+        "Ref": "j5esyl5rgyu5yzzzb45wufknf",
+        "CreatedAt": "2026-10-21T15:43:56.623430924Z"
+      }
+    ]
+  }
+}

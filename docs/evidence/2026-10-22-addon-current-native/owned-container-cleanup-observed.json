@@ -1,0 +1,58 @@
+{
+  "observed_at": "2026-10-21T16:07:14.271534+00:00",
+  "docker_engine": {
+    "exit_code": 0,
+    "stdout": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7\n",
+    "stderr": ""
+  },
+  "containers": [
+    {
+      "instance_id": "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad",
+      "engine": {
+        "kind": "docker",
+        "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+      },
+      "container_id": "573cce3a7c38741557ffa501276ab4f7e0480c256cc8fe9252b6e1c9a8094176",
+      "argv": [
+        "docker",
+        "inspect",
+        "573cce3a7c38741557ffa501276ab4f7e0480c256cc8fe9252b6e1c9a8094176"
+      ],
+      "exit_code": 1,
+      "stdout": "[]\n",
+      "stderr": "error: no such object: 573cce3a7c38741557ffa501276ab4f7e0480c256cc8fe9252b6e1c9a8094176\n"
+    },
+    {
+      "instance_id": "01a15f30-3b0b-7000-b3b7-70768510066d",
+      "engine": {
+        "kind": "docker",
+        "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+      },
+      "container_id": "35ceb5b02f48b6f60c21a472caba465f713400da3e4a8ca56ef436dda182935c",
+      "argv": [
+        "docker",
+        "inspect",
+        "35ceb5b02f48b6f60c21a472caba465f713400da3e4a8ca56ef436dda182935c"
+      ],
+      "exit_code": 1,
+      "stdout": "[]\n",
+      "stderr": "error: no such object: 35ceb5b02f48b6f60c21a472caba465f713400da3e4a8ca56ef436dda182935c\n"
+    },
+    {
+      "instance_id": "01a15f35-54a5-7000-b929-86084ccafd4e",
+      "engine": {
+        "kind": "docker",
+        "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+      },
+      "container_id": "39d2bf37e8c0c349933371e0be898476b555d20a3fa5d3e0eddcf58f7a8b2828",
+      "argv": [
+        "docker",
+        "inspect",
+        "39d2bf37e8c0c349933371e0be898476b555d20a3fa5d3e0eddcf58f7a8b2828"
+      ],
+      "exit_code": 1,
+      "stdout": "[]\n",
+      "stderr": "error: no such object: 39d2bf37e8c0c349933371e0be898476b555d20a3fa5d3e0eddcf58f7a8b2828\n"
+    }
+  ]
+}

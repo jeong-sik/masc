@@ -30,6 +30,26 @@ let runtime id : Masc.Tui_decode.runtime_option =
 
 let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
 
+(* A Keeper outcome names the runtime that answered by exact id. The join to
+   the catalog is an equality on that id; an id the catalog lacks is kept raw
+   rather than matched by prefix or split into a guessed provider. *)
+let test_a_last_runtime_id_joins_the_catalog_by_equality () =
+  let catalog = [ runtime "glm.glm-5"; runtime "codex_subscription.gpt-5.6-luna" ] in
+  (match
+     Masc.Tui_decode.resolve_last_runtime catalog "codex_subscription.gpt-5.6-luna"
+   with
+   | Masc.Tui_decode.Last_runtime_cataloged ro ->
+       Alcotest.(check string) "joined id" "codex_subscription.gpt-5.6-luna" ro.ro_id
+   | Last_runtime_uncataloged _ -> Alcotest.fail "a listed runtime was not joined");
+  List.iter
+    (fun unlisted ->
+      match Masc.Tui_decode.resolve_last_runtime catalog unlisted with
+      | Last_runtime_uncataloged raw ->
+          Alcotest.(check string) "raw id kept" unlisted raw
+      | Last_runtime_cataloged ro ->
+          Alcotest.failf "%S joined to %S" unlisted ro.ro_id)
+    [ "codex_subscription"; "glm.glm-5.1"; "GLM.GLM-5"; "" ]
+
 (* The width these checks read at. Wide enough that the authority row -- two
    clauses while no runtime surface has loaded -- stays one row, so the counts
    below are about the rows each check is named for. *)
@@ -1412,4 +1432,6 @@ let () = Alcotest.run "runtime list geometry"
           test_http_slot_without_body_deadline_is_refused_for_exact_lane
         ;Alcotest.test_case "default lane route counts unassigned keepers" `Quick
           test_default_lane_route_counts_unassigned_keepers
+        ;Alcotest.test_case "a last runtime id joins the catalog by equality" `Quick
+          test_a_last_runtime_id_joins_the_catalog_by_equality
         ;]]

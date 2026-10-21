@@ -159,6 +159,7 @@ type keeper_lane_turn_phase =
 
 type keeper_lane_last_outcome = {
   klo_runtime_state : string;
+  klo_selected_runtime_id : string option;
   klo_selected_model : string option;
 }
 
@@ -3142,10 +3143,26 @@ let keeper_lane_turn_phase_to_string = function
 
 let decode_keeper_lane_last_outcome json =
   let* klo_runtime_state = required_string_field json "runtime_state" in
+  let* klo_selected_runtime_id =
+    required_nullable_string_field json "selected_runtime_id"
+  in
   let* klo_selected_model =
     required_nullable_string_field json "selected_model"
   in
-  Ok { klo_runtime_state; klo_selected_model }
+  Ok { klo_runtime_state; klo_selected_runtime_id; klo_selected_model }
+
+type last_runtime =
+  | Last_runtime_cataloged of runtime_option
+  | Last_runtime_uncataloged of string
+
+let resolve_last_runtime runtimes runtime_id =
+  match
+    List.find_opt
+      (fun (ro : runtime_option) -> String.equal ro.ro_id runtime_id)
+      runtimes
+  with
+  | Some ro -> Last_runtime_cataloged ro
+  | None -> Last_runtime_uncataloged runtime_id
 
 let decode_keeper_lane json =
   let* kl_keeper = required_string_field json "keeper" in

@@ -86,14 +86,14 @@ let mark_turn_provider_attempt_started ~observation_token ~base_path name =
     set_turn_phase ~observation_token ~base_path name (Packed Turn_executing)
 ;;
 
-let set_turn_selected_model ~observation_token ~base_path name selected_model =
+let set_turn_selected_runtime ~observation_token ~base_path name selected_runtime =
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
       let e', changed =
         update_current_turn ~observation_token e (fun obs ->
-          { (stamp_turn_progress ~now ~event_kind:"selected_model" obs) with
-            selected_model
+          { (stamp_turn_progress ~now ~event_kind:"selected_runtime" obs) with
+            selected_runtime
           })
       in
       e', changed)
@@ -130,7 +130,7 @@ let mark_turn_finished ~observation_token ~base_path name =
           ; ct_started_at = obs.started_at
           ; ct_ended_at = now
           ; ct_decision_stage = obs.decision_stage
-          ; ct_selected_model = obs.selected_model
+          ; ct_selected_runtime = obs.selected_runtime
           ; ct_wake = obs.wake
           }
         in

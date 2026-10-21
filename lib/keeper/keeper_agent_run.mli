@@ -340,6 +340,11 @@ val run_turn
        (Keeper_turn_driver.lane_terminal_error -> unit)
        (* Called once per runtime walk that returns a candidate's error as
           the lane's error, with the candidate that produced it. *)
+  -> ?on_runtime_selected:(runtime_id:string -> unit)
+       (* Called once when the runtime walk returns a result, with the
+          candidate that produced it, before the answer is finalized. A turn
+          can still fail after this: this is the only place the caller learns
+          which candidate answered when finalization then rejects the turn. *)
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?shared_context:Agent_core.Context.t
   -> ?repetition_execution:Keeper_repetition_scope.Execution.t

@@ -755,8 +755,20 @@ val keeper_lane_turn_phase_to_string : keeper_lane_turn_phase -> string
 
 type keeper_lane_last_outcome = {
   klo_runtime_state : string;
+  klo_selected_runtime_id : string option;
+      (** Exact id of the runtime that produced the turn's outcome. After a
+          failover it differs from the runtime the keeper is assigned. *)
   klo_selected_model : string option;
 }
+
+(** A runtime id from a Keeper outcome joined to the runtime catalog. An id
+    the catalog does not list stays the raw id: it is never split or matched
+    by prefix to guess a provider. *)
+type last_runtime =
+  | Last_runtime_cataloged of runtime_option
+  | Last_runtime_uncataloged of string
+
+val resolve_last_runtime : runtime_option list -> string -> last_runtime
 
 (** The phase conditions that can each put a keeper in the same phase:
     either health reading makes it failing, and a pending launch is one of

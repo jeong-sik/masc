@@ -2,7 +2,8 @@
     previously existed in [Keeper_registry.registry_entry] but was never
     emitted in [snapshot_to_json] (A-PR-2 observability gaps G2/G5/G10):
 
-    - live_turn [selected_model] / [active_tool_count] (G2)
+    - live_turn [selected_runtime_id] / [selected_model] / [active_tool_count] (G2)
+    - last_outcome [selected_runtime_id] / [selected_model] (#37334)
     - [last_skip] {ts, reasons} (G5)
     - [board_cursor] {ts, post_id} (G10)
 
@@ -56,8 +57,8 @@ let test_live_turn_surfaces_model_and_tools () =
         let observation_token = Masc.Keeper_turn_observation_token.fresh () in
         Keeper_registry.mark_turn_started ~observation_token ~base_path:base
           ~wake:Keeper_registry.Proactive_tick name;
-        Keeper_registry.set_turn_selected_model ~observation_token:(Some observation_token) ~base_path:base name
-          (Some "claude-sonnet");
+        Keeper_registry.set_turn_selected_runtime ~observation_token:(Some observation_token) ~base_path:base name
+          (Some { Keeper_registry.sr_runtime_id = "claude_code.sonnet"; sr_model = Some "claude-sonnet" });
         Keeper_registry.record_turn_tool_inflight ~observation_token ~base_path:base name ~count:3)
       ()
   in
@@ -66,6 +67,8 @@ let test_live_turn_surfaces_model_and_tools () =
   (match live with
    | `Null -> fail "live_turn should be present while a turn is active"
    | _ -> ());
+  check string "live_turn.selected_runtime_id surfaced" "claude_code.sonnet"
+    (J.member "selected_runtime_id" live |> J.to_string);
   check string "live_turn.selected_model surfaced" "claude-sonnet"
     (J.member "selected_model" live |> J.to_string);
   check int "live_turn.active_tool_count surfaced" 3
@@ -86,6 +89,8 @@ let test_live_turn_model_null_before_selection () =
   let live = J.member "live_turn" json in
   check bool "selected_model is JSON null before routing" true
     (match J.member "selected_model" live with `Null -> true | _ -> false);
+  check bool "selected_runtime_id is JSON null before routing" true
+    (match J.member "selected_runtime_id" live with `Null -> true | _ -> false);
   check int "active_tool_count defaults to 0" 0
     (J.member "active_tool_count" live |> J.to_int)
 ;;
@@ -233,6 +238,135 @@ let test_chat_turn_clears_live_turn_on_finish () =
     (J.member "run_state" json |> J.member "kind" |> J.to_string)
 ;;
 
+(* #37334: the runtime that answered survives the turn. A lane assigned to one
+   runtime can complete on another after failover; the frozen outcome keeps the
+   exact runtime id next to the model, and an outcome without a runtime keeps
+   both null instead of inventing the assigned lane. *)
+
+let finished_outcome ~name ~selected =
+  let base = temp_base () in
+  let json =
+    observed_json ~base ~name
+      ~setup:(fun () ->
+        let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+        Keeper_registry.mark_turn_started ~observation_token ~base_path:base
+          ~wake:Keeper_registry.Proactive_tick name;
+        Keeper_registry.set_turn_selected_runtime
+          ~observation_token:(Some observation_token) ~base_path:base name selected;
+        Keeper_registry.mark_turn_finished ~observation_token ~base_path:base name)
+      ()
+  in
+  J.member "last_outcome" json
+;;
+
+let nullable_string field json =
+  match J.member field json with
+  | `Null -> None
+  | `String s -> Some s
+  | _ -> fail (field ^ " must be a string or null")
+;;
+
+let test_last_outcome_keeps_failover_runtime () =
+  let outcome =
+    finished_outcome ~name:"failover-keeper"
+      ~selected:
+        (Some
+           { Keeper_registry.sr_runtime_id = "codex_subscription.gpt-5.6-luna"
+           ; sr_model = Some "gpt-5.6-luna"
+           })
+  in
+  check (option string) "last_outcome.selected_runtime_id"
+    (Some "codex_subscription.gpt-5.6-luna")
+    (nullable_string "selected_runtime_id" outcome);
+  check (option string) "last_outcome.selected_model" (Some "gpt-5.6-luna")
+    (nullable_string "selected_model" outcome)
+;;
+
+let test_last_outcome_runtime_without_model () =
+  let outcome =
+    finished_outcome ~name:"terminal-error-keeper"
+      ~selected:
+        (Some { Keeper_registry.sr_runtime_id = "glm.glm-5"; sr_model = None })
+  in
+  check (option string) "runtime id kept when the model is unknown"
+    (Some "glm.glm-5") (nullable_string "selected_runtime_id" outcome);
+  check (option string) "model stays null" None
+    (nullable_string "selected_model" outcome)
+;;
+
+let test_last_outcome_without_selection_is_null () =
+  let outcome = finished_outcome ~name:"undispatched-keeper" ~selected:None in
+  check (option string) "runtime id null" None
+    (nullable_string "selected_runtime_id" outcome);
+  check (option string) "model null" None (nullable_string "selected_model" outcome)
+;;
+
+(* #37334: which runtime a turn is credited to is decided by how its attempt
+   ended, in one function the turn execution calls. A turn that fails in
+   finalization after the walk produced an answer is credited to the candidate
+   that answered, not to nothing and not to the lane's assignment; a walk that
+   failed is credited to the candidate whose error the lane returned. *)
+
+module Attempt_end = Masc.Keeper_turn_selected_runtime
+
+let selected_pair = function
+  | None -> None
+  | Some (r : Keeper_registry.selected_runtime) -> Some (r.sr_runtime_id, r.sr_model)
+;;
+
+let test_attempt_end_completed_names_the_answering_runtime () =
+  check (option (pair string (option string))) "completed with a model"
+    (Some ("codex_subscription.gpt-5.6-luna", Some "gpt-5.6-luna"))
+    (selected_pair
+       (Attempt_end.selected_runtime
+          (Attempt_end.Completed
+             { runtime_id = "codex_subscription.gpt-5.6-luna"
+             ; selected_model = Some "gpt-5.6-luna"
+             })));
+  check (option (pair string (option string))) "completed without a runtime observation"
+    (Some ("glm.glm-5", None))
+    (selected_pair
+       (Attempt_end.selected_runtime
+          (Attempt_end.Completed { runtime_id = "glm.glm-5"; selected_model = None })))
+;;
+
+let test_attempt_end_failure_after_an_answer_keeps_the_answering_runtime () =
+  check (option (pair string (option string)))
+    "answering runtime outranks the lane's terminal error origin"
+    (Some ("codex_subscription.gpt-5.6-luna", None))
+    (selected_pair
+       (Attempt_end.selected_runtime
+          (Attempt_end.Failed
+             { answering_runtime_id = Some "codex_subscription.gpt-5.6-luna"
+             ; terminal_origin_runtime_id = Some "glm.glm-5"
+             })));
+  check (option (pair string (option string))) "answering runtime alone"
+    (Some ("codex_subscription.gpt-5.6-luna", None))
+    (selected_pair
+       (Attempt_end.selected_runtime
+          (Attempt_end.Failed
+             { answering_runtime_id = Some "codex_subscription.gpt-5.6-luna"
+             ; terminal_origin_runtime_id = None
+             })))
+;;
+
+let test_attempt_end_walk_failure_names_the_terminal_origin () =
+  check (option (pair string (option string))) "terminal error origin"
+    (Some ("glm.glm-5", None))
+    (selected_pair
+       (Attempt_end.selected_runtime
+          (Attempt_end.Failed
+             { answering_runtime_id = None; terminal_origin_runtime_id = Some "glm.glm-5" })))
+;;
+
+let test_attempt_end_without_a_dispatched_candidate_names_none () =
+  check (option (pair string (option string))) "nothing dispatched" None
+    (selected_pair
+       (Attempt_end.selected_runtime
+          (Attempt_end.Failed
+             { answering_runtime_id = None; terminal_origin_runtime_id = None })))
+;;
+
 (* Two attempts may have the same display counter (including a resumed
    operation). Late callbacks must retain the identity captured by their turn. *)
 let test_late_predecessor_cannot_finish_successor () =
@@ -285,8 +419,9 @@ let test_late_predecessor_cannot_finish_successor () =
     (Some "agent_core_before_turn") (live ()).last_progress_kind;
   Keeper_registry.set_turn_phase ~observation_token:(Some b)
     ~base_path:base name Keeper_registry.(Packed Turn_routing);
-  Keeper_registry.set_turn_selected_model ~observation_token:(Some b)
-    ~base_path:base name (Some "successor-model");
+  Keeper_registry.set_turn_selected_runtime ~observation_token:(Some b)
+    ~base_path:base name
+    (Some { Keeper_registry.sr_runtime_id = "successor-runtime"; sr_model = Some "successor-model" });
   let measurement : Keeper_registry.turn_measurement =
     { tm_captured_at = 123.; tm_context_actions = { handoff = false } }
   in
@@ -306,8 +441,8 @@ let test_late_predecessor_cannot_finish_successor () =
       Keeper_registry.Decision_active_tool_policy_selected;
     Keeper_registry.set_turn_phase ~observation_token ~base_path:base name
       Keeper_registry.(Packed Turn_finalizing);
-    Keeper_registry.set_turn_selected_model ~observation_token ~base_path:base name
-      (Some "predecessor-model");
+    Keeper_registry.set_turn_selected_runtime ~observation_token ~base_path:base name
+      (Some { Keeper_registry.sr_runtime_id = "predecessor-runtime"; sr_model = Some "predecessor-model" });
     Keeper_registry.mark_turn_provider_attempt_started ~observation_token ~base_path:base name;
     Keeper_registry.mark_turn_runtime_done ~observation_token ~base_path:base name;
     Keeper_registry.mark_turn_runtime_exhausted ~observation_token ~base_path:base name)
@@ -459,6 +594,26 @@ let () =
             test_live_turn_surfaces_model_and_tools;
           test_case "model null before runtime selection" `Quick
             test_live_turn_model_null_before_selection;
+        ] );
+      ( "attempt_end",
+        [
+          test_case "completed names the answering runtime" `Quick
+            test_attempt_end_completed_names_the_answering_runtime;
+          test_case "failure after an answer keeps the answering runtime" `Quick
+            test_attempt_end_failure_after_an_answer_keeps_the_answering_runtime;
+          test_case "walk failure names the terminal origin" `Quick
+            test_attempt_end_walk_failure_names_the_terminal_origin;
+          test_case "no dispatched candidate names none" `Quick
+            test_attempt_end_without_a_dispatched_candidate_names_none;
+        ] );
+      ( "last_outcome",
+        [
+          test_case "keeps the runtime that answered after failover" `Quick
+            test_last_outcome_keeps_failover_runtime;
+          test_case "keeps a runtime id without a model" `Quick
+            test_last_outcome_runtime_without_model;
+          test_case "null when no runtime was selected" `Quick
+            test_last_outcome_without_selection_is_null;
         ] );
       ( "last_skip",
         [ test_case "surfaces recent skip verdict" `Quick test_last_skip_surfaced ]

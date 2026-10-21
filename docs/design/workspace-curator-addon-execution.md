@@ -82,10 +82,12 @@ prompt bytes: an explicit later pass may legitimately use equal input.
 
 Use `Lane_addon_runtime.retain_tool_request_owner` before any RPC to preserve the
 existing installation fence. Its backing `Lane_addon_tool_request_owner.retain`
-currently stores a digest and destination binding, **not the complete request or
-a recoverable batch**. It cannot replace the host capture above. Recovery needs a
-strict readable host record and typed enumeration/recovery before the consumer
-is wired; an execution-history row is not this authoritative journal.
+now stores the complete canonical request with its digest and destination, and
+`load` strictly restores a known key. The batch codecs preserve classification
+and briefing input; the trusted provenance envelope above is still required.
+Recovery also needs typed enumeration and an accepted-work/commit lifecycle
+before the consumer is wired; an execution-history row or known-ID load is not
+this authoritative journal.
 
 The package retains opaque requests and their common Exact terminal results in
 installation state. It has no workspace ledger path, Keeper memory directory or

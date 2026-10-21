@@ -511,6 +511,38 @@ let test_addons_do_not_require_a_keeper () =
    | _ -> Alcotest.fail "an empty workspace must offer the Add-ons inspector")
 ;;
 
+(* An installation the TUI has seen ask a question gets one Results row,
+   found by its declaration id; a Keeper's question adds none. *)
+let test_an_installation_that_asked_has_one_results_row () =
+  let state =
+    create_state ~workspace:"empty" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let module Asks = Masc.Tui_decode_asks in
+  let ask asker id : Asks.ask_row =
+    { ar_asker = asker; ar_id = id; ar_asked_at = 0.; ar_source_turn_ref = None;
+      ar_context = None; ar_questions = []; ar_resolution = Asks.Ask_open } in
+  let quiz = Asks.Ask_installation { ai_declaration_id = "operator-quiz"; ai_title = "Operator quiz" } in
+  let results state =
+    List.filter_map (function
+      | _, Palette_addon_results id -> Some id
+      | _, ( Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
+           | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons
+           | Palette_goto _ | Palette_usage_scope _ | Palette_config _
+           | Palette_gate_mode _ | Palette_chat _ | Palette_task _
+           | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
+           | Palette_code_file _ | Palette_code_location _ ) -> None)
+      (palette_entries state) in
+  Alcotest.(check (list string)) "nothing seen, nothing offered" [] (results state);
+  state.asks_snapshot <- Some { Asks.asn_keeper = None; asn_open_count = 3;
+    asn_rows = [ ask quiz "s-1-ask"; ask quiz "s-2-ask"; ask (Asks.Ask_keeper "code-reviewer") "k-1" ] };
+  Alcotest.(check (list string)) "one row per installation, none for a Keeper"
+    [ "operator-quiz" ] (results state);
+  state.palette_query <- "operator-quiz";
+  (match palette_matches state with
+   | (_, Palette_addon_results "operator-quiz") :: _ -> ()
+   | _ -> Alcotest.fail "the declaration id finds the installation's Results")
+;;
+
 let () =
   Alcotest.run
     "masc-tui-palette-matching"
@@ -549,6 +581,8 @@ let () =
             `Quick test_metrics_is_one_row_that_answers_its_other_names
         ; Alcotest.test_case "Add-ons do not require a Keeper" `Quick
             test_addons_do_not_require_a_keeper
+        ; Alcotest.test_case "an installation that asked has one Results row" `Quick
+            test_an_installation_that_asked_has_one_results_row
         ; Alcotest.test_case "every surface and Config pane has a row" `Quick
             test_every_surface_and_config_pane_has_a_row
         ] )

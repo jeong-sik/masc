@@ -16,6 +16,8 @@ type palette_action =
   | Palette_msx
   | Palette_dos
   | Palette_lane_addons
+  | Palette_addon_results of string
+      (** One installation's Results, by its declaration id. *)
   | Palette_goto of Masc_tui_types.surface
   | Palette_usage_scope of string option
   | Palette_config of Masc_tui_types.config_pane

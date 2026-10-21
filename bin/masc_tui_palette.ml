@@ -43,6 +43,8 @@ type palette_action =
   | Palette_msx
   | Palette_dos
   | Palette_lane_addons
+  (* One installation's Results, by its declaration id. *)
+  | Palette_addon_results of string
   | Palette_goto of surface
   | Palette_usage_scope of string option
   | Palette_config of config_pane
@@ -133,6 +135,46 @@ let palette_typed_question query =
       if String.equal word (String.trim prefix) then Some (question, symbol)
       else None) lsp_question_prefixes
 
+(* The installations whose Results the palette can open, as (declaration id,
+   title), from what this TUI has already read: an installation that asked a
+   question, one the Lanes list showed live, one the Lane Add-ons screen read
+   live. An installation none of them has shown is not offered; the first
+   title read for an id names it. *)
+let addon_result_targets (state : state) =
+  let module Asks = Masc.Tui_decode_asks in
+  let module Inventory = Masc.Tui_decode_lane_inventory in
+  let module Addons = Masc_tui_lane_addons in
+  let from_asks = match state.asks_snapshot with
+    | None -> []
+    | Some snapshot -> List.filter_map (fun (row : Asks.ask_row) ->
+        match row.ar_asker with
+        | Asks.Ask_installation { ai_declaration_id; ai_title } -> Some (ai_declaration_id, ai_title)
+        | Asks.Ask_keeper _ -> None) snapshot.asn_rows in
+  let from_inventory = match state.lane_inventory with
+    | None -> []
+    | Some snapshot -> List.filter_map (fun (row : Inventory.row) ->
+        match row.state with
+        | Inventory.Package_state { declaration = Some (Inventory.Valid { installation_id; title; _ }); instances } ->
+            if List.exists (fun (instance : Inventory.instance) -> instance.presence = Inventory.Live) instances
+            then Some (installation_id, title) else None
+        | Inventory.Package_state
+            { declaration = (Some (Inventory.Invalid _ | Inventory.Absent | Inventory.Unobserved) | None); _ }
+        | Inventory.Exact_state _ | Inventory.Browser_clients _
+        | Inventory.Browser_executor _ | Inventory.Machine_state _ -> None) snapshot.rows in
+  let from_addons =
+    let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
+    match view.snapshot with
+    | None -> []
+    | Some snapshot -> List.filter_map (fun (instance : Addons.instance) ->
+        match instance.installation_id, instance.runtime_presence with
+        | Some id, Addons.Live_entry -> Some (id, instance.title)
+        | Some _, (Addons.Retained_binding | Addons.Presence_unknown)
+        | None, (Addons.Live_entry | Addons.Retained_binding | Addons.Presence_unknown) -> None)
+        snapshot.instances in
+  List.fold_left (fun targets (id, title) ->
+    if List.mem_assoc id targets then targets else targets @ [ (id, title) ])
+    [] (from_asks @ from_inventory @ from_addons)
+
 let palette_entries (state : state) =
   [ "settings", Palette_config Config_params ]
   @ List.concat_map (fun lane ->
@@ -173,6 +215,8 @@ let palette_entries (state : state) =
   @ [ "go MSX", Palette_msx ]
   @ [ "go DOS", Palette_dos ]
   @ [ "go Lane Add-ons", Palette_lane_addons ]
+  @ List.map (fun (id, title) -> ("go " ^ title ^ " Results", Palette_addon_results id))
+      (addon_result_targets state)
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Activity", Palette_goto Acting ]
   @ [ "go Approvals", Palette_goto Approvals ]
@@ -261,6 +305,7 @@ let palette_subsequence ~needle haystack =
 let palette_action_words = function
   | Palette_goto Metrics -> [ "metrics"; "telemetry"; "charts"; "stats" ]
   | Palette_usage_scope (Some scope_id) -> [scope_id]
+  | Palette_addon_results id -> [id]
   | Palette_goto
       ( Overview | Acting | Keepers _ | Memory | Lanes | Clients | Board
       | Approvals | Planning | Schedules | Verification | Harness | Fusion
@@ -289,7 +334,7 @@ let palette_matches (state : state) =
                | ( _
                  , ( Palette_browser_lane | Palette_hide_browser_lane
                    | Palette_connectors | Palette_collab | Palette_msx
-                   | Palette_dos | Palette_lane_addons | Palette_goto _
+                   | Palette_dos | Palette_lane_addons | Palette_addon_results _ | Palette_goto _
                    | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
                    | Palette_task _ | Palette_board_hearth _
                    | Palette_board_post _ | Palette_code_file _
@@ -336,7 +381,8 @@ let selected_file state =
   match List.nth_opt matches cursor with
   | Some (_, Palette_code_file path) -> Some path
   | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
-    | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_goto _
+    | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_addon_results _
+    | Palette_goto _
     | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
     | Palette_code_location _))
@@ -348,7 +394,8 @@ let selected_location state =
   match List.nth_opt matches cursor with
   | Some (_, Palette_code_location (offer, location)) -> Some (offer, location)
   | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
-    | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_goto _
+    | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_addon_results _
+    | Palette_goto _
     | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
     | Palette_code_file _))

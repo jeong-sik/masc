@@ -39,10 +39,19 @@ type skill_evidence_activation =
   | Skill_evidence_most_recent_observed_timestamp_tie of
       skill_evidence_activation_item list
 
+type duration_statistics = { sds_samples : int; sds_mean_ms : float option }
+type composition_statistics =
+  { scst_records : int
+  ; scst_completed : duration_statistics
+  ; scst_failed : duration_statistics
+  ; scst_deferred : int
+  }
+
 type skill_evidence =
   { se_status : skill_evidence_status
   ; se_activation : skill_evidence_activation option
   ; se_composition : Yojson.Safe.t option
+  ; se_composition_statistics : composition_statistics option
   ; se_coverage : skill_evidence_coverage
   }
 

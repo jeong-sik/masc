@@ -44,6 +44,24 @@ val make :
     duplicated and unknown origin values are refused by both make and load. *)
 
 val save_latest : Workspace.config -> t -> (save_outcome, error) result
+type duration_statistics = private { samples : int; mean_ms : float option }
+type statistics = private
+  { records : int
+  ; completed : duration_statistics
+  ; failed : duration_statistics
+  ; deferred : int
+  }
+type observation = private { latest : t option; statistics : statistics }
+
+val statistics : t list -> statistics
+(** One sample per original run id, selecting its most recently recorded
+    result. Append records win timestamp ties against the pre-append file. Means describe the stored executor result duration, not
+    end-to-end asynchronous queue, dependency wait or model latency. Deferred
+    results are counted separately and never enter a terminal mean. *)
+val statistics_to_yojson : statistics -> Yojson.Safe.t
+val load_observation : Workspace.config -> Skill_reference.t -> (observation, error) result
+(** Read the exact-reference partition once, sharing the same validated records
+    between latest selection and statistics. A read error refuses both. *)
 val load_latest : Workspace.config -> Skill_reference.t -> (t option, error) result
 val reference : t -> Skill_reference.t
 val to_yojson : t -> Yojson.Safe.t

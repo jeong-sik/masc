@@ -5554,7 +5554,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
    | Masc.Keeper_skill_activation_discovery.Most_recent_observed_timestamp_tie _ -> fail "fresh retained async Skill detail is missing");
   let detail = Server_skill_evidence.project ~config reference in
   let evidence = detail |> member "activation" |> member "evidence" in
-  check string "detail uses required async evidence contract" "masc.skill-evidence/v6"
+  check string "detail uses required async evidence contract" "masc.skill-evidence/v7"
     (detail |> member "schema" |> to_string);
   check_json "detail returns the original Task and admission frame"
     (Ledger.activation_to_yojson original_activation) (evidence |> member "activation");

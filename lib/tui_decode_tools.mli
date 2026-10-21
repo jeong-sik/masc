@@ -190,6 +190,11 @@ type effective_skill_load_reason =
   | Skill_keeper_profile
   | Skill_task of string
 
+type skill_output_route = { sor_name : string; sor_node_id : string; sor_pointer : string }
+type skill_io =
+  | Model_orchestrated
+  | Composition_io of { input_schema : Yojson.Safe.t; exports : skill_output_route list }
+
 type effective_skill_profile = {
   esp_reference : Skill_reference.t;
   esp_name : string;
@@ -202,6 +207,7 @@ type effective_skill_profile = {
   esp_batch_count : int;
   esp_max_parallelism : int;
   esp_flow : skill_flow option;
+  esp_io : skill_io;
 }
 
 type configured_skill_name_unavailable = {

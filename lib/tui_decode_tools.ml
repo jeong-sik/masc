@@ -67,6 +67,11 @@ type effective_skill_load_reason =
   | Skill_keeper_profile
   | Skill_task of string
 
+type skill_output_route = { sor_name : string; sor_node_id : string; sor_pointer : string }
+type skill_io =
+  | Model_orchestrated
+  | Composition_io of { input_schema : Yojson.Safe.t; exports : skill_output_route list }
+
 type effective_skill_profile = {
   esp_reference : Skill_reference.t;
   esp_name : string;
@@ -79,6 +84,7 @@ type effective_skill_profile = {
   esp_batch_count : int;
   esp_max_parallelism : int;
   esp_flow : skill_flow option;
+  esp_io : skill_io;
 }
 
 (* A Skill name the Keeper profile selected that the turn's catalog does not
@@ -266,6 +272,23 @@ let decode_effective_skill_load_reason json =
     Error (Printf.sprintf "effective Skill load reason has unknown kind %S" value)
 ;;
 
+let decode_skill_io ~kind json =
+  let* io = required_object_field json "io" in
+  let* io_kind = required_string_field io "kind" in
+  match kind, io_kind with
+  | "instruction", "model_orchestrated" -> Ok Model_orchestrated
+  | "composition", "composition" ->
+      let* input_schema = required_object_field io "input_schema" in
+      let* routes = required_list_field io "exports" in
+      let* exports = decode_list "Skill output routes" (fun route ->
+        let* sor_name = required_string_field route "name" in
+        let* sor_node_id = required_string_field route "node_id" in
+        let* sor_pointer = required_string_field route "pointer" in
+        Ok { sor_name; sor_node_id; sor_pointer }) routes in
+      Ok (Composition_io { input_schema; exports })
+  | _, _ -> Error "Skill kind and I/O contract disagree"
+;;
+
 let decode_effective_skill_profile json =
   let* reference = required_object_field json "reference" in
   let* esp_reference =
@@ -275,6 +298,7 @@ let decode_effective_skill_profile json =
   let* identity = required_object_field reference "identity" in
   let* esp_name = required_string_field identity "name" in
   let* esp_kind = required_string_field json "kind" in
+  let* esp_io = decode_skill_io ~kind:esp_kind json in
   let* esp_execution = required_string_field json "execution" in
   let* context = required_object_field json "context" in
   let* esp_body_bytes = required_int_field context "body_bytes" in
@@ -308,6 +332,7 @@ let decode_effective_skill_profile json =
     ; esp_batch_count
     ; esp_max_parallelism
     ; esp_flow
+    ; esp_io
     }
 
 let decode_effective_tool_surface json =

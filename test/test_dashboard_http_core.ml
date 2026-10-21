@@ -7986,38 +7986,59 @@ let test_skill_evidence_joins_activation_and_composition () =
     | Ok value -> value
     | Error _ -> fail "invalid Skill activation fixture"
   in
-  let run_id = "composition-run-1" in
+  let module Composition = Lib.Keeper_skill_composition_evidence in
+  let schedule : Agent_core.Tool_contract.schedule =
+    { planned_index = 0
+    ; batch_index = 0
+    ; batch_size = 1
+    ; execution_mode = Agent_core.Tool_contract.Serial
+    }
+  in
+  let completed tool_name data =
+    Lib.Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data ()
+  in
   let node =
     `Assoc
-      [ "record_kind", `String "tool_call"
-      ; "composition_run_id", `String run_id
+      [ "node_id", `String "lane-status"
+      ; "execution_id", Ids.Execution_id.(generate () |> to_yojson)
+      ; ( "execution_origin"
+        , `String
+            (Composition.Node_execution_origin.to_string Fresh_dispatch) )
       ; "tool_name", `String "keeper_lane_status"
+      ; "input", `Assoc []
+      ; "schedule", Lib.Keeper_tool_composition_projection.schedule_to_json schedule
+      ; "result", Lib.Tool_result.to_json (completed "keeper_lane_status" (`Assoc []))
+      ; "tool_use_id", `String "lane-status-1"
+      ; "failure_effect_disposition", `Null
+      ; "deferred_kind", `Null
+      ; "result_bytes", `Int 2
+      ; "truncated_to", `Null
       ]
   in
+  let composition =
+    match
+      Composition.make
+        ~reference
+        ~composition_run_id:(Lib.Keeper_tool_plan.Composition_run_id.fresh ())
+        ~parent_invocation:
+          (Agent_core.Tool_contract.Invocation.create
+             ~tool_use_id:"skill-call-1"
+             ~turn:1
+             ~schedule
+             ~completion:Agent_core.Tool_contract.Continue_after_success)
+        ~request_id:None
+        ~keeper_name:"delta"
+        ~composition_tool:"keeper_compose_release-checklist"
+        ~composition_execution:Lib.Keeper_tool_composition_catalog.Inline
+        ~result:
+          (completed "keeper_compose_release-checklist"
+             (`Assoc [ "actions", `List [ node ] ]))
+        ~executor_settlements:[ node ]
+    with
+    | Ok evidence -> Composition.to_yojson evidence
+    | Error error -> fail (Composition.error_to_string error)
+  in
   let json =
-    let composition =
-      `Assoc
-        [ "schema", `String "masc.skill-composition-evidence/v1"
-        ; "reference", Skill_reference.to_yojson reference
-        ; "composition_run_id", `String run_id
-        ; "parent_tool_use_id", `String "skill-call-1"
-        ; "parent_turn", `Int 1
-        ; "parent_planned_index", `Int 0
-        ; "request_id", `Null
-        ; "keeper", `String "delta"
-        ; "composition_tool", `String "keeper_compose_release-checklist"
-        ; "composition_execution", `String "inline"
-        ; "executor_settlements", `List [ node ]
-        ; ( "result"
-          , `Assoc
-              [ "disposition", `String "completed"
-              ; "tool_name", `String "keeper_compose_release-checklist"
-              ; "duration_ms", `Float 1.0
-              ; "data", `Assoc [ "actions", `List [ node ] ]
-              ] )
-        ; "recorded_at", `Float 1.0
-        ]
-    in
     let activation =
       `Assoc
         [ "selection", `String "most_recent_observed"
@@ -8058,7 +8079,7 @@ let test_skill_evidence_joins_activation_and_composition () =
       ~activation_owner_gap_count:0
   in
   let open Yojson.Safe.Util in
-  check string "evidence schema" "masc.skill-evidence/v6"
+  check string "evidence schema" "masc.skill-evidence/v7"
     (json |> member "schema" |> to_string);
   check string "observed status" "observed" (json |> member "status" |> to_string);
   check string "activation keeper" "delta"

@@ -44,6 +44,15 @@ val execution_label : surface -> string
 (** ["on_demand"] for an instruction, else the composition's execution mode;
     the profile JSON's [execution]. *)
 
+type io =
+  | Model_orchestrated
+  | Composition_io of
+      { input_schema : Yojson.Safe.t
+      ; exports : Keeper_tool_plan.export list
+      }
+(** Declared invocation contract and selected output routes. An empty export
+    list means the complete execution result, not an empty output. *)
+
 type profile = private
   { reference : Skill_reference.t
   ; surface : surface
@@ -58,6 +67,7 @@ type profile = private
   ; statically_read_only : bool option
   ; declaration_span : Keeper_skill_body_ast.span option
   ; flow : flow option
+  ; io : io
   }
 
 val of_skill_with_reference : Skill_reference.t -> Keeper_skill_catalog.skill -> profile

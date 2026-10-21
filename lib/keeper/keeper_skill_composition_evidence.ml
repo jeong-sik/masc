@@ -426,19 +426,74 @@ let newest_order a b =
   | order -> order
 ;;
 
-let load_latest config reference =
+type duration_statistics = { samples : int; mean_ms : float option }
+type statistics =
+  { records : int
+  ; completed : duration_statistics
+  ; failed : duration_statistics
+  ; deferred : int
+  }
+type observation = { latest : t option; statistics : statistics }
+
+let unique_runs runs =
+  let module Runs = Map.Make (String) in
+  List.fold_left (fun index candidate ->
+    Runs.update candidate.composition_run_id (function
+      | None -> Some candidate
+      | Some previous -> Some (if newest_order candidate previous >= 0 then candidate else previous))
+      index) Runs.empty runs
+  |> Runs.bindings |> List.map snd
+;;
+
+let statistics runs =
+  let empty = { samples = 0; mean_ms = None } in
+  let add duration row =
+    let samples = row.samples + 1 in
+    let mean_ms = match row.mean_ms with
+      | None -> duration
+      | Some mean -> mean *. (float_of_int row.samples /. float_of_int samples)
+                     +. duration /. float_of_int samples in
+    { samples; mean_ms = Some mean_ms }
+  in
+  List.fold_left (fun totals run ->
+    let fields = match run.result with `Assoc fields -> fields | _ -> [] in
+    (* [t] is private and validates the canonical result before construction. *)
+    match List.assoc_opt "disposition" fields, List.assoc_opt "duration_ms" fields with
+    | Some (`String "completed"), Some (`Float duration) ->
+        { totals with records = totals.records + 1; completed = add duration totals.completed }
+    | Some (`String "failed"), Some (`Float duration) ->
+        { totals with records = totals.records + 1; failed = add duration totals.failed }
+    | Some (`String "deferred"), Some (`Float _) ->
+        { totals with records = totals.records + 1; deferred = totals.deferred + 1 }
+    | _ -> invalid_arg "validated composition result lost its disposition or duration")
+    { records = 0; completed = empty; failed = empty; deferred = 0 }
+    (unique_runs runs)
+;;
+
+let statistics_to_yojson stats =
+  let duration row = `Assoc ["samples", `Int row.samples;
+    "mean_ms", Option.fold ~none:`Null ~some:(fun value -> `Float value) row.mean_ms] in
+  `Assoc ["scope", `String "exact_reference_retained_runs";
+    "duration_scope", `String "stored_executor_result";
+    "records", `Int stats.records; "completed", duration stats.completed;
+    "failed", duration stats.failed; "deferred", `Int stats.deferred]
+;;
+
+let load_observation config reference =
   let ( let* ) = Result.bind in
   let* runs = scan_runs config reference in
   let* legacy = load_file config reference (legacy_path config reference) in
-  Ok
-    (List.fold_left
-       (fun newest candidate ->
-          match newest with
-          | None -> Some candidate
-          | Some newest ->
-            Some (if newest_order candidate newest > 0 then candidate else newest))
-       None
-       (List.filter_map Fun.id (legacy :: List.map Option.some runs)))
+  (* Append records supersede a duplicate legacy run, including timestamp ties. *)
+  let runs = unique_runs (Option.to_list legacy @ runs) in
+  let latest = List.fold_left (fun newest candidate -> match newest with
+    | None -> Some candidate
+    | Some newest -> Some (if newest_order candidate newest > 0 then candidate else newest))
+    None runs in
+  Ok { latest; statistics = statistics runs }
+;;
+
+let load_latest config reference =
+  Result.map (fun observation -> observation.latest) (load_observation config reference)
 ;;
 
 let prepare_store_directory config =

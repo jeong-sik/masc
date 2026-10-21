@@ -14,6 +14,7 @@ import { harmonyAt, PPQ, GM_DRUM_CHANNEL } from '../sequencer-project.mjs'
 import { MidiSourcePicker as SourcePicker } from '../midi-source-picker.mjs'
 import { sourceSecondsAtTick, sourceTickAtSeconds } from '../midi-source-playback.mjs'
 import { isFluidSound } from '../soundfont.mjs'
+import { pickerFooter, selectionLabel } from '../instruments.mjs'
 
 const frozenSound = selection => ({ kind: 'vst', selection, instrument: { identifier: 'Bass', version: '1' },
   preset: { data: Buffer.from('frozen state').toString('base64'), sha256: createHash('sha256').update('frozen state').digest('hex') } })
@@ -51,7 +52,7 @@ async function controller(options = {}) {
   }
   const slot = `sequencer-${randomUUID()}`
   globalThis[slot] = {
-    process, InstrumentPicker, MidiSourcePicker, defaultStateDirectory: () => '/synthetic-vst',
+    process, InstrumentPicker, MidiSourcePicker, pickerFooter, selectionLabel, defaultStateDirectory: () => '/synthetic-vst',
     snapshotWriter: () => async value => { observed.snapshots.push(value) },
     captureVstSound(selection) { observed.soundCaptures.push(selection); return options.capture?.(selection) ?? { promise: Promise.resolve(frozenSound(selection)), cancel() {} } },
     renderVstPhrase(value) { observed.native.push(value); return options.native(value) },

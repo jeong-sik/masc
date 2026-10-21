@@ -14,7 +14,7 @@ import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback
 import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceMeters, selectedMeter } from './midi-source-editor.mjs'
 import { safeText } from './terminal.mjs'
 import { openPlayback } from './playback.mjs'
-import { InstrumentPicker } from './instruments.mjs'
+import { InstrumentPicker, pickerFooter, selectionLabel } from './instruments.mjs'
 import { defaultStateDirectory, snapshotWriter } from './vst.mjs'
 import { renderVstPhrase } from './sequencer-vst.mjs'
 import { captureVstSound } from './project-sound-files.mjs'
@@ -157,6 +157,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       if (preview) play()
   }
   const picker = new InstrumentPicker({ directory: stateDirectory, notify: draw,
+    active: () => {
+      const sound = audioInstrument()
+      return sound.kind === 'vst' ? sound.selection : sound.kind === 'soundfont' ? null : undefined
+    },
     selected: selection => chooseInstrument({ kind: 'vst', selection }),
     soundfont: () => chooseInstrument({ kind: 'soundfont' }),
     failed: error => { status = `VST: ${error.message}`; draw() } })
@@ -223,11 +227,18 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       }
     } else if (picker.view) {
       lines.length = 0
-      lines.push(picker.view.title, status)
+      const sound = audioInstrument()
+      const selectedSound = sound.kind === 'unselected' ? 'Choose an instrument'
+        : selectionLabel(sound.kind === 'vst' ? sound.selection : null)
+      lines.push(picker.view.title, `${selectedSound} · ${status}`)
       if (picker.view.query !== undefined) lines.push(`${picker.view.searching ? 'Search' : 'Filter'}: ${picker.view.query}`)
       const items = picker.items(), height = Math.max(1, rows - 6)
       const start = Math.max(0, picker.view.cursor - height + 1)
-      for (let i = start; i < Math.min(items.length, start + height); i++) lines.push(`${i === picker.view.cursor ? '›' : ' '} ${items[i].name}`)
+      for (let i = start; i < Math.min(items.length, start + height); i++) {
+        const cursor = i === picker.view.cursor ? '›' : ' '
+        const active = picker.isActive(items[i]) ? '●' : ' '
+        lines.push(`${cursor}${active} ${items[i].name}`)
+      }
     } else if (harmony) {
       lines[3] = `Harmony · ${harmony.scope.kind === 'mix' ? 'audible mix' : 'selected track/channel'} · exact key durations · candidates`
       if (harmony.kind === 'loading') lines.push('Analyzing in worker…')
@@ -302,8 +313,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.slice(0, rows - 2).forEach((line, row) => { output += `\x1b[${row + 1};1H${fit(line)}` })
-    output += `\x1b[${rows - 1};1H${fit(sourcePicker.view ? '↑/↓:choose  Enter:arm keyboard  r:refresh  Esc/q:cancel' : picker.view ? '↑/↓:choose  Enter:select  /:search  e:native editor  p:preset path  Esc:return' : prompt !== null ? `:${prompt}` : harmony ? '↑/↓:choose interval  Enter:go to notes  :commands  Esc/q:return' : 'Space:play  i:instrument  Enter:note  arrows:cursor  Tab:track  :commands  ?:help')}`
-    output += `\x1b[${rows};1H${fit(sourcePicker.view ? openedSourceMenuOwner?.monitor ? 'Selection arms step input with the chosen instrument and audio output.' : 'Selection opens MIDI input only; no audio or output route.' : harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 's:save  l:loop  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
+    output += `\x1b[${rows - 1};1H${fit(sourcePicker.view ? '↑/↓:choose  Enter:arm keyboard  r:refresh  Esc/q:cancel' : picker.view ? pickerFooter(picker.view) : prompt !== null ? `:${prompt}` : harmony ? '↑/↓:choose interval  Enter:go to notes  :commands  Esc/q:return' : 'Space:play  i:instrument  Enter:note  arrows:cursor  Tab:track  :commands  ?:help')}`
+    if (!picker.view) output += `\x1b[${rows};1H${fit(sourcePicker.view ? openedSourceMenuOwner?.monitor ? 'Selection arms step input with the chosen instrument and audio output.' : 'Selection opens MIDI input only; no audio or output route.' : harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 's:save  l:loop  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
     process.stdout.write(output)
   }
   function stop(options) {
@@ -611,6 +622,10 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       return
     }
     if (picker.view) {
+      if (key.name === 's' && !picker.view.searching
+          && ['plugins', 'presets'].includes(picker.view.kind)) {
+        stop(); status = 'Stopped'; draw(); return
+      }
       try { await picker.keypress(text, key) } catch (error) { status = `VST: ${error.message}` }
       draw(); return
     }

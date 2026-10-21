@@ -232,7 +232,11 @@ let test_original_capacity_evidence_keeps_its_retry_meaning kind () =
       | (Expired|Not_yet_valid|Boundary_unknown),Exact.Not_final (Exact.Provider_refused (Exact.Provider_unavailable _)) -> true
       | (Expired|Not_yet_valid|Boundary_unknown|Input_rejected),(Exact.Final _|Exact.Not_final _) -> false in
     check bool "only an actual input rejection is terminal" true expected;
-    check (list string) "no generation was dispatched" ["/v1/messages/count_tokens"] (F.request_paths server))
+    let expected_paths=match kind with
+      | Expired | Not_yet_valid -> []
+      | Boundary_unknown | Input_rejected -> ["/v1/messages/count_tokens"] in
+    check (list string) "only valid evidence can reach measurement; generation never starts"
+      expected_paths (F.request_paths server))
 
 let test_a_refused_input_is_final () =
   with_case (fun ~sw ~net ~clock ~base_path ~store ->

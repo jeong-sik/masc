@@ -119,7 +119,10 @@ let test_output_limit_retains_failed_original_appraisal_evidence () =
     | Ok _ | Error (A.Execution_rejected _ | A.Transport_unavailable _) ->
       fail "an output limit must stay a failed original appraisal") [();()];
   match Runs.list_runs registry with
-  | [run] -> (match run.status with
+  | [summary] ->
+    let run=match Runs.get registry ~run_id:summary.run_id with
+      | Some run -> run | None -> fail "the original failed appraisal disappeared" in
+    (match run.status with
       | Runs.Completed {outcome=Runs.Failed {code="candle_appraisal_rejected";_};output;_} ->
         check bool "failed appraisal preserves the typed provider terminal" true
           (Yojson.Safe.equal (Json.member "result" output) final)

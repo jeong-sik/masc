@@ -1017,14 +1017,8 @@ let run_keeper_invocation_turn_admitted_inner
                   let ( let* ) = Result.bind in
                   let owner result = Result.map_error Keeper_owner_registry.command_error_to_string result in
                   let* _ = Keeper_owner_registry.defer_direct_input_wait
-                      ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id |> owner in
-                  let* waiting = Keeper_owner_registry.direct_input_wait
-                      ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id |> owner in
-                  (match waiting with
-                   | Some waiting when Yojson.Safe.equal
-                       (Agent_core.Agent_input_request.pending_to_json waiting.pending)
-                       (Agent_core.Agent_input_request.pending_to_json {waiting.pending with request}) -> Ok ()
-                   | Some _ | None -> Error "visible input request differs from its original retained waiting request")
+                      ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id ~request |> owner in
+                  Ok ()
                 | Runtime_agent.Completed | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
                 | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _ ->
                 if checkpoint_yield then

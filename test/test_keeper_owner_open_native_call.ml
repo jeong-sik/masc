@@ -608,7 +608,41 @@ let test_owned_input_wait ?response fixture () =
          | Corrupt_retained -> Fs_compat.save_file retained "corrupt retained"
          | Changed_retained -> Fs_compat.save_file retained ("\n" ^ Fs_compat.load_file retained)
          | Consumed_input | Foreign_scope -> ());
-        let result = Owner.defer_direct_input_wait owner ~operation_id:id in
+        (match fixture with
+         | Owned_wait ->
+           let original_operation=operation_of owner id in
+           let original_native=native_state owner id in
+           let canonical_path=Keeper_checkpoint_store.agent_core_checkpoint_path
+               ~session_dir ~session_id:canonical.session_id in
+           let canonical_bytes=Fs_compat.load_file canonical_path in
+           let retained_bytes=Fs_compat.load_file retained in
+           let requests =
+             [ {pending.request with request_id="other request"}
+             ; {pending.request with participant_name=Some "another operator"}
+             ; {pending.request with question="different visible question"}
+             ; {pending.request with schema=Some (`Assoc ["type",`String "number"])}
+             ; {pending.request with timeout_s=None}
+             ; {pending.request with created_at=2.}
+             ] in
+           List.iter (fun request ->
+             (match Owner.defer_direct_input_wait owner ~operation_id:id ~request with
+              | Error (Owner.Operation_rejected (Store.Invalid_input _)) -> ()
+              | Error error -> fail (Owner.error_to_string error)
+              | Ok _ -> fail "mismatched visible request published a wait");
+             check bool "request refusal leaves the original operation unchanged" true
+               (operation_of owner id=original_operation);
+             check bool "request refusal preserves the complete native receipt" true
+               (Native.equal_state original_native (native_state owner id));
+             check bool "request refusal publishes no waiting continuation" true
+               (owner_ok (Owner.direct_input_wait owner ~operation_id:id)=None);
+             check bool "request refusal preserves the original input relation" true
+               ((owner_ok (Owner.current_input_checkpoint owner)).observation=Store.Input_observed reference);
+             check string "request refusal preserves canonical bytes" canonical_bytes
+               (Fs_compat.load_file canonical_path);
+             check string "request refusal preserves retained bytes" retained_bytes
+               (Fs_compat.load_file retained)) requests
+         | Consumed_input | Missing_retained | Corrupt_retained | Changed_retained | Foreign_scope -> ());
+        let result = Owner.defer_direct_input_wait owner ~operation_id:id ~request:pending.request in
         Eio.Promise.resolve notify_finished result;
         match fixture with
         | Owned_wait -> ignore (owner_ok result); Owner.Operation_deferred
@@ -629,7 +663,7 @@ let test_owned_input_wait ?response fixture () =
             (Agent_core.Agent_input_request.pending_to_json waiting.pending));
        check bool "same original checkpoint" true (Keeper_checkpoint_ref.equal (Option.get !owned) waiting.checkpoint);
        check bool "retirement acknowledged with wait" true (native_state owner id=Native.No_native_call);
-       (match Owner.defer_direct_input_wait owner ~operation_id:id with
+       (match Owner.defer_direct_input_wait owner ~operation_id:id ~request:pending.request with
         | Error (Owner.Operation_rejected (Store.Invalid_input _)) -> ()
         | Error error -> fail (Owner.error_to_string error) | Ok _ -> fail "outside fiber acquired child authority");
        submit owner later "independent input";

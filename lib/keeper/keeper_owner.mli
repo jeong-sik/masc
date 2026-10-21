@@ -468,12 +468,16 @@ val respond_direct_input_wait : t -> net:Eio_context.eio_net ->
 val direct_input_wait : t -> operation_id:Chat_operation.Operation_id.t ->
   (Keeper_semantic_execution.input_wait option, error) result
 val defer_direct_input_wait : t -> operation_id:Chat_operation.Operation_id.t ->
+  request:Agent_core.Agent_input_request.t ->
   (Chat_operation.t, error) result
 (** Only the original executing chat child may defer its operation. The Owner
     derives the complete pending request from its exact retained input payload,
-    checks the original trace, invocation and repetition scope, then commits
-    native retirement and waiting together. No caller-supplied question or
-    canonical/history fallback; an uncertain result grants no retry authority.
+    checks the original trace, invocation and repetition scope, then
+    compares every field of the visible [request] against that canonical
+    request before committing native retirement and waiting together. A mismatch
+    leaves the operation, native receipt and input relation unchanged. The caller
+    cannot supply the stored question or use canonical/history fallback;
+    an uncertain result grants no retry authority.
     Reads/receipt publication can reach the existing draining Owner. *)
 val resume_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t ->
   observed:Keeper_semantic_execution.gate_checkpoint -> (unit, error) result

@@ -226,9 +226,11 @@ val direct_input_wait : base_path:string -> keeper_name:string ->
   (Keeper_semantic_execution.input_wait option, command_error) result
 val defer_direct_input_wait : base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t ->
+  request:Agent_core.Agent_input_request.t ->
   (Keeper_chat_operation.t, command_error) result
 (** Existing-Owner receipt lookup. Deferral still requires the original live
-    chat child; neither lookup nor a pending question grants dispatch rights. *)
+    chat child and verifies the visible request before publishing a wait;
+    neither lookup nor a pending question grants dispatch rights. *)
 val resume_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   observed:Keeper_semantic_execution.gate_checkpoint -> (unit, command_error) result
 

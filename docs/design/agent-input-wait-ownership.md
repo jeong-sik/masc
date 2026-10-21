@@ -16,8 +16,13 @@ fresh-ID source rather than agent name, turn and timestamp.
 `Agent.provide_input` takes this proof, checks both IDs under the Agent's state
 lock, uses the owner's canonical question, appends an Answer message if needed,
 and consumes the pending wait in the same mutation. Declined and Timeout are
-explicit settlements without synthetic messages. An old, foreign or repeated
-response returns a typed refusal and leaves the current request and messages
+explicit settlements without synthetic messages. The live callback and restored
+Agent both use this Core contract: only Answer adds model-visible history;
+Declined/Timeout consume the pending request without telling the model which of
+those two responses was selected. This does not guarantee the model will avoid
+asking again. Request schemas are preserved but Core currently does not validate
+Answer JSON against them; no schema-validation guarantee is made here. An old,
+foreign or repeated response returns a typed refusal and leaves the current request and messages
 unchanged. A Timeout response is not automatic wall-clock expiry.
 
 Publishing Started is not an accepted resume: input/callback validation can
@@ -219,8 +224,15 @@ Busy returns without response effects. Before effects, the unpaused original
 maintenance child captures the exact queued wait, operation digest, current
 input relation, trace and original session root. The caller's complete wait
 must match that original authority; matching IDs with a different question do
-not pass. The direct turn separately compares its visible InputRequired request
-with the complete stored request before delivering that question.
+not pass. Before a direct wait is published, the same original executing child
+supplies its visible InputRequired request to the Owner. The Owner derives the
+pending request from its exact retained checkpoint and compares every request
+field there, before the SQLite deferral transaction. A mismatch leaves the
+original operation running, its native retirement receipt unacknowledged and
+its input relation unchanged, without publishing a wait. A successful comparison
+does not substitute caller fields for the stored canonical question. Canonical
+files are not a fallback for this comparison. This is distinct from delivery:
+a later transport failure still preserves an already admitted wait.
 
 Physical installation rechecks exact retained bytes, original operation scope,
 complete pending, and canonical history. The canonical must retain the original

@@ -227,7 +227,8 @@ type _ command =
   | Commit_direct_input_response : input_response_writer * Keeper_input_wait_response.receipt ->
       (unit,error) result command
   | Direct_input_wait : Operation_id.t -> (Keeper_semantic_execution.input_wait option, error) result command
-  | Defer_direct_input_wait : {operation_id:Operation_id.t; child:Keeper_interrupt_token.t} ->
+  | Defer_direct_input_wait : {operation_id:Operation_id.t; child:Keeper_interrupt_token.t;
+      request:Agent_core.Agent_input_request.t} ->
       (Chat_operation.t, error) result command
   | Direct_native_call : Operation_id.t -> (Keeper_native_call.state, error) result command
   | Current_input_checkpoint : (current_input_checkpoint, error) result command
@@ -1112,7 +1113,7 @@ let run_operation_read t ~label f =
     |> Result.map_error (record_operation_error t)
 ;;
 
-let prepare_direct_input_wait t ~trace_id ~operation_id =
+let prepare_direct_input_wait t ~trace_id ~operation_id ~request =
   let ( let* ) = Result.bind in
   let invalid detail = Error (Chat_operation_store.Invalid_input detail) in
   let* operation = Chat_operation_store.get t.operation_store operation_id in
@@ -1151,6 +1152,12 @@ let prepare_direct_input_wait t ~trace_id ~operation_id =
   let* pending = match checkpoint.pending_input with
     | Some pending -> Ok pending
     | None -> invalid "owned input checkpoint has no pending request" in
+  let* () =
+    if Yojson.Safe.equal
+        (Agent_core.Agent_input_request.pending_to_json pending)
+        (Agent_core.Agent_input_request.pending_to_json {pending with request})
+    then Ok ()
+    else invalid "visible input request differs from its original retained waiting request" in
   (* pending.run_id is the lifecycle invocation, not the native locator run ID.
      Their binding is the original child's published, retired exact checkpoint. *)
   let* waiting = Keeper_semantic_execution.input_wait
@@ -2067,7 +2074,7 @@ let start
             Chat_operation_store.direct_input_wait t.operation_store ~operation_id) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
-        | Command (Defer_direct_input_wait {operation_id;child}, resolve) ->
+        | Command (Defer_direct_input_wait {operation_id;child;request}, resolve) ->
           let response = match (Keeper_owner_reducer.projection state).meta,
               Atomic.get t.turn_in_flight, Atomic.get t.child_cancel,
               (Atomic.get t.operation_projection).running_operation_id with
@@ -2075,7 +2082,7 @@ let start
                 when Keeper_interrupt_token.equal child interrupt_token
                   && Operation_id.equal operation_id running ->
               (match run_operation_read t ~label:"read exact original input wait" (fun () ->
-                 prepare_direct_input_wait t ~trace_id:meta.runtime.trace_id ~operation_id) with
+                 prepare_direct_input_wait t ~trace_id:meta.runtime.trace_id ~operation_id ~request) with
                | Error _ as error -> error
                | Ok (operation,waiting) ->
                  run_operation_command t ~label:"defer original direct input wait" (fun () ->
@@ -2728,9 +2735,9 @@ let direct_checkpoint t ~operation_id = request t (Direct_checkpoint operation_i
 let defer_direct_checkpoint t ~operation_id ~execution_digest ~checkpoint =
   request t (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint})
 let direct_input_wait t ~operation_id = request t (Direct_input_wait operation_id)
-let defer_direct_input_wait t ~operation_id =
+let defer_direct_input_wait t ~operation_id ~request:visible_request =
   match Keeper_turn_preview_owner.current () with
-  | Some child -> request t (Defer_direct_input_wait {operation_id;child})
+  | Some child -> request t (Defer_direct_input_wait {operation_id;child;request=visible_request})
   | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
       "input waiting requires an inherited executing child"))
 let direct_native_call t ~operation_id = request t (Direct_native_call operation_id)

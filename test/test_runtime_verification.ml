@@ -933,6 +933,156 @@ default = "fixture.selected"
         ])))
 ;;
 
+(* The child speaks the stream-json handshake, lists the host's tools as the
+   real client does before its first provider request, and then plays the
+   steps the case names, in order: [retry:N] reports a provider retry with
+   HTTP status N, [text] sends an assistant answer, [terminal:N] ends the turn
+   with a result carrying status N. After the last step it goes quiet. *)
+let claude_refusal_fixture ~steps = Printf.sprintf {|#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+if "auth" in args and "status" in args:
+    print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "max"}))
+    sys.exit(0)
+
+def emit(frame):
+    print(json.dumps(frame), flush=True)
+
+session = next(arg.split("=", 1)[1] for arg in args if arg.startswith("--session-id="))
+request = json.loads(sys.stdin.readline())
+emit({"type": "control_response", "response": {"subtype": "success",
+    "request_id": request["request_id"], "response": {}}})
+assert json.loads(sys.stdin.readline())["type"] == "user"
+emit({"type": "system", "subtype": "init", "session_id": session})
+def mcp(method, params, rpc_id):
+    message = {"jsonrpc": "2.0", "method": method, "params": params}
+    if rpc_id is not None:
+        message["id"] = rpc_id
+    emit({"type": "control_request", "request_id": "refusal-" + method,
+        "request": {"subtype": "mcp_message", "server_name": "masc", "message": message}})
+    return json.loads(sys.stdin.readline())
+mcp("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
+    "clientInfo": {"name": "refusal-fixture", "version": "1"}}, 1)
+mcp("notifications/initialized", {}, None)
+mcp("tools/list", {}, 2)
+for index, step in enumerate(%S.split(",")):
+    kind, _, value = step.partition(":")
+    if kind == "retry":
+        emit({"type": "system", "subtype": "api_retry", "session_id": session,
+            "uuid": "refusal-retry-" + str(index), "attempt": index + 1, "max_retries": 10,
+            "retry_delay_ms": 500, "error_status": int(value)})
+    elif kind == "text":
+        emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session,
+            "uuid": "refusal-assistant-" + str(index), "message": {"role": "assistant",
+            "model": "claude-sonnet-5-5", "content": [{"type": "text", "text": "working"}]}})
+    elif kind == "terminal":
+        emit({"type": "result", "subtype": "success", "is_error": True, "session_id": session,
+            "uuid": "refusal-result", "result": "provider refused the request",
+            "api_error_status": int(value)})
+    else:
+        raise SystemExit("unknown step " + step)
+for line in sys.stdin:
+    pass
+|} steps
+;;
+
+(* Every case gets its own fixture and its own captured runtime, prepared
+   before any of them runs. *)
+let claude_refusal_verifications steps_per_case =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let eio_state = Eio_context.snapshot_state () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      Eio_context.restore_state eio_state)
+    (fun () -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let directory = Filename.temp_dir "claude-refusal-" "" |> Unix.realpath in
+      Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
+      Eio_context.set_env env;
+      let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock:env#clock
+        ~grace_seconds:Process_eio.child_exit_grace_seconds in
+      let prepare index steps =
+        let case_dir = Filename.concat directory (string_of_int index) in
+        Fs_compat.mkdir_p case_dir;
+        let account_home = Filename.concat case_dir "account" in
+        Fs_compat.mkdir_p account_home;
+        Out_channel.with_open_bin (Filename.concat account_home "config.toml")
+          (fun out -> output_string out "");
+        let script = Filename.concat case_dir "claude-refusal-fixture" in
+        Out_channel.with_open_bin script (fun out ->
+          output_string out (claude_refusal_fixture ~steps));
+        Unix.chmod script 0o700;
+        let runtime_path = Filename.concat case_dir "runtime.toml" in
+        Out_channel.with_open_bin runtime_path (fun out ->
+          Printf.fprintf out {|
+[providers.fixture]
+protocol = "claude-code"
+command = %S
+account-home = %S
+is-non-interactive = true
+[models.selected]
+api-name = "claude-sonnet-5-5"
+max-context = 272000
+tools-support = true
+turn-timeout-s = 15.0
+[fixture.selected]
+[runtime]
+default = "fixture.selected"
+|} script account_home);
+        (match Runtime.init_default ~config_path:runtime_path with
+         | Ok () -> ()
+         | Error detail -> fail detail);
+        let selected = match Runtime.get_runtime_by_id "fixture.selected" with
+          | Some runtime -> runtime
+          | None -> fail "selected claude fixture must resolve" in
+        let private_dir =
+          Filename.temp_dir ~temp_dir:case_dir "readiness-" "" |> Unix.realpath in
+        selected, private_dir in
+      let prepared = List.mapi prepare steps_per_case in
+      List.map
+        (fun (selected, private_dir) ->
+           (Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+              ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / private_dir)
+              ~cwd_path:private_dir ~timeout_s:3. selected).failure)
+        prepared)))
+;;
+
+type refusal_expectation =
+  | Refused of int
+  | Deadline
+  | Rejected
+
+let refusal_summary = function
+  | None -> "verified"
+  | Some failure ->
+    Verify.failure_code failure ^ ": " ^ Option.value (Verify.failure_detail failure) ~default:""
+;;
+
+let test_claude_verification_names_a_refused_credential () =
+  let cases =
+    [ "a 401 retry before the deadline", "retry:401", Refused 401
+    ; "a terminal 401 result", "terminal:401", Refused 401
+    ; "a terminal 403 result", "terminal:403", Refused 403
+    ; "a terminal 500 result stays a rejection", "terminal:500", Rejected
+    ; "a later retry with another status clears the refusal", "retry:401,retry:529", Deadline
+    ; "an answer after the retry clears the refusal", "retry:401,text", Deadline
+    ] in
+  let failures = claude_refusal_verifications (List.map (fun (_, steps, _) -> steps) cases) in
+  List.iter2
+    (fun (label, _, expected) failure ->
+       match expected, failure with
+       | Refused status, Some (Verify.Provider_auth_refused detail) ->
+         check bool (label ^ " names the HTTP status") true
+           (contains detail (Printf.sprintf "HTTP %d" status))
+       | Deadline, Some Verify.Timed_out -> ()
+       | Rejected, Some (Verify.Provider_rejected _) -> ()
+       | (Refused _ | Deadline | Rejected), _ -> fail (label ^ ": " ^ refusal_summary failure))
+    cases
+    failures
+;;
+
 let test_codex_readiness_excludes_inherited_tools () =
   List.iter (fun body -> check bool "invalid or external profile is explicit failure" true
     (Result.is_error (Runtime_verification_codex_home.project_config body)))
@@ -1508,6 +1658,8 @@ let () =
         ; test_case "Codex readiness excludes inherited tools" `Quick test_codex_readiness_excludes_inherited_tools
         ; test_case "official probes preserve selected effort on the wire" `Quick
             test_official_probes_preserve_selected_effort
+        ; test_case "a refused Claude Code credential is named, not timed out" `Quick
+            test_claude_verification_names_a_refused_credential
         ; test_case "assigned lane selects initial target" `Quick test_assigned_lane_selects_initial_target
         ; test_case "actual tool-result roundtrip" `Quick test_roundtrip
         ; test_case "no tool cannot claim ready" `Quick test_no_tool_cannot_claim_success

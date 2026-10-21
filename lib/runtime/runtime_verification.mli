@@ -126,9 +126,10 @@ val initial_runtime_id
 (** [timeout_s] is one window over a runtime's whole readiness run, on
     [clock], for every arm: for an HTTP binding that is the wait for its
     admission permit, both provider round trips and the tool call between
-    them; a run still inside it when the window closes is [Timed_out]. It
-    is held by [measure] around each arm's [run], not declared per request,
-    so nothing restarts it. *)
+    them; a run still inside it when the window closes is [Timed_out], except
+    that a Claude Code run whose latest report is an HTTP 401 or 403 retry
+    is [Provider_auth_refused]. It is held by [measure] around each arm's
+    [run], not declared per request, so nothing restarts it. *)
 val verify
   :  secure_random:Eio.Flow.source_ty Eio.Resource.t
   -> sw:Eio.Switch.t

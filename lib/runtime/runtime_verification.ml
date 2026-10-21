@@ -527,6 +527,30 @@ let with_usage_window (rate_limit : Runtime_claude_code.rate_limit option) detai
      | parts -> Printf.sprintf "%s (%s)" detail (String.concat ", " parts))
 ;;
 
+(* HTTP 401 and 403 from the provider are a refused credential or account.
+   Claude Code retries a refused provider request on its own and reports each
+   retry as a stream notice, so the deadline can pass while it is still
+   retrying; the status on that notice gives the same verdict a terminal
+   result with the status gives. *)
+let claude_auth_status = function
+  | Some ((401 | 403) as status) -> Some status
+  | Some _ | None -> None
+;;
+
+(* A child that inherits an environment credential runs on it before the
+   signed-in account, so a refusal on that child names the credential's source
+   as a candidate rather than the account the operator looks at first. *)
+let claude_auth_refusal ~account_home ~status detail =
+  let inherited =
+    if Runtime_claude_code.runs_on_environment_credential account_home
+    then
+      " (this child inherited an environment credential, which Claude Code uses \
+       before the signed-in account)"
+    else ""
+  in
+  Provider_auth_refused (Printf.sprintf "HTTP %d: %s%s" status detail inherited)
+;;
+
 let failure_of_agent_core_error error =
   let module Route = Keeper_runtime_failure_route in
   let detail = Agent_core.Error.to_string error in
@@ -592,6 +616,10 @@ let muse_account_spent ~mgr ~clock ~cwd ~scope config =
       | Error _ -> false)
 
 let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime_instance.t) =
+  (* The refusal the client's latest report amounts to. Whichever ends the
+     run first -- this window or the client's own timeout -- reads it. *)
+  let refusal_before_deadline = ref None in
+  let deadline_failure () = Option.value !refusal_before_deadline ~default:Timed_out in
   let run (tool : Runtime_official_client_tool.dynamic_tool) ~prompt =
     if not runtime.model.tools_support
     then Error (Unavailable Tools_not_declared)
@@ -884,6 +912,36 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
            Runtime_claude_code.run_turn
              ~dynamic_tools:[ tool ]
              ?reasoning_effort
+             ~on_stream_event:(function
+               | Runtime_claude_code.Provider_retry_observed retry ->
+                 refusal_before_deadline :=
+                   Option.map
+                     (fun status ->
+                        claude_auth_refusal
+                          ~account_home:execution.account_home
+                          ~status
+                          (Printf.sprintf
+                             "Claude Code was retrying the provider request (retry %d of %d)"
+                             retry.Runtime_claude_api_retry.attempt
+                             retry.Runtime_claude_api_retry.max_retries))
+                     (claude_auth_status retry.Runtime_claude_api_retry.error_status)
+               (* Anything else the client reports came from a provider answer or
+                  from work after one, so the credential was accepted after the
+                  retry that named a refusal. *)
+               | Runtime_claude_code.Conversation_compacted
+               | Runtime_claude_code.Turn_started _ | Runtime_claude_code.Text_delta _
+               | Runtime_claude_code.Thinking_delta _
+               | Runtime_claude_code.Child_content_observed _
+               | Runtime_claude_code.Content_block_stopped _
+               | Runtime_claude_code.Dynamic_tool_started _
+               | Runtime_claude_code.Dynamic_tool_finished _
+               | Runtime_claude_code.Native_tool_started _
+               | Runtime_claude_code.Native_tool_finished _
+               | Runtime_claude_code.Native_tool_progress _
+               | Runtime_claude_code.Native_task_observed _
+               | Runtime_claude_code.Usage_windows_reported _
+               | Runtime_claude_code.Usage_reported _ | Runtime_claude_code.Turn_finished _
+                 -> refusal_before_deadline := None)
              ~mgr
              ~clock
              ~cwd
@@ -903,7 +961,14 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
            Error
              (Unavailable
                 (Invalid_configuration (Runtime_claude_code.error_to_string error)))
-         | Error (Runtime_claude_code.Timeout _) -> Error Timed_out
+         | Error (Runtime_claude_code.Timeout _) -> Error (deadline_failure ())
+         | Error
+             (Runtime_claude_code.Turn_failed_with_observation
+                { api_error_status; detail; _ } as error) ->
+           (match claude_auth_status api_error_status with
+            | Some status ->
+              Error (claude_auth_refusal ~account_home:execution.account_home ~status detail)
+            | None -> Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
          | Error (Runtime_claude_code.Quota_blocked { rate_limit; _ } as error) ->
            (* The subscription's usage window refused the turn. It reopens on
               its own, but the window can be hours or days, so it reads as a
@@ -919,7 +984,6 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
               | Runtime_claude_code.Turn_transport_interrupted _
               | Runtime_claude_code.Context_window_exceeded _
               | Runtime_claude_code.Turn_failed _
-              | Runtime_claude_code.Turn_failed_with_observation _
               | Runtime_claude_code.Stopped_by_host _
               | Runtime_claude_code.Process_exited _
               | Runtime_claude_code.Unhandled_exception _ ) as error) ->
@@ -1001,10 +1065,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
         Watched_work.run
           ~watcher:(fun () ->
             Eio.Time.sleep clock timeout_s;
-            Error Timed_out)
+            Error (deadline_failure ()))
           (fun () -> run tool ~prompt)
       with
-      | Eio.Time.Timeout -> Error Timed_out
+      | Eio.Time.Timeout -> Error (deadline_failure ())
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn ->
         Error (Provider_rejected (Printexc.to_string exn)))
 ;;

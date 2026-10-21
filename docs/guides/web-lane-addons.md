@@ -22,6 +22,32 @@ Open drafts에서 열린 초안을 전환할 수 있다. 같은 파일 이름의
 서버의 최종 validation과 충돌 검사 결과가 적용되며 저장 성공과 worker 적용 완료는
 별개다. 현재 적용 revision과 정리 상태는 선언 표에서 확인한다.
 
+## 끄고 다시 연결한 결과 확인
+
+설치의 **On / off**에서 activity 초안을 바꾸고 **Save activity**를 누른다.
+Off는 선언과 관측 이력을 보존하며 worker 정리를 요청한다. **Read current activity**는
+현재 파일과 서버 관측을 다시 읽는다. 저장 직후에는 서버가 이전 파일 revision을
+관측하고 있을 수 있으므로 그때는 적용 미확인으로 표시한다.
+
+상태는 서버의 `application` 판정이다. `cleaning`은 정리 대기, `inactive`는 정리 확인,
+`starting`은 시작 대기, `applied`는 실행 중인 worker를 뜻한다. 실패·확인 불가와 불완전한
+목록은 완료로 표시하지 않는다. worker ID가 없거나 revision이 같다는 사실만으로
+정리·시작 성공을 추측하지 않는다.
+
+**Workers with this installation ID**를 펼치면 같은 설치 ID의 worker마다 실제 경로,
+instance, incarnation, 설치 revision, 완료된 관측 sequence와 보존된 행 수를 볼 수 있다.
+경로를 바꾼 같은 ID의 기록도 포함하지만, 같은 파일에서 ID를 바꾼 이전 소유자의 전체
+정리 목록은 아니다. On으로 다시 연결하면 새 incarnation의 관측을 확인한다.
+이전 worker의 성공 결과를 새 worker의 결과로 세지 않는다.
+
+`live`와 `retained`는 Runtime의 현재 연결 기록과 보존된 binding을 구분한다.
+`live` 자체가 worker 프로세스의 생존을 증명하지는 않는다. retained worker에는 새 Action·Observe를
+열지 않으며, 이미 요청한 action의 상태 조회는 원래 identity로 계속 제공한다.
+실행 중이라는 상태와 완료된 관측, action receipt의 성공은 각각 별도 근거다.
+
+실제 Docker/MCP worker를 해제·재연결하고 Dashboard에서 확인한 범위와 화면은
+[재연결 관측 기록](../evidence/2026-10-21-addon-reconnect/README.md)을 참고한다.
+
 입력은 화면 이동·컴포넌트 재진입·작업공간 왕복 중 보존되지만 브라우저 재시작 후
 복구되는 저장소는 아니다. 작업공간 연결이 바뀌거나 재확인이 실패하면 새 preview를
 받기 전에는 초안을 만들 수 없다. schema가 바뀌면 새 입력 세트를 열고 기존 값은

@@ -416,6 +416,16 @@ let guided_actions () =
     output={rows=[];coverage=[]};complete=Some true} in
   let view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with focus=UI.Instances; snapshot=Some snapshot} |> ok in
   let first = UI.submit_action view |> ok in
+  List.iter (fun runtime_presence ->
+    let retained = {instance with runtime_presence} in
+    let retained_snapshot = {snapshot with instances=[retained]} in
+    check bool "retained or unknown worker cannot execute a fresh observation" false (UI.can_observe retained);
+    check bool "retired worker cannot open a new action" true
+      (Result.is_error (UI.open_actions ~request_id:first.request_id
+        {UI.initial with focus=UI.Instances;snapshot=Some retained_snapshot}));
+    check bool "open action cannot outlive its live worker" true
+      (Result.is_error (UI.submit_action {view with snapshot=Some retained_snapshot})))
+    [UI.Retained_binding;UI.Presence_unknown];
   check string "current worker supplies identity" "worker" first.instance_id;
   check bool "arbitrary schema field and value are used" true
     (first.action=`Assoc ["operation",`String "capture"]);

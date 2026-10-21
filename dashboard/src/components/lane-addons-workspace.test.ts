@@ -16,7 +16,7 @@ function workspace(root: string | null) {
 }
 function snapshot(id: string, actions = false) {
   return parseLaneAddonSnapshot({ configuration: null, rows: [], coverage: [], instances: [{
-    instance_id: id, run_id: id, addon_id: 'test-package', title: id, revision: 'r1', incarnation: id,
+    instance_id: id, run_id: id, runtime_presence: 'live', addon_id: 'test-package', title: id, revision: 'r1', incarnation: id,
     phase: { kind: 'attached' }, configuration: null, action_schema: actions
       ? { type: 'object', properties: { action: { type: 'object' } } } : null, observation_seq: 0, rows_count: 0,
     package: { outputs: {}, binding_schema: null, presentation: { description: null, readings: [] } },

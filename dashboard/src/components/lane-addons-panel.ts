@@ -13,6 +13,7 @@ import { LaneAddonReadings } from './lane-addon-readings'
 import { LaneDeclarationEditor } from './lane-declaration-editor'
 import { LanePackageInstaller } from './lane-package-installer'
 import { LanePackageActivityPanel } from './lane-package-activity-panel'
+import { LaneAddonConnection } from './lane-addon-connection'
 import { laneDeclarationSessionFor } from '../lib/lane-declaration-sessions'
 import { lanePackageActivityObservationRevision } from '../lib/lane-package-activity-session'
 import { useLaneNavigation, LaneNavigationNotice, clearLaneNavigation } from './lane-navigation'
@@ -108,7 +109,7 @@ function LaneAddonActions({ instances, authority }: {
   }, [authority])
 
   const visibleRequests = authority === null ? [] : requests.filter(item => sameWorkspace(item.authority, authority))
-  const capable = instances.filter(item => item.action_schema !== null)
+  const capable = instances.filter(item => item.runtime_presence === 'live' && item.action_schema !== null)
   const draftCurrent = inputAuthority.current === authority
   const selected = draftCurrent ? capable.find(item => instanceBinding(item) === binding) : undefined
   const available = selected !== undefined && selected.phase.kind !== 'detaching' && selected.phase.kind !== 'detached'
@@ -507,10 +508,8 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
                 aria-label=${`Configure activity for ${declaration.id}`}>On / off</button></td>
             <td class="break-all">${declaration.desired_revision}</td>
             <td class="break-all">${declaration.applied_revision ?? 'None'}<div>${declaration.instance_id ?? 'No instance'}</div></td>
-            <td>${!declaration.enabled
-              ? declaration.instance_id === null ? 'Configured off · no current worker observed' : 'Off requested · worker cleanup not yet confirmed'
-              : declaration.applied_revision === null ? 'Not yet applied'
-                : declaration.applied_revision === declaration.desired_revision ? 'Desired revision applied' : 'Revision change pending'}</td>
+            <td><p>Configured ${declaration.enabled ? 'on' : 'off'}</p>
+              <${LaneAddonConnection} snapshot=${snapshot} installationId=${declaration.id} sourcePath=${declaration.source_path} /></td>
           </tr>`)}</tbody></table></div>
           ${configuration.declarations.length === 0 && html`<p>No readable TOML declarations.</p>`}
           <p>Configuration status tracks installed revisions. Observation status is shown per instance below.</p>`}
@@ -573,7 +572,7 @@ function LaneAddonsPanelContent({ navigationTarget }: { navigationTarget?: Extra
       <td>${item.run_id}<div>${item.revision}</div></td>
       <td>${item.phase.kind}${(item.phase.message || item.error) && html`<p role="status">${item.phase.message ?? item.error}</p>`}</td>
       <td>${item.observation_seq} / ${item.rows_count}</td>
-      <td class="space-x-2"><button class=${buttonClass} disabled=${item.phase.kind === 'detached' || item.phase.kind === 'detaching' || item.phase.kind === 'observing'} onClick=${() => act(() => observeLaneAddon(item.instance_id))}>Observe</button>
+      <td class="space-x-2"><button class=${buttonClass} disabled=${item.runtime_presence !== 'live' || item.phase.kind === 'detached' || item.phase.kind === 'detaching' || item.phase.kind === 'observing'} onClick=${() => act(() => observeLaneAddon(item.instance_id))}>Observe</button>
       <button class=${buttonClass} disabled=${item.phase.kind === 'detached' || staleRemoval(configuration, item)} onClick=${() => { if (!staleRemoval(configuration, item)) act(() => detachLaneAddon(item.instance_id)) }}>${staleRemoval(configuration, item) ? 'Resolve TOML before removal' : item.configuration === null ? 'Remove worker' : 'Remove TOML + worker'}</button>
       <p class="mt-2 max-w-sm text-sm">${staleRemoval(configuration, item)
         ? 'Resolve the changed declaration with Edit TOML, then Refresh until its revision is applied before removing this installation. No TOML or worker has been removed.'

@@ -755,11 +755,10 @@ let configuration_lines view snapshot = match snapshot.configuration with
       @ List.concat (List.mapi (fun index (declaration : declaration) ->
         [Printf.sprintf "%s %s · %s" (if view.configuration_cursor=index then ">" else " ")
            (Option.value ~default:"unresolved installation" declaration.installation_id) declaration.source_path;
-         (match declaration.enabled, declaration.instance_id with
-          | Some false, Some _ -> "   Off requested · worker cleanup not yet confirmed"
-          | Some false, None -> "   Configured off · no current worker observed"
-          | Some true, _ -> "   Configured on"
-          | None, _ -> "   Desired activity unknown");
+         (match declaration.enabled with
+          | Some false -> "   Configured off"
+          | Some true -> "   Configured on"
+          | None -> "   Desired activity unknown");
          "   " ^ declaration_application view declaration;
          "   desired " ^ Option.value ~default:"unknown" declaration.desired;
          "   applied " ^ Option.value ~default:"none" declaration.applied]
@@ -1024,9 +1023,11 @@ let pending_action view =
 
 let action_target view = selected_instance view
 
-let can_observe (instance : instance) = match instance.phase with
-  | Row.Attached | Row.Observing | Row.Failed _ -> true
-  | Row.Detaching | Row.Detached -> false
+let can_observe (instance : instance) = match instance.runtime_presence with
+  | Retained_binding | Presence_unknown -> false
+  | Live_entry -> match instance.phase with
+    | Row.Attached | Row.Observing | Row.Failed _ -> true
+    | Row.Detaching | Row.Detached -> false
 
 let removal_block_reason view (instance : instance) =
   let refusal detail = Some (detail ^ "; correct TOML or refresh before removal; nothing was removed.") in
@@ -1124,6 +1125,8 @@ let submit_action view =
       && instance.action_schema=Some menu.schema) snapshot.instances) with
     | Some instance -> Ok instance
     | None -> Error "The selected Add-on changed. Refresh and choose its action again." in
+  let* () = if can_observe instance then Ok ()
+    else Error "The selected worker is no longer available for actions." in
   let* action = match menu.form with
     | Some form -> Masc_tui_schema_form.value form
     | None -> (match List.nth_opt menu.choices menu.cursor with
@@ -1385,6 +1388,23 @@ let host_request_lines item = match item.host_requests with
          else List.map (fun (request_id, wait) -> "  " ^ request_id ^ ": " ^ host_wait_text wait) hr_waiting)
       @ Option.fold ~none:[] ~some:(fun issue -> ["  stopped: " ^ host_issue_text issue]) hr_issue
 
+let connection_worker_lines snapshot item =
+  let workers = match item.installation_id with
+    | None -> [item]
+    | Some id -> List.filter (fun (worker : instance) ->
+        worker.installation_id = Some id) snapshot.instances in
+  [""; "Workers with this installation ID · each incarnation keeps its own results"]
+  @ List.concat_map (fun (worker : instance) ->
+      ["  " ^ worker.id ^ " · " ^ (match worker.runtime_presence with
+         | Live_entry -> "live" | Retained_binding -> "retained" | Presence_unknown -> "presence unknown")
+         ^ " · " ^ phase_label worker.phase;
+       "    incarnation " ^ worker.incarnation;
+       "    TOML " ^ Option.value ~default:"manual attachment" worker.source_path;
+       "    installed revision " ^ Option.value ~default:worker.revision worker.configuration_revision;
+       Printf.sprintf "    completed observation sequence %d · retained rows %d"
+         worker.observation_seq worker.rows_count]
+      @ (if worker.observation_seq=0 then ["    no completed observation received"] else [])) workers
+
 let detail_lines ~width view =
   let wrap = document_rows ~width in
   match selected_instance view, view.snapshot with
@@ -1442,7 +1462,8 @@ let detail_lines ~width view =
       | Configurations ->
           ["Source: " ^ Option.value ~default:"not supplied" item.source_path;
            "Revision: " ^ item.revision;
-           "Instance: " ^ item.id]
+           "Instance: " ^ item.id;
+           "Incarnation: " ^ item.incarnation]
           @ (match snapshot.configuration with
              | None -> ["Installation inventory unavailable"]
              | Some config ->
@@ -1453,10 +1474,12 @@ let detail_lines ~width view =
                            | Some false -> "configured off"
                            | None -> "desired activity unknown");
                          "Desired: " ^ Option.value ~default:"unknown" declaration.desired;
-                         "Applied: " ^ Option.value ~default:"unknown" declaration.applied]
+                         "Applied: " ^ Option.value ~default:"unknown" declaration.applied;
+                         declaration_application view declaration]
                         @ List.map (fun issue -> "Issue: " ^ issue) declaration.issues
                    else []) config.declarations)
           @ host_request_lines item
+          @ connection_worker_lines snapshot item
       | Rows ->
           if record_rows=[] then empty_result_lines view item
           else List.concat_map (fun (row : Row.row) ->

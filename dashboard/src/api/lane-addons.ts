@@ -20,13 +20,28 @@ const coverageSchema = Schema.Struct({
 const instanceConfigurationSchema = Schema.Struct({
   id: text, source_path: text, revision: text,
 })
+const applicationSchema = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal('starting') }),
+  Schema.Struct({ kind: Schema.Literal('cleaning') }),
+  Schema.Struct({ kind: Schema.Literal('applied'), instance_id: text }),
+  Schema.Struct({ kind: Schema.Literal('inactive') }),
+  Schema.Struct({ kind: Schema.Literal('failed'), messages: Schema.NonEmptyArray(text) }),
+  Schema.Struct({ kind: Schema.Literal('unknown'), messages: Schema.NonEmptyArray(text) }),
+)
 const configurationSchema = Schema.Struct({
   directory: text, complete: Schema.Boolean,
   issues: Schema.Array(Schema.Struct({ source_path: text, id: nullableText, message: text })),
   declarations: Schema.Array(Schema.Struct({
-    id: text, source_path: text, enabled: Schema.Boolean, desired_revision: text,
+    id: text, source_path: text, enabled: Schema.Boolean, source_revision: text, desired_revision: text,
     applied_revision: nullableText, instance_id: nullableText,
-  })),
+    application: applicationSchema,
+  }).pipe(Schema.filter(declaration => {
+    switch (declaration.application.kind) {
+      case 'starting': case 'applied': return declaration.enabled
+      case 'inactive': return !declaration.enabled
+      case 'cleaning': case 'failed': case 'unknown': return true
+    }
+  }, { message: () => 'Declaration activity and application state disagree' }))),
 })
 const outputSelectionSchema = Schema.Union(
   Schema.Struct({ lanes: Schema.NonEmptyArray(text), all_lanes: Schema.optional(Schema.Never) }),
@@ -41,6 +56,7 @@ const presentationSchema = Schema.Struct({
 })
 const instanceSchema = Schema.Struct({
   instance_id: text, run_id: text, addon_id: text, title: text, revision: text,
+  runtime_presence: Schema.Literal('live', 'retained'),
   incarnation: text, action_schema: Schema.NullOr(jsonObject),
   package: Schema.Struct({
     outputs: Schema.Record({ key: text, value: outputSelectionSchema }),
@@ -71,6 +87,7 @@ export type LaneAddonReading = Schema.Schema.Type<typeof readingSchema>
 export type LaneAddonRow = Schema.Schema.Type<typeof laneAddonRowSchema>
 export type LaneAddonInstance = Schema.Schema.Type<typeof instanceSchema>
 export type LaneAddonSnapshot = Schema.Schema.Type<typeof snapshotSchema>
+export type LaneAddonApplication = Schema.Schema.Type<typeof applicationSchema>
 export type LaneAddonSlice = Schema.Schema.Type<typeof sliceSchema>
 export type LaneAddonActionReceipt = Schema.Schema.Type<typeof actionReceiptSchema>
 export type LaneAddonActionRequest = {

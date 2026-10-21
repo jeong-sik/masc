@@ -5,6 +5,7 @@ import type { LaneAddonSnapshot } from '../api/lane-addons'
 import type { LaneDeclarationSession } from '../lib/lane-declaration-sessions'
 import { lanePackageActivityFor } from '../lib/lane-package-activity-session'
 import { ActionButton } from './common/button'
+import { LaneAddonConnection } from './lane-addon-connection'
 
 export function LanePackageActivityPanel({ documents, authority, snapshot, onRefresh }: {
   documents: LaneDeclarationSession; authority: ExecutionWorkspaceAuthority; snapshot: LaneAddonSnapshot; onRefresh: () => void;
@@ -26,10 +27,8 @@ export function LanePackageActivityPanel({ documents, authority, snapshot, onRef
     </header>
     <p>Off keeps this declaration and retained observations, and asks the server to clean up its worker. On makes it eligible for reconciliation again. Existing TOML editor drafts are unchanged.</p>
     <p role="status">File activity (last read): ${state.current ? state.current.enabled ? 'On' : 'Off' : busy ? 'Reading…' : 'Unverified'}</p>
-    <p role="status">${!observed ? 'Declaration application is not in the current observation.'
-      : !observed.enabled ? observed.instance_id === null ? 'Observed configuration: Off · no current worker observed' : 'Observed configuration: Off requested · worker cleanup not yet confirmed'
-        : observed.applied_revision === null ? 'Observed configuration: On · not yet applied'
-          : observed.applied_revision !== observed.desired_revision ? 'Observed configuration: On · revision change pending' : 'Observed configuration: On · desired revision applied'}</p>
+    <${LaneAddonConnection} snapshot=${snapshot} installationId=${target.installationId} sourcePath=${target.sourcePath}
+      expectedSourceRevision=${state.current?.document.source_revision} />
     ${observed && state.current && observed.enabled !== state.current.enabled && html`<p role="status">The file activity differs from the last inventory observation. Read current activity to refresh both; worker completion is tracked separately.</p>`}
     ${state.draft && html`<button type="button" class="rounded border border-[var(--border)] px-3 py-2 disabled:opacity-50" role="switch" aria-checked=${state.draft.enabled} aria-label=${`Activity draft for ${target.installationId}`}
       disabled=${!ready || state.uncertain} onClick=${() => owner.toggle(authority)}>

@@ -27,11 +27,11 @@ const catalog = { directory: '/workspace/packages', parent: '/workspace', entrie
   { kind: 'issue', path: '/workspace/packages/bad/lane.toml', message: 'Invalid manifest' },
 ] }
 const instance = (id: string, run_id = 'run') => ({ instance_id: id, run_id, addon_id: 'producer', title: `Producer ${id}`, revision: 'p1',
-  incarnation: `inc-${id}`, action_schema: null, binding: {}, package: { binding_schema: null, presentation: { description: null, readings: [] }, outputs: { results: { all_lanes: true } } },
+  runtime_presence: 'live', incarnation: `inc-${id}`, action_schema: null, binding: {}, package: { binding_schema: null, presentation: { description: null, readings: [] }, outputs: { results: { all_lanes: true } } },
   configuration: { id, source_path: `${directory}/${id}.toml`, revision: 'applied' },
   phase: { kind: 'attached' }, observation_seq: 0, rows_count: 0 })
 const snapshot = { configuration: { directory, complete: true, issues: [], declarations: ['producer', 'other-run'].map(id => ({
-  id, source_path: `${directory}/${id}.toml`, enabled: true, desired_revision: 'applied', applied_revision: 'applied', instance_id: id,
+  id, source_path: `${directory}/${id}.toml`, enabled: true, source_revision: 'r1', application: { kind: 'starting' }, desired_revision: 'applied', applied_revision: 'applied', instance_id: id,
 })) }, instances: [instance('producer'), instance('other-run', 'different-run')], rows: [], coverage: [] }
 let sequence = 0, generation = 0, epoch = ''
 function workspace(root: string | null) {

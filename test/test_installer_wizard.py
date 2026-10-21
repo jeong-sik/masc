@@ -81,6 +81,74 @@ def run_shell(body, terminal_input=None):
 
 
 class Wizard(unittest.TestCase):
+    def test_next_and_resume_commands_preserve_the_selected_workspace(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            # Shell syntax in user-selected paths must survive copying the
+            # command, rather than becoming expansion or command substitution.
+            unusual = root / "space ' \" $HOME `touch injected` $(touch injected)"
+            unusual.mkdir()
+            binary = unusual / 'masc'
+            receipt = root / 'receipt.json'
+            binary.write_text('#!' + sys.executable + '\n' + '''
+import json, os, sys
+from pathlib import Path
+if os.environ.get('SETUP_CANCEL') == '1':
+    sys.exit(9)
+Path(os.environ['COMMAND_RECEIPT']).write_text(json.dumps({
+    'argv': sys.argv[1:],
+    'env': {key: os.environ.get(key) for key in (
+        'MASC_ASSETS_DIR', 'MASC_BASE_PATH', 'AGENT_CORE_MODEL_CATALOG',
+        'MASC_RUNTIME_EVENTS')},
+}))
+''')
+            binary.chmod(0o755)
+            assets = str(unusual / 'assets')
+            base = str(unusual / 'workspace')
+            catalog = str(unusual / 'catalog.json')
+            variables = {'DEST': str(binary), 'DASHBOARD_ASSETS_DIR': assets,
+                         'BASE_PATH': base, 'AGENT_CORE_MODEL_CATALOG': catalog,
+                         'VERSION': 'v9.9.9', 'MASC_PORT': '9876'}
+            body = '\n' + ''.join(key + '=' + shlex.quote(value) + '\n'
+                                  for key, value in variables.items())
+            for mode, expected_argv in (
+                ('next', ['setup', '--base-path', base, '--port', '9876']),
+                ('reopen', ['--base-path', base, '--port', '9876']),
+                ('resume', ['setup', '--base-path', base, '--port', '9876']),
+            ):
+                for runtime_events in (None, '0'):
+                    with self.subTest(mode=mode, runtime_events=runtime_events):
+                        script = body + ('unset MASC_RUNTIME_EVENTS\n' if runtime_events is None
+                                         else 'MASC_RUNTIME_EVENTS=0\n')
+                        if mode == 'resume':
+                            script += ('DRY_RUN=0\nRUN_SETUP_JOURNEY=1\n'
+                                       'export SETUP_CANCEL=1\nfinish_setup_journey\n')
+                        else:
+                            script += ('RUN_SETUP_JOURNEY=' + ('1' if mode == 'reopen' else '0') +
+                                       '\nprint_install_summary\n')
+                        result, _ = run_shell(script)
+                        self.assertEqual(result.returncode, 1 if mode == 'resume' else 0,
+                                         result.stderr)
+                        commands = [line.strip() for line in
+                                    (result.stdout + result.stderr).splitlines()
+                                    if line.startswith('  env ')]
+                        self.assertEqual(len(commands), 1)
+                        env = dict(os.environ, COMMAND_RECEIPT=str(receipt))
+                        env.pop('SETUP_CANCEL', None)
+                        env.pop('MASC_RUNTIME_EVENTS', None)
+                        copied = subprocess.run(['bash', '-c', commands[0]], cwd=root,
+                                                env=env, capture_output=True, text=True,
+                                                timeout=5)
+                        self.assertEqual(copied.returncode, 0, copied.stderr)
+                        observed = json.loads(receipt.read_text())
+                        self.assertEqual(observed['argv'], expected_argv)
+                        self.assertEqual(observed['env'], {
+                            'MASC_ASSETS_DIR': assets, 'MASC_BASE_PATH': base,
+                            'AGENT_CORE_MODEL_CATALOG': catalog,
+                            'MASC_RUNTIME_EVENTS': runtime_events,
+                        })
+                        self.assertFalse((root / 'injected').exists())
+
     def test_authenticated_provider_probe_keeps_credentials_out_of_curl_argv(self):
         key = 'synthetic-provider-probe-credential'
         with tempfile.TemporaryDirectory() as directory:

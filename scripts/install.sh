@@ -685,6 +685,36 @@ report_ping_status() {
   return 1
 }
 
+print_workspace_command() {
+  # Quote whole argv words for Bash/zsh, including env assignments. A custom
+  # prefix or workspace may contain spaces, quotes or literal shell syntax.
+  printf 'env'
+  printf ' %q' "MASC_ASSETS_DIR=$DASHBOARD_ASSETS_DIR" "MASC_BASE_PATH=$BASE_PATH"
+  if [ "${MASC_RUNTIME_EVENTS+x}" = x ]; then
+    printf ' %q' "MASC_RUNTIME_EVENTS=$MASC_RUNTIME_EVENTS"
+  fi
+  if [ -n "${AGENT_CORE_MODEL_CATALOG:-}" ]; then
+    printf ' %q' "AGENT_CORE_MODEL_CATALOG=$AGENT_CORE_MODEL_CATALOG"
+  fi
+  printf ' %q' "$DEST" "$@" --base-path "$BASE_PATH" --port "$MASC_PORT"
+  printf '\n'
+}
+
+print_install_summary() {
+  printf '\n%smasc %s installed.%s\n' "$c_grn" "$VERSION" "$c_off"
+  printf 'Installed: server, TUI, dashboard, browser host and preflight tools\n'
+  printf 'Workspace: %s\n\n' "$BASE_PATH"
+  if [ "$RUN_SETUP_JOURNEY" -eq 1 ]; then
+    printf 'Setup finished. Reopen this workspace:\n  '
+    print_workspace_command
+  else
+    printf 'Next: choose a model and sandbox, then meet imp:\n  '
+    print_workspace_command setup
+  fi
+  printf '\nSetup guides CLI sign-in or API credentials and sandbox preparation.\n'
+  printf 'Install, upgrade and optional MCP/browser setup:\n  https://github.com/%s/blob/%s/docs/INSTALL.md\n\n' "$REPO" "$VERSION"
+}
+
 finish_setup_journey() {
   [ "$RUN_SETUP_JOURNEY" -eq 1 ] || return 0
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -695,7 +725,9 @@ finish_setup_journey() {
   # workspace check already borrows: an installer read from a pipe leaves this
   # child reading the pipe, and the wizard reports a cancellation nobody asked for.
   if ! with_terminal_input "$DEST" setup --base-path "$BASE_PATH" --port "$MASC_PORT" >&2; then
-    warn "MASC is installed; imp preparation is incomplete. Run masc setup to resume."
+    warn "MASC is installed; setup did not finish. Resume with:"
+    printf '  ' >&2
+    print_workspace_command setup >&2
     return 1
   fi
 }
@@ -1873,67 +1905,4 @@ configure_shell_path
 # Setup can start a runtime and write workspace state. Run it only after the
 # installed bundle is committed, so cancelling setup cannot roll the binary back.
 finish_setup_journey
-catalog_hint=$(model_catalog_env_value)
-# Keep the copy-paste start command aligned with runtime base/catalog env, but
-# do not default-disable Runtime_events. If the operator supplied an override,
-# preserve it; otherwise let the binary's default-on contract apply.
-runtime_events_start_env=""
-if [ "${MASC_RUNTIME_EVENTS+x}" = "x" ]; then
-  runtime_events_start_env="MASC_RUNTIME_EVENTS=\"$MASC_RUNTIME_EVENTS\" "
-fi
-start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\""
-if [ -n "$catalog_hint" ]; then
-  start_env="AGENT_CORE_MODEL_CATALOG=\"$catalog_hint\" $start_env"
-fi
-
-cat <<EOF
-
-${c_grn}masc ${VERSION} installed.${c_off}
-
-Installed:
-  server + TUI + dashboard + browser host + deployment preflight tools
-  workspace: $BASE_PATH
-  provider credentials, Keeper creation and execution backend setup are separate
-  browser registration: https://github.com/$REPO/blob/$VERSION/connectors/browser/host/README.md
-
-Next: start your first conversation with imp:
-  ${c_dim}# export your provider key in this shell -- the server reads it from its${c_off}
-  ${c_dim}# own environment, and the server the TUI starts inherits the TUI's${c_off}
-  ${c_dim}# export <PROVIDER>_API_KEY=...   (runtime.toml names the variable)${c_off}
-
-  ${c_dim}# install/start Docker Desktop (macOS) or Docker Engine (Linux), then:${c_off}
-  ${c_dim}# prepare the sandbox, start imp, and open the conversation workspace${c_off}
-  $start_env "$DEST" setup --base-path "$BASE_PATH" --port "$MASC_PORT"
-
-  ${c_dim}# optional: mint a worker bearer for a separate MCP client${c_off}
-  eval "\$($DEST login --base-path \"$BASE_PATH\" --host 127.0.0.1 --port \"$MASC_PORT\" --agent local-mcp-client --role worker --client-env MASC_TOKEN --no-expiry --shell)"
-
-  ${c_dim}# open the workspace: on a terminal this is the fleet TUI, and it starts${c_off}
-  ${c_dim}# the server here when nothing is answering the port${c_off}
-  $start_env "$DEST" --base-path "$BASE_PATH" --port "$MASC_PORT"
-
-  ${c_dim}# the server on its own, with no terminal (loopback only)${c_off}
-  $start_env "$DEST" start --base-path "$BASE_PATH" --port "$MASC_PORT"
-
-  ${c_dim}# to change provider or model later, edit:${c_off}
-  #   $BASE_PATH/.masc/config/runtime.toml
-
-  ${c_dim}# sanity check in a second terminal while the server is running${c_off}
-  curl http://127.0.0.1:${MASC_PORT}/health
-
-  ${c_dim}# the TUI under its own name, when the port is not the default${c_off}
-  ${c_dim}# a fresh root seeds one Keeper, imp, with autoboot off: start it from the Keepers view once a model and a sandbox exist (or reinstall with --team)${c_off}
-  "$TUI_DEST" --base-path "$BASE_PATH" --port "$MASC_PORT"
-
-  ${c_dim}# or create one non-interactively once the server is up:${c_off}
-  ${c_dim}# $DEST keeper-create --help${c_off}
-
-  ${c_dim}# setup above builds and promotes catalog name base for Docker Keepers.${c_off}
-  ${c_dim}# To replace it later, build a fresh tag with sandbox-image, then promote base; see docs/INSTALL.md.${c_off}
-  ${c_dim}# microVM uses a separate runtime/image store; see the platform guide:${c_off}
-  # https://github.com/$REPO/blob/$VERSION/docs/INSTALL.md
-
-  ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
-  See: https://github.com/$REPO#mcp-client-setup
-
-EOF
+print_install_summary

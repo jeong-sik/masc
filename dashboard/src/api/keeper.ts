@@ -184,12 +184,14 @@ export type {
   BulkKeeperDirectiveResult,
   BulkKeeperDirectiveResponse,
   BulkKeeperResumeTarget,
+  KeeperClearOutcome,
 } from './keeper-lifecycle'
 export {
   bootKeeper,
   shutdownKeeper,
   resetKeeper,
   clearKeeper,
+  keeperClearOutcome,
   pauseKeeper,
   resumeKeeper,
   wakeKeeper,

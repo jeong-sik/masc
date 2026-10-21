@@ -182,6 +182,21 @@ interface KeeperClearRequest {
   preserve_system_prompt?: boolean
 }
 
+// What a successful clear did. The server answers `ok` both when it emptied
+// the conversation and when it deleted a checkpoint it could not decode, which
+// leaves no history to recover; the second case carries
+// `undecodable_checkpoint_removed` in `detail`.
+export type KeeperClearOutcome =
+  | { kind: 'history_cleared' }
+  | { kind: 'undecodable_checkpoint_removed' }
+
+export function keeperClearOutcome(detail: unknown): KeeperClearOutcome {
+  if (isRecord(detail) && isRecord(detail.undecodable_checkpoint_removed)) {
+    return { kind: 'undecodable_checkpoint_removed' }
+  }
+  return { kind: 'history_cleared' }
+}
+
 export function clearKeeper(
   name: string,
   payload: KeeperClearRequest,

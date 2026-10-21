@@ -1,0 +1,21 @@
+{
+  "observed_at": "2026-10-21T12:34:36.637833+00:00",
+  "engine_id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7",
+  "instance_id": "01a15e68-fe1a-7000-a88d-b24037b9d7c8",
+  "container_id": "daabc0b0e7dc27732b9dae1f5be668097a3227cfe4c3ad6cd227461daf0e4ca1",
+  "inspect_exit": 0,
+  "state": {
+    "Status": "running",
+    "Running": true,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 38573,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-10-21T12:21:42.08084567Z",
+    "FinishedAt": "0001-01-01T00:00:00Z"
+  },
+  "detail": ""
+}

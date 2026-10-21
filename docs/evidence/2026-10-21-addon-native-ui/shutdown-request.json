@@ -1,0 +1,8 @@
+{
+  "server_pid": 15634,
+  "signal": "SIGTERM",
+  "verified_command": "/tmp/masc-addon-native-39595834943/masc start --base-path /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-native-ui-20261021-at4jf4xn --port 64247 --host 127.0.0.1",
+  "sent_at": "2026-10-21T12:43:00.384422+00:00",
+  "final_off_snapshot": "final-off.json",
+  "container_release_snapshot": "container-final-off.json"
+}

@@ -1,0 +1,45 @@
+{"at": 1792585465.720636, "settle_ms": 2000, "capture": "01-startup"}
+{"at": 1792585985.134737, "keys": "/addons\r", "settle_ms": 1500, "capture": "02-addons-command"}
+{"at": 1792586008.8341188, "keys": "\u001b", "settle_ms": 700, "capture": "03-return"}
+{"at": 1792586017.432786, "keys": ":addons", "settle_ms": 600, "capture": "04-addons-palette"}
+{"at": 1792586029.3739572, "keys": "\r", "settle_ms": 1200, "capture": "05-on-overview"}
+{"at": 1792586057.0472908, "keys": "\r", "settle_ms": 900, "capture": "06-on-detail"}
+{"at": 1792586074.824523, "keys": "E", "settle_ms": 1000, "capture": "07-toml-on-current"}
+{"at": 1792586084.0500128, "keys": " ", "settle_ms": 300, "capture": "08-off-draft"}
+{"at": 1792586091.719845, "keys": "s", "settle_ms": 1800, "capture": "09-off-save"}
+{"at": 1792586123.1750631, "keys": "r", "settle_ms": 900, "capture": "10-off-application"}
+{"at": 1792586132.281138, "keys": "\u001br", "settle_ms": 1200, "capture": "11-off-retained-detail"}
+{"at": 1792586159.7627652, "keys": "r", "settle_ms": 1200, "capture": "12-off-retained-refreshed"}
+{"at": 1792586178.6766489, "keys": "\u001b", "settle_ms": 300, "capture": "13-off-overview"}
+{"at": 1792586188.689306, "keys": "h", "settle_ms": 300, "capture": "14-off-history-overview"}
+{"at": 1792586216.283165, "keys": "\r", "settle_ms": 1200, "capture": "15-off-history-detail"}
+{"at": 1792586247.989763, "keys": "E", "settle_ms": 800, "capture": "16-reconnect-current-off"}
+{"at": 1792586259.310134, "keys": "\u001b", "settle_ms": 250, "capture": "17-history-back"}
+{"at": 1792586260.443019, "keys": "h", "settle_ms": 250, "capture": "18-current-off"}
+{"at": 1792586261.557991, "keys": "\r", "settle_ms": 800, "capture": "19-current-off-document"}
+{"at": 1792586273.250104, "keys": "E", "settle_ms": 800, "capture": "20-current-off-edit"}
+{"at": 1792586282.4275358, "keys": "j", "settle_ms": 250, "capture": "21-current-off-selected"}
+{"at": 1792586283.559982, "keys": "E", "settle_ms": 700, "capture": "22-off-document-selected"}
+{"at": 1792586289.546178, "keys": " ", "settle_ms": 250, "capture": "23-on-draft"}
+{"at": 1792586290.6542358, "keys": "s", "settle_ms": 1800, "capture": "24-on-save"}
+{"at": 1792586325.534969, "keys": "r", "settle_ms": 800, "capture": "25-reconnected-application"}
+{"at": 1792586336.0558112, "keys": "\u001b", "settle_ms": 250, "capture": "26-document-back", "show": false}
+{"at": 1792586337.168158, "keys": "\u001b", "settle_ms": 250, "capture": "27-summary-back", "show": false}
+{"at": 1792586338.281419, "keys": "r", "settle_ms": 800, "capture": "28-on-reconnected-overview"}
+{"at": 1792586431.716456, "keys": ":addons\r", "settle_ms": 900, "capture": "29-on-new-overview"}
+{"at": 1792586443.977661, "keys": "j", "settle_ms": 600, "capture": "30-new-worker-selected", "show": false}
+{"at": 1792586445.084552, "keys": "\r", "settle_ms": 800, "capture": "31-on-new-result"}
+{"at": 1792586456.51535, "keys": "\u001b", "settle_ms": 250, "show": false}
+{"at": 1792586457.622978, "keys": "h", "settle_ms": 250, "capture": "32-reconnected-history", "show": false}
+{"at": 1792586458.72687, "keys": "j", "settle_ms": 350, "show": false}
+{"at": 1792586459.831539, "keys": "\r", "settle_ms": 650, "capture": "33-old-result-after-reconnect"}
+{"at": 1792586486.917512, "keys": "o", "settle_ms": 500, "capture": "34-retained-observe-refused"}
+{"at": 1792586518.005636, "keys": "\u001b", "settle_ms": 250, "show": false}
+{"at": 1792586519.1123881, "keys": "h", "settle_ms": 250, "show": false}
+{"at": 1792586520.216652, "keys": "j", "settle_ms": 350, "show": false}
+{"at": 1792586521.321352, "keys": "E", "settle_ms": 600, "capture": "35-teardown-on-document", "show": false}
+{"at": 1792586536.460232, "keys": " ", "settle_ms": 200, "capture": "36-teardown-draft", "show": false}
+{"at": 1792586537.5645921, "keys": "s", "settle_ms": 1500, "capture": "37-final-off-save", "show": false}
+{"at": 1792586550.268681, "keys": "r", "settle_ms": 700, "capture": "38-final-cleanup-confirmed", "show": false}
+{"at": 1792586579.07276, "keys": "r", "settle_ms": 600, "capture": "39-final-cleanup-observed", "show": false}
+{"at": 1792586580.1772642, "stop": true}

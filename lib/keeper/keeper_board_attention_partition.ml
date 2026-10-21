@@ -418,13 +418,22 @@ let load ~base_path ~keeper_name =
   Ok (view_partitions view)
 ;;
 
-let validate_serialized ~keeper_name contents =
+let validate_serialized ~base_path ~ledger_path contents =
   if String.length contents > 0 && contents.[String.length contents - 1] <> '\n'
   then Error "incomplete partition ledger tail; owner recovery required"
   else
     let* rows, _confirmations = parse contents in
     let* view = apply_rows (empty_view ()) rows in
-    validate_keeper_identity ~keeper_name view
+    match Id_map.choose_opt view.by_id with
+    | None -> Ok ()
+    | Some (_, partition) ->
+      let keeper_name = partition.keeper_name in
+      let* () = validate_keeper_identity ~keeper_name view in
+      let expected_path = path ~base_path ~keeper_name in
+      if String.equal expected_path ledger_path then Ok ()
+      else Error (Printf.sprintf
+        "Board attention partition keeper path mismatch keeper=%s expected=%s actual=%s"
+        keeper_name expected_path ledger_path)
 ;;
 
 let purge ~base_path ~keeper_name =

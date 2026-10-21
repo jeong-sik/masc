@@ -827,8 +827,7 @@ let board_attention_partition_store =
              match contents with
              | None -> Error (path ^ ": disappeared during partition inventory")
              | Some contents ->
-               let keeper_name = Filename.basename path |> Filename.chop_extension in
-               Partition.validate_serialized ~keeper_name contents
+               Partition.validate_serialized ~base_path ~ledger_path:path contents
                |> Result.map_error (fun detail -> path ^ ": " ^ detail)
            in
            count_row report verdict) empty_report paths))

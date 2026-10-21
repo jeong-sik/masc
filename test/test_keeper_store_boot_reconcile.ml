@@ -1455,12 +1455,11 @@ let test_gate_preflight_preserves_orphan_wal () =
     check string "orphan WAL remains untouched" "unread orphan WAL" (Fs_compat.load_file path))
 ;;
 
-let test_board_partition_preflight_uses_production_replay () =
+let test_board_partition_preflight_uses_production_replay ~keeper_name () =
   with_workspace (fun config ->
     let module Partition = Keeper_board_attention_partition in
     let module Candidate = Partition.Candidate in
     let base_path = config.Workspace.base_path in
-    let keeper_name = "preflight-keeper" in
     let signal : Board_dispatch.board_signal =
       { kind = Board_dispatch.Board_post_created; post_id = "preflight-post"
       ; author = "external"; title = "Preflight"; content = "Retained evidence"
@@ -1475,7 +1474,7 @@ let test_board_partition_preflight_uses_production_replay () =
       | Ok [partition] -> partition
       | Ok _ -> fail "fixture must create one production partition"
       | Error detail -> fail detail in
-    let path = Filename.concat (Partition.directory ~base_path) (keeper_name ^ ".jsonl") in
+    let path = Partition.path ~base_path ~keeper_name in
     let current = Partition.to_yojson partition in
     (* Give the other Keeper a genuine root identity. A forged root would
        fail before the ledger's Keeper binding was checked. *)
@@ -1489,7 +1488,7 @@ let test_board_partition_preflight_uses_production_replay () =
       | Ok [partition] -> Partition.to_yojson partition
       | Ok _ -> fail "fixture must create one foreign production partition"
       | Error detail -> fail detail in
-    Unix.unlink (Filename.concat (Partition.directory ~base_path) (other_keeper ^ ".jsonl"));
+    Unix.unlink (Partition.path ~base_path ~keeper_name:other_keeper);
     let replace name value = match current with
       | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
       | _ -> fail "production partition must encode an object" in
@@ -1508,8 +1507,10 @@ let test_board_partition_preflight_uses_production_replay () =
       check (list string) (label ^ ": no recovery files") before
         (Array.to_list (Sys.readdir (Filename.dirname path)) |> List.sort String.compare))
       [ "current production row", row current, 0
+      ; "empty owner ledger", "", 0
       ; "old schema", row (replace "schema_version" (`Int 0)), 1
       ; "foreign keeper with genuine root", row foreign, 1
+      ; "mixed keeper roots", row current ^ row foreign, 1
       ; "forged root", row (replace "partition_id" (`String "forged")), 1
       ; "changed immutable identity", row current ^ row (replace "created_at" (`Float 2.0)), 1
       ; "incomplete tail", Yojson.Safe.to_string current, 1
@@ -1571,7 +1572,11 @@ let () =
         ; test_case "Gate preflight preserves an orphan WAL" `Quick
             test_gate_preflight_preserves_orphan_wal
         ; test_case "partition preflight uses production decode and replay" `Quick
-            test_board_partition_preflight_uses_production_replay
+            (test_board_partition_preflight_uses_production_replay
+               ~keeper_name:"preflight-keeper")
+        ; test_case "partition preflight preserves noncanonical Keeper identity" `Quick
+            (test_board_partition_preflight_uses_production_replay
+               ~keeper_name:"Foo.Bar")
         ; test_case "partition preflight refuses failed inventory" `Quick
             test_board_partition_preflight_refuses_failed_inventory
         ; test_case "admission preflight decodes and preserves pending input" `Quick

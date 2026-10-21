@@ -403,7 +403,7 @@ let test_successor_frontier_ignores_an_old_semantic_destination ()=
         |> Result.map_error Request.error_to_string |> get with
       | Some batch -> batch | None -> fail "expected disjoint current pending work" in
     let current_capture=Consumer.capture_classification ~config ~prompt ~ledger:change.ledger ~batch |> consumed in
-    let current=seed_size_refusal store current_capture in
+    ignore (seed_size_refusal store current_capture);
     check bool "retained candidates carry different actual semantic revisions" true
       ((Capture.destination old_capture).configuration_revision<>(Capture.destination current_capture).configuration_revision);
     check bool "the old destination is not a current continuation" false

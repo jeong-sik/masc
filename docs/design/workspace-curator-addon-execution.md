@@ -4,7 +4,9 @@ This is the proposed E02 implementation contract under the
 [Addon worklist](../../reports/addon-lane-full-worklist-20261021.md).
 It specifies the execution boundary. The [Curator worker](../../addons/workspace-curator/README.md)
 and [shared host semantic port](workspace-curator-semantic-validation.md) are now
-implemented; production consumer, commit recovery and wake integration remain.
+implemented. The original admission consumer now captures actual Runtime
+provenance and reads/submits/restores the original worker result; production
+scheduler switching, domain commit recovery and wake integration remain.
 This is not a claim of completed extraction or an installed replacement.
 
 Source baseline: `3145acf9fc32ab77c25d97ab7e5710194cd270cf`.
@@ -197,3 +199,33 @@ production Addon consumer. The follow-up
 now defines the caller-supplied provenance envelope, physical-workspace binding
 and captured-template/input checks, but production metadata capture and the
 remaining lifecycle/semantic/consumer integration are still required above.
+
+
+## Original admission consumer implementation
+
+`Server_workspace_memory_addon` uses the original Runtime action serializer to
+capture the live configured installation, actual declaration source revision and
+admitted configuration revision. Its pure capture factory retains the complete
+original capture before any RPC. The same configured destination is rechecked
+for resumed calls, while original captured revisions remain immutable audit
+facts rather than being replaced by today's values.
+
+Every pass strictly reloads the original host record and restores its physical
+workspace. New work reads before admission and submits only after a newly stored
+intent. An explicit capacity non-admission permits another read/admission of the
+same original ID. Pending, unknown, missing-after-dispatch, uncertain journal
+publication and Already_stored cannot send another submit. A complete late
+answer is fully domain-validated before retaining a judgment. Terminal unknown
+and other execution refusals retain their original final as an Execution refusal;
+they need no worker on replay. Domain judgments also restore without a live
+worker; commit states are returned to the original owner without applying them.
+
+This adapter does not create another scheduler or model runner. The current
+production Curator scheduler has **not yet switched** to it. That switch must
+still prioritize accepted-work recovery even while Off, preserve input/output
+size refusal and whole-batch successor linkage, perform actual fresh
+before/expected-after domain commit recovery, and subscribe to original result
+and export events without replacing the existing MCP inventory callback.
+`capture_*` publication failure still requires original discovery, not another
+fresh request. No extraction, production recovery or Off/On completion follows
+from this source alone.

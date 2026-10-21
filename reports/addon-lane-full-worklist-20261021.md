@@ -111,7 +111,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
-| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | capture/progress/discovery/semantic 단계 실행 근거 유지. original admission·domain commit/recovery·scoped wake 후속 exact af9e1ee의8-suite39674624863은147건 PASS(새 host-cycle wake7 포함). 실제 output-limit 보존과 측정/증거 부재의 typed 구분을 새 후속 구현; Python89건 PASS, 새 OCaml 실행 별도. production owner/size successor·실제 중지/재개·provider/두 UI/설치는 남음 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
+| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 기존 capture/progress/semantic·original admission/commit/wake 근거 유지. typed-size exact805 실행39676761394는컴파일뒤fixture3건 FAIL; owning layer c18의측정전거절/observer detail수리후 새실행별도. whole-batch successor intent→child retain/read→parent ACK·strict ancestry/direct Exact gate·복구15시나리오 소스 구현. production owner·실제 중지/재개·provider/두 UI/설치는 남음 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
 | E05 | Board Attention 실행의 Addon 경계 검토·추출 | 조사·설계, Required | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
@@ -409,3 +409,11 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - 새 typed size 후속은 실제 `Output_limit_reached`를 일반 invalid output과 분리하고 OCaml/공통 Python worker/별도 Operator Quiz/Candle/Browser consumer까지 연결한다. token 측정·유효 증거가 없다는 상태는 input-size 거절이 아니라 Transient로 보존한다. 기존 transient/config/auth 우선순위와 원래 terminal no-replay를 유지한다.
 - Python Curator7·Candle14·Quiz Flow68 총89건이 실제 subprocess/도메인 fixture에서 PASS다. 새 ML/MLI는 parser 검사이며 compiled 선택 실행은 별도다. 실제 provider나 official-client 프로세스 실행을 fixture 성공으로 바꾸어 쓰지 않는다.
 - production owner의 original accepted-work 발견/Off 복구·전체 batch successor의 durable predecessor 연결·initial prepared save/capture·observer receipt·실제 provider/두 UI/운영 설치와 원래54개 완료는 남는다. A01–H06 이름과 완료 기준은 유지한다.
+
+
+## E02 successor 재개 체크포인트 · 2026-10-22
+
+- 부모의 원래 typed size terminal을 보존하고, 전체 자식 capture와 ID를 부모 intent에 먼저 저장한다. 자식 retain/read 확인 뒤 부모 ACK를 기록한다. ACK 전 child resume·direct Exact를 거절하며, ACK 후 사라진 child는 재생성하지 않는다.
+- strict capture v2의 predecessor로 원래 template·workspace·ledger·destination·whole prefix/remainder와 완전 ancestry를 재검증한다. Briefing input-only policy와 동일 prepared state를 유지한다. production scheduler·observer·도메인 write를 새로 만들지 않는다.
+- 실제 저장소의 중단 경계·같은 ID 재개·자식 유실·충돌·부모 유실/순환·중첩 후속·prefix commit·Briefing을 위한15새 시나리오를 추가했다. parser PASS와 독립 source review, compiled 실행은 구분한다. 이 기록은54개 완료 판정이 아니다.
+- 이전typed-size805의39676761394는실제 FAIL이다. 만료/미래증거는측정전거절되어HTTP0건이맞고, Candle목록은summary라detail조회가필요하다. 두 fixture의총3실패를owning layer c18에서수리했으며실패로그/영수증을보존한다. c18수리및새후속의compiled성공은아직미확인이다.

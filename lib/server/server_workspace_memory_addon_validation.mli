@@ -11,6 +11,9 @@ val authorize : base_path:string -> Lane_addon_exact.validation_authority
     package cannot bypass a retained binding. An unreadable namespace refuses
     resolution rather than becoming absence. The Curator package must
     have a strict original capture at this exact installation/tool and physical
-    workspace. Its complete common Exact request must equal the captured one.
+    workspace. A child additionally needs the strictly loaded acknowledged
+    predecessor chain and exact whole-batch derivation, including direct Exact
+    calls and retained delivery. Its complete common Exact request must equal
+    the captured one.
     Missing/unreadable/conflicting authority refuses before route resolution,
     including retained-answer delivery. No current prompt override replaces it. *)

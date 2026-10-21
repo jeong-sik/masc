@@ -5899,6 +5899,7 @@
 (test
  (name test_workspace_curator_addon_commit)
  (modules test_workspace_curator_addon_commit)
+ (deps ../addons/workspace-curator/lane.toml)
  (libraries masc_test_deps masc.server))
 
 (test

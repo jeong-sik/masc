@@ -5,15 +5,17 @@ type refusal_stage = Before_dispatch | Execution
 type refusal = { stage : refusal_stage; evidence : Yojson.Safe.t }
 type change = { before : Yojson.Safe.t; after : Yojson.Safe.t }
 type commit = { judgment : Yojson.Safe.t; change : change }
+type successor = { request_id : string; request : Yojson.Safe.t }
 type event = Dispatch_intended | Admission_declined of Yojson.Safe.t | Execution_observed of observation
   | Judgment_retained of Yojson.Safe.t | Commit_intended of change
   | Commit_uncertain of Yojson.Safe.t | Commit_retry_observed of Yojson.Safe.t
   | Commit_observed of Yojson.Safe.t | Commit_conflicted of Yojson.Safe.t
-  | Refused of refusal
+  | Refused of refusal | Successor_intended of successor | Successor_observed of string
 type phase = Captured | Admission_wait of Yojson.Safe.t | Dispatch_pending of observation option
   | Judged of Yojson.Safe.t | Committing of commit
   | Commit_unknown of commit * Yojson.Safe.t | Finished of commit
   | Conflicted of commit * Yojson.Safe.t | Rejected of refusal
+  | Subdividing of refusal * successor | Subdivided of refusal * successor
 type t = { events_rev : event list; phase : phase }
 let captured = {events_rev=[];phase=Captured}
 let phase t = t.phase
@@ -36,6 +38,9 @@ let event_to_json = function
   | Commit_retry_observed before -> envelope "commit_retry_observed" ["before",before]
   | Commit_observed after -> envelope "commit_observed" ["after",after]
   | Commit_conflicted observed -> envelope "commit_conflicted" ["observed",observed]
+  | Successor_intended successor -> envelope "successor_intended"
+      ["request_id",`String successor.request_id;"request",successor.request]
+  | Successor_observed request_id -> envelope "successor_observed" ["request_id",`String request_id]
   | Refused {stage;evidence} ->
     let stage = match stage with Before_dispatch -> "before_dispatch" | Execution -> "execution" in
     envelope "refused" ["stage",`String stage;"evidence",evidence]
@@ -61,6 +66,17 @@ let event_of_json json =
   | "commit_retry_observed" -> value "before" (fun value -> Commit_retry_observed value)
   | "commit_observed" -> value "after" (fun value -> Commit_observed value)
   | "commit_conflicted" -> value "observed" (fun value -> Commit_conflicted value)
+  | "successor_intended" ->
+    let* fields = fields ["request_id";"request"] in
+    (match List.assoc "request_id" fields with
+     | `String request_id when String.trim request_id <> "" ->
+       Ok (Successor_intended {request_id;request=List.assoc "request" fields})
+     | _ -> Error "successor intent requires a nonblank child ID")
+  | "successor_observed" ->
+    let* fields = fields ["request_id"] in
+    (match List.assoc "request_id" fields with
+     | `String request_id when String.trim request_id <> "" -> Ok (Successor_observed request_id)
+     | _ -> Error "successor observation requires a nonblank child ID")
   | "refused" -> let* fields = fields ["stage";"evidence"] in
     let* stage = match List.assoc "stage" fields with
       | `String "before_dispatch" -> Ok Before_dispatch
@@ -73,48 +89,59 @@ let step phase = function
   | Dispatch_intended -> (match phase with
       | Captured | Admission_wait _ -> Ok (Dispatch_pending None)
       | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-      | Finished _ | Conflicted _ | Rejected _ -> invalid ())
+      | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> invalid ())
   | Admission_declined evidence -> (match phase with
       | Dispatch_pending None -> Ok (Admission_wait evidence)
       | Captured | Admission_wait _ | Dispatch_pending (Some _) | Judged _
-      | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ -> invalid ())
+      | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> invalid ())
   | Execution_observed observation -> (match phase with
       | Dispatch_pending _ -> Ok (Dispatch_pending (Some observation))
       | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _
-      | Finished _ | Conflicted _ | Rejected _ -> invalid ())
+      | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> invalid ())
   | Judgment_retained judgment -> (match phase with
       | Dispatch_pending _ -> Ok (Judged judgment)
       | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _
-      | Finished _ | Conflicted _ | Rejected _ -> invalid ())
+      | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> invalid ())
   | Commit_intended change -> (match phase with
       | Judged judgment -> Ok (Committing {judgment;change})
       | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _
-      | Finished _ | Conflicted _ | Rejected _ -> invalid ())
+      | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> invalid ())
   | Commit_uncertain evidence -> (match phase with
       | Committing commit | Commit_unknown (commit,_) -> Ok (Commit_unknown (commit,evidence))
-      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Finished _ | Conflicted _ | Rejected _ -> invalid ())
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> invalid ())
   | Commit_retry_observed before -> (match phase with
       | Commit_unknown (commit,_) ->
         if Yojson.Safe.equal before commit.change.before
             && not (Yojson.Safe.equal before commit.change.after) then Ok (Committing commit)
         else Error "commit retry observation does not establish the original before-state"
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
-      | Finished _ | Conflicted _ | Rejected _ -> invalid ())
+      | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> invalid ())
   | Commit_observed after -> (match phase with
       | Committing commit | Commit_unknown (commit,_) ->
         if Yojson.Safe.equal after commit.change.after then Ok (Finished commit)
         else Error "commit observation does not match the original expected state"
-      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Finished _ | Conflicted _ | Rejected _ -> invalid ())
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> invalid ())
   | Commit_conflicted observed -> (match phase with
       | Committing commit | Commit_unknown (commit,_) ->
         if Yojson.Safe.equal observed commit.change.after then Error "expected state is a confirmation, not a conflict"
         else Ok (Conflicted (commit,observed))
-      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Finished _ | Conflicted _ | Rejected _ -> invalid ())
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> invalid ())
   | Refused refusal -> (match phase,refusal.stage with
       | (Captured | Admission_wait _),Before_dispatch | Dispatch_pending _,Execution -> Ok (Rejected refusal)
       | (Captured | Admission_wait _),Execution | Dispatch_pending _,Before_dispatch
-      | (Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _),
+      | (Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _),
         (Before_dispatch | Execution) -> invalid ())
+  | Successor_intended successor -> (match phase with
+      | Rejected ({stage=Execution;_} as refusal) -> Ok (Subdividing (refusal,successor))
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+      | Commit_unknown _ | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_}
+      | Subdividing _ | Subdivided _ -> invalid ())
+  | Successor_observed request_id -> (match phase with
+      | Subdividing (refusal,successor) ->
+        if String.equal request_id successor.request_id then Ok (Subdivided (refusal,successor))
+        else Error "successor acknowledgement differs from its original intent"
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+      | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdivided _ -> invalid ())
 let append t event =
   let* event = event_of_json (event_to_json event) in
   let* phase = step t.phase event in Ok {events_rev=event :: t.events_rev;phase}

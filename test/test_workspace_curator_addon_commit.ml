@@ -68,13 +68,15 @@ let advance store record event=match Owner.advance ~store ~expected:record ~even
     |> Result.map_error Owner.update_error_to_string |> get with
   | Owner.Stored record -> record
   | Owner.Already_stored _ | Owner.Unconfirmed _ -> fail "fixture needs a fresh recorded fact"
-let retain store capture output =
+let retain_capture store capture =
   let request_id=Capture.Request_id.to_string (Capture.request_id capture) in
   owned (Owner.retain ~store ~scope:Capture.scope ~request_id ~installation_id:destination.installation_id
     ~package_id:destination.package_id ~tool:destination.tool ~request:(Capture.to_json capture));
   let record=match owned (Owner.load ~store ~scope:Capture.scope ~request_id) with
     | Some record -> record | None -> fail "missing original capture" in
-  let record=advance store record Progress.Dispatch_intended in
+  record
+let retain store capture output =
+  let record=advance store (retain_capture store capture) Progress.Dispatch_intended in
   advance store record (Progress.Judgment_retained (`Assoc ["status",`String "answered";
     "slot",`String "original";"output",output]))
 let settle ?(briefing_contract=(fun () -> contract)) ~save base_path store (record : Owner.retained) =
@@ -149,7 +151,7 @@ let test_refused_write_and_recovered_intent retry_only ()=with_workspace (fun ba
   check bool "fresh retry observation survives actual journal reopen" true
     (List.exists (function Progress.Commit_retry_observed _ -> true
       | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _ | Commit_intended _
-      | Commit_uncertain _ | Commit_observed _ | Commit_conflicted _ | Refused _ -> false) (Progress.events result.progress));
+      | Commit_uncertain _ | Commit_observed _ | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _ -> false) (Progress.events result.progress));
   settle ~save:no_save base_path store result |> accepted |> committed |> ignore)
 let test_changed_or_unreadable_sources unreadable ()=with_workspace (fun base_path store ->
   let capture,output=classification base_path ["Original selected source"] in
@@ -241,6 +243,222 @@ let test_briefing_pass modification ()=with_workspace (fun base_path store ->
       check bool "later additions still require a separate pass" true
         (Briefing.needs_refresh ~sources:(Ledger.briefing_sources fresh) ~contract complete))
   else conflicted result |> ignore)
+module Exact = Lane_addon_exact
+let size_input=Exact.Call_final (Exact.Input_refused Exact.Input_capacity)
+let size_output=Exact.Call_final (Exact.Output_limit_reached {detail="Actual provider output limit"})
+let refuse store capture final =
+  let record=advance store (retain_capture store capture) Progress.Dispatch_intended in
+  advance store record (Progress.Refused {stage=Progress.Execution;evidence=Exact.final_to_json final})
+let narrow base_path store (record : Owner.retained) =
+  Consumer.For_testing.narrow ~store:(Store.create ~root:(Store.root store)) ~base_path ~request_id:record.request_id
+let successor = function
+  | Consumer.Successor_ready {parent;child} -> parent,child
+  | Consumer.Indivisible _ | Consumer.Successor_waiting _ -> fail "expected one confirmed original child"
+let restore_capture base_path store record = Capture.restore
+  ~workspace:(get (Capture.observe_workspace ~base_path))
+  ~load:(fun ~request_id -> Owner.load ~store ~scope:Capture.scope ~request_id
+    |> Result.map_error Owner.error_to_string) record
+let original store capture = match owned (Owner.load ~store ~scope:Capture.scope
+    ~request_id:(Capture.Request_id.to_string (Capture.request_id capture))) with
+  | Some record -> record | None -> fail "expected original retained request"
+let intent store capture final =
+  let parent=refuse store capture final in
+  let child=match get (Capture.narrow ~request_id:(Capture.Request_id.fresh ()) ~final capture) with
+    | Some child -> child | None -> fail "expected a smaller whole batch" in
+  let request=get (Lane_addon_action.canonical (Capture.to_json child)) in
+  let intent : Progress.successor = {request_id=Capture.Request_id.to_string (Capture.request_id child);request} in
+  advance store parent (Progress.Successor_intended intent),child,intent
+let no_call ~arguments:_=fail "successor linkage cannot call a worker"
+let no_worker_resume base_path store (record : Owner.retained) =
+  Consumer.For_testing.resume ~store ~base_path ~request_id:record.request_id ~call:no_call
+let test_successor_keeps_whole_rows_and_one_child final ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Original entire fact a";"Original entire fact b";
+    "Original entire fact c";"Original entire fact d"] in
+  let parent=refuse store capture final in
+  let ledger_before=Ledger.to_json (get (Ledger.load ~base_path)) in
+  let parent,child=narrow base_path store parent |> accepted |> successor in
+  check bool "child ID differs from the terminal original" true (parent.request_id<>child.request_id);
+  let smaller=get (restore_capture base_path store child) in
+  check string "immutable predecessor identifies the original parent" parent.request_id
+    (match Capture.predecessor smaller with Some id -> Capture.Request_id.to_string id | None -> fail "missing predecessor");
+  check bool "original destination and revisions survive narrowing" true
+    (Capture.destination smaller=Capture.destination capture);
+  (match Capture.work capture,Capture.work smaller with
+   | Capture.Classification original,Capture.Classification child ->
+     check bool "whole selected prefix and unconsumed suffix are conserved" true
+       (child.batch.selected=List.take 2 original.batch.selected
+        && child.batch.remaining=List.drop 2 original.batch.selected @ original.batch.remaining);
+     check json "complete original row payloads survive" (match original.batch.input with
+       | `Assoc fields -> `List (List.take 2 (match List.assoc "new_facts" fields with `List rows -> rows | _ -> fail "rows"))
+       | _ -> fail "original input") (Yojson.Safe.Util.member "new_facts" child.batch.input);
+     check json "captured classification ledger stays unchanged" (Ledger.to_json original.ledger) (Ledger.to_json child.ledger)
+   | Capture.Classification _,Capture.Briefing _ | Capture.Briefing _,(Capture.Classification _ | Capture.Briefing _) -> fail "wrong domain");
+  check json "linking never saves a domain state" ledger_before (Ledger.to_json (get (Ledger.load ~base_path)));
+  let parent_again,child_again=narrow base_path store parent |> accepted |> successor in
+  check string "reopened parent reuses the same child" child.request_id child_again.request_id;
+  check json "repeated linkage does not append a parent fact" (Progress.to_json parent.progress) (Progress.to_json parent_again.progress);
+  check json "unstarted child remains Captured" (`List []) (Progress.to_json child_again.progress);
+  check int "strict discovery contains only the original and one child" 2
+    (List.length (owned (Owner.discover ~store ~scope:Capture.scope)));
+  (match no_worker_resume base_path store parent with
+   | Ok (Consumer.Terminal (restored,_)) -> check json "parent keeps its original terminal" (Exact.final_to_json final) (Exact.final_to_json restored)
+   | Ok _ | Error _ -> fail "parent terminal changed"))
+let test_successor_recovers_intent child_published ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Original fact a";"Original fact b";"Original fact c"] in
+  let parent,child,intended=intent store capture size_input in
+  if child_published then (
+    let child_record=retain_capture store child in
+    check bool "child cannot execute before parent acknowledgement" true
+      (match no_worker_resume base_path store child_record with Error (Consumer.Rejected _) -> true
+       | Ok _ | Error (Consumer.Unavailable _ | Consumer.Uncertain _) -> false);
+    check bool "ordinary capture restore has no unacknowledged escape" true
+      (Result.is_error (restore_capture base_path store child_record)));
+  let parent,child=narrow base_path store parent |> accepted |> successor in
+  check string "recovery uses the durably selected ID" intended.request_id child.request_id;
+  check json "recovery keeps the complete original child bytes" intended.request child.request;
+  check bool "strict parent has acknowledged that child" true (match Progress.phase parent.progress with
+    | Progress.Subdivided (_,actual) -> actual=intended
+    | _ -> false);
+  get (restore_capture base_path store child) |> ignore)
+let test_successor_pending_and_non_size_refuse ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Source a";"Source b"] in
+  let parent=retain_capture store capture in
+  let unchanged record=check bool "non-size authority cannot mint a child" true (Result.is_error (narrow base_path store record)) in
+  unchanged parent;
+  let pending=advance store parent Progress.Dispatch_intended in
+  unchanged pending;
+  let unknown=advance store pending (Progress.Execution_observed (Progress.Outcome_unknown (`Assoc ["detail",`String "lost"]))) in
+  unchanged unknown;
+  let refused=advance store unknown (Progress.Refused {stage=Progress.Execution;
+    evidence=Exact.final_to_json (Exact.Call_final (Exact.Invalid_output {detail="invalid JSON, not a size refusal"}))}) in
+  unchanged refused;
+  check int "no unrelated request was invented" 1 (List.length (owned (Owner.discover ~store ~scope:Capture.scope))))
+let test_indivisible_terminal ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["One indivisible entire source, including all of its text"] in
+  let parent=refuse store capture size_input in
+  check bool "single original fact is reported without truncation or new work" true
+    (match narrow base_path store parent |> accepted with Consumer.Indivisible record -> record.request_id=parent.request_id
+     | Consumer.Successor_ready _ | Consumer.Successor_waiting _ -> false);
+  check int "singleton remains one terminal capture" 1 (List.length (owned (Owner.discover ~store ~scope:Capture.scope))))
+let child_record_path store (record : Owner.retained) = Filename.concat (Store.root store)
+  (Filename.concat "tool-request-owners" (Filename.concat (Store.digest Capture.scope) (Store.digest record.request_id ^ ".json")))
+let test_acknowledged_missing_child_is_not_recreated ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Original source a";"Original source b"] in
+  let parent,child=narrow base_path store (refuse store capture size_input) |> accepted |> successor in
+  let dispatched=advance store child Progress.Dispatch_intended in
+  let path=child_record_path store child in
+  Unix.rename path (path ^ ".removed");
+  check bool "lost child dispatch history is not new admission permission" true
+    (match narrow base_path store parent with Error (Consumer.Unavailable _) -> true
+     | Ok _ | Error (Consumer.Rejected _ | Consumer.Uncertain _) -> false);
+  check bool "acknowledged absent child remains absent" true
+    (owned (Owner.load ~store ~scope:Capture.scope ~request_id:child.request_id)=None);
+  Unix.rename (path ^ ".removed") path;
+  let _,recovered=narrow base_path store parent |> accepted |> successor in
+  check json "restored child keeps its dispatch uncertainty" (Progress.to_json dispatched.progress) (Progress.to_json recovered.progress))
+let test_conflicting_child_cannot_change_parent_intent ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Original source a";"Original source b"] in
+  let parent,child,intended=intent store capture size_input in
+  let destination=Capture.destination child in
+  owned (Owner.retain ~store ~scope:Capture.scope ~request_id:intended.request_id
+    ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool
+    ~request:(`Assoc ["unrelated",`Bool true]));
+  check bool "conflict cannot retarget or mint another child" true (Result.is_error (narrow base_path store parent));
+  check json "original intent remains authoritative" (Progress.to_json parent.progress)
+    (Progress.to_json (original store capture).progress);
+  check int "no replacement sibling was minted" 2 (List.length (owned (Owner.discover ~store ~scope:Capture.scope))))
+let test_briefing_successor_keeps_prepared_state output_limit ()=with_workspace (fun base_path store ->
+  let classification,answer=classification base_path ["Source a";"Source b";"Source c";"Source d"] in
+  let ledger=match after classification answer with Capture.Classification_commit ledger -> ledger
+    | Capture.Briefing_commit _ -> fail "ledger expected" in
+  get (Ledger.save ~base_path ledger);
+  let batch,capture,_=prepare_briefing base_path ledger Briefing.empty in
+  let directory=Ledger.directory ~base_path in
+  get (Briefing.save ~directory (Briefing.prepared_state batch));
+  let before=Briefing.to_json (get (Briefing.load ~directory)) in
+  let parent=refuse store capture (if output_limit then size_output else size_input) in
+  if output_limit then check bool "Briefing output limit never authorizes input reduction" true
+    (Result.is_error (narrow base_path store parent))
+  else (
+    let _,child=narrow base_path store parent |> accepted |> successor in
+    let child=get (restore_capture base_path store child) in
+    match Capture.work child with
+    | Capture.Briefing child ->
+      check int "whole original entries are bisected" 1 (Briefing.selected_count child);
+      check int "all unconsumed original sources remain" 3 (Briefing.remaining_count child);
+      check json "child has the identical original prepared state" before (Briefing.to_json (Briefing.prepared_state child))
+    | Capture.Classification _ -> fail "Briefing child changed domain");
+  check json "linking does not save or advance briefing" before (Briefing.to_json (get (Briefing.load ~directory))))
+let output_for capture = match Capture.work capture with
+  | Capture.Classification {batch;_} -> `Assoc ["decisions",`List (List.map (fun (fact : Ledger.pending_fact) ->
+      `Assoc ["fact_id",`String (Request.fact_id fact.fact);"kind",`String "create_claim";"value",`String fact.claim]) batch.selected)]
+  | Capture.Briefing _ -> `Assoc ["briefing",`String "Original child semantic result"]
+let test_child_can_answer_and_commit_only_its_original_prefix ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Original fact a";"Original fact b";"Original fact c";"Original fact d"] in
+  let parent,child=narrow base_path store (refuse store capture size_input) |> accepted |> successor in
+  let smaller=get (restore_capture base_path store child) in
+  let output=output_for smaller in
+  let call ~arguments =
+    let state,fields=match Yojson.Safe.Util.member "kind" arguments with
+      | `String "read" -> "absent",[]
+      | `String "submit" -> "finished",["result",`Assoc ["status",`String "answered";"slot",`String "child-slot";"output",output]]
+      | _ -> fail "unexpected child RPC" in
+    Ok {(Mcp_protocol.Mcp_types.tool_result_of_text "child fixture reply") with
+      structured_content=Some (`Assoc (["request_id",`String child.request_id;"state",`String state] @ fields))} in
+  let result=Consumer.For_testing.resume ~store ~base_path ~request_id:child.request_id ~call |> accepted in
+  let judgment=match result with Consumer.Judgment {record;_} -> record | _ -> fail "child did not retain its original judgment" in
+  settle ~save:(save base_path) base_path store judgment |> accepted |> committed |> ignore;
+  let current=get (Ledger.load ~base_path) in
+  check int "only the original child prefix was applied" 2 (List.length (Ledger.dispositions current));
+  let _,again=narrow base_path store parent |> accepted |> successor in
+  settle ~save:no_save base_path store again |> accepted |> committed |> ignore)
+let package ()=Lane_addon_manifest.load ~path:"../addons/workspace-curator/lane.toml"
+  |> Result.map_error Lane_addon_manifest.error_to_string |> get
+let authorize base_path store capture =
+  let request=get (Server_workspace_memory_addon_validation.request capture) in
+  Server_workspace_memory_addon_validation.authorize ~base_path ~store ~declaration_id:"curator" ~package:(package ()) request
+let test_direct_exact_authority_requires_acknowledged_ancestry ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Source a";"Source b"] in
+  let parent,child,_=intent store capture size_input in
+  retain_capture store child |> ignore;
+  check bool "direct Exact cannot bypass an unacknowledged predecessor" true
+    (Result.is_error (authorize base_path store child));
+  narrow base_path store parent |> accepted |> successor |> ignore;
+  let validate=get (authorize base_path store child) in
+  get (validate (output_for child)))
+let test_missing_or_cyclic_parent_refuses missing ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Source a";"Source b"] in
+  let parent,child=narrow base_path store (refuse store capture size_input) |> accepted |> successor in
+  let smaller=get (restore_capture base_path store child) in
+  if missing then (
+    let path=child_record_path store parent in Unix.rename path (path ^ ".removed"))
+  else (
+    let request=match parent.request with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,
+          if key="predecessor" then `String child.request_id else value) fields)
+      | _ -> fail "original parent capture" in
+    let request=get (Lane_addon_action.canonical request) in
+    let wire=match get (Store.load_tool_request_owner store ~scope:Capture.scope ~request_id:parent.request_id) with
+      | Some (`Assoc fields) -> `Assoc (List.map (fun (key,value) -> key,
+          if key="request" then request else if key="request_digest" then `String (Store.digest (Yojson.Safe.to_string request)) else value) fields)
+      | Some _ | None -> fail "original parent wire" in
+    get (Store.save_tool_request_owner store ~scope:Capture.scope ~request_id:parent.request_id wire));
+  check bool "child resume cannot borrow missing or cyclic ancestry" true
+    (match no_worker_resume base_path store child with Error (Consumer.Rejected _) -> true
+     | Ok _ | Error (Consumer.Unavailable _ | Consumer.Uncertain _) -> false);
+  check bool "direct Exact rejects the same broken ancestry" true (Result.is_error (authorize base_path store smaller)))
+let test_nested_successor_has_no_root_sibling ()=with_workspace (fun base_path store ->
+  let capture,_=classification base_path ["Source a";"Source b";"Source c";"Source d"] in
+  let root,child=narrow base_path store (refuse store capture size_input) |> accepted |> successor in
+  let child_capture=get (restore_capture base_path store child) in
+  let child=refuse store child_capture size_output in
+  let _,grandchild=narrow base_path store child |> accepted |> successor in
+  let grandchild_capture=get (restore_capture base_path store grandchild) in
+  check string "nested child links to its immediate original parent" child.request_id
+    (match Capture.predecessor grandchild_capture with Some id -> Capture.Request_id.to_string id | None -> fail "missing parent");
+  let _,same_child=narrow base_path store root |> accepted |> successor in
+  check string "the root still names its first child" child.request_id same_child.request_id;
+  check int "one root, one child, one grandchild only" 3 (List.length (owned (Owner.discover ~store ~scope:Capture.scope))))
 let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "classification applies once and survives journal reopen" `Quick test_classification_commit_and_reopen;
   test_case "real save with lost receipt confirms after without another write" `Quick test_lost_save_receipt_after_publication;
@@ -256,4 +474,19 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "source additions wait outside the original fixed pass" `Quick (test_briefing_pass Add_source);
   test_case "removed briefing target prevents old publication" `Quick (test_briefing_pass Remove_source);
   test_case "changed briefing contract prevents old publication" `Quick (test_briefing_pass Change_contract);
-  test_case "missing prepared state is not created after the model" `Quick (test_briefing_pass Missing_preparation)]]
+  test_case "missing prepared state is not created after the model" `Quick (test_briefing_pass Missing_preparation);
+  test_case "input size successor conserves whole rows and survives reopen" `Quick (test_successor_keeps_whole_rows_and_one_child size_input);
+  test_case "output size classification successor keeps one child" `Quick (test_successor_keeps_whole_rows_and_one_child size_output);
+  test_case "intent without child recovers the same durable ID" `Quick (test_successor_recovers_intent false);
+  test_case "retained child cannot execute before acknowledgement" `Quick (test_successor_recovers_intent true);
+  test_case "pending unknown and invalid output cannot create a successor" `Quick test_successor_pending_and_non_size_refuse;
+  test_case "one indivisible original fact is never truncated" `Quick test_indivisible_terminal;
+  test_case "acknowledged missing child is not recreated as undispatched" `Quick test_acknowledged_missing_child_is_not_recreated;
+  test_case "conflicting child cannot replace a durable parent intent" `Quick test_conflicting_child_cannot_change_parent_intent;
+  test_case "input size Briefing child preserves prepared state" `Quick (test_briefing_successor_keeps_prepared_state false);
+  test_case "Briefing output limit cannot reduce input" `Quick (test_briefing_successor_keeps_prepared_state true);
+  test_case "acknowledged child answers and commits only its prefix" `Quick test_child_can_answer_and_commit_only_its_original_prefix;
+  test_case "direct Exact authority cannot bypass parent acknowledgement" `Quick test_direct_exact_authority_requires_acknowledged_ancestry;
+  test_case "missing predecessor refuses resume and direct Exact" `Quick (test_missing_or_cyclic_parent_refuses true);
+  test_case "cyclic predecessor refuses resume and direct Exact" `Quick (test_missing_or_cyclic_parent_refuses false);
+  test_case "nested refusal narrows the child without a root sibling" `Quick test_nested_successor_has_no_root_sibling]]

@@ -107,7 +107,7 @@ let test_commit_recovery_uses_original_before_after_and_judgment () = with_store
      Alcotest.check json "original before-state survives recovery" before commit.change.before;
      Alcotest.check json "original expected after-state survives recovery" after commit.change.after
    | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _ | Progress.Committing _
-   | Progress.Commit_unknown _ | Progress.Conflicted _ | Progress.Rejected _ -> Alcotest.fail "commit not confirmed");
+   | Progress.Commit_unknown _ | Progress.Conflicted _ | Progress.Rejected _ | Progress.Subdividing _ | Progress.Subdivided _ -> Alcotest.fail "commit not confirmed");
   (match updated (advance store retry (Progress.Commit_observed (read ()))) with
    | Owner.Already_stored record -> check_events "lost terminal acknowledgement is idempotent" (events finished) record
    | Owner.Stored _ | Owner.Unconfirmed _ -> Alcotest.fail "terminal acknowledgement republished");
@@ -127,7 +127,7 @@ let test_conflict_and_refusal_are_terminal_facts () = with_store (fun _ store ->
      Alcotest.check json "conflict preserves observed state" observed current;
      Alcotest.check json "conflict preserves original judgment" judgment commit.judgment
    | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _ | Progress.Committing _
-   | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Rejected _ -> Alcotest.fail "conflict lost"));
+   | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Rejected _ | Progress.Subdividing _ | Progress.Subdivided _ -> Alcotest.fail "conflict lost"));
   with_store (fun _ store ->
     owned (retain store);
     let captured = load store in

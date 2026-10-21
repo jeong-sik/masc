@@ -9,6 +9,8 @@ type interaction =
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab
 type t = Open_tab of string | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
+let reply_timeout_sec = function
+  | Open_tab _ | On_tab _ -> 60.
 let ( let* ) = Result.bind
 let key_name = function
   | Enter -> "Enter" | Tab -> "Tab" | Escape -> "Escape" | Backspace -> "Backspace"

@@ -237,6 +237,43 @@ let params_member name json =
 
 (* A whole turn: text streamed and completed, a built-in tool item, and an
    approval the host asked for anyway, answered from the read posture. *)
+let test_native_tool_completion_preserves_vendor_evidence () =
+  List.iter (fun (status, expected) ->
+    let observed = ref [] in
+    let args = {|{"query":"coordination"}|} in
+    let output = "vendor-local tool failure: exact output" in
+    let frame = Yojson.Safe.to_string (`Assoc
+      ["jsonrpc", `String "2.0"; "method", `String "item/completed";
+       "params", `Assoc ["sessionId", `String "s-1"; "viewCursor", `String "v:3";
+         "item", `Assoc ["itemId", `String "tc-1"; "kind", `String "toolCall";
+           "turnId", `String "t-1"; "revision", `Int 2; "status", `String status;
+           "tool", `String "unregistered-native-tool"; "callId", `String "call_1";
+           "args", `String args; "visibleOutput", `String output]]]) in
+    run_scripted
+      ~on_stream_event:(function
+        | Serve.Native_tool_finished {observation; completion; args; visible_output} ->
+          observed := (observation, completion, args, visible_output) :: !observed
+        | _ -> ())
+      (handshake_and_session ~granted:["eventStream"]
+       @ [Write turn_started; Write frame; Write turn_completed])
+      (fun result _requests ->
+        (match result with Ok _ -> () | Error error -> fail (Serve.error_to_string error));
+        match !observed with
+        | [(observation, completion, actual_args, actual_output)] ->
+          check (option string) "exact vendor tool id" (Some "unregistered-native-tool") observation.tool_name;
+          check bool status true (completion.outcome = expected);
+          check (option int) "no fabricated exit status" None completion.exit_code;
+          check (option string) "arguments" (Some args) actual_args;
+          check (option string) "output" (Some output) actual_output
+        | _ -> fail "native-only completed item lost its evidence"))
+    [ "completed", Runtime_native_tools.Completion_reported
+    ; "failed", Runtime_native_tools.Error_reported
+    ; "timedOut", Runtime_native_tools.Error_reported
+    ; "rejected", Runtime_native_tools.Decline_reported
+    ; "cancelled", Runtime_native_tools.Unrecognized_status "cancelled"
+    ; "newVendorStatus", Runtime_native_tools.Unrecognized_status "newVendorStatus" ]
+;;
+
 let test_turn_with_tool_and_approval () =
   let deltas = Buffer.create 16 in
   let decisions = ref [] in
@@ -1548,6 +1585,8 @@ let () =
         ; test_case "message phase marks the answer" `Quick test_message_phase_marks_the_answer
         ; test_case "stream callback preserves reserved controls" `Quick
             test_stream_callback_preserves_reserved_controls
+        ; test_case "native-only tool completion keeps status, arguments and output" `Quick
+            test_native_tool_completion_preserves_vendor_evidence
         ; test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval
         ; test_case "turn/start receipt is the line the host read" `Quick
             test_turn_start_receipt_is_the_line_the_host_read

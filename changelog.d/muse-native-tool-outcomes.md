@@ -1,0 +1,3 @@
+### Fixed
+
+- Keep Muse's reported native-tool completion outcome, arguments and visible output. Forward the typed completion to the matching chat activity occurrence instead of reporting only that the native call ended.

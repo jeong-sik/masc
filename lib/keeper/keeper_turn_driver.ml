@@ -2956,6 +2956,7 @@ let run_named
             ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
           | Ok (workspace_root, native_context) ->
           Keeper_muse_runtime.run
+            ?on_native_tool_completion
             ?argument_source:official_argument_source
             ?on_tool_execution
             ?composed_context:official_client_composed_context

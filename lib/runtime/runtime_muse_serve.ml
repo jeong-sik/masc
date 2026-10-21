@@ -144,7 +144,12 @@ type stream_event =
   | Text_delta of { item_id : string; text : string }
   | Text_completed of { item_id : string; text : string }
   | Native_tool_started of Runtime_native_tools.observation
-  | Native_tool_finished of Runtime_native_tools.observation
+  | Native_tool_finished of
+      { observation : Runtime_native_tools.observation
+      ; completion : Runtime_native_tools.completion
+      ; args : string option
+      ; visible_output : string option
+      }
   | Approval_decided of
       { tool_name : string
       ; subject : Runtime_muse_msp.approval_subject_kind
@@ -969,6 +974,18 @@ let item_in_turn ~turn_id (item : Msp.item) =
   | None -> false
 ;;
 
+let tool_completion (status : Msp.item_status) : Runtime_native_tools.completion =
+  let outcome = match status with
+    | Msp.Item_completed_status -> Runtime_native_tools.Completion_reported
+    | Msp.Item_failed | Msp.Item_timed_out -> Runtime_native_tools.Error_reported
+    | Msp.Item_rejected -> Runtime_native_tools.Decline_reported
+    | Msp.Item_cancelled -> Runtime_native_tools.Unrecognized_status "cancelled"
+    | Msp.In_progress -> Runtime_native_tools.Unrecognized_status "inProgress"
+    | Msp.Unrecognized_item_status status -> Runtime_native_tools.Unrecognized_status status
+  in
+  {outcome; exit_code=None}
+;;
+
 let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~on_stream_event state =
   let continue state =
     await_terminal io config ~mcp_servers ~session_id ~turn_id ~on_stream_event state
@@ -1071,7 +1088,12 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
           (* MSP allows a completed item that never opened (a single-shot
              item, or one after a gap); it is still one call. *)
           if not was_open then emit (Native_tool_started (observation item));
-          emit (Native_tool_finished (observation item));
+          emit (Native_tool_finished
+            { observation = observation item
+            ; completion = tool_completion item.status
+            ; args = item.args
+            ; visible_output = item.visible_output
+            });
           let open_tool_items =
             if was_open then max 0 (state.open_tool_items - 1) else state.open_tool_items
           in

@@ -1,0 +1,14 @@
+{"at": 1792599448.9724102, "keys": ":addons\r", "settle_ms": 450, "capture": "01-fixed-overview", "show": false}
+{"at": 1792599466.950102, "keys": "h", "settle_ms": 200, "capture": "02-fixed-retained-history", "show": true}
+{"at": 1792599493.751643, "keys": "j", "settle_ms": 100, "show": false}
+{"at": 1792599509.9493, "keys": "\r", "settle_ms": 500, "capture": "03-fixed-original-detail", "show": false}
+{"at": 1792599523.453366, "keys": "4", "settle_ms": 150, "capture": "04-fixed-original-record", "show": false}
+{"at": 1792599542.527951, "keys": "r", "settle_ms": 450, "capture": "05-fixed-original-read-failed", "show": true}
+{"at": 1792599554.3812768, "keys": " ", "settle_ms": 100, "show": false}
+{"at": 1792599570.10527, "keys": "e", "settle_ms": 100, "capture": "06-fixed-preserve-only", "show": false}
+{"at": 1792599577.912087, "keys": "\r", "settle_ms": 500, "capture": "07-fixed-receipt-row-and-failure", "show": true}
+{"at": 1792599597.04721, "keys": "r", "settle_ms": 450, "capture": "08-fixed-normal-read-recovered", "show": false}
+{"at": 1792599609.870761, "keys": "e", "settle_ms": 100, "show": false}
+{"at": 1792599619.610091, "keys": "\r", "settle_ms": 450, "capture": "09-fixed-normal-evidence-keeps-row", "show": false}
+{"at": 1792599639.751652, "keys": "3", "settle_ms": 300, "capture": "10-fixed-application-after-evidence", "show": true}
+{"at": 1792599653.07526, "stop": true}

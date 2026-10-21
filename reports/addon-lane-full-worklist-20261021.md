@@ -35,8 +35,8 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 고정6f68 native39626945820: TUI24+application5 PASS. 두 실행 파일 내장 SHA·해시·key reference 대조 완료; 같은 source Dashboard build 성공. 후속 #44895 d06fc922 native39631388009는 별도 요청·결과 미확인 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
-| A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 같은6f68 API/Docker/Dashboard/TUI로 On→Off→On 및 Remove TOML+worker→재설치 실행. 세 incarnation·원래 결과/receipt·실제 정리 확인. Evidence 직후 retained row 소실 재현→#44895 소스 수리·독립 PASS; 수정 바이너리 재검증·운영 설치 별도 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
+| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 고정6f68 및 수리d06fc922 native 각 TUI24+application5 PASS. matching 두 실행 파일 내장 SHA·해시·key reference와 clean 같은소스 Dashboard build 확인. 운영 설치와 구분 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
+| A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 6f68 실제 두 UI On→Off→On 및 Remove TOML+worker→재설치·세 incarnation/정리 확인. Evidence 직후 row 소실 #44895 수리 뒤 exactd06 실제 TUI에서 row/선택/원래 receipt/읽기실패 공존 및 정상 보존 확인. 새 후보 전체 lifecycle·운영 설치 별도 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
 | A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 main 병합. 고정 `7b16a917` 실제 TUI에서 retained 실행 키 미노출·수동 Observe 거절·이력 진입 확인; 전체 상세 새로고침 결함은 A02/G06에서 별도 추적 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
 | A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | 공통 #44710·G01 #44803 및 G06 #44840의 6개 층 main 병합 확인. G06 병합 head와 이후 fragment-only branch head를 구분. Browser #44168 전체 현재 판정·남은 맥락 리뷰와 새 follow-up head의 재승인은 별도 | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
 | A05 | Browser 스택의 후속 3개 층과 기존 증거 영향 검토 | 세 층의 전체 delta 직독; exact `76b741f` run `39555413943` 두 suite 14건 PASS, 독립 source delta 검토 PASS; 실제 앱·전체 스택 검증 별도 | #44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증 |
@@ -134,7 +134,7 @@ Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현�
 | G03 | 요청부터 종료·정리까지 원래 timeline/trace 연결 | 부분 구현; Dashboard가 버리던 host_requests를 원래 worker/incarnation에 결속해 보존·표시하는 후속 구현. 모델 lane/provider/operator/source 대기와 전달·기록 실패를 닫힌 타입으로 읽고, 손상 진단은 worker·결과와 분리. 전체 요청 이력·실제 화면·설치 검증 필요 | request/run/instance/revision, 대기 이유·결과·실패·정리 증거를 같은 원래 작업으로 추적 |
 | G04 | 교체·경로/ID 변경·이전 소유자 이력 표시 | 후속 소스 구현: 같은 ID worker와 같은 TOML 경로의 다른 ID를 두 UI에서 분리. Dashboard 3파일62건·tsc PASS, TUI 관측 모델 parser PASS; 독립 리뷰·OCaml 실행·실제 UI 별도 | 새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근 |
 | G05 | 에이전트 작업 중 표시와 현재 포인터/입력 활동 표시 | 범위별 재확인 필요 | 실제 동작 이벤트 기반으로 작업자·활동·포인터 위치 표시; 완료·중단·해제 때 표시 정리 |
-| G06 | 두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화 | 같은6f68의 bare global Slice HTTP200·retained refresh·읽기 실패/원래 row/receipt 공존·cross-run 거절·복구 관측. Evidence 보존 직후 row 소실 결함 #44895로 수리, application 마지막 관측도 보존. 수정 실행·모든 workspace/revision 경계 미완료 | draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능 |
+| G06 | 두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화 | 6f68 bare global Slice HTTP200·retained refresh·cross-run 거절·복구 관측. #44895 exactd06에서 Evidence 보존 뒤 원래 row/selection/receipt와 Slice EOF 유지·장애 해제 후 정상 보존 실측. application 관측 보존 독립 SOURCE PASS; 모든 workspace/revision 경계 미완료 | draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능 |
 
 
 G04 후속 [#44807](https://github.com/jeong-sik/masc/pull/44807) · 다른 설치 ID의 같은 TOML 경로
@@ -276,3 +276,11 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - 전체54개 ID·작업·완료 기준은 유지했다. 이 checkpoint는 A01/A02/G06/H01과 E01의 실제 증거를 늘리고 확인된 결함을 수리한 진척이며, 운영 설치·Browser67층 병합·E01 전체·54개 완료 판정이 아니다.
 
 - Browser 재배치 뒤 독립 census는 현재 결속 승인0/67, 최신 formal승인 부재24/옛head만43이며 current FAIL/HOLD·CR·Draft·미해결 thread0을 확인했다. top44702만dirty다. 실제 main c3efec4 대 aa0e merge-tree도 작업표 한 파일 충돌을 반환해 단순 API 전파 지연으로 단정하지 않는다. Firefox 삭제 전·후 실행 sink의 환경 허용목록은 독립 SOURCE PASS이나 이 사실이 전체67층 승인·실제 Firefox 실행을 뜻하지 않는다.
+
+### 2026-10-22 KST · Evidence 결함 수리의 같은 head 실행
+
+- [수정 후보 d06fc922의 별도 원본 증거](../docs/evidence/2026-10-22-addon-evidence-fixed/README.md): native39631388009 실제 성공(TUI24+application5), 두 executable 실행 SHA/해시 및 clean 같은 source Dashboard build를 확인했다. 실제 브라우저는 새로 열지 않아 Dashboard의 두 UI lifecycle 실측은 이전6f68 범위로 남긴다.
+- 원래 임시 workspace의 Off 선언을 유지해 worker를 시작하지 않고 matching 새 server/TUI를 실행했다. server 재시작 뒤에도 원래 세 binding/row가 읽혔다. 원래 첫 worker의 row를 골라 실제 Slice EOF 상태에서 Preserve only를 실행해 동일 selected row·receipt·기존 read failure가 즉시 함께 남음을 관측했다. 장애 해제 뒤 정상 상태의 두 번째 보존도 같은 행을 유지했다.
+- 새 실행의 원래 stored Evidence는 이전과 동일 digest2ed0cb5e…이며 실제 파일 hash를 확인했다. Broadcast·LLM·오디오·provider·Candle 정산은 실행하지 않았다. 새 임시 server/TUI/proxy도 종료했고 원래 PID 부재와 두 port refusal을 기록했다.
+- #44895는 current d06fc922의 독립 정식 APPROVED를 받았다. 이후 Native Stack 연결 메타데이터가 생겼으므로 전체 scope의 최신 guard와 상위 증거 PR 승인/병합은 별도로 확인한다. 같은 head 실행 성공은 그 병합의 완료가 아니다.
+- 두 UI lifecycle6f68·수리후 TUI d06·Candle container d35·Browser 재배치 aa0e를 한 후보의 전체 검증으로 합치지 않는다. 54개 작업명·완료 기준은 그대로 유지한다.

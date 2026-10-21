@@ -1,0 +1,62 @@
+{
+  "workspace": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9",
+  "capture_directory": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/capture-fixed",
+  "source": "d06fc9229f2d46597933526d06863e0473c87874",
+  "port": 49445,
+  "backend_port": 49446,
+  "manifest": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/package/addons/vst-phrase/lane.toml",
+  "declaration": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/.masc/config/lane-addons/native-ui.toml",
+  "package_source_files": [
+    {
+      "path": "addons/vst-phrase/lane.toml",
+      "sha256": "e76352e9853cfb84bd977c4746fd894b235317035999dcf41e1fb3287b20b8c1"
+    },
+    {
+      "path": "addons/vst-phrase/server.py",
+      "sha256": "69b495a04982bdb96e5ff2d0a6005cd7a6e9b3d7bdafb7db4e3083ae63e23cd4"
+    },
+    {
+      "path": "addons/vst-phrase/Dockerfile",
+      "sha256": "84bf672180d6ddfa4a3a75ef9d5cc399e27a4d50b80acf019b2973340ab19a1d"
+    },
+    {
+      "path": "addons/protocol.py",
+      "sha256": "a8a614c64ae672c799201395d24571bbc7c79f3b5c4682fdd3130a7d72bc79fa"
+    }
+  ],
+  "docker_context": "desktop-linux",
+  "created_at": "2026-10-21T15:39:44.633163+00:00",
+  "server": "/tmp/masc-addon-native-39631388009/tui-macos-arm64-d06fc9229f2d46597933526d06863e0473c87874-39631388009/masc",
+  "tui": "/tmp/masc-addon-native-39631388009/tui-macos-arm64-d06fc9229f2d46597933526d06863e0473c87874-39631388009/masc-tui",
+  "server_pid": 27273,
+  "tui_pid": 35331,
+  "server_argv": [
+    "/tmp/masc-addon-native-39631388009/tui-macos-arm64-d06fc9229f2d46597933526d06863e0473c87874-39631388009/masc",
+    "start",
+    "--base-path",
+    "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "49446"
+  ],
+  "native_qualification": {
+    "run": 39631388009,
+    "source_sha": "d06fc9229f2d46597933526d06863e0473c87874",
+    "workflow_sha": "c3efec4db0a32c1bac8d298ccadd7506e06ec16f",
+    "hashes": {
+      "masc": "65579a888cb983a885fa58e2d41d991bdc86c9633ad77e6ea3eec1e225189898",
+      "masc-tui": "a36680cee406aecf07868d5fac11cd5b158509ee18e9d93ca4d1aaec5e7f3a00",
+      "key-reference.md": "7aae284947e0a787ed89cf8d991b501ce60890803eadac6bf308b10291cf3fa9"
+    },
+    "executed_build_identities": {
+      "masc": "d06fc9229f2d46597933526d06863e0473c87874",
+      "masc-tui": "d06fc9229f2d46597933526d06863e0473c87874"
+    },
+    "qualified_at": "2026-10-21T16:16:40.161401+00:00"
+  },
+  "dashboard_source_identity": {
+    "schema": "masc.dashboard-build.v1",
+    "source_commit": "d06fc9229f2d46597933526d06863e0473c87874"
+  }
+}

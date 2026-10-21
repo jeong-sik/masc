@@ -1,0 +1,15 @@
+{
+  "run": 39631388009,
+  "source_sha": "d06fc9229f2d46597933526d06863e0473c87874",
+  "workflow_sha": "c3efec4db0a32c1bac8d298ccadd7506e06ec16f",
+  "hashes": {
+    "masc": "65579a888cb983a885fa58e2d41d991bdc86c9633ad77e6ea3eec1e225189898",
+    "masc-tui": "a36680cee406aecf07868d5fac11cd5b158509ee18e9d93ca4d1aaec5e7f3a00",
+    "key-reference.md": "7aae284947e0a787ed89cf8d991b501ce60890803eadac6bf308b10291cf3fa9"
+  },
+  "executed_build_identities": {
+    "masc": "d06fc9229f2d46597933526d06863e0473c87874",
+    "masc-tui": "d06fc9229f2d46597933526d06863e0473c87874"
+  },
+  "qualified_at": "2026-10-21T16:16:40.161401+00:00"
+}

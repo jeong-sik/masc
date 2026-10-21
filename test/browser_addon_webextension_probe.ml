@@ -87,7 +87,12 @@ let () =
           Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
         ~error_handler:(fun _ ?request:_ _ _ -> failwith "unexpected fixture HTTP error") address flow) in
     Eio.Fiber.fork_daemon ~sw (fun () ->
-      while true do Eio.Net.accept_fork ~sw socket ~on_error:raise serve done;`Stop_daemon);
+      (* The fixture owns the external browser until after this probe exits.
+         Keep-alive connections must therefore retire with this daemon instead
+         of becoming ordinary children that keep the outer switch alive. *)
+      Eio.Switch.run (fun server_sw ->
+        while true do Eio.Net.accept_fork ~sw:server_sw socket ~on_error:raise serve done);
+      `Stop_daemon);
     let fixture_url=Printf.sprintf "http://127.0.0.1:%d/fixture" port in
     let workspace_port=require (Workspace_connection.port port |> Result.map_error Workspace_connection.error_message) in
     require (Workspace_connection.save ~base_path ~port:workspace_port |> Result.map_error Workspace_connection.error_message);

@@ -8,6 +8,17 @@ let test_original_and_owners () =
   let first,old=R.open_read ~key R.initial in
   let reopened,current=R.open_read ~key (R.close first) in
   let content=R.validate key original |> require in
+  let other,other_request=R.open_read ~key R.initial in
+  let refused=R.complete other (request old) (Error "foreign read failure") in
+  Alcotest.(check bool) "same-key generation cannot borrow another physical read owner" true
+    (R.request_job (request (R.pending refused))==R.request_job (request other_request));
+  let first=R.complete first (request old) (Ok content) in
+  let other=R.complete other (request other_request) (Ok content) in
+  let _,first_preparation=R.start_preparation ~width:40 first in
+  let other,other_preparation=R.start_preparation ~width:40 other in
+  let refused=R.complete_preparation other (request first_preparation) (Error "foreign preparation failure") in
+  Alcotest.(check bool) "same source facts cannot borrow another preparation owner" true
+    (R.preparation_job (request (R.pending_preparation refused))==R.preparation_job (request other_preparation));
   let stale=R.complete reopened (request old) (Ok content) in
   Alcotest.(check bool) "closed request cannot settle a same-key reopen" true
     (Result.is_error (R.source stale));
@@ -76,7 +87,66 @@ let test_binary_workspace_admission () = Eio_main.run (fun _ ->
     ~host:"another-server" ~port:8935 ~path:"/api/v1/artifact-bytes/digest" in
   Alcotest.(check bool) "endpoint mismatch never dispatches" true
     (bound (fun () -> Result.is_error (changed ())) && not !sent))
+let test_original_job_cancellation () = Eio_main.run (fun _ ->
+  Eio.Switch.run (fun sw ->
+    let ui=Masc_tui_types.create_state ~workspace:"owned-board-reader"
+      ~port:0 ~refresh_interval:0. () in
+    let never,_=Eio.Promise.create () in
+    let start job =
+      let entered,enter=Eio.Promise.create () in
+      let released,release=Eio.Promise.create () in
+      let cancelled=ref false in
+      Masc_tui_workspace_job.fork ~observation:true ~key:job
+        ~observe:(function
+          | Cancellation_requested -> cancelled:=true
+          | Registration_released -> Eio.Promise.resolve release ()) ui ~sw
+        (fun () -> Eio.Promise.resolve enter (); Eio.Promise.await never);
+      Eio.Promise.await entered;
+      cancelled,released in
+    let first,old=R.open_read ~key R.initial in
+    let old=request old in
+    let old_key=R.request_job old in
+    Alcotest.(check bool) "the pending request retains its registration key" true
+      (old_key==R.request_job (request (R.pending first)));
+    let old_cancelled,old_released=start old_key in
+    let reopened,current=R.open_read ~key (R.close first) in
+    let current=request current in
+    let current_key=R.request_job current in
+    Alcotest.(check bool) "same-reference reopen owns a different job" false
+      (old_key==current_key);
+    let current_cancelled,current_released=start current_key in
+    Masc_tui_workspace_job.cancel_observation ui ~key:old_key;
+    Eio.Promise.await old_released;
+    Alcotest.(check bool) "old cancellation reached its original worker" true !old_cancelled;
+    Alcotest.(check bool) "replacement worker is still registered" true
+      (not !current_cancelled && List.exists (fun (key,_) -> key==current_key)
+        ui.workspace_observation_cancellations);
+    let ready=R.complete reopened current (R.validate key original) in
+    let prepared,preparation=R.start_preparation ~width:40 ready in
+    let preparation=request preparation in
+    let preparation_key=R.preparation_job preparation in
+    Alcotest.(check bool) "preparation retains its own separate job" true
+      (preparation_key!=current_key && preparation_key==R.preparation_job
+        (request (R.pending_preparation prepared)));
+    let preparation_cancelled,preparation_released=start preparation_key in
+    let resized,replacement=R.start_preparation ~width:20 prepared in
+    let replacement=request replacement in
+    Alcotest.(check bool) "resize allocates a new preparation job" false
+      (preparation_key==R.preparation_job replacement);
+    let late=R.complete_preparation resized preparation (Ok []) in
+    Alcotest.(check bool) "late work cannot replace the resized pending job" true
+      (R.preparation_job (request (R.pending_preparation late))==R.preparation_job replacement);
+    Masc_tui_workspace_job.cancel_observation ui ~key:preparation_key;
+    Eio.Promise.await preparation_released;
+    Alcotest.(check bool) "preparation cancellation leaves source worker alone" true
+      (!preparation_cancelled && not !current_cancelled);
+    Masc_tui_workspace_job.cancel_observation ui ~key:current_key;
+    Eio.Promise.await current_released;
+    Alcotest.(check bool) "the original replacement worker was cancelled" true !current_cancelled;
+    Alcotest.(check bool) "cleanup releases every owned registry entry" true
+      (ui.workspace_observation_cancellations=[] && ui.workspace_cancellations=[])))
 let ()=Alcotest.run "Board original attachment reader" ["authority",[
   Alcotest.test_case "original bytes and superseded physical owners" `Quick test_original_and_owners;
   Alcotest.test_case "integrity and binary save boundary" `Quick test_integrity_and_binary;
-  Alcotest.test_case "binary GET workspace admission" `Quick test_binary_workspace_admission]]
+  Alcotest.test_case "binary GET workspace admission" `Quick test_binary_workspace_admission;
+  Alcotest.test_case "original observation job cancellation" `Quick test_original_job_cancellation]]

@@ -3774,11 +3774,13 @@ let launch_chat_call_read state ~mailbox =
     (begin_chat_call_read state)
 
 let cancel_board_preparation state =
-  Option.iter (fun request -> Masc_tui_workspace_job.cancel_observation state ~key:(Obj.repr request))
+  Option.iter (fun request -> Masc_tui_workspace_job.cancel_observation state
+    ~key:(Masc_tui_board_reader.preparation_job request))
     (Masc_tui_board_reader.pending_preparation state.board_reader)
 
 let close_board_reader state =
-  Option.iter (fun request -> Masc_tui_workspace_job.cancel_observation state ~key:(Obj.repr request))
+  Option.iter (fun request -> Masc_tui_workspace_job.cancel_observation state
+    ~key:(Masc_tui_board_reader.request_job request))
     (Masc_tui_board_reader.pending state.board_reader);
   cancel_board_preparation state;
   state.board_reader <- Masc_tui_board_reader.close state.board_reader;
@@ -3792,7 +3794,7 @@ let launch_board_read state ~mailbox key =
     state.board_reader_owner <- Some (state.workspace_authority,state.workspace_read_authority);
     let host=server_peer_host and port=state.port in
     Option.iter (fun request ->
-      launch_workspace_json_read ~key:(Obj.repr request) state ~mailbox
+      launch_workspace_json_read ~key:(Masc_tui_board_reader.request_job request) state ~mailbox
         ~deliver:(fun result -> Board_attachment_loaded (request,result))
         (fun () ->
           let ( let* ) = Result.bind in
@@ -3814,7 +3816,7 @@ let prepare_board_read state ~mailbox ~cols =
      | Some request ->
        cancel_board_preparation state;
        state.board_reader <- reader;
-       launch_workspace_result ~observation:true ~key:(Obj.repr request) state ~mailbox
+       launch_workspace_result ~observation:true ~key:(Masc_tui_board_reader.preparation_job request) state ~mailbox
          ~boundary_error:Fun.id ~deliver:(fun result -> Board_attachment_prepared (request,result))
          (fun () -> Masc_tui_response_decode.run ~name:"board.attachment.prepare_wait"
            (fun () -> Ok (Masc_tui_board_reader.prepare request))))

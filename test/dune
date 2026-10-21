@@ -5,7 +5,8 @@
 (test
  (name test_tui_board_reader)
  (modules test_tui_board_reader)
- (libraries masc_test_deps masc_tui_board_reader masc_tui_workspace_read))
+ (libraries masc_test_deps masc_tui_board_reader masc_tui_workspace_read
+  masc_tui_types masc_tui_workspace_job))
 
 (test
  (name test_tool_display)

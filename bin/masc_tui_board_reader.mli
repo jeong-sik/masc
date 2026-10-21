@@ -4,8 +4,13 @@ type key = { post_id : string; sha256 : string; bytes : int; name : string optio
 type presentation = Source | Markdown | Html
 type content
 type t
-type request = key Masc_tui_fetched.request
+type request
 type preparation_request
+val request_job : request -> unit ref
+val preparation_job : preparation_request -> unit ref
+(** Each physical request owns one stable workspace observation key. Read and
+    preparation keys are separate; closing and reopening allocates new keys.
+    Dispatch and cancellation must use the key of the same original request. *)
 val initial : t
 val key : t -> key option
 val equal_key : key -> key -> bool

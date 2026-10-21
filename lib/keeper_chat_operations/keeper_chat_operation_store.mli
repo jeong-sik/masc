@@ -214,7 +214,10 @@ val update_direct_input_checkpoint : t -> now:float ->
   (input_checkpoint_update, error) result
 (** Atomically advance the active direct native call and the trace's input
     owner. A stale input predecessor leaves both unchanged. The native-call
-    identity, operation digest and phase retain their existing validation. *)
+    identity, operation digest and phase retain their existing validation.
+    An uncertain commit remains Error even if it installed both references.
+    Reread native and input ownership together before reconciling; semantic
+    readback alone is not confirmation and blind retry is not permitted. *)
 
 val defer_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Operation.t, error) result

@@ -437,7 +437,9 @@ let test_input_and_native_checkpoint_commit_atomically () = with_store @@ fun _p
       (Keeper_checkpoint_ref.equal call.checkpoint (checkpoint 1))
    | No_native_call | Terminal_unacknowledged _ -> fail "native authority was lost");
   Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
-  rejected "uncertain input commit was claimed confirmed" (advance ());
+  (match advance () with
+   | Error (Store.Store_unavailable _) -> ()
+   | Ok _ | Error _ -> fail "uncertain input commit was not retained as a storage error");
   check_input "uncertain commit can have installed actual input owner" (Some (checkpoint 2)) store;
   (match read store with Native.Active call ->
     check bool "native ref and input owner advance together" true

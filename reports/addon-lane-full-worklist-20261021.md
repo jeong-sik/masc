@@ -15,7 +15,7 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
   이전 관측 보존·새 incarnation·새 입력 결과를 확인했다. 입력은 synthetic phrase snapshot이다.
 - Dashboard 8개 suite 145건 및 TypeScript 검사 통과. OCaml은 parser 검사만 수행했다.
   두 PR의 독립 source/evidence 검토는 PASS이며, 정식 GitHub 승인·병합·설치와 구분한다.
-- 위 두 PR과 A03 수정 #44721은 Native Stack #44710의 3개 층이며, 2026-10-21 후속 조회에서 모두 open/unmerged였다. 설계·작업표 층은 별도 추가 중이다.
+- 위 두 PR과 A03 수정 #44721, 경계·작업표 #44726은 Native Stack #44710의 4개 층이며, 2026-10-21 후속 조회에서 모두 Ready/open/unmerged였다. CI 개선 #44727·changelog #44731은 별도 Native Stack #44732다.
 - Browser Addon의 기존 6개 요구사항은 구현 및 범위를 고정한 분리 실측을 마쳤다.
   Deferred Tools·Hook 선택·host Exact Output도 그 범위에 포함된다.
   기존 완료 영수증 이후 Native Stack #44168이 67층으로 늘었으며,
@@ -35,11 +35,11 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | exact `7f9e34b` native 요청 run `39555509454` 접수, 결과 미확인 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
+| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | exact `7f9e34b` native run `39555509454` 실행 중; syntax job PASS, native artifact 미완료 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
 | A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 미실행 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
 | A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 `7f9e34b` 소스 수정·독립 검토 2건 PASS; parser PASS, 새 TUI 미실행 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
 | A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | #44707 현재 head 정식 승인 확인; #44721 재리뷰 접수, 맥락 queued | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
-| A05 | Browser 스택의 후속 3개 층과 기존 증거 영향 검토 | 세 층의 전체 delta 직독; 영향 두 suite 요청 run `39555413943` 접수, 실행 결과 미확인 | #44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증 |
+| A05 | Browser 스택의 후속 3개 층과 기존 증거 영향 검토 | 세 층의 전체 delta 직독; exact `76b741f` run `39555413943` 두 suite 14건 PASS, 독립 delta 검토 진행 | #44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증 |
 | A06 | 두 스택의 전체 통합 준비 | open/unmerged | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
 
 빌더 요청: `kmsg-2ada1cdc54884c58aa6736a80b598868`는 기존 `566b98b` 대상이다. 후속 exact 후보 `7f9e34b`는 native run `39555509454`로 요청했다. 중복 시작을 피하도록 빌더에게 대체 안내 `kmsg-1974c332ed1abfed8b4bde992b686e8f`를 보냈으며 안내 접수는 원래 작업 취소·실행 여부의 증거가 아니다.
@@ -51,7 +51,7 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| B01 | 각 Lane의 입력·판정·효과·저장소·자원 소유 경계 작성 | 실제 인터페이스·호출자 경계 문서 작성, 독립 검토 전 | 옮길 실행과 host에 남을 authority를 실제 `.mli`/호출자에 연결 |
+| B01 | 각 Lane의 입력·판정·효과·저장소·자원 소유 경계 작성 | 실제 인터페이스·호출자 경계 문서 작성, 독립 source/response 검토 PASS; 적용·통합 별도 | 옮길 실행과 host에 남을 authority를 실제 `.mli`/호출자에 연결 |
 | B02 | 기존 등록·호출 경로로 연결을 통일하고 중복 glue 정리 | 기존 기반 있음 | 새로운 도메인마다 server 분기·중복 singleton·별도 registry를 추가하지 않고 필요한 typed port로 연결 |
 | B03 | 설치 ID·instance·incarnation·request·revision·run 연결 일관화 | 일부 구현 | 원래 대상·결과를 조인할 수 있고 교체 worker에 이전 권한/응답을 넘기지 않음 |
 | B04 | Off·Detach·Drain·Cancel·실제 정리의 의미를 통일 | 기존 lifecycle 있음 | 새 호출 중지와 진행 중 호출의 종료/불확실 상태, 자원 정리 완료를 각각 기록 |
@@ -77,7 +77,7 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | D01 | Addon별 모델 route와 기능 활성화의 독립 선택 검증 확장 | Browser broker 있음 | LLM 없는 동작은 독립 실행되고, 설치/출력별 선택 모델이 실제 호출에 반영 |
-| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | 기존 grant 재사용·완전 domain decode·단계별 ID·불확실 결과 계약 초안; 독립 검토 및 구현 필요 | `Consumer_request_schema`의 권한·package baseline·요청 digest를 재사용; Grade enum·keeper 집합·weight 상한은 Candle의 완전한 domain decode로 검증 |
+| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | 기존 grant 재사용·완전 domain decode·단계별 ID·불확실 결과 계약 source/response 검토 PASS; 적용 구현 필요 | `Consumer_request_schema`의 권한·package baseline·요청 digest를 재사용; Grade enum·keeper 집합·weight 상한은 Candle의 완전한 domain decode로 검증 |
 | D03 | 모델 호출 전 요청 보존 및 원래 identity 결속 | 기반 있음 | request·stage·input·schema·route·trace를 보존한 뒤 한 번 dispatch |
 | D04 | 오류·거절·불확실 결과의 typed 처리 일관화 | 도메인별 차이 있음 | transport 불가/잘못된 출력/실행 거절/효과 불확실의 재시도 의미를 유지 |
 | D05 | credential·provider admission·동시 실행 권한을 host에 유지 | Browser 검증 있음 | worker/child에 비밀 유출 없음; 실제 provider별 queue·취소·동시성 동작 확인 |
@@ -169,9 +169,9 @@ Dashboard·TUI의 원래 근거 표시를 각각 확인한다. Optional은 Off �
 - A03: #44721, head `7f9e34bab08484124bb18a477ecb5e5ba0fb5769`, base `cc4529a905bb66db977785ee61894bea00d16ac1`. retained/unknown worker의 실행 키 안내에 handlers와 같은 `can_observe`를 사용한다. 이력·정리·원래 receipt 조회를 보존했다. OCaml parser와 diff 검사 PASS; 독립 source/response 리뷰 PASS. 새 실행 바이너리·화면 증거는 아직 없다.
 - B01/D02 경계 문서: [lane-addon-extraction-boundaries.md](../docs/design/lane-addon-extraction-boundaries.md). 현재 소스와 unmerged Browser 의존성, 옮길 실행/host authority, Candle의 단계별 요청 identity 및 typed 불확실 결과의 빈 경계를 명시했다. 문서가 실제 추출 완료를 뜻하지 않는다.
 - #44707 코드 리뷰의 추가 P3는 G01에 보존한다. 단일 PR 승인을 전체 Native Stack 승인으로 확대하지 않는다.
-- A01: [native run 39555509454](https://github.com/jeong-sik/masc/actions/runs/39555509454), source `7f9e34bab08484124bb18a477ecb5e5ba0fb5769`, workflow `cccb1fc4808435ed06ece3e586095f37d8dd449c`, scenario `addon-lifecycle`. 별도 CI PR #44727의 두 독립 source 검토는 최종 head PASS다. 두 기존 suite와 matching server/TUI/key generator를 선택했으며 실제 실행 결과는 아직 확인하지 않았다. 기존 TUI suite는 presentation assertion도 포함하는 mixed suite다. artifact 생성은 실제 화면 검증과 구분한다.
+- A01: [native run 39555509454](https://github.com/jeong-sik/masc/actions/runs/39555509454), source `7f9e34bab08484124bb18a477ecb5e5ba0fb5769`, workflow `cccb1fc4808435ed06ece3e586095f37d8dd449c`, scenario `addon-lifecycle`. 별도 CI PR #44727의 두 독립 source 검토는 최종 head PASS다. 두 기존 suite와 matching server/TUI/key generator를 선택했으며 실행 조회에서 source/config syntax job 성공, native job `119074243862` 실행 중을 확인했다. 완료 artifact는 아직 없다. 기존 TUI suite는 presentation assertion도 포함하는 mixed suite다. artifact 생성은 실제 화면 검증과 구분한다.
 - A05: #44695 전체 delta는 built-in/Addon action reply 정책 공유, #44698은 session/navigation 정책까지 같은 `Browser_lane.reply_timeout_sec`로 연결한다. #44702는 download의 remote claim 보유자를 무한히 기다리지 않고 local preparation만 join하며, 남은 claim이 있으면 파일·grant 상태를 보존한 sticky cleanup 실패를 남긴다. 입력 행동군이나 Safari 지원을 추가한 변경은 아니다.
-- A05 실행 요청: [run 39555413943](https://github.com/jeong-sik/masc/actions/runs/39555413943), source `76b741f8816f074249baef3166ca152d9c9d2c13`, `minimal=true`, `eio_backend=posix`, suites `test_browser_addon_reply_policy,test_browser_addon_downloads`. 기존 28-case 영수증을 최신 변경의 성공으로 재사용하지 않고 두 영향 경로만 새로 선택했다. 새 결과는 아직 미확인이다.
+- A05 실행 요청: [run 39555413943](https://github.com/jeong-sik/masc/actions/runs/39555413943), source `76b741f8816f074249baef3166ca152d9c9d2c13`, `minimal=true`, `eio_backend=posix`, suites `test_browser_addon_reply_policy,test_browser_addon_downloads`. 기존 28-case 영수증을 최신 변경의 성공으로 재사용하지 않고 두 영향 경로만 새로 선택했다. 완료된 job `119073936227` 로그를 직독해 exact source와 `MINIMAL_CHECK=true`, 두 selected suite, `TARGET_EIO_BACKEND=posix`를 확인했다. reply policy 1건·downloads 13건, 총 14건 PASS다. 실제 브라우저·provider·전체 회귀 실행은 이 두 suite의 범위가 아니다.
 
 ## 재개할 때 읽을 자료
 

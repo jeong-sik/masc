@@ -6546,11 +6546,14 @@ let decode_fleet_placeholder section =
          error)
 
 (* Server_routes_http_runtime.full_health_snapshot_metadata: every full body
-   carries it beside the sections, and its [status] says whether they are the
-   latest refresh. A [stale] snapshot keeps serving the last reading it
-   measured -- after a refresh timed out or raised, or when none has run
-   within the time to live -- so the fleet it carries is a past one (#38499).
-   The server always writes [computed_at_unix] and [stale_reason], and a
+   carries it beside the sections, and its [status] says whether their
+   observation certifies the current generation. A [stale] snapshot serves a measured observation
+   after invalidation, a refresh timeout/error, or TTL expiry. A successful
+   scan invalidated while running may replace the measured reading while
+   remaining stale; it does not certify the current generation (#38499).
+   [stale_reason] includes [invalidated] and is retained as a string, including
+   unrecognised values. The server always writes [computed_at_unix] and
+   [stale_reason], and a
    stale snapshot fills both. A time before 1970 is refused with the rest that
    are not times: the age drawn from it would overflow the integer it is
    counted in. *)

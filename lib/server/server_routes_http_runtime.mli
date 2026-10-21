@@ -232,7 +232,12 @@ val make_health_response_json :
     for refresh when it is missing or stale.  The HTTP handler must not
     synchronously run durable keeper scans; the Eio refresh loop started by
     {!start_full_health_snapshot_refresh_loop} performs those scans. Optional
-    [timing] records only this request's work, never background refresh work. *)
+    [timing] records only this request's work, never background refresh work.
+
+    A successful scan invalidated while running is still a measured
+    observation: publish its fields/time as [stale], retain the first stale
+    timestamp across unsuccessful attempts to obtain a current observation,
+    and request a successor. It never certifies the current generation. *)
 
 val make_health_response_body :
   ?listener:string ->
@@ -294,9 +299,10 @@ module For_testing : sig
 
   val run_full_health_refresh_worker :
     sw:Eio.Switch.t ->
-    compute:(unit -> (unit, Proactive_refresh.failure) result) -> unit
+    compute:(unit -> ((string * Yojson.Safe.t) list, Proactive_refresh.failure) result) -> unit
   (** Runs an injected compute through the production full-health singleflight
-      coordinator. [Error failure] represents a completed compute that returned a
+      coordinator. [Ok fields] supplies the measured fields, so observations
+      from successive workers can be distinguished. [Error failure] represents a completed compute that returned a
       failed observation (not a thrown worker exception). The worker is attached
       to [sw], not to a caller timeout. *)
 

@@ -1743,9 +1743,14 @@ let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~princi
       let result = connection.call_exported_tool ~on_result ~authorize ~principal ~name:export.tool.name ~arguments in
       (* Worker-owned state is not an input source, so source-change hints alone
          cannot reveal a tool's effect. Refresh its observation after a completed
-         reply, including a worker error that may have changed machine state. *)
+         reply, including a worker error that may have changed machine state.
+         Such a reply can also have admitted a durable host request. Signal the
+         same instance's host cycle after RPC serialization has unwound; merely
+         observing its rows never lists or dispatches that request. *)
       (match result with
-       | Ok _ -> if not e.stopping then wake e
+       | Ok _ -> if not e.stopping then (
+           wake e;
+           if Option.is_some connection.host then wake_host e)
        | Error (Lane_addon_call_context.Host_refusal _) -> ()
        | Error (Lane_addon_call_context.Transport_error detail) ->
            if not e.stopping then (

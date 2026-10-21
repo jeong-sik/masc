@@ -1757,9 +1757,9 @@ let test_task_history_current_sources () = with_workspace (fun _env _sw base_pat
     (List.exists (fun (event:Masc.Tui_decode.task_history_event) ->
       event.th_actor=Some keeper && event.th_label="task.created"
       && Option.is_some event.th_origin) decoded.history_events);
-  let emit kind = ignore (Masc.Activity_graph.emit config ~kind
-    ~actor:(Masc.Activity_graph.entity ~kind:"agent" keeper)
-    ~subject:(Masc.Activity_graph.entity ~kind:"task" task_id)
+  let emit kind = ignore (Activity_graph.emit config ~kind
+    ~actor:(Activity_graph.entity ~kind:"agent" keeper)
+    ~subject:(Activity_graph.entity ~kind:"task" task_id)
     ~payload:(`Assoc ["task_id",`String task_id]) ~tags:["task"] ()) in
   emit "task.started";
   let first=History.read ~config ~task_id ~max_events:1 () |> page in

@@ -1285,6 +1285,7 @@ let backend ~store () = match !override with
                 (Lane_addon_native_worker.process_identity worker) in
               Ok {
                 resource;
+                resolved_image=None;
                 exported_tools=(fun () -> Lane_addon_native_worker.exported_tools worker);
                 action_schema=(fun () -> Lane_addon_native_worker.action_schema worker);
                 call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->

@@ -18,7 +18,12 @@ let wait clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.005; loop ()) in loop ()
 let server = {|import json,os,sys
 root=sys.argv[1]
-schema={"type":"object","properties":{"context":{"type":"object"},"request_id":{"type":"string"},"action":{"type":"object"}},"required":["context","request_id","action"]}
+schema={"type":"object","properties":{
+    "context":{"type":"object","properties":{"instance_id":{"type":"string"},"incarnation":{"type":"string"}},
+        "required":["instance_id","incarnation"],"additionalProperties":False},
+    "request_id":{"type":"string"},
+    "action":{"type":"object","properties":{},"additionalProperties":False}},
+    "required":["context","request_id","action"],"additionalProperties":False}
 with open(os.path.join(root,"spawned"),"w") as out: out.write(str(os.getpid()))
 for line in sys.stdin:
     req=json.loads(line)
@@ -73,7 +78,12 @@ tool = "lane_act"
     |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
   let detached id = let item = inspect id in
     text "kind" (member "phase" item)="detached" && text "runtime_presence" item="retained" in
-  let ready id = (inspect id |> member "observation_seq" |> Yojson.Safe.Util.to_int)>0 in
+  let ready id =
+    let current = inspect id in
+    match require (Lane_addon_lifecycle.state_of_json (member "lifecycle" current)) with
+    | Lane_addon_lifecycle.Failed failure -> fail (Lane_addon_lifecycle.failure_detail failure.cause)
+    | Detaching _ | Detached _ -> fail "native fixture retired before observation"
+    | Attached | Observing -> (current |> member "observation_seq" |> Yojson.Safe.Util.to_int)>0 in
   let id = attach () in wait clock (fun () -> ready id);
   let captured = inspect id in
   check string "durable admission is native" "host_process"

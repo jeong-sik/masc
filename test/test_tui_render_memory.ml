@@ -509,7 +509,7 @@ let test_memory_search_uses_the_filter_text_and_query () =
   let fact = { original with mf_claim = "deploy"; mf_category = Cat.Fact;
                             mf_origin = "authored" } in
   answer_memory_facts state { snapshot with mfs_ordinary =
-    Masc.Tui_decode_memory_facts.Memory_store_present { ordinary with mos_facts = [fact] } };
+    Masc.Tui_decode_memory_facts.Memory_store_present { mos_facts = [fact] } };
   let verify ~typing query expected =
     state.search <- if typing then Some query else None;
     state.search_last <- if typing then "unrelated committed query" else query;

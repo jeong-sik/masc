@@ -50,3 +50,16 @@ explicit. They are not lifetime spending. Token usage comes from the canonical
 usage counters rather than hardware prompt/decode timing counters. The input to
 output ratio uses only paired observations; zero output and unobserved output
 are distinct, and no synthetic denominator or health threshold is introduced.
+
+## Loading selected observations
+
+The lightweight fleet execution snapshot does not include Keeper metrics series.
+The status tab reads the selected Keeper's dated metrics store once, and offers an
+explicit refresh. Leaving the tab aborts that read. It does not request full fleet
+history or heavyweight Keeper status, and adds no polling loop.
+
+The visible receipt states when it was read, the requested physical-row window,
+rows examined, projected executions and skipped malformed or unsupported rows.
+Heartbeat rows contribute to the scan count without becoming turn observations.
+Read errors are distinct from a successfully read empty store. These charts describe
+the loaded window; a completed refresh is not a claim of continuous live sampling.

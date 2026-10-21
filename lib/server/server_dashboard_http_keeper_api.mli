@@ -18,6 +18,19 @@ val tool_call_entries :
     read is the [Error], which [/tool-calls] answers as 503
     [tool_call_store_unavailable]; it is never an empty list. *)
 
+val keeper_metrics_response :
+  config:Workspace.config ->
+  keeper_name:string ->
+  Httpun.Request.t ->
+  [ `OK | `Bad_request | `Service_unavailable ] * Yojson.Safe.t
+(** Selected Keeper's bounded metrics tail. [limit] defaults to the Dashboard's
+    fixed 120-row window; query overrides are rejected. Only the selected
+    metrics store is read, using strict chronological physical-row coverage.
+    Successful responses include [series], [window_summary], [scanned_rows],
+    [skipped_rows] and the effective [limit]. Malformed JSON, retired schemas
+    and invalid metric records count as skipped; valid heartbeat rows belong
+    to the summary. Missing stores are empty, read failures are 503. *)
+
 val keeper_tool_call_lookup_response :
   config:Workspace.config ->
   keeper_name:string ->

@@ -202,6 +202,7 @@ let keeper_get_permission ?(include_thinking = false) req_path =
   if keeper_path_ends_with req_path keeper_suffix_trajectory && include_thinking
   then Some Masc_domain.CanAdmin
   else if keeper_path_ends_with req_path keeper_suffix_turn_records
+       || keeper_path_ends_with req_path "/metrics"
   then Some Masc_domain.CanReadState
   else if
     is_keeper_checkpoints_get_path req_path

@@ -648,6 +648,11 @@ let test_keeper_sensitive_get_permissions_are_exact () =
   check bool "turn records require authenticated state read" true
     (permission "/api/v1/keepers/fixture-keeper/turn-records"
      = Some Masc_domain.CanReadState);
+  check bool "metrics require authenticated state read" true
+    (permission "/api/v1/keepers/fixture-keeper/metrics"
+     = Some Masc_domain.CanReadState);
+  check bool "metrics permission does not accept extra segments" true
+    (permission "/api/v1/keepers/fixture-keeper/metrics/extra" = None);
   check bool "turn records route rejects trailing segment" true
     (permission "/api/v1/keepers/fixture-keeper/turn-records/extra" = None);
   check bool "ordinary keeper read stays public" true
@@ -7938,6 +7943,88 @@ let test_tool_calls_select_keeper_before_limiting () =
         [Some "99";Some "100";Some "101"] (outputs latest))
 ;;
 
+let test_keeper_metrics_reads_selected_strict_window () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let module Store = Dated_jsonl in
+  let keeper = "metrics-selected" in
+  let read ?(name = keeper) query =
+    let request = Httpun.Request.create `GET
+      ("/api/v1/keepers/" ^ name ^ "/metrics" ^ query) in
+    Server_dashboard_http_keeper_api.keeper_metrics_response
+      ~config ~keeper_name:name request
+  in
+  let expect_ok query = match read query with
+    | `OK, json -> json
+    | (`Bad_request | `Service_unavailable), json -> fail (Yojson.Safe.to_string json)
+  in
+  let write path contents =
+    Fs_compat.mkdir_p (Filename.dirname path);
+    let channel = open_out_bin path in
+    Fun.protect ~finally:(fun () -> close_out channel)
+      (fun () -> output_string channel contents)
+  in
+  let metric trace ts =
+    `Assoc (Lib.Keeper_metrics_record.fields Lib.Keeper_metrics_record.Turn @
+      [ "ts_unix", `Float ts; "trace_id", `String trace; "channel", `String "turn"
+      ; "latency_ms", `Int 20; "turn_mode", `String "text_response"
+      ; "tools_used", `List []; "tool_call_count", `Int 0
+      ; "usage", `Assoc ["input_tokens", `Int 120; "output_tokens", `Int 80]
+      ; "cost_usd", `Float 0.01
+      ; "inference_telemetry", `Assoc
+          ["provider", `String "private-provider";
+           "nested", `Assoc ["model", `String "private-model"; "ttft_ms", `Int 2]]
+      ])
+  in
+  let heartbeat = `Assoc
+    (Lib.Keeper_metrics_record.fields Lib.Keeper_metrics_record.Heartbeat @
+      ["ts_unix", `Float 15.; "channel", `String "heartbeat"]) in
+  let store = Lib.Keeper_types_support.keeper_metrics_store config keeper in
+  let path = Filename.concat (Store.base_dir store) "2026-10/21.jsonl" in
+  write path (String.concat "\n"
+    [Yojson.Safe.to_string (metric "first" 10.); "{broken"; "{}";
+     Yojson.Safe.to_string (`Assoc (Lib.Keeper_metrics_record.fields Lib.Keeper_metrics_record.Turn));
+     Yojson.Safe.to_string heartbeat; Yojson.Safe.to_string (metric "last" 20.)] ^ "\n");
+  (* Another Keeper's corrupt layout must not participate in the selected read. *)
+  let foreign = Lib.Keeper_types_support.keeper_metrics_store config "metrics-foreign" in
+  write (Filename.concat (Store.base_dir foreign) "invalid-layout") "not metrics";
+  let open Yojson.Safe.Util in
+  let json = expect_ok "" in
+  check string "selected Keeper" keeper (json |> member "keeper" |> to_string);
+  check int "prior dashboard default" 120 (json |> member "limit" |> to_int);
+  check int "physical rows include malformed JSON" 6 (json |> member "scanned_rows" |> to_int);
+  check int "malformed, retired and invalid records are explicit" 3
+    (json |> member "skipped_rows" |> to_int);
+  check int "valid heartbeat belongs to summary" 1
+    (json |> member "window_summary" |> member "heartbeat_points" |> to_int);
+  let series = json |> member "series" |> to_list in
+  check (list string) "turns retain chronological identity" ["first"; "last"]
+    (List.map (fun row -> row |> member "trace_id" |> to_string) series);
+  let last = List.nth series 1 in
+  check int "actual usage survives projection" 120
+    (last |> member "usage" |> member "input_tokens" |> to_int);
+  check (float 0.000001) "actual cost survives projection" 0.01
+    (last |> member "cost_usd" |> to_float);
+  check bool "provider telemetry redacted" true
+    (last |> member "inference_telemetry" |> member "provider" = `Null);
+  check bool "nested model telemetry redacted" true
+    (last |> member "inference_telemetry" |> member "nested" |> member "model" = `Null);
+  List.iter (fun query -> check bool "fixed window rejects limit overrides" true
+    (fst (read query) = `Bad_request))
+    ["?limit=120"; "?limit=4"; "?limit=0"; "?limit=-1"; "?limit=abc"; "?limit=2&limit=3"];
+  check bool "invalid Keeper cannot select a store" true
+    (fst (read ~name:"../metrics-selected" "") = `Bad_request);
+  (match read ~name:"metrics-absent" "" with
+   | `OK, empty -> check int "missing store is a readable empty window" 0
+       (empty |> member "scanned_rows" |> to_int)
+   | (`Bad_request | `Service_unavailable), json -> fail (Yojson.Safe.to_string json));
+  let broken = Lib.Keeper_types_support.keeper_metrics_store config "metrics-unreadable" in
+  write (Store.base_dir broken) "not a directory";
+  (match read ~name:"metrics-unreadable" "" with
+   | `Service_unavailable, failure -> check string "store failure is explicit"
+       "metrics_store_unavailable" (failure |> member "code" |> to_string)
+   | (`OK | `Bad_request), json -> fail (Yojson.Safe.to_string json))
+;;
+
 let test_skill_evidence_joins_activation_and_composition () =
   let source_id =
     match Skill_source_config.source_id_of_string "workspace" with
@@ -8308,6 +8395,8 @@ let () =
       ( "dashboard behavior contracts",
         [ test_case "board close route rejects wrong typed decisions" `Quick
             test_board_close_route_rejects_wrong_typed_decisions_without_closing;
+          test_case "Keeper metrics reads only the selected strict window" `Quick
+            test_keeper_metrics_reads_selected_strict_window;
           test_case "Skill evidence joins activation and composition" `Quick
             test_skill_evidence_joins_activation_and_composition;
           test_case "GitHub login stream includes CORS" `Quick

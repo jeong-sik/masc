@@ -1,2 +1,0 @@
-### Fixed
-- Show selected Skill performance above the Tools catalog with mean executor-duration and outcome-distribution charts; `f` selects and loads the next Composition without scrolling through Normal Skills.

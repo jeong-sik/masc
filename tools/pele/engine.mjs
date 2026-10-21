@@ -87,7 +87,12 @@ function retainedSvg(source) {
           }
         }
         break;
-      case 7: case 10:
+      case 7:
+        // xmldom retains the XML declaration as a PI; it is not a stylesheet
+        // instruction and is valid only at the beginning of this document.
+        if (node.target === 'xml' && node.parentNode === document && node === document.firstChild) break;
+        throw new Error('Processing instructions are unavailable in terminal SVG');
+      case 10:
         throw new Error('Processing instructions and DOCTYPE are unavailable in terminal SVG');
     }
     for (const child of Array.from(node.childNodes ?? [])) inspect(child);

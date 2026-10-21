@@ -17,11 +17,15 @@ test('retained SVG uses real resvg, internal references and aspect-preserving do
   assert.deepEqual(geometry(result.png), [100, 50]);
   assert.equal(result.svg, svg);
   assert.deepEqual(geometry(renderDocument({ format: 'svg', source: svg, maxWidth: 800 }).png), [400, 200]);
+  const declared = '<?xml version="1.0" encoding="UTF-8"?>' + svg;
+  assert.deepEqual(geometry(renderDocument({ format: 'svg', source: declared, maxWidth: 100 }).png), [100, 50]);
 });
 
 test('SVG source is required to be well-formed markup, not an HTML document or repaired XML', () => {
   for (const source of ['', '<html><svg/></html>', '<svg/>',
     '<svg xmlns="http://www.w3.org/2000/svg"><g></svg>',
+    '<?xml bogus?>' + svg, '<?xml version="2.0"?>' + svg,
+    '<?xml version="1.0"?><?xml version="1.0"?>' + svg,
     '<!DOCTYPE svg><svg xmlns="http://www.w3.org/2000/svg"/>',
     '<?xml-stylesheet href="file:///not-opened.css"?><svg xmlns="http://www.w3.org/2000/svg"/>']) {
     assert.throws(() => renderDocument({ format: 'svg', source, maxWidth: 100 }));

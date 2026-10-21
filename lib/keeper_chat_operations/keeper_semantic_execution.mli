@@ -141,6 +141,13 @@ val checkpoint_references : t -> Keeper_checkpoint_ref.t list
     direct operation's references all live directly under the session root,
     in the directory named by the reference's trace id. *)
 
+val continuation_checkpoints : t -> Keeper_checkpoint_ref.t list
+(** Current native checkpoint and phase-specific continuations, all under
+    their trace directories in the session root. The immutable native admission seed is excluded;
+    it is historical evidence, not the latest pending-input authority. If a
+    phase independently references that same seed, its continuation remains.
+    {!checkpoint_references} still includes every seed for retention/cleanup. *)
+
 val gate_approval_ids : t -> string list
 (** Approval ids this execution may still read from the Gate store: the
     obligations of a Gate wait or of the wait it is resuming, and the approval

@@ -167,10 +167,10 @@ that is safe to delete and do not provide a cleanup operation. Repeating a
 failed or uncertain preparation creates another bundle, rather than repairing
 the first one or proving that the earlier attempt made no write.
 
-Both preparation and inspection report `ready_to_install=false`. Explicit
-prior-input reconciliation, source revalidation before any future installation,
-atomic installation and rollback remain to be implemented. This command cannot
-make an unresolved copied journal usable by a Keeper.
+Both preparation and inspection report `ready_to_install=false`. The explicit
+input-selection step below can prepare a separate derivative. Source revalidation
+before installation, atomic installation and rollback remain to be implemented.
+Preparation alone cannot make the copied journal usable by a Keeper.
 
 ### Explicit prior-input adoption in a derivative
 
@@ -200,20 +200,66 @@ establish which rows actually exist; it cannot certify file/directory syncs or
 turn the earlier error into a confirmed publication.
 
 The original published bundle stays immutable: its verifier requires zero
-input rows. Future operator integration must retain it, bind a derivative and
-the explicit decision to its source bundle/SHA and Keeper/current trace, verify
-and durably retain each exact payload at the input owner's session location,
-then publish a separate reconciliation manifest. Conflicting pending/consumed
-evidence and active or unknown-effect native calls require an explicit repair
-decision; a file's existence does not resolve them. Existing native continuation
-admission and the input producer's complete-pending/message-prefix checks remain
-in force. A history cut or compaction cannot bypass those checks through this
-primitive; its lineage remains unresolved until a separate valid witness exists.
+input rows. Native continuation admission and the input producer's complete
+pending/message-prefix checks remain in force. A history cut or compaction
+cannot bypass those checks through this primitive; its lineage remains
+unresolved until a separate valid witness exists.
 
-This layer provides only database derivation and relationship verification.
-No operator adoption command, derivative manifest, payload-selection authority,
-installation or rollback is implemented here. It does not make the CLI report
-`ready_to_install=true`, unblock every historical trace, or complete #38005.
+### Select exact input evidence and publish an adoption bundle
+
+After reviewing the original bundle, assess the selected Keeper's current trace:
+
+```bash
+masc workspace-upgrade --base-path WORKSPACE --journal-input BUNDLE_ID --trace TRACE_ID
+masc workspace-upgrade --base-path WORKSPACE --adopt-journal-input BUNDLE_ID --trace TRACE_ID --checkpoint-sha256 CHECKPOINT_SHA256
+masc workspace-upgrade --base-path WORKSPACE --journal-adoption ADOPTION_ID
+```
+
+Assessment is read-only. It requires an internally verified source bundle,
+unchanged live v2 journal, strict current Keeper metadata naming the trace, and
+an owned canonical checkpoint whose exact bytes decode for that trace. It shows
+the complete pending request and checkpoint digest. Current native and phase
+continuations must have the same complete pending request and preserve their
+messages as an exact prefix of the selected canonical history. An immutable
+native admission seed is checked separately for preserved seed-to-latest message
+history; its older pending field is not current input authority. A phase that
+independently names that seed still receives the full pending check. Conflicting history, an active
+native call, or unknown native effects require explicit repair. This command
+does not choose the newest file, infer acceptance from empty pending input, or
+reconstruct an earlier consumed answer from the old journal.
+
+The second command is an explicit operator decision to adopt that exact current
+input state as the selected baseline. It requires the assessed checkpoint digest,
+acquires the configured BasePath lease and revalidates journal, metadata,
+canonical bytes, source-bundle files and named retained history. It confirms
+durable retention at the input owner's session location, then writes a separate
+private `.masc/upgrades/journal-inputs/<adoption-id>/` bundle containing exact
+`metadata.json`, exact `checkpoint.json`, `adopted.sqlite3` and a manifest published
+last. The live journal, metadata, canonical checkpoint and original bundle remain
+unchanged. Only the selected trace gains an input reference; the global unknown
+history floor and every original journal cell remain intact.
+
+A source change before manifest publication refuses publication and preserves
+partial files and retained artifacts. Retention errors preserve their full typed
+installation outcome; cancellation carried by post-commit unwind is re-raised
+with its original backtrace. A visible manifest with uncertain parent sync returns
+`durability_confirmed=false`. Keep all evidence after failures or uncertainty;
+there is no automatic repair, cleanup or permission to retry blindly.
+
+The third command verifies the source bundle, private metadata/checkpoint,
+exact selected reference, actual retained payload and derivative database in
+read-only mode. A missing retained payload is refused even if the canonical file
+still exists; verification never recreates it or borrows canonical authority.
+Rehashing changed derivative cells does not make them match the original journal.
+This verifies an internal relationship, not current live-source freshness, past
+fsyncs or human authorship against a process running under the same UID. Startup
+cleanup may remove an unreferenced retained artifact before installation; restart
+verification then refuses rather than recreating it.
+
+All these outputs keep `ready_to_install=false`. Installation, rollback,
+history-cut/compaction reconciliation, new-trace birth, host-response admission,
+reconnection and the persistent TUI waiting-state surface remain separate work.
+This preparation does not complete #38005 or make a running Keeper use the copy.
 
 ### Input checkpoint producer boundary
 

@@ -4291,19 +4291,36 @@ let workspace_upgrade_cmd =
     ~doc:"Preserve an offline journal and prepare a private recovery bundle; does not install it.") in
   let journal_bundle = Arg.(value & opt (some string) None & info ["journal-bundle"] ~docv:"BUNDLE_ID"
     ~doc:"Verify an existing private journal bundle without installation or source changes.") in
-  let run base_path apply source_sha256 restore journal prepare_journal journal_bundle =
-    let action = match apply, source_sha256, restore, journal, prepare_journal, journal_bundle with
-      | None, None, None, None, None, None -> Some Masc_cli_workspace_upgrade.Inspect
-      | Some keeper_name, Some source_sha256, None, None, None, None -> Some (Apply {keeper_name; source_sha256})
-      | None, None, Some backup_id, None, None, None -> Some (Restore {backup_id})
-      | None, None, None, Some keeper_name, None, None -> Some (Inspect_journal keeper_name)
-      | None, Some source_sha256, None, None, Some keeper_name, None -> Some (Prepare_journal {keeper_name;source_sha256})
-      | None, None, None, None, None, Some bundle_id -> Some (Inspect_journal_bundle bundle_id)
+  let journal_input = Arg.(value & opt (some string) None & info ["journal-input"] ~docv:"BUNDLE_ID"
+    ~doc:"Assess exact current input evidence against a preserved journal bundle without writes.") in
+  let adopt_journal_input = Arg.(value & opt (some string) None & info ["adopt-journal-input"] ~docv:"BUNDLE_ID"
+    ~doc:"Explicitly adopt the assessed canonical input into a separate bundle; does not install it.") in
+  let trace = Arg.(value & opt (some string) None & info ["trace"] ~docv:"TRACE_ID"
+    ~doc:"Select the current trace named by the Keeper metadata and canonical checkpoint.") in
+  let checkpoint_sha256 = Arg.(value & opt (some string) None & info ["checkpoint-sha256"] ~docv:"SHA256"
+    ~doc:"Require the exact checkpoint digest displayed by --journal-input.") in
+  let journal_adoption = Arg.(value & opt (some string) None & info ["journal-adoption"] ~docv:"ADOPTION_ID"
+    ~doc:"Verify an existing input-adoption bundle and retained payload without writes.") in
+  let run base_path apply source_sha256 restore journal prepare_journal journal_bundle
+      journal_input adopt_journal_input trace checkpoint_sha256 journal_adoption =
+    let action = match apply, source_sha256, restore, journal, prepare_journal, journal_bundle,
+        journal_input, adopt_journal_input, trace, checkpoint_sha256, journal_adoption with
+      | None, None, None, None, None, None, None, None, None, None, None -> Some Masc_cli_workspace_upgrade.Inspect
+      | Some keeper_name, Some source_sha256, None, None, None, None, None, None, None, None, None -> Some (Apply {keeper_name; source_sha256})
+      | None, None, Some backup_id, None, None, None, None, None, None, None, None -> Some (Restore {backup_id})
+      | None, None, None, Some keeper_name, None, None, None, None, None, None, None -> Some (Inspect_journal keeper_name)
+      | None, Some source_sha256, None, None, Some keeper_name, None, None, None, None, None, None -> Some (Prepare_journal {keeper_name;source_sha256})
+      | None, None, None, None, None, Some bundle_id, None, None, None, None, None -> Some (Inspect_journal_bundle bundle_id)
+      | None, None, None, None, None, None, Some bundle_id, None, Some trace_id, None, None -> Some (Inspect_journal_input {bundle_id;trace_id})
+      | None, None, None, None, None, None, None, Some bundle_id, Some trace_id, Some checkpoint_sha256, None ->
+        Some (Adopt_journal_input {bundle_id;trace_id;checkpoint_sha256})
+      | None, None, None, None, None, None, None, None, None, None, Some adoption_id -> Some (Inspect_journal_adoption adoption_id)
       | _ -> None in
     match action with Some action -> Masc_cli_workspace_upgrade.run ~base_path ~action
-    | None -> prerr_endline "Choose one inspection, configuration upgrade/restore, or journal preparation with its assessed --source-sha256."; 1 in
+    | None -> prerr_endline "Choose one workspace-upgrade action with its required source digest, or input trace and checkpoint digest."; 1 in
   Cmd.v (Cmd.info "workspace-upgrade" ~doc:"Inspect configuration upgrades and preserve offline journal recovery bundles.")
-    Term.(const run $ base_path $ apply $ source_sha256 $ restore $ journal $ prepare_journal $ journal_bundle)
+    Term.(const run $ base_path $ apply $ source_sha256 $ restore $ journal $ prepare_journal $ journal_bundle
+      $ journal_input $ adopt_journal_input $ trace $ checkpoint_sha256 $ journal_adoption)
 
 let antigravity_account_cmd =
   let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in

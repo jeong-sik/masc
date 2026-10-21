@@ -5366,9 +5366,18 @@ let launch_lane_addons ?target state ~mailbox request =
                | Error detail -> Some (Addons.Request_failure
                    ("Broadcast receipt received; retry tracking could not be confirmed: " ^ detail)))
           | Some _,None -> Some (Addons.Request_failure "Broadcast workspace scope is unavailable") in
-        (match inspect () with
-         | Ok snapshot -> Ok (reply ~snapshot ~receipt ?diagnostic ~inventory_read:`Read ())
-         | Error detail -> Ok (reply ~receipt ?diagnostic ~inventory_read:(`Failed detail) ()))
+        (match request with
+         | Addons.Evidence _ ->
+             (* Preserving evidence does not change worker inventory. That
+                inventory omits retained rows, so applying it here would erase
+                the original result view after its receipt was saved. *)
+             Ok (reply ~receipt ?diagnostic ())
+         | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ ->
+             (match inspect () with
+              | Ok snapshot -> Ok (reply ~snapshot ~receipt ?diagnostic ~inventory_read:`Read ())
+              | Error detail -> Ok (reply ~receipt ?diagnostic ~inventory_read:(`Failed detail) ()))
+         | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _
+         | Addons.Subscriptions _ -> assert false)
   in
   launch_workspace_request
     ~operation:(match request with

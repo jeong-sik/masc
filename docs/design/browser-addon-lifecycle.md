@@ -646,13 +646,36 @@ failed: the four generic installation cases advertised an invalid action schema
 and timed out before observation. The [fixture repair](https://github.com/jeong-sik/masc/pull/44642)
 declares the existing closed action/context contract and reports typed lifecycle
 failures immediately; it does not change product validation or timeout values.
+The focused retry [39532506931](https://github.com/jeong-sik/masc/actions/runs/39532506931)
+selects only `test_lane_addon_native_runtime` at composition
+`cfcc25688c121f8e92cacb164d5740d6dc842dcf` (reviewed fixture source
+`9304ac5f09b03c9103bd200ea7e0789ed46e3bef` plus those two runner paths).
 Execution after that repair is still unverified.
 
 Current-source Chrome [39531126420](https://github.com/jeong-sik/masc/actions/runs/39531126420)
-and live BiDi [39531129073](https://github.com/jeong-sik/masc/actions/runs/39531129073)
-were requested at `f30b0253085887587e23162a894d916fe2ccaad9` on workflow
-`f14befbde7638f40c26e8e2b74138970f3cccc04` to verify those backends after
-the common environment change. A request is not a completed result.
+passed 43/43 steps in each private and persistent mode. Each mode recorded five
+scripted HTTP model requests/responses with JSON mode and the canonical schema
+instruction, trusted input, cookies, held-model cancellation without replay,
+fresh incarnation and cleanup assertions. Its JSON records steps and model
+traffic, not ordinary MCP receipts; the screenshots show the reset fixture page.
+
+Live BiDi [39531129073](https://github.com/jeong-sik/masc/actions/runs/39531129073)
+passed 28/28 steps with 17 tool receipts. Trusted hover/click/double-click/drag,
+partial tab creation, original child settlement, persistent profile and fresh
+worker/client/claim passed. The held navigation arrived once; interrupted input
+kept `effect_outcome_unknown` and stale input did not reach the fixture. Its log
+also retains `BiDi command cancelled; download cleanup requires confirmed backend teardown`.
+This is not a successful orderly backend Retire receipt: original native claim
+settlement and host allocation cleanup independently confirm owned-process
+cleanup. The preserved raw PNG is not a Keeper-store reread after cleanup;
+that artifact guarantee is covered by the Gecko transfer evidence instead.
+
+Both runs compiled exact source `f30b0253085887587e23162a894d916fe2ccaad9`
+on workflow `f14befbde7638f40c26e8e2b74138970f3cccc04`, after the common
+environment projection. Source/workflow records, all four native input hashes,
+actual JSON outcomes and PNGs were inspected independently. The later fixture
+repair changes only its test, documentation and changelog; product and browser
+probes are unchanged.
 
 Full regression, personal-site sessions, installed TUI behavior, other browser
 families, formal whole-stack approval and merge remain separate claims.

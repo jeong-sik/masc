@@ -41,13 +41,20 @@ revalidates actual authority before effects.
 `Decision.decode`/`Ledger.apply` or `Briefing.decode_output`/`accept`. It does not
 write the ledger, publish briefing, complete an observer or decide to retry.
 The actual owner's original-flow semantic acceptance port and commit recovery
-journal still have to consume this captured request.
+still have to consume this captured request. The shared
+[original request progress](addon-original-request-progress.md) records host
+intent, uncertainty and expected-state observations alongside the capture;
+production owner integration and strict restart discovery remain separate work.
 
 The five `test_workspace_memory_execution_capture` scenarios use actual owner
 retention and a fresh store handle, preserve exact input/render after an override
 change, reject changed provenance/owner/schema, reject copied/replaced physical
 roots, preserve a briefing's private chunk and test the held-root final check.
-Parser/source review are not compiled execution or live worker/UI proof.
+Exact `d4d54edcd444d46c0405505e9808d684e18f1d5b` selected execution
+[39653626146](https://github.com/jeong-sik/masc/actions/runs/39653626146)
+completed successfully: these five scenarios and six related suites, 92 tests
+total. This validates that source and selected behavior; it is not a new progress
+implementation's execution, live worker/UI proof or production installation.
 
 Remaining E02 work includes production metadata capture, accepted-work inventory
 and lifecycle, original-flow semantic validation and typed failures, uncertain

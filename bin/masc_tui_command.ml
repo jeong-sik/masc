@@ -5,6 +5,7 @@ type t =
       body : string;
     }
   | Task_recover
+  | Task_inspect
   | Task_missing_title
   | Help
   | Features
@@ -104,6 +105,8 @@ let queue_help =
    reads first is whichever list nobody updated. *)
 let catalog =
   [ { word = "login"; aliases = []; args = "[client]"; summary = "sign in to an official client and verify a model connection" }
+  ; { word = "task-inspect"; aliases = []; args = "";
+      summary = "inspect the original retained Task creation without repeating it" }
   ; { word = "task-recover"
     ; aliases = []
     ; args = ""
@@ -390,6 +393,7 @@ let parse text =
     let line = String.sub first 1 (String.length first - 1) in
     match split_word line with
     | "task-recover", "" -> Task_recover
+    | "task-inspect", "" -> Task_inspect
     | "task", "" -> Task_missing_title
     | "task", title -> Task_for_keeper { title; body }
     | "errors", "" -> Show_load_errors

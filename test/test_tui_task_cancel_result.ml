@@ -436,6 +436,141 @@ let test_creation_receipt_refusals_and_corrupt_primary env () = Eio.Switch.run @
   check bool "refused lookup cannot repair or replace its primary" true
     (Yojson.Safe.from_string (Fs_compat.load_file primary)=corrupt)
 
+module Creation_read = Masc_tui_task_creation_read
+let retained_actual_creation state call ~workspace ~request_id =
+  let intent={ (creation_intent ~workspace ~original:"/task inspect original\noriginal body"
+    ~title:"inspect original" ~body:"original body") with request_id } in
+  let original=begin_task_dispatch state intent and committed=ref None in
+  Dispatch.launch original.tdr_dispatch ~prepare:(fun () -> Ok "original-session")
+    ~send:(fun ~session_id ~request_id ~arguments ->
+      let answer=send_creation call ~session_id ~request_id ~arguments |> require_ok in
+      committed := Some (Wire.task_id_of_add_task answer.text |> require_ok);
+      Error "controlled lost reply after actual commit");
+  await_task original;
+  (match take_task_dispatch_completion state original with Some (Dispatch.Unconfirmed _) -> ()
+   | _ -> fail "original creation outcome was rewritten");
+  original,(match !committed with Some id -> id | None -> fail "fixture creation never committed")
+let inspect_actual call source =
+  let arguments=match Creation_read.arguments source with Ok args -> args
+    | Error _ -> fail "original workspace arguments were not available" in
+  let response=call (Wire.request_body ~request_id:"original-inspection" ~tool:"masc_tasks" ~arguments) in
+  match Wire.outcome_of_body ~request_id:"original-inspection" (Yojson.Safe.to_string response) with
+  | Ok answer -> Creation_read.decode source answer
+  | Error detail -> Error (Creation_read.Read_failed detail)
+let launch_inspection results state call request =
+  let source=request.tcr_original.tdr_inspection in
+  let envelope=Protocol.capture_workspace_message state in
+  Results.launch ~key:request.tcr_job ~observation:true state ~results
+    ~boundary_error:(fun detail -> Creation_read.Read_failed detail)
+    ~deliver:(fun result -> envelope (Protocol.Task_creation_read_done (request,result)))
+    (fun () -> inspect_actual call source)
+let rec owned_message results = match Results.take_ready results with
+  | [] -> Eio.Fiber.yield ();owned_message results
+  | [ready] -> ready.message
+  | _ -> fail "fixture admitted unrelated owned results"
+let admit_inspection state = function
+  | Protocol.Workspace_scoped (authority,reading,(Protocol.Task_creation_read_done (request,result) as message)) ->
+    if Protocol.workspace_message_admitted state ~authority ~reading message then
+      complete_task_creation_inspection state request result else false
+  | _ -> fail "inspection lost its original workspace observation envelope"
+let original_unconfirmed original = match Dispatch.progress original.tdr_dispatch with
+  | Completed {outcome=Unconfirmed _;_} -> ()
+  | _ -> fail "inspection rewrote original creation transport evidence"
+let creation_state base workspace =
+  let state=create_state ~workspace:"creation-inspection" ~local_base_path:base ~port:8935 ~refresh_interval:2. () in
+  state.server_identity <- Some workspace;state.workspace_identity <- Workspace_identity_match;
+  state.msg_target_keeper_name <- Some "creation-keeper";state
+let begin_inspection state = match begin_task_creation_inspection state with
+  | Some request -> request | None -> fail "explicit original inspection did not begin"
+let recorded original task_id = match Creation_read.observation original.tdr_inspection with
+  | Masc_tui_fetched.Ready (Creation_read.Recorded receipt) ->
+    check string "exact actual created Task observed" task_id receipt.task_id
+  | _ -> fail "actual original creation fact was not retained"
+
+let test_original_inspection_and_refused_actual_reply env () = Eio.Switch.run @@ fun sw ->
+  let clock=Eio.Stdenv.clock env in
+  with_server ~clock ~sw ~owner:"inspect-original" @@ fun base config workspace _original call ->
+  Eio_context.with_turn_switch sw @@ fun () ->
+  let state=creation_state base workspace in
+  let original,task_id=retained_actual_creation state call ~workspace ~request_id:"inspect-exact-original" in
+  let before=Masc.Workspace.get_tasks_raw config in
+  (match Masc_tui_command.parse "/task-inspect" with Task_inspect -> () | _ -> fail "explicit inspection intent missing");
+  check bool "original failed request is inspectable" true (open_task_creation_inspection state ~keeper:"creation-keeper");
+  let request=begin_inspection state and results=Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  launch_inspection results state call request;
+  Input.insert state.msg_input "newer input while original creation is inspected";
+  check bool "actual original receipt admitted" true (admit_inspection state (owned_message results));
+  recorded original task_id;original_unconfirmed original;
+  check (option string) "only ready exact fact offers explicit Task inspection" (Some task_id)
+    (Creation_read.recorded_task original.tdr_inspection);
+  (* Read another actual protocol key, then offer that real answer to the
+     original source. It must not become an empty/foreign success. *)
+  let retry=begin_inspection state in
+  let response=call (Wire.request_body ~request_id:"different-original" ~tool:"masc_tasks"
+    ~arguments:["creation_request_id",`String "another-request"]) in
+  let answer=Wire.outcome_of_body ~request_id:"different-original" (Yojson.Safe.to_string response) |> require_ok in
+  let result=Creation_read.decode original.tdr_inspection answer in
+  (match result with Error (Creation_read.Invalid_reply _) -> () | _ -> fail "foreign original request was accepted");
+  check bool "refused reply settles only its current source" true (complete_task_creation_inspection state retry result);
+  (match Creation_read.observation original.tdr_inspection with
+   | Masc_tui_fetched.Stale (Creation_read.Recorded receipt,Creation_read.Invalid_reply _) ->
+       check string "failed recheck keeps original fact" task_id receipt.task_id
+   | _ -> fail "refused reply erased the retained creation fact");
+  check (option string) "stale fact grants no ready Task-open decision" None
+    (Creation_read.recorded_task original.tdr_inspection);
+  original_unconfirmed original;
+  check string "read result preserves newer input" "newer input while original creation is inspected" (Input.contents state.msg_input);
+  check bool "inspection never creates another Task or changes resources" true (before=Masc.Workspace.get_tasks_raw config);
+  check bool "inspection never grants a Keeper handoff" true (state.pending_task_followups=[])
+
+let test_inspection_reopen_history_and_workspace_withdrawal env () = Eio.Switch.run @@ fun sw ->
+  let clock=Eio.Stdenv.clock env in
+  with_server ~clock ~sw ~owner:"inspect-scope-a" @@ fun base config workspace _original call ->
+  with_server ~clock ~sw ~owner:"inspect-scope-b" @@ fun _other other_config other_workspace _other_task _other_call ->
+  Eio_context.with_turn_switch sw @@ fun () ->
+  let state=creation_state base workspace in
+  let original,task_id=retained_actual_creation state call ~workspace ~request_id:"inspect-reopened-original" in
+  check bool "original inspection opened" true (open_task_creation_inspection state ~keeper:"creation-keeper");
+  let first=begin_inspection state and results=Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  launch_inspection results state call first;
+  let late=owned_message results in
+  close_task_creation_inspection state ~reason:Creation_read.Interrupted;
+  check bool "same original inspector can reopen" true (open_task_creation_inspection state ~keeper:"creation-keeper");
+  let second=begin_inspection state in
+  launch_inspection results state call second;
+  check bool "new original ticket admitted" true (admit_inspection state (owned_message results));
+  recorded original task_id;
+  check bool "old completed reply cannot finish reopened same original" false (admit_inspection state late);
+  recorded original task_id;
+  let newer,newer_id=retained_actual_creation state call ~workspace ~request_id:"inspect-newer-original" in
+  let neighbor=match task_creation_neighbor state ~older:false with Some original -> original
+    | None -> fail "newer retained original disappeared" in
+  check bool "history chooses original identity, not equal title" true (neighbor==newer && neighbor!=original);
+  close_task_creation_inspection state ~reason:Creation_read.Interrupted;
+  check bool "newer exact original selectable" true (select_task_creation_inspection state neighbor);
+  let latest=begin_inspection state in
+  launch_inspection results state call latest;
+  check bool "newer exact actual fact admitted" true (admit_inspection state (owned_message results));
+  recorded newer newer_id;
+  let before=Masc.Workspace.get_tasks_raw config and other_before=Masc.Workspace.get_tasks_raw other_config in
+  let withdrawn=begin_inspection state in
+  launch_inspection results state call withdrawn;
+  let late_foreign=owned_message results in
+  suspend_workspace_readings state;
+  state.workspace_authority <- Workspace_authority 1;
+  state.server_identity <- Some other_workspace;
+  check bool "foreign workspace never displays the original inspector" true (current_task_creation_reader state=None);
+  check bool "late original reading cannot borrow foreign workspace" false (admit_inspection state late_foreign);
+  (match Creation_read.observation newer.tdr_inspection with
+   | Masc_tui_fetched.Stale (Creation_read.Recorded receipt,Creation_read.Workspace_unconfirmed _) ->
+       check string "withdrawal retains its last original creation fact" newer_id receipt.task_id
+   | _ -> fail "withdrawal erased the original reading or left it pending");
+  original_unconfirmed original;original_unconfirmed newer;
+  check bool "original Task resources unchanged by all reads" true (before=Masc.Workspace.get_tasks_raw config);
+  check bool "foreign actual Task resources remain untouched" true (other_before=Masc.Workspace.get_tasks_raw other_config)
+
 let () = Eio_main.run @@ fun env ->
   let snapshot = Eio_context.snapshot_state () in
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -455,4 +590,8 @@ let () = Eio_main.run @@ fun env ->
         test_case "lost actual creation reply, equal titles, duplicates and deletion retain exact facts" `Quick
           (test_creation_receipt_after_lost_reply_and_duplicate_request env);
         test_case "actual creation refusals and corrupt primary never borrow recovery authority" `Quick
-          (test_creation_receipt_refusals_and_corrupt_primary env)]])
+          (test_creation_receipt_refusals_and_corrupt_primary env);
+        test_case "original actual creation inspection and refused cross-request reply preserve input" `Quick
+          (test_original_inspection_and_refused_actual_reply env);
+        test_case "actual receipt inspection survives reopen/history and refuses foreign workspace" `Quick
+          (test_inspection_reopen_history_and_workspace_withdrawal env)]])

@@ -86,7 +86,7 @@ let start t = match selected t with
       match Fetched.refresh ~equal:String.equal t.fetched ~key:choice.execution_id with
       | Fetched.Already_loading -> t,None
       | Started (fetched,request) ->
-          let document = if t.choosing then Reading.create ~title:"Original call" [] else t.document in
+          let document = if t.choosing then Reading.create_observation ~title:"Original call" [] else t.document in
           let t={t with choosing=false;fetched;document} in
           {t with document=result_document t},Some request
 let complete t request result =

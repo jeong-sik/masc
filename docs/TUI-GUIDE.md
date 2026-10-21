@@ -662,19 +662,25 @@ names. A line that starts with `/` is a command for the TUI instead:
 - `/task-recover` — restores the latest retained failed or unconfirmed Task
   command for this Keeper and matching workspace. It only restores input;
   it does not create or send a Task. A server error or missing reply does not
-  prove that creation failed: inspect Tasks before repeating the command.
+  prove that creation failed: use `/task-inspect` before repeating the command.
   While creation is active, the shared footer distinguishes preparation, awaiting
   a reply, and a result awaiting UI application within its existing width rules.
   New text, attachment and reference edits survive late replies, including
   changing the draft and returning to empty.
   Retained commands live in this TUI session; they are not restart recovery.
-  New `/task` creations also commit their original request ID with the Task.
-  An explicit `masc_tasks` call with `creation_request_id` and the original
-  `expected_workspace` reads that creation fact. `recorded` names the Task ID;
-  `not_observed` is inconclusive, and repeated request IDs are `ambiguous`.
-  This lookup does not repeat creation or prove current Task status. The TUI
-  does not yet perform this reconciliation automatically; `/task-recover`
-  remains an input-copy action.
+- `/task-inspect` — opens retained Task creations for this Keeper and the
+  confirmed original workspace. `[` selects an older request, `]` a newer one,
+  and `r` reads its exact creation fact again. The original title, body and
+  transport outcome remain visible beside the lookup. A failed refresh keeps
+  the last fact and its failure. “Not observed” does not prove that creation
+  failed; multiple records remain ambiguous. After a single ready creation
+  fact, `o` opens its matching loaded Task through the usual Tasks view. If no
+  matching row is loaded, the inspector stays open and reports that current
+  presence is unconfirmed. The creation fact itself does not prove current
+  status or completion. Esc closes the inspector.
+  Inspection never repeats creation, restores input or hands work to a Keeper.
+  New input survives late replies. Closing/reopening or changing workspace
+  retires old reply admission; retained observations belong to this TUI session.
 
 - `/diff` — opens the working-tree Git changes directly in chat. Pressing
   `Enter`, `d`, or `Right` opens the file's Git diff inline with syntax

@@ -9261,6 +9261,48 @@ let drain_queued_message state ~base_path ~mailbox =
   end
 ;;
 
+(* Exact original creation inspection is a read-only workspace observation. *)
+let cancel_task_creation_read state =
+  Option.iter (fun reader ->
+    let original=reader.tci_original in
+    let pending=original.tdr_inspection_pending in
+    retire_task_creation_request original ~reason:Masc_tui_task_creation_read.Interrupted;
+    Option.iter (fun request -> Masc_tui_workspace_job.cancel_observation state ~key:request.tcr_job) pending)
+    state.task_creation_reader
+
+let close_task_creation_reader state =
+  cancel_task_creation_read state;
+  close_task_creation_inspection state ~reason:Masc_tui_task_creation_read.Interrupted
+
+let launch_task_creation_read state ~mailbox =
+  cancel_task_creation_read state;
+  Option.iter (fun request ->
+    let source=request.tcr_original.tdr_inspection in
+    let intent=Masc_tui_task_creation_read.origin source in
+    let identity=intent.workspace and authority=request.tcr_authority in
+    let host=server_peer_host and port=state.port and session=state.mcp_session in
+    let rpc_id=Printf.sprintf "%s:creation-read:%Ld" intent.request_id
+      (Masc_tui_fetched.request_id request.tcr_ticket) in
+    launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
+      ~boundary_error:(fun detail -> Masc_tui_task_creation_read.Read_failed detail)
+      ~deliver:(fun result -> Task_creation_read_done (request,result)) (fun () ->
+        let ( let* ) = Result.bind in
+        let workspace_error detail=Masc_tui_task_creation_read.Workspace_unconfirmed detail in
+        let* arguments=Masc_tui_task_creation_read.arguments source in
+        let* ()=check_workspace_request state ~mailbox ~authority ~identity ~host ~port ()
+          |> Result.map_error workspace_error in
+        let* session_id=(match session with Some id -> Ok id
+          | None -> Masc_tui_http.open_mcp_session ~host ~port ~client_version:Runtime_build_version.current)
+          |> Result.map_error (fun detail -> Masc_tui_task_creation_read.Read_failed detail) in
+        let* ()=check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached
+          state ~mailbox ~authority ~identity ~host ~port () |> Result.map_error workspace_error in
+        let* answer=Masc_tui_http.call_mcp_tool ~host ~port ~session_id ~request_id:rpc_id
+          ~tool:"masc_tasks" ~arguments
+          |> Result.map_error (fun detail -> Masc_tui_task_creation_read.Read_failed detail) in
+        Masc_tui_response_decode.run ~name:"tui.task_creation.decode"
+          (fun () -> Masc_tui_task_creation_read.decode source answer)))
+    (begin_task_creation_inspection state)
+
 (* /task in the composer or the chat pane: create the task first, then hand
    the keeper the operator's words with the task id in front. Creation runs
    on the original switch; only its request-owned receipt mutates UI state. The MCP session
@@ -9274,7 +9316,7 @@ let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
     | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _), _
     | Workspace_identity_match, None -> None in
   let intent : Masc_tui_task_dispatch.intent = {
-    request_id=Printf.sprintf "tui-task-%.6f" (Unix.gettimeofday ());
+    request_id="tui-task-" ^ Random_id.uuid_v7 ();
     keeper=keeper_name;title;body;original;workspace} in
   let request = begin_task_dispatch state intent in
   if not (keeper_available_for_new_message state keeper_name) then
@@ -11124,7 +11166,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
     Option.is_some state.msg_recall_replaces
     && match command with
       | Masc_tui_command.Say _ -> false
-      | Masc_tui_command.Task_for_keeper _ | Task_recover | Task_missing_title | Help | Features
+      | Masc_tui_command.Task_for_keeper _ | Task_recover | Task_inspect | Task_missing_title | Help | Features
       | Show_load_errors | About
       | Lane_addons _ | Play_invites | Play_link _ | Play_invite _ | Play_revoke _ | Play_invalid _
       | Open_metrics | Account_login _ | Open_settings | Open_diff | Open_patch_modal | Open_usage
@@ -11820,6 +11862,15 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (Printf.sprintf
            "unknown command /%s (text is sent as typed; /help lists commands)"
            word)
+  | Masc_tui_command.Task_inspect ->
+      (match (match keeper_name with Some _ as named -> named | None -> state.msg_target_keeper_name) with
+       | None -> report_action state "error" "/task-inspect needs the original Keeper"
+       | Some keeper ->
+         close_task_creation_reader state;
+         if open_task_creation_inspection state ~keeper then begin
+           Masc_tui_message_input.clear state.msg_input;
+           launch_task_creation_read state ~mailbox
+         end else report_action state "error" "No retained Task creation for this Keeper and confirmed original workspace")
   | Masc_tui_command.Task_recover ->
       (match (match keeper_name with Some _ as named -> named | None -> state.msg_target_keeper_name) with
        | None -> report_action state "error" "/task-recover needs the original Keeper"
@@ -17034,7 +17085,7 @@ let handle_composer_key state ~base_path ~mailbox key =
              | None -> ()
            end;
            state.view <- Keepers Keeper_message
-       | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_recover | Masc_tui_command.Task_missing_title
+       | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_recover | Masc_tui_command.Task_inspect | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.Features
        | Masc_tui_command.Show_load_errors
        | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
@@ -17401,7 +17452,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
         | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
         | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
         | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_opened _
-        | Observer_received (_, _) | Observer_closed _ | Task_dispatch_completed _ -> ())
+        | Observer_received (_, _) | Observer_closed _ | Task_dispatch_completed _ | Task_creation_read_done _ -> ())
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
@@ -18267,6 +18318,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            | Repositories | Code | Changes | Connectors | Runtime | Config
            | Resources | Tools | System_logs ->
                ()))
+  | Task_creation_read_done (request,result) ->
+      ignore (complete_task_creation_inspection state request result)
   | Task_dispatch_completed request ->
       (match take_task_dispatch_completion state request with
        | None -> ()
@@ -18286,10 +18339,10 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
               report_action state "error" (Printf.sprintf "task for %s was not sent: %s; /task-recover retains the command"
                 intent.keeper detail)
           | Server_error detail ->
-              report_action state "error" (Printf.sprintf "task creation for %s returned an error: %s; inspect Tasks before /task-recover"
+              report_action state "error" (Printf.sprintf "task creation for %s returned an error: %s; use /task-inspect before /task-recover"
                 intent.keeper detail)
           | Unconfirmed detail ->
-              report_action state "error" (Printf.sprintf "task creation outcome for %s is unconfirmed: %s; inspect Tasks before /task-recover"
+              report_action state "error" (Printf.sprintf "task creation outcome for %s is unconfirmed: %s; use /task-inspect before /task-recover"
                 intent.keeper detail)))
   | Observer_closed outcome ->
       let reason =
@@ -18656,7 +18709,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            state.goal_confirmation <- Goal_confirmation.Inspecting read
        | Runtime_form_save_changed _, _ | Keeper_settings_save_changed _, _ -> ()
        | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
-       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_logs_loaded _ | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatch_completed _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
+       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_logs_loaded _ | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( Fusion_launch_options_loaded (_, _) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( Board_vote_done _ | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( Verification_evidence_loaded (_, _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Browser_activity_read (_, _) | ( Browser_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( Resources_listed _ | ( Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_read (_, _) | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | ( Task_dispatch_completed _ | Task_creation_read_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
       | Ok message ->
           state.goal_action_pending <- None;
@@ -24756,6 +24809,7 @@ and is loaded on demand through keeper_skill.
          each did. *)
       reconcile_detail_reading state;
       if Option.is_none (current_chat_call_reader state) then close_chat_call_reader state;
+      if Option.is_none (current_task_creation_reader state) then close_task_creation_reader state;
       let text_target = text_input_target state ~compact_viewport in
       let recovered_paste = Option.is_some interrupted_paste in
       let machine_activity_on_screen () =
@@ -24811,6 +24865,7 @@ and is loaded on demand through keeper_skill.
           the composer under the card would put the link [y] just copied into a
           draft that goes to a Keeper on the next Enter. It is first, above the
           overlays the card is drawn over. *)
+       | Some (Pasted _) when Option.is_some (current_task_creation_reader state) -> ()
        | Some (Pasted _) when Option.is_some (current_chat_call_reader state) -> ()
        | Some (Pasted _) when Option.is_some (current_detail_reading state) -> ()
        | Some (Pasted _) when state.msx_open -> ()
@@ -26501,6 +26556,49 @@ and is loaded on demand through keeper_skill.
        (* /about is modal for the help sheet's reason: Esc closes it, c turns
           the candle to its other style, and everything else is swallowed so
           no surface binding or global quit fires under it. *)
+       | Some k when Option.is_some (current_task_creation_reader state) ->
+           (match current_task_creation_reader state with
+            | None -> ()
+            | Some reader ->
+              let original=reader.tci_original in
+              let source=original.tdr_inspection in
+              let count,height=Masc_tui_render_overlays.detail_reading_viewport state
+                (Masc_tui_task_creation_read.document source) in
+              if k="esc" then close_task_creation_reader state
+              else if k="r" then launch_task_creation_read state ~mailbox:async_messages
+              else if k="[" || k="]" then
+                (match task_creation_neighbor state ~older:(k="[") with
+                 | None -> ()
+                 | Some original ->
+                   close_task_creation_reader state;
+                   if select_task_creation_inspection state original then
+                     launch_task_creation_read state ~mailbox:async_messages)
+              else if k="o" then
+                (match Masc_tui_task_creation_read.recorded_task source with
+                 | None -> ()
+                 | Some task_id when not (List.exists (fun (task : Masc_domain.task) -> task.id=task_id)
+                     (task_domain_values state)) ->
+                   report_action state "task"
+                     (task_id ^ " creation is recorded; this Task is not in the loaded Task rows. The original inspector remains open; current presence/status is unconfirmed.")
+                 | Some task_id ->
+                   close_task_creation_reader state;
+                   goto_surface state ~mailbox:async_messages Planning;
+                   state.planning_mode <- Planning_list;
+                   state.task_detail_id <- Some task_id;state.task_detail_scroll <- 0;
+                   state.task_history <- Masc_tui_fetched.clear state.task_history;
+                   state.task_focus <- Masc_tui_overview_tasks.land_on state.tasks ~task_id;
+                   launch_task_history_load state ~mailbox:async_messages task_id)
+              else
+                let movement=match k with
+                  | "j" | "down" | "wheel-down" -> Some (Masc_tui_detail_reading.By 1)
+                  | "k" | "up" | "wheel-up" -> Some (Masc_tui_detail_reading.By (-1))
+                  | "pagedown" -> Some (Masc_tui_detail_reading.By height)
+                  | "pageup" -> Some (Masc_tui_detail_reading.By (-height))
+                  | "home" | "g" -> Some Masc_tui_detail_reading.First
+                  | "end" | "G" -> Some Masc_tui_detail_reading.Last
+                  | _ -> None in
+                Option.iter (fun movement -> original.tdr_inspection <-
+                  Masc_tui_task_creation_read.move ~count ~height movement source) movement)
        | Some k when Option.is_some (current_chat_call_reader state) ->
            (match state.chat_call_reader with
             | None -> ()

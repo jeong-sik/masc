@@ -45,9 +45,11 @@ def read(request_id):
     return admitted({"kind": "read", "request_id": request_id})
 
 
-def observe(incarnation):
-    return call("lane_observe", {"context": {"instance_id": incarnation, "incarnation": incarnation},
-                                 "binding": {"sources": []}, "sources": []})
+def observe():
+    # The host sends context only to packages declaring an action tool.
+    # Candle is a derive-only package, even though its exported tools use
+    # the separate host-admitted caller envelope.
+    return call("lane_observe", {"binding": {"sources": []}, "sources": []})
 
 
 def listing():
@@ -79,7 +81,8 @@ class CandleWorker(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
             original = request()
-            first = self.run_worker(state, [observe("worker-old"), submit(original), listing()])
+            first = self.run_worker(state, [observe(), submit(original), listing()])
+            self.assertEqual(self.output(first[0])["rows"][0]["fields"]["pending"], 0)
             self.assertEqual(self.output(first[1])["state"], "pending")
             exact = self.output(first[2])["requests"]
             self.assertEqual(exact, [{"kind": "exact_output", "request_id": "grade-1", "output": "grade",
@@ -87,8 +90,9 @@ class CandleWorker(unittest.TestCase):
                                       "messages": [{"role": "user", "text": original["prompt"]}]}])
             answer = {"status": "answered", "output": {"grade": "A"}, "slot": "original-slot",
                       "usage": {"input_tokens": 11, "output_tokens": 3}}
-            second = self.run_worker(state, [observe("worker-new"), listing(), deliver("grade-1", answer),
+            second = self.run_worker(state, [observe(), listing(), deliver("grade-1", answer),
                                              read("grade-1"), listing()])
+            self.assertEqual(self.output(second[0])["rows"][0]["fields"]["pending"], 1)
             self.assertEqual(self.output(second[1])["requests"], exact)
             self.assertEqual(self.output(second[2]), {"accepted": True})
             self.assertEqual(self.output(second[3]), {"request_id": "grade-1", "state": "finished", "result": answer})

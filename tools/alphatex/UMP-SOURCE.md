@@ -90,6 +90,16 @@ part of the sequencer objective tracked by #44748. Focused source/worker/control
 and native-protocol checks do not establish installed Ghostty or physical-device
 behavior.
 
+On macOS, run `node tools/alphatex/native/test-edited-ump-wire.mjs` from the
+repository root to check edited capture packets through the actual Worker and
+unchanged native source transport into private CoreMIDI MIDI2 destinations.
+It compares per-source received words against explicit pitch/velocity/index/
+controller/release values, observes owned-note/pedal cleanup on cancellation,
+and emits a receipt with actual received words and retired owner state. It uses
+the Swift compiler and CoreMIDI, without opening an existing instrument or
+replacing the installed application. This is virtual-endpoint evidence; it does
+not establish physical latency, audio/MIDI sample alignment or visible Ghostty.
+
 Protocol: [MMA/AMEI UMP 1.1.2](https://amei-music.github.io/midi2.0-docs/amei-pdf/M2-104-UM_v1-1-2_UMP_and_MIDI_2-0_Protocol_Specification.pdf),
 §7.4.2, §7.4.14–7.4.15.3 and Appendix C. Attribute 3 makes Note Number an index;
 absolute pitch overrides previous tuning for that attack only. The persisted

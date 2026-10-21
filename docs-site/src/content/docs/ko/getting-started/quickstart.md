@@ -12,8 +12,9 @@ curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh
 bash /tmp/masc-install.sh
 ```
 
-설치기가 작업 공간을 둘 디렉터리를 묻습니다. 이어서 설정할 때도 같은 경로를 사용하세요.
-`--base-path`는 `.masc`가 **들어 있는 디렉터리**입니다. 스크립트를 먼저 읽으려면
+터미널에서 마법사가 켜져 있고 `--base-path`가 없으면 설치기가 작업 공간 경로를 묻습니다.
+이 질문도 직접 지정한 경로도 없으면 현재 디렉터리를 사용합니다. 이어서 설정할 때도 같은
+경로를 사용하세요. `--base-path`는 `.masc`가 **들어 있는 디렉터리**입니다. 스크립트를 먼저 읽으려면
 다운로드 성공 후 `less /tmp/masc-install.sh`로 확인하고(`q`로 종료), `bash` 명령을 실행합니다.
 특정 버전을 고정하려면 그 태그의 설치기를 받고 `--version TAG`도 지정해야 합니다.
 자세한 예시는 [설치 가이드](https://github.com/jeong-sik/masc/blob/main/docs/INSTALL.ko.md)를 참고하세요.
@@ -46,8 +47,12 @@ bash /tmp/masc-install.sh
 `activation_mode = "manual"`, `sandbox_profile = "docker"`,
 `sandbox_image = "base"`, `network_mode = "inherit"`이며 설정 중 다른 실행 환경을
 선택할 수 있습니다. 다른 작업 공간이 포트를 쓰면 `--port 8936`을 지정하세요.
-대화형 여정은 TUI를 열기 전에 `--no-tui`로 서버를 준비하므로 대화 화면에서 나가도
-준비된 서버는 계속 실행됩니다. 같은 작업 공간의 읽기 전용 상태 보고는 `masc doctor`로 확인합니다.
+터미널에서 샌드박스·네트워크 옵션 없이 `masc setup`을 실행하면 대화형 여정이 열립니다.
+이 여정은 `--no-tui`로 서버를 준비한 뒤 TUI를 따로 열므로 대화에서 나가도 서버를 유지합니다.
+반면 `masc setup`에 샌드박스·네트워크 옵션을 직접 지정하면 TUI 종료 시 setup이 직접
+시작한 서버도 종료합니다. 서버를 유지하고 따로 접속하려면 `--no-tui`를 붙이세요.
+기존 서버에 연결한 경우에는 그 서버를 종료하지 않습니다.
+같은 작업 공간의 읽기 전용 상태 보고는 `masc doctor`로 확인합니다.
 
 TUI에서 **Keepers → imp**를 선택하고 다음을 하나씩 요청하세요.
 

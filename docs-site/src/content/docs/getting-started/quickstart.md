@@ -13,8 +13,10 @@ curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh
 bash /tmp/masc-install.sh
 ```
 
-The installer asks which directory should hold your workspace. Keep that choice
-when resuming; `--base-path` names the directory **containing** `.masc`.
+With a terminal, the wizard enabled and no `--base-path`, the installer asks
+which directory should hold your workspace. Without that prompt or an explicit
+path, it uses the current directory. Keep the same path when resuming;
+`--base-path` names the directory **containing** `.masc`.
 To inspect the script, download it successfully, read it with
 `less /tmp/masc-install.sh` (`q` exits), then run the `bash` command.
 To pin a release, download its installer and also pass `--version TAG`; see the
@@ -50,8 +52,12 @@ Setup preserves existing Keeper configuration. A freshly seeded `imp` defaults
 to `activation_mode = "manual"`, `sandbox_profile = "docker"`,
 `sandbox_image = "base"` and `network_mode = "inherit"`; setup can select another
 backend. If another workspace occupies the port, add `--port 8936`.
-The interactive journey prepares its server with `--no-tui` before opening the
-TUI, so leaving the conversation does not stop that prepared server.
+In a terminal, `masc setup` without sandbox or network options opens the guided
+journey. It prepares its server with `--no-tui` before opening the TUI separately,
+so leaving that conversation does not stop the prepared server. When you pass
+sandbox or network options directly to `masc setup`, leaving its TUI stops a
+server that setup started itself. Add `--no-tui` to keep that server running and
+connect separately. Setup does not stop a server it reused.
 Use `masc doctor` for a read-only report on the same workspace.
 
 In the TUI, select **Keepers → imp** and send these requests one at a time:

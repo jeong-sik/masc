@@ -40,8 +40,8 @@ step.
    "$HOME/.local/bin/masc" setup
    ```
 
-   Use your chosen binary directory if you changed `--prefix`. Setup uses the
-   workspace selected during installation; to name it explicitly, add
+   Use your chosen binary directory if you changed `--prefix`. To resume in
+   the workspace selected during installation, add
    `--base-path /path/to/your/workspace` with that same directory. Setup checks
    the selected model and sandbox, prepares the server and `imp`, offers
    optional host tools and opens the TUI.

@@ -65,8 +65,13 @@ let test_tool_enums () =
     check bool (tool ^ " leaves automatic selection available") true (lane_default schema = `Null))
     tool_verbs;
   let act = Tool_schemas_misc_toml.browser_act in
-  check (list lane) "masc_browser_act offers automation and live tab creation" [ Lane_name.Automation; Lane_name.Live ]
-    (decode_all "masc_browser_act" (lane_enum act));
+  (* Opening a tab is the one action every lane can take: automation serves
+     every action, live and stagehand each serve tab creation. The lanes the
+     schema offers follow the backends, so a lane that gains tab creation shows
+     up here until the schema lists it. *)
+  let open_tab = Browser_lane.(Page_act (Action.Open_tab "https://example.org/")) in
+  check (list lane) "masc_browser_act offers the lanes that can open a tab" (sorted (serving [ open_tab ]))
+    (sorted (decode_all "masc_browser_act" (lane_enum act)));
   check bool "masc_browser_act leaves automatic selection available" true (lane_default act = `Null)
 
 let () =

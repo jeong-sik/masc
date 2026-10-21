@@ -6327,3 +6327,8 @@
 
 (include stanzas/test_tui_ask_followup_result.inc)
 (include stanzas/test_browser_addon_worker.inc)
+
+(test
+ (name test_run_tool_workflow)
+ (modules test_run_tool_workflow)
+ (libraries masc_test_deps))

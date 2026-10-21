@@ -17,6 +17,23 @@ type run_record = {
   updated_at: string;
 }
 
+type error =
+  | Missing_run of { task_id : string; path : string }
+  | Invalid_run of { task_id : string; path : string }
+  | Storage_failure of string
+
+let error_to_string = function
+  | Missing_run { task_id; path } ->
+    Printf.sprintf
+      "No execution run record exists yet for task %s (expected run.json at %s)."
+      task_id path
+  | Invalid_run { task_id; path } ->
+    Printf.sprintf
+      "Failed to parse run.json at %s (task %s) — file exists but \
+       run_record_of_json returned None; check schema drift or truncated write"
+      path task_id
+  | Storage_failure detail -> detail
+
 let run_record_to_json (r : run_record) : Yojson.Safe.t =
   `Assoc [
     ("task_id", `String r.task_id);
@@ -73,24 +90,15 @@ let write_run config (run : run_record) =
   let path = run_json_path config run.task_id in
   write_json config path (run_record_to_json run)
 
-let read_run config task_id : (run_record, string) result =
+let read_run config task_id : (run_record, error) result =
   let path = run_json_path config task_id in
   if not (path_exists config path) then
-    Error
-      (Printf.sprintf
-         "No execution run record exists yet for task %s (expected run.json at %s)."
-         task_id path)
+    Error (Missing_run { task_id; path })
   else
     match run_record_of_json (read_json config path) with
     | Some r -> Ok r
     | None ->
-      Error
-        (Printf.sprintf
-           "Failed to parse run.json at %s (task %s) — file exists but \
-            run_record_of_json returned None; check schema drift or \
-            truncated write"
-           path
-           task_id)
+      Error (Invalid_run { task_id; path })
 
 (** Initialize run for task *)
 let init config ~task_id ~agent_name : (run_record, string) result =
@@ -126,7 +134,7 @@ let init config ~task_id ~agent_name : (run_record, string) result =
     single full-content overwrite, so it does not need a separate
     lock — writing the mirror and the [run.json] record inside the
     same critical section keeps them consistent. *)
-let update_plan config ~task_id ~content : (run_record, string) result =
+let update_plan config ~task_id ~content : (run_record, error) result =
   try
     let run_file = run_json_path config task_id in
     with_file_lock config run_file (fun () ->
@@ -140,7 +148,7 @@ let update_plan config ~task_id ~content : (run_record, string) result =
           Ok updated)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | e -> Error (Printexc.to_string e)
+  | e -> Error (Storage_failure (Printexc.to_string e))
 
 (** Get run details. Missing runs are bootstrapped so resume/read paths do
     not block autonomous keeper turns before any explicit masc_run_init call. *)
@@ -148,7 +156,7 @@ let get ?agent_name config ~task_id : (Yojson.Safe.t, string) result =
   let read_or_create_run () =
     let path = run_json_path config task_id in
     if path_exists config path then
-      read_run config task_id
+      Result.map_error error_to_string (read_run config task_id)
     else
       init config ~task_id ~agent_name
   in

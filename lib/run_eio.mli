@@ -16,6 +16,13 @@ type run_record = {
   updated_at : string;
 }
 
+type error =
+  | Missing_run of { task_id : string; path : string }
+  | Invalid_run of { task_id : string; path : string }
+  | Storage_failure of string
+
+val error_to_string : error -> string
+
 (** {1 JSON serde}
 
     [_to_json] always succeeds; [_of_json] returns [None] on missing
@@ -38,7 +45,7 @@ val run_json_path : Workspace_utils.config -> string -> string
 val write_run : Workspace_utils.config -> run_record -> unit
 
 val read_run :
-  Workspace_utils.config -> string -> (run_record, string) result
+  Workspace_utils.config -> string -> (run_record, error) result
 
 (** [init config ~task_id ~agent_name] creates the run directory,
     a default [plan.md], and writes an initial [run.json]. *)
@@ -48,12 +55,13 @@ val init :
   agent_name:string option ->
   (run_record, string) result
 
-(** File-locked read-modify-write on [run.json]. *)
+(** File-locked read-modify-write on [run.json]. [Missing_run] requires
+    initializing the run first; it does not create a record or plan. *)
 val update_plan :
   Workspace_utils.config ->
   task_id:string ->
   content:string ->
-  (run_record, string) result
+  (run_record, error) result
 
 (** {1 Queries} *)
 

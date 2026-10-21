@@ -15,8 +15,8 @@ open Tool_args
 (** {1 Individual Handlers} *)
 
 (* RFC-0189 PR-1b.6 — handlers in this module return typed
-   [Tool_result.result]. Run_eio is the persistence layer; its Error
-   cases are opaque "Failed to ..." (Runtime_failure). The
+   [Tool_result.result]. Missing run initialization is a workflow precondition;
+   damaged records and storage errors remain Runtime_failure. The
    "task_id is required" caller-input rejections are Workflow_rejection.
 
    JSON responses flow as typed [~data:json] directly. *)
@@ -54,11 +54,25 @@ let handle_run_plan ~tool_name ~start_time ctx args : Tool_result.result =
   | Ok run ->
       Tool_result.make_ok ~tool_name ~start_time ~data:(Run_eio.run_record_to_json run) ()
   | Error e ->
+      let class_, effect_disposition, message =
+        match e with
+        | Run_eio.Missing_run _ ->
+          Tool_result.Workflow_rejection, Tool_result.Proven_pre_effect,
+          Run_eio.error_to_string e
+          ^ " Call masc_run_init for this task before setting its plan."
+        | Run_eio.Invalid_run _ ->
+          Tool_result.Runtime_failure, Tool_result.Proven_pre_effect,
+          Run_eio.error_to_string e
+        | Run_eio.Storage_failure _ ->
+          Tool_result.Runtime_failure, Tool_result.Effect_outcome_unknown,
+          Run_eio.error_to_string e
+      in
       Tool_result.make_err
         ~tool_name
-        ~class_:Tool_result.Runtime_failure
+        ~class_
+        ~effect_disposition
         ~start_time
-        (Printf.sprintf "Failed to update run plan: %s" e)
+        (Printf.sprintf "Failed to update run plan: %s" message)
 
 let handle_run_get ~tool_name ~start_time ctx args : Tool_result.result =
   let task_id = get_string args "task_id" "" in

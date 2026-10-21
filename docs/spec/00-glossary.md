@@ -4293,7 +4293,7 @@ status: reference
     클라이언트 턴은 그 trace의 history 파일에서 `turn_ref`가 가리키는 조각으로 읽는다.
     두 위치(atom 위치·공식 클라이언트 위치)는 각각 따로 옮기며, `commit`이 Memory OS snapshot
     커밋을 보고할 때만 옮긴다. 공식 클라이언트 턴 쪽이 읽을 수 없는 거절 경계선에서
-    멈추더라도(`Keeper_librarian_range.Official_stop`), 이 정지는 공식 위치만 세우며 atom 쪽은
+    멈추더라도(`Keeper_librarian_range.Official_stop`, 그 줄 앞의 공식 턴은 먼저 읽는다), 이 정지는 공식 위치만 세우며 atom 쪽은
     독립적으로 읽어 atom 위치를 전진시킨다. atom 쪽에 더 읽을 것이 없을 때 비로소 pass 가
     `Official_range_stopped`로 종료된다(#38475).
   - 연속성 pass(`Keeper_librarian_continuity`): 스냅숏이 덮은 앞부분을 다시 쓰는 pass.

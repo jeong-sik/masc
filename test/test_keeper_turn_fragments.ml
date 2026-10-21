@@ -207,15 +207,34 @@ let test_official_lines_are_selected_beyond_the_cursor () =
     (Range.may_have_unread_official ~lines:log ~cursor:(Some { Official.boundary_line = 4 }))
 ;;
 
-(* A refused line beyond the cursor stops: it may be an official turn's end
-   line. One at or before the cursor was already passed and stops nothing. *)
+(* A refused line beyond the cursor stops at that line: it may be an official
+   turn's end line. The readable official turns before it are read first; one
+   at or before the cursor was already passed and stops nothing. *)
 let test_a_refused_line_beyond_the_cursor_stops () =
   let log = [ ended ~line:1 ~turn:1 official; refused 2; ended ~line:3 ~turn:3 official ] in
-  check (list int) "beyond the cursor: stop at the refused line" [ -2 ]
+  check (list int) "no cursor: the turn before the refused line is read" [ 1 ]
     (lines_of (Range.select_official ~lines:log ~cursor:None Range.All_unread));
+  check (list int) "a narrowed round takes the same turn" [ 1 ]
+    (lines_of (Range.select_official ~lines:log ~cursor:None Range.To_first_cut_point));
+  check (list int) "at the turn before it: stop at the refused line" [ -2 ]
+    (lines_of
+       (Range.select_official ~lines:log ~cursor:(Some { Official.boundary_line = 1 })
+          Range.All_unread));
   check (list int) "at or before the cursor: read on" [ 3 ]
     (lines_of
        (Range.select_official ~lines:log ~cursor:(Some { Official.boundary_line = 2 })
+          Range.All_unread));
+  check (list int) "a refused first line leaves nothing to read before it" [ -1 ]
+    (lines_of
+       (Range.select_official
+          ~lines:[ refused 1; ended ~line:2 ~turn:2 official ]
+          ~cursor:None
+          Range.All_unread));
+  check (list int) "lines that read as another kind of turn do not count" [ -3 ]
+    (lines_of
+       (Range.select_official
+          ~lines:[ ended ~line:1 ~turn:1 (atoms 1); ended ~line:2 ~turn:2 Boundaries.Stale_noop; refused 3 ]
+          ~cursor:None
           Range.All_unread));
   check bool "the cheap check reports the stop" true
     (Range.may_have_unread_official ~lines:log ~cursor:None)

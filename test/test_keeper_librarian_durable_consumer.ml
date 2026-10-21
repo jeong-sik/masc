@@ -3960,6 +3960,43 @@ let test_a_refused_boundary_line_is_not_lifted_for_official_turns () =
   check_official_stop config ~line:2
 ;;
 
+(* A refused boundary line stops the official part at that line, not before
+   it: an official turn that ended on an earlier line is read, the position
+   reaches it, and the next pass stands at the refused line. *)
+let test_an_official_turn_before_a_refused_boundary_line_is_read () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-official-then-refused" in
+  write_meta config trace_id;
+  write_official_turn config ~trace_id ~turn:1 ~user:"q1" ~assistant:"a1" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:1.0;
+  append_refused_boundary_line config;
+  let carried = ref [] in
+  let committed_range = ref None in
+  (match
+     consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id input ->
+       carried := text_markers input;
+       committed_range := official_range_id;
+       Consumer.Memory_committed)
+   with
+   | Consumer.Official_advanced { atom = None; official } ->
+     check int "the position reaches the turn before the refused line" 1 official.boundary_line
+   | Consumer.Official_advanced { atom = Some _; _ }
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Progress_advanced _
+   | Consumer.Memory_not_committed _ -> fail "the turn before the refused line was not read");
+  check (list string) "the turn before the refused line is carried" [ "q1"; "a1" ] !carried;
+  (match !committed_range with
+   | Some range ->
+     check int "the receipt starts at the log's beginning" 0
+       range.Masc.Keeper_memory_os_current.after_boundary_line;
+     check (list int) "the receipt names only the line before the refused one" [ 1 ]
+       (List.map fst range.Masc.Keeper_memory_os_current.turns)
+   | None -> fail "the official range was not committed");
+  check_official_stop config ~line:2
+;;
+
 (* The same backwards clock, but an official-client line of the retired era
    is still the official cursor. This commit does not replace that cursor, so
    the round after the hand-off would carry the same stamp and the row between
@@ -4425,6 +4462,8 @@ let () =
             test_an_official_line_older_than_the_baseline_is_read
         ; test_case "a refused boundary line is not lifted for official turns" `Quick
             test_a_refused_boundary_line_is_not_lifted_for_official_turns
+        ; test_case "an official turn before a refused boundary line is read" `Quick
+            test_an_official_turn_before_a_refused_boundary_line_is_read
         ; test_case "an official stop does not hold the atom part" `Quick
             test_an_official_stop_does_not_hold_the_atom_part
         ; test_case "an official stop does not narrow later passes" `Quick

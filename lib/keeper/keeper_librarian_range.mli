@@ -178,22 +178,27 @@ type official_line =
 type official_selection =
   | Official_read of official_line list
       (** In line order, never empty. The last one is the cursor after the
-          round commits. *)
+          round commits. Only the lines before the first refused line beyond
+          the cursor are taken; once the cursor reaches them the refused line
+          is the next selection ({!Official_stop}). *)
   | Nothing_official
   | Official_stop of
       { line : int
       ; error : Keeper_turn_boundaries.read_error
       }
-      (** Row 2c for these lines. A refused line beyond the cursor may be an
+      (** Row 2c for these lines. The first refused line beyond the cursor,
+          with no readable official turn before it. That line may be an
           official turn's end line; passing it would skip that turn (I3). No
           restart lifts it: a restart says where atoms begin again and
           nothing about these lines. The remedy is a purge of the keeper.
           The stop holds these lines only; the atom selection of the same
           round is independent of it (RFC §4.10). *)
 
-(** The [No_atom_history] end lines beyond [cursor], of every trace: a trace
-    that ended still has fragments in its own session directory.
-    [To_first_cut_point] takes the oldest one. *)
+(** The [No_atom_history] end lines beyond [cursor] and before the first
+    refused line beyond it, of every trace: a trace that ended still has
+    fragments in its own session directory. [lines] is in ascending line
+    order, as {!Keeper_turn_boundaries.read} returns it. [To_first_cut_point]
+    takes the oldest one. *)
 val select_official
   :  lines:
        (int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result)

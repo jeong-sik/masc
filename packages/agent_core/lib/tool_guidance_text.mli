@@ -2,8 +2,10 @@
 
     agent_core is config-free by layering: it cannot read
     [config/prompts/agent_core.md] itself. The host (MASC prompt init)
-    renders the managed templates and installs the text here once at
-    startup; {!current} returns the last installed value.
+    installs render callbacks here during startup; {!current} returns the last
+    installed callbacks. Each callback resolves text when its consumer calls it.
+    Tool constructors snapshot descriptions into their schemas; an override
+    affects newly constructed schemas, not tools that already exist.
 
     The defaults are the last-resort copy of the same sentences so that
     agent_core's own tests and standalone consumers behave identically
@@ -19,17 +21,17 @@ type t =
     (** The requested name carries a trailing payload after a registered
         prefix; [prefix] is quoted by the implementation. *)
   ; unknown_tool_not_bare_with_closest : name:string -> string
-  ; unknown_tool_not_bare : string
+  ; unknown_tool_not_bare : unit -> string
   ; handoff_description : name:string -> description:string -> string
-  ; handoff_prompt_param_description : string
-  ; agent_tool_prompt_param_description : string
+  ; handoff_prompt_param_description : unit -> string
+  ; agent_tool_prompt_param_description : unit -> string
   }
 
 (** The last-resort copy of the same sentences, byte-identical to what the
     host's managed templates render. *)
 val defaults : t
 
-(** Install the host-rendered text. Called once from the host's prompt init;
+(** Install the host render callbacks. Called once from the host's prompt init;
     a later call replaces the earlier value. *)
 val configure : t -> unit
 

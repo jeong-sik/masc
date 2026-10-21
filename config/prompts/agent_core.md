@@ -1,5 +1,5 @@
 ---
-description: agent-core tool-loop wording — installed into Agent_core.Tool_guidance_text by the host at prompt-init time; agent_core stays config-free
+description: agent-core tool-loop wording — host-installed callbacks resolve current prompt text; tool schemas capture descriptions at construction; agent_core stays config-free
 category: tool
 operator_surface: fragment
 ---

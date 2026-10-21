@@ -71,7 +71,7 @@ let make_handoff_tool ~(delegate : string -> Types.tool_result) (target : handof
       (text.handoff_description ~name:target.name ~description:target.description)
     ~parameters:
       [ { Types.name = "prompt"
-        ; description = text.handoff_prompt_param_description
+        ; description = text.handoff_prompt_param_description ()
         ; param_type = Types.String
         ; required = true
         }

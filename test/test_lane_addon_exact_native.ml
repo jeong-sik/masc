@@ -90,9 +90,12 @@ sources=[]
           |> member "instances" |> Yojson.Safe.Util.to_list in
         let current ()=instances () |> List.find_opt (fun item ->
           member "id" (member "configuration" item)=`String "native" && text "kind" (member "phase" item)<>"detached") in
-        let path prefix item=match member "pid" (member "resource" item) with
-          | `Int pid -> Some (Filename.concat root (prefix ^ string_of_int pid))
-          | _ -> None in
+        let path prefix item=match member "resource" item with
+          | `Null -> None
+          | resource ->
+              (match Lane_addon_lifecycle.resource_of_json resource |> ok with
+               | Native_resource {pid;_} -> Some (Filename.concat root (prefix ^ string_of_int pid))
+               | Container_resource _ -> fail "expected the native fixture worker") in
         let await predicate=F.await_within_fixture_budget ~clock ~failure:"native host cycle did not settle"
           (let result,resolve=Eio.Promise.create () in
            Eio.Switch.check sw;

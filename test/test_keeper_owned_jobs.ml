@@ -3756,7 +3756,13 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
     ; draft_reference = Draft.reference draft; run_reference
     ; parent_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation
     ; source_turn = 41; source_task_id = Some "task-A"; producer=Journal.Prepared } in
-  let journal = Journal.prepare ~base_path:fixture.base_path source |> require "interrupted launch journal" in
+  (* The producer records the trace and Keeper turn its turn context holds, as
+     the composition surface does when it prepares a journal. Without that
+     observation the launch identity is unknown and the executor refuses the
+     launch before it can be interrupted. *)
+  let observation : Journal.source_observation =
+    { trace_id = Some fixture.meta.runtime.trace_id; session_id = None; keeper_turn_id; answer_source_ids = [] } in
+  let journal = Journal.prepare ~observation ~base_path:fixture.base_path source |> require "interrupted launch journal" in
   let request_context = Some
       [ "composition_tool", `String Draft.run_tool_name
       ; "parent_tool_use_id", `String source.parent_tool_use_id
@@ -3984,7 +3990,7 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
     { source with composition_run_id = pre_reserve_run_id
     ; run_reference = pre_reserve_run_ref
     ; parent_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id pre_reserve_invocation } in
-  let pre_reserve_journal = Journal.prepare ~base_path:fixture.base_path pre_reserve_source
+  let pre_reserve_journal = Journal.prepare ~observation ~base_path:fixture.base_path pre_reserve_source
       |> require "pre-reserve interrupted launch journal" in
   let pre_reserve_context = Some
       [ "composition_tool", `String Draft.run_tool_name

@@ -138,7 +138,7 @@ let test_autonomous_input_owner_rejects_lost_response_lineage () =
      let producer = Keeper_input_checkpoint_producer.publish_autonomous producer original |> prepared in
      let candidate = Response.prepare ~net:env#net ~source:(exact original)
          ~expected_source_ref:(Store.exact_snapshot_reference (exact original))
-         ~pending:(Option.get original.pending_input) ~response:(Core.Hooks.Answer "production") |> prepared in
+         ~pending:(Option.get original.pending_input) ~response:(Core.Hooks.Answer (`String "production")) |> prepared in
      let consumed = Response.checkpoint candidate in
      ignore (Keeper_input_checkpoint_producer.publish_autonomous producer consumed |> prepared);
      accepted := Some consumed;

@@ -25,7 +25,7 @@
       "correction": "Use Runs.get by the original run ID before reading the retained output."
     }
   ],
-  "repair_head": "c18a1f8c5ab",
+  "repair_head": "c18a1f8c5ab3ed20b459c1b06fd8059276daf45d",
   "repair_execution": "not yet observed",
   "limits": "Failed run does not certify corrected fixtures, newer successor source, production wiring, live provider, installed UI."
 }

@@ -398,6 +398,7 @@ test('VST progress belongs only to the active preparation id and immutable proje
   const view=await controller({project})
   const progress=(id,value)=>view.worker.emit('message',{kind:'progress',id,progress:value})
   try{
+    view.command('output explicit-audio');await flush()
     view.key('space');await flush()
     const first=view.observed.requests.find(job=>job.kind==='prepare-vst')
     progress(first.id+1,{kind:'vst-render',completed:1,total:2})

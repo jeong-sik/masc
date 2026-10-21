@@ -62,6 +62,7 @@ jobs:
       - name: Install OCaml dependencies
         run: opam install ./masc.opam --deps-only --with-test -y
       - name: Build the selected native behavior scope
+        id: native-build
         env:
           PROOF_SCENARIO: ${{ inputs.scenario }}
         run: |
@@ -102,21 +103,36 @@ jobs:
           printf '%s\n' "${targets[@]}" > proof/build-targets.txt
           opam exec -- dune build "${targets[@]}" 2>&1 | tee proof/build.log
       - name: Verify candidate and ownership behavior
+        run: |
+          set -euo pipefail
+          : > proof/executed-tests.txt
+          : > proof/test-results.tsv
+          failed=0
+          while IFS= read -r target; do
+            case "$target" in
+              test/*)
+                suite="$(basename "$target" .exe)"
+                set +e
+                "_build/default/$target" </dev/null 2>&1 | tee "proof/$suite.log"
+                result=("${PIPESTATUS[@]}")
+                set -e
+                printf '%s\t%s\t%s\n' "$suite" "${result[0]}" "${result[1]}" >> proof/test-results.tsv
+                printf '%s\n' "$suite" >> proof/executed-tests.txt
+                if [ "${result[0]}" -ne 0 ] || [ "${result[1]}" -ne 0 ]; then
+                  failed=1
+                fi
+                ;;
+            esac
+          done < proof/build-targets.txt
+          exit "$failed"
+      - name: Package exact compiled candidate and behavior results
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
         env:
           SOURCE_SHA: ${{ inputs.source-sha }}
           WORKFLOW_SHA: ${{ github.sha }}
           PROOF_SCENARIO: ${{ inputs.scenario }}
         run: |
           set -euo pipefail
-          while IFS= read -r target; do
-            case "$target" in
-              test/*)
-                suite="$(basename "$target" .exe)"
-                "_build/default/$target" </dev/null 2>&1 | tee "proof/$suite.log"
-                printf '%s\n' "$suite" >> proof/executed-tests.txt
-                ;;
-            esac
-          done < proof/build-targets.txt
           test "$(_build/default/bin/masc_tui.exe --build-commit)" = "$SOURCE_SHA"
           _build/default/bin/masc_tui.exe --help </dev/null > proof/help.txt
           _build/default/bin/masc_tui_keys_doc_cli.exe </dev/null > proof/key-reference.md
@@ -133,6 +149,15 @@ jobs:
           import hashlib, json, os
           from pathlib import Path
           binary = Path('proof/masc-tui')
+          results = [
+              {'suite': suite, 'suite_exit_code': int(code), 'log_exit_code': int(log_code)}
+              for suite, code, log_code in (
+                  row.split('\t') for row in Path('proof/test-results.tsv').read_text().splitlines()
+              )
+          ]
+          targets = Path('proof/build-targets.txt').read_text().splitlines()
+          expected_tests = [Path(target).stem for target in targets if Path(target).parts[:1] == ('test',)]
+          executed_tests = Path('proof/executed-tests.txt').read_text().splitlines()
           Path('proof/receipt.json').write_text(json.dumps({
               'source_sha': os.environ['SOURCE_SHA'],
               'workflow_sha': os.environ['WORKFLOW_SHA'],
@@ -145,8 +170,11 @@ jobs:
                   'producer': 'bin/masc_tui_keys_doc_cli.exe',
               },
               'server_sha256': hashlib.sha256(Path('proof/masc').read_bytes()).hexdigest() if os.environ['PROOF_SCENARIO'] in ('workspace-files', 'rich-workspace', 'rich-chat-workspace', 'original-tool-result', 'code-references', 'resource-reading', 'addon-lifecycle', 'source-readers') else None,
-              'build_targets': Path('proof/build-targets.txt').read_text().splitlines(),
-              'executed_tests': Path('proof/executed-tests.txt').read_text().splitlines(),
+              'build_targets': targets,
+              'expected_tests': expected_tests,
+              'executed_tests': executed_tests,
+              'test_results': results,
+              'behavior_passed': bool(expected_tests) and executed_tests == expected_tests and [result['suite'] for result in results] == expected_tests and all(result['suite_exit_code'] == 0 and result['log_exit_code'] == 0 for result in results),
               'installed_runtime_verified': False,
               'visible_ui_verified': False,
               'packaging': 'native executable; see native-dependencies.txt for dynamic libraries'

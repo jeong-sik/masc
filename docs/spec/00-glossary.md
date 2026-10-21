@@ -281,11 +281,12 @@ status: reference
     세우지 않는다. 코드도 같다: UMP 루프 계획은 `timeline.regions`의 각 항목에서
     `repeatCount`를 읽어 클립을 만든다. 거절 조건은 `repeatCount` 하나가 아니다 —
     `repeatCount`가 0이거나, `id`가 비었거나, `source`가 `timeline.sources`에 없거나,
-    `component`가 `.audio`인 Region 중 하나만 걸려도 그 계획 전체가
-    "invalid captured loop region"으로 서지 않는다(`UmpLoopTransport.swift`의 `UmpLoopPlan`).
+    `component`가 `.audio`인 Region 중 하나만 걸려도 계획 전체가
+    "invalid captured loop region"으로 거절된다(`UmpLoopTransport.swift`의 `UmpLoopPlan`).
     같은 파일이 계획 수준에서도 "invalid captured loop arrangement"(schemaVersion·duration·
-    빈 sources·빈 regions·중복 id)와 "captured loop trim exceeds original source"(자른 구간이
-    원본 길이를 넘음)를 따로 낸다. 그래서 Region의 자격은 반복 횟수만이 아니라 원본
+    빈 sources·빈 regions·sources·regions 각각의 중복 id)와 "captured loop trim exceeds
+    original source"(자른 구간이 원본 길이를 넘거나 `extent`·`sourceDivisor`가 0)를 따로
+    낸다. 그래서 Region의 자격은 반복 횟수만이 아니라 원본
     `source`와 그 길이에 함께 매인다. 브라우저 장면이 문서 구조에서 갈라 읽는 구역은
     이 낱말이 아니며 **Browser Scene Region** 항목이 맡는다.
   → [tools/alphatex/README.md](../../tools/alphatex/README.md) ·
@@ -323,8 +324,8 @@ status: reference
     들을 대상을 고르는 라우트 조작이지 재생 기능이 아니므로 "audition" 대신 이렇게 쓴다.
   - `arrangement region audition` — 어레인지먼트의 Region 창을 trim·repeat·resume·seek
     규칙대로 들려주는 재생. 원본 전체를 한 번에 보내는 full-source audition과 달리,
-    스케줄러가 밀린 복사를 건너뛰고 현재 위상만 되살린다(ARRANGEMENT.md "WAV arrangement
-    transport"의 "This phase policy differs from the original full-source audition's
+    스케줄러가 밀린 복사를 건너뛰고 현재 위상만 되살린다(ARRANGEMENT.md "Expressive MIDI
+    arrangement transport"의 "This phase policy differs from the original full-source audition's
     complete ordered-stream delivery.").
   - 이름 경계: `monitoring`은 `audition`이 아니다. `:monitor`는 오디오 입력을,
     `:midi-monitor`는 들어오는 MIDI를 다른 목적지로 계속 전달하는 상태다

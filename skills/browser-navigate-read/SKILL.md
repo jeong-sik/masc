@@ -45,6 +45,7 @@ description = "scene: visible content of the landing page. regions: landmark map
 id = "navigate"
 tool = "BrowserGoto"
 input = { kind = "object", fields = [
+  { name = "lane", value = { kind = "literal", value = "automation" } },
   { name = "tabId", value = { kind = "param", name = "tabId" } },
   { name = "url", value = { kind = "param", name = "url" } }
 ] }

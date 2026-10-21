@@ -74,6 +74,7 @@ let test_goto_answer_satisfies_output_contract () =
       Browser_lane.install_server_session_observer Browser_lane.Server_automation
         (Some (fun () -> Browser_lane.Browser_open));
       Eio.Switch.on_release sw (fun () ->
+        Browser_lane.install_activity_observer None;
         Browser_lane.install_automation_executor None;
         Browser_lane.install_server_session_observer Browser_lane.Server_automation None);
       let args = `Assoc [ "lane", `String "automation"; "tabId", `Int 7; "url", `String "https://example.org/" ] in
@@ -210,7 +211,8 @@ let test_navigate_then_read observation case () =
     let read_mode = read_mode observation in
     let requested_url = "https://example.org/start" in
     let landing_url = "https://example.org/redirected" in
-    let navigation = `Assoc [ "tabId", `Int 7; "url", `String requested_url ] in
+    let navigation =
+      `Assoc [ "lane", `String "automation"; "tabId", `Int 7; "url", `String requested_url ] in
     let args =
       `Assoc [ "tabId", `Int 7; "url", `String requested_url; "mode", `String read_mode ]
     in

@@ -67,6 +67,15 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   비동기 파일 관측을 권한 허가나 물리 실행 시작으로 바꾸어 쓰지 않는다. Non-Eio fallback과
   보호된 factory lock의 대기는 유지되므로 전체 준비나 취소가 즉시 끝난다고 주장하지 않는다.
 
+- MCP 세션 복원은 실제 owner base path를 받아 공용 I/O executor에서 읽고 순수하게 해석한
+  뒤, 취소 확인을 거쳐 원래 caller가 registry에 적용한다. HTTP·stdio의 공통 활성화가
+  완료를 기다린 뒤 state/readiness를 공표한다. background maintenance로 복원을 미루거나
+  cwd·전역 기본 경로를 worker에서 추론하지 않는다. 저장은 blocking worker 안에서 lock을
+  잡은 뒤 불변 registry map을 캡처하고 flush/close/rename까지 직렬화한다. Eio 문맥에서
+  Stdlib mutex를 기다리거나 오래된 선행 snapshot을 뒤늦게 쓰지 않는다. 실행 중 host I/O는
+  취소로 강제 종료되지 않으며 이미 교체한 파일을 취소가 되돌리지 않는다. 누락·읽기 실패·
+  JSON 실패·root 거절·실제 적용을 구분하고, 원래 protocol/profile/timestamp 정책을 유지한다.
+
 - Ask 답변 복구의 사전 증거는 같은 회차·Keeper·canonical answer의 UTC-day window에서만
   공유한다. 실제 첫 수요에서 캡처하고 원본 답변 행이 하나뿐인 window의 큰 proof 집합은 보관하지 않는다.
   기존 파일 cursor cache와 회차의 불변 snapshot을 구분하며, 실패한 window를 다른 날짜나

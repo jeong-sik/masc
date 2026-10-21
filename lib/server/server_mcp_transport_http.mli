@@ -66,7 +66,7 @@ val remember_mcp_profile :
   unit
 val forget_mcp_session : string -> unit
 val profile_label : tool_profile -> string
-val reap_stale_sessions : is_active_session:(string -> bool) -> int
+val reap_stale_sessions : base_path:string -> is_active_session:(string -> bool) -> int
 val validate_mcp_session_profile :
   profile:tool_profile -> string -> (unit, string) result
 val validate_mcp_session_delete_profile :

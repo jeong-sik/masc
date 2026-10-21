@@ -226,7 +226,8 @@ val activate_owner_state
   -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
   -> initialized_owner_state
   -> activated_owner_state
-(** Shared HTTP/stdio commit protocol: restore the durable Gate, publish the
+(** Shared HTTP/stdio commit protocol: restore the durable Gate and MCP session
+    protocol/profile state from the actual owner's base path, publish the
     lazy-task barrier under the exclusive BasePath lease, claim canonical
     persistence ownership, then immediately start the affine Keeper token.
     Current request writers use a disjoint staging namespace, so forensic

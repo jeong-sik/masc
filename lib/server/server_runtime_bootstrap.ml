@@ -1543,6 +1543,10 @@ let activate_owner_state
   boot_stage "gate_persistence.begin";
   install_keeper_gate_persistence state;
   boot_stage "gate_persistence.end";
+  boot_stage "mcp_sessions.begin";
+  Server_mcp_transport_http_session.load_sessions_from_file
+    ~base_path:(Mcp_server.workspace_config state).base_path ();
+  boot_stage "mcp_sessions.end";
   boot_stage "lazy_tasks.begin";
   start_owner_lazy_tasks ~sw state;
   boot_stage "lazy_tasks.end";

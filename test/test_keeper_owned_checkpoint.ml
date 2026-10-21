@@ -211,6 +211,86 @@ let test_post_commit_cancellation_keeps_installation () = with_session (fun sess
    | _ -> fail "post-commit cancellation erased durable publication");
   assert_snapshot "post-cancel" snapshot (load session_dir (Store.exact_snapshot_reference snapshot)))
 
+let test_confirmation_propagates_committed_cancellation ~in_observer () =
+  let was_recording = Printexc.backtrace_status () in
+  Fun.protect ~finally:(fun () -> Printexc.record_backtrace was_recording) @@ fun () ->
+  Printexc.record_backtrace true;
+  with_session (fun session_dir ->
+    let _, snapshot = accepted "committed cancellation" in
+    let cancellation = Eio.Cancel.Cancelled Exit in
+    let writer ~on_durable_commit ~ownership_root ~path ~bytes =
+      if in_observer then
+        Keeper_fs.save_bytes_durable_atomic_observed
+          ~on_durable_commit:(fun () -> on_durable_commit (); raise cancellation)
+          ~ownership_root path bytes
+      else
+        match Keeper_fs.save_bytes_durable_atomic_observed ~on_durable_commit ~ownership_root path bytes with
+        | Ok Keeper_fs.Committed -> raise cancellation
+        | (Ok (Keeper_fs.Committed_but_observer_failed _) | Error _) as result -> result in
+    let outcome = Store.For_testing.retain_exact_snapshot_with_writer
+        ~write_checkpoint_bytes:writer ~session_dir snapshot in
+    let backtrace = match outcome with
+      (* Keeper_fs propagates real observer cancellation. Store records it as
+         an interrupted unwind, just like cancellation after the writer returns. *)
+      | Store.Installed {auxiliary=[Store.Post_commit_unwind_interrupted (cause, backtrace)]; _}
+          when cause == cancellation -> backtrace
+      | Store.Installed _ | Store.Not_installed _ -> fail "actual commit omitted its original cancellation evidence" in
+    let original = Printexc.raw_backtrace_entries backtrace in
+    check bool "actual cancellation retained its nonempty original backtrace" true (Array.length original > 0);
+    (match Store.require_confirmed_installation outcome with
+     | exception (Eio.Cancel.Cancelled _ as cause) ->
+       let reraised = Printexc.raw_backtrace_entries (Printexc.get_raw_backtrace ()) in
+       check bool "same original exception is reraised" true (cause == cancellation);
+       check bool "original raw backtrace remains the origin" true
+         (Array.length reraised >= Array.length original
+          && Array.for_all Fun.id (Array.mapi (fun i entry -> entry = reraised.(i)) original))
+     | Ok _ | Error _ -> fail "committed cancellation became a normal storage result");
+    assert_snapshot "cancelled confirmation keeps installed bytes" snapshot
+      (load session_dir (Store.exact_snapshot_reference snapshot)))
+
+let test_confirmation_preserves_observer_failure () = with_session (fun session_dir ->
+  let _, snapshot = accepted "observer failed after actual commit" in
+  let observer_error = Sys_error "observer failure" in
+  let writer ~on_durable_commit ~ownership_root ~path ~bytes =
+    Keeper_fs.save_bytes_durable_atomic_observed
+      ~on_durable_commit:(fun () -> on_durable_commit (); raise observer_error)
+      ~ownership_root path bytes in
+  let outcome = Store.For_testing.retain_exact_snapshot_with_writer
+      ~write_checkpoint_bytes:writer ~session_dir snapshot in
+  (match outcome with
+   | Store.Installed {auxiliary=[Store.Commit_observer_failed (cause, _)]; _}
+       when cause == observer_error -> ()
+   | Store.Installed _ | Store.Not_installed _ -> fail "actual observer failure lost its installed evidence");
+  (match Store.require_confirmed_installation outcome with
+   | Error evidence -> check bool "observer failure remains the same unconfirmed result" true (evidence == outcome)
+   | Ok _ -> fail "observer failure became confirmation");
+  assert_snapshot "observer failure keeps installed bytes" snapshot
+    (load session_dir (Store.exact_snapshot_reference snapshot)))
+
+let test_confirmation_preserves_unconfirmed_evidence () = with_session (fun session_dir ->
+  List.iter (fun (stage, label) ->
+    let _, snapshot = accepted label in
+    let outcome = Store.For_testing.retain_exact_snapshot_with_writer
+        ~write_checkpoint_bytes:(fault_writer stage) ~session_dir snapshot in
+    (match Store.require_confirmed_installation outcome with
+     | Error evidence -> check bool "original structured evidence is returned unchanged" true (evidence == outcome)
+     | Ok _ -> fail "uncertain installation became confirmation");
+    match outcome with
+    | Store.Installed _ -> assert_snapshot "uncertain bytes remain evidence" snapshot
+        (load session_dir (Store.exact_snapshot_reference snapshot))
+    | Store.Not_installed _ ->
+      (match Store.load_retained_exact_snapshot ~session_dir ~reference:(Store.exact_snapshot_reference snapshot) with
+       | Error (Store.Source_unavailable Store.Ref_not_found) -> ()
+       | Ok _ | Error _ -> fail "precommit failure invented an artifact"))
+    [Keeper_fs.Payload_write, "not installed";
+     Keeper_fs.Parent_directory_fsync_after_rename, "durability unknown"];
+  let _, snapshot = accepted "confirmed exact reference" in
+  let outcome = Store.retain_exact_snapshot ~session_dir snapshot in
+  match Store.require_confirmed_installation outcome with
+  | Ok reference -> check bool "confirmed reference is the actual installed one" true
+      (Keeper_checkpoint_ref.equal reference (Store.exact_snapshot_reference snapshot))
+  | Error _ -> fail "actual durable installation was not confirmed")
+
 let test_owned_paths_and_history_deletion () = with_session (fun session_dir ->
   let _a, snapshot = accepted "A" in
   Store.retain_exact_snapshot ~session_dir snapshot |> require_installed;
@@ -307,6 +387,14 @@ let test_release_removes_only_the_released_artifact () = with_session (fun sessi
     (Sys.file_exists (artifact_path session_dir dropped)))
 
 let () = run "keeper owned exact checkpoints" ["retention", [
+  test_case "confirmation reraises actual post-commit unwind cancellation" `Quick
+    (test_confirmation_propagates_committed_cancellation ~in_observer:false);
+  test_case "confirmation reraises actual commit-observer cancellation" `Quick
+    (test_confirmation_propagates_committed_cancellation ~in_observer:true);
+  test_case "confirmation preserves actual non-cancellation observer failure" `Quick
+    test_confirmation_preserves_observer_failure;
+  test_case "confirmation preserves installed and unconfirmed evidence" `Quick
+    test_confirmation_preserves_unconfirmed_evidence;
   test_case "large canonical read keeps exact source bytes" `Quick test_large_canonical_read_keeps_exact_source;
   test_case "A survives B canonical and rolling history" `Quick test_survives_canonical_and_history;
   test_case "same reference retry keeps exact bytes" `Quick test_same_reference_retry;

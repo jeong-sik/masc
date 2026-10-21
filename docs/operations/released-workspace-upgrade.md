@@ -385,3 +385,19 @@ This connects the native retry path only. Operator history clear, authoritative
 host response admission, reconnect/TUI behavior and whole-issue acceptance remain
 unfinished. All #38005 stack layers remain Draft; these changes do not authorize
 live installation or merge.
+
+### Confirming retained checkpoint writes
+
+The Native next-call seed, input Producer, Birth and journal-adoption paths use the shared
+`Keeper_checkpoint_store.require_confirmed_installation` interpreter. Only an
+installed result without auxiliary evidence yields its exact reference. A real
+Eio cancellation in observer or unwind evidence is reraised with its original
+exception and backtrace; committed bytes remain evidence. Other uncertain or
+not-installed results retain the original structured result. The interpreter
+performs no I/O and does not reconfirm uncertain durability.
+
+The new focused cancellation cases use actual durable filesystem writes and the
+existing observer/unwind test boundary. They establish the staged-result boundary,
+not a full Native seed cancellation integration run. The native adapter calls the
+same interpreter directly. Operator history clear and the remaining #38005
+product acceptance remain separate unfinished work.

@@ -416,18 +416,9 @@ let check_input_plan plan =
   unchanged_files ~base_path:plan.ip_bundle.base_path (plan.ip_metadata::plan.ip_canonical::plan.ip_related)
 
 let confirm_input_retention outcome =
-  let auxiliary = match outcome with
-    | Checkpoint.Installed installed -> installed.auxiliary
-    | Not_installed refused -> refused.auxiliary in
-  List.iter (function
-    | Checkpoint.Commit_observer_failed ((Eio.Cancel.Cancelled _ as cause),backtrace)
-    | Post_commit_unwind_interrupted ((Eio.Cancel.Cancelled _ as cause),backtrace) ->
-      Printexc.raise_with_backtrace cause backtrace
-    | Commit_observer_failed _ | Post_commit_unwind_interrupted _
-    | Commit_durability_unknown _ | Release_process_lock_failed _ -> ()) auxiliary;
-  match outcome with
-  | Checkpoint.Installed {auxiliary=[];_} -> Ok ()
-  | Installed {auxiliary=_::_;_} | Not_installed _ -> error (Input_retention_unconfirmed outcome)
+  Checkpoint.require_confirmed_installation outcome
+  |> Result.map ignore
+  |> Result.map_error (fun outcome -> {bundle_id=None; failure=Input_retention_unconfirmed outcome})
 
 let adopt_input_using ~before_publication
     ~(write_manifest : string -> string -> (unit, Fs_compat.atomic_replace_failure) result)

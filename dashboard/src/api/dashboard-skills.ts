@@ -235,11 +235,19 @@ export interface SkillCompositionEvidence {
 }
 
 export interface SkillEvidenceResponse {
-  schema: 'masc.skill-evidence/v6'
+  schema: 'masc.skill-evidence/v7'
   status: 'observed' | 'not_observed_in_retained_coverage'
   reference: SkillReference
   activation: SkillActivationSelection | null
   composition: SkillCompositionEvidence | null
+  composition_statistics: {
+    scope: 'exact_reference_retained_runs'
+    duration_scope: 'stored_executor_result'
+    records: number
+    completed: { samples: number; mean_ms: number | null }
+    failed: { samples: number; mean_ms: number | null }
+    deferred: number
+  } | null
   coverage: SkillEvidenceCoverage
 }
 
@@ -578,7 +586,7 @@ const SkillActivationPayloadSchema = Schema.Struct({
 })
 
 const SkillEvidenceResponseSchema = Schema.Struct({
-  schema: Schema.Literal('masc.skill-evidence/v6'),
+  schema: Schema.Literal('masc.skill-evidence/v7'),
   status: Schema.Literal('observed', 'not_observed_in_retained_coverage'),
   reference: SkillReferenceSchema,
   activation: Schema.NullOr(Schema.Union(
@@ -643,6 +651,14 @@ const SkillEvidenceResponseSchema = Schema.Struct({
     result: ToolResultSchema,
     executor_settlements: Schema.Array(CompositionNodeSchema),
     recorded_at: Schema.Number,
+  })),
+  composition_statistics: Schema.NullOr(Schema.Struct({
+    scope: Schema.Literal('exact_reference_retained_runs'),
+    duration_scope: Schema.Literal('stored_executor_result'),
+    records: NonNegativeSafeIntegerSchema,
+    completed: Schema.Struct({ samples: NonNegativeSafeIntegerSchema, mean_ms: Schema.NullOr(Schema.Number) }),
+    failed: Schema.Struct({ samples: NonNegativeSafeIntegerSchema, mean_ms: Schema.NullOr(Schema.Number) }),
+    deferred: NonNegativeSafeIntegerSchema,
   })),
   coverage: Schema.Struct({
     composition_scope: Schema.Literal(
@@ -1426,6 +1442,20 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
         || (node.truncated_to >= 0 && node.truncated_to <= node.result_bytes)))
     if (!validResultDuration || !validNodes) {
       contractError('invalid_response', 'composition result violates typed numeric invariants')
+    }
+  }
+  const statistics = decoded.composition_statistics
+  if (statistics !== null) {
+    const validDuration = (row: { samples: number; mean_ms: number | null }) =>
+      row.samples === 0 ? row.mean_ms === null
+        : row.mean_ms !== null && Number.isFinite(row.mean_ms) && row.mean_ms >= 0
+    if (decoded.coverage.composition_scope === 'unavailable'
+      || (statistics.records > 0) !== (decoded.composition !== null)) {
+      contractError('invalid_response', 'composition statistics disagree with retained evidence coverage')
+    }
+    if (!validDuration(statistics.completed) || !validDuration(statistics.failed)
+      || statistics.completed.samples + statistics.failed.samples + statistics.deferred !== statistics.records) {
+      contractError('invalid_response', 'composition duration statistics violate sample invariants')
     }
   }
   const { composition_scope: scope, composition_records_read: read } = decoded.coverage

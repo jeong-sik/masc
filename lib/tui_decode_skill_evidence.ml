@@ -41,10 +41,19 @@ type skill_evidence_activation =
   | Skill_evidence_most_recent_observed_timestamp_tie of
       skill_evidence_activation_item list
 
+type duration_statistics = { sds_samples : int; sds_mean_ms : float option }
+type composition_statistics =
+  { scst_records : int
+  ; scst_completed : duration_statistics
+  ; scst_failed : duration_statistics
+  ; scst_deferred : int
+  }
+
 type skill_evidence =
   { se_status : skill_evidence_status
   ; se_activation : skill_evidence_activation option
   ; se_composition : Yojson.Safe.t option
+  ; se_composition_statistics : composition_statistics option
   ; se_coverage : skill_evidence_coverage
   }
 
@@ -361,8 +370,34 @@ let decode_skill_evidence_activation reference json =
   | _ -> Error "Skill evidence activation must be an object or null"
 ;;
 
+let decode_composition_statistics json =
+  let duration json =
+    let* sds_samples = required_nonnegative_int_field json "samples" in
+    let* sds_mean_ms = required_nullable_float_field json "mean_ms" in
+    match sds_samples, sds_mean_ms with
+    | 0, None -> Ok { sds_samples; sds_mean_ms }
+    | n, Some value when n > 0 && Float.is_finite value && value >= 0. ->
+        Ok { sds_samples; sds_mean_ms }
+    | _, _ -> Error "Skill duration mean disagrees with sample count"
+  in
+  let* scope = required_string_field json "scope" in
+  let* duration_scope = required_string_field json "duration_scope" in
+  if scope <> "exact_reference_retained_runs" || duration_scope <> "stored_executor_result"
+  then Error "Skill duration scope is unsupported"
+  else
+    let* scst_records = required_nonnegative_int_field json "records" in
+    let* completed = required_object_field json "completed" in
+    let* scst_completed = duration completed in
+    let* failed = required_object_field json "failed" in
+    let* scst_failed = duration failed in
+    let* scst_deferred = required_nonnegative_int_field json "deferred" in
+    if scst_completed.sds_samples + scst_failed.sds_samples + scst_deferred <> scst_records
+    then Error "Skill duration sample counts disagree with records"
+    else Ok { scst_records; scst_completed; scst_failed; scst_deferred }
+;;
+
 let decode_skill_evidence json =
-  if member "schema" json <> `String "masc.skill-evidence/v6"
+  if member "schema" json <> `String "masc.skill-evidence/v7"
   then Error "Skill evidence schema is unsupported"
   else
     let* reference =
@@ -372,6 +407,10 @@ let decode_skill_evidence json =
     in
     let* se_activation = decode_skill_evidence_activation reference json in
     let* se_composition = decode_skill_evidence_optional_object "composition" json in
+    let* statistics = decode_skill_evidence_optional_object "composition_statistics" json in
+    let* se_composition_statistics = match statistics with
+      | None -> Ok None
+      | Some statistics -> decode_composition_statistics statistics |> Result.map Option.some in
     let* () =
       match se_composition with
       | None -> Ok ()
@@ -463,6 +502,16 @@ let decode_skill_evidence json =
           | Skill_evidence_composition_unavailable ), (None | Some _), _ ->
           Error "Skill evidence composition coverage disagrees with its record"
       in
+      let* () = match se_composition_statistics with
+        | None -> Ok ()
+        | Some statistics ->
+            (match sec_composition_scope with
+             | Skill_evidence_composition_unavailable ->
+                 Error "Skill statistics cannot claim an unavailable composition partition"
+             | Skill_evidence_exact_reference_latest_completed ->
+                 if (statistics.scst_records > 0) = Option.is_some se_composition
+                 then Ok ()
+                 else Error "Skill statistics disagree with retained composition evidence") in
       let owner_gap_count =
         match se_activation with
         | None -> 0
@@ -506,6 +555,7 @@ let decode_skill_evidence json =
         { se_status
         ; se_activation
         ; se_composition
+        ; se_composition_statistics
         ; se_coverage =
             { sec_composition_scope
             ; sec_composition_records_read

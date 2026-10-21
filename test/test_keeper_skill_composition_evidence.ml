@@ -384,13 +384,43 @@ let test_canonical_failed_results () =
       [Tool_result.Proven_pre_effect; Tool_result.Proven_post_effect; Tool_result.Effect_outcome_unknown])
 ;;
 
+let test_duration_statistics () =
+  let module E = Keeper_skill_composition_evidence in
+  let reference = make_reference "indexed-proof" 'a' in
+  let run = Keeper_tool_plan.Composition_run_id.fresh () in
+  let first = make_evidence reference [] run ~recorded_at:100. in
+  let change ~disposition ~duration ~recorded_at evidence =
+    let json = E.to_yojson evidence in
+    let fields = match json with `Assoc fields -> fields | _ -> Alcotest.fail "object" in
+    let result = `Assoc ["disposition", `String disposition; "duration_ms", `Float duration;
+      "tool_name", `String "keeper_compose_indexed-proof"; "data", `Assoc []] in
+    `Assoc (("recorded_at", `Float recorded_at) :: ("result", result)
+      :: List.remove_assoc "recorded_at" (List.remove_assoc "result" fields))
+    |> E.of_yojson |> Result.get_ok in
+  let older = change ~disposition:"completed" ~duration:1000. ~recorded_at:100. first in
+  let latest = change ~disposition:"completed" ~duration:10. ~recorded_at:200. first in
+  let other = make_evidence reference [] (Keeper_tool_plan.Composition_run_id.fresh ()) ~recorded_at:300.
+    |> change ~disposition:"completed" ~duration:30. ~recorded_at:300. in
+  let deferred = make_evidence reference [] (Keeper_tool_plan.Composition_run_id.fresh ()) ~recorded_at:400.
+    |> change ~disposition:"deferred" ~duration:900. ~recorded_at:400. in
+  let stats = E.statistics [older; latest; other; deferred] in
+  Alcotest.(check int) "original run counted once" 3 stats.records;
+  Alcotest.(check int) "only completed samples" 2 stats.completed.samples;
+  Alcotest.(check (option (float 0.00001))) "completed mean excludes old and deferred" (Some 20.) stats.completed.mean_ms;
+  Alcotest.(check int) "deferred separately" 1 stats.deferred;
+  Alcotest.(check (option (float 0.00001))) "missing failures are unknown" None stats.failed.mean_ms;
+  let empty = E.statistics [] in
+  Alcotest.(check (option (float 0.00001))) "empty mean is unknown, not zero" None empty.completed.mean_ms
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Alcotest.run
     "keeper_skill_composition_evidence"
     [ ( "latest authority"
-      , [ Alcotest.test_case "canonical failed results and storage refusal" `Quick test_canonical_failed_results
+      , [ Alcotest.test_case "duration samples and original run deduplication" `Quick test_duration_statistics
+        ; Alcotest.test_case "canonical failed results and storage refusal" `Quick test_canonical_failed_results
         ; Alcotest.test_case
             "newest recorded_at wins regardless of write order"
             `Quick

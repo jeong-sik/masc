@@ -42,6 +42,13 @@ let execution_label = function
   | Composition_skill mode -> Keeper_tool_composition_catalog.execution_mode_to_string mode
 ;;
 
+type io =
+  | Model_orchestrated
+  | Composition_io of
+      { input_schema : Yojson.Safe.t
+      ; exports : Keeper_tool_plan.export list
+      }
+
 type profile =
   { reference : Skill_reference.t
   ; surface : surface
@@ -56,6 +63,7 @@ type profile =
   ; statically_read_only : bool option
   ; declaration_span : Keeper_skill_body_ast.span option
   ; flow : flow option
+  ; io : io
   }
 
 let tool_component_bytes (tool : Agent_core.Tool.t) =
@@ -219,6 +227,7 @@ let of_skill_with_reference reference (skill : Keeper_skill_catalog.skill) =
          ; statically_read_only = None
          ; declaration_span = None
          ; flow = None
+         ; io = Model_orchestrated
          }
      | Keeper_skill_catalog.Composition entry ->
        let batch_count, parallel_batch_count, max_parallelism =
@@ -238,6 +247,9 @@ let of_skill_with_reference reference (skill : Keeper_skill_catalog.skill) =
          ; statically_read_only = Some (statically_read_only entry.plan)
          ; declaration_span = skill.composition_span
          ; flow = Some (flow_of_plan entry.plan)
+         ; io = Composition_io
+             { input_schema = Keeper_tool_composition_catalog.input_schema_of_params entry.params
+             ; exports = Keeper_tool_plan.exports entry.plan }
          }
 ;;
 
@@ -350,6 +362,14 @@ let to_yojson profile =
             [ "start_line", `Int span.start_line
             ; "end_line", `Int span.end_line
             ] )
+    ; ( "io", match profile.io with
+        | Model_orchestrated -> `Assoc ["kind", `String "model_orchestrated"]
+        | Composition_io { input_schema; exports } ->
+            `Assoc ["kind", `String "composition"; "input_schema", input_schema;
+              "exports", `List (List.map (fun (export : Keeper_tool_plan.export) ->
+                `Assoc ["name", `String export.name;
+                  "node_id", `String (Keeper_tool_plan.Node_id.to_string export.node_id);
+                  "pointer", `String (Keeper_tool_plan.Json_pointer.to_string export.pointer)]) exports)] )
     ; ( "flow"
       , match profile.flow with
         | Some flow -> flow_to_yojson flow

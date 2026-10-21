@@ -9,16 +9,16 @@ let composition_scope_to_string = function
 ;;
 
 let composition_evidence ~config reference =
-  match Keeper_skill_composition_evidence.load_latest config reference with
+  match Keeper_skill_composition_evidence.load_observation config reference with
   | Error error ->
-    ( None
+    ( None, None
     , { scope = `Unavailable; records_read = 0 }
     , [ Keeper_skill_composition_evidence.error_to_string error ] )
-  | Ok None ->
-    None, { scope = `Exact_reference_latest_completed; records_read = 0 }, []
-  | Ok (Some evidence) ->
-    ( Some (Keeper_skill_composition_evidence.to_yojson evidence)
-    , { scope = `Exact_reference_latest_completed; records_read = 1 }
+  | Ok observation ->
+    ( Option.map Keeper_skill_composition_evidence.to_yojson observation.latest
+    , Some (Keeper_skill_composition_evidence.statistics_to_yojson observation.statistics)
+    , { scope = `Exact_reference_latest_completed;
+        records_read = (if Option.is_some observation.latest then 1 else 0) }
     , [] )
 ;;
 
@@ -245,6 +245,7 @@ let activation_scope_to_string = function
 let to_yojson
       ~reference
       ~composition
+      ~composition_statistics
       ~composition_coverage
       ~composition_unavailable
       ~activation
@@ -255,13 +256,14 @@ let to_yojson
       ~activation_owner_gap_count =
   let observed = Option.is_some activation || Option.is_some composition in
   `Assoc
-    [ "schema", `String "masc.skill-evidence/v6"
+    [ "schema", `String "masc.skill-evidence/v7"
     ; ( "status"
       , `String
           (if observed then "observed" else "not_observed_in_retained_coverage") )
     ; "reference", Skill_reference.to_yojson reference
     ; "activation", Option.value ~default:`Null activation
     ; "composition", Option.value ~default:`Null composition
+    ; "composition_statistics", Option.value ~default:`Null composition_statistics
     ; ( "coverage"
       , `Assoc
           [ ( "composition_scope"
@@ -288,12 +290,13 @@ let project ~config reference =
   let activation, activation_owner_gap_count =
     activation_projection ~config discovery
   in
-  let composition, composition_coverage, composition_unavailable =
+  let composition, composition_statistics, composition_coverage, composition_unavailable =
     composition_evidence ~config reference
   in
   to_yojson
     ~reference
     ~composition
+    ~composition_statistics
     ~composition_coverage
     ~composition_unavailable
     ~activation
@@ -320,6 +323,15 @@ module For_testing = struct
     to_yojson
       ~reference
       ~composition
+      ~composition_statistics:(
+        match composition with
+        | None when composition_scope = `Unavailable -> None
+        | None -> Some (Keeper_skill_composition_evidence.statistics []
+            |> Keeper_skill_composition_evidence.statistics_to_yojson)
+        | Some json ->
+            let evidence = Keeper_skill_composition_evidence.of_yojson json |> Result.get_ok in
+            Some (Keeper_skill_composition_evidence.statistics [evidence]
+              |> Keeper_skill_composition_evidence.statistics_to_yojson))
       ~composition_coverage:
         { scope = composition_scope; records_read = composition_records_read }
       ~composition_unavailable

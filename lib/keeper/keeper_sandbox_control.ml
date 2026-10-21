@@ -1137,22 +1137,20 @@ let live_status_json ?(include_preflight = true)
         ~timeout_sec ()
     | None, (Some _ | None) -> None
   in
-  let containers, container_error =
+  let container_observation =
     match meta.sandbox_profile with
     | Docker ->
       (match containers_override with
-       | Some (Ok containers) ->
-           (live_containers_for_keeper ~meta containers, None)
-       | Some (Error err) -> ([], Some err)
-       | None -> (
-         match live_containers ~config ~meta ~timeout_sec with
-         | Ok containers -> (containers, None)
-         | Error err -> ([], Some err)))
-    | Micro_vm -> (
-      match live_microvm_containers ~config ~meta ~timeout_sec with
-      | Ok containers -> (containers, None)
-      | Error err -> ([], Some err))
-    | Remote_ssh -> ([], None)
+       | Some observation ->
+         Result.map (live_containers_for_keeper ~meta) observation
+       | None -> live_containers ~config ~meta ~timeout_sec)
+    | Micro_vm -> live_microvm_containers ~config ~meta ~timeout_sec
+    | Remote_ssh -> Ok []
+  in
+  let containers, container_error, effective_mode =
+    match container_observation with
+    | Ok containers -> containers, None, Some (container_mode meta containers)
+    | Error error -> [], Some error, None
   in
   let why_no_container =
     match container_error with
@@ -1185,7 +1183,7 @@ let live_status_json ?(include_preflight = true)
         (match configured_image with
          | Some (Error error) -> `String (Keeper_sandbox_image_resolver.error_to_string error)
          | Some (Ok _) | None -> `Null));
-      ("effective_mode", `String (container_mode meta containers));
+      ("effective_mode", Json_util.string_opt_to_json effective_mode);
       ( "managed_container_kind"
       , match meta.sandbox_profile with
         | Docker -> `String managed_kind

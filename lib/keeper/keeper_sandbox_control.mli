@@ -164,7 +164,11 @@ val live_status_json :
     render performs its own keeper-scoped Docker listing.
 
     [include_repository_checkouts=false] skips Git checkout inspection for
-    dashboard hot paths. *)
+    dashboard hot paths.
+
+    A failed container inventory leaves [effective_mode] null and preserves
+    the failure in [container_error]. Only a successful inventory can establish
+    that a microVM is running or absent. *)
 
 type sandbox_log_backend =
   | Docker_logs

@@ -397,10 +397,6 @@ export function removeTrackedKeeperChatOperation(requestId: string): void {
   writeAll(readAll().filter(request => request.operationId !== id))
 }
 
-export function hasTrackedKeeperChatOperation(keeperName: string): boolean {
-  return trackedKeeperChatOperationsForKeeper(keeperName).length > 0
-}
-
 export function _clearTrackedKeeperChatOperationsForTests(): void {
   writeAll([])
 }

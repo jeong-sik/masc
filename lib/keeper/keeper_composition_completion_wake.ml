@@ -141,22 +141,73 @@ let terminal_of_status : Keeper_msg_async.request_status -> Keeper_event_queue.c
   | Keeper_msg_async.Waiting_for_dependencies _ -> None
 ;;
 
+type result_observer =
+  { canonical_root : string
+  ; lifetime : Eio.Switch.t
+  ; on_result_ready : Keeper_tool_execution_journal.result_notification -> unit }
+
+(* Only live switch-owned callbacks, never original candidates or result truth. *)
+let result_observers : result_observer list Atomic.t = Atomic.make []
+
+let observe_results ~sw ~base_path ~on_result_ready =
+  Eio.Switch.check sw;
+  let canonical_root = Eio_guard.run_in_systhread ~label:"composition-result-observer-root"
+      (fun () -> Fs_compat.realpath base_path) in
+  Eio.Switch.check sw;
+  let observer = {canonical_root;lifetime=sw;on_result_ready} in
+  let remove () = Atomic_util.update result_observers
+      (List.filter (fun current -> current != observer)) in
+  Atomic_util.update result_observers (fun current -> observer::current);
+  try Eio.Switch.on_release sw remove with exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    remove ();
+    Printexc.raise_with_backtrace exn backtrace
+
+let announce_result (entry : Keeper_msg_async.entry) completion =
+  match Atomic.get result_observers with
+  | [] -> ()
+  | observers ->
+    match Keeper_tool_execution_journal.completion_result_notification completion with
+    | Error error ->
+      Log.Keeper.warn ~keeper_name:entry.keeper_name
+        "composition result hint unavailable request=%s base_path=%S error=%s"
+        entry.request_id entry.base_path (Keeper_tool_execution_journal.error_to_string error)
+    | Ok None -> ()
+    | Ok (Some notification) ->
+      List.iter (fun observer ->
+        if String.equal observer.canonical_root notification.base_path then (
+          let log_failure exn = Log.Keeper.warn ~keeper_name:notification.keeper_name
+              "composition result observer unavailable request=%s base_path=%S error=%s"
+              entry.request_id notification.base_path (Printexc.to_string exn) in
+          try
+            Eio.Switch.check observer.lifetime;
+            observer.on_result_ready notification
+          with
+          | Eio.Cancel.Cancelled _ as exn ->
+              (* A different subscriber's cancelled switch must not cancel
+                 committed delivery. The publisher's own cancellation still wins. *)
+              Eio_guard.check_if_ready ();
+              log_failure exn
+          | exn -> log_failure exn)) observers
+
 let on_worker_settled ~base_path ~composition_tool settlement =
   match settlement with
   | Keeper_msg_async.Status_settlement
       { entry; durability = Keeper_msg_async.Durable; origin = _ } ->
-    (match Keeper_tool_execution_journal.completion_pending ~base_path entry with
+    (match Keeper_tool_execution_journal.observe_completion ~base_path entry with
      | Error error -> Log.Keeper.error ~keeper_name:entry.submitted_by
          "composition completion awaits original recovery authority request_id=%s: %s"
          entry.request_id (Keeper_tool_execution_journal.error_to_string error)
-     | Ok true ->
+     | Ok completion ->
+       (match Keeper_tool_execution_journal.completion_observation_disposition completion with
+       | Recovery_pending | Unadmitted_attempt ->
        (match Keeper_composition_completion_outbox.acknowledge ~base_path
            ~keeper_name:entry.submitted_by ~request_id:entry.request_id with
         | Ok () -> ()
         | Error error -> Log.Keeper.error ~keeper_name:entry.submitted_by
             "recoverable physical attempt completion retirement failed request_id=%s: %s"
             entry.request_id (Keeper_composition_completion_outbox.error_to_string error))
-     | Ok false ->
+       | Canonical_completion ->
     (match terminal_of_status entry.Keeper_msg_async.status with
      | None ->
        (match entry.status with
@@ -183,6 +234,7 @@ let on_worker_settled ~base_path ~composition_tool settlement =
             ~terminal
         with
         | Ok () ->
+          announce_result entry completion;
           (match Keeper_composition_completion_outbox.acknowledge
                    ~base_path ~keeper_name:entry.submitted_by ~request_id:entry.Keeper_msg_async.request_id with
            | Ok () -> ()
@@ -192,7 +244,7 @@ let on_worker_settled ~base_path ~composition_tool settlement =
         (* [deliver] already logged the reason. The pre-dispatch obligation
            remains for canonical-result reconciliation; only delivery is
            retried, while the result remains in the original request record. *)
-        | Error _ -> ())))
+        | Error _ -> ()))))
   (* The store does not hold this settlement as canonical truth. Telling the
      Keeper its work succeeded on evidence that may not survive would be worse
      than leaving it to read the record. *)
@@ -213,12 +265,15 @@ let on_worker_settled ~base_path ~composition_tool settlement =
       composition_tool
 ;;
 
-let deliver_entry ~base_path ~composition_tool (entry : Keeper_msg_async.entry) =
+let deliver_entry ~base_path ~completion ~composition_tool (entry : Keeper_msg_async.entry) =
   match terminal_of_status entry.status with
   | None -> Error "canonical composition completion has a nonterminal status"
-  | Some terminal -> deliver ~base_path ~not_before:entry.submitted_at
-      ~keeper_name:entry.submitted_by
-      ~request_id:entry.request_id ~composition_tool ~terminal
+  | Some terminal ->
+    match deliver ~base_path ~not_before:entry.submitted_at
+        ~keeper_name:entry.submitted_by
+        ~request_id:entry.request_id ~composition_tool ~terminal with
+    | Error _ as error -> error
+    | Ok () -> announce_result entry completion; Ok ()
 
 let reconcile ~base_path =
   Keeper_composition_completion_outbox.flush ~base_path ~deliver:(deliver_entry ~base_path)

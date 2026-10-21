@@ -48,16 +48,20 @@ val discover : base_path:string -> (discovery, error) result
 type record_outcome = Retired | Waiting | Delivered
 val recover :
   pending ->
-  deliver:(composition_tool:string -> Keeper_msg_async.entry -> (unit, string) result) ->
+  deliver:(completion:Keeper_tool_execution_journal.completion_observation ->
+    composition_tool:string -> Keeper_msg_async.entry -> (unit, string) result) ->
   (record_outcome, error) result
 (** Reread this original obligation and reject a changed request/recipient before
     loading current canonical terminal proof and using the same delivery/ACK
-    path as [flush]. A removed obligation is retired; a pending hint cannot
+    path as [flush]. The delivery callback receives the same original completion
+    observation, so result hints do not repeat disposition reads. A removed
+    obligation is retired; a pending hint cannot
     borrow another owner's obligation or authorize replay. *)
 
 val flush :
   base_path:string ->
-  deliver:(composition_tool:string -> Keeper_msg_async.entry -> (unit, string) result) ->
+  deliver:(completion:Keeper_tool_execution_journal.completion_observation ->
+    composition_tool:string -> Keeper_msg_async.entry -> (unit, string) result) ->
   (report, error) result
 (** Reconcile only this pending partition. Read exact canonical terminal
     proof before delivery; never execute or restart a request worker. Active

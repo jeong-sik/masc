@@ -23,5 +23,6 @@ val resolve :
 (** [Error] when a file is at the meta path but this binary does not decode
     it, or the read fails. That Keeper exists and the boot path
     re-materialises its meta, so the answer is "not now", never
-    {!No_keeper}. The read writes nothing, so a caller holding a lock may ask
-    it. *)
+    {!No_keeper}. The read writes no meta file, so a caller holding a lock may
+    ask it; finding the meta path still creates the keepers folder when it is
+    missing. *)

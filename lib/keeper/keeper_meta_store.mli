@@ -4,12 +4,12 @@
     keep their read API while writes are restricted to complete Owner
     snapshots. *)
 
-(** Read a keeper meta JSON file at [path]. Returns [Ok None] when
-    the file does not exist. Unknown top-level keys are rejected with a
-    reset-required error.
-
-    The read decodes and never writes: a file that does not decode as the
-    current schema is left exactly as it is and reads as absent.
+(** Read a keeper meta JSON file at [path]. Returns [Ok None] when the file
+    does not exist, and also when it is JSON that does not decode as the
+    current schema (an unknown, missing or wrong-typed field): that file is
+    left exactly as it is, the loss is logged as a WARN, and the boot path
+    re-materialises the Keeper from its declaration. [Error] when the file
+    cannot be read or is not JSON. The read never writes the file.
 
     The parse-failure WARN is emitted on state transitions (new failure,
     changed failure reason, recovery) per (site, path), not on every

@@ -172,6 +172,8 @@
   (re_export masc.masc_exec_command_gate)
   (re_export masc.masc_exec_bash_parser)
   (re_export masc_tui_msx_tick)
+  (re_export masc_tui_composer)
+  (re_export masc_tui_composer_projection)
   (re_export masc_tui_types)
   (re_export masc_tui_task_payloads)
   (re_export masc_tui_local_read_observation)

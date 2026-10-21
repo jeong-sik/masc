@@ -693,7 +693,10 @@ let composer_draft_window state ~cols ~prompt =
 
 let composer_line state ~cols =
   if state.view = Overview && not state.composer_focused then
-    Theme.recede () ^ fit_width " Choose a Keeper before writing · i:choose" cols ^ Ansi.reset
+    let note=match Composer.reading_note (Composer_projection.source_reading state) with
+      | None -> "Choose a Keeper before writing"
+      | Some note -> Terminal_text.single_line note in
+    Theme.recede () ^ fit_width (" " ^ note ^ " · i:choose") cols ^ Ansi.reset
   else match browser_lane_on_screen state with
   (* The page reader owns the keys here, so there is no composer to draw. The
      row it would take stays empty: the title already names the lane, its
@@ -736,6 +739,9 @@ let composer_line state ~cols =
     | false, None -> prompt ^ draft
     | false, Some line -> prompt ^ draft ^ "   " ^ line
   in
+  let body=match Composer.reading_note composer.Composer.reading with
+    | None -> body
+    | Some note -> body ^ "  · " ^ Terminal_text.single_line note in
   (* A held tool call is drawn on whatever surface the operator is looking at.
      Its prompt lives in the chat pane, and a turn holding a call is denied
      when the wait runs out -- so an operator reading the Board would lose the
@@ -748,6 +754,10 @@ let composer_line state ~cols =
 
 
 let composer_cursor state ~rows ~cols =
+  (* An unfocused row has no cursor, including the source-only Overview row.
+     Do not resolve a recipient or project its draft merely to hide it. *)
+  if not state.composer_focused then Frame_presenter.Hidden
+  else
   match browser_lane_on_screen state with
   | Some _ -> Frame_presenter.Hidden
   | None ->

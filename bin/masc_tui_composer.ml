@@ -10,8 +10,17 @@ type focus =
   | Unfocused
   | Focused
 
+type metadata_status = Not_observed | Read_failed of string | Observed
+type reading =
+  | Workspace_not_observed
+  | Workspace_unconfirmed
+  | Different_workspace
+  | Metadata of
+      { status:metadata_status; pending:Masc_tui_local_read_observation.pending option }
+
 type t = {
   target : target;
+  reading : reading;
   focus : focus;
   draft : string;
   staged_images : int;
@@ -50,6 +59,27 @@ let prompt composer =
     if composer.staged_images = 0
     then Printf.sprintf "to %s" keeper
     else Printf.sprintf "to %s [%d image]" keeper composer.staged_images
+
+let metadata_step = function
+  | Masc_tui_local_read_observation.Awaiting_start -> "starting read"
+  | Io_queued -> "waiting to read"
+  | Io_running -> "reading metadata"
+  | Io_returning -> "receiving result"
+  | Preparing | Comparison_queued | Comparison_running | Comparison_returning -> "preparing result"
+  | Awaiting_ui -> "result awaiting state application"
+
+let reading_note reading =
+  match reading with
+  | Workspace_not_observed -> Some "Server workspace not observed"
+  | Workspace_unconfirmed -> Some "Server workspace awaiting confirmation"
+  | Different_workspace -> Some "Chat needs the server workspace"
+  | Metadata {status=Observed;pending=None} -> None
+  | Metadata {status=Not_observed;pending=None} -> Some "Keeper list not observed"
+  | Metadata {status=Not_observed;pending=Some phase} -> Some ("Keeper list: " ^ metadata_step phase)
+  | Metadata {status=Observed;pending=Some phase} -> Some ("Refreshing Keeper list: " ^ metadata_step phase)
+  | Metadata {status=Read_failed detail;pending=None} -> Some ("Keeper list unavailable: " ^ detail)
+  | Metadata {status=Read_failed detail;pending=Some phase} ->
+      Some ("Keeper list: " ^ metadata_step phase ^ " · last read failed: " ^ detail)
 
 let accepts_input composer =
   match (composer.focus, composer.target) with

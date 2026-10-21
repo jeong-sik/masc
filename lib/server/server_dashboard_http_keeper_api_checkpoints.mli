@@ -21,13 +21,12 @@ val checkpoint_load_error_json :
     [current_error], and [history_errors] expose missing or unavailable assets
     without mixing diagnostic rows into the summary fields.
 
-    [input_wait_observation] reports [stored_pending] or [stored_none] only
-    after strictly decoding the canonical checkpoint. Its [checkpoint_ref]
-    hashes the exact bytes that supplied [pending_input], including the
-    original invocation and request identity. Missing, unreadable, mismatched
-    or unsupported sources are [unavailable], never an absent wait. History
-    is not used as a fallback. This is a stored observation, not live or
-    retained continuation authority and not permission to submit a response. *)
+    [input_wait_observation] uses the current Owner trace/root/input relation
+    and its exact retained payload, independently of the canonical inventory.
+    It reports owned_pending, owned_none, unobserved or unavailable. Missing
+    Owner, unavailable prior history, trace mismatch or unreadable retained
+    input never falls back to canonical/history. This is an observation, not
+    response or continuation admission. See Keeper_input_wait_observation. *)
 val inventory_json : Workspace.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t
 
 type purge_report =

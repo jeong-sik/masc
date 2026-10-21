@@ -810,6 +810,8 @@ let direct_native_call ~base_path ~keeper_name ~operation_id =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner -> Keeper_owner.direct_native_call owner ~operation_id)
 (* Binding admits a native call for dispatch, fresh or resumed, so it stays
    behind the stop fence; a stopping Owner refuses it as well. *)
+let current_input_checkpoint ~base_path ~keeper_name =
+  with_native_call_receipt_command ~base_path ~keeper_name Keeper_owner.current_input_checkpoint
 let begin_history_clear ~base_path ~keeper_name =
   with_owner_command ~base_path ~keeper_name Keeper_owner.begin_history_clear
 let commit_history_clear ~base_path ~keeper_name ~writer ~receipt =

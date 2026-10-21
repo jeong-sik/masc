@@ -64,6 +64,7 @@ max-context = 4096
     let module Store = Keeper_chat_operation_store in
     let path = Store.path_for_keeper ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
       ~keeper_name:meta.name in
+    Fs_compat.mkdir_p (Filename.dirname path);
     let store = Store.open_or_create ~path
       |> Result.map_error Store.error_to_string |> require_ok in
     Store.close store |> Result.map_error Store.error_to_string |> require_ok;

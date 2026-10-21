@@ -127,39 +127,6 @@ let checkpoint_ref_load_error_json
     `Assoc [ "kind", `String "lock_failed"; "detail", `String detail ]
 ;;
 
-let input_wait_observation_json snapshot_result =
-  let status, checkpoint_ref, pending_input, error =
-    match snapshot_result with
-    | Ok snapshot ->
-      let checkpoint = Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot in
-      let reference = Keeper_checkpoint_store.exact_snapshot_reference snapshot in
-      let status, pending_input =
-        match checkpoint.pending_input with
-        | None -> "stored_none", `Null
-        | Some pending ->
-          "stored_pending", Agent_core.Agent_input_request.pending_to_json pending
-      in
-      ( status
-      , `Assoc
-          [ "trace_id", `String (Keeper_id.Trace_id.to_string reference.trace_id)
-          ; "turn_count", `Int reference.turn_count
-          ; "sha256", `String reference.sha256
-          ]
-      , pending_input
-      , `Null )
-    | Error error ->
-      "unavailable", `Null, `Null, checkpoint_ref_load_error_json error
-  in
-  `Assoc
-    [ "schema", `String "masc.keeper.input-wait.observation.v1"
-    ; "source", `String "canonical_checkpoint"
-    ; "status", `String status
-    ; "checkpoint_ref", checkpoint_ref
-    ; "pending_input", pending_input
-    ; "error", error
-    ]
-;;
-
 let checkpoint_load_failure_json
       ~(source_kind : string)
       ~(snapshot_id : string)
@@ -192,7 +159,7 @@ let inventory_json (config : Workspace.config) (name : string)
     let current_path =
       Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id
     in
-    (* Summary, pending proof and reference all come from one exact read. A
+    (* Canonical summary and reference come from one exact read. A
        concurrent replacement cannot lend its identity to another payload. *)
     let snapshot_result =
       Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id
@@ -269,7 +236,9 @@ let inventory_json (config : Workspace.config) (name : string)
             | None -> `Null )
         ; "current_status", `String current_status
         ; "current_error", current_error
-        ; "input_wait_observation", input_wait_observation_json snapshot_result
+        ; "input_wait_observation", Keeper_input_wait_observation.to_json
+            (Keeper_input_wait_observation.read ~base_path:config.base_path ~keeper_name:meta.name
+               ~expected_trace:meta.runtime.trace_id)
         ; "history", `List history_json
         ; "history_errors", `List history_errors
         ] )

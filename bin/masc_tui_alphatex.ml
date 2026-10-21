@@ -42,7 +42,7 @@ let failure_text = function
 let note_text (note : Score.note) =
   let fret =
     match note.attack with
-    | Score.Struck -> note.fret
+    | Score.Struck | Score.Muted -> note.fret
     | Score.Tied -> "(" ^ note.fret ^ ")"
   in
   if note.marked then fret ^ "*" else fret

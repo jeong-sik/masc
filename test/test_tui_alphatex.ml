@@ -27,7 +27,9 @@ let shape (score : Score.t) =
               , List.map
                   (fun (note : Score.note) ->
                     Printf.sprintf "%s%s@%d%s"
-                      (match note.attack with Score.Struck -> "" | Score.Tied -> "-")
+                      (match note.attack with
+                       | Score.Struck | Score.Muted -> ""
+                       | Score.Tied -> "-")
                       note.fret note.on_string
                       (if note.marked then "*" else ""))
                   beat.notes ) ))
@@ -106,11 +108,16 @@ let test_a_tie_holds_the_note_before_it () =
     [ 192, [ 0, 96, ( false, [ "7@4"; "5@3" ] ); 96, 96, ( false, [ "-7@4"; "-5@3" ] ) ] ];
   check_music "with markup after it" ":4 7.4 -.4{h}"
     [ 192, [ 0, 96, ( false, [ "7@4" ] ); 96, 96, ( false, [ "-7@4*" ] ) ] ];
+  check_music "past a directive, which opens alphaTab's next bar" ":4 7.4 \\tempo 90 -.4"
+    [ 192, [ 0, 96, ( false, [ "7@4" ] ); 96, 96, ( false, [ "-7@4" ] ) ] ];
   (* alphaTab plays these as an open string, which [-] does not say. *)
   check_failure "with no note before it" ":4 -.4 3.3" (Tie_without_note 4);
   check_failure "with the note only on another string" ":4 7.3 -.4" (Tie_without_note 4);
   check_failure "four bars back" ":4 7.4 | 5.3 | 5.3 | 5.3 | -.4" (Tie_without_note 4);
   check_failure "empty bars count as bars" ":4 7.4 | | | | -.4" (Tie_without_note 4);
+  check_failure "a bar a directive opened counts as a bar" ":4 7.4 | r | r \\ts 3 4 r | -.4"
+    (Tie_without_note 4);
+  check_failure "holding a dead note" ":4 x.4 -.4" (Tie_to_dead_note 4);
   check_failure "a chord member holds no member of its own chord" ":4 (7.4 -.3)"
     (Tie_without_note 3);
   check_failure "on a string the tuning lacks" ":4 7.6 -.7"

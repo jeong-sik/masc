@@ -705,7 +705,7 @@ let test_original_task_delete_failure_and_late_scope env () = Eio.Switch.run @@ 
   original_unconfirmed original
 
 let proof_transition config ~owner ~task_id action notes =
-  match Masc.Workspace.transition_r config ~agent_name:owner ~task_id ~action ~notes
+  match Masc.Workspace.transition_task_r config ~agent_name:owner ~task_id ~action ~notes
     ~prepare_verification_request:(fun ~task ~assignee ~verification_id ~claim ->
       Masc.Verification_protocol.create_submit_request ~config ~task ~assignee ~verification_id ~claim) () with
   | Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error)

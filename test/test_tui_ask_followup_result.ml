@@ -49,7 +49,7 @@ let with_answer f =
     ~submissions:["q1",Masc.Keeper_ask.Chose {choice_ids=["c1"]}] ~responder ~now:200.
     |> Result.map_error Masc.Keeper_ask_store.answer_failure_to_string |> require);
   let resolution=match Masc.Keeper_ask_store.rows_result ~base_path:base ~keeper_name:keeper with
-    | Ok (Stored_rows rows) -> List.assoc ask.ask_id rows
+    | Ok (Stored_rows rows) -> snd (List.assoc ask.ask_id rows)
     | Ok Missing_log | Error _ -> fail "canonical answer did not persist" in
   ignore (Wake.deliver ~base_path:base ~keeper_name:keeper ~ask_id:ask.ask_id
     |> Result.map_error Wake.error_to_string |> require);

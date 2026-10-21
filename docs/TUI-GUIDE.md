@@ -681,6 +681,17 @@ names. A line that starts with `/` is a command for the TUI instead:
   A failed Task refresh keeps its last observation and the failure. Not observed
   is inconclusive; a deletion record reports historical evidence and its cleanup
   phase. The creation fact itself does not prove current status or completion.
+  `h` reads a fresh stored history prefix; `H` reads its known older page.
+  The page demand follows the viewport, with no total-history cap. Exhausting
+  the observed prefix does not prove that retained-away events never existed.
+  Complete stored events include verdict reasons and authority metadata.
+  `v` reads the next verification submission observed in ready Task/history
+  data; evidence `r` stays pinned to that exact Task and submission. Retained
+  submissions can be inspected after Task settlement or archival, using the
+  existing CanAdmin credential. Missing, corrupt or mismatched submitted evidence
+  leaves its previous reading and the failure. This reader shows full captured
+  text and binary identity/preview availability; it does not draw image pixels.
+  Reading submitted evidence is separate from an approval or useful-work verdict.
   Esc closes the inspector.
   Inspection never repeats creation, restores input or hands work to a Keeper.
   New input survives late replies. Closing/reopening or changing workspace

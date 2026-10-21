@@ -11,8 +11,8 @@
       cfg coverage (see {!Dashboard_tla_specs}).
     - [GET /api/v1/verification/tlc-results] — latest observed TLC log
       projection for each clean / buggy cfg.
-    - [GET /api/v1/verification/evidence] — submitted evidence for an
-      authenticated operator.
+    - [GET /api/v1/verification/evidence] — exact retained Task/submission
+      evidence for an authenticated operator.
     - [POST /api/v1/verification/verdict] — authenticated operator verdict.
 
     - [POST /api/v1/dashboard/tasks/cancel] — operator cancellation.
@@ -79,58 +79,23 @@ let parse_operator_verdict_json = function
   | _ -> Error "request body must be a JSON object"
 ;;
 
-let awaiting_task config task_id =
-  match
-    Workspace.get_tasks_raw config
-    |> List.find_opt (fun (task : Masc_domain.task) ->
-           String.equal task.id task_id)
-  with
-  | None -> Error (Printf.sprintf "Task %s was not found" task_id)
-  | Some
-      { task_status =
-          Masc_domain.AwaitingVerification { assignee; verification_id; _ }
-      ; _
-      } ->
-    Ok (assignee, verification_id)
-  | Some
-      ({ task_status =
-           Masc_domain.(Todo | Claimed _ | InProgress _ | Done _ | Cancelled _)
-       ; _
-       } as task) ->
-    Error
-      (Printf.sprintf
-         "Task %s is %s; operator evidence and verdicts require \
-          awaiting_verification"
-         task_id
-         (Masc_domain.task_status_to_string task.task_status))
-;;
-
-let operator_evidence_json ~config ~operator_id ~task_id =
-  let open Result.Syntax in
-  let* producer, verification_id = awaiting_task config task_id in
-  let authority = Masc_domain.Human_operator { operator_id } in
-  let evidence =
-    Workspace_verification_store.inspect_submitted_evidence_for_authority
-      ~base_path:config.Workspace.base_path
-      ~request_id:verification_id
-      ~task_id
-      ~task_worker:producer
-      ~authority
-  in
-  Ok
-    (`Assoc
-      [ "task_id", `String task_id
-      ; "verification_id", `String verification_id
-      ; "producer", `String producer
-      ; ( "authority_kind"
-        , `String (Masc_domain.completion_authority_kind authority) )
-      ; ( "authority_actor"
-        , `String (Masc_domain.completion_authority_actor authority) )
-      ; ( "evidence"
-        , Workspace_verification_operator_evidence.access_to_yojson
-            ~base_path:config.Workspace.base_path
-            evidence )
-      ])
+let operator_evidence_json ~config ~operator_id ~task_id ~verification_id =
+  if task_id="" || task_id<>String.trim task_id || verification_id=""
+     || verification_id<>String.trim verification_id
+     || Filename.basename verification_id<>verification_id then
+    Error "exact task_id and verification_id are required"
+  else
+    let authority=Masc_domain.Human_operator {operator_id} in
+    let evidence=Workspace_verification_store.inspect_submitted_evidence_for_operator
+      ~base_path:config.Workspace.base_path ~request_id:verification_id ~task_id ~operator_id in
+    let producer=match evidence with
+      | Workspace_verification_store.Evidence_available {request;_} -> `String request.worker
+      | Evidence_unavailable _ -> `Null in
+    Ok (`Assoc ["task_id",`String task_id;"verification_id",`String verification_id;
+      "producer",producer;"authority_kind",`String (Masc_domain.completion_authority_kind authority);
+      "authority_actor",`String (Masc_domain.completion_authority_actor authority);
+      "evidence",Workspace_verification_operator_evidence.access_to_yojson
+        ~base_path:config.Workspace.base_path evidence])
 ;;
 
 let commit_operator_verdict ~config ~operator_id request =
@@ -371,15 +336,16 @@ let add_routes router =
          ~permission:Masc_domain.CanAdmin
          (fun state operator_id req reqd ->
             let config = Mcp_server.workspace_config state in
-            match trimmed_query_param req "task_id" with
-            | None ->
+            match Server_utils.query_param req "task_id",Server_utils.query_param req "verification_id" with
+            | (None,_) | (_,None) ->
               respond_json_value_with_cors
                 ~status:`Bad_request
                 request
                 reqd
-                (error_json "task_id query parameter is required")
-            | Some task_id ->
-              (match operator_evidence_json ~config ~operator_id ~task_id with
+                (error_json "task_id and verification_id query parameters are required")
+            | Some task_id,Some verification_id ->
+              (match Domain_pool_ref.submit_io_or_inline (fun () ->
+                 operator_evidence_json ~config ~operator_id ~task_id ~verification_id) with
                | Ok json ->
                  respond_json_value_with_cors
                    request

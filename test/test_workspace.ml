@@ -1849,11 +1849,16 @@ let test_operator_verdict_boundary_is_reachable () =
     in
     Alcotest.(check bool) "submit with evidence snapshot" true
       (Result.is_ok submitted);
+    let task=Workspace.get_tasks_raw config |> List.find (fun (task : Masc_domain.task) -> task.id="task-001") in
+    let verification_id=match task.Masc_domain.task_status with
+      | AwaitingVerification {verification_id;_} -> verification_id
+      | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ -> Alcotest.fail "actual verification submission not awaiting" in
     let evidence =
       Server_routes_http_routes_verification.For_testing.operator_evidence_json
         ~config
         ~operator_id:"operator-test"
         ~task_id:"task-001"
+        ~verification_id
     in
     (match evidence with
      | Ok json ->

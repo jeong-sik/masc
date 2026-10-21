@@ -48,7 +48,32 @@ val task_observation : t ->
 val task_pending : t -> bool
 val complete_task : t -> task_request ->
   (task_snapshot, error) result -> t
-val task_on_screen : t -> bool
 val back_to_creation : t -> t
 (** A Task read remains attached to its original single ready creation ticket.
     Closing/suspending/history selection retires it independently of transport. *)
+
+type source = Creation | Task | History | Evidence
+val displayed_source : t -> source
+type history_request
+type history_snapshot
+val start_history : earlier:bool -> limit:int -> t -> t * history_request option
+val history_page_request : history_request -> Masc.Tui_decode_task_inspection.history_request
+val history_request_id : history_request -> int64
+val history_is_current : t -> history_request -> bool
+val prepare_history : Masc.Tui_decode_task_inspection.history -> history_snapshot
+val complete_history : t -> history_request -> (history_snapshot,error) result -> t
+val history_observation : t -> (Masc.Tui_decode_task_inspection.history,error) Masc_tui_fetched.observation
+
+type evidence_request
+type evidence_snapshot
+val start_evidence : next:bool -> t -> t * evidence_request option
+(** Explicit next/first observed submission. A refresh in Evidence keeps that
+    exact submission; ids come only from ready Task/history observations. *)
+val evidence_task_id : evidence_request -> string
+val evidence_verification_id : evidence_request -> string
+val evidence_request_id : evidence_request -> int64
+val evidence_is_current : t -> evidence_request -> bool
+val prepare_evidence : task_id:string -> verification_id:string ->
+  Masc.Tui_decode.verification_evidence -> (evidence_snapshot,error) result
+val complete_evidence : t -> evidence_request -> (evidence_snapshot,error) result -> t
+val evidence_observation : t -> (Masc.Tui_decode.verification_evidence,error) Masc_tui_fetched.observation

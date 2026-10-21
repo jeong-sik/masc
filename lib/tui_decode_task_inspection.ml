@@ -1,3 +1,4 @@
+module Verification_ids = Set.Make (String)
 open Result.Syntax
 type detail =
   { task : Masc_domain.task
@@ -40,7 +41,7 @@ let history ~task_id json =
 
 type history =
   { history_task_id : string; history_events : Tui_decode.task_history_event list
-  ; history_next_cursor : string option; history_cursors : string list }
+  ; history_records : Yojson.Safe.t list; history_verifications : string list; history_next_cursor : string option; history_cursors : string list }
 type history_request =
   { hr_task_id : string; hr_limit : int; hr_cursor : string option; hr_prefix : history option }
 let history_first ~task_id ~limit =
@@ -66,10 +67,32 @@ let history_page ~request json =
   let seen=match echo with None -> seen | Some cursor -> cursor::seen in
   let* ()=match next with Some cursor when List.mem cursor seen -> Error "Task history cursor did not advance"
     | Some _ | None -> Ok () in
-  let* events=history ~task_id:id (List.assoc "events" fields) in
+  let raw_events=List.assoc "events" fields in
+  let* events=history ~task_id:id raw_events in
+  let prefix=match request.hr_prefix with None -> [] | Some prefix -> prefix.history_verifications in
+  let verification_seen=List.fold_left (fun seen id -> Verification_ids.add id seen) Verification_ids.empty prefix in
+  let* history_records=match raw_events with
+    | `List rows -> Ok (match request.hr_prefix with None -> rows | Some prefix -> prefix.history_records @ rows)
+    | _ -> Error "Task history events are not a list" in
+  let* _,rev_ids=match raw_events with
+    | `List rows -> List.fold_left (fun prior row ->
+      let* seen,ids=prior in
+      let* value=match row with
+        | `Assoc fields ->
+          (match List.filter (fun (name,_) -> name="verification_id") fields with
+           | [] | [_,`Null] -> Ok None
+           | [_,json] -> Result.map Option.some (nonblank json)
+           | _ -> Error "Task history has duplicate verification identities")
+        | _ -> Error "Task history event is not an object" in
+      match value with
+      | None -> Ok (seen,ids)
+      | Some id when Verification_ids.mem id seen -> Ok (seen,ids)
+      | Some id -> Ok (Verification_ids.add id seen,id::ids)) (Ok (verification_seen,List.rev prefix)) rows
+    | _ -> Error "Task history events are not a list" in
+  let history_verifications=List.rev rev_ids in
   let* ()=if List.length events<=request.hr_limit then Ok () else Error "Task history page exceeds its requested demand" in
   let events=match request.hr_prefix with None -> events | Some prefix -> prefix.history_events @ events in
-  Ok {history_task_id=id;history_events=events;history_next_cursor=next;history_cursors=seen}
+  Ok {history_task_id=id;history_events=events;history_records;history_verifications;history_next_cursor=next;history_cursors=seen}
 
 type deletion_cleanup = Cleanup_required | Cleanup_verified
 type deletion_observation = {

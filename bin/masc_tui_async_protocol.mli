@@ -724,6 +724,10 @@ type async_msg =
   | Observer_closed of (unit, Masc_tui_http.observer_error) result
   | Original_task_read_done of Masc_tui_types.task_creation_read_request
       * (Masc_tui_task_creation_read.task_snapshot, Masc_tui_task_creation_read.error) result
+  | Original_task_history_done of Masc_tui_types.task_creation_read_request
+      * (Masc_tui_task_creation_read.history_snapshot, Masc_tui_task_creation_read.error) result
+  | Original_task_evidence_done of Masc_tui_types.task_creation_read_request
+      * (Masc_tui_task_creation_read.evidence_snapshot, Masc_tui_task_creation_read.error) result
   | Task_dispatch_completed of Masc_tui_types.task_dispatch_request
   | Task_creation_read_done of Masc_tui_types.task_creation_read_request
       * (Masc_tui_task_creation_read.receipt, Masc_tui_task_creation_read.error) result

@@ -31,13 +31,16 @@ let request_path base_path req_id =
 
 let load_request_for_evidence base_path req_id =
   let path = request_path base_path req_id in
-  if not (Sys.file_exists path) then
+  if req_id="" || req_id<>String.trim req_id || Filename.basename req_id<>req_id then
+    Error Request_scope_mismatch
+  else if not (Sys.file_exists path) then
     Error Request_not_found
   else
     try
       let json = Safe_ops.read_json_eio path in
       match request_header_of_yojson json with
       | Error detail -> Error (Request_header_invalid detail)
+      | Ok request when request.id<>req_id -> Error Request_scope_mismatch
       | Ok request ->
         (match submitted_evidence_snapshot_of_request_json json with
          | Error detail -> Error (Evidence_snapshot_invalid detail)
@@ -446,3 +449,12 @@ let inspect_submitted_evidence_for_authority ~base_path ~request_id ~task_id
           ; reason = Request_scope_mismatch
           }
 ;;
+
+let inspect_submitted_evidence_for_operator ~base_path ~request_id ~task_id ~operator_id =
+  let authority=Masc_domain.Human_operator {operator_id} in
+  if not (Masc_domain.completion_authority_has_identity authority) then
+    Evidence_unavailable {request_id;reason=Completion_authority_identity_missing}
+  else match load_request_for_evidence base_path request_id with
+    | Error reason -> Evidence_unavailable {request_id;reason}
+    | Ok (request,items) when request.task_id=task_id -> Evidence_available {request;items}
+    | Ok _ -> Evidence_unavailable {request_id;reason=Request_scope_mismatch}

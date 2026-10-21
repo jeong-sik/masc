@@ -243,6 +243,12 @@ val inspect_submitted_evidence_for_authority :
   submitted_evidence_access
 (** Read submitted evidence after a trusted boundary has produced a completion
     authority. The task id and producer must still match the durable request. *)
+val inspect_submitted_evidence_for_operator :
+  base_path:string -> request_id:string -> task_id:string -> operator_id:string ->
+  submitted_evidence_access
+(** A trusted CanAdmin boundary supplies the operator. Read the exact immutable
+    request, including after Task settlement/archival; its id and Task must
+    match. The recorded producer is not replaced by a current Task owner. *)
 val verifications_dir : string -> string
 val request_path : string -> string -> string
 

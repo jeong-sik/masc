@@ -1118,18 +1118,14 @@ let post_keeper_chat_streaming ?expected_workspace ?(admission_intent = Masc_tui
       |> Result.map_error (fun error ->
              Masc_tui_keeper_chat_projection.Protocol_error error)
 
-(** Fetch the operator evidence bundle for one awaiting-verification task
-    ([GET /api/v1/verification/evidence]). A task outside
-    awaiting_verification is a 400 whose body names why; that text becomes
-    the error the pane draws. *)
-let fetch_verification_evidence ~(host : string) ~(port : int)
-    ~(task_id : string) ~(verification_id : string) :
-    (Masc.Tui_decode.verification_evidence,
-     Masc_tui_types.Verification_evidence_read.failure) result =
+(** Fetch the operator evidence bundle for the exact Task and immutable
+    verification request, including after settlement or archival. *)
+let read_verification_evidence ~prepare ~(host : string) ~(port : int)
+    ~(task_id : string) ~(verification_id : string) =
   let module Failure = Masc_tui_types.Verification_evidence_read in
   let path =
-    Printf.sprintf "/api/v1/verification/evidence?task_id=%s"
-      (percent_encode_path_segment task_id)
+    Uri.make ~path:"/api/v1/verification/evidence"
+      ~query:["task_id",[task_id];"verification_id",[verification_id]] () |> Uri.to_string
   in
   match Masc_tui_workspace_read.read_response
       ~send:(fun ~path -> http_get_response ~host ~port ~path ~headers:[])
@@ -1143,8 +1139,13 @@ let fetch_verification_evidence ~(host : string) ~(port : int)
       else
         match Yojson.Safe.from_string response.body with
         | json -> Masc.Tui_decode.decode_verification_evidence_for_request ~task_id ~verification_id json
-          |> Result.map_error (fun detail -> Failure.Invalid_payload detail)
+          |> Result.map_error (fun detail -> Failure.Invalid_payload detail) |> Result.map prepare
         | exception Yojson.Json_error detail -> Error (Failure.Invalid_json detail))
+let fetch_verification_evidence ~host ~port ~task_id ~verification_id =
+  read_verification_evidence ~prepare:Fun.id ~host ~port ~task_id ~verification_id
+let fetch_original_verification_evidence ~host ~port ~task_id ~verification_id =
+  read_verification_evidence ~prepare:(Masc_tui_task_creation_read.prepare_evidence ~task_id ~verification_id)
+    ~host ~port ~task_id ~verification_id
 
 (** Fetch one goal's merged event timeline
     ([GET /api/v1/dashboard/goals/detail]). Only the [timeline] (and the
@@ -1163,13 +1164,17 @@ let fetch_goal_timeline ~(host : string) ~(port : int) ~(goal_id : string) :
 
 (** Read one exact continuation page. The response demand comes from the
     caller's viewport; older pages carry their captured prefix on the CPU path. *)
-let fetch_task_history_page ~host ~port ~(request : Masc.Tui_decode_task_inspection.history_request) =
+let read_task_history_page ~prepare ~host ~port ~(request : Masc.Tui_decode_task_inspection.history_request) =
   let query=["task_id",[request.hr_task_id];"limit",[string_of_int request.hr_limit]]
     @ (match request.hr_cursor with None -> [] | Some cursor -> ["cursor",[cursor]]) in
   let path=Uri.make ~path:"/api/v1/dashboard/tasks/history/page" ~query () |> Uri.to_string in
   Result.bind (get_json ~host ~port ~path) (fun json ->
     Masc_tui_response_decode.run ~name:"task.history.page.decode_wait" (fun () ->
-      Masc.Tui_decode_task_inspection.history_page ~request json))
+      Masc.Tui_decode_task_inspection.history_page ~request json |> Result.map prepare))
+let fetch_task_history_page ~host ~port ~request =
+  read_task_history_page ~prepare:Fun.id ~host ~port ~request
+let fetch_original_task_history ~host ~port ~request =
+  read_task_history_page ~prepare:Masc_tui_task_creation_read.prepare_history ~host ~port ~request
 
 let fetch_original_task_detail ~host ~port ~task_id ~previous =
   let path=Uri.make ~path:"/api/v1/dashboard/tasks/detail" ~query:["task_id",[task_id]] () |> Uri.to_string in

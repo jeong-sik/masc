@@ -52,8 +52,10 @@ val distribution_bars :
   width:int ->
   bar_item list ->
   string list
-(** [distribution_bars ~width items] renders ranked horizontal bars with counts and percentages,
-    bounded strictly within [width] display cells. *)
+(** [distribution_bars ~width items] renders counts and shares of the supplied
+    nonnegative counts. Every bar uses the same 0–100 percent scale; missing
+    categories outside [items] are not part of the denominator. Empty tracks
+    use a neutral colour. Output is bounded within [width] display cells. *)
 
 (** {1 High-Resolution Braille Curve Plots} *)
 

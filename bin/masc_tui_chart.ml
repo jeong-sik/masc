@@ -206,17 +206,18 @@ type bar_item = {
 let distribution_bars ~width items =
   if width <= 0 || items = [] then []
   else
-    let total = List.fold_left (fun acc it -> acc + Stdlib.max 0 it.count) 0 items in
-    let max_count = List.fold_left (fun acc it -> Stdlib.max acc it.count) 0 items in
+    let total = List.fold_left (fun acc it -> acc +. float_of_int (Stdlib.max 0 it.count)) 0. items in
+    let count_width = List.fold_left (fun acc it ->
+      Stdlib.max acc (String.length (string_of_int (Stdlib.max 0 it.count)))) 5 items in
     let max_name_len = List.fold_left (fun acc it -> Stdlib.max acc (Layout.display_width it.name)) 0 items in
     let name_col_width = Stdlib.min 18 (Stdlib.max 6 max_name_len) in
-    (* fixed: "  " (2) + name (name_col_width) + "  " (2) + " " (1) + count (5) + " " (1) + "(xxx%)" (6) = name_col_width + 17 *)
-    let fixed_cols = 2 + name_col_width + 2 + 1 + 5 + 1 + 6 in
+    let fixed_cols = 2 + name_col_width + 2 + 1 + count_width + 1 + 6 in
     let bar_width = Stdlib.max 0 (width - fixed_cols) in
     List.map
       (fun it ->
         let count = Stdlib.max 0 it.count in
-        let pct = if total <= 0 then 0 else (count * 100) / total in
+        let share = if total <= 0. then 0. else float_of_int count /. total in
+        let pct = int_of_float (share *. 100.) in
         let color =
           match it.style with
           | Some s -> Masc_tui_theme.status s
@@ -225,23 +226,23 @@ let distribution_bars ~width items =
         let padded_name = Layout.fit_width it.name name_col_width in
         if bar_width <= 0 then
           Layout.fit_width
-            (Printf.sprintf "  %s  %s%5d (%2d%%)%s"
-               padded_name color count pct Masc_tui_theme.Sgr.reset)
+            (Printf.sprintf "  %s  %s%*d (%2d%%)%s"
+               padded_name color count_width count pct Masc_tui_theme.Sgr.reset)
             width
         else
           let filled =
-            if max_count <= 0 || count <= 0 then 0
-            else Stdlib.max 1 (Stdlib.min bar_width ((count * bar_width) / max_count))
+            if count <= 0 then 0
+            else Stdlib.max 1 (Stdlib.min bar_width (int_of_float (share *. float_of_int bar_width)))
           in
           let unfilled = Stdlib.max 0 (bar_width - filled) in
-          Printf.sprintf "  %s  %s%s%s%s%s %5d (%2d%%)"
+          Printf.sprintf "  %s  %s%s%s%s%s %*d (%2d%%)"
             padded_name
             color
             (repeat bar_full filled)
-            Masc_tui_theme.Sgr.dim
+            (Masc_tui_theme.Sgr.reset ^ Masc_tui_theme.tone Dim)
             (repeat bar_light unfilled)
             Masc_tui_theme.Sgr.reset
-            count
+            count_width count
             pct)
       items
 ;;

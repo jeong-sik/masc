@@ -1480,7 +1480,7 @@ type system_log_entry = {
 type system_log_snapshot = {
   sys_entries : system_log_entry list;
   sys_total : int;
-  sys_latest_seq : int;
+  sys_latest_seq : int option;
 }
 
 (* The server accepts "warn" and "warning" for one level and writes levels in
@@ -2593,7 +2593,7 @@ let decode_system_log_snapshot json =
   let* entries_json = required_list_field json "entries" in
   let* sys_entries = decode_list "entries" decode_system_log_entry entries_json in
   let* sys_total = required_int_field json "total" in
-  let* sys_latest_seq = required_int_field json "latest_seq" in
+  let* sys_latest_seq = required_nullable_int_field json "latest_seq" in
   Ok { sys_entries; sys_total; sys_latest_seq }
 
 (* The tokens are the lowercase constructor names

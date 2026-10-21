@@ -32,9 +32,13 @@ let system_log_detail_field ~width ~style label value =
       (style, prefix ^ first)
       :: List.map (fun line -> style, continuation ^ line) rest
 
+let system_logs_status state = match System_logs_view.source state.system_logs with
+  | Server -> "Server  " ^ connection_badge state
+  | This_tui -> System_logs_view.source_label This_tui
+
 let system_log_detail_lines (state : state) ~seq ~width =
   let entry =
-    Option.bind state.system_logs (fun snapshot ->
+    Option.bind (system_logs_page state).lp_snapshot (fun snapshot ->
         List.find_opt
           (fun entry -> entry.Masc.Tui_decode.sl_seq = seq)
           snapshot.Masc.Tui_decode.sys_entries)
@@ -52,7 +56,9 @@ let system_log_detail_lines (state : state) ~seq ~width =
         |> Option.value ~default:Masc_tui_theme.Glyph.no_value
       in
       let fields =
-        system_log_detail_field ~width ~style:Ansi.dim "Sequence"
+        system_log_detail_field ~width ~style:Ansi.dim "Origin"
+          (System_logs_view.source_label (System_logs_view.source state.system_logs))
+        @ system_log_detail_field ~width ~style:Ansi.dim "Sequence"
           (string_of_int entry.sl_seq)
         @ system_log_detail_field ~width ~style:Ansi.dim "Timestamp" entry.sl_ts
         @ system_log_detail_field ~width ~style:level_style "Level"
@@ -92,12 +98,12 @@ let render_system_log_detail (state : state) seq =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  seq %d  %s" (screen_title " MASC Log detail") seq
-       (connection_badge state));
+       (system_logs_status state));
   box_divider buf cols;
   let lines = system_log_detail_lines state ~seq ~width:(max 1 (framed_inner_width cols - 4)) in
   let content_height = max 1 (rows - 5) in
   let max_scroll = max 0 (List.length lines - content_height) in
-  let scroll = max 0 (min state.system_logs_detail_scroll max_scroll) in
+  let scroll = max 0 (min (system_logs_page state).lp_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
   for index = 0 to content_height - 1 do
     match Rows.at lines_window (scroll + index) with
@@ -162,7 +168,7 @@ let render_system_logs (state : state) =
   let entries = Masc_tui_types.visible_system_log_entries state in
   let total_entries = List.length entries in
   let loaded_entries =
-    match state.system_logs with
+    match (system_logs_page state).lp_snapshot with
     | None -> 0
     | Some snapshot -> List.length snapshot.sys_entries
   in
@@ -180,14 +186,14 @@ let render_system_logs (state : state) =
      columns and the connection badge below eighty. *)
   let filter_note =
     let level =
-      match state.system_logs_min_level with
+      match (system_logs_page state).lp_min_level with
       | None -> "  level\xe2\x89\xa5DEBUG"
       | Some floor ->
           Printf.sprintf "  level\xe2\x89\xa5%s"
             (String.trim (Masc.Tui_decode.system_log_level_label floor))
     in
     let category =
-      match state.system_logs_category with
+      match (system_logs_page state).lp_category with
       | None -> ""
       | Some category ->
           "  category:" ^ Terminal_text.single_line category
@@ -202,32 +208,33 @@ let render_system_logs (state : state) =
      so at the default this stays off the row rather than spending its width
      on the surface that has least to spare. *)
   let set_filter_note =
-    match state.system_logs_min_level, state.system_logs_category with
+    match (system_logs_page state).lp_min_level, (system_logs_page state).lp_category with
     | None, None -> ""
     | _ -> filter_note
   in
   let header =
-    match state.system_logs with
+    match (system_logs_page state).lp_snapshot with
     | None ->
         let reading_note =
-          match state.system_logs_error with
+          match (system_logs_page state).lp_error with
           | None -> title_missing_reading ~error:None
           | Some _ -> ""
         in
         Printf.sprintf "%s  %s  %s"
           (activity_title ~cols ~on_logs:true
-             ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state))
+             ~after:(Printf.sprintf "  %s  %s" timestamp (system_logs_status state))
              (reading_note ^ set_filter_note))
-          timestamp (connection_badge state)
+          timestamp (system_logs_status state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
         Printf.sprintf "%s  %s  %s"
           (activity_title ~cols ~on_logs:true
-             ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state))
-             (Printf.sprintf "(%d of %d, seq %d)%s" total_entries
-                snapshot.sys_total snapshot.sys_latest_seq filter_note))
-          timestamp (connection_badge state)
+             ~after:(Printf.sprintf "  %s  %s" timestamp (system_logs_status state))
+             (Printf.sprintf "(%d of %d)%s%s" total_entries snapshot.sys_total
+                (match snapshot.sys_latest_seq with None -> "" | Some seq -> Printf.sprintf "  seq %d" seq)
+                filter_note))
+          timestamp (system_logs_status state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -242,7 +249,7 @@ let render_system_logs (state : state) =
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
-  (match state.system_logs_error with
+  (match (system_logs_page state).lp_error with
    | None -> ()
    | Some detail ->
        box_line_styled buf cols ~style:(Theme.bad ())
@@ -255,15 +262,15 @@ let render_system_logs (state : state) =
     | Some s ->
         Masc_tui_scroll.content_height ~rows ~chrome:s.sc_chrome ~count:s.sc_count
           ~preview_keep:s.sc_preview_keep ~overflow_takes_row:s.sc_overflow_takes_row
-    | None -> max 1 (rows - listing_chrome ~error:state.system_logs_error)
+    | None -> max 1 (rows - listing_chrome ~error:(system_logs_page state).lp_error)
   in
   let max_scroll = max 0 (total_entries - content_height) in
-  let scroll = max 0 (min state.system_logs_scroll max_scroll) in
+  let scroll = max 0 (min (system_logs_page state).lp_scroll max_scroll) in
   let entries_window = Rows.of_list ~first:scroll ~height:content_height entries in
   if total_entries = 0 then begin
     let empty =
       match
-        empty_page_of ~snapshot:state.system_logs ~error:state.system_logs_error
+        empty_page_of ~snapshot:(system_logs_page state).lp_snapshot ~error:(system_logs_page state).lp_error
       with
       (* [empty_page_of] returns [Page_failed] for an error with no snapshot
          and for an error over one, so a note about the title's count is true
@@ -316,7 +323,7 @@ let render_system_logs (state : state) =
                 ; slog_message = Terminal_text.single_line e.sl_message
                 }
           in
-          if idx = state.system_logs_cursor then
+          if idx = (system_logs_page state).lp_cursor then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
           else box_line buf cols line
     done;

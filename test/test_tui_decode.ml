@@ -8169,7 +8169,7 @@ let test_decode_system_log_snapshot_reads_the_live_shape () =
   | Ok snapshot ->
       Alcotest.(check int) "total is the ring count, not the page" 774273
         snapshot.Tui_decode.sys_total;
-      Alcotest.(check int) "latest seq" 774272 snapshot.Tui_decode.sys_latest_seq;
+      Alcotest.(check (option int)) "latest seq" (Some 774272) snapshot.Tui_decode.sys_latest_seq;
       (match snapshot.Tui_decode.sys_entries with
        | [ entry ] ->
            Alcotest.(check string) "module" "Discord"

@@ -747,6 +747,50 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
     ~module_filter:"Transport" ~since_seq:(Some since_seq) ~before_seq:None
     ~category_filter:(Some "lifecycle") ~exclude_category:None ~ring_bounds:(Log.Ring.bounds ()) entries in
   let decoded=Masc.Tui_decode.decode_system_log_snapshot exported |> require in
+  let module Logs=Masc_tui_system_logs in
+  state.system_logs <- Logs.apply Logs.Server (Ok decoded) state.system_logs;
+  let local=Logs.client_snapshot ~limit:Log.Ring.capacity ~min_level:None |> require in
+  let shared_seq=match List.find_opt (fun (entry : Masc.Tui_decode.system_log_entry) ->
+    List.exists (fun (other : Masc.Tui_decode.system_log_entry) -> other.sl_seq=entry.sl_seq) local.sys_entries) decoded.sys_entries with
+    | Some entry -> entry.sl_seq | None -> fail "actual source pages have no common ring sequence" in
+  state.system_logs <- Logs.update_current (fun page -> {page with
+    lp_min_level=Some Masc.Tui_decode.System_info;lp_detail_seq=Some shared_seq}) state.system_logs;
+  state.system_logs <- Logs.select Logs.This_tui state.system_logs;
+  state.system_logs <- Logs.apply This_tui (Ok local) state.system_logs;
+  state.system_logs <- Logs.update_current (fun page -> {page with lp_category=Some "lifecycle"}) state.system_logs;
+  let client_page=Logs.current state.system_logs in
+  Log.Server.info "Actual later server observation after client source selection";
+  let late_entries=Log.Ring.recent ~limit:Log.Ring.capacity ~since_seq () in
+  let late_frame=Server_dashboard_logs_json.build ~config ~limit:Log.Ring.capacity
+    ~level_filter:"info" ~applied_level:Log.Info ~min_level:(Log.level_to_int Log.Info)
+    ~module_filter:"" ~since_seq:(Some since_seq) ~before_seq:None
+    ~category_filter:None ~exclude_category:None ~ring_bounds:(Log.Ring.bounds ()) late_entries in
+  let late_server=Masc.Tui_decode.decode_system_log_snapshot late_frame |> require in
+  state.system_logs <- Logs.apply Server (Ok late_server) state.system_logs;
+  check bool "late actual server frame cannot replace client data, filters or detail target" true
+    (Logs.current state.system_logs=client_page && (Logs.current state.system_logs).lp_detail_seq=None);
+  state.system_logs <- Logs.select Server state.system_logs;
+  check bool "server owns its actual late frame and original severity/detail selection" true
+    ((Logs.current state.system_logs).lp_snapshot=Some late_server
+     && (Logs.current state.system_logs).lp_min_level=Some Masc.Tui_decode.System_info
+     && (Logs.current state.system_logs).lp_detail_seq=Some shared_seq);
+  let empty_entries=Log.Ring.recent ~limit:Log.Ring.capacity ~before_seq:0 () in
+  let empty_frame=Server_dashboard_logs_json.build ~config ~limit:Log.Ring.capacity
+    ~level_filter:"debug" ~applied_level:Log.Debug ~min_level:(Log.level_to_int Log.Debug)
+    ~module_filter:"" ~since_seq:None ~before_seq:(Some 0)
+    ~category_filter:None ~exclude_category:None ~ring_bounds:(Log.Ring.bounds ()) empty_entries in
+  let empty=Masc.Tui_decode.decode_system_log_snapshot empty_frame |> require in
+  check bool "actual empty server page carries no invented latest sequence" true
+    (empty.sys_entries=[] && empty.sys_latest_seq=None);
+  state.system_logs <- Logs.apply Server (Ok empty) state.system_logs;
+  state.system_logs <- Logs.select This_tui state.system_logs;
+  state.system_logs <- Logs.apply Server (Error "controlled server source failure after actual frames") state.system_logs;
+  check bool "server empty/error observations cannot become local empty/error state" true
+    (Logs.current state.system_logs=client_page);
+  state.system_logs <- Logs.clear_server state.system_logs;
+  check bool "server workspace retirement preserves process-local page" true (Logs.current state.system_logs=client_page);
+  check bool "retired server detail cannot resolve a colliding client sequence" true
+    ((Logs.page Server state.system_logs).lp_snapshot=None && (Logs.page Server state.system_logs).lp_detail_seq=None);
   let disk=Array.to_list (Sys.readdir log_dir) |> List.concat_map (fun name ->
     let path=Filename.concat log_dir name in
     let channel=open_in path in

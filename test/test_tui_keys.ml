@@ -1223,14 +1223,14 @@ let test_detail_search_counts_follow_the_active_pane () =
            hv_verdict = "approve"; hv_evaluator = "evaluator";
            hv_fallback_reason = None; hv_notes_hash = "hash" }];
       hs_calibration = None; hs_overview = None };
-  state.system_logs <- Some
+  state.system_logs <- System_logs_view.apply System_logs_view.Server (Ok
     { Tui_decode.sys_entries =
         [{ Tui_decode.sl_seq = 1; sl_ts = "2026-09-13T00:00:00Z";
            sl_level = Tui_decode.System_info;
            sl_source = Tui_decode.System_structured;
            sl_module = "test"; sl_keeper = None; sl_turn = None;
            sl_message = "needle"; sl_details = `Null; sl_category = None }];
-      sys_total = 1; sys_latest_seq = 1 };
+      sys_total = 1; sys_latest_seq = Some 1 }) state.system_logs;
   let check_pane label surface set_detail =
     state.view <- surface;
     let count () = Masc_tui_surface_search.surface_search_count state surface ~query:state.search_last in
@@ -1252,7 +1252,7 @@ let test_detail_search_counts_follow_the_active_pane () =
   check_pane "Harness" Harness
     (fun detail -> state.harness_detail <- if detail then Some ("task-1", 1.) else None);
   check_pane "System logs" System_logs
-    (fun detail -> state.system_logs_detail_seq <- if detail then Some 1 else None)
+    (fun detail -> edit_system_logs_page state (fun page -> {page with lp_detail_seq=(if detail then Some 1 else None)}))
 
 let test_changes_diff_uses_visible_search_rows () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in

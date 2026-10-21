@@ -133,7 +133,7 @@ let clamped_scroll_now (state : state) = function
   | Runtime_detail_scroll _ -> Runtime_detail_scroll state.runtime_detail_scroll
   | Runtime_params_scroll _ -> Runtime_params_scroll state.config_scroll
   | System_log_detail_scroll _ ->
-      System_log_detail_scroll state.system_logs_detail_scroll
+      System_log_detail_scroll (system_logs_page state).lp_detail_scroll
   | Planning_detail_scroll _ | Planning_confirmation_scroll _ -> Planning_detail_scroll state.planning_scroll
   | Lane_run_detail_scroll _ ->
       Lane_run_detail_scroll

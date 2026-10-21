@@ -144,6 +144,14 @@
   schedule 요청으로 진행·재조회와 실제 stamped snapshot·오류를 구분하고 기존 page-capped
   부재 판정을 유지한다. Item account도 자기 pending이 없으면 미조회다. 표시 projection은
   source 상태·요청·취소·응답 적용·binding/Item/schedule 효과 권한을 쓰거나 바꾸지 않는다.
+- 전역 Logs는 Server와 This TUI를 닫힌 source로 선택하고 snapshot·오류·필터·스크롤·상세
+  대상을 source별 불변 page에 보관한다. 늦은 서버 응답은 서버 page만 갱신하며 같은 seq를
+  로컬 상세의 identity로 빌리지 않는다. workspace 회수는 서버 page만 비우고 프로세스 관측은
+  유지한다. 서버 HTTP floor도 서버 page에서 캡처한다. 로컬 선택은 서버 authority나 HTTP
+  요청을 기다리지 않고 현재 프로세스의 bounded Ring을 공용 decoder로 읽는다. 키와 기존
+  cadence에서만 갱신하고 draw·검색·스크롤에서 파일 이력이나 새 timer를 만들지 않는다.
+  원래 nullable latest sequence는 None으로 보존하고 빈 페이지를 실패·Loading·가짜 seq로
+  바꾸지 않는다. 화면 연결 소스와 실제 paint·입력/지연 실측·동시 프로세스 증거는 구분한다.
 - Keeper 상세의 활동 요약과 Logs는 같은 `Masc_tui_fetched` 관측을 사용한다.
   입력 handler와 cadence는 파일을 읽지 않고 원래 workspace authority·base path·Keeper·
   물리 행 범위에 묶인 I/O 요청을 보낸다. 응답은 원래 read scope와 ticket도 일치해야

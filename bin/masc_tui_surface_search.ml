@@ -138,7 +138,7 @@ let surface_row_texts (state : state) : surface -> string list option =
                 s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
         state.runtime_surface
   | System_logs ->
-      if Option.is_some state.system_logs_detail_seq then None
+      if Option.is_some (system_logs_page state).lp_detail_seq then None
       else Option.map
         (fun _ ->
           visible_system_log_entries state
@@ -147,7 +147,7 @@ let surface_row_texts (state : state) : surface -> string list option =
               e.Tui_decode.sl_module ^ " "
               ^ Option.value ~default:"" e.Tui_decode.sl_keeper
               ^ " " ^ e.Tui_decode.sl_message))
-        state.system_logs
+        (system_logs_page state).lp_snapshot
   | Code ->
       (* With a file focused (and no file overlay over it), "/" searches the
          file's lines; the tree remains the default search list. The Git

@@ -141,11 +141,20 @@ export interface SkillFlow {
   batches: readonly SkillFlowBatch[]
 }
 
+export type SkillIo =
+  | { kind: 'model_orchestrated' }
+  | {
+    kind: 'composition'
+    input_schema: Readonly<Record<string, unknown>>
+    exports: readonly { name: string; node_id: string; pointer: string }[]
+  }
+
 export interface SkillProfile {
   reference: SkillReference
   kind: string
   activation_tool: string
   execution: string
+  io: SkillIo
   capabilities: {
     as_skill: boolean
     as_tool: boolean
@@ -735,6 +744,18 @@ const AsyncRequestObservationSchema = Schema.Union(
 const SkillProfileDetailsFields = {
   activation_tool: Schema.NonEmptyString,
   execution: Schema.NonEmptyString,
+  io: Schema.Union(
+    Schema.Struct({ kind: Schema.Literal('model_orchestrated') }),
+    Schema.Struct({
+      kind: Schema.Literal('composition'),
+      input_schema: UnknownRecordSchema,
+      exports: Schema.Array(Schema.Struct({
+        name: Schema.NonEmptyString,
+        node_id: Schema.NonEmptyString,
+        pointer: Schema.String,
+      })),
+    }),
+  ),
   capabilities: Schema.Struct({
     as_skill: Schema.Boolean,
     as_tool: Schema.Boolean,

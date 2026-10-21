@@ -79,6 +79,7 @@ const editorProfile = {
   reference,
   kind: 'instruction',
   activation_tool: 'keeper_skill',
+  io: { kind: 'model_orchestrated' as const },
   execution: 'model_orchestrated',
   capabilities: {
     as_skill: true,
@@ -116,6 +117,30 @@ const editorPreview = {
 }
 
 describe('existing Skill editor contract', () => {
+  it('accepts the declared I/O shipped by the server and rejects malformed contracts', () => {
+    const compositionIo = {
+      kind: 'composition',
+      input_schema: { type: 'object', required: ['task'], properties: { task: { type: 'string' } } },
+      exports: [{ name: 'answer', node_id: 'result', pointer: '/data/answer' }],
+    }
+    for (const io of [{ kind: 'model_orchestrated' }, compositionIo]) {
+      const response = { ok: true, status: 'valid', preview: {
+        ...editorPreview, profile: { ...editorProfile, io },
+      } }
+      expect(decodeSkillEditorPreview(response).profile.io).toEqual(io)
+    }
+    for (const io of [
+      { kind: 'unknown' },
+      { ...compositionIo, input_schema: 'not an object' },
+      { ...compositionIo, exports: [{ name: 'answer', node_id: 'result' }] },
+      { kind: 'model_orchestrated', invented: true },
+    ]) {
+      expect(() => decodeSkillEditorPreview({ ok: true, status: 'valid', preview: {
+        ...editorPreview, profile: { ...editorProfile, io },
+      } })).toThrow()
+    }
+  })
+
   it('strictly decodes loaded, preview, and save receipts', () => {
     expect(decodeSkillEditorLoaded({
       status: 'ready',

@@ -1,0 +1,2 @@
+### Fixed
+- Accept the server's declared Skill I/O in Dashboard catalog and editor responses. Show input schemas, output routes and retained executor mean/outcome charts alongside exact-revision evidence.

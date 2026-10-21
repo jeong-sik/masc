@@ -53,3 +53,7 @@ selection and statistics; it adds no HTTP request to Tools startup.
 Source review, a successful native build, installation and a visible operator
 screen are separate verification stages. This guide describes the source
 interaction and does not establish installation.
+
+Dashboard → Monitor → Skills uses the same typed I/O and retained evidence.
+Expand a Composition row to inspect its declared input and output routes, then
+load exact-revision evidence for the executor performance and outcome bars.

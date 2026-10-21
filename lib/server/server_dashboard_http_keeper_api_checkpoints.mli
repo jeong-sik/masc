@@ -37,6 +37,13 @@ type purge_report =
   ; bytes_after : int
   ; reasoning_blocks_stripped : int
   ; tool_results_cleared : int
+  ; messages_dropped_at_structural_break : int
+        (** Messages the purge removes because the transcript's tool cycles
+            are broken. [messages_before] minus [messages_after] equals this
+            count: the other counters count blocks inside messages that stay.
+            The cut starts at the first broken tool cycle, or earlier, at a
+            turn end the Librarian position already counts, when a position
+            moves ({!Keeper_checkpoint_purge.report}). *)
   }
 
 type purge_result =

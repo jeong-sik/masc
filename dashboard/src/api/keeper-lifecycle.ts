@@ -261,6 +261,7 @@ export interface KeeperCheckpointPurgeReport {
   bytes_removed: number
   reasoning_blocks_stripped: number
   tool_results_cleared: number
+  messages_dropped_at_structural_break: number
 }
 
 export interface KeeperCheckpointPurgeResponse {

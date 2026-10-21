@@ -282,6 +282,7 @@ type purge_report =
   ; bytes_after : int
   ; reasoning_blocks_stripped : int
   ; tool_results_cleared : int
+  ; messages_dropped_at_structural_break : int
   }
 
 type purge_result =
@@ -395,6 +396,8 @@ let purge_report_json report =
     ; "bytes_removed", `Int (report.bytes_before - report.bytes_after)
     ; "reasoning_blocks_stripped", `Int report.reasoning_blocks_stripped
     ; "tool_results_cleared", `Int report.tool_results_cleared
+    ; ( "messages_dropped_at_structural_break"
+      , `Int report.messages_dropped_at_structural_break )
     ]
 ;;
 
@@ -538,6 +541,8 @@ let purge_current_unlocked config ~keeper_name ~apply =
               ; bytes_after = String.length purged_bytes
               ; reasoning_blocks_stripped = raw_report.reasoning_blocks_stripped
               ; tool_results_cleared = raw_report.tool_results_cleared
+              ; messages_dropped_at_structural_break =
+                  raw_report.messages_dropped_at_structural_break
               }
             in
             let apply_allowed =

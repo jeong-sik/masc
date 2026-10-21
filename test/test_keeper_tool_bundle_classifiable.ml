@@ -46,7 +46,7 @@ let with_publication_recovery_registry ~registry_root f =
     ~sw
     ~fs:(Eio.Stdenv.fs env)
     ~registry_root
-    (fun registry -> f registry (Eio.Stdenv.net env))
+    (fun registry -> f registry (Eio.Stdenv.net env) sw)
 ;;
 
 let publication_recovery_turn_context ~registry ~keeper_name =
@@ -312,6 +312,7 @@ let with_bundle_tools
       ?(tool_deny = [])
       ?(addon_exports = [])
       ?agent_cell
+      ?(check_on_demand = fun _ -> ())
       f
   =
   ignore (Masc_test_deps.init_unified_tool_registry ());
@@ -371,7 +372,20 @@ let with_bundle_tools
          Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
        in
        with_publication_recovery_registry ~registry_root:dir
-       @@ fun publication_recovery_registry net ->
+       @@ fun publication_recovery_registry net sw ->
+       Option.iter (fun _ ->
+         (* Load receipts read the current Task from the same Owner projection
+            as a running Keeper, rather than from the frozen bundle metadata. *)
+         (match Keeper_owner_registry.install_from_store
+                  ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+          | Ok 0 -> ()
+          | Ok count -> failf "expected an empty Keeper inventory, got %d owners" count
+          | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
+         match Keeper_owner_registry.create_meta ~base_path:config.base_path meta with
+         | Ok (Some _) -> ()
+         | Ok None -> fail "fixture Owner did not persist its Keeper metadata"
+         | Error error -> fail (Keeper_owner_registry.command_error_to_string error))
+         agent_cell;
        let publication_recovery =
          publication_recovery_turn_context
            ~registry:publication_recovery_registry
@@ -421,6 +435,7 @@ let with_bundle_tools
          ~config:(Agent_core.Types.default_config ~model:"fixture-model")
          ~net ~tools:bundle.agent_core_tools ())) agent_cell;
        Fun.protect ~finally:bundle.cleanup (fun () ->
+         check_on_demand bundle.on_demand_tool_names;
          f
            config
            meta
@@ -530,9 +545,7 @@ let test_stored_image_reader_is_callable_with_read_authority () =
 
 (* The handler is the tool. Reading only its schema would let a tool that
    answers nothing pass for one that works. *)
-let run_tool ?(tool_use_id = "bundle-instruction-activation")
-      (tool : Agent_core.Tool.t) input =
-  let invocation =
+let tool_invocation ~tool_use_id (tool : Agent_core.Tool.t) =
     Agent_core.Tool_contract.Invocation.create
       ~tool_use_id
       ~turn:0
@@ -543,7 +556,11 @@ let run_tool ?(tool_use_id = "bundle-instruction-activation")
         ; execution_mode = Agent_core.Tool_contract.Serial
         }
       ~completion:(Agent_core.Tool.completion tool)
-  in
+;;
+
+let run_tool ?(tool_use_id = "bundle-instruction-activation")
+      (tool : Agent_core.Tool.t) input =
+  let invocation = tool_invocation ~tool_use_id tool in
   match
     tool.handler
       (Agent_core.Tool.Execution_env.create ~invocation ())
@@ -572,7 +589,8 @@ let test_addon_exports_load_into_the_running_agent () =
       let loader = match List.find_opt (fun (tool : Agent_core.Tool.t) ->
           tool.schema.name = Keeper_identity_tool_search.tool_name) tools with
         | Some tool -> tool | None -> fail "deferred Addon has no loader" in
-      (match Agent_core.Tool.execute loader (`Assoc ["names", `List [`String name]]) with
+      let invocation = tool_invocation ~tool_use_id:"bundle-addon-load" loader in
+      (match Agent_core.Tool.execute ~invocation loader (`Assoc ["names", `List [`String name]]) with
        | Ok _ -> () | Error error -> fail error.Agent_core.Types.message);
       check bool "requested Addon becomes callable in the same agent" true (callable name);
       let loaded = match Agent_core.Tool_set.find name (Agent_core.Agent.tools agent) with
@@ -580,6 +598,9 @@ let test_addon_exports_load_into_the_running_agent () =
       check bool "loading keeps the original exported schema" true
         (loaded.schema.input_schema = Some tool.input_schema));
   with_bundle_tools ~agent_core:false ~addon_exports:[export]
+    ~check_on_demand:(fun names ->
+      check bool "official-client metadata defers the exported Addon tool" true
+        (List.mem name names))
     (fun _config _meta _snapshot _index _surface tools ->
       check bool "fixed-tool runtimes retain the complete Addon schema" true
         (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) tools));

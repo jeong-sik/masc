@@ -7,6 +7,7 @@
 type t
 type ('admission, 'attempt, 'measurement, 'advance) progress
 
+(** Every list is in the order the flow reached its entries, oldest first. *)
 type ('admission, 'attempt, 'measurement, 'advance) progress_snapshot =
   { candidate_visit_count : int
   ; admissions : 'admission list

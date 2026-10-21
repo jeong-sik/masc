@@ -192,6 +192,9 @@ type code_pane =
   | Code_notes  (** wrapped memo document is drawn over the file *)
   | Code_history  (** complete history document is drawn over the file *)
 
+val footer_hints_code_hover : string
+(** Keys for the full hover reading over the current Code file. *)
+
 val footer_hints_code : pane:code_pane -> string
 (** The Code footer, narrowed to what [pane] answers.
 

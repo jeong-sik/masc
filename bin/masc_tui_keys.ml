@@ -1429,6 +1429,14 @@ type code_pane =
   | Code_notes  (** wrapped memo document is drawn over the file *)
   | Code_history  (** complete history document is drawn over the file *)
 
+let footer_hints_code_hover = hints_of_bindings
+  [ b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "edges"
+  ; b Navigate "Esc / Left" "return to code"
+  ; b Meta "?" "help"
+  ]
+
 let code_notes_bindings =
   [ b Navigate "j/k" "scroll"
   ; b Navigate "PgUp/PgDn" "page"

@@ -92,6 +92,20 @@ let code_draft_rows state ~cols =
       |> List.map (fun text -> style ^ marker ^ text ^ Ansi.reset)) in
     List.concat_map wrap [status; comparing; bytes; "e edit · S save · r reread · A adopt compared revision · X discard · Esc close"] @ rows
 
+let code_hover_rows state ~cols =
+  match current_code_hover state with
+  | None -> []
+  | Some reading ->
+      Message_layout.wrap_body
+        ~max_cells:(max 1 (framed_inner_width cols - 2))
+        ~sanitize:Terminal_text.single_line reading.chr_text
+
+let code_hover_viewport state =
+  let _, cols = get_terminal_size () in
+  let pane_cols = if cols >= keeper_split_threshold_cols then cols - keeper_roster_pane_cols else cols in
+  (List.length (code_hover_rows state ~cols:pane_cols),
+   max 1 (code_pane_content_height state - 1))
+
 let code_notes_rows (state : state) ~cols =
   let memos =
     match Masc_tui_fetched.current state.code_file with
@@ -434,6 +448,8 @@ let render_code (state : state) =
     framed_bottom pane_buf pane_cols
   in
   let content_pane ~split pane_buf pane_cols =
+    let hover = current_code_hover state in
+    let hover_showing = Option.is_some hover in
     let draft_showing = state.code_draft_open && Option.is_some (current_code_draft state) in
     let history_showing = state.code_history_open in
     let diff_showing = state.code_diff_open in
@@ -454,7 +470,13 @@ let render_code (state : state) =
             else path
           in
           let base =
-            if draft_showing then "draft: " ^ path
+            if hover_showing then
+              (match hover with
+               | Some reading -> Printf.sprintf "hover: %s:%d · %s" path
+                   reading.chr_query.clq_line
+                   (Terminal_text.single_line reading.chr_query.clq_symbol)
+               | None -> path)
+            else if draft_showing then "draft: " ^ path
             else if notes_showing then "notes: " ^ path
             else if diff_showing then
               Printf.sprintf "diff col %d vs HEAD: %s"
@@ -478,7 +500,7 @@ let render_code (state : state) =
                        Some (Printf.sprintf "asking %s about %S"
                          query.clq_question query.clq_symbol)
                    | None -> state.code_lsp_note) in
-            match note with
+            match (if hover_showing then None else note) with
             | Some note ->
                 base ^ "  " ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
                 ^ Terminal_text.single_line note ^ Ansi.reset
@@ -497,7 +519,7 @@ let render_code (state : state) =
              No width arithmetic here: framed_line fits the title to the pane,
              which is the truncation §3.1 asks for. *)
           let with_note =
-            if notes_showing || diff_showing || history_showing then with_note
+            if hover_showing || notes_showing || diff_showing || history_showing then with_note
             else
               let line = state.code_file_cursor + 1 in
               match
@@ -546,7 +568,23 @@ let render_code (state : state) =
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height state in
-    (if draft_showing then
+    (if hover_showing then
+       let rendered = code_hover_rows state ~cols:pane_cols in
+       let height = max 1 (content_height - 1) in
+       let total = List.length rendered in
+       let scroll = match hover with
+         | None -> 0 | Some reading -> max 0 (min reading.chr_scroll (max 0 (total - height))) in
+       if content_height > 1 then
+         box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
+           (Printf.sprintf "  rows %d-%d of %d · Esc returns to code"
+             (min total (scroll + 1)) (min total (scroll + height)) total);
+       let window = Rows.of_list ~first:scroll ~height rendered in
+       for index = 0 to height - 1 do
+         match Rows.at window (scroll + index) with
+         | Some line -> box_line pane_buf pane_cols ("  " ^ line)
+         | None -> box_empty pane_buf pane_cols
+       done
+     else if draft_showing then
        let rendered = code_draft_rows state ~cols:pane_cols in
        let maximum = max 0 (List.length rendered - content_height) in
        let scroll = max 0 (min state.code_draft_scroll maximum) in
@@ -865,5 +903,6 @@ let render_code (state : state) =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints_code ~pane:code_pane));
+       ~hints:(if Option.is_some (current_code_hover state) then Masc_tui_keys.footer_hints_code_hover
+               else Masc_tui_keys.footer_hints_code ~pane:code_pane));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf

@@ -1,6 +1,8 @@
 (** Workspace Code surface and the viewport shared with its key handlers. *)
 
 val code_pane_content_height : Masc_tui_types.state -> int
+val code_hover_viewport : Masc_tui_types.state -> int * int
+(** Full hover row count and visible budget; shared by drawing and scrolling. *)
 val code_notes_viewport : Masc_tui_types.state -> int * int
 (** Wrapped memo row count and visible row budget at the current file-pane width. *)
 val code_history_viewport : Masc_tui_types.state -> int * int

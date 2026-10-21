@@ -7300,6 +7300,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
    cadence ([surface_needs]); the ones here are snapshots that would
    otherwise read as empty until the next tick. *)
 let goto_surface ?(from_reference = false) state ~mailbox (destination : surface) =
+  state.code_hover <- None;
   if destination <> Tools && state.tools_async_detail_open then close_tools_async_detail state;
   state.keeper_navigation_open <- false;
   state.keeper_message_focus <- Right_pane;
@@ -24430,6 +24431,14 @@ and is loaded on demand through keeper_skill.
           Option.iter (observe_input_received input_reader) input;
           input
       in
+      let input = match current_code_hover state, input with
+        | Some _, Some (Mouse_wheel (direction, _, _)) ->
+            Some (Key (match direction with
+              | Masc.Tui_mouse_protocol.Wheel_up -> "up"
+              | Masc.Tui_mouse_protocol.Wheel_down -> "down"))
+        | Some _, Some (Mouse_left_press _) -> state.code_hover <- None; input
+        | Some _, Some (Key ("tab" | "shift-tab" | "\t")) -> state.code_hover <- None; input
+        | (Some _ | None), (Some _ | None) -> input in
       (* A queued action retires a deferred return before any handler changes
          its reading. Repeated B shares its pending request; protocol replies
          and idle cadence are observations rather than operator actions. *)
@@ -29739,6 +29748,18 @@ and is loaded on demand through keeper_skill.
            state.changes_diff_hscroll <-
              max 0 (min (max 0 (state.changes_diff_max_width - 1))
                (state.changes_diff_hscroll + direction))
+       | Some ("esc" | "left" | "K") when Option.is_some (current_code_hover state) ->
+           state.code_hover <- None
+       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "home" | "end" as key)
+           when Option.is_some (current_code_hover state) ->
+           let count, height = Masc_tui_render_code.code_hover_viewport state in
+           let move = match key with
+             | "j" | "down" -> `Down | "k" | "up" -> `Up
+             | "pageup" -> `Page_up | "pagedown" -> `Page_down
+             | "home" -> `First | "end" -> `Last | _ -> `First in
+           Code_results.scroll_hover state ~count ~height move
+       | Some key when Option.is_some (current_code_hover state)
+           && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
        | Some "e" when state.view = Code && code_edit_focus state -> edit_code_draft ()
        | Some "S" when state.view = Code && code_edit_focus state ->
            (match Masc_tui_code_requests.save_draft state ~host:server_peer_host

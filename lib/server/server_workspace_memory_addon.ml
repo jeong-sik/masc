@@ -110,7 +110,7 @@ let resume_with ~store ~base_path ~request_id ~call =
     |> Result.map_error (fun detail -> Unavailable detail) in
   let* capture=rejected (Capture.restore ~workspace original) in
   let publish original event=Eio_unix.run_in_systhread (fun () -> advance ~store original event) in
-  let observe original reason observation evidence =
+  let observe (original : Owner.retained) reason observation evidence =
     let observation=observation evidence in
     match Progress.phase original.progress with
     | Progress.Dispatch_pending (Some previous) when same_observation previous observation ->

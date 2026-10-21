@@ -1,0 +1,172 @@
+[p1 "MASC · Overview" | space "masc-addon-lane-qualification-20261022"(30): 1 managed, 0 untracked — p1* "MASC · Overview"]
+root
+  container
+    text "개요"
+    group "Fleet 상태와 작업"
+      container
+        text "1"
+        text "실행 가능"
+      container
+        text "✓"
+        text "정상"
+      button [ref=144]
+        text "◷"
+        text "예약"
+      button "Toggle Chat Dock" [ref=145, loc=css:button[aria-label="Toggle Chat Dock"]]
+        svg_root
+        text "Chat"
+        text "⌘J"
+    group "연결과 운영 도구"
+      status
+        text "재연결 중"
+      group "Namespace pause control"
+        button [ref=146]
+          svg_root
+          text "Emergency Stop"
+      status
+        button "오류 콘솔 · 대시보드 오류 없음" [ref=147, loc=css:button[aria-label="오류 콘솔 · 대시보드 오류 없음"]]
+          svg_root
+          text "오류 콘솔"
+      button "Auth status" [ref=148, loc=css:button[aria-label="Auth status"]]
+        text "Verified @dashboard · admin"
+      button "Server build v0.60.0 · eb484b0aab" [ref=149, loc=css:button[aria-label="Server build v0.60.0 · eb484b0aab"]]
+        text "v0.60.0 · eb484b0aab"
+      button "Open display tweaks (density, motion, bubbles, font scale, voltage, theme)" [ref=150, loc=css:button[aria-label="Open display tweaks (density, motion, bubbles, font scale, voltage, theme)"]]
+        svg_root
+        text "Tweaks"
+  container
+    container
+      button [ref=151]
+        text "M"
+      button [ref=152]
+        svg_root
+      button [ref=153]
+        svg_root
+      button [ref=154]
+        svg_root
+      button [ref=155]
+        svg_root
+      button [ref=156]
+        svg_root
+      button [ref=157]
+        svg_root
+      button [ref=158]
+        svg_root
+      button [ref=159]
+        svg_root
+      button [ref=160]
+        svg_root
+      button [ref=161]
+        svg_root
+      button [ref=162]
+        svg_root
+      button [ref=163]
+        svg_root
+      button [ref=164]
+        svg_root
+      button [ref=165]
+        svg_root
+      button [ref=166]
+        svg_root
+    container [ref=167]
+      container [ref=168]
+        container
+          container
+            container
+              text "운영 홈"
+              heading
+                text "지금, 전체"
+              paragraph
+                text "fleet 전체 — 목표 · Gate · Fusion · 연결 한눈에"
+            container
+              text "02:26"
+              text "KST"
+          container "Cross-surface KPIs"
+            button [ref=169]
+              text "실행 중 KEEPER"
+              container
+                text "1"
+                text "/ 1"
+            button [ref=170]
+              text "주의 필요"
+              text "0"
+            button [ref=171]
+              text "열린 GATE"
+              text "0"
+            button [ref=172]
+              text "최우선 목표"
+              text "P3"
+            button [ref=173]
+              text "활성 커넥터"
+              text "—"
+            button [ref=174]
+              text "예약 HITL"
+              text "—"
+            button [ref=175]
+              text "진행 심의"
+              text "0"
+          container "Candle"
+            heading
+              text "CANDLE"
+            unordered_list
+              container
+                list_item
+                  text "발행"
+                list_item
+                  text "1.000"
+                  text "Candle"
+              container
+                list_item
+                  text "소각"
+                list_item
+                  text "0.000"
+                  text "Candle"
+              container
+                list_item
+                  text "유통"
+                list_item
+                  text "1.000"
+                  text "Candle"
+          container
+            container
+              container
+                heading
+                  text "주의 필요 · 지금 손이 필요한 것"
+                text "0"
+              text "모든 keeper 정상"
+            container
+              container
+                heading
+                  text "텔레메트리"
+                button [ref=176]
+                  text "로그 보기 →"
+              image "Live Agent Core telemetry histogram"
+              container
+                container
+                  text "피크"
+                  container
+                    text "43"
+                    text "/5m"
+                container
+                  text "평균"
+                  container
+                    text "4.3"
+                    text "/5m"
+                container
+                  text "이벤트"
+                  text "119"
+                container
+                  text "최신"
+                  text "4m"
+                container
+                  text "소스"
+                  container
+                    text "6"
+                    text "/"
+                    text "9"
+                container
+                  text "갭"
+                  text "0"
+  button "Open Chat Dock" [ref=177, loc=css:button[aria-label="Open Chat Dock"]]
+    svg_root
+    text "Chat"

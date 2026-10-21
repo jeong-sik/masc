@@ -1,0 +1,48 @@
+{
+  "at": "2026-10-21T17:10:40.377448+00:00",
+  "identity": "local-admin",
+  "method": "GET",
+  "path": "/api/v1/verification/evidence?task_id=task-001&verification_id=vrf-5ee2e4f6674a8ccda7adaa075d60da5b",
+  "request": null,
+  "http_status": 200,
+  "response": {
+    "ok": true,
+    "result": {
+      "task_id": "task-001",
+      "verification_id": "vrf-5ee2e4f6674a8ccda7adaa075d60da5b",
+      "producer": "candle-host-qualifier",
+      "authority_kind": "human_operator",
+      "authority_actor": "local-admin",
+      "evidence": {
+        "access": "available",
+        "request": {
+          "id": "vrf-5ee2e4f6674a8ccda7adaa075d60da5b",
+          "task_id": "task-001",
+          "worker": "candle-host-qualifier",
+          "created_at": 1792602626.330383
+        },
+        "items": [
+          {
+            "kind": "artifact",
+            "reference": "artifact:measurement.json",
+            "content": "{\n  \"source_commit\": \"eb484b0aabe699b46740bcb787a935fb67bbfa8e\",\n  \"source_path\": \"lib/server/server_candle_appraiser.ml\",\n  \"sha256\": \"b4e3984bdbf0fb70cf065c9313e8fa31b0f943cc403d3731a95c997447981078\",\n  \"verified_count\": 1,\n  \"method\": \"Compared the complete checkout bytes with the exact Git blob; computed SHA-256.\",\n  \"performed_at\": \"2026-10-21T16:58:37.184865+00:00\",\n  \"task_id\": \"task-001\"\n}",
+            "bytes": 400,
+            "truncated": false
+          },
+          {
+            "kind": "note",
+            "content": "Compared the complete source file with its exact Git blob and retained SHA-256 plus verified_count=1."
+          },
+          {
+            "kind": "note",
+            "content": "Guest shim dependency repaired; the actual Keeper wrote and read back measurement.json in its owned running guest. The host performed the source-byte comparison; the Keeper only preserved that measurement."
+          },
+          {
+            "kind": "note",
+            "content": "Resubmission after the original artifact_unreadable receipt; inspect the new immutable artifact. This qualifies source bytes only, not behavior or the full54 goal."
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,423 @@
+{
+  "at": "2026-10-21T17:22:00.235669+00:00",
+  "identity": "local-admin",
+  "method": "GET",
+  "path": "/api/v1/lane-addons",
+  "request": null,
+  "http_status": 200,
+  "response": {
+    "configuration": {
+      "directory": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/lane-addons",
+      "complete": true,
+      "issues": [],
+      "declarations": [
+        {
+          "id": "candle-host-qual-eb484",
+          "source_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/lane-addons/candle-host.toml",
+          "enabled": false,
+          "source_revision": "177330dbc0cd80c76ed7b83448ec62a626e5566c39ff99f5a3878667b905ff27",
+          "desired_revision": "2417232f2fe23014fa3bb250f4a15805136d90312f8ec1bd8058376122d7800d",
+          "applied_revision": null,
+          "instance_id": null,
+          "application": {
+            "kind": "inactive"
+          }
+        }
+      ]
+    },
+    "instances": [
+      {
+        "runtime_presence": "retained",
+        "phase": {
+          "kind": "detached"
+        },
+        "lifecycle": {
+          "kind": "detached",
+          "release": {
+            "kind": "released",
+            "engine": {
+              "kind": "docker",
+              "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+            },
+            "container_id": "c01d88be2771c158b1299879b028cf135e97644cbca07fe8c66067e6449571a0"
+          }
+        },
+        "configuration": {
+          "id": "candle-host-qual-eb484",
+          "source_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/lane-addons/candle-host.toml",
+          "revision": "2417232f2fe23014fa3bb250f4a15805136d90312f8ec1bd8058376122d7800d"
+        },
+        "observation_seq": 11,
+        "instance_id": "01a15f76-fb31-7000-917d-0859e016e13a",
+        "incarnation": "01a15f76-fb31-7000-917d-0859e016e13a",
+        "action_schema": null,
+        "run_id": "candle-host-original-obligation",
+        "addon_id": "candle-appraiser",
+        "title": "Candle appraisal worker",
+        "revision": "0.1.0",
+        "execution_authority": {
+          "kind": "container",
+          "runtime": "docker",
+          "engine": {
+            "kind": "docker",
+            "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+          }
+        },
+        "resolved_image": {
+          "runtime": "docker",
+          "digest": "sha256:dfa4491a3c5c6ffac467e2e2ac2aa58cd46109d38fafea0f2ec0b492ce6ee00a"
+        },
+        "rows_count": 1,
+        "observation_pending": true,
+        "coalesced_wakes": 2,
+        "unchanged_source_refreshes": 0,
+        "binding": {
+          "sources": []
+        },
+        "source_access": {
+          "kind": "operator_configuration"
+        },
+        "package": {
+          "tool_hooks": [
+            "validate_input",
+            "validate_output"
+          ],
+          "exact_outputs": {
+            "grade": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "grade": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "grade"
+                ],
+                "additionalProperties": false
+              },
+              "request_schema": true
+            },
+            "relation": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "relation": {
+                    "type": "string",
+                    "enum": [
+                      "related",
+                      "unrelated"
+                    ]
+                  }
+                },
+                "required": [
+                  "relation"
+                ],
+                "additionalProperties": false
+              },
+              "request_schema": true
+            },
+            "weights": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "weights": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "weights"
+                ],
+                "additionalProperties": false
+              },
+              "request_schema": true
+            }
+          },
+          "id": "candle-appraiser",
+          "revision": "0.1.0",
+          "title": "Candle appraisal worker",
+          "contributions": [
+            "derive"
+          ],
+          "image": "masc-candle-proof:d35d2559-0c67b092c532",
+          "command": [
+            "python3",
+            "server.py",
+            "--state",
+            "/state"
+          ],
+          "directory": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/package/addons/candle-appraiser",
+          "action_tool": null,
+          "state_storage": "persistent",
+          "tool_invocation": "host_context",
+          "exported_tools": [
+            "candle_appraise"
+          ],
+          "outputs": {
+            "appraisals": {
+              "lanes": [
+                "candle/appraisals"
+              ]
+            }
+          },
+          "refresh_policy": "every_hint",
+          "model_access": "disabled",
+          "binding_schema": {
+            "type": "object",
+            "properties": {
+              "sources": {
+                "type": "array",
+                "maxItems": 0,
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "sources"
+            ],
+            "additionalProperties": false
+          },
+          "presentation": {
+            "description": "Durable Candle judgments; settlement remains host-owned",
+            "readings": [
+              {
+                "lane_id": "candle/appraisals",
+                "path": [
+                  "pending"
+                ],
+                "label": "Pending judgments",
+                "unit": "requests",
+                "format": "number"
+              },
+              {
+                "lane_id": "candle/appraisals",
+                "path": [
+                  "finished"
+                ],
+                "label": "Retained results",
+                "unit": "requests",
+                "format": "number"
+              }
+            ]
+          },
+          "skills_directory": null,
+          "resources": {
+            "cpus": 0.5,
+            "memory_bytes": 134217728,
+            "pids": 16,
+            "max_reply_bytes": 4194304
+          }
+        },
+        "visibility": {
+          "kind": "shared"
+        },
+        "resource": {
+          "kind": "container",
+          "id": "c01d88be2771c158b1299879b028cf135e97644cbca07fe8c66067e6449571a0"
+        }
+      },
+      {
+        "runtime_presence": "retained",
+        "phase": {
+          "kind": "detached"
+        },
+        "lifecycle": {
+          "kind": "detached",
+          "release": {
+            "kind": "released",
+            "engine": {
+              "kind": "docker",
+              "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+            },
+            "container_id": "3d1127b0b6a1abb914a93da3b957a8430e9e4411d0b90c289cb4ae56bd23f388"
+          }
+        },
+        "configuration": {
+          "id": "candle-host-qual-eb484",
+          "source_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/lane-addons/candle-host.toml",
+          "revision": "2417232f2fe23014fa3bb250f4a15805136d90312f8ec1bd8058376122d7800d"
+        },
+        "observation_seq": 0,
+        "instance_id": "01a15f73-edb7-7000-a58a-db6d69987a2b",
+        "incarnation": "01a15f73-edb7-7000-a58a-db6d69987a2b",
+        "action_schema": null,
+        "run_id": "candle-host-original-obligation",
+        "addon_id": "candle-appraiser",
+        "title": "Candle appraisal worker",
+        "revision": "0.1.0",
+        "execution_authority": {
+          "kind": "container",
+          "runtime": "docker",
+          "engine": {
+            "kind": "docker",
+            "id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7"
+          }
+        },
+        "resolved_image": {
+          "runtime": "docker",
+          "digest": "sha256:dfa4491a3c5c6ffac467e2e2ac2aa58cd46109d38fafea0f2ec0b492ce6ee00a"
+        },
+        "rows_count": 0,
+        "observation_pending": true,
+        "coalesced_wakes": 0,
+        "unchanged_source_refreshes": 0,
+        "binding": {
+          "sources": []
+        },
+        "source_access": {
+          "kind": "operator_configuration"
+        },
+        "package": {
+          "tool_hooks": [
+            "validate_input",
+            "validate_output"
+          ],
+          "exact_outputs": {
+            "grade": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "grade": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "grade"
+                ],
+                "additionalProperties": false
+              },
+              "request_schema": true
+            },
+            "relation": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "relation": {
+                    "type": "string",
+                    "enum": [
+                      "related",
+                      "unrelated"
+                    ]
+                  }
+                },
+                "required": [
+                  "relation"
+                ],
+                "additionalProperties": false
+              },
+              "request_schema": true
+            },
+            "weights": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "weights": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "weights"
+                ],
+                "additionalProperties": false
+              },
+              "request_schema": true
+            }
+          },
+          "id": "candle-appraiser",
+          "revision": "0.1.0",
+          "title": "Candle appraisal worker",
+          "contributions": [
+            "derive"
+          ],
+          "image": "masc-candle-proof:d35d2559-0c67b092c532",
+          "command": [
+            "python3",
+            "server.py",
+            "--state",
+            "/state"
+          ],
+          "directory": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/package/addons/candle-appraiser",
+          "action_tool": null,
+          "state_storage": "persistent",
+          "tool_invocation": "host_context",
+          "exported_tools": [
+            "candle_appraise"
+          ],
+          "outputs": {
+            "appraisals": {
+              "lanes": [
+                "candle/appraisals"
+              ]
+            }
+          },
+          "refresh_policy": "every_hint",
+          "model_access": "disabled",
+          "binding_schema": {
+            "type": "object",
+            "properties": {
+              "sources": {
+                "type": "array",
+                "maxItems": 0,
+                "items": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "sources"
+            ],
+            "additionalProperties": false
+          },
+          "presentation": {
+            "description": "Durable Candle judgments; settlement remains host-owned",
+            "readings": [
+              {
+                "lane_id": "candle/appraisals",
+                "path": [
+                  "pending"
+                ],
+                "label": "Pending judgments",
+                "unit": "requests",
+                "format": "number"
+              },
+              {
+                "lane_id": "candle/appraisals",
+                "path": [
+                  "finished"
+                ],
+                "label": "Retained results",
+                "unit": "requests",
+                "format": "number"
+              }
+            ]
+          },
+          "skills_directory": null,
+          "resources": {
+            "cpus": 0.5,
+            "memory_bytes": 134217728,
+            "pids": 16,
+            "max_reply_bytes": 4194304
+          }
+        },
+        "visibility": {
+          "kind": "shared"
+        },
+        "resource": {
+          "kind": "container",
+          "id": "3d1127b0b6a1abb914a93da3b957a8430e9e4411d0b90c289cb4ae56bd23f388"
+        }
+      }
+    ],
+    "rows": [],
+    "coverage": []
+  }
+}

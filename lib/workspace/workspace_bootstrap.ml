@@ -98,5 +98,5 @@ let reconcile_message_seq config path =
 ;;
 
 (* The backlog a workspace starts with. *)
-let empty_backlog () = { tasks = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = now_iso (); version = 1 }
+let empty_backlog () = { tasks = []; task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = now_iso (); version = 1 }
 

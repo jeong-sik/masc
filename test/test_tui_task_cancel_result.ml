@@ -334,6 +334,108 @@ let test_unknown_task_and_original_input_recovery env () = Eio.Switch.run @@ fun
   ignore (recover_task_dispatch_input state ~keeper:intent.keeper);
   check string "explicit recovery selects latest original intent" "/task unstarted" (Input.contents state.msg_input)
 
+(* Actual MCP resources and the strict persisted backlog are the assertions.
+   The response is deliberately discarded after the resource commits. *)
+let read_creation_receipt ~call ~workspace ~request_id =
+  let text = call (Wire.request_body ~request_id:"inspect-creation" ~tool:"masc_tasks"
+    ~arguments:["creation_request_id",`String request_id;
+      "expected_workspace",`Assoc ["base_path",`String (Masc.Tui_decode.Canonical_path.to_string workspace.Masc.Tui_decode.sid_base_path);
+                                   "masc_root",`String (Masc.Tui_decode.Canonical_path.to_string workspace.sid_masc_root)]])
+    |> tool_result ~request_id:"inspect-creation" |> require_ok in
+  let json = Yojson.Safe.from_string text in
+  let open Yojson.Safe.Util in
+  let ids = json |> member "creation_receipt" |> member "task_ids" |> to_list |> List.map to_string in
+  let state = json |> member "creation_receipt" |> member "state" |> to_string in
+  check string "lookup retains original opaque request" request_id
+    (json |> member "creation_request_id" |> to_string);
+  check string "lookup names the original workspace" (Masc.Tui_decode.Canonical_path.to_string workspace.sid_masc_root)
+    (json |> member "workspace" |> member "masc_root" |> to_string);
+  state,ids
+
+let test_creation_receipt_after_lost_reply_and_duplicate_request env () = Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  with_server ~clock ~sw ~owner:"receipt-resource" @@ fun _base config workspace _original call ->
+  let create request_id =
+    let intent = { (creation_intent ~workspace ~original:"/task equal title"
+      ~title:"equal title" ~body:"exact original body") with request_id } in
+    let source = Dispatch.create intent in
+    Eio_context.with_turn_switch sw (fun () -> Dispatch.launch source
+      ~prepare:(fun () -> Ok "original-session")
+      ~send:(fun ~session_id ~request_id ~arguments ->
+        ignore (require_ok (send_creation call ~session_id ~request_id ~arguments));
+        Error "response deliberately discarded after actual creation"));
+    let rec await () = match Dispatch.progress source with
+      | Completed {outcome=Unconfirmed _;_} -> ()
+      | Completed _ -> fail "lost reply became a success or a no-send"
+      | Not_started | Reserved | Preparing | Sending -> Eio.Fiber.yield ();await () in
+    await () in
+  let original_request = "creation-receipt-original" in
+  create original_request;
+  let state,ids = read_creation_receipt ~call ~workspace ~request_id:original_request in
+  check string "actual committed original was found" "recorded" state;
+  let original_id = match ids with [id] -> id | _ -> fail "original has no exact creation identity" in
+  create "creation-receipt-other";
+  let state,ids = read_creation_receipt ~call ~workspace ~request_id:original_request in
+  check (pair string (list string)) "equal title cannot borrow another request's Task"
+    ("recorded",[original_id]) (state,ids);
+  let before = Masc.Workspace.get_tasks_raw config in
+  let _ = read_creation_receipt ~call ~workspace ~request_id:"not-observed-request" in
+  check (pair string (list string)) "missing request is unobserved, never not-created"
+    ("not_observed",[]) (read_creation_receipt ~call ~workspace ~request_id:"not-observed-request");
+  check bool "receipt reads do not create or change any Task" true (before=Masc.Workspace.get_tasks_raw config);
+  (* A repeated non-idempotent request is not suppressed or guessed away. *)
+  create original_request;
+  let state,ids = read_creation_receipt ~call ~workspace ~request_id:original_request in
+  check string "repeated actual request remains ambiguous" "ambiguous" state;
+  check int "both actual creations remain visible" 2 (List.length ids);
+  check bool "the original identity is retained" true (List.mem original_id ids);
+  check bool "the actual Task identities are distinct" true
+    (match ids with [a;b] -> a<>b | _ -> false);
+  (* Durable creation evidence outlives the deleted current Task. *)
+  (match Masc.Workspace.delete_task_r config ~task_id:original_id with
+   | Ok _ -> () | Error error -> fail (Masc_domain.masc_error_to_string error));
+  check bool "original Task was actually deleted" false
+    (List.exists (fun (task : Masc_domain.task) -> task.id=original_id) (Masc.Workspace.get_tasks_raw config));
+  check (pair string (list string)) "deletion cannot rewrite the original creation facts"
+    (state,ids) (read_creation_receipt ~call ~workspace ~request_id:original_request)
+
+let test_creation_receipt_refusals_and_corrupt_primary env () = Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  with_server ~clock ~sw ~owner:"receipt-original" @@ fun _base config workspace _original call ->
+  with_server ~clock ~sw ~owner:"receipt-foreign" @@ fun _other_base other_config other_workspace _other _other_call ->
+  let before = Masc.Workspace.get_tasks_raw config and foreign_before = Masc.Workspace.get_tasks_raw other_config in
+  let invoke tool arguments =
+    call (Wire.request_body ~request_id:"receipt-invalid" ~tool ~arguments)
+    |> tool_result ~request_id:"receipt-invalid" in
+  let refused = function Error _ -> () | Ok _ -> fail "invalid creation receipt request was accepted" in
+  refused (invoke "masc_add_task" ["title",`String "must not exist";"creation_request_id",`Null]);
+  refused (invoke "masc_add_task" ["title",`String "must not exist";"creation_request_id",`String "   "]);
+  refused (invoke "masc_add_task" ["title",`String "must not exist";
+    "creation_request_id",`String "one";"creation_request_id",`String "two"]);
+  refused (invoke "masc_tasks" ["creation_request_id",`String "original";"status",`String "done"]);
+  refused (invoke "masc_tasks" ["creation_request_id",`String "original";
+    "expected_workspace",`Assoc ["base_path",`String (Masc.Tui_decode.Canonical_path.to_string other_workspace.sid_base_path);
+                                 "masc_root",`String (Masc.Tui_decode.Canonical_path.to_string other_workspace.sid_masc_root)]]);
+  check bool "refused requests preserve original Task resources" true (before=Masc.Workspace.get_tasks_raw config);
+  check bool "foreign Task resources remain unchanged" true (foreign_before=Masc.Workspace.get_tasks_raw other_config);
+  let request_id = "receipt-before-primary-corruption" in
+  let reply = invoke "masc_add_task" ["title",`String "durable original";"creation_request_id",`String request_id]
+    |> require_ok in
+  let task_id = Wire.task_id_of_add_task reply |> require_ok in
+  check (pair string (list string)) "actual durable receipt available before corruption"
+    ("recorded",[task_id]) (read_creation_receipt ~call ~workspace ~request_id);
+  (* A valid recovery copy must not certify an unreadable primary. *)
+  let primary = Masc.Workspace.backlog_path config in
+  let json = Fs_compat.load_file primary |> Yojson.Safe.from_string in
+  let corrupt = match json with
+    | `Assoc fields -> `Assoc (("task_creation_receipts",`String "corrupt") :: List.remove_assoc "task_creation_receipts" fields)
+    | _ -> fail "actual backlog is not an object" in
+  Fs_compat.save_file primary (Yojson.Safe.to_string corrupt);
+  refused (invoke "masc_tasks" ["creation_request_id",`String request_id]);
+  refused (invoke "masc_add_task" ["title",`String "must not use recovery";"creation_request_id",`String "new-after-corruption"]);
+  check bool "refused lookup cannot repair or replace its primary" true
+    (Yojson.Safe.from_string (Fs_compat.load_file primary)=corrupt)
+
 let () = Eio_main.run @@ fun env ->
   let snapshot = Eio_context.snapshot_state () in
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -349,4 +451,8 @@ let () = Eio_main.run @@ fun env ->
         test_case "created original Task survives workspace withdrawal and full notifications" `Quick
           (test_created_task_survives_workspace_withdrawal env);
         test_case "actual unknown creation and edited input retain explicit original recovery" `Quick
-          (test_unknown_task_and_original_input_recovery env)]])
+          (test_unknown_task_and_original_input_recovery env);
+        test_case "lost actual creation reply, equal titles, duplicates and deletion retain exact facts" `Quick
+          (test_creation_receipt_after_lost_reply_and_duplicate_request env);
+        test_case "actual creation refusals and corrupt primary never borrow recovery authority" `Quick
+          (test_creation_receipt_refusals_and_corrupt_primary env)]])

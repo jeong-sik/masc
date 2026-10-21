@@ -668,6 +668,14 @@ names. A line that starts with `/` is a command for the TUI instead:
   New text, attachment and reference edits survive late replies, including
   changing the draft and returning to empty.
   Retained commands live in this TUI session; they are not restart recovery.
+  New `/task` creations also commit their original request ID with the Task.
+  An explicit `masc_tasks` call with `creation_request_id` and the original
+  `expected_workspace` reads that creation fact. `recorded` names the Task ID;
+  `not_observed` is inconclusive, and repeated request IDs are `ambiguous`.
+  This lookup does not repeat creation or prove current Task status. The TUI
+  does not yet perform this reconciliation automatically; `/task-recover`
+  remains an input-copy action.
+
 - `/diff` — opens the working-tree Git changes directly in chat. Pressing
   `Enter`, `d`, or `Right` opens the file's Git diff inline with syntax
   highlighting and line numbers; `j`/`k` scrolls the diff, `v` opens the

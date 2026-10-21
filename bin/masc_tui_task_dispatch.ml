@@ -42,6 +42,7 @@ let launch t ~prepare ~send =
                ("expected_workspace", `Assoc
                  ["base_path", `String (Masc.Tui_decode.Canonical_path.to_string workspace.sid_base_path);
                   "masc_root", `String (Masc.Tui_decode.Canonical_path.to_string workspace.sid_masc_root)])
+               :: ("creation_request_id", `String t.intent.request_id)
                :: ("title", `String t.intent.title)
                :: (if String.trim t.intent.body = "" then []
                    else ["description", `String t.intent.body]) in

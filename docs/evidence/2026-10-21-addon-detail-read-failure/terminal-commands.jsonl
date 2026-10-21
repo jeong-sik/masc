@@ -1,0 +1,16 @@
+{"at": 1792590744.6892369, "capture": "01-before-proxy-retry", "show": true, "settle_ms": 100}
+{"at": 1792590770.340363, "keys": ":addons\r", "settle_ms": 1500, "capture": "02-addons-open", "show": true}
+{"at": 1792590820.616899, "keys": "r", "settle_ms": 1500, "capture": "03-identity-retry", "show": true}
+{"at": 1792590837.320168, "keys": ":addons\r", "settle_ms": 1000, "capture": "04-addons-current", "show": true}
+{"at": 1792590846.271383, "keys": "h", "settle_ms": 250, "capture": "05-history", "show": true}
+{"at": 1792590854.812719, "keys": "j\r", "settle_ms": 500, "capture": "06-original-detail-success", "show": true}
+{"at": 1792590866.160218, "keys": "4 ", "settle_ms": 200, "capture": "07-original-record-marked", "show": true}
+{"at": 1792590867.4076002, "keys": "r", "settle_ms": 1500, "capture": "08-scoped-read-failed-retained", "show": true}
+{"at": 1792590878.128394, "keys": "e", "settle_ms": 250, "capture": "09-failed-evidence-prompt", "show": true}
+{"at": 1792590891.487351, "keys": "\r", "settle_ms": 500, "capture": "10-evidence-receipt-with-failure", "show": true}
+{"at": 1792590911.240638, "keys": "A", "settle_ms": 100, "capture": "11-command-input-failure-preserved", "show": false}
+{"at": 1792590912.345571, "keys": "nonsense\r", "settle_ms": 200, "capture": "12-input-error-retains-read-failure", "show": true}
+{"at": 1792590929.362155, "keys": "\u001br", "settle_ms": 500, "capture": "13-successful-read-after-restore", "show": true}
+{"at": 1792590999.55653, "keys": "A\u0015slice {\"run_id\":\"native-ui-proof\",\"lane_id\":\"qualification-empty-filter\"}\r", "settle_ms": 500, "capture": "14-successful-empty-scope", "show": true}
+{"at": 1792591018.986217, "keys": "r", "settle_ms": 400, "capture": "15-full-read-restores-original", "show": false}
+{"at": 1792591020.3254871, "stop": true}

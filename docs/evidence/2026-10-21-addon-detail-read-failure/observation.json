@@ -1,0 +1,56 @@
+{
+  "recorded_at": "2026-10-21T14:01:31.285065+00:00",
+  "source_sha": "2c0e4abaf3322f2d9a4ed9e336b4cd230b4da1fd",
+  "run_id": 39607780651,
+  "artifact_id": 12349783199,
+  "workspace": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5",
+  "capture_directory": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-g06-failure-20261021-qiz4y6o1",
+  "backend_port": 59360,
+  "proxy_port": 59359,
+  "server_pid": 3632,
+  "tui_pid": 4307,
+  "corrected_proxy_pid": 82104,
+  "initial_proxy_error": "HTTP400 request_authority_untrusted; forwarded Host named proxy port",
+  "helper_repair": "Normalize Host to backend authority; retain real response bytes; reuse listen address",
+  "fault": "Close only GET /api/v1/lane-addons/slice when the manual flag exists; fabricate no response",
+  "fault_first": {
+    "at": 1792590867.4118059,
+    "method": "GET",
+    "path": "/api/v1/lane-addons/slice?run_id=native-ui-proof",
+    "decision": "closed before forwarding; no response"
+  },
+  "fault_last": {
+    "at": 1792590910.44135,
+    "method": "GET",
+    "path": "/api/v1/lane-addons/slice?run_id=native-ui-proof",
+    "decision": "closed before forwarding; no response"
+  },
+  "faulted_read_count": 16,
+  "evidence_posts": [
+    {
+      "at": 1792590891.4971719,
+      "method": "POST",
+      "path": "/api/v1/lane-addons/evidence",
+      "decision": "forwarded to actual matching backend"
+    }
+  ],
+  "terminal_command_count": 16,
+  "terminal": {
+    "columns": 160,
+    "rows": 56,
+    "kind": "actual PTY with VT cell interpretation"
+  },
+  "known_unresolved": [
+    "Other-run advanced Slice may be admitted as original detail success; source P2 under repair"
+  ],
+  "not_proven": [
+    "current rebased source321efcb execution",
+    "full54 completion",
+    "real audio/VST",
+    "actual browser/model",
+    "operator installation",
+    "all API failure classes",
+    "same-source Dashboard",
+    "release verification"
+  ]
+}

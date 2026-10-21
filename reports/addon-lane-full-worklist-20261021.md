@@ -195,6 +195,18 @@ Dashboard·TUI의 원래 근거 표시를 각각 확인한다. Optional은 Off �
 
 PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값이다. 실행을 재개할 때 다시 읽는다.
 
+## 2026-10-21 native 관측 당시 기록 · 서로 다른 후보의 범위 보존
+
+#44850 원본 작성 당시의 A06 관측도 별도로 보존한다. 다음 값은 위 표와 합산할 현재 승인·병합 판정이 아니다.
+
+> 공통·G01·G06 main 병합. Browser #44168의 67층을 main56bedd7 위에 공식 gh stack rebase 후 전체 atomic push했고 각 원격 head를 확인했다(top #44702 eb484b0aabe699b46740bcb787a935fb67bbfa8e). 새 head/base/diff의 독립 재리뷰·현재 충돌/병합 판정은 별도이며 이전 d35의 승인 수를 이월 집계하지 않는다. 증거 #44851도 별도 open 후보
+
+- [고정15478fda의 repaired On/Off/재연결](../docs/evidence/2026-10-21-addon-repaired-native-ui/README.md): 이전/새 worker·결과·수동 retained refresh·최종 정리. 당시 cadence capture만으로 실제 자동 HTTP 요청을 증명하지 않는다.
+- [고정2c0e4aba의 상세 읽기 실패/복구](../docs/evidence/2026-10-21-addon-detail-read-failure/README.md): 실제 matching 서버/TUI와 controlled transport fault. 원래 행과 선택, 새 Evidence receipt, 실패 상태를 함께 확인하고 복구 및 same-run empty를 관측했다. 요청 기록은 실제 cadence 요청을 보여 주며 latency 수치가 아니다.
+- 두 묶음은 서로 다른 native source/run의 증거다. 새 restack source, 같은 후보의 Dashboard, 실제 VST/audio·Browser·LLM, 운영 설치, 전체54 완료로 합치지 않는다. private login/credential/server log는 공개 묶음에서 제외했다.
+- 고정2c 당시 관측한 G06 추가 P2: 실제 `/addons slice {"run_id":"other-run"}`가 현재 Detail의 원래 owner 성공으로 분류될 수 있다. 다른 run·생략 scope가 원래 결과/실패를 지우지 않도록 중앙 typed admission 수리가 필요하다. 같은 run의 lane/time 필터 empty는 정상 결과다. Overview의 전역 조회 기능은 유지한다.
+- G01 latest restack top `23cecb45c1dbde9ee36fd0d49463c3a27c7a0d13`, G06 top `321efcb199bec4018b337519de85e2cacb6a8154`는 이 기록 시점의 소스 좌표이며, 공개 전후 새 head/리뷰는 다시 읽는다. historical62·92·native27·28건을 서로 더해 최신 후보의 전체 검사로 부르지 않는다.
+
 
 ## 2026-10-21 재개 체크포인트 · G01 후속
 

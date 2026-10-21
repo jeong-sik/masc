@@ -351,10 +351,18 @@ let () =
                   the current file (backup retained)"
                  incoming_turn_count
                  known_turn_count)
-          | Ok (Store.Saved { relation = _; turn_count; canonical_bytes = _ }) ->
+          | Ok (Store.Saved { relation = _; turn_count; canonical_bytes = _; checkpoint = stored }) ->
             Printf.printf
               "applied: purged checkpoint saved at turn_count %d\n"
               turn_count;
+            (* The position below was computed from [purged]. A save that had to
+               write a recovery copy holds other messages, so that position would
+               name numbering the file does not have. *)
+            if not (stored == purged)
+            then
+              error
+                "the purged checkpoint was stored as a recovery copy; the Librarian \
+                 position was not moved (backup retained)";
             (* The position follows the checkpoint. A failure here leaves the
                old position against the new numbering; the next Librarian
                round stops on the mismatch until the keeper's Librarian files

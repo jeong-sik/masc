@@ -202,9 +202,12 @@ let test_unencodable_payload_is_recovered_at_the_sink () =
       (checkpoint_with_unencodable_tool_use ~session_id:sid)
   with
   | Error message -> fail ("the sink should have stored the recovery copy: " ^ message)
-  | Ok _ ->
+  | Ok (Keeper_checkpoint_store.Stale_noop _) -> fail "a first save cannot be stale"
+  | Ok (Keeper_checkpoint_store.Saved { checkpoint = stored; _ }) ->
     check bool "the recovery copy was written" true (Sys.file_exists path);
     let bytes = Fs_compat.load_file path in
+    check string "the outcome names the checkpoint the file holds" bytes
+      (Agent_core.Checkpoint.to_string stored);
     (match Agent_core.Checkpoint.of_string bytes with
      | Ok loaded ->
        (* The call itself survives; only the unencodable args became empty. *)
@@ -216,6 +219,31 @@ let test_unencodable_payload_is_recovered_at_the_sink () =
         | messages -> failf "expected the poisoned assistant message, got %d" (List.length messages))
      | Error error ->
        fail ("the stored recovery copy must decode: " ^ Agent_core.Error.to_string error))
+;;
+
+(* A save that needed no recovery stores the checkpoint it was given, and the
+   outcome hands that same value back. *)
+let test_saved_outcome_returns_the_checkpoint_it_stored () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "saved-outcome-checkpoint" in
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:sid in
+  let ckpt = make_checkpoint ~session_id:sid ~turn_count:1 ~marker:"plain" in
+  match
+    Keeper_checkpoint_store.save_agent_core_classified
+      ~history_retained:(history_retained ())
+      ~session_dir
+      ckpt
+  with
+  | Error message -> fail message
+  | Ok (Keeper_checkpoint_store.Stale_noop _) -> fail "a first save cannot be stale"
+  | Ok (Keeper_checkpoint_store.Saved { checkpoint = stored; _ }) ->
+    check bool "the outcome returns the checkpoint it was given" true (stored == ckpt);
+    check string "and the file holds it" (Fs_compat.load_file path)
+      (Agent_core.Checkpoint.to_string stored)
 ;;
 
 (* 한 파일의 저장은 저장소가 그 파일에 둔 encoding memo 하나를 같이 쓴다. 저장마다
@@ -2836,6 +2864,8 @@ let () =
             test_stage_saves_sharing_one_memo_write_canonical_bytes;
           test_case "an unencodable payload is recovered at the sink" `Quick
             test_unencodable_payload_is_recovered_at_the_sink;
+          test_case "a saved outcome returns the checkpoint it stored" `Quick
+            test_saved_outcome_returns_the_checkpoint_it_stored;
           test_case "summary answers watermark and count without reading" `Quick
             test_summary_answers_watermark_and_count_without_reading;
           test_case "summary found through a symlinked session root" `Quick

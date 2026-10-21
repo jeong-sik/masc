@@ -782,6 +782,7 @@ type save_agent_core_outcome =
       { relation : save_agent_core_relation
       ; turn_count : int
       ; canonical_bytes : int
+      ; checkpoint : Agent_core.Checkpoint.t
       }
   | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
 
@@ -2010,6 +2011,7 @@ let save_outcome_after_write
        { relation = save_relation ~known ~incoming:ckpt.turn_count
        ; turn_count = ckpt.turn_count
        ; canonical_bytes = identity.size
+       ; checkpoint = ckpt
        })
 
 let write_canonical_durably ~ownership_root path encoded_source =

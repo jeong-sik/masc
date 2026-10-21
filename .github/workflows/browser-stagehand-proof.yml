@@ -15,6 +15,7 @@ on:
           - chromium
           - firefox
           - gecko
+          - webextension
         default: chromium
       firefox_version:
         description: 'Mozilla Firefox release fixture for firefox/gecko, isolated from the runner app'
@@ -33,7 +34,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 60
     env:
-      PROBE_TARGET: ${{ inputs.browser == 'firefox' && 'browser_addon_firefox_probe' || inputs.browser == 'gecko' && 'browser_addon_gecko_transfer_probe' || 'stagehand_browser_probe' }}
+      PROBE_TARGET: ${{ inputs.browser == 'firefox' && 'browser_addon_firefox_probe' || inputs.browser == 'gecko' && 'browser_addon_gecko_transfer_probe' || inputs.browser == 'webextension' && 'browser_addon_webextension_probe' || 'stagehand_browser_probe' }}
     steps:
       - name: Require an exact browser source candidate
         env:
@@ -45,9 +46,9 @@ jobs:
           import os, re
           if not re.fullmatch(r"[0-9a-f]{40}", os.environ["CANDIDATE_SHA"]):
               raise SystemExit("candidate_sha must be a full 40-character source commit")
-          if os.environ["PROOF_BROWSER"] not in ("chromium", "firefox", "gecko"):
-              raise SystemExit("browser must be chromium, firefox or gecko")
-          if os.environ["PROOF_BROWSER"] in ("firefox", "gecko") and not re.fullmatch(
+          if os.environ["PROOF_BROWSER"] not in ("chromium", "firefox", "gecko", "webextension"):
+              raise SystemExit("browser must be chromium, firefox, gecko or webextension")
+          if os.environ["PROOF_BROWSER"] in ("firefox", "gecko", "webextension") and not re.fullmatch(
               r"[0-9]+\.[0-9]+(?:\.[0-9]+)?", os.environ["FIREFOX_FIXTURE_VERSION"]
           ):
               raise SystemExit("firefox_version must name a numeric Mozilla release")
@@ -86,12 +87,15 @@ jobs:
         run: opam install . --deps-only --with-test -y
 
       - name: Build the native browser Add-on proof inputs
-        run: >-
-          opam exec -- dune build --release
-          "test/$PROBE_TARGET.exe"
-          bin/masc_native_addon_launcher.exe
-          bin/masc_browser_process_owner.exe
-          bin/masc_browser_addon_worker.exe
+        env:
+          PROOF_BROWSER: ${{ inputs.browser }}
+        run: |
+          targets=("test/$PROBE_TARGET.exe" bin/masc_native_addon_launcher.exe
+            bin/masc_browser_process_owner.exe bin/masc_browser_addon_worker.exe)
+          if [[ "$PROOF_BROWSER" == webextension ]]; then
+            targets+=(bin/masc_browser_host.exe)
+          fi
+          opam exec -- dune build --release "${targets[@]}"
 
       # Chrome for Testing, not branded Chrome: branded builds refuse
       # --load-extension from 137, and 154 is the build the CDP extension load
@@ -103,7 +107,7 @@ jobs:
           echo "CHROME_FOR_TESTING=$(tail -1 "$RUNNER_TEMP/chrome-for-testing.txt" | sed 's/^[^ ]* //')" >> "$GITHUB_ENV"
 
       - name: Install the selected isolated Firefox release
-        if: inputs.browser == 'firefox' || inputs.browser == 'gecko'
+        if: inputs.browser == 'firefox' || inputs.browser == 'gecko' || inputs.browser == 'webextension'
         env:
           FIREFOX_FIXTURE_VERSION: ${{ inputs.firefox_version }}
         run: |
@@ -162,7 +166,7 @@ jobs:
           echo "FIREFOX_BINARY=$fixture/Firefox.app/Contents/MacOS/firefox" >> "$GITHUB_ENV"
 
       - name: Install the owned Gecko driver
-        if: inputs.browser == 'gecko'
+        if: inputs.browser == 'gecko' || inputs.browser == 'webextension'
         run: brew install geckodriver
 
       - name: Retain the exact proof inputs
@@ -178,8 +182,11 @@ jobs:
           cp _build/default/bin/masc_native_addon_launcher.exe proof/native-browser/binaries/
           cp _build/default/bin/masc_browser_process_owner.exe proof/native-browser/binaries/
           cp _build/default/bin/masc_browser_addon_worker.exe proof/native-browser/binaries/
+          if [[ "$PROOF_BROWSER" == webextension ]]; then
+            cp _build/default/bin/masc_browser_host.exe proof/native-browser/binaries/
+          fi
           (cd proof/native-browser && shasum -a 256 binaries/*.exe > SHA256SUMS)
-          if [[ "$PROOF_BROWSER" == firefox || "$PROOF_BROWSER" == gecko ]]; then
+          if [[ "$PROOF_BROWSER" == firefox || "$PROOF_BROWSER" == gecko || "$PROOF_BROWSER" == webextension ]]; then
             shasum -a 256 "$FIREFOX_BINARY" > proof/native-browser/FIREFOX_BINARY_SHA256
           fi
 
@@ -219,6 +226,21 @@ jobs:
             --launcher _build/default/bin/masc_native_addon_launcher.exe \
             --guardian _build/default/bin/masc_browser_process_owner.exe \
             --worker _build/default/bin/masc_browser_addon_worker.exe \
+            --out proof/native-browser
+
+      - name: Exercise the external WebExtension through production native messaging and HTTP ingress
+        if: inputs.browser == 'webextension'
+        run: |
+          MOZ_HEADLESS=1 "$FIREFOX_BINARY" --version > proof/native-browser/BROWSER_VERSION
+          geckodriver --version > proof/native-browser/DRIVER_VERSION
+          python3 scripts/probe-browser-addon-webextension.py \
+            --firefox "$FIREFOX_BINARY" \
+            --driver "$(command -v geckodriver)" \
+            --probe _build/default/test/browser_addon_webextension_probe.exe \
+            --launcher _build/default/bin/masc_native_addon_launcher.exe \
+            --guardian _build/default/bin/masc_browser_process_owner.exe \
+            --worker _build/default/bin/masc_browser_addon_worker.exe \
+            --native-host _build/default/bin/masc_browser_host.exe \
             --out proof/native-browser
 
       - name: Upload native browser proof

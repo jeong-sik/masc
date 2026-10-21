@@ -10902,7 +10902,6 @@ let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
   match display with
   | None -> notice ~kind:Notice_failure "image preview requires pixel graphics or 256-colour text"
   | Some display ->
-    notice ~kind:Notice_reply (Printf.sprintf "Loading image (any key cancels): %s" name);
     let port = state.port in
     let keeper_name = if state.view = Resources then None else state.msg_target_keeper_name in
     let generation = state.image_request_generation in

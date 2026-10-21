@@ -183,6 +183,11 @@ completion refuses the old grid and asks to reopen it; any key dismisses the
 preview. Missing decoders and unsupported colour capabilities leave a visible
 refusal with the original reading intact. This path does not change local named
 file or staged-attachment image previews, browser layout or copied source bytes.
+Acquisition progress is a temporary footer observation of the pending read,
+bound to its generation, view, Keeper, workspace and original resource reading.
+It disappears when that read completes or loses ownership; it is not appended
+to conversation history. Actual acquisition and presentation failures still
+leave their existing notices.
 Scripts, metadata, templates, embedded frames and explicit hidden subtrees do
 not contribute reading/image candidates. This reading does not execute CSS or
 JavaScript, and does not reproduce a browser's page layout.

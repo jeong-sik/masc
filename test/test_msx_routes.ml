@@ -652,8 +652,22 @@ let test_checkpoint_route () =
           in
           check bool "save through attached worker succeeds" true (status = `OK);
           ignore (Lane.step ~frames:12 : (Lane.observation, Lane.error) result);
+          let stepped = current_frame_number () in
           let status, _ =
             Route.checkpoint_response ~config ~restore:true ~body:"{}"
+          in
+          check bool "restore naming no slot is a bad request" true (status = `Bad_request);
+          check int "restore naming no slot restores nothing" stepped (current_frame_number ());
+          (* A key the tool layer drops before the worker sees the arguments
+             must not turn a restore into a listing. *)
+          let status, _ =
+            Route.checkpoint_response ~config ~restore:true ~body:{|{"_x":1}|}
+          in
+          check bool "restore naming only an internal key is a bad request" true
+            (status = `Bad_request);
+          check int "that restore restores nothing either" stepped (current_frame_number ());
+          let status, _ =
+            Route.checkpoint_response ~config ~restore:true ~body:{|{"slot":"quick"}|}
           in
           check bool "restore through attached worker succeeds" true (status = `OK);
           check int "saved clock restored" before (current_frame_number ());

@@ -224,6 +224,95 @@ let test_cache_owner_cancellation phase =
      with Owner_stopped -> ());
     Alcotest.(check bool) "owner cancellation closes every socket" true (all_closed fds))
 
+exception Stop_requested
+
+(* Sends the response headers, waits until the client has parsed them, sends
+   the first byte of a two-byte body, and then stays silent. *)
+let start_stalled_body_server ~sw ~net ~headers_parsed =
+  let socket = Eio.Net.listen ~sw ~backlog:8 net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let callback _ _ body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:4096 body |> take_all) : string);
+    let headers =
+      Cohttp.Header.of_list ["content-type", "application/json"; "content-length", "2"] in
+    `Expert (Cohttp.Response.make ~status:`OK ~headers (), fun _input output ->
+      Eio.Buf_write.flush output;
+      Eio.Promise.await headers_parsed;
+      Eio.Buf_write.string output "{";
+      Eio.Buf_write.flush output;
+      Eio.Fiber.await_cancel ())
+  in
+  let server = Cohttp_eio.Server.make_response_action ~callback () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  Eio.Net.listening_addr socket
+
+(* A transport socket that runs [after_read] once each read has returned. *)
+module Observed_socket = struct
+  type tag = [ `Generic | `Unix ]
+  type t =
+    { socket : tag Eio.Net.stream_socket_ty Eio.Resource.t
+    ; after_read : unit -> unit
+    }
+
+  let read_methods = []
+  let single_read t buf =
+    let got = Eio.Flow.single_read t.socket buf in
+    t.after_read ();
+    got
+  let single_write t bufs = Eio.Flow.single_write t.socket bufs
+  let copy t ~src = Eio.Flow.copy src t.socket
+  let shutdown t = Eio.Flow.shutdown t.socket
+  let close t = Eio.Resource.close t.socket
+end
+
+(* A stop that reaches a request while its reader is running between two body
+   reads. The connection's owner is cancelled by the same stop and closes the
+   descriptor before the reader's next read. That read must end as the stop's
+   cancellation, not as a transport failure on a closed descriptor.
+
+   The reader triggers the stop itself, inside the read that returned the
+   first body byte, so it is running when the stop arrives. It then waits,
+   protected, until the owner's attempt switch has been released, which is
+   after that switch closed the descriptor. The next read is the one the
+   outcome is about. *)
+let test_stop_between_body_reads = with_runtime (fun env sw ->
+  let headers_parsed, parse_headers = Eio.Promise.create () in
+  let address = start_stalled_body_server ~sw ~net:env#net ~headers_parsed in
+  let owner_released, release_owner = Eio.Promise.create () in
+  let stop = ref (fun () -> Alcotest.fail "the read ran outside the request") in
+  let stopped = ref false in
+  let after_read () =
+    if Eio.Promise.is_resolved headers_parsed && not !stopped then (
+      stopped := true;
+      !stop ();
+      Eio.Cancel.protect (fun () -> Eio.Promise.await owner_released)) in
+  let net = routed_net ~net:env#net ~addresses:[address]
+      ~connect:(fun ~sw:attempt_sw address ->
+        (* Release hooks run newest first: registered before the socket's
+           own hook, this one runs after the descriptor is closed. *)
+        Eio.Switch.on_release attempt_sw (fun () -> Eio.Promise.resolve release_owner ());
+        let socket = Eio.Net.connect ~sw:attempt_sw env#net address in
+        Eio.Resource.T ({ Observed_socket.socket; after_read },
+                        Eio.Net.Pi.stream_socket (module Observed_socket))) in
+  let observer = Http_request_observer.create (fun { Http_request_observer.phase; _ } ->
+    (match phase with
+     | Http_request_observer.Response_headers_received _ -> Eio.Promise.resolve parse_headers ()
+     | Http_request_observer.Client_entered _ | Http_request_observer.Dispatch_entered
+     | Http_request_observer.Client_finished _ -> ());
+    Ok ()) in
+  match
+    Http_request_observer.with_observer observer (fun () ->
+      Eio.Cancel.sub (fun request ->
+        stop := (fun () -> Eio.Cancel.cancel request Stop_requested);
+        post net))
+  with
+  | exception Eio.Cancel.Cancelled Stop_requested ->
+    Alcotest.(check bool) "the stop came after the first body byte" true !stopped;
+    Alcotest.(check bool) "the owner closed the socket before the next read" true
+      (Eio.Promise.is_resolved owner_released)
+  | Ok _ -> Alcotest.fail "a body that never completes was answered"
+  | Error _ -> Alcotest.fail "the stop was reported as a transport failure")
+
 let test_last_eio_failure_kind =
   with_runtime (fun env sw ->
     let first = `Tcp (Eio.Net.Ipaddr.V6.loopback, 1) in
@@ -242,6 +331,7 @@ let () = Alcotest.run "HTTP resolved addresses"
      [Alcotest.test_case "owner cancelled during connect" `Quick (test_cache_owner_cancellation Pending);
       Alcotest.test_case "owner cancelled after TCP acquisition" `Quick (test_cache_owner_cancellation Connected);
       Alcotest.test_case "owner cancelled with parked connection" `Quick (test_cache_owner_cancellation Parked);
+      Alcotest.test_case "stop between body reads ends as the stop" `Quick test_stop_between_body_reads;
       Alcotest.test_case "last Eio failure preserves typed kind" `Quick test_last_eio_failure_kind;
       Alcotest.test_case "refused then healthy single dispatch" `Quick test_refused_then_healthy;
       Alcotest.test_case "blackhole cannot block reachable peer or cache reuse" `Quick test_blackhole_and_cache;

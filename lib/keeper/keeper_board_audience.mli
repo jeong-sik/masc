@@ -18,10 +18,12 @@ type route =
   | Ignore
 
 val classify
-  :  visibility:Board.visibility
+  :  post_kind:Board.post_kind
+  -> visibility:Board.visibility
   -> Board_dispatch.board_signal
   -> (t, classification_error) result
-(** Exact explicit address wins. Otherwise comments and reactions are scoped
+(** A created or edited [System_post] reads no address from its text: its audience
+    follows its visibility alone. Exact explicit address wins. Otherwise comments and reactions are scoped
     to structural thread participants, while a newly-created unaddressed post
     is discoverable — unless its visibility is [Unlisted], which keeps it out
     of every keeper's feed: that post is thread activity too and never enters

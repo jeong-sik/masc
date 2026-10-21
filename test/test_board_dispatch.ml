@@ -2207,6 +2207,7 @@ let test_malformed_target_is_read_as_prose () =
     "discoverable"
     (match
        Board.audience_for_post
+         ~post_kind:Board.Human_post
          ~visibility:Board.Public
          ~title:""
          ~content:"please inspect @!"
@@ -2260,7 +2261,7 @@ let test_prose_mentions_do_not_record_validation_rejections () =
    Internal post stays discoverable. *)
 let test_unlisted_post_is_not_discoverable () =
   let label ~visibility ~content =
-    match Board.audience_for_post ~visibility ~title:"" ~content with
+    match Board.audience_for_post ~post_kind:Board.Human_post ~visibility ~title:"" ~content with
     | Ok audience -> audience_label audience
     | Error error -> Board.show_board_error error
   in
@@ -2305,6 +2306,71 @@ let test_write_boundary_emits_typed_audience () =
          (Board.Agent_id.to_string target)
      | _ -> Alcotest.fail "expected one exact Board target")
 ;;
+
+(* A system post is written by platform code, and the text it carries is
+   evidence such as an evaluator message or a commit refusal. An address inside
+   that text neither wakes a keeper nor rejects the post, so its audience
+   follows its visibility alone. Each address form is tried alone, because the
+   mixed text fails on the old behaviour only through its unsupported selector
+   and would leave the target and broadcast forms unpinned. The same text on a
+   human post still counts as an address. *)
+let test_system_post_text_is_not_an_address () =
+  let audience ~post_kind ~visibility content =
+    Board.audience_for_post ~post_kind ~visibility ~title:content ~content
+  in
+  let expected_for = function
+    | Board.Public | Board.Internal -> "discoverable"
+    | Board.Unlisted -> "thread_participants"
+    | Board.Direct -> "error"
+  in
+  List.iter
+    (fun content ->
+       List.iter
+         (fun visibility ->
+            let label = Printf.sprintf "%S" content in
+            match audience ~post_kind:Board.System_post ~visibility content with
+            | Ok found ->
+              Alcotest.(check string) label (expected_for visibility) (audience_label found)
+            | Error _ ->
+              Alcotest.(check string) label (expected_for visibility) "error")
+         [ Board.Public; Board.Internal; Board.Unlisted; Board.Direct ])
+    [ "gate=evaluator: commit refused @keeper-a"
+    ; "gate=evaluator: commit refused @@all"
+    ; "gate=evaluator: commit refused @@internal"
+    ; "gate=evaluator: commit refused @keeper-a @@internal @@all"
+    ];
+  let human content =
+    match audience ~post_kind:Board.Human_post ~visibility:Board.Internal content with
+    | Ok found -> audience_label found
+    | Error error -> "error: " ^ Board.show_board_error error
+  in
+  Alcotest.(check string) "human @name is an address" "targets" (human "refused @keeper-a");
+  Alcotest.(check string) "human @@all is a broadcast" "broadcast" (human "refused @@all");
+  Alcotest.(check bool) "human unsupported selector is refused" true
+    (match audience ~post_kind:Board.Human_post ~visibility:Board.Internal "refused @@internal" with
+     | Error (Board.Validation_error _) -> true
+     | Error _ | Ok _ -> false)
+
+let test_system_post_with_address_text_is_written_unaddressed () =
+  let seen = ref None in
+  Board_dispatch.set_board_signal_hook (fun addressed -> seen := Some addressed);
+  (match
+     Board_dispatch.create_post
+       ~author:"system"
+       ~content:"Stalled task task-1. gate=evaluator: refused @keeper-a @@internal"
+       ~post_kind:Board.System_post
+       ~visibility:Board.Internal
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  match !seen with
+  | None -> Alcotest.fail "typed Board signal was not emitted"
+  | Some addressed ->
+    Alcotest.(check string)
+      "the evidence text addressed nobody"
+      "discoverable"
+      (audience_label addressed.Board_dispatch.audience)
 
 let test_post_audience_survives_edit_and_restart () =
   let get = function
@@ -2361,7 +2427,7 @@ let test_target_case_is_identity_level () =
      while the Keeper boundary folds them into one canonical id (pinned in
      test_keeper_lane_mentions). *)
   match
-    Board.audience_for_post ~visibility:Board.Public ~title:""
+    Board.audience_for_post ~post_kind:Board.Human_post ~visibility:Board.Public ~title:""
       ~content:"@MiXeD-Agent and @mixed-agent"
   with
   | Ok (Board.Targets targets) ->
@@ -2850,6 +2916,10 @@ let () =
         (with_eio test_unlisted_post_is_not_discoverable);
       Alcotest.test_case "write emits typed audience" `Quick
         (with_eio test_write_boundary_emits_typed_audience);
+      Alcotest.test_case "system post text is not an address" `Quick
+        (with_eio test_system_post_text_is_not_an_address);
+      Alcotest.test_case "system post with address text is written unaddressed" `Quick
+        (with_eio test_system_post_with_address_text_is_written_unaddressed);
       Alcotest.test_case "post audience survives edit and restart" `Quick
         (with_eio test_post_audience_survives_edit_and_restart);
       Alcotest.test_case "target case is identity-level" `Quick

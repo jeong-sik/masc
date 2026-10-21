@@ -613,7 +613,6 @@ let pending_board_event_of_board_observation
       (observation : Board_signal.board_observation)
   : (pending_board_event, Board_signal.board_unavailable) result
   =
-  let matched = Board_signal.match_observation ~meta ~observation in
   match Board_dispatch.read_post ~post_id:observation.post_id with
   | Error error ->
     Error
@@ -622,6 +621,12 @@ let pending_board_event_of_board_observation
       ; error
       }
   | Ok post_snapshot ->
+    let matched =
+      Board_signal.match_observation
+        ~post_kind:(post_snapshot : Board.post).post_kind
+        ~meta
+        ~observation
+    in
     let title, preview, hearth, post_kind, updated_at =
       let post : Board.post = post_snapshot in
       match observation.kind with
@@ -1356,7 +1361,7 @@ let collect_board_events_with_cursor_policy
         && compare_board_cursor_token token (board_cursor_token_of_post p) <= 0
     in
     let route_signal (p : Board.post) (signal : Board_dispatch.board_signal) =
-      match Board_audience.classify ~visibility:p.visibility signal with
+      match Board_audience.classify ~post_kind:p.post_kind ~visibility:p.visibility signal with
       | Error error ->
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string ObservationQueryFailures)

@@ -398,6 +398,7 @@ let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
      | Ok (Board.Post_created post as outcome) ->
        (match
           Board.audience_for_post
+            ~post_kind:post.post_kind
             ~visibility:post.visibility
             ~title:post.title
             ~content:post.body
@@ -425,7 +426,8 @@ let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
         Ok post
       | Ok (post, true) ->
         emit_board_write ();
-        match Board.audience_for_post ~visibility:post.visibility
+        match Board.audience_for_post ~post_kind:post.post_kind
+            ~visibility:post.visibility
             ~title:post.title ~content:post.body with
         | Error error -> Error error
         | Ok audience ->

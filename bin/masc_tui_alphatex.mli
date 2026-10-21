@@ -2,8 +2,9 @@
 
     The TUI draws an [\`\`\`alphatex] or [\`\`\`atex] fence as a guitar tab when
     {!Masc_tui_alphatex_score.read} reads its text as a score. The tuning
-    names the lines, the highest string first. A note that carried technique
-    markup keeps its fret and gets a [*] after it.
+    names the lines, the highest string first. A tied note shows the fret it
+    holds in parentheses, [(7)]. A note that carried technique markup keeps
+    its fret and gets a [*] after it.
 
     Repeat signs are barlines: a bar an [\ro] opened starts past [|:], one a
     [\rc N] closed ends in [:|xN|] with the count of total plays, and [\ae]

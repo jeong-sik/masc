@@ -50,6 +50,8 @@ type failure =
   | Not_a_note of string
   | Fret_out_of_range of string
   | Chord_string_twice of int
+  | Tie_without_note of int
+  | Tie_to_dead_note of int
   | Effect_without_note
   | Unsupported_rhythm of string
   | No_music
@@ -59,10 +61,18 @@ type failure =
   | Alternate_ending_out_of_range of string
   | Repeat_without_bar
 
+(* How a note sounds on its beat: picked, picked dead ([x] where the fret
+   goes), or held on from the earlier note on its string ([-] there). *)
+type attack =
+  | Struck
+  | Muted
+  | Tied
+
 type note = {
   fret : string;
   on_string : int;
   marked : bool;
+  attack : attack;
 }
 
 (* A beat's duration, the way a reader shows it: the plain lengths, the dot
@@ -179,6 +189,10 @@ let failure_text = function
       Printf.sprintf "fret %s is not a fret this draws" (quoted fret)
   | Chord_string_twice string ->
       Printf.sprintf "a chord with two notes on string %d" string
+  | Tie_without_note string ->
+      Printf.sprintf "a tie on string %d with no note on that string in its bar or the three before"
+        string
+  | Tie_to_dead_note string -> Printf.sprintf "a tie on string %d holds a dead note" string
   | Effect_without_note -> "an effect with no note before it"
   | Unsupported_rhythm markup ->
       Printf.sprintf "{%s} changes a beat's length, which this does not draw"
@@ -397,6 +411,13 @@ let max_strings = 12
    not frets. *)
 let max_fret_digits = 2
 
+(* What stands where the fret goes: a fret, [x] for a dead note, or [-] for
+   a tie, which has no fret of its own until the note it holds is found. *)
+type written =
+  | Fret of string
+  | Dead
+  | Tie
+
 type item_error =
   | Item_not_a_note
   | Item_bad_duration of string
@@ -406,7 +427,9 @@ type item_error =
 let note_item word =
   let limit = String.length word in
   let rec digits i = if i < limit && is_digit word.[i] then digits (i + 1) else i in
-  let fret_stop = if limit > 0 && word.[0] = 'x' then 1 else digits 0 in
+  let fret_stop =
+    if limit > 0 && (word.[0] = 'x' || word.[0] = '-') then 1 else digits 0
+  in
   if fret_stop = 0 || fret_stop >= limit || word.[fret_stop] <> '.' then
     Error Item_not_a_note
   else if fret_stop > max_fret_digits then
@@ -418,7 +441,13 @@ let note_item word =
       match int_of_string_opt (String.sub word (fret_stop + 1) (string_stop - fret_stop - 1)) with
       | None -> Error Item_not_a_note
       | Some on_string ->
-          let note = { fret = String.sub word 0 fret_stop; on_string; marked = false } in
+          let written =
+            match word.[0] with
+            | 'x' -> Dead
+            | '-' -> Tie
+            | _ -> Fret (String.sub word 0 fret_stop)
+          in
+          let note = (written, on_string) in
           if string_stop = limit then Ok (note, None)
           else if word.[string_stop] <> '.' then Error Item_not_a_note
           else begin
@@ -484,17 +513,36 @@ let ticks_of_said said = span_of_duration (Plain said)
 
 (* A note names a string the tuning has. The tuning is settled before the
    first note ([Tuning_after_music]), so this is known as each note is read. *)
-let on_tuning ~strings note =
-  if note.on_string < 1 || note.on_string > strings then
-    Error (String_past_tuning { string = note.on_string; strings })
-  else Ok note
+let on_tuning ~strings on_string =
+  if on_string < 1 || on_string > strings then
+    Error (String_past_tuning { string = on_string; strings })
+  else Ok on_string
+
+(* The text a dead note draws where its fret goes, as alphaTex writes it. *)
+let dead_fret = "x"
+
+(* A written note with its fret known. A tie takes the fret of the note it
+   holds, which [held] finds by string among the beats already read. A tie
+   that holds a dead note is refused: alphaTab 1.8.4 copies only the dead
+   note's internal fret 0 and reads the tie as a held open string, [(0)]. *)
+let sounding_note ~held written on_string =
+  match written with
+  | Fret fret -> Ok { fret; on_string; marked = false; attack = Struck }
+  | Dead -> Ok { fret = dead_fret; on_string; marked = false; attack = Muted }
+  | Tie -> (
+      match held on_string with
+      | None -> Error (Tie_without_note on_string)
+      | Some { attack = Muted; _ } -> Error (Tie_to_dead_note on_string)
+      | Some { fret; attack = Struck | Tied; _ } ->
+          Ok { fret; on_string; marked = false; attack = Tied })
 
 (* The bracketed members, whitespace apart. A chord's time is the bracket's
    [.dur] alone, so a member carries none. A member may carry technique markup
    in braces, written against it or after a space, which marks that note. Two
    notes on one string cannot both be drawn in the cell they share, so a chord
-   never holds more notes than the tuning has strings. *)
-let chord_notes ~strings inner =
+   never holds more notes than the tuning has strings. A tied member holds a
+   note from an earlier beat, never one of its own chord. *)
+let chord_notes ~strings ~held inner =
   let ( let* ) = Result.bind in
   let limit = String.length inner in
   let rec members found index =
@@ -534,11 +582,13 @@ let chord_notes ~strings inner =
         match note_item word with
         | Ok (_, Some _) -> Error (Not_a_note word)
         | Error error -> Error (item_failure word error)
-        | Ok (note, None) ->
-            let* note = on_tuning ~strings note in
-            if List.exists (fun earlier -> earlier.on_string = note.on_string) placed then
-              Error (Chord_string_twice note.on_string)
-            else notes ({ note with marked } :: placed) rest)
+        | Ok ((written, on_string), None) ->
+            let* on_string = on_tuning ~strings on_string in
+            if List.exists (fun earlier -> earlier.on_string = on_string) placed then
+              Error (Chord_string_twice on_string)
+            else
+              let* note = sounding_note ~held written on_string in
+              notes ({ note with marked } :: placed) rest)
   in
   let* found = members [] 0 in
   match found with
@@ -552,6 +602,7 @@ type sounding = {
   s_span : int;
   s_notes : note list;  (* [] is a rest *)
   s_marked : bool;  (* a rhythm effect rode on it, and a cell draws that *)
+  s_bar : int;  (* the bar alphaTab puts it in, which a tie's search counts *)
 }
 
 (* The repeat signs read since the last bar line, waiting for the open
@@ -584,6 +635,8 @@ type builder = {
   b_subtitle : string option;  (* the last [\subtitle] said *)
   b_tempo : int option;  (* the last [\tempo] that fit an int *)
   b_ts : (int * int) option;  (* the last [\ts] whose numbers fit *)
+  b_bar : int;  (* alphaTab's bar count so far, for a tie's search *)
+  b_bar_has_beat : bool;  (* a beat stands in alphaTab's current bar *)
 }
 
 (* A beat that says its own length sets the length for the beats after it,
@@ -600,9 +653,11 @@ let push_beat ?said notes state =
   | Some span ->
       Ok
         { state with
-          b_beats = { s_dur = dur; s_span = span; s_notes = notes; s_marked = false }
-                    :: state.b_beats
+          b_beats =
+            { s_dur = dur; s_span = span; s_notes = notes; s_marked = false; s_bar = state.b_bar }
+            :: state.b_beats
         ; b_default = unit
+        ; b_bar_has_beat = true
         }
   | None -> Error (Duration_outside_subset (Printf.sprintf ":%d" unit))
 
@@ -894,6 +949,25 @@ let collect_endings tokens =
 let string_count state =
   List.length (Option.value state.b_tuning ~default:default_tuning)
 
+(* The bars before a tie's own that alphaTab 1.8.4 looks back through for the
+   note the tie holds (Note.findTieOrigin, _maxOffsetForSameLineSearch). *)
+let tie_bars_back = 3
+
+(* The note a tie on [on_string] holds, found the way alphaTab finds it: the
+   latest earlier note on that string, past rests and notes on other strings,
+   in the tie's bar or the three before it. The bars are alphaTab's, not the
+   measures this reader draws: an empty bar counts as one, as alphaTab reads
+   it as a bar of rest, and so does a bar a directive opened after a beat.
+   With none there, alphaTab plays the tie as an open string; the reader
+   refuses it instead. *)
+let held_note state on_string =
+  let earliest_bar = state.b_bar - tie_bars_back in
+  Seq.append (List.to_seq state.b_beats)
+    (Seq.concat_map (fun (_, beats) -> List.to_seq beats) (List.to_seq state.b_measures))
+  |> Seq.take_while (fun (sounding : sounding) -> sounding.s_bar >= earliest_bar)
+  |> Seq.find_map (fun (sounding : sounding) ->
+         List.find_opt (fun (note : note) -> note.on_string = on_string) sounding.s_notes)
+
 let beat_of_word state word =
   let ( let* ) = Result.bind in
   let limit = String.length word in
@@ -931,10 +1005,11 @@ let beat_of_word state word =
             | None -> Error (Duration_outside_subset word))
        | Some _, [] -> Error (Not_a_note word)
        | None, _ -> Error (Duration_outside_subset word))
-  | '0'..'9' | 'x' ->
+  | '0'..'9' | 'x' | '-' ->
       (match note_item word with
-       | Ok (note, said) ->
-           let* note = on_tuning ~strings:(string_count state) note in
+       | Ok ((written, on_string), said) ->
+           let* on_string = on_tuning ~strings:(string_count state) on_string in
+           let* note = sounding_note ~held:(held_note state) written on_string in
            push_beat ?said [ note ] state
        | Error error -> Error (item_failure word error))
   | _ -> Error (Not_a_note word)
@@ -995,6 +1070,11 @@ let read source =
                  ; tempo = state.b_tempo
                  ; time_signature = state.b_ts
                  })
+    (* alphaTab 1.8.4 ends its bar at any directive that follows a beat in
+       it, and the directive opens the next bar. The measure drawn here keeps
+       the directive; only the bar count a tie's search reads moves on. *)
+    | Tk_directive _ :: _ when state.b_bar_has_beat ->
+        step { state with b_bar = state.b_bar + 1; b_bar_has_beat = false } tokens
     | Tk_directive Title :: rest ->
         let* text, after = text_argument Title_text rest in
         (* The latest title wins, the way the latest tempo does. *)
@@ -1154,7 +1234,7 @@ let read source =
               let* state = mark_latest_beat state in
               step state rest))
     | Tk_chord (inner, said) :: rest ->
-        let* notes = chord_notes ~strings:(string_count state) inner in
+        let* notes = chord_notes ~strings:(string_count state) ~held:(held_note state) inner in
         let* state = push_beat ?said notes state in
         step state rest
     | Tk_bar :: rest ->
@@ -1167,6 +1247,8 @@ let read source =
               b_measures = (state.b_marks, state.b_beats) :: state.b_measures
             ; b_beats = []
             ; b_marks = no_marks
+            ; b_bar = state.b_bar + 1
+            ; b_bar_has_beat = false
             }
             rest
     (* alphaTex ends its metadata with a lone [.]: it separates the directives
@@ -1189,5 +1271,7 @@ let read source =
     ; b_subtitle = None
     ; b_tempo = None
     ; b_ts = None
+    ; b_bar = 0
+    ; b_bar_has_beat = false
     }
     tokens

@@ -33,7 +33,7 @@ let test_each_grant_is_checked_whole () =
     ; "an empty visibilities", [ board ~visibilities:[] "b" ]
     ; "an unknown visibility", [ board ~visibilities:[ "secret" ] "b" ]
     ; "an upper-case visibility", [ board ~visibilities:[ "Public" ] "b" ]
-    ; "a kind this host does not have", [ `Assoc [ "source_id", `String "w"; "kind", `String "wiki" ] ]
+    ; "a kind this host does not have", [ `Assoc [ "source_id", `String "w"; "kind", `String "notepad" ] ]
     ; "the same source_id twice", [ board "x"; repository "x" ]
     ; "a path outside the repository", [ repository ~paths:[ "../secrets" ] "r" ]
     ; "an absolute path", [ repository ~paths:[ "/etc/passwd" ] "r" ]

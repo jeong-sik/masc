@@ -133,7 +133,13 @@ readonly WS_DIRECT_SHA="d812d6fec4153efc11235661e0d4b4d0d789c45b"
 # 7cc5836 is ocaml-msx main with #48 and #50 (#49 relanded): refresh the
 # build Git identity and publish a commit only for the core project's own
 # clean checkout. The top-level lib source digest is unchanged.
-readonly OCAML_MSX_SHA="7cc5836b517c43e3690272d7c7d561d9a1e5cc3b"
+# cec423387 = ocaml-msx #52: the plain-CALL trap serves SNSMAT 0x0141,
+# GTSTCK 0x00D5 and GTTRIG 0x00D8, and the served-vector ledger records
+# whether the caller returned into ROM or RAM. Sangokushi II's second-unit
+# deploy and battle-direction prompts read those vectors, so before this pin
+# the shared machine could not see arrow keys at all. The top-level lib
+# source digest moves cc6489f2ddae4a48596b4879b3c0e368 -> 78f5ad93c70d726594517af5e0f4c57b.
+readonly OCAML_MSX_SHA="cec423387a7335f7d095e3a3489ec3e7272581fa"
 # DOS emulator core (8086 + BIOS/DOS interrupt surface + CGA/EGA/VGA video).
 # Path-pinned locally for core development; SHA-pinned here for CI.
 # d887e45 = ocaml-dos #11: keys have names, so lib/dos_lane can take "up" and

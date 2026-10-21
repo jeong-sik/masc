@@ -1,5 +1,9 @@
 # Candle 지급 설정
 
+현재 지원 범위와 남은 요구사항은 [Candle 전체 요구사항 명세서](../spec/candle-requirements.md)를,
+소스·운영 읽기 관측의 근거는 [현황 분석](../audits/2026-10-21-candle-current-state.md)을 참고한다.
+이 가이드는 지급 설정 중심이며, 선물·유통량 연동 가격 등 확장 계약은 명세서에서 구분한다.
+
 Candle은 설정 폴더의 `candle.toml`을 매번 읽는다. 파일이 없으면 Off다. 파일이 있지만 필수 값이 없거나 잘못되면 이유를 포함한 Disabled가 된다. 서버는 계속 동작하며 이 상태에서는 Snapshot과 지급 의무를 기록하지 않는다.
 
 설정과 원장이 유효한 상태에서 appraiser lane이 없거나 registry가 아직 게시되지 않았거나 교체 게시 중이면 지급 가용성은 그 이유로 Disabled가 된다. 이때도 검증 통과의 Snapshot과 확정의 지급 의무는 기록한다. lane이 다시 사용 가능해지면 같은 의무에서 지급을 재개한다.

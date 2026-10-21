@@ -2,7 +2,7 @@
     the range-based consumer and the Goal context of a task. *)
 
 type read_error =
-  | Chat_store_unreadable of string
+  | Chat_store_unreadable of Keeper_chat_store.strict_decode_error
   | External_attention_unreadable of Keeper_external_attention.read_error
   | External_cursor_failed of string
 

@@ -1,11 +1,13 @@
 type read_error =
-  | Chat_store_unreadable of string
+  | Chat_store_unreadable of Keeper_chat_store.strict_decode_error
   | External_attention_unreadable of Keeper_external_attention.read_error
   | External_cursor_failed of string
 
 let read_error_to_string = function
   | External_cursor_failed detail -> "external admission cursor: " ^ detail
-  | Chat_store_unreadable detail -> "keeper chat store is unreadable: " ^ detail
+  | Chat_store_unreadable error ->
+    "keeper chat store is unreadable: "
+    ^ Keeper_chat_store.strict_decode_error_to_string error
   | External_attention_unreadable error ->
     "external attention store is unreadable: "
     ^ Keeper_external_attention.read_error_to_string error
@@ -28,7 +30,7 @@ let counterpart_observations_read ?external_after ~base_dir ~keeper_name ~after 
       Ok []
     | Some _ | None ->
       Keeper_chat_store.load_all_result ~base_dir ~keeper_name
-      |> Result.map_error (fun detail -> Chat_store_unreadable detail)
+      |> Result.map_error (fun error -> Chat_store_unreadable error)
   in
   let user_rows =
     user_rows

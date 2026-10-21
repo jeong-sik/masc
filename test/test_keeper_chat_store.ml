@@ -170,11 +170,11 @@ let test_load_all_result_rejects_malformed_row () =
          ^ "\n{not-json\n");
       match K.load_all_result ~base_dir ~keeper_name with
       | Ok _ -> Alcotest.fail "strict load accepted a malformed row"
-      | Error detail ->
+      | Error error ->
         Alcotest.(check string)
           "error identifies the unreadable row"
           (Printf.sprintf "%s:2 unreadable chat row" path)
-          detail)
+          (K.strict_decode_error_to_string error))
 ;;
 
 let test_load_all_result_speaker_authority_contract () =
@@ -190,7 +190,9 @@ let test_load_all_result_speaker_authority_contract () =
          ^ {|{"id":"missing-authority","role":"user","content":"historical","ts":2.0}|}
          ^ "\n");
       (match K.load_all_result ~base_dir ~keeper_name with
-       | Error detail -> Alcotest.failf "strict load rejected valid rows: %s" detail
+       | Error error ->
+         Alcotest.failf "strict load rejected valid rows: %s"
+           (K.strict_decode_error_to_string error)
        | Ok [ valid; historical ] ->
          (match valid.K.speaker with
           | Some speaker ->
@@ -210,13 +212,13 @@ let test_load_all_result_speaker_authority_contract () =
          ^ "\n");
       (match K.load_all_result ~base_dir ~keeper_name with
        | Ok _ -> Alcotest.fail "strict load accepted speaker identity without authority"
-       | Error detail ->
+       | Error error ->
          Alcotest.(check string)
            "identity requires typed authority"
            (Printf.sprintf
               "%s:1 speaker_id/speaker_name without speaker_authority"
               path)
-           detail);
+           (K.strict_decode_error_to_string error));
       write_file path
         ({|{"id":"valid-before","role":"user","content":"before","ts":3.0,"speaker_authority":"owner"}|}
          ^ "\n"
@@ -240,11 +242,11 @@ let test_load_all_result_speaker_authority_contract () =
            (List.length messages));
       match K.load_all_result ~base_dir ~keeper_name with
       | Ok _ -> Alcotest.fail "strict load accepted unknown speaker authority"
-      | Error detail ->
+      | Error error ->
         Alcotest.(check string)
           "mixed strict load fails at the typed authority error"
           (Printf.sprintf "%s:2 unknown speaker_authority %S" path "admin")
-          detail)
+          (K.strict_decode_error_to_string error))
 ;;
 
 (* A persisted surface is the row's only routing identity. A row whose
@@ -292,13 +294,13 @@ let test_load_all_result_rejects_invalid_surface () =
         (ids (K.load_all ~base_dir ~keeper_name));
       match K.load_all_result ~base_dir ~keeper_name with
       | Ok _ -> Alcotest.fail "strict load accepted a surface it could not decode"
-      | Error detail ->
+      | Error error ->
         Alcotest.(check string)
           "strict load names the surface row"
           (Printf.sprintf
              "%s:2 invalid surface field: unknown surface kind carrier-pigeon"
              path)
-          detail)
+          (K.strict_decode_error_to_string error))
 ;;
 
 let roles messages =
@@ -1150,11 +1152,12 @@ let test_retired_kind_row_dropped () =
         (drop_value invalid_payload -. before);
       match K.load_all_result ~base_dir ~keeper_name with
       | Ok _ -> Alcotest.fail "strict load accepted a retired kind row"
-      | Error detail ->
+      | Error error ->
         Alcotest.(check bool)
           "strict reader names the retired field"
           true
-          (String_util.contains_substring detail
+          (String_util.contains_substring
+             (K.strict_decode_error_to_string error)
              {|unknown chat row field "kind"|}))
 
 let test_window_keeps_tool_lines_of_retained_turns () =

@@ -556,15 +556,35 @@ val load_result :
 val load_all :
   base_dir:string -> keeper_name:string -> chat_message list
 
+type strict_decode_cause =
+  | Invalid_surface of string
+  | Unknown_speaker_authority of string
+  | Missing_speaker_authority
+  | Invalid_row_contract of string
+  | Unreadable_file of string
+
+(** A strict read failure. [location] is the [path:line] (or byte offset) of
+    the offending row, or the file path for file-level failures. *)
+type strict_decode_error =
+  { location : string
+  ; cause : strict_decode_cause
+  }
+
+(** Renders with the same wording the strict reader has always used,
+    e.g. ["<path>:2 unreadable chat row"]. *)
+val strict_decode_error_to_string : strict_decode_error -> string
+
 val load_all_result :
-  base_dir:string -> keeper_name:string -> (chat_message list, string) result
+  base_dir:string -> keeper_name:string ->
+  (chat_message list, strict_decode_error) result
 (** Fail-closed whole-transcript reader for consumers whose durable cursor
     advances past the returned rows. Unlike {!load_all}, one unreadable row,
     a [surface] that does not decode, an invalid row contract, an unknown typed [speaker_authority],
     speaker identity without its authority, an incomplete final row, or a
     store read failure is an error rather than a silently shorter history.
-    Missing authority remains valid only for rows written without any speaker
-    provenance. *)
+    Row decode failures carry [Invalid_row_contract]; an incomplete tail or a
+    store read failure carries [Unreadable_file]. Missing authority remains
+    valid only for rows written without any speaker provenance. *)
 
 type page = { messages : chat_message list; has_more : bool }
 

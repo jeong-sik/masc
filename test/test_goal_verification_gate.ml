@@ -1698,7 +1698,7 @@ let persist_notification_keeper config name =
 
 let notification_rows config keeper request_id =
   match Keeper_chat_store.load_all_result ~base_dir:config.Workspace.base_path ~keeper_name:keeper with
-  | Error detail -> fail detail
+  | Error error -> fail (Keeper_chat_store.strict_decode_error_to_string error)
   | Ok rows -> List.filter (fun (row : Keeper_chat_store.chat_message) ->
       row.external_message_id = Some request_id) rows
 

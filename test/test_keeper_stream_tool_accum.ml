@@ -1310,8 +1310,11 @@ let test_recovered_name_seals_exact_event_and_durable_row () =
     (match Store.append_tool_calls_result ~base_dir ~keeper_name:"recovered"
         ~tool_calls:calls () with
      | Ok () -> () | Error detail -> fail detail);
-    let rows = match Store.load_all_result ~base_dir ~keeper_name:"recovered" with
-      | Ok rows -> rows | Error detail -> fail detail in
+    let rows =
+      match Store.load_all_result ~base_dir ~keeper_name:"recovered" with
+      | Ok rows -> rows
+      | Error error -> fail (Store.strict_decode_error_to_string error)
+    in
     match rows with
     | [row] ->
       check bool "reloaded durable row is a tool call" true

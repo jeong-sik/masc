@@ -23,6 +23,9 @@ let with_workspace run = Eio_main.run @@ fun env ->
     run config)
 
 let accepted = function Ok value -> value | Error detail -> fail detail
+let accepted_rows = function
+  | Ok value -> value
+  | Error error -> fail (Chat.strict_decode_error_to_string error)
 let delivery content : Workspace_broadcast.broadcast_delivery =
   { request_id = "wmsg-0123456789abcdef0123456789abcdef"; seq=1
   ; rendered=content; from_agent="verifier"; content; mention=None
@@ -30,7 +33,7 @@ let delivery content : Workspace_broadcast.broadcast_delivery =
   ; fanout_state=Fanout_durable_admitted; audience=Fleet_conversation }
 
 let rows config = Chat.load_all_result ~base_dir:config.Workspace_utils.base_path
-  ~keeper_name:"beta" |> accepted
+  ~keeper_name:"beta" |> accepted_rows
 let project config sender_authority message =
   Projection.append_workspace_message_to_recipient ~base_path:config.Workspace_utils.base_path
     ~sender_authority message ~keeper_name:"beta" |> accepted

@@ -516,7 +516,14 @@ let test_failed_request_reloads_completed_media_across_attempts () =
         ~settlement:(Server_keeper_operation_transcript.Request_failed failure)
         ~tool_calls:[] ~blocks ()
       |> require "failed-request transcript persistence";
-      match Store.load_all_result ~base_dir ~keeper_name |> require "strict transcript reload" with
+      let rows =
+        match Store.load_all_result ~base_dir ~keeper_name with
+        | Ok rows -> rows
+        | Error error ->
+          failf "strict transcript reload: %s"
+            (Store.strict_decode_error_to_string error)
+      in
+      match rows with
       | [ row ] ->
           check bool "reload retains the server failure role" true
             (Store.Role.equal row.role Store.Role.Request_failure);

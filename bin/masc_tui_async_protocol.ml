@@ -765,6 +765,11 @@ type 'a mailed = {
   message : 'a;
 }
 
+let capture_workspace_message state =
+  let authority = state.workspace_authority in
+  let reading = if server_authority_ready state then Some state.workspace_read_authority else None in
+  fun message -> Workspace_scoped (authority,reading,message)
+
 (* Snapshot authority is withdrawn independently of admitted effects. Keep
    this match exhaustive: a new reply must choose whether it is a replaceable
    observation or the outcome of an operation already sent. *)

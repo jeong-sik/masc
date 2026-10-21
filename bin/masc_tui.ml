@@ -1709,8 +1709,13 @@ let decode_play_mutation decode = function
 
 
 
+type async_mailbox = {
+  notifications : async_msg mailed Eio.Stream.t;
+  workspace_results : async_msg Masc_tui_workspace_result.t;
+}
+
 let enqueue_async mailbox msg =
-  Eio.Stream.add mailbox
+  Eio.Stream.add mailbox.notifications
     { ready_at_ns = Mtime_clock.elapsed_ns (); message = msg }
 
 let same_server_workspace (expected : Tui_decode.server_identity)
@@ -1736,9 +1741,8 @@ let same_workspace_identity expected current =
 (* Capture authority at dispatch. Keeper-name equality cannot authorize a
    reply after the server changed workspace, including A -> B -> A. *)
 let workspace_enqueue state =
-  let authority = state.workspace_authority in
-  let reading = if server_authority_ready state then Some state.workspace_read_authority else None in
-  fun mailbox message -> enqueue_async mailbox (Workspace_scoped (authority, reading, message))
+  let envelope = capture_workspace_message state in
+  fun mailbox message -> enqueue_async mailbox (envelope message)
 
 let check_workspace_request ?schedule_form_action ?refresh_ticket
     ?(prior_contact = Masc_tui_server_lifecycle.Nothing_answered) state ~mailbox ~authority ~identity ~host ~port () =
@@ -1888,33 +1892,12 @@ let fork_workspace_job = Masc_tui_workspace_job.fork
    envelope. Each caller supplies its own admission before doing its work. *)
 let launch_workspace_result ?key ?(operation = false) ?(observation = false)
     ?observe_job ?(on_not_run = fun () -> ()) state ~mailbox ~boundary_error ~deliver perform =
-  let enqueue_async = workspace_enqueue state in
-  let deliver_result result =
-    let message = deliver result in
-    enqueue_async mailbox (if operation then Workspace_operation message else message)
-  in
-  let run () =
-    let result =
-      try
-        perform ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (boundary_error (Printexc.to_string exn))
-    in
-    deliver_result result
-  in
-  let not_run detail =
-    on_not_run ();
-    deliver_result (Error (boundary_error detail))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      (match fork_workspace_job ?key ~observation ?observe:observe_job state ~sw run with
-       | () -> ()
-       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-       | exception exn ->
-           not_run (Printexc.to_string exn))
-  | None -> not_run "Eio switch is unavailable"
+  let envelope = capture_workspace_message state in
+  Masc_tui_workspace_result.launch ?key ~observation ?observe_job ~on_not_run
+    state ~results:mailbox.workspace_results ~boundary_error
+    ~deliver:(fun result ->
+      let message = deliver result in
+      envelope (if operation then Workspace_operation message else message)) perform
 
 (* Existing request/effect callers still recheck the endpoint before dispatch. *)
 let launch_workspace_request ?(operation = false) state ~mailbox ~boundary_error ~deliver read =
@@ -21760,9 +21743,13 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) state ~
        finite owned set rechecks the same deadline before its first result. *)
     let ready, next = Delivery_round.take !delivery_round
       ~can_take:(fun () -> not (over_budget ()))
-      ~queued:(fun () -> Eio.Stream.length mailbox)
-      ~take_shared:(fun () -> Eio.Stream.take_nonblocking mailbox)
-      ~collect_owned:(fun () -> collect_owned_results state) in
+      ~queued:(fun () -> Eio.Stream.length mailbox.notifications)
+      ~take_shared:(fun () -> Eio.Stream.take_nonblocking mailbox.notifications)
+      ~collect_owned:(fun () ->
+        collect_owned_results state @ List.map
+          (fun (ready : async_msg Masc_tui_workspace_result.ready) ->
+            {ready_at_ns=ready.ready_at_ns;message=ready.message})
+          (Masc_tui_workspace_result.take_ready mailbox.workspace_results)) in
     delivery_round := next;
     match ready with
     | None ->
@@ -22327,7 +22314,10 @@ let main
   let http_refresh_inflight = ref false in
   let http_scoped_refresh_inflight = ref false in
   let scoped_refresh_followup = ref No_scoped_followup in
-  let async_messages = Eio.Stream.create 32 in
+  let workspace_results = Masc_tui_workspace_result.create () in
+  Option.iter (fun sw -> Eio.Switch.on_release sw (fun () ->
+    Masc_tui_workspace_result.close workspace_results)) (Eio_context.get_switch_opt ());
+  let async_messages = {notifications=Eio.Stream.create 32;workspace_results} in
   let async_delivery_round = ref Delivery_round.empty in
   let workspace_write_ready action =
     match write_authority_refusal state state.workspace_authority with

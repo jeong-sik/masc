@@ -30,7 +30,7 @@ let test_media_only_autonomous () =
     (Media.append_text ~text:row.text row.media);
   match Media.newest_image row.media with
   | Some (Preview.Output_image { name = "result"; source = Preview.Inline_data src }) ->
-    check string "payload decoded on opening" "image" (Result.get_ok (Preview.decode_payload src))
+    check string "payload decoded on opening" "image" (Result.get_ok (Masc_tui_image_payload.decode src))
   | _ -> fail "voice displaced the image action"
 
 let test_failure_retains_outputs () =

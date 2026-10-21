@@ -10,7 +10,7 @@ let blob mime value =
     rc_kind = Mcp.Resource_blob {base64=value} }
 
 let payload = function
-  | Preview.Output_image {source=Inline_data data;_} -> data
+  | Preview.Output_image {source=Inline_data data;_} -> Masc_tui_image_payload.encoded data
   | Named_path _ | Staged _ | Stored_attachment _
   | Output_image {source=(Inline_svg _ | Inline_mermaid _ | Server_path _ | Remote_uri _);_}
   | Unavailable_image _ | No_image -> fail "expected retained inline bytes"
@@ -26,7 +26,7 @@ let test_wire_conservation () =
     match Images.images ~mime_type:None parts with
     | [2,image] ->
       check string "encoded bytes retained" "QUJDRA==" (payload image);
-      (match Preview.decode_payload (payload image) with
+      (match Masc_tui_image_payload.decode_wire (payload image) with
        | Ok bytes -> check string "original bytes" "ABCD" bytes
        | Error error -> fail error)
     | [] | _ :: _ -> fail "every response image keeps its original part number"
@@ -60,7 +60,7 @@ let test_source_ownership () =
 let test_decode_refusal () =
   match Images.images ~mime_type:None [blob (Some "image/png") "***"] with
   | [_,image] ->
-    (match Preview.decode_payload (payload image) with Error _ -> () | Ok _ -> fail "invalid payload decoded")
+    (match Masc_tui_image_payload.decode_wire (payload image) with Error _ -> () | Ok _ -> fail "invalid payload decoded")
   | [] | _ :: _ -> fail "decoding belongs to acquisition, not metadata selection"
 
 let test_malformed_parts_refused () =

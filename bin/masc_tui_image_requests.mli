@@ -11,3 +11,5 @@ val load :
 (** Fetch the authenticated peer in an Eio fiber. Run retained-payload
     verification, base64 decoding, remote downloads and image conversion on a
     system thread. Returns PNG bytes or the acquisition/decoder refusal. *)
+(* Declared SVG, including encoded and verified retained payloads, uses the
+   offline SVG renderer after decoding. Other image formats use converters. *)

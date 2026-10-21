@@ -3615,7 +3615,7 @@
 (test
  (name test_tui_chat_media)
  (modules test_tui_chat_media)
- (libraries alcotest masc masc_tui_chat_media masc_tui_image_preview masc_tui_markdown
+ (libraries masc_tui_image_payload alcotest masc masc_tui_chat_media masc_tui_image_preview masc_tui_markdown
   masc_tui_keeper_chat_history yojson))
 
 (test
@@ -6360,7 +6360,7 @@
 (test
  (name test_tui_resource_images)
  (modules test_tui_resource_images)
- (libraries alcotest yojson masc_tui_mcp masc_tui_resource_images masc_tui_image_preview))
+ (libraries masc_tui_image_payload alcotest yojson masc_tui_mcp masc_tui_resource_images masc_tui_image_preview))
 
 (test
  (name test_tui_html_svg)
@@ -6397,3 +6397,8 @@
  (modules test_tui_resource_copy)
  (libraries masc_tui_resource_reading masc_tui_scroll alcotest base64 masc masc_tui_link masc_tui_types masc_tui_resource_document
   masc_tui_resource_catalog masc_tui_resources_updates masc_tui_mcp))
+
+(test
+ (name test_tui_image_payload)
+ (modules test_tui_image_payload)
+ (libraries masc_tui_image_payload masc_tui_artifact_html alcotest))

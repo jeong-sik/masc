@@ -11014,7 +11014,7 @@ let listen_newest_media state =
   | Some { name; kind; source } ->
       let bytes_result =
         match source with
-        | `Data payload -> Masc_tui_image_preview.decode_payload payload
+        | `Data payload -> Masc_tui_image_payload.decode_wire payload
         | `Server_path path -> (
             match
               Masc_tui_http.http_get ~host:server_peer_host ~port:state.port

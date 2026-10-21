@@ -50,6 +50,47 @@ let test_follow_output_contract () =
     check bool "ordinary clicks need no destination receipt" false
       (List.mem (`String "destinationUrl") (schema |> member "required" |> to_list))
 
+(* The answer a composition node receives is the one BrowserGoto returns to
+   the model: the landing page receipt wrapped with the browser that served it
+   and what that browser can do. The node's declared output has to accept that
+   whole object, because the navigation has already happened by the time the
+   output is checked. *)
+let test_goto_answer_satisfies_output_contract () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let landing = `Assoc [ "url", `String "https://example.org/landing"; "title", `String "Landing page" ] in
+      let execute = function
+        | Browser_lane.Page_goto _ -> Browser_lane.Answered (`Assoc [ "ok", `Bool true; "data", landing ])
+        | ( Browser_lane.Tabs_list | Browser_lane.Page_read _ | Browser_lane.Page_document _
+          | Browser_lane.Page_downloads _ | Browser_lane.Page_capture _ | Browser_lane.Page_scene _
+          | Browser_lane.Page_interact _ | Browser_lane.Page_elements _ | Browser_lane.Page_act _
+          | Browser_lane.Page_context _ | Browser_lane.Page_instruct _ | Browser_lane.Page_locate _
+          | Browser_lane.Page_extract _ | Browser_lane.Session_open _ | Browser_lane.Session_close
+          | Browser_lane.Session_status ) ->
+          fail "navigation issued a command other than Page_goto" in
+      Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
+      Browser_lane.install_automation_executor (Some execute);
+      Browser_lane.install_server_session_observer Browser_lane.Server_automation
+        (Some (fun () -> Browser_lane.Browser_open));
+      Eio.Switch.on_release sw (fun () ->
+        Browser_lane.install_automation_executor None;
+        Browser_lane.install_server_session_observer Browser_lane.Server_automation None);
+      let args = `Assoc [ "lane", `String "automation"; "tabId", `Int 7; "url", `String "https://example.org/" ] in
+      let result = Masc.Tool_misc_browser_lane.handle_goto ~tool_name:"BrowserGoto"
+        ~start_time:(Tool_timing.start ()) args in
+      check bool "the navigation was answered" false (Tool_result.is_failed result);
+      let id = match Plan.Node_id.make "navigate" with
+        | Ok id -> id | Error Plan.Node_id.Empty -> fail "empty node id" in
+      let node = Plan.node ~id ~tool_name:"BrowserGoto" ~input:(Plan.Json_template.literal args) () in
+      let plan = match Plan.create ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ()) [ node ] with
+        | Ok plan -> plan | Error error -> fail (Plan.error_to_string error) in
+      match Plan.validate_output plan ~run_id:(Plan.Run_id.fresh ()) ~node_id:id (Tool_result.data result) with
+      | Ok _ -> ()
+      | Error _ ->
+        fail ("BrowserGoto's declared output rejects its own answer: "
+          ^ Yojson.Safe.to_string (Tool_result.data result))))
+
 (* Both are held back from Agent Core requests until keeper_tool_search names
    them. Measured 2026-09-18..24: 2 and 14 turns used them, while their 1,980
    and 1,583 byte schemas rode every request. *)
@@ -240,6 +281,7 @@ let test_navigate_then_read observation case () =
 
 let () = run "browser composition" ["native skill",[
   test_case "runtime destination output contract" `Quick test_follow_output_contract;
+  test_case "navigation answer satisfies its output contract" `Quick test_goto_answer_satisfies_output_contract;
   test_case "live follow description is one text" `Quick (test_description_is_one_text follow_skill);
   test_case "navigation description is one text" `Quick (test_description_is_one_text navigate_skill);
   test_case "live follow is deferred" `Quick (test_is_deferred follow_skill);

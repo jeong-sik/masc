@@ -7445,7 +7445,7 @@ id = "navigate"
 tool = "BrowserGoto"
 [compositions.nodes.input]
 kind = "literal"
-value = {tabId=7, url="https://example.org/next"}
+value = {lane="automation", tabId=7, url="https://example.org/next"}
 [[compositions.nodes]]
 id = "read"
 tool = "BrowserRead"
@@ -7588,7 +7588,7 @@ id = "navigate"
 tool = "BrowserGoto"
 [compositions.nodes.input]
 kind = "literal"
-value = {tabId=7, url="https://example.org/next"}
+value = {lane="automation", tabId=7, url="https://example.org/next"}
 [[compositions.nodes]]
 id = "second"
 %s|} name second_node
@@ -9154,7 +9154,7 @@ let probe ?(needs_sandbox = false) tool_name args =
 
 let composable_output_probes =
   [ probe "BrowserRead" (`Assoc ["lane",`String "automation";"tabId",`Int 1])
-  ; probe "BrowserGoto" (`Assoc ["url", `String "https://example.org/probe"])
+  ; probe "BrowserGoto" (`Assoc ["lane",`String "automation";"url", `String "https://example.org/probe"])
   ; probe "BrowserInteract" (`Assoc ["lane",`String "automation";"tabId",`Int 1;
       "action",`String "scroll";"x",`Int 0;"y",`Int 100;
       "expectedUrl",`String "https://example.org/probe"])

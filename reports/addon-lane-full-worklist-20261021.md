@@ -249,3 +249,5 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - [Candle worker 13건의 원본 로그·source receipt](../docs/evidence/2026-10-22-candle-worker/README.md)를 보존했다. 고정 d35d2559 source의 기존 Python suite를 실제 MCP subprocess와 durable state로 실행한 결과다. 이번 문서 후속에서 재실행하지 않았다.
 - incarnation 값 변경과 worker process 재시작은 실제 host-managed Addon Off/On과 다르다. 응답은 scripted이며 일부 persistence/nesting 검사는 direct import와 fault injection을 쓴다. OCaml host·실제 provider·원장 정산·실제 두 UI·운영 설치 성공을 뜻하지 않는다.
 - E01은 기존 package와 host adapter를 유지하며 host 소비자와 원래 obligation/정산을 연결하는 최소 실행 범위를 검토한다. worker-only 성공으로 E01을 완료 표시하거나 E02로 순서를 건너뛰지 않는다.
+
+- E01 host 소비자 최소 검사 [39624635082](https://github.com/jeong-sik/masc/actions/runs/39624635082)는 같은 d35 source의 기존 `test_candle_appraiser_contract,test_candle_appraisal_flow`를 선택했다. 첫 run identity를 확인했으며 결과는 아직 읽지 않았다. actual worker→host Grade 검사와 scripted Addon port→실제 payout worker 정산 검사는 각각의 범위이고, 둘을 실제 host Off/On 정산 완주로 합치지 않는다.

@@ -48,3 +48,16 @@ with the original obligation, actual same-installation Off/On, the new worker
 incarnation and exactly one authoritative Paid result. Credential/provider
 admission and final ledger authority remain in the host. Worker-only success
 cannot substitute for that scenario or for both UI observations.
+
+## Separately requested compiled host consumers
+
+[Run 39624635082](https://github.com/jeong-sik/masc/actions/runs/39624635082)
+selects the same frozen d35 source and the existing
+`test_candle_appraiser_contract,test_candle_appraisal_flow` suites with
+`minimal=true,eio_backend=posix`. `host-check-dispatch.json` preserves the
+accepted request and `host-check-run-identification.json` the initial run
+identity. Its result has not been read at this publication boundary.
+The contract suite joins actual worker stdio/restart with host Grade decoding;
+the flow suite joins the production payout worker and all appraisal stages to
+host settlement with a scripted Addon port. Even their eventual success would
+not prove actual host-managed Addon Off/On followed by real-provider settlement.

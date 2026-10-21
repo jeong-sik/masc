@@ -1465,7 +1465,39 @@ let application_follows_decoded_observations () =
     (Some "Accepted file application · Applied · worker worker-1")
     (application partial_read (configuration {|{"kind":"applied","instance_id":"worker-1"}|}))
 
+let connection_workers_preserve_other_installation_owners () =
+  let snapshot = UI.decode (installation_inspect ~runtime:"live" ()) |> ok in
+  let current : UI.instance = match snapshot.instances with
+    | [item] -> item | _ -> fail "one current worker" in
+  let old = {current with id="old-worker";incarnation="old-incarnation";
+    installation_id=Some "previous-installation";runtime_presence=UI.Retained_binding;
+    phase=UI.Row.Failed "cleanup refused";configuration_revision=Some "old-binding"} in
+  let moved = {current with id="same-installation-old-path";incarnation="moved-incarnation";
+    source_path=Some "/previous/operator-quiz.toml";phase=UI.Row.Detached;
+    runtime_presence=UI.Retained_binding} in
+  let unrelated = {old with id="unrelated-worker";source_path=Some "/other/operator-quiz.toml"} in
+  let manual = {old with id="manual-worker";incarnation="manual-incarnation";
+    installation_id=None;source_path=None} in
+  let snapshot = {snapshot with instances=[old;unrelated;current;manual;moved]} in
+  let groups = UI.connection_workers snapshot current in
+  let ids = List.map (fun (item : UI.instance) -> item.id) in
+  check (list string) "same installation follows identity across file moves"
+    [current.id;moved.id] (ids groups.installation_workers);
+  check (list string) "other installation at the exact source stays separate"
+    [old.id] (ids groups.other_path_owners);
+  check bool "the old owner retains its incarnation, revision and cleanup failure" true
+    (groups.other_path_owners=[old]);
+  let manual_groups = UI.connection_workers snapshot manual in
+  check (list string) "manual attachment keeps only its exact incarnation"
+    [manual.id] (ids manual_groups.installation_workers);
+  check (list string) "missing source never joins all manual attachments" []
+    (ids manual_groups.other_path_owners);
+  let removed = UI.connection_workers {snapshot with instances=[{manual with incarnation="replacement"}]} manual in
+  check (list string) "a replacement incarnation is not the original manual observation" []
+    (ids removed.installation_workers)
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "connection workers preserve separate installation owners" `Quick connection_workers_preserve_other_installation_owners;
   test_case "application reads preserve editor and save diagnostics" `Quick application_reads_preserve_editor;
   test_case "application lines follow decoded observations and complete refreshes" `Quick
     application_follows_decoded_observations;

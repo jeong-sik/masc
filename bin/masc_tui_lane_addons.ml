@@ -47,6 +47,10 @@ type declaration = {
 type configuration = { directory : string; complete : bool; declarations : declaration list }
 type snapshot = { instances : instance list; output : Row.output; complete : bool option;
   configuration : configuration option }
+type connection_workers = {
+  installation_workers : instance list;
+  other_path_owners : instance list;
+}
 type action_request = { instance_id : string; incarnation : string; request_id : string; action : Yojson.Safe.t }
 type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of string
   | Slice of (string * string) list | Evidence of Yojson.Safe.t
@@ -1497,22 +1501,42 @@ let host_request_lines item = match item.host_requests with
          else List.map (fun (request_id, wait) -> "  " ^ request_id ^ ": " ^ host_wait_text wait) hr_waiting)
       @ Option.fold ~none:[] ~some:(fun issue -> ["  stopped: " ^ host_issue_text issue]) hr_issue
 
+let connection_workers (snapshot : snapshot) (item : instance) =
+  match item.installation_id with
+  | None ->
+      {installation_workers=List.filter (fun (worker : instance) ->
+         worker.id=item.id && worker.incarnation=item.incarnation) snapshot.instances;
+       other_path_owners=[]}
+  | Some id ->
+      let installation_workers = List.filter (fun (worker : instance) ->
+        worker.installation_id=Some id) snapshot.instances in
+      let other_path_owners = match item.source_path with
+        | None -> []
+        | Some path -> List.filter (fun (worker : instance) ->
+            match worker.installation_id, worker.source_path with
+            | Some owner, Some candidate -> owner<>id && candidate=path
+            | None, None | None, Some _ | Some _, None -> false) snapshot.instances in
+      {installation_workers;other_path_owners}
+
 let connection_worker_lines (snapshot : snapshot) (item : instance) =
-  let workers = match item.installation_id with
-    | None -> [item]
-    | Some id -> List.filter (fun (worker : instance) ->
-        worker.installation_id = Some id) snapshot.instances in
+  let workers = connection_workers snapshot item in
+  let lines (worker : instance) =
+    ["  " ^ worker.id ^ " · " ^ (match worker.runtime_presence with
+       | Live_entry -> "live" | Retained_binding -> "retained" | Presence_unknown -> "presence unknown")
+       ^ " · " ^ phase_label worker.phase;
+     "    installation " ^ Option.value ~default:"manual attachment" worker.installation_id;
+     "    incarnation " ^ worker.incarnation;
+     "    TOML " ^ Option.value ~default:"manual attachment" worker.source_path;
+     "    installed revision " ^ Option.value ~default:worker.revision worker.configuration_revision;
+     Printf.sprintf "    completed observation sequence %d · retained rows %d"
+       worker.observation_seq worker.rows_count]
+    @ (if worker.observation_seq=0 then ["    no completed observation received"] else []) in
   [""; "Workers with this installation ID · each incarnation keeps its own results"]
-  @ List.concat_map (fun (worker : instance) ->
-      ["  " ^ worker.id ^ " · " ^ (match worker.runtime_presence with
-         | Live_entry -> "live" | Retained_binding -> "retained" | Presence_unknown -> "presence unknown")
-         ^ " · " ^ phase_label worker.phase;
-       "    incarnation " ^ worker.incarnation;
-       "    TOML " ^ Option.value ~default:"manual attachment" worker.source_path;
-       "    installed revision " ^ Option.value ~default:worker.revision worker.configuration_revision;
-       Printf.sprintf "    completed observation sequence %d · retained rows %d"
-         worker.observation_seq worker.rows_count]
-      @ (if worker.observation_seq=0 then ["    no completed observation received"] else [])) workers
+  @ List.concat_map lines workers.installation_workers
+  @ (match workers.other_path_owners with
+     | [] -> []
+     | owners -> [""; "Other installation IDs at this TOML path · separate owners, not the selected installation"]
+         @ List.concat_map lines owners)
 
 (* The Results list takes a third of the row, never less than
    [results_list_min_cells], once the terminal is at least

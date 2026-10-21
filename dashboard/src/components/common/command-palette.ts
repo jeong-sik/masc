@@ -27,6 +27,7 @@ import { shellAuthSummary, boardPosts, fusionRuns } from '../../store'
 import { gateData } from '../gate-signals'
 import { goalTreeData } from '../../goal-tree-state'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
+import { approvalInputText } from '../../lib/keeper-approval-input-text'
 import { surfaceLabel } from '../v2/nav-rail-v2'
 import { V2_PRIMARY_SURFACE_IDS } from '../../config/navigation'
 import { toggleCopilotDock } from '../copilot-dock'
@@ -237,7 +238,7 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
         id: `approval-${item.id}`,
         group: 'Gate',
         kind: 'approval',
-        title: item.input_preview || `${item.tool_name} 승인`,
+        title: approvalInputText(item.input_preview || `${item.tool_name} 승인`),
         sub: `${item.keeper_name} · ${item.tool_name}`,
         glyph: '✓',
         run: () => navigate('approvals'),

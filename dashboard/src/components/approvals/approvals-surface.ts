@@ -33,6 +33,12 @@ import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import { formatDateTimeKo, formatDurationCompound } from '../../lib/format-time'
 import { toolDisplayLabel } from '../../lib/tool-display-label'
 import { approvalOriginSummary, approvalContinuationLabel } from '../../lib/keeper-approval-origin'
+import { approvalInputText } from '../../lib/keeper-approval-input-text'
+import {
+  approvalInputDisclosure,
+  decisionWaitsForFullInput,
+  type ApprovalInputDisclosure,
+} from './approval-input-disclosure'
 import {
   keeperResolvedApprovalDecisionClass,
   keeperResolvedApprovalDecisionTone,
@@ -382,7 +388,7 @@ function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: strin
       ? { label: '입력 참조', value: item.origin.source.sources.map(source => `${source.snapshot_ref}@${source.admitted_revision}`).join(', ') }
       : null,
     { label: '요청시각', value: compactText(item.requested_at) },
-    { label: '입력', value: compactText(item.input_preview) || '입력 미리보기 없음' },
+    { label: '입력', value: compactText(approvalInputText(item.input_preview ?? '')) || '입력 미리보기 없음' },
     { label: 'Auto Judge', value: disposition },
     { label: 'Exact attempt', value: exact },
   ].filter((row): row is { label: string; value: string } => Boolean(row?.value))
@@ -582,6 +588,60 @@ function approvalSummaryBlock(item: KeeperApprovalQueueItem) {
   }
 }
 
+/** The text box has been scrolled to its end, or has nothing below the fold. */
+function scrolledToEnd(box: HTMLElement): boolean {
+  return box.scrollHeight - box.scrollTop - box.clientHeight <= 1
+}
+
+/** The full input, or the plain statement that only a preview exists. The
+ *  card holds Approve until the text has been read to its end: opening the box
+ *  is not enough, because the box scrolls and a tail can sit below the fold.
+ *  The detail panel shows it open and holds nothing. */
+function ApprovalInputFull({
+  disclosure,
+  open,
+  held = false,
+  onOpened,
+  onReadToEnd,
+}: {
+  disclosure: ApprovalInputDisclosure
+  open: boolean
+  held?: boolean
+  onOpened?: () => void
+  onReadToEnd?: () => void
+}) {
+  if (disclosure.kind === 'preview_is_whole') return null
+  if (disclosure.kind === 'full_input_not_sent') {
+    return html`<div class="ap-input-note" data-testid="approval-input-note">
+      입력 원문이 오지 않아 미리보기만 보여요. 뒷부분이 잘렸을 수 있어요.
+    </div>`
+  }
+  return html`<details
+    class="ap-input-full"
+    data-testid="approval-input-full"
+    open=${open}
+    onToggle=${(event: Event) => {
+      const details = event.currentTarget as HTMLDetailsElement
+      // Preact also closes the box when the request changes under it; that
+      // close must not count as reading.
+      if (!details.open) return
+      onOpened?.()
+      const box = details.querySelector<HTMLElement>('.ap-input-pre')
+      if (box && scrolledToEnd(box)) onReadToEnd?.()
+    }}
+  >
+    <summary>입력 원문 전체 (${disclosure.fullText.length}자)${held ? ' · 끝까지 내려야 승인할 수 있어요' : ''}</summary>
+    <pre
+      class="ap-input-pre mono"
+      tabindex="0"
+      aria-label="입력 원문 전체"
+      onScroll=${(event: Event) => {
+        if (scrolledToEnd(event.currentTarget as HTMLElement)) onReadToEnd?.()
+      }}
+    >${disclosure.fullText}</pre>
+  </details>`
+}
+
 function ApprovalCard({
   item,
   selected,
@@ -595,8 +655,20 @@ function ApprovalCard({
   const busy = actingId === item.id
   const anyBusy = Boolean(actingId)
   const title = approvalTitle(item)
+  const inputPreview = approvalInputText(item.input_preview ?? '').trim()
   const rearmExpectation = summaryRearmExpectation(item)
   const phase = approvalPhase(item)
+  // Opening the full input is bound to this exact request: a new input hash is
+  // a new request and starts closed again.
+  const inputKey = `${item.id}:${item.input_hash}`
+  const [openedInputKey, setOpenedInputKey] = useState<string | null>(null)
+  const [readInputKey, setReadInputKey] = useState<string | null>(null)
+  const disclosure = useMemo(
+    () => approvalInputDisclosure({ input: item.input, input_preview: item.input_preview }),
+    [item.input, item.input_preview],
+  )
+  const decisionHeld = decisionWaitsForFullInput(disclosure, readInputKey === inputKey)
+  const heldTitle = '입력 원문 전체를 끝까지 읽은 뒤에 누를 수 있어요'
 
   return html`
     <article
@@ -648,11 +720,21 @@ function ApprovalCard({
             </div>
             <div class="ap-req-meta ap-origin-summary mono" data-testid="approval-origin-summary">${approvalOriginSummary(item.origin)}</div>
             <div class="ap-req-quote">
-              ${item.input_preview?.trim() ? `“${item.input_preview.trim()}”` : '입력 미리보기 없음'}
+              ${inputPreview ? `“${inputPreview}”` : '입력 미리보기 없음'}
             </div>
+            <${ApprovalInputFull}
+              disclosure=${disclosure}
+              open=${openedInputKey === inputKey}
+              held=${decisionHeld}
+              onOpened=${() => setOpenedInputKey(inputKey)}
+              onReadToEnd=${() => setReadInputKey(inputKey)}
+            />
           </div>
         </div>
         <div class="ap-actions">
+          <span class="ap-input-hash mono" title=${item.input_hash} data-testid="approval-input-hash">
+            #${item.input_hash.slice(0, 12)}
+          </span>
           ${rearmExpectation
             ? html`<button
                 type="button"
@@ -666,14 +748,15 @@ function ApprovalCard({
             type="button"
             class="ap-act approve"
             onClick=${() => void respondToKeeperApproval(item.id, 'approve')}
-            disabled=${anyBusy}
+            title=${decisionHeld ? heldTitle : undefined}
+            disabled=${anyBusy || decisionHeld}
           >${busy ? '처리 중…' : '승인'}</button>
           <button
             type="button"
             class="ap-act always"
             onClick=${() => void respondToKeeperApproval(item.id, 'approve', true)}
-            title="승인하고 동일 요청을 자동 승인하는 Always 규칙을 저장합니다"
-            disabled=${anyBusy}
+            title=${decisionHeld ? heldTitle : '승인하고 동일 요청을 자동 승인하는 Always 규칙을 저장합니다'}
+            disabled=${anyBusy || decisionHeld}
           >${busy ? '처리 중…' : '항상 승인'}</button>
           <button
             type="button"
@@ -704,6 +787,7 @@ function ApprovalDetailPanel({
   if (!item) return null
   const rows = approvalDetailRows(item)
   const phase = approvalPhase(item)
+  const disclosure = approvalInputDisclosure(item)
 
   return html`
     <aside
@@ -726,6 +810,7 @@ function ApprovalDetailPanel({
           </div>
         `)}
       </dl>
+      <${ApprovalInputFull} disclosure=${disclosure} open=${true} />
     </aside>
   `
 }

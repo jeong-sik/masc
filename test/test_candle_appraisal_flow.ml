@@ -192,6 +192,8 @@ let test_worker_pays_once_with_isolated_inputs_and_integer_evidence () =
      check (list string) "grade sees no Task, identity, cost or priority" ["goal";"grades"] (keys (A.input (A.Grade goal)));
      check (list string) "relation sees only one title and the Goal"
        ["goal";"task_title"] (keys (A.input (A.Relation first)));
+     check (list string) "each relation retains the original candidate task ID"
+       ["task-a";"task-b";"external"] [first.task_id;second.task_id;third.task_id];
      check (list string) "only completion-window tasks are judged"
        ["Store the ledger";"Test the ledger";"Operator's contribution"]
        [first.task_title;second.task_title;third.task_title];
@@ -211,6 +213,47 @@ let test_worker_pays_once_with_isolated_inputs_and_integer_evidence () =
     (List.map (fun (r : A.task_relation) -> r.trace.run_id) p.relations);
   let decoded = Candle_payment.of_yojson (Candle_payment.to_yojson p) |> ok in
   check bool "ledger decode retains the issued payment and its evidence" true (decoded = p)
+
+let test_equal_task_titles_keep_distinct_retained_appraisals () =
+  with_workspace @@ fun _env config ->
+  let waiting, rows = obligation "same-task-titles" in
+  append config rows;
+  let sources : Candle_candidates.sources = {
+    task_lookups=(fun ~goal_id:_ ids -> Ok (List.map (fun id ->
+      let lookup = match List.assoc id task_rows with
+        | E.Found task -> E.Found {task with title="Same contribution title"}
+        | E.Deleted -> E.Deleted in
+      id, lookup) ids));
+    is_keeper=(fun () -> Ok (fun name -> List.mem name ["keeper-a";"keeper-b"]))} in
+  ignore (Candle_candidates.drain_with ~sources ~now ~base_path:config.base_path |> ok);
+  let calls = ref [] and relations = ref [] in
+  let appraise ~identity request =
+    (match request with
+     | A.Relation relation ->
+       let intent = Candle_appraisal_intent.make ~identity ~prompt:"Judge only the captured contribution." request |> ok in
+       let replay = Candle_appraisal_intent.make ~identity ~prompt:"Judge only the captured contribution." request |> ok in
+       check string "reconstructing an original request retains its ID"
+         (Candle_appraisal_intent.request_id intent) (Candle_appraisal_intent.request_id replay);
+       let snapshot = Candle_appraisal_intent.to_worker_request intent in
+       check string "the worker retains the original task" relation.task_id
+         Yojson.Safe.Util.(to_string (member "task_id" snapshot));
+       check bool "only the original Goal/title reach model input" true
+         Yojson.Safe.(equal Util.(member "input" snapshot) (A.input request));
+       relations := !relations @ [relation.task_id, intent]
+     | A.Grade _ | A.Weights _ -> ());
+    make_runner calls ~identity request in
+  (match drain config appraise with
+   | [Candle_appraise.Settled goal_id] -> check string "original payout settled" waiting.goal_id goal_id
+   | _ -> fail "the equal-title payout did not settle");
+  check (list string) "each original candidate is retained" ["task-a";"task-b";"external"]
+    (List.map fst !relations);
+  let ids = List.map (fun (_, intent) -> Candle_appraisal_intent.request_id intent) !relations in
+  check int "equal titles never reuse another task's model request" 3
+    (List.length (List.sort_uniq String.compare ids));
+  (match List.map (fun (_, intent) -> A.input (Candle_appraisal_intent.request intent)) !relations with
+   | [first;second;third] -> check bool "audit IDs add no model evidence" true (first=second && second=third)
+   | _ -> fail "three relation inputs were expected");
+  ignore (one_payment config waiting.goal_id)
 
 let test_allowed_large_weights_settle_with_exact_money_and_evidence () =
   let scenario ~goal_id ~amount ~weight_max ~weight expected =
@@ -1036,6 +1079,7 @@ let () =
       ;test_case "finite overflow retries after decay" `Quick test_finite_overflow_retries_after_decay
       ;test_case "clock catch-up retries but malformed history rejects" `Quick test_clock_reversal_retries_but_malformed_history_rejects
       ;test_case "worker pays once with isolated judgments and arithmetic" `Quick test_worker_pays_once_with_isolated_inputs_and_integer_evidence
+      ;test_case "equal task titles keep distinct retained appraisals" `Quick test_equal_task_titles_keep_distinct_retained_appraisals
       ;test_case "allowed large weights preserve exact money and Paid evidence" `Quick test_allowed_large_weights_settle_with_exact_money_and_evidence
       ;test_case "invalid weights wait for an event, not a pulse" `Quick test_invalid_weights_wait_for_an_event_not_a_pulse
       ;test_case "provider refusal waits for an event" `Quick test_refused_transport_waits_for_an_event

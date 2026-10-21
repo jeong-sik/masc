@@ -25,7 +25,7 @@ let relations ~appraise ~identity goal tasks ids =
     | task_id :: rest ->
       (match List.assoc_opt task_id tasks with
        | Some (E.Found task) ->
-         let* answer = call ~appraise ~identity (A.Relation {goal;task_title=task.title}) in
+         let* answer = call ~appraise ~identity (A.Relation {goal;task_id;task_title=task.title}) in
          (match answer.decision with
           | A.Relation_decided relation -> loop ({A.task_id;relation;trace=answer.trace} :: accumulated) rest
           | A.Grade_decided _ | A.Weights_decided _ -> Error (A.Invalid_response "appraiser returned the wrong stage"))

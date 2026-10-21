@@ -273,8 +273,10 @@ val model_visible_schemas : unit -> Masc_domain.tool_schema list
     schema. *)
 val keeper_model_names : t -> string list
 
-(** The [defer_loading] declared for this descriptor, read from the tool file
-    named for its internal name whatever name the model knows it by. *)
+(** Add-on exports are deferrable through the turn's retained export authority.
+    Static descriptors read [defer_loading] from the tool file named for their
+    internal name, whatever name the model knows them by. Runtimes with a fixed
+    tool set still receive the complete schema surface. *)
 val declared_loading : t -> Tool_definition_toml.loading
 
 (** [declared_loading] of the descriptor the model knows as [name]; a name no

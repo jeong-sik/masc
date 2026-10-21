@@ -1065,7 +1065,7 @@
  ;; test_tool_blob_store clears the durable tool-call index between cases; the
  ;; index library is unwrapped, so its module is referenced bare.
  masc.keeper_tool_call_index
- masc.agent_core))
+ masc.agent_core mcp_protocol))
 
 (test
  (name test_voice_session_manager)

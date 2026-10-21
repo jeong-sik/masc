@@ -94,7 +94,7 @@ A의 이번 Addon 변경 닫기는 대상 범위가 다르며, 같은 수정이�
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | D01 | Addon별 모델 route와 기능 활성화의 독립 선택 검증 확장 | Browser broker 있음 | LLM 없는 동작은 독립 실행되고, 설치/출력별 선택 모델이 실제 호출에 반영 |
-| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | 기존 grant 재사용·완전 domain decode·단계별 ID·불확실 결과 계약 source 검토 PASS. Browser top d35d2559에 Candle package/host 적용 소스 존재; 실제 provider·전체 통합 검증 별도 | `Consumer_request_schema`의 권한·package baseline·요청 digest를 재사용; Grade enum·keeper 집합·weight 상한은 Candle의 완전한 domain decode로 검증 |
+| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | [#44768](https://github.com/jeong-sik/masc/pull/44768)·[#44769](https://github.com/jeong-sik/masc/pull/44769)에 원래 요청 identity·grant·완전 domain decode·terminal unknown 처리 source 구현. 독립 source/response 검토 PASS; OCaml 실행 검사는 아직 미완료 | `Consumer_request_schema` 권한·package baseline·요청 digest 재사용; Grade enum·keeper 집합·weight 상한은 Candle 완전 domain decode로 검증 |
 | D03 | 모델 호출 전 요청 보존 및 원래 identity 결속 | 기반 있음 | request·stage·input·schema·route·trace를 보존한 뒤 한 번 dispatch |
 | D04 | 오류·거절·불확실 결과의 typed 처리 일관화 | 도메인별 차이 있음 | transport 불가/잘못된 출력/실행 거절/효과 불확실의 재시도 의미를 유지 |
 | D05 | credential·provider admission·동시 실행 권한을 host에 유지 | Browser 검증 있음 | worker/child에 비밀 유출 없음; 실제 provider별 queue·취소·동시성 동작 확인 |
@@ -110,7 +110,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 고정d35 worker13+compiled contract2/appraisal24 PASS 유지. 실제 Docker3개·같은 named volume에서 원래 pending/answered/unknown 보존·변경 거절·정리 실측 및 독립 감사 PASS. 실제 host-managed Off/On·provider·원래 obligation 정산·두 UI는 미검증; 새 Browser head로 증거 자동 이월 없음 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
+| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | worker #44749·host wake #44750·identity #44768·production adapter #44769: export/공통 Exact host에서 원래 설치 결속·unknown 재실행 방지를 구현. 고정 d35의 worker 13건·compiled contract 2건·appraisal 24건 PASS와 실제 Docker 3개·동일 named volume의 원래 pending/answered/unknown 보존·변경 거절·정리 실측 및 독립 감사 증거를 보존. 현재 head의 실행 증거로 자동 이월하지 않으며 실제 host-managed Off/On·provider·원래 obligation 정산·두 UI는 미검증 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
 | E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 설계 필요 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |

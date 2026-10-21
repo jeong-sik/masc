@@ -75,6 +75,10 @@ val load_exact_request : t -> declaration_id:string -> request_id:string ->
 (** A package's exact-output request and its attempts, keyed by the
     declaration id so a restarted worker finds what the host retained. Same
     durability and read verification as action receipts. *)
+val save_tool_request_owner : t -> scope:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
+val load_tool_request_owner : t -> scope:string -> request_id:string -> (Yojson.Safe.t option, string) result
+(** Host consumer's original request destination. Uses the same verified
+    publication/read boundary as Exact records, in a separate namespace. *)
 val save_sampling_request : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
 val save_sampling_outcome : t -> instance_id:string -> request_id:string ->

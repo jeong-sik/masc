@@ -2744,6 +2744,51 @@ let gc_done_task id =
    the archive, so a crash right after it loses whatever the archive does not
    hold yet. [on_task_mutation_fn] runs when the backlog commit settles: read
    the archive there. *)
+(* The restored task is in the backlog before the archive copy is dropped. An
+   archive that stops being readable in between makes the pass fail, leaves the
+   archive as it was, and the next pass drops the copy without holding the task
+   twice. *)
+let test_gc_stops_when_the_archive_cannot_be_read_to_drop_a_restored_task () =
+  with_test_env (fun config ->
+    let orphan =
+      gc_make_task
+        ~id:"task-905"
+        ~created_at:gc_ancient_ts
+        ~status:
+          (Masc_domain.AwaitingVerification
+             { assignee = "claude"
+             ; started_at = gc_ancient_ts
+             ; submitted_at = gc_ancient_ts
+             ; verification_id = "verif-905"
+             })
+    in
+    append_archive config [ orphan ];
+    let path = Workspace_utils_paths_backend.archive_path config in
+    let archive_before = Fs_compat.load_file path in
+    let broken = "this is not json" in
+    let previous = Atomic.get Workspace_hooks.on_task_mutation_fn in
+    Atomic.set Workspace_hooks.on_task_mutation_fn (fun () ->
+      Fs_compat.save_file path broken);
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.on_task_mutation_fn previous)
+      (fun () ->
+        match Workspace.gc config ~days:1 () with
+        | (_ : string) -> Alcotest.fail "the pass finished although the archive could not be read"
+        | exception Workspace.Task_archive_failed detail ->
+          Alcotest.(check bool) "the error names the archive file" true
+            (str_contains detail "tasks-archive.json"));
+    Alcotest.(check string) "the unreadable archive is left as it was" broken
+      (Fs_compat.load_file path);
+    Alcotest.(check bool) "the restored task is in the backlog" true
+      (gc_backlog_has config "task-905");
+    Fs_compat.save_file path archive_before;
+    let _ = Workspace.gc config ~days:1 () in
+    Alcotest.(check bool) "the next pass drops the archive copy" false
+      (List.mem 905 (Workspace.read_archive_task_ids config));
+    Alcotest.(check bool) "the task stays in the backlog" true
+      (gc_backlog_has config "task-905"))
+;;
+
 let test_gc_archives_before_it_commits_the_backlog () =
   with_test_env (fun config ->
     write_tasks config [ gc_done_task "task-920"; gc_done_task "task-921" ];
@@ -2910,6 +2955,32 @@ let test_append_archive_tasks_refuses_a_file_that_is_not_an_archive () =
           (label ^ ": the error names the archive file")
           true
           (str_contains detail "tasks-archive.json");
+        Alcotest.(check string)
+          (label ^ ": the file is untouched")
+          content
+          (Fs_compat.load_file path)))
+    [ "not json", "this is not json"
+    ; "blank", ""
+    ; "no tasks list", {|{"last_updated":"2026-01-01T00:00:00Z"}|}
+    ; "tasks is not a list", {|{"tasks":"task-1"}|}
+    ]
+;;
+
+(* The same files stay as they were when rows are dropped: rewriting the
+   archive from what could not be read would erase every row it holds. *)
+let test_drop_archive_tasks_refuses_a_file_that_is_not_an_archive () =
+  List.iter
+    (fun (label, content) ->
+      with_test_env (fun config ->
+        let path = archive_file config in
+        Fs_compat.save_file path content;
+        (match Workspace_task_id.drop_archive_tasks config ~ids:[ "task-930" ] with
+         | Ok () -> Alcotest.fail (label ^ ": the drop reported success on an archive it cannot read")
+         | Error detail ->
+           Alcotest.(check bool)
+             (label ^ ": the error names the archive file")
+             true
+             (str_contains detail "tasks-archive.json"));
         Alcotest.(check string)
           (label ^ ": the file is untouched")
           content
@@ -3834,6 +3905,10 @@ let () =
             `Quick
             test_gc_stops_before_the_backlog_when_the_archive_is_unreadable
         ; Alcotest.test_case
+            "stops when the archive cannot be read to drop a restored task"
+            `Quick
+            test_gc_stops_when_the_archive_cannot_be_read_to_drop_a_restored_task
+        ; Alcotest.test_case
             "archives over a same-id row that does not decode"
             `Quick
             test_gc_archives_over_a_same_id_row_that_does_not_decode
@@ -3869,6 +3944,8 @@ let () =
             "append refuses a file that is not an archive"
             `Quick
             test_append_archive_tasks_refuses_a_file_that_is_not_an_archive
+        ; Alcotest.test_case "drop refuses a file that is not an archive" `Quick
+            test_drop_archive_tasks_refuses_a_file_that_is_not_an_archive
         ; Alcotest.test_case
             "append keeps the rows it does not replace"
             `Quick

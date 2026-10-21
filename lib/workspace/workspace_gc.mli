@@ -62,8 +62,10 @@ exception Task_archive_failed of string
     under the shared backlog lock.
 
     Raises {!Task_archive_failed} when the archive cannot take the tasks to
-    archive, before the backlog is touched. Raises [Backlog_read_failed] when
-    the backlog cannot be read. *)
+    archive, before the backlog is touched, or cannot be read or written to
+    drop the restored tasks, after the backlog commit and the restore events
+    (the next pass drops them).
+    Raises [Backlog_read_failed] when the backlog cannot be read. *)
 val archive_terminal_tasks :
   Workspace_utils_backend_setup.config -> days:int -> unit -> Masc_domain.task list * string
 
@@ -99,7 +101,9 @@ val archive_terminal_tasks :
     Nested archive locks are always acquired after the backlog lock.
 
     Raises {!Task_archive_failed} when the archive cannot take the tasks to
-    archive, before the backlog is touched. Raises [Backlog_read_failed] when
-    the backlog cannot be read. *)
+    archive, before the backlog is touched, or cannot be read or written to
+    drop the restored tasks, after the backlog commit and the restore events
+    (the next pass drops them).
+    Raises [Backlog_read_failed] when the backlog cannot be read. *)
 val gc :
   Workspace_utils_backend_setup.config -> days:int -> unit -> string

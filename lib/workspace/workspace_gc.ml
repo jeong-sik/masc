@@ -79,7 +79,7 @@ let archive_terminal_tasks config ~days () =
   in
   let cutoff_iso = Masc_domain.iso8601_of_unix_seconds cutoff_time in
 
-  let live_tasks_after_gc, archived_tasks, restored =
+  let live_tasks_after_gc, archived_tasks, restored, archive_drop =
     let lock_path = backlog_lock_path config in
     with_file_lock config lock_path (fun () ->
       (* Keep the archive snapshot and its cleanup on the same backlog
@@ -153,8 +153,8 @@ let archive_terminal_tasks config ~days () =
           (fun (t : task) -> if List.mem t.id archived_ids then None else Some t.id)
           orphaned
       in
-      if stale_orphan_ids <> [] then drop_archive_tasks config ~ids:stale_orphan_ids;
-      live_tasks_after_gc, archived_tasks, restored)
+      let archive_drop = drop_archive_tasks config ~ids:stale_orphan_ids in
+      live_tasks_after_gc, archived_tasks, restored, archive_drop)
   in
   let stale_count = List.length archived_tasks in
   let restore_count = List.length restored in
@@ -176,6 +176,16 @@ let archive_terminal_tasks config ~days () =
       ~tags:[ "gc"; "self_heal"; "rfc-0220" ]
       ()
   ) restored;
+  (* The backlog already holds the restored tasks, so their events are written
+     first. A drop that failed then stops the pass: the archive copies stay and
+     the next pass drops them. *)
+  Result.iter_error
+    (fun detail ->
+       raise
+         (Task_archive_failed
+            (detail
+             ^ "; the restored tasks are already in the backlog and the next pass drops their archive copies")))
+    archive_drop;
   (if stale_count > 0 then
      task_results :=
        Printf.sprintf "Archived %d terminal task(s) (older than %d days)" stale_count days

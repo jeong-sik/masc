@@ -5225,7 +5225,7 @@ let launch_lane_addons ?target state ~mailbox request =
     | Addons.Inspect | Attach _ | Observe _ | Detach _ | Slice _ | Evidence _ | Act _
     | Action_status _ -> view.presentation in
   let application_reading = match lane_addons_request_failure_kind request with
-    | `Request -> Masc_tui_lane_application.empty
+    | `Request -> Masc_tui_lane_application.suspend view.application_reading
     | `Inventory | `Detail -> view.application_reading in
   let initial_detail = match target with
     | Addons.Read_detail (id, incarnation) -> Some (id, incarnation)

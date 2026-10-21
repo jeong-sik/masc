@@ -60,8 +60,9 @@ Keeper 간 돈·아이템 선물, 공급량·잔액·Items·초상화 조회.
 
 **운영 기록에서 관측됨:** Paid 1건, Granted 28건, 무료 Purchased/Equipped 각 1건,
 half_life 168시간의 설정과 정책 행. 이 기록은 과거 사건이며 현 서버에서의 새 거래 성공
-증거가 아니다. 현재 지연 감액률은 0이다. 선물·유료 구매·supply_scaled는 이번 운영
-읽기에서 실행 증거가 확인되지 않았다.
+증거가 아니다. 관측 파일의 지연 감액률은 0이다. 파일은 runtime-root 아래에서 읽었으며,
+별도 `MASC_CONFIG_DIR` override와 서버 실효 설정 API는 미검증이다.
+선물·유료 구매·supply_scaled는 이번 운영 읽기에서 실행 증거가 확인되지 않았다.
 
 **부족함:** 지급 대기·최근 거절·거래 내역 전용 화면/API, 부분 평가 resume, 채택된
 사람 평가 기준·공정성 합격선, reader/writer 버전 혼용 방어. 초기 복구 실패 시 의무
@@ -151,7 +152,7 @@ Candle 전용 정책 편집 화면, 환불·재판매·미귀속 판정 재개. 
 |---|---|---|---|
 | CND-ECO-01 | 총액은 운영 grade 금액표에서만 나온다. 배분 중간 합·곱·나눗셈은 Zarith로 정확하게 계산한다 | 구현 | S01/S05, T02/T03 |
 | CND-ECO-02 | largest_remainder/down, 이름 순 tie-break, 감액 down/up을 명시하고 Paid에 기록한다. down의 미배분액은 미발행으로 분리한다 | 구현 | S05, T02/T03 |
-| CND-ECO-03 | 기한은 YYYY-MM-DD 달력 날짜의 UTC 23:59:59로 해석한다. 사람이 확인을 늦춘 시간을 감액에 포함하지 않는다 | 구현. 현 운영 rate=0은 실제 감액 검증 아님 | S05/S08, T01/T02 |
+| CND-ECO-03 | 기한은 YYYY-MM-DD 달력 날짜의 UTC 23:59:59로 해석한다. 사람이 확인을 늦춘 시간을 감액에 포함하지 않는다 | 구현. 관측 파일 rate=0은 실제 감액 검증 아님 | S05/S08, T01/T02 |
 | CND-ECO-04 | 초과 완전 시간과 천분율 rate/floor로 선형 감액한다. 기한 없음은 감액0, invalid due는 임의 기본 기한으로 바꾸지 않는다 | 구현. 기한 변경으로 감액을 피하는 문제는 7절 정책 | S05/S08, T02/T03 |
 | CND-ECO-05 | 명시적 HalfLifeSet 경계별로 감쇠한다. 동일 정책·조회·장착·다른 지갑 사건으로 자기 감쇠 내림 구간을 임의 분할하지 않는다 | 구현 | S04–S06, T02/T04 |
 | CND-ECO-06 | 정수 Q128·whole-second 산술과 정의된 오차를 따른다. 정확한 whole half-life, 경계·큰 금액·시간 역행을 검사한다 | 구현. 실수 지수 floor와 모든 입력의 완전 일치를 약속하지 않음 | S05, 산술 계약/T02 |
@@ -360,7 +361,7 @@ Owed가 생겼다면 뒤의 Goal phase 저장 실패·reopen/drop과 별개로 �
 | ACC-06 판정 격리 | Grade/Relation/Weights 입력 제한·추가 recipient·미설정 grade·가중치 오류 거절 | T03. 실모델 주입 저항·공정성은 ACC-07 |
 | ACC-07 모델 품질 | 운영 등급/slot/prompt별 사람 label·채택된 반복/변형/주입/관계/기여도 기준과 실패 전수 보존 | H03은 부분 자료. 기준·사람 보정 미완료 |
 | ACC-08 부분 실패 | Relation/Weights 실패 후 동일 의무 유지. 현 구현은 Grade 재호출을 확인; 단계 재개를 채택하면 무효화 포함 별도 검증 | T03. 부분 resume 미구현 |
-| ACC-09 배분·기한 | remainder/tie/down/up·due 없음/잘못됨·UTC 날짜 경계·확인 지연 배제·wallet overflow | T02/T03. 현 운영 감액률0, 실제 감액 사건 미관측 |
+| ACC-09 배분·기한 | remainder/tie/down/up·due 없음/잘못됨·UTC 날짜 경계·확인 지연 배제·wallet overflow | T02/T03. 관측 파일 감액률0, 실제 감액 사건 미관측 |
 | ACC-10 감쇠·정책 | Off→Hours→다른 Hours, 동일 정책 반복·조회·장착·다른 지갑 사건에도 정의된 금액/소각 유지 | T02/T04. L은168 설정/정책 행만 확인 |
 | ACC-11 구매 경합 | 두 구매·가격 상승·상한·Unpriced·무료 중복·잔액 부족에서 원자 차감/소유, 실패 무차감 | T04. L 무료1건 외 현재 실행 미검증 |
 | ACC-12 착용·이미지 | 구매→equip→동일 선택→default→재시작, PNG ETag/장비 mismatch, TUI 장비 관측·캐시 확인 | T04/T05/H02. 현재 실제 Dashboard/remote TUI 미실측 |

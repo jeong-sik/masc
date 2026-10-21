@@ -212,15 +212,21 @@ let transcript_quarantine_reason_of_string = function
 type host_turn_stop =
   | Host_graceful_shutdown
   | Runtime_reported_interrupt
+  | Repeated_tool_call
+  | Repeated_assistant_text
 
 let host_turn_stop_to_string = function
   | Host_graceful_shutdown -> "host_graceful_shutdown"
   | Runtime_reported_interrupt -> "runtime_reported_interrupt"
+  | Repeated_tool_call -> "repeated_tool_call"
+  | Repeated_assistant_text -> "repeated_assistant_text"
 ;;
 
 let host_turn_stop_of_string = function
   | "host_graceful_shutdown" -> Some Host_graceful_shutdown
   | "runtime_reported_interrupt" -> Some Runtime_reported_interrupt
+  | "repeated_tool_call" -> Some Repeated_tool_call
+  | "repeated_assistant_text" -> Some Repeated_assistant_text
   | _ -> None
 ;;
 

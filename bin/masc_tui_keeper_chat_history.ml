@@ -178,7 +178,9 @@ let rec interruption_cause_of_internal_error
     (match stop with
      | Keeper_internal_error.Host_graceful_shutdown -> Some Host_shutdown
      | Keeper_internal_error.Runtime_reported_interrupt ->
-       Some Runtime_turn_interrupted)
+       Some Runtime_turn_interrupted
+     | Keeper_internal_error.Repeated_tool_call
+     | Keeper_internal_error.Repeated_assistant_text -> None)
   | Keeper_internal_error.Runtime_connection_closed _ ->
     Some Provider_connection_closed
   | Keeper_internal_error.Provider_attempt_effect_fenced { cause; _ }

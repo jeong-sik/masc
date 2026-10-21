@@ -1602,7 +1602,11 @@ let masc_observation_sentence masc =
           | Keeper_internal_error.Host_graceful_shutdown ->
             "was running this turn when MASC shut down"
           | Keeper_internal_error.Runtime_reported_interrupt ->
-            "reported this turn as interrupted")
+            "reported this turn as interrupted"
+          | Keeper_internal_error.Repeated_tool_call ->
+            "stopped this invocation after repeated tool calls without progress; completed effects were not replayed"
+          | Keeper_internal_error.Repeated_assistant_text ->
+            "stopped this invocation after repeated assistant text without progress; completed effects were not replayed")
      | Keeper_internal_error.Runtime_connection_closed
          { runtime_id; detail; turn_accepted } ->
        Printf.sprintf

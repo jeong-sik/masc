@@ -647,10 +647,16 @@ and timed out before observation. The [fixture repair](https://github.com/jeong-
 declares the existing closed action/context contract and reports typed lifecycle
 failures immediately; it does not change product validation or timeout values.
 The focused retry [39532506931](https://github.com/jeong-sik/masc/actions/runs/39532506931)
-selects only `test_lane_addon_native_runtime` at composition
+passed all five cases of `test_lane_addon_native_runtime` at composition
 `cfcc25688c121f8e92cacb164d5740d6dc842dcf` (reviewed fixture source
 `9304ac5f09b03c9103bd200ea7e0789ed46e3bef` plus those two runner paths).
-Execution after that repair is still unverified.
+The executed log confirms native action once-only behavior, original process
+settlement before release, retained recovery, fresh configured incarnation and
+installation-slot reuse, including all three interrupted-slot scenarios. The
+browser case also passed its environment, middleware, ingress, original-identity,
+cancellation and cleanup assertions. The original failed runs remain above;
+this focused result does not establish full regression success. Later changes
+only update evidence documentation, with fixture and product source unchanged.
 
 Current-source Chrome [39531126420](https://github.com/jeong-sik/masc/actions/runs/39531126420)
 passed 43/43 steps in each private and persistent mode. Each mode recorded five

@@ -43,11 +43,16 @@ let entity = function
       ~required:["kind";"id"] ~optional:[] json in
     let* kind=nonblank (List.assoc "kind" fields) in
     let* id=nonblank (List.assoc "id" fields) in Ok (Some (kind,id))
-let history ~task_id json =
+module Observation_set = Set.Make (struct
+  type t = Tui_decode.task_history_origin
+  let compare = Stdlib.compare
+end)
+type observation_index = Observation_set.t
+let decode_history ~task_id json =
   let* () = validate json in
   let* rows = match json with `List rows -> Ok rows | _ -> Error "Task history is not a list" in
-  let* reversed=List.fold_left (fun prior row ->
-    let* acc=prior in
+  let* reversed,observations=List.fold_left (fun prior row ->
+    let* acc,observations=prior in
     let* envelope=Agent_core.Execution_json.object_fields ~context:"Task physical observation"
       ~required:["source";"file";"offset";"event"] ~optional:[] row in
     let* source=source (List.assoc "source" envelope) in
@@ -94,10 +99,12 @@ let history ~task_id json =
           th_actor=Option.map (fun (_,id) -> id) actor;
           th_from_status=string "from_status";th_to_status=string "to_status";
           th_note=Some (Yojson.Safe.pretty_to_string event.payload)} in
-    if List.exists (fun (prior:Tui_decode.task_history_event) -> prior.th_origin=Some origin) acc
-    then Error "Task history repeated one physical observation" else Ok (event::acc)
-  ) (Ok []) rows in
-  Ok (List.rev reversed)
+    if Observation_set.mem origin observations
+    then Error "Task history repeated one physical observation"
+    else Ok (event::acc,Observation_set.add origin observations)
+  ) (Ok ([],Observation_set.empty)) rows in
+  Ok (List.rev reversed,observations)
+let history ~task_id json = Result.map fst (decode_history ~task_id json)
 
 let history_verification_id row =
   let* envelope=Agent_core.Execution_json.object_fields ~context:"Task verification observation"
@@ -124,6 +131,7 @@ type history =
   ; history_events : Tui_decode.task_history_event list
   ; history_records : Yojson.Safe.t list
   ; history_verifications : string list
+  ; history_observations : observation_index
   ; history_next_cursor : string option
   ; history_cursors : string list }
 type history_request =
@@ -168,7 +176,7 @@ let history_page ~request json =
     | Some prefix when prefix.history_sources<>sources -> Error "Task history source coverage changed"
     | Some _ | None -> Ok () in
   let raw_events=List.assoc "events" fields in
-  let* events=history ~task_id:id raw_events in
+  let* events,observations=decode_history ~task_id:id raw_events in
   let prefix=match request.hr_prefix with None -> [] | Some prefix -> prefix.history_verifications in
   let verification_seen=List.fold_left (fun seen id -> Verification_ids.add id seen) Verification_ids.empty prefix in
   let* history_records=match raw_events with
@@ -189,14 +197,15 @@ let history_page ~request json =
     | Some origin when List.assoc_opt origin.tho_source sources=Some Source_observed -> Ok ()
     | Some _ | None -> Error "Task observation came from an unobserved source") (Ok ()) events in
   let* ()=if List.length events<=request.hr_limit then Ok () else Error "Task history page exceeds its requested demand" in
-  let* events=match request.hr_prefix with
-    | None -> Ok events
+  let* events,observations=match request.hr_prefix with
+    | None -> Ok (events,observations)
     | Some prefix ->
-      if List.exists (fun (event:Tui_decode.task_history_event) ->
-        List.exists (fun (prior:Tui_decode.task_history_event) -> prior.th_origin=event.th_origin) prefix.history_events) events
+      if not (Observation_set.disjoint prefix.history_observations observations)
       then Error "Task continuation repeated an original physical observation"
-      else Ok (prefix.history_events @ events) in
-  Ok {history_task_id=id;history_sources=sources;history_events=events;history_records;history_verifications;history_next_cursor=next;history_cursors=seen}
+      else Ok (prefix.history_events @ events,
+        Observation_set.union prefix.history_observations observations) in
+  Ok {history_task_id=id;history_sources=sources;history_events=events;
+    history_observations=observations;history_records;history_verifications;history_next_cursor=next;history_cursors=seen}
 
 
 type deletion_cleanup = Cleanup_required | Cleanup_verified

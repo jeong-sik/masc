@@ -14,12 +14,16 @@ val history : task_id:string -> Yojson.Safe.t -> (Tui_decode.task_history_event 
     their declared source codec. All present original identities must agree;
     conflicting nested identities and unknown sources are rejected. *)
 type history_source_state = Source_observed | Source_not_created
+type observation_index
+(** Immutable membership of the exact source/file/byte-offset observations in
+    one validated prefix. It grants no source access or continuation authority. *)
 type history = private
   { history_task_id : string
   ; history_sources : (Tui_decode.task_history_source * history_source_state) list
   ; history_events : Tui_decode.task_history_event list
   ; history_records : Yojson.Safe.t list
   ; history_verifications : string list
+  ; history_observations : observation_index
   ; history_next_cursor : string option
   ; history_cursors : string list }
 type history_request = private
@@ -40,7 +44,10 @@ val history_page : request:history_request -> Yojson.Safe.t -> (history, string)
     the validated physical observation, never from its transport envelope.
     Original records remain available for explicit full evidence reading;
     display summaries do not erase verdict reasons or authority metadata.
-    Parsing/concatenation belongs on the CPU path. *)
+    An immutable physical-observation index rejects repeated rows within and
+    across pages without scanning accumulated events for each incoming row.
+    Event order and distinct sources remain unchanged.
+    Parsing/indexing/concatenation belongs on the CPU path. *)
 
 type deletion_cleanup = Cleanup_required | Cleanup_verified
 type deletion_observation = {

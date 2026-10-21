@@ -9,6 +9,19 @@ type task_cancel_outcome =
   | Task_cancel_refused of string
   | Task_cancel_unconfirmed of string
 
+type ask_followup_read = private {
+  afr_request : Snapshot_read.request;
+  afr_submission : ask_submission;
+  afr_origin : Masc_tui_observation_origin.t;
+  afr_admission_started_ns : int64;
+}
+val capture_ask_followup_read :
+  instance:Masc_tui_observation_origin.instance -> request:Snapshot_read.request ->
+  submission:ask_submission -> expected_workspace:Masc.Tui_decode.server_identity ->
+  admission_started_ns:int64 -> ask_followup_read
+(** Capture original immutable provenance before preparing/logging/dispatching
+    the read. UI and late cleanup consume this capsule, not replacement state. *)
+
 type approval_observation = {
   ao_ticket: Masc_tui_operator_projection.Listing_order.ticket;
   ao_result: (approval_snapshot, string) result;
@@ -265,9 +278,8 @@ type async_msg =
   | Ask_answer_receipt_ready of ask_submission
       (** The original submission owns the published receipt; this message only
           asks the loop to observe it. *)
-  | Ask_followup_observed of Snapshot_read.request * ask_submission *
-      Masc.Tui_decode_asks.ask_followup_event * int64
-  | Ask_followup_finished of Snapshot_read.request * ask_submission * Masc_tui_ask_projection.followup_result
+  | Ask_followup_observed of ask_followup_read * Masc.Tui_decode_asks.ask_followup_event * int64
+  | Ask_followup_finished of ask_followup_read * Masc_tui_ask_projection.followup_result
   (** A workspace-bound roster can settle before unrelated readers. *)
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   | Http_dataset_loaded of early_http_dataset

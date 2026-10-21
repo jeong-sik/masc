@@ -14135,7 +14135,8 @@ type ask_followup_trace =
   | Followup_job_event of Masc_tui_workspace_job.event
   | Followup_ui_settled of Ask.followup_result
 
-let log_ask_followup request submission ~sources event =
+let log_ask_followup read ~sources event =
+  let request=read.afr_request and submission=read.afr_submission in
   let phase,source,received_ns,source_applied,completion=match event with
     | Followup_read_started -> "started",None,None,None,None
     | Followup_worker_entered -> "worker_entered",None,None,None,None
@@ -14161,6 +14162,8 @@ let log_ask_followup request submission ~sources event =
   Log.Transport.info "tui_ask_followup=%s" (Yojson.Safe.to_string (`Assoc [
     "asker", Masc_tui_ask_projection.asker_to_json submission.as_asker;"ask_id", `String submission.as_ask_id;
     "request", `Int (Snapshot_read.request_id request);
+    "origin",Masc_tui_observation_origin.to_json read.afr_origin;
+    "read_admission_started_ns",`Intlit (Int64.to_string read.afr_admission_started_ns);
     "submission_started_ns",`Intlit (Int64.to_string submission.as_started_ns);
     "question_source_turn_ref", (match submission.as_source_turn_ref with
       | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference);
@@ -14178,9 +14181,12 @@ let log_ask_followup request submission ~sources event =
    authority withdraws them; [resume_reads_after_authority_change] sends
    them again from this same list. *)
 let launch_ask_followup_load state ~mailbox =
-  if state.view = Approvals && server_authority_ready state then
+  if state.view = Approvals && server_authority_ready state then begin
+    let admission_started_ns=Mtime_clock.elapsed_ns () in
     match state.server_identity, Masc_tui_types.begin_ask_followup_read state with
     | Some expected_workspace, Some (request, submission, keeper_name) ->
+        let read=capture_ask_followup_read ~instance:state.observation_instance
+          ~request ~submission ~expected_workspace ~admission_started_ns in
         let host=server_peer_host and port=state.port in
         let clock=Eio_context.get_clock_opt () in
         let envelope=capture_workspace_message state in
@@ -14189,17 +14195,17 @@ let launch_ask_followup_load state ~mailbox =
           (Some (request,fun detail -> ignore (Eio.Promise.try_resolve resolve detail)))
           ~detail:"answer follow-up observation superseded";
         let finish ()=Masc_tui_types.finish_ask_followup_worker state request in
-        log_ask_followup request submission ~sources:(Masc_tui_types.current_ask_followup state)
+        log_ask_followup read ~sources:(Masc_tui_types.current_ask_followup state)
           Followup_read_started;
         Masc_tui_workspace_result.launch_observation state ~results:mailbox.workspace_results
           ~on_not_run:finish ~boundary_error:(fun detail -> Ask.Followup_read_failed detail)
-          ~observe_job:(fun event -> log_ask_followup request submission ~sources:None (Followup_job_event event))
+          ~observe_job:(fun event -> log_ask_followup read ~sources:None (Followup_job_event event))
           ~not_started:(fun detail -> Ask.Followup_not_started detail)
-          ~cancelled:(envelope (Ask_followup_finished (request,submission,Error Ask.Followup_cancelled)))
-          ~progress:(fun (event,received_ns) -> envelope (Ask_followup_observed (request,submission,event,received_ns)))
-          ~deliver:(fun result -> envelope (Ask_followup_finished (request,submission,result)))
+          ~cancelled:(envelope (Ask_followup_finished (read,Error Ask.Followup_cancelled)))
+          ~progress:(fun (event,received_ns) -> envelope (Ask_followup_observed (read,event,received_ns)))
+          ~deliver:(fun result -> envelope (Ask_followup_finished (read,result)))
           (fun publish -> Fun.protect ~finally:finish (fun () ->
-            log_ask_followup request submission ~sources:None Followup_worker_entered;
+            log_ask_followup read ~sources:None Followup_worker_entered;
             let result=try match clock with
               | None -> Error (Ask.Followup_read_failed "Eio clock is unavailable for answer follow-up observation")
               | Some clock -> Eio.Fiber.first
@@ -14211,12 +14217,13 @@ let launch_ask_followup_load state ~mailbox =
               with
               | Eio.Cancel.Cancelled _ as exn ->
                 let backtrace=Printexc.get_raw_backtrace () in
-                log_ask_followup request submission ~sources:None Followup_producer_cancelled;
+                log_ask_followup read ~sources:None Followup_producer_cancelled;
                 Printexc.raise_with_backtrace exn backtrace
               | exn -> Error (Ask.Followup_read_failed (Printexc.to_string exn)) in
-            log_ask_followup request submission ~sources:None (Followup_producer_returned result);
+            log_ask_followup read ~sources:None (Followup_producer_returned result);
             result))
     | None, _ | Some _, None -> ()
+  end
 
 let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =
   if server_authority_ready state then begin
@@ -19756,14 +19763,16 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
   | Approval_decision_done (approval, decision, result, generation, approvals) ->
       apply_approval_decision_completion state generation approval decision
         result approvals
-  | Ask_followup_observed (request, submission, event, received_ns) ->
+  | Ask_followup_observed (read, event, received_ns) ->
+      let request=read.afr_request and submission=read.afr_submission in
       Option.iter (fun result ->
-        log_ask_followup request submission ~sources:(Masc_tui_types.current_ask_followup state)
+        log_ask_followup read ~sources:(Masc_tui_types.current_ask_followup state)
           (Followup_source_applied (event,received_ns,Result.is_ok result)))
         (Masc_tui_types.take_ask_followup_event state request submission event)
-  | Ask_followup_finished (request, submission, result) ->
+  | Ask_followup_finished (read, result) ->
+      let request=read.afr_request and submission=read.afr_submission in
       Option.iter (fun result ->
-        log_ask_followup request submission ~sources:(Masc_tui_types.current_ask_followup state)
+        log_ask_followup read ~sources:(Masc_tui_types.current_ask_followup state)
           (Followup_ui_settled result))
         (Masc_tui_types.finish_ask_followup_read state request submission result)
   | Ask_answer_receipt_ready submission ->

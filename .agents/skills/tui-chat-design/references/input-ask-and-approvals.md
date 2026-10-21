@@ -103,6 +103,16 @@
   producer와 UI 행을 별개 시도로 세지 않고, 종단 없는 물리/논리 구간을 unfinished로 보존한다.
   clock/trace/source serialization·오류 formatter 비용도 실측 분모에 남긴다. Task 완료·paint나
   실제 비교 실측으로 바꾸어 주장하지 않는다.
+- 후속 관측의 출처는 원래 조회의 private capsule로 캡처한다. TUI state 수명마다 기존
+  UUID 생산자로 instance ID를 만들고 linked Build_version의 reported version을 보관한다.
+  확인된 workspace 두 경로와 서버가 admission 때 보고한 version/binary commit은 같은
+  불변 origin에 담고 JSON은 한 번 준비한다. 부분·종단·취소 메시지와 worker/job/UI 로그는
+  그 capsule을 그대로 쓰며 늦은 정리를 현재 workspace나 새 서버 identity로 다시 표시하지 않는다.
+  admission_started_ns는 private read admission/출처 준비 전 시각이며 이후 observed/admitted
+  시각과 구분한다. pending 공유로 새 ticket을 만들지 않은 수요도 clock 비용을 가진다.
+  instance ID는 MCP credential이나 권한 token이 아니다. client version은 소스 SHA가 아니며,
+  server_identity_at_admission은 뒤의 응답을 처리한 binary 증명이 아니다. 실제 비교는 이
+  scope와 별도 실행/설치 근거를 함께 보존하고 다른 프로세스의 monotonic clock을 빼지 않는다.
 - Approvals의 `T`는 마지막으로 답변한 원래 Ask의 canonical answer identity와 Task 링크로
   공용 원본 Task inspector를 연다. 생성 요청과 Ask 출처는 닫힌 타입으로 구분한다.
   Ask에는 생성 영수증·생성 조회가 없으며 현재 Keeper나 전역 Task 목록을 빌리지 않는다.

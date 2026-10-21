@@ -9,6 +9,16 @@ type task_cancel_outcome =
   | Task_cancel_refused of string
   | Task_cancel_unconfirmed of string
 
+type ask_followup_read = {
+  afr_request : Snapshot_read.request;
+  afr_submission : ask_submission;
+  afr_origin : Masc_tui_observation_origin.t;
+  afr_admission_started_ns : int64;
+}
+let capture_ask_followup_read ~instance ~request ~submission ~expected_workspace ~admission_started_ns =
+  {afr_request=request;afr_submission=submission;afr_admission_started_ns=admission_started_ns;
+   afr_origin=Masc_tui_observation_origin.capture instance ~expected_workspace}
+
 type approval_observation = {
   ao_ticket: Masc_tui_operator_projection.Listing_order.ticket;
   ao_result: (approval_snapshot, string) result;
@@ -279,9 +289,8 @@ type async_msg =
   | Http_asks_loaded of early_asks_observation
   | Http_approvals_loaded of early_approval_observation
   | Ask_answer_receipt_ready of ask_submission
-  | Ask_followup_observed of Snapshot_read.request * ask_submission *
-      Masc.Tui_decode_asks.ask_followup_event * int64
-  | Ask_followup_finished of Snapshot_read.request * ask_submission * Masc_tui_ask_projection.followup_result
+  | Ask_followup_observed of ask_followup_read * Masc.Tui_decode_asks.ask_followup_event * int64
+  | Ask_followup_finished of ask_followup_read * Masc_tui_ask_projection.followup_result
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   | Http_dataset_loaded of early_http_dataset
   | Http_surface_read_completed of Surface_read_context.t * async_msg

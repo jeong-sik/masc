@@ -8128,6 +8128,7 @@ type lane_nested_read =
   | Lane_declaration_read of { path : string; edit : bool }
 
 type state = {
+  observation_instance : Masc_tui_observation_origin.instance;
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
   mutable home_opened_request : home_request option;
@@ -15026,6 +15027,8 @@ let create_state
     ()
   =
   {
+  observation_instance = Masc_tui_observation_origin.create_instance
+    ~id:(Random_id.uuid_v7 ()) ~client_version:Build_version.current;
   home_selected = None;
   home_decision_scroll = 0;
   home_opened_request = None;

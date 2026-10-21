@@ -131,7 +131,7 @@ let batch_of_json ~ledger json =
     let* rows = snapshot_array (fun row -> Ok row) (List.assoc "new_facts" input_fields) in
     let rec validate facts rows = match facts, rows with
       | [], [] -> Ok ()
-      | fact :: facts, row :: rows ->
+      | (fact : Ledger.pending_fact) :: facts, row :: rows ->
         let* fields = snapshot_fields ["new_fact"; "neighbors"; "related_claims"; "related_conflicts"] row in
         let* neighbors = snapshot_array pending_of_json (List.assoc "neighbors" fields) in
         let* () = unique_facts neighbors in

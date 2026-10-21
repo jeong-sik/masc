@@ -116,7 +116,7 @@ export function KeeperClearContextDialog({
         </label>
 
         <div class="rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)] v2-monitoring-panel">
-          정상적으로 읽을 수 있는 checkpoint의 대화 기록을 비웁니다. 파일을 읽거나 해석하지 못하면 오류를 반환하고 원본을 그대로 둡니다. 손상된 파일을 복구하는 기능은 아닙니다.
+          읽을 수 있는 checkpoint는 대화 기록만 비웁니다. 파일이 깨져서 해석할 수 없으면 복구하지 않고 그 파일을 삭제하므로 대화 기록이 사라집니다. 이 서버보다 새 버전이 쓴 파일이나 읽다가 실패한 파일은 그대로 두고 오류를 돌려줍니다. 기록을 비우거나 지우는 단계가 실패하면 공식 클라이언트 세션만 이미 비워져 있을 수 있습니다.
         </div>
 
         <div class="flex items-center justify-end gap-2 v2-monitoring-toolbar">

@@ -694,15 +694,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     reconcile_prepared_continuations ();
     reconcile_ask_answers ();
     project_transition_outboxes Server_transition_outbox_recovery.Startup;
-    (* Restore MCP transport sessions from disk before first cleanup cycle.
-       Grace period timestamps survive server restart, so recently-active
-       clients can reconnect without "Unknown Mcp-Session-Id" errors. *)
-    (try Server_mcp_transport_http_session.load_sessions_from_file ()
-     with
-     | Eio.Cancel.Cancelled _ as e ->
-       Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
-     | exn ->
-       Log.Server.warn "session restore failed: %s" (Printexc.to_string exn));
     let rec loop () =
       Eio.Time.sleep clock maintenance_tick_sec;
       (* A payout that could not be prepared (a Task or the links did not read)
@@ -741,6 +732,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          in
          let sessions_reaped =
            Server_mcp_transport_http_session.reap_stale_sessions
+             ~base_path:config.base_path
              ~is_active_session:is_active
          in
          if sse_guards_reaped + http_guards_reaped + sessions_reaped > 0

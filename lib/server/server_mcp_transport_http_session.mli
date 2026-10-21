@@ -86,27 +86,36 @@ val forget_mcp_session : string -> unit
     On restart, [load_sessions_from_file] restores the state so the
     grace period applies to recently-active sessions. *)
 
-val sessions_file_path : unit -> string
-(** Returns the path to the persistence file.  Exposed for testing. *)
+val sessions_file_path : base_path:string -> unit -> string
+(** Derive the persistence path from the actual owner's base path; no cwd or
+    process-default inference. *)
 
-val save_sessions_to_file : unit -> unit
-(** Serialize current session state and write atomically to disk.
+val save_sessions_to_file : base_path:string -> unit -> unit
+(** Serialize current session state and replace the file after flush/close.
     Called automatically by [reap_stale_sessions] after each cleanup.
-    Safe to call at any time — uses write-then-rename. *)
+    The common I/O executor owns the host work. Writers serialize before
+    capturing immutable registry maps, so a queued old capture cannot replace
+    a newer write and the temporary file has one writer. Callers await physical
+    completion; cancellation does not undo a completed file replacement.
+    Non-Eio callers perform the same work directly. *)
 
-val load_sessions_from_file : unit -> unit
-(** Load session state from disk into the in-memory registries.
-    Call once during server startup, before the MCP handler accepts
-    requests.  Errors (missing file, corrupt JSON) are silently
-    ignored — the server starts clean. *)
+val load_sessions_from_file : base_path:string -> unit -> unit
+(** Read/decode in the common I/O executor, then apply the immutable decoded
+    entries in the caller after checking cancellation. Call once in owner
+    activation before publishing the state/readiness capability to HTTP/stdio.
+    Startup health remains independent. Missing files restore nothing; unreadable,
+    corrupt or invalid-root files restore nothing and retain a diagnostic.
+    Original per-entry protocol/profile/timestamp handling remains unchanged.
+    Return joins read/decode and application, not background work. *)
 
 val profile_label : Server_mcp_transport_http_types.tool_profile -> string
 (** Stable label for the MCP HTTP surface a session belongs to.
     Used in profile-mismatch errors and termination logs. *)
 
 val reap_stale_sessions :
+  base_path:string ->
   is_active_session:(string -> bool) -> int
-(** [reap_stale_sessions ~is_active_session] removes session
+(** [reap_stale_sessions ~base_path ~is_active_session] removes session
     entries whose [session_id] returns [false] from
     [is_active_session].  Returns the number of reaped entries.
 

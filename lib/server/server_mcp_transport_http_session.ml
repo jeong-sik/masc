@@ -165,16 +165,14 @@ let profile_of_string = function
   | "seat" -> Some Server_mcp_transport_http_types.Seat
   | _ -> None
 
-let sessions_file_path () =
-  let base = default_base_path () in
+let sessions_file_path ~base_path () =
   Filename.concat
-    (Config_dir_resolver.masc_root ~base_path:base)
+    (Config_dir_resolver.masc_root ~base_path)
     "mcp_transport_sessions.json"
 
 (** Serialize current session state to JSON and write to disk atomically.
     Uses write-then-rename to avoid partial writes on crash. *)
-let save_sessions_to_file () =
-  let path = sessions_file_path () in
+let write_sessions path =
   let dir = Filename.dirname path in
   (* [begin]/[end] close the [then] branch so the trailing [;] sequences into
      the rest of the function. Without them, OCaml absorbs [; let versions =
@@ -251,7 +249,7 @@ let save_sessions_to_file () =
      the finally only releases the fd. Mirrors [atomic_write_file] in
      server_routes_http_routes_sidecar.ml. *)
   (try
-     Eio_guard.protect
+     Fun.protect
        ~finally:(fun () -> close_out_noerr oc)
        (fun () ->
          output_string oc (Yojson.Basic.to_string json);
@@ -264,98 +262,126 @@ let save_sessions_to_file () =
      raise exn);
   Unix.rename tmp_path path
 
-(** Load session state from disk. Restores protocol versions, profiles,
-    and last-active timestamps so the grace period applies correctly
-    after a server restart.
+(* The process owns one session registry. Lock only in the blocking worker,
+   before capturing its immutable maps, and retain the lock through rename. *)
+let persistence_mutex = Stdlib.Mutex.create ()
 
-    Errors (missing file, corrupt JSON) are silently ignored — the
-    server starts with a clean slate, which is safe but means clients
-    must re-handshake. *)
-let load_sessions_from_file () =
-  let path = sessions_file_path () in
-  if not (Stdlib.Sys.file_exists path) then ()
-  else begin
-    try
-      let float_field = function
-        | Some (`Float value) -> Some value
-        | Some (`Int value) -> Some (float_of_int value)
-        | _ -> None
-      in
-      let string_field key fields =
-        match List.assoc_opt key fields with
-        | Some (`String value) when String.trim value <> "" -> Some value
-        | _ -> None
-      in
-      let transport_context fields =
-        let network_protocol_name = string_field "network_protocol_name" fields in
-        let network_protocol_version =
-          string_field "network_protocol_version" fields
-        in
-        let network_transport = string_field "network_transport" fields in
-        match
-          network_protocol_name, network_protocol_version, network_transport
-        with
-        | None, None, None -> None
-        | _ ->
-          Some
-            { Otel_dispatch_hook.network_protocol_name
-            ; network_protocol_version
-            ; network_transport
-            }
-      in
-      let json = Yojson.Basic.from_file path in
-      (match json with
-       | `Assoc [("sessions", `Assoc entries)] ->
-           List.iter (fun (sid, entry) ->
-             match entry with
-             | `Assoc fields ->
-                 let pv = List.assoc_opt "protocol_version" fields in
-                 let profile_str = List.assoc_opt "profile" fields in
-                 let ts = List.assoc_opt "last_active_sse" fields in
-                 let started = List.assoc_opt "started_at" fields in
-                 (match pv with
-                  | Some (`String v) ->
-                      if is_valid_protocol_version v then begin
-                        let t =
-                          match float_field ts with
-                          | Some value -> value
-                          | None -> 0.0
-                        in
-                        let started_at =
-                          match float_field started with
-                          | Some value -> value
-                          | None -> t
-                        in
-                        Atomic_util.update protocol_version_by_session
-                          (fun map -> SMap.add sid v map);
-                        let profile =
-                          match profile_str with
-                          | Some (`String p) -> profile_of_string p
-                          | _ -> None
-                        in
-                        (match profile with
-                         | Some profile ->
-                             Atomic_util.update mcp_profile_by_session
-                               (fun map -> SMap.add sid profile map)
-                         | None -> ());
-                        Atomic_util.update session_last_active_sse
-                          (fun map -> SMap.add sid t map);
-                        Atomic_util.update session_started_at
-                          (fun map -> SMap.add sid started_at map);
-                        (match transport_context fields with
-                         | Some transport ->
-                             Atomic_util.update session_transport_context
-                               (fun map -> SMap.add sid transport map)
-                         | None -> ())
-                      end
-                  | _ -> ())
-             | _ -> ()
-           ) entries
-       | _ -> ())
+let save_sessions_to_file ~base_path () =
+  let path = sessions_file_path ~base_path () in
+  Eio_guard.run_in_systhread ~label:"mcp-session-save" (fun () ->
+    Stdlib.Mutex.protect persistence_mutex (fun () -> write_sessions path));
+  Eio_guard.check_if_ready ()
+
+type restored_session =
+  { session_id : string
+  ; version : string
+  ; profile : Server_mcp_transport_http_types.tool_profile option
+  ; last_active : float
+  ; started_at : float
+  ; transport : Otel_dispatch_hook.transport_context option }
+
+type session_restore =
+  | Missing
+  | Read_failed of string
+  | Json_failed of string
+  | Shape_rejected
+  | Restored of restored_session list
+
+let decode_sessions json =
+  let float_field = function
+    | Some (`Float value) -> Some value
+    | Some (`Int value) -> Some (float_of_int value)
+    | _ -> None
+  in
+  let string_field key fields =
+    match List.assoc_opt key fields with
+    | Some (`String value) when String.trim value <> "" -> Some value
+    | _ -> None
+  in
+  let transport_context fields =
+    let network_protocol_name = string_field "network_protocol_name" fields in
+    let network_protocol_version =
+      string_field "network_protocol_version" fields
+    in
+    let network_transport = string_field "network_transport" fields in
+    match
+      network_protocol_name, network_protocol_version, network_transport
     with
-    | Stdlib.Sys_error _ -> ()
-    | Yojson.Json_error _ -> ()
-  end
+    | None, None, None -> None
+    | _ ->
+      Some
+        { Otel_dispatch_hook.network_protocol_name
+        ; network_protocol_version
+        ; network_transport
+        }
+  in
+  (match json with
+   | `Assoc [("sessions", `Assoc entries)] ->
+       Restored (List.filter_map (fun (sid, entry) ->
+         match entry with
+         | `Assoc fields ->
+             let pv = List.assoc_opt "protocol_version" fields in
+             let profile_str = List.assoc_opt "profile" fields in
+             let ts = List.assoc_opt "last_active_sse" fields in
+             let started = List.assoc_opt "started_at" fields in
+             (match pv with
+              | Some (`String v) ->
+                  if is_valid_protocol_version v then (
+                    let t =
+                      match float_field ts with
+                      | Some value -> value
+                      | None -> 0.0
+                    in
+                    let started_at =
+                      match float_field started with
+                      | Some value -> value
+                      | None -> t
+                    in
+                    let profile =
+                      match profile_str with
+                      | Some (`String p) -> profile_of_string p
+                      | _ -> None
+                    in
+                    Some {session_id=sid;version=v;profile;last_active=t;started_at;
+                          transport=transport_context fields})
+                  else None
+              | _ -> None)
+         | _ -> None
+       ) entries)
+   | _ -> Shape_rejected)
+
+let read_sessions path =
+  try
+    ignore (Unix.stat path);
+    decode_sessions (Yojson.Basic.from_file path)
+  with
+  | Unix.Unix_error (Unix.ENOENT,_,_) -> Missing
+  | Unix.Unix_error (error,operation,path) ->
+      Read_failed (Printf.sprintf "%s %s: %s" operation path (Unix.error_message error))
+  | Stdlib.Sys_error detail -> Read_failed detail
+  | Yojson.Json_error detail -> Json_failed detail
+
+let load_sessions_from_file ~base_path () =
+  let path = sessions_file_path ~base_path () in
+  let restored = Eio_guard.run_in_systhread ~label:"mcp-session-load" (fun () -> read_sessions path) in
+  Eio_guard.check_if_ready ();
+  match restored with
+  | Missing -> Log.Server.debug "session restore absent path=%S" path
+  | Read_failed detail -> Log.Server.warn "session restore unreadable path=%S error=%s" path detail
+  | Json_failed detail -> Log.Server.warn "session restore invalid JSON path=%S error=%s" path detail
+  | Shape_rejected -> Log.Server.warn "session restore rejected root path=%S" path
+  | Restored sessions ->
+      List.iter (fun session ->
+        let sid = session.session_id in
+        Atomic_util.update protocol_version_by_session (fun map -> SMap.add sid session.version map);
+        Option.iter (fun profile ->
+          Atomic_util.update mcp_profile_by_session (fun map -> SMap.add sid profile map)) session.profile;
+        Atomic_util.update session_last_active_sse (fun map -> SMap.add sid session.last_active map);
+        Atomic_util.update session_started_at (fun map -> SMap.add sid session.started_at map);
+        Option.iter (fun transport ->
+          Atomic_util.update session_transport_context (fun map -> SMap.add sid transport map)) session.transport)
+        sessions;
+      Log.Server.debug "session restore applied path=%S entries=%d" path (List.length sessions)
 
 (** Reap session entries whose session_id has no active SSE connection
     AND whose grace period has expired.
@@ -366,7 +392,7 @@ let load_sessions_from_file () =
     reconnect without triggering "Unknown Mcp-Session-Id" errors.
 
     Call periodically from the cleanup loop. Returns number of reaped entries. *)
-let reap_stale_sessions ~is_active_session =
+let reap_stale_sessions ~base_path ~is_active_session =
   let now = Unix.gettimeofday () in
   let stale, kept_by_grace =
     SMap.fold (fun sid _ (stale_acc, grace_acc) ->
@@ -398,7 +424,7 @@ let reap_stale_sessions ~is_active_session =
     Log.Server.info "session grace: %d sessions kept (inactive but within %.0fs grace)"
       kept_by_grace grace_period_seconds;
   (* Persist session state after each reap cycle so file stays current. *)
-  (try save_sessions_to_file ()
+  (try save_sessions_to_file ~base_path ()
    with Stdlib.Sys_error msg ->
      Log.Server.warn "session persist failed: %s" msg);
   List.length stale

@@ -22,3 +22,7 @@ val hints : t -> string option
 val rows : width:int -> t -> row list
 val scroll : count:int -> height:int -> t -> int
 val move : count:int -> height:int -> movement -> t -> t
+(** [Last] retains an end anchor across reflow and replacement of the same
+    captured observation, including temporary preparation rows. [First] starts
+    at zero. [By] leaves the anchor and moves from the current bounded position.
+    A newly created reading always starts at zero. *)

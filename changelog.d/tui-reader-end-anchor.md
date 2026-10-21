@@ -1,0 +1,3 @@
+### Fixed
+
+- Keep captured TUI document readers at the end after terminal reflow, rather than reusing an offset from the previous width.

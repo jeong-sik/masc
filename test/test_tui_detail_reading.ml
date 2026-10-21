@@ -52,8 +52,30 @@ let test_navigation_normalizes_before_moving () =
   let first = Reading.move ~count:100 ~height:10 (Reading.By min_int) last in
   check int "large negative movement is bounded" 0 (Reading.scroll ~count:100 ~height:10 first)
 
+let test_end_intent_survives_repreparation () =
+  let held = Reading.move ~count:100 ~height:10 Reading.Last (reading ()) in
+  check int "end stays selected when reflow expands the extent" 190
+    (Reading.scroll ~count:200 ~height:10 held);
+  (* Reflow can temporarily project one preparation notice. It must not
+     replace the operator's last-edge intent with that notice's offset. *)
+  let held = Reading.move ~count:1 ~height:10 Reading.Last held in
+  let replaced = Reading.replace ~title:"same captured observation" [] held in
+  check int "end follows the changed observation extent" 190
+    (Reading.scroll ~count:200 ~height:10 replaced);
+  let shorter = Reading.scroll ~count:20 ~height:10 replaced in
+  check int "end also follows a shorter extent" 10 shorter;
+  let moved = Reading.move ~count:200 ~height:10 (Reading.By (-1)) replaced in
+  check int "relative navigation releases the end anchor" 189
+    (Reading.scroll ~count:300 ~height:10 moved);
+  let first = Reading.move ~count:300 ~height:10 Reading.First replaced in
+  check int "first releases the end anchor" 0
+    (Reading.scroll ~count:400 ~height:10 first);
+  check int "a new capture does not inherit another capture's anchor" 0
+    (Reading.scroll ~count:200 ~height:10 (reading ()))
+
 let () = run "detail reading ownership"
   [ "capture", [test_case "selection stays read-only" `Quick test_selection_does_not_retarget_capture;
                  test_case "workspace revoke" `Quick test_workspace_revoke_cannot_resurrect_capture;
                  test_case "surface revoke" `Quick test_surface_change_releases_capture];
-    "navigation", [test_case "resize and edges" `Quick test_navigation_normalizes_before_moving] ]
+    "navigation", [test_case "resize and edges" `Quick test_navigation_normalizes_before_moving;
+                   test_case "end intent survives re-preparation" `Quick test_end_intent_survives_repreparation] ]

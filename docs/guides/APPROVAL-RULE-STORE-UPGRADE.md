@@ -29,6 +29,18 @@ restarting the queue sequence from an empty store. `replay-results.json` is a
 derived projection, not a replacement for the queue; archive it with the gate
 state so old readback is not mistaken for a new decision.
 
+The deployment `validate-stores` check decodes the snapshot and replays its
+append log with the runtime's generation and final sequence checks. A valid
+snapshot does not make a malformed or future-generation WAL acceptable.
+Preflight refuses an incomplete WAL tail and leaves its bytes untouched for
+owner recovery; it does not invoke startup recovery, install the queue or
+create a reset. With no snapshot, it follows the runtime's reset semantics
+and ignores an orphan WAL without deleting it.
+
+This is deployment validation. Gate remains `Preflight_only` in the shared
+store inventory, so its lane-local startup failure does not become a new
+whole-server boot refusal.
+
 ## Operator-selected upgrade
 
 1. Identify every runtime/base path to upgrade and stop all processes writing

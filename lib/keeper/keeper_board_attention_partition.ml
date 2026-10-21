@@ -37,13 +37,13 @@ let parse = Keeper_board_attention_partition_wire.parse
 let serialize = Keeper_board_attention_partition_wire.serialize
 let serialize_confirmations = Keeper_board_attention_partition_wire.serialize_confirmations
 
-let partition_dir base_path =
+let directory ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "board_attention_partitions"
 ;;
 
 let path ~base_path ~keeper_name =
   Filename.concat
-    (partition_dir base_path)
+    (directory ~base_path)
     (Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name ^ ".jsonl")
 ;;
 
@@ -80,8 +80,8 @@ end
 
 module Ready_set = Set.Make (Ready_order)
 
-type view =
-  { cursor : Fs_compat.Private_jsonl_cursor.t
+type 'cursor view =
+  { cursor : 'cursor
   ; by_id : t Id_map.t
   ; ready : Ready_set.t
   ; completed : Id_set.t
@@ -296,7 +296,7 @@ let view_partitions view =
 ;;
 
 type cache_entry =
-  { cached : view option Atomic.t
+  { cached : Fs_compat.Private_jsonl_cursor.t view option Atomic.t
   ; mutation_mutex : Stdlib.Mutex.t
   }
 
@@ -416,6 +416,24 @@ let load ~base_path ~keeper_name =
   let* view = read_view (path ~base_path ~keeper_name) in
   let* () = validate_keeper_identity ~keeper_name view in
   Ok (view_partitions view)
+;;
+
+let validate_serialized ~base_path ~ledger_path contents =
+  if String.length contents > 0 && contents.[String.length contents - 1] <> '\n'
+  then Error "incomplete partition ledger tail; owner recovery required"
+  else
+    let* rows, _confirmations = parse contents in
+    let* view = apply_rows (empty_view ()) rows in
+    match Id_map.choose_opt view.by_id with
+    | None -> Ok ()
+    | Some (_, partition) ->
+      let keeper_name = partition.keeper_name in
+      let* () = validate_keeper_identity ~keeper_name view in
+      let expected_path = path ~base_path ~keeper_name in
+      if String.equal expected_path ledger_path then Ok ()
+      else Error (Printf.sprintf
+        "Board attention partition keeper path mismatch keeper=%s expected=%s actual=%s"
+        keeper_name expected_path ledger_path)
 ;;
 
 let purge ~base_path ~keeper_name =

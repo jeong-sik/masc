@@ -44,6 +44,7 @@ module Id : sig
     | Memory_source_current
     | Disposition_receipts
     | Board_posts
+    | Board_attention_partitions
     | Provider_inputs
     | Turn_records
     | Turn_boundaries

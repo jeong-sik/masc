@@ -33,13 +33,8 @@ let fail_unexpected_stream_error err =
   Alcotest.fail ("unexpected SSE error: " ^ stream_error_to_string err)
 ;;
 
-let check_zero_usage = function
-  | Some (u : Types.api_usage) ->
-    Alcotest.(check int) "input" 0 u.input_tokens;
-    Alcotest.(check int) "output" 0 u.output_tokens;
-    Alcotest.(check int) "cache_creation" 0 u.cache_creation_input_tokens;
-    Alcotest.(check int) "cache_read" 0 u.cache_read_input_tokens
-  | None -> Alcotest.fail "expected zero usage"
+let check_absent_usage usage =
+  Alcotest.(check bool) "no usage measurement was reported" true (Option.is_none usage)
 ;;
 
 (** Unwrap finalize result or fail the test. *)
@@ -68,7 +63,7 @@ let test_create_stream_acc () =
   let response = finalize_ok acc in
   Alcotest.(check string) "empty id" "" response.id;
   Alcotest.(check string) "empty model" "" response.model;
-  check_zero_usage response.usage
+  check_absent_usage response.usage
 ;;
 
 (* ── accumulate_event tests ───────────────────────────────── *)
@@ -104,7 +99,7 @@ let test_accumulate_message_start_no_usage () =
     (Types.MessageStart { id = "msg_2"; model = "gpt-4"; usage = None });
   let response = finalize_ok acc in
   Alcotest.(check string) "id" "msg_2" response.id;
-  check_zero_usage response.usage
+  check_absent_usage response.usage
 ;;
 
 let test_accumulate_content_block_start () =
@@ -234,7 +229,7 @@ let test_accumulate_message_delta_no_usage () =
   let acc = Streaming.create_stream_acc () in
   Streaming.accumulate_event acc (Types.MessageDelta { stop_reason = None; usage = None });
   let response = finalize_ok acc in
-  check_zero_usage response.usage
+  check_absent_usage response.usage
 ;;
 
 let test_accumulate_other_events () =
@@ -364,7 +359,7 @@ let test_finalize_with_usage () =
 let test_finalize_no_usage () =
   let acc = Streaming.create_stream_acc () in
   let resp = finalize_ok acc in
-  check_zero_usage resp.usage
+  check_absent_usage resp.usage
 ;;
 
 let test_finalize_unknown_content_type () =

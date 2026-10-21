@@ -52,13 +52,8 @@ let fail_unexpected_stream_error err =
   Alcotest.fail ("unexpected error: " ^ stream_error_to_string err)
 ;;
 
-let check_zero_usage = function
-  | Some u ->
-    Alcotest.(check int) "input" 0 u.input_tokens;
-    Alcotest.(check int) "output" 0 u.output_tokens;
-    Alcotest.(check int) "cache_creation" 0 u.cache_creation_input_tokens;
-    Alcotest.(check int) "cache_read" 0 u.cache_read_input_tokens
-  | None -> Alcotest.fail "expected zero usage"
+let check_unreported_usage usage =
+  Alcotest.(check bool) "no usage measurement was reported" true (Option.is_none usage)
 ;;
 
 (* ── create_stream_acc ────────────────────────────────────── *)
@@ -68,7 +63,7 @@ let test_create_initial_state () =
   let response = finalize_with_end_turn acc in
   Alcotest.(check string) "msg_id empty" "" response.id;
   Alcotest.(check string) "msg_model empty" "" response.model;
-  check_zero_usage response.usage
+  check_unreported_usage response.usage
 ;;
 
 (* ── accumulate: MessageStart ─────────────────────────────── *)
@@ -95,7 +90,7 @@ let test_accumulate_message_start_no_usage () =
     (MessageStart { id = "m1"; model = "test"; usage = None });
   let response = finalize_with_end_turn acc in
   Alcotest.(check string) "id" "m1" response.id;
-  check_zero_usage response.usage
+  check_unreported_usage response.usage
 ;;
 
 let test_accumulate_message_start_with_cache () =
@@ -1317,7 +1312,7 @@ let test_finalize_no_usage () =
     ];
   match Streaming.finalize_stream_acc acc with
   | Error err -> fail_unexpected_stream_error err
-  | Ok resp -> check_zero_usage resp.usage
+  | Ok resp -> check_unreported_usage resp.usage
 ;;
 
 let test_finalize_unknown_block_type_fails_closed () =
@@ -1398,6 +1393,111 @@ let test_map_http_error_empty_completion_is_its_own_variant () =
 ;;
 
 (* ── Runner ───────────────────────────────────────────────── *)
+
+(* Usage presence is independent of its numeric value. These events exercise
+   the same immutable core used by the mutable transport accumulator above. *)
+let terminal_usage_of_events events =
+  let module State = Llm_provider.Complete_stream_state in
+  let state = List.fold_left State.transition State.empty events in
+  match State.finalize state with
+  | State.Completed response -> response.usage
+  | State.Failed error -> fail_unexpected_stream_error error
+;;
+
+let empty_delta_usage : delta_usage =
+  { input_tokens = None
+  ; output_tokens = None
+  ; cache_creation_input_tokens = None
+  ; cache_read_input_tokens = None
+  ; cost_usd = None
+  }
+;;
+
+let test_usage_empty_delta_is_unreported () =
+  terminal_usage_of_events
+    [ MessageStart { id = "m"; model = "m"; usage = None }
+    ; MessageDelta { stop_reason = Some EndTurn; usage = Some empty_delta_usage }
+    ; MessageStop
+    ]
+  |> check_unreported_usage
+;;
+
+let test_usage_explicit_zero_is_reported () =
+  let usage : delta_usage =
+    { input_tokens = Some 0
+    ; output_tokens = Some 0
+    ; cache_creation_input_tokens = Some 0
+    ; cache_read_input_tokens = Some 0
+    ; cost_usd = Some 0.0
+    }
+  in
+  match terminal_usage_of_events
+    [ MessageDelta { stop_reason = Some EndTurn; usage = Some usage }; MessageStop ]
+  with
+  | None -> Alcotest.fail "explicit zero is a measurement"
+  | Some measured ->
+    Alcotest.(check int) "input zero" 0 measured.input_tokens;
+    Alcotest.(check int) "output zero" 0 measured.output_tokens;
+    Alcotest.(check int) "cache write zero" 0 measured.cache_creation_input_tokens;
+    Alcotest.(check int) "cache read zero" 0 measured.cache_read_input_tokens;
+    Alcotest.(check (option (float 0.0))) "zero charge" (Some 0.0) measured.cost_usd
+;;
+
+let test_usage_zero_start_is_reported () =
+  match terminal_usage_of_events
+    [ MessageStart { id = "m"; model = "m"; usage = Some (make_usage 0 0) }
+    ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+    ; MessageStop
+    ]
+  with
+  | None -> Alcotest.fail "explicit zero on the prelude is a measurement"
+  | Some measured ->
+    Alcotest.(check int) "input zero" 0 measured.input_tokens;
+    Alcotest.(check int) "output zero" 0 measured.output_tokens
+;;
+
+let test_usage_cost_only_zero_survives_omission () =
+  let usage = { empty_delta_usage with cost_usd = Some 0.0 } in
+  match terminal_usage_of_events
+    [ MessageDelta { stop_reason = None; usage = Some usage }
+    ; MessageDelta { stop_reason = None; usage = Some empty_delta_usage }
+    ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+    ; MessageStop
+    ]
+  with
+  | None -> Alcotest.fail "a zero charge is an observed usage field"
+  | Some measured ->
+    Alcotest.(check (option (float 0.0))) "zero charge survives" (Some 0.0) measured.cost_usd
+;;
+
+let test_usage_replayed_prelude_keeps_newer_cumulative_fields () =
+  let start = MessageStart { id = "m"; model = "m"; usage = Some (make_usage 100 0) } in
+  let first : delta_usage =
+    { input_tokens = Some 120
+    ; output_tokens = Some 8
+    ; cache_creation_input_tokens = Some 3
+    ; cache_read_input_tokens = Some 5
+    ; cost_usd = Some 0.0
+    }
+  in
+  let last : delta_usage = { empty_delta_usage with output_tokens = Some 9 } in
+  match terminal_usage_of_events
+    [ start
+    ; MessageDelta { stop_reason = None; usage = Some first }
+    ; start
+    ; MessageDelta { stop_reason = None; usage = Some last }
+    ; MessageDelta { stop_reason = Some EndTurn; usage = Some last }
+    ; MessageStop
+    ]
+  with
+  | None -> Alcotest.fail "observed cumulative counters were lost"
+  | Some measured ->
+    Alcotest.(check int) "prelude cannot reset newer input" 120 measured.input_tokens;
+    Alcotest.(check int) "latest output replaces, never adds" 9 measured.output_tokens;
+    Alcotest.(check int) "cache write survives prelude replay" 3 measured.cache_creation_input_tokens;
+    Alcotest.(check int) "cache read survives omission" 5 measured.cache_read_input_tokens;
+    Alcotest.(check (option (float 0.0))) "cost zero survives prelude" (Some 0.0) measured.cost_usd
+;;
 
 let () =
   Alcotest.run
@@ -1590,6 +1690,13 @@ let () =
             "unknown type fails closed"
             `Quick
             test_finalize_unknown_block_type_fails_closed
+        ] )
+    ; ( "usage_presence"
+      , [ Alcotest.test_case "empty delta is unreported" `Quick test_usage_empty_delta_is_unreported
+        ; Alcotest.test_case "explicit zero delta" `Quick test_usage_explicit_zero_is_reported
+        ; Alcotest.test_case "explicit zero prelude" `Quick test_usage_zero_start_is_reported
+        ; Alcotest.test_case "cost-only zero survives omission" `Quick test_usage_cost_only_zero_survives_omission
+        ; Alcotest.test_case "prelude replay keeps newer cumulative fields" `Quick test_usage_replayed_prelude_keeps_newer_cumulative_fields
         ] )
     ; ( "map_http_error"
       , [ Alcotest.test_case "http error" `Quick test_map_http_error_http

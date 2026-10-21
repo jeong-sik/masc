@@ -6127,24 +6127,46 @@ let test_blank_completion_closes_identity_across_four_messages () =
    [partial_answer] or with a phase this client does not know keeps the
    newest-message reading, and so does text streamed for a message that never
    completed. *)
-let test_reply_is_read_from_message_phase () =
-  let handshake = [init_result; account_chatgpt; thread_result; turn_result] in
+module Phase_frames = struct
   let message ?phase id text = `Assoc
       (["type", `String "agentMessage"; "id", `String id; "text", `String text]
-       @ match phase with None -> [] | Some phase -> ["phase", phase]) in
+       @ match phase with None -> [] | Some phase -> ["phase", phase])
+
   let delta id text = Yojson.Safe.to_string (`Assoc [
       "method", `String "item/agentMessage/delta";
       "params", `Assoc ["threadId", `String "thread-1"; "turnId", `String "turn-1";
-        "itemId", `String id; "delta", `String text]]) in
-  let completed item = Yojson.Safe.to_string (`Assoc [
-      "method", `String "item/completed";
+        "itemId", `String id; "delta", `String text]])
+
+  let item method_ item = Yojson.Safe.to_string (`Assoc [
+      "method", `String method_;
       "params", `Assoc ["threadId", `String "thread-1"; "turnId", `String "turn-1";
-        "item", item]]) in
+        "item", item]])
+
+  let started = item "item/started"
+  let completed = item "item/completed"
+
   let terminal items = Yojson.Safe.to_string (`Assoc [
       "method", `String "turn/completed";
       "params", `Assoc ["threadId", `String "thread-1";
         "turn", `Assoc ["id", `String "turn-1"; "items", `List items;
-          "status", `String "completed"]]]) in
+          "status", `String "completed"]]])
+
+  (* The turn's reply, or the error it ended with, for each named frame list. *)
+  let check_replies cases =
+    let handshake = [init_result; account_chatgpt; thread_result; turn_result] in
+    let reply (name, frames, _) =
+      with_fixture (handshake @ frames) (fun path ->
+        match run_fixture path with
+        | Ok turn -> name, Ok turn.text
+        | Error error -> name, Error (Runtime_codex_app_server.error_to_string error))
+    in
+    check (list (pair string (result string string))) "reply of each turn"
+      (List.map (fun (name, _, expected) -> name, Ok expected) cases)
+      (List.map reply cases)
+end
+
+let test_reply_is_read_from_message_phase () =
+  let open Phase_frames in
   let narration_text = "Running the suite now." in
   let narration = message ~phase:(`String "commentary") "c-1" narration_text in
   let later_narration = message ~phase:(`String "commentary") "c-2" "Checking once more." in
@@ -6188,15 +6210,53 @@ let test_reply_is_read_from_message_phase () =
       answer_text
     ]
   in
-  let reply (name, frames, _) =
-    with_fixture (handshake @ frames) (fun path ->
-      match run_fixture path with
-      | Ok turn -> name, Ok turn.text
-      | Error error -> name, Error (Runtime_codex_app_server.error_to_string error))
-  in
-  check (list (pair string (result string string))) "reply of each turn"
-    (List.map (fun (name, _, expected) -> name, Ok expected) cases)
-    (List.map reply cases)
+  check_replies cases
+;;
+
+(* A message that streams and never gets [item/completed]. Its phase comes
+   from [item/started], and a terminal list that names it completes it. A
+   message that completes ends the ones streamed before it. Otherwise the
+   newest message that is not commentary and not blank is the reply, whether
+   it completed or not, and two messages are never joined. *)
+let test_reply_from_messages_that_never_complete () =
+  let open Phase_frames in
+  let narration_text = "Running the suite now." in
+  let narration = message ~phase:(`String "commentary") "c-1" narration_text in
+  let answer_text = "All suites pass." in
+  let plan = message "m-1" "Here is the plan." in
+  let tool_round = [native_command_started; native_command_completed] in
+  check_replies
+    [ "streamed commentary the terminal list names",
+      [delta "c-1" narration_text] @ tool_round @ [terminal [narration]],
+      ""
+    ; "streamed commentary item/started declared",
+      [started (message ~phase:(`String "commentary") "c-1" "");
+       delta "c-1" narration_text] @ tool_round @ [terminal []],
+      ""
+    ; "the newer of two unfinished messages",
+      [delta "m-1" "Here is the plan."; delta "m-2" answer_text; terminal []],
+      answer_text
+    ; "a blank unfinished message after an answer",
+      [delta "m-1" answer_text; delta "m-2" ""; terminal []],
+      answer_text
+    ; "an unfinished message a later commentary completion ends",
+      [delta "x" "All su"; completed (message ~phase:(`String "commentary") "y" narration_text);
+       terminal []],
+      ""
+    ; "an unfinished message after a completed one",
+      [completed plan; delta "m-2" answer_text; terminal []],
+      answer_text
+    ; "an unfinished message after a completed one the terminal list repeats",
+      [completed plan; delta "m-2" answer_text; terminal [plan]],
+      answer_text
+    ; "a terminal message no notification completed",
+      [delta "x" "All su"; terminal [message "y" answer_text]],
+      answer_text
+    ; "a final answer before an unfinished message",
+      [completed (message ~phase:(`String "final_answer") "f-1" answer_text);
+       delta "m-2" "One more thing"; terminal []],
+      answer_text
+    ]
 ;;
 
 let test_keeper_preserves_typed_history_on_codex_wire () =
@@ -8970,6 +9030,8 @@ let () =
             test_blank_completion_closes_identity_across_four_messages
         ; test_case "reply is read from the message phase" `Quick
             test_reply_is_read_from_message_phase
+        ; test_case "reply from messages that never complete" `Quick
+            test_reply_from_messages_that_never_complete
         ; test_case "anonymous completion closes current item" `Quick
             test_anonymous_completion_closes_current_item
         ; test_case "mixed optional item identities preserve order" `Quick

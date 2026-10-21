@@ -11,24 +11,22 @@ step.
 
 ## 1. Install and first run
 
-1. Download and inspect the installer, then run it. It verifies `SHA256SUMS`,
-   installs the executables and the browser dashboard, and offers the setup
+1. Download the latest installer, then run it only if the download succeeds.
+   It verifies `SHA256SUMS`, installs the executables and the browser dashboard, and offers the setup
    wizard.
 
    ```bash
-   TAG=v0.58.0
-   curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
-     -o /tmp/masc-install.sh
-   less /tmp/masc-install.sh   # read it before running it
-   bash /tmp/masc-install.sh --version "$TAG"
+   curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+     -o /tmp/masc-install.sh &&
+   bash /tmp/masc-install.sh
    ```
 
    - A binary install needs no OCaml or Node.js toolchain.
    - The default install location is `~/.local/bin`. If it is not on `PATH`, add
      it in this terminal with `export PATH="$HOME/.local/bin:$PATH"`.
 2. Prepare model access: one of a supported CLI login, an API key, or a
-   reachable local model server. For the default Keeper sandbox, install Docker
-   (or Apple Container on macOS 26+).
+   reachable local model server. Setup helps choose and prepare Docker, a supported
+   microVM backend or remote SSH; installing Docker first is not required.
 
 **Signal to go on:** `masc --help` prints the command list.
 **If it does not:** check that the install location is on `PATH` (default
@@ -39,15 +37,18 @@ step.
 1. If the wizard did not open, run it yourself.
 
    ```bash
-   "$HOME/.local/bin/masc" setup --base-path "$HOME/masc-workspace"
+   "$HOME/.local/bin/masc" setup
    ```
 
-   Setup runs the **Bootstrap** step (sandbox runtime, default `base` image,
-   server, `local-admin` login, `imp`) and the **Tools** step (optional host
-   capabilities), then opens the TUI.
-2. The Keeper running by default is `imp`, with `activation_mode = "manual"`,
+   Use your chosen binary directory if you changed `--prefix`. Setup uses the
+   workspace selected during installation; to name it explicitly, add
+   `--base-path /path/to/your/workspace` with that same directory. Setup checks
+   the selected model and sandbox, prepares the server and `imp`, offers
+   optional host tools and opens the TUI.
+2. The first Keeper is `imp`. Before setup selects a backend, a fresh
+   configuration defaults to `activation_mode = "manual"`,
    `sandbox_profile = "docker"`, `sandbox_image = "base"` and
-   `network_mode = "inherit"`.
+   `network_mode = "inherit"`. Setup may select another sandbox.
 
 **Signal to go on:** the TUI opens and the chat input for `imp` is visible.
 **If it does not:** run `masc doctor --base-path <dir>` for a readiness report.

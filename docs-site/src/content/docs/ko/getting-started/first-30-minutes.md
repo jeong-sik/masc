@@ -10,23 +10,21 @@ Board 를 읽고 쓰는 것까지 해 봅니다. 각 단계 끝에는 *이것이
 
 ## 1. 설치와 첫 실행
 
-1. 설치 스크립트를 받아 읽은 뒤 실행합니다. 설치기는 `SHA256SUMS` 를 검증하고,
+1. 최신 설치 스크립트를 받고, 다운로드에 성공한 경우에만 실행합니다. 설치기는 `SHA256SUMS` 를 검증하고,
    실행 파일과 브라우저 대시보드를 설치하며, 설정 마법사를 제안합니다.
 
    ```bash
-   TAG=v0.58.0
-   curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
-     -o /tmp/masc-install.sh
-   less /tmp/masc-install.sh   # 실행 전에 내용을 읽는다
-   bash /tmp/masc-install.sh --version "$TAG"
+   curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+     -o /tmp/masc-install.sh &&
+   bash /tmp/masc-install.sh
    ```
 
    - 바이너리 설치에는 OCaml 이나 Node.js 개발 도구가 필요하지 않습니다.
    - 기본 설치 위치는 `~/.local/bin` 입니다. `PATH` 에 없으면 이 터미널에서
      `export PATH="$HOME/.local/bin:$PATH"` 로 추가합니다.
 2. 모델 접근을 준비합니다. 지원하는 CLI 로그인, API 키, 접근 가능한 로컬 모델
-   서버 중 하나가 필요합니다. 기본 Keeper 샌드박스를 쓰려면 Docker(또는 macOS 26+
-   에서 Apple Container)를 설치합니다.
+   서버 중 하나가 필요합니다. 설정 화면에서 Docker, 지원되는 microVM, 원격 SSH 중
+   실행 환경을 고르고 준비합니다. Docker를 미리 설치할 필요는 없습니다.
 
 **다음으로 가는 신호:** `masc --help` 가 명령 목록을 출력합니다.
 **막히면:** 설치 위치가 `PATH` 에 없는지 먼저 봅니다. 기본 위치는 `~/.local/bin` 입니다.
@@ -36,15 +34,17 @@ Board 를 읽고 쓰는 것까지 해 봅니다. 각 단계 끝에는 *이것이
 1. 마법사가 열리지 않았다면 직접 실행합니다.
 
    ```bash
-   "$HOME/.local/bin/masc" setup --base-path "$HOME/masc-workspace"
+   "$HOME/.local/bin/masc" setup
    ```
 
-   setup 은 **Bootstrap** 단계(샌드박스 런타임, 기본 `base` 이미지, 서버,
-   `local-admin` 로그인, `imp`)와 **Tools** 단계(선택적 호스트 기능)를 실행한 뒤
-   TUI 를 엽니다.
-2. 기본으로 떠 있는 Keeper 는 `imp` 이고, `activation_mode = "manual"`,
-   `sandbox_profile = "docker"`, `sandbox_image = "base"`,
-   `network_mode = "inherit"` 입니다.
+   `--prefix`를 바꿨다면 그 실행 파일 경로를 사용합니다. setup은 설치 때 선택한
+   작업 공간을 사용합니다. 직접 지정하려면 같은 디렉터리로
+   `--base-path /path/to/your/workspace`를 덧붙이세요. 선택한 모델과 샌드박스를
+   확인하고, 서버와 `imp`를 준비하며 선택적 호스트 도구를 안내한 뒤 TUI를 엽니다.
+2. 첫 Keeper는 `imp`입니다. 설정 화면에서 실행 환경을 고르기 전 새 설정의
+   기본값은 `activation_mode = "manual"`, `sandbox_profile = "docker"`,
+   `sandbox_image = "base"`, `network_mode = "inherit"`입니다.
+   설정 중 다른 샌드박스를 선택할 수 있습니다.
 
 **다음으로 가는 신호:** TUI 가 열리고 `imp` 의 채팅 입력란이 보입니다.
 **막히면:** `masc doctor --base-path <dir>` 로 준비 상태를 봅니다. Keeper 가 멈춘

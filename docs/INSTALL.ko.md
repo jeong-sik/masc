@@ -169,14 +169,15 @@ bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 먼저 GitHub Releases 에 그 태그가 있는지 확인하세요.
 
 ```bash
-TAG=v0.59.0
+TAG=v0.60.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 ```
 
-태그에서 받은 `install.sh`는 그 태그의 자산을 설치하고, `--version`이 없으면
-설치기가 최신 릴리스를 찾습니다.
+태그의 설치기를 내려받기만 해서는 설치 버전이 고정되지 않습니다. 위처럼
+`--version "$TAG"`도 지정해야 합니다. 생략하면 설치기가 최신 릴리스를 찾습니다.
+예시는 게시된 v0.60.0을 고정하며, `main` 문서에는 그 릴리스에 없는 변경이 있을 수 있습니다.
 
 셸 PATH 변경에 동의한 경우 새 터미널에서 `masc`가 잡힙니다. 그 외에는 설치
 디렉터리를 PATH에 직접 추가하세요. 기본 경로라면
@@ -192,7 +193,7 @@ workspace를 제안합니다. 명시한 `--base-path`는 질문 없이 사용하
 터미널에서 설치하면서 workspace 설정을 새로 만들 때, 그 workspace를 이후 `masc`가 찾는
 기본값으로 기록합니다. 기존 설정을 유지하는 재설치는 기록된 기본값을 건드리지 않습니다. 터미널
 없이 스크립트로 설치하면 기록하지 않으므로, 검증이나 CI 설치가 이 컴퓨터의 기본값을 바꾸지 않습니다. 설치 위치와
-작업 데이터 위치는 독립적입니다. 릴리스 페이지의 `install.sh`는 해당 버전의 자산을 설치하며, 설치기 수정은
+작업 데이터 위치는 독립적입니다. `--version`을 지정하면 해당 버전의 자산을 설치하며, 설치기 수정은
 릴리스 노트에 소스 커밋과 함께 기록합니다. 바이너리 태그는 바꾸지 않습니다.
 체크섬이 없거나 불일치하면 설치를 중단합니다.
 

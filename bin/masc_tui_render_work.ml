@@ -239,7 +239,8 @@ let render_work_tasks (state : state) =
     ~title:(screen_title " MASC Work / Tasks")
     ~hints:Masc_tui_keys.footer_hints_work_tasks
     ~body:(fun ~budget c ->
-      Option.iter c.push (local_source_pending_note state Local_work);
+      let pending_note = local_source_pending_note state Local_work in
+      Option.iter c.push pending_note;
       (match state.local_workspace, state.task_flow with
        | Local_workspace_unread, _ ->
            c.push "  Active tasks · not observed"
@@ -271,7 +272,10 @@ let render_work_tasks (state : state) =
        | [] -> ()
        | reasons -> c.push ("  Coverage: " ^ String.concat " · " reasons));
       c.push_divider ();
-      let header_rows = 3 + (if reasons = [] then 0 else 1) in
+      let header_rows =
+        3 + (if Option.is_some pending_note then 1 else 0)
+        + (if reasons = [] then 0 else 1)
+      in
       let count = List.length rows in
       let room = work_tasks_room ~budget ~header_rows ~count in
       if budget > header_rows && rows = [] && Option.is_some state.task_flow then

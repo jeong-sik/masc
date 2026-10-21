@@ -57,7 +57,8 @@ let scenario () =
         let lane=Runtime_schema.addon_lane ~declaration_id:"native" ~output:"plan" |> ok in
         ignore (F.publish_registry ~lane_id:(Runtime_schema.exact_lane_key (Runtime_schema.Addon lane))
           ~slot_ids:["loopback"] (F.resolver_snapshot ~source:root [{F.id="loopback";base_url=server.base_url}]));
-        R.register_exact_runner (Server_lane_addon_exact.runner ~base_path:root);
+        R.register_exact_runner ~validate_request:(Server_lane_addon_exact.validate_request ~base_path:root)
+          (Server_lane_addon_exact.runner ~base_path:root);
         let config=Workspace.default_config root in
         let script=Filename.concat root "worker.py" and manifest=Filename.concat root "package.toml" in
         write script worker;

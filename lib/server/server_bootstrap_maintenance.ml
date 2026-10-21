@@ -339,7 +339,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Lane_addon_runtime.register_skill_export_handler
     Server_skill_snapshot_runtime.publish_lane_skills;
   Server_lane_addon_sampling.register ~config ~net:env#net;
-  Lane_addon_runtime.register_exact_runner (Server_lane_addon_exact.runner ~base_path:config.base_path);
+  Lane_addon_runtime.register_exact_runner
+    ~validate_request:(Server_lane_addon_exact.validate_request ~base_path:config.base_path)
+    (Server_lane_addon_exact.runner ~base_path:config.base_path);
   Lane_addon_runtime.register_github_reader
     (Server_repository_pulls.lane_addon_github ~now:Time_compat.now
        ~http_post:Server_repository_pulls.default_http_post ~config);

@@ -70,7 +70,7 @@ let with_case f =
        let store = Lane_addon_store.create ~root:(Filename.concat base_path "lane-addons") in
        f ~sw ~net ~clock ~base_path ~store)
 
-let publish ?(cli_slots = []) ~base_path targets =
+let publish ?(lane_id = lane_id) ?(cli_slots = []) ~base_path targets =
   ignore
     (F.publish_registry ~lane_id
        ~slot_ids:(List.map (fun (target : F.target_fixture) -> target.id) targets)
@@ -80,7 +80,7 @@ let publish ?(cli_slots = []) ~base_path targets =
 
 let run_request ?(package=package) ?runner ?schema ?messages ~base_path ~store id =
   let runner = Option.value runner ~default:(Server_lane_addon_exact.runner ~base_path) in
-  match Exact.run ~store ~declaration_id ~package ~runner (request ?schema ?messages id) with
+  match Exact.run ~validate_request:(Server_lane_addon_exact.validate_request ~base_path) ~store ~declaration_id ~package ~runner (request ?schema ?messages id) with
   | Ok attempt -> attempt
   | Error detail -> fail detail
 
@@ -284,6 +284,183 @@ let test_requested_shape_advances_http_without_replacing_baseline () =
     check int "first candidate dispatched once" 1 (F.post_count wrong);
     check int "second candidate dispatched once" 1 (F.post_count right))
 
+module Capture = Workspace_memory_execution_capture
+module Curator = Server_workspace_memory_addon_validation
+module Ledger = Workspace_memory_ledger
+module Request = Workspace_memory_request
+module Briefing = Workspace_memory_briefing
+module Owner = Lane_addon_tool_request_owner
+let get = function Ok value -> value | Error detail -> fail detail
+let captured_prompt effective : Prompt_registry.prompt_resolution =
+  { effective; source=Prompt_registry.Override; file_value=None; override_value=Some effective;
+    file_path=None; file_exists=false; has_override=true }
+let destination : Capture.destination =
+  { installation_id=Owner.installation_id (Owner.Configuration declaration_id);
+    package_id=Curator.package_id; tool=Curator.tool;
+    source_revision="original-source"; configuration_revision="original-selection" }
+let curator_package = {package with id=Curator.package_id; exact_outputs=List.map
+  (fun name -> {Types.name; schema=`Assoc ["type", `String "object"];
+    request_schema=Types.Consumer_request_schema}) ["classification";"briefing"]}
+let retain_capture ~store capture =
+  Owner.retain ~store ~scope:Capture.scope
+    ~request_id:(Capture.Request_id.to_string (Capture.request_id capture))
+    ~installation_id:destination.installation_id ~package_id:destination.package_id
+    ~tool:destination.tool ~request:(Capture.to_json capture)
+  |> Result.map_error Owner.error_to_string |> get
+let classification_capture ~base_path =
+  let workspace = get (Capture.observe_workspace ~base_path) in
+  let claim="An original source fact" in
+  let fact : Ledger.pending_fact =
+    {fact=Ledger.Ordinary {keeper_id="writer";claim_sha256=Lane_addon_store.digest claim};claim} in
+  let prompt=captured_prompt "Classify the original facts: {{workspace_memory_changes}}" in
+  let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
+    prompt ["workspace_memory_changes",Yojson.Safe.to_string input] in
+  let batch=match Request.prepare ~neighbor_limit:0 ~render ~ledger:Ledger.empty ~current:[fact] ~pending:[fact]
+    |> Result.map_error Request.error_to_string |> get with
+    | Some batch -> batch | None -> fail "one original fact needs classification" in
+  let capture=Capture.classification ~request_id:(Capture.Request_id.fresh ()) ~workspace ~destination
+    ~prompt ~ledger:Ledger.empty ~batch |> get in
+  let good=`Assoc ["decisions",`List [`Assoc ["fact_id",`String (Request.fact_id fact.fact);
+    "kind",`String "create_claim";"value",`String "A host-validated claim"]]] in
+  capture,good,`Assoc ["decisions",`List []]
+let run_curator ?runner ~base_path ~store request =
+  let runner=Option.value runner ~default:(Server_lane_addon_exact.runner ~base_path) in
+  Exact.run ~store ~declaration_id ~package:curator_package ~runner
+    ~validate_request:(Server_lane_addon_exact.validate_request ~base_path) request
+
+let test_original_curator_semantics_advance_http_and_survive_reopen () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let capture,good,bad=classification_capture ~base_path in
+    retain_capture ~store capture;
+    let request=get (Curator.request capture) in
+    let wrong=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response bad)) in
+    let right=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response good)) in
+    publish ~lane_id:"quiz/classification" ~base_path
+      [{F.id="wrong-facts";base_url=wrong.base_url};{F.id="original-facts";base_url=right.base_url}];
+    (match answered_by (get (run_curator ~base_path ~store request)) with
+     | Some (answer,slot,_) ->
+       check bool "only a complete original fact decision is accepted" true (answer=good);
+       check string "domain rejection advances inside the same HTTP walk" "original-facts" slot
+     | None -> fail "valid original fact decision must answer");
+    let reopened=Lane_addon_store.create ~root:(Lane_addon_store.root store) in
+    check bool "reopened original capture and final answer are reused" true
+      (answered_by (get (run_curator ~base_path ~store:reopened request)) <> None);
+    check int "invalid candidate was sent once" 1 (F.post_count wrong);
+    check int "accepted candidate is not dispatched again" 1 (F.post_count right);
+    let owner=Owner.load ~store:reopened ~scope:Capture.scope ~request_id:request.request_id
+      |> Result.map_error Owner.error_to_string |> get in
+    match owner with
+    | Some retained ->
+      check bool "validation has no host commit authority" true
+        (Lane_addon_request_progress.phase retained.progress=Lane_addon_request_progress.Captured)
+    | None -> fail "original host capture disappeared")
+
+let test_original_curator_semantics_advance_the_cli_tail () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let capture,good,_=classification_capture ~base_path in
+    let bad=match good with
+      | `Assoc [("decisions",`List [`Assoc fields])] ->
+        `Assoc ["decisions",`List [`Assoc (("kind",`String "join_claim")::
+          ("value",`String "absent-original-claim")::
+          List.remove_assoc "value" (List.remove_assoc "kind" fields))]]
+      | _ -> fail "one original classification row expected" in
+    retain_capture ~store capture;
+    let wrong=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response bad)) in
+    publish ~lane_id:"quiz/classification" ~base_path
+      ~cli_slots:[F.cli_primary_runtime;F.cli_secondary_runtime] [{F.id="http";base_url=wrong.base_url}];
+    let prompts=ref [] in
+    let cli_runner : Keeper_lane_cli_oneshot.runner = fun ~runtime_id ~system_prompt:_ ~output_schema:_ ~prompt ->
+      prompts := (runtime_id,prompt)::!prompts;
+      Ok (Yojson.Safe.to_string (if runtime_id=F.cli_primary_runtime then bad else good)) in
+    let runner=Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner in
+    let request=get (Curator.request capture) in
+    (match answered_by (get (run_curator ~runner ~base_path ~store request)) with
+     | Some (_,slot,_) -> check string "CLI semantic rejection reaches the next admitted client"
+         F.cli_secondary_runtime slot
+     | None -> fail "the next CLI's complete original decision must answer");
+    check (list string) "original CLI order remains within one request"
+      [F.cli_primary_runtime;F.cli_secondary_runtime] (List.rev_map fst !prompts);
+    let requirement=Agent_core.Exact_output.make_output_requirement ~schema:(Capture.output_schema capture)
+      ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
+    let original_prompt=Capture.rendered_prompt capture ^ "\n\n"
+      ^ Agent_core.Exact_output.schema_instruction_text requirement in
+    check bool "both clients receive the complete captured prompt and common schema instruction" true
+      (List.for_all (fun (_,prompt) -> prompt=original_prompt) !prompts);
+    check int "the HTTP candidate was attempted once" 1 (F.post_count wrong))
+
+let test_curator_authority_is_required_before_dispatch_and_replay () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let capture,good,_=classification_capture ~base_path in
+    let request=get (Curator.request capture) in
+    let server=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response good)) in
+    publish ~lane_id:"quiz/classification" ~base_path [{F.id="only";base_url=server.base_url}];
+    check bool "a package name cannot grant missing host authority" true
+      (Result.is_error (run_curator ~base_path ~store request));
+    check int "missing capture sends nothing" 0 (F.post_count server);
+    retain_capture ~store capture;
+    let changed=Exact.request_to_json request |> function
+      | `Assoc fields -> get (Exact.request_of_json (`Assoc
+          (("messages",`List [user "A replacement prompt"])::List.remove_assoc "messages" fields)))
+      | _ -> fail "original request must be an object" in
+    check bool "worker cannot replace captured prompt bytes" true
+      (Result.is_error (run_curator ~base_path ~store changed));
+    check bool "worker cannot transfer this capture to another installation" true
+      (Result.is_error (Exact.run ~store ~declaration_id:"another" ~package:curator_package
+        ~runner:(Server_lane_addon_exact.runner ~base_path)
+        ~validate_request:(Server_lane_addon_exact.validate_request ~base_path) request));
+    check bool "relabeling the package does not bypass an original Curator capture" true
+      (Result.is_error (Exact.run ~store ~declaration_id
+        ~package:{curator_package with id="another-package"}
+        ~runner:(Server_lane_addon_exact.runner ~base_path)
+        ~validate_request:(Server_lane_addon_exact.validate_request ~base_path) request));
+    check int "refusals do not enter the provider" 0 (F.post_count server);
+    ignore (get (run_curator ~base_path ~store request) : Exact.attempt);
+    let other=Filename.concat base_path "other-workspace" in Unix.mkdir other 0o700;
+    check bool "retained answers require the original physical workspace too" true
+      (Result.is_error (run_curator ~base_path:other ~store request));
+    check bool "authority restoration reuses the original terminal" true
+      (answered_by (get (run_curator ~base_path ~store request)) <> None);
+    check int "no provider replay follows authority refusal" 1 (F.post_count server))
+
+let test_retained_schema_only_curator_answer_is_not_a_domain_judgment () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let capture,_,bad=classification_capture ~base_path in
+    retain_capture ~store capture;
+    let request=get (Curator.request capture) in
+    let server=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response bad)) in
+    publish ~lane_id:"quiz/classification" ~base_path [{F.id="only";base_url=server.base_url}];
+    let runner=Server_lane_addon_exact.runner ~base_path in
+    (* Seed a real retained schema-only result as produced without the host
+       semantic port. It must not gain domain authority when read later. *)
+    ignore (get (Exact.run ~store ~declaration_id ~package:curator_package ~runner
+      ~validate_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ -> Ok (fun _ -> Ok ())) request) : Exact.attempt);
+    (match get (run_curator ~base_path ~store request) with
+     | Exact.Final (Exact.Call_final (Exact.Invalid_output _)) -> ()
+     | _ -> fail "schema-only terminal is not a complete captured decision");
+    check int "invalid retained terminal is not retried" 1 (F.post_count server))
+
+let test_curator_briefing_semantics_reject_blank_before_acceptance () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let prompt=captured_prompt "Summarize the original pass: {{workspace_memory_briefing}}" in
+    let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_briefing
+      prompt ["workspace_memory_briefing",Yojson.Safe.to_string input] in
+    let sources=[{Briefing.id="claim-a";kind=Briefing.Claim;text="Original complete source"}] in
+    let batch=match get (Briefing.prepare ~sources ~contract:(Briefing.contract ~template:prompt.effective)
+      ~render Briefing.empty) with
+      | Briefing.Prepared batch -> batch
+      | Briefing.Unchanged | Briefing.Cleanup _ -> fail "original briefing pass expected" in
+    let capture=Capture.briefing ~request_id:(Capture.Request_id.fresh ())
+      ~workspace:(get (Capture.observe_workspace ~base_path)) ~destination ~prompt ~batch |> get in
+    retain_capture ~store capture;
+    let wrong=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response (`Assoc ["briefing",`String " "]))) in
+    let right=F.start_server ~sw ~net ~clock
+      (F.Reply (F.openai_response (`Assoc ["briefing",`String "The original completed summary"]))) in
+    publish ~lane_id:"quiz/briefing" ~base_path
+      [{F.id="blank";base_url=wrong.base_url};{F.id="original-summary";base_url=right.base_url}];
+    match answered_by (get (run_curator ~base_path ~store (get (Curator.request capture)))) with
+    | Some (_,slot,_) -> check string "briefing full-domain validation advances" "original-summary" slot
+    | None -> fail "nonblank original summary must answer")
+
 let () =
   run "lane add-on exact runner"
     [ ( "runner"
@@ -300,4 +477,9 @@ let () =
         ; test_case "the cli tail answers after the http slots" `Quick test_the_cli_tail_answers_after_the_http_slots
         ; test_case "HTTP preserves conversation roles" `Quick test_http_preserves_conversation_roles
         ; test_case "CLI refuses assistant history before dispatch" `Quick test_cli_refuses_assistant_without_dispatch
-        ; test_case "request shape advances HTTP without replacing baseline" `Quick test_requested_shape_advances_http_without_replacing_baseline ] ) ]
+        ; test_case "request shape advances HTTP without replacing baseline" `Quick test_requested_shape_advances_http_without_replacing_baseline
+        ; test_case "original Curator facts advance HTTP and survive reopen" `Quick test_original_curator_semantics_advance_http_and_survive_reopen
+        ; test_case "original Curator semantics advance CLI tail" `Quick test_original_curator_semantics_advance_the_cli_tail
+        ; test_case "Curator authority precedes dispatch and replay" `Quick test_curator_authority_is_required_before_dispatch_and_replay
+        ; test_case "schema-only retained Curator answer has no domain authority" `Quick test_retained_schema_only_curator_answer_is_not_a_domain_judgment
+        ; test_case "Curator briefing rejects blank before acceptance" `Quick test_curator_briefing_semantics_reject_blank_before_acceptance ] ) ]

@@ -148,17 +148,29 @@ type runner = lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_
     (package baseline or request schema). The supplied [validate] still checks
     the package baseline independently. It sends nothing; the returned [call] does. *)
 
+type validation_authority =
+  store:Lane_addon_store.t -> declaration_id:string -> package:Lane_addon_types.package ->
+  request -> (Yojson.Safe.t -> (unit, string) result, string) result
+(** Trusted host binding to an original consumer's pure domain validator.
+    Resolution may read host-owned state; the returned validator must perform
+    no effects. A worker cannot supply this port or disable it through Hooks.
+    [Error] refuses both dispatch and delivery without replacing the original
+    result. Authority is resolved again on every [run], including replay. *)
+
 val run :
   store:Lane_addon_store.t ->
   declaration_id:string ->
   package:Lane_addon_types.package ->
   runner:runner ->
+  validate_request:validation_authority ->
   request ->
   (attempt, string) result
 (** Request-schema permission is checked before dispatch and delivery without
     replacing an already retained final. A retained [Answered] is checked against
     the current package baseline and the original request's partial required
-    shape before delivery. One that no longer matches is delivered as
+    shape and trusted consumer semantics before delivery. The same pure checks
+    are supplied inside the original HTTP/CLI candidate walk before acceptance.
+    One that no longer matches is delivered as
     [Invalid_output] and the provider is not called again.
 
     Request identity is checked before output selection. A refused output

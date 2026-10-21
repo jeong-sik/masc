@@ -681,6 +681,7 @@ export function SkillsPanel() {
   const asyncObservationError = useSignal<string | null>(null)
   const expanded = useSignal<string | null>(null)
   const evidence = useSignal<Record<string, SkillEvidenceResponse>>({})
+  const evidenceErrors = useSignal<Record<string, string>>({})
   const evidenceLoading = useSignal<string | null>(null)
   const createOpen = useSignal(false)
   const createKind = useSignal<'instruction' | 'composition'>('instruction')
@@ -842,9 +843,12 @@ export function SkillsPanel() {
                       <div class="mb-2 flex items-center justify-between"><strong>Retained evidence</strong><button class="ss-btn" type="button" disabled=${evidenceLoading.value === rowKey} onClick=${async () => {
                         if (!row.surface) return
                         evidenceLoading.value = rowKey
+                        evidenceErrors.value = { ...evidenceErrors.value, [rowKey]: '' }
                         try { evidence.value = { ...evidence.value, [rowKey]: await fetchSkillEvidence(row.surface.reference) } }
+                        catch (cause) { evidenceErrors.value = { ...evidenceErrors.value, [rowKey]: cause instanceof Error ? cause.message : String(cause) } }
                         finally { evidenceLoading.value = null }
                       }}>${evidenceLoading.value === rowKey ? 'Loading…' : 'Load'}</button></div>
+                      ${evidenceErrors.value[rowKey] ? html`<div role="alert" class="text-[var(--color-status-err)]">${evidenceErrors.value[rowKey]}</div>` : null}
                       <${SkillEvidenceView} result=${evidence.value[rowKey] ?? null} />
                     </div>
                   </div>

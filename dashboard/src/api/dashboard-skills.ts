@@ -483,6 +483,7 @@ const ToolResultSchema = Schema.Union(ToolOutputResultSchema, ToolFailedResultSc
 const CompositionNodeSchema = Schema.Struct({
   node_id: Schema.NonEmptyString,
   execution_id: Schema.NonEmptyString,
+  execution_origin: Schema.Literal('fresh_dispatch', 'retained_completion', 'dispatch_refused'),
   tool_name: Schema.NonEmptyString,
   input: Schema.Unknown,
   schedule: Schema.Struct({
@@ -542,6 +543,7 @@ const SkillInvocationSchema = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal('composition'),
     origin: Schema.Union(TaskCompositionOriginSchema, SessionCompositionOriginSchema),
+    execution_id: Schema.NonEmptyString,
     tool_name: Schema.NonEmptyString,
   }),
   Schema.Struct({

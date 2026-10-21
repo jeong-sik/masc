@@ -96,8 +96,10 @@ const LANE_MEANING: Record<LaneKey, Record<string, (live: boolean) => string>> =
   turn: {
     idle: (live) => live ? '턴은 열려 있지만 지금 하는 일이 없다' : '지금 맡은 턴이 없다',
     prompting: () => '무엇을 할지 정리해 모델에 넘길 준비 중',
+    routing: () => '어떤 모델로 부를지 고르는 중',
     executing: () => '모델을 부르거나 도구를 쓰는 중',
     finalizing: () => '결과를 저장하고 턴을 닫는 중',
+    exhausted: () => '쓸 수 있는 모델이 없어 턴이 끝났다 — 사람이 손대야 한다',
   },
   decision: {
     undecided: (live) => live ? '아직 무엇을 할지 정하지 않았다' : '진행 중인 턴이 없어 정할 것도 없다',
@@ -123,8 +125,10 @@ const LANE_MEANING_DEV: Record<LaneKey, Record<string, (live: boolean) => string
   turn: {
     idle: (live) => live ? 'turn context 존재하지만 work 미진행' : '진행 중인 turn 없음',
     prompting: () => 'prompt assembly 가 turn input 준비 중',
+    routing: () => 'provider routing 이 다음 execution path 선택 중',
     executing: () => 'model/tool execution work 안에 있음',
     finalizing: () => '결과 seal + 다음 idle snapshot 준비 중',
+    exhausted: () => 'runtime 옵션 모두 소진 — turn 종료, 사용 가능한 path 없음',
   },
   decision: {
     undecided: (live) => live ? 'decision work 미커밋' : '진행 중인 turn 이 없어 결정 단계 없음',

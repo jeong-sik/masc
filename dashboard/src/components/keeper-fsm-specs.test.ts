@@ -6,7 +6,11 @@ import {
   turnFsmTlaSymbol,
   TURN_FSM_STATES,
 } from './keeper-fsm-specs'
-import { serverRuntimeStates } from './keeper-runtime-wire-states.test-fixture'
+import {
+  serverDecisionStages,
+  serverRuntimeStates,
+  serverTurnPhases,
+} from './keeper-runtime-wire-states.test-fixture'
 
 // State alphabets the dashboard renders. These must stay in lockstep with
 // the OCaml runtime: KSM ← keeper_state_machine.ml `type phase` (8 ctors),
@@ -62,10 +66,14 @@ describe('buildCompositeFsmSpec', () => {
     expect(ids).toEqual(KCL_STATES)
   })
 
-  it('creates the KCL cluster from the runtime states the server sends', () => {
+  it.each([
+    ['KTC', serverTurnPhases],
+    ['KDP', serverDecisionStages],
+    ['KCL', serverRuntimeStates],
+  ] as const)('creates the %s cluster from the states the server sends', (axis, serverStates) => {
     const spec = buildCompositeFsmSpec(defaultParams)
-    const ids = spec.nodes.filter(n => n.parent === 'KCL').map(n => n.id.split(':')[1]!)
-    expect([...ids].sort()).toEqual([...serverRuntimeStates()].sort())
+    const ids = spec.nodes.filter(n => n.parent === axis).map(n => n.id.split(':')[1]!)
+    expect([...ids].sort()).toEqual([...serverStates()].sort())
   })
 
   it('total node count = 4 parents + 22 children = 26', () => {

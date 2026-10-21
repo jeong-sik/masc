@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest'
 import type { DashboardScheduledAutomationRequest } from '../../api'
 import type { KeeperLifecycleEvent } from '../../api/keeper'
 import type { CompositeObservation, SwimlaneSegment } from '../fsm-hub-types'
-import { serverRuntimeStates } from '../keeper-runtime-wire-states.test-fixture'
+import {
+  serverDecisionStages,
+  serverRuntimeStates,
+  serverTurnPhases,
+} from '../keeper-runtime-wire-states.test-fixture'
 import { queueDrainStatusOf } from '../schedule/queue-drain-status'
 import {
   DRAIN_PRESENT,
@@ -105,10 +109,14 @@ describe('laneReading', () => {
     expect(laneValueTone('brand_new_state')).toBe('info')
   })
 
-  it('reads every runtime state the server sends from the closed vocabulary', () => {
-    const fallback = laneReading([observation(NOW - 10, { runtime: 'brand_new_state' })], 'runtime', false, NOW)
-    for (const state of serverRuntimeStates()) {
-      const reading = laneReading([observation(NOW - 10, { runtime: state })], 'runtime', false, NOW)
+  it.each([
+    ['turn', serverTurnPhases],
+    ['decision', serverDecisionStages],
+    ['runtime', serverRuntimeStates],
+  ] as const)('reads every %s state the server sends from the closed vocabulary', (lane, serverStates) => {
+    const fallback = laneReading([observation(NOW - 10, { [lane]: 'brand_new_state' })], lane, false, NOW)
+    for (const state of serverStates()) {
+      const reading = laneReading([observation(NOW - 10, { [lane]: state })], lane, false, NOW)
       expect(reading?.meaning, state).not.toBe(fallback?.meaning)
       expect(laneValueLabel(state), state).not.toBe(state)
     }

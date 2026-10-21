@@ -46,13 +46,18 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     ksm_restarting --> ksm_running
   end
 
-  %% ─ KTC (Turn cycle, 4 states) ──────────────────────────
+  %% ─ KTC (Turn cycle, 6 states) ──────────────────────────
   subgraph KTC ["턴 · KTC"]
     direction LR
     ktc_idle["idle"] --> ktc_prompting["prompting"]
     ktc_prompting --> ktc_executing["executing"]
+    ktc_prompting --> ktc_routing["routing"]
+    ktc_routing --> ktc_executing
+    ktc_executing --> ktc_routing
     ktc_executing --> ktc_finalizing["finalizing"]
     ktc_finalizing --> ktc_idle
+    ktc_routing --> ktc_exhausted["exhausted"]
+    ktc_executing --> ktc_exhausted
   end
 
   %% ─ KDP (Decision pipeline, 3 states) ───────────────────
@@ -85,8 +90,8 @@ const MERMAID_COMPOSITE: string = `flowchart TB
 
   class ksm_stopped terminal
   class ksm_running,ksm_paused,ktc_idle,kcl_idle stable
-  class ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_finalizing,kcl_routing,kcl_executing motion
-  class ksm_failing,ksm_crashed,kcl_exhausted error
+  class ksm_draining,ksm_restarting,ktc_prompting,ktc_routing,ktc_executing,ktc_finalizing,kcl_routing,kcl_executing motion
+  class ksm_failing,ksm_crashed,ktc_exhausted,kcl_exhausted error
 `
 
 /**

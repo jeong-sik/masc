@@ -10,7 +10,7 @@ import { arrangementFromPhrase, arrangementFromMidiSource } from '../phrase-arra
 import * as editor from '../sequencer-editor.mjs'
 import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo } from '../midi-source-editor.mjs'
 import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
-import { harmonyAt, PPQ } from '../sequencer-project.mjs'
+import { harmonyAt, PPQ, GM_DRUM_CHANNEL } from '../sequencer-project.mjs'
 import { MidiSourcePicker as SourcePicker } from '../midi-source-picker.mjs'
 import { sourceSecondsAtTick, sourceTickAtSeconds } from '../midi-source-playback.mjs'
 import { isFluidSound } from '../soundfont.mjs'
@@ -55,7 +55,7 @@ async function controller(options = {}) {
     snapshotWriter: () => async value => { observed.snapshots.push(value) },
     captureVstSound(selection) { observed.soundCaptures.push(selection); return options.capture?.(selection) ?? { promise: Promise.resolve(frozenSound(selection)), cancel() {} } },
     renderVstPhrase(value) { observed.native.push(value); return options.native(value) },
-    isFluidSound,
+    isFluidSound, GM_DRUM_CHANNEL,
     captureFluidSound() { throw new Error('Unexpected FluidSynth selection') },
     renderFluidSound() { throw new Error('Unexpected FluidSynth render') },
     mkdtemp: async () => '/synthetic-temp', rm: async () => {},

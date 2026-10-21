@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto'
 import { emitKeypressEvents } from 'node:readline'
 import { Worker } from 'node:worker_threads'
 import { Note } from 'tonal'
+import { GM_DRUM_CHANNEL } from './sequencer-project.mjs'
 import { newEditor, editorCommand, editorAction, selectedNote, selectedNotes, editorView, editorAxis, editorHarmony, editorSound, stepInputEffect } from './sequencer-editor.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
@@ -58,6 +59,7 @@ const help = [
   ':loop START END selects and enables repetition; l toggles it while retaining the range.',
   ':transpose -12    :quantize 0.25    :duplicate 8   (selected track)',
   ':track-add Bass    :track 2    :program 33    :rename Bass',
+  ':drum-track Drums creates GM channel 10; :note 36 0 0.25 100 inserts a drum hit',
   ':level 100    :pan 64        track level and pan, each 0–127',
   ':cursor 4 C3    :title My phrase    :undo    :redo    :mute    :solo',
   ':save-as /path/song.json    :export /path/song.mid    :wave /path/song.wav',
@@ -192,12 +194,14 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (closed || suspended) return
     const rows = process.stdout.rows || 24, cols = Math.max(1, (process.stdout.columns || 80) - 8)
     const project = editorView(editor), axis = editorAxis(editor), per = axis.per, track = project.tracks[editor.track], current = selectedNote(editor)
+    const percussion = editor.project.kind !== 'midi-source' && track.channel === GM_DRUM_CHANNEL
+    const noteName = pitch => percussion ? String(pitch) : Note.fromMidi(pitch)
     const selection = new Set(selectedNotes(editor).map(note => note.id))
     const at = editorHarmony(editor)
     const lines = [
       `${project.title}${dirty() ? ' *' : ''} · ${project.timingLabel ?? `${project.tempo} BPM`} · ${project.meter.join('/')} · ${(project.displayLength ?? project.length) / per} ${axis.label} · ${stepInput?.kind === 'practice-input' ? 'practicing' : transport.kind}${loop ? ' · LOOP' : ''}`,
-      `Track ${editor.track + 1}/${project.tracks.length}: ${track.name} · ${track.detail ?? `ch ${track.channel + 1} · program ${track.program} · level ${track.level} · pan ${track.pan}`}${track.muted ? ' · MUTED' : ''}${track.solo ? ' · SOLO' : ''} · ${track.notes.length} notes`,
-      `Cursor ${editor.tick / per} · ${Note.fromMidi(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · input length ${editor.duration / per} · velocity ${current?.velocity ?? editor.velocity}${selection.size ? ` · ${selection.size} selected` : ''}${editor.noteClipboard ? ` · ${editor.noteClipboard.notes.length} copied` : ''}`,
+      `Track ${editor.track + 1}/${project.tracks.length}: ${track.name} · ${percussion ? 'GM drums · ' : ''}${track.detail ?? `ch ${track.channel + 1} · program ${track.program} · level ${track.level} · pan ${track.pan}`}${track.muted ? ' · MUTED' : ''}${track.solo ? ' · SOLO' : ''} · ${track.notes.length} notes`,
+      `Cursor ${editor.tick / per} · ${noteName(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · input length ${editor.duration / per} · velocity ${current?.velocity ?? editor.velocity}${selection.size ? ` · ${selection.size} selected` : ''}${editor.noteClipboard ? ` · ${editor.noteClipboard.notes.length} copied` : ''}`,
       `Chord candidates: ${at.candidates.join(' / ') || '—'} · ${at.notes.join(' ')} · ${stepInput ? `${stepInput.kind === 'practice-input' ? 'MIDI practice' : 'MIDI step'} · ${stepHeld} held · ` : ''}${status}`,
     ]
     if (sourcePicker.view) {
@@ -285,7 +289,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         }
         const cursor = Math.floor((editor.tick - first) / editor.step)
         if (pitch === editor.pitch) cells[cursor] = current ? '◆' : '◇'
-        lines.push(`${Note.fromMidi(pitch).padStart(5)}  ${cells.join('')}`)
+        lines.push(`${noteName(pitch).padStart(5)}  ${cells.join('')}`)
       }
       const instrument = audioInstrument().kind === 'vst' ? `VST ${audioInstrument().selection.name}` : isFluidSound(audioInstrument())
         ? `FluidSynth ${audioInstrument().engine.version} · ${audioInstrument().font.name} · MIDI control ${audioInstrument().engine.controlFrames} samples` : audioInstrument().kind === 'soundfont' ? 'SoundFont' : 'choose instrument'

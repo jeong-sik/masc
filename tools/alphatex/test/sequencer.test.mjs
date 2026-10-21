@@ -80,7 +80,7 @@ test('extended inversions retain the selected bass and unsupported rootless choi
   assert.throws(() => edit(original, { kind: 'progression', symbols: ['Dm7', 'Cmaj7/B'], mode: 'rootless', start: 0, duration: PPQ, velocity: 80 }), /explicit slash-chord bass/)
   assert.deepEqual(original, newProject())
 })
-test('MIDI duration and melodic channel boundaries cannot silently wrap or become drums', () => {
+test('MIDI duration and melodic channel allocation cannot silently wrap or become drums', () => {
   let project = newProject()
   project.length = project.loop.end = 0x0fffffff
   const midi = new JZZ.MIDI.SMF(projectMidi(project))
@@ -94,8 +94,10 @@ test('MIDI duration and melodic channel boundaries cannot silently wrap or becom
   const before = structuredClone(project)
   assert.throws(() => edit(project, { kind: 'track', name: 'Extra voice' }), /15 melodic MIDI channels/)
   assert.deepEqual(project, before)
-  project.tracks[0].channel = 9
-  assert.throws(() => projectMidi(project), /percussion/)
+  project = edit(project, { kind: 'drum-track', name: 'Drums' })
+  assert.equal(project.tracks.length, 16)
+  assert.equal(project.tracks.at(-1).channel, 9)
+  assert.equal(new JZZ.MIDI.SMF(projectMidi(project)).length, 17)
 })
 test('multitrack mute/solo and loop clipping match the MIDI file schedule', () => {
   let p = chord(newProject(), 'Dm7', { duration: 4 * PPQ })

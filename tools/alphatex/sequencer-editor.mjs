@@ -149,6 +149,7 @@ function runCommand(editor, line) {
     case 'quantize': count(1); edit = { kind: 'quantize', grid: beats(args[0]) }; break
     case 'duplicate': count(1); edit = { kind: 'duplicate', offset: beats(args[0]) }; break
     case 'track-add': count(1, Number.MAX_SAFE_INTEGER); edit = { kind: 'track', name: args.join(' ') }; break
+    case 'drum-track': count(1, Number.MAX_SAFE_INTEGER); edit = { kind: 'drum-track', name: args.join(' ') }; break
     case 'title': count(1, Number.MAX_SAFE_INTEGER); edit = { kind: 'title', value: args.join(' ') }; break
     case 'rename': count(1, Number.MAX_SAFE_INTEGER); edit = { kind: 'track-settings', name: args.join(' ') }; break
     case 'program': count(1); edit = { kind: 'track-settings', program: Number(args[0]) }; break
@@ -185,7 +186,8 @@ function runCommand(editor, line) {
     const voice = next.project.tracks[next.track].notes.find(note => note.id === selected?.id)
     return { editor: voice ? { ...next, pitch: voice.pitch } : next }
   }
-  return { editor: command === 'track-add' ? { ...next, track: next.project.tracks.length - 1 } : next,
+  return { editor: ['track-add', 'drum-track'].includes(command) ? { ...next, track: next.project.tracks.length - 1,
+    ...(command === 'drum-track' ? { pitch: 36 } : {}) } : next,
     ...(command === 'loop' ? { effect: { kind: 'loop' } } : {}) }
 }
 

@@ -421,6 +421,23 @@ intervals and the rootless dictionary. Candidates at the cursor include bass and
 inversions but do not assert a unique harmonic interpretation. `transpose -12`,
 `quantize 0.25` and `duplicate 8` operate on the selected track transactionally.
 
+Add a rhythm part with `:drum-track Drums`. It creates and selects the single
+General MIDI percussion track on channel 10; ordinary `:track-add` continues to
+allocate the other 15 melodic channels. Drum rows show MIDI key numbers. For
+example, `:note 36 0 0.25 110`, `:note 38 1 0.25 100` and
+`:note 42 0.5 0.25 70` place kick, snare and closed hi-hat hits using the
+[GM percussion map](https://midi.org/general-midi). Numeric MIDI keys and note
+names work in `:note` and `:cursor`; GM drum sounds depend on the selected synth
+and kit. The built-in SoundFont and a GM-capable bound FluidSynth font use this
+channel; a selected VST must provide its own compatible drum mapping.
+
+Timing, velocity, level/pan, mute/solo, selection, undo/redo, save/reopen, MIDI/WAV
+export and arrangement handoff retain the drum track. Pitched harmony of an
+authored phrase excludes its drum hits; selected-track harmony and
+chord/progression/revoice commands require a melodic track. Imported original
+MIDI keeps its explicit channel interpretation, including when analyzing channel
+10. This does not infer GM mode from arbitrary MIDI bytes.
+
 For part of a phrase, `:select-notes START END [LOW HIGH]` selects complete notes
 whose onsets lie in `[START, END)` and whose keys lie in the inclusive pitch range
 (for example, `:select-notes 0 4 C3 B4`). It keeps their full lengths, including

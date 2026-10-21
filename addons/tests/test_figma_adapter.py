@@ -207,11 +207,42 @@ class AdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already has a writer"):
             Adapter(self.host, self.api, self.path)
         self.adapter.close()
-        self.api.token = "different-owner"
-        with self.assertRaisesRegex(ValueError, "different endpoints or credentials"):
+        self.api.url = "http://127.0.0.1:3"
+        with self.assertRaisesRegex(ValueError, "endpoint binding does not match"):
             Adapter(self.host, self.api, self.path)
-        self.api.token = Api.token
+        self.api.url = Api.url
         self.adapter = Adapter(self.host, self.api, self.path)
+
+    def test_rotating_both_credentials_retains_uncertain_delivery_without_replay(self):
+        self.api.lose_submit = True
+        with self.assertRaises(TransportError):
+            self.adapter.step()
+        self.adapter.close()
+        self.host.token = "rotated-host-token"
+        self.api.token = "rotated-service-token"
+        self.adapter = Adapter(self.host, self.api, self.path)
+        self.api.finish()
+        self.adapter.step()
+        self.assertEqual(len(self.api.submits), 1)
+        self.assertEqual(len(self.host.receipts), 1)
+        self.assertEqual(self.host.receipts[0]["operation_id"], COMMAND["id"])
+        self.assertEqual(self.host.receipts[0]["worker_boot_id"], "host-boot")
+        self.assertEqual(self.adapter.db.execute("SELECT state FROM deliveries").fetchone()[0], "acknowledged")
+
+    def test_rotating_credentials_retries_retained_result_after_lost_ack(self):
+        self.adapter.step()
+        self.api.finish()
+        self.host.lose_ack = True
+        with self.assertRaises(TransportError):
+            self.adapter.step()
+        first = self.host.receipts[0]
+        self.adapter.close()
+        self.host.token = "rotated-host-token"
+        self.api.token = "rotated-service-token"
+        self.adapter = Adapter(self.host, self.api, self.path)
+        self.adapter.step()
+        self.assertEqual(self.host.receipts, [first, first])
+        self.assertEqual(len(self.api.submits), 1)
 
 
 if __name__ == "__main__":

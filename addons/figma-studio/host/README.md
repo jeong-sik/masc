@@ -41,14 +41,26 @@ the intended document before submitting work. The adapter validates protocol
 and capabilities before dequeuing any work. Unsupported versions fail before
 any Figma operation is submitted.
 
-State is private, has one writer and binds to the configured endpoints and
-credential fingerprints. Changing either identity requires a new directory.
+State is private, has one writer and binds to the configured endpoints.
+Credential rotation retains the same ledger; credentials are not part of its
+durable identity. Each delivery retains its original worker and service identity.
+An endpoint binding mismatch refuses startup without modifying the ledger.
 The ledger records each dequeued request before sending it. A lost reply is
 reconciled by reading its operation ID, never by resubmitting the edit. Readback
 chunks are reassembled with length and digest verification. Results, including
 any required MCP size reduction, are retained before delivery and retried with
 the original worker identity. The independent service and Addon retain their
 own evidence; an adapter restart cannot relabel it for a replacement worker.
+There is a crash gap between receiving a dequeued request and persisting it;
+the adapter cannot recover that request from its ledger if it stops in that gap.
+
+This is a deferred experiment. The current service has no reviewed session
+liveness or remote cancellation contract. Session presence in `/v1/status` does
+not prove the Plugin is connected; absence does not prove a queued operation
+cannot execute. Prepared/dispatched operations remain submitted and are queried
+by operation ID until the service supplies a terminal result. The adapter cannot
+claim closure or prevent delayed edits after reconnect on its own. Do not merge
+or install this experiment as a completed product.
 
 For contract verification, provide a Figma Studio distribution ZIP to
 `addons/tests/figma_studio_integration.py`. The test extracts it outside the

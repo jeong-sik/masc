@@ -1,10 +1,9 @@
-"""Focused liveness tests for the Figma Studio host adapter.
+"""Focused uncertain-operation recovery tests for the Figma Studio host adapter.
 
 Run from this directory: python3 -m unittest test_adapter -v
 """
 
 import json
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -74,44 +73,42 @@ def state_of(adapter, kind, identity):
     return row["state"], json.loads(row["result"]) if row["result"] else None
 
 
-class CloseDeadSessionJobsTest(unittest.TestCase):
-    def setUp(self):
-        self.directory = tempfile.mkdtemp(prefix="figma-adapter-test-")
-        self.adapter = Adapter(FakeClient(), FakeFigma(), Path(self.directory))
+class MissingSessionTest(unittest.TestCase):
+    def test_missing_session_is_not_remote_cancellation(self):
+        for remote_state in ("prepared", "dispatched"):
+            with self.subTest(remote_state=remote_state), tempfile.TemporaryDirectory() as directory:
+                client = FakeClient()
+                figma = FakeFigma(sessions=[], operations={
+                    "op-1": {"service_id": "svc-1", "state": remote_state}})
+                adapter = Adapter(client, figma, Path(directory))
+                try:
+                    submitted(adapter, "plugin", "op-1", session_id="s-gone")
+                    adapter.step()
+                    self.assertEqual(state_of(adapter, "plugin", "op-1"), ("submitted", None))
+                    self.assertEqual(client.delivered, [])
+                finally:
+                    adapter.close()
 
-    def tearDown(self):
-        self.adapter.close()
-
-    def test_closes_only_dead_session_jobs_of_this_boot_and_service(self):
-        submitted(self.adapter, "plugin", "dead", session_id="s-dead")
-        submitted(self.adapter, "plugin", "live", session_id="s-alive")
-        submitted(self.adapter, "plugin", "old-boot", session_id="s-dead", boot="boot-0")
-        submitted(self.adapter, "plugin", "old-service", session_id="s-dead", service="svc-0")
-        submitted(self.adapter, "rest", "rest-job", session_id="s-dead")
-        self.adapter.close_dead_session_jobs("boot-1", "svc-1", {"s-alive"})
-        state, result = state_of(self.adapter, "plugin", "dead")
-        self.assertEqual("result", state)
-        self.assertFalse(result["ok"])
-        self.assertIn("no longer live", result["payload"]["error"])
-        for kind, identity in [("plugin", "live"), ("plugin", "old-boot"),
-                               ("plugin", "old-service"), ("rest", "rest-job")]:
-            state, _ = state_of(self.adapter, kind, identity)
-            self.assertEqual("submitted", state, identity)
-
-    def test_step_closes_jobs_of_vanished_sessions(self):
-        client, figma = FakeClient(), FakeFigma(sessions=[document("s-alive")])
-        adapter = Adapter(client, figma, Path(self.directory) / "step")
-        try:
-            submitted(adapter, "plugin", "op-1", session_id="s-gone")
-            adapter.step()
-            state, result = state_of(adapter, "plugin", "op-1")
-            self.assertEqual("acknowledged", state)
-            self.assertFalse(result["ok"])
-            self.assertIn("no longer live", result["payload"]["error"])
-            self.assertEqual([("op-1", False)],
-                             [(args["operation_id"], args["ok"]) for args in client.delivered])
-        finally:
-            adapter.close()
+    def test_missing_session_can_still_return_a_terminal_operation_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client, figma = FakeClient(), FakeFigma(sessions=[])
+            adapter = Adapter(client, figma, Path(directory))
+            try:
+                submitted(adapter, "plugin", "op-1", session_id="s-gone")
+                adapter.step()
+                self.assertEqual(state_of(adapter, "plugin", "op-1"), ("submitted", None))
+                figma.operations["op-1"] = {
+                    "service_id": "svc-1", "state": "applied",
+                    "result": {"readback_available": True}}
+                result = {"ok": True, "payload": {"completed": [{"node_id": "node-1"}]}}
+                figma.readback = lambda identity: result
+                adapter.step()
+                self.assertEqual(state_of(adapter, "plugin", "op-1"), ("acknowledged", result))
+                self.assertEqual(len(client.delivered), 1)
+                self.assertEqual(client.delivered[0]["operation_id"], "op-1")
+                self.assertTrue(client.delivered[0]["ok"])
+            finally:
+                adapter.close()
 
 
 if __name__ == "__main__":

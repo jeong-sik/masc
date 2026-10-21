@@ -801,6 +801,24 @@ let test_a_host_stop_still_rotates_nowhere () =
     (EC.recoverable_runtime_failure_reason typed = None)
 ;;
 
+let test_unmodeled_completion_keeps_its_contract_boundary () =
+  let error = Agent_core.Provider_failure_attribution.core_error_of_http_error ~provider:"fixture"
+    (Http.ProviderFailure {kind=Http.Empty_completion {stop_reason=Llm_provider.Types.Unknown "future_stop"};
+      message="original diagnostic"})
+    |> Agent_core.Error_domain.of_core_error |> Agent_core.Error_domain.to_core_error in
+  Alcotest.(check bool) "ordinary empty recovery refuses unknown contract" false
+    (EC.is_empty_completion_error error);
+  Alcotest.(check bool) "request is not blamed" false (EC.is_invalid_request_error error);
+  Alcotest.(check bool) "automatic recovery is not inferred" false (EC.is_auto_recoverable_turn_error error);
+  Alcotest.(check bool) "no whole-runtime server-failure classification" true
+    (EC.recoverable_runtime_failure_reason error = None);
+  match Masc.Keeper_runtime_attempt.core_error_to_runtime_outcome error with
+  | Some (Runtime_attempt_fsm.Call_err (Http.ProviderTerminal _ as http_error)) ->
+    Alcotest.(check bool) "candidate walk stops on the contract boundary" false
+      (Runtime_attempt_fsm.should_try_next http_error)
+  | _ -> Alcotest.fail "unmodeled empty response must stop candidate replay"
+;;
+
 let () =
   Alcotest.run
     "keeper_core_error_typed_bridge"
@@ -815,6 +833,8 @@ let () =
             "all core_error cases produce expected wire"
             `Quick
             test_sdk_typed_wire
+        ; Alcotest.test_case "typed unmodeled response refuses replay" `Quick
+            test_unmodeled_completion_keeps_its_contract_boundary
         ; Alcotest.test_case
             "terminal tool errors preserve typed conservative semantics"
             `Quick

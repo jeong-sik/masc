@@ -40,6 +40,7 @@ type terminal_class =
   | Protocol_error
   | Config_mismatch
   | Provider_integration
+  | Unmodeled_empty_completion
   | Terminal_effect_dependency_unavailable
   | Terminal_effect_policy_rejection
   | Terminal_effect_runtime_failure
@@ -349,8 +350,11 @@ let route_of_provider_error (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.CapacityExhausted { retry_after; _ } ->
     observe_retry ?retry_after Provider_capacity
   | Llm_provider.Error.ProviderUnavailable _ -> observe_retry Server_error
-  | Llm_provider.Error.EmptyCompletion { stop_reason; _ } ->
-    observe_retry (Empty_completion { stop_reason })
+  | Llm_provider.Error.EmptyCompletion { stop_reason; detail; _ } ->
+    (match Llm_provider.Retry.verdict_of_empty_completion ~stop_reason ~message:detail with
+     | Empty_attributed -> observe_retry (Empty_completion { stop_reason })
+     | Empty_unattributed _ -> exhaust Unmodeled_empty_completion
+     | Empty_overflow overflow -> route_of_api_error overflow)
   | Llm_provider.Error.ServerError { transient = true; _ } ->
     observe_retry Server_error
   (* The provider said this 5xx is not transient, so the same path answers
@@ -550,6 +554,7 @@ let terminal_class_label = function
   | Protocol_error -> "protocol_error"
   | Config_mismatch -> "config_mismatch"
   | Provider_integration -> "provider_integration"
+  | Unmodeled_empty_completion -> "unmodeled_empty_completion"
   | Terminal_effect_dependency_unavailable ->
     "terminal_effect_dependency_unavailable"
   | Terminal_effect_policy_rejection -> "terminal_effect_policy_rejection"
@@ -661,6 +666,9 @@ let response_observed = function
         route. *)
      | Config_mismatch
      (* missing key or invalid configuration: no generation. *)
+     | Unmodeled_empty_completion
+     (* An empty wire reply with an unknown stop reason may be an overflow or
+        refusal; it does not prove that the model observed the turn input. *)
      | Provider_integration
      (* unparseable, provider-reported, or unknown-variant reply: no usable
         answer is on record. *)
@@ -739,9 +747,9 @@ let route_resumes_on_same_path = function
           [PauseTurn] and [Compaction] require replaying the provider's actual
           assistant response. An [EmptyCompletion] error carries no response
           content, so replaying the pre-response checkpoint is not that
-          continuation. Context overflow and unknown reasons normally become
-          typed API errors before this boundary; keep injected values closed
-          rather than guessing a same-path recovery. *)
+          continuation. Known overflow normally becomes a typed API error,
+          while unknown reasons now have their own terminal class. Keep
+          injected retry values closed rather than guessing recovery. *)
        false
      | Hard_quota ->
        (* a quota comes back by itself only when the provider said when; one
@@ -783,6 +791,7 @@ let route_resumes_on_same_path = function
      | Protocol_error
      | Config_mismatch
      | Provider_integration
+     | Unmodeled_empty_completion
      | Terminal_effect_dependency_unavailable
      | Terminal_effect_policy_rejection
      | Terminal_effect_runtime_failure

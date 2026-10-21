@@ -241,10 +241,20 @@ let test_empty_completion_keeps_answer_observation () =
     ; Agent_core.Types.RepetitionTruncation
     ; Agent_core.Types.PauseTurn
     ; Agent_core.Types.Compaction
-    ; Agent_core.Types.ContextWindowExceeded
     ; Agent_core.Types.UnmatchedToolCalls
-    ; Agent_core.Types.Unknown "future_provider_reason"
     ]
+;;
+
+let test_unmodeled_empty_completion_is_visible_terminal () =
+  let error = empty_completion_error (Agent_core.Types.Unknown "future_provider_reason") in
+  let route = route_of_agent_core_error error in
+  check_route "unknown response contract stops without blaming the request"
+    (KFR.Exhausted_visible_alive {terminal=KFR.Unmodeled_empty_completion}) error;
+  Alcotest.(check bool) "wire arrival does not prove input observation" false (KFR.response_observed route);
+  Alcotest.(check bool) "same-path recovery is not inferred" false (KFR.route_resumes_on_same_path route);
+  check_route "known overflow remains a context fact"
+    (KFR.Rotate_now {rotate=KFR.Context_window_exceeded})
+    (empty_completion_error Agent_core.Types.ContextWindowExceeded)
 ;;
 
 let test_provider_config_judges () =
@@ -986,6 +996,8 @@ let () =
             "empty completion keeps answer observation"
             `Quick
             test_empty_completion_keeps_answer_observation
+        ; Alcotest.test_case "unmodeled empty completion is terminal but observed" `Quick
+            test_unmodeled_empty_completion_is_visible_terminal
         ; Alcotest.test_case
             "wire error kinds split on what arrived"
             `Quick

@@ -47,10 +47,10 @@ val is_model_rejected_parse_error : Agent_core.Error.t -> bool
 val is_invalid_request_error : Agent_core.Error.t -> bool
 
 (** [true] for a 0-byte empty completion: the provider ended the turn with a
-    modeled, non-overflow stop_reason but returned no content.  Only the two
-    typed AGENT_CORE shapes for this condition match (see the .ml); the unmodeled
-    stop_reason shape that AGENT_CORE intentionally reports as non-retryable
-    [InvalidRequest] does not. *)
+    modeled, non-overflow stop_reason but returned no content. Only the typed
+    AGENT_CORE [EmptyCompletion] shape matches. A value
+    [EmptyCompletion] with an unmodeled reason is excluded, as is a known
+    context overflow; neither authorizes ordinary empty-output recovery. *)
 val is_empty_completion_error : Agent_core.Error.t -> bool
 
 (** [true] when the keeper should preserve liveness and skip consecutive

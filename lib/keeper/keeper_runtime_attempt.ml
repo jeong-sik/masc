@@ -88,14 +88,22 @@ let provider_error_to_http_error = function
     Llm_provider.Http_client.NetworkError
       { message = detail; kind = Llm_provider.Http_client.Unknown }
   | Llm_provider.Error.EmptyCompletion { stop_reason; detail; _ } ->
-    Llm_provider.Http_client.NetworkError
-      { message =
-          Printf.sprintf
-            "empty completion (stop_reason=%s): %s"
-            (Llm_provider.Types.stop_reason_to_string stop_reason)
-            detail
-      ; kind = Llm_provider.Http_client.Unknown
-      }
+    (match Llm_provider.Retry.verdict_of_empty_completion ~stop_reason ~message:detail with
+     | Empty_attributed ->
+       Llm_provider.Http_client.NetworkError
+         { message = Printf.sprintf "empty completion (stop_reason=%s): %s"
+             (Llm_provider.Types.stop_reason_to_string stop_reason) detail
+         ; kind = Llm_provider.Http_client.Unknown }
+     | Empty_unattributed {token} ->
+       Llm_provider.Http_client.ProviderTerminal
+         { kind = Llm_provider.Http_client.Other "unmodeled_empty_completion"
+         ; message = Printf.sprintf "empty completion with unmodeled stop_reason=%S: %s" token detail }
+     | Empty_overflow overflow ->
+       (* Known overflow is normally promoted to Api ContextOverflow upstream.
+          A directly supplied provider value is still a known context fact. *)
+       Llm_provider.Http_client.ProviderFailure
+         { kind = Llm_provider.Http_client.Context_overflow {limit=None}
+         ; message = Llm_provider.Retry.error_message overflow })
 
 let core_error_to_runtime_outcome err =
   match Keeper_internal_error.classify_masc_internal_error err with

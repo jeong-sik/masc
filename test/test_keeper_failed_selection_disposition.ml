@@ -337,6 +337,33 @@ let test_failure_before_an_answer_leaves_continuation_unsettled () =
     unobserved_failure_routes
 ;;
 
+let test_unmodeled_empty_completion_keeps_replay_pending () =
+  let error =
+    Agent_core.Error.Provider
+      (Llm_provider.Error.EmptyCompletion
+         { provider = "fixture"
+         ; stop_reason = Llm_provider.Types.Unknown "provider_specific_overflow"
+         ; detail = "provider returned an empty assistant turn"
+         })
+  in
+  let route = KFR.route_of_error ~boundary:KFR.Agent_core_execution error in
+  let outcome =
+    Cycle.Failed
+      { meta = test_meta ()
+      ; failure =
+          { Turn.error; runtime_id = "lane-a"; route
+          ; source_disposition = Turn.Follow_failure_route
+          ; deferred_runtime_lane = None
+          }
+      }
+  in
+  (match Loop.continuation_settlement_of_cycle_outcome (Some outcome) with
+   | Loop.Continuation_unsettled -> ()
+   | Loop.Continuation_settled_recorded | Loop.Continuation_settled_failed _ ->
+       fail "an unknown empty reply cannot settle unseen replay evidence");
+  assert_no_queue_action "unmodeled empty completion keeps admitted input pending" outcome
+;;
+
 (* The settlement is a chat-store receipt, not a queue action: the batch of a
    failed turn stays pending whether or not the provider answered. *)
 let test_failure_after_an_answer_still_leaves_batch_pending () =
@@ -546,6 +573,10 @@ let () =
             "a failure with no answer on record stays unsettled"
             `Quick
             test_failure_before_an_answer_leaves_continuation_unsettled
+        ; test_case
+            "an unknown empty reply leaves replay evidence unsettled"
+            `Quick
+            test_unmodeled_empty_completion_keeps_replay_pending
         ; test_case
             "a settled failure still leaves the batch pending"
             `Quick

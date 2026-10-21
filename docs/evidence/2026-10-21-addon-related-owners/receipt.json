@@ -1,0 +1,32 @@
+{
+  "source": "c54fd2515c0901c63ebe19069153a7bf4d46e156",
+  "base": "ad6ca89213d57c9ac978e1f3e5704292c4334cf6",
+  "source_blobs": {
+    "bin/masc_tui_lane_addons.ml": "35641af274b39494c84b941a8997dc69c52bdffb",
+    "bin/masc_tui_lane_addons.mli": "f87fe052c83814634123ad168c0518df94cf59f5",
+    "dashboard/src/components/lane-addon-connection.test.ts": "c7592405293fecc158b25e9eaff515e2d1875d91",
+    "dashboard/src/components/lane-addon-connection.ts": "ab3af77d24c3d421cb93fbea1db6e2955605f508",
+    "test/test_tui_lane_addons.ml": "7a3da2cdadbbb37b94f2e4bdefec9e68140f61c4"
+  },
+  "dashboard": {
+    "suite_files": [
+      "src/components/lane-addon-connection.test.ts",
+      "src/components/lane-installation-manager.test.ts",
+      "src/components/lane-addons-panel.test.ts"
+    ],
+    "files": 3,
+    "tests": 62,
+    "vitest_exit": 0,
+    "tsc_command": "pnpm exec tsc --noEmit",
+    "tsc_exit": 0
+  },
+  "ocaml": {
+    "parser_exit": 0,
+    "typing": "not performed",
+    "behavior": "not performed"
+  },
+  "actual_dashboard": "not performed",
+  "actual_tui": "not performed",
+  "integration": "not merged",
+  "installed_runtime": "unchanged"
+}

@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DashboardFusionRunsResponse } from './api/dashboard-fusion'
 import type { BoardPost } from './types'
+import type { FusionRunEvidence } from './api/board'
 
 const fusionApiMocks = vi.hoisted(() => ({
   fetchDashboardMemory: vi.fn<() => Promise<{ posts: BoardPost[] }>>(),
   fetchFusionRuns: vi.fn<() => Promise<DashboardFusionRunsResponse>>(),
-  fetchFusionRunEvidencePost: vi.fn<(runId: string) => Promise<BoardPost | null>>(),
+  fetchFusionRunEvidence: vi.fn<(runId: string) => Promise<FusionRunEvidence>>(),
 }))
 
 // Spread the real module rather than listing what the store uses: the store
@@ -15,7 +16,7 @@ vi.mock('./api/board', async importOriginal => {
   const actual = await importOriginal<typeof import('./api/board')>()
   return {
     ...actual,
-    fetchFusionRunEvidencePost: fusionApiMocks.fetchFusionRunEvidencePost,
+    fetchFusionRunEvidence: fusionApiMocks.fetchFusionRunEvidence,
   }
 })
 
@@ -48,6 +49,8 @@ vi.mock('./components/common/toast', () => ({
 
 import {
   fusionBoardError,
+  fusionEvidenceRequests,
+  forgetFusionEvidenceRequests,
   fusionBoardLoading,
   fusionBoardPosts,
   fusionRuns,
@@ -60,6 +63,7 @@ import {
 } from './store'
 
 beforeEach(() => {
+  forgetFusionEvidenceRequests()
   fusionBoardPosts.value = []
   fusionBoardError.value = null
   fusionBoardLoading.value = false
@@ -137,11 +141,11 @@ describe('refreshFusionBoard', () => {
 describe('loadFusionRunEvidence', () => {
   it('merges a post the 500-row window no longer reaches', async () => {
     fusionBoardPosts.value = [fusionPost('fus-recent')]
-    fusionApiMocks.fetchFusionRunEvidencePost.mockResolvedValue(fusionPost('fus-old'))
+    fusionApiMocks.fetchFusionRunEvidence.mockResolvedValue({ status: 'recorded', post: fusionPost('fus-old') })
 
     await loadFusionRunEvidence('fus-old')
 
-    expect(fusionApiMocks.fetchFusionRunEvidencePost).toHaveBeenCalledWith('fus-old')
+    expect(fusionApiMocks.fetchFusionRunEvidence).toHaveBeenCalledWith('fus-old')
     expect(fusionBoardPosts.value.map(post => post.id).sort()).toEqual([
       'fus-old',
       'fus-recent',
@@ -149,37 +153,69 @@ describe('loadFusionRunEvidence', () => {
   })
 
   it('asks once per run id, so a render loop cannot make a request per frame', async () => {
-    fusionApiMocks.fetchFusionRunEvidencePost.mockResolvedValue(fusionPost('fus-once'))
+    fusionApiMocks.fetchFusionRunEvidence.mockResolvedValue({ status: 'recorded', post: fusionPost('fus-once') })
 
     await loadFusionRunEvidence('fus-once')
     await loadFusionRunEvidence('fus-once')
 
-    expect(fusionApiMocks.fetchFusionRunEvidencePost).toHaveBeenCalledTimes(1)
+    expect(fusionApiMocks.fetchFusionRunEvidence).toHaveBeenCalledTimes(1)
   })
 
   it('asks again after the list is refetched, because the run may have landed its post', async () => {
-    fusionApiMocks.fetchFusionRunEvidencePost.mockResolvedValue(null)
+    fusionApiMocks.fetchFusionRunEvidence.mockResolvedValue({ status: 'pending' })
     await loadFusionRunEvidence('fus-pending')
     expect(fusionBoardPosts.value).toHaveLength(0)
 
     fusionApiMocks.fetchDashboardMemory.mockResolvedValue({ posts: [] })
     await refreshFusionBoard()
 
-    fusionApiMocks.fetchFusionRunEvidencePost.mockResolvedValue(fusionPost('fus-pending'))
+    fusionApiMocks.fetchFusionRunEvidence.mockResolvedValue({ status: 'recorded', post: fusionPost('fus-pending') })
     await loadFusionRunEvidence('fus-pending')
 
-    expect(fusionApiMocks.fetchFusionRunEvidencePost).toHaveBeenCalledTimes(2)
+    expect(fusionApiMocks.fetchFusionRunEvidence).toHaveBeenCalledTimes(2)
     expect(fusionBoardPosts.value.map(post => post.id)).toEqual(['fus-pending'])
   })
 
   it('keeps the cached list when the fetch fails, so the pane keeps its sparse detail', async () => {
     fusionBoardPosts.value = [fusionPost('fus-kept')]
-    fusionApiMocks.fetchFusionRunEvidencePost.mockRejectedValue(new Error('HTTP 404'))
+    fusionApiMocks.fetchFusionRunEvidence.mockRejectedValue(new Error('HTTP 404'))
 
     await loadFusionRunEvidence('fus-missing')
 
     expect(fusionBoardPosts.value.map(post => post.id)).toEqual(['fus-kept'])
     expect(fusionBoardError.value).toBeNull()
+    expect(fusionEvidenceRequests.value.get('fus-missing')).toMatchObject({ status: 'failed', error: 'HTTP 404' })
+    await loadFusionRunEvidence('fus-missing')
+    expect(fusionApiMocks.fetchFusionRunEvidence).toHaveBeenCalledTimes(1)
+    fusionApiMocks.fetchFusionRunEvidence.mockResolvedValue({ status: 'absent' })
+    await loadFusionRunEvidence('fus-missing', { retry: true })
+    expect(fusionApiMocks.fetchFusionRunEvidence).toHaveBeenCalledTimes(2)
+    expect(fusionEvidenceRequests.value.get('fus-missing')).toMatchObject({ status: 'absent' })
+  })
+
+  it('does not let a retired failure overwrite a new request', async () => {
+    let rejectOld!: (reason: Error) => void
+    fusionApiMocks.fetchFusionRunEvidence.mockImplementationOnce(() => new Promise((_, reject) => { rejectOld = reject }))
+    const old = loadFusionRunEvidence('fus-race')
+    await vi.waitFor(() => expect(fusionApiMocks.fetchFusionRunEvidence).toHaveBeenCalledTimes(1))
+    forgetFusionEvidenceRequests()
+    fusionApiMocks.fetchFusionRunEvidence.mockResolvedValue({ status: 'pending' })
+    await loadFusionRunEvidence('fus-race')
+    rejectOld(new Error('retired read'))
+    await old
+    expect(fusionEvidenceRequests.value.get('fus-race')).toMatchObject({ status: 'pending' })
+  })
+
+  it('retains a single pending request even on explicit retry', async () => {
+    let finish!: (value: FusionRunEvidence) => void
+    fusionApiMocks.fetchFusionRunEvidence.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = loadFusionRunEvidence('fus-inflight')
+    await vi.waitFor(() => expect(fusionApiMocks.fetchFusionRunEvidence).toHaveBeenCalledTimes(1))
+    await loadFusionRunEvidence('fus-inflight', { retry: true })
+    expect(fusionApiMocks.fetchFusionRunEvidence).toHaveBeenCalledTimes(1)
+    finish({ status: 'absent' })
+    await pending
+    expect(fusionEvidenceRequests.value.get('fus-inflight')).toMatchObject({ status: 'absent' })
   })
 })
 

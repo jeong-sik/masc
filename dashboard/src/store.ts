@@ -32,6 +32,7 @@ import type {
 import { fetchDashboardBootstrap, fetchDashboardShell } from './api/dashboard-hot'
 import { showToast } from './components/common/toast'
 import { errorMessageOr } from './lib/format-string'
+import type { FusionRunEvidence } from './api/board'
 import { isAbortError } from './lib/async-state'
 import { normalizeKeepers } from './keeper-store-normalize'
 import { setArrayByKeyIfChanged } from './signal-utils'
@@ -1591,28 +1592,43 @@ export async function refreshFusionBoard(): Promise<void> {
 // whatever the board has done since. Merged into the same signal the list fills:
 // a run found either way is one run, and reconcileBoardPosts keeps the identity.
 //
-// Silent on failure. This runs for a run the list did not carry, so the pane it
-// feeds already draws the honest sparse detail; replacing that with an error
-// would report the fetch instead of the run.
-export const fusionEvidenceRequests = signal<ReadonlyMap<string, symbol>>(new Map())
+// Keep lookup state separate from registry lifecycle and cached Board rows.
+// Settled failures remain visible and require deliberate retry, avoiding a
+// render-driven retry loop while preserving the original request's ownership.
+type FusionEvidenceRead = { request: symbol } & (
+  | { status: 'loading' }
+  | { status: 'failed'; error: string }
+  | FusionRunEvidence
+)
+export const fusionEvidenceRequests = signal<ReadonlyMap<string, FusionEvidenceRead>>(new Map())
 
-export async function loadFusionRunEvidence(runId: string): Promise<void> {
+export async function loadFusionRunEvidence(runId: string, options: { retry?: boolean } = {}): Promise<void> {
   const requests = fusionEvidenceRequests.peek()
-  if (runId === '' || requests.has(runId)) return
+  const prior = requests.get(runId)
+  if (runId === '' || (prior && (!options.retry || prior.status === 'loading'))) return
   const request = Symbol(runId)
-  fusionEvidenceRequests.value = new Map(requests).set(runId, request)
+  fusionEvidenceRequests.value = new Map(requests).set(runId, { request, status: 'loading' })
   try {
-    const { fetchFusionRunEvidencePost } = await import('./api/board')
-    const post = await fetchFusionRunEvidencePost(runId)
+    const { fetchFusionRunEvidence } = await import('./api/board')
+    const evidence = await fetchFusionRunEvidence(runId)
     // A list refresh retires previous requests. A late answer from that
     // earlier read must not replace evidence fetched after the refresh.
-    if (fusionEvidenceRequests.peek().get(runId) !== request || post === null) return
-    fusionBoardPosts.value = reconcileBoardPosts(fusionBoardPosts.value, [
-      post,
-      ...fusionBoardPosts.value.filter(existing => existing.id !== post.id),
-    ])
+    if (fusionEvidenceRequests.peek().get(runId)?.request !== request) return
+    batch(() => {
+      fusionEvidenceRequests.value = new Map(fusionEvidenceRequests.peek()).set(runId, { request, ...evidence })
+      if (evidence.status === 'recorded') {
+        const post = evidence.post
+        fusionBoardPosts.value = reconcileBoardPosts(fusionBoardPosts.value, [
+          post,
+          ...fusionBoardPosts.value.filter(existing => existing.id !== post.id),
+        ])
+      }
+    })
   } catch (err) {
-    console.warn('[Fusion] run evidence fetch error:', err)
+    if (fusionEvidenceRequests.peek().get(runId)?.request !== request) return
+    fusionEvidenceRequests.value = new Map(fusionEvidenceRequests.peek()).set(runId, {
+      request, status: 'failed', error: errorMessageOr(err, 'Fusion evidence read failed'),
+    })
   }
 }
 

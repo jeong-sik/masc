@@ -85,6 +85,9 @@ function surfaceProfile(
   return {
     activation_tool: activationTool,
     execution,
+    io: composition
+      ? { kind: 'composition', input_schema: { type: 'object' }, exports: [] }
+      : { kind: 'model_orchestrated' },
     capabilities: {
       as_skill: true,
       as_tool: composition,
@@ -422,6 +425,7 @@ describe('labels', () => {
       kind: 'composition',
       profile: {
         activation_tool: 'keeper_compose_prior-art',
+        io: { kind: 'composition', input_schema: { type: 'object' }, exports: [] },
         execution: 'async',
         capabilities: {
           as_skill: true,
@@ -600,6 +604,7 @@ const editorProfile = {
   reference: reference(intake),
   kind: 'instruction',
   activation_tool: 'keeper_skill',
+  io: { kind: 'model_orchestrated' as const },
   execution: 'model_orchestrated',
   capabilities: {
     as_skill: true,

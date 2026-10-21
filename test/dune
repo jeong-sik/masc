@@ -6377,7 +6377,7 @@
 (test
  (name test_tui_artifact_checks)
  (modules test_tui_artifact_checks)
- (libraries alcotest masc masc.tool_types masc.time_codec digestif
+ (libraries alcotest masc masc.masc_tool_blob_store masc.tool_types masc.time_codec digestif
   masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_fetched))
 
 (test

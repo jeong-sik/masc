@@ -1,4 +1,5 @@
 open Alcotest
+module Tui_decode = Masc.Tui_decode
 module Types = Masc_tui_types
 module Mcp = Masc_tui_mcp
 module Catalog = Masc_tui_resource_catalog

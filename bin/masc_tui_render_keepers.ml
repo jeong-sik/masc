@@ -1388,13 +1388,38 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         what
     in
     let stamped_or view error =
-      match error with
-      | Some detail -> [ (Theme.bad ()) ^ "  " ^ detail ^ Ansi.reset ]
-      | None -> (
-          match view with
-          | Some (stamp, lines) when String.equal stamp k.k_name ->
-              List.map (fun line -> "  " ^ line) lines
-          | Some _ | None -> [ tab_loading_row "loading" ])
+      let observed = match view with
+        | Some (stamp, lines) when String.equal stamp k.k_name ->
+            Some (List.map (fun line -> "  " ^ line) lines)
+        | Some _ | None -> None in
+      (* Only this tab's original pending request proves a read is scheduled.
+         A missing or foreign snapshot does not prove any work is in flight. *)
+      let pending = Masc_tui_types.detail_read_started state
+          ~tab:state.detail_tab ~keeper:k.k_name in
+      let failure = match error with
+        | None -> []
+        | Some detail ->
+            [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset ] in
+      let progress = match pending with
+        | None -> []
+        | Some started_ns ->
+            [ loading_row ~started_ns
+                (match observed with None -> "loading" | Some _ -> "refreshing") ] in
+      match observed with
+      | Some lines ->
+          let previous = match error, pending with
+            | None, None -> []
+            | Some _, (Some _ | None) | None, Some _ ->
+                [ Ansi.dim ^ "  Last observation:" ^ Ansi.reset ] in
+          failure @ progress @ previous @ lines
+      | None ->
+          (match error, pending with
+           | None, None ->
+               [ Ansi.dim ^ "  "
+                 ^ (if server_authority_ready state then "Not observed · r to read"
+                    else "Not observed · workspace confirmation required")
+                 ^ Ansi.reset ]
+           | Some _, (Some _ | None) | None, Some _ -> failure @ progress)
     in
     let channel_lines () =
       let rows = match state.connectors_error, state.connectors with

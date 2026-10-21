@@ -47,6 +47,13 @@
   Keeper별 freshness barrier와 이름 관측을 기다린다. 미해결 선언문은 다음 editor
   진입에서 복구할 수 있으며 재시작 복구를 증명하지 않는다. 로그는 선언문을 싣지
   않고 요청 시작·phase 반영을 기록한다. 이 시각은 화면 표시·네트워크 RTT가 아니다.
+- Keeper의 Instructions·Sandbox status·GitHub·Identity 상세는 현재 tab·Keeper의
+  원래 `detail_reads` 요청이 있을 때만 조회 진행을 표시한다. 값이 없거나 다른 Keeper의
+  stamp라는 이유로 loading을 만들지 않는다. 요청도 값도 오류도 없으면 미조회로 남기고
+  기존 server authority 확인이 필요하면 그 상태를 구분한다. 같은 Keeper의 실제 값이
+  남아 있으면 재조회 진행·실패와 마지막 관측을 함께 보여준다. 원문 오류는 single-line으로
+  정리한다. 이 projection은 실제 조회·초기화·응답 admission·로그인/저장 권한을 바꾸지 않고,
+  다른 Keeper의 값이나 container-log pending을 status 요청으로 빌리지 않는다.
 - Keeper 상세의 활동 요약과 Logs는 같은 `Masc_tui_fetched` 관측을 사용한다.
   입력 handler와 cadence는 파일을 읽지 않고 원래 workspace authority·base path·Keeper·
   물리 행 범위에 묶인 I/O 요청을 보낸다. 응답은 원래 read scope와 ticket도 일치해야

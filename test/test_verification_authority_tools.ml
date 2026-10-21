@@ -909,7 +909,8 @@ let test_root_layout_does_not_run_a_checkouts_configured_fsmonitor () =
 (* A producer whose tree is on its endpoint has no checkout on this host to
    describe: the line must not name a commit read from the host directory. *)
 let test_root_layout_does_not_probe_a_tree_on_the_producers_endpoint () =
-  with_surface (fun config surface ->
+  let body = {|{"entries":["repos"],"checkouts":[{"relative_path":"repos/remote","name":"remote","git_link":"directory"}],"limit":null}|} in
+  with_surface ~ssh_script:(ssh_script_for ~layout_body:body) (fun config surface ->
     let root = producer_playground config producer in
     let checkout = Filename.concat root "repos/remote" in
     init_git_checkout checkout;

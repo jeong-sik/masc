@@ -304,17 +304,21 @@ status: reference
   문장에서는 무엇을 듣는지 반드시 함께 적는다. 지금 코드와 문서에서 확인되는 쓰임은 넷이다.
   - `Source audition` — 가져온 MIDI 소스의 순서 있는 원본 메시지 열을 명시한 MIDI 출력이나
     VST로 내보내는 재생. 처음부터 시작하고 pause/resume과 source-clock seek를 지원한다
-    (MIDI-SOURCE.md:90, README.md:311).
+    (MIDI-SOURCE.md "Ordered source audition", README.md "Imported performance audition").
   - `WAV-only audition` — 캡처 구간의 WAV만 `:play-audio`로 듣는 재생
-    (CAPTURE-AUDIO-CLOCK.md:1, README.md:334).
+    (CAPTURE-AUDIO-CLOCK.md "Captured-region WAV audition", README.md의 `:play-audio`).
   - `paired audition` — 저장한 take의 WAV와 UMP 스트림을 함께 듣는 재생
-    (CAPTURE-PLAYBACK.md:3).
-  - `solo/mute 확인` — 섞인 라우트에서 한 층만 남겨 들어 보는 확인(ARRANGEMENT.md:151).
+    (CAPTURE-PLAYBACK.md: "A saved take can audition its original WAV and UMP stream
+    together.").
+  - `solo/mute 확인` — 섞인 라우트에서 한 층만 남겨 들어 보는 확인(ARRANGEMENT.md "WAV
+    arrangement transport": "A mixed route also supports solo/mute audition of either
+    source kind.").
     들을 대상을 고르는 라우트 조작이지 재생 기능이 아니므로 "audition" 대신 이렇게 쓴다.
   - 이름 경계: `monitoring`은 `audition`이 아니다. `:monitor`는 오디오 입력을,
     `:midi-monitor`는 들어오는 MIDI를 다른 목적지로 계속 전달하는 상태다
-    (README.md:340, 353). 한 번 듣고 끝나는 재생과 달리 라우트가 열려 있는 동안 계속
-    흐르고 `off`로만 닫힌다. "audition monitoring"처럼 두 낱말을 겹쳐 쓰지 않는다.
+    (README.md의 `:monitor`·`:midi-monitor`). 한 번 듣고 끝나는 재생과 달리 라우트가 열려
+    있는 동안 계속 흐르고 `off`로만 닫힌다. "audition monitoring"처럼 두 낱말을 겹쳐 쓰지
+    않는다.
   - 이름 경계: 화면 낱말 `:play-audio`는 WAV-only audition만 가리킨다. MIDI 소스 전체를
     듣는 일에 이 명령을 인용하지 않는다.
   → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
@@ -1771,7 +1775,8 @@ status: reference
   바뀌었으면 충돌로 거절해 새 순서를 덮어쓰지 않는다. 빈 후보 목록은 lane 제거와
   다른 편집이므로 거절되고, lane 제거는 별도 동작이다.
   `[runtime].media_failover`(vision runtimes, 이미지를 읽는 런타임 목록)와
-  exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
+  exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md`의
+  "8.x Keeper별 exact-output lane 우선순위")는
   런타임 후보 순서와 별개 축이다. 다만 후보 나열이 별개여도 rate-limit 증거 셀은
   공유한다 — exact lane은 `Runtime_candidate_backpressure.candidate`를 읽고 자기
   관측을 되돌려 써서, 쉬는 슬롯을 형제 뒤로 강등한다(`Demotion`의 후보 강등과 같은
@@ -4026,7 +4031,7 @@ status: reference
 
 **Demand Retrieval across Revisions (리비전을 넘는 요청 시 검색)**
 : 과거 admission 관측이 확정된 리비전 계보를 따라 현재 후속 기억을 찾아내는 `keeper_memory_search`의 경로(#42029·#42054·#42055). 세 단계가 분리되어 있다.
-  1. **Admission Lookup Binding**: Librarian이 `incorporated`/`already_represented`로 판정한 미룬 명시 쓰기는 원본 관측·후보 식별자·선택된 대상의 조회 결속(`admission_recall_binding`)을 후보 소비와 같은 WAL 트랜잭션으로 커밋한다. `not_durable`·`deferred` 판정은 결속을 만들지 않는다. 결속 대상은 Librarian이 돌려준 claim과 글이 똑같은 선택된 기억으로 정해지고(`fact.claim = claim`), 같은 글의 기억이 둘이면 먼저 찾은 쪽이 대상이다(`keeper_librarian_runtime.ml:1022`). 결속은 Librarian이 선언한 관계를 기록할 뿐 그 관계를 독립 검증한 것이 아니다.
+  1. **Admission Lookup Binding**: Librarian이 `incorporated`/`already_represented`로 판정한 미룬 명시 쓰기는 원본 관측·후보 식별자·선택된 대상의 조회 결속(`admission_recall_binding`)을 후보 소비와 같은 WAL 트랜잭션으로 커밋한다. `not_durable`·`deferred` 판정은 결속을 만들지 않는다. 결속 대상은 Librarian이 돌려준 claim과 글이 똑같은 선택된 기억으로 정해지고(`fact.claim = claim`), 같은 글의 기억이 둘이면 먼저 찾은 쪽이 대상이다(`lib/keeper/keeper_librarian_runtime.ml`의 `validate_admission_answer` 안 `fact.claim = claim` 선택). 결속은 Librarian이 선언한 관계를 기록할 뿐 그 관계를 독립 검증한 것이 아니다.
   2. **구조적 후보 수집**: `read_successor_recall_for_keepers_dir`가 커밋된 스냅샷 전이와 리비전 링크만 리비전 순서로 깊이 제한 없이 따라간다. 전이 증거가 빠지면 미해결이고, 철회 뒤 무관하게 같은 글이 다시 추가돼도 끊긴 경로를 되살리지 않는다. 구조적 후보는 아직 답이 아니다.
   3. **범위 판정**: 후속 선택기(`Keeper_memory_successor_selection`)가 쿼리·원본 관측·대상·커밋된 경로를 보고 현재 대상이 같은 주제·사건·적용 범위를 다루는지 판정한다. 모델 실패·불확실한 범위·바뀐 증거는 미해결로 남기며 직접 일치 결과는 그대로 보존한다 — 권위 있는 "일치 없음" 답으로 바꾸지 않는다.
   결과의 본문과 Memory ID는 현재 대상 것이고 과거 조회 출처(`lookup_evidence`·`successor_lookup_evidence`)는 별도로 표시된다. 여러 관측이 같은 현재 대상을 가리켜도 결과는 하나다.

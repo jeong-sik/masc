@@ -2410,6 +2410,41 @@ let defer_direct_input_wait store ~now ~operation_id ~execution_digest ~(waiting
   read_existing ()
 ;;
 
+let direct_input_response_intent store ~operation_id =
+  let* () = ensure_open store in
+  let* operation = operation_or_unknown store.db operation_id in
+  let* execution = direct_execution_with_db store.db operation in
+  Ok (Option.bind execution (fun (execution : Semantic.t) -> execution.input_response_intent))
+
+let prepare_direct_input_response store ~now ~operation_id ~execution_digest ~(intent:Semantic.input_response_intent) =
+  let* () = ensure_open store in
+  with_transaction store (fun () ->
+    let* operation = operation_or_unknown store.db operation_id in
+    if operation.execution_digest <> execution_digest then Error (Invalid_input "input response intent execution digest changed")
+    else match operation.state with
+    | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ ->
+      Error (Not_queued operation_id)
+    | Operation.Queued ->
+      let* current = direct_execution_with_db store.db operation in
+      let* expected = match current,input_wait_state current with
+        | Some execution,Some waiting when Semantic.equal_input_wait waiting intent.waiting -> Ok execution
+        | (Some _ | None),(Some _ | None) -> Error (Invalid_input "input response intent lost its original wait") in
+      let* () = match expected.native_call with
+        | Keeper_native_call.No_native_call -> Ok ()
+        | Active _ | Terminal_unacknowledged _ -> Error Native_call_unsettled in
+      let* () = match expected.input_response_intent with
+        | Some current when not (Semantic.equal_input_response_intent current intent) ->
+          Error (Invalid_input "original input response intent cannot be replaced")
+        | Some _ | None -> Ok () in
+      let* input = input_observation_with_db store.db ~trace_id:intent.waiting.checkpoint.trace_id in
+      let* () = match input with
+        | Input_observed reference when Keeper_checkpoint_ref.equal reference intent.waiting.checkpoint -> Ok ()
+        | Input_observed _ | Input_unobserved | Prior_input_unavailable ->
+          Error (Invalid_input "input response intent predecessor changed; reconcile original input lineage") in
+      let* next = semantic_transition ~now (Semantic.Prepare_input_response intent) expected in
+      update_semantic store ~expected next)
+;;
+
 let resolve_direct_input_wait store ~now ~operation_id ~execution_digest ~observed ~checkpoint =
   let* () = ensure_open store in
   with_transaction store (fun () ->

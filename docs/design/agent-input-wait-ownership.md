@@ -311,3 +311,44 @@ All layers remain Draft. Shared Core Declined/Timeout observations, autonomous
 waiting, dedicated input-wait classification,
 canonical/live/retained divergence reconciliation, snapshot/SSE invalidation and
 persistent/reconnected Acting/TUI are still required for #38005 acceptance.
+
+## Durable direct response intent and checkpoint lifetime
+
+Before canonical mutation, the response protocol needs a journal fact binding
+one complete original wait W, validated canonical source S, frozen consumed
+candidate C and typed Answer/Declined/Timeout response. S may extend W's history;
+it need not equal W. All references share W's trace, S does not regress W's
+turn, and C preserves S's turn while changing both source and wait bytes.
+Canonical answer JSON rejects duplicate keys and non-finite values. These
+identity checks do not validate a physical transformation or grant installation
+or response authority.
+
+`prepare_direct_input_response` records that immutable fact transactionally under
+the actual original queued operation, execution digest, complete wait, retired
+native state and current input predecessor. The same intent preserves its
+revision; a different response/source/candidate/wait cannot replace it. Recording
+it keeps the wait blocked, including claim, priority, generic resume and successful
+settlement. An actual commit may survive an uncertain acknowledgement; that
+acknowledgement remains an error with no deletion or automatic retry authority.
+The reader returns the actual persisted fact, never one inferred from a file.
+
+Semantic retention and startup sweep include S and C while the intent exists.
+Ordinary continuation/pending-input selection excludes both: only W remains the
+original waiting authority. Reconciliation diagnostics preserve the intent;
+resolution must name its exact C, clears it with the original continuation/input
+publication, and keeps C live. Confirmed cancellation or failure releases the
+intent references while independent global input ownership remains authoritative.
+The optional fact is omitted when absent. A present null, malformed/duplicate/
+unknown fields, unknown response kind, mismatched wait or incompatible phase is
+rejected by the strict journal codec.
+
+This layer supplies the storage and retention boundary only. The existing Owner
+response path does not yet record an intent before its physical installation.
+The next layer must split prepare/confirmed candidate retention, intent commit,
+canonical CAS/reconfirmation and final resolution under fresh original Owner
+child authority, including restart. No matching hash or retained file read is a
+confirmed installation. Actual independent Producer publication of a newer global
+input G still needs typed lineage reconciliation that preserves its history,
+context and other pending request; refusing G here is not that recovery. R1 is
+not resolved, and these layers cannot become Ready or be installed on the
+strength of the intent foundation.

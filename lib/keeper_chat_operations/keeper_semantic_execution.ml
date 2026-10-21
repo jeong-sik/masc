@@ -168,6 +168,36 @@ let equal_input_wait left right = Keeper_checkpoint_ref.equal left.checkpoint ri
   && Yojson.Safe.equal (Agent_core.Agent_input_request.pending_to_json left.pending)
        (Agent_core.Agent_input_request.pending_to_json right.pending)
 
+type input_response_intent =
+  { waiting : input_wait
+  ; source : Keeper_checkpoint_ref.t
+  ; candidate : Keeper_checkpoint_ref.t
+  ; response : Agent_core.Hooks.elicitation_response }
+let input_response_intent ~(waiting : input_wait) ~source ~candidate ~response =
+  if not (Keeper_id.Trace_id.equal waiting.checkpoint.trace_id source.Keeper_checkpoint_ref.trace_id
+      && Keeper_id.Trace_id.equal source.trace_id candidate.Keeper_checkpoint_ref.trace_id)
+     || source.turn_count < waiting.checkpoint.turn_count
+     || candidate.turn_count <> source.turn_count
+     || Keeper_checkpoint_ref.equal source candidate
+     || Keeper_checkpoint_ref.equal waiting.checkpoint candidate
+  then Error "input response intent changed trace, turn or consumed checkpoint identity"
+  else
+    let* response = match response with
+      | Agent_core.Hooks.Answer answer ->
+        Keeper_chat_operation.canonical_json answer
+        |> Result.map (fun answer -> Agent_core.Hooks.Answer answer)
+        |> Result.map_error (function
+          | Keeper_chat_operation.Duplicate_object_key key -> "duplicate response key: " ^ key
+          | Keeper_chat_operation.Non_finite_float -> "response contains a non-finite number")
+      | Agent_core.Hooks.Declined -> Ok Agent_core.Hooks.Declined
+      | Agent_core.Hooks.Timeout -> Ok Agent_core.Hooks.Timeout in
+    Ok {waiting;source;candidate;response}
+let equal_input_response_intent left right =
+  equal_input_wait left.waiting right.waiting
+  && Keeper_checkpoint_ref.equal left.source right.source
+  && Keeper_checkpoint_ref.equal left.candidate right.candidate
+  && left.response = right.response
+
 type terminal = Completed | Cancelled | Failed of string
 type recovery_origin =
   | Unconfirmed_sources
@@ -201,6 +231,7 @@ type t =
   ; frame : Snapshot.t
   ; phase : phase
   ; native_call : Keeper_native_call.state
+  ; input_response_intent : input_response_intent option
   ; created_at : float
   ; updated_at : float
   }
@@ -223,6 +254,7 @@ type action =
   | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
   | Suspend_input of input_wait
+  | Prepare_input_response of input_response_intent
   | Resolve_input of { observed : input_wait; checkpoint : Keeper_checkpoint_ref.t }
   | Reconcile_gate_binding of gate_binding * gate_wait
   | Resolve_gate of gate_resolution
@@ -271,6 +303,8 @@ let phase_checkpoints execution = match execution.phase with
      | Input_wait waiting -> [waiting.checkpoint])
 let checkpoint_references execution =
   Keeper_native_call.checkpoint_references execution.native_call @ phase_checkpoints execution
+  @ (match execution.input_response_intent with
+     | None -> [] | Some intent -> [intent.source;intent.candidate])
 let continuation_checkpoints execution =
   let native = match execution.native_call with
     | Keeper_native_call.No_native_call -> []
@@ -321,7 +355,7 @@ let create ~id ~input ~sources ~now =
     let* input, input_sha256 = canonical_input input |> Result.map_error (fun detail -> Invalid_record detail) in
     let* frame = Snapshot.admit Snapshot.empty (Snapshot.Fresh id)
       |> Result.map_error (fun error -> Invalid_record (Snapshot.error_to_string error)) in
-    Ok { id; revision = 0L; input = Some input; input_sha256; gate_obligations=[]; sources; current_sources = sources; frame; phase = Preparing; native_call = Keeper_native_call.No_native_call; created_at = now; updated_at = now }
+    Ok { id; revision = 0L; input = Some input; input_sha256; gate_obligations=[]; sources; current_sources = sources; frame; phase = Preparing; native_call = Keeper_native_call.No_native_call; input_response_intent=None; created_at = now; updated_at = now }
 
 let same_admission left right =
   Scope_id.equal left.id right.id && left.sources = right.sources
@@ -480,13 +514,30 @@ let apply ~now action current =
                | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Input_wait _); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
            | Suspended _ | Settled _ -> reject ())
+      | Prepare_input_response intent ->
+          let* () = match current.native_call with
+            | Keeper_native_call.No_native_call -> Ok ()
+            | Active _ | Terminal_unacknowledged _ -> Error Native_call_unsettled in
+          (match current.phase with
+           | Recovering {origin=Input_wait waiting;_}
+               when equal_input_wait waiting intent.waiting
+                 && Option.is_some (Scope_id.direct_operation_id current.id)
+                 && Option.fold ~none:true ~some:(equal_input_response_intent intent) current.input_response_intent ->
+             unchanged current.phase
+           | Recovering {origin=(Input_wait _ | Unconfirmed_sources | Confirmed_undispatched
+               | Checkpointed _ | Official_checkpointed _ | Interrupted_execution
+               | Runtime_retry _ | Gate_wait _ | Gate_binding _);_}
+           | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
+           | Suspended _ | Settled _ -> reject ())
       | Resolve_input {observed;checkpoint} ->
           (match current.phase with
            | Recovering {origin=Input_wait expected;_}
                when equal_input_wait observed expected
                  && Keeper_id.Trace_id.equal checkpoint.trace_id observed.checkpoint.trace_id
                  && checkpoint.turn_count >= observed.checkpoint.turn_count
-                 && not (Keeper_checkpoint_ref.equal checkpoint observed.checkpoint) ->
+                 && not (Keeper_checkpoint_ref.equal checkpoint observed.checkpoint)
+                 && Option.fold ~none:true
+                      ~some:(fun intent -> Keeper_checkpoint_ref.equal intent.candidate checkpoint) current.input_response_intent ->
              unchanged (Suspended checkpoint)
            | Recovering {origin=(Input_wait _ | Unconfirmed_sources | Confirmed_undispatched
                | Checkpointed _ | Official_checkpointed _ | Interrupted_execution
@@ -568,7 +619,7 @@ let apply ~now action current =
          | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
          | Require_reconciliation _ | Suspend _ | Suspend_official_checkpoint _
          | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
-         | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _ | Resolve_input _ | Reconcile_gate_binding _
+         | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _ | Prepare_input_response _ | Resolve_input _ | Reconcile_gate_binding _
          | Resolve_gate _ | Resume_gate _ | Discharge_gate _ ->
            if phase <> current.phase then
              Error Native_call_unsettled
@@ -583,7 +634,7 @@ let apply ~now action current =
               Ok Keeper_native_call.No_native_call
             | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
             | Require_reconciliation _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
-            | Resolve_input _ | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
+            | Prepare_input_response _ | Resolve_input _ | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
             | Settle (Completed | Cancelled | Failed _) -> Ok current.native_call)
          | Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown ->
            (match action with
@@ -596,7 +647,7 @@ let apply ~now action current =
               Error Native_call_unsettled
             | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
             | Require_reconciliation _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
-            | Resolve_input _ | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
+            | Prepare_input_response _ | Resolve_input _ | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
             | Settle (Cancelled | Failed _) -> Ok current.native_call)) in
     let gate_obligations = match action with
       | Suspend_gate_reconciliation (binding, _) -> binding.obligations
@@ -605,17 +656,26 @@ let apply ~now action current =
       | Settle _ -> []
       | Confirm_sources | Begin_execution | Resume_checkpoint _
       | Resume_official_checkpoint _ | Suspend_official_checkpoint _
-      | Require_reconciliation _ | Suspend _ | Suspend_input _ | Resolve_input _ | Suspend_runtime_retry _
+      | Require_reconciliation _ | Suspend _ | Suspend_input _ | Prepare_input_response _ | Resolve_input _ | Suspend_runtime_retry _
       | Resume_runtime_retry _ | Update_runtime_retry_wait _ | Resolve_gate _ | Resume_gate _ -> current.gate_obligations in
+    let input_response_intent = match action with
+      | Prepare_input_response intent -> Some intent
+      | Resolve_input _ | Settle _ -> None
+      | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
+      | Require_reconciliation _ | Suspend _ | Suspend_official_checkpoint _
+      | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
+      | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _ | Reconcile_gate_binding _
+      | Resolve_gate _ | Resume_gate _ | Discharge_gate _ -> current.input_response_intent in
     if phase = current.phase && gate_obligations = current.gate_obligations
        && Keeper_native_call.equal_state native_call current.native_call
+       && Option.equal equal_input_response_intent input_response_intent current.input_response_intent
     then Ok current
     else if current.revision = Int64.max_int then Error Revision_exhausted
     else
       let input = match phase with
         | Settled _ -> None
         | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Recovering _ -> current.input in
-      Ok { current with revision = Int64.succ current.revision; phase; input; gate_obligations; native_call; updated_at = now }
+      Ok { current with revision = Int64.succ current.revision; phase; input; gate_obligations; native_call; input_response_intent; updated_at = now }
 
 let source_to_json source =
   `Assoc [ "post_id", `String source.post_id
@@ -697,6 +757,14 @@ let phase_json = function
       `Assoc ["kind", `String "suspended"; "checkpoint", checkpoint_json checkpoint]
   | Settled terminal -> `Assoc ["kind", `String "settled"; "terminal", terminal_json terminal]
 
+let input_response_intent_json (intent : input_response_intent) =
+  `Assoc ["waiting",recovery_origin_json (Input_wait intent.waiting);
+    "source",checkpoint_json intent.source;"candidate",checkpoint_json intent.candidate;
+    "response",(match intent.response with
+      | Agent_core.Hooks.Answer value -> `Assoc ["kind",`String "answer";"value",value]
+      | Agent_core.Hooks.Declined -> `Assoc ["kind",`String "declined"]
+      | Agent_core.Hooks.Timeout -> `Assoc ["kind",`String "timeout"])]
+
 let to_json execution =
   `Assoc ([ "schema", `String "masc.keeper_semantic_execution.v1"
          ; "id", Scope_id.to_json execution.id
@@ -712,6 +780,8 @@ let to_json execution =
           @ (match execution.native_call with Keeper_native_call.No_native_call -> []
              | Keeper_native_call.Active _ | Keeper_native_call.Terminal_unacknowledged _ ->
                ["native_call", Keeper_native_call.state_to_json execution.native_call])
+          @ (match execution.input_response_intent with None -> []
+             | Some intent -> ["input_response_intent",input_response_intent_json intent])
           @ (if execution.gate_obligations = [] then []
              else ["gate_obligations", `List (List.map gate_obligation_json execution.gate_obligations)]))
 
@@ -951,8 +1021,35 @@ let phase_of_json json =
       terminal_of_json (field "terminal" fields) |> Result.map (fun terminal -> Settled terminal)
   | _ -> Error "unknown execution phase"
 
+let input_response_intent_of_json json =
+  let* fields = exact ["waiting";"source";"candidate";"response"] json in
+  let* origin = recovery_origin_of_json (field "waiting" fields) in
+  let* waiting = match origin with
+    | Input_wait waiting -> Ok waiting
+    | Unconfirmed_sources | Confirmed_undispatched | Checkpointed _ | Official_checkpointed _
+    | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> Error "response intent has no original input wait" in
+  let* source = checkpoint_of_json (field "source" fields) in
+  let* candidate = checkpoint_of_json (field "candidate" fields) in
+  let response_json = field "response" fields in
+  let* kind = kind_of_json response_json in
+  let* response = match kind with
+    | "answer" ->
+      let* fields = exact ["kind";"value"] response_json in
+      Ok (Agent_core.Hooks.Answer (field "value" fields))
+    | "declined" -> let* _ = exact ["kind"] response_json in Ok Agent_core.Hooks.Declined
+    | "timeout" -> let* _ = exact ["kind"] response_json in Ok Agent_core.Hooks.Timeout
+    | _ -> Error "unknown input response kind" in
+  input_response_intent ~waiting ~source ~candidate ~response
+
 let of_json json =
   let decode () =
+    let* input_response_intent, json = match json with
+      | `Assoc fields ->
+        (match List.assoc_opt "input_response_intent" fields with
+         | None -> Ok (None,json)
+         | Some value -> let* intent = input_response_intent_of_json value in
+           Ok (Some intent,`Assoc (List.remove_assoc "input_response_intent" fields)))
+      | _ -> Ok (None,json) in
     let native_call_json, json = match json with
       | `Assoc fields ->
         (match List.assoc_opt "native_call" fields with
@@ -1010,6 +1107,18 @@ let of_json json =
           | Unconfirmed_sources | Confirmed_undispatched); _} -> Ok ()
       | Recovering {origin=Input_wait _;_} ->
         if gate_obligations=[] then Ok () else Error "input wait retains unresolved Gate obligations" in
+    let* () = match input_response_intent with
+      | None -> Ok ()
+      | Some intent ->
+        (match phase,native_call with
+         | Recovering {origin=Input_wait waiting;_},Keeper_native_call.No_native_call
+             when equal_input_wait waiting intent.waiting && Option.is_some (Scope_id.direct_operation_id id)
+               && revision >= 4L -> Ok ()
+         | (Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _
+           | Recovering {origin=(Input_wait _ | Unconfirmed_sources | Confirmed_undispatched | Checkpointed _
+               | Official_checkpointed _ | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _);_}),
+             (Keeper_native_call.No_native_call | Active _ | Terminal_unacknowledged _) ->
+           Error "response intent lost its original direct input wait") in
     let* input_sha256 = string "input_sha256" fields in
     let* () = if canonical_sha input_sha256 then Ok () else Error "invalid admitted input digest" in
     let* () = validate_native_call ~id ~input_sha256 ~phase native_call in
@@ -1044,5 +1153,5 @@ let of_json json =
       else Error "execution phase, revision and initial frame are incoherent" in
     let* created_at = time "created_at" fields in
     let* updated_at = time "updated_at" fields in
-    Ok { id; revision; input; input_sha256; gate_obligations; sources; current_sources; frame; phase; native_call; created_at; updated_at }
+    Ok { id; revision; input; input_sha256; gate_obligations; sources; current_sources; frame; phase; native_call; input_response_intent; created_at; updated_at }
   in decode () |> Result.map_error (fun detail -> Invalid_record detail)

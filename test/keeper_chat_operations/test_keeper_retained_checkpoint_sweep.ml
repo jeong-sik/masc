@@ -216,10 +216,55 @@ let test_prior_input_history_keeps_unnamed_retained_evidence () = with_root (fun
      fail "sweep did not preserve the unknown prior input boundary");
   check bool "unreferenced bytes survive while prior ownership is unknown" true (Sys.file_exists unnamed))
 
+let test_response_intent_keeps_source_and_candidate_after_restart () = with_root (fun root ->
+  let original=checkpoint "original waiting input" and source=checkpoint "extended response source"
+  and candidate=checkpoint "frozen consumed candidate" and orphan=checkpoint "unrelated orphan" in
+  let path=keeper_store root "response-intent" in
+  let operation_id=with_open path (fun store ->
+    let operation=claimed_direct store "original-response-intent" in
+    let call_id="019a0010-1000-7000-8000-000000000051" in
+    let pending : Agent_core.Agent_input_request.pending =
+      {run_id="sweep-original-input-run";request={request_id="sweep-original-question";
+        participant_name=None;question="Which original input?";schema=None;timeout_s=None;created_at=10.}} in
+    let locator=Agent_core.Agent.execution_locator_of_yojson
+      (`Assoc ["version",`Int 1;"run_id",`String "execution-run-sweep-original-input"]) |> string_ok in
+    let call=Keeper_native_call.create ~call_id ~runtime_id:"native.primary" ~operation_digest:operation.execution_digest
+      ~api:(Keeper_native_call.New_input {seed_message_count=1}) ~seed_checkpoint:original ~locator |> string_ok in
+    Store.update_direct_native_call store ~now:12. ~operation_id:operation.operation_id ~execution_digest:operation.execution_digest
+      (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call;call}) |> store_ok;
+    ignore (Store.update_direct_input_checkpoint store ~now:13. ~operation_id:operation.operation_id ~execution_digest:operation.execution_digest
+      ~call_id ~observed:original ~observed_input:None ~checkpoint:original |> store_ok);
+    Store.update_direct_native_call store ~now:14. ~operation_id:operation.operation_id ~execution_digest:operation.execution_digest
+      (Keeper_native_call.Terminal {call_id;disposition={Agent_core.Agent.outcome=Agent_core.Agent.Terminal_succeeded;
+        recovery=Agent_core.Agent.Retire}}) |> store_ok;
+    let waiting=Execution.input_wait ~checkpoint:original ~pending |> string_ok in
+    ignore (Store.defer_direct_input_wait store ~now:15. ~operation_id:operation.operation_id ~execution_digest:operation.execution_digest ~waiting |> store_ok);
+    let intent=Execution.input_response_intent ~waiting ~source ~candidate ~response:Agent_core.Hooks.Declined |> string_ok in
+    Store.prepare_direct_input_response store ~now:16. ~operation_id:operation.operation_id ~execution_digest:operation.execution_digest ~intent |> store_ok;
+    operation.operation_id) in
+  (* Sweep observes actual reopened SQLite facts; these files test retention,
+     not checkpoint payload validation or physical response installation. *)
+  let file reference=retained root ~session:["sweep-trace"] reference in
+  List.iter (fun reference -> write (file reference) "{}") [original;source;candidate;orphan];
+  let report=sweep root in
+  check int "original wait plus response source/candidate survive restart" 3 report.live_references;
+  check int "only unrelated orphan removed" 1 report.removed;
+  List.iter (fun reference -> check bool "response recovery evidence retained" true (Sys.file_exists (file reference)))
+    [original;source;candidate];
+  check bool "unreferenced orphan removed" false (Sys.file_exists (file orphan));
+  with_open path (fun store -> ignore (Store.cancel_queued store ~now:17. ~operation_id |> store_ok));
+  let report=sweep root in
+  check int "only current input ownership remains after cancellation" 1 report.live_references;
+  check int "source and candidate no longer live after confirmed cancellation" 2 report.removed;
+  check bool "current original input retained" true (Sys.file_exists (file original));
+  List.iter (fun reference -> check bool "cancelled response evidence swept" false (Sys.file_exists (file reference))) [source;candidate])
+
 let () =
   run "keeper_retained_checkpoint_sweep"
     [ ( "sweep"
-      , [ test_case "prior input uncertainty preserves every retained artifact" `Quick
+      , [ test_case "response intent retains original source and candidate across restart" `Quick
+            test_response_intent_keeps_source_and_candidate_after_restart;
+          test_case "prior input uncertainty preserves every retained artifact" `Quick
             test_prior_input_history_keeps_unnamed_retained_evidence;
           test_case "input checkpoint owner survives restart sweep" `Quick
         test_input_owner_retains_only_current_checkpoint_after_restart;

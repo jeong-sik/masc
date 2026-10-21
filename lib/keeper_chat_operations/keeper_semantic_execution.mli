@@ -74,6 +74,20 @@ val equal_input_wait : input_wait -> input_wait -> bool
 (** Exact owned input and complete canonical request. The serialized request is
     validated; this value alone is not filesystem or response authority. The
     Owner must read and compare its exact retained payload before admission. *)
+type input_response_intent = private
+  { waiting : input_wait
+  ; source : Keeper_checkpoint_ref.t
+  ; candidate : Keeper_checkpoint_ref.t
+  ; response : Agent_core.Hooks.elicitation_response }
+val input_response_intent : waiting:input_wait -> source:Keeper_checkpoint_ref.t ->
+  candidate:Keeper_checkpoint_ref.t -> response:Agent_core.Hooks.elicitation_response ->
+  (input_response_intent, string) result
+val equal_input_response_intent : input_response_intent -> input_response_intent -> bool
+(** The original complete wait, canonical source and frozen consumed candidate.
+    All references share the wait's trace; the source may extend its history,
+    and the candidate preserves the source's turn. Answers are canonical JSON.
+    This value validates identity structure, not physical payloads, installation,
+    response acceptance or continuation authority. *)
 type terminal = Completed | Cancelled | Failed of string
 type recovery_origin =
   | Unconfirmed_sources
@@ -107,6 +121,7 @@ type t = private
   ; frame : Keeper_repetition_snapshot.t
   ; phase : phase
   ; native_call : Keeper_native_call.state
+  ; input_response_intent : input_response_intent option
   ; created_at : float
   ; updated_at : float
   }
@@ -136,6 +151,7 @@ type action =
   | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
   | Suspend_input of input_wait
+  | Prepare_input_response of input_response_intent
   | Resolve_input of { observed : input_wait; checkpoint : Keeper_checkpoint_ref.t }
   | Reconcile_gate_binding of gate_binding * gate_wait
   | Resolve_gate of gate_resolution
@@ -158,7 +174,9 @@ val continuation_checkpoints : t -> Keeper_checkpoint_ref.t list
     their trace directories in the session root. The immutable native admission seed is excluded;
     it is historical evidence, not the latest pending-input authority. If a
     phase independently references that same seed, its continuation remains.
-    {!checkpoint_references} still includes every seed for retention/cleanup. *)
+    Prepared input-response source/candidate references are also excluded: they
+    are recovery evidence, never ordinary pending-input or resume authority.
+    {!checkpoint_references} includes both kinds of evidence for cleanup. *)
 
 val gate_approval_ids : t -> string list
 (** Approval ids this execution may still read from the Gate store: the
@@ -184,7 +202,11 @@ val apply : now:float -> action -> t -> (t, error) result
     record without spending a revision. Input_wait is a blocked original
     continuation, never a resumable checkpoint or a timer-expiring record.
     Suspend_input acknowledges only settled Retire native evidence together
-    with the wait; generic resume and successful settlement cannot consume it. *)
+    with the wait; generic resume and successful settlement cannot consume it.
+    Prepare_input_response requires the exact original direct wait and no native
+    call. It keeps that wait blocked and pins one immutable intent until exact
+    candidate resolution or cancellation/failure. Reconciliation preserves it;
+    preparing the same intent does not spend another revision. *)
 val update_native_call : now:float -> expected:Keeper_native_call.state ->
   replacement:Keeper_native_call.state -> t -> (t, error) result
 (** Direct-operation-only CAS. A terminal call remains evidence until the

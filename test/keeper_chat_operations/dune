@@ -35,7 +35,7 @@
 (test
  (name test_keeper_retained_checkpoint_sweep)
  (modules test_keeper_retained_checkpoint_sweep)
- (libraries alcotest masc masc.masc_core masc.keeper_chat_operations masc.keeper_execution_scope
+ (libraries alcotest masc masc.agent_core masc.masc_core masc.keeper_chat_operations masc.keeper_execution_scope
   masc.keeper_checkpoint_ref masc.keeper_registry digestif sqlite3 unix yojson))
 
 (test

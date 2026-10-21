@@ -346,9 +346,9 @@ let observe_retained ~store ~declaration_id ~schema request =
             else Error "only an unknown Exact outcome can retain exception evidence"
           | Some _ -> Error "invalid retained Exact exception evidence" in
         (match List.assoc_opt "status" fields,List.assoc_opt "reason" fields with
-         | Some _,None -> let* _ = final_of_json ~schema outcome in Ok ()
+         | Some _,(None | Some _) -> let* _ = final_of_json ~schema outcome in Ok ()
          | None,Some _ -> let* _ = not_final_of_json outcome in Ok ()
-         | (None,None) | (Some _,Some _) -> Error "invalid retained Exact attempt outcome")
+         | None,None -> Error "invalid retained Exact attempt outcome")
       | Some _ -> Error "retained Exact attempt must be an outcome object or started marker" in
     let* () = List.fold_left (fun state value -> let* () = state in attempt value) (Ok ()) record.attempts in
     match record.final with

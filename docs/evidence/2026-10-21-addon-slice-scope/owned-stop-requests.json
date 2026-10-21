@@ -1,0 +1,15 @@
+{
+  "at": 1792593592.13829,
+  "requests": [
+    {
+      "pid": 80887,
+      "observed_command": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /tmp/masc-addon-goal-resume-20261021/scope_fault_proxy.py",
+      "signal": "SIGTERM"
+    },
+    {
+      "pid": 80714,
+      "observed_command": "/tmp/masc-addon-native-39614788834/masc start --base-path /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5 --port 61736",
+      "signal": "SIGTERM"
+    }
+  ]
+}

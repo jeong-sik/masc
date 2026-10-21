@@ -1,0 +1,1369 @@
+{
+  "recorded_at": "2026-10-21T14:46:22.970109+00:00",
+  "source_sha": "d9b62724e72e7a3f231a4a7f2f3ca4cd7d8a5e1f",
+  "run_id": 39614788834,
+  "artifact_id": 12352905666,
+  "server_pid": 80714,
+  "proxy_pid": 80887,
+  "tui_pid": 2325,
+  "workspace": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5",
+  "backend_port": 61736,
+  "proxy_port": 61735,
+  "terminal": {
+    "columns": 160,
+    "rows": 56,
+    "type": "manual PTY / pyte VT cell capture"
+  },
+  "refusal_request_windows": [
+    {
+      "capture": "08-cross-run-refused",
+      "start": 1792593402.989032,
+      "end": 1792593412.845852,
+      "actual_requests": [
+        {
+          "at": 1792593403.150253,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.150582,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.1508448,
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.150995,
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.154266,
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.1544251,
+          "method": "GET",
+          "path": "/api/v1/dashboard/briefing",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.154513,
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.154598,
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&expected_workspace=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.1546822,
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.156245,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.15819,
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.159744,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.1680572,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.16817,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.170409,
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.17056,
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.171455,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593403.171561,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.151419,
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.151681,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.15217,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.152423,
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.155725,
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.156822,
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.157087,
+          "method": "GET",
+          "path": "/api/v1/dashboard/briefing",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.157299,
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&expected_workspace=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.157454,
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.160883,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.3787808,
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.386961,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.39818,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.398657,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.405621,
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.406205,
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.412452,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593405.4125912,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.158633,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.158769,
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.158856,
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.1589491,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.160634,
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.161237,
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&expected_workspace=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.161386,
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.161479,
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.1615639,
+          "method": "GET",
+          "path": "/api/v1/dashboard/briefing",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.163332,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.164073,
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.1652548,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.1751769,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.1752691,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.177181,
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.177257,
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.178072,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593407.1781461,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.1598122,
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.159966,
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.160033,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.160131,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.1626081,
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.162698,
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.162768,
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&expected_workspace=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.162839,
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.162912,
+          "method": "GET",
+          "path": "/api/v1/dashboard/briefing",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.1645162,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.1651258,
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.166626,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.177741,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.17783,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.179393,
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.1796238,
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.180227,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593409.180513,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.168083,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.168382,
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.16847,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.16861,
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.170434,
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.170934,
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.171201,
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.171307,
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&expected_workspace=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.171426,
+          "method": "GET",
+          "path": "/api/v1/dashboard/briefing",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.17391,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.174293,
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.176203,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.1846159,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.185676,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.1876469,
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.187872,
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.1886022,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593411.188742,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        }
+      ]
+    },
+    {
+      "capture": "09-omitted-run-refused",
+      "start": 1792593412.845852,
+      "end": 1792593413.95079,
+      "actual_requests": [
+        {
+          "at": 1792593413.184602,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.1847758,
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.18492,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.1850119,
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.186929,
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.1872509,
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.1873438,
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&expected_workspace=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.18749,
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.187646,
+          "method": "GET",
+          "path": "/api/v1/dashboard/briefing",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.189114,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.1897159,
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.190918,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.20295,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.2030442,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.205576,
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.205666,
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.2065449,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593413.2066162,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        }
+      ]
+    },
+    {
+      "capture": "10-blank-run-refused",
+      "start": 1792593413.95079,
+      "end": 1792593415.0580978,
+      "actual_requests": []
+    },
+    {
+      "capture": "11-duplicate-run-refused",
+      "start": 1792593415.0580978,
+      "end": 1792593425.873757,
+      "actual_requests": [
+        {
+          "at": 1792593415.1887062,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.18887,
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.188952,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.18907,
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.191113,
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.191669,
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&expected_workspace=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.191797,
+          "method": "GET",
+          "path": "/api/v1/dashboard/briefing",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.191885,
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.191982,
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.193463,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.195393,
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.196558,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.2072031,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.207299,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.209252,
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.2093382,
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.21023,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593415.210303,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.200405,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.205785,
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.2058759,
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.20595,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.207965,
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.208349,
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&expected_workspace=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.2085178,
+          "method": "GET",
+          "path": "/api/v1/dashboard/briefing",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.208618,
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.208705,
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.20997,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.2116108,
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.2126951,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.21698,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.2170508,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.2188532,
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.218938,
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.219838,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593417.2199092,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.2092228,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.2093818,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.209486,
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.20963,
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.211932,
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.212171,
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.212268,
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&expected_workspace=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.2123609,
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.21248,
+          "method": "GET",
+          "path": "/api/v1/dashboard/briefing",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.214251,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.214666,
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.216181,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.229681,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.229861,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.233352,
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.233483,
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.234806,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593419.2349381,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.22019,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.220404,
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.220542,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.2206311,
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.222566,
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.223216,
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&expected_workspace=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.223305,
+          "method": "GET",
+          "path": "/api/v1/dashboard/briefing",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.2234082,
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.223503,
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.225255,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.226201,
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.227394,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.2377138,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.237802,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.242789,
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.242891,
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.243903,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593421.243978,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.2400482,
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.240263,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.240447,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.240576,
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.2434182,
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&expected_workspace=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.245156,
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.24525,
+          "method": "GET",
+          "path": "/api/v1/dashboard/briefing",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.245342,
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.2454479,
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.247029,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.249341,
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.250754,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.309702,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.309839,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.312292,
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.312407,
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.313368,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593423.313465,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.236743,
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.237021,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.237189,
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.237369,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.239319,
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.240679,
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.2407858,
+          "method": "GET",
+          "path": "/api/v1/dashboard/briefing",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.240897,
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.2410188,
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&expected_workspace=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.243584,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.244282,
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5&expected_masc_root=/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.246345,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.272471,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.27273,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.276213,
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.2763112,
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.277619,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        },
+        {
+          "at": 1792593425.277751,
+          "method": "GET",
+          "path": "/health",
+          "decision": "forwarded to actual matching backend"
+        }
+      ]
+    }
+  ],
+  "evidence_posts": [
+    {
+      "at": 1792593395.898758,
+      "method": "POST",
+      "path": "/api/v1/lane-addons/evidence",
+      "decision": "forwarded to actual matching backend"
+    }
+  ],
+  "faulted_read_count": 16,
+  "known_defect": "Overview slice {} sends /slice? and receives actual HTTP400; /slice on the same backend returns HTTP200. Follow-up source repair not executed by this frozen artifact.",
+  "setup_and_manual_corrections": [
+    "Initial Python lacked pyte; ephemeral uv pyte installed outside product.",
+    "Non-tty driver setup failed on stdin selector; child90529 was confirmed absent before valid driver2325.",
+    "Capture12 appended palette text to the still-open command composer and shows JSON parse refusal, not scope admission.",
+    "Capture15 used the palette entry, which opens Add-ons and does not execute the trailing Slice query; it is not claimed as a second scope-admission path."
+  ],
+  "not_proven": [
+    "new rebased source execution",
+    "global Slice fix execution",
+    "all54 completion",
+    "same-source Dashboard",
+    "real audio/VST",
+    "actual browser/model",
+    "operator installation",
+    "all workspace races",
+    "release verification"
+  ]
+}

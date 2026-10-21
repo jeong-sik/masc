@@ -1,0 +1,4 @@
+{"at": 1792593383.23564, "event": "enabled Slice-only connection-close fault"}
+{"at": 1792593427.082547, "event": "disabled Slice-only connection-close fault"}
+{"at": 1792593438.0279942, "event": "re-enabled Slice fault for actual palette submission; capture12 was a composer JSON parse error"}
+{"at": 1792593454.500236, "event": "disabled fault before same-run filter and Overview checks; palette15 did not execute query"}

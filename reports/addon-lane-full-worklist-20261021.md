@@ -35,12 +35,12 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 완료 — 고정 G01 제품 `7b16a9175711aefe744c5c704e038a42fd5b6b7b`: native run `39595834943`의 TUI 20건·application 5건 PASS, artifact `12343798542` 확보. 실제 server/TUI build identity와 파일 해시를 대조; 후속 G04/G03·실제 화면은 별도 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
-| A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 격리 native 제품 `7b16a917`에서 실제 TUI On→Off→On·새 incarnation/입력 결과·API 이력 보존·정리 관측. 원래 상세의 수동/자동 새로고침이 retained 결과를 지우는 P2 재현; #44838 소스 수리·새 후보 실행 필요 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
+| A01 | 변경 TUI의 최소 검사와 정확한 소스의 실행 artifact 확보 | 고정 d9b62724의 native run 39614788834 완료 성공: TUI 24건·application 5건, matching server/TUI 해시·내장 SHA 대조 완료. 실제 관측에서 추가 global-query 결함을 찾아 e6c7521a로 수리; 새 exact native run 39620100070 접수, 결과 미확인 | `test_tui_lane_addons`·직접 관련 application 검사 결과, 실행 artifact의 source/build identity 확보 |
+| A02 | 새 TUI로 On/Off/재연결 실제 화면 관측 | 고정 7b16a917 실제 On→Off→On에서 retained refresh 결함 재현. 고정 d9b62724 실제 TUI에서 원래 row/selection·읽기 실패·실제 Evidence receipt 공존, 잘못된 run 입력 거절·복구·same-run empty 관측. lifecycle 수리·운영 설치·같은 후보 Dashboard는 별도 | 같은 설치의 이전/새 incarnation, 정리 상태, 원래 결과·receipt를 실제 화면과 API로 확인 |
 | A03 | retained worker에 남는 Observe/Action 키 안내 정리 | #44721 main 병합. 고정 `7b16a917` 실제 TUI에서 retained 실행 키 미노출·수동 Observe 거절·이력 진입 확인; 전체 상세 새로고침 결함은 A02/G06에서 별도 추적 | 표시 가능한 행동과 실제 요청 허용 조건이 일치; 이력 조회·정리 조치는 보존 |
-| A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | 공통 Stack #44710 네 층 병합 완료. G01 후속 소스 독립 리뷰 P0–P2 없음; 최종 head의 MASC 재리뷰는 별도 필요 | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
+| A04 | MASC 코드·맥락 리뷰 대응 및 현재 head 판정 확인 | 공통 Stack #44710과 G01 Stack #44803 세 층 main 병합 확인. G06의 과거0f/6f 승인 결속과 CR 해소를 확인했으나 실제 충돌 후 whole5 restack 및 새 수리·증거 층으로 head/scope 변경; 현재 재리뷰 필요 | 실제 verdict를 읽고 P0–P2 해소, 바뀐 head/base/diff에 재결속 |
 | A05 | Browser 스택의 후속 3개 층과 기존 증거 영향 검토 | 세 층의 전체 delta 직독; exact `76b741f` run `39555413943` 두 suite 14건 PASS, 독립 source delta 검토 PASS; 실제 앱·전체 스택 검증 별도 | #44695·#44698·#44702의 reply/download 정책 변경을 읽고 영향을 받는 경로만 검증 |
-| A06 | 두 스택의 전체 통합 준비 | 공통 Stack #44710은 main 병합. Browser Stack #44168은 67층 open, top #44702 `d35d2559`; 전체 현재 승인·충돌·통합 재확인 필요 | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
+| A06 | 두 스택의 전체 통합 준비 | 공통 #44710 및 G01 #44803 main 병합. Browser #44168은 67층 open, top #44702 d35d2559. G06 #44840은 main b2397d64 위로 전체 재배치·충돌 수리 후 global-query 및 새 증거 층 추가; 현재 승인·전체 통합 필요 | REST stack 구성·각 head·독립 승인·미해결 리뷰·충돌 재확인; 병합은 전체 스택의 맨 위 PR로만 진행 |
 
 빌더 요청: `kmsg-2ada1cdc54884c58aa6736a80b598868`는 기존 `566b98b` 대상이다. 후속 exact 후보 `7f9e34b`는 native run `39555509454`로 요청했다. 중복 시작을 피하도록 빌더에게 대체 안내 `kmsg-1974c332ed1abfed8b4bde992b686e8f`를 보냈으며 안내 접수는 원래 작업 취소·실행 여부의 증거가 아니다.
 코드 리뷰: `kmsg-f7fecd527b3870306df62a4079c30ad8` 완료 및 #44707 review `5595612747` APPROVED 직독. head `566b98b5d1645d6312d518bf2810f3e5e0626586`, reviewed base `b95d927e30c6718e0fe656d3019c6cf39766c02c`, diff `ff95fe2ecb2658cee6da5b251d2b119c825270116c978246de762b5374e336c2`. 한 층의 소스 승인이다. #44721 후속 요청 `kmsg-dc966b86727baccd78eaa31700ef384e`는 queued 접수다.
@@ -77,7 +77,7 @@ Dashboard·TUI 관측, 실제 사용·복구·설치 검증. 이전 대화의 �
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | D01 | Addon별 모델 route와 기능 활성화의 독립 선택 검증 확장 | Browser broker 있음 | LLM 없는 동작은 독립 실행되고, 설치/출력별 선택 모델이 실제 호출에 반영 |
-| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | Browser top `d35d2559`에서 consumer grant 재사용·원래 intent 보존·완전 Candle domain decode 소스 확인; main 통합·실제 실행 미확인 | `Consumer_request_schema`의 권한·package baseline·요청 digest를 재사용; Grade enum·keeper 집합·weight 상한은 Candle의 완전한 domain decode로 검증 |
+| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | 기존 grant 재사용·완전 domain decode·단계별 ID·불확실 결과 계약 source 검토 PASS. Browser top d35d2559에 Candle package/host 적용 소스 존재; 실제 provider·전체 통합 검증 별도 | `Consumer_request_schema`의 권한·package baseline·요청 digest를 재사용; Grade enum·keeper 집합·weight 상한은 Candle의 완전한 domain decode로 검증 |
 | D03 | 모델 호출 전 요청 보존 및 원래 identity 결속 | 기반 있음 | request·stage·input·schema·route·trace를 보존한 뒤 한 번 dispatch |
 | D04 | 오류·거절·불확실 결과의 typed 처리 일관화 | 도메인별 차이 있음 | transport 불가/잘못된 출력/실행 거절/효과 불확실의 재시도 의미를 유지 |
 | D05 | credential·provider admission·동시 실행 권한을 host에 유지 | Browser 검증 있음 | worker/child에 비밀 유출 없음; 실제 provider별 queue·취소·동시성 동작 확인 |
@@ -93,7 +93,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | Browser Stack #44168에 worker/host 연결 구현 존재 (`addons/candle-appraiser`, `Server_candle_appraiser`); main 미통합, 실제 provider·Off/재연결/정산·UI 검증 미완료 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
+| E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | Browser Stack #44168 top d35d2559에 candle-appraiser package·기존 Exact grant·host adapter 적용 소스 존재(open/unmerged). 실제 provider 판단·Off obligation/재연결·중복 없는 정산·두 UI 검증 필요; 중복 wrapper를 만들지 않음 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
 | E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 설계 필요 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
@@ -129,12 +129,12 @@ Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현�
 
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
-| G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | [#44801](https://github.com/jeong-sik/masc/pull/44801) host application의 원래 id/path/source·desired revision/enabled 결속 구현. 수리한 고정 제품의 direct run `39594048964` 3suite78건과 native artifact 2suite25건 PASS. Dashboard 62건·tsc PASS; 전체 연결 그래프·실제 화면·설치 미확인 | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
+| G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | Stack #44803의 #44801·#44802·#44830 main 병합 확인(770ca204·912f1108·1a8c3744). host application 연결과 historical62/후속92건 증거 구분 보존. 새 main 조합의 native/UI·설치 증거는 별도 | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
 | G02 | 입력→Hook→worker→모델→출력/소비자의 연결 관계 표시 | 일부 Flow 있음 | 실제 연결 reference에 근거해 표시; 관측 그래프를 실행 허가로 사용하지 않음 |
 | G03 | 요청부터 종료·정리까지 원래 timeline/trace 연결 | 부분 구현; Dashboard가 버리던 host_requests를 원래 worker/incarnation에 결속해 보존·표시하는 후속 구현. 모델 lane/provider/operator/source 대기와 전달·기록 실패를 닫힌 타입으로 읽고, 손상 진단은 worker·결과와 분리. 전체 요청 이력·실제 화면·설치 검증 필요 | request/run/instance/revision, 대기 이유·결과·실패·정리 증거를 같은 원래 작업으로 추적 |
 | G04 | 교체·경로/ID 변경·이전 소유자 이력 표시 | 후속 소스 구현: 같은 ID worker와 같은 TOML 경로의 다른 ID를 두 UI에서 분리. Dashboard 3파일62건·tsc PASS, TUI 관측 모델 parser PASS; 독립 리뷰·OCaml 실행·실제 UI 별도 | 새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근 |
 | G05 | 에이전트 작업 중 표시와 현재 포인터/입력 활동 표시 | 범위별 재확인 필요 | 실제 동작 이벤트 기반으로 작업자·활동·포인터 위치 표시; 완료·중단·해제 때 표시 정리 |
-| G06 | 두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화 | 기반/일부 검증 있음 | draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능 |
+| G06 | 두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화 | 고정 d9b62724 실제 native에서 other/omitted/blank/duplicate run 입력의 전송 전 거절·원래 결과/실패/영수증 보존·정상 복구·same-run filtered empty 확인. Overview global slice {}의 /slice?→400을 추가 발견; #44868 수리 소스 PASS, 새 native 결과 미확인. 모든 workspace/실패 경계 완료 아님 | draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능 |
 
 
 G04 후속 [#44807](https://github.com/jeong-sik/masc/pull/44807) · 다른 설치 ID의 같은 TOML 경로
@@ -226,3 +226,13 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - [실측·실패 영수증](../docs/evidence/2026-10-21-addon-native-ui/README.md): 고정 제품 `7b16a9175711aefe744c5c704e038a42fd5b6b7b`의 실제 TUI/서버와 Docker/MCP observer로 On → Off → On을 조작했다. 같은 설치의 이전/새 incarnation, 새 입력 결과, 원래 row/evidence 보존과 두 컨테이너 해제를 확인했다. 수동 PTY 원문/cell capture와 그로부터 렌더한 PNG이며 물리 데스크톱 스크린샷은 아니다. Synthetic phrase 입력이고 오디오·모델·action 실행 증거가 아니다.
 - A02는 완료가 아니다. 원래 상세에서 수동/visible cadence Inspect가 retained slice를 누락해 화면 결과를 지우는 P2를 재현했다. #44838은 조회 시 원래 instance/incarnation을 보존하고 effect/status 영수증은 기존대로 유지하는 소스 수리이며, 독립 source PASS·parser PASS와 새 native 실행을 구분한다.
 - G06에는 Inspect 성공+retained Slice 실패 시 이전 결과를 덮는 소스 경로도 남았다. 실패와 성공한 빈 결과를 구분해 보존하고 직접 검증해야 한다. 원래 54개 요구와 완료 기준, 같은 후보 Dashboard 조합·실제 모델/앱·장기/성능·운영 설치 검증은 유지한다.
+
+## 2026-10-21 고정 d9 실제 관측과 global Slice 후속
+
+- [고정 d9의 실제 요청·원래 결과·영수증·복구 기록](../docs/evidence/2026-10-21-addon-slice-scope/README.md)을 공개한다. native run [39614788834](https://github.com/jeong-sik/masc/actions/runs/39614788834)의 matching server/TUI·24+5 검사와 실제 A composer의 거절·복구를 분리해 기록한다. 과거2c·15478 실행과 새 main/rebase 후보의 실행으로 합치지 않는다.
+- 실제 same-run 빈 필터는 정상 empty로 받아 원래 행을 비우고 receipt를 유지했다. 다른 run·생략·blank·duplicate 입력은 전송 전에 거절됐다. 공개 trace의 거절 구간과 이후 직접 API 비교 구간을 분리해, 나중에 보낸 other-run API를 거절 구간에 잘못 세지 않는다.
+- 추가 P2: 목록의 `slice {}`는 typed admission을 통과하지만 `/slice?`를 보내 실제400을 받았다. 같은 서버의 `/slice`는200이었다. [#44868](https://github.com/jeong-sik/masc/pull/44868)은 빈 query만 bare endpoint로 조립한다. nonempty 인코딩·필드 순서/중복·Detail의 원래 run 검증은 보존했다. parser·diff·독립 source PASS이며, corrected binary 실행은 아직 증명하지 않았다.
+- 새 고정 제품 `e6c7521a0b709de79ed8997d204cd5924f395dbb`의 native [39620100070](https://github.com/jeong-sik/masc/actions/runs/39620100070)은 접수됐다. 결과·matching artifact·실제 global-query 성공은 후속으로 읽는다. CI watch/대기나 중복 dispatch는 하지 않는다.
+- G01의 세 merged 상태와 병합 커밋은 확인했다. G06 충돌 수리는 새 main의 G01 기록과 기존 A02/G06 실측 기록을 모두 보존했다. 54개 ID·작업 내용·완료 기준은 바꾸지 않았다. 새 head의 MASC 재리뷰·전체 통합·설치가 남는다.
+- E01은 미구현이 아니다. 기존 Browser 후보 d35d2559의 package·Server_candle_appraiser 입력 보존/원래 요청 read/authoritative Absent submit/완전 domain decode 경계를 직접 읽었다. 실제 provider와 Off 후 obligation/재연결·정산 및 두 UI는 미검증이다. 기존 구현을 기준으로 그 경계를 검증한다.
+- 실측용 프로세스3개·포트2개와 정확한 이전 컨테이너2개의 부재를 종료 후 별도로 확인했다. private 로그인·credential·server log는 공개하지 않았다. 현재 54개 목표는 진행 중이다.

@@ -40,12 +40,6 @@ let keeper_toml_load_error_to_string error =
       error.detail
 ;;
 
-let keeper_toml_load_error_paths error =
-  if String.equal error.keeper_path error.failing_path
-  then [ error.keeper_path ]
-  else [ error.keeper_path; error.failing_path ]
-;;
-
 (* The deny axis is by model-visible name, so the only names a deny entry can
    mean are the ones the descriptor spine projects to the model. Skipped when
    the profile denies nothing: the model-visible walk revalidates every

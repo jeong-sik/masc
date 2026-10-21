@@ -120,14 +120,6 @@ let keeper_profile_defaults_materializable (defaults : keeper_profile_defaults) 
   | Some Manual | None -> has_runtime_identity
 ;;
 
-let keeper_toml_path_opt name =
-  Config_dir_resolver.log_warnings ~context:"KeeperTypesProfile" ();
-  Config_dir_resolver.keeper_toml_path_opt name
-
-let keeper_toml_path name =
-  Config_dir_resolver.log_warnings ~context:"KeeperTypesProfile" ();
-  Config_dir_resolver.keeper_toml_path name
-
 let keeper_toml_path_opt_for_base_path ~base_path name =
   Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path name
 
@@ -204,10 +196,11 @@ let materialization_defaults_of_content ~path bytes =
   Result.bind (inspect_keeper_toml_content ~path bytes) (fun (name, defaults) ->
     load_keeper_instructions_for_file ~toml_path:path ~file_name name defaults)
 
-let load_keeper_profile_defaults_result_uncached_with_paths
-    ~keeper_toml_path
-    name :
+let load_keeper_profile_defaults_result_for_base_path ~base_path name :
     (keeper_profile_defaults, keeper_toml_load_error) result =
+  let keeper_toml_path =
+    Config_dir_resolver.keeper_toml_path_for_base_path ~base_path name
+  in
   if not (Env_config_core.existing_file keeper_toml_path)
   then declaration_not_found ~expected_path:keeper_toml_path name
   else
@@ -223,19 +216,6 @@ let load_keeper_profile_defaults_result_uncached_with_paths
           ~file_name:name
           loaded_name
           defaults
-
-let load_keeper_profile_defaults_result_uncached name :
-    (keeper_profile_defaults, keeper_toml_load_error) result =
-  load_keeper_profile_defaults_result_uncached_with_paths
-    ~keeper_toml_path:(keeper_toml_path name)
-    name
-
-let load_keeper_profile_defaults_result_for_base_path ~base_path name :
-    (keeper_profile_defaults, keeper_toml_load_error) result =
-  load_keeper_profile_defaults_result_uncached_with_paths
-    ~keeper_toml_path:
-      (Config_dir_resolver.keeper_toml_path_for_base_path ~base_path name)
-    name
 
 type keeper_profile_snapshot =
   { base_path : string
@@ -534,54 +514,14 @@ let keeper_toml_config_errors_result () =
 let keeper_toml_unknown_keys () =
   keeper_toml_unknown_keys_in_dir (Config_dir_resolver.keepers_dir ())
 
-(* Profile defaults cache — strict results are cached by source file
-   fingerprint, not by keeper name alone. TOML edits happen outside the
-   process, so held entries must invalidate when their dependency mtimes/sizes
-   change. Ok results and errors that follow from a file's bytes are held. A
-   read failure is not held: it is an I/O event such as descriptor exhaustion,
-   not a function of the bytes, and nothing in the fingerprint changes when it
-   clears, so the next load reads again. *)
+(* A read failure is an I/O event such as descriptor exhaustion, not a
+   function of the file's bytes, and nothing in a file fingerprint changes
+   when it clears. Every other load error follows from the bytes. *)
 let load_error_follows_from_bytes (error : keeper_toml_load_error) =
   match error.kind with
   | Read_error -> false
   | Parse_error | Profile_error | Invalid_name | Declaration_not_found _
   | Unknown_deny_tool _ -> true
-
-type profile_defaults_cache_key = string * string
-
-type profile_defaults_cache_entry =
-  { primary_toml_path : string option
-  ; dependency_paths : string list
-  ; dependency_fingerprint : string
-  ; result : (keeper_profile_defaults, keeper_toml_load_error) result
-  }
-
-let profile_defaults_cache : (profile_defaults_cache_key, profile_defaults_cache_entry) Hashtbl.t =
-  Hashtbl.create 32
-let profile_defaults_mu = Stdlib.Mutex.create ()
-
-let profile_cache_scope () =
-  try
-    let resolution = Config_dir_resolver.resolve () in
-    resolution.config_root.path
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    (* resolver failure fallback uses env only as a cache-key salt;
-       profile parsing remains explicit and the cache miss path revalidates
-       file fingerprints before returning a cached result. NDT-OK *)
-    String.concat "|"
-      [ Option.value ~default:"" (Sys.getenv_opt "MASC_CONFIG_DIR")
-      ; Printexc.to_string exn
-      ]
-
-let profile_defaults_cache_key name = (profile_cache_scope (), name)
-
-let same_string_opt a b =
-  match a, b with
-  | None, None -> true
-  | Some a, Some b -> String.equal a b
-  | _ -> false
 
 let file_fingerprint path =
   match Fs_compat.file_mtime path, Fs_compat.file_size path with
@@ -594,13 +534,14 @@ let dependency_fingerprint paths =
   paths |> List.map file_fingerprint |> String.concat "|"
 
 (* Profile snapshot holder — one capture per (base path, keepers dir), keyed by
-   the same file fingerprint as the profile defaults cache. The fingerprint
-   covers every listed [*.toml] path, so a file that appears or disappears
-   changes it, and it is taken before the files are parsed, so an edit that
-   lands during a parse leaves a capture the next listing no longer matches.
-   A capture is held only when every declaration loaded or failed for a reason
-   that follows from its bytes; a capture with a read failure is returned but
-   not held, so the next capture reads every file again. *)
+   the path, mtime and size of every listed [*.toml] file. TOML edits happen
+   outside the process, so the fingerprint is read on every capture. It covers
+   every listed path, so a file that appears or disappears changes it, and it
+   is taken before the files are parsed, so an edit that lands during a parse
+   leaves a capture the next listing no longer matches. A capture is held only
+   when every declaration loaded or failed for a reason that follows from its
+   bytes; a capture with a read failure is returned but not held, so the next
+   capture reads every file again. *)
 type profile_snapshot_entry =
   { snapshot_fingerprint : string
   ; snapshot : keeper_profile_snapshot
@@ -652,75 +593,15 @@ let read_keeper_profile_snapshot ~base_path =
     snapshot
 ;;
 
-let profile_dependency_paths ~name:_ ~primary_toml_path
-    (result : (keeper_profile_defaults, keeper_toml_load_error) result) =
-  let paths =
-    match primary_toml_path, result with
-    | Some toml_path, Ok _ -> [ toml_path ]
-    | Some _, Error error -> keeper_toml_load_error_paths error
-    | None, _ -> []
-  in
-  dedupe_keep_order paths
-
-let load_keeper_profile_defaults_result name :
-    (keeper_profile_defaults, keeper_toml_load_error) result =
-  let primary_toml_path = keeper_toml_path_opt name in
-  let key = profile_defaults_cache_key name in
-  let cached =
-    Stdlib.Mutex.lock profile_defaults_mu;
-    let value = Hashtbl.find_opt profile_defaults_cache key in
-    Stdlib.Mutex.unlock profile_defaults_mu;
-    value
-  in
-  match cached with
-  | Some entry
-    when same_string_opt entry.primary_toml_path primary_toml_path
-         && String.equal entry.dependency_fingerprint
-              (dependency_fingerprint entry.dependency_paths) ->
-    entry.result
-  | _ ->
-    let result = load_keeper_profile_defaults_result_uncached name in
-    let dependency_paths =
-      profile_dependency_paths ~name ~primary_toml_path result
-    in
-    let holdable =
-      match result with
-      | Ok _ -> true
-      | Error error -> load_error_follows_from_bytes error
-    in
-    if holdable
-    then (
-      let entry =
-        { primary_toml_path
-        ; dependency_paths
-        ; dependency_fingerprint = dependency_fingerprint dependency_paths
-        ; result
-        }
-      in
-      Stdlib.Mutex.lock profile_defaults_mu;
-      Hashtbl.replace profile_defaults_cache key entry;
-      Stdlib.Mutex.unlock profile_defaults_mu);
-    result
-
-let invalidate_keeper_profile_defaults_cache name =
-  let key = profile_defaults_cache_key name in
-  Stdlib.Mutex.lock profile_defaults_mu;
-  Hashtbl.remove profile_defaults_cache key;
-  Stdlib.Mutex.unlock profile_defaults_mu;
-  (* A snapshot holds every declaration of its keepers dir, so an in-process
-     write of one declaration drops every held snapshot. *)
+(* A snapshot holds every declaration of its keepers dir, so an in-process
+   write of one declaration drops every held snapshot. *)
+let invalidate_keeper_profile_snapshots () =
   Stdlib.Mutex.protect profile_snapshot_mu (fun () ->
     Hashtbl.reset profile_snapshot_cache)
 
-let keeper_profile_defaults_materializable_for_name ?base_path name =
+let keeper_profile_defaults_materializable_for_name ~base_path name =
   try
-    let defaults_result =
-      match base_path with
-      | Some base_path ->
-        load_keeper_profile_defaults_result_for_base_path ~base_path name
-      | None -> load_keeper_profile_defaults_result name
-    in
-    (match defaults_result with
+    (match load_keeper_profile_defaults_result_for_base_path ~base_path name with
      | Ok defaults -> keeper_profile_defaults_materializable defaults
      | Error error ->
        Log.Keeper.warn
@@ -739,15 +620,10 @@ let keeper_profile_defaults_materializable_for_name ?base_path name =
               Keeper_profile_load_failure_site.(to_label Materializable_check) );
           ]
         ();
-      let base_path_detail =
-        match base_path with
-        | Some base_path -> Printf.sprintf " base_path=%s" base_path
-        | None -> ""
-      in
       Log.Keeper.warn
-        "profile materializable check for %s failed%s: %s"
+        "profile materializable check for %s failed base_path=%s: %s"
         name
-        base_path_detail
+        base_path
         (Printexc.to_string exn);
       false
 

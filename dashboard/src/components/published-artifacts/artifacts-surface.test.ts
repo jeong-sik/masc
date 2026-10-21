@@ -86,6 +86,35 @@ describe('artifact library user flow', () => {
     expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer')
   })
 
+  it('reads only an explicitly previewed HTML revision and keeps its preview inert', async () => {
+    const view = render(html`<${ArtifactsSurface} />`)
+    fireEvent.click(await view.findByRole('button', { name: 'HTML 미리보기' }))
+    const frame = await view.findByTitle(`${second.title} 빠른 미리보기`)
+    expect(vi.mocked(get).mock.calls.some(([path]) => path === `/api/v1/published-artifacts/${secondId}?revision=2`)).toBe(true)
+    expect(vi.mocked(get).mock.calls.some(([path]) => path.includes(firstId))).toBe(false)
+    expect(frame.getAttribute('sandbox')).toBe('')
+    expect(frame.getAttribute('srcdoc')).toContain("script-src 'none'")
+    expect(frame.getAttribute('srcdoc')).toContain("connect-src 'none'")
+    expect(frame.getAttribute('srcdoc')).toContain('<button onclick=')
+    fireEvent.click(view.getByRole('button', { name: '미리보기 접기' }))
+    expect(view.queryByTitle(`${second.title} 빠른 미리보기`)).toBeNull()
+  })
+
+  it('retires a collapsed preview request and refuses its late body', async () => {
+    let finish: ((value: unknown) => void) | undefined
+    vi.mocked(get).mockImplementation(async path => path === '/api/v1/published-artifacts'
+      ? { artifacts: [first, second], diagnostics: [] }
+      : new Promise(resolve => { finish = resolve }))
+    const view = render(html`<${ArtifactsSurface} />`)
+    fireEvent.click(await view.findByRole('button', { name: 'HTML 미리보기' }))
+    await waitFor(() => expect(finish).toBeDefined())
+    const options = vi.mocked(get).mock.calls.find(([path]) => path.includes(secondId))?.[1]
+    fireEvent.click(view.getByRole('button', { name: '미리보기 접기' }))
+    expect(options?.signal?.aborted).toBe(true)
+    finish?.({ artifact: second, content: '<h1>late</h1>', revisions: [second] })
+    await waitFor(() => expect(view.queryByTitle(`${second.title} 빠른 미리보기`)).toBeNull())
+  })
+
   it('shows copy success inside the reader and copies the selected version link', async () => {
     route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: firstId, revision: '1' }, postId: null }
     const view = render(html`<${ArtifactsSurface} />`)

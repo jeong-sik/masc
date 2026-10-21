@@ -6,18 +6,28 @@ import { storedTokenRevision } from '../../api/token-revision'
 import { fetchPublishedArtifacts, fetchPublishedArtifact, type ArtifactList, type ArtifactDocument } from '../../api/published-artifacts'
 import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import { ArtifactReader } from './artifact-reader'
+import { ArtifactPreview } from './artifact-preview'
 
-type Remote<T> = { key: string; kind: 'loaded'; data: T }
+type Remote<T> = { key: string; kind: 'loaded'; data: T; receivedAt: number }
   | { key: string; kind: 'error'; message: string }
 const errorMessage = (error: unknown) => error instanceof ApiRequestError && error.status === 404
   ? '문서 또는 선택한 버전을 찾지 못했습니다.'
   : error instanceof Error ? error.message : '문서를 불러오지 못했습니다.'
+
+function isToday(timestamp: string, now: Date): boolean {
+  const date = new Date(timestamp)
+  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate()
+}
 
 export function ArtifactsSurface() {
   const { artifact: selectedId, revision } = route.value.params
   const authRevision = storedTokenRevision.value
   const [refresh, setRefresh] = useState(0)
   const [query, setQuery] = useState('')
+  const [format, setFormat] = useState<'all' | 'markdown' | 'html'>('all')
+  const [todayOnly, setTodayOnly] = useState(false)
+  const [previewId, setPreviewId] = useState<string | null>(null)
   const [catalog, setCatalog] = useState<Remote<ArtifactList> | null>(null)
   const [document, setDocument] = useState<Remote<ArtifactDocument> | null>(null)
   const catalogKey = String(authRevision)
@@ -27,7 +37,7 @@ export function ArtifactsSurface() {
   useEffect(() => {
     const controller = new AbortController()
     void fetchPublishedArtifacts(controller.signal).then(data => {
-      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) setCatalog({ key: catalogKey, kind: 'loaded', data })
+      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) setCatalog({ key: catalogKey, kind: 'loaded', data, receivedAt: Date.now() })
     }, error => {
       if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) setCatalog({ key: catalogKey, kind: 'error', message: errorMessage(error) })
     })
@@ -37,7 +47,7 @@ export function ArtifactsSurface() {
     if (!selectedId) return
     const controller = new AbortController()
     void fetchPublishedArtifact(selectedId, revision, controller.signal).then(data => {
-      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) setDocument({ key: documentKey, kind: 'loaded', data })
+      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) setDocument({ key: documentKey, kind: 'loaded', data, receivedAt: Date.now() })
     }, error => {
       if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) setDocument({ key: documentKey, kind: 'error', message: errorMessage(error) })
     })
@@ -47,8 +57,12 @@ export function ArtifactsSurface() {
   const list = catalog?.key === catalogKey ? catalog : null
   const doc = document?.key === documentKey ? document : null
   const search = query.trim().toLocaleLowerCase()
+  const now = new Date()
+  const todayCount = list?.kind === 'loaded' ? list.data.artifacts.filter(a => isToday(a.created_at, now)).length : null
   const artifacts = list?.kind === 'loaded' ? list.data.artifacts.filter(a =>
-    `${a.title}\n${a.summary}\n${a.author}`.toLocaleLowerCase().includes(search)) : []
+    `${a.title}\n${a.summary}\n${a.author}`.toLocaleLowerCase().includes(search)
+    && (format === 'all' || a.format === format)
+    && (!todayOnly || isToday(a.created_at, now))) : []
   return html`
     <section class="space-y-4" aria-label="아티팩트 보관함">
       <header class="flex flex-wrap items-center justify-between gap-3">
@@ -61,21 +75,47 @@ export function ArtifactsSurface() {
           <input type="search" aria-label="아티팩트 검색" placeholder="제목, 요약, 작성자 검색"
             class="w-full max-w-lg rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2 text-sm"
             value=${query} onInput=${(event: Event) => setQuery((event.target as HTMLInputElement).value)} />
+          <div class="flex flex-wrap items-center gap-3 text-sm">
+            <label>형식 ${' '}<select aria-label="아티팩트 형식" value=${format}
+              onChange=${(event: Event) => setFormat((event.target as HTMLSelectElement).value as typeof format)}>
+              <option value="all">모든 형식</option><option value="markdown">Markdown 문서</option><option value="html">HTML 웹 페이지</option>
+            </select></label>
+            <button type="button" aria-pressed=${todayOnly} onClick=${() => setTodayOnly(value => !value)}>오늘 게시·수정${todayCount === null ? '' : ` ${todayCount}개`}</button>
+            ${list?.kind === 'loaded' ? html`<span class="text-xs text-[var(--color-fg-muted)]">
+              목록 조회 <time dateTime=${new Date(list.receivedAt).toISOString()}>${new Date(list.receivedAt).toLocaleTimeString()}</time>
+              · 전체 ${list.data.artifacts.length}개${list.data.diagnostics.length ? ' · 일부 조회 실패' : ''}
+            </span>` : null}
+          </div>
           ${list === null ? html`<p role="status">목록을 불러오고 있습니다.</p>`
             : list.kind === 'error' ? html`<p role="alert">${list.message}</p>`
             : html`
               ${list.data.diagnostics.length ? html`<p role="alert" class="text-xs">일부 문서를 읽지 못했습니다. ${list.data.diagnostics.map(d => `${d.id}: ${d.error}`).join(' · ')}</p>` : null}
-              ${artifacts.length === 0 ? html`<p role="status" class="text-sm text-[var(--color-fg-secondary)]">${search ? '검색 결과가 없습니다.' : '아직 게시된 아티팩트가 없습니다. Keeper가 보고서를 게시하면 여기에 표시됩니다.'}</p>` : null}
-              <ul class="m-0 grid list-none gap-3 p-0 md:grid-cols-2 xl:grid-cols-3">
+              ${artifacts.length === 0 ? html`<p role="status" class="text-sm text-[var(--color-fg-secondary)]">${search || format !== 'all' || todayOnly ? '조건에 맞는 아티팩트가 없습니다.' : '아직 게시된 아티팩트가 없습니다. Keeper가 보고서를 게시하면 여기에 표시됩니다.'}</p>` : null}
+              <ul class="m-0 grid list-none gap-4 p-0 xl:grid-cols-2">
                 ${artifacts.map(a => html`<li key=${a.id}>
+                  <article class="h-full overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
                   <button type="button" aria-current=${a.id === selectedId ? 'true' : undefined}
-                    class="w-full rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-left hover:bg-[var(--color-bg-hover)]"
+                    class="w-full p-4 text-left hover:bg-[var(--color-bg-hover)]"
                     onClick=${() => navigate('workspace', { section: 'artifacts', artifact: a.id })}>
-                    <span class="block text-xs uppercase text-[var(--color-fg-muted)]">${a.format} · v${a.revision}</span>
+                    <span class="flex flex-wrap items-center gap-2 text-xs">
+                      <span class=${`rounded border px-2 py-1 ${a.format === 'html' ? 'border-violet-400/40 bg-violet-400/10 text-violet-300' : 'border-sky-400/40 bg-sky-400/10 text-sky-300'}`}>${a.format === 'html' ? 'HTML · 웹 페이지' : 'Markdown · 문서'}</span>
+                      <span class="text-[var(--color-fg-muted)]">v${a.revision}</span>
+                      ${isToday(a.created_at, now) ? html`<span class="font-semibold text-[var(--color-fg-default)]">오늘</span>` : null}
+                    </span>
                     <strong class="mt-1 block break-words">${a.title}</strong>
                     <span class="mt-1 block break-words text-sm text-[var(--color-fg-secondary)]">${a.summary}</span>
                     <span class="mt-2 block text-xs text-[var(--color-fg-muted)]">${a.author} · ${new Date(a.created_at).toLocaleString()}</span>
                   </button>
+                  ${a.format === 'html' ? html`
+                    <div class="border-t border-[var(--color-border-default)] px-4 py-2 text-sm">
+                      <button type="button" aria-expanded=${previewId === a.id}
+                        onClick=${() => setPreviewId(value => value === a.id ? null : a.id)}>
+                        ${previewId === a.id ? '미리보기 접기' : 'HTML 미리보기'}
+                      </button>
+                    </div>
+                    ${previewId === a.id ? html`<${ArtifactPreview} key=${JSON.stringify([authRevision, a.id, a.revision])} artifact=${a} authRevision=${authRevision} />` : null}
+                  ` : null}
+                  </article>
                 </li>`)}
               </ul>`}
         </aside>

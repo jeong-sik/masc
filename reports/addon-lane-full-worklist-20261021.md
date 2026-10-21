@@ -207,6 +207,8 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - 고정2c 당시 관측한 G06 추가 P2: 실제 `/addons slice {"run_id":"other-run"}`가 현재 Detail의 원래 owner 성공으로 분류될 수 있다. 다른 run·생략 scope가 원래 결과/실패를 지우지 않도록 중앙 typed admission 수리가 필요하다. 같은 run의 lane/time 필터 empty는 정상 결과다. Overview의 전역 조회 기능은 유지한다.
 - G01 latest restack top `23cecb45c1dbde9ee36fd0d49463c3a27c7a0d13`, G06 top `321efcb199bec4018b337519de85e2cacb6a8154`는 이 기록 시점의 소스 좌표이며, 공개 전후 새 head/리뷰는 다시 읽는다. historical62·92·native27·28건을 서로 더해 최신 후보의 전체 검사로 부르지 않는다.
 
+- G06 source 후속 [#44852](https://github.com/jeong-sik/masc/pull/44852), head `d9b62724e72e7a3f231a4a7f2f3ca4cd7d8a5e1f`: 중앙 launcher의 typed scope admission 수리와 요청/상태 검사를 추가했다. parser·diff 검사는 PASS이며, independent source 재검토와 native 실행은 별도로 기록한다. [native run39614788834](https://github.com/jeong-sik/masc/actions/runs/39614788834)는 이 정확한 후보의 `addon-lifecycle`로 접수됐으며 아직 완료 결과를 읽지 않았다. 고정2c의23+5건과 실제 UI 관측으로 이 새 수리의 실행을 증명하지 않는다.
+
 
 ## 2026-10-21 재개 체크포인트 · G01 후속
 

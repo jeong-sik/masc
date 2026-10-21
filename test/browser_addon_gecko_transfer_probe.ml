@@ -12,7 +12,11 @@ let argument flag =
     | [] -> invalid_arg ("missing " ^ flag) in
   find (Array.to_list Sys.argv)
 let write path value = Out_channel.with_open_bin path (fun ch -> output_string ch value)
-let string key value = Yojson.Safe.Util.(value |> member key |> to_string_option)
+let field key (value:Yojson.Safe.t) = match value with
+  | `Assoc fields -> List.assoc_opt key fields
+  | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _ -> None
+let string key value = match field key value with
+  | Some (`String text) -> Some text | None|Some _ -> None
 let steps=ref [] and receipts=ref [] and witnesses=ref []
 let output=ref ""
 let flush () = write (Filename.concat !output "gecko-transfer-proof.json")
@@ -197,14 +201,24 @@ let () =
          | `List [row] when string "url" row=Some (fixture_url ^ "download") ->
            (match string "status" row with
             | Some "pending" -> None
-            | Some "completed" -> Some (Ok row)
+            | Some "completed" ->
+              witness "download" row;
+              Some (match field "artifactError" row with
+                | Some reason -> Error ("download artifact publication refused: " ^ Yojson.Safe.to_string reason)
+                | None ->
+                  let* artifact=field "artifact" row |> Option.to_result ~none:"completed download has no artifact" in
+                  let* claim=Browser_addon_downloads.claim_of_json
+                    (`Assoc ["kind",`String "published";"receipt",artifact]) in
+                  match claim with
+                  | Published _ -> Ok row
+                  | Snapshot _ -> Error "completed download returned a private snapshot")
             | Some _|None -> Some (Error ("download did not complete: " ^ Yojson.Safe.to_string row)))
          | _ -> Some (Error ("unexpected downloads: " ^ Yojson.Safe.to_string value)))) in
     let artifact=Yojson.Safe.Util.member "artifact" download in
     witness "download" download;
     let digest=record "download receipt names a host artifact without a worker path"
-      (let* digest=Yojson.Safe.Util.(artifact |> member "arguments" |> member "sha256" |> to_string_option)
-         |> Option.to_result ~none:"download has no artifact digest" in
+      (let* arguments=field "arguments" artifact |> Option.to_result ~none:"download has no artifact arguments" in
+       let* digest=string "sha256" arguments |> Option.to_result ~none:"download has no artifact digest" in
        let* _=check "download leaked its worker path or omitted the artifact reader"
          (Yojson.Safe.Util.member "path" download=`Null && string "reader" artifact=Some "keeper_artifact_read") in
        Ok digest) in

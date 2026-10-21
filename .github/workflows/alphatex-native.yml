@@ -66,11 +66,31 @@ jobs:
             echo "#43719 music stack; this step runs them as soon as they are on the ref."
             exit 0
           fi
+          wave_export_root=
+          trap 'if [[ -n "$wave_export_root" ]]; then rm -rf "$wave_export_root"; fi' EXIT
+          run_harness() {
+            if [[ "$1" == tools/alphatex/native/test-wave-export.mjs ]]; then
+              wave_export_root="$(mktemp -d)" || return
+              native=tools/alphatex/native
+              xcrun swiftc -parse-as-library -D MIDI_LIBRARY -O \
+                "$native/WaveArrangement.swift" "$native/WaveLoopClock.swift" \
+                "$native/SourceAudioClock.swift" "$native/CaptureAudioClock.swift" \
+                "$native/PulseAudioClock.swift" "$native/PulseLoopClock.swift" \
+                "$native/MidiTransport.swift" "$native/UmpTransport.swift" \
+                "$native/UmpOutput.swift" "$native/UmpRegions.swift" \
+                "$native/HybridMidiTransport.swift" "$native/UmpLoopTransport.swift" \
+                "$native/UmpState.swift" -o "$wave_export_root/music-arrangement" \
+                -framework AVFoundation -framework CoreAudio -framework CoreMIDI || return
+              node "$1" "$wave_export_root/music-arrangement" "$wave_export_root/results"
+            else
+              node "$1"
+            fi
+          }
           status=0
           for harness in "${harnesses[@]}"; do
             name="$(basename "$harness")"
             echo "::group::$name"
-            if node "$harness"; then
+            if run_harness "$harness"; then
               echo "PASS $name"
             else
               echo "FAIL $name" >&2

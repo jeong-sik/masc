@@ -11,6 +11,12 @@ type lane =
   ; enabled : bool
   ; slots : string list
   ; cli_slots : string list
+  ; max_output_tokens : int option
+        (** The lane's declared output budget; [None] declares none, and
+            restoring [None] removes the key from the lane table. *)
+  ; thinking : bool option
+        (** The lane's declared [enable_thinking]; [None] declares none, and
+            restoring [None] removes the key from the lane table. *)
   }
 
 type snapshot =
@@ -127,8 +133,10 @@ val runtime_text_with :
   string
 (** The runtime.toml text with [\[runtime.assignments\]] set to
     [assignments] (rows for keepers in [current_assignments] but not in
-    [assignments] are removed) and the [enabled] / [slots] / [cli_slots] of every lane
-    whose values differ from [current_lanes] rewritten. Every other line is
+    [assignments] are removed) and the [enabled] / [slots] / [cli_slots] /
+    [max_output_tokens] / [thinking] of every lane whose values differ from
+    [current_lanes] rewritten. A request setting the preset declares none of is
+    removed from the lane table, and one that already holds is not rewritten. Every other line is
     kept, including comment lines inside the arrays of lanes left alone.
     Exposed for tests. *)
 

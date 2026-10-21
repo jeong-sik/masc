@@ -33,11 +33,23 @@ let check_original sid =
   (match Session.validate_mcp_session_delete_profile ~profile:Server_mcp_transport_http_types.Seat sid with
    | Error _ -> () | Ok () -> fail "restored session changed its original transport profile")
 
+let save ~base_path () =
+  match Session.save_sessions_to_file ~base_path () with
+  | Session.Saved -> ()
+  | Session.Skipped _ -> fail "expected actual persistence, observed a skipped save"
+  | Session.Save_failed _ -> fail "expected actual persistence, observed a write failure"
+
+let skipped ~base_path expected =
+  match Session.save_sessions_to_file ~base_path () with
+  | Session.Skipped reason -> check bool "original typed skip reason retained" true (expected reason)
+  | Session.Saved -> fail "preserved original was reported as replaced"
+  | Session.Save_failed _ -> fail "preservation attempted a failing write"
+
 let test_roundtrip () = with_temp_base @@ fun base_path ->
   let sid = "persist-roundtrip-session" in
   with_sessions [sid] @@ fun () ->
   remember sid;
-  Session.save_sessions_to_file ~base_path ();
+  save ~base_path ();
   let path = Session.sessions_file_path ~base_path () in
   check bool "actual owner persistence file written" true (Sys.file_exists path);
   check bool "no temporary residue after completed write" false (Sys.file_exists (path ^ ".tmp"));
@@ -55,7 +67,7 @@ let test_blocked_writers_preserve_live_sessions () = with_temp_base @@ fun base_
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   remember first;
-  let write () = Session.save_sessions_to_file ~base_path () in
+  let write () = save ~base_path () in
   let original = Eio.Fiber.fork_promise ~sw write in
   let queued = Eio.Fiber.fork_promise ~sw write in
   (* Both real writes need the actual FIFO's reader. The live session registry
@@ -129,7 +141,9 @@ let test_cancelled_read_does_not_apply_decoded_sessions () = with_temp_base @@ f
       ~profile:Server_mcp_transport_http_types.Operator_remote sid with
    | Error _ -> () | Ok () -> fail "cancelled restore applied a transport profile");
   let path = Session.sessions_file_path ~base_path () in
-  Session.save_sessions_to_file ~base_path ();
+  skipped ~base_path (function
+    | Session.Restore_unsettled -> true
+    | Session.Restore_unobserved | Session.Restore_failed _ -> false);
   check bool "cancelled restore cannot replace its unread original" true
     ((Unix.lstat path).Unix.st_kind = Unix.S_FIFO);
   (* A fresh, joined restore can consume the same original snapshot. *)
@@ -170,7 +184,7 @@ let test_overlay_preserves_original_field_policies () = with_temp_base @@ fun ba
     Yojson.Basic.to_file path (`Assoc ["sessions",`Assoc rows]);
     Session.load_sessions_from_file ~base_path () in
   let persisted sid =
-    Session.save_sessions_to_file ~base_path ();
+    save ~base_path ();
     let json = Yojson.Basic.from_file path in
     Yojson.Basic.Util.(json |> member "sessions" |> member sid) in
   let string_field fields key expected =
@@ -225,18 +239,26 @@ let test_overlay_preserves_original_field_policies () = with_temp_base @@ fun ba
   check_original peer
 
 let test_failed_restore_preserves_original () =
-  List.iter (fun original -> with_temp_base @@ fun base_path ->
+  List.iter (fun (original,expected_failure) -> with_temp_base @@ fun base_path ->
+    let sid = "persist-live-after-bad-snapshot" in
+    with_sessions [sid] @@ fun () ->
     let path = Session.sessions_file_path ~base_path () in
     Unix.mkdir (Filename.dirname path) 0o700;
     Out_channel.with_open_bin path (fun output -> output_string output original);
     Session.load_sessions_from_file ~base_path ();
+    remember sid;
+    check_original sid;
     ignore (Session.reap_stale_sessions ~base_path ~is_active_session:(fun _ -> true));
-    Session.save_sessions_to_file ~base_path ();
+    skipped ~base_path (function
+      | Session.Restore_failed failure -> expected_failure failure
+      | Session.Restore_unobserved | Session.Restore_unsettled -> false);
     check string "failed restore survives actual maintenance and direct save" original
       (In_channel.with_open_bin path In_channel.input_all);
     check bool "refused save never opens a temporary output" false
-      (Sys.file_exists (path ^ ".tmp")))
-    ["{unclosed"; "{\"not_sessions\":{}}"]
+      (Sys.file_exists (path ^ ".tmp"));
+    check_original sid)
+    ["{unclosed",(function Session.Json_failed _ -> true | Session.Read_failed _ | Session.Shape_rejected -> false);
+     "{\"not_sessions\":{}}",(function Session.Shape_rejected -> true | Session.Read_failed _ | Session.Json_failed _ -> false)]
 
 let test_read_failure_is_path_local_and_latched () = with_temp_base @@ fun damaged ->
   with_temp_base @@ fun independent ->
@@ -253,14 +275,26 @@ let test_read_failure_is_path_local_and_latched () = with_temp_base @@ fun damag
   with_sessions [sid] @@ fun () ->
   remember sid;
   Session.load_sessions_from_file ~base_path:independent ();
-  Session.save_sessions_to_file ~base_path:independent ();
+  save ~base_path:independent ();
   let peer_path = Session.sessions_file_path ~base_path:independent () in
   check bool "independent missing path persists the live session" true
     Yojson.Basic.Util.(Yojson.Basic.from_file peer_path |> member "sessions" |> member sid <> `Null);
   Session.load_sessions_from_file ~base_path:damaged ();
-  Session.save_sessions_to_file ~base_path:damaged ();
+  let original_refusal = function
+    | Session.Restore_failed (Session.Read_failed _) -> true
+    | Session.Restore_failed (Session.Json_failed _ | Session.Shape_rejected)
+    | Session.Restore_unobserved | Session.Restore_unsettled -> false in
+  skipped ~base_path:damaged original_refusal;
   check string "later readable replacement cannot clear this process refusal" original
-    (In_channel.with_open_bin path In_channel.input_all)
+    (In_channel.with_open_bin path In_channel.input_all);
+  (* A later failed read must not replace the first refusal's cause. *)
+  let later = "{later-invalid-json" in
+  Out_channel.with_open_bin path (fun output -> output_string output later);
+  Session.load_sessions_from_file ~base_path:damaged ();
+  skipped ~base_path:damaged original_refusal;
+  check string "later failure retains its original bytes and original refusal" later
+    (In_channel.with_open_bin path In_channel.input_all);
+  check_original sid
 
 let test_save_before_restore_preserves_existing () = with_temp_base @@ fun base_path ->
   let path = Session.sessions_file_path ~base_path () in
@@ -269,16 +303,39 @@ let test_save_before_restore_preserves_existing () = with_temp_base @@ fun base_
   with_sessions [sid] @@ fun () ->
   let original = session_bytes sid in
   Out_channel.with_open_bin path (fun output -> output_string output original);
-  Session.save_sessions_to_file ~base_path ();
+  skipped ~base_path (function
+    | Session.Restore_unobserved -> true
+    | Session.Restore_unsettled | Session.Restore_failed _ -> false);
   check string "save-first preserves an existing original" original
     (In_channel.with_open_bin path In_channel.input_all);
   Session.load_sessions_from_file ~base_path ();
   check_original sid;
   Session.forget_mcp_session sid;
-  Session.save_sessions_to_file ~base_path ();
+  save ~base_path ();
   let json = Yojson.Basic.from_file path in
   check bool "successful restore permits later session removal to persist" true
     Yojson.Basic.Util.(json |> member "sessions" |> member sid = `Null)
+
+let test_failed_write_can_retry_after_resource_release () = with_temp_base @@ fun base_path ->
+  let sid = "persist-write-error-live" in
+  with_sessions [sid] @@ fun () ->
+  let path = Session.sessions_file_path ~base_path () in
+  Unix.mkdir (Filename.dirname path) 0o700;
+  Session.load_sessions_from_file ~base_path ();
+  let temporary = path ^ ".tmp" in
+  Unix.mkdir temporary 0o700;
+  remember sid;
+  (match Session.save_sessions_to_file ~base_path () with
+   | Session.Save_failed _ -> ()
+   | Session.Saved -> fail "blocked actual output was reported as replaced"
+   | Session.Skipped _ -> fail "write error was confused with a restore refusal");
+  check bool "failed write did not create a completed snapshot" false (Sys.file_exists path);
+  check_original sid;
+  Unix.rmdir temporary;
+  save ~base_path ();
+  Session.forget_mcp_session sid;
+  Session.load_sessions_from_file ~base_path ();
+  check_original sid
 
 let () =
   run "server_mcp_session_persist"
@@ -297,4 +354,6 @@ let () =
        test_case "read refusal stays with its path and process" `Quick
          test_read_failure_is_path_local_and_latched;
        test_case "save-first preserves an existing unrestored file" `Quick
-         test_save_before_restore_preserves_existing]]
+         test_save_before_restore_preserves_existing;
+       test_case "actual write failure remains distinct and retries after resource release" `Quick
+         test_failed_write_can_retry_after_resource_release]]

@@ -90,7 +90,23 @@ val sessions_file_path : base_path:string -> unit -> string
 (** Derive the persistence path from the actual owner's base path; no cwd or
     process-default inference. *)
 
-val save_sessions_to_file : base_path:string -> unit -> unit
+type restore_failure =
+  | Read_failed of string
+  | Json_failed of string
+  | Shape_rejected
+
+type save_skip_reason =
+  | Restore_unobserved
+  | Restore_unsettled
+  | Restore_failed of restore_failure
+
+type write_failure =
+  | System_error of string
+  | Unix_error of { code : Unix.error; operation : string; path : string }
+
+type save_result = Saved | Skipped of save_skip_reason | Save_failed of write_failure
+
+val save_sessions_to_file : base_path:string -> unit -> save_result
 (** Serialize current session state and replace the file after flush/close.
     Called automatically by [reap_stale_sessions] after each cleanup.
     The common I/O executor owns the host work. Writers serialize before
@@ -103,7 +119,16 @@ val save_sessions_to_file : base_path:string -> unit -> unit
     A restore failure disables replacement of that path for this process;
     repair the original and restart to restore persistence. Other paths and
     the live in-memory registry remain usable. A first save to a genuinely
-    missing path may create it without a preceding restore. *)
+    missing path may create it without a preceding restore.
+    [Saved] means physical replacement completed; [Skipped] retains the reason
+    without opening output. [Restore_unsettled] includes pending or cancelled
+    restores without successful settlement and does not assert worker activity.
+    [Restore_failed] retains the first failure that refused the path for this
+    process. [Save_failed] retains an expected host-write error; it does not
+    latch a restore refusal or imply rollback. Cancellation and unexpected
+    exceptions still propagate. Failed-restore owners keep new sessions live
+    in memory, without persisting them until the original is repaired and the
+    process restarts. *)
 
 val load_sessions_from_file : base_path:string -> unit -> unit
 (** Read/decode and prepare immutable per-field maps in the common I/O executor,

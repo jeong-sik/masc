@@ -297,8 +297,10 @@ status: reference
     loop instance"와 재생·탐색 시점의 `MidiFailure` 문자열(`invalid captured loop seek`·
     `captured loop missed the common epoch`)은 이 목록에 들지 않는다.
     `extent`·`offset`·`sourceDivisor`는 `UInt128`로 읽히는 문자열이라 음수가 없고,
-    숫자로 읽히지 않으면 초기화가 이 여섯과 다른 문자열 `invalid captured region integer`로
-    거절한다.
+    정규 십진 표기로 읽히지 않으면(`UInt128`으로 읽은 값을 다시 문자열로 돌렸을 때
+    원문과 달라지는 `007`·`+5` 같은 표기도 여기 든다) 초기화가 이 여섯과 다른 문자열
+    `invalid captured region integer`로 거절한다. `sourceDivisor`만 선택 필드라
+    없으면 1로 본다.
     그래서 Region의 자격은 반복 횟수만이 아니라 원본
     `source`와 그 길이, 그리고 다른 Region과의 채널 점유에 함께 매인다. 브라우저 장면이
     문서 구조에서 갈라 읽는 구역은

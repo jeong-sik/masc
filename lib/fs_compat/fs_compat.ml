@@ -4738,31 +4738,38 @@ let append_private_jsonl_durable_locked_at_end_offset_with_io_for_testing
 
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   test_exec_home_guard ~op:"append_jsonl" path;
-  let dir = Stdlib.Filename.dirname path in
-  mkdir_p_memoized dir;
-  let line = Yojson.Safe.to_string json ^ "\n" in
-  let path_mu = get_append_path_mutex path in
-  Stdlib.Mutex.protect path_mu (fun () ->
-    Fd_cache.with_writer path (fun oc ->
-      Stdlib.output_string oc line;
-      Stdlib.flush oc))
+  let write () =
+    Mkdir_memo.mkdir_p_memoized ~mkdir_p:mkdir_p_unix
+      (Stdlib.Filename.dirname path);
+    append_file_unix path (Yojson.Safe.to_string json ^ "\n")
+  in
+  (* Keep the path lock and cached-channel lease wholly inside the job.
+     The joined result is also the caller's commit-acknowledgement boundary:
+     do not add [on_systhread]'s post-write cancellation check here. *)
+  match execution_context () with
+  | Non_eio -> write ()
+  | Eio_fiber ->
+    Eio_unix.run_in_systhread
+      ~label:(labelled "fs-compat-append-jsonl" path) write
 
 let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
   if jsons = [] then ()
   else begin
     test_exec_home_guard ~op:"append_jsonl_batch" path;
-    let dir = Stdlib.Filename.dirname path in
-    mkdir_p_memoized dir;
-    let buf = Buffer.create 4096 in
-    List.iter (fun json ->
-      Buffer.add_string buf (Yojson.Safe.to_string json);
-      Buffer.add_char buf '\n'
-    ) jsons;
-    let chunk = Buffer.contents buf in
-    let path_mu = get_append_path_mutex path in
-    Stdlib.Mutex.protect path_mu (fun () ->
-      Fd_cache.with_writer path (fun oc ->
-        Stdlib.output_string oc chunk;
-        Stdlib.flush oc))
+    let write () =
+      Mkdir_memo.mkdir_p_memoized ~mkdir_p:mkdir_p_unix
+        (Stdlib.Filename.dirname path);
+      let buf = Buffer.create 4096 in
+      List.iter (fun json ->
+        Buffer.add_string buf (Yojson.Safe.to_string json);
+        Buffer.add_char buf '\n'
+      ) jsons;
+      append_file_unix path (Buffer.contents buf)
+    in
+    match execution_context () with
+    | Non_eio -> write ()
+    | Eio_fiber ->
+      Eio_unix.run_in_systhread
+        ~label:(labelled "fs-compat-append-jsonl-batch" path) write
   end
 ;;

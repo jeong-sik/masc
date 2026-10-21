@@ -1725,6 +1725,13 @@ val append_fd_durable_for_testing :
 
 (** Append JSON value as line to JSONL file.
 
+    In an Eio fiber, directory preparation, encoding and the complete
+    per-path writer critical section run on a joined system thread.
+    Other execution contexts run inline. A successful return means the
+    record was flushed; cancellation does not imply that no record was
+    written. There is no additional cancellation check after the writer
+    returns, so callers can record their commit acknowledgement first.
+
     Backed by a process-local per-path fd cache (RFC-0162 §3.4).
     Each path keeps one cached [out_channel] reused across appends;
     cross-domain serialization is provided by the same per-path
@@ -1736,7 +1743,9 @@ val append_jsonl : string -> Yojson.Safe.t -> unit
 
 (** [append_jsonl_batch path jsons] writes multiple JSON entries to [path]
     in a single lock+flush cycle. More efficient than calling [append_jsonl]
-    repeatedly when batching pending entries. No-op if [jsons] is empty. *)
+    repeatedly when batching pending entries. Uses the same joined-thread
+    and commit acknowledgement boundary as {!append_jsonl}.
+    No-op if [jsons] is empty. *)
 val append_jsonl_batch : string -> Yojson.Safe.t list -> unit
 
 (** [invalidate_cached_writer path] drops the cached [append_jsonl]

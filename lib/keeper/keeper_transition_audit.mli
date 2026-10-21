@@ -56,12 +56,17 @@ val recent_completed_turns :
 
 (** Start the background drain fiber on [sw] and switch recorders to
     enqueue mode. Registers a shutdown hook that flushes the remaining
-    queue. Call once from server bootstrap. *)
+    queue, and a switch release hook that drains after the background
+    fiber has settled. Call once from server bootstrap. *)
 val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
 
 (** Drain all queued forensics records to the default store now.
     Returns the number of records written. Store-backed readers call
-    this before reading; safe from any fiber. *)
+    this before reading; safe from any fiber. The drain takes a snapshot
+    of the pending queue. In an Eio fiber, taking and appending each record
+    is protected from cancellation; cancellation is checked between records.
+    An interrupted drain restores its unattempted suffix ahead of newer
+    queued records, without replaying completed append attempts. *)
 val flush_pending : unit -> int
 
 (** Forensics records queued for the async drain fiber. A rising depth

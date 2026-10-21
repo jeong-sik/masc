@@ -179,11 +179,31 @@ let flush_pending () =
       Stdlib.Queue.transfer append_queue drained;
       drained)
   in
-  let n = Stdlib.Queue.length batch in
-  Stdlib.Queue.iter
-    (fun { pending_site; pending_json } -> append_now ~site:pending_site pending_json)
-    batch;
-  n
+  let append_next () =
+    let { pending_site; pending_json } = Stdlib.Queue.take batch in
+    append_now ~site:pending_site pending_json
+  in
+  let rec drain n =
+    if Stdlib.Queue.is_empty batch then n
+    else begin
+      Eio_guard.check_if_ready ();
+      (* Taking ownership and acknowledging this one append form a single
+         cancellation boundary. Never replay an entered, joined write. *)
+      (match Eio_guard.execution_context () with
+       | Eio_fiber -> Eio.Cancel.protect append_next
+       | Non_eio -> append_next ());
+      drain (n + 1)
+    end
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      if not (Stdlib.Queue.is_empty batch) then
+        with_append_queue_lock (fun () ->
+          (* Keep the unattempted suffix before records enqueued during I/O.
+             This cleanup holds only a native queue lock and never yields. *)
+          Stdlib.Queue.transfer append_queue batch;
+          Stdlib.Queue.transfer batch append_queue))
+    (fun () -> drain 0)
 ;;
 
 let enqueue_or_append ~site json =
@@ -216,6 +236,10 @@ let enqueue_or_append ~site json =
 
 let start_flush_fiber ~sw ~clock =
   Atomic.set async_append_active true;
+  (* Release runs after the drain fiber has settled and restored any suffix
+     interrupted by cancellation. An earlier shutdown hook may have seen only
+     the shared queue while that suffix was still owned by the drain. *)
+  Eio.Switch.on_release sw (fun () -> ignore (flush_pending () : int));
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Log.Keeper.info
       "transition_audit: async flush fiber started (interval=%.1fs, capacity=%d)"

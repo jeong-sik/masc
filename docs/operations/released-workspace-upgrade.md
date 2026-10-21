@@ -119,9 +119,9 @@ This primitive does not import a canonical checkpoint as response authority.
 Inspect one existing Keeper journal and then prepare the reviewed source bytes:
 
 ```bash
-masc workspace-upgrade --base-path WORKSPACE --journal KEEPER
-masc workspace-upgrade --base-path WORKSPACE --prepare-journal KEEPER --source-sha256 SHA256
-masc workspace-upgrade --base-path WORKSPACE --journal-bundle BUNDLE_ID
+masc workspace-upgrade journal inspect --base-path WORKSPACE --keeper KEEPER
+masc workspace-upgrade journal prepare --base-path WORKSPACE --keeper KEEPER --source-sha256 SHA256
+masc workspace-upgrade journal bundle --base-path WORKSPACE --bundle BUNDLE_ID
 ```
 
 The first command reads the owned journal and displays its SHA-256 without
@@ -169,8 +169,8 @@ the first one or proving that the earlier attempt made no write.
 
 Both preparation and inspection report `ready_to_install=false`. The explicit
 input-selection step below can prepare a separate derivative. Source revalidation
-before installation, atomic installation and rollback remain to be implemented.
-Preparation alone cannot make the copied journal usable by a Keeper.
+before installation is a separate required step below. Preparation alone cannot
+make the copied journal usable by a Keeper.
 
 ### Explicit prior-input adoption in a derivative
 
@@ -210,9 +210,9 @@ unresolved until a separate valid witness exists.
 After reviewing the original bundle, assess the selected Keeper's current trace:
 
 ```bash
-masc workspace-upgrade --base-path WORKSPACE --journal-input BUNDLE_ID --trace TRACE_ID
-masc workspace-upgrade --base-path WORKSPACE --adopt-journal-input BUNDLE_ID --trace TRACE_ID --checkpoint-sha256 CHECKPOINT_SHA256
-masc workspace-upgrade --base-path WORKSPACE --journal-adoption ADOPTION_ID
+masc workspace-upgrade journal input --base-path WORKSPACE --bundle BUNDLE_ID --trace TRACE_ID
+masc workspace-upgrade journal adopt --base-path WORKSPACE --bundle BUNDLE_ID --trace TRACE_ID --checkpoint-sha256 CHECKPOINT_SHA256
+masc workspace-upgrade journal adoption --base-path WORKSPACE --adoption ADOPTION_ID
 ```
 
 Assessment is read-only. It requires an internally verified source bundle,
@@ -256,10 +256,72 @@ fsyncs or human authorship against a process running under the same UID. Startup
 cleanup may remove an unreferenced retained artifact before installation; restart
 verification then refuses rather than recreating it.
 
-All these outputs keep `ready_to_install=false`. Installation, rollback,
-history-cut/compaction reconciliation, new-trace birth, host-response admission,
-reconnection and the persistent TUI waiting-state surface remain separate work.
-This preparation does not complete #38005 or make a running Keeper use the copy.
+All these preparation outputs keep `ready_to_install=false`. Installation and
+rollback use the separate explicit commands below. History-cut/compaction
+reconciliation, new-trace birth, host-response admission, reconnection and the
+persistent TUI waiting-state surface remain separate work. Preparation does not
+complete #38005 or make a running Keeper use the copy.
+
+### Offline installation and conditional rollback
+
+Journal operations use subcommands, each with its own required arguments.
+The top-level released configuration inspection, `--apply` and `--restore`
+commands above keep their existing behavior. The journal commands in this Draft
+stack are development work; their existence is not whole-rollout acceptance.
+
+```bash
+masc workspace-upgrade journal installation-plan --base-path WORKSPACE --adoption ADOPTION_ID
+masc workspace-upgrade journal install --base-path WORKSPACE --adoption ADOPTION_ID --source-sha256 ORIGINAL_SHA256 --adopted-sha256 DERIVATIVE_SHA256
+masc workspace-upgrade journal installations --base-path WORKSPACE
+masc workspace-upgrade journal installation --base-path WORKSPACE --installation INSTALLATION_ID
+masc workspace-upgrade journal restore --base-path WORKSPACE --installation INSTALLATION_ID
+```
+
+Installation assessment is read-only. It reopens the internally valid source and
+adoption bundles, requires the exact original live journal, and checks that the
+current strict metadata/canonical still match the adopted selection. Installation
+requires both assessed digests and the configured exclusive BasePath lease. It
+reconfirms exact retained-payload durability rather than treating an earlier
+readback as fsync proof. Only that retained file's witness is refreshed after
+this identical-byte rewrite; every unrelated captured snapshot stays unchanged.
+
+Before replacing the journal, installation writes a private durable intent at
+`.masc/upgrades/journal-installs/<installation-id>/manifest.json`. An uncertain
+intent parent sync refuses journal replacement. Once the intent is confirmed,
+it rechecks all evidence and SQLite companion absence and replaces only the
+selected Keeper journal through the shared strict atomic writer, preserving its
+permissions. The original bundle and adoption derivative remain unchanged. The
+installed database keeps unavailable prior history for omitted traces and does
+not grant new native continuation or host-response authority.
+
+A target rename followed by a sync failure returns
+`durability_confirmed=false`; cancellation propagates even after rename. Keep
+the intent and source/adoption bundles. If interruption occurred before an id
+was returned, `journal installations` discovers the owned intent directory
+without creating it and reports every observed entry with its id and either a
+verified observation or its error. Partial/corrupt entries do not hide other
+records or trigger repair. After restart, inspection verifies the intent and
+classifies actual live bytes as `original_present`, `adopted_present`,
+`changed` or `missing`. This is a current snapshot: an intent with original bytes
+does not prove an installation never ran, adopted bytes do not certify a past
+fsync, and original bytes do not prove rollback completed. Inspection does not
+infer current input freshness or permission to retry.
+
+Rollback holds the same lease and requires the live journal to equal the exact
+adopted bytes, metadata/canonical to still match the selected input, and SQLite
+companions to be absent. It rechecks descriptor/content evidence immediately
+before restoring the verified original bytes, preserving current permissions.
+A later operation, input edit, or unresolved companion refuses rollback. The
+original, derivative and intent remain available after successful or uncertain
+restoration. Restoring a v2 journal restores the original operator state; it
+does not make that schema acceptable to a v3-only runtime.
+
+The server must be stopped and independent editors must respect this offline
+maintenance boundary. Last-read revalidation is not a POSIX atomic
+compare-and-swap against a noncooperating writer. Development tests use owned
+temporary workspaces only; no live installation or restart is part of this work.
+The full stack remains Draft until the remaining continuation and operator-input
+contracts are implemented and actually verified.
 
 ### Input checkpoint producer boundary
 
@@ -277,6 +339,7 @@ that evidence is refused pending explicit continuation reconciliation. This is
 an incomplete recovery boundary, not proof that compaction, host responses,
 reconnection, or the operator waiting-state surface are integrated.
 
-Do not merge or install the v3 stack alone. Offline journal preparation that
-preserves queued and terminal evidence, complete continuation reconciliation,
-and actually executed direct/autonomous acceptance cases are still required.
+Do not merge or install the v3 stack alone. Complete continuation and new-trace
+reconciliation, operator-input response/reconnect/TUI integration, and actual
+whole-rollout acceptance cases are still required. Offline preparation and a
+conditional journal replacement do not substitute for those contracts.

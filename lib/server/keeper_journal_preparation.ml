@@ -25,6 +25,7 @@ type failure =
   | Input_source_changed of string
   | Input_history_unresolved of string
   | Input_retention_unconfirmed of Checkpoint.checkpoint_installation
+  | Installation_intent_unconfirmed of Fs_compat.atomic_replace_failure
 type error = { bundle_id : string option; failure : failure }
 type publication = Published of receipt | Publication_unconfirmed of receipt
 
@@ -46,7 +47,9 @@ let error_message {bundle_id;failure} =
     | Input_selection_invalid detail -> "Input adoption selection is invalid: " ^ detail
     | Input_source_changed path -> "Input adoption evidence changed; assess again: " ^ path
     | Input_history_unresolved detail -> "Input history requires explicit repair: " ^ detail
-    | Input_retention_unconfirmed _ -> "Checkpoint retention was not durably confirmed. Preserve any retained file; no adoption was published." in
+    | Input_retention_unconfirmed _ -> "Checkpoint retention was not durably confirmed. Preserve any retained file; no adoption was published."
+    | Installation_intent_unconfirmed cause -> "Installation intent publication is uncertain; no journal replacement was attempted: " ^
+      Fs_compat.atomic_replace_failure_to_string cause in
   match bundle_id with None -> detail | Some id -> detail ^ " Retain bundle " ^ id ^ " for inspection."
 
 let root base_path = Filename.concat base_path Common.masc_dirname
@@ -541,7 +544,227 @@ let load_input_adoption ~base_path ~adoption_id:id = blocking (fun () -> boundar
   | [] | [_] | [_;_] | [_;_;_] | _::_::_::_::_::_ -> error Invalid_bundle)
   |> Result.map_error (fun failure -> {failure with bundle_id=Some id}))
 
+type installation_plan =
+  { ji_input : input_plan; ji_adoption : input_adoption
+  ; ji_original : Fs_compat.owned_regular_file_contents
+  ; ji_derivative : Fs_compat.owned_regular_file_contents
+  ; ji_files : (string * Fs_compat.owned_regular_file_contents) list }
+type installation_record = { jr_id : string; jr_adoption : input_adoption; jr_permissions : int }
+type replacement = Replaced of installation_record | Replacement_unconfirmed of installation_record
+type installed_journal = Original_present | Adopted_present | Changed | Missing
+let installed_journal_to_string = function Original_present -> "original_present"
+  | Adopted_present -> "adopted_present" | Changed -> "changed" | Missing -> "missing"
+let installation_directories base_path = Filename.concat (Filename.concat (root base_path) "upgrades") "journal-installs"
+let installation_directory base_path id = Filename.concat (installation_directories base_path) id
+let installation_id receipt = receipt.jr_id
+let installation_record_to_json receipt = `Assoc
+  ["schema",`String "masc.keeper_journal_installation_intent.v1";
+   "installation_id",`String receipt.jr_id;"adoption",input_adoption_to_json receipt.jr_adoption;
+   "original_permissions",`Int receipt.jr_permissions;"actor_uid",`Int (Unix.geteuid ());
+   "intent_only",`Bool true]
+let installation_plan_to_json plan = `Assoc
+  ["schema",`String "masc.keeper_journal_installation_plan.v1";
+   "adoption",input_adoption_to_json plan.ji_adoption;
+   "source_sha256",`String plan.ji_adoption.ia_bundle.source_hash;
+   "adopted_sha256",`String plan.ji_adoption.ia_derivative_hash;
+   "read_only",`Bool true;"operator_decision_required",`Bool true]
+let capture_adoption_files receipt =
+  let base_path = receipt.ia_bundle.base_path in
+  let directory = input_directory base_path receipt.ia_id in
+  let* metadata = read_private ~base_path (Filename.concat directory "metadata.json") in
+  let* checkpoint = read_private ~base_path (Filename.concat directory "checkpoint.json") in
+  let* derivative = read_private ~base_path (Filename.concat directory "adopted.sqlite3") in
+  let* manifest = read_private ~base_path (Filename.concat directory "manifest.json") in
+  let* json = decode_json manifest.content in
+  if digest metadata.content<>receipt.ia_metadata_hash || digest checkpoint.content<>receipt.ia_reference.sha256
+      || digest derivative.content<>receipt.ia_derivative_hash
+      || not (Yojson.Safe.equal json (input_adoption_to_json receipt)) then error Invalid_bundle
+  else Ok (derivative,List.map (fun (name,file) -> Filename.concat directory name,file)
+    ["metadata.json",metadata;"checkpoint.json",checkpoint;"adopted.sqlite3",derivative;"manifest.json",manifest])
+let check_installation_plan plan =
+  let base_path = plan.ji_adoption.ia_bundle.base_path in
+  let* () = check_input_plan plan.ji_input in
+  let* () = no_companions (Filename.concat (input_directory base_path plan.ji_adoption.ia_id) "adopted.sqlite3") in
+  unchanged_files ~base_path plan.ji_files
+let assess_installation ~base_path ~adoption_id = blocking (fun () -> boundary base_path (fun () ->
+  let* adoption = load_input_adoption ~base_path ~adoption_id in
+  let bundle = adoption.ia_bundle in
+  let base_path = bundle.base_path in
+  let* input = assess_input ~base_path ~bundle_id:bundle.id
+    ~trace_id:(Keeper_id.Trace_id.to_string adoption.ia_reference.trace_id) in
+  let* () = if Keeper_checkpoint_ref.equal (Checkpoint.exact_snapshot_reference input.ip_checkpoint) adoption.ia_reference
+      && digest (snd input.ip_metadata).content=adoption.ia_metadata_hash then Ok ()
+    else error (Input_source_changed "current metadata/canonical differs from the adopted selection") in
+  let* original = current_source input.ip_original in
+  let* derivative,files = capture_adoption_files adoption in
+  let retained_path = retained_path base_path adoption.ia_reference in
+  let* retained,_ = read_reference ~base_path ~path:retained_path adoption.ia_reference in
+  let plan = {ji_input=input;ji_adoption=adoption;ji_original=original;ji_derivative=derivative;
+    ji_files=(retained_path,retained)::files} in
+  let* () = check_installation_plan plan in
+  Ok plan))
+let write_replacement ~mode path content =
+  Fs_compat.write_file_atomic_strict_staged_blocking path ~write:(fun out ->
+    Unix.fchmod (Unix.descr_of_out_channel out) mode; output_string out content)
+let replacement_result record path (result : (unit,Fs_compat.atomic_replace_failure) result) = match result with
+  | Ok () -> Ok (Replaced record)
+  | Error {Fs_compat.stage=After_rename;_} -> Ok (Replacement_unconfirmed record)
+  | Error ({Fs_compat.stage=Before_rename;_} as cause) ->
+    error (Io_failed {path;detail=Fs_compat.atomic_replace_failure_to_string cause})
+let with_offline_lease ~run_dir ~base_path f =
+  match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+  | Base_path_already_owned _ -> error Workspace_in_use
+  | Base_path_rejected cause -> error (Unsafe_path (Server_startup_takeover.base_path_lock_rejection_to_string cause))
+  | Base_path_acquired lease ->
+    Fun.protect ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease) f
+let reconfirm_installation_retention plan =
+  let reference = plan.ji_adoption.ia_reference in
+  let base_path = plan.ji_adoption.ia_bundle.base_path in
+  let* () = Checkpoint.retain_exact_snapshot ~session_dir:(session_dir base_path reference.trace_id)
+    plan.ji_input.ip_checkpoint |> confirm_input_retention in
+  let path = retained_path base_path reference in
+  let* retained,_ = read_reference ~base_path ~path reference in
+  (* Reconfirmation durably rewrites the same accepted bytes. Update only this
+     file's witness; every unrelated pre-lease snapshot remains unchanged. *)
+  let refresh files = List.map (fun (captured,file) ->
+    if captured=path then captured,retained else captured,file) files in
+  Ok {plan with ji_input={plan.ji_input with ip_related=refresh plan.ji_input.ip_related};
+    ji_files=refresh plan.ji_files}
+let install_using ~before_replacement
+    ~(write_intent : string -> string -> (unit,Fs_compat.atomic_replace_failure) result)
+    ~write_replacement ~run_dir
+    ~expected_source_sha256 ~expected_adopted_sha256 plan = blocking (fun () ->
+  let active_record = ref None in
+  let bundle = plan.ji_adoption.ia_bundle in
+  let result = boundary bundle.base_path (fun () ->
+    let* () = if expected_source_sha256=bundle.source_hash
+        && expected_adopted_sha256=plan.ji_adoption.ia_derivative_hash then Ok ()
+      else error (Input_selection_invalid "installation digests differ from the reviewed plan") in
+    with_offline_lease ~run_dir ~base_path:bundle.base_path (fun () ->
+      let* () = check_installation_plan plan in
+      let* plan = reconfirm_installation_retention plan in
+      let* () = check_installation_plan plan in
+      let* () = private_directory (installation_directories bundle.base_path) in
+      let id = Random_id.hex ~bytes:16 in
+      let directory = installation_directory bundle.base_path id in
+      Unix.mkdir directory 0o700; active_record := Some id; sync_directory (installation_directories bundle.base_path);
+      let record = {jr_id=id;jr_adoption=plan.ji_adoption;jr_permissions=plan.ji_original.snapshot.permissions} in
+      let intent_path = Filename.concat directory "manifest.json" in
+      let* () = match write_intent intent_path (Yojson.Safe.to_string (installation_record_to_json record)) with
+        | Ok () -> Ok ()
+        | Error ({Fs_compat.stage=After_rename;_} as cause) -> error (Installation_intent_unconfirmed cause)
+        | Error ({Fs_compat.stage=Before_rename;_} as cause) ->
+          error (Io_failed {path=intent_path;detail=Fs_compat.atomic_replace_failure_to_string cause}) in
+      let* intent = read_private ~base_path:bundle.base_path intent_path in
+      let* intent_json = decode_json intent.content in
+      let* () = if Yojson.Safe.equal intent_json (installation_record_to_json record) then Ok () else error Invalid_bundle in
+      before_replacement ();
+      let* () = check_installation_plan plan in
+      let* () = unchanged ~base_path:bundle.base_path (intent_path,intent) in
+      let path = plan.ji_input.ip_original.source_path in
+      write_replacement ~mode:record.jr_permissions path plan.ji_derivative.content
+      |> replacement_result record path)) in
+  Result.map_error (fun failure -> {failure with bundle_id= !active_record}) result)
+let install ~run_dir ~expected_source_sha256 ~expected_adopted_sha256 plan =
+  install_using ~before_replacement:(fun () -> ()) ~write_intent:write ~write_replacement ~run_dir
+    ~expected_source_sha256 ~expected_adopted_sha256 plan
+let load_installation ~base_path ~installation_id:id = blocking (fun () -> boundary base_path (fun () ->
+  if not (valid_id id) then error Invalid_bundle else
+  let* base_path = workspace base_path in
+  let path = Filename.concat (installation_directory base_path id) "manifest.json" in
+  let* file = read_private ~base_path path in
+  let* json = decode_json file.content in
+  let* adoption_json = json_member "adoption" json in
+  let* adoption_id = json_string "adoption_id" adoption_json in
+  let* adoption = load_input_adoption ~base_path ~adoption_id in
+  let* permissions_json = json_member "original_permissions" json in
+  let* permissions = match permissions_json with
+    | `Int permissions when permissions>=0 && permissions land 0o7777=permissions -> Ok permissions
+    | _ -> error Invalid_bundle in
+  let record = {jr_id=id;jr_adoption=adoption;jr_permissions=permissions} in
+  let* () = if Yojson.Safe.equal json (installation_record_to_json record) then Ok () else error Invalid_bundle in
+  let* () = unchanged ~base_path (path,file) in
+  Ok record) |> Result.map_error (fun failure -> {failure with bundle_id=Some id}))
+let live_input_evidence record =
+  let adoption = record.jr_adoption in
+  let base_path = adoption.ia_bundle.base_path in
+  let* derivative,files = capture_adoption_files adoption in
+  let trace = Keeper_id.Trace_id.to_string adoption.ia_reference.trace_id in
+  let canonical_path = Checkpoint.agent_core_checkpoint_path
+    ~session_dir:(session_dir base_path adoption.ia_reference.trace_id) ~session_id:trace in
+  let metadata_path = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path)
+    (Keeper_runtime_root_entry.keeper_basename ~keeper_name:adoption.ia_bundle.keeper_name Keeper_runtime_root_entry.Metadata) in
+  let* metadata = read ~base_path ~absent:(Input_source_changed metadata_path) metadata_path in
+  let* canonical = read ~base_path ~absent:(Input_source_changed canonical_path) canonical_path in
+  let* () = if digest metadata.content=adoption.ia_metadata_hash && digest canonical.content=adoption.ia_reference.sha256
+    then Ok () else error (Input_source_changed "current metadata/canonical differs from installation evidence") in
+  Ok (derivative,(metadata_path,metadata)::(canonical_path,canonical)::files)
+let inspect_installation ~base_path ~installation_id = blocking (fun () -> boundary base_path (fun () ->
+  let* record = load_installation ~base_path ~installation_id in
+  let bundle = record.jr_adoption.ia_bundle in
+  let path = source_path bundle.base_path bundle.keeper_name in
+  let* () = no_companions path in
+  let* current = match Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
+      ~ownership_root:(root bundle.base_path) path with
+    | Ok current -> Ok current
+    | Error cause -> error (Unsafe_path (Fs_compat.owned_regular_file_read_error_to_string cause)) in
+  let* () = no_companions path in
+  match current with
+  | None -> Ok (record,Missing)
+  | Some file ->
+    let hash = digest file.content in
+    let observed = if hash=bundle.source_hash then Original_present
+      else if hash=record.jr_adoption.ia_derivative_hash then Adopted_present else Changed in
+    let* () = unchanged ~base_path:bundle.base_path (path,file) in
+    Ok (record,observed)))
+let list_installations ~base_path = blocking (fun () -> boundary base_path (fun () ->
+  let* base_path = workspace base_path in
+  let* entries = Fs_compat.read_owned_directory_if_present ~owner_uid:(Unix.geteuid ())
+    ~ownership_root:(root base_path) (installation_directories base_path)
+    |> Result.map_error (fun cause -> {bundle_id=None;
+      failure=Unsafe_path (Fs_compat.owned_regular_file_read_error_to_string cause)}) in
+  match entries with
+  | None -> Ok []
+  | Some names -> Ok (List.map (fun id -> id,inspect_installation ~base_path ~installation_id:id)
+      (List.sort String.compare names))))
+let restore_installation_using ~before_replacement ~write_replacement ~run_dir record = blocking (fun () ->
+  let bundle = record.jr_adoption.ia_bundle in
+  boundary bundle.base_path (fun () -> with_offline_lease ~run_dir ~base_path:bundle.base_path (fun () ->
+    let* verified = load_installation ~base_path:bundle.base_path ~installation_id:record.jr_id in
+    let* () = if Yojson.Safe.equal (installation_record_to_json record) (installation_record_to_json verified)
+      then Ok () else error Invalid_bundle in
+    let* _derivative,input_files = live_input_evidence verified in
+    let* source_files = capture_bundle_files bundle in
+    let original_path = Filename.concat (bundle_path bundle.base_path bundle.id) "original.sqlite3" in
+    let* original = read_private ~base_path:bundle.base_path original_path in
+    let* () = if digest original.content=bundle.source_hash then Ok () else error Invalid_bundle in
+    let path = source_path bundle.base_path bundle.keeper_name in
+    let* () = no_companions path in
+    let* current = read ~base_path:bundle.base_path ~absent:Source_absent path in
+    let* () = if digest current.content=record.jr_adoption.ia_derivative_hash then Ok () else error Source_changed in
+    let intent_path = Filename.concat (installation_directory bundle.base_path record.jr_id) "manifest.json" in
+    let* intent = read_private ~base_path:bundle.base_path intent_path in
+    let* intent_json = decode_json intent.content in
+    let* () = if Yojson.Safe.equal intent_json (installation_record_to_json record) then Ok () else error Invalid_bundle in
+    before_replacement ();
+    let* () = unchanged_files ~base_path:bundle.base_path ((path,current)::(intent_path,intent)::input_files @ source_files) in
+    let* () = no_companions path in
+    write_replacement ~mode:current.snapshot.permissions path original.content |> replacement_result record path))
+  |> Result.map_error (fun failure -> {failure with bundle_id=Some record.jr_id}))
+let restore_installation ~run_dir record =
+  restore_installation_using ~before_replacement:(fun () -> ()) ~write_replacement ~run_dir record
+
 module For_testing = struct
+  let replacement_writer ~sync_target_parent ~mode path content =
+    Fs_compat.Atomic_replace_for_testing.write_file_atomic_strict_staged ~sync_parent:sync_target_parent
+      path ~write:(fun out -> Unix.fchmod (Unix.descr_of_out_channel out) mode; output_string out content)
+  let install ?(sync_intent_parent=sync_directory) ~before_replacement ~sync_target_parent ~run_dir
+      ~expected_source_sha256 ~expected_adopted_sha256 plan =
+    let write_intent path content = replacement_writer ~sync_target_parent:sync_intent_parent ~mode:0o600 path content in
+    install_using ~before_replacement ~write_intent ~write_replacement:(replacement_writer ~sync_target_parent)
+      ~run_dir ~expected_source_sha256 ~expected_adopted_sha256 plan
+  let restore_installation ~before_replacement ~sync_target_parent ~run_dir record =
+    restore_installation_using ~before_replacement ~write_replacement:(replacement_writer ~sync_target_parent) ~run_dir record
   let confirm_input_retention = confirm_input_retention
   let prepare ~before_publication ~sync_manifest_parent ~run_dir plan =
     let write_manifest path content =

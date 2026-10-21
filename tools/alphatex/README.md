@@ -545,11 +545,14 @@ must bind distinct destinations. Bindings are session selections, not musical
 edits saved into the original performance.
 
 Source audition sends ordered MIDI 1.0 channel expression and F0/F7 wire data
-using the source tempo map or SMPTE clock. It plays once from the beginning.
-Pause/resume and seek restore supported channel state; unknown initial values
-and opaque device effects report errors as described in [Source state](SOURCE-STATE.md).
-Source clip looping remains unfinished. The VST route instead pauses and seeks
-within its rendered audio; its `:wave` export uses the selected source pattern.
+using the source tempo map or SMPTE clock. Playback starts at the beginning;
+`:loop START END` narrows it to a session-local source range that repeats and `l`
+toggles that repetition. The selection never changes the source document or its
+MIDI/WAV export. Pause/resume and seek restore supported channel state; unknown
+initial values and opaque device effects report errors as described in
+[Source state](SOURCE-STATE.md). The VST route pauses and seeks within its
+rendered audio and loops the same window; its `:wave` export uses the selected
+source pattern.
 Editable phrase projects retain their loop and SoundFont routes. Stop
 closes an in-flight SysEx stream, releases each owned held key and disables hold
 controllers 64/66/69 that this source enabled. It never broadcasts all-notes-off.

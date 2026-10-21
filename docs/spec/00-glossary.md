@@ -416,17 +416,18 @@ status: reference
     MIDI/WAV 내보내기도 바꾸지 않으므로 저장되는 loop 상태가 아니고(MIDI-SOURCE.md: "The
     loop selection does not change the source document or MIDI/WAV export"), seek는 그 구간
     안이어야 한다(sequencer-tui.mjs: "Seek must be within the source loop range"). 원본
-    앞부분에 없는 초기 채널값을 되돌려야 하는 seek는 거절된다(MidiTransport.swift:297,
+    앞부분에 없는 초기 채널값을 되돌려야 하는 seek는 거절된다(`MidiTransport.swift`의
     "source seek cannot restore an initial channel value absent from the source prefix").
     알 수 없는 초기 필드와 기기 고유 부작용도 조용히 넘어가지 않고 명시적으로 실패한다.
   - 서술 이력: #43769(`2fa99025a2`)의 MIDI-SOURCE.md는 "Pause, resume, seek and looping
-    are explicitly unavailable for source timelines"라고 적었고, #43792(`59d3653d3b`)가
-    같은 문장을 pause/resume·seek 지원 문장으로 바꿨다. #44513 이후 `:loop` 구간 루프가
-    더해져 "plays once from the beginning" 문장도 사라졌다. 옛 문장을 인용하면 현행 코드와
-    어긋나므로, 이 항목은 현행 main 문장만 근거로 쓴다. 다만 MUSIC-SEQUENCER.md의 낡은
-    개요 문장("Source looping, VST routing, overdubs, shared clock and practice workflows
-    remain separate unfinished units")은 아직 남아 있어, 소스 looping 의 현행 근거로 쓰지
-    않는다.
+    are explicitly unavailable for source timelines"라고 적었고, #43792(`59d3653d3b`)가 그
+    문장을 pause/resume·seek 지원 문장으로 바꿨으며, #44513이 `:loop` 세션 구간 루프를
+    더했다. "It plays once from the beginning."과 "Source clip looping remains unfinished."
+    같은 옛 문장은 지금 MIDI-SOURCE.md와 README.md 어디에도 없고, MUSIC-SEQUENCER.md의
+    "Source looping, VST routing, overdubs, shared clock and practice workflows remain
+    separate unfinished units" 개요 문장도 #44572에서 "Source-window looping is available
+    but stays session-local"로 고쳐졌다. 옛 문장을 인용하면 현행 코드와 어긋나므로, 이
+    항목은 현행 main 문장만 근거로 쓴다.
   → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
   [tools/alphatex/native/MidiTransport.swift](../../tools/alphatex/native/MidiTransport.swift)
 

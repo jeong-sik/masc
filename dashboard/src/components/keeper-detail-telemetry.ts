@@ -68,7 +68,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>prompt bytes</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${latestTotal != null ? latestTotal.toLocaleString() : '-'}</span>
           </${DetailRow}>
-          <${ObservedMetricChart} label="프롬프트 바이트 추이" formatValue=${(n: number) => `${n.toLocaleString()} bytes`}
+          <${ObservedMetricChart} label="프롬프트 바이트 추이" unit="bytes" formatValue=${(n: number) => `${n.toLocaleString()} bytes`}
             series=${[{ name: 'prompt bytes', color: 'var(--color-status-warn)', readings: promptReadings }]} />
           <div class="mt-1 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-disabled)]">
             <span>latest ${latestTotal != null ? `${latestTotal.toLocaleString()} bytes` : '-'}</span>
@@ -175,7 +175,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>wall tok/s</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-status-ok)]">${formatTokPerSec(wallSummary.latest)}</span>
           </${DetailRow}>
-          <${ObservedMetricChart} label="Wall TPS 추이" formatValue=${(n: number) => formatTokPerSec(n)}
+          <${ObservedMetricChart} label="Wall TPS 추이" unit="tok/s" formatValue=${(n: number) => formatTokPerSec(n)}
             series=${[{ name: 'wall tok/s', color: 'var(--color-status-ok)', readings: wallReadings }]} />
           <div class="text-3xs text-[var(--color-fg-disabled)] mt-1">avg ${(wallSummary.sum! / wallSummary.observed).toFixed(1)}</div>
         <//>
@@ -187,7 +187,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>hw tok/s</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-status-ok)]">${formatTokPerSec(hwSummary.latest)}</span>
           </${DetailRow}>
-          <${ObservedMetricChart} label="하드웨어 TPS 추이" formatValue=${(n: number) => formatTokPerSec(n)}
+          <${ObservedMetricChart} label="하드웨어 TPS 추이" unit="tok/s" formatValue=${(n: number) => formatTokPerSec(n)}
             series=${[{ name: 'hw tok/s', color: 'var(--color-status-ok)', readings: hwReadings }]} />
           <div class="text-3xs text-[var(--color-fg-disabled)] mt-1">avg ${(hwSummary.sum! / hwSummary.observed).toFixed(1)} · decode-only</div>
         <//>
@@ -199,7 +199,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>API latency</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${formatMsCompact(latencySummary.latest, '미관측')}</span>
           </${DetailRow}>
-          <${ObservedMetricChart} label="API 지연 시간 추이" formatValue=${(n: number) => formatMsCompact(n)}
+          <${ObservedMetricChart} label="API 지연 시간 추이" unit="ms" formatValue=${(n: number) => formatMsCompact(n)}
             series=${[{ name: 'API latency', color: 'var(--color-accent-fg)', readings: latencyReadings }]} />
         <//>
 
@@ -223,7 +223,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>TTFT</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${formatMsCompact(ttfrcSummary.latest, '미관측')}</span>
           </${DetailRow}>
-          <${ObservedMetricChart} label="TTFT 추이" formatValue=${(n: number) => formatMsCompact(n)}
+          <${ObservedMetricChart} label="TTFT 추이" unit="ms" formatValue=${(n: number) => formatMsCompact(n)}
             series=${[{ name: 'TTFT', color: 'var(--color-accent-fg)', readings: ttfrcReadings }]} />
         <//>
 
@@ -233,7 +233,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <${Eyebrow}>prefill</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${formatMsCompact(prefillSummary.latest, '미관측')}</span>
           </${DetailRow}>
-          <${ObservedMetricChart} label="Prefill 추이" formatValue=${(n: number) => formatMsCompact(n)}
+          <${ObservedMetricChart} label="Prefill 추이" unit="ms" formatValue=${(n: number) => formatMsCompact(n)}
             series=${[{ name: 'prefill', color: 'var(--color-accent-fg)', readings: prefillReadings }]} />
         <//>
       </div>

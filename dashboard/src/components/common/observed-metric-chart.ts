@@ -14,8 +14,9 @@ function timeLabel(ts: number): string {
 }
 
 /** Timestamp-based plot plus the same original values as an accessible table. */
-export function ObservedMetricChart({ label, series, formatValue }: {
+export function ObservedMetricChart({ label, unit, series, formatValue }: {
   label: string
+  unit: string
   series: readonly MetricChartSeries[]
   formatValue: (value: number) => string
 }) {
@@ -82,7 +83,7 @@ export function ObservedMetricChart({ label, series, formatValue }: {
         ${tableOpen ? html`<div class="max-h-60 overflow-auto mt-1">
           <table class="w-full text-left tabular-nums">
             <caption class="text-left">${label} · 결측은 미관측으로 표시</caption>
-            <thead><tr><th scope="col">시각</th><th scope="col">계열</th><th scope="col">값</th></tr></thead>
+            <thead><tr><th scope="col">시각</th><th scope="col">계열</th><th scope="col">값 (${unit})</th></tr></thead>
             <tbody>${summaries.flatMap(series => series.rows.map((row, index) => html`
               <tr key=${`${series.name}:${index}`}><td>${timeLabel(row.ts)}</td><td>${series.name}</td>
                 <td>${row.value === null ? '미관측' : String(row.value)}</td></tr>

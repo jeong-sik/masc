@@ -41,7 +41,7 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
       </div>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3 v2-monitoring-row">
         <${DetailCard} class="md:col-span-2">
-          <${ObservedMetricChart} label="입출력 토큰 추이" formatValue=${(n: number) => `${formatTokens(n)} tokens`}
+          <${ObservedMetricChart} label="입출력 토큰 추이" unit="tokens" formatValue=${(n: number) => `${formatTokens(n)} tokens`}
             series=${[
               { name: 'input', color: 'var(--color-accent-fg)', readings: points.map(p => ({ ts: p.ts, value: p.input_tokens })) },
               { name: 'output', color: 'var(--color-status-ok)', dashed: true, readings: points.map(p => ({ ts: p.ts, value: p.output_tokens })) },
@@ -71,14 +71,14 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
         <${DetailRow}><${Eyebrow}>턴 지연 시간<//>
           <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${formatMsCompact(latencySummary.latest, '미관측')}</span>
         <//>
-        <${ObservedMetricChart} label="턴 지연 시간" formatValue=${(n: number) => formatMsCompact(n)}
+        <${ObservedMetricChart} label="턴 지연 시간" unit="ms" formatValue=${(n: number) => formatMsCompact(n)}
           series=${[{ name: 'latency', color: 'var(--color-accent-fg)', readings: latency }]} />
       <//>
       <${DetailCard}>
         <${DetailRow}><${Eyebrow}>${costSummary.missing > 0 ? '일부 관측 비용 합계 (USD)' : '보존 관측 비용 합계 (USD)'}<//>
           <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${costSummary.sum === null ? '미관측' : costLabel(costSummary.sum)}</span>
         <//>
-        <${ObservedMetricChart} label="관측별 비용 (USD)" formatValue=${costLabel}
+        <${ObservedMetricChart} label="관측별 비용 (USD)" unit="USD" formatValue=${costLabel}
           series=${[{ name: 'cost', color: 'var(--color-accent-fg)', readings: costs }]} />
       <//>
     </div>`

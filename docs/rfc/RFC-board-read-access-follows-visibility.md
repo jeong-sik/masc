@@ -94,7 +94,7 @@ type viewer =
 ### 4.2 viewer 를 만드는 곳
 
 - MCP: `execute_tool_eio` 가 호출자 이름과 `Auth` 역할을 이미 안다 (`lib/mcp_server_eio_execute.ml:~104-200`). 거기서 만들어 `Mcp_tool_runtime_board.dispatch` 로 넘긴다.
-- Keeper: `meta.name` 으로 `Named` 를 만든다. 인증이 꺼져 있어도 `Named` 다. 서버가 이름을 덮어쓰기 때문에 Keeper 끼리의 `Direct` 격리는 인증 모드와 상관없이 지켜진다.
+- Keeper: `meta.name` 으로 `Named` 를 만든다. 인증이 꺼져 있어도 `Named` 다. Keeper 도구 팔 안에서는 서버가 이름을 묶으므로 모델이 다른 Keeper 를 사칭할 수 없다. 이것이 Keeper 끼리의 `Direct` 격리를 보장한다는 뜻은 아니다 (§4.8).
 - HTTP: `Some 이름` 이면 `Auth` 에서 역할을 물어 `Operator` 또는 `Named`, `None` 이면 `Anonymous`. 인증이 꺼져 있으면 `Operator`.
 
 `lib/board` 와 `lib/board_tool_adapter` 는 `Auth` 를 알지 못한다 (`lib/board_tool_adapter/dune` 에 `masc.auth` 가 없다). 그래서 역할 판정은 입구가 하고 Board 쪽은 만들어진 값만 받는다.
@@ -126,6 +126,8 @@ type viewer =
 - 목록·검색·집계는 `viewer` 를 받는 함수로 둔다. 거를 조건을 먼저 걸고 나서 `limit` 을 적용한다. 지금은 `limit + offset` 개를 가져온 뒤 자르는데 (`board_tool_post.ml:272-300`, `server_board_list_http.ml:36,61-63`, `server_dashboard_http.ml:63-80`), 가져온 뒤에 거르면 보이는 글이 창 밖에 있을 때 페이지가 비거나 짧고 `has_more`, `total` 이 틀린다. 이미 있는 `list_recent_posts_matching_author` (`board_dispatch.mli:241`)와 같은 꼴이다.
 - viewer 를 받는 함수가 지금 이름(`get_post`, `list_posts`, `list_comments`, `search`, `get_post_and_comments`)을 가져가고 `~viewer` 를 필수로 받는다. 지금 이름을 부르는 곳은 전부 컴파일이 실패해서 컴파일러가 호출 지점을 열거한다. 서버가 viewer 없이 읽어야 하는 곳은 이름 끝에 `_unchecked` 를 붙인 함수로 옮긴다. 모듈 경로로는 막지 못한다. `board_tool_adapter` 가 `wrapped false` 이고 모듈 별칭이 있어서 (`lib/server/server_routes_http_common.ml:26-27`, `bin/main_stdio_eio.ml:6`) 경로 문자열을 찾으면 놓친다. 식별자 이름은 별칭을 거쳐도 남는다.
 - 시험이 `lib/` 와 `bin/` 에서 `_unchecked` 식별자와 원시 저장소 읽기(`Board_dispatch.backend ()` 로 얻은 저장소의 `Board.search_posts`, `Board.read_comments`)를 모아 허용 목록과 비교한다. 목록 밖에서 쓰면 빨개진다.
+- 시험이 Keeper 도구 팔에서 모델이 적은 `viewer` 를 포함한 어떤 인자도 viewer 를 바꾸지 못함을 고정한다. Keeper 가 다른 identity 로 읽거나 다른 사람의 투표 표시를 보던 길이 닫혔는지 본다.
+- 시험 하나가 같은 `Direct` 글을 두 길로 읽는다. 서버 내부 읽기(`_unchecked`: 깨우기 판단, 증거 확인)는 글을 받아야 하고, viewer 를 받는 읽기는 비독자에게 "없음"을 돌려줘야 한다. 내부 읽기가 조용히 빈 결과를 내면 Keeper 가 멈추는 길이 되므로, 두 길이 갈라지는 것을 한 시험이 같이 확인한다.
 
 ### 4.6 숨긴 글의 모양
 
@@ -144,7 +146,7 @@ type viewer =
 
 ### 4.8 인증이 꺼진 서버
 
-인증이 꺼진 서버에서 MCP·HTTP 호출자는 `Operator` 다. 이름이 자기 신고라 검사가 장식이고, 단일 운영자 환경의 대시보드는 자격 증명 없이 `None` 으로 읽는데 `Anonymous` 규칙을 쓰면 `Direct` 와 `Internal` 을 잃는다. Keeper 는 §4.2 대로 `Named` 로 남는다. PR 본문과 `docs/` 에 "인증이 꺼진 서버에서 MCP·HTTP 호출자에게 Board 공개 범위는 읽기 권한이 아니다" 를 그대로 적는다. 보안을 얻었다고 읽히면 오해다.
+인증이 꺼진 서버에서 MCP·HTTP 호출자는 `Operator` 다. 이름이 자기 신고라 검사가 장식이고, 단일 운영자 환경의 대시보드는 자격 증명 없이 `None` 으로 읽는데 `Anonymous` 규칙을 쓰면 `Direct` 와 `Internal` 을 잃는다. Keeper 도구 팔은 §4.2 대로 `Named` 로 남는다. 그래도 인증이 꺼져 있으면 Keeper 끼리의 `Direct` 격리는 보장이 아니다. 같은 Keeper 가 `Execute` 등으로 MCP·HTTP 엔드포인트를 직접 부를 수 있으면 그 호출은 `Operator` 로 풀리고, 그 호출자의 이름도 자기 신고다. PR 본문과 `docs/` 에 "인증이 꺼진 서버에서 MCP·HTTP 호출자에게 Board 공개 범위는 읽기 권한이 아니다" 를 그대로 적는다. 보안을 얻었다고 읽히면 오해다.
 
 ### 4.9 `Direct` 의 독자가 바뀌는 때
 

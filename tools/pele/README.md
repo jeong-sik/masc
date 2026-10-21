@@ -33,6 +33,8 @@ The installer publishes an immutable content-addressed runtime beside its
 launcher, verifies a real render, and then atomically updates `masc-pele`.
 Node.js 22+ and pnpm are required at installation. Node.js and the installed
 runtime are required at preview time; the source checkout is not.
+Install the helper from the same source revision as the TUI: its explicit format
+protocol rejects requests from callers that do not identify the source format.
 
 Upstream renderer speed claims do not measure this PNG pipeline. Font loading,
 Node startup, rasterization and terminal transmission add their own latency.

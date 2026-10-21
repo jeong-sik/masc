@@ -41,6 +41,8 @@ if [ ! -d "$support_dir" ]; then
   pnpm --dir "$staging" install --prod --frozen-lockfile --ignore-scripts
   printf '%s\n' '{"format":"mermaid","source":"flowchart TD\n A --> B","maxWidth":640}' |
     node "$staging/render.mjs" >/dev/null
+  printf '%s\n' '{"format":"svg","source":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"32\" height=\"16\"><rect width=\"32\" height=\"16\" fill=\"#19a974\"/></svg>","maxWidth":640}' |
+    node "$staging/render.mjs" >/dev/null
   # A concurrent installer may already have published the identical runtime.
   node --input-type=module - "$staging" "$support_dir" <<'PUBLISH'
 import { renameSync, existsSync } from 'node:fs';

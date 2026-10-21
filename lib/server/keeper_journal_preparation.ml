@@ -39,7 +39,7 @@ let root base_path = Filename.concat base_path Common.masc_dirname
 let bundles base_path = Filename.concat (Filename.concat (root base_path) "upgrades") "journals"
 let bundle_path base_path id = Filename.concat (bundles base_path) id
 let source_path base_path keeper_name = Store.path_for_keeper
-  ~keepers_runtime_dir:(Workspace.keepers_runtime_dir (Workspace.default_config base_path)) ~keeper_name
+  ~keepers_runtime_dir:(Common.keepers_runtime_dir_of_base ~base_path) ~keeper_name
 let source_sha256 (plan : plan) = plan.source_hash
 let bundle_id receipt = receipt.id
 let plan_to_json (plan : plan) = `Assoc

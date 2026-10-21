@@ -466,3 +466,26 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - 새 actual fixture는 public owner·설정 Runtime·persistent Python/MCP worker·공통 Exact·loopback HTTP를 연결한다. 컨테이너 자원 시작/정리는 대체했고 size/crash journal 경계와 유실 delivery는 명시적으로 제어한다. parser·독립 source review·새 compiled 실행·실제 provider/두 UI/설치는 별도다. 이전 injected34건을 새 production 실행 증거로 세지 않는다.
 - 완료 fact의 과거 selected만 영구 제외하면 실제 삭제 후 같은 fact 재추가가 막히는 P2를 독립 리뷰에서 확인했다. 현재 strict ledger의 pending 의미로 회복하고 원래 거절/unknown no-replay는 유지하는 수리와 실제 owner 시나리오를 추가했다. 과거/현재 config의 size terminal을 함께 세어 현재 후속을 막는 별도 P2도 발견했다. fresh semantic destination·current domain/source 관련성으로 후보를 좁히고 실제 narrow에서는 권한을 다시 확인하는 수리 및 별도 actual fixture를 추가했다. 실행 증거는 이후 선택 결과로 기록한다.
 - typed observer는 아직 intent-only다. 옛 direct executor의 registry write도 제거되어 registry compare/reconcile·delivery·ACK와 nullable 통계/UI 연결이 끝나기 전 관측 공백이 남는다. 실행 소유권을 잃은 builtin Curator route/config·UI projection도 같은 통합 후속에서 제거하거나 실제 Addon 연결로 명확히 정리해야 한다. 이를 숨기려고 직접 실행 경로를 유지하지 않는다. E02 완료·운영 설치·A01–H06 전체 완료는 선언하지 않는다. 원래54개 이름·완료 기준은 유지한다.
+
+
+## 2026-10-22 E02 production compile repair and observation foundation
+
+PR #44979 c4f796a5aa6670f95aad986f4ba4d8052ee4443f의 실제 선택 CI
+[39692088763](https://github.com/jeong-sik/masc/actions/runs/39692088763)는
+`test_workspace_memory_curator_lane.ml:406`의 미사용 `current` binding 경고26으로
+컴파일 실패했다. 기존 소스 승인과 실행 결과를 구분한다. 원래 journal seed 효과는
+`ignore (seed_size_refusal store current_capture)`로 보존했고, whole-stack 재배치·push 후
+새 head는 `1a7d67fc6a538f320be3b5ff5cd43e6319a75084`다. 새 선택 CI
+[39693756145](https://github.com/jeong-sik/masc/actions/runs/39693756145)와 독립 재리뷰를
+요청했으며 이 기록 시점 결과는 미확인이다. 네 suite는 실제 public owner, host cycle,
+원래 commit, worker contract이며, 실제 provider·두 UI·설치를 증명하지 않는다.
+
+관측 후속은 [origin/timing 계약](../docs/design/exact-observation-origin-and-timing.md)에
+따라 v7의 closed completion origin과 nullable 측정 시간, 엄격한 전체 usage 계약을
+연결한다. 측정된 완료 순서는 유지하고 미측정 결과의 등록 시각은 명시적인 정렬 기준으로만
+사용한다. 미측정 결과를 p50이나 완료 시각으로 만들지 않으며, 같은 문자열 오류의
+실제 Producer 결과를 재시작 관측으로 오인하지 않는다. 원래 receipt의 registry 전달·
+조건부 durable reconcile·ACK, 실제 provider·화면·설치는 여전히 후속이다.
+
+A01–H06의 원래 54개 작업명과 완료 기준은 변경하지 않았다. 이 foundation만으로
+E02·G03 또는 전체 목표의 완료를 선언하지 않는다.

@@ -64,18 +64,21 @@ let usage_of_api_usage (api_usage : Agent_core.Types.api_usage) =
   ;}
 ;;
 
+type completion_origin = Producer | Restart_replay
+
 type run_status =
   | Running
   | Completed of
       { outcome : outcome
-      ; elapsed_s : float
+      ; origin : completion_origin
+      ; elapsed_s : float option
       ; output : Yojson.Safe.t
       ; selected_slot : string option
       ; usage : usage option
       }
   | Completion_persistence_failed of
       { intended_outcome : outcome
-      ; elapsed_s : float
+      ; elapsed_s : float option
       ; output : Yojson.Safe.t
       ; selected_slot : string option
       ; usage : usage option
@@ -283,7 +286,8 @@ module Payload = struct
 
   type completion =
     { outcome : outcome
-    ; elapsed_s : float
+    ; origin : completion_origin
+    ; elapsed_s : float option
     ; output : Yojson.Safe.t
     ; output_source : payload_source
     ; selected_slot : string option
@@ -295,14 +299,14 @@ module Payload = struct
   let restart_reason = "exact-output fibers do not survive server restart"
   let replayed_running_completion =
     Some
-      (fun ~started_at _registration ->
-         let elapsed_s = Float.max 0.0 (Time_compat.now () -. started_at) in
+      (fun ~started_at:_ _registration ->
          { outcome =
              Failed
                { code = server_restarted_code
                ; detail = restart_reason
                }
-         ; elapsed_s
+         ; origin = Restart_replay
+         ; elapsed_s = None
          ; output =
              `Assoc
                [ "reason", `String server_restarted_code
@@ -400,7 +404,8 @@ module Payload = struct
     in
     `Assoc
       ([ "outcome", `String (outcome_label completion.outcome)
-       ; "elapsed_s", `Float completion.elapsed_s
+       ; "origin", `String (match completion.origin with Producer -> "producer" | Restart_replay -> "restart_replay")
+       ; "elapsed_s", (match completion.elapsed_s with None -> `Null | Some value -> `Float value)
        ; "output", payload_source_to_yojson ~value:completion.output completion.output_source
        ; ( "selected_slot"
          , match completion.selected_slot with
@@ -427,11 +432,21 @@ module Payload = struct
     let* detail_fields = detail_fields in
     let* () =
       Run_registry_core.Json.exact_fields
-        ~required:([ "outcome"; "elapsed_s"; "output"; "selected_slot" ] @ detail_fields)
-        ~optional:[ "usage" ]
+        ~required:([ "outcome"; "origin"; "elapsed_s"; "output"; "selected_slot"; "usage" ] @ detail_fields)
         fields
     in
-    let* elapsed_s = Run_registry_core.Json.float_field "elapsed_s" fields in
+    let* origin = match List.assoc_opt "origin" fields with
+      | Some (`String "producer") -> Ok Producer
+      | Some (`String "restart_replay") -> Ok Restart_replay
+      | Some _ | None -> Error "completion origin is absent or unknown" in
+    let* elapsed_s = match List.assoc_opt "elapsed_s" fields with
+      | Some `Null -> Ok None
+      | Some (`Float value) when Float.is_finite value && value >= 0. -> Ok (Some value)
+      | Some (`Int value) when value >= 0 -> Ok (Some (float_of_int value))
+      | Some _ | None -> Error "elapsed_s must be null or a nonnegative finite duration" in
+    let* () = match origin,elapsed_s with
+      | Restart_replay,Some _ -> Error "restart observation cannot carry a measured duration"
+      | Restart_replay,None | Producer,(None|Some _) -> Ok () in
     let* output_source, output =
       match List.assoc_opt "output" fields with
       | Some value -> payload_source_of_yojson value
@@ -457,13 +472,25 @@ module Payload = struct
     in
     let* usage =
       match List.assoc_opt "usage" fields with
-      | None | Some `Null -> Ok None
+      | Some `Null -> Ok None
+      | None -> Error "missing field usage"
       | Some json ->
         (match usage_of_yojson json with
          | Ok usage -> Ok (Some usage)
          | Error detail -> Error (Printf.sprintf "field usage: %s" detail))
     in
-    Ok { outcome; elapsed_s; output; output_source; selected_slot; usage }
+    let* () = match origin with
+      | Producer -> Ok ()
+      | Restart_replay ->
+        let valid_outcome = match outcome with
+          | Failed {code;detail} -> code=server_restarted_code && detail=restart_reason
+          | Succeeded | Cancelled -> false in
+        let inline = match output_source with In_row -> true | In_file _ -> false in
+        let expected=`Assoc ["reason",`String server_restarted_code;"detail",`String restart_reason] in
+        if valid_outcome && inline && selected_slot=None && usage=None
+           && Yojson.Safe.equal (Yojson.Safe.sort output) (Yojson.Safe.sort expected) then Ok ()
+        else Error "restart completion does not match the original replay observation" in
+    Ok { outcome; origin; elapsed_s; output; output_source; selected_slot; usage }
   ;;
 end
 
@@ -471,7 +498,7 @@ module Store = Run_registry_core.Make (Payload)
 
 type failed_completion =
   { intended_outcome : outcome
-  ; elapsed_s : float
+  ; elapsed_s : float option
   ; output : Yojson.Safe.t
   ; selected_slot : string option
   ; usage : usage option
@@ -489,11 +516,13 @@ type t =
 type completion_error =
   | Unknown_run
   | Invalid_selected_slot
+  | Invalid_elapsed_duration
   | Persistence_failed of persistence_failure
 
 let completion_error_to_string = function
   | Unknown_run -> "completion referenced an unknown exact-lane run"
   | Invalid_selected_slot -> "selected exact-lane slot must be non-blank"
+  | Invalid_elapsed_duration -> "measured exact-lane duration must be nonnegative and finite"
   | Persistence_failed failure -> failure.detail
 ;;
 
@@ -501,14 +530,14 @@ let completion_error_to_string = function
    output are kept ([payload_source]) rather than the values, and this binary
    reads only this generation. [test_store_version_pins_the_registration_shape]
    holds the row shape and this name together. *)
-let storage_filename = "exact-lane-runs-v6.jsonl"
+let storage_filename = "exact-lane-runs-v7.jsonl"
 
-(* Next to the log: [<dir>/exact-lane-run-payloads/<run_id>/input-<sha256>.json]
+(* Next to the log: [<dir>/exact-lane-run-payloads-v7/<run_id>/input-<sha256>.json]
    and [output-<sha256>.json]. The digest is part of the name, so writing a new
    value for a run never replaces the bytes a durable row already names: a
    second registration of one id whose append then fails leaves the first
    registration's file as it was. *)
-let payload_dirname = "exact-lane-run-payloads"
+let payload_dirname = "exact-lane-run-payloads-v7"
 
 type payload_kind =
   | Input_payload
@@ -589,6 +618,7 @@ let projected_run_of_entry failed_completions (entry : Store.entry) =
     | _, Store.Completed completion ->
       Completed
         { outcome = completion.outcome
+        ; origin = completion.origin
         ; elapsed_s = completion.elapsed_s
         ; output = `Null
         ; selected_slot = completion.selected_slot
@@ -625,6 +655,7 @@ let full_run_of_entry failed_completions (entry : Store.entry) =
          diagnostic overlay from masking durable evidence. *)
       Completed
         { outcome = completion.outcome
+        ; origin = completion.origin
         ; elapsed_s = completion.elapsed_s
         ; output = completion.output
         ; selected_slot = completion.selected_slot
@@ -835,7 +866,7 @@ let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~usage 
         match stored with
         | Error _ as error -> error
         | Ok output_source ->
-          let completion = { Payload.outcome; elapsed_s; output; output_source; selected_slot; usage } in
+          let completion = { Payload.outcome; origin=Producer; elapsed_s; output; output_source; selected_slot; usage } in
           (match Store.complete t.store ~id:run_id ~completion with
            | `Completed -> Ok ()
            | (`Unknown | `Persistence_failed _) as error -> Error error)
@@ -868,16 +899,25 @@ let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~usage 
     Ok ()
   | Error Unknown_run -> Error Unknown_run
   | Error Invalid_selected_slot -> Error Invalid_selected_slot
+  | Error Invalid_elapsed_duration -> Error Invalid_elapsed_duration
   | Error (Persistence_failed _ as error) ->
     notify_changed ();
     Error error
 ;;
 
 let mark_completed t ~run_id ~outcome ~elapsed_s ~selected_slot ?usage ~output () =
+  if not (Float.is_finite elapsed_s) || elapsed_s < 0. then Error Invalid_elapsed_duration else
   match selected_slot with
   | Some selected_slot when String.trim selected_slot = "" -> Error Invalid_selected_slot
   | None | Some _ ->
-    mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~usage ~output
+    mark_completed_internal t ~run_id ~outcome ~elapsed_s:(Some elapsed_s) ~selected_slot ~usage ~output
+;;
+
+let mark_completed_unmeasured t ~run_id ~outcome ~selected_slot ?usage ~output () =
+  match selected_slot with
+  | Some selected_slot when String.trim selected_slot = "" -> Error Invalid_selected_slot
+  | None | Some _ ->
+    mark_completed_internal t ~run_id ~outcome ~elapsed_s:None ~selected_slot ~usage ~output
 ;;
 
 (* [total] counts every retained run, not the page, so a caller can say
@@ -1012,6 +1052,7 @@ let get t ~run_id =
            let output = settled output in
            ( Completed
                { outcome = completion.outcome
+               ; origin = completion.origin
                ; elapsed_s = completion.elapsed_s
                ; output = value_or_null output
                ; selected_slot = completion.selected_slot
@@ -1073,14 +1114,15 @@ let run_summary_fields run =
   let completion =
     match run.status with
     | Running -> []
-    | Completed { outcome; elapsed_s; output = _; selected_slot; usage } ->
+    | Completed { outcome; origin; elapsed_s; output = _; selected_slot; usage } ->
       let detail =
         match outcome with
         | Succeeded | Cancelled -> []
         | Failed { code; detail } ->
           [ "code", `String code; "detail", `String detail ]
       in
-      [ "elapsed_s", `Float elapsed_s
+      [ "completion_origin", `String (match origin with Producer -> "producer" | Restart_replay -> "restart_replay")
+      ; "elapsed_s", (match elapsed_s with None -> `Null | Some value -> `Float value)
       ; ( "selected_slot"
         , match selected_slot with
           | None -> `Null
@@ -1100,7 +1142,8 @@ let run_summary_fields run =
           [ "intended_code", `String code; "intended_detail", `String detail ]
       in
       [ "intended_status", `String (outcome_label intended_outcome)
-      ; "elapsed_s", `Float elapsed_s
+      ; "completion_origin", `String "producer"
+      ; "elapsed_s", (match elapsed_s with None -> `Null | Some value -> `Float value)
       ; ( "selected_slot"
         , match selected_slot with
           | None -> `Null

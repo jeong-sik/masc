@@ -13,6 +13,7 @@ function detailFixture(overrides: Record<string, unknown> = {}) {
     run: {
       run_id: 'payload-run', run_kind: 'exact_output', lane: 'librarian_exact',
       subject_id: null, actor: 'keeper-a', started_at: 1, status: 'succeeded',
+      completion_origin: 'producer', usage: null,
       elapsed_s: 0.4, selected_slot: null,
       input: { kind: 'exact', payload: null }, output: null,
       skill_evidence: { state: 'no_keeper_skills' },
@@ -93,6 +94,7 @@ describe('parseExactLaneRunsResponse', () => {
         actor: 'keeper-a',
         started_at: 1,
         status: 'succeeded',
+        completion_origin: 'producer', usage: null,
         elapsed_s: 0.4,
         selected_slot: 'auto-judge-primary',
       }],
@@ -170,6 +172,7 @@ describe('parseExactLaneRunsResponse', () => {
           intended_status: 'failed',
           intended_code: 'model_error',
           intended_detail: 'typed failure detail',
+          completion_origin: 'producer', usage: null,
           elapsed_s: 0.4,
           selected_slot: null,
           persistence_error: 'append rejected before commit',
@@ -183,6 +186,7 @@ describe('parseExactLaneRunsResponse', () => {
           started_at: 2,
           status: 'completion_durability_unknown',
           intended_status: 'succeeded',
+          completion_origin: 'producer', usage: null,
           elapsed_s: 0.5,
           selected_slot: 'librarian-secondary',
           persistence_error: 'rollback settlement failed',
@@ -220,6 +224,7 @@ describe('parseExactLaneRunsResponse', () => {
         started_at: 1,
         status: 'completion_persistence_failed',
         intended_status: 'succeeded',
+        completion_origin: 'producer', usage: null,
         elapsed_s: 0.4,
         selected_slot: null,
         persistence_error: 'append failed',
@@ -241,6 +246,7 @@ describe('parseExactLaneRunsResponse', () => {
         actor: 'keeper-a',
         started_at: 1,
         status: 'succeeded',
+        completion_origin: 'producer', usage: null,
         elapsed_s: 0.4,
       }],
     })).toThrow('missing=[selected_slot]')
@@ -353,6 +359,8 @@ describe('parseExactLaneRunResponse', () => {
     expect(() => parseExactLaneRunResponse({ ...detailFixture(), run: absent })).toThrow('missing=[output]')
     const running: Record<string, unknown> = detailFixture({ status: 'running' }).run
     delete running.output
+    delete running.completion_origin
+    delete running.usage
     delete running.elapsed_s
     delete running.selected_slot
     expect(() => parseExactLaneRunResponse({ ...detailFixture(), run: running })).toThrow('null exactly while running')
@@ -370,6 +378,7 @@ describe('parseExactLaneRunResponse', () => {
         actor: 'keeper-a',
         started_at: 1,
         status: 'succeeded',
+        completion_origin: 'producer', usage: null,
         elapsed_s: 0.4,
         selected_slot: null,
         skill_evidence: { state: 'no_keeper_skills' },
@@ -402,5 +411,45 @@ describe('parseExactLaneRunResponse', () => {
         },
       },
     })).toThrow('unknown value')
+  })
+})
+
+
+describe('exact observation origin, timing and provider usage', () => {
+  it('preserves an unmeasured terminal and explicit absent extended usage', () => {
+    const parsed = parseExactLaneRunResponse(detailFixture({ elapsed_s: null, usage: null }))
+    expect(parsed.elapsedSeconds).toBeUndefined()
+    expect(parsed.completionOrigin).toBe('producer')
+    expect(parsed.usage).toBeNull()
+    expect(parsed.output).toBeNull()
+  })
+
+  it('decodes the full provider usage contract independently of timing', () => {
+    const parsed = parseExactLaneRunResponse(detailFixture({ elapsed_s: null, usage: {
+      input_tokens: 40, output_tokens: 7, cache_creation_input_tokens: 3, cache_read_input_tokens: 20, cost_usd: 0.015,
+    } }))
+    expect(parsed.usage).toEqual({ inputTokens: 40, outputTokens: 7, cacheCreationInputTokens: 3, cacheReadInputTokens: 20, costUsd: 0.015 })
+    expect(parsed.elapsedSeconds).toBeUndefined()
+  })
+
+  it('keeps a restart observation separate from a producer completion', () => {
+    const raw = detailFixture({ status: 'failed', completion_origin: 'restart_replay', elapsed_s: null,
+      code: 'server_restarted', detail: 'the original observation fiber was lost', selected_slot: null, usage: null })
+    expect(parseExactLaneRunResponse(raw).completionOrigin).toBe('restart_replay')
+    expect(() => parseExactLaneRunResponse({ ...raw, run: { ...raw.run, elapsed_s: 10 } })).toThrow('restart observation')
+  })
+
+  it('refuses unknown origin, missing nullable fields and partial or malformed full usage', () => {
+    expect(() => parseExactLaneRunResponse(detailFixture({ completion_origin: 'guessed' }))).toThrow('completion_origin')
+    for (const key of ['completion_origin', 'usage', 'elapsed_s']) {
+      const raw: Record<string, unknown> = detailFixture().run
+      delete raw[key]
+      expect(() => parseExactLaneRunResponse({ ...detailFixture(), run: raw })).toThrow('missing=')
+    }
+    for (const usage of [{ input_tokens: 1, output_tokens: 2 },
+      { input_tokens: 1, output_tokens: 2, cache_creation_input_tokens: 0, cache_read_input_tokens: -1 },
+      { input_tokens: 1, output_tokens: 2, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, extra: true }]) {
+      expect(() => parseExactLaneRunResponse(detailFixture({ usage }))).toThrow()
+    }
   })
 })

@@ -43,7 +43,7 @@ let lane_by_id json lane_id =
 let test_runs_without_a_slot_are_split_by_why () =
   let completed ~run_id ~lane ~outcome ~selected_slot =
     exact_run ~run_id ~lane ~started_at:50.
-      ~status:(Exact.Completed { outcome; elapsed_s = 1.; output = `Null; selected_slot; usage = None })
+      ~status:(Exact.Completed { origin = Exact.Producer; outcome; elapsed_s = Some 1.; output = `Null; selected_slot; usage = None })
   in
   let restarted = Exact.Failed { code = Exact.server_restarted_code; detail = "orphan" } in
   let provider = Exact.Failed { code = "provider"; detail = "offline" } in
@@ -54,7 +54,10 @@ let test_runs_without_a_slot_are_split_by_why () =
         ~outcome:Exact.Succeeded ~selected_slot:None
     ; completed ~run_id:"board-jev-2" ~lane:Exact.Board_attention
         ~outcome:Exact.Succeeded ~selected_slot:None
-    ; completed ~run_id:"board-restart" ~lane:Exact.Board_attention
+    ; exact_run ~run_id:"board-restart" ~lane:Exact.Board_attention ~started_at:50.
+        ~status:(Exact.Completed { origin=Exact.Restart_replay; outcome=restarted; elapsed_s=None;
+          output=`Null; selected_slot=None; usage=None })
+    ; completed ~run_id:"producer-restart-code" ~lane:Exact.Board_attention
         ~outcome:restarted ~selected_slot:None
     ; completed ~run_id:"board-failed" ~lane:Exact.Board_attention
         ~outcome:provider ~selected_slot:None
@@ -64,7 +67,7 @@ let test_runs_without_a_slot_are_split_by_why () =
         ~status:
           (Exact.Completion_persistence_failed
              { intended_outcome = Exact.Succeeded
-             ; elapsed_s = 1.
+             ; elapsed_s = Some 1.
              ; output = `Null
              ; selected_slot = None
              ; usage = None
@@ -103,7 +106,7 @@ let test_runs_without_a_slot_are_split_by_why () =
   check int "Vendor System One answered the slotless successes, recorded or not" 3
     (without "vendor_system_one");
   check int "a restart orphan is its own count" 1 (without "server_restarted");
-  check int "a failure and a cancellation before any slot" 2 (without "no_slot");
+  check int "producer failure code grants no replay origin" 3 (without "no_slot");
   let named =
     board |> Yojson.Safe.Util.member "selected_slots" |> Yojson.Safe.Util.to_list
     |> List.fold_left (fun sum slot -> sum + int_at slot [ "count" ]) 0
@@ -132,8 +135,8 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
         ~started_at:90.
         ~status:
           (Exact.Completed
-             { outcome = Exact.Succeeded
-             ; elapsed_s = 4.
+             { origin = Exact.Producer; outcome = Exact.Succeeded
+             ; elapsed_s = Some 4.
              ; output = `Assoc []
              ; selected_slot = Some "hitl-primary"
              ; usage = None
@@ -144,8 +147,8 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
         ~started_at:80.
         ~status:
           (Exact.Completed
-             { outcome = Exact.Failed { code = "provider"; detail = "offline" }
-             ; elapsed_s = 8.
+             { origin = Exact.Producer; outcome = Exact.Failed { code = "provider"; detail = "offline" }
+             ; elapsed_s = Some 8.
              ; output = `Null
              ; selected_slot = Some "librarian-secondary"
              ; usage = None
@@ -313,9 +316,9 @@ let test_board_lane_projects_credential_free_jev_readiness () =
 
 (* Lane audit W5+W7: the verifier lane's success means A VERDICT WAS
    PRODUCED — an exhausted evaluator (Not_reviewed) counts as failed — and a
-   server-restart orphan's synthesised duration (now - started_at) must not
-   enter the latency percentile, while still bounding last_terminal_at. *)
-let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
+   server-restart orphan has no measured duration and must not
+   enter the latency percentile or invent last_terminal_at. *)
+let test_no_verdict_is_failed_and_unmeasured_elapsed_skips_p50 () =
   let exact_runs =
     [ exact_run
         ~run_id:"librarian-measured"
@@ -323,8 +326,8 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
         ~started_at:80.
         ~status:
           (Exact.Completed
-             { outcome = Exact.Failed { code = "provider"; detail = "offline" }
-             ; elapsed_s = 8.
+             { origin = Exact.Producer; outcome = Exact.Failed { code = "provider"; detail = "offline" }
+             ; elapsed_s = Some 8.
              ; output = `Null
              ; selected_slot = None
              ; usage = None
@@ -335,9 +338,9 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
         ~started_at:10.
         ~status:
           (Exact.Completed
-             { outcome =
+             { origin = Exact.Restart_replay; outcome =
                  Exact.Failed { code = "server_restarted"; detail = "orphan" }
-             ; elapsed_s = 100000.
+             ; elapsed_s = None
              ; output = `Null
              ; selected_slot = None
              ; usage = None
@@ -464,8 +467,8 @@ let test_latest_terminal_uses_completion_time () =
         ~started_at:100.
         ~status:
           (Exact.Completed
-             { outcome = Exact.Failed { code = "early"; detail = "early" }
-             ; elapsed_s = 1.
+             { origin = Exact.Producer; outcome = Exact.Failed { code = "early"; detail = "early" }
+             ; elapsed_s = Some 1.
              ; output = `Null
              ; selected_slot = Some "secondary"
              ; usage = None
@@ -476,8 +479,8 @@ let test_latest_terminal_uses_completion_time () =
         ~started_at:90.
         ~status:
           (Exact.Completed
-             { outcome = Exact.Succeeded
-             ; elapsed_s = 20.
+             { origin = Exact.Producer; outcome = Exact.Succeeded
+             ; elapsed_s = Some 20.
              ; output = `Null
              ; selected_slot = Some "primary"
              ; usage = None
@@ -529,6 +532,61 @@ let test_latest_terminal_uses_completion_time () =
     (librarian
      |> Yojson.Safe.Util.member "last_terminal_at"
     |> Yojson.Safe.Util.to_float)
+;;
+
+let test_unmeasured_terminal_uses_observation_anchor_without_inventing_finish () =
+  let measured = exact_run ~run_id:"measured" ~lane:Exact.Workspace_curator ~started_at:90.
+    ~status:(Exact.Completed { origin=Exact.Producer; outcome=Exact.Succeeded; elapsed_s=Some 20.;
+      output=`Null; selected_slot=Some "slot"; usage=None }) in
+  (* The original request was already terminal when observation first recorded
+     it at 200. That registration cannot be treated as its execution start. *)
+  let late = exact_run ~run_id:"z-late-observation" ~lane:Exact.Workspace_curator ~started_at:200.
+    ~status:(Exact.Completed { origin=Exact.Producer;
+      outcome=Exact.Failed {code="original_failure";detail="retained terminal"}; elapsed_s=None;
+      output=`Null; selected_slot=None; usage=None }) in
+  let tied = {late with run_id="a-late-observation";
+    status=Exact.Completed {origin=Exact.Producer;outcome=Exact.Succeeded;elapsed_s=None;
+      output=`Null;selected_slot=None;usage=None}} in
+  let project runs = Projection.For_testing.snapshot_json_with ~now:250.
+    ~resolve_lane:(fun _ -> Projection.Unconfigured "not configured")
+    ~jev_readiness:Typesafeai.Off ~exact_runs_total:(List.length runs) ~exact_runs:runs
+    ~verification_runs:[] ~goal_verification_runs:[]
+    |> fun json -> lane_by_id json "workspace_curator_exact" in
+  List.iter (fun runs ->
+    let row=project runs in
+    check (option (float 0.)) "unknown finish stays absent" None
+      (match Yojson.Safe.Util.member "last_terminal_at" row with `Null -> None | v -> Some (Yojson.Safe.Util.to_float v));
+    check (float 0.) "only measured duration enters latency" 20.
+      (Yojson.Safe.Util.member "p50_elapsed_s" row |> Yojson.Safe.Util.to_float);
+    check string "equal anchors use original ID, independent of traversal" "failed"
+      (Yojson.Safe.Util.member "last_outcome" row |> Yojson.Safe.Util.to_string))
+    [[measured;tied;late];[late;tied;measured]]
+;;
+
+let test_registry_rows_reach_tui_without_synthetic_duration () =
+  let module Decode = Masc.Tui_decode in
+  let registry=Exact.create () in
+  Exact.register_running registry ~run_id:"tui-original" ~lane:Exact.Workspace_curator
+    ~actor:"curator" ~started_at:10. ~input:(Exact.Exact_input `Null);
+  (match Exact.mark_completed registry ~run_id:"tui-original" ~outcome:Exact.Succeeded
+    ~elapsed_s:2. ~selected_slot:None ~output:`Null () with
+   | Ok () -> () | Error e -> fail (Exact.completion_error_to_string e));
+  let measured=Exact.get registry ~run_id:"tui-original" |> Option.get in
+  let unknown={measured with status=Exact.Completed {origin=Exact.Producer;outcome=Exact.Succeeded;
+    elapsed_s=None;output=`Null;selected_slot=None;usage=None}} in
+  List.iter (fun (run,expected) ->
+    let summary=Exact.run_summary_to_yojson run in
+    let listing=`Assoc ["has_more",`Bool false;"runs",`List [summary]] in
+    (match Decode.decode_lane_run_page ~lane:Standalone_lane.Workspace_curator listing with
+     | Ok {lrpg_runs=[row];_} -> check (option (float 0.)) "original summary duration" expected row.lrs_elapsed_s
+     | Ok _ -> fail "expected one original summary" | Error e -> fail e);
+    (match Projection.For_testing.run_detail_json_with ~run_id:run.run_id ~exact_runs:[run]
+        ~verification_runs:[] ~goal_verification_runs:[] with
+     | Projection.Detail_found detail -> (match Decode.decode_lane_run_detail detail with
+       | Ok row -> check (option (float 0.)) "original detail duration" expected row.lrd_elapsed_s
+       | Error e -> fail e)
+     | Projection.Detail_not_found | Projection.Detail_ambiguous -> fail "expected original detail"))
+    [measured,Some 2.;unknown,None]
 ;;
 
 let verifier_tool : Verification.tool_observation =
@@ -1060,10 +1118,14 @@ let () =
             "Board lane projects credential-free JEV readiness"
             `Quick
             test_board_lane_projects_credential_free_jev_readiness
+        ; test_case "unmeasured original and deterministic terminal selection" `Quick
+            test_unmeasured_terminal_uses_observation_anchor_without_inventing_finish
+        ; test_case "registry summary and detail reach the TUI decoder" `Quick
+            test_registry_rows_reach_tui_without_synthetic_duration
         ; test_case
-            "no verdict is failed; synthetic elapsed skips p50"
+            "no verdict is failed; unmeasured elapsed skips p50"
             `Quick
-            test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50
+            test_no_verdict_is_failed_and_unmeasured_elapsed_skips_p50
         ; test_case
             "verifier runs are filtered before pagination"
             `Quick

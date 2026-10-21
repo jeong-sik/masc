@@ -67,6 +67,9 @@ let metadata_step = function
   | Io_returning -> "receiving result"
   | Preparing | Comparison_queued | Comparison_running | Comparison_returning -> "preparing result"
   | Awaiting_ui -> "result awaiting state application"
+  | Masc_tui_local_read_observation.Read_failed Raised -> "read failed"
+  | Masc_tui_local_read_observation.Read_failed Interrupted -> "read interrupted"
+  | Read_not_started -> "read not started"
 
 let reading_note reading =
   match reading with

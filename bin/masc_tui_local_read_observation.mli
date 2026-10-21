@@ -52,6 +52,12 @@ val facts : t -> facts
     state application is not paint, usable input or useful Task progress. *)
 type pending = Awaiting_start | Io_queued | Io_running | Io_returning | Preparing
   | Comparison_queued | Comparison_running | Comparison_returning | Awaiting_ui
+  | Read_failed of failure | Read_not_started
 val pending : t -> pending
 (** A projection of observed facts only. The caller must separately check that
-    the original source still has an active read. No elapsed-time inference. *)
+    the original source still has an active read. A returned caller maps to
+    [Awaiting_ui]; its return alone does not prove payload success or state
+    application. An exceptional caller retains [Raised] or [Interrupted], and
+    an unstarted caller remains [Read_not_started]. These observations imply
+    neither a queued UI message nor physical worker/registration release.
+    No elapsed-time inference. *)

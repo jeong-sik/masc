@@ -53,7 +53,10 @@ let local_source_pending_note state source =
       | Comparison_queued -> "waiting for Task comparison worker"
       | Comparison_running -> "comparing Task values"
       | Comparison_returning -> "returning Task comparison"
-      | Awaiting_ui -> "result awaiting state application" in
+      | Awaiting_ui -> "result awaiting state application"
+      | Local_read_observation.Read_failed Raised -> "read failed"
+      | Local_read_observation.Read_failed Interrupted -> "read interrupted"
+      | Read_not_started -> "read not started" in
     let name=match source with Local_keepers -> "Keeper metadata" | Local_work -> "Work" in
     "  " ^ name ^ " · " ^ step) (local_source_pending state source)
 module Markdown = Masc_tui_markdown

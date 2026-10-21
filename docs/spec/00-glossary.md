@@ -4394,11 +4394,12 @@ status: reference
     매 검색마다 이벤트 사이드카를 읽는 부하를 막기 위해 평소에는 흡수 원장(`memory-absorbed.jsonl`)만으로
     해결하고, 검색어에 답하는 행의 체인 끝이 non-current일 때만 사이드카(`.memory-events.jsonl`)를 읽는다. 손상된
     이벤트 줄은 `event_unreadable_lines`로 분리 보고된다(#38543·#38552).
-  - **Keeper 삭제 시 사이드카 정리 및 캐시 무효화**: Keeper를 삭제(`purge_keeper_artifacts`)할 때 이
-    사이드카 파일(`<keeper>.memory-events.jsonl`)도 함께 삭제(`Keeper_memory_events_artifact`)되고
-    캐시된 파일 쓰기 핸들러(`Fs_compat.invalidate_cached_writer`)도 무효화된다. 따라서 동일 프로세스에서
-    같은 이름으로 다시 생성된 후속 키퍼가 이전의 조회·철회·대체 이벤트를 상속하거나 삭제된 inode에 쓰기
-    내용이 유실되는 결함을 원천 방지한다(#38235).
+  - **Keeper 삭제 시 사이드카 정리**: Keeper를 삭제(`purge_keeper_artifacts`)할 때 이
+    사이드카 파일(`<keeper>.memory-events.jsonl`)도 함께 삭제(`Keeper_memory_events_artifact`)된다.
+    이 파일은 쓸 때마다 경로를 새로 열어(`Fs_compat.append_private_jsonl_durable_locked_result`)
+    잠긴 채 쓰므로, 동일 프로세스에서 같은 이름으로 다시 생성된 후속 키퍼가 이전의 조회·철회·대체
+    이벤트를 상속하거나 삭제된 파일에 쓰는 일이 없다(#38235). 줄바꿈 없이 끊긴 끝 줄은 다음 쓰기가
+    잘라 낸다(#38597).
   → [Keeper_shutdown_types](../../lib/keeper/keeper_shutdown_types.mli),
   [Server_dashboard_http_delete_actions](../../lib/server/server_dashboard_http_delete_actions.ml)
 

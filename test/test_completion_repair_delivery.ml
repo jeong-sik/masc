@@ -286,6 +286,70 @@ let test_a_queue_that_appears_before_the_lock_keeps_the_task () =
     | Ok _ -> Alcotest.fail "a routable producer must not have its task released"
     | Error error -> Alcotest.fail (D.masc_error_to_string error))
 
+(* A route that cannot be read under the lock is its own outcome, carrying the
+   read's detail, and not a backlog error: the backlog is fine, and the
+   producer may be a Keeper whose meta this binary does not decode. *)
+let test_an_unread_route_under_the_lock_is_its_own_outcome () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-no-keeper-then-unread" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    let before = only_task config in
+    let route_detail = "the producer's meta does not decode" in
+    match
+      W.release_unroutable_rejected_task_r config ~authority:system ~task_id
+        ~producer ~verification_id ~reason
+        ~still_unroutable:(fun () -> Error route_detail)
+        ()
+    with
+    | Ok (W.Producer_route_unread { detail }) ->
+      Alcotest.(check string) "the read's own detail" route_detail detail;
+      Alcotest.(check string) "the task is left untouched"
+        (D.show_task before) (D.show_task (only_task config));
+      check_pending config 1
+    | Ok _ -> Alcotest.fail "an unread route must not release or pass as routable"
+    | Error error ->
+      Alcotest.failf "an unread route was reported as a backlog error: %s"
+        (D.masc_error_to_string error))
+
+(* The same window with a meta this binary does not decode, through the real
+   route read. The first routing read found nothing, so delivery goes to the
+   release; the meta that lands before the lock may be a Keeper, so the task
+   stays and the release answers [Error], the arm [reconcile_pending] counts
+   as retained. *)
+let test_an_undecodable_meta_that_appears_before_the_lock_keeps_the_task () =
+  with_workspace (fun config ->
+    let verification_id = "vrf-no-keeper-then-undecodable" in
+    prepare_submission config verification_id;
+    commit config ~authority:system ~verification_id (D.Verdict_rejected { reason });
+    let item =
+      match pending config with
+      | [ item ] -> item
+      | items -> Alcotest.failf "one obligation, found %d" (List.length items)
+    in
+    (match
+       Wake.wake_rejected_producer ~config ~producer ~task_id ~verification_id
+         ~reason ~authority:system
+     with
+     | Wake.Unroutable_producer _ -> ()
+     | _ -> Alcotest.fail "the first routing read must find no Keeper");
+    let meta_path = Masc.Keeper_types_profile.keeper_meta_path config producer in
+    Fs_compat.mkdir_p (Filename.dirname meta_path);
+    Out_channel.with_open_text meta_path (fun out -> output_string out "[]");
+    let before = only_task config in
+    (match Wake.release_unroutable_task ~config item with
+     | Error _ -> ()
+     | Ok _ ->
+       Alcotest.fail "a producer whose meta cannot be read must keep its task");
+    Alcotest.(check string) "the task is left where the delivery expects it"
+      (D.show_task before) (D.show_task (only_task config));
+    check_pending config 1;
+    Alcotest.(check string) "the meta is left as it landed" "[]"
+      (In_channel.with_open_text meta_path In_channel.input_all);
+    (* The next interval reads the same meta first and keeps the obligation. *)
+    reconcile config ~delivered:0 ~unroutable:0 ~retained:1;
+    check_pending config 1)
+
 (* Release precedes acknowledgement. A release that fails must therefore leave
    the obligation standing: if the order were the other way, this obligation
    would be gone and the task would stay held by a name that will never act. *)
@@ -688,6 +752,10 @@ let () =
           `Quick test_an_operator_verdict_releases_as_the_operator
       ; Alcotest.test_case "a queue that appears before the lock keeps the task"
           `Quick test_a_queue_that_appears_before_the_lock_keeps_the_task
+      ; Alcotest.test_case "an unread route under the lock is its own outcome"
+          `Quick test_an_unread_route_under_the_lock_is_its_own_outcome
+      ; Alcotest.test_case "an undecodable meta before the lock keeps the task"
+          `Quick test_an_undecodable_meta_that_appears_before_the_lock_keeps_the_task
       ; Alcotest.test_case "a failed release keeps the obligation"
           `Quick test_a_failed_release_keeps_the_obligation
       ; Alcotest.test_case "a release that can never succeed ends the obligation"

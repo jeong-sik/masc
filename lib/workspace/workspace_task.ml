@@ -381,6 +381,10 @@ type unroutable_rejection_release =
       (** A Keeper queue appeared at the producer's name between the routing
           decision and this lock. The verdict can be delivered after all, so
           the task stays where the delivery expects to find it. *)
+  | Producer_route_unread of { detail : string }
+      (** The producer's route could not be read inside this lock: a file at
+          its Keeper meta path that this binary does not decode, or a failed
+          read. That may still be a Keeper, so the task stays where it is. *)
   | Task_absent
 
 let release_unroutable_rejected_task_r
@@ -439,67 +443,66 @@ let release_unroutable_rejected_task_r
             landing at the producer's name in between means a queue now exists
             and the verdict can be delivered after all, so the task is left
             where the delivery expects to find it. Asked again here, under the
-            lock that decides, rather than trusting the earlier answer. *)
-         let* still_unroutable =
-           still_unroutable ()
-           |> Result.map_error (fun detail ->
-             Masc_domain.System (Masc_domain.System_error.IoError detail))
-         in
-         if not still_unroutable
-         then Ok Producer_became_routable
-         else
-         let handoff_context : Masc_domain.task_handoff_context =
-           { summary =
-               "rejected work had no producer Keeper to return it to; released to \
-                the backlog"
-           ; reason = Some reason
-           ; next_step = Some "Any agent may claim this task and answer the rejection"
-           ; failure_mode = None
-           ; reclaim_policy = Some Masc_domain.Allow_reclaim
-           ; evidence_refs = [ verification_id ]
-           ; updated_at = Some (Masc_domain.now_iso ())
-           ; updated_by = Some actor
-           }
-         in
-         let tasks =
-           List.map
-             (fun (candidate : task) ->
-                if String.equal candidate.id task_id
-                then
-                  { candidate with
-                    task_status = Masc_domain.Todo
-                  ; handoff_context = Some handoff_context
-                  }
-                else candidate)
-             backlog.tasks
-         in
-         let* persistence =
-           write_backlog_result config { backlog with tasks }
-           |> Result.map_error (fun message ->
-             Masc_domain.System (Masc_domain.System_error.IoError message))
-         in
-         let post_commit_errors =
-           project_task_release_to_todo
-             config
-             ~persistence
-             ~from_status:task.task_status
-             ~task_id
-             ~previous_assignee:assignee
-             ~actor_kind
-             ~actor
-             ~reason
-             ~activity_fields:
-               [ "unroutable_rejection", `Bool true
-               ; "verification_id", `String verification_id
-               ]
-             ~module_name:"release_unroutable_rejected_task_r"
-         in
-         Ok
-           (Released
-              { previous_status = task.task_status
-              ; backlog_version = persistence.committed_revision
-              ; post_commit_errors
-              })
+            lock that decides, rather than trusting the earlier answer. A
+            route that cannot be read is its own answer, not a backlog
+            failure: the producer may be a Keeper whose meta this binary does
+            not decode, so the task stays put too. *)
+         (match still_unroutable () with
+          | Error detail -> Ok (Producer_route_unread { detail })
+          | Ok false -> Ok Producer_became_routable
+          | Ok true ->
+            let handoff_context : Masc_domain.task_handoff_context =
+              { summary =
+                  "rejected work had no producer Keeper to return it to; released to \
+                   the backlog"
+              ; reason = Some reason
+              ; next_step = Some "Any agent may claim this task and answer the rejection"
+              ; failure_mode = None
+              ; reclaim_policy = Some Masc_domain.Allow_reclaim
+              ; evidence_refs = [ verification_id ]
+              ; updated_at = Some (Masc_domain.now_iso ())
+              ; updated_by = Some actor
+              }
+            in
+            let tasks =
+              List.map
+                (fun (candidate : task) ->
+                   if String.equal candidate.id task_id
+                   then
+                     { candidate with
+                       task_status = Masc_domain.Todo
+                     ; handoff_context = Some handoff_context
+                     }
+                   else candidate)
+                backlog.tasks
+            in
+            let* persistence =
+              write_backlog_result config { backlog with tasks }
+              |> Result.map_error (fun message ->
+                Masc_domain.System (Masc_domain.System_error.IoError message))
+            in
+            let post_commit_errors =
+              project_task_release_to_todo
+                config
+                ~persistence
+                ~from_status:task.task_status
+                ~task_id
+                ~previous_assignee:assignee
+                ~actor_kind
+                ~actor
+                ~reason
+                ~activity_fields:
+                  [ "unroutable_rejection", `Bool true
+                  ; "verification_id", `String verification_id
+                  ]
+                ~module_name:"release_unroutable_rejected_task_r"
+            in
+            Ok
+              (Released
+                 { previous_status = task.task_status
+                 ; backlog_version = persistence.committed_revision
+                 ; post_commit_errors
+                 }))
        | Masc_domain.Claimed _
        | Masc_domain.InProgress _
        | Masc_domain.Todo

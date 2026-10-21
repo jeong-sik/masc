@@ -11,6 +11,8 @@ type t = { description : string option; readings : reading list }
 val empty : t
 val of_json : Yojson.Safe.t -> (t, string) result
 val to_json : t -> Yojson.Safe.t
-val render : reading -> Yojson.Safe.t -> (string, string) result
-(** Text readings preserve line breaks. Terminal and HTML consumers must
-    sanitize/escape the returned text at their respective display boundary. *)
+val value : reading -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
+(** The value [reading.path] addresses in a row's fields, once it matches the
+    declared format. A text value keeps its line breaks; the terminal and HTML
+    consumers lay the value out and sanitize/escape it at their own display
+    boundary. *)

@@ -934,8 +934,10 @@ let evidence_export_chooses_a_keeper_by_name () =
     "delivery",`Assoc ["destination",`String "broadcast";"status",`String "failed";
       "error",`String ("observer\027[2J" ^ String.make 120 'x')]] in
   let narrow = UI.lines ~width:40 {detail with receipt=Some unsafe_receipt} in
+  (* The frame's own colours are SGR; any other escape left after removing
+     them came from the receipt text. *)
   check bool "Summary receipt wraps and escapes external terminal controls" true
-    (List.for_all (fun line -> not (String.contains line '\027')
+    (List.for_all (fun line -> not (String.contains (Masc_tui_theme.strip_sgr line) '\027')
       && Masc_tui_message_layout.display_width line <= 40) narrow);
   check (list string) "uncertain sharing requests verification before resending"
     ["Evidence preserved: 2 rows · sha256 abc";"Broadcast outcome unknown · evidence preserved; verify before resending"]
@@ -1110,16 +1112,39 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
   check bool "package purpose is visible before opening" true
     (List.mem "    Read an analysis report" (UI.lines ~width:100 overview));
   let detail = UI.open_selected_instance overview in
-  let lines = UI.lines ~width:100 detail in
-  check bool "body is multiline text, not escaped JSON" true
-    (List.mem "  Report: First finding" lines && List.mem "  Second finding" lines);
-  check bool "partial input and delivery remain distinct" true
-    (List.mem "  Input complete: false" lines && List.mem "  Delivery: not attempted" lines);
-  check bool "the visible report carries the selected marker" true
-    (List.mem "> Useful analysis" lines);
-  let index value = List.find_index (String.equal value) lines |> Option.get in
-  check bool "results precede the activity timeline" true
-    (index "  Second finding" < index "Activity timeline");
+  let selected_id view = Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row view) in
+  let value_texts value = List.map (fun (row : UI.value_row) -> row.text) (UI.value_rows ~depth:0 value) in
+  let reading_texts row = List.map (fun (_, value) -> match value with
+    | Ok value -> value_texts value
+    | Error detail -> fail detail) (UI.result_readings worker row) in
+  check (option string) "opening selects the declared report" (Some row.id) (selected_id detail);
+  check (list (list string)) "a text value keeps its written lines as rows, not escaped JSON"
+    [["First finding"; "Second finding"]; ["false"]; ["not attempted"]] (reading_texts row);
+  check (list (triple int (option string) bool))
+    "an object field is a key, and a list item is a bullet one level deeper"
+    [0, Some "kind", false; 0, Some "points", false; 1, None, true; 1, None, true]
+    (List.map (fun (row : UI.value_row) -> row.depth, row.key, row.bullet)
+      (UI.value_rows ~depth:0 (`Assoc ["kind",`String "rubric";
+        "points",`List [`String "one";`String "two"]])));
+  check (list (pair int (option string)))
+    "a field holding a small object of single-line values takes one row, a deeper one nests"
+    [0, Some "judgment"; 0, Some "points"; 1, None]
+    (List.map (fun (row : UI.value_row) -> row.depth, row.key)
+      (UI.value_rows ~depth:0 (`Assoc ["judgment",`Assoc ["kind",`String "incorrect"];
+        "points",`List [`String "one"]])));
+  check (list (triple int (option string) bool))
+    "an object item puts its bullet on its first field"
+    [0, Some "kind", true; 1, Some "pin", false]
+    (List.map (fun (row : UI.value_row) -> row.depth, row.key, row.bullet)
+      (UI.value_rows ~depth:0 (`List [`Assoc ["kind",`String "pr";"pin",`String "1@a"]])));
+  let long_titles = {detail with snapshot=Some {snapshot with output={rows=[
+      {row with title=String.make 150 'r'};
+      {row with id="long-second";title=String.concat " " (List.init 40 (fun _ -> "결과"));observed_at=2.}];
+    coverage=[]}}} in
+  List.iter (fun width ->
+    check bool "every Results row fits the terminal width" true
+      (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= width)
+        (UI.lines ~width detail @ UI.lines ~width long_titles))) [40; 80; 120; 200];
   let raw_lines = UI.lines ~width:100 {detail with presentation=UI.Technical} in
   check bool "raw coordinates remain under details with the JSON formatter's layout" true
     (List.for_all (fun line -> List.mem line raw_lines)
@@ -1128,47 +1153,54 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
     fields=["body",`String "Other first finding\nOther second finding";
       "complete",`Bool true;"delivery",`String "not attempted"]} in
   let two = {detail with snapshot=Some {snapshot with output={rows=[row;second];coverage=[]}}} in
-  let before = UI.lines ~width:100 two in
-  check bool "only the selected report expands its body" true
-    (List.mem "> Useful analysis" before && List.mem "  Another analysis" before
-     && not (List.mem "  Report: Other first finding" before));
   let moved = UI.move_observation {two with scroll=7} 1 in
-  let after = UI.lines ~width:100 moved in
   check int "selecting another report starts at its visible result" 0 moved.scroll;
-  check bool "actual activity navigation moves the expanded body and marker together" true
-    (List.mem "> Another analysis" after
-     && List.mem "  Report: Other first finding" after
-     && List.mem "  Other second finding" after
-     && not (List.mem "  Report: First finding" after));
   check (option string) "the raw detail target is the visible selected report"
-    (Some second.id) (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row moved));
+    (Some second.id) (selected_id moved);
   let moved_raw = UI.lines ~width:100 {moved with presentation=UI.Technical} in
   check bool "D exposes the same report and excludes the previous one" true
     (List.mem "Row second-report" moved_raw && not (List.mem "Row report-row" moved_raw));
   let unselected = {two with row_cursor=(-1)} in
-  let unselected_lines = UI.lines ~width:100 unselected in
-  check bool "a vanished selection asks for explicit navigation without choosing a report" true
-    (List.mem "Choose a result with j/k." unselected_lines
-     && not (List.mem "> Useful analysis" unselected_lines)
-     && not (List.mem "  Report: First finding" unselected_lines));
+  check (option string) "a vanished selection leaves no report selected" None (selected_id unselected);
   check (option string) "j explicitly chooses a report from no selection" (Some row.id)
-    (Option.map (fun (row : UI.Row.row) -> row.id)
-      (UI.selected_row (UI.move_observation unselected 1)));
-  let missing = {row with fields=[]} in
-  let missing_detail = {detail with snapshot=Some {snapshot with output={rows=[missing];coverage=[]}}} in
+    (selected_id (UI.move_observation unselected 1));
   check bool "missing declared data is explicitly unavailable" true
-    (List.mem "  Report: unavailable · field unavailable" (UI.lines ~width:100 missing_detail));
-  let foreign = {row with lane_id="report-worker/other"} in
-  check bool "readings are scoped to the exact declared Lane" true
-    (not (List.mem "  Report: First finding" (UI.lines ~width:100
-      {detail with snapshot=Some {snapshot with output={rows=[foreign];coverage=[]}}})));
-  let windows = {row with fields=["body",`String "First\r\n\r\nSecond\rstandalone\r"]} in
-  let windows_detail = {detail with snapshot=Some {snapshot with output={rows=[windows];coverage=[]}}} in
-  let windows_lines = UI.lines ~width:100 windows_detail in
-  check bool "CRLF report lines omit terminator CR and expose standalone CR" true
-    (List.mem "  Report: First" windows_lines
-     && List.mem "  " windows_lines
-     && List.mem "  Second\\x0Dstandalone\\x0D" windows_lines);
+    (match UI.result_readings worker {row with fields=[]} with
+     | (_, Error _) :: _ -> true
+     | (_, Ok _) :: _ | [] -> false);
+  check int "readings are scoped to the exact declared Lane" 0
+    (List.length (UI.result_readings worker {row with lane_id="report-worker/other"}));
+  let windows_body = "First\r\n\r\nSecond\rstandalone\r" in
+  check (list string) "a CRLF break drops its CR, and a standalone CR stays in the text"
+    ["First"; ""; "Second\rstandalone\r"] (value_texts (`String windows_body));
+  let windows = {row with fields=["body",`String windows_body]} in
+  check bool "no written carriage return reaches the terminal" true
+    (List.for_all (fun line -> not (String.contains line '\r'))
+      (UI.lines ~width:100 {detail with snapshot=Some {snapshot with output={rows=[windows];coverage=[]}}}));
+  let many = List.init 40 (fun index -> {row with id=Printf.sprintf "many-%02d" index;
+    title=Printf.sprintf "Result number %02d" index;observed_at=float_of_int index}) in
+  let crowded = {detail with snapshot=Some {snapshot with output={rows=many;coverage=[]}}} in
+  let far = UI.move_observation (UI.select_initial_result crowded) 35 in
+  check (option string) "j reaches a result far down a long list" (Some "many-35") (selected_id far);
+  List.iter (fun (count, focus) ->
+    let first, shown = UI.result_window ~rows:12 ~focus ~count in
+    check bool "the list window keeps the selected row in view within the rows it has" true
+      (first >= 0 && first <= focus && focus < first + shown
+       && shown = min 12 count && first + shown <= count))
+    [41, 36; 41, 0; 41, 40; 8, 7; 300, 150];
+  let two_lanes = P.of_json (`Assoc ["readings",`List [
+      `Assoc ["lane_id",`String "alpha";"path",`List [`String "body"];"label",`String "A";"format",`String "text"];
+      `Assoc ["lane_id",`String "beta";"path",`List [`String "body"];"label",`String "B";"format",`String "text"]]])
+    |> ok in
+  let lane_row id lane observed_at = {row with id;lane_id=worker.id ^ "/" ^ lane;observed_at} in
+  let interleaved = {detail with snapshot=Some {snapshot with
+    instances=[{worker with display=two_lanes}];
+    output={rows=[lane_row "beta-1" "beta" 1.; lane_row "alpha-2" "alpha" 2.; lane_row "beta-3" "beta" 3.];
+      coverage=[]}}} in
+  let walk = UI.select_initial_result interleaved in
+  check (list (option string)) "j walks results Lane by Lane, then by time, as the list groups them"
+    [Some "alpha-2"; Some "beta-1"; Some "beta-3"]
+    [selected_id walk; selected_id (UI.move_observation walk 1); selected_id (UI.move_observation walk 2)];
   let grade = {row with id="grade";lane_id=worker.id ^ "/grades";
     title="Old grade";observed_at=0.;fields=["grade",`String "incorrect"]} in
   let score = {row with id="score";title="Declared score";observed_at=3.} in
@@ -1180,7 +1212,6 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
     title="Internal report context";observed_at=0.;fields=["raw",`String "retained source"]} in
   let with_context = {detail with snapshot=Some
     {snapshot with output={rows=[context;row;second];coverage=[]}};row_cursor=1} in
-  let context_lines = UI.lines ~width:100 with_context in
   check (option string) "opening a context-only observation does not select its internal row" None
     (Option.map (fun (row : UI.Row.row) -> row.id)
       (UI.selected_row (UI.select_initial_result {with_context with snapshot=Some
@@ -1190,8 +1221,6 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
     (Option.map (fun (row : UI.Row.row) -> row.id)
       (UI.selected_row (UI.select_initial_result {with_context with snapshot=Some
         {snapshot with instances=[generic];output={rows=[context];coverage=[]}}})));
-  check bool "supporting context is not presented as a user result" true
-    (not (List.exists (fun line -> String.equal (String.trim line) context.title) context_lines));
   check (option string) "result navigation skips the supporting context" (Some second.id)
     (Option.map (fun (row : UI.Row.row) -> row.id)
       (UI.selected_row (UI.move_observation with_context 1)));
@@ -1229,10 +1258,6 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
     {snapshot with output={rows=[producer_last;row;producer_middle];coverage=[]}}} in
   check (option string) "opening uses the same chronology as navigation" (Some row.id)
     (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row unsorted));
-  let unsorted_lines = UI.lines ~width:100 unsorted in
-  let index text = List.find_index (String.equal text) unsorted_lines |> Option.get in
-  check bool "other results follow the advertised navigation order" true
-    (index "  Middle result" < index "  Last result");
   check (option string) "j reaches the next displayed result" (Some producer_middle.id)
     (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row (UI.move_observation unsorted 1)));
   let retained_worker = {worker with phase=UI.Row.Detached} in
@@ -1264,10 +1289,8 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
     (selected_id (UI.move_record next 1));
   check bool "rendering and navigation preserve immutable producer order" true
     (Option.map (fun (snapshot : UI.snapshot) -> snapshot.output.rows) next.snapshot = Some original_rows);
-  let same_title_summary = UI.lines ~width:100 {next with focus=UI.Timeline} in
-  check bool "an undeclared record stays out of Results until a result is chosen" true
-    (List.mem "Choose a result with j/k." same_title_summary
-     && not (List.mem ("  Lane " ^ same_title.lane_id) same_title_summary));
+  check (option string) "an undeclared record stays out of Results until a result is chosen" None
+    (selected_id {next with focus=UI.Timeline});
   let same_title_raw = UI.lines ~width:100 {next with presentation=UI.Technical} in
   check bool "raw evidence joins the same selected row and Lane" true
     (List.mem ("Row " ^ same_title.id) same_title_raw

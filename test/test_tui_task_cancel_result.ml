@@ -623,7 +623,7 @@ let test_original_task_read_without_global_rows_and_archive env () = Eio.Switch.
      check string "read exact actual original Task" task_id detail.task.id;
      check string "full original Task description retained" "original body" detail.task.description
    | _ -> fail "live original Task observation missing");
-  ignore (cancel ~call ~task_id ~expected_workspace:workspace ~reason:"archive original after actual cancel" |> require_ok);
+  ignore (cancel ~config ~task_id ~expected_workspace:workspace ~reason:"archive original after actual cancel" |> require_ok);
   (* Keep the actual cancellation and creation receipts. Only its timestamp is
      aged in this private fixture so production GC can archive it without a
      sleep or an invalid zero-day retention. *)

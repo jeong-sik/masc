@@ -1,0 +1,52 @@
+
+ RUN  v5.0.2 /private/tmp/masc-addon-inventory-application-20261021/dashboard
+
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps provider waits and delivery failure attached to the original worker after replacement 23ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > shows an unreadable cycle while preserving the worker and completed rows 15ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > offers the editor for the loader-supported suffix-only TOML filename 23ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > renders the owning package display contract in order while retaining raw fields and binding schema 9ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > shows unavailable for absent or incorrectly typed readings without inventing successful values 5ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > refuses rounded JSON integer readings while preserving safe numbers and fractions 7ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > refuses rounded or nonfinite numbers anywhere in JSON readings 4ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > renders deeply nested valid JSON readings without recursive validation overflow 106ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps the panel usable when the browser compact formatter rejects a deep valid reading 114ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > preserves first invalid JSON number in display order: {"first":[9007199254740993],"second":1e400} 1ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > preserves first invalid JSON number in display order: {"first":[1e400],"second":9007199254740993} 0ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > rejects malformed package display contracts instead of discarding them 2ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > opens original evidence from horizontal lanes without filtering and includes empty workers 27ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > allows keyboard selection of simultaneous observations and exposes missing relationship targets 18ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > projects an unknown package and its common evidence without a domain-specific renderer 10ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > separates requested off from observed worker cleanup 8ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > shows installed and pending TOML declarations independently of observation health 11ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > blocks removal for backend refusal: partial inventory 16ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > blocks removal for backend refusal: invalid owned file 19ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > blocks removal for backend refusal: same ID issue elsewhere 17ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > blocks removal for backend refusal: owned file renamed to another ID 20ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > blocks removal for backend refusal: duplicate ID declarations 25ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > allows configured cleanup when its file is absent (unrelated issue=false) 16ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > allows configured cleanup when its file is absent (unrelated issue=true) 19ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps the previous instance visible while a changed declaration and parse errors remain unresolved 37ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps detached history without offering edits to absent or differently owned files 37ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > allows detaching while observation is in progress without waiting for observe 14ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > distinguishes semantic lanes from the same package and keeps their full identities accessible 7ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > distinguishes matching local lanes from UUIDv7 instances sharing a timestamp prefix 7ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > queries the selected time and lane, showing partial coverage and explicit evidence action 23ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps a failed optional read local and allows leaving while a read remains pending 7ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > attaches a user package with the supplied binding through the common contract 8ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > selects a cross-lane time range by dragging and submits that exact query window 17ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > does not restore a cleared slice when its older request finishes 16ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > rejects unknown control states and malformed common rows instead of inventing defaults 3ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > submits an advertised package action with an exact binding while slice and other controls remain usable 35ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > retains uncertain requests without replay and cancels a held status read independently of slice 24ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > reports outcome_unknown honestly without turning the receipt into successful completion 18ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > reports failed_before_effect honestly without turning the receipt into successful completion 18ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > requires selection after incarnation replacement while preserving old receipts and giving new requests unique IDs 30ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps original receipt reads after a live worker becomes retained 25ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > keeps last recorded status visible when a later receipt read fails 22ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > rejects non-object action input and hides new actions for detached instances 24ms
+ ✓ src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > uses real action transport with exact request identity and rejects mismatched or malformed receipts 3ms
+
+ Test Files  1 passed (1)
+      Tests  44 passed (44)
+   Start at  21:55:59
+   Duration  2.54s (tests 37%, transform 28%, import 22%, environment 7%, setup 5%)

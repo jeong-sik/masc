@@ -1,0 +1,60 @@
+
+ RUN  v5.0.2 /private/tmp/masc-addon-inventory-application-20261021/dashboard
+
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > shows the host application even with no worker rows: {"kind":"inactive"} 36ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > shows the host application even with no worker rows: {"kind":"cleaning"} 17ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > shows the host application even with no worker rows: {"kind":"failed","messages":["cleanup refused"]} 13ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > shows the host application even with no worker rows: {"kind":"unknown","messages":["not observed"]} 21ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > shows off and unknown machine activity alongside retained screen observations without offering an activity toggle 62ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > names the machine publication unavailable when the worker observation cannot be read 23ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > shows browser off and unavailable without losing executor or live observations 41ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > searches all families and offers existing owner destinations without inventing controls 85ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > shows off with retained candidates and work finishing independently 17ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > labels the retained reading after refresh fails and retries on demand 15ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > does not accept late rows from another workspace or retain its visible rows 12ms
+ ✓ src/components/lane-inventory-panel.test.ts > operator Lane inventory > does not read or keep rows while workspace authority is unknown 13ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > retains host application independently of worker counts and rejects contradictory activity 13ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > keeps every machine activity independent of publication and rejects missing or malformed activity 25ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > preserves browser activity independently of registration and requires an explicit observation 4ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > reads the actual TUI fixture contract with every built-in and exact observation 1ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > keeps disabled candidates and running observations, rejecting contradictory activity 1ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > rejects mismatched families, duplicate identities, missing builtins and conflicting exact readings 3ms
+ ✓ src/api/lane-inventory.test.ts > common Lane inventory wire > keeps off intent and unfinished retained cleanup, rejecting nonboolean flags 5ms
+ ✓ src/components/lane-addon-connection.test.ts > host-owned Addon lifecycle observations > shows another installation at the exact TOML path separately from the current ID and unrelated workers 17ms
+ ✓ src/components/lane-addon-connection.test.ts > host-owned Addon lifecycle observations > does not borrow another ID application when the selected declaration is absent 2ms
+ ✓ src/components/lane-addon-connection.test.ts > host-owned Addon lifecycle observations > does not turn a missing current worker ID into confirmed cleanup 1ms
+ ✓ src/components/lane-addon-connection.test.ts > host-owned Addon lifecycle observations > does not turn a retained applied revision into a running worker 0ms
+ ✓ src/components/lane-addon-connection.test.ts > host-owned Addon lifecycle observations > does not confirm a different current file or an incomplete inventory 1ms
+ ✓ src/components/lane-addon-connection.test.ts > host-owned Addon lifecycle observations > refuses missing or inconsistent host application facts: {} 4ms
+ ✓ src/components/lane-addon-connection.test.ts > host-owned Addon lifecycle observations > refuses missing or inconsistent host application facts: {} 1ms
+ ✓ src/components/lane-addon-connection.test.ts > host-owned Addon lifecycle observations > refuses missing or inconsistent host application facts: {"enabled":false,"application":{"kind":"applied","instance_id":"old"}} 1ms
+ ✓ src/components/lane-addon-connection.test.ts > host-owned Addon lifecycle observations > refuses missing or inconsistent host application facts: {"enabled":true,"application":{"kind":"inactive"}} 0ms
+ ✓ src/components/lane-addon-connection.test.ts > host-owned Addon lifecycle observations > refuses missing or inconsistent host application facts: {"application":{"kind":"unknown","messages":[]}} 1ms
+ ✓ src/components/lane-addon-connection.test.ts > host-owned Addon lifecycle observations > refuses missing or inconsistent host application facts: {"application":{"kind":"new-unrecognized-state"}} 0ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > retains every host-emitted wait reason with its original request ID 5ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > retains the actual host cycle stop without converting it to a result: {"kind":"listing_failed","detail":""} 0ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > retains the actual host cycle stop without converting it to a result: {"kind":"listing_refused","detail":"invalid worker request"} 0ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > retains the actual host cycle stop without converting it to a result: {"kind":"relisted_delivered_request","request_id":"original-request"} 0ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > retains the actual host cycle stop without converting it to a result: {"kind":"result_delivery_failed","request_id":"original-request","detail":"worker disconnected"} 0ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > retains the actual host cycle stop without converting it to a result: {"kind":"exact_record_failed","request_id":"original-request","detail":"store unavailable"} 0ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > retains the actual host cycle stop without converting it to a result: {"kind":"ask_record_failed","request_id":"original-question","detail":"store unavailable"} 0ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > retains the actual host cycle stop without converting it to a result: {"kind":"no_exact_runner"} 0ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > keeps an unreadable cycle separate from worker and result facts: {"cycles":-1,"waiting":[],"issue":null} 1ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > keeps an unreadable cycle separate from worker and result facts: {"cycles":1,"waiting":[{"request_id":"r","reason":{"reason":"future_reason"}}],"issue":null} 5ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > keeps an unreadable cycle separate from worker and result facts: {"cycles":1,"waiting":[{"request_id":"r","reason":{"reason":"provider_unavailable"}}],"issue":null} 1ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > keeps an unreadable cycle separate from worker and result facts: {"cycles":1,"waiting":[{"request_id":"r","reason":{"reason":"lane_off","detail":"unexpected"}}],"issue":null} 1ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > keeps an unreadable cycle separate from worker and result facts: {"cycles":1,"waiting":[{"request_id":"","reason":{"reason":"awaiting_operator"}}],"issue":null} 4ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > keeps an unreadable cycle separate from worker and result facts: {"cycles":1,"waiting":[],"issue":{"kind":"future_issue"}} 1ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > keeps an unreadable cycle separate from worker and result facts: {"cycles":1,"waiting":[],"issue":{"kind":"result_delivery_failed","detail":"missing request"}} 1ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > keeps an unreadable cycle separate from worker and result facts: {"cycles":1,"waiting":[],"issue":null,"applied":true} 0ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > keeps an unreadable cycle separate from worker and result facts: null 0ms
+ ✓ src/api/lane-addon-host-requests.test.ts > original worker host request observations > preserves zero cycles and absence as different observations 0ms
+
+ Test Files  4 passed (4)
+      Tests  48 passed (48)
+   Start at  21:55:39
+   Duration  11.07s (import 42%, transform 29%, environment 13%, setup 11%, tests 4%)
+
+     Import  149 modules were evaluated 187 times · 4.38s total, 42% of tracked time
+             ~891ms faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+             learn more: https://vitest.dev/guide/improving-performance#test-isolation

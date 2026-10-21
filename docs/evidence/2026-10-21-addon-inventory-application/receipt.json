@@ -1,0 +1,43 @@
+{
+  "source": "9c294b7d9d345a295c49c50995ccdd53de38d1cb",
+  "base": "ad6ca89213d57c9ac978e1f3e5704292c4334cf6",
+  "scope": "G01 authoritative application in common inventory; not full worklist completion",
+  "source_blobs": {
+    "bin/masc_tui_lane_inventory.ml": "a23f674154b8acf48bf6b04f0deaa101a6d29489",
+    "dashboard/src/api/lane-addons.ts": "26c20281022afaa57161127dd2c0e9fa14a171f4",
+    "dashboard/src/api/lane-inventory.test.ts": "c49d5cc296ad84c6e652cd316ac817ba73a0d84a",
+    "dashboard/src/api/lane-inventory.ts": "287a05e593ab8731378b658be123c89fd64e9d19",
+    "dashboard/src/components/lane-inventory-panel.test.ts": "12b1f06846029cc77f6da8b304a0a909b0e86235",
+    "dashboard/src/components/lane-inventory-panel.ts": "3880b2b22748a254ccc42c3b7df1943f9ff846e3",
+    "lib/lane_addon/lane_addon_runtime.ml": "ade63129ff3d4aecffd0c86e8dc9eccfd5458c49",
+    "lib/lane_addon/lane_addon_runtime.mli": "ae69f98d9895fd26757994638e1d1c2aa4bed438",
+    "lib/server/server_lane_inventory.ml": "5de6bc33f131464184a9ae06886c21f495749168",
+    "lib/server/server_lane_inventory.mli": "3eafa629b817ae0a0553672ffaec944db78b2b92",
+    "lib/tui_decode_lane_inventory.ml": "7e205210293ac1f5a252429ef261a071d91858ca",
+    "lib/tui_decode_lane_inventory.mli": "99b6b001bf059667f4fe709f30cdb162c6527d41",
+    "test/test_lane_addon_reconcile.ml": "15491d8bb91495e4fe2290d6b449b2df5a8356c5",
+    "test/test_server_lane_inventory.ml": "2fdf6cdeaf210b7130ab854fb5ccdad4c9c53cfc",
+    "test/test_tui_lane_inventory.ml": "8d0ef4b18d8e00944d96fa6807ce5f8d8d105e5a"
+  },
+  "dashboard": {
+    "vitest": {
+      "exit_code": 0,
+      "files": 6,
+      "tests": 62,
+      "log": "dashboard-vitest.txt"
+    },
+    "typescript": {
+      "command": "pnpm exec tsc --noEmit",
+      "exit_code": 0
+    }
+  },
+  "ocaml": {
+    "parser_passed": true,
+    "typecheck": "not performed",
+    "behavior_tests": "not performed",
+    "native_build": "not performed"
+  },
+  "visible_dashboard": "not performed",
+  "visible_tui": "not performed",
+  "installed_runtime": "not replaced"
+}

@@ -195,6 +195,13 @@ val client_tool_host_error :
     and the context prefix in log output. *)
 module type LOGGER = sig
   val emit : level -> ?details:Yojson.Safe.t -> ?keeper_name:string -> ?turn_id:int -> ?category:category -> string -> unit
+  val emit_lazy :
+    level -> ?keeper_name:string -> ?turn_id:int -> ?category:category ->
+    (unit -> string * Yojson.Safe.t) -> unit
+  (** Build both message and structured details only when the existing module
+      threshold permits this level. Admission is checked once; an admitted
+      event uses the same console, redaction, ring and optional file sinks as
+      [emit]. The builder must only format already captured observations. *)
   val routine_lazy :
     ?details:Yojson.Safe.t ->
     ?keeper_name:string ->

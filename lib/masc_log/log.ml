@@ -961,6 +961,10 @@ module type LOGGER = sig
     string ->
     unit
 
+  val emit_lazy :
+    level -> ?keeper_name:string -> ?turn_id:int -> ?category:category ->
+    (unit -> string * Yojson.Safe.t) -> unit
+
   val routine_lazy :
     ?details:Yojson.Safe.t ->
     ?keeper_name:string ->
@@ -1017,20 +1021,28 @@ module Make (M : sig val name : string end) = struct
     in
     level_to_int level >= threshold
 
+  let write_event level ?keeper_name ?turn_id ?category ~details message =
+    let level_str = level_to_string level in
+    let prefix = match keeper_name with
+      | Some kn ->
+          Printf.sprintf "[%s] [%s] [%s/%s]"
+            (timestamp ()) level_str M.name kn
+      | None ->
+          Printf.sprintf "[%s] [%s] [%s]"
+            (timestamp ()) level_str M.name
+    in
+    Console_sink.write (prefix ^ " " ^ message);
+    Ring.push ?keeper_name ?turn_id ?category
+      ~level ~module_name:M.name ~message ~details ()
+
   let emit level ?(details = `Null) ?keeper_name ?turn_id ?category message =
+    if should_log_module level then
+      write_event level ?keeper_name ?turn_id ?category ~details message
+
+  let emit_lazy level ?keeper_name ?turn_id ?category build =
     if should_log_module level then begin
-      let level_str = level_to_string level in
-      let prefix = match keeper_name with
-        | Some kn ->
-            Printf.sprintf "[%s] [%s] [%s/%s]"
-              (timestamp ()) level_str M.name kn
-        | None ->
-            Printf.sprintf "[%s] [%s] [%s]"
-              (timestamp ()) level_str M.name
-      in
-      Console_sink.write (prefix ^ " " ^ message);
-      Ring.push ?keeper_name ?turn_id ?category
-        ~level ~module_name:M.name ~message ~details ()
+      let message, details = build () in
+      write_event level ?keeper_name ?turn_id ?category ~details message
     end
 
   let log_module level ?keeper_name ?turn_id ?category fmt =

@@ -19,16 +19,16 @@ function currentWire(value: string | null = '0.72') {
     categories: {
       dashboard: [
         {
-          env: 'MASC_DASHBOARD_CTX_PREPARING',
+          env: 'MASC_EXAMPLE_THRESHOLD',
           description: 'Warn threshold',
           value,
           default: '0.70',
           source: 'env',
-          source_detail: 'environment variable MASC_DASHBOARD_CTX_PREPARING',
+          source_detail: 'environment variable MASC_EXAMPLE_THRESHOLD',
           provenance: {
             kind: 'env',
-            detail: 'environment variable MASC_DASHBOARD_CTX_PREPARING',
-            env: 'MASC_DASHBOARD_CTX_PREPARING',
+            detail: 'environment variable MASC_EXAMPLE_THRESHOLD',
+            env: 'MASC_EXAMPLE_THRESHOLD',
             raw_source: 'environment',
             raw_env_present: true,
             raw_env_blank: false,
@@ -62,12 +62,12 @@ describe('decodeDashboardConfig', () => {
       pid: 12345,
     })
     expect(entry).toEqual({
-      env: 'MASC_DASHBOARD_CTX_PREPARING',
+      env: 'MASC_EXAMPLE_THRESHOLD',
       description: 'Warn threshold',
       displayValue: '0.72',
       defaultValue: '0.70',
       source: 'env',
-      sourceDetail: 'environment variable MASC_DASHBOARD_CTX_PREPARING',
+      sourceDetail: 'environment variable MASC_EXAMPLE_THRESHOLD',
       sensitive: false,
     })
   })

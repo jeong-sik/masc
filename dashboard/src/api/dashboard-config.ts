@@ -6,7 +6,6 @@ import {
 } from './effect-http'
 import {
   decodeDashboardConfig,
-  type ConfigEntry,
   type DashboardConfig,
   type DashboardConfigSchemaDriftError,
 } from './schemas/dashboard-config'
@@ -37,45 +36,4 @@ export function fetchDashboardConfig(): Effect.Effect<
     const raw = yield* http.getUnknown(DASHBOARD_CONFIG_PATH)
     return yield* decodeDashboardConfig(raw)
   })
-}
-
-function configEntry(
-  data: DashboardConfig,
-  env: string,
-): ConfigEntry | undefined {
-  return data.categories.dashboard?.find(entry => entry.env === env)
-}
-
-function threshold(
-  data: DashboardConfig,
-  env: string,
-  fallback: number,
-): number {
-  const entry = configEntry(data, env)
-  if (entry === undefined) return fallback
-  const value = Number.parseFloat(entry.displayValue)
-  return Number.isFinite(value) ? value : fallback
-}
-
-export function parseContextThresholds(
-  data: DashboardConfig,
-  defaults: { critical: number; warn: number; high: number },
-): { critical: number; warn: number; high: number } {
-  return {
-    critical: threshold(
-      data,
-      'MASC_DASHBOARD_CTX_HANDOFF_IMMINENT',
-      defaults.critical,
-    ),
-    warn: threshold(
-      data,
-      'MASC_DASHBOARD_CTX_PREPARING',
-      defaults.warn,
-    ),
-    high: threshold(
-      data,
-      'MASC_DASHBOARD_CTX_HIGH',
-      defaults.high,
-    ),
-  }
 }

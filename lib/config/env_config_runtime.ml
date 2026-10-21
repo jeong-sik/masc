@@ -501,15 +501,6 @@ module Dashboard = struct
   let keeper_action_stale_sec =
     get_float ~default:3600.0 "MASC_DASHBOARD_KEEPER_ACTION_STALE_SEC"
 
-  (** Keeper context-ratio lifecycle thresholds.
-      Higher ratio = closer to context limit = more urgency. *)
-  let ctx_handoff_imminent =
-    get_float ~default:0.85 "MASC_DASHBOARD_CTX_HANDOFF_IMMINENT"
-  let ctx_preparing =
-    get_float ~default:0.70 "MASC_DASHBOARD_CTX_PREPARING"
-  let ctx_high =
-    get_float ~default:0.50 "MASC_DASHBOARD_CTX_HIGH"
-
   (** Dashboard shell-cache pre-warm timeouts.
 
       The pre-warm fires once on server bootstrap. It is wrapped in two

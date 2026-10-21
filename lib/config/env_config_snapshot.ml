@@ -180,12 +180,6 @@ let dashboard_entries =
       "Benchmark results directory override; None when unset";
     entry ~default:"(none)" "MASC_DASHBOARD_CACHE_MAX_ENTRIES"
       "Dashboard cache max entries (clamped 16-512)";
-    entry ~default:"0.50" "MASC_DASHBOARD_CTX_HIGH"
-      "Context ratio threshold: high";
-    entry ~default:"0.85" "MASC_DASHBOARD_CTX_HANDOFF_IMMINENT"
-      "Context ratio threshold: handoff-imminent";
-    entry ~default:"0.70" "MASC_DASHBOARD_CTX_PREPARING"
-      "Context ratio threshold: preparing";
     entry ~default:"48" "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
       "Execution refresh timeout (floor 30, ceiling 300)";
     entry ~default:"120" "MASC_DASHBOARD_EXECUTION_TIMEOUT_SEC"

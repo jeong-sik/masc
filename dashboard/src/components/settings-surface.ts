@@ -1733,8 +1733,6 @@ export function SettingsSurface() {
   const httpBaseUrlEntry = configEntry(dashboardConfig, 'MASC_HTTP_BASE_URL')
   const basePathEntry = configEntry(dashboardConfig, 'MASC_BASE_PATH')
   const configDirEntry = configEntry(dashboardConfig, 'MASC_CONFIG_DIR')
-  const ctxPreparingEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_CTX_PREPARING')
-  const ctxHandoffEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_CTX_HANDOFF_IMMINENT')
   const runtimeWarningEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO')
   const signalStaleEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_SIGNAL_STALE_SEC')
 
@@ -2132,16 +2130,6 @@ export function SettingsSurface() {
                   : html`
                     <div data-testid="notify-thresholds">
                       <div class="set-sub-h">Live alert thresholds</div>
-                      <${ThresholdTruthRow}
-                        label="Preparing context"
-                        entry=${ctxPreparingEntry}
-                        value=${formatThresholdPercent(configEntryDisplayValue(ctxPreparingEntry))}
-                      />
-                      <${ThresholdTruthRow}
-                        label="Handoff imminent"
-                        entry=${ctxHandoffEntry}
-                        value=${formatThresholdPercent(configEntryDisplayValue(ctxHandoffEntry))}
-                      />
                       <${ThresholdTruthRow}
                         label="Runtime warning"
                         entry=${runtimeWarningEntry}

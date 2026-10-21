@@ -44,8 +44,6 @@ describe('keeperStateTone (pure)', () => {
   it('also accepts dashboard-layer state names (KeeperLifecycleState + agent status)', () => {
     // types/core.ts KeeperLifecycleState
     expect(keeperStateTone('active')).toBe('ok')
-    expect(keeperStateTone('preparing')).toBe('info')
-    expect(keeperStateTone('handoff-imminent')).toBe('info')
     expect(keeperStateTone('idle')).toBe('neutral')
     expect(keeperStateTone('unbooted')).toBe('neutral')
     // agent.status union

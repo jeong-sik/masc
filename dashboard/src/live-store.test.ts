@@ -149,7 +149,5 @@ describe('keeperHealthSummary', () => {
         stage: 'unknown',
       },
     ])
-    expect(keeperHealthSummary.value.warningCount).toBe(0)
-    expect(keeperHealthSummary.value.criticalCount).toBe(0)
   })
 })

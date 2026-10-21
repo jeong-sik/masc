@@ -10,7 +10,7 @@ let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
    single word cannot carry both. *)
 let keeper ?(health = "offline") ?(status = "offline") ?(tool_audit_at = "")
     ?(updated_at = "") ?(keepalive_running = false) ?(turn_count = 0)
-    ?(paused = `Bool false) () =
+    ?(paused = `Bool false) ?(context_ratio = `Null) () =
   `Assoc
     [
       ("name", `String "omega");
@@ -29,7 +29,7 @@ let keeper ?(health = "offline") ?(status = "offline") ?(tool_audit_at = "")
       ("recent_tool_names", `List []);
       ("latest_tool_names", `List []);
       ("latest_action_source", `Null);
-      ("context_ratio", `Null);
+      ("context_ratio", context_ratio);
     ]
 
 let state_of row =
@@ -135,6 +135,28 @@ let test_paused_keeper_with_fresh_activity_is_not_healthy () =
   check string "state" "warning" (state_of row);
   check string "note" "운영자 일시정지" (note_of row)
 
+(* How full the context is stays a number on the row. It does not turn a live
+   keeper warning or critical: the continuity row maps no ratio to a state. *)
+let test_context_ratio_does_not_change_the_state () =
+  let live ratio =
+    build_one
+      (keeper ~health:"healthy" ~status:"active"
+         ~tool_audit_at:"2001-09-09T01:46:40Z" ~context_ratio:ratio ())
+  in
+  let empty = live `Null in
+  List.iter
+    (fun ratio ->
+      let full = live (`Float ratio) in
+      let what = Printf.sprintf "ratio %g" ratio in
+      check string (what ^ ": state") (state_of empty) (state_of full);
+      check string (what ^ ": note") (note_of empty) (note_of full);
+      check string (what ^ ": lifecycle") (lifecycle_of empty) (lifecycle_of full);
+      check string (what ^ ": a full context is not a warning") "healthy"
+        (state_of full);
+      check yojson (what ^ ": the ratio itself is kept") (`Float ratio)
+        Yojson.Safe.Util.(full.json |> member "context_ratio"))
+    [ 0.5; 0.7; 0.85; 0.95; 1.0 ]
+
 (* A pause is not a liveness failure, so it must not inherit the offline
    verdict either. *)
 let test_paused_keeper_is_not_critical () =
@@ -229,6 +251,8 @@ let () =
             test_paused_keeper_with_fresh_activity_is_not_healthy;
           test_case "paused keeper is not critical" `Quick
             test_paused_keeper_is_not_critical;
+          test_case "context ratio does not change the state" `Quick
+            test_context_ratio_does_not_change_the_state;
           test_case "unknown status is rejected even when paused" `Quick
             test_unknown_status_is_rejected_even_when_paused;
           test_case "non-boolean paused is rejected" `Quick

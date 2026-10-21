@@ -184,9 +184,6 @@ module Dashboard : sig
   val signal_quiet_sec : float
   val signal_live_sec : float
   val keeper_action_stale_sec : float
-  val ctx_handoff_imminent : float
-  val ctx_preparing : float
-  val ctx_high : float
   val shell_prewarm_inner_timeout_sec : float
   val shell_prewarm_outer_timeout_sec : float
   val execution_timeout_sec : float

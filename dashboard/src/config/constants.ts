@@ -64,14 +64,6 @@ export const PERIODIC_REFRESH_DEV_MS = 180_000
 export const PERIODIC_REFRESH_PROD_MS = 120_000
 export const TELEMETRY_AUTO_REFRESH_MS = 30_000
 
-// --- Context ratio thresholds (fallback defaults) ---
-// Runtime values come from /api/v1/dashboard/config (SSOT: lib/config/env_config_runtime.ml).
-// These constants are compiled fallbacks used before the config response arrives.
-// Consumers should read from config/context-thresholds.ts, not import these directly.
-export const CONTEXT_RATIO_CRITICAL = 0.85  // handoff-imminent
-export const CONTEXT_RATIO_WARN = 0.70      // preparing
-export const CONTEXT_RATIO_HIGH = 0.50
-
 // --- Keeper UI/runtime limits ---
 export const KEEPER_HISTORY_TAIL_MESSAGES = 200
 export const STREAMING_THINKING_PREVIEW_CHARS = 6_000

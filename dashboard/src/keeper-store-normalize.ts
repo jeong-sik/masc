@@ -301,7 +301,7 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
 // a new value at the `KeeperLifecycleState` union type forces a
 // parallel update here.
 const KEEPER_LIFECYCLE_STATES: ReadonlySet<KeeperLifecycleState> = new Set<KeeperLifecycleState>([
-  'active', 'preparing', 'handoff-imminent',
+  'active',
   'idle', 'offline', 'unbooted', 'stopped',
   'paused', 'crashed', 'unknown',
 ])

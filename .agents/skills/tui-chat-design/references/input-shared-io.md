@@ -48,6 +48,15 @@
   source 저장·로그·paint나 Task 완료를 이 보관과 혼동하지 않는다. 등록/제거의 pending
   목록 탐색·CAS 경합·결과 보관/분리/역순 변환 비용도 Before/After에 포함한다. 새 한도·
   timer·캐시·retry loop를 두거나 큐 대기 제거를 실제 입력/Loading 지연 감소로 환산하지 않는다.
+- 이미 수락된 Task 취소의 원래 영수증은 workspace 철회로 취소하지 않는 기존 switch에
+  남긴다. 같은 세션 결과 저장소로 전달하되 원래 Task·expected workspace를 담은 unscoped
+  메시지를 유지한다. 공용 조회용 workspace job에 넣거나 현 workspace 권한을 감싸면
+  수락된 결과를 잃거나 새 workspace에 후속 조회를 보내게 된다. 기존 요청 전 두 검증·MCP
+  세션·reason/handoff·서버 전이 판정은 유지하고, 성공 영수증 뒤 재조회는 기존 foreign
+  판정으로 보류/철회한다. 자동 재전송·새 root switch로 인계하지 않는다. runtime/switch
+  취소와 통신 실패 뒤 결과 미확인 문제는 결과 보관과 별개이며 성공으로 올리지 않는다.
+  no-switch·동기 dispatch 실패도 같은 보관 경로를 쓰지만 종료된 세션에 새 메시지는 만들지
+  않는다. 큐 공간 대기 제거를 취소 성공·입력 응답·화면 반영의 실측 개선으로 부르지 않는다.
 - Keeper 생성은 editor가 반환한 뒤 workspace 확인과 create-only POST를 소유 fiber에서
   수행한다. 확인 중·전송 중·종료 상태는 원래 요청에 묶고, 전송 전 중단·서버 거절·
   생성 확인·결과 미확인을 구분한다. POST 진입 뒤 취소·연결 실패는 결과 미확인이며

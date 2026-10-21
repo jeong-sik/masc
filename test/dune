@@ -6292,3 +6292,5 @@
  (libraries alcotest masc masc.masc_types masc.fs_compat masc_keeper_chat_delivery_identity masc_server masc_tui_context_inspector eio eio_main httpun uri yojson unix))
 
 (include stanzas/test_tui_verification_evidence_read.inc)
+
+(include stanzas/test_tui_task_cancel_result.inc)

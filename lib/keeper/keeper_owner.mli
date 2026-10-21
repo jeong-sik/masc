@@ -416,6 +416,12 @@ val advance_direct_input_checkpoint : t -> writer:input_checkpoint_writer ->
     record its receipt while Owner stops; a new writer cannot be admitted.
     Stale witnesses refuse, uncertain commits remain Error, and callers must
     reconcile both durable relations before any further publication. *)
+val bind_retired_input_cut : t -> writer:input_checkpoint_writer ->
+  operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  observed:Keeper_native_call.state -> call:Keeper_native_call.t ->
+  cut:Keeper_input_history_cut.binding -> (input_checkpoint_writer, error) result
+(** Admit a new call and the exact retired-response cut together. This requires
+    the current direct child and refuses stopping/shutdown admission. *)
 (** Admit a native call for dispatch: a fresh one, a replacement for a retired
     one, or the same call again when its scope resumes. A stopping Owner refuses
     it with [Owner_stopping]. Checkpoint and terminal receipts are still

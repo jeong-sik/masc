@@ -820,6 +820,9 @@ let advance_autonomous_input_checkpoint ~base_path ~keeper_name ~writer ~checkpo
 let advance_direct_input_checkpoint ~base_path ~keeper_name ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.advance_direct_input_checkpoint owner ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint)
+let bind_retired_input_cut ~base_path ~keeper_name ~writer ~operation_id ~execution_digest ~observed ~call ~cut =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.bind_retired_input_cut owner ~writer ~operation_id ~execution_digest ~observed ~call ~cut)
 let bind_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~observed ~call =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.bind_direct_native_call owner ~operation_id ~execution_digest ~observed ~call)

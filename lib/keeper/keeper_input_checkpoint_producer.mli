@@ -20,6 +20,12 @@ val prepare : base_path:string -> keeper_name:string -> session_dir:string ->
     but its messages must retain the exact input checkpoint as a prefix. An
     unproven history cut requires explicit reconciliation before dispatch;
     two pending=None states alone cannot establish consumed-answer lineage. *)
+val bind_retired_input_cut : t -> cut:Keeper_input_history_cut.t ->
+  seed:Keeper_checkpoint_store.exact_checkpoint_snapshot ->
+  operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
+  observed:Keeper_native_call.state -> call:Keeper_native_call.t -> (t, error) result
+(** Retain the verified cut, bind its actual seed, then atomically publish input
+    ownership and the next native call. Failure never grants replay authority. *)
 val publish_autonomous : t -> Agent_core.Checkpoint.t -> (t, error) result
 val publish_direct : t -> operation_id:Keeper_chat_operation.Operation_id.t ->
   execution_digest:string -> call_id:string -> observed:Keeper_checkpoint_ref.t ->

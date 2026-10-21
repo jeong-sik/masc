@@ -191,6 +191,11 @@ type input_checkpoint_change =
       { operation_id : Operation_id.t; execution_digest : string; call_id : string
       ; observed : Keeper_checkpoint_ref.t; checkpoint : Keeper_checkpoint_ref.t }
 
+type retired_input_cut =
+  { operation_id:Operation_id.t; execution_digest:string;
+    observed:Keeper_native_call.state; call:Keeper_native_call.t;
+    cut:Keeper_input_history_cut.binding }
+
 type _ command =
   | Exact_projection :
       (Keeper_owner_reducer.projection, error) result command
@@ -207,6 +212,8 @@ type _ command =
   | Input_checkpoint : Keeper_id.Trace_id.t -> (Chat_operation_store.input_checkpoint_observation, error) result command
   | Begin_input_checkpoint : Keeper_id.Trace_id.t * Keeper_interrupt_token.t -> (input_checkpoint_writer, error) result command
   | Advance_input_checkpoint : input_checkpoint_writer * input_checkpoint_change ->
+      (input_checkpoint_writer, error) result command
+  | Bind_retired_input_cut : input_checkpoint_writer * retired_input_cut ->
       (input_checkpoint_writer, error) result command
   | Update_direct_native_call :
       {operation_id:Operation_id.t; execution_digest:string; change:Keeper_native_call.change} -> (unit, error) result command
@@ -602,7 +609,7 @@ let answer : type response. response command -> answer = function
   | Direct_checkpoint _ -> In_its_drain_step
   | Direct_native_call _ -> In_its_drain_step
   | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _ -> In_its_drain_step
-  | Update_direct_native_call _ -> In_its_drain_step
+  | Update_direct_native_call _ | Bind_retired_input_cut _ -> In_its_drain_step
   | Defer_direct_checkpoint _ -> In_its_drain_step
   | Resume_direct_checkpoint _ -> In_its_drain_step
   | Direct_runtime_retry _ -> In_its_drain_step
@@ -1839,6 +1846,35 @@ let start
                 "input checkpoint writer no longer owns this executing child and trace")) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Bind_retired_input_cut (writer,{operation_id;execution_digest;observed;call;cut}), resolve) ->
+          let checkpoint=Keeper_input_history_cut.checkpoint cut in
+          let response=reject_if_stopping state (fun () ->
+            reject_if_shutdown shutdown_operation_id (fun () ->
+              match (Keeper_owner_reducer.projection state).meta,
+                  Atomic.get t.turn_in_flight, Atomic.get t.child_cancel with
+              | Some meta,Some {lane=Chat_operation;interrupt_token;_},Some _
+                  when writer.input_lane=Chat_operation
+                    && Keeper_id.Trace_id.equal meta.runtime.trace_id writer.input_trace
+                    && Keeper_id.Trace_id.equal checkpoint.trace_id writer.input_trace
+                    && Keeper_interrupt_token.equal interrupt_token writer.input_child ->
+                (match Keeper_input_history_cut.validate_native cut ~observed ~call with
+                 | Error detail -> Error (Operation_rejected (Chat_operation_store.Invalid_input detail))
+                 | Ok () ->
+                   match run_operation_command t ~label:"bind retired input history cut" (fun () ->
+                     Chat_operation_store.bind_direct_input_checkpoint t.operation_store ~now:(t.now ())
+                       ~operation_id ~execution_digest ~observed ~call
+                       ~observed_input:writer.input_reference ~checkpoint) with
+                   | Ok (Chat_operation_store.Input_checkpoint_updated,_) ->
+                     Ok {writer with input_reference=Some checkpoint}
+                   | Ok (Chat_operation_store.Input_checkpoint_source_changed _,_) ->
+                     Error (Operation_rejected (Chat_operation_store.Invalid_input
+                       "input history cut predecessor changed; reconcile both owners"))
+                   | Error _ as error -> error)
+              | (Some _ | None),(Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),(Some _ | None) ->
+                Error (Operation_rejected (Chat_operation_store.Invalid_input
+                  "input history cut requires its original direct child and trace")))) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Update_direct_native_call {operation_id; execution_digest; change}, resolve) ->
           let persist () = run_operation_command t ~label:"persist direct native execution" (fun () ->
             Chat_operation_store.update_direct_native_call t.operation_store ~now:(t.now ())
@@ -2509,6 +2545,12 @@ let advance_autonomous_input_checkpoint t ~writer ~checkpoint =
   input_child_request t writer (Autonomous_input checkpoint)
 let advance_direct_input_checkpoint t ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
   input_child_request t writer (Direct_input {operation_id;execution_digest;call_id;observed;checkpoint})
+let bind_retired_input_cut t ~writer ~operation_id ~execution_digest ~observed ~call ~cut =
+  match Keeper_turn_preview_owner.current () with
+  | Some caller when Keeper_interrupt_token.equal caller writer.input_child ->
+    request t (Bind_retired_input_cut (writer,{operation_id;execution_digest;observed;call;cut}))
+  | Some _ | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "input history cut requires its inherited Owner child"))
 let bind_direct_native_call t ~operation_id ~execution_digest ~observed ~call =
   request t (Update_direct_native_call {operation_id; execution_digest; change=Keeper_native_call.Bind {observed; call}})
 let checkpoint_direct_native_call t ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =

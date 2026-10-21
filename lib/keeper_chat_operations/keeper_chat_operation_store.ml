@@ -2711,6 +2711,22 @@ let update_direct_input_checkpoint store ~now ~operation_id ~execution_digest
       let* () = install_input_checkpoint_with_db store ~previous checkpoint in
       Ok Input_checkpoint_updated)
 
+let bind_direct_input_checkpoint store ~now ~operation_id ~execution_digest
+    ~observed ~call ~observed_input ~checkpoint =
+  let* () = ensure_open store in
+  let* () = check_input_predecessor ~observed:observed_input ~checkpoint in
+  with_transaction store (fun () ->
+    let* previous = input_observation_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
+    if not (input_predecessor_matches observed_input previous) then
+      Ok (Input_checkpoint_source_changed previous)
+    else
+      let* _next = apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest
+        (Keeper_native_call.Bind {observed;call}) in
+      let previous = match previous with Input_observed reference -> Some reference
+        | Input_unobserved | Prior_input_unavailable -> None in
+      let* () = install_input_checkpoint_with_db store ~previous checkpoint in
+      Ok Input_checkpoint_updated)
+
 let resolve_direct_gate store ~now ~operation_id ~resolution =
   let* () = ensure_open store in
   let expected_commit = ref None in

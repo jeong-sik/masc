@@ -310,6 +310,15 @@ val update_direct_input_checkpoint : t -> now:float ->
     Reread native and input ownership together before reconciling; semantic
     readback alone is not confirmation and blind retry is not permitted. *)
 
+val bind_direct_input_checkpoint : t -> now:float ->
+  operation_id:Operation.Operation_id.t -> execution_digest:string ->
+  observed:Keeper_native_call.state -> call:Keeper_native_call.t ->
+  observed_input:Keeper_checkpoint_ref.t option -> checkpoint:Keeper_checkpoint_ref.t ->
+  (input_checkpoint_update, error) result
+(** Atomically bind the next native call and publish a verified input history
+    cut. Owner validates the transformation before using this storage primitive.
+    Both predecessor comparisons are transactional; uncertain commits stay Error. *)
+
 val defer_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Operation.t, error) result
 val resume_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t ->

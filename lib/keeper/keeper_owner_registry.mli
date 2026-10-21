@@ -188,6 +188,12 @@ val advance_direct_input_checkpoint : base_path:string -> keeper_name:string ->
   checkpoint:Keeper_checkpoint_ref.t -> (Keeper_owner.input_checkpoint_writer, command_error) result
 (** Writer capture uses admission lookup; durable reads and publication reach
     an existing stopping Owner so its draining child can record actual input. *)
+val bind_retired_input_cut : base_path:string -> keeper_name:string -> writer:Keeper_owner.input_checkpoint_writer ->
+  operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
+  observed:Keeper_native_call.state -> call:Keeper_native_call.t ->
+  cut:Keeper_input_history_cut.binding -> (Keeper_owner.input_checkpoint_writer, command_error) result
+(** Admit a new call and the exact retired-response cut together. This requires
+    the current direct child and refuses stopping/shutdown admission. *)
 val bind_direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
   observed:Keeper_native_call.state -> call:Keeper_native_call.t -> (unit, command_error) result
 val checkpoint_direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->

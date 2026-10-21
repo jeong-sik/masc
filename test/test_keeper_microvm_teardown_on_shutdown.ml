@@ -10,41 +10,6 @@
 
 module Runtime = Masc.Keeper_turn_sandbox_runtime
 
-(* Every keeper goes through finalization, and only microvm keepers have a
-   guest. If an absent guest were an error the shutdown would block on it, so
-   this pins that removing nothing succeeds -- run against a name that has
-   never had a guest. *)
-let test_removing_an_absent_guest_succeeds () =
-  let base_path = Filename.temp_file "microvm_teardown_" "" in
-  Unix.unlink base_path;
-  Unix.mkdir base_path 0o755;
-  Fun.protect
-    ~finally:(fun () -> try Unix.rmdir base_path with _ -> ())
-    (fun () ->
-       let config = Masc.Workspace.default_config base_path in
-       match
-         Runtime.teardown_keeper_sandbox_by_name
-           ~timeout_sec:30.0
-           ~config
-           ~keeper_name:"microvm-teardown-probe-never-started"
-           ~backend:Masc.Keeper_sandbox.Micro_vm
-           (* The runtime is named because teardown refuses an unnamed one:
-              a guest can only be removed with the spelling of the CLI that
-              booted it. *)
-           ~microvm_backend:Masc.Keeper_microvm_backend.Apple_container
-           ()
-       with
-       | Ok () -> ()
-       | Error detail ->
-         (* container absent from the host is not a failed teardown either:
-            the suite has to pass on a machine without the CLI. *)
-         if not (Astring.String.is_infix ~affix:"executable file not found" detail)
-            && not (Astring.String.is_infix ~affix:"No such file" detail)
-         then
-           Alcotest.failf
-             "removing a guest that was never started must succeed, got: %s"
-             detail)
-
 (* A fake [container] first on PATH. [inspect] always exits 1, which is all a
    name that does not exist and an apiserver that cannot answer have in
    common; the guest listing is what tells them apart. [stop] and [delete]
@@ -103,13 +68,19 @@ let teardown_with_fake_container ~listing keeper_name =
            ()))
 ;;
 
-(* A guest the runtime does not list is gone: the name is released. *)
-let test_a_guest_missing_from_the_listing_is_removed () =
+(* Every keeper goes through finalization, and only microvm keepers have a
+   guest. If an absent guest were an error the shutdown would block on it, so
+   this pins that removing nothing succeeds -- run against a name that has
+   never had a guest. *)
+let test_removing_an_absent_guest_succeeds () =
   match
-    teardown_with_fake_container ~listing:"echo '[]'; exit 0" "microvm-teardown-unlisted"
+    teardown_with_fake_container
+      ~listing:"echo '[]'; exit 0"
+      "microvm-teardown-probe-never-started"
   with
   | Ok () -> ()
-  | Error detail -> Alcotest.failf "an unlisted guest must count as removed: %s" detail
+  | Error detail ->
+    Alcotest.failf "removing a guest that was never started must succeed, got: %s" detail
 ;;
 
 (* The inspect failure alone must not read as "gone". When the listing cannot
@@ -206,8 +177,6 @@ let () =
             test_removing_an_absent_guest_succeeds
         ; Alcotest.test_case "an unnamed microVM runtime is refused" `Quick
             test_an_unnamed_runtime_is_refused
-        ; Alcotest.test_case "a guest missing from the listing is removed" `Quick
-            test_a_guest_missing_from_the_listing_is_removed
         ; Alcotest.test_case "an unreadable inventory leaves the guest unconfirmed" `Quick
             test_an_unreadable_inventory_leaves_the_guest_unconfirmed
         ; Alcotest.test_case "a listed guest is not reported removed" `Quick

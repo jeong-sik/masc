@@ -1186,7 +1186,7 @@ let test_startup_sweep_serializes_inventory_with_boot () =
   let cli = Filename.concat bin_dir "container" in
   let oc = open_out cli in
   output_string oc
-    "#!/bin/sh\ncase \"$1\" in\nstop|delete) exit 0;;\ninspect) exit 1;;\nimage) exit 2;;\n*) exit 99;;\nesac\n";
+    "#!/bin/sh\ncase \"$1\" in\nstop|delete) exit 0;;\ninspect) exit 1;;\nlist) printf '[]\\n'; exit 0;;\nimage) exit 2;;\n*) exit 99;;\nesac\n";
   close_out oc;
   Unix.chmod cli 0o755;
   let previous_path = Sys.getenv "PATH" in
@@ -2164,12 +2164,11 @@ let test_work_volume_trim_argv_grants_only_its_capabilities () =
 
 let test_work_volume_trim_confirms_cleanup () =
   Eio_main.run @@ fun _ ->
-  let cli = [ Backend.cli_name Backend.Apple_container ] in
   let volume_name = "masc-keeper-work-x" in
   let name = M.work_volume_trim_name ~keeper_name:"x" in
   let image = "masc-sandbox:general" in
   let rm = M.delete_force_argv_for Backend.Apple_container ~container_name:name in
-  let list = cli @ [ "list"; "--all"; "--format"; "json" ] in
+  let list = (M.guest_inventory_argv_for Backend.Apple_container) in
   let trim = M.apple_work_volume_trim_argv ~keeper_name:"x" ~volume_name ~image in
   let execute ?(expect_trim = true) ~before ~after ~trim_status () =
     let remaining = ref
@@ -2245,7 +2244,7 @@ let test_trim_cancellation_runs_protected_cleanup () =
   List.iter (fun cleanup_fails ->
     let container_name, trim_argv = trim_test_plan "trim-cancel" in
     let delete_argv = M.delete_force_argv_for Backend.Apple_container ~container_name in
-    let listing = [ Backend.cli_name Backend.Apple_container; "list"; "--all"; "--format"; "json" ] in
+    let listing = (M.guest_inventory_argv_for Backend.Apple_container) in
     let started = ref false and cleaned = ref false and reported = ref [] in
     let cancelled =
       try
@@ -2295,7 +2294,7 @@ keep=%s
 printf '%%s\n' "$*" >> "$log"
 case "$*" in
   "delete --force $trim") [ -e "$keep" ] || rm -f "$marker"; exit 1 ;;
-  "list --all --format json")
+  "list -a --format json")
     if [ -e "$marker" ]; then printf '[{"id":"%%s"}]\n' "$trim"; else printf '[]\n'; fi ;;
   inspect\ *) exit 1 ;;
   stop\ *|delete\ --force\ *) exit 0 ;;
@@ -2347,6 +2346,8 @@ let test_teardown_removes_guests_despite_trim_cleanup_error () =
   let cli = Filename.concat dir "container" in
   let log = Filename.concat dir "calls" in
   let stuck = Filename.concat dir "guest-stuck" in
+  let trim_deleted = Filename.concat dir "trim-deleted" in
+  let trim_listed = Filename.concat dir "trim-listed" in
   let keeper_name = "trim-teardown-sweep" in
   let config = Masc.Workspace.default_config dir in
   let guests =
@@ -2362,22 +2363,36 @@ let test_teardown_removes_guests_despite_trim_cleanup_error () =
   in
   let trim = M.work_volume_trim_name ~keeper_name in
   let previous_path = Sys.getenv "PATH" in
+  (* One listing serves the guest probes and the trim check. Only the first
+     listing after the trim helper is deleted, the one that confirms its
+     absence, cannot be read; every later one answers, so the guests are
+     probed against a readable inventory. *)
   let oc = open_out cli in
   Printf.fprintf oc {|#!/bin/sh
 log=%s
 trim=%s
 stuck_guest=%s
 stuck=%s
+trim_deleted=%s
+trim_listed=%s
 printf '%%s\n' "$*" >> "$log"
 case "$*" in
-  "list --all --format json") printf 'not json\n'; exit 0 ;;
+  "delete --force $trim") : > "$trim_deleted"; exit 0 ;;
+  "list -a --format json")
+    if [ -e "$trim_deleted" ] && [ ! -e "$trim_listed" ]; then
+      : > "$trim_listed"; printf 'not json\n'
+    else
+      printf '[]\n'
+    fi
+    exit 0 ;;
   "inspect $stuck_guest")
     if [ -e "$stuck" ]; then printf '[{"status":{"state":"running"}}]\n'; exit 0; else exit 1; fi ;;
   inspect\ *) exit 1 ;;
   stop\ *|delete\ --force\ *) exit 0 ;;
   *) exit 99 ;;
 esac
-|} (Filename.quote log) (Filename.quote trim) (Filename.quote stuck_guest) (Filename.quote stuck);
+|} (Filename.quote log) (Filename.quote trim) (Filename.quote stuck_guest) (Filename.quote stuck)
+    (Filename.quote trim_deleted) (Filename.quote trim_listed);
   close_out oc;
   Unix.chmod cli 0o755;
   Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
@@ -2418,6 +2433,8 @@ esac
      names after it are still attempted. *)
   close_out (open_out stuck);
   close_out (open_out log);
+  Sys.remove trim_deleted;
+  Sys.remove trim_listed;
   (match teardown () with
    | Error detail ->
      Alcotest.(check bool) "guest failure wins over the trim failure" true

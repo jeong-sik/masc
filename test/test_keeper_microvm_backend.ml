@@ -611,6 +611,12 @@ let test_guest_names_come_from_each_runtimes_own_listing () =
     (names
        Backend.Nerdctl_kata
        (nerdctl_row ~id_digit:'a' "vm-n" ^ "\n" ^ nerdctl_row ~id_digit:'b' "vm-m" ^ "\n"));
+  (* nerdctl lists every container in the namespace, so a row another tool
+     started is read by its name alone. *)
+  expect
+    "nerdctl reads a foreign row by its name"
+    [ "foreign" ]
+    (names Backend.Nerdctl_kata {|{"id":"short","name":"foreign","runtime":7,"labels":3}|});
   expect "container with no guests" [] (names Backend.Apple_container "[]");
   expect "msb with no guests" [] (names Backend.Microsandbox "[]");
   expect "nerdctl with no guests" [] (names Backend.Nerdctl_kata "");
@@ -619,7 +625,8 @@ let test_guest_names_come_from_each_runtimes_own_listing () =
   refuses "container text instead of JSON" (names Backend.Apple_container "no containers");
   refuses "msb row without a name" (names Backend.Microsandbox {|[{"status":"running"}]|});
   refuses "msb row that is not an object" (names Backend.Microsandbox {|["sbx-a"]|});
-  refuses "nerdctl row that is not the template" (names Backend.Nerdctl_kata "vm-n Up")
+  refuses "nerdctl row that is not the template" (names Backend.Nerdctl_kata "vm-n Up");
+  refuses "nerdctl row without a name" (names Backend.Nerdctl_kata {|{"id":"a"}|})
 ;;
 
 (* The listing the probe reads and the listing the sweep scopes are one argv per

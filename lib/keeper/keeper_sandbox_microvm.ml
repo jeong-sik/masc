@@ -67,6 +67,12 @@ include
 (** The CLI prefix for one backend. *)
 let command_argv_for backend = [ Backend.cli_name backend ]
 
+(** Apple [container]'s listing of every container, of any state. The trim
+    helper's removal check, the sweep and the guest state probe all read this
+    one argv, so a flag cannot be spelled two ways. *)
+let apple_container_list_argv =
+  command_argv_for Backend.Apple_container @ [ "list"; "-a"; "--format"; "json" ]
+
 (** Flags Docker takes that [container run] rejects outright.
 
     [container] errors on an unknown option rather than ignoring it, so
@@ -1223,13 +1229,12 @@ let apple_work_volume_trim_argv ~keeper_name ~volume_name ~image =
 
 let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name =
   let name = work_volume_trim_name ~keeper_name in
-  let cli = command_argv_for Backend.Apple_container in
   (* Removal's exit code alone cannot prove absence: --rm may already have
      removed the container, or a timed-out CLI may have left it running. *)
   let removal_status, removal_out, removal_err =
     run ~timeout_sec:remove_timeout_sec (delete_force_argv_for Backend.Apple_container ~container_name:name)
   in
-  match run ~timeout_sec (cli @ [ "list"; "--all"; "--format"; "json" ]) with
+  match run ~timeout_sec apple_container_list_argv with
   | Unix.WEXITED 0, listing, _ ->
     let rec absent = function
       | [] -> Ok ()
@@ -2289,8 +2294,7 @@ type container_listing =
    it for labels; the state probe reads it for names only. *)
 let guest_inventory_argv_for backend =
   match (backend : Backend.t) with
-  | Backend.Apple_container ->
-    command_argv_for backend @ [ "list"; "-a"; "--format"; "json" ]
+  | Backend.Apple_container -> apple_container_list_argv
   | Backend.Microsandbox -> command_argv_for backend @ [ "list"; "--format"; "json" ]
   | Backend.Nerdctl_kata ->
     command_argv_for backend @ [ "ps"; "-a"; "--no-trunc"; "--format";
@@ -2458,14 +2462,39 @@ let guest_names_of_microsandbox_listing raw =
   | exception Yojson.Json_error _ -> Error "msb list: unparseable JSON"
 ;;
 
+(* nerdctl lists every container in its namespace, including ones other tools
+   started, so only the name is read: a foreign row's labels or runtime are not
+   this probe's business. A row that carries no name still fails the answer. *)
+let guest_names_of_nerdctl_listing raw =
+  let name_of_line line =
+    match Yojson.Safe.from_string line with
+    | `Assoc fields ->
+      (match List.assoc_opt "name" fields with
+       | Some (`String name) -> Ok name
+       | Some _ | None -> Error "nerdctl ps: a row carries no name")
+    | _ -> Error "nerdctl ps: a row is not an object"
+    | exception Yojson.Json_error _ -> Error "nerdctl ps: unparseable JSON"
+  in
+  let lines =
+    String.split_on_char '\n' raw
+    |> List.map String.trim
+    |> List.filter (fun line -> line <> "")
+  in
+  List.fold_right
+    (fun line names ->
+       match names, name_of_line line with
+       | (Error _ as failure), _ -> failure
+       | Ok names, Ok name -> Ok (name :: names)
+       | Ok _, (Error _ as failure) -> failure)
+    lines
+    (Ok [])
+;;
+
 let guest_names_of_inventory_for backend raw =
   match (backend : Backend.t) with
   | Backend.Apple_container -> guest_names_of_apple_listing raw
   | Backend.Microsandbox -> guest_names_of_microsandbox_listing raw
-  | Backend.Nerdctl_kata ->
-    Result.map
-      (List.map (fun row -> row.nerdctl_name))
-      (nerdctl_inventory_of_json_lines raw)
+  | Backend.Nerdctl_kata -> guest_names_of_nerdctl_listing raw
 ;;
 
 let nerdctl_live_containers_of_json_lines ~base_path ~keeper_name raw =

@@ -774,7 +774,14 @@ run_one() {
               "$(jq -cn --arg name "${keeper_name}" --arg op "${operation_id}" \
                 '{target:{kind:"keeper", name:$name}, operation_id:$op}')" 20; then
               local status_payload
-              status_payload="$(tool_result_json)"
+              if ! status_payload="$(tool_result_json)" \
+                || ! printf '%s' "${status_payload}" | jq -es --argjson expected "${operation_id_json}" \
+                'length == 1 and (.[0] | type == "object" and .operation_id == $expected)' >/dev/null; then
+                printf '%s' "${LAST_TOOL_RAW}" > "${run_dir}/operation-invalid.json"
+                finish_status="transport_error"
+                error_text="keeper_delegate_status returned no matching operation_id"
+                break
+              fi
               op_state="$(printf '%s' "${status_payload}" | jq -r '.state // empty')"
               case "${op_state}" in
                 Succeeded|Failed|Cancelled)
@@ -785,21 +792,23 @@ run_one() {
             fi
             sleep "${POLL_INTERVAL_SEC}"
           done
-          if [[ -z "${result_json}" ]]; then
-            finish_status="timeout"
-            error_text="episode did not finish within ${timeout_sec}s"
-          else
-            printf '%s' "${result_json}" > "${run_dir}/operation-final.json"
-            case "$(printf '%s' "${result_json}" | jq -r '.state')" in
-              Succeeded)
-                finish_status="ok"
-                ;;
-              *)
-                finish_status="provider_error"
-                error_text="$(printf '%s' "${result_json}" | jq -r \
-                  '[.state, (.failure_kind // empty), (.failure_detail // empty)] | map(select(. != "")) | join(": ")')"
-                ;;
-            esac
+          if [[ "${finish_status}" == "ok" ]]; then
+            if [[ -z "${result_json}" ]]; then
+              finish_status="timeout"
+              error_text="episode did not finish within ${timeout_sec}s"
+            else
+              printf '%s' "${result_json}" > "${run_dir}/operation-final.json"
+              case "$(printf '%s' "${result_json}" | jq -r '.state')" in
+                Succeeded)
+                  finish_status="ok"
+                  ;;
+                *)
+                  finish_status="provider_error"
+                  error_text="$(printf '%s' "${result_json}" | jq -r \
+                    '[.state, (.failure_kind // empty), (.failure_detail // empty)] | map(select(. != "")) | join(": ")')"
+                  ;;
+              esac
+            fi
           fi
         fi
       fi

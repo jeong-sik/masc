@@ -68,6 +68,12 @@ verification fails or the episode times out; it is null when no accepted
 identity was observed. The report validates it with the runtime's canonical
 operation-ID type. This observation does not claim a Task or verification ID.
 
+Every status response must explicitly identify that admitted operation before
+its state can settle the episode. A foreign, absent or malformed identity is
+recorded as a transport error, with the original normalized MCP envelope retained in
+`runs/<run-id>/operation-invalid.json`. Prepared artifacts are still graded for
+diagnostics, but a contradictory response cannot qualify the episode as passed.
+
 An episode whose Keeper setup fails before workspace preparation still records
 its failure. Verification runs only against a workspace prepared by that
 episode, including timed-out episodes; a directory left by an interrupted

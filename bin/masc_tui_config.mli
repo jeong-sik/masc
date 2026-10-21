@@ -173,7 +173,10 @@ val set_audio_input_device :
     capture records whatever the operating system calls the default input.
     [Error] carries what stopped the write; the next capture opens on
     whatever the file still says, so the caller has to say which of the two
-    happened. A write whose durability could not be confirmed is [Ok], the
+    happened. Captures resolve their device once through
+    {!Masc.Voice_bridge.resolved_audio_device} — environment, this pick,
+    then the platform probe — so the panel, the capture and sox open the
+    same one. A write whose durability could not be confirmed is [Ok], the
     way {!set_theme} treats the same case. *)
 
 val text_with_audio_input_device :

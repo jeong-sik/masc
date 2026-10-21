@@ -2027,10 +2027,23 @@ let rec_exit_message ?device ~code ~stdout ~stderr () =
     | None -> ""
   in
   let blank text = String.trim text = "" in
+  (* One line at most, and only its first: a chatty recorder's transcript is
+     not a failure reason, and the operator copies this sentence into a report.
+     200 characters holds sox's own "can't open input ..." lines and keeps a
+     hostile tool from pushing the sentence into wrapping. *)
+  let reason text =
+    let trimmed = String.trim text in
+    let line =
+      match String.index_opt trimmed '\n' with
+      | Some index -> String.sub trimmed 0 index
+      | None -> trimmed
+    in
+    if String.length line > 200 then String.sub line 0 200 ^ "..." else line
+  in
   match (blank stderr, blank stdout) with
-  | false, _ -> Printf.sprintf "rec exit %d: %s%s" code (String.trim stderr) device_note
+  | false, _ -> Printf.sprintf "rec exit %d: %s%s" code (reason stderr) device_note
   | true, false ->
-    Printf.sprintf "rec exit %d: %s%s" code (String.trim stdout) device_note
+    Printf.sprintf "rec exit %d: %s%s" code (reason stdout) device_note
   | true, true -> Printf.sprintf "rec exit %d%s" code device_note
 ;;
 (* One place says why a recorder is not starting: a missing program is named
@@ -2082,6 +2095,24 @@ let rec_argv ~audio_file =
   ]
 ;;
 
+(* One place decides which device a capture opens: an [AUDIODEV] in the
+   environment wins when it names a device, a blank one is no name and
+   falls through, and the stored pick is next. The panel and every capture
+   resolve through {!resolved_audio_device}, so what the panel names is
+   what sox opens. *)
+let resolved_audio_device ?(env = Unix.environment ()) ~pick () =
+  let from_env =
+    Array.find_map
+      (fun kv ->
+         if String.starts_with ~prefix:"AUDIODEV=" kv then
+           Some (String.trim (String.sub kv 9 (String.length kv - 9)))
+         else None)
+      env
+  in
+  match from_env with
+  | Some device when device <> "" -> Some device
+  | _ -> pick
+
 let record_and_transcribe
       ~agent_id
       ?(timeout_sec = default_capture_timeout_seconds)
@@ -2109,12 +2140,20 @@ let record_and_transcribe
      only the current environment plus this one assignment keeps every other
      knob the parent carries intact. *)
   let recorder_env =
-    match audio_device with
-    | None -> None
-    | Some device ->
-      Some
-        (Array.append (Unix.environment ())
-           [| Printf.sprintf "AUDIODEV=%s" device |])
+    Option.map
+      (fun device ->
+         let inherited =
+           Unix.environment ()
+           |> Array.to_list
+           |> List.filter (fun kv ->
+                  not (String.starts_with ~prefix:"AUDIODEV=" kv))
+         in
+         (* Exactly one AUDIODEV travels. A duplicated name's interpretation is
+            unspecified, and a blank inherited value must not shadow the device
+            the operator picked -- either would open a different device than
+            the panel names. *)
+         Array.of_list (inherited @ [ Printf.sprintf "AUDIODEV=%s" device ]))
+      audio_device
   in
   let cleanup () =
     try Sys.remove audio_file with

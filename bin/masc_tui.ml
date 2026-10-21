@@ -2919,29 +2919,7 @@ let launch_voice_config_load state ~mailbox =
         Error (Masc_tui_http.named_refusal "voice config" ~status:code ~body)
       | Error message -> Error message
     in
-    let device =
-      (* AUDIODEV wins when set, the way sox reads it. Then the operator's
-         stored pick from [tui].audio_input_device, so the panel names the
-         device a capture will actually open. Only with neither does the
-         CoreAudio default answer, which is what an unset AUDIODEV and no
-         stored pick mean. *)
-      match (Sys.getenv_opt "AUDIODEV", !boot_audio_input_device) with
-      | Some device, _ when String.trim device <> "" -> Some (String.trim device)
-      | Some _ | None, Some device -> Some device
-      | None, None ->
-        (match Masc_tui_audio_device.default_input () with
-         | Masc_tui_audio_device.Default_input name -> Some name
-         (* The panel shows "unknown" for each of these; the log keeps them
-            apart, because a machine with no input selected and a probe
-            that could not read the report call for different fixes. *)
-         | Masc_tui_audio_device.No_default_input ->
-           Log.Transport.info "voice: the audio report marks no device as the default input";
-           None
-         | Masc_tui_audio_device.Probe_failed reason ->
-           Log.Transport.warn "voice: the default input device could not be read: %s" reason;
-           None
-         | Masc_tui_audio_device.No_probe_on_this_platform -> None)
-    in
+    let device = resolved_audio_input_device ~for_display:true in
     (* The admin read, which names each endpoint. The public config route above
        answers three booleans and no identity, so a panel built only on it can
        say that a fallback exists and not which one. *)
@@ -10781,6 +10759,29 @@ let boot_midi_soundfont : string option ref = ref None
    an explicit export keeps meaning what sox reads it to mean. *)
 let boot_audio_input_device : string option ref = ref None
 
+(* One resolution for the panel and every capture: the environment wins when
+   it names a device (the way sox reads AUDIODEV), the stored pick is next,
+   and only a panel asked to name a device falls back to the probe. Both go
+   through {!Masc.Voice_bridge.resolved_audio_device}, so what the panel
+   names is what the recorder opens. *)
+let resolved_audio_input_device ~for_display =
+  match Masc.Voice_bridge.resolved_audio_device ~pick:!boot_audio_input_device () with
+  | Some device -> Some device
+  | None when not for_display -> None
+  | None ->
+    (match Masc_tui_audio_device.default_input () with
+     | Masc_tui_audio_device.Default_input name -> Some name
+     (* The panel shows "unknown" for each of these; the log keeps them
+        apart, because a machine with no input selected and a probe
+        that could not read the report call for different fixes. *)
+     | Masc_tui_audio_device.No_default_input ->
+       Log.Transport.info "voice: the audio report marks no device as the default input";
+       None
+     | Masc_tui_audio_device.Probe_failed reason ->
+       Log.Transport.warn "voice: the default input device could not be read: %s" reason;
+       None
+     | Masc_tui_audio_device.No_probe_on_this_platform -> None)
+
 (* /listen: play the newest playable attachment in this conversation — the
    same newest-wins rule Ctrl-O uses for images, extended to audio and MIDI.
    Bytes come from the block itself, our own media store, or a local file;
@@ -16943,7 +16944,7 @@ let launch_voice_capture ?(calibrate = false) state ~mailbox ~keeper =
         (* The operator's stored pick travels to the recorder, so a capture
            from the panel opens the device the config names, not whatever the
            OS currently calls the default input. *)
-        ?audio_device:!boot_audio_input_device
+        ?audio_device:(resolved_audio_input_device ~for_display:false)
         ~on_level:(fun level -> enqueue_async mailbox (Voice_level { keeper; level }))
         ~should_stop:(fun () -> state.voice_stop_requested) () with
     | Error error -> Voice_failed { keeper; error }

@@ -405,6 +405,15 @@ type capture_level =
     A measured zero amplitude is [Level_observed neg_infinity]; an unreadable
     recording is [Level_unavailable], never a fabricated silent measurement. *)
 
+val resolved_audio_device :
+  ?env:string array -> pick:string option -> unit -> string option
+(** The device a capture opens, resolved once: an [AUDIODEV] in [env] wins
+    when it names a device, a blank one is no name and falls through, and
+    the stored pick is next. [env] defaults to this process's environment.
+    The panel and every capture resolve through this one place, so what the
+    panel names is what sox opens. [None] leaves the fallback to the caller
+    (the panel probes the platform; a capture opens the default). *)
+
 val record_and_transcribe :
   agent_id:string ->
   ?timeout_sec:float ->

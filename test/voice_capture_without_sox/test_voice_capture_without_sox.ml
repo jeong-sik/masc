@@ -175,6 +175,44 @@ let test_other_refusals_keep_their_own_reason () =
     true
     (contains ~needle:(Unix.error_message Unix.EACCES) message)
 
+(* Resolution is the single place the panel and the capture share, so its
+   precedence is pinned here: a named AUDIODEV wins, a blank one is no name,
+   and the stored pick is what falls through. *)
+let test_resolution_prefers_a_named_env_device () =
+  let open Masc.Voice_bridge in
+  Alcotest.(check (option string))
+    "a named AUDIODEV wins over the stored pick"
+    (Some "env-mic")
+    (resolved_audio_device
+       ~env:[| "HOME=/somewhere"; "AUDIODEV=env-mic" |]
+       ~pick:(Some "stored-mic") ());
+  Alcotest.(check (option string))
+    "a blank AUDIODEV is no name and falls through"
+    (Some "stored-mic")
+    (resolved_audio_device ~env:[| "AUDIODEV=" |] ~pick:(Some "stored-mic") ());
+  Alcotest.(check (option string))
+    "without either, nothing is picked here"
+    None
+    (resolved_audio_device ~env:[| "HOME=/somewhere" |] ~pick:None ())
+
+let test_an_inherited_blank_audiodev_is_shadowed () =
+  (* The parent's blank AUDIODEV= is the reported symptom: without the
+     filter the recorder saw a blank device while the panel named the pick. *)
+  let had = Sys.getenv_opt "AUDIODEV" in
+  Unix.putenv "AUDIODEV" "";
+  let message =
+    Fun.protect
+      ~finally:(fun () ->
+        match had with
+        | Some value -> Unix.putenv "AUDIODEV" value
+        | None -> Unix.putenv "AUDIODEV" "")
+      (fun () -> capture_error ~audio_device:(Some "picked-mic"))
+  in
+  Alcotest.(check bool)
+    (Printf.sprintf "the recorder saw the pick, not the blank (%s)" message)
+    true
+    (contains ~needle:"rec fail picked-mic" message)
+
 let () =
   Alcotest.run
     "voice capture without sox"
@@ -189,5 +227,9 @@ let () =
             test_a_failed_recorder_reports_its_own_reason
         ; Alcotest.test_case "a picked device travels and is named on failure" `Quick
             test_a_picked_device_travels_and_is_named_on_failure
+        ; Alcotest.test_case "resolution prefers a named env device" `Quick
+            test_resolution_prefers_a_named_env_device
+        ; Alcotest.test_case "an inherited blank AUDIODEV is shadowed" `Quick
+            test_an_inherited_blank_audiodev_is_shadowed
         ] )
     ]

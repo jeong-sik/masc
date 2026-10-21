@@ -163,6 +163,17 @@ val reconcile_snapshot : t -> snapshot -> t
 (** Preserve exact selected identities. A removed row, worker incarnation or
     declaration requires explicit reselection before acting on a replacement. *)
 val move_lane : t -> int -> t
+type value_row = { depth : int; key : string option; bullet : bool; text : string }
+val value_rows : depth:int -> Yojson.Safe.t -> value_row list
+(** A result value as an outline: an object field is a key, a list item is a
+    bullet, a string is its own text, and a nested value sits one level
+    deeper. A written line break starts a row. *)
+val result_readings :
+  instance -> Row.row -> (Masc.Lane_addon_presentation.reading * (Yojson.Safe.t, string) result) list
+(** The row's value for each reading declared on the row's exact Lane. *)
+val result_window : rows:int -> focus:int -> count:int -> int * int
+(** [(first, shown)]: the list rows the Results list draws when [count] rows
+    meet a window of [rows] that must keep row [focus] in view. *)
 val lines : ?height:int -> ?failed_note:string -> width:int -> t -> string list
 (** Printable rows wrapped to the actual frame width. Rendering and scrolling
     must use the same width so every field and receipt remains reachable. *)

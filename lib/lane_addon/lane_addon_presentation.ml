@@ -50,7 +50,7 @@ let to_json t =
     `Assoc ["lane_id",`String r.lane_id;"path",`List (List.map (fun s -> `String s) r.path);
       "label",`String r.label;"unit",optional r.unit;"format",`String (match r.format with
         Text -> "text" | Number -> "number" | Boolean -> "boolean" | Json -> "json")]) t.readings)]
-let render reading fields =
+let value reading fields =
   let rec resolve value = function
     | [] -> Ok value
     | key :: rest -> (match value with
@@ -58,10 +58,7 @@ let render reading fields =
         | Some value -> resolve value rest | None -> Error "field unavailable")
       | _ -> Error "field path does not address an object") in
   let* value = resolve fields reading.path in
-  let* value = match reading.format,value with
-    | Text,`String value -> Ok value
-    | Number,(`Int _ | `Intlit _) -> Ok (Yojson.Safe.to_string value)
-    | Number,`Float number when Float.is_finite number -> Ok (Yojson.Safe.to_string value)
-    | Boolean,`Bool _ | Json,_ -> Ok (Yojson.Safe.to_string value)
-    | (Text | Number | Boolean), _ -> Error "field does not match declared display format" in
-  Ok (reading.label ^ ": " ^ value ^ Option.fold ~none:"" ~some:(fun unit -> " " ^ unit) reading.unit)
+  match reading.format,value with
+  | Text,`String _ | Number,(`Int _ | `Intlit _) | Boolean,`Bool _ | Json,_ -> Ok value
+  | Number,`Float number when Float.is_finite number -> Ok value
+  | (Text | Number | Boolean), _ -> Error "field does not match declared display format"

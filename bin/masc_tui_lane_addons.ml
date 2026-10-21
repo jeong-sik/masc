@@ -501,7 +501,12 @@ let ordered_result_rows view snapshot =
   let rows = ordered_rows view snapshot in
   match view.screen, detail_instance view snapshot with
   | Detail _, Some item ->
+      (* Grouped by Lane in the order Left/Right and the activity timeline
+         use, and by time within a Lane, so j/k walks the list the Results
+         pane draws. *)
       List.filter (fun (_, row) -> row_is_result item row) rows
+      |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
+           String.compare a.lane_id b.lane_id)
   | Overview, _ | Detail _, _ -> rows
 let select_initial_result view =
   match view.snapshot, selected_instance view with
@@ -1155,29 +1160,129 @@ let edit_action ~key view =
   | Updated form -> Ok ({view with action_menu=Some {menu with form=Some form};error=None;scroll=0},None)
   | Submit _ -> let* request = submit_action view in Ok (view,Some request)
 
-(* The row title is the producer's human label. Numeric/boolean readings fit
-   the overview; full strings, nested coordinates and evidence remain in D. *)
-let reading_summary fields =
-  fields |> List.filter_map (fun (key,value) -> match value with
-    | (`Int _ | `Intlit _ | `Float _ | `Bool _) ->
-        Some (key ^ "=" ^ Yojson.Safe.to_string value)
-    | _ -> None) |> String.concat " · "
+(* A result value laid out as an outline instead of one line of JSON: an
+   object field is a key, a list item is a bullet, a string is its text with
+   no quoting, and a nested value sits one indent deeper. The outline says
+   nothing about what a package means by its fields. *)
+type value_row = { depth : int; key : string option; bullet : bool; text : string }
 
-let result_lines (instance : instance) (row : Row.row) =
+type value_shape =
+  | Leaf of string
+  | Fields of (string * Yojson.Safe.t) list
+  | Items of Yojson.Safe.t list
+
+(* An absent value reads as a dash and an empty collection as "none"; the
+   exact JSON stays under 4 Records and D. *)
+let value_shape = function
+  | `String text -> Leaf text
+  | `Null -> Leaf "—"
+  | `Bool value -> Leaf (Bool.to_string value)
+  | (`Int _ | `Intlit _ | `Float _) as number -> Leaf (Yojson.Safe.to_string number)
+  | `Assoc [] | `List [] -> Leaf "none"
+  | `Assoc fields -> Fields fields
+  | `List items -> Items items
+
+(* A written line break starts a row of its own under the same key. *)
+let leaf_rows ~depth ~key text =
+  match Masc_tui_text_block.lines text with
+  | [] -> [{ depth; key; bullet = false; text = "" }]
+  | first :: rest ->
+      { depth; key; bullet = false; text = first }
+      :: List.map (fun text -> { depth; key = None; bullet = false; text }) rest
+
+(* A small object of single-line leaves reads on one row ("n 0 · d 3"),
+   which is how a count, a pair or a tag fits beside its key. *)
+let inline_fields fields =
+  let rec collect acc = function
+    | [] -> Some (List.rev acc)
+    | (key, value) :: rest ->
+        (match value_shape value with
+         | Leaf text when not (String.contains text '\n') -> collect ((key ^ " " ^ text) :: acc) rest
+         | Leaf _ | Fields _ | Items _ -> None) in
+  Option.map (String.concat " · ") (collect [] fields)
+
+let rec value_rows ~depth value =
+  match value_shape value with
+  | Leaf text -> leaf_rows ~depth ~key:None text
+  | Fields fields -> List.concat_map (fun (key, value) -> field_rows ~depth key value) fields
+  | Items items -> List.concat_map (item_rows ~depth) items
+and field_rows ~depth key value =
+  let nested () = { depth; key = Some key; bullet = false; text = "" } :: value_rows ~depth:(depth + 1) value in
+  match value_shape value with
+  | Leaf text -> leaf_rows ~depth ~key:(Some key) text
+  | Fields fields ->
+      (match inline_fields fields with
+       | Some text -> [{ depth; key = Some key; bullet = false; text }]
+       | None -> nested ())
+  | Items _ -> nested ()
+(* An item's first row takes the bullet at the list's depth, so the rest of
+   the item lines up under the bullet's text. *)
+and item_rows ~depth item =
+  match value_rows ~depth:(depth + 1) item with
+  | first :: rest -> { first with depth; bullet = true } :: rest
+  | [] -> [{ depth; key = None; bullet = true; text = "" }]
+
+(* What one declared reading shows for a row: its value, or why the row does
+   not carry one. Readings are scoped to the exact Lane they name. *)
+let result_readings (instance : instance) (row : Row.row) =
   let module P = Masc.Lane_addon_presentation in
-  let readings = List.filter (fun (reading : P.reading) ->
-    String.equal row.lane_id (instance.id ^ "/" ^ reading.lane_id))
-    instance.display.readings in
-  match readings with
-  | [] ->
-      let summary = reading_summary row.fields in
-      if summary="" then [] else ["  " ^ summary]
-  | readings -> List.concat_map (fun (reading : P.reading) ->
-      let rendered = match P.render reading (`Assoc row.fields) with
-        | Ok text -> text
-        | Error detail -> reading.label ^ ": unavailable · " ^ detail in
-      Masc_tui_text_block.lines rendered
-      |> List.map (fun line -> "  " ^ line)) readings
+  instance.display.readings
+  |> List.filter (fun (reading : P.reading) ->
+       String.equal row.lane_id (instance.id ^ "/" ^ reading.lane_id))
+  |> List.map (fun (reading : P.reading) -> (reading, P.value reading (`Assoc row.fields)))
+
+(* Cells an outline row indents per level, which a list bullet ("· ") also
+   takes, so an item's continuation lines up under its text. *)
+let value_indent_cells = 2
+
+module Span = Masc_tui_span
+
+(* Frame vocabulary ([Masc_tui_theme.tone]): a label is the accent, and the
+   keys, bullets and stamps around a value are dim. Nothing here colours a
+   value by what it means. *)
+let muted_style () = Span.fg (Masc_tui_theme.tone Masc_tui_theme.Dim)
+let label_style () =
+  Span.combine (Span.fg (Masc_tui_theme.tone Masc_tui_theme.Accent)) (Span.weight Masc_tui_theme.Sgr.bold)
+let bold_style () = Span.weight Masc_tui_theme.Sgr.bold
+
+(* Wrap [text] after a styled lead so continuation pieces start under the
+   text, not under the lead. *)
+let led_rows ~width ~lead ~text_style text =
+  let lead_cells = Span.width lead in
+  let pieces = document_rows ~width:(max 1 (width - lead_cells)) text in
+  let hang = Span.text Span.plain (String.make lead_cells ' ') in
+  List.mapi (fun index piece ->
+    Span.concat [ (if index = 0 then lead else hang); Span.text text_style piece ])
+    (match pieces with [] -> [ "" ] | pieces -> pieces)
+
+let value_row_spans ~width (row : value_row) =
+  let indent = String.make (row.depth * value_indent_cells) ' ' in
+  let lead = Span.concat
+    [ Span.text Span.plain indent
+    ; (if row.bullet then Span.text (muted_style ()) "· " else Span.empty)
+    ; (match row.key with
+       | Some key -> Span.text (muted_style ()) (Masc.Tui_terminal_text.sanitize_terminal_text key ^ "  ")
+       | None -> Span.empty) ] in
+  led_rows ~width ~lead ~text_style:Span.plain row.text
+
+let reading_spans ~width ((reading : Masc.Lane_addon_presentation.reading), value) =
+  let unit = Option.fold ~none:"" ~some:(fun unit -> " " ^ unit) reading.unit in
+  let label = Span.text (label_style ()) (Masc.Tui_terminal_text.sanitize_terminal_text reading.label) in
+  let beside text = led_rows ~width ~lead:(Span.concat [ label; Span.text Span.plain "  " ])
+      ~text_style:Span.plain (text ^ unit) in
+  match value with
+  | Error detail ->
+      led_rows ~width ~lead:(Span.concat [ label; Span.text Span.plain "  " ])
+        ~text_style:(muted_style ()) ("unavailable · " ^ detail)
+  | Ok value ->
+      let outline () =
+        Span.concat [ label; Span.text (muted_style ()) unit ]
+        :: List.concat_map (value_row_spans ~width) (value_rows ~depth:1 value) in
+      (match value_shape value with
+       | Leaf text when not (String.contains text '\n') -> beside text
+       | Fields fields ->
+           (match inline_fields fields with Some text -> beside text | None -> outline ())
+       | Leaf _ | Items _ -> outline ())
 
 let installation_identity (instance : instance) = instance.installation_id
 
@@ -1409,16 +1514,125 @@ let connection_worker_lines snapshot item =
          worker.observation_seq worker.rows_count]
       @ (if worker.observation_seq=0 then ["    no completed observation received"] else [])) workers
 
-let detail_lines ~width view =
+(* The Results list takes a third of the row, never less than
+   [results_list_min_cells], once the terminal is at least
+   [results_two_pane_min_cells] wide; a narrower terminal stacks the result
+   above the list. *)
+let results_list_min_cells = 34
+let results_list_share = 3
+let results_two_pane_min_cells = 90
+let results_gutter = " │ "
+(* A window marks a cut above and below its focus, so it needs a row for each
+   mark and one for the focus. *)
+let window_min_rows = 3
+
+let lane_name (item : instance) lane_id =
+  let prefix = item.id ^ "/" in
+  if String.starts_with ~prefix lane_id
+  then String.sub lane_id (String.length prefix) (String.length lane_id - String.length prefix)
+  else lane_id
+
+(* One heading per Lane, then its results. [rows] arrives grouped by Lane
+   ([ordered_result_rows]). Answers the rows and the position of the selected
+   result, which the window keeps in view. *)
+let result_list_spans (item : instance) ~(selected : Row.row option) rows =
+  let rec same_lane lane = function
+    | (row : Row.row) :: rest when String.equal row.lane_id lane ->
+        let same, others = same_lane lane rest in (row :: same, others)
+    | rows -> ([], rows) in
+  let is_selected (row : Row.row) =
+    Option.fold ~none:false ~some:(fun (chosen : Row.row) -> String.equal chosen.id row.id) selected in
+  let entry (row : Row.row) =
+    let title = Masc.Tui_terminal_text.sanitize_terminal_text row.title in
+    if is_selected row then Span.text (bold_style ()) ("> " ^ title)
+    else Span.text Span.plain ("  " ^ title) in
+  let rec groups = function
+    | [] -> []
+    | (row : Row.row) :: _ as rows ->
+        let same, others = same_lane row.lane_id rows in
+        let heading = Span.text (label_style ())
+            (Printf.sprintf "%s (%d)"
+               (Masc.Tui_terminal_text.sanitize_terminal_text (lane_name item row.lane_id))
+               (List.length same)) in
+        ((heading, false) :: List.map (fun row -> (entry row, is_selected row)) same) @ groups others in
+  let entries = groups rows in
+  let focus = Option.value ~default:0 (List.find_index snd entries) in
+  (List.map fst entries, focus)
+
+(* Which list rows to show around [focus] as (first, shown): the whole list
+   when it fits in [rows], otherwise a window of [rows] that keeps [focus]
+   near its middle. *)
+let result_window ~rows ~focus ~count =
+  if count <= rows || rows < window_min_rows then (0, count)
+  else (max 0 (min (count - rows) (focus - rows / 2)), rows)
+
+let window_spans ~rows ~focus spans =
+  let count = List.length spans in
+  let first, shown = result_window ~rows ~focus ~count in
+  let above = first and below = count - (first + shown) in
+  let more hidden arrow = Span.text (muted_style ()) (Printf.sprintf "%s %d more" arrow hidden) in
+  List.filteri (fun index _ -> index >= first && index < first + shown) spans
+  |> List.mapi (fun index span ->
+       if index = 0 && above > 0 then more (above + 1) "↑"
+       else if index = shown - 1 && below > 0 then more (below + 1) "↓"
+       else span)
+
+let selected_result_spans ~width (item : instance) (selected : Row.row option) =
+  match selected with
+  | None -> [ Span.text (muted_style ()) "Choose a result with j/k." ]
+  | Some row ->
+      let values = match result_readings item row with
+        (* A package that declares no readings shows the row's fields. *)
+        | [] -> List.concat_map (value_row_spans ~width) (value_rows ~depth:0 (`Assoc row.fields))
+        | readings -> List.concat_map (reading_spans ~width) readings in
+      led_rows ~width ~lead:Span.empty ~text_style:(bold_style ()) row.title
+      @ led_rows ~width ~lead:Span.empty ~text_style:(muted_style ())
+          (lane_name item row.lane_id ^ " · " ^ utc_stamp row.observed_at ^ " UTC")
+      @ (Span.empty :: values)
+
+let side_by_side ~list_width ~detail_width list detail =
+  let list = Array.of_list list and detail = Array.of_list detail in
+  let at items index = if index < Array.length items then items.(index) else Span.empty in
+  List.init (max (Array.length list) (Array.length detail)) (fun index ->
+    Span.render (Span.concat
+      [ Span.pad_to list_width Span.plain (Span.truncate list_width (at list index))
+      ; Span.text (muted_style ()) results_gutter
+      ; Span.truncate detail_width (at detail index) ]))
+
+(* The Results tab: the list beside the selected result, or the result above
+   the list when the terminal is too narrow for both. [height] is the rows
+   left under the tab strip; the list is windowed to it around the selected
+   result. *)
+let results_lines ~height ~width (item : instance) ~selected rows =
+  let list, focus = result_list_spans item ~selected rows in
+  if width >= results_two_pane_min_cells then
+    let list_width = max results_list_min_cells (width / results_list_share) in
+    let detail_width = width - list_width - Span.width (Span.text Span.plain results_gutter) in
+    let detail = selected_result_spans ~width:detail_width item selected in
+    side_by_side ~list_width ~detail_width
+      (window_spans ~rows:(max height (List.length detail)) ~focus list) detail
+  else
+    (selected_result_spans ~width item selected @ (Span.empty :: window_spans ~rows:height ~focus list))
+    |> List.map (fun span -> Span.render (Span.truncate width span))
+
+let tab_strip ~width view =
+  let tab focus label =
+    if view.focus = focus then Span.text (label_style ()) ("[" ^ label ^ "]")
+    else Span.text (muted_style ()) label in
+  [ tab Timeline "1 Results"; tab Connections "2 Links";
+    tab Configurations "3 Installation"; tab Rows "4 Records" ]
+  |> List.mapi (fun index span -> if index = 0 then [ span ] else [ Span.text Span.plain "  "; span ])
+  |> List.concat |> Span.concat |> Span.truncate width |> Span.render
+
+let detail_lines ~height ~width view =
   let wrap = document_rows ~width in
   match selected_instance view, view.snapshot with
   | None, _ -> ["The selected Add-on changed. Esc returns to the list."]
   | Some item, Some snapshot ->
-      let tab focus label = if view.focus=focus then "[" ^ label ^ "]" else label in
       let header = instance_heading snapshot item ^ " · " ^ phase_label item.phase in
-      let tabs = String.concat "  " [
-        tab Timeline "1 Results"; tab Connections "2 Links";
-        tab Configurations "3 Installation"; tab Rows "4 Records"] in
+      let head = List.concat_map wrap ["?:help  Esc:back  Tab:section  j/k:move  D:raw"; header]
+        @ [tab_strip ~width view; ""]
+        @ List.concat_map wrap (diagnostic_lines view) in
       let record_rows = List.map snd (ordered_rows view snapshot) in
       let rows = List.map snd (ordered_result_rows view snapshot) in
       let selected = selected_row view in
@@ -1426,29 +1640,19 @@ let detail_lines ~width view =
       | Timeline | Instances ->
           let selected = Option.bind selected (fun selected ->
             List.find_opt (fun (row : Row.row) -> row.id = selected.id) rows) in
-          if rows=[] then Option.to_list item.display.description
+          if rows=[] then List.concat_map wrap (Option.to_list item.display.description
             @ (if record_rows=[] then empty_result_lines view item
                else ["No declared result rows in this received view.";
                      "Supporting records remain available in 4 Records."])
-            @ snapshot_coverage_lines snapshot.output.coverage
-          else Option.to_list item.display.description
-            @ [""; "Results"]
-            @ (match selected with
-               | None -> ["Choose a result with j/k."; ""]
-               | Some row ->
-                   ["> " ^ row.title; "  Lane " ^ row.lane_id; "  " ^ utc_stamp row.observed_at ^ " UTC"]
-                   @ result_lines item row @ [""])
-            @ (let other_rows = List.filter (fun (row : Row.row) ->
-                 match selected with
-                 | None -> true
-                 | Some selected -> not (String.equal selected.id row.id)) rows in
-               if other_rows=[] then [] else
-                 ["Other results · j/k to select"]
-                 @ List.map (fun (row : Row.row) -> "  " ^ row.title) other_rows
-                 @ [""])
-            @ ["Activity timeline"]
-            @ timeline_lines ~width ~instances:[item] ?selected rows
-            @ snapshot_coverage_lines snapshot.output.coverage
+            @ snapshot_coverage_lines snapshot.output.coverage)
+          else
+            let intro = List.concat_map wrap (Option.to_list item.display.description) in
+            let height = max 1 (height - List.length head - List.length intro) in
+            intro
+            @ results_lines ~height ~width item ~selected rows
+            @ List.concat_map wrap ([""; "Activity timeline"]
+                @ timeline_lines ~width ~instances:[item] ?selected rows
+                @ snapshot_coverage_lines snapshot.output.coverage)
       | Connections ->
           let sources = match Masc.Lane_addon_sources.parse item.binding with
             | Error detail -> ["Input binding: " ^ detail]
@@ -1462,8 +1666,8 @@ let detail_lines ~width view =
                 | S.Fusion_run {id;run_id} -> "Input: " ^ id ^ " · Fusion " ^ run_id
                 | S.Msx_capture {id} | S.Dos_capture {id}
                 | S.Browser_document {id;_} -> "Input: " ^ id) sources in
-          sources @ List.map (fun (name,_) -> "Output: " ^ name) item.outputs
-      | Configurations ->
+          List.concat_map wrap (sources @ List.map (fun (name,_) -> "Output: " ^ name) item.outputs)
+      | Configurations -> List.concat_map wrap (
           ["Source: " ^ Option.value ~default:"not supplied" item.source_path;
            "Revision: " ^ item.revision;
            "Instance: " ^ item.id;
@@ -1483,8 +1687,8 @@ let detail_lines ~width view =
                         @ List.map (fun issue -> "Issue: " ^ issue) declaration.issues
                    else []) config.declarations)
           @ host_request_lines item
-          @ connection_worker_lines snapshot item
-      | Rows ->
+          @ connection_worker_lines snapshot item)
+      | Rows -> List.concat_map wrap (
           if record_rows=[] then empty_result_lines view item
           else List.concat_map (fun (row : Row.row) ->
             [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
@@ -1494,9 +1698,8 @@ let detail_lines ~width view =
              Yojson.Safe.pretty_to_string (`Assoc row.fields)]
             @ List.map (fun (e : Row.evidence) ->
               "Evidence " ^ e.uri ^ " · sha256 " ^
-              Option.value ~default:"unknown" e.sha256) row.evidence) record_rows in
-      List.concat_map wrap (["?:help  Esc:back  Tab:section  j/k:move  D:raw"; header; tabs; ""]
-        @ diagnostic_lines view @ body)
+              Option.value ~default:"unknown" e.sha256) row.evidence) record_rows) in
+      head @ body
   | Some _, None -> ["Reading Add-ons…"]
 
 let rec action_fields prefix = function
@@ -1713,7 +1916,7 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
         let receipt_lines = List.concat_map (document_rows ~width) receipt_lines in
         (match view.screen with
         | Overview -> overview_lines ~width view @ receipt_lines
-        | Detail _ -> receipt_lines @ detail_lines ~width view
+        | Detail _ -> receipt_lines @ detail_lines ~height:(height - List.length receipt_lines) ~width view
             @ (match view.focus with
                | Connections -> [""] @ (flow_lines ~embedded:true view |> List.concat_map (fun line ->
                    document_rows ~width line))

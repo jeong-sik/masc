@@ -67,41 +67,18 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   비동기 파일 관측을 권한 허가나 물리 실행 시작으로 바꾸어 쓰지 않는다. Non-Eio fallback과
   보호된 factory lock의 대기는 유지되므로 전체 준비나 취소가 즉시 끝난다고 주장하지 않는다.
 
-- MCP 세션 복원은 실제 owner base path를 받아 공용 I/O executor에서 읽고 순수하게 해석한
-  뒤, 취소 확인을 거쳐 원래 caller가 registry에 적용한다. HTTP·stdio의 공통 활성화가
-  완료를 기다린 뒤 state/readiness를 공표한다. background maintenance로 복원을 미루거나
-  cwd·전역 기본 경로를 worker에서 추론하지 않는다. 저장은 blocking worker 안에서 lock을
-  잡은 뒤 불변 registry map을 캡처하고 flush/close/rename까지 직렬화한다. Eio 문맥에서
-  Stdlib mutex를 기다리거나 오래된 선행 snapshot을 뒤늦게 쓰지 않는다. 실행 중 host I/O는
-  취소로 강제 종료되지 않으며 이미 교체한 파일을 취소가 되돌리지 않는다. 누락·읽기 실패·
-  JSON 실패·root 거절·실제 적용을 구분하고, 원래 protocol/profile/timestamp 정책을 유지한다.
-  해석 중 필드별 불변 map을 준비하고 취소 확인 뒤 현재 registry와 한 CAS로 합친다.
-  유효 protocol map이 비어 있으면 게시를 생략하되 정상 복원 정리는 마친다. 중복 ID의 마지막 유효 필수값·마지막 존재 선택값을 유지하고, 선택값 부재를 삭제로
-  해석하지 않는다. transport가 존재하면 그 객체 전체를 교체한다. 적용 시점의 관련 없는
-  세션을 보존하며 restore 값의 원래 충돌 우선순위도 지킨다. protocol·profile·활동·시작·transport map은 하나의 불변 atomic registry에 둔다.
-  유효 등록은 protocol과 활동·시작·선택 transport를 함께 게시하고, 알려진 세션의 profile
-  갱신도 활동과 함께 게시한다. profile만으로 알려진 세션 권한을 만들지 않고 별개 API 호출을
-  하나의 transaction으로 간주하지 않는다. 저장과 기간 관측은 registry를 한 번 캡처한다.
-  삭제는 기존 기간 관측·client 등록 해제 뒤 모든 로컬 필드를 함께 제거한다. clock은 CAS 밖에서
-  읽으며 profile-only 호출에도 한 번 읽는다. CAS 재시도에서 순수 map 갱신·병합이 반복되고
-  서로 다른 필드 갱신도 같은 atomic 값에서 경합하므로 무조건 빨라졌다고 하지 않는다. caller 갱신 호출 감소를
-  CPU·시작 준비·입력 지연의 실측 개선으로 환산하지 않는다.
-  세션 저장은 `Saved`·`Skipped reason`·`Save_failed error`를 구분한다. 생략은 미복원 원본·
-  성공적으로 정리되지 않은 복원·경로의 최초 복원 거절 원인으로 나눈다. 미정리에는 취소된
-  복원도 포함되므로 worker가 아직 실행 중이라고 추정하지 않는다. 최초로 기록한 읽기·JSON·
-  root 거절 원인은 같은 프로세스의 후속 실패나 재조회로 덮지 않는다. 경로별 보존·원래 token
-  소유권·host mutex는 유지한다. 예상 host 쓰기 오류는 타입으로 반환하고 경고하며, 복원 거절로
-  latch하지 않아 실제 자원이 풀린 뒤 다시 저장할 수 있다. 취소·예상 밖 예외는 전파한다.
-  복원 실패의 새 세션은 메모리에만 남는다고 시작 경고에 밝히고, 반복 생략은 기존 routine
-  로그로 남긴다. 저장 완료만 파일 교체 증거이며 생략·실패를 성공이나 지연 개선으로 세지 않는다.
-  snapshot 최종 경로는 일반 파일이어야 한다. 기존 `.tmp`를 열거나 지우지 않고 원래 디렉터리에
-  `Filename.open_temp_file`로 새 출력을 독점 생성한다. 정상 close 뒤 rename하고 실패하면 자신이
-  만든 출력만 정리한다. Ready였던 목적지도 저장 전에 종류를 다시 확인한다. 입력은 lstat 뒤
-  nonblocking·close-on-exec open과 fstat의 종류·dev/inode를 확인한 뒤 같은 descriptor에서 읽는다.
-  FIFO·symlink 등은 `Non_regular_file`로 보존하고 경로가 open 중 바뀌면 읽기 실패로 남긴다.
-  이미 취소된 caller는 복원 token 예약 전에 거절한다. 실제 host I/O가 즉시 취소되거나 외부의
-  디렉터리 변경이 잠긴다고 주장하지 않는다. FIFO를 정상 출력/입력처럼 쓰던 fixture는 지우고,
-  원본 자원 보존·일반 파일 동시 저장·취소된 진입·정상 복원을 검증하는 실제 자원 시나리오로 바꾼다.
+- 세션·snapshot 영속화는 실제 owner 경로의 host I/O와 순수 해석을 공용 executor에 두고,
+  취소·소유권 확인 뒤 owner가 상태를 적용한다. 준비 완료와 물리 I/O·caller·UI 관측을 구분한다.
+  관련 필드는 한 불변 atomic registry로 게시하고 저장은 한 committed 상태를 캡처한다.
+  profile-only와 초기화 권한, 원래 optional/default/중복 정책과 unrelated live key를 보존한다.
+  CAS 안에는 순수 map 변환만 두고 clock·로그·외부 lifecycle 효과는 밖에 둔다. 별개 API 호출과
+  외부 효과까지 transaction이라 부르지 않는다. 재시도·경합·준비 비용을 실측에서 빼지 않는다.
+  파일 교체는 공용 `Fs_compat` atomic writer와 canonical 임시 이름을 재사용한다. 기존 host
+  worker에서는 inline 경로를 쓰고 재생성 가능한 파일만 rename-only로 저장한다. 원래 예외와
+  backtrace가 필요한 caller는 staged 결과를 사용해 예상 host 실패만 타입으로 처리하고,
+  취소·예상 밖 오류는 전파한다. 새 임시 파일 프로토콜을 복제하지 않는다. 입력·목적지 종류,
+  descriptor identity, 복원 거절의 최초 원인·token·경로 보존은 저장 완료와 별개로 확인한다.
+  현재 protocol/resource 시나리오와 한계는 해당 audit에 두고 Skill에는 재사용할 규율을 적는다.
 
 - Ask 답변 복구의 사전 증거는 같은 회차·Keeper·canonical answer의 UTC-day window에서만
   공유한다. 실제 첫 수요에서 캡처하고 원본 답변 행이 하나뿐인 window의 큰 proof 집합은 보관하지 않는다.

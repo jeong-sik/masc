@@ -242,24 +242,11 @@ let write_sessions path =
     ) all_ids
   in
   let json = `Assoc [ "sessions", `Assoc json_entries ] in
-  let tmp_path, oc = Filename.open_temp_file ~mode:[Open_binary] ~temp_dir:dir
-    (Filename.basename path ^ ".") ".tmp" in
-  (* Only this fresh exclusive regular output belongs to the writer. Preserve
-     every preexisting name and close successfully before publishing it. *)
-  match Fun.protect
-       ~finally:(fun () -> close_out_noerr oc)
-       (fun () ->
-         output_string oc (Yojson.Basic.to_string json);
-         output_char oc '\n';
-         flush oc;
-         close_out oc;
-         Unix.rename tmp_path path)
-  with
-  | () -> ()
-  | exception exn ->
-      let backtrace = Printexc.get_raw_backtrace () in
-      (try Sys.remove tmp_path with Sys_error _ -> ());
-      Printexc.raise_with_backtrace exn backtrace
+  match Fs_compat.save_file_atomic_rename_only_staged path
+      (Yojson.Basic.to_string json ^ "\n") with
+  | Ok () -> ()
+  | Error failure ->
+      Printexc.raise_with_backtrace failure.exception_ failure.backtrace
 
 (* The process owns one session registry. Lock only in the blocking worker,
    before capturing its immutable maps, and retain the lock through rename. *)

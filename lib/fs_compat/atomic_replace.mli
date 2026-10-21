@@ -56,6 +56,16 @@ type atomic_replace_failure =
 
 val atomic_replace_failure_to_string : atomic_replace_failure -> string
 
+val save_file_atomic_rename_only_staged
+  :  save_file:(string -> string -> unit)
+  -> string
+  -> string
+  -> (unit, atomic_replace_failure) Result.t
+(** Rename-only replacement through the canonical temporary-file core of
+    {!save_file_atomic_rename_only}, retaining the original failure exception
+    and backtrace. No fsync. Cancellation propagates after cleanup. Callers may
+    re-raise unexpected errors instead of flattening them into strings. *)
+
 val save_file_atomic_strict_staged
   :  save_file:(string -> string -> unit)
   -> string

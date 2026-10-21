@@ -176,12 +176,16 @@ let save_file_atomic ~save_file path content =
    new one, but after a power loss the renamed file can be empty or hold
    only part of [content]. Only a caller that rebuilds the file on its next
    pass may use it (#37503: the binary's own tool and MCP assets). *)
-let save_file_atomic_rename_only ~save_file path content =
+let save_file_atomic_rename_only_staged ~save_file path content =
   write_file_atomic_with_parent_sync
     ~sync_file:(fun (_ : string) -> ())
     ~sync_parent:(fun (_ : string) -> ())
     ~write_temp:(fun tmp -> save_file tmp content)
     path
+;;
+
+let save_file_atomic_rename_only ~save_file path content =
+  save_file_atomic_rename_only_staged ~save_file path content
   |> string_error_result
 ;;
 

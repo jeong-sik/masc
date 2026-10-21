@@ -81,7 +81,8 @@ release velocities, source ports and every non-note event. Channel/source-note
 selection disambiguates routing; a stale note anchor is refused. Unclosed notes
 before END and unmatched/overlapping keys in the selected range/scope are refused
 instead of silently omitting unsafe voices. Whole-candidate phrase overlap and
-MIDI pairing checks still apply against unchanged notes. Poly-pressure is not
+MIDI pairing checks still apply against unchanged notes. Paired releases on
+another source track are refused before any edit. Poly-pressure is not
 retargeted to the replacement pitches. These edits use the existing export,
 harmony, saved-document and editable-arrangement consumers.
 

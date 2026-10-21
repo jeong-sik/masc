@@ -208,3 +208,16 @@ test('three-voice recorded shapes retain their count and changing onset counts r
   assert.throws(() => command(incomplete, 'revoice-led 0 10 rootless C3 C5 G7#9 G7#9 G7#9 G7#9'), /constant number/)
   assert.deepEqual(incomplete, before)
 })
+
+test('cross-track paired releases refuse the new command without changing either track or history', () => {
+  const file = new JZZ.MIDI.SMF(1, 960), on = new JZZ.MIDI.SMF.MTrk(), off = new JZZ.MIDI.SMF.MTrk()
+  for (const key of [60,64,67]) {
+    on.add(0, JZZ.MIDI.noteOn(0, key, 90)); off.add(960, JZZ.MIDI.noteOff(0, key, 45))
+  }
+  on.add(1920, JZZ.MIDI.smfEndOfTrack()); off.add(1920, JZZ.MIDI.smfEndOfTrack()); file.push(on); file.push(off)
+  const original = importMidiSource(file.toUint8Array()), editor = newEditor(original), before = structuredClone(editor)
+  assert.equal(editor.performance.notes.length, 3)
+  assert.ok(editor.performance.notes.every(note => note.track === 0 && note.off.startsWith('1:')))
+  assert.throws(() => command(editor, 'revoice-led 0 1 close C3 C5 Dm'), /another source track/)
+  assert.deepEqual(editor, before); assert.deepEqual(projectMidi(editor.project), file.toUint8Array())
+})

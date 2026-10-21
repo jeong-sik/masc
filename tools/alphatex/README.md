@@ -544,7 +544,8 @@ The command also edits imported MIDI using its native beats (PPQ) or frames
 (SMPTE), chosen pattern and current track. Use `:channel N` or a selected source
 note to resolve channels; a source-note selection also anchors its port. A stale
 anchor, ambiguous ports, drum channel, unclosed notes or unmatched/overlapping
-keys in that scope are refused. Original data, non-note expression bytes, note-off
+keys in that scope are refused. Paired releases on another source track are
+refused to keep other tracks unchanged. Original data, non-note expression bytes, note-off
 forms and release velocities remain retained. Keyed poly-pressure keeps its
 original key, as with the single-cursor command.
 

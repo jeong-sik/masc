@@ -360,6 +360,7 @@ export function sourceCommand(editor,line) {
       if (scoped.some(note => note.channel === GM_DRUM_CHANNEL)) throw new Error('Chord voicings need a melodic MIDI channel')
       const events = new Map((editor.performance?.events ?? []).map(event => [event.id, event]))
       const track = editor.view.tracks[editor.track].sourceTrack
+      if (scoped.some(note => events.get(note.off)?.track !== track)) throw new Error('Revoicing note releases belong to another source track')
       if ((editor.performance?.diagnostics ?? []).some(diagnostic => {
         const event = events.get(diagnostic.event)
         return event?.track === track && (channel === undefined || (event.bytes[0] & 15) === channel)

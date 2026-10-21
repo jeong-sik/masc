@@ -171,6 +171,31 @@ let test_lock_symlink () = with_base (fun outside -> with_base (fun base_path ->
   Alcotest.(check string) "prior check survives refused lock requests" checked.change_id
     (List.hd listing.checks).change_id))
 
+let test_precondition_settlement () = with_base (fun base_path ->
+  let artifact, revision = publish ~base_path "report" in
+  let checked = set ~base_path ~actor:"human" (change ~checked:true artifact.id revision) in
+  let dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "published_artifact_checks" in
+  let file = Filename.concat dir (artifact.id ^ "-r1.json") in
+  let before = Fs_compat.load_file file in
+  let identity = Unix.stat file in
+  let injected = Atomic.make false in
+  let close_fd fd =
+    let stat = Unix.fstat fd in
+    Unix.close fd;
+    if stat.Unix.st_dev = identity.Unix.st_dev && stat.Unix.st_ino = identity.Unix.st_ino
+       && Atomic.compare_and_set injected false true
+    then raise (Unix.Unix_error (Unix.EIO, "close", "injected precondition settlement")) in
+  let io = Fs_compat.{before_sync_parent=(fun _ -> ());close_fd} in
+  (match S.For_testing.set_with_rewrite_io ~io ~base_path ~actor:"human"
+    (change ~expected:(Some checked.change_id) ~checked:false artifact.id revision) with
+   | Error (S.Unavailable _) -> ()
+   | Error error -> Alcotest.fail (S.error_message error)
+   | Ok _ -> Alcotest.fail "failed precondition was treated as a saved check");
+  Alcotest.(check bool) "real precondition descriptor close failed" true (Atomic.get injected);
+  Alcotest.(check string) "precondition failure changed no record bytes" before (Fs_compat.load_file file);
+  Alcotest.(check string) "original check remains authoritative" checked.change_id
+    (List.hd (S.list ~base_path |> stored).checks).change_id)
+
 let () = Eio_main.run (fun _ ->
   Alcotest.run "shared artifact revision checks"
     ["durable explicit confirmation",[
@@ -178,4 +203,5 @@ let () = Eio_main.run (fun _ ->
       Alcotest.test_case "two clients compete through durable CAS" `Quick test_concurrent_cas;
       Alcotest.test_case "strict request, actor spoof and immutable digest" `Quick test_strict_request_and_digest;
       Alcotest.test_case "lock links cannot create or alter external files" `Quick test_lock_symlink;
+      Alcotest.test_case "precondition close failure is not a possible commit" `Quick test_precondition_settlement;
       Alcotest.test_case "corrupt and unsafe storage remain unknown" `Quick test_corrupt_or_unsafe_storage]])

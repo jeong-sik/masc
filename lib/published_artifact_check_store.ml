@@ -78,7 +78,7 @@ let list ~base_path = protect (fun () ->
     ([],[]) (Option.value ~default:[] entries) in
   Ok {checks=List.rev checks;diagnostics=List.rev diagnostics})
 
-let set ~base_path ~actor (request : Check.request) = protect (fun () ->
+let set_with_rewrite ~rewrite ~base_path ~actor (request : Check.request) = protect (fun () ->
   let* (_, revision, _) =
     Artifacts.read ~base_path ~id:request.target.id ~revision:(Some request.target.revision)
     |> Result.map_error (fun error -> Artifact_error error) in
@@ -112,8 +112,11 @@ let set ~base_path ~actor (request : Check.request) = protect (fun () ->
       | Fs_compat.Cursor_mismatch _ ->
         let* current = load_file ~base_path name in Error (Conflict current)
       | Rewrite_published_durability_unknown _ -> Error (Commit_uncertain check)
-      | Transaction_settlement_failed {primary=Transaction_succeeded _;_} ->
+      | Transaction_settlement_failed {primary=Transaction_succeeded (Cursor_succeeded _);_} ->
         Error (Commit_uncertain check)
+      | Transaction_settlement_failed
+          {primary=Transaction_succeeded (Snapshot_succeeded _ | Cursor_precondition_succeeded _);_} as error ->
+        Error (Unavailable (Fs_compat.private_jsonl_transaction_error_to_string error))
       | Transaction_settlement_failed {primary=Transaction_failed error;_} -> failed error
       | (Stable_lock_contended _ | Unexpected_stable_lock_permissions _
         | Invalid_stable_lock_state _ | Unexpected_transaction_file_kind _
@@ -122,7 +125,17 @@ let set ~base_path ~actor (request : Check.request) = protect (fun () ->
         | Invalid_transaction_suffix | Private_jsonl_operation_failed _
         | Rewrite_stage_failed _ | Transaction_append_failed _) as error ->
         Error (Unavailable (Fs_compat.private_jsonl_transaction_error_to_string error)) in
-    match Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
-      file ~expected:snapshot.cursor (Yojson.Safe.to_string (Check.to_json check) ^ "\n") with
+    match rewrite file ~expected:snapshot.cursor (Yojson.Safe.to_string (Check.to_json check) ^ "\n") with
     | Ok _ -> Ok check
     | Error error -> failed error)
+
+let set ~base_path ~actor request =
+  set_with_rewrite ~rewrite:Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
+    ~base_path ~actor request
+
+module For_testing = struct
+  let set_with_rewrite_io ~io ~base_path ~actor request =
+    set_with_rewrite
+      ~rewrite:(Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing ~io)
+      ~base_path ~actor request
+end

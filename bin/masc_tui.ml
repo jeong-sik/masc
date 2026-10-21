@@ -22151,6 +22151,10 @@ let main
      before anything can log. *)
   redirect_stderr_off_terminal ~base_path;
   Log.init_from_env ();
+  (* The client ring is process-local. Its structured details need their own
+     file sink; the server's dashboard and this stderr mirror cannot persist
+     them. Keep initialization failure diagnostic and let the surface open. *)
+  ignore (Masc_tui_observation_store.initialize ~base_path);
   let state =
     create_state ~reasoning_visibility ~tool_visibility ~workspace
       ~local_base_path:base_path ~port

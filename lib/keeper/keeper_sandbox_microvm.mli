@@ -759,7 +759,7 @@ type container_listing =
           running with nothing able to reap it. *)
 
 val container_listing_for : Keeper_microvm_backend.t -> container_listing
-(** [Labelled_json_array] for [container list -a --format json].
+(** [Labelled_json_array] for [container list --all --format json].
     [Nerdctl_labelled_json_lines] for nerdctl ps with explicit LabelsMap.
     [Listing_not_established] for msb, whose listing rows carry no labels
     (they live in msb inspect under active_config.labels). *)

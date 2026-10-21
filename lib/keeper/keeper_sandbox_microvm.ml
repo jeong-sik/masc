@@ -1221,6 +1221,12 @@ let apple_work_volume_trim_argv ~keeper_name ~volume_name ~image =
     ; image; "-eu"; "-c"; work_volume_reclaim_script ~keeper_name ]
 ;;
 
+(* The trim cleanup, the abandoned-guest sweep, Keeper status and the guest
+   probe read this one argv: they ask the same runtime the same question. *)
+let apple_container_list_argv () =
+  command_argv_for Backend.Apple_container @ [ "list"; "--all"; "--format"; "json" ]
+;;
+
 (* The name of one row of Apple's [container list] JSON: the top-level [id],
    else [configuration.id]. [None] for a row that names no container. *)
 let apple_listing_row_id fields =
@@ -1238,13 +1244,12 @@ let apple_listing_row_id fields =
 
 let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name =
   let name = work_volume_trim_name ~keeper_name in
-  let cli = command_argv_for Backend.Apple_container in
   (* Removal's exit code alone cannot prove absence: --rm may already have
      removed the container, or a timed-out CLI may have left it running. *)
   let removal_status, removal_out, removal_err =
     run ~timeout_sec:remove_timeout_sec (delete_force_argv_for Backend.Apple_container ~container_name:name)
   in
-  match run ~timeout_sec (cli @ [ "list"; "--all"; "--format"; "json" ]) with
+  match run ~timeout_sec (apple_container_list_argv ()) with
   | Unix.WEXITED 0, listing, _ ->
     let rec absent = function
       | [] -> Ok ()
@@ -2269,7 +2274,7 @@ let live_containers_of_json ~base_path ~keeper_name = function
     the base path hash, the keeper name, and the owner pid it decides
     abandonment on. Filtering is not enough -- the pid has to be read back.
 
-    Apple's [container list -a --format json] answers a JSON array whose
+    Apple's [container list --all --format json] answers a JSON array whose
     entries nest [configuration.labels], which is where all three live.
 
     [msb list] documents [--label <LABEL>] (repeatable, AND-matched), so a
@@ -2288,10 +2293,6 @@ type container_listing =
   | Labelled_json_array of string list
   | Nerdctl_labelled_json_lines of string list
   | Listing_not_established of string
-
-let apple_container_list_argv () =
-  command_argv_for Backend.Apple_container @ [ "list"; "-a"; "--format"; "json" ]
-;;
 
 let nerdctl_inventory_argv () =
   command_argv_for Backend.Nerdctl_kata

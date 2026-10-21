@@ -1223,7 +1223,7 @@ let test_startup_sweep_serializes_inventory_with_boot () =
         run ()) };
   let run_argv ~timeout_sec:_ argv =
     match argv with
-    | [ "container"; "list"; "-a"; "--format"; "json" ] ->
+    | [ "container"; "list"; "--all"; "--format"; "json" ] ->
       Eio.Promise.resolve listing_started_r ();
       Eio.Promise.await release_listing;
       Unix.WEXITED 0,
@@ -2297,7 +2297,6 @@ case "$*" in
   "delete --force $trim") [ -e "$keep" ] || rm -f "$marker"; exit 1 ;;
   "list --all --format json")
     if [ -e "$marker" ]; then printf '[{"id":"%%s"}]\n' "$trim"; else printf '[]\n'; fi ;;
-  "list -a --format json") printf '[]\n' ;;
   inspect\ *) exit 1 ;;
   stop\ *|delete\ --force\ *) exit 0 ;;
   *) exit 99 ;;
@@ -2337,9 +2336,10 @@ esac
   Alcotest.(check bool) "failed deletion retains its evidence" true (Sys.file_exists marker)
 ;;
 
-(* A trim inventory the helper cannot confirm must not spare the ordinary
+(* A trim helper that outlives its removal must not spare the ordinary
    guests: every name is attempted, and the trim error surfaces only when
-   all removals succeeded. *)
+   all removals succeeded. The helper and the guests are read from the same
+   listing, which names the helper and none of the guests. *)
 let test_teardown_removes_guests_despite_trim_cleanup_error () =
   with_eio_fs @@ fun () ->
   let module Turn = Masc.Keeper_turn_sandbox_runtime in
@@ -2371,8 +2371,7 @@ stuck_guest=%s
 stuck=%s
 printf '%%s\n' "$*" >> "$log"
 case "$*" in
-  "list --all --format json") printf 'not json\n'; exit 0 ;;
-  "list -a --format json") printf '[]\n' ;;
+  "list --all --format json") printf '[{"id":"%%s"}]\n' "$trim" ;;
   "inspect $stuck_guest")
     if [ -e "$stuck" ]; then printf '[{"status":{"state":"running"}}]\n'; exit 0; else exit 1; fi ;;
   inspect\ *) exit 1 ;;
@@ -2403,12 +2402,12 @@ esac
   let attempted lines name =
     List.mem ("stop " ^ name) lines && List.mem ("delete --force " ^ name) lines
   in
-  (* Malformed helper inventory, guests removable: every guest is attempted
-     and the trim error is the result. *)
+  (* The helper remains, guests removable: every guest is attempted and the
+     trim error is the result. *)
   (match teardown () with
    | Error detail ->
      Alcotest.(check bool) "trim error surfaces when guests are removed" true
-       (Astring.String.is_infix ~affix:"trim cleanup inventory is invalid JSON" detail)
+       (Astring.String.is_infix ~affix:"remains after removal" detail)
    | Ok () -> Alcotest.fail "unconfirmed helper absence was reported as removed");
   let first_calls = calls () in
   List.iter

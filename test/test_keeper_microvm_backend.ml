@@ -545,7 +545,7 @@ let test_only_a_labelled_listing_is_offered () =
      check
        (Alcotest.list Alcotest.string)
        "container lists with labels"
-       [ "container"; "list"; "-a"; "--format"; "json" ]
+       [ "container"; "list"; "--all"; "--format"; "json" ]
        argv
    | Microvm.Nerdctl_labelled_json_lines _ -> fail "Apple received nerdctl grammar"
    | Microvm.Listing_not_established reason ->

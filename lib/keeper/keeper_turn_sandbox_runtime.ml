@@ -849,13 +849,9 @@ let probe_microvm_container_state ?timeout_sec ~backend container_name =
     ~listing
 ;;
 
-let inspect_container_running ?timeout_sec ~microvm_backend container_name =
+let inspect_container_running ?timeout_sec container_name =
   match
-    (match microvm_backend with
-     | Some backend -> probe_microvm_container_state ?timeout_sec ~backend container_name
-     | None ->
-       Keeper_sandbox_runtime.probe_container_state_optional
-         ~container_name ?timeout_sec ())
+    Keeper_sandbox_runtime.probe_container_state_optional ~container_name ?timeout_sec ()
   with
   | Ok Keeper_sandbox_runtime.Docker_container_running -> Ok ()
   | Ok Keeper_sandbox_runtime.Docker_container_stopped ->
@@ -870,20 +866,17 @@ type failed_exec_recovery =
   | Restart_failed_exec
   | Failed_exec_state_probe_error of string
 
+(* Asked only after a Docker exec failed: every exec entrypoint runs
+   [docker_exec_only] first, which refuses a microvm runtime. *)
 let failed_exec_recovery ?timeout_sec (t : t) =
   match get_state t with
   | Not_started -> Restart_failed_exec
   | Running { container_name } ->
     (match
-       (if is_microvm t
-        then
-          Result.bind (microvm_backend_of t) (fun backend ->
-            probe_microvm_container_state ?timeout_sec ~backend container_name)
-        else
-          Keeper_sandbox_runtime.probe_container_state_optional
-            ~container_name
-            ?timeout_sec
-            ())
+       Keeper_sandbox_runtime.probe_container_state_optional
+         ~container_name
+         ?timeout_sec
+         ()
      with
      | Ok Keeper_sandbox_runtime.Docker_container_running -> Preserve_failed_exec
      | Ok Keeper_sandbox_runtime.Docker_container_stopped
@@ -2304,21 +2297,9 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
     if not validate_running
     then Ok container_name
     else (
-      (* A microvm keeper with no runtime recorded cannot be probed at all, so
-         the validation is a refusal rather than a restart against a runtime
-         nobody named. *)
-      let probe =
-        if is_microvm t
-        then
-          Result.bind (microvm_backend_of t) (fun backend ->
-            inspect_container_running
-              ?timeout_sec
-              ~microvm_backend:(Some backend)
-              container_name)
-        else
-          inspect_container_running ?timeout_sec ~microvm_backend:None container_name
-      in
-      match probe with
+      (* Validation is asked for only by the Docker exec entrypoints, after
+         [docker_exec_only] has refused a microvm runtime. *)
+      match inspect_container_running ?timeout_sec container_name with
       | Ok () -> Ok container_name
       | Error _ ->
         set_state t Not_started;

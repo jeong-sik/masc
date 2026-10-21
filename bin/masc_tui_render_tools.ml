@@ -583,7 +583,7 @@ let skill_statistics_lines ~cols = function
       [ Theme.info (), Printf.sprintf "평균 executor 실행 시간 · 보존 실행 %d건" stats.scst_records ]
       @ List.map duration rows
       @ [ Ansi.dim, "막대: 0 → 관측된 최대 평균 · 동일 revision / 전체 Keepers"
-        ; Ansi.bold, "실행 결과 분포" ]
+        ; Ansi.bold, "실행 결과 분포 · 전체 보존 실행 = 100%" ]
       @ (Masc_tui_chart.distribution_bars
            ~width:(max 1 (Masc_tui_frame.inner_width ~cols - 4))
            [ { name = "completed"; count = stats.scst_completed.sds_samples; style = Some Masc_tui_theme.Ok }

@@ -397,7 +397,7 @@
  (name masc_tui_chart)
  (wrapped false)
  (modules masc_tui_chart)
- (libraries masc_tui_theme masc_tui_message_layout))
+ (libraries masc_tui_theme masc_tui_message_layout zarith))
 
 ;; Usage's quota scope trend, built once per provider history answer so the
 ;; frame draws rows rather than regrouping every point on every repaint.

@@ -51,17 +51,15 @@ capabilities from guarantees still to be demonstrated.
 Binary releases target macOS (Apple Silicon and Intel) and Linux (x86_64 and
 ARM64). You do not need an OCaml or Node.js toolchain for a binary install.
 Check the [platform requirements](docs/INSTALL.md#platforms-and-prerequisites)
-and [release assets](https://github.com/jeong-sik/masc/releases/tag/v0.59.0).
+and [release assets](https://github.com/jeong-sik/masc/releases/latest).
 Model access is separate: bring a supported CLI login, an API credential, or a
-reachable local model server. For the default Keeper sandbox, install Docker.
-
-> Installation target: v0.58.0.
+reachable local model server. The setup screen helps you choose and prepare a
+sandbox; Docker is one option, alongside supported microVM and remote SSH backends.
 
 ```bash
-TAG=v0.59.0
-curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
   -o /tmp/masc-install.sh &&
-bash /tmp/masc-install.sh --version "$TAG"
+bash /tmp/masc-install.sh
 ```
 
 The installer verifies `SHA256SUMS`, installs the executables and matching
@@ -74,8 +72,10 @@ To inspect the script first, download it, read it with `less`, then run `bash`.
 Sign in to your model CLI or export the API credential your provider needs.
 The wizard lets you select models with **↑/↓, Space and Enter**, checks their
 response and tool use, and asks for a primary connection and fallback order.
-It reports when an account limit prevents a check. Start Docker for the default
-sandbox; setup offers help with missing sandbox prerequisites.
+CLI subscriptions use their own login; API connections use the selected provider’s
+credential, and local servers use their configured endpoint. You need one usable
+connection. Setup reports account limits and offers help with missing sandbox
+prerequisites; Docker need not be installed before downloading MASC.
 
 If setup did not open after installation, run:
 
@@ -124,8 +124,8 @@ libraries first:
   `PKG_CONFIG_PATH`, `CPATH` and `LIBRARY_PATH` for `openssl@3` and `libpq` as the
   macOS step of the [Release workflow](.github/workflows/release.yml) does.
 
-The dashboard build below is required for browser access from a checkout. Coding agents use CI builds
-according to [the repository execution protocol](docs/constitution.xml).
+The dashboard build below is required for browser access from a checkout.
+Coding agents follow [the repository execution protocol](docs/constitution.xml).
 
 ```bash
 git clone https://github.com/jeong-sik/masc.git
@@ -158,16 +158,19 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 ```
 
 Alternatively, `scripts/install-local-build.sh` builds and copies `masc`,
-`masc-tui` and `masc-browser-host` into `~/.local/bin` in one step; run it in a
+`masc-tui`, `masc-browser-host` and the deployment preflight tools into
+`~/.local/bin` in one step; run it in a
 shell where `eval "$(opam env)"` has been applied. It also reinstalls every
 registered Firefox browser-lane host from the new build and stops the host
 processes those workspaces started; the extension reconnects to the new copy.
 A workspace that holds a release guest shim for microVM Keepers gets the shim
 of the release the build names (`docs/MICROVM-REMOTE-RUNBOOK.md`).
 Before it replaces anything, the script checks the workspace's `runtime.toml`
-and stored state with the new build, and installs nothing (exit status 2) when
-it cannot: pass `--base-path DIR` or set `MASC_BASE_PATH` when no workspace is
-found.
+and stored state with the new build. A resolved workspace that observably does
+not exist yet is treated as a new workspace, with those checks reported as not
+run. If the workspace cannot be resolved or observed, installation stops before
+replacement; pass `--base-path DIR` or set `MASC_BASE_PATH` when
+no workspace is found. A configuration or stored-state rejection also stops installation.
 
 `./quickstart.sh` seeds a workspace under `~/masc-quickstart`, starts the
 server, and writes an MCP bearer to `.masc/config/mcp-client.env`. It starts

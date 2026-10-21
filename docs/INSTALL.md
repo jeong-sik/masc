@@ -176,14 +176,16 @@ To install one specific release instead of the latest one, take that tag's
 installer and pin it. Check that the tag is listed on GitHub Releases first:
 
 ```bash
-TAG=v0.59.0
+TAG=v0.60.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 ```
 
-`install.sh` from a tag installs that tag's assets; without `--version` the
-installer resolves the latest release.
+Downloading a tag’s installer alone does not pin the installed version: pass
+`--version "$TAG"` as above. Without `--version`, the installer resolves the
+latest release. The example pins the published v0.60.0; `main` documentation can
+describe changes that are not in that release.
 
 A new terminal finds `masc` if you accepted the shell PATH prompt. Otherwise,
 add the installation directory yourself. For the default prefix, run
@@ -202,7 +204,7 @@ records the workspace as the default that a later bare `masc` finds. A reinstall
 that keeps an existing configuration leaves the recorded default as it is, and a
 scripted install without a terminal records nothing, so a verification or CI
 install does not change the machine's default. The install location and the working-data
-location are independent. The `install.sh` on the release page installs that
+location are independent. With an explicit `--version`, the release installer installs that
 version's assets, and installer fixes are recorded in the release notes with
 their source commit. The binary tag is not changed. A missing or mismatched
 checksum stops the install.

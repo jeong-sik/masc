@@ -3,58 +3,56 @@ title: 빠른 시작
 description: 보유 런타임을 연결하고 기본 샌드박스의 imp와 대화합니다.
 ---
 
-macOS·Linux용 바이너리를 설치합니다. OCaml·Node.js 빌드 도구는 필요 없습니다.
-이 안내는 **0.58.0** 기준입니다. 게시 여부는
-[Releases](https://github.com/jeong-sik/masc/releases)에서 확인하고 바이너리와
-같은 태그에 첨부된 설치기를 사용하세요.
+macOS·Linux용 최신 공개 바이너리를 설치합니다. OCaml·Node.js 빌드 도구는 필요 없습니다.
+[Releases](https://github.com/jeong-sik/masc/releases)에서 배포 버전과 지원 플랫폼을 확인하세요.
 
 ```bash
-TAG=v0.58.0
-curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
-  -o /tmp/masc-install.sh
-bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+  -o /tmp/masc-install.sh &&
+bash /tmp/masc-install.sh
 ```
 
-설치가 끝나면 아래 명령을 따로 실행해 현재 터미널의 PATH를 설정하세요.
+터미널에서 마법사가 켜져 있고 `--base-path`가 없으면 설치기가 작업 공간 경로를 묻습니다.
+이 질문도 직접 지정한 경로도 없으면 현재 디렉터리를 사용합니다. 이어서 설정할 때도 같은
+경로를 사용하세요. `--base-path`는 `.masc`가 **들어 있는 디렉터리**입니다. 스크립트를 먼저 읽으려면
+다운로드 성공 후 `less /tmp/masc-install.sh`로 확인하고(`q`로 종료), `bash` 명령을 실행합니다.
+특정 버전을 고정하려면 그 태그의 설치기를 받고 `--version TAG`도 지정해야 합니다.
+자세한 예시는 [설치 가이드](https://github.com/jeong-sik/masc/blob/main/docs/INSTALL.ko.md)를 참고하세요.
+
+## `imp`와 첫 대화
+
+1. 모델 연결 하나를 준비합니다. 지원하는 CLI 구독과 해당 로그인, API 인증 정보,
+   도구 호출을 지원하는 로컬 모델 서버 중 하나를 사용합니다. Claude Code·Codex 구독
+   연결은 공식 CLI 계정을 사용하므로 별도 API 키가 필요하지 않습니다. 연결 검사 실패 시
+   설정 화면에서 로그인 후 같은 선택으로 재시도할 수 있고, 계정 한도는 따로 표시합니다.
+2. 설정 화면에서 샌드박스를 고릅니다. Docker, 지원되는 microVM, 원격 SSH는 각각 다른
+   선택지입니다. Docker를 먼저 설치하지 않아도 MASC를 설치할 수 있습니다. 설정 화면은
+   준비물을 확인하고 가능한 설치·시작 동작을 제공합니다. 이미지 준비와 Keeper 시작 성공은
+   별도로 확인합니다.
+3. 설정을 마쳐 작업 공간 서버와 `imp`를 준비하고 TUI를 엽니다. 선택적 음성과 호스트 도구는
+   설정 도중이나 나중에 연결할 수 있습니다.
+
+설정 화면이 열리지 않았거나 나중에 마치기로 했다면 다음을 실행하세요.
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
+"$HOME/.local/bin/masc" setup
 ```
 
-선택 사항: 실행 전에 스크립트를 읽으려면 `less /tmp/masc-install.sh`를 실행하세요. `q`를 눌러 나간 다음 위의 `bash` 설치 명령을 실행합니다.
+`--prefix`를 바꿨다면 그 실행 파일 경로를 사용하세요. 작업 공간을 직접 지정하려면 설치 때
+고른 디렉터리로 `--base-path /path/to/your/workspace`를 덧붙입니다. PATH 추가 안내를
+수락했다면 새 터미널에서 `masc`가 잡힙니다. 현재 터미널에는 기본 설치 경로 기준으로
+`export PATH="$HOME/.local/bin:$PATH"`를 실행하세요.
 
-재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다. `export PATH=...`에는 설치 옵션을 붙이지 마세요.
-
-## `imp`와 첫 대화 (0.58.0)
-
-이 경로는 `masc setup`이 포함된 **0.58.0 설치 계약**입니다. 다운로드 전에
-[GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 태그와 자산 제공 여부를 확인하세요.
-
-1. 설치 마법사를 `--base-path "$HOME/masc-workspace"`로 실행하고 보유한 모델
-   런타임을 고릅니다. 런타임 설정의 `--setup-lanes`는 선택한 모델을 보조 판단
-   레인에도 연결합니다. 두 번째 모델 구독은 필요하지 않습니다.
-2. Claude Code·Codex는 CLI를 설치하고 해당 CLI에서 로그인한 뒤 이 터미널에서
-   응답하는지 확인합니다. API 방식은 마법사에서 지정한 인증 환경변수를 이
-   터미널에서 export합니다. 로컬 모델은 서버를 시작하고 도구 호출을 지원하는
-   모델을 로드합니다. MASC는 모델 런타임을 설치하거나 대신 로그인하지 않습니다.
-3. **Bootstrap (부트스트랩)**: macOS에서는 Docker Desktop(또는 macOS 26+ Apple Container), Linux에서는 Docker Engine을 설치하고 시작합니다(현재 사용자로 `docker info`가 성공해야 합니다). `masc setup`의 **Bootstrap** 단계는 샌드박스 런타임을 확인하고 기본 `base` 샌드박스 이미지를 빌드·승격(promote)한 뒤, 작업 공간 서버 시작·연결, `local-admin` 로그인, `imp` 준비를 수행합니다.
-4. **Tools (도구 연결)**: `masc setup`의 **Tools** 단계에서는 `imp`가 쓸 선택적 호스트 도구들을 점검하고 연결합니다 — 자동화 브라우저(`geckodriver` + Firefox), 라이브 Firefox BiDi 또는 MASC Firefox/Zen 부가 기능(add-on), GitHub CLI(`gh`) 로그인, PDF 검사(`poppler`), 그리고 웹 검색(`ZAI_API_KEY` 등 검색 API 키 또는 로컬 Docker 기반 `masc-searxng` 컨테이너).
-
-모델 번호를 고르거나 정확한 모델 ID를 입력하세요. 마법사는 context 한도의
-출처를 표시하며, Codex에서 관측한 클라이언트 한도를 카탈로그보다 우선합니다.
-한도를 알 수 없을 때만 문서에 명시된 값을 입력합니다. Claude Code·Codex는
-도구 호출·streaming을 자동 설정합니다. Z.AI 인증 환경변수는 `ZAI_API_KEY`입니다.
-
-```bash
-masc setup --base-path "$HOME/masc-workspace"
-```
-
-`setup`은 누락된 설정을 시드하고 **Bootstrap** 및 **Tools** 단계를 거쳐 기존 `imp`를 시작하고
-TUI를 엽니다. Keeper 설정 파일은 보존합니다. 기본 `imp` 설정은
+기존 Keeper 설정은 보존합니다. 새로 시드한 `imp`의 기본값은
 `activation_mode = "manual"`, `sandbox_profile = "docker"`,
-`sandbox_image = "base"`, `network_mode = "inherit"`입니다. 다른 작업 공간이 포트를 쓰고 있으면
-`--port 8936`처럼 빈 포트를 지정하세요. 종료할 때 setup이 직접 시작한 서버도
-종료합니다. 서버를 계속 실행하려면 `--no-tui`를 사용하고 별도로 접속하세요.
+`sandbox_image = "base"`, `network_mode = "inherit"`이며 설정 중 다른 실행 환경을
+선택할 수 있습니다. 다른 작업 공간이 포트를 쓰면 `--port 8936`을 지정하세요.
+터미널에서 샌드박스·네트워크 옵션 없이 `masc setup`을 실행하면 대화형 여정이 열립니다.
+이 여정은 `--no-tui`로 서버를 준비한 뒤 TUI를 따로 열므로 대화에서 나가도 서버를 유지합니다.
+반면 `masc setup`에 샌드박스·네트워크 옵션을 직접 지정하면 TUI 종료 시 setup이 직접
+시작한 서버도 종료합니다. 서버를 유지하고 따로 접속하려면 `--no-tui`를 붙이세요.
+기존 서버에 연결한 경우에는 그 서버를 종료하지 않습니다.
+같은 작업 공간의 읽기 전용 상태 보고는 `masc doctor`로 확인합니다.
 
 TUI에서 **Keepers → imp**를 선택하고 다음을 하나씩 요청하세요.
 

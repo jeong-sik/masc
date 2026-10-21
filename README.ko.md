@@ -53,17 +53,15 @@ MASC의 여러 기능은 에이전트가 목표와 지금까지의 과정을 이
 바이너리 릴리스는 macOS(Apple Silicon·Intel)와 Linux(x86_64·ARM64)를 대상으로
 합니다. 바이너리를 설치할 때는 OCaml이나 Node.js 개발 도구가 필요하지 않습니다.
 [플랫폼 요구사항](docs/INSTALL.md#platforms-and-prerequisites)과
-[배포된 파일](https://github.com/jeong-sik/masc/releases/tag/v0.59.0)을 확인하세요.
+[배포된 파일](https://github.com/jeong-sik/masc/releases/latest)을 확인하세요.
 모델 연결은 별도로 준비합니다. 지원하는 CLI 로그인, API 인증 정보 또는 접속 가능한
-로컬 모델 서버가 필요합니다. 기본 Keeper 샌드박스에는 Docker를 설치하세요.
-
-> Installation target: v0.59.0 (check tag availability on GitHub Releases).
+로컬 모델 서버 중 하나가 필요합니다. 설정 화면에서 실행 환경을 고르고 준비합니다.
+Docker 외에도 지원되는 microVM과 원격 SSH를 선택할 수 있습니다.
 
 ```bash
-TAG=v0.59.0
-curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
   -o /tmp/masc-install.sh &&
-bash /tmp/masc-install.sh --version "$TAG"
+bash /tmp/masc-install.sh
 ```
 
 설치 스크립트는 `SHA256SUMS`를 검증하고 실행 파일과 같은 버전의 브라우저 대시보드를
@@ -76,7 +74,9 @@ PATH 추가 안내를 수락하거나 셸의 PATH에 직접 넣으세요. 스크
 모델 CLI에 로그인하거나 제공자가 요구하는 API 인증 환경변수를 설정하세요.
 마법사에서 **↑/↓, Space, Enter**로 모델을 선택하면 응답과 도구 사용을 확인한 뒤
 기본 연결과 대체 순서를 묻습니다. 계정 한도로 검사를 못 한 경우도 표시합니다.
-기본 샌드박스에는 Docker를 실행해 두세요. 필요한 샌드박스 도구가 없으면 설정 화면에서 안내합니다.
+CLI 구독은 해당 CLI 로그인, API 연결은 제공자의 인증 정보, 로컬 서버는 접속 주소를
+사용합니다. 사용할 수 있는 연결 하나를 준비하면 됩니다. Docker를 미리 설치하지
+않아도 MASC를 내려받을 수 있고, 필요한 샌드박스 도구는 설정 화면에서 안내합니다.
 
 설치 뒤 설정 화면이 열리지 않았다면 다음을 실행하세요.
 
@@ -122,7 +122,7 @@ Git, opam, C 개발 도구, Python 3, Node.js 22, Corepack과 native 라이브�
   `libpq`에 맞춰 `PKG_CONFIG_PATH`, `CPATH`, `LIBRARY_PATH`를 export합니다.
 
 체크아웃에서 대시보드를 쓰려면 아래 frontend 빌드도 필요합니다.
-코딩 에이전트는 [저장소 실행 프로토콜](docs/constitution.xml)에 따라 CI에서 빌드합니다.
+코딩 에이전트는 [저장소 실행 프로토콜](docs/constitution.xml)을 따릅니다.
 
 ```bash
 git clone https://github.com/jeong-sik/masc.git
@@ -153,12 +153,15 @@ ln -sf "$PWD/_build/default/bin/main_eio.exe" ~/.local/bin/masc
 ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 ```
 
-대신 `scripts/install-local-build.sh`를 쓰면 `masc`, `masc-tui`, `masc-browser-host`를
-한 번에 빌드해 `~/.local/bin`에 복사합니다. `eval "$(opam env)"`를 적용한 셸에서 실행하세요. 이 스크립트는 등록된
+대신 `scripts/install-local-build.sh`를 쓰면 `masc`, `masc-tui`, `masc-browser-host`와
+배포 사전점검 도구를 한 번에 빌드해 `~/.local/bin`에 복사합니다. `eval "$(opam env)"`를 적용한 셸에서 실행하세요. 이 스크립트는 등록된
 Firefox browser-lane host도 새 빌드로 다시 설치하고, 그 작업 공간에서 실행 중인 host 프로세스를
 종료합니다. 확장은 새 사본으로 다시 연결합니다.
-아무것도 바꾸기 전에 새 빌드로 작업 공간의 `runtime.toml`과 저장 상태를 검사하고, 검사할 수 없으면(작업 공간을
-찾지 못하면 `--base-path DIR`을 주거나 `MASC_BASE_PATH`를 설정하세요) 아무것도 설치하지 않고 종료 코드 2로 끝납니다.
+아무것도 바꾸기 전에 새 빌드로 작업 공간의 `runtime.toml`과 저장 상태를 검사합니다.
+경로가 해석되고 아직 존재하지 않는다고 확인되면 새 작업 공간으로 취급하고 검사는
+미실행으로 표시합니다. 경로를 해석하거나 관측할 수 없으면 교체 전에
+멈춥니다. 작업 공간을 찾지 못하면 `--base-path DIR`을 주거나 `MASC_BASE_PATH`를
+설정하세요. 설정이나 저장 상태가 거부된 경우에도 설치를 중단합니다.
 
 `./quickstart.sh`는 `~/masc-quickstart` 아래에 작업 공간을 만들고, 서버를
 띄우고, MCP bearer를 `.masc/config/mcp-client.env`에 씁니다. Keeper는 띄우지

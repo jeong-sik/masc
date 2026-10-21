@@ -97,7 +97,12 @@ sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
 
 macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이상**이 필요합니다. 설치기가 해당 CPU의 Python과 실행 라이브러리를 검증해 릴리스 파일과 함께 설치합니다. Homebrew나 Xcode 명령줄 도구를 설치하지 않습니다.
 
-기본 sandbox에는 실행 중인 Docker 엔진이 필요하고, 모델 연결에는 해당 CLI 로그인이나 API 인증이 필요합니다. 둘 다 미리 준비해 두면 좋지만, 없어도 설정 화면이 무엇이 빠졌는지 알려주고 설치를 제안합니다.
+설정 화면에서 sandbox 서비스를 확인하고 빠진 준비물의 설치·시작 동작을 제안합니다.
+macOS에서는 공식 다운로드나 안내 페이지를 열며 MASC가 업체 설치기의 서명이나 체크섬을
+검증하는 것은 아닙니다. Linux에서는 제안된 패키지 명령을 실행합니다. 지원되는 Apple
+Silicon Mac에서는 Apple Container를, macOS와 Linux에서는 Docker를 선택할 수 있습니다.
+모델 연결에는 해당 제공자의 구독이나 API 사용 권한이 필요합니다. Claude Code와 Codex는
+연결 검사가 실패했을 때 모델 선택을 유지한 채 로그인 화면을 열 수 있습니다.
 
 시작에 실패하면 설치기가 표시하는 실행 파일 경로와 stderr 원문을 확인하세요. `SIGABRT` 같은 종료 신호만으로 누락 라이브러리라고 단정할 수는 없습니다. `--force`는 workspace 설정을 보존하면서 릴리스 파일을 다시 설치하며, 지원하지 않는 OS를 호환되게 만들지는 않습니다.
 
@@ -169,14 +174,15 @@ bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 먼저 GitHub Releases 에 그 태그가 있는지 확인하세요.
 
 ```bash
-TAG=v0.59.0
+TAG=v0.60.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 ```
 
-태그에서 받은 `install.sh`는 그 태그의 자산을 설치하고, `--version`이 없으면
-설치기가 최신 릴리스를 찾습니다.
+태그의 설치기를 내려받기만 해서는 설치 버전이 고정되지 않습니다. 위처럼
+`--version "$TAG"`도 지정해야 합니다. 생략하면 설치기가 최신 릴리스를 찾습니다.
+예시는 게시된 v0.60.0을 고정하며, `main` 문서에는 그 릴리스에 없는 변경이 있을 수 있습니다.
 
 셸 PATH 변경에 동의한 경우 새 터미널에서 `masc`가 잡힙니다. 그 외에는 설치
 디렉터리를 PATH에 직접 추가하세요. 기본 경로라면
@@ -192,7 +198,7 @@ workspace를 제안합니다. 명시한 `--base-path`는 질문 없이 사용하
 터미널에서 설치하면서 workspace 설정을 새로 만들 때, 그 workspace를 이후 `masc`가 찾는
 기본값으로 기록합니다. 기존 설정을 유지하는 재설치는 기록된 기본값을 건드리지 않습니다. 터미널
 없이 스크립트로 설치하면 기록하지 않으므로, 검증이나 CI 설치가 이 컴퓨터의 기본값을 바꾸지 않습니다. 설치 위치와
-작업 데이터 위치는 독립적입니다. 릴리스 페이지의 `install.sh`는 해당 버전의 자산을 설치하며, 설치기 수정은
+작업 데이터 위치는 독립적입니다. `--version`을 지정하면 해당 버전의 자산을 설치하며, 설치기 수정은
 릴리스 노트에 소스 커밋과 함께 기록합니다. 바이너리 태그는 바꾸지 않습니다.
 체크섬이 없거나 불일치하면 설치를 중단합니다.
 

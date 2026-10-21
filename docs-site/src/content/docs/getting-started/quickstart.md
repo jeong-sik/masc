@@ -3,61 +3,62 @@ title: Quickstart
 description: Connect your model runtime and talk to imp in its default sandbox.
 ---
 
-Install the prebuilt binary for macOS or Linux; no OCaml or Node.js build tools
-are required. This guide targets **0.58.0**. Check publication on
-[Releases](https://github.com/jeong-sik/masc/releases) and use the installer
-attached to the same tag as your binary.
+Install the latest published binary for macOS or Linux; no OCaml or Node.js
+build tools are required. Check [Releases](https://github.com/jeong-sik/masc/releases)
+for the available version and platform requirements.
 
 ```bash
-TAG=v0.58.0
-curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
-  -o /tmp/masc-install.sh
-bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+  -o /tmp/masc-install.sh &&
+bash /tmp/masc-install.sh
 ```
 
-After installation, run this separate command to update PATH in the current terminal.
+With a terminal, the wizard enabled and no `--base-path`, the installer asks
+which directory should hold your workspace. Without that prompt or an explicit
+path, it uses the current directory. Keep the same path when resuming;
+`--base-path` names the directory **containing** `.masc`.
+To inspect the script, download it successfully, read it with
+`less /tmp/masc-install.sh` (`q` exits), then run the `bash` command.
+To pin a release, download its installer and also pass `--version TAG`; see the
+[installation guide](https://github.com/jeong-sik/masc/blob/main/docs/INSTALL.md#install).
+
+## First conversation with `imp`
+
+1. Prepare one model connection: a supported CLI subscription and its login,
+   an API credential, or a local model server with tool support. Claude Code and
+   Codex use their official CLI accounts; an API key is not required for those
+   subscription connections. Setup offers sign-in and retry when a connection
+   check fails and reports account limits separately.
+2. Choose a sandbox in setup. Docker, supported microVM backends and remote SSH
+   are different choices; you do not have to install Docker before installing
+   MASC. Setup checks prerequisites and offers available installation/startup
+   actions. Image preparation and a successful Keeper start are separate checks.
+3. Complete setup to prepare the workspace server and `imp`, then open the TUI.
+   Optional voice and host tools can be configured along the way or later.
+
+If setup did not open, or you chose to finish later, run:
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
+"$HOME/.local/bin/masc" setup
 ```
 
-Optional inspection: run `less /tmp/masc-install.sh` before installation. Press `q` to exit, then run the `bash` installation command above.
+Use your chosen binary directory if you changed `--prefix`. To select the
+workspace explicitly, append `--base-path /path/to/your/workspace` using the
+same directory you chose during installation. A new terminal finds `masc` after
+accepting the PATH prompt; for this terminal, use
+`export PATH="$HOME/.local/bin:$PATH"` with the default prefix.
 
-For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command. The separate `export PATH=...` command takes no installer options.
-
-## First conversation with `imp` (0.58.0)
-
-This is the 0.58.0 installation contract. Check the release tag and asset
-availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) before downloading.
-
-1. Run the installer wizard with `--base-path "$HOME/masc-workspace"` and select
-   the model runtime you own. Runtime setup binds that selection to the helper
-   lanes with `--setup-lanes`; you do not need a second model subscription.
-2. Authenticate that runtime before starting MASC. For Claude Code or Codex,
-   install its CLI and complete its own login, then confirm it can answer a
-   prompt in this terminal. For an API runtime, export the credential variable
-   named by the wizard in this terminal. For a local model, start its server
-   and load a model that supports tool calls. MASC does not install or log in
-   to these model runtimes.
-3. **Bootstrap**: Install and start Docker Desktop on macOS (or Apple Container on macOS 26+), or Docker Engine on Linux (`docker info` must succeed as your current user). In `masc setup`, the **Bootstrap** step checks your sandbox runtime, builds and promotes the default `base` sandbox image, starts or connects to the workspace server, logs in as `local-admin`, and prepares `imp`.
-4. **Tools**: In `masc setup`, the **Tools** step lets you inspect and wire optional host capabilities for `imp` — the automation browser (`geckodriver` + Firefox), live Firefox BiDi or the MASC Firefox/Zen add-on, GitHub CLI (`gh`) login, PDF inspection (`poppler`), and web search (via `ZAI_API_KEY`, another search API key, or the local Docker-backed `masc-searxng` container).
-
-Choose a numbered model or enter an exact model ID. The wizard shows the source
-of its context limit; Codex's observed client limit takes precedence over the
-catalog. If no limit is known, enter the documented value. Claude Code and Codex
-enable tools and streaming automatically. Z.AI credentials use `ZAI_API_KEY`.
-
-```bash
-masc setup --base-path "$HOME/masc-workspace"
-```
-
-`setup` seeds missing configuration, runs the **Bootstrap** and **Tools** steps,
-starts the existing `imp`, and opens the TUI. It preserves the
-Keeper manifest. The default `imp` has `activation_mode = "manual"`,
-`sandbox_profile = "docker"`, `sandbox_image = "base"`, and `network_mode = "inherit"`.
-If another workspace occupies the port, choose a free one with `--port 8936`.
-On exit, setup stops a server it started itself. Use `--no-tui` to leave that
-server running and connect to it separately.
+Setup preserves existing Keeper configuration. A freshly seeded `imp` defaults
+to `activation_mode = "manual"`, `sandbox_profile = "docker"`,
+`sandbox_image = "base"` and `network_mode = "inherit"`; setup can select another
+backend. If another workspace occupies the port, add `--port 8936`.
+In a terminal, `masc setup` without sandbox or network options opens the guided
+journey. It prepares its server with `--no-tui` before opening the TUI separately,
+so leaving that conversation does not stop the prepared server. When you pass
+sandbox or network options directly to `masc setup`, leaving its TUI stops a
+server that setup started itself. Add `--no-tui` to keep that server running and
+connect separately. Setup does not stop a server it reused.
+Use `masc doctor` for a read-only report on the same workspace.
 
 In the TUI, select **Keepers → imp** and send these requests one at a time:
 

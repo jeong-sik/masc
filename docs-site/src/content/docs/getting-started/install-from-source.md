@@ -61,13 +61,21 @@ The keys and surfaces match the prebuilt binary — see the
 ## 4. Enable autonomous Keepers (optional)
 
 As with the prebuilt install, Keepers need a model runtime and a command sandbox.
-Run `masc setup` to configure your model runtime, build the default sandbox image, and start the workspace, or start the server directly with `masc start`:
+Install the source executables and their companions together before using the
+`masc` command. Keep the same workspace used by quickstart above:
 
 ```bash
-masc setup --base-path ~/masc
+scripts/install-local-build.sh --base-path "$HOME/masc-quickstart"
+"$HOME/.local/bin/masc" setup --base-path "$HOME/masc-quickstart"
 # Or start the server directly once configured:
-masc start --base-path ~/masc
+"$HOME/.local/bin/masc" start --base-path "$HOME/masc-quickstart"
 ```
+
+The install script builds and installs the server, TUI, browser host and
+deployment preflight tools in `~/.local/bin`. Use your chosen binary directory
+if you pass `--prefix`. Setup helps configure model access and the selected
+sandbox, then opens the TUI. For a browser dashboard, also follow the dashboard
+build in the [README](https://github.com/jeong-sik/masc#from-source).
 
 See [Local Models](/runbooks/llama-server/) for the no-key option and
 [Docker Sandbox](/runbooks/sandbox/) for the sandbox requirement.

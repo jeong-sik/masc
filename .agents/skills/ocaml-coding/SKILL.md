@@ -78,6 +78,9 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   backtrace가 필요한 caller는 staged 결과를 사용해 예상 host 실패만 타입으로 처리하고,
   취소·예상 밖 오류는 전파한다. 새 임시 파일 프로토콜을 복제하지 않는다. 입력·목적지 종류,
   descriptor identity, 복원 거절의 최초 원인·token·경로 보존은 저장 완료와 별개로 확인한다.
+  agent 세션의 디렉터리 발견은 worker에서 불변 이름만 만들고 owner에 dispatch한다.
+  조회 중 들어온 실제 연결·대기 알림은 현재 state에서 보존하며 없는 이름만 복원한다.
+  discovery 실패·dispatch 전 취소와 이미 수락한 message의 후속 취소를 구분한다.
   현재 protocol/resource 시나리오와 한계는 해당 audit에 두고 Skill에는 재사용할 규율을 적는다.
 
 - Ask 답변 복구의 사전 증거는 같은 회차·Keeper·canonical answer의 UTC-day window에서만

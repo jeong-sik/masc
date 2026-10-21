@@ -2053,6 +2053,11 @@
 ; fd-safe write path (close_out_noerr finally guard).
 
 (test
+ (name test_session_restore)
+ (modules test_session_restore)
+ (libraries alcotest masc eio eio_main unix yojson))
+
+(test
  (name test_server_mcp_session_persist)
  (modules test_server_mcp_session_persist)
  (libraries alcotest masc_server masc.otel_dispatch_hook masc.fs_compat eio eio_main unix yojson))

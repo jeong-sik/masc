@@ -114,7 +114,19 @@ val status_string : registry -> string
 (** List of currently connected agent names. *)
 val connected_agents : registry -> string list
 
-(** Restore sessions from on-disk agent files (call at startup). *)
+(** Restore missing agent sessions from names in the actual owner directory.
+    Host existence/directory checks and name discovery run in the common I/O
+    executor before dispatch, outside the registry state mutex. The actor (or
+    existing direct fallback) creates queues and merges into its current state.
+    Existing sessions retain their queue, timestamps and listening state.
+
+    Matching [.json] entry names, directory/symlink handling and missing/non-
+    directory no-op behavior are unchanged; file contents are not read. A host
+    discovery error reaches the caller before any restore message is queued.
+    Entry/completion cancellation checks prevent a cancelled discovery from
+    dispatching. Cancellation after dispatch does not retract an accepted message
+    or forcibly stop host I/O. Non-Eio callers discover inline. This restores
+    agent-name presence, separately from MCP transport-session authority. *)
 val restore_from_disk : registry -> agents_path:string -> unit
 
 (** {1 MCP Session Store} *)

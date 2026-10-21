@@ -34,7 +34,7 @@ type msg =
   | Push_notification of Yojson.Safe.t * int resolver
   | Get_session of string * session option resolver
   | Get_sessions of session AgentMap.t resolver
-  | Restore_from_disk_req of string * float * unit resolver
+  | Restore_discovered_req of string list * float * unit resolver
 
 type registry_state = {
   sessions: session AgentMap.t;
@@ -301,29 +301,26 @@ let process_msg config state msg =
       Eio.Promise.resolve_ok p status;
       state
 
-  | Restore_from_disk_req (agents_path, now, p) ->
-      let state' = ref state in
-      if Sys.file_exists agents_path && Sys.is_directory agents_path then begin
-        let restored = ref 0 in
-        Sys.readdir agents_path |> Array.iter (fun name ->
-          if Filename.check_suffix name ".json" then begin
-            let agent_name = Filename.chop_suffix name ".json" in
-            let session = {
-              agent_name;
-              connected_at = now;
-              last_activity = now;
-              is_listening = false;
-              message_queue = Eio.Stream.create max_notification_queue;
-            } in
-            state' := { !state' with sessions = AgentMap.add agent_name session !state'.sessions };
-            incr restored
-          end
-        );
-        if !restored > 0 then
-          Log.Session.info "Restored %d session(s) from disk" !restored
-      end;
+  | Restore_discovered_req (agent_names, now, p) ->
+      let sessions, restored = List.fold_left (fun (sessions, restored) agent_name ->
+        (* Discovery may yield before dispatch. A real connection or a prior
+           restore can establish the name in the meantime; keep its live queue
+           and activity rather than replacing it with an empty restored one. *)
+        if AgentMap.mem agent_name sessions then (sessions, restored)
+        else
+          let session = {
+            agent_name;
+            connected_at = now;
+            last_activity = now;
+            is_listening = false;
+            message_queue = Eio.Stream.create max_notification_queue;
+          } in
+          (AgentMap.add agent_name session sessions, restored + 1)
+      ) (state.sessions, 0) agent_names in
+      if restored > 0 then
+        Log.Session.info "Restored %d session(s) from disk" restored;
       Eio.Promise.resolve_ok p ();
-      !state'
+      { state with sessions }
 
 let process_registry_msg registry msg =
   Stdlib.Mutex.protect registry.state_mutex (fun () ->
@@ -362,7 +359,7 @@ let resolve_msg_error msg =
   | Push_notification (_, u) -> cancel u
   | Get_session (_, u) -> cancel u
   | Get_sessions u -> cancel u
-  | Restore_from_disk_req (_, _, u) -> cancel u
+  | Restore_discovered_req (_, _, u) -> cancel u
 
 let start_loop registry ~sw =
   if Atomic.compare_and_set registry.loop_started false true then begin
@@ -503,9 +500,24 @@ let connected_agents registry =
   let sessions = get_sessions registry in
   AgentMap.fold (fun name _ acc -> name :: acc) sessions []
 
+let discover_agent_names ~agents_path =
+  Eio_guard.run_in_systhread ~label:"agent-session-discovery" (fun () ->
+    if Sys.file_exists agents_path && Sys.is_directory agents_path then
+      Sys.readdir agents_path
+      |> Array.to_list
+      |> List.filter_map (fun name ->
+        if Filename.check_suffix name ".json" then
+          Some (Filename.chop_suffix name ".json")
+        else None)
+    else [])
+
 let restore_from_disk registry ~agents_path =
+  Eio_guard.check_if_ready ();
+  let now = Time_compat.now () in
+  let agent_names = discover_agent_names ~agents_path in
+  Eio_guard.check_if_ready ();
   let p, r = Eio.Promise.create () in
-  dispatch registry (Restore_from_disk_req (agents_path, Time_compat.now (), r));
+  dispatch registry (Restore_discovered_req (agent_names, now, r));
   await_exn_if_needed p
 
 (* ============================================ *)

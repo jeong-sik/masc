@@ -13,6 +13,7 @@ import { captureFluidSound } from './soundfont.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
 import { safeText } from './terminal.mjs'
+import { StatusReader } from './status-reader.mjs'
 import { openPlayback } from './playback.mjs'
 import { devices, record, monitorInput } from './capture.mjs'
 import { openLiveMidi, backingMidiClaims, liveMidiPlan } from './live-midi.mjs'
@@ -92,6 +93,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   if (signal?.aborted) return
   let sourceRoot = dirname(path), revision = loaded?.revision ?? null
   let accepting = true, closed = false, suspended = false, takeAbort = null, takeTask = null, phrasePreparation = null, task = Promise.resolve(), prompt = null, status = 'Import a WAV or MIDI source with :help', showHelp = false
+  const statusReader = new StatusReader()
   let pendingDraw = null, sequence = 0, workerFailure = null, recovery = null, terminatingWorker = false
   const failedSavePaths = new Set()
   const directory = await mkdtemp(join(tmpdir(), 'masc-arrangement-play-'))
@@ -848,11 +850,18 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   function keypress(text, key = {}) {
     if (!accepting || closed || suspended) return
     if (key.ctrl && key.name === 'c') { finish(); return }
+    if (statusReader.keypress(text, key, process.stdout)) { draw(); return }
+    if (key.ctrl && key.name === 'l' || prompt === null && text === '!') {
+      statusReader.open('Arrangement status at open', `${status}\n\nProject: ${path}`)
+      draw(); return
+    }
     if (prompt !== null) {
       if (key.name === 'escape') prompt = null
       else if (key.name === 'backspace') prompt = [...prompt].slice(0, -1).join('')
       else if (key.name === 'return') {
         const line = prompt; prompt = null
+        // Reading a status must never finalize an active recording.
+        if (statusReader.command(line, 'Arrangement status at open', `${status}\n\nProject: ${path}`)) { draw(); return }
         if (arrangementCommandAdmission(line).kind === 'stop') {
           derivationAdmission++
           // Also invalidate derivations admitted in this same input batch,
@@ -920,6 +929,8 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   function drawNow() {
     if (closed || suspended) return
+    const reading = statusReader.render(process.stdout)
+    if (reading !== null) { process.stdout.write(reading); return }
     const project = editor.project, clip = selectedRegion(editor), asset = project.assets.find(asset => asset.id === editor.asset)
     const monitorInfo = recording?.monitoring ?? monitoring?.info
     const reportedLatency = monitorInfo ? ` · ${((monitorInfo.latency.inputSeconds + monitorInfo.latency.outputSeconds) * 1000).toFixed(2)} ms reported I/O` : ''
@@ -976,7 +987,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.slice(0, Math.max(0, rows - 2)).forEach((line, index) => { output += `\x1b[${index + 1};1H${fit(line)}` })
     output += `\x1b[${Math.max(1, rows - 1)};1H${fit(prompt === null ? `arrows:cursor/regions  Shift+←→:move  Tab:lane  a:asset  Enter:${asset?.kind === 'capture' ? 'open source' : 'place'}  u/y:undo/redo` : `:${prompt}`)}`
-    output += `\x1b[${rows};1H${fit('s:save  d:duplicate  x:remove  m/o:mute/solo  :commands  ?:help  q:save/back')}`
+    output += `\x1b[${rows};1H${fit('Ctrl-L:status  s:save  d:duplicate  x:remove  m/o:mute/solo  :commands  ?:help  q:save/back')}`
     process.stdout.write(output)
   }
   const onEnd = () => finish(), onSignal = () => finish(), onAbort = () => finish(), onResize = () => draw()

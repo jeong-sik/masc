@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { emitKeypressEvents } from 'node:readline'
 import cliTruncate from 'cli-truncate'
 import { safeText } from './terminal.mjs'
+import { StatusReader } from './status-reader.mjs'
 import { inspectMusicEntry } from './music-library-info.mjs'
 
 const actions = [
@@ -155,6 +156,9 @@ export async function viewMusic(options = {}) {
   let finish, prompt = null
   const done = new Promise(resolve => { finish = resolve })
   const model = new MusicWorkbench({ ...options, changed: draw })
+  const statusReader = new StatusReader()
+  const statusBody = () => [model.status, ...model.errors.map(error => `${error.root}: ${error.message}`),
+    '', ...details(), '', `Projects: ${model.projectRoot}`, `Takes: ${model.sessionRoot}`].join('\n')
   function details() {
     const selected = model.inspection
     if (!selected) return []
@@ -185,6 +189,8 @@ export async function viewMusic(options = {}) {
   }
   function draw() {
     if (model.closed || model.child) return
+    const reading = statusReader.render(process.stdout)
+    if (reading !== null) { process.stdout.write(reading); return }
     const rows = process.stdout.rows || 24, columns = process.stdout.columns || 80
     const detail = details()
     const available = Math.max(1, rows - 9 - (detail.length ? detail.length + 1 : 0))
@@ -203,12 +209,17 @@ export async function viewMusic(options = {}) {
     })
     const footer = prompt === null ? '↑/↓ choose · Enter open · r refresh · :open PATH · :midi PATH · :session PATH' : ':' + prompt
     output += `\x1b[${rows - 1};1H${cliTruncate(safeText(footer), Math.max(0, columns - 1))}`
-    output += `\x1b[${rows};1Hq / Esc: return`
+    output += `\x1b[${rows};1H${cliTruncate('Ctrl-L:status · q / Esc: return', Math.max(0, columns - 1))}`
     process.stdout.write(output)
   }
   function keypress(text, key = {}) {
     if (model.closed || model.child) return
     if (key.ctrl && key.name === 'c') { finish(); return }
+    if (statusReader.keypress(text, key, process.stdout)) { draw(); return }
+    if (key.ctrl && key.name === 'l' || prompt === null && text === '!') {
+      statusReader.open('Music library status at open', statusBody())
+      draw(); return
+    }
     if (prompt !== null) {
       if (key.name === 'escape') prompt = null
       else if (key.name === 'backspace') prompt = [...prompt].slice(0, -1).join('')
@@ -216,6 +227,7 @@ export async function viewMusic(options = {}) {
         const line = prompt.trim(), split = line.indexOf(' ')
         const command = split < 0 ? line : line.slice(0, split), path = split < 0 ? '' : line.slice(split + 1).trim()
         prompt = null
+        if (statusReader.command(line, 'Music library status at open', statusBody())) { draw(); return }
         const kinds = { open: 'project', midi: 'midi', session: 'session' }
         if (Object.hasOwn(kinds, command) && path) {
           const expanded = path.startsWith('~/') ? join(homedir(), path.slice(2)) : resolve(path)

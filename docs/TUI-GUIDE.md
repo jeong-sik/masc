@@ -1728,6 +1728,16 @@ existing files. `q` returns from an editor to the library and from the library
 to MASC. The phrase editor's first audio Space opens instrument/preset selection;
 `i` changes it. Install or update the helper with `scripts/install-alphatex.sh`.
 
+In the music library, phrase and arrangement editors, and recording/take screen,
+`Ctrl-L` opens the full status and source path observed at that moment. Scroll
+with arrows, Page Up/Down or Home/End; Esc, q or Enter returns to the underlying
+screen. In normal browsing, `!` opens the same reading; `:status` is its
+argument-free command. Ctrl-L also works while entering a command or choosing
+an instrument and keeps that input/selection. The reading never saves, edits,
+starts playback or finalizes recording. Work already running continues; close
+and reopen to read a newer status. Earlier overwritten messages and recovery
+messages emitted only after exit are not retained by this reading.
+
 In Keeper chat, `/score [N]` opens a frozen alphaTex block in the same terminal
 with the official alphaTab engine for full notation, track selection, zoom,
 scroll and local synthesized playback. N counts closed scores newest first.

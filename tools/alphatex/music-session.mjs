@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process'
 import { devices, record } from './capture.mjs'
 import { CaptureTimeline, readCapture, waveform, exportMidiClips } from './session-data.mjs'
 import { safeText } from './terminal.mjs'
+import { StatusReader } from './status-reader.mjs'
 
 // The score viewer lends us its terminal while suspended; standalone invocation
 // additionally owns alternate screen/raw mode and restores exactly what it acquired.
@@ -24,6 +25,7 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
   let phase = directory ? 'loading' : 'discovering', status = '', closed = false, scroll = 0, dirty = false
   let start = 0, span = 10, follow = true, exportTask = null
   let helpShown = false
+  const statusReader = new StatusReader()
   const wasRaw = process.stdin.isRaw
   let finish
   const done = new Promise(resolve => { finish = () => { discoveryAbort.abort(); resolve() } })
@@ -42,6 +44,8 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
   function draw() {
     if (closed) return
     dirty = false
+    const reading = statusReader.render(process.stdout)
+    if (reading !== null) { process.stdout.write(reading); return }
     const rows = process.stdout.rows || 24, width = Math.max(1, (process.stdout.columns || 80) - 9)
     if (follow && timeline) start = Math.max(0, timeline.duration - span)
     const lines = [
@@ -97,7 +101,7 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.forEach((line, row) => { if (row < rows - 1) output += `\x1b[${row + 1};1H${fit(line)}` })
-    output += `\x1b[${rows};1H${fit(prompt === null ? 'r:record  s:save  Space:play/stop  p:pause/resume  :seek SECONDS  q:back  ?:help' : `:${prompt}`)}`
+    output += `\x1b[${rows};1H${fit(prompt === null ? 'Ctrl-L:status  r:record  s:save  Space:play/stop  p:pause/resume  :seek SECONDS  q:back  ?:help' : `:${prompt}`)}`
     process.stdout.write(output)
   }
   function stopPlayer() {
@@ -200,16 +204,25 @@ export async function viewSession({ directory, root = resolve('music-sessions'),
     else throw new Error('Use :seek SECONDS, :pause, :resume, :stop, :source SOURCE_ID MIDI_UID, :midi-output MIDI_UID or :output AUDIO_UID')
   }
   function keypress(text, key = {}) {
+    if (key.ctrl && key.name === 'c') { finish(); return }
+    if (statusReader.keypress(text, key, process.stdout)) { draw(); return }
+    if (key.ctrl && key.name === 'l' || prompt === null && text === '!') {
+      statusReader.open('Music session status at open', `${phase}\n${status}\n\nTake: ${take ?? root}`)
+      draw(); return
+    }
     if (prompt !== null) {
-      if (key.ctrl && key.name === 'c') { finish();return }
       if (key.name === 'escape') prompt = null
       else if (key.name === 'backspace') prompt = [...prompt].slice(0, -1).join('')
-      else if (key.name === 'return') { const line = prompt;prompt = null;try { outputCommand(line) } catch (error) { status = error.message } }
+      else if (key.name === 'return') {
+        const line = prompt; prompt = null
+        if (statusReader.command(line, 'Music session status at open', `${phase}\n${status}\n\nTake: ${take ?? root}`)) { draw(); return }
+        try { outputCommand(line) } catch (error) { status = error.message }
+      }
       else if (text && !key.ctrl && !key.meta) prompt += safeText(text)
       draw();return
     }
     if (text === ':') { prompt = '';draw();return }
-    if (key.ctrl && key.name === 'c' || ['q', 'escape'].includes(key.name)) { finish(); return }
+    if (['q', 'escape'].includes(key.name)) { finish(); return }
     if (text === '?') { helpShown = !helpShown; scroll = 0; draw(); return }
     switch (key.name) {
       case 'p':

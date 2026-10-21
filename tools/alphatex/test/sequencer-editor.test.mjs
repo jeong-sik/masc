@@ -1,3 +1,4 @@
+import { StatusReader } from '../status-reader.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { newEditor, editorCommand, editorAction, selectedNote } from '../sequencer-editor.mjs'
@@ -140,7 +141,7 @@ test('loading a saved arrangement dispatches before phrase terminal or backgroun
   const ownership = { raw: [], workers: 0, temporary: 0 }
   const dispatched = []
   const process = { stdin: { isTTY: true, setRawMode(value) { ownership.raw.push(value) } }, stdout: { isTTY: true } }
-  globalThis[slot] = { process, loadProject, newEditor, join, tmpdir, randomUUID, defaultStateDirectory,
+  globalThis[slot] = { StatusReader, process, loadProject, newEditor, join, tmpdir, randomUUID, defaultStateDirectory,
     async openArrangement(options) { dispatched.push(options) },
     async mkdtemp() { ownership.temporary++; throw new Error('Unexpected terminal temporary directory') },
     Worker: class { constructor() { ownership.workers++; throw new Error('Unexpected terminal worker') } } }

@@ -1,3 +1,4 @@
+import { StatusReader } from '../status-reader.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { EventEmitter } from 'node:events'
@@ -16,7 +17,7 @@ async function scenario(paired) {
  const timeline={duration:1,channels:0,midi:new Map(),manifest:{state:'recorded',input:{name:'Synthetic'}}}
  const slot='capture-controller-'+randomUUID()
  const abort=new AbortController()
- globalThis[slot]={process,join,resolve,tmpdir,randomUUID,safeText:String,emitKeypressEvents(){},
+ globalThis[slot]={ StatusReader,process,join,resolve,tmpdir,randomUUID,safeText:String,emitKeypressEvents(){},
   mkdtemp:async()=>'/private-owned-play',mkdir:async()=>{},rm:async path=>observed.removed.push(path),
   devices:async()=>({audio:[],midi:[]}),midiDestinations:async()=>[],readCapture:async()=>timeline,
   CaptureTimeline:class{},waveform(){throw Error('No waveform expected')},exportMidiClips(){throw Error('No export expected')},record(){throw Error('No recording expected')},spawn(){throw Error('Selected output must use native playback')},

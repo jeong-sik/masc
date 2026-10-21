@@ -1,4 +1,5 @@
 import {MidiSourcePicker as ActualMidiSourcePicker}from '../midi-source-picker.mjs'
+import { StatusReader } from '../status-reader.mjs'
 import {phraseBacking} from '../phrase-backing.mjs'
 import {sameStepContext,stepControl}from '../step-input.mjs'
 import test from 'node:test'
@@ -32,7 +33,7 @@ async function controller(options = {}) {
   }
   const slot = `sequencer-${randomUUID()}`
   globalThis[slot] = {
-    process, sameStepContext, stepControl, phraseBacking, ...editor, Worker, InstrumentPicker,
+    process, sameStepContext, stepControl, phraseBacking, ...editor, Worker, InstrumentPicker, StatusReader,
     isFluidSound, GM_DRUM_CHANNEL,
     captureFluidSound() { throw new Error('Unexpected FluidSynth selection') },
     renderFluidSound() { throw new Error('Unexpected FluidSynth render') },

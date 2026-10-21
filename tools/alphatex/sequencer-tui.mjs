@@ -13,6 +13,7 @@ import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
 import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceMeters, selectedMeter } from './midi-source-editor.mjs'
 import { safeText } from './terminal.mjs'
+import { StatusReader } from './status-reader.mjs'
 import { openPlayback } from './playback.mjs'
 import { InstrumentPicker, pickerFooter, selectionLabel } from './instruments.mjs'
 import { defaultStateDirectory, snapshotWriter } from './vst.mjs'
@@ -94,6 +95,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   path = loaded?.path ?? join(root, `phrase-${randomUUID()}.json`)
   const initialSnapshot = editor.project
   let saved = loaded?.project, status = 'Enter a note or :help', prompt = null, showHelp = false
+  const statusReader = new StatusReader()
   let loop = false, accepting = true, closed = false, suspended = false, task = Promise.resolve(), childTask = null
   let harmony = null
   let stepInput = null, stepHeld = 0
@@ -198,6 +200,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   }
   function drawNow() {
     if (closed || suspended) return
+    const reading = statusReader.render(process.stdout)
+    if (reading !== null) { process.stdout.write(reading); return }
     const rows = process.stdout.rows || 24, cols = Math.max(1, (process.stdout.columns || 80) - 8)
     const project = editorView(editor), axis = editorAxis(editor), per = axis.per, track = project.tracks[editor.track], current = selectedNote(editor)
     const percussion = editor.project.kind !== 'midi-source' && track.channel === GM_DRUM_CHANNEL
@@ -314,7 +318,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.slice(0, rows - 2).forEach((line, row) => { output += `\x1b[${row + 1};1H${fit(line)}` })
     output += `\x1b[${rows - 1};1H${fit(sourcePicker.view ? '↑/↓:choose  Enter:arm keyboard  r:refresh  Esc/q:cancel' : picker.view ? pickerFooter(picker.view) : prompt !== null ? `:${prompt}` : harmony ? '↑/↓:choose interval  Enter:go to notes  :commands  Esc/q:return' : 'Space:play  i:instrument  Enter:note  arrows:cursor  Tab:track  :commands  ?:help')}`
-    if (!picker.view) output += `\x1b[${rows};1H${fit(sourcePicker.view ? openedSourceMenuOwner?.monitor ? 'Selection arms step input with the chosen instrument and audio output.' : 'Selection opens MIDI input only; no audio or output route.' : harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 's:save  l:loop  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
+    if (!picker.view) output += `\x1b[${rows};1H${fit(sourcePicker.view ? openedSourceMenuOwner?.monitor ? 'Selection arms step input with the chosen instrument and audio output.' : 'Selection opens MIDI input only; no audio or output route.' : harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 'Ctrl-L:status  s:save  l:loop  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
     process.stdout.write(output)
   }
   function stop(options) {
@@ -621,6 +625,11 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       }).catch(error => { status = error.message }).finally(draw)
       return
     }
+    if (statusReader.keypress(text, key, process.stdout)) { draw(); return }
+    if (key.ctrl && key.name === 'l' || prompt === null && !picker.view && text === '!') {
+      statusReader.open('Phrase status at open', `${status}\n\nProject: ${path}`)
+      draw(); return
+    }
     if (picker.view) {
       if (key.name === 's' && !picker.view.searching
           && ['plugins', 'presets'].includes(picker.view.kind)) {
@@ -634,6 +643,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       else if (key.name === 'backspace') prompt = [...prompt].slice(0, -1).join('')
       else if (key.name === 'return') {
         const line = prompt; prompt = null
+        if (statusReader.command(line, 'Phrase status at open', `${status}\n\nProject: ${path}`)) { draw(); return }
         let admittedEffect
         try { admittedEffect = stepInputEffect(line) }
         catch (error) { status = error.message; draw(); return }

@@ -25238,6 +25238,7 @@ and is loaded on demand through keeper_skill.
           overlays the card is drawn over. *)
        | Some (Pasted _) when Option.is_some (current_task_inspector state) -> ()
        | Some (Pasted _) when Option.is_some (current_chat_call_reader state) -> ()
+       | Some (Pasted _) when Option.is_some (current_board_reader state) -> ()
        | Some (Pasted _) when Option.is_some (current_detail_reading state) -> ()
        | Some (Pasted _) when state.msx_open -> ()
        | Some (Pasted _) when Option.is_some (Masc_tui_types.play_card_shown state) -> ()

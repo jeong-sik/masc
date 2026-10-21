@@ -666,8 +666,10 @@ let handle_act ~base_path ~tool_name ~start_time args =
    (RFC-browser-keeper-firefox §3.5): with the chosen one gone or of another
    transport. An interact request always names a tab, and a tab names the
    connection it was observed on, so it never reaches this with no connection
-   or with several to choose from. The request itself is not sent there: its
-   tab and point were observed on another connection. *)
+   or with several to choose from: [Browser_selection.resolve] answers an
+   unchosen route with [Binding_required] while a tab is named. The request
+   itself is not sent there: its tab and point were observed on another
+   connection. *)
 let bidi_start_for verb (error : Browser_lane.selection_error) =
   match Browser_lane.live_capability verb with
   | None -> None

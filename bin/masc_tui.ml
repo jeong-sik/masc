@@ -14135,6 +14135,11 @@ let launch_ask_followup_load state ~mailbox =
     | Some expected_workspace, Some (request, submission, keeper_name) ->
         let read=capture_ask_followup_read ~instance:state.observation_instance
           ~request ~submission ~expected_workspace ~admission_started_ns in
+        (match state.observation_store with
+         | None -> ()
+         | Some store -> ignore (Masc_tui_observation_store.record_admission store
+             ~origin:read.afr_origin ~request:(Snapshot_read.request_id request)
+             ~admission_started_ns));
         let host=server_peer_host and port=state.port in
         let clock=Eio_context.get_clock_opt () in
         let envelope=capture_workspace_message state in
@@ -22150,12 +22155,13 @@ let main
   (* The client ring is process-local. Its structured details need their own
      file sink; the server's dashboard and this stderr mirror cannot persist
      them. Keep initialization failure diagnostic and let the surface open. *)
-  ignore (Masc_tui_observation_store.initialize ~base_path);
+  let observation_store=Masc_tui_observation_store.initialize ~base_path in
   let state =
     create_state ~reasoning_visibility ~tool_visibility ~workspace
       ~local_base_path:base_path ~port
       ~refresh_interval:refresh ()
   in
+  state.observation_store <- Result.to_option observation_store;
   state.view <- Overview;
 
   let tui_settings_read = Masc_tui_config.prepare_startup_read

@@ -8130,6 +8130,8 @@ type lane_nested_read =
 
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
+  (* Opening process store; workspace withdrawal never replaces its owner. *)
+  mutable observation_store : Masc_tui_observation_store.t option;
   mutable home_selected : home_action option;
   mutable home_decision_scroll : int;
   mutable home_opened_request : home_request option;
@@ -15020,6 +15022,7 @@ let create_state
   {
   observation_instance = Masc_tui_observation_origin.create_instance
     ~id:(Random_id.uuid_v7 ()) ~client_version:Build_version.current;
+  observation_store = None;
   home_selected = None;
   home_decision_scroll = 0;
   home_opened_request = None;

@@ -15,13 +15,14 @@ not overwritten. This source unit has not run this command or its resource case.
 
 ## Packet contract
 
-The packet has `schema_version: 1` and a `cases` list. Each case has a unique
+The packet has `schema_version: 2` and a `cases` list. Each case has a unique
 nonempty `id` and `before`/`after` objects. Each object contains exactly:
 
 | Field | Value |
 |---|---|
 | `instances` | Nonempty list of original `origin.tui_instance_id` strings |
 | `attempts` | Independent roster of original attempt objects described below |
+| `admissions` | List of independent admission JSONL artifact objects |
 | `conditions` | Five declared SHA256 condition values, or null when unknown |
 | `source_commit` | Declared 40-character lowercase commit, or null |
 | `binary` | Optional artifact object, or null; verified bytes are not execution proof |
@@ -41,8 +42,18 @@ Each declared attempt has `instance_id`, `request`, and
 an original nonnegative Int64 nanosecond value, not the string clock schema of
 the separate startup report. Preserve the independent full admitted-attempt
 roster; selecting successful reads from the log alone cannot recover filtered or
-unlogged attempts. All observed reads for the selected instances are unioned
-with this roster; undeclared observed attempts and reused instances across arms
+unlogged attempts. Main appends each original admitted read before dispatch to
+`admissions/ask-followup.jsonl` in the same private client session, independently
+of log severity. Copy and hash this file separately from daily Log.Ring files.
+Each journal row has `schema_version: 1`, `event: "tui_ask_followup_admission"`
+and the three original attempt fields. It contains no question/answer body or
+inferred outcome. Empty journals do not invent attempts.
+
+All journaled and observed reads for selected instances are unioned with the
+supplied roster. An attempt may occur in both the roster and journal. Duplicate
+journal rows/artifacts and malformed records are evidence errors; original
+file/digest/line references remain in JSON. Undeclared observed attempts and
+reused instances across arms
 or cases are reported as evidence errors, not silently excluded.
 
 ## Output and interpretation
@@ -68,6 +79,12 @@ Producer/UI cause differences remain visible rather than being forced equal.
 Conflicting singleton facts, changed original capsules, invalid clocks, malformed
 selected evidence, artifact changes and duplicate rows invalidate comparison.
 Known declared attempts and case/arm slots remain even when artifacts fail.
+Valid journaled attempts also remain when daily log artifacts fail. If the
+journal itself is invalid, only the supplied roster and other valid evidence
+can preserve those identities. The reader never invents missing attempts.
+Hash-matched journal bytes do not prove complete capture: initialization/write
+failure or interruption before flush can still lose identities. Warnings are
+best effort and subject to logger policy.
 Exit 2 indicates invalid evidence or a packet/output error; reports retain the
 available facts when they can be written. Exit 0 means the descriptive packet was
 read, not that execution, improvement, source/binary identity or completeness was
@@ -79,3 +96,9 @@ Do not add intervals across processes or call this a full cold-start/usable-inpu
 measurement. Successful follow-up reads do not prove original Task useful work,
 visible UI, installation or model behavior. The complete multi-axis objective
 still needs independently matched actual execution evidence.
+
+Admission appends reuse the serialized Fs_compat JSONL backend and flush before
+the started observation/dispatch. They add synchronous preparation and storage
+work after `read_admission_started_ns`; observed admission-to-start, worker and
+UI intervals include it. Flush is not fsync, and no latency improvement is claimed.
+Failed capture leaves observation dispatch available; it grants no authority.

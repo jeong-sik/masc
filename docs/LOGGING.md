@@ -143,3 +143,12 @@ is added here with its reason.
 A static component such as `"agent_core:event"` does route through `Log`: a
 module's `name` string may contain a colon even though the OCaml identifier
 cannot, and that site is the `Agent_core_event` module.
+
+### TUI admission evidence
+
+Each private TUI session also keeps `admissions/ask-followup.jsonl`. It records
+original admitted follow-up identities before dispatch independently of log level.
+Copy it separately from daily logs for the [comparison packet](guides/TUI-ASK-FOLLOWUP-COMPARISON.md).
+Missing event logs remain unobserved attempts. Journal writes add synchronous
+preparation/flush work; capture failures are best-effort warnings and can leave
+unknown attempts. Retained bytes do not prove exhaustive capture or execution.

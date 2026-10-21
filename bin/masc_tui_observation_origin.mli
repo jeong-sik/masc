@@ -6,6 +6,8 @@ val create_instance : id:string -> client_version:string -> instance
     at the TUI lifetime boundary. No clock, entropy or I/O is performed here. *)
 type t
 val capture : instance -> expected_workspace:Masc.Tui_decode.server_identity -> t
+val instance_id : t -> string
+(** The original captured process identity, without decoding serialized facts. *)
 val to_json : t -> Yojson.Safe.t
 (** Prepare the immutable JSON once at read admission. Server version/commit are
     the identity observed at admission, not proof of which binary later served

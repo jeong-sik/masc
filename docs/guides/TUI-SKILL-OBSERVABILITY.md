@@ -21,6 +21,19 @@ batch/dependency view remains available. Diagram acquisition captures geometry
 and palette, has no terminal effects in its worker, and rejects results after
 selection, workspace, Keeper or view changes.
 
+The selected Skill's **SKILL PERFORMANCE** card appears above the catalog, so
+its measurements are visible without scrolling past every Skill. Press `f`
+outside the async-request section to select the next Composition and load its
+exact-revision measurements. This returns to **호출 범위** and the top of the
+pane. `Enter` reloads the selected revision. The same actions work with normal
+terminal keys; no image helper is required for the charts.
+
+The card compares completed and failed mean executor duration on one shared
+zero-based axis and shows completed/failed/deferred counts as distribution bars.
+Missing samples remain unobserved, while observed zero durations remain 0ms.
+These are aggregate comparisons, not a time-series or latency percentile chart.
+Normal Skills have an explanation instead of a fabricated duration chart.
+
 Press `Enter` to load evidence for the selected **exact content revision**.
 The observation shows the latest original activation/composition and every
 retained settlement's actual input, result disposition, measured duration,

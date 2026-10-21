@@ -561,19 +561,36 @@ let skill_io_lines = function
                (if route.sor_pointer = "" then "(root)" else Terminal_text.single_line route.sor_pointer)) routes)
 ;;
 
-let skill_statistics_lines = function
-  | None -> [Ansi.dim, "     Average executor duration: unavailable"]
+let skill_statistics_lines ~cols = function
+  | None -> [Ansi.dim, "실행 시간 집계 없음 · 미관측은 0ms가 아닙니다"]
   | Some stats ->
-      let duration name (row : Masc.Tui_decode_skill_evidence.duration_statistics) =
-        Ansi.dim, Printf.sprintf "       %s: %s · samples=%d" name
-          (Option.fold ~none:"not observed" ~some:(Printf.sprintf "%.1fms") row.sds_mean_ms)
-          row.sds_samples in
-      [Ansi.bold, Printf.sprintf "     Average recorded executor duration · exact revision · all Keepers · retained runs=%d"
-          stats.Masc.Tui_decode_skill_evidence.scst_records;
-       duration "completed" stats.scst_completed;
-       duration "failed" stats.scst_failed;
-       Ansi.dim, Printf.sprintf "       deferred=%d (excluded from terminal means)" stats.scst_deferred;
-       Ansi.dim, "       Stored executor result only; asynchronous queue/dependency waits and model latency are not measured here"]
+      let rows =
+        [ "completed", Theme.ok (), stats.Masc.Tui_decode_skill_evidence.scst_completed
+        ; "failed", Theme.bad (), stats.scst_failed ] in
+      let peak = List.fold_left (fun peak (_, _, row) ->
+        match row.Masc.Tui_decode_skill_evidence.sds_mean_ms with
+        | None -> peak | Some value -> max peak value) 0. rows in
+      let bar_width = max 0 (Masc_tui_frame.inner_width ~cols - 43) in
+      let duration (name, style, row) =
+        match row.Masc.Tui_decode_skill_evidence.sds_mean_ms with
+        | None -> Ansi.dim, Printf.sprintf "%s   —  · n=%d (미관측)" name row.sds_samples
+        | Some value ->
+          let filled = if peak <= 0. then 0 else
+            min bar_width (max 0 (int_of_float (value /. peak *. float_of_int bar_width))) in
+          let repeat glyph count = String.concat "" (List.init count (fun _ -> glyph)) in
+          style, Printf.sprintf "%-9s %s%s  %.1fms · n=%d" name
+            (repeat "█" filled) (repeat "░" (bar_width - filled)) value row.sds_samples in
+      [ Theme.info (), Printf.sprintf "평균 executor 실행 시간 · 보존 실행 %d건" stats.scst_records ]
+      @ List.map duration rows
+      @ [ Ansi.dim, "막대: 0 → 관측된 최대 평균 · 동일 revision / 전체 Keepers"
+        ; Ansi.bold, "실행 결과 분포" ]
+      @ (Masc_tui_chart.distribution_bars
+           ~width:(max 1 (Masc_tui_frame.inner_width ~cols - 4))
+           [ { name = "completed"; count = stats.scst_completed.sds_samples; style = Some Masc_tui_theme.Ok }
+           ; { name = "failed"; count = stats.scst_failed.sds_samples; style = Some Masc_tui_theme.Bad }
+           ; { name = "deferred"; count = stats.scst_deferred; style = Some Masc_tui_theme.Warn } ]
+         |> List.map (fun line -> "", line))
+      @ [ Ansi.dim, "deferred는 평균에서 제외 · queue/의존 대기/model 시간은 별도" ]
 ;;
 
 let skill_settlement_lines composition =
@@ -910,9 +927,9 @@ let tools_display_lines ?(cols = 80) (state : state) =
                 (List.length flow.sf_nodes) )
             :: batch_lines
         in
-        let selected_skill_evidence_lines =
+        let selected_skill_statistics_lines, selected_skill_evidence_lines =
           match List.nth_opt ets_skill_profiles state.tools_skill_cursor with
-          | None -> []
+          | None -> [], []
           | Some profile ->
             let key =
               Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string
@@ -921,6 +938,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
              | Some (observed_key, json) when String.equal key observed_key ->
               (match Masc.Tui_decode_skill_evidence.decode_skill_evidence json with
                | Error _ ->
+                 [ Theme.bad (), "실측 응답 형식 오류" ],
                  [ Theme.bad (), "     Retained evidence response is malformed" ]
                | Ok evidence ->
                let evidence_lines =
@@ -1078,12 +1096,30 @@ let tools_display_lines ?(cols = 80) (state : state) =
                in
                let statistics_lines = match profile.esp_io with
                  | Masc.Tui_decode_tools.Model_orchestrated -> []
-                 | Composition_io _ -> skill_statistics_lines evidence.se_composition_statistics in
-               statistics_lines @ evidence_lines
+                 | Composition_io _ -> skill_statistics_lines ~cols evidence.se_composition_statistics in
+               statistics_lines, evidence_lines
                @ Option.fold ~none:[] ~some:skill_settlement_lines evidence.se_composition
                @ coverage_lines)
              | Some _ | None ->
+               [ Ansi.dim, "Enter: 선택 revision 실측 불러오기 · f: 다음 Composition 실측" ],
                [ Ansi.dim, "     Retained evidence: Enter to load this exact revision" ])
+        in
+        let performance_card =
+          match selected_tools_skill_profile state with
+          | None -> []
+          | Some profile ->
+            let rows = match profile.esp_io with
+              | Masc.Tui_decode_tools.Model_orchestrated ->
+                  [ Ansi.dim, "Normal Skill · 지침 텍스트에는 executor 실행 시간이 없습니다"
+                  ; Theme.info (), "f: Composition 선택 + 실측 불러오기 · J/K: Skill 선택" ]
+              | Composition_io _ -> selected_skill_statistics_lines in
+            let pending = match state.tools_evidence_reference, state.tools_evidence_request with
+              | Some reference, Some _ when Skill_reference.equal reference profile.esp_reference ->
+                  [ Theme.info (), "실측 조회 중 · 이전 관측이 있으면 함께 표시합니다" ]
+              | Some _, Some _ | Some _, None | None, Some _ | None, None -> [] in
+            skill_usage_box ~cols
+              ((Ansi.bold, "SKILL PERFORMANCE · " ^ Terminal_text.single_line profile.esp_name)
+               :: pending @ rows)
         in
         [ Ansi.bold,
           Printf.sprintf " Effective Keeper Surface — %s (%s)"
@@ -1093,8 +1129,9 @@ let tools_display_lines ?(cols = 80) (state : state) =
           Printf.sprintf "   runtime=%s  client=%s  native=%s"
             (Terminal_text.single_line ets_runtime_id)
             (Terminal_text.single_line ets_official_client_kind)
-            native;
-          delivery_tone, "   Runtime 도구 전달: " ^ delivery;
+            native ]
+        @ performance_card
+        @ [ delivery_tone, "   Runtime 도구 전달: " ^ delivery;
           Ansi.dim,
           Printf.sprintf "   instruction skills=%s  composition skills=%s"
             (Terminal_text.single_line instruction)

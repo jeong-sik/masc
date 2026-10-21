@@ -28613,6 +28613,19 @@ and is loaded on demand through keeper_skill.
        | Some ("t" | "T") when state.view = Tools && state.tools_pane = Tools_async && state.tools_async_detail_open ->
            open_tools_async_source_task state ~mailbox:async_messages
        | Some "\x0f" when state.view = Tools && state.tools_pane <> Tools_async -> handle_skill_diagram ()
+       | Some "f" when state.view = Tools && state.tools_pane <> Tools_async ->
+           let profiles = tools_skill_profiles state in
+           let compositions = List.mapi (fun index profile -> index, profile) profiles
+             |> List.filter (fun (_, profile) -> match profile.Masc.Tui_decode_tools.esp_io with
+                  | Model_orchestrated -> false | Composition_io _ -> true) in
+           let next = List.find_opt (fun (index, _) -> index > state.tools_skill_cursor) compositions in
+           (match (match next with Some _ -> next | None -> List.nth_opt compositions 0) with
+            | None -> report_action state "system" "No Composition Skill is available on this Keeper surface"
+            | Some (index, _) ->
+                state.tools_skill_cursor <- index;
+                state.tools_pane <- Tools_surface;
+                state.tools_scroll <- 0;
+                handle_skill_evidence ())
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
        | Some "\r" when state.view = Tools && state.tools_pane = Tools_async ->

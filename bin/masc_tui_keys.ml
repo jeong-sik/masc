@@ -1058,6 +1058,8 @@ let for_surface = function
       ; b Navigate "J/K" "Skill"
           ~help:"in async runs, select an original request; otherwise select \
                  a published Skill"
+      ; b Act "f" "Composition performance"
+          ~help:"outside async requests, select the next Composition and load its exact-revision performance charts"
       ; b Act "Enter" "Skill evidence" ~help:"load retained evidence for the selected exact Skill revision"
       ; b Act "Ctrl-O" "Skill graph" ~help:"outside async requests, preview the declared composition with Pele"
       ; b Navigate "[ / ]" "Keeper" ~help:"change the effective Keeper surface"

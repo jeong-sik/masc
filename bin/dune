@@ -1908,6 +1908,7 @@
   masc.runtime
   masc_types
   masc_tui_ansi
+  masc_tui_chart
   masc_tui_token_scale
   masc_tui_context_inspector
   masc_keeper_registry

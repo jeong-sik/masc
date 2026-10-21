@@ -296,7 +296,6 @@ val read_owned_directory
   -> ?inventory_root:owned_inventory_root
   -> ?before_read:(string -> unit)
   -> ?after_read:(string -> unit)
-  -> ?sync_directory:(Unix.file_descr -> unit)
   -> ownership_root:string
   -> string
   -> (string list, owned_regular_file_read_error) result
@@ -306,7 +305,6 @@ val read_owned_directory_if_present
   -> ?inventory_root:owned_inventory_root
   -> ?before_read:(string -> unit)
   -> ?after_read:(string -> unit)
-  -> ?sync_directory:(Unix.file_descr -> unit)
   -> ownership_root:string
   -> string
   -> (string list option, owned_regular_file_read_error) result
@@ -315,10 +313,7 @@ val read_owned_directory_if_present
     root/ancestors pass fresh identity, UID and permission validation. The root
     itself must be bound; missing/replaced root authority is always an error.
     A missing path or failure after the requested directory was bound, including
-    enumeration/final-validation failure, remains an error. [sync_directory],
-    when supplied, settles every actual bound directory descriptor before
-    final validation, including the existing ancestors of an absent child.
-    A settlement failure is an error, never absence. [Some []] is an
+    enumeration/final-validation failure, remains an error. [Some []] is an
     existing empty directory. Uses the same no-follow descriptors and cleanup
     contract as {!read_owned_directory}, never a separate pathname preflight. *)
 

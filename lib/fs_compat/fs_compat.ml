@@ -1274,16 +1274,16 @@ let read_owned_directory_listing ?owner_uid ?inventory_root
       result)
 ;;
 
-let read_owned_directory ?owner_uid ?inventory_root ?before_read ?after_read ?sync_directory ~ownership_root path =
-  match read_owned_directory_listing ?owner_uid ?inventory_root ?before_read ?after_read ?sync_directory
+let read_owned_directory ?owner_uid ?inventory_root ?before_read ?after_read ~ownership_root path =
+  match read_owned_directory_listing ?owner_uid ?inventory_root ?before_read ?after_read
       ~visit_directory:(fun _ names -> names) ~allow_initial_absence:false ~ownership_root path with
   | Ok (Owned_directory_entries names) -> Ok names
   | Ok (Owned_directory_absent error) -> Error error
   | Error _ as error -> error
 ;;
 
-let read_owned_directory_if_present ~owner_uid ?inventory_root ?before_read ?after_read ?sync_directory ~ownership_root path =
-  read_owned_directory_listing ~owner_uid ?inventory_root ?before_read ?after_read ?sync_directory
+let read_owned_directory_if_present ~owner_uid ?inventory_root ?before_read ?after_read ~ownership_root path =
+  read_owned_directory_listing ~owner_uid ?inventory_root ?before_read ?after_read
     ~visit_directory:(fun _ names -> names) ~allow_initial_absence:true ~ownership_root path
   |> Result.map (function
     | Owned_directory_entries names -> Some names

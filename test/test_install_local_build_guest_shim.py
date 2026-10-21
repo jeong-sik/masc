@@ -105,6 +105,35 @@ PAIR = ["masc-exec-shim", "masc-exec-shim.sha256"]
 
 
 class GuestShim(unittest.TestCase):
+    def test_invalid_browser_addon_inputs_leave_installed_programs_and_guest_shim_untouched(self):
+        for program in local_build.BROWSER_ADDON_PROGRAMS:
+            for invalid in ("missing", "not_executable", "directory"):
+                with self.subTest(program=program, invalid=invalid), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary).resolve()
+                    base, shim, sidecar = workspace_with_shim(root)
+                    build = build_naming(root)
+                    for name in local_build.BROWSER_ADDON_PROGRAMS:
+                        local_build.executable(build / f"{name}.exe", name)
+                    bad = build / f"{program}.exe"
+                    if invalid == "not_executable":
+                        bad.chmod(0o600)
+                    else:
+                        bad.unlink()
+                        if invalid == "directory":
+                            bad.mkdir()
+                    prefix = root / "prefix"
+                    prefix.mkdir()
+                    old_server = local_build.executable(prefix / "masc", "old-server")
+                    old_worker = local_build.executable(prefix / "masc-browser-addon-worker", "old-worker")
+                    before = {p: p.read_bytes() for p in (shim, sidecar, old_server, old_worker)}
+                    result = install(root, build, release_base(root), base, "--with-browser-addon")
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(str(bad), result.stderr)
+                    for path, content in before.items():
+                        self.assertEqual(path.read_bytes(), content, str(path))
+                    self.assertEqual(local_build.helper_calls(build), [])
+                    self.assertEqual(local_build.lane_calls(prefix), [])
+
     # #42726: the release installer was the only thing that placed the shim, so
     # a workspace deployed from local builds kept the shim of its last release
     # install while the server moved on. Which architecture is the sidecar's

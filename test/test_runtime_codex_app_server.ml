@@ -8368,9 +8368,12 @@ let test_production_keeper_resolves_a_resumed_codex_turn_against_its_thread () =
    travels in front of it. *)
 let carries_extra_system_context envelope =
   let metadata = Yojson.Safe.Util.(envelope |> member "message" |> member "metadata") in
-  List.for_all
-    (fun (key, _) -> Yojson.Safe.Util.member key metadata <> `Null)
-    Agent_core.Types.Extra_system_context_provenance.metadata
+  match metadata with
+  | `Assoc metadata ->
+    (match Agent_core.Types.Extra_system_context_provenance.classify metadata with
+     | Present -> true
+     | Absent | Historical | Invalid | Duplicate -> false)
+  | _ -> false
 ;;
 
 let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =

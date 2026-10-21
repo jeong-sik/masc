@@ -38,7 +38,7 @@ let with_answer f =
   let question=Masc.Keeper_ask.question ~question_id:"q1" ~header:"decision" ~prompt:"Proceed?"
     ~choices:[choice] ~mode:Masc.Keeper_ask.Single ~free_text:Masc.Keeper_ask.Choices_only
     |> Result.map_error Masc.Keeper_ask.invalid_question_to_string |> require in
-  let continuation=Masc.Keeper_continuation_channel.dashboard ~thread_id:"original-thread" |> require in
+  let continuation=Keeper_continuation_channel.dashboard ~thread_id:"original-thread" |> require in
   let ask=Masc.Keeper_ask.ask ~ask_id:"original-answer" ~keeper_name:keeper ~questions:[question]
     ~context:"original work" ~task_id ~continuation ~asked_at:100. ()
     |> Result.map_error Masc.Keeper_ask.invalid_ask_to_string |> require in

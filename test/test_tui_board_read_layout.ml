@@ -101,8 +101,51 @@ let test_failed_render_and_single_document () =
   ignore (Layout.get cache ~source ~render:(fun () -> incr renders; render source ()));
   Alcotest.(check int) "only one document retained" 1 !renders
 
+(* Whether the post list is on screen is the layout's answer, asked every time;
+   the operator's earlier choice cannot keep it true after the terminal narrows
+   (#39014). Nothing here pins how the screen looks. *)
+let test_leaving_the_acting_pane_keeps_a_choice_the_layout_hides () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let split_cols = Masc_tui_roster_pane.threshold_cols in
+  state.board_focus <- Right_pane;
+  Alcotest.(check bool) "the split closes the cycle at the list" true
+    (board_focus_on_leaving_acting_pane state ~cols:split_cols = Left_pane);
+  Alcotest.(check bool) "below the split the stored choice stands" true
+    (board_focus_on_leaving_acting_pane state ~cols:(split_cols - 1) = Right_pane);
+  state.board_focus <- Left_pane;
+  Alcotest.(check bool) "a stored list choice is not rewritten below the split" true
+    (board_focus_on_leaving_acting_pane state ~cols:(split_cols - 1) = Left_pane);
+  state.board_focus <- Right_pane;
+  state.board_detail_wide <- true;
+  Alcotest.(check bool) "the wide layout has no list to return to" true
+    (board_focus_on_leaving_acting_pane state ~cols:split_cols = Right_pane)
+
+let test_focus_follows_the_layout () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let split_cols = Masc_tui_roster_pane.threshold_cols in
+  let focus ~cols = board_read_focus state ~cols in
+  state.board_focus <- Left_pane;
+  Alcotest.(check bool) "the split gives the list its keys" true
+    (focus ~cols:split_cols = Left_pane);
+  Alcotest.(check bool) "narrowed below the split, the open post has the keys" true
+    (focus ~cols:(split_cols - 1) = Right_pane);
+  Alcotest.(check bool) "narrowing does not rewrite the stored choice" true
+    (state.board_focus = Left_pane);
+  Alcotest.(check bool) "widening again gives the choice back" true
+    (focus ~cols:split_cols = Left_pane);
+  state.board_detail_wide <- true;
+  Alcotest.(check bool) "the wide layout draws no list either" true
+    (focus ~cols:split_cols = Right_pane);
+  state.board_detail_wide <- false;
+  state.board_focus <- Right_pane;
+  Alcotest.(check bool) "a choice of the post stays the post at any width" true
+    (focus ~cols:split_cols = Right_pane && focus ~cols:(split_cols - 1) = Right_pane)
+
 let () = Alcotest.run "Board document layout"
   ["scroll and refresh", [
     Alcotest.test_case "128 comments scroll without re-layout" `Quick test_long_thread_scroll_reuses_rows;
     Alcotest.test_case "every live layout input invalidates" `Quick test_live_inputs_replace_rows;
-    Alcotest.test_case "failed rendering and one document ownership" `Quick test_failed_render_and_single_document]]
+    Alcotest.test_case "failed rendering and one document ownership" `Quick test_failed_render_and_single_document;
+    Alcotest.test_case "keys follow the pane the layout draws" `Quick test_focus_follows_the_layout;
+    Alcotest.test_case "leaving the acting pane keeps a choice the layout hides" `Quick
+      test_leaving_the_acting_pane_keeps_a_choice_the_layout_hides]]

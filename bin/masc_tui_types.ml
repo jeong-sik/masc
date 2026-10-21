@@ -16674,6 +16674,28 @@ let board_read_layout ~cols ~wide =
   else Board_read_split
 ;;
 
+(* The pane the Board read keys act on. [board_focus] is the operator's choice
+   and stays as chosen; whether that pane is on screen is the layout's answer,
+   asked every time. Only the split draws the post list, so in the other two
+   layouts the open post has the keys, and a terminal narrowed after the
+   operator moved to the list no longer sends j/k and the page keys to a list
+   nobody can see. Widening again gives the choice back (#39014). *)
+let board_read_focus (state : state) ~cols =
+  match board_read_layout ~cols ~wide:state.board_detail_wide with
+  | Board_read_split -> state.board_focus
+  | Board_read_wide | Board_read_one_pane -> Right_pane
+;;
+
+(* What [board_focus] becomes when the Activity pane gives the keys back. The
+   cycle closes at the left pane, and only the split has one: elsewhere the
+   stored choice stands, so a pane the operator never chose cannot take over
+   when the terminal is wide again. *)
+let board_focus_on_leaving_acting_pane (state : state) ~cols =
+  match board_read_layout ~cols ~wide:state.board_detail_wide with
+  | Board_read_split -> Left_pane
+  | Board_read_wide | Board_read_one_pane -> state.board_focus
+;;
+
 (* Drafts belong to a workspace and exact config path, and survive view changes
    and temporary loss of workspace authority. Only a matching current reading
    can expose one. The colored rows are a rendering cache of that session text. *)

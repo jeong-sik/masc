@@ -587,8 +587,8 @@ let board_read_layout = Board_read_layout.create ()
 (* The comment v/V votes on while the comments have focus, so the one the
    gutter marks. With the post body focused the keys vote on the post, and
    no comment is marked. *)
-let selected_comment (state : state) =
-  if state.board_focus = Right_pane && state.board_comments_focused then
+let selected_comment ~(focus : pane_focus) (state : state) =
+  if focus = Right_pane && state.board_comments_focused then
     state.board_comment_cursor
   else None
 
@@ -599,8 +599,8 @@ let selected_comment_gutter () =
   Masc_tui_theme.tone Masc_tui_theme.Accent ^ Ansi.bold ^ ">" ^ Ansi.reset
   ^ String.make (Board_read_layout.comment_gutter_cells - 1) ' '
 
-let comment_row_gutter (state : state) =
-  let selected = selected_comment state in
+let comment_row_gutter ~focus (state : state) =
+  let selected = selected_comment ~focus state in
   let marker = selected_comment_gutter () in
   fun comment_id ->
     match selected with
@@ -611,7 +611,7 @@ let comment_row_gutter (state : state) =
    landing comment comes first; then a cursor move's request to bring the
    selected comment on screen; otherwise the reader's own scroll, which
    PgUp/PgDn move by rows. *)
-let requested_comment_scroll (state : state) document ~viewport_rows =
+let requested_comment_scroll ~focus (state : state) document ~viewport_rows =
   match state.board_comment_landing with
   | Some comment_id -> (
       match Board_read_layout.initial_comment_offset document ~comment_id with
@@ -619,7 +619,7 @@ let requested_comment_scroll (state : state) document ~viewport_rows =
       | None -> state.board_comment_scroll)
   | None -> (
       let followed =
-        if state.board_comment_follow then selected_comment state else None
+        if state.board_comment_follow then selected_comment ~focus state else None
       in
       match
         Option.bind followed (fun comment_id ->
@@ -634,7 +634,7 @@ let requested_comment_scroll (state : state) document ~viewport_rows =
 (* The thread beside the post, one screen row at a time (p-7784d032). Owns
    its own allocation and scroll projection so [board_read_pane] only ever
    touches the shared [board_read_allocation] the stacked layout uses. *)
-let draw_board_read_side buf (state : state) document ~rows ~body_cols
+let draw_board_read_side ~focus buf (state : state) document ~rows ~body_cols
     ~comment_cols ~total_lines ~detail_line_count ~detail_comment_count =
   let side_budget =
     Layout.allocate_board_read_side ~terminal_rows:rows
@@ -654,7 +654,7 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
       ~comment_rows:comment_content_rows
       ~body_scroll:state.board_scroll
       ~comment_scroll:
-        (requested_comment_scroll state document
+        (requested_comment_scroll ~focus state document
            ~viewport_rows:comment_content_rows)
   in
   (* box_top/box_bottom draw no border in the borderless geometry this
@@ -666,7 +666,7 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
   let rows_drawn = max side_budget.body_rows side_budget.comment_rows in
   let body_buf = Buffer.create (4 * 1024) in
   let comment_buf = Buffer.create (4 * 1024) in
-  let gutter = comment_row_gutter state in
+  let gutter = comment_row_gutter ~focus state in
   for i = 0 to rows_drawn - 1 do
     if i < side_budget.body_rows then
       let idx = i + scroll.body_offset in
@@ -681,7 +681,7 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
       box_line comment_buf comment_cols
         (Ansi.bold
         ^ Printf.sprintf "%sComments (%d)"
-            (if state.board_focus = Right_pane && state.board_comments_focused
+            (if focus = Right_pane && state.board_comments_focused
              then "> " else "  ")
             detail_comment_count
         ^ Ansi.reset)
@@ -701,7 +701,7 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
 (* The read post alone -- borders, header, body, comments -- at [cols]
    wide, footer excluded, so a caller can lay it beside the post list.
    Returns the scroll the frame used. *)
-let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
+let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols buf =
   let prep_started = Masc_tui_frame_timing.start_stage () in
   let detail =
     Board_detail.view_for state.board_detail ~post_id:list_post.bp_id
@@ -725,7 +725,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   box_divider buf cols;
 
   let title_line = Printf.sprintf "%s%s%s%s"
-    (if state.board_focus = Right_pane && not state.board_comments_focused
+    (if focus = Right_pane && not state.board_comments_focused
      then "> " else "  ")
     Ansi.bold
     (fit_width (Terminal_text.single_line post.bp_title) (framed_inner_width cols - 2))
@@ -1078,7 +1078,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   let scroll, body_lines_drawn, comment_lines_drawn =
     match side_layout with
     | Some (body_cols, comment_cols) ->
-        draw_board_read_side buf state document ~rows ~body_cols
+        draw_board_read_side ~focus buf state document ~rows ~body_cols
           ~comment_cols ~total_lines ~detail_line_count ~detail_comment_count
     | None ->
         let row_budget =
@@ -1093,7 +1093,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
             ~comment_line_count:detail_line_count ~comment_rows:comment_height
             ~body_scroll:state.board_scroll
             ~comment_scroll:
-              (requested_comment_scroll state document
+              (requested_comment_scroll ~focus state document
                  ~viewport_rows:comment_height)
         in
         for i = 0 to content_height - 1 do
@@ -1106,11 +1106,10 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
           box_divider buf cols;
           box_line buf cols
             (Ansi.bold
-             ^ (if state.board_focus = Right_pane
-                   && state.board_comments_focused
+             ^ (if focus = Right_pane && state.board_comments_focused
                 then "> Comments" else "  Comments")
              ^ Ansi.reset);
-          let gutter = comment_row_gutter state in
+          let gutter = comment_row_gutter ~focus state in
           for i = 0 to comment_height - 1 do
             box_line buf cols
               (Board_read_layout.comment_line document ~gutter
@@ -1196,12 +1195,15 @@ let render_board_read (state : state) (list_post : board_post) =
   let layout =
     Masc_tui_types.board_read_layout ~cols ~wide:state.board_detail_wide
   in
+  (* The pane the keys act on, which is the stored choice only while the post
+     list is drawn; the footer and the pane cues name this one (#39014). *)
+  let focus = Masc_tui_types.board_read_focus state ~cols in
   let buf = Buffer.create 4096 in
   let footer =
     footer_line state ~max_cells:cols
       ~hints:
         (Masc_tui_keys.footer_hints_board_read
-           ~focus_posts:(state.board_focus = Left_pane)
+           ~focus_posts:(focus = Left_pane)
            ~focus_comments:state.board_comments_focused
            ~full_history:(state.board_history_post_id = Some list_post.bp_id)
            ~layout
@@ -1211,7 +1213,7 @@ let render_board_read (state : state) (list_post : board_post) =
   Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with
   | Board_read_wide | Board_read_one_pane ->
-    let scroll = board_read_pane state list_post ~rows ~cols buf in
+    let scroll = board_read_pane ~focus state list_post ~rows ~cols buf in
     Buffer.add_string buf footer;
     finish_surface state ~clamped:(Board_read scroll)
       ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
@@ -1222,7 +1224,7 @@ let render_board_read (state : state) (list_post : board_post) =
     let right_buf = Buffer.create 4096 in
     board_list_pane state ~open_post:list_post ~rows ~cols:left_cols left_buf;
     let scroll =
-      board_read_pane state list_post ~rows ~cols:right_cols right_buf
+      board_read_pane ~focus state list_post ~rows ~cols:right_cols right_buf
     in
     write_two_panes buf ~left_cols:left_cols ~left:left_buf
       ~right:right_buf;

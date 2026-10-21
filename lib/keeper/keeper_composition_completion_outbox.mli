@@ -37,6 +37,24 @@ type report =
   ; failures : (string * error) list
   }
 
+type pending = private { base_path : string; keeper_name : string; request_id : string }
+type discovery = private { entries : pending list; failures : (string * error) list }
+val discover : base_path:string -> (discovery, error) result
+(** Read and validate the original pending identities in directory order.
+    Captures the canonical base path and recipient, not terminal or execution
+    authority. Missing records carry no work; malformed records remain failures
+    labeled by pending filename, not an unverified decoded request identity. *)
+
+type record_outcome = Retired | Waiting | Delivered
+val recover :
+  pending ->
+  deliver:(composition_tool:string -> Keeper_msg_async.entry -> (unit, string) result) ->
+  (record_outcome, error) result
+(** Reread this original obligation and reject a changed request/recipient before
+    loading current canonical terminal proof and using the same delivery/ACK
+    path as [flush]. A removed obligation is retired; a pending hint cannot
+    borrow another owner's obligation or authorize replay. *)
+
 val flush :
   base_path:string ->
   deliver:(composition_tool:string -> Keeper_msg_async.entry -> (unit, string) result) ->

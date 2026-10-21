@@ -18,6 +18,8 @@ let error_to_string = function
 ;;
 
 type obligation = { request_id : string; keeper_name : string }
+type pending = { base_path : string; keeper_name : string; request_id : string }
+type discovery = { entries : pending list; failures : (string * error) list }
 
 type report =
   { inspected : int
@@ -42,13 +44,13 @@ let pending_directory ~base_path = Filename.concat (directory ~base_path) "pendi
 let filename request_id = Digestif.SHA256.(digest_string request_id |> to_hex) ^ ".json"
 let path ~base_path request_id = Filename.concat (pending_directory ~base_path) (filename request_id)
 
-let to_json obligation = `Assoc
+let to_json (obligation : obligation) = `Assoc
   [ "schema", `String "keeper.composition_completion_obligation.v1"
   ; "request_id", `String obligation.request_id
   ; "keeper_name", `String obligation.keeper_name ]
 ;;
 
-let of_json = function
+let of_json : Yojson.Safe.t -> (obligation, error) result = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)
         = [ "keeper_name"; "request_id"; "schema" ] ->
     (match List.assoc_opt "schema" fields, List.assoc_opt "request_id" fields,
@@ -153,7 +155,7 @@ end
 
 
 
-let flush ~base_path ~deliver =
+let pending_names ~base_path =
   protect_io @@ fun () ->
   let base_path = Fs_compat.realpath base_path in
   let dir = pending_directory ~base_path in
@@ -162,50 +164,80 @@ let flush ~base_path ~deliver =
   let names = match inspection with
     | Fs_compat.Owned_directory_missing -> []
     | Fs_compat.Owned_directory _ -> Fs_compat.read_dir dir in
+  Ok (base_path, names)
+
+let discover ~base_path =
+  protect_io @@ fun () ->
+  let* base_path, names = pending_names ~base_path in
+  let entries, failures = List.fold_left (fun (entries, failures) name ->
+    match protect_io (fun () -> read ~base_path name) with
+    | Error error -> entries, (name, error) :: failures
+    | Ok None -> entries, failures
+    | Ok (Some (obligation : obligation)) ->
+        let pending : pending =
+          {base_path;keeper_name=obligation.keeper_name;request_id=obligation.request_id} in
+        pending :: entries, failures) ([], []) names in
+  Ok {entries=List.rev entries;failures=List.rev failures}
+
+let recover_record ~base_path ~name ~expected ~deliver =
+  protect_io (fun () ->
+  let* obligation = read ~base_path name in
+  match obligation with
+  | None -> Ok Retired
+  | Some obligation ->
+    if (match expected with
+      | None -> false
+      | Some (original : pending) ->
+          not (String.equal original.request_id obligation.request_id
+            && String.equal original.keeper_name obligation.keeper_name))
+    then Error (Invalid_obligation "pending completion changed its original request/recipient")
+    else
+    match Async.load_canonical_durable_terminal ~base_path ~caller:obligation.keeper_name obligation.request_id with
+    | Error (Async.Canonical_terminal_runtime_active _ | Async.Canonical_terminal_nonterminal _) -> Ok Waiting
+    (* The remaining terminal-load errors are listed by constructor: a new
+       [Async.canonical_terminal_error] constructor must be classified here
+       deliberately rather than caught by a catch-all. *)
+    | Error
+        (( Async.Canonical_terminal_absent
+         | Async.Canonical_terminal_unreadable _
+         | Async.Canonical_terminal_access_rejected _
+         | Async.Canonical_terminal_publication_ambiguous _
+         | Async.Canonical_terminal_noncanonical_location _ ) as error) ->
+      Error (Canonical_result_unavailable error)
+    | Ok proof ->
+      let entry = Async.durable_terminal_entry proof in
+      if not (String.equal entry.keeper_name obligation.keeper_name)
+      then Error (Invalid_obligation "canonical result changed completion owner")
+      else
+        let* tool = composition_tool entry in
+        let* recovery_pending = Keeper_tool_execution_journal.completion_pending ~base_path entry
+            |> Result.map_error (fun error -> Storage_failed (Keeper_tool_execution_journal.error_to_string error)) in
+        if recovery_pending then
+          let* () = acknowledge ~base_path ~keeper_name:obligation.keeper_name ~request_id:entry.request_id in
+          Ok Retired
+        else
+        match entry.status with
+        | Async.Waiting_for_dependencies _ ->
+          let* () = acknowledge_waiting ~base_path ~keeper_name:obligation.keeper_name
+              ~request_id:entry.request_id ~composition_tool:tool in
+          Ok Retired
+        | Queued | Running | Cancelling _ | Lost _ | Cancelled _
+        | Persistence_failed _ | Done _ ->
+        let* () = deliver ~composition_tool:tool entry |> Result.map_error (fun detail -> Storage_failed detail) in
+        let* () = acknowledge ~base_path ~keeper_name:obligation.keeper_name ~request_id:obligation.request_id in
+        Ok Delivered)
+
+let recover (pending : pending) ~deliver =
+  recover_record ~base_path:pending.base_path ~name:(filename pending.request_id)
+    ~expected:(Some pending) ~deliver
+
+let flush ~base_path ~deliver =
+  protect_io @@ fun () ->
+  let* base_path, names = pending_names ~base_path in
   let empty = { inspected = 0; waiting = 0; delivered = 0; failures = [] } in
   let result = List.fold_left (fun report name ->
     let report = { report with inspected = report.inspected + 1 } in
-    let outcome = protect_io (fun () ->
-      let* obligation = read ~base_path name in
-      match obligation with
-      | None -> Ok Retired
-      | Some obligation ->
-        match Async.load_canonical_durable_terminal ~base_path ~caller:obligation.keeper_name obligation.request_id with
-        | Error (Async.Canonical_terminal_runtime_active _ | Async.Canonical_terminal_nonterminal _) -> Ok Waiting
-        (* The remaining terminal-load errors are listed by constructor: a new
-           [Async.canonical_terminal_error] constructor must be classified here
-           deliberately rather than caught by a catch-all. *)
-        | Error
-            (( Async.Canonical_terminal_absent
-             | Async.Canonical_terminal_unreadable _
-             | Async.Canonical_terminal_access_rejected _
-             | Async.Canonical_terminal_publication_ambiguous _
-             | Async.Canonical_terminal_noncanonical_location _ ) as error) ->
-          Error (Canonical_result_unavailable error)
-        | Ok proof ->
-          let entry = Async.durable_terminal_entry proof in
-          if not (String.equal entry.keeper_name obligation.keeper_name)
-          then Error (Invalid_obligation "canonical result changed completion owner")
-          else
-            let* tool = composition_tool entry in
-            let* recovery_pending = Keeper_tool_execution_journal.completion_pending ~base_path entry
-                |> Result.map_error (fun error -> Storage_failed (Keeper_tool_execution_journal.error_to_string error)) in
-            if recovery_pending then
-              let* () = acknowledge ~base_path ~keeper_name:obligation.keeper_name ~request_id:entry.request_id in
-              Ok Retired
-            else
-            match entry.status with
-            | Async.Waiting_for_dependencies _ ->
-              let* () = acknowledge_waiting ~base_path ~keeper_name:obligation.keeper_name
-                  ~request_id:entry.request_id ~composition_tool:tool in
-              Ok Retired
-            | Queued | Running | Cancelling _ | Lost _ | Cancelled _
-            | Persistence_failed _ | Done _ ->
-            let* () = deliver ~composition_tool:tool entry |> Result.map_error (fun detail -> Storage_failed detail) in
-            let* () = acknowledge ~base_path ~keeper_name:obligation.keeper_name ~request_id:obligation.request_id in
-            Ok Delivered)
-    in
-    match outcome with
+    match recover_record ~base_path ~name ~expected:None ~deliver with
     | Ok Retired -> report
     | Ok Waiting -> { report with waiting = report.waiting + 1 }
     | Ok Delivered -> { report with delivered = report.delivered + 1 }

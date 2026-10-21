@@ -58,3 +58,24 @@ val reconcile : base_path:string -> (Keeper_composition_completion_outbox.report
                                      Keeper_composition_completion_outbox.error) result
 (** Recover pending completion deliveries from canonical request records on
     startup and the existing maintenance pulse. Does not replay worker effects. *)
+
+type t
+val create :
+  base_path:string ->
+  ?on_report:(keeper_name:string -> Keeper_composition_completion_outbox.report -> unit) ->
+  unit -> t
+val pulse : sw:Eio.Switch.t -> t -> (unit, Keeper_composition_completion_outbox.error) result
+(** Server-lifetime supervisor. Discover validated original obligations, then
+    reserve one switch-owned worker per non-active Keeper. Workers yield before
+    delivery and preserve that owner's original discovery order. The caller
+    does not join request-proof, queue or ACK I/O; discovery itself still joins.
+    Each obligation is reread and must match its original root/request/recipient,
+    then current terminal/journal/waiting proof and once-only queue checks apply.
+    New obligations for an active owner wait for a later pulse. Active entries
+    remain until worker/cancellation cleanup. Check the supplied lifetime switch
+    before discovery, reservation and scheduling. Cancellation is not a storage
+    failure; protected physical I/O can still delay shutdown.
+    Reports cover settled original-owner batches, before observer/active cleanup,
+    not consumption, logical Composition progress or worker-exit proof. Observer
+    failure cannot undo committed delivery. No new timer, retry cap, pool,
+    execution permission or replacement request. Single-domain Eio caller. *)

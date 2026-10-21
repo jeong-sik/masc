@@ -721,6 +721,25 @@ let load_agent_core_as ~read_use ~(session_dir : string) ~(session_id : string) 
       Error (Read_failed { cause = Os_error errno; detail = Printexc.to_string exn })
     | exn -> Error (Read_failed { cause = Read_raised; detail = Printexc.to_string exn })
 
+type turn_history =
+  | Saved_history of Agent_core.Checkpoint.t
+  | No_saved_history
+  | Saved_history_superseded of { expected : int; got : int }
+
+let turn_history_of_load = function
+  | Ok checkpoint -> Ok (Saved_history checkpoint)
+  | Error Not_found -> Ok No_saved_history
+  | Error (Superseded_version { expected; got }) ->
+    Ok (Saved_history_superseded { expected; got })
+  | Error
+      ( ( Store_error _
+        | Parse_error _
+        | Newer_version _
+        | Io_error _
+        | Read_failed _
+        | Agent_core_error _ ) as error ) -> Error error
+;;
+
 let load_agent_core ~session_dir ~session_id =
   load_agent_core_as ~read_use:Read_only ~session_dir ~session_id
 

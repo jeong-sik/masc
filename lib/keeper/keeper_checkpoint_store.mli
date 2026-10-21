@@ -171,6 +171,24 @@ val load_agent_core_history_file :
   snapshot_id:string ->
   (Agent_core.Checkpoint.t, checkpoint_load_error) result
 
+(** What a turn starts from, read from the store. A trace with no checkpoint
+    and one whose checkpoint an earlier [checkpoint_version] wrote both start
+    without saved history; they are told apart because the first save of the
+    second replaces the old file. Every other failed read is not a start: the
+    saved history was not seen and may still be there. *)
+type turn_history =
+  | Saved_history of Agent_core.Checkpoint.t
+  | No_saved_history
+  | Saved_history_superseded of { expected : int; got : int }
+
+(** Which load failures are a start without saved history ([Not_found],
+    [Superseded_version]) and which are not. The turn's load
+    ({!Keeper_context_core.load_context_from_checkpoint_classified}) and the
+    next-request forecast decide through it. *)
+val turn_history_of_load :
+  (Agent_core.Checkpoint.t, checkpoint_load_error) result ->
+  (turn_history, checkpoint_load_error) result
+
 (** Load the canonical AGENT_CORE checkpoint for [session_id]. While the file
     has the (device, inode, size, mtime) it had when {!save_agent_core_for_keeper}
     in this process wrote it, or when {!load_agent_core_for_save} read it, the

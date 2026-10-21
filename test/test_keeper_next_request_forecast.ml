@@ -286,6 +286,137 @@ max-concurrent = 1
              Keeper_carried_front.Carried (Keeper_carried_front.Turn_record { turn = 1 })))
      | _ -> Alcotest.fail "one configured runtime must produce one forecast candidate")
 
+(* A Keeper whose next turn starts without saved history is still forecast:
+   the turn reads no checkpoint for a Keeper that has none yet, and starts
+   fresh over one an earlier [checkpoint_version] wrote, so the forecast
+   begins from an empty history rather than refusing (#38681). A checkpoint
+   that cannot be read stays an error: the saved history was not seen. *)
+let forecast_with_checkpoint_file ~name ~write =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.on_release sw (fun () ->
+    Runtime.For_testing.restore runtime_snapshot;
+    match previous_fs with
+    | Some fs -> Fs_compat.set_fs fs
+    | None -> Fs_compat.clear_fs ());
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace base_path);
+  let config = Workspace.default_config base_path in
+  let config_path = Filename.concat base_path "runtime.toml" in
+  Out_channel.with_open_bin config_path (fun output ->
+    output_string output
+      {|[runtime]
+default = "forecast.seed"
+[providers.forecast]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.seed]
+api-name = "forecast-test-model"
+max-context = 8192
+tools-support = true
+streaming = false
+[forecast.seed]
+max-concurrent = 1
+|});
+  (match Runtime.init_default ~config_path with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String name ]) with
+    | Ok meta -> meta
+    | Error detail -> Alcotest.fail detail
+  in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  (* The path is only built, not created; the save below writes a plain file. *)
+  Fs_compat.mkdir_p session_dir;
+  write ~session_dir ~session_id:trace_id ~agent_name:meta.name;
+  Keeper_next_request_forecast.forecast ~config ~keeper_name:meta.name
+
+let checkpoint_with_messages ~session_id ~agent_name messages : Agent_core.Checkpoint.t =
+  { version = Agent_core.Checkpoint.checkpoint_version
+  ; session_id
+  ; agent_name
+  ; model = "forecast-test-model"
+  ; system_prompt = None
+  ; messages
+  ; usage = Agent_core.Types.empty_usage
+  ; turn_count = 1
+  ; created_at = 0.
+  ; tools = []
+  ; tool_choice = None
+  ; disable_parallel_tool_use = false
+  ; temperature = None
+  ; top_p = None
+  ; top_k = None
+  ; min_p = None
+  ; reasoning_effort = None
+  ; enable_thinking = None
+  ; preserve_thinking = None
+  ; response_format = Agent_core.Types.Off
+  ; cache_system_prompt = false
+  ; context = Agent_core.Context.create_sync ()
+  ; pending_input = None; mcp_sessions = []
+  ; working_context = None
+  }
+
+let test_forecast_for_a_keeper_with_no_saved_history () =
+  match
+    forecast_with_checkpoint_file ~name:"forecast-no-history"
+      ~write:(fun ~session_dir:_ ~session_id:_ ~agent_name:_ -> ())
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok forecast ->
+    Alcotest.(check int) "a Keeper with no checkpoint forecasts from no history" 0
+      forecast.checkpoint_messages
+
+let test_forecast_over_a_superseded_checkpoint () =
+  match
+    forecast_with_checkpoint_file ~name:"forecast-superseded"
+      ~write:(fun ~session_dir ~session_id ~agent_name ->
+        let json =
+          Agent_core.Checkpoint.to_json
+            (checkpoint_with_messages ~session_id ~agent_name
+               (history ~exchanges:5 ~text_bytes:100))
+        in
+        let rewritten =
+          match json with
+          | `Assoc fields ->
+            `Assoc
+              (List.map
+                 (fun (key, value) ->
+                    if String.equal key "version"
+                    then key, `Int (Agent_core.Checkpoint.checkpoint_version - 1)
+                    else key, value)
+                 fields)
+          | other -> other
+        in
+        Fs_compat.save_file
+          (Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id)
+          (Yojson.Safe.to_string rewritten))
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok forecast ->
+    Alcotest.(check int) "a checkpoint of an earlier version forecasts from no history" 0
+      forecast.checkpoint_messages
+
+let test_forecast_refuses_a_checkpoint_it_cannot_read () =
+  match
+    forecast_with_checkpoint_file ~name:"forecast-unreadable"
+      ~write:(fun ~session_dir ~session_id ~agent_name:_ ->
+        Fs_compat.save_file
+          (Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id)
+          "{ unreadable checkpoint")
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an unreadable checkpoint was forecast as an empty history"
+
 (* RFC-0458 §3.4 rule 5: the forecast shows the order this Keeper's next turn
    takes. A head that failed in this Keeper's own walk is walked first again;
    the same mark recorded by another Keeper sends it behind. *)
@@ -1254,6 +1385,12 @@ let () =
             test_forecast_reads_an_observed_front_beyond_unobserved_rows
         ; Alcotest.test_case "a superseded checkpoint forecasts no saved history" `Quick
             test_a_superseded_checkpoint_forecasts_no_saved_history
+        ; Alcotest.test_case "a Keeper with no saved history is forecast" `Quick
+            test_forecast_for_a_keeper_with_no_saved_history
+        ; Alcotest.test_case "a superseded checkpoint is forecast as no history" `Quick
+            test_forecast_over_a_superseded_checkpoint
+        ; Alcotest.test_case "an unreadable checkpoint is still refused" `Quick
+            test_forecast_refuses_a_checkpoint_it_cannot_read
         ; Alcotest.test_case "the recorder's forecast walks its marked head first" `Quick
             test_the_recorders_forecast_walks_its_marked_head_first
         ; Alcotest.test_case "the Librarian gap is read from small files" `Quick

@@ -474,19 +474,21 @@ let forecast ~config ~keeper_name =
     let trace_id = Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id in
     let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
     (match
-       Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id
-       |> Keeper_checkpoint_store.saved_history
+       Keeper_checkpoint_store.turn_history_of_load
+         (Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id)
      with
      | Error error ->
-       Error (Keeper_checkpoint_store.saved_history_error_to_string error)
-     | Ok saved ->
+       Error (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+     | Ok saved_history ->
+       (* The turn the forecast predicts starts without saved history for a
+          Keeper that has none yet and for one whose checkpoint an earlier
+          version wrote; neither is a forecast it cannot make. *)
        let history =
-         match saved with
-         | Keeper_checkpoint_store.Saved_history.Read checkpoint ->
+         match saved_history with
+         | Keeper_checkpoint_store.Saved_history checkpoint ->
            checkpoint.Agent_core.Checkpoint.messages
-         (* The next turn starts fresh on a superseded checkpoint, so its
-            request carries no saved history. *)
-         | Keeper_checkpoint_store.Saved_history.Superseded _ -> []
+         | Keeper_checkpoint_store.No_saved_history
+         | Keeper_checkpoint_store.Saved_history_superseded _ -> []
        in
        let wake, wake_line_bytes = wake_line () in
        let messages = history @ [ wake ] in

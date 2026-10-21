@@ -310,6 +310,10 @@ let exact_request_path ~declaration_id ~request_id =
   Filename.concat "exact-requests" (Filename.concat (digest declaration_id) (digest request_id ^ ".json"))
 let save_exact_request t ~declaration_id ~request_id json =
   save_record_with ~sync_parent:sync_parent_directory t (exact_request_path ~declaration_id ~request_id) json
+let tool_request_owner_path ~scope ~request_id =
+  Filename.concat "tool-request-owners" (Filename.concat (digest scope) (digest request_id ^ ".json"))
+let save_tool_request_owner t ~scope ~request_id json =
+  save_record_with ~sync_parent:sync_parent_directory t (tool_request_owner_path ~scope ~request_id) json
 let broadcast_path ~instance_id ~request_id =
   Filename.concat "broadcasts" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
 let save_broadcast t ~instance_id ~request_id json =
@@ -507,6 +511,10 @@ let load_action = load_action_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 let load_exact_request t ~declaration_id ~request_id =
   load_record_with ~what:"exact request record" ~sync_file:Unix.fsync ~sync_parent:Unix.fsync t
     (exact_request_path ~declaration_id ~request_id)
+
+let load_tool_request_owner t ~scope ~request_id =
+  load_record_with ~what:"tool request owner" ~sync_file:Unix.fsync ~sync_parent:Unix.fsync t
+    (tool_request_owner_path ~scope ~request_id)
 
 let host_result_path ~instance_id ~request_id =
   Filename.concat "host-results" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))

@@ -319,6 +319,50 @@ export=["queue_question"]
       check int "one model resolution after the exported reply" 1 !(state.resolutions);
       check bool "a host cycle followed the exported reply" true (cycles config > before))
 
+let test_original_tool_destination_survives_replacement_and_reattachment () =
+  let tool = Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc [
+    "name", `String "queue_question"; "inputSchema", `Assoc ["type",`String "object"]]) |> unwrap in
+  let calls = ref 0 in
+  let invoke _ = incr calls; Ok (Mcp_protocol.Mcp_types.tool_result_of_text "unused") in
+  let manifest = manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n" in
+  with_installation ~manifest ~exported_tool:(tool,invoke) (fun clock config _worker _state root ->
+    let access = Lane_addon_sources.Operator_configuration in
+    let current () = match Runtime.tool_exports ~config ~access ~reserved:[] |> unwrap with
+      | [export] -> Some export | _ -> None in
+    await clock (fun () -> Option.is_some (current ()));
+    let original = Option.get (current ()) in
+    let bind export = Runtime.retain_tool_request_owner ~config ~access ~reserved:[] ~export
+      ~scope:"original-consumer" ~request_id:"original-request" ~request:(`Assoc ["input",`String "original"]) in
+    let accepted = function Ok () -> () | Error _ -> fail "the original installation lost its binding" in
+    accepted (bind original);
+    let directory = Filename.concat root ".masc/config/lane-addons" in
+    let source = Filename.concat directory "quiz.toml" in
+    write source {|id="replacement"
+run_id="quiz-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[]
+|};
+    ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
+    await clock (fun () -> match current () with
+      | Some export -> not (Lane_addon_tool_export.equal_owner original.owner export.owner)
+      | None -> false);
+    let replacement = Option.get (current ()) in
+    (match bind replacement with
+     | Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected _)) -> ()
+     | Ok () | Error (Runtime.Unavailable _ | Runtime.Outcome_unknown _ | Runtime.Host_refusal _) ->
+       fail "a replacement installation claimed original request ownership");
+    write source declaration;
+    ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
+    await clock (fun () -> match current () with
+      | Some export -> not (Lane_addon_tool_export.equal_owner replacement.owner export.owner)
+      | None -> false);
+    accepted (bind (Option.get (current ())));
+    (match bind original with
+     | Error (Runtime.Unavailable _) -> ()
+     | Ok () | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) -> fail "a stale worker handle retained authority");
+    check int "binding never invokes a worker tool" 0 !calls)
+
 let test_a_request_that_is_not_final_waits_for_the_next_event () =
   with_installation ~listing:[ exact "r2" ] ~mode:Off (fun clock config worker state  _root->
     await clock (fun () -> cycles config >= 1);
@@ -1175,6 +1219,8 @@ let () =
         ; test_case "model events admit and withdraw one exact scope" `Quick test_model_events_admit_and_withdraw_an_exact_scope
         ; test_case "withdrawal event can precede a stale listing" `Quick test_withdrawal_event_before_stale_listing
         ; test_case "retirement cancels exact before worker cleanup finishes" `Quick test_retirement_cancels_exact_before_worker_cleanup_finishes
+        ; test_case "original tool destination survives replacement and reattachment" `Quick
+            test_original_tool_destination_survives_replacement_and_reattachment
         ; test_case "a request that is not final waits for the next event" `Quick
             test_a_request_that_is_not_final_waits_for_the_next_event
         ; test_case "a request listed again after delivery ends the cycle" `Quick

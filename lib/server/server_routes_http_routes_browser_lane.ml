@@ -18,15 +18,14 @@
 open Server_auth
 module Http = Http_server_eio
 
-let lane_token_path () =
-  Env_config_core.resolve_against_base_path
-    (List.fold_left Filename.concat Common.masc_dirname
-       [ Common.browser_lane_dirname; Common.browser_lane_token_name ])
+let lane_token_path ~config =
+  List.fold_left Filename.concat (Workspace.masc_dir config)
+    [ Common.browser_lane_dirname; Common.browser_lane_token_name ]
 ;;
 
-let lane_token () =
+let lane_token ~config =
   match
-    In_channel.with_open_bin (lane_token_path ()) (fun ic ->
+    In_channel.with_open_bin (lane_token_path ~config) (fun ic ->
         Browser_lane.Lane_token.of_text (In_channel.input_all ic))
   with
   | Ok token -> Some (Browser_lane.Lane_token.to_string token)
@@ -35,8 +34,8 @@ let lane_token () =
 ;;
 
 (* Fail closed: no installed token, or a wrong one, is the same refusal. *)
-let lane_authorized request =
-  match lane_token () with
+let lane_authorized ~config request =
+  match lane_token ~config with
   | None -> false
   | Some token ->
     Server_mcp_transport_http_session.get_header_any_case
@@ -121,33 +120,45 @@ let result_payload fields =
      ; "error", Option.value (List.assoc_opt "error" fields) ~default:`Null
      ] @ phase)
 
-let add_routes router =
+let add_routes ?config router =
   let refuse request reqd =
     respond_json_value_with_cors ~status:`Forbidden request reqd
       (error_json "lane token required")
   in
+  let with_lane request reqd run =
+    let config=match config with Some config -> Some config | None ->
+      Option.map Mcp_server.workspace_config (current_server_state ()) in
+    match config with
+    | None -> respond_json_value_with_cors ~status:`Service_unavailable request reqd
+        (error_json "browser workspace is unavailable")
+    | Some config ->
+        if Eio_unix.run_in_systhread (fun () -> lane_authorized ~config request)
+        then run config else refuse request reqd in
+  let ingress_error request reqd = function
+    | Browser_addon_ingress.Registration_refused refusal ->
+        respond_json_value_with_cors ~status:`Bad_request request reqd
+          (error_json (Browser_lane.registration_refusal_to_wire refusal))
+    | Unavailable detail -> respond_json_value_with_cors ~status:`Service_unavailable request reqd (error_json detail)
+    | Outcome_unknown detail -> respond_json_value_with_cors ~status:`Bad_gateway request reqd (error_json detail) in
   router
   |> Server_routes_http_browser_surface.add_routes
   |> Http.Router.post "/browser-lane/poll" (fun request reqd ->
-       if not (lane_authorized request) then refuse request reqd
-       else
+       with_lane request reqd (fun config ->
          match client_of_request request with
          | Error message ->
            respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
          | Ok client_info -> (
-           match Browser_lane.take_command ~client_info ~window_sec:25. with
+           match Browser_addon_ingress.poll ~config ~client:client_info ~window_sec:25. with
            | Error refusal ->
              (* The host reads this code to tell a connection the lane ended,
                 which it replaces, from a refusal it would only meet again. *)
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (error_json (Browser_lane.registration_refusal_to_wire refusal))
+             ingress_error request reqd refusal
            | Ok None ->
              respond_json_value_with_cors request reqd (`Assoc [ ("ok", `Bool true); ("empty", `Bool true) ])
            | Ok (Some issued) ->
-             respond_json_value_with_cors request reqd (poll_answer_json issued)))
+             respond_json_value_with_cors request reqd (poll_answer_json issued))))
   |> Http.Router.post "/browser-lane/result" (fun request reqd ->
-       if not (lane_authorized request) then refuse request reqd
-       else
+       with_lane request reqd (fun config ->
          Http.Request.read_body_async reqd (fun body ->
              let respond ~status fields =
                respond_json_value_with_cors ~status request reqd (`Assoc (("ok", `Bool true) :: fields))
@@ -163,23 +174,21 @@ let add_routes router =
                  match List.assoc_opt "id" fields with
                  | Some (`String id) ->
                    let payload = result_payload fields in
-                   (match Browser_lane.deliver_result ~client_id:client_info.client_id ~id ~payload with
+                   (match Browser_addon_ingress.deliver ~config ~client:client_info ~id ~payload with
                     | Ok () -> respond ~status:`OK []
-                    | Error message ->
-                      respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message))
+                    | Error failure -> ingress_error request reqd failure)
                  | _ ->
                    respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (error_json "id is required")))))
+                     (error_json "id is required"))))))
   |> Http.Router.post "/browser-lane/ping" (fun request reqd ->
-       if not (lane_authorized request) then refuse request reqd
-       else respond_json_value_with_cors request reqd (`Assoc ["ok", `Bool true]))
+       with_lane request reqd (fun _config ->
+         respond_json_value_with_cors request reqd (`Assoc ["ok", `Bool true])))
   |> Http.Router.post "/browser-lane/disconnect" (fun request reqd ->
-       if not (lane_authorized request) then refuse request reqd
-       else match client_of_request request with
+       with_lane request reqd (fun config -> match client_of_request request with
        | Error message -> respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
        | Ok info ->
-         match Browser_lane.disconnect_client ~client_id:info.client_id with
-         | Error message -> respond_json_value_with_cors ~status:`Bad_request request reqd (error_json message)
-         | Ok () -> respond_json_value_with_cors request reqd (`Assoc ["ok", `Bool true]))
+         match Browser_addon_ingress.disconnect ~config ~client:info with
+         | Error failure -> ingress_error request reqd failure
+         | Ok () -> respond_json_value_with_cors request reqd (`Assoc ["ok", `Bool true])))
 
 ;;

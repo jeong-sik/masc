@@ -1477,6 +1477,19 @@ let test_board_partition_preflight_uses_production_replay () =
       | Error detail -> fail detail in
     let path = Filename.concat (Partition.directory ~base_path) (keeper_name ^ ".jsonl") in
     let current = Partition.to_yojson partition in
+    (* Give the other Keeper a genuine root identity. A forged root would
+       fail before the ledger's Keeper binding was checked. *)
+    let other_keeper = "another" in
+    let other_candidate = {candidate with
+      keeper_name=other_keeper;
+      candidate_id=Candidate.candidate_id_of_signal ~keeper_name:other_keeper signal} in
+    (match Partition.ensure_roots ~base_path ~keeper_name:other_keeper [other_candidate] with
+     | Error detail -> fail detail | Ok _ -> ());
+    let foreign = match Partition.load ~base_path ~keeper_name:other_keeper with
+      | Ok [partition] -> Partition.to_yojson partition
+      | Ok _ -> fail "fixture must create one foreign production partition"
+      | Error detail -> fail detail in
+    Unix.unlink (Filename.concat (Partition.directory ~base_path) (other_keeper ^ ".jsonl"));
     let replace name value = match current with
       | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
       | _ -> fail "production partition must encode an object" in
@@ -1496,7 +1509,7 @@ let test_board_partition_preflight_uses_production_replay () =
         (Array.to_list (Sys.readdir (Filename.dirname path)) |> List.sort String.compare))
       [ "current production row", row current, 0
       ; "old schema", row (replace "schema_version" (`Int 0)), 1
-      ; "foreign keeper", row (replace "keeper_name" (`String "another")), 1
+      ; "foreign keeper with genuine root", row foreign, 1
       ; "forged root", row (replace "partition_id" (`String "forged")), 1
       ; "changed immutable identity", row current ^ row (replace "created_at" (`Float 2.0)), 1
       ; "incomplete tail", Yojson.Safe.to_string current, 1

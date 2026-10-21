@@ -1131,12 +1131,12 @@ let with_owned_inventory_root path fn =
 exception Owned_directory_read_rejected of owned_regular_file_read_failure
 exception Owned_directory_descendant_missing of exn
 
-type owned_directory_listing =
+type 'a owned_directory_listing =
   | Owned_directory_absent of owned_regular_file_read_error
-  | Owned_directory_entries of string list
+  | Owned_directory_entries of 'a
 
-let read_owned_directory_blocking ?owner_uid ?inventory_root ~allow_initial_absence
-    ~before_read ~after_read ~ownership_root path =
+let read_owned_directory_blocking ?owner_uid ?inventory_root ?sync_directory ~allow_initial_absence
+    ~before_read ~after_read ~visit_directory ~ownership_root path =
   match owned_directory_paths ~ownership_root path with
   | Error rejection ->
     owned_file_error (Ownership_boundary_rejected { path; rejection })
@@ -1175,6 +1175,8 @@ let read_owned_directory_blocking ?owner_uid ?inventory_root ~allow_initial_abse
         && same_file_identity observed descriptor
         && same_file_identity descriptor_current descriptor) !opened
     in
+    let settle () = Option.iter (fun sync ->
+      List.iter (fun (_path,fd,_stat) -> sync fd) !opened) sync_directory in
     let result =
       try
         let bind ~allow_absence directory open_fd =
@@ -1212,11 +1214,14 @@ let read_owned_directory_blocking ?owner_uid ?inventory_root ~allow_initial_abse
         if not (current ()) then owned_file_error (Filesystem_identity_changed { path })
         else begin
           before_read path;
-          let names = owned_directory_names fd in
+          let names = owned_directory_names fd |> List.filter (fun name -> name <> "." && name <> "..")
+            |> List.sort String.compare in
+          let held = {inventory_path=path;requested_path=path;inventory_fd=fd;inventory_stat=Unix.fstat fd} in
+          let value = visit_directory held names in
           after_read path;
+          settle ();
           if current () then
-            Ok (Owned_directory_entries (List.sort String.compare
-              (List.filter (fun name -> name <> "." && name <> "..") names)))
+            Ok (Owned_directory_entries value)
           else owned_file_error (Filesystem_identity_changed { path })
         end
       with
@@ -1225,6 +1230,7 @@ let read_owned_directory_blocking ?owner_uid ?inventory_root ~allow_initial_abse
       | Owned_directory_read_rejected failure -> owned_file_error failure
       | Owned_directory_descendant_missing cause ->
           (try
+             settle ();
              if current () then Ok (Owned_directory_absent
                {failure=Owned_file_operation_failed {path; operation=Read_contents; cause}; close_failure=None})
              else owned_file_error (Filesystem_identity_changed {path})
@@ -1254,32 +1260,42 @@ let read_owned_directory_blocking ?owner_uid ?inventory_root ~allow_initial_abse
 
 let read_owned_directory_listing ?owner_uid ?inventory_root
     ?(before_read = fun _ -> ()) ?(after_read = fun _ -> ())
+    ?sync_directory ~visit_directory
     ~allow_initial_absence ~ownership_root path =
   with_fs_or_fallback ~path
     ~fallback:(fun () -> read_owned_directory_blocking ?owner_uid ?inventory_root
-      ~allow_initial_absence ~before_read ~after_read ~ownership_root path)
+      ?sync_directory ~allow_initial_absence ~before_read ~after_read ~visit_directory ~ownership_root path)
     (fun _fs ->
       let result = Eio_unix.run_in_systhread
         ~label:(labelled "fs-compat-read-owned-directory" path)
         (fun () -> read_owned_directory_blocking ?owner_uid ?inventory_root
-          ~allow_initial_absence ~before_read ~after_read ~ownership_root path) in
+          ?sync_directory ~allow_initial_absence ~before_read ~after_read ~visit_directory ~ownership_root path) in
       Eio.Fiber.check ();
       result)
 ;;
 
-let read_owned_directory ?owner_uid ?inventory_root ?before_read ?after_read ~ownership_root path =
-  match read_owned_directory_listing ?owner_uid ?inventory_root ?before_read ?after_read
-      ~allow_initial_absence:false ~ownership_root path with
+let read_owned_directory ?owner_uid ?inventory_root ?before_read ?after_read ?sync_directory ~ownership_root path =
+  match read_owned_directory_listing ?owner_uid ?inventory_root ?before_read ?after_read ?sync_directory
+      ~visit_directory:(fun _ names -> names) ~allow_initial_absence:false ~ownership_root path with
   | Ok (Owned_directory_entries names) -> Ok names
   | Ok (Owned_directory_absent error) -> Error error
   | Error _ as error -> error
 ;;
 
-let read_owned_directory_if_present ~owner_uid ?inventory_root ?before_read ?after_read ~ownership_root path =
-  read_owned_directory_listing ~owner_uid ?inventory_root ?before_read ?after_read
-    ~allow_initial_absence:true ~ownership_root path
+let read_owned_directory_if_present ~owner_uid ?inventory_root ?before_read ?after_read ?sync_directory ~ownership_root path =
+  read_owned_directory_listing ~owner_uid ?inventory_root ?before_read ?after_read ?sync_directory
+    ~visit_directory:(fun _ names -> names) ~allow_initial_absence:true ~ownership_root path
   |> Result.map (function
     | Owned_directory_entries names -> Some names
+    | Owned_directory_absent _ -> None)
+;;
+
+let with_owned_directory_inventory_if_present ~owner_uid ~inventory_root ~sync_directory path visit_directory =
+  read_owned_directory_blocking ~owner_uid ~inventory_root ~sync_directory
+    ~allow_initial_absence:true ~before_read:(fun _ -> ()) ~after_read:(fun _ -> ())
+    ~visit_directory ~ownership_root:inventory_root.inventory_path path
+  |> Result.map (function
+    | Owned_directory_entries value -> Some value
     | Owned_directory_absent _ -> None)
 ;;
 
@@ -1460,13 +1476,34 @@ let load_owned_regular_file_range_with_sha256_blocking
 external open_owned_inventory_entry : Unix.file_descr -> string -> Unix.file_descr
   = "caml_masc_owned_entry_open"
 
-let with_owned_inventory_entry root path fn =
+let with_owned_inventory_entry ?owner_uid ?(single_link = false) root path fn =
   let ownership_root = root.inventory_path in
   match owned_directory_paths ~ownership_root (Filename.dirname path) with
   | Error rejection -> owned_file_error (Ownership_boundary_rejected {path; rejection})
   | Ok descendants ->
     let descriptors = ref [] in
     let opened = ref [] in
+    let check_owner path (stat : Unix.stats) = match owner_uid with
+      | None -> ()
+      | Some expected_uid ->
+        if stat.st_uid <> expected_uid then
+          raise (Owned_directory_read_rejected (Owned_path_owner_mismatch
+            {path;expected_uid;actual_uid=stat.st_uid}));
+        if stat.st_perm land 0o022 <> 0 then
+          raise (Owned_directory_read_rejected (Owned_path_writable_by_others
+            {path;permissions=stat.st_perm land 0o7777}));
+        if single_link && stat.st_kind = Unix.S_REG && stat.st_nlink <> 1 then
+          raise (Owned_directory_read_rejected (Owned_file_operation_failed
+            {path;operation=Inspect_descriptor;cause=Sys_error "owned record has multiple hard links"})) in
+    let current_entry path fd initial =
+      let observed = Unix.lstat path in
+      check_owner path observed;
+      let descriptor = match owner_uid with
+        | None -> initial
+        | Some _ -> let descriptor = Unix.fstat fd in check_owner path descriptor; descriptor in
+      observed.Unix.st_kind = initial.Unix.st_kind
+      && descriptor.Unix.st_kind = initial.Unix.st_kind
+      && same_file_identity observed initial && same_file_identity descriptor initial in
     let close_all () =
       let failure = ref None in
       List.iter (fun fd ->
@@ -1479,35 +1516,47 @@ let with_owned_inventory_entry root path fn =
         if not (inventory_root_current root)
         then owned_file_error (Filesystem_identity_changed {path})
         else begin
+          check_owner ownership_root (Unix.fstat root.inventory_fd);
           let parent = List.fold_left (fun parent directory ->
             let fd = open_owned_directory_child parent (Filename.basename directory) in
             descriptors := fd :: !descriptors;
-            opened := (directory, Unix.fstat fd) :: !opened;
+            let stat = Unix.fstat fd in
+            check_owner directory stat;
+            opened := (directory, fd, stat) :: !opened;
             fd) root.inventory_fd descendants in
           let fd = open_owned_inventory_entry parent (Filename.basename path) in
           descriptors := fd :: !descriptors;
           let stat = Unix.fstat fd in
+          check_owner path stat;
           let current () = inventory_root_current root
-            && List.for_all (fun (directory, stat) ->
-                 same_file_identity (Unix.lstat directory) stat) !opened
-            && same_file_identity (Unix.lstat path) stat in
+            && current_entry ownership_root root.inventory_fd root.inventory_stat
+            && List.for_all (fun (directory, fd, stat) -> current_entry directory fd stat) !opened
+            && current_entry path fd stat in
           if not (current ()) then owned_file_error (Filesystem_identity_changed {path})
           else
-            let result = fn fd stat in
+            let result = fn fd stat parent in
             if current () && same_file_snapshot stat (Unix.fstat fd) then result
             else owned_file_error (Filesystem_identity_changed {path})
         end)
     with
     | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+    | Owned_directory_read_rejected failure -> owned_file_error failure
     | cause -> owned_file_operation_error ~path Read_contents cause
 ;;
 
 let owned_inventory_entry_kind root path =
-  with_owned_inventory_entry root path (fun _fd stat -> Ok stat.Unix.st_kind)
+  with_owned_inventory_entry root path (fun _fd stat _parent -> Ok stat.Unix.st_kind)
+;;
+
+let with_owned_inventory_regular_file ~owner_uid root path fn =
+  with_owned_inventory_entry ~owner_uid ~single_link:true root path (fun file stat parent ->
+    if stat.Unix.st_kind <> Unix.S_REG then
+      owned_file_error (Path_is_not_regular_file {path;kind=stat.st_kind})
+    else Ok (fn ~file ~parent ~stat))
 ;;
 
 let owned_inventory_entry_digest root path =
-  with_owned_inventory_entry root path (fun fd stat ->
+  with_owned_inventory_entry root path (fun fd stat _parent ->
     if stat.Unix.st_kind <> Unix.S_REG
     then owned_file_error (Path_is_not_regular_file {path; kind=stat.st_kind})
     else read_owned_range_digest_descriptor ~offset:0 ~max_bytes:0 ~path fd stat)

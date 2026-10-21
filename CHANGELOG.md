@@ -2,6 +2,420 @@
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-10-20
+
+### Changed
+- TBD
+
+### Deprecated
+- TBD
+
+
+### Fresh state required
+
+- Skill activation event logs written before this release (`<base-path>/.masc/traces/<trace>/skill-activation-events.jsonl` whose first row names `masc.skill-activation-events/v1`) are refused at their header. Until such a log is retired, every Skill read in that trace fails with the ledger error and nothing is recorded there. With the server stopped, rename each such file in place (for example to `skill-activation-events.pre-v2.jsonl`); discovery reads only the exact file name, so the old rows stay on disk but no longer appear in Skill history. After the restart, one `keeper_skill` read from an existing Keeper should succeed. (#44063)
+
+### Added
+
+- Add editable multitrack phrase documents, chord candidates and close/drop-2/rootless voicings, shared MIDI/WAV timing, track levels/pan and explicit clipping evidence. (#43717)
+- Add a TUI piano roll for phrase and chord-progression experiments, note editing, undo/redo, mute/solo, project save/reopen and MIDI/WAV export with safe shutdown. (#43718)
+- Add native phrase-loop playback with pause/resume, seek and explicit audio-output selection, including owned-process finalization and visible playback failures. (#43738)
+- Play phrase projects through a pinned CoreMIDI destination with multitrack programs, volume/pan, loop, pause/resume and seek; release owned keys when closing or switching back to audio. (#43758)
+- Import SMF/RMID performances into the piano roll for note and chord experiments, retaining original timing, expression, metadata and SysEx through JSON save/reopen and MIDI export. (#43763)
+- Audition imported MIDI performances through explicitly bound output ports, retaining tempo/SMPTE timing, channel expression and F0/F7 data with owned key/pedal cleanup on stop. (#43769)
+- Retain editable MIDI/WAV region arrangements with native source timing, immutable source assets, verified project-owned WAV copies and portable revision-protected save/reopen. (#43781)
+- Arrange retained MIDI and WAV sources in the TUI with clip placement, trimming, repetition, duplication, undo/redo and portable save/reopen. (#43785)
+- Stream overlapping WAV arrangement regions through one selected output with finite repeats, pause/resume, beat seek and owned TUI cleanup. (#43789)
+- Pause, resume and seek imported MIDI performances with source-clock conversion, channel expression, RPN component and sustain/sostenuto state reconstruction. (#43792)
+- Play trimmed expressive MIDI arrangement regions with finite repeats, source-port outputs, channel ownership admission and pause/seek/resume. (#43796)
+- Native arrangement playback can coordinate WAV voices and expressive MIDI regions from one host-clock epoch, with paired pause, seek, resume and failure cleanup. The terminal mixed-lane route remains a separate integration. (#43799)
+- The terminal arrangement editor plays audible WAV and expressive MIDI lanes together through one native transport. Select an explicit mixed audio/MIDI route, use per-source MIDI ports, and pause, seek or resume both parts together. New and saved arrangements accept both output flags. (#43802)
+- Arrangement projects retain complete captured takes with original WAV, raw UMP, audio-block timing and manifest bytes. Import a take, open its waveform/MIDI viewer, export MIDI 2.0 clips to persistent project storage, and save or move the project without its original recording folder. (#43807)
+- Saved captures audition original WAV and MIDI 2.0 UMP together through one native clock, retaining source identities, packet words, pre-roll, the first-audio offset and MIDI tails. Select audio/MIDI outputs or per-input destinations in the take viewer; Space starts or stops the complete source. (#43812)
+- Native captured-take playback pauses/resumes with `p` and seeks WAV and MIDI together with `:seek SECONDS`, reconstructing live keys, sustain/sostenuto, ordered channel and per-note expression, program/bank state and original note attributes/releases when source baselines are known. (#43816)
+- Captured takes can be placed as paired WAV/UMP regions with decimal-second trims, compressed repeats, duplicate/move, mute/solo, undo/redo and portable save/reopen. Source ranges retain integer host ticks, MIDI pre-roll/tails and whole-frame audio intersections. (#43819)
+- Add explicit `:play-audio` audition of captured WAV regions with original host-clock gaps, finite compressed repeats, pause/resume and seek. (#43823)
+- Keep silent-only capture intervals alive through their arrangement horizon, and retain exact source samples with checked rational frame placement. (#43823)
+- Add native paired MIDI2 UMP and WAV region transport with exact source cuts, compressed repeats, shared-clock pause/seek and scoped note cleanup. (#43826)
+- Preserve original expressive messages and release words while excluding expired missed attacks; ordinary TUI preparation remains a separate integration step. (#43826)
+- Play captured MIDI2/WAV regions from the ordinary arrangement TUI through verified source snapshots and explicit per-input MIDI output selection. (#43827)
+- Mix ordinary WAV and clock-only captures with paired regions while preserving exact cuts, compressed repeats, portable sources and cancellation cleanup. (#43827)
+- Play standalone SMF, captured MIDI2/WAV and ordinary WAV regions together through one arrangement transport with a shared host clock. (#43829)
+- Preserve protocol-specific output bindings, admit independent groups/channels on one MIDI destination, and drain both MIDI engines on completion or failure. (#43829)
+- Record simultaneous audio and original MIDI2 input against playing arrangements, then attach verified takes with exact host-clock placement and portable source retention. (#43831)
+- Correlate native recording epochs, finalize takes before transport changes, and preserve recording failures and recovery sources through view exit. (#43831)
+- Monitor a selected audio input through an explicit output before or during arrangement recording, with owned route handoffs and device-reported latency. (#43836)
+- Add a standalone native live MIDI input backend with selected source/destination UIDs, complete delivered UMP forwarding, explicit endpoint or group/channel ownership and declared backing reservations. (#43839)
+- Preserve input deadlines and raw high-resolution messages, bound in-flight callback payloads, and drain owned keys, pedals, partial SysEx and callback handoffs on stop or failure. (#43839)
+- Install the separate music-midi-live helper; TUI and authoritative backing ownership integration remain follow-up work. (#43839)
+- Route selected live MIDI inputs to independent instrument outputs in the arrangement TUI while recording original MIDI and WAV, with authoritative backing channel reservations and serialized ownership transitions. (#43842)
+- Measure selected audio loopback channels from the arrangement TUI, preserving reference signals, captured WAV and exact clock residual candidates without automatically changing recording placement. (#43844)
+- Split captured audio and MIDI into independently placed arrangement components while preserving original WAV, UMP and clocks. (#43846)
+- Apply explicit signed manual capture offsets with exact project-zero cropping and compressed repeat playback. (#43846)
+- Route individual recorded audio input channels to selected arrangement output channels without changing the original WAV, MIDI or clocks. (#43851)
+- #43854 Inspect retained audio calibration samples and clocks, then explicitly adopt one measured residual for a routed captured-audio region with undo and portable provenance while preserving original MIDI.
+- #43858 Save an explicit manual or inspected measured audio correction for new arrangement recordings, retain each take's chosen policy before capture, and attach corrected audio once while preserving original MIDI, source files and clocks.
+- #43861 Save arrangement count-in and metronome settings, run accented rational clicks on the shared native audio clock, and record from stopped backing against its acknowledged musical downbeat while retaining original audio and MIDI pre-roll.
+- `masc_decide` asks Ollama System One (`/v1/systemone`) up to 64 typed questions (choice / noul / score) with probabilities back: local Ollama with `nimble` by default, or cloud `clef:cloud` charged per input token (~$0.00006 per judgment). Confidence is distribution concentration, not calibration — for ranking and screening, not verdicts. #43863
+- Added a workspace-scoped Git file catalog for tracked and nonignored files, sharing the file reader's confidentiality and symlink checks. (#43865)
+- Added Ctrl-P file finding in Workspace Code, with checkout-wide filtering, safe asynchronous selection, and jump-back navigation. Existing file content and position remain available if reading a selection fails or is cancelled. (#43866)
+- #43878 Move editable phrase, chord and voicing experiments into backing arrangements, edit MIDI sources as independent variants, and retain the edited SMF2 pattern for placement while preserving original sources and portable drafts.
+- #43881 Inspect and edit original MIDI controller, bend, program and pressure events with source-event selection, keyboard value changes, immutable undo/redo, preserved patterns and ports, and portable arrangement variants.
+- Prepare phrase and selected source MIDI for VST rendering, preserving performance timing and retained WAV/MIDI artifacts. #43884
+- Choose a VST instrument and preset or SoundFont directly from phrase playback, with retained render evidence and owned cancellation. #43885
+- #43889 Explicitly order same-tick MIDI expression events before existing notes, with validated source-port preservation, undo/redo, portable variants and unchanged note timing.
+- Browse saved music projects and takes in a plain terminal workbench, returning from editors with owned cancellation and refreshed selection. #43892
+- Open the workspace music library from Dashboard s or /music, including phrase, arrangement and take continuation without score graphics. #43893
+- #43896 Inspect and edit imported MIDI tempo maps with keyboard selection, immutable undo/redo, source-resolution note preservation, PPQ playback timing and portable arrangement variants; retain fixed SMPTE frame timing.
+- Compare reported preparation intervals by declared direct/exact-skill strategy with exact signed ns differences, preserving failed and unavailable arms and exposing comparison blockers without claiming execution or speedup. (#43898)
+- Read validated details for the selected music project or take in an owned worker, retaining source failures and waiting for cancellation cleanup. #43900
+- Show the selected music library item's title, tempo, duration, tracks and capture outcome while preserving selection and editor ownership. #43901
+- #43903 Persist arrangement loop ranges and repeat source-preserving SMF regions on one native owner, with shared clip boundaries, cross-cycle state admission, pause/seek/resume and owned note cleanup.
+- Preserve declared preparation setup and process observations in reports, including read state, original record and hash, without inferring liveness or replacing native outcomes. (#43904)
+- #43912 Repeat original WAV arrangement ranges continuously on one native audio owner, preserving source phase, finite clip repeats and authored gaps across fractional sample cycles, with pause, seek and resume.
+- Loop original MIDI and WAV arrangement tracks on one authored clock, preserving source phase and original MIDI releases across full or partial repeats, pause, seek and shared cleanup. (#43930)
+- Choose among returned Code definition/reference locations while preserving queued input, the original reading and owned B navigation (#43933, #43931).
+- Loop captured audio on the authored arrangement clock while retaining original timing, channel routes and source files, including silent windows and pause, seek and resume controls. (#43938)
+- Provider admission supports Background requests with bounded service alongside Priority and Standard requests, preserving shared capacity, cancellation ownership and existing two-class behavior when no background work waits. #43939
+- Hover and drag by observed elements through native BiDi/WebDriver pointer input, with current visibility, document and hit-target checks before dispatch (#43970).
+- Show BiDi agent activity and trusted browser pointer positions in an inert page overlay; expose owned queued/running interactions in browser connection observations (#43971).
+- Let image-capable Keepers read original screenshot and sandbox image pixels with `keeper_image_read`, without a separate vision-model call. Unsupported runtimes receive a tool rejection and can explicitly use delegated image analysis. (#43973)
+- Loop paired captured MIDI/WAV and hybrid SMF passages on one authored clock while retaining exact raw MIDI, reached channel ownership and source snapshots through playback controls. (#43977)
+- Open a new HTTP(S) tab on an explicitly selected live BiDi connection and return its tab ID for subsequent reads and pointer actions, preserving existing tabs and avoiding duplicate creation after uncertain outcomes (#43978).
+- Inspect an original async request in Tools, including terminal outcomes, source Task and separate Composition resolution; retain source-specific observations during refresh failures and reject retired read replies. (#43985)
+- Open an async request's original source Task and history in Tools, with independent exact reads, retained partial failures, original provenance and complete shared Task documents. (#43991)
+- Add a one-shot count-in and an optional metronome to arrangement loops; WAV, SMF and captured UMP backing start together after the count-in, and pause/resume keeps the remaining introduction. (#43998)
+- Record WAV and original MIDI/UMP together while arrangement backing loops; each pass becomes its own take lane with only the latest unmuted, and audio and MIDI select the same pass. (#44005)
+- Support observed drag waypoints and move durations, with distinct activation movement before release. (#44011).
+- Support trusted Chrome hover, observed menu clicks, routed pointer dragging, and semantic HTML5 drop arrival. (#44016).
+- Select and audition paired loop recording takes with `:takes` and `:take N|next|previous`; the WAV/MIDI pair changes together as one undoable step that survives save and reopen. (#44019)
+- Show the attributed Keeper, interaction state and observed pointer in owned Chrome sessions; preserve actor identity through queued interactions and keep overlay failures from changing or replaying native input. (#44020)
+- Add a read-only Task history page API with original Task/workspace and physical file-bound cursors shared by HTTP/1 and H2; changed, unreadable or corrupt dated-layout prefixes fail without advancing. TUI consumers still use their existing recent slice pending the consumer change. (#44022)
+- Read earlier original Task history in Work and Tools with H, retaining the observed prefix and cursor on failure, and keeping page ownership independent from Task body reads. (#44029)
+- The chat ASCII tab preview reads `\subtitle "…"` beside `\title` and draws it behind the title in the header (`"Riff" · "Warm-up"`); a score carrying it no longer falls back to the unknown-directive box (#44037).
+- Choose an available browser from actual connections and owned session state, preserving exact browser identity for ongoing work and allowing status or cleanup after a browser is disabled. (#44039)
+- Keep the selected VST instrument and preset with saved phrases and MIDI sources across save/reopen, undo/redo and Save As. (#44043)
+- Keeper chat can open original tool-call input and output with `/calls` or a folded-result action, retaining the conversation and read position across retries (#44045).
+- Dispatch guarded native double clicks, Unicode typing and modifier key combinations through BiDi, owned Firefox and owned Chrome; preserve pages while quarantining a Chrome session whose native keyboard release is uncertain. (#44046)
+- Set and measure actual WebExtension browser zoom on the observed tab, retain its per-tab or per-origin scope, and reject stale identities or unsupported transports before input. (#44047)
+- Owned Chrome supports native tab creation, back/forward, reload and confirmed close, retaining created-tab recovery receipts on partial navigation and never reusing retired tab IDs. (#44050)
+- Initial browser discovery and work-session opening accept task action requirements, select an implementing browser before effects, and return its public capability constraints with actionable no-dispatch failures for unsupported combinations. (#44052)
+- Keeper Identity grows a detach path: press `D` twice in the Identity tab to
+  forget one service's stored token, drop the tools the login attached, and
+  ask the provider to revoke what it still holds. The pane reports the two
+  separately -- locally deleted, and revoke taken, failed, or not offered
+  (#44075).
+- TUI Board reader: with comments focused, j/k select a comment and v/V vote it up or down (two presses, like a post vote); with the body focused, v/V vote on the open post, which the footer already advertised but did nothing. Each comment shows its net score. (#44103)
+- TUI: a mouse drag selects text inside the one pane where it started (roster, main area or Activity pane) and copies it with OSC 52 on release, instead of the terminal selecting whole rows across every pane. Clicks on marked rows now act on release. (#44106)
+- A Lane Add-on package manifest can declare named exact outputs (`[world.exact_outputs.<name>] schema = "<path>"`): the schema file ships in the package, is checked with the action schema validator when the manifest loads, and is part of the declaration revision. A package without the table keeps its revision. Slot binding and execution follow in the next layers of RFC operator-quiz L1. (#44131)
+- Keeper execution receipts retain ordered runtime candidate failures, their dispatch observations, and the separately observed terminal origin, so a later failure does not erase an earlier candidate's evidence. (#44146)
+- Keeper trust and compact HTTP responses retain historical runtime candidate evidence with its original turn identity, distinguishing uncaptured and unreadable evidence from an observed walk without failures. (#44165)
+- Keeper details show each recorded runtime candidate failure and its terminal origin beside the current blocker, retaining the original turn, call observations, and server-derived error summaries. Invalid history is shown as unreadable. (#44197)
+- Keeper TUI details show recorded candidate failures and terminal origin from the source receipt, separately from the current blocker. (#44204)
+- Add an explicit native Code references scenario with five focused LSP suites and matching TUI/server artifacts. (#44208)
+- A pure Keeper cost accumulator retains reported amounts with priced, unpriced, unresolved and unobserved-attempt coverage, including explicit unknown historical coverage and additive snapshot deltas. Production metadata and operator views are not connected yet. (#44221)
+- Encode Keeper cost coverage as an exact observation object, preserving numeric sums with unknown history and refusing inconsistent coverage. (#44244)
+- Expose the stored Agent input request and its exact checkpoint reference through the admin Keeper checkpoint inventory. Missing or unreadable sources remain explicitly unavailable rather than appearing as a cleared wait. (#44307)
+
+### Changed
+
+- Declared `accepted_reasoning_efforts = ["none"]` for the `mistral-small` row in `packages/agent_core/models.toml` to reflect Mistral's documented `"none"` reasoning effort while keeping `"high"` unselected until `openai_chat_extended` response parsing is verified for Mistral's chunked `ThinkChunk`/`TextChunk` content (#38564, #43713).
+- Updated the comment above `external unsetenv : string -> unit = "masc_test_unsetenv"` in `test/deps/masc_test_deps.ml` to accurately state that OCaml 5.5 added `Unix.unsetenv` while explaining why the test suite continues to bind the shared C stub and why `with_process_env` removes variables instead of setting `""` (#37336, #43715).
+- Removed unused `Adaptive_only` / `Anthropic_adaptive_only` and `Adaptive_preferred` / `Anthropic_adaptive_preferred` Anthropic thinking-control vocabulary variants and their unreachable serializer and exact-output catalog branches (#43752, #41881).
+- Deliver Connector status and bindings before directory names finish, retaining the original workspace read and showing that names remain pending. (#43887)
+- Add an explicit native workspace-files proof scenario with matching server/TUI artifacts and focused Git, file ownership and confidentiality checks. #43906
+- Traverse the original Ready Composition predecessor order directly instead of rebuilding a full prefix for every node, preserving binding waits and resource conflict rules. (#43910)
+- Reuse the original Ready Composition dependency layers for execution after checking plan identity, avoiding a second graph construction while preserving live resource binding. (#43911)
+- Build Ready Composition static groups directly instead of scanning synthetic empty resource dependencies, preserving live binding conflicts and failure accounting. (#43913)
+- Reuse an execution-local index of original prepared-file predecessors and layer-local pending membership while preserving static waves, outcome order and physical file authority. (#43918)
+- Share original prepared-file resource-ordering layers with execution instead of rebuilding the same dependency graph, retaining plan/member checks and resource authority. (#43921)
+- Reuse original immutable file scope lists within aggregate resource ordering and Ready bindings while retaining live consumer validation and conflict semantics. (#43926)
+- Open published artifacts in a full-window reader with a compact toolbar, responsive HTML canvas and centered Markdown. Back to list preserves search; report metadata remains available under Report information. (#43929)
+- Show canonical Tool result outcome counts and the latest result after an Ask answer while preserving original Task state and incomplete observation evidence. (#43936)
+- Reserve original owned-job recovery from each validated pending marker before later marker reads while retaining canonical owner checks, shared presence hints and cancellation cleanup. (#43943)
+- Keep the exact original preparation report visible as an earlier observation during explicit recheck, distinguish pending/loading/failure, and preserve other Keepers' owned reads. (#43944)
+- Reserve original Composition recovery from validated ready candidates before later pending-name inspections while preserving canonical admission, held recovery and per-pulse declaration sharing. (#43952)
+- Expose original Composition resolution separately from physical worker status, seal the same captured observation through status manifests and delivery checks, and add exact owner/request lookup without enumerating terminal history. (#43979)
+- Add an explicit rich-workspace native proof scope for a matching server and TUI, Code ownership, Unicode positions, music handoff and AlphaTex behavior. (#43995)
+- The score view's state line names the selected VST instrument and its preset
+  (`Retrologue · Warm Pad`), the picker marks the live row with `●`, and the
+  footer lists only the keys the open menu answers (#44001).
+- Prepare complete Task/history displays once per original immutable source and pane width, retain explicit prior displays during replacement, and isolate worker Unicode caches from UI frames. (#44003)
+- Attribute Task display preparation stages to the original source and ticket, preserving worker, caller, UI, cancellation and registration facts separately. (#44013)
+- Exercise shared H2 listener response capacity, real MCP subscription overflow and slow sibling delivery, and the actual GitHub login adapter's stream-local capacity failure through production transports. (#44033)
+- Preserve original Task display preparation across fresh reads with exactly equal typed Task values, retaining fresh Goal/diagnostic observations and each read's original ownership. (#44038)
+- Start browser discovery and work sessions with automatic selection, then retain the selected browser in every observation and action receipt; expose actionable selection failures to Keepers and require the observed owner for navigation and close. (#44040)
+- Present Automatic, Work browser and connected browser identities in the TUI, keep implementation overrides in advanced choices, open work windows visibly and preserve bound ownership across stale discovery or connection loss. (#44041)
+- Preserve Work Task display preparation across another Task's backlog write by reusing equal immutable Task values after the actual read, while applying fresh membership, Goal and failure observations. (#44044)
+- Retain Work Task producer identity with stable immutable values so repeated observations of the same raw snapshot skip Task comparison, while fresh Goal and failure observations still apply. (#44048)
+- Make the tool TOML `exclusive_maximum` tests fail when the key or its number-only and float-only rules are missing, and list every accepted param key in the loader interface. (#44054)
+- Usage Plan collapses exhausted accounts to a one-line summary by default with an `x` toggle, and Plan rows use a 1-space indent (#44071).
+- Usage Trend replaces block bars with a braille line plot that breaks at gap days (#44071).
+- TUI: the screen margin is one column per side instead of two on every surface, and the freed columns go to content; Board list and compose drop their extra two-column indent. Overlay content now sits against its border. (#44105)
+- The TUI shows what waits on the operator at the end of the top menu row on
+  every surface, named by kind (questions, approvals, Goals to confirm, stuck
+  tasks) instead of one number in the bottom-right corner. The row above the
+  composer holds only the next wake, and the chat footer no longer repeats the
+  open-question count (#44132).
+- The TUI starts with the narrow Activity pane on Dashboard as on every other
+  surface, so a wide terminal has the feed beside Dashboard. Ctrl-L still
+  cycles narrow, wide and hidden, and a chosen layout applies on Dashboard too
+  (#44140).
+- The TUI Dashboard draws "Needs your decision", "Continue" and "Status" as
+  titled cards in two columns on a terminal about ninety columns wide, and
+  writes the selected decision out in full inside its card instead of cutting
+  it with an ellipsis. Narrower or shorter terminals keep the plain rows
+  (#44170).
+- Add an explicit native TUI proof scope for original tool results, covering retained-source paging, HTTP permissions, shared artifact bounds, and Reader state with a matching server/TUI pair. (#44191)
+- The TUI Usage surface draws each account in Plan usage as a titled card, two
+  to a row, on a terminal wide enough for two columns of cards. Narrower
+  terminals keep the rows (#44195).
+- A direct message no longer carries a channel session key. No request set it, and every direct turn already kept its session under `traces/<trace_id>`. (#44228)
+- The TUI Dashboard cards wrap every row to the card width instead of cutting
+  it at the edge, and the selected row keeps its band on each wrapped line. The
+  top menu badge names held calls as "held calls" instead of "approvals"
+  (#44263).
+- The Dashboard draws plain rows, not cards, when the decision window shows only
+  some of the decisions, because only the plain heading can name the row range
+  (#44263).
+
+### Removed
+
+- `scripts/llama-runtime-pool.sh bench` is removed. It called the MCP tool `masc_llama_runtime_bench`, which the server does not have. (#44130)
+- The activity graph no longer decodes the event kind `agent.session_bound` or draws a `presence` span from it. No producer writes that kind into `activity-events`; session binding is logged under a `type` field in the workspace event log. A stored `agent.session_bound` row is still listed but no longer changes a graph node or span. (#44134)
+- `docs/guides/MEMORY-ADMISSION-RECOVERY.md`. It described a queue that stays blocked until an attested backup is restored, a state the admission queue no longer reaches; `docs/guides/keeper-memory-limits.md` now describes explicit write admission. (#44144)
+- The range-v1 explicit-write recovery tool `scripts/maintenance/recover-memory-admission.py` and its test. It refused the current sparse-candidate store, and its guide went with #44144, which removed the blocked queue state it served. (#44151)
+- The `keeper.turn.max_tool_rounds` runtime param. It capped tool rounds in every AGENT_CORE run, the one-shot completion review included, which is a cumulative budget gate. A `runtime_params.json` that still names the key loads unchanged and drops the key on the next write. (#44227)
+
+### Fixed
+
+- Expand single-line `if` / `elif` / `else:` statements in `addons/tests/test_value_difference.py` onto separate lines so `ruff check addons/tests/test_value_difference.py` passes without `E701` diagnostics. (#43699)
+- Annotate `installation_id: str | None = "fusion-results"` in `addons/tests/test_fusion_report.py` (`upstream`) so `pyright addons/tests/test_fusion_compute.py addons/tests/test_fusion_report.py` passes with 0 errors without suppressions. (#43701)
+- Narrow optional `header`, `result`, `structuredContent`, and `reservation` values in `scripts/item-http-acceptance.py` so `pyright scripts/item-http-acceptance.py` passes with 0 errors. (#43703)
+- Restore `transaction:Auth.credential_transaction` on `Play_participation.read` and `Play_participation.write` so participation state I/O requires an active Auth credential transaction witness, and clarify the `Play_participation` module docstring. (#43704)
+- Delegate `Keeper_config.validate_name` to `Keeper_id.Keeper_name.of_string` so `Keeper_config.validate_name` enforces the same 128-byte `Keeper_id.Keeper_name.max_length` bound, and report overlong portable names in `Keeper_config.invalid_name_error`. (#43705)
+- Resolved all 47 Pyright type-checking diagnostics (`reportOptionalMemberAccess`, `reportOptionalSubscript`, `reportOptionalIterable`, `reportOperatorIssue`, `reportGeneralTypeIssues`, `reportArgumentType`, `reportIncompatibleMethodOverride`, and `reportCallIssue`) in `test/test_install_runtime_setup.py` without rule suppressions (#41181, #43711).
+- Reject non-finite (`NaN`, `±∞`) float parses in `Env_config_core.get_float_clamped` and route `Env_config_keeper.KeeperKeepalive.sleep_chunk_sec` and `rate_limit_backoff_cap_sec` through `get_float_clamped` so `MASC_KEEPER_RATE_LIMIT_BACKOFF_CAP_SEC=nan` falls back to its default instead of collapsing keepalive rate-limit backoff to `0s` (#38685, #43712).
+- Require `MASC_HTTP_BASE_URL` (`public_base_url`) to be a valid `http(s)` origin (`Play_invite.is_http_public_base_url`) before `Play_invite.issue` mints a `Player` credential or `/play/agent.md` renders join URLs, returning `409 not_ready` with `public_base_url_not_http` in `missing` instead of issuing an unusable invite link (#39891, #43714).
+- Validate numeric HTTP hosts using browser IPv4 parsing rules before creating an invite credential, including range checks for decimal, octal, hexadecimal, and shortened forms (#43714).
+- Surface sanitized, length-bounded HTTP `"error"` detail when `masc runtime-resume` is refused by the server (#43740, #36541).
+- Enforce `[keeper].name` filename stem parity across Keeper TOML profile loading and inspection paths (#43741, #36427).
+- Count unassigned keepers on default lane routes in TUI Runtime lane and runtime listings (#43742, #40825).
+- Preserve task-specific `handoff_context` fields when Keeper shutdown releases owned tasks to the backlog (#43743, #40767).
+- Use `Hashtbl` request-ID sets in TUI chat timeline per-row loops and add an equivalence test for source-scoped held row filtering (#43744, #42253).
+- Propagated `Keeper_operator_interrupt.Operator_interrupt` from Antigravity and Muse stream projection and model-input projection callbacks instead of swallowing it as a generic callback warning (#43753, #39341).
+- Validated the inner `Dos_snapshot` header and format version in `Dos_lane.lookup_autosave` so an autosave with an unsupported inner snapshot version is reported as `Autosave_unreadable` rather than `Autosave` (#43754, #39960).
+- Rejected blank or whitespace-padded Goal IDs in `Goal_store.create` and trimmed `task_id` / `goal_id` in `Task_goal_assignment.set_task_goal` and `/api/v1/dashboard/tasks/assign-goal` before lookup and linking (#43755, #39964).
+- Enforced self-approval refusal (`me != pr_author`) and optional `--review-base` / `--review-diff` and `--body` verdict line checks in `scripts/review/approve-guard.sh --check` so `--check` does not report `WOULD APPROVE` when the real approval call refuses (#43756, #39423).
+- Keep phrase MIDI keys owned when a Note On or cleanup note-off send fails, so the final cleanup still releases them. (#43758)
+- Keep a source MIDI note, pedal or SysEx terminator owned when its cleanup send fails, so the next cleanup retries it without repeating successful releases. (#43769)
+- Route changed-snapshot range reads in `Tool_blob_store.fetch_range` through `validate_and_read_streaming ()` so whole-blob allocation is avoided on snapshot replacement, and remove dead `range_of_bytes` / `validate_whole_snapshot` helpers (#43773, closes #38874).
+- Defer `note_transport_uncertainty` in `Keeper_claude_code_runtime` until `~on_prompt_sent` so Claude Code processes exiting before turn admission remain at `No_effect_observed` and rotate to the next lane candidate (#43774, closes #42212).
+- Keep incomplete user-message writes fenced through their typed write-unknown observation, including a timeout before the prompt-sent callback, while preserving initialization failover (#43774).
+- Purge derived Antigravity and Muse official-client home artifacts across all candidates of an assigned lane on Keeper shutdown/purge, and log typed `official_client_purge_warning` diagnostics when a candidate home cannot be derived (#43775, closes #42269).
+- Destructure `candidates` starting at `head` (`_ :: member :: _`) in `test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint` so `Store.claim_next` receives a contiguous fresh batch prefix (#43776, closes #43766).
+- Retire the `"Press enter again to answer <keeper>"` footer notice when Ask answering or workspace authority is withdrawn, and suppress disarmed Ask confirmation notices in `Masc_tui_render_prim.footer_line` (#43777, closes #40856).
+- Refuse unsupported editor documents before terminal admission and stop WAV metadata reads when their caller cancels. (#43781)
+- Preserve save uncertainty per path and settle pending arrangement IO when its worker exits during close. (#43785)
+- Finish arrangement playback at the duration boundary and bound native source hash temporary storage during long-file admission. (#43789)
+- Preserve reset-controller state and original note-off wire forms when reconstructing MIDI source boundaries; reject unknown initial or opaque device state explicitly. (#43792)
+- Refuse MIDI source seek/resume while a sounding note began under a different program or bank, instead of restarting it with the latest patch. (#43792)
+- Retain failed MIDI release ownership for cleanup, skip missed repeat copies, and require source state before sounding keys after a region handoff. (#43796)
+- A delayed first coordinated MIDI callback skips expired region copies while preserving the original event order of copies still playing. (#43799)
+- Already accepted arrangement commands wait for the active take viewer to return terminal ownership and remove its snapshot, preventing overlapping viewers after a delayed save. Closing aborts and drains the active viewer while preparation remains cancellable. (#43807)
+- Capture playback passes explicit MIDI bindings and honors WAV-only audio-output selection. Native admission diagnoses shared group/system state between independent inputs, and shutdown releases owned keys, pedals and incomplete exclusive streams before removing private sources. (#43812)
+- Delayed seek callbacks skip expired notes, including callbacks past the source end. Reconstruction diagnoses unknown initial values, opaque effects and one-shot Portamento Control instead of inventing state or replaying consumed effects; full-source UMP audition remains available. (#43816)
+- Legacy schema-1 captured sources reopen by reconstructing missing MIDI bounds from verified original packets, including WAV-only captures, while retaining the stored revision until an explicit save. (#43819)
+- Captured timing bounds are checked against original packet timestamps on import, reopen and snapshot preparation. Arrangement preparation diagnoses audible captured regions until native paired-region playback is connected, preserving full-source audition and existing muted-lane audio routes. (#43819)
+- `:play-audio` accepts a captured region that ends inside its own final source frame when the audition also plays a WAV at a higher sample rate. (#43823)
+- Keep captured per-input MIDI overrides when `:midi-output` later selects the default destination, so overridden inputs no longer move to the new default. (#43827)
+- Replay captured MIDI2 controller and pitch-bend preambles at their original deadlines across arrangement repeats and seeks, while retaining explicit source-baseline checks. (#43834)
+- Revalidate selected input and monitor output UIDs so a reused device handle cannot silently select a different interface. (#43836)
+- Monitor and record audio devices with more than two channels through discrete channel layouts instead of failing with "no usable audio stream"; a wider input plays on a mono/stereo output in channel order. Add the required `-parse-as-library` flag to the documented native build command. (#43836)
+- Cancel only the owned loopback measurement with Esc/q, wait for its native and analysis cleanup, and restore monitoring without closing the arrangement or losing queued edits. (#43844)
+- Preserve lane mute and solo state when splitting a capture, and retain exact MIDI repeat boundaries, due events and transport horizons at fractional tempos. (#43846)
+- Schedule immediate arrangement playback beyond active audio render clocks to retain the common audio and MIDI start. (#43846)
+- Derive placed capture start seconds from the reduced exact start, so native playback no longer refuses placed regions at fractional tempos as disagreeing with their exact start. (#43846)
+- Keep source and output buffer channel layouts separate, silence unselected outputs, and reject unavailable renderer channels before playback or MIDI transmission. (#43851)
+- #43854 Bind measured playback to the CoreAudio device buffer size and reject changes throughout a run, allowing audio-unit render capacity to change during graph preparation.
+- Offline durable source scans skip leftover `.atomic_*.tmp` staging files so unpublished partial payloads do not cause `Durable_source_parse_failed`. (#43857)
+- `masc_decide` rejects malformed criteria and binds answers to the original choice options and score rubric. Score responses decode Ollama's indexed objects, and all probabilities, confidence values and scores must be finite and within their requested domains. #43863
+- Preserve Connector binding reread demand through temporary workspace uncertainty, reject retired request completions, and retain failed rereads without an immediate retry loop. (#43880)
+- Distinguish Connector reads, queued binding rechecks and held demand from the last observation in Connectors and Keeper Channels. (#43880)
+- Preserve an exact binding action prepared after Connector status arrives when its directory enrichment completes, and reject duplicate or retired status results. (#43887)
+- Refresh changed Connector bindings without waiting for obsolete name-directory work, cancelling only the original observation and retaining its ownership until actual cleanup. (#43891)
+- Coalesce binding changes while status is pending, then start the fresh read when status arrives while rejecting retired status and name results. (#43891)
+- Keep a failure saving a known driver return outside the invocation-error handler so persistence errors do not recast completed invocations as unavailable. (#43904)
+- Preserve Code reading positions and jump history until a return succeeds; failures, cancellations and stale results keep the current reading. Restore horizontal scrolling, tree selection and pane focus as well as cursor and vertical position. (#43915)
+- Keep the current Code reading until a different-file language-server location opens successfully. Record source history on success, update the destination directory, and reject stale ordinary reads during navigation. (#43922)
+- Read authoritative tool-call disposition before wire outcome in quality analysis, failure sweeps, roundtrip probes, readiness evidence, and Dashboard telemetry. Display deferred, unsettled, and malformed evidence separately without borrowing another telemetry source's success flag. ([#43928](https://github.com/jeong-sik/masc/pull/43928))
+- Preserve a durable event-queue quarantine intent across interrupted moves, refuse incomplete recovery on boot and queue access, and resume the exact archived entries only after explicit operator acceptance (#43932).
+- Librarian memory processing uses Background provider admission so Keeper requests can pass the memory backlog on accounts with a declared service limit, while judgments retain priority and memory work continues receiving permits. #43940
+- Ask Code and Keeper language-server questions at the selected symbol's UTF-16 position when Korean, emoji or combining text precedes it; reject malformed source encoding before dispatch (#43947, #43945).
+- Enumerate Keeper profile declaration results and error kinds so warning 4 no longer blocks compilation, preserving the claims for mismatched names (#43951).
+- The chat ASCII tab preview reads `\clef` (alphaTab's names and sign forms) instead of refusing the whole score for it, the way `\ks` is read: checked presentation metadata that changes no fret (#43953).
+- Preserve original MIDI notes and releases at native loop deadlines and fractional capture entries, including delayed compressed-copy callbacks. (#43955)
+- Keep waiting within the existing BiDi startup deadline after Firefox exits cleanly, allowing a replacement outside its original process group to open the port and receive the profile-verified host (#43956).
+- End Code question progress when its owned request settles or is cancelled, including refresh and retry, without persisting progress as an answer note. #43958
+- HTTP/2 request bodies now distinguish successful completion from stream failure, so aborted or reset uploads never reach body handlers. Early refusals discard unread DATA without exhausting the connection window; OAuth uses the same completion-aware reader with its own body limit. Pin h2 and h2-eio to the matching dependency repair. (#43961)
+- Avoid whole-document text reads in BiDi screenshot guards and pointer receipts, continue active-tab selection past unreadable contexts, and reuse ancestor visibility work within each native elements observation. #43966
+- Share native pointer action encoding across BiDi and WebDriver and use small post-input receipts so large pages do not retire a successful BiDi connection (#43967).
+- Keep declared provider identity distinct from an anonymous wire when resolving model capabilities. Declared Gemini and Kimi providers can read their catalog's native model facts, while anonymous endpoints retain alias, provider-base and manifest isolation. Frozen requests retain their resolved facts or missing-policy result (#43968).
+- Add explicit operator resolution for an exact waiting/lost Composition owner, preserving original outcomes and artifacts, refusing further work, and retiring only its observed pending marker after the terminal decision is durable. (#43969)
+- Restore TUI source compilation by binding recorded tool outcomes through their owning library and enumerating preparation-cache result constructors. #43975
+- Correct the remaining tool-result module paths in the approvals renderer and identity-refresh tests, with an explicit test dependency on the owning library. #43976
+- Keep the BiDi connection and created-tab recovery receipt available after a confirmed navigation or page-summary failure; reserve connection retirement for unknown outcomes (#43978).
+- Preserve typed stream reset observations in malformed HTTP/2 request tests when aborted response EOF settles first, while retaining the HTTP error, delivery isolation and subsequent-upload checks (#43981).
+- Resolve capabilities, prices, thinking policy, wizard model choices and exact-output bindings from the same declared provider/model authority. Explicit served bare-model families prevent borrowing another vendor's facts; scoped missing values and exact model identity remain authoritative (#43982).
+- Restore exhaustive TUI activity classification for native image reads so the new `Tool_read_image` handler does not fail compilation (#43983).
+- Preserve composition execution results separately from result delivery and subsequent actions in cold and held chat history. Original physical execution IDs prevent later calls from changing the reported result (#43984).
+- Restore compilation of Composition result delivery by disambiguating confirmed invocation bindings from optional status snapshots, and handle operator resolution outcomes exhaustively (#43987).
+- Keep Code return and location progress tied to the current navigation request, so cancellation retires activity while preserving the last settled observation and source reading (#43988).
+- Reconcile recovered provider tool names with their exact admitted stream occurrence, preserving raw identity while showing one Skill call in live chat (#43993).
+- Use the Code renderer's terminal text interface for pending navigation paths so the native TUI compiles while retaining single-line sanitization. (#43994)
+- Preserve browser commands and their Keeper actor in native-host polls regardless of JSON field order, preventing owned hover and drag requests from timing out before reaching Firefox (#44002).
+- Pin the H2 dependency to balanced concurrent peer-stream accounting so refused streams and completed server pushes cannot release another request's slot (#44004).
+- Preserve the durable result manifest when Keepers publish reports, so successful publication returns its link instead of a misleading storage error. If receipt persistence fails after publication, retain the committed report's recovery link and artifact reference without requesting a duplicate publication. (#44007)
+- Keep unavailable BiDi tab addresses visible without hiding readable tabs. (#44009).
+- Use trusted native pointer input for observed semantic clicks and pointerdown menus. (#44010).
+- Retire a rejected Task display result's own pending ticket so returning to the same source and width can start a live preparation. (#44013)
+- Preserve the required string field and exact event-row hash when Skill activation replay fails, so an undecodable session record can be identified without dropping or rewriting its evidence. Event positions are relative to the current read batch; this diagnostic change does not migrate old records or restore blocked Skill reads. (#44015)
+- Keep late hover controls observable and retain usable partial scenes at the actual response byte ceiling. (#44017).
+- Bound HTTP/2 retained application payloads per listener, reject whole responses with an empty 503 before success headers, and reset overflowing SSE streams without blocking other subscribers. Add restart-scoped stream and byte capacities to runtime.toml (#44018).
+- Open saved phrases and imported MIDI at the first note in their first nonempty track, including explicit pattern changes, while retaining manual editing positions and ambiguous-channel selection boundaries (#44021).
+- Unblock the four operator executable builds by removing a duplicate TUI dependency and making async request and skill activation error matches explicit. (#44025)
+- Declare JSON, skill reference and logging dependencies directly in the TUI Task document libraries so their interfaces and implementations compile with transitive dependencies hidden. (#44027)
+- Open the MIDI editor and the arrangement from the score viewer (`p`, `a`) with the current score and selected tracks instead of an empty editor. (#44028)
+- Make Task document input selection exhaustive over planning mode and task focus, removing fragile-match build errors while preserving existing Work and async Tools behavior. (#44032)
+- Declare fetched-state and text-block dependencies directly in the TUI Tools renderer so original async request and Task detail rendering compiles with transitive dependencies hidden. (#44036)
+- Keep a pending VST sound capture through note edits, undo, editor commands, loop and Space, and stop a running preview of the previous sound before auditioning the adopted one. (#44043)
+- Declare `masc_browser_interact` drag `via` points in the tool TOML grammar so the server, TUI, browser host and deployment preflight helper start again, and accept `exclusive_maximum` so pointer fractions advertise the `[0,1)` range the pointer enforces. (#44049)
+- Show the deployment preflight helper's exit status and error output when `install-local-build.sh` cannot resolve the workspace, instead of reporting only a failed workspace lookup. (#44051)
+- The H2 listener suite initializes a session before it subscribes, so the subscription route is exercised on the stateful protocol revision the test uses instead of being refused with 400. (#44062)
+- Name the composition `execution_id` row shape as skill activation event log v2, so a log of the previous shape is refused at its header instead of failing every append on its first undecodable row. (#44063)
+- In Work Task detail, `r` reads the open Task's history again from its first page, as the history line and TUI-KEYS describe; a stale cursor, an exhausted prefix or a failed first read no longer needs the Task closed and reopened. (#44065)
+- `[models.<id>.capabilities]` accepts `anthropic-thinking-control` so an operator-own Anthropic endpoint the model catalog answers no policy for can state the policy its endpoint speaks; Keeper turns on such bindings no longer fail before dispatch once `thinking-support` is set. The loader refuses the key where the catalog already declares a policy for the binding's model, where the wire is not Anthropic, and on official-client runtimes (#44073, #44068).
+- Fix the published-reports test suite so it compiles: bind the bare `Tool_bridge` reference to `Masc.Tool_bridge` like the other Keeper suites do. (#44074)
+- Build `test_tui_server_identity_refresh` again: the TUI async protocol is a library the test can link, and the test names every library it uses. (#44080)
+- Port the v0.59.0 RC type-check fixes for `lib/server/server_auth.mli`, `test/keeper_argument_quality_cli.ml`, `test/test_keeper_memory_os_current.ml` and `test/test_tui_surface_needs.ml` from the release branch so the main test tree type-checks. (#44086)
+- Link the libraries the v0.60.0 split moved out of the test stanzas (`masc` for `test_browser_host`, `yojson` for `test_browser_interaction`, `unix` for `test_tui_async_request_details`) so the main test tree type-checks. (#44087)
+- Follow the v0.60.0 module moves in the test tree: `Tool_result` and `Operator_composition_resolution_command` are now referenced bare from their `(wrapped false)` leaf libraries, `Tool_misc_browser_lane` is qualified through `Masc`, `workspace_identity` and `Autonomous_turn` use the current shapes, and `Backend_anthropic.build_request` output is parsed before inspection. (#44088)
+- `keeper_image_read`, `keeper_analyze_image` and peer-artifact reads now report a sandbox path that does not exist or is not a regular file as a refusal (`path_not_found` / `path_not_a_file`, `workflow_rejection`) instead of a runtime failure, on every sandbox profile including the frozen Turn_runtime binary capture; real transport or capture faults stay `runtime_failure`. (#44089)
+- Pausing or seeking a captured MIDI 2.0 take no longer ends playback when the take has sustain, pressure or bend after a Note On, or Timing Clock and Active Sensing words: only fields that decide an attack need a baseline, and a refused reconstruction keeps the transport playing or paused and reports why. (#44091)
+- A captured region's first copy is admitted when expression follows its Note On; repeats and later regions still refuse a voice that would sound with a stale patch or pitch. (#44091)
+- Hybrid SMF and captured arrangements keep playing when the captured reconstruction is refused. (#44091)
+- A late loop wrap no longer sends a copy's original release as a wrong Note Off or stops playback for a held key that crosses a program change, and a late MIDI 2.0 loop entry whose copy also closes no longer re-attacks expired voices. (#44092)
+- Captured loop admission takes its channel scope from channel-voice words only, so a Timing Clock no longer blocks a region on another channel. (#44092)
+- Enter on a captured source always opens its source viewer; the unreachable Shift+Enter placement branch is gone, and `:place` places the capture. (#44093)
+- Adjacent and repeated MIDI arrangement regions now hand over on one exact nanosecond grid. A duplicate placed right after a region is no longer refused as overlapping, a last copy no longer cuts the next region's first note, and seeking onto a copy boundary no longer re-attacks the previous copy's notes. (#44095)
+- TUI: when the selected Keeper question leaves the list, nothing is selected anymore. The next question no longer slides under the cursor, so repeating `a`, a digit and two Enters cannot answer a question that was never shown; `[` or `]` selects the question at that position. The first Enter of a submit names the chosen answer. (#44098)
+- `docs/guides/TUI-KEYS.md` is generated from the key registry again: the paragraphs under each table now live in `bin/masc_tui_keys.ml` (`reference_notes`), every row the doc and registry disagreed on was reconciled against the key handlers, and `test_tui_keys_doc` passes. Help sentences no longer carry line breaks or runs of spaces that split a table row. (#44099)
+- TUI: an open Keeper question now stays on every screen until it is answered: the red `; Awaiting you` line counts open questions, the `;` panel lists them and Enter opens the answer, and chat, Board compose and narrow Keeper screens lead their footer with the count. (#44104)
+- Keepers on Muse, Claude Code and Codex no longer resend the whole World State on every resume: each section is compared with what the client session already holds, standing sections (wiki, memory ledger, own board posts, goals, …) go only when they changed, arrivals of this turn go every time, and one line names the sections left out. A new, reset or compacted session still gets every section. Muse sessions had kept every turn's full World State until compaction stopped converging. (#44107)
+- TUI Keeper chat: in Compact mode (Ctrl-D default) a turn's tool calls gather into one block at the first call's place even when reasoning, narration or a model response sits between them, in the live trail and in history alike; a Skill block, a status or error row, or another segment or attempt still starts a new block. Full mode keeps the exact order. (#44108)
+- Music capture playback answers a pause or seek refused while it is still starting: the refusal rides the first `playing` event instead of only stderr. The arrangement hint says `Enter:open source` on a captured asset. (#44109)
+- The TUI opens the original source Task of an async request even when no execution ever claimed that Task. The dashboard task detail wrote `"execution_links": null` for such a Task, which the shared Task decoder rejects; the response now uses the shared encoding, leaving the key out until an execution claims the Task. (#44111)
+- A Task status row with a missing or non-RFC 3339 lifecycle timestamp is rejected when it is read. `claimed_at`, `started_at`, `submitted_at`, `completed_at` and `cancelled_at` were taken as the empty string or any text; only `AwaitingVerification.started_at` was checked. Like any other corrupt required field, such a row makes the whole backlog unreadable and the error names the row, so the deployment preflight (`validate-task-backlog`) refuses it before the executable is replaced. If a stored row still has such a value, set that timestamp to an RFC 3339 instant while the server is stopped, or restore `backlog.json.last-good`; the preflight error names the row by index. A bad row in `tasks-archive.json` fails only the status lookup of that Task. (#44123)
+- Rejecting a Task that was waiting for a verdict no longer moves the producer's `current_task` off another Task the producer started in the meantime. The rejected Task still returns to `InProgress`; it takes the focus unless the producer's `current_task` is another Task the producer still holds as `Claimed` or `InProgress`. (#44124)
+- A browser call that named no lane and was refused because no browser could be chosen (`no_available_browser`, `ambiguous_browsers`, `browser_binding_required`, ...) shows as one refusal row on the TUI Keeper screen instead of its raw tool JSON. Browser choice and the TUI read these codes from one table beside the lane's own refusal cases. (#44125)
+- The peer-artifact materialize test fake docker accepts the sentinel `sh -c` read argv that sandbox reads use since #44089, so full regression stops failing on `keeper_artifact_transfer` with a runtime failure. (#44127)
+- `keeper_sandbox_start` returns an error naming what is wrong when the Docker mount source is a regular file or device, a symbolic link that points nowhere, or cannot be created, instead of passing it to `docker run` or raising out of the start request. (#44129)
+- A dashed agent name that is not a generated nickname no longer gets its last segment as an inferred prefix. `claude-sonnet-5` was typed `5` and `codex-mcp-client` was typed `client`; the bearer-token owner fallback used the same value as a credential name. Generated nicknames and bare names are unchanged, and so is the credential name of `keeper-*` aliases. `agent_type` recorded by a session bind is now the whole name for every other dashed name, including `keeper-<name>-agent` and names ending in `-keeper`, which the dashboard then counts as general agents. (#44135)
+- The `ocaml-coding` and `tui-chat-design` repository Skills are readable again: each body now fits the inline tool-result boundary and its topic sections are bundled files under `references/`, which `keeper_skill` reads with `identity` and `file`. Before, the Skill catalog refused both bodies for every Keeper. (#44136)
+- A streaming request whose body cannot take the `stream` fields is rejected before it is sent. `Http_client.inject_stream_param`, `inject_stream_options_include_usage` and `inject_stream_and_options` returned a body that was not JSON unchanged, and re-serialized a JSON value that was not an object without adding the fields; they now return a `result` with a `body_injection_error`, and the request fails with `AcceptRejected`. (#44138)
+- Keep the finalizer regression inside its owning library so the external HTTP test does not import a private codec module. (#44138)
+- Exercise the actual H2 and auto-detect listeners at their configured concurrent stream limit, including repeated refusal and exact reset slot reuse. (#44139)
+- A Keeper's explicit memory writes reach Memory again after committed receipts of earlier writes were lost. The admission queue no longer refuses every pass when a consumed sequence has no receipt; it removes only the rows a receipt names and judges the remaining rows against current Memory. Receipts whose snapshot is missing, undecodable or mismatched still stop judgment until an ordinary Librarian read reconciles them. (#44144)
+- A caller that does not hold a Task and calls `submit_for_verification` on it is now refused with rule id `task_submit_requires_current_owner` and a `current_assignee` field, for Claimed, InProgress and AwaitingVerification Tasks. It used to get the generic `task_transition_invalid_state`. The holder's own resubmission and the refusal text for a Todo Task are unchanged. (#44145)
+- A dashboard `shutdown` of a Keeper name that does not exist answers 200 with `already_absent: true` instead of a 500 "paused-state persist failed after shutdown". Nothing was written before, so the 500 read like a half-finished shutdown. The lifecycle log line now says `outcome=already_absent` for it. (#44149)
+- A keeper whose dashboard worker raised no longer drops out of the execution-trust keepers list (and the keepers list builder it shares) when its degraded row cannot be built; it now gets a row with its name and the error. (#44185)
+- Cover candidate failure receipt propagation through actual Keeper turns for failed lanes and successful fallback. (#44207)
+- Leader-selected CI preparation and runner rechecks read independent source approval without rejecting their own pending or failed CI pin. Actual merge admission retains the pin check, and source receipts cannot publish approval or admit releases. (#44213)
+- The web dashboard drops a stored Bearer token the server refused as `invalid_token` or `token_expired` instead of re-sending it on every poll. A loopback dev token is still re-minted in place, a token stored after the refused request left is kept, and `actor_mismatch` keeps the token. (#44224)
+- Approved-selection verification preserves its typed refusal when a prepared candidate identity differs, including the expected and computed fields. It no longer masks that mismatch as an evidence-read failure through an AttributeError. (#44225)
+- After a Memory snapshot is lost or unreadable, the Librarian receipt reconcile copies every receipt it drops for lacking that snapshot's proof (explicit-write receipts and range receipts without unread records included) into the `<keeper>.librarian-range-commit.json.rejected-<time>` sidecar before rewriting or removing the receipt file, instead of dropping them without a copy. (#44226)
+- A completion or Goal review whose evaluator slot was refused while its provider had stated when the path serves again (a rate limit, a hard quota reset, or a spent usage window read after a 403) now retries when that rest ends instead of stopping until a producer or operator acts. (#44227)
+- The Owner removes a retained checkpoint file (`<trace>/accepted-checkpoints/<sha>.json`, a full transcript) as soon as a confirmed operation-journal commit stops naming it: a native call's next checkpoint, a call that replaces a retired one, a cooperative or Gate suspension, a resume, and the operation's settlement. Before, every such file stayed until the next server startup sweep; one long call had written 1.71 GB in 18 minutes. (#44228)
+- Source-approved candidate commits use fixed author/committer identity, timestamps and UTF-8 encoding, so inherited actor Git settings do not change the SHA between preparation and CI reconstruction. (#44230)
+- The TUI Memory header shows the fleet total of source-bound snapshot invalidations on a `Source:` row, and how many keepers have an unreadable source snapshot. It used to show only the ordinary side's support invalidations, so a fleet with source invalidations read as clean. (#44237)
+- Reuse the original prepared continuity source and validated turn boundaries when applying a learned source width, avoiding a second full checkpoint read and validation while preserving recovery receipts and publication checks. #44250
+- Preserve lifetime Keeper pricing coverage from actual success and failure readings through Owner commits, durable metadata, HTTP, TUI and Dashboard views, distinguishing reported zero, missing prices, partial sums and unobserved history without resetting records. (#44251)
+- Server start no longer repeats the undecodable-source warning for restart-interrupted requests whose failure row is already written. The stored source is decoded only when that row is appended, so the warning appears once, from the start that writes it. (#44253)
+- The Dashboard drawing and the key loop that stores the decision window's first
+  row now read the window's row budget from one function. While the one-time
+  help line was on screen the key loop counted one row more than the drawing
+  (#44263).
+- Retain an Agent's original run and input request through checkpoint restoration, reject stale responses without changing the current question, and consume accepted input waits before later failure or intermediate checkpoint capture. Checkpoint v12 explicitly stores pending ownership. (#44275)
+- Preserve an Agent's original input request when pausing, and save accepted input settlement before later parameter or provider work. Native continuation shutdown keeps the retained owner after an uncertain checkpoint write; an input pause before the first provider turn no longer requires a fabricated AfterTurn ordinal. (#44290)
+- Absorbed memory search reads the events sidecar only when a row that answers the query has a chain that stops short of a current claim, so a stopped chain in an unrelated row no longer makes every search read the whole sidecar or fail when it is unreadable. (#44292)
+- The Muse MSP codec is proven against the stable schema bundle muse-code-sdk publishes for host 1.4.11, and its expected fingerprint now comes from that bundle's `stable/manifest.json` instead of a placeholder in the golden transcripts. Every Muse turn no longer logs that the host's schema differs from the proven one. (#44293)
+- A Muse Keeper's reply is now the agent message the host marks with `messagePhase: "finalAnswer"`, not the newest message in the turn. Narration marked `commentary` still reaches the live stream but never becomes the reply, so a turn that narrates, calls a tool and ends without an answer settles as a turn with no answer. A message with no phase, or a phase MASC does not know, still reads as an answer, as the schema specifies. (#44293)
+- TUI elapsed times and ages read as nothing when the value is negative, NaN or infinite, instead of passing NaN to the time ladder. The Activity pane draws the no-value mark for an age whose call is stamped after the TUI clock, where it drew `0ms`. (#44299)
+- An image turn no longer reroutes to an image-capable runtime whose path is resting on a dated provider rest (a rate limit or a quota window with a known reset). It degrades on the serving lane head until the rest ends, then reroutes again. A quota observation with no stated end still leads image turns, so the next image turn can clear it. (#44300)
+- Scrolling a keeper chat in the TUI while the keeper is in a running turn no longer rebuilds every row of the conversation on each PageUp, PageDown or wheel step. (#44327)
+
+### Performance
+
+- Reuse a private JSON encoding buffer within continuity prefix hashing to reduce temporary allocations without changing checkpoint digests (#44266).
+- Project continuity source spans with one forward history scan and share frozen opener lookup preparation across historical boundary checks, preserving tool atoms, pinned context and unread exclusions (#44267).
+- Show recent direct Keeper conversation while combined history and trace enrichment are still loading, retaining partial results and retryable failures (#44312).
+- Avoid parsing discarded chat trace arguments and results, and reuse exact-turn trace projections within a Dashboard render (#44350).
+- Read canonical checkpoint files without growing-buffer copies, reducing temporary allocation for stable-size regular files while preserving exact source admission. (#44357)
+- Decode TUI chat-history, memory-journal and older-page responses on the shared CPU worker, keeping HTTP and result admission on their original caller. (#44369)
+- Start TUI chat history and memory-journal reads together and apply each result independently, preserving source-specific rows, errors and paging state across refreshes and Keeper revisits. (#44379)
+- Load the first canonical TUI chat page alongside aggregate history and the memory journal, preserving source rows, opaque paging cursors and stale-response boundaries. (#44385)
+- Load full Keeper configuration previews when settings or diagnostic editors open, avoiding preview work on chat-only entry. Prevent cached settings from another Keeper appearing during the first configuration read. (#44397)
+
+### Documentation
+
+- See the [`masc_decide` guide](../docs/guides/masc-decide.md) for operator MCP calls, backend requirements, failure recovery, experimental status and stopping client use. (#43863)
+- Describe native TUI proof scenarios, exact-source receipts and isolated server/TUI behavior verification in the contributor guides. #43907
+- Document Code file finding, jump-back reading positions, pending-return cancellation, retry and verification boundaries. (#43916)
+- Explain successful and failed LSP location navigation, cancellation, return history, and the exact-source verification boundary. (#43923)
+- Explain language-server location selection, input cancellation and exact-source verification boundaries in the Code guide (#43934, #43931).
+- The glossary now has an entry for `result_wait`, the read binding returned by a named async composition submission's receipt: the receipt is not completion, the binding is passed unchanged as `binding` to `keeper_composition_result`, the read verifies durable producer membership and manufactures no absent exports, and an acknowledgement lost by the caller returns the same first request and `result_wait` on replay inside the original frame without a second worker (#43942).
+- Explain Unicode symbol-position handling, the shared TUI/Keeper caller scope, actual Pyright reproduction and focused verification limits (#43948, #43945).
+- Add a "first 30 minutes" onboarding chapter to the docs-site — install, first Keeper, first Task, Board and wiki, and the browser lane — each with the signal that says the step worked, plus links from the README and the TUI guide (#43950).
+- Explain Code question progress ownership and distinguish the observed predecessor defect from the corrected candidate's pending execution evidence. #43959
+- Explain Code navigation activity, retained observations and the evidence boundary between source review and matching native execution (#43989).
+- Document that alphaTex tie `{t}` and other note effects go between the note
+  and the duration dot (`7.4{t}.8`, not `7.4.8{t}`), with the corrected
+  `Bamseom Solo` excerpt as a fixture and a regression test pinning the valid
+  placement and the `AT205` refusal (#44061).
+- RFC `operator-quiz-lane`: a Keeper quizzes the operator from fleet records (merged PRs, changelog, board decisions) on a Schedule, the operator answers in Approvals, and one append-only answer-key log records each question before it is shown; score, history and the missed-topic map are computed on read. (#44101)
+- RFC `operator-quiz-lane` is revised to the operator's choice: an `operator-quiz` Lane Add-on keeps its answer keys on its persistent state volume and authors and grades through its own exact-output lanes; the generic core pieces it needs (package-owned exact-output lanes, host-to-package work requests, record-read grants, add-on questions in Approvals, a `masc.lane_act` schedule) are planned as separate layers. (#44114)
+- The glossary now defines the TUI music surface and the three words it exposes: `Music Library (/music)` (Dashboard `s` / chat `/music`, named for the "terminal music library" comment in `Masc_tui_command`, drawn by `masc-alphatex --music`, which needs the installed companion on `PATH` and neither Kitty graphics nor an alphaTex fence), `Phrase` (the piano-roll document that writes notes), `Arrangement` (the document that places retained WAV/MIDI sources as regions on one clock, with separate transports from Phrase) and `Take` (one recording pass, retained under `recordings/UUID` and selected with `:takes`). The entries separate the music sense of `arrangement` from its ordinary-language use, note that "library" also names the imported-asset list inside the arrangement editor, and record that the surface has no `docs/guides` page yet (#44116).
+- A design note splits the request to use the screen's space as fully as
+  possible into three steps: the default Activity pane on Dashboard, reclaiming
+  the two blank rows around a full-screen surface, and a two-column Dashboard.
+  The note lists why the blank-row step needs staged changes (#44142).
+- The TUI layout language allows a titled card for a screen that shows
+  independent readings side by side, and a design note records what the card
+  layout borrows from the reference screens and why reclaiming the blank rows
+  around a screen is postponed (#44170).
+- The glossary now defines the two nouns the arrangement editor leans on: `Region` (a placement on the arrangement clock — start, length, lane, repeats — that names no sound of its own; `plan.regions` and `umpRegions` in code, "regions" in the tool docs) and `Captured source` (the read-only, SHA-256-named copy of a take's four original files that `:import-take` attaches and `:open-take` opens). The Arrangement and Take entries now name `Region` instead of the generic "구간", and the entries record that the `take` in `:open-take`/`:split-take` names the captured asset, not a recording pass (#44182).
+- The glossary now defines `Card`: the titled box a screen uses for one reading when it shows several side by side. The entry pins what `Masc_tui_card` guarantees (an exact rectangle, the title in the top edge, a cut body saying how many rows it left out, no colour of its own, columns that end on the same row), says that a screen with one reading has no box and that a narrow screen falls back to plain rows, and separates it from the dashboard's Board Attachment "card", which is a different surface (#44242).
+
+### Internal
+
+- Add a macOS CI workflow that compiles and runs the alphatex native Swift harnesses and the alphatex JavaScript suite (#44078).
+- Run the alphatex native harness workflow on `macos-15` (Swift 6) so sources that use `UInt128` compile (#44082).
+- Give the keeper tool matrix argument contracts for `keeper_artifact_publish` and `keeper_image_read`, so `test_keeper_tool_matrix` no longer fails on a missing contract (#44085).
+- `Main minimal build` now also runs `dune build @check` on main (tests compiled, not run), so a broken test tree shows up on main instead of at release-candidate time; the step summary reports the product build and the type-check separately. (#44090)
+- Pin the collapsed unusable Usage block and the braille Trend grid with direct test assertions (#44096).
+- The UMP kept-field rule lives in one `UmpField` table; loop harnesses drop debug prints; exact source nanoseconds are checked across SMF tempo changes and SMPTE time. (#44109)
+- TUI suites that failed on main after deliberate product changes pass again: fixtures follow the composition `execution_id`, the local Keeper read gate, tool-call admission, `/calls` and the live browser lane; `docs/guides/TUI-KEYS.md` is regenerated; cases that only pinned drawn wording, row counts or column widths are removed. (#44112)
+- The MIDI transport harness pins that a region's end releases a note it still holds exactly once, before the next copy, a cut entry at the wrap or an adjacent region on the same channel begins. (#44115)
+- `docs/guides/TUI-KEYS.md` is regenerated after the `;` agenda help changed, so `test_tui_keys_doc` passes on main again. (#44121)
+- The retired-`kind` strict-reader test pins the field name only (`unknown chat row field "kind"` substring) instead of the full `path:line` error text, so a future reader-error format change no longer breaks the contract test for unrelated reasons. (#44148)
+- Removed `Server_utils.board_actor_author_for_write`, which returned the trimmed name it was given, and the `meta.<field>_raw_agent_name` branches that could never run because of it. Board author and voter handling is otherwise unchanged. (#44178)
+- The dashboard runtime inventory now reads "official client" from `Runtime_execution.checkpoint_owner` instead of matching the execution variants a second time. The inventory values are unchanged. (#44180)
+- Removed the `runtime_state` variable from the `KeeperTurnCycle` and `KeeperDecisionPipeline` TLA+ models. The code has no such axis; the invariants are now stated over `turn_phase` and `decision_stage`, with the same reachable state counts. (#44187)
+- Removed the unused exact-output overlay merge functions (`validate_overlay_model_identities`, `merge_exact_model_entries`) and their tests, and corrected `docs/LLAMA-SERVER-RUNBOOK.md` on what happens to a model missing from the catalog. (#44188)
+- `test_verifier_official_client` checks that the managed verifier contract leads the system prompt the official client receives, instead of equalling all of it; the host appends the Librarian's frozen unread evidence after it since #43793. (#44201)
+- Corrected three comments on the MSX spectator screen that said game keys are not sent to the server machine; the executable layer sends them (`server_key`, `post_msx_press`). (#44218)
+- Clarify the default observation mode, control-only game-key forwarding and prior spectator/room key handlers without changing input dispatch. (#44218)
+
 ## [0.59.0] - 2026-10-19
 
 ### Upgrade notes

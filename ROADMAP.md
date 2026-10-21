@@ -1,9 +1,9 @@
 # masc Roadmap
 
-> Current package version: v0.59.0
-> Latest changelog entry: v0.59.0 (2026-10-19)
-> Latest published GitHub release: v0.59.0 (2026-10-19)
-> Updated: 2026-10-19
+> Current package version: v0.60.0
+> Latest changelog entry: v0.60.0 (2026-10-20)
+> Latest published GitHub release: v0.60.0 (2026-10-21)
+> Updated: 2026-10-21
 
 A planning view, not a release promise. The operating model behind it
 (labels, priority, pull-request and release rules) is
@@ -36,8 +36,8 @@ State read on 2026-10-17 from `gh release list`, the `main` branch, and
 | v0.56.0 | 2026-10-14 16:36 | |
 | v0.57.0 | 2026-10-16 09:23 | |
 | v0.58.0 | 2026-10-16 22:06 | |
-| v0.59.0 | 2026-10-19 19:18 | latest |
-| v0.60.0 | not cut | |
+| v0.59.0 | 2026-10-19 19:18 | |
+| v0.60.0 | 2026-10-21 00:14 | latest |
 
 The cut order for each train is: freeze, `release/v0.y.0`, version bump and
 changelog assembly, release candidate (`v0.y.0-rc*`), an independent release

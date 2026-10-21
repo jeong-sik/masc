@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /private/tmp/masc-addon-related-worker-owners-20261021/dashboard
+
+
+ Test Files  3 passed (3)
+      Tests  62 passed (62)
+   Start at  20:43:03
+   Duration  8.07s (transform 30%, import 27%, tests 20%, environment 14%, setup 10%)
+
+  Transform  transforming modules took 2.23s · 30% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns

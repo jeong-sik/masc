@@ -1,0 +1,20 @@
+{
+  "source": "c54fd2515c0901c63ebe19069153a7bf4d46e156",
+  "results": [
+    {
+      "file": "bin/masc_tui_lane_addons.mli",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "bin/masc_tui_lane_addons.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    },
+    {
+      "file": "test/test_tui_lane_addons.ml",
+      "exit_code": 0,
+      "diagnostics": ""
+    }
+  ]
+}

@@ -896,6 +896,17 @@ let validate_custom_value ~name value =
     Masc.Keeper_chat_events.model_content_activity_of_json value
     |> Result.map (fun _ -> ())
     |> Result.map_error (fun detail -> Malformed_event detail)
+  else if String.equal name "KEEPER_THINKING_DELTA" then
+    (* The reasoning block a delta belongs to is read from [index]; a frame
+       without one would be undecodable in the live view, so the strict pass
+       says so too. *)
+    (match value with
+     | `Assoc fields ->
+       (match List.assoc_opt "index" fields with
+        | Some (`Int _) -> Ok ()
+        | Some _ | None ->
+          Error (Malformed_event "KEEPER_THINKING_DELTA.value needs an integer index"))
+     | _ -> Error (Malformed_event "KEEPER_THINKING_DELTA.value must be an object"))
   else if String.equal name "KEEPER_STREAM_MESSAGE_STOP" then
     (match value with
      | `Null -> Ok ()

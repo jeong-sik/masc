@@ -109,8 +109,16 @@ type delta =
           KEEPER_STREAM_MESSAGE_DELTA), so they arrive together here too. At
           least one of the two is present. *)
   | Text of {text : string; response : Masc.Keeper_chat_events.text_response}  (** Assistant text to append. *)
-  | Thinking of {text : string; response : Masc.Keeper_chat_events.response_identity option}  (** Supplied reasoning bytes and their observed response identity. None
-          preserves unbound bytes without granting response ownership. *)
+  | Thinking of
+      { text : string
+      ; index : int
+      ; response : Masc.Keeper_chat_events.response_identity option
+      }
+      (** Supplied reasoning bytes, the stream content block they belong to
+          ([index], within one response) and their observed response identity.
+          None preserves unbound bytes without granting response ownership.
+          Deltas of one block continue one reasoning stretch; a different
+          [index] or response starts another. *)
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
   | Native_tool_progress of

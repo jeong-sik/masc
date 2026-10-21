@@ -191,6 +191,22 @@ type unreadable =
   ; last_detail : string
   }
 
+(* One reasoning block of the stream: its content block index and the response
+   that index belongs to. The index is whatever the producer numbers its
+   blocks with (the provider's own for HTTP streams, a per-run counter for the
+   Claude Code and Codex runtimes), so it only has to stay the same for the
+   deltas of one block. Deltas of one block share a stretch; a delta of another
+   block starts a new one even when nothing sits between them, so two adjacent
+   blocks do not read as one (#37717). The index alone is not an identity: the
+   same index recurs in the next response, whose [response] differs. *)
+type thinking_block =
+  { block_index : int
+  ; block_response : Masc.Keeper_chat_events.response_identity option
+  }
+
+let same_thinking_block a b =
+  a.block_index = b.block_index && a.block_response = b.block_response
+
 (* One stretch of the turn as it arrived. The three accumulators above answer
    "what did the turn say / think / call" as totals; the trail answers "in what
    order". A tool-call round interleaves them -- reasoning, then a call, then
@@ -202,7 +218,7 @@ type unreadable =
 type trail_node =
   | Node_segment_boundary
   | Node_response_boundary
-  | Node_thinking of int * float * Buffer.t
+  | Node_thinking of int * float * Buffer.t * thinking_block
   | Node_text of int * float * Buffer.t * int option
   | Node_tool of int
   | Node_superseded of
@@ -566,8 +582,10 @@ let stream_details_within ~keeper_name ~room transcript =
        ])
 
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
-   between closes it. Coalescing here rather than at draw time keeps the trail
-   bounded by the turn's shape (rounds), not by its chunking on the wire. *)
+   between closes it, and reasoning also closes on a delta of another block.
+   Coalescing here rather than at draw time keeps the trail bounded by the
+   turn's shape (rounds and blocks), not by its chunking on the wire -- which
+   holds while a producer keeps one index per block. *)
 let fresh_stretch t =
   let id = t.next_stretch_id in
   t.next_stretch_id <- id + 1;
@@ -577,13 +595,14 @@ let begin_response t =
   t.response_first_stretch <- t.next_stretch_id;
   t.reversed_trail <- Node_response_boundary :: t.reversed_trail
 
-let trail_thinking ~now t text =
+let trail_thinking ~now t ~block text =
   (match t.reversed_trail with
-   | Node_thinking (_, _, buffer) :: _ -> Buffer.add_string buffer text
-   | (Node_segment_boundary | Node_response_boundary | Node_text _ | Node_tool _ | Node_superseded _) :: _ | [] ->
+   | Node_thinking (_, _, buffer, open_block) :: _ when same_thinking_block open_block block ->
+       Buffer.add_string buffer text
+   | (Node_segment_boundary | Node_response_boundary | Node_text _ | Node_thinking _ | Node_tool _ | Node_superseded _) :: _ | [] ->
        let buffer = Buffer.create 256 in
        Buffer.add_string buffer text;
-       t.reversed_trail <- Node_thinking (fresh_stretch t, now, buffer) :: t.reversed_trail)
+       t.reversed_trail <- Node_thinking (fresh_stretch t, now, buffer, block) :: t.reversed_trail)
 
 let trail_text ~now t text =
   (match t.reversed_trail with
@@ -778,7 +797,7 @@ let project_trail ?(response_boundary = fun acc -> acc) t ~thinking ~text ~tools
           | items -> superseded ~attempt ~runtime_id items :: acc
         in
         walk segment acc [] rest
-    | Node_thinking (origin, at, buffer) :: rest ->
+    | Node_thinking (origin, at, buffer, _) :: rest ->
         let acc = flush_tools ~segment acc group in
         let lines =
           Buffer.contents buffer
@@ -1844,7 +1863,7 @@ let apply_delta ~now t (delta : Live.delta) =
           trail_text ~now t text
         end
       end
-  | Live.Thinking {text;response} ->
+  | Live.Thinking {text;index;response} ->
       let generation, stream_scope = match response with
         | None -> None, None
         | Some owner -> Some owner.response_generation, Some owner.response_scope in
@@ -1857,7 +1876,7 @@ let apply_delta ~now t (delta : Live.delta) =
         if text <> "" then begin
           if admitted then t.model_signal <- Some (Reasoning_at now);
           Buffer.add_string t.thinking_buffer text;
-          trail_thinking ~now t text
+          trail_thinking ~now t ~block:{ block_index = index; block_response = response } text
         end
       end
   | Live.Tool_started { occurrence; tool_name } ->

@@ -1686,15 +1686,32 @@ let append_user_message_once
     Error detail
 ;;
 
-type strict_decode_error =
+type strict_decode_cause =
   | Invalid_surface of string
   | Unknown_speaker_authority of string
   | Missing_speaker_authority
   | Invalid_row_contract of string
+  | Unreadable_file of string
+
+type strict_decode_error =
+  { location : string
+  ; cause : strict_decode_cause
+  }
+
+let strict_decode_error_to_string { location; cause } =
+  match cause with
+  | Invalid_surface detail ->
+    Printf.sprintf "%s invalid surface field: %s" location detail
+  | Unknown_speaker_authority label ->
+    Printf.sprintf "%s unknown speaker_authority %S" location label
+  | Missing_speaker_authority ->
+    Printf.sprintf "%s speaker_id/speaker_name without speaker_authority" location
+  | Invalid_row_contract detail -> Printf.sprintf "%s %s" location detail
+  | Unreadable_file detail -> detail
 
 type parsed_line =
   { message : chat_message option
-  ; strict_decode_error : strict_decode_error option
+  ; strict_decode_error : strict_decode_cause option
   }
 
 let parse_line_decoded ~file_path (line : string) : parsed_line =
@@ -2359,26 +2376,12 @@ let parse_transcript_row_strict ~path ~redaction ~position line =
   then `Blank
   else
     match parse_line_decoded ~file_path:path trimmed with
-    | { strict_decode_error = Some (Invalid_surface detail); _ } ->
-      `Unreadable
-        (Printf.sprintf "%s invalid surface field: %s" location detail)
-    | { strict_decode_error = Some (Unknown_speaker_authority label); _ } ->
-      `Unreadable
-        (Printf.sprintf
-           "%s unknown speaker_authority %S"
-           location
-           label)
-    | { strict_decode_error = Some Missing_speaker_authority; _ } ->
-      `Unreadable
-        (Printf.sprintf
-           "%s speaker_id/speaker_name without speaker_authority"
-           location)
-    | { strict_decode_error = Some (Invalid_row_contract detail); _ } ->
-      `Unreadable (Printf.sprintf "%s %s" location detail)
+        | { strict_decode_error = Some cause; _ } ->
+      `Unreadable { location; cause }
     | { message = Some message; strict_decode_error = None } ->
       `Message (redact_message redaction message)
     | { message = None; strict_decode_error = None } ->
-      `Unreadable (Printf.sprintf "%s unreadable chat row" location)
+      `Unreadable { location; cause = Invalid_row_contract "unreadable chat row" }
 ;;
 
 let parse_transcript_rows ~path ~redaction rows =
@@ -2398,7 +2401,7 @@ let parse_transcript_rows_result ~path ~redaction rows =
           match parse_transcript_row_strict ~path ~redaction ~position:(Line_number line_no) line with
           | `Blank -> Ok (messages_rev, line_no)
           | `Message message -> Ok (message :: messages_rev, line_no)
-          | `Unreadable detail -> Error detail)
+          | `Unreadable err -> Error err)
        (Ok ([], 0))
   |> Result.map (fun (messages_rev, _line_no) -> List.rev messages_rev)
 ;;
@@ -2483,7 +2486,8 @@ let load_all ~base_dir ~keeper_name : chat_message list =
        | Private_file_failed _ | Private_file_failed_with_cleanup_failure _ ->
          load_transcript_fully ~path ~redaction)
 
-let load_all_result ~base_dir ~keeper_name : (chat_message list, string) result =
+let load_all_result ~base_dir ~keeper_name :
+  (chat_message list, strict_decode_error) result =
   let path = chat_path ~base_dir ~keeper_name in
   let redaction = redaction_for ~base_dir ~keeper_name in
   (* The [load_all] cache is permissive: malformed rows are omitted. A strict
@@ -2502,15 +2506,23 @@ let load_all_result ~base_dir ~keeper_name : (chat_message list, string) result 
     if rows_end < end_offset
     then
       Error
-        (Printf.sprintf
-           "%s incomplete chat tail: complete rows end at byte %d, file ends at byte %d"
-           path
-           rows_end
-           end_offset)
+        { location = path
+        ; cause =
+            Unreadable_file
+              (Printf.sprintf
+                 "%s incomplete chat tail: complete rows end at byte %d, file ends at byte %d"
+                 path
+                 rows_end
+                 end_offset)
+        }
     else parse_transcript_rows_result ~path ~redaction rows
   | Private_file_failed error
   | Private_file_failed_with_cleanup_failure { error; cleanup_failure = _ } ->
-    Error (Fs_compat.Private_jsonl_rows.error_to_string error)
+    Error
+      { location = path
+      ; cause =
+          Unreadable_file (Fs_compat.Private_jsonl_rows.error_to_string error)
+      }
 
 type history_page =
   { history_messages : chat_message list
@@ -2534,8 +2546,8 @@ let load_result ~base_dir ~keeper_name =
       match parse_transcript_row_strict ~path ~redaction ~position:(Byte_offset row.offset) row.line with
       | `Blank -> Ok ()
       | `Message message -> push message; Ok ()
-      | `Unreadable detail ->
-        Error (Keeper_chat_history_page.Invalid_row { offset = row.offset; detail }))
+      | `Unreadable err ->
+        Error (Keeper_chat_history_page.Invalid_row { offset = row.offset; detail = strict_decode_error_to_string err }))
       (Ok ()) page.rows
   in
   Ok (fst (finish ()))
@@ -2553,7 +2565,7 @@ let load_history_page_result ~base_dir ~keeper_name ?cursor
       match parse_transcript_row_strict ~path ~redaction ~position:(Byte_offset row.offset) row.line with
       | `Blank -> Ok messages
       | `Message message -> Ok (message :: messages)
-      | `Unreadable detail -> Error (Keeper_chat_history_page.Invalid_row { offset = row.offset; detail }))
+      | `Unreadable err -> Error (Keeper_chat_history_page.Invalid_row { offset = row.offset; detail = strict_decode_error_to_string err }))
       (Ok []) page.rows
   in
   Ok { history_messages = List.rev messages_rev; next_cursor = page.next_cursor }
@@ -2991,8 +3003,8 @@ let load_turn_transcript_result ~base_dir ~keeper_name ~turn_ref =
           match parse_transcript_row_strict ~path ~redaction ~position:(Byte_offset row.offset) row.line with
           | `Blank -> Ok messages
           | `Message message -> Ok (message :: messages)
-          | `Unreadable detail ->
-              Error (Keeper_chat_history_page.Invalid_row { offset = row.offset; detail }))
+          | `Unreadable err ->
+              Error (Keeper_chat_history_page.Invalid_row { offset = row.offset; detail = strict_decode_error_to_string err }))
         (Ok []) page.rows in
     Ok { history_messages = List.rev messages_rev; next_cursor = page.next_cursor }
   in

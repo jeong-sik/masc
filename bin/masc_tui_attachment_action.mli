@@ -65,4 +65,6 @@ val run :
   midi_soundfont:string option ->
   outcome
 (** URL 첨부는 바로 연다. artifact 첨부는 [fetch]로 바이트를 받아 캐시에
-    저장한 뒤 kind별 동작을 한다. 저장·fetch 실패는 [Failed]의 사유가 된다. *)
+    저장한 뒤 kind별 동작을 한다. 업로드·HTTP 읽기와 같은
+    [Tool_blob_store.max_served_bytes]까지 허용하며, 이를 넘으면 파일을 쓰지
+    않고 거절한다. 저장·fetch 실패는 [Failed]의 사유가 된다. *)

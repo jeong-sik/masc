@@ -464,6 +464,7 @@ const ToolOutputResultSchema = Schema.Struct({
 
 const ToolFailedResultSchema = Schema.Struct({
   disposition: Schema.Literal('failed'),
+  effect_disposition: Schema.Literal('proven_pre_effect', 'proven_post_effect', 'effect_outcome_unknown'),
   data: Schema.Unknown,
   tool_name: Schema.NonEmptyString,
   duration_ms: Schema.Number,
@@ -502,6 +503,7 @@ const CompositionNodeSchema = Schema.Struct({
   deferred_kind: Schema.NullOr(Schema.Literal(
     'generic_deferred',
     'external_effect_deferred',
+    'owned_job_result_wait',
   )),
   result_bytes: NonNegativeSafeIntegerSchema,
   truncated_to: Schema.NullOr(NonNegativeSafeIntegerSchema),
@@ -1460,7 +1462,6 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
       Number.isFinite(node.result.duration_ms)
       && node.result.duration_ms >= 0
       && node.result.tool_name === node.tool_name
-      && node.schedule.batch_index < node.schedule.batch_size
       && (node.truncated_to === null
         || (node.truncated_to >= 0 && node.truncated_to <= node.result_bytes)))
     if (!validResultDuration || !validNodes) {

@@ -161,6 +161,19 @@ let converter_succeeds dir name bytes =
 
 let unwrap = function Ok value -> value | Error _ -> fail "unexpected workflow failure"
 
+let test_character_frame_refuses_unrepresentable_ratio () =
+  with_cache (fun cache_dir _run ->
+    let be32 n = String.init 4 (fun i -> Char.chr ((n lsr ((3 - i) * 8)) land 255)) in
+    let run _ = fail "unrepresentable image must be refused before starting a decoder" in
+    List.iter (fun (width, height, columns, rows) ->
+      let png = png_header ^ be32 width ^ be32 height in
+      let display = Cache.Character_cells {columns;rows} in
+      check bool "unrepresentable ratio refused" true
+        (Result.is_error (Cache.prepare_presentation ~run ~cache_dir display png));
+      check (list string) "refusal creates no temporary files" []
+        (Sys.readdir cache_dir |> Array.to_list))
+      [400,1,100,20; 1000,10,78,21])
+
 let test_character_frame_protocol_and_cleanup () =
   with_cache (fun cache_dir run ->
     (* The process fixture supplies decoder output; this header supplies its
@@ -502,7 +515,9 @@ let test_a_killed_decoder_is_described_as_killed () =
 let () =
   run "tui image cache"
     [ ( "workflows"
-      , [ test_case "character decoder frame protocol and attempt cleanup" `Quick
+      , [ test_case "character preview refuses an unrepresentable ratio before decoding" `Quick
+            test_character_frame_refuses_unrepresentable_ratio
+        ; test_case "character decoder frame protocol and attempt cleanup" `Quick
             test_character_frame_protocol_and_cleanup
         ; test_case "a delete during the fetch does not take the download" `Quick
             test_a_delete_during_the_fetch_does_not_take_the_download

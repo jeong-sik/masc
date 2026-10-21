@@ -10,8 +10,9 @@ val fit_grid : src_w:int -> src_h:int -> max_cols:int -> max_rows:int -> int * i
     each character cell stacks two of them; the rounding that makes it even
     can leave the ratio off by less than one pixel row.
 
-    [(0, 0)] when either bound leaves no room, which the caller draws as an
-    empty body rather than as a stretched picture. *)
+    [(0, 0)] when either bound leaves no room or fitting the source width
+    leaves fewer than two pixel rows. The caller draws an empty body rather
+    than stretching a source too wide for an even-row grid. *)
 
 val downscale :
   src_w:int -> src_h:int -> cols:int -> rows:int -> string -> string

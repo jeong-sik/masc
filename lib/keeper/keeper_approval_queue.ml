@@ -572,58 +572,18 @@ let read_pending_log_unlocked
         | [] -> [])
       else lines
     in
-    let applied =
-      List.fold_left
-        (fun accumulator line ->
-           match accumulator with
-           | Error _ as error -> error
-           | Ok (pending_map, delivery_map, next_sequence, rows) ->
-             if String.equal (String.trim line) ""
-             then Ok (pending_map, delivery_map, next_sequence, rows)
-             else (
-               match Yojson.Safe.from_string line with
-               | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
-               | json ->
-                 (match log_row_of_yojson ~base_path json with
-                  | Error _ as error -> error
-                  | Ok decoded ->
-                    if decoded.row_generation < snapshot_generation
-                    then Ok (pending_map, delivery_map, next_sequence, rows)
-                    else if decoded.row_generation > snapshot_generation
-                    then
-                      Error
-                        (Printf.sprintf
-                           "row generation %d is ahead of snapshot generation %d"
-                           decoded.row_generation
-                           snapshot_generation)
-                    else (
-                      let pending_map, delivery_map =
-                        apply_log_row (pending_map, delivery_map) decoded.row
-                      in
-                      Ok
-                        ( pending_map
-                        , delivery_map
-                        , max next_sequence decoded.row_next_sequence
-                        , rows + 1 )))))
-        (Ok (pending_map, delivery_map, next_sequence, 0))
-        lines
-    in
-    (match applied with
-     | Error reason -> Error { path; reason }
-     | Ok (log_pending, log_deliveries, log_next_sequence, rows_applied) ->
-       (match validate_snapshot_sequences ~next_sequence:log_next_sequence
-          (List.map snd (SMap.bindings log_pending))
-          (List.map snd (SMap.bindings log_deliveries)) with
-        | Error reason -> Error { path; reason }
-        | Ok () ->
-          Ok
-            { log_pending
-            ; log_deliveries
-            ; log_next_sequence
-            ; log_end = snapshot.Fs_compat.cursor
-            ; rows_applied
-            ; partial_tail
-            }))
+    match replay_log_lines ~base_path ~snapshot_generation ~pending_map
+        ~delivery_map ~next_sequence lines with
+    | Error reason -> Error { path; reason }
+    | Ok (log_pending, log_deliveries, log_next_sequence, rows_applied) ->
+      Ok
+        { log_pending
+        ; log_deliveries
+        ; log_next_sequence
+        ; log_end = snapshot.Fs_compat.cursor
+        ; rows_applied
+        ; partial_tail
+        }
 ;;
 
 (* What a restart would see: the snapshot plus the log rows after it. No

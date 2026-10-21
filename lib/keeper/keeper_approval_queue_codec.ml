@@ -929,3 +929,49 @@ let apply_log_row (pending_map, delivery_map) = function
     pending_map, SMap.add delivery.entry.id delivery delivery_map
   | Delivery_remove id -> pending_map, SMap.remove id delivery_map
 ;;
+
+let replay_log_lines ~base_path ~snapshot_generation ~pending_map ~delivery_map
+    ~next_sequence lines =
+  let applied =
+    List.fold_left
+      (fun accumulator line ->
+         match accumulator with
+         | Error _ as error -> error
+         | Ok (pending_map, delivery_map, next_sequence, rows) ->
+           if String.equal (String.trim line) ""
+           then Ok (pending_map, delivery_map, next_sequence, rows)
+           else (
+             match Yojson.Safe.from_string line with
+             | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
+             | json ->
+               (match log_row_of_yojson ~base_path json with
+                | Error _ as error -> error
+                | Ok decoded ->
+                  if decoded.row_generation < snapshot_generation
+                  then Ok (pending_map, delivery_map, next_sequence, rows)
+                  else if decoded.row_generation > snapshot_generation
+                  then
+                    Error
+                      (Printf.sprintf
+                         "row generation %d is ahead of snapshot generation %d"
+                         decoded.row_generation
+                         snapshot_generation)
+                  else (
+                    let pending_map, delivery_map =
+                      apply_log_row (pending_map, delivery_map) decoded.row
+                    in
+                    Ok
+                      ( pending_map
+                      , delivery_map
+                      , max next_sequence decoded.row_next_sequence
+                      , rows + 1 )))))
+      (Ok (pending_map, delivery_map, next_sequence, 0))
+      lines
+  in
+  let ( let* ) = Result.bind in
+  let* pending_map, delivery_map, next_sequence, rows = applied in
+  let* () = validate_snapshot_sequences ~next_sequence
+      (List.map snd (SMap.bindings pending_map))
+      (List.map snd (SMap.bindings delivery_map)) in
+  Ok (pending_map, delivery_map, next_sequence, rows)
+;;

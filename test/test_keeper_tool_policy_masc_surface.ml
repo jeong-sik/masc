@@ -15,30 +15,50 @@ let test_model_surface_exposes_direct_board_operations () =
 (* The keeper lane admits any name on the model surface and never reads
    [required_permission], so the projection is the only thing keeping a
    Worker-level Keeper away from an operator tool. Every descriptor the model
-   can see, under any name, whose internal tool the catalog classifies must
-   therefore be one a Worker token could call over MCP. [masc_board_delete] is
-   the one exception: its handler refuses anyone but the post's author. *)
+   can see, under any name, is judged by the catalog's effective metadata, so a
+   tool the catalog has no entry for reads as operator-only and is reported
+   here until the catalog classifies it. [masc_board_delete] is the one
+   exception: its handler refuses anyone but the post's author. *)
+let handler_checks_the_author = [ "masc_board_delete" ]
+
+let model_tools_beyond_worker descriptors =
+  let module Descriptor = Masc.Keeper_tool_descriptor in
+  descriptors
+  |> List.filter_map (fun (descriptor : Descriptor.t) ->
+    let internal = descriptor.internal_name in
+    match Descriptor.keeper_model_names descriptor with
+    | [] -> None
+    | _ :: _ ->
+      let meta = Tool_catalog.metadata internal in
+      if
+        List.mem internal handler_checks_the_author
+        || Masc_domain.has_permission Masc_domain.Worker meta.required_permission
+      then None
+      else Some internal)
+  |> List.sort_uniq String.compare
+
 let test_model_surface_stays_within_worker_permissions () =
   let module Descriptor = Masc.Keeper_tool_descriptor in
-  let handler_checks_the_author = [ "masc_board_delete" ] in
-  let beyond_worker =
-    Descriptor.all_descriptors ()
-    |> List.filter_map (fun (descriptor : Descriptor.t) ->
-      let internal = descriptor.internal_name in
-      match
-        Descriptor.keeper_model_names descriptor,
-        List.assoc_opt internal Tool_catalog.explicit_metadata
-      with
-      | [], _ | _ :: _, None -> None
-      | _ :: _, Some (meta : Tool_catalog.metadata) ->
-        if
-          List.mem internal handler_checks_the_author
-          || Masc_domain.has_permission Masc_domain.Worker meta.required_permission
-        then None
-        else Some internal)
-    |> List.sort_uniq String.compare
-  in
-  check (list string) "model-visible tools a Worker token may not call" [] beyond_worker
+  check (list string) "model-visible tools a Worker token may not call" []
+    (model_tools_beyond_worker (Descriptor.all_descriptors ()))
+
+let test_model_tool_without_catalog_entry_is_beyond_worker () =
+  let module Descriptor = Masc.Keeper_tool_descriptor in
+  let uncatalogued = "keeper_tool_without_catalog_entry" in
+  check bool "the control name has no catalog entry" true
+    (Option.is_none (Tool_catalog.registered_metadata uncatalogued));
+  match
+    List.find_opt
+      (fun (descriptor : Descriptor.t) ->
+         Descriptor.keeper_model_names descriptor <> []
+         && not (List.mem descriptor.internal_name handler_checks_the_author))
+      (Descriptor.all_descriptors ())
+  with
+  | None -> fail "no model-visible descriptor to rename"
+  | Some model_visible ->
+    check (list string) "a model-visible tool the catalog does not classify"
+      [ uncatalogued ]
+      (model_tools_beyond_worker [ { model_visible with internal_name = uncatalogued } ])
 
 let test_model_surface_exposes_working_capability_families () =
   let names = Masc.Keeper_tool_policy.keeper_model_tool_names () in
@@ -98,6 +118,10 @@ let () =
             "stays within Worker permissions"
             `Quick
             test_model_surface_stays_within_worker_permissions;
+          test_case
+            "reports a model-visible tool the catalog does not classify"
+            `Quick
+            test_model_tool_without_catalog_entry_is_beyond_worker;
           test_case
             "exposes code web media voice and Fusion"
             `Quick

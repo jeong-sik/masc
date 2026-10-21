@@ -84,7 +84,7 @@
 (executable
  (name browser_addon_firefox_probe)
  (modules browser_addon_firefox_probe)
- (libraries masc masc.browser_lane masc.browser_configuration masc.time_compat
+ (libraries masc.server masc.skill_snapshot masc.skill_snapshot_service masc masc.browser_lane masc.browser_configuration masc.time_compat
   masc.fs_compat masc.config masc.runtime masc.masc_eio_context masc.native_addon_lease
   masc.lane_addon_call_context masc.tool_types exact_output_fixture
   eio eio_main eio.unix yojson base64 unix mirage-crypto-rng.unix mtime.clock.os))

@@ -24,10 +24,10 @@ Build targets include literal files in the stanza's (deps ...), the files a
 (glob_files ...)/(glob_files_rec ...) dep matches, and %{dep:...} environment
 values. This is not a Dune dependency-expression evaluator: alias deps and
 deps under any variable other than %{project_root}/ and %{workspace_root}/
-remain owned by Dune's runtest action. A (source_tree DIR) dep is passed
-through as the target `dune build DIR` accepts from the root -- building it is
-a normal build, not the runtest action, and a targeted run without it misses
-the tree the suite reads.
+remain owned by Dune's runtest action. A (source_tree DIR) dep is expanded
+here into the files under DIR: `dune build DIR` accepts the directory and
+exits 0, but it copies nothing, so only the file targets bring the tree into
+_build for a targeted run.
 
 A glob dep is expanded here for the same reason. Dune materialises a stanza's
 deps inside its runtest action; a targeted run builds the executable instead,
@@ -231,12 +231,25 @@ def collect_literal_deps(form, suite_dir: str) -> list[str]:
                 paths = [item]
             elif item and item[0] == "source_tree":
                 # A list dep is a dependency expression: (source_tree DIR),
-                # (glob_files ...), (alias ...). source_tree names a target
-                # `dune build` accepts from the root -- the directory itself,
-                # which copies the tree into _build. (alias ...) names nothing
-                # a build target can be, so it stays with Dune's runtest
-                # action.
-                paths = [d for d in item[1:] if isinstance(d, str)]
+                # (glob_files ...), (alias ...). `dune build DIR` is not a way
+                # to copy the tree: it exits 0 and leaves _build/default/DIR
+                # absent, because dune materialises a source tree only inside
+                # the runtest action that reads it. A suite that opens a file
+                # under DIR therefore fails only in the targeted lane. Name
+                # the files instead -- a file target is copied. (alias ...)
+                # names nothing a build target can be, so it stays with
+                # Dune's runtest action.
+                paths = []
+                for dir_path in item[1:]:
+                    if not isinstance(dir_path, str):
+                        continue
+                    paths.extend(
+                        glob_files_targets(
+                            [os.path.join(dir_path, "**", "*")],
+                            suite_dir,
+                            recursive=True,
+                        )
+                    )
             elif item and item[0] in ("glob_files", "glob_files_rec"):
                 paths = glob_files_targets(
                     item[1:], suite_dir, recursive=item[0] == "glob_files_rec"

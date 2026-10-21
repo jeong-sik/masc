@@ -123,17 +123,32 @@ let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
         Client.revoke client;
         Eio.Promise.resolve start_retiring ();
         Eio.Promise.await closed;
-        Eio.Fiber.yield ();
-        check bool "retirement joins the original active transfer" true (Eio.Promise.peek retired=None);
+        check bool "retirement refuses deletion before the held transfer settles" true
+          (match Eio.Promise.await retired with
+           | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
+           | W.Service_refusal {disposition=W.Not_started;_}
+           | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+        check bool "the retired owner refuses a fresh claim" true
+          (match Owner.dispatch owner {W.incarnation;command=Download_claim {id;actor;route;verb}} with
+           | W.Service_refusal {disposition=W.Not_started;_} -> true
+           | W.Service_refusal {disposition=W.Outcome_unknown;_}
+           | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
         check bool "revocation still fences fresh claims" true
           (Result.is_error (Client.call client ~on_cancel_after_dispatch:(fun () -> ())
             (W.Download_claim {id;actor;route;verb})));
         Masc.Browser_download_artifact.publish_descriptor ~socket ~store descriptor)) in
       check bool "retired owner accepts exact commit and release" true (member "reader" receipt=`String "keeper_artifact_read");
-      check bool "retirement completes after release" true (Eio.Promise.await retired=W.Receipt);
+      check bool "settlement cannot clear the original cleanup refusal" true
+        (Owner.dispatch owner {W.incarnation;command=Retire}=Eio.Promise.await retired);
       check int "no browser read is replayed during transfer" 3 !calls;
       check bool "published bytes outlive worker cleanup" true (Result.is_ok (Tool_blob_store.fetch store ~sha256));
-      check bool "only confirmed source files are released" false (Sys.file_exists source || Sys.file_exists later);
+      let later_sha256=member "arguments" receipt |> member "sha256" |> Yojson.Safe.Util.to_string in
+      check (option string) "the held transfer publishes after retirement refusal" (Some "later")
+        (Tool_blob_store.fetch store ~sha256:later_sha256 |> Result.map_error Tool_blob_store.fetch_error_to_string |> ok);
+      check string "cleanup refusal preserves the earlier source" bytes
+        (In_channel.with_open_bin source In_channel.input_all);
+      check string "settlement preserves the held source" "later"
+        (In_channel.with_open_bin later In_channel.input_all);
       Lease.retire admission |> Result.map_error Lease.error_to_string |> ok)))))
 let ()=run "browser Addon host artifact finalization" ["transfer",[
   test_case "descriptor authority and digest precede publication" `Quick descriptor_ingestion;

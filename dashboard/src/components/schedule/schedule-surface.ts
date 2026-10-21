@@ -24,7 +24,6 @@ import { ActionButton } from '../common/button'
 import { StatusChip } from '../common/status-chip'
 import { showToast } from '../common/toast'
 import { KeeperLaneInventoryPanel } from '../tools/keeper-waiting-inventory-panel'
-import { KeeperBackgroundPanel } from '../tools/keeper-background-panel'
 import {
   ScheduleAside,
   ScheduledAutomationPanel,
@@ -97,7 +96,6 @@ export function ScheduleSurface() {
   const page = projection?.state === 'available' ? projection.page : null
   const projectionError = projection?.state === 'unavailable' ? projection.reason : null
   const waitingInventory = data?.keeper_waiting_inventory ?? null
-  const keeperBackground = data?.keeper_background ?? null
   const loading = scheduledAutomationLoading.value
   const error = scheduledAutomationError.value
   const blockingError = automation ? null : projectionError ?? error
@@ -129,10 +127,10 @@ export function ScheduleSurface() {
   const [pruning, setPruning] = useState(false)
   const selectedScheduleId = routeScheduleId
   const [exactSchedule, setExactSchedule] = useState<ExactScheduleState>({ kind: 'idle' })
-  // Keeper-lane wake evidence + background are large operator diagnostics
-  // (a card per keeper, dozens of lane rows). Collapsed AND unmounted by default
-  // so the schedule stays the light, primary content; the panels only mount when
-  // the operator opens them.
+  // Keeper-lane wake evidence is a large operator diagnostic (a card per
+  // keeper, dozens of lane rows). Collapsed AND unmounted by default so the
+  // schedule stays the light, primary content; the panel only mounts when the
+  // operator opens it.
   const [diagOpen, setDiagOpen] = useState(false)
 
   useEffect(() => {
@@ -375,10 +373,10 @@ export function ScheduleSurface() {
 
         ${'' /* Secondary diagnostics live BELOW the schedule and are unmounted
               until opened: the actual schedule (calendar/list) is the primary,
-              above-the-fold content. The keeper-lane wake evidence + background
-              panels are large operator diagnostics (a card per keeper, dozens of
-              lane rows) that previously buried the schedule and rendered on every
-              tick. Lazy-mounting them keeps the default surface light. */}
+              above-the-fold content. The keeper-lane wake evidence panel is a
+              large operator diagnostic (a card per keeper, dozens of lane rows)
+              that previously buried the schedule and rendered on every tick.
+              Lazy-mounting it keeps the default surface light. */}
         <section class="ov-card mt-4 sch-diag" data-testid="schedule-diagnostics">
           <button
             type="button"
@@ -386,17 +384,12 @@ export function ScheduleSurface() {
             aria-expanded=${diagOpen ? 'true' : 'false'}
             data-testid="schedule-diagnostics-toggle"
             onClick=${() => setDiagOpen(open => !open)}
-          >Keeper 진단 · wake evidence · background ${diagOpen ? '▴' : '▾'}</button>
+          >Keeper 진단 · wake evidence ${diagOpen ? '▴' : '▾'}</button>
           ${diagOpen
             ? html`
                 <section class="mt-3" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
                   <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
                   <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />
-                </section>
-
-                <section class="mt-4" aria-label="Keeper background" data-testid="schedule-keeper-background">
-                  <div class="ov-card-h"><h3>Keeper Background · recurring tasks</h3></div>
-                  <${KeeperBackgroundPanel} background=${keeperBackground} />
                 </section>
               `
             : null}

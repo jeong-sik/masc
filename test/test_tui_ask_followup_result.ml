@@ -85,14 +85,16 @@ let actual_read base ask resolution ~before_source ~parts publish =
   | Ok observed ->
     frame (Server.Followup_completed {answered_at=observed.answered_at;stimulus_id=observed.stimulus_id});
     Decode.finish_ask_followup_stream !stream
-let launch state results request submission ~released perform =
+let launch ?key state results request submission ~released perform =
   let envelope=Protocol.capture_workspace_message state in
   let stop,resolve=Eio.Promise.create () in
   Ui.supersede_ask_followup_worker state
     (Some (request,fun detail -> ignore (Eio.Promise.try_resolve resolve detail))) ~detail:"original read superseded";
   let finish ()=Ui.finish_ask_followup_worker state request in
-  Results.launch_observation state ~results ~boundary_error:Fun.id ~on_not_run:finish
+  Results.launch_observation ?key state ~results ~boundary_error:Fun.id ~on_not_run:finish
     ~observe_job:(function Masc_tui_workspace_job.Cancellation_requested -> () | Registration_released -> released ())
+    ~cancelled:(envelope (Protocol.Ask_followup_finished (request,submission,
+      Error "Answer follow-up observation cancelled; any received sources are retained.")))
     ~progress:(fun (event,received_ns) -> envelope (Protocol.Ask_followup_observed (request,submission,event,received_ns)))
     ~deliver:(fun result -> envelope (Protocol.Ask_followup_finished (request,submission,result)))
     (fun publish -> Fun.protect ~finally:finish (fun () ->
@@ -229,6 +231,83 @@ let test_session_close_and_unstarted_preserve_resources () = with_answer @@ fun 
   check bool "close is separate from actual completed worker cleanup" true
     (state.workspace_observation_cancellations=[] && state.ask_followup_cancel=None);
   check bool "closed and unstarted reads do not alter original Task resources" true (before=Masc.Workspace.get_tasks_raw config)
+
+let test_actual_followup_cancellation_settles_after_cleanup () = with_answer @@ fun base config ask resolution task_id state ->
+  Eio.Switch.run @@ fun sw -> Eio_context.with_turn_switch sw @@ fun () ->
+  let before=Masc.Workspace.get_tasks_raw config and results=Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  let key=ref () and seen=ref [] in
+  let task_seen,task_resolve=Eio.Promise.create () and blocked,_release_blocked=Eio.Promise.create () in
+  let cleaning,cleaning_resolve=Eio.Promise.create () and cleanup,cleanup_release=Eio.Promise.create () in
+  let left,left_resolve=Eio.Promise.create () in
+  let request,submission=begin_read state in
+  launch ~key state results request submission ~released:(fun () -> ignore (Eio.Promise.try_resolve left_resolve ()))
+    (actual_read base ask resolution ~parts:(ref []) ~before_source:(function
+      | Wake.Reaction_evidence _ ->
+        Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () ->
+          Eio.Promise.resolve cleaning_resolve ();Eio.Promise.await cleanup))
+          (fun () -> Eio.Promise.await blocked)
+      | Linked_task _ -> Eio.Promise.resolve task_resolve () | Tool_results _ -> ()));
+  Eio.Promise.await task_seen;Eio.Fiber.yield ();ignore (apply_ready state results seen);exact_task state task_id;
+  Masc_tui_message_input.insert state.msg_input "input during cancelled follow-up";
+  Masc_tui_workspace_job.cancel_observation state ~key;
+  Eio.Promise.await cleaning;
+  check bool "cancellation request is separate from actual producer cleanup" true
+    (Ui.Snapshot_read.in_flight state.ask_followup_read && Option.is_some state.ask_followup_cancel
+     && List.exists (fun (owner,_) -> owner==key) state.workspace_observation_cancellations);
+  check bool "no cancelled terminal before actual producer cleanup" true (apply_ready state results seen=None);
+  Eio.Promise.resolve cleanup_release ();Eio.Promise.await left;
+  let held=Results.take_ready results in
+  let cancelled=List.find_map (fun (ready : Protocol.async_msg Results.ready) -> match apply state ready.message with
+    | Terminal (Error _) -> Some ready.message
+    | Part _ -> None | Terminal (Ok ()) -> fail "actual cancellation became success"
+    | Refused -> fail "current cancelled original read was refused") held in
+  let cancelled=match cancelled with Some message -> message | None -> fail "cancelled worker left an orphaned read ticket" in
+  check bool "cancelled original request settled and actual job registration released" true
+    (not (Ui.Snapshot_read.in_flight state.ask_followup_read) && state.ask_followup_cancel=None
+     && not (List.exists (fun (owner,_) -> owner==key) state.workspace_observation_cancellations));
+  exact_task state task_id;
+  check bool "cancelled unreceived source is unconfirmed, never a fabricated empty reaction" true
+    ((view state).fv_reactions.fo_state=Projection.Followup_unconfirmed && (view state).fv_reactions.fo_value=None);
+  let fresh,owner=begin_read state and fresh_left,fresh_resolve=Eio.Promise.create () in
+  launch state results fresh owner ~released:(fun () -> ignore (Eio.Promise.try_resolve fresh_resolve ()))
+    (actual_read base ask resolution ~parts:(ref []) ~before_source:(fun _ -> ()));
+  check bool "old cancellation cannot settle the replacement read" true (apply state cancelled=Refused);
+  Eio.Promise.await fresh_left;
+  check bool "fresh actual read can complete after cancellation" true (terminal state results (ref [])=Ok ());
+  check bool "actual cancellation and replacement preserve original Task resources" true (before=Masc.Workspace.get_tasks_raw config);
+  check string "cancelled observation leaves operator input intact" "input during cancelled follow-up" (Masc_tui_message_input.contents state.msg_input)
+
+let test_cancelled_dispatch_retains_unstarted_original_observation () = with_answer @@ fun base config ask resolution task_id state ->
+  Eio.Switch.run @@ fun outer -> Eio_context.with_turn_switch outer @@ fun () ->
+  let before=Masc.Workspace.get_tasks_raw config and results=Results.create () in
+  Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
+  let request,submission=begin_read state in
+  let exception Stop_before_dispatch in
+  let propagated=try
+    Eio.Cancel.sub (fun context -> Eio.Switch.run (fun cancelled_switch ->
+      Eio_context.with_turn_switch cancelled_switch (fun () ->
+        Eio.Cancel.cancel context Stop_before_dispatch;
+        launch state results request submission ~released:(fun () -> ())
+          (actual_read base ask resolution ~parts:(ref []) ~before_source:(fun _ -> ())))));
+    false
+  with Eio.Cancel.Cancelled Stop_before_dispatch -> true in
+  check bool "original pre-dispatch cancellation still propagates" true propagated;
+  check bool "unstarted original read retains a terminal observation" true (Result.is_error (terminal state results (ref [])));
+  check bool "unstarted cancellation leaves no pending ticket or worker metadata" true
+    (not (Ui.Snapshot_read.in_flight state.ask_followup_read) && state.ask_followup_cancel=None
+     && state.workspace_observation_cancellations=[]);
+  let original=view state in
+  check bool "no source identity or Task observation is fabricated before actual entry" true
+    (original.fv_identity=None && original.fv_task.fo_value=None
+     && original.fv_task.fo_state=Projection.Followup_unconfirmed);
+  let fresh,owner=begin_read state and left,left_resolve=Eio.Promise.create () in
+  launch state results fresh owner ~released:(fun () -> ignore (Eio.Promise.try_resolve left_resolve ()))
+    (actual_read base ask resolution ~parts:(ref []) ~before_source:(fun _ -> ()));
+  Eio.Promise.await left;
+  check bool "actual original read starts after cancelled dispatch" true (terminal state results (ref [])=Ok ());
+  exact_task state task_id;
+  check bool "cancelled dispatch and fresh actual observation preserve Task resources" true (before=Masc.Workspace.get_tasks_raw config)
 
 module Task_read = Masc_tui_original_task_read
 module Task_decode = Masc.Tui_decode_task_inspection
@@ -392,5 +471,7 @@ let () = Eio_main.run @@ fun env ->
       test_case "actual partial and terminal observations survive a full shared queue" `Quick test_full_queue_keeps_partial_and_terminal;
       test_case "actual stream failure and old visits preserve original Task evidence" `Quick test_failure_and_reopened_scope_keep_original_facts;
       test_case "session close and missing turn switch preserve actual resources" `Quick test_session_close_and_unstarted_preserve_resources;
+      test_case "actual follow-up cancellation settles only after producer cleanup" `Quick test_actual_followup_cancellation_settles_after_cleanup;
+      test_case "cancelled dispatch retains an unstarted original observation and still propagates" `Quick test_cancelled_dispatch_retains_unstarted_original_observation;
       test_case "canonical answered Ask opens actual Task history and submitted evidence" `Quick test_answered_ask_opens_actual_task_history_evidence;
       test_case "answered Ask inspection preserves failed observations and rejects old visits" `Quick test_answered_ask_inspection_reopen_and_withdraw]])

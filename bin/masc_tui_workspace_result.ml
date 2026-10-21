@@ -75,14 +75,21 @@ let take_ready results =
 
 let close results = Atomic.set results Closed
 
-let launch_registered ~dispatch ~on_not_run ~results ~boundary_error ~deliver perform =
+type 'message cancellation = Propagate | Publish_cancelled of 'message
+let launch_registered ~cancellation ~dispatch ~on_not_run ~results ~boundary_error ~deliver perform =
   match register results with
   | None -> on_not_run ()
   | Some token ->
     let deliver_result result = publish results token (deliver result) in
+    let publish_cancelled () = match cancellation with
+      | Propagate -> () | Publish_cancelled message -> publish results token message in
+    let propagate_cancelled exn =
+      let backtrace=Printexc.get_raw_backtrace () in
+      publish_cancelled ();
+      Printexc.raise_with_backtrace exn backtrace in
     let run () = Fun.protect ~finally:(fun () -> retire_pending results token) (fun () ->
       let result = try perform (publish_progress results token) with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | Eio.Cancel.Cancelled _ as exn -> propagate_cancelled exn
         | exn -> Error (boundary_error (Printexc.to_string exn)) in
       deliver_result result) in
     let not_run detail = Fun.protect ~finally:(fun () -> retire_pending results token) (fun () ->
@@ -91,27 +98,36 @@ let launch_registered ~dispatch ~on_not_run ~results ~boundary_error ~deliver pe
     match Eio_context.get_switch_opt () with
     | None -> not_run "Eio switch is unavailable"
     | Some sw ->
-      (match (Eio.Switch.check sw;
-        dispatch ~sw ~on_withdrawn:(fun () -> retire_pending results token) run) with
-       | () -> ()
-       | exception (Eio.Cancel.Cancelled _ as exn) -> retire_pending results token; raise exn
+      (match Eio.Switch.check sw with
+       | () ->
+         (match dispatch ~sw ~on_withdrawn:(fun () -> publish_cancelled ();retire_pending results token) run with
+          | () -> ()
+          | exception (Eio.Cancel.Cancelled _ as exn) ->
+            Fun.protect ~finally:(fun () -> retire_pending results token) (fun () -> propagate_cancelled exn)
+          | exception exn -> not_run (Printexc.to_string exn))
+       | exception (Eio.Cancel.Cancelled _ as exn) ->
+         let backtrace=Printexc.get_raw_backtrace () in
+         Fun.protect ~finally:(fun () -> retire_pending results token) (fun () ->
+           (match cancellation with Propagate -> () | Publish_cancelled _ -> on_not_run ());
+           publish_cancelled ();
+           Printexc.raise_with_backtrace exn backtrace)
        | exception exn -> not_run (Printexc.to_string exn))
 
 let launch ?key ?(observation = false) ?observe_job ?(on_not_run = fun () -> ())
     state ~results ~boundary_error ~deliver perform =
-  launch_registered ~results ~on_not_run ~boundary_error ~deliver
+  launch_registered ~cancellation:Propagate ~results ~on_not_run ~boundary_error ~deliver
     ~dispatch:(fun ~sw ~on_withdrawn run ->
       Masc_tui_workspace_job.fork ?key ~observation ?observe:observe_job
         ~on_withdrawn state ~sw run) (fun _publish -> perform ())
 
 let launch_session ~results ~boundary_error ~deliver perform =
-  launch_registered ~results ~on_not_run:(fun () -> ()) ~boundary_error ~deliver
+  launch_registered ~cancellation:Propagate ~results ~on_not_run:(fun () -> ()) ~boundary_error ~deliver
     ~dispatch:(fun ~sw ~on_withdrawn:_ run ->
       Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)) (fun _publish -> perform ())
 
 let launch_observation ?key ?observe_job ?(on_not_run=fun () -> ())
-    state ~results ~boundary_error ~progress ~deliver perform =
-  launch_registered ~results ~on_not_run ~boundary_error ~deliver
+    state ~results ~boundary_error ~cancelled ~progress ~deliver perform =
+  launch_registered ~cancellation:(Publish_cancelled cancelled) ~results ~on_not_run ~boundary_error ~deliver
     ~dispatch:(fun ~sw ~on_withdrawn run ->
       Masc_tui_workspace_job.fork ?key ~observation:true ?observe:observe_job
         ~on_withdrawn:(fun () -> Fun.protect ~finally:on_withdrawn on_not_run)

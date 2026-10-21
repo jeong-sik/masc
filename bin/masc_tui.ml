@@ -14159,6 +14159,8 @@ let launch_ask_followup_load state ~mailbox =
           ~phase:"started" ~source:None ~received_ns:None ~outcome:"pending";
         Masc_tui_workspace_result.launch_observation state ~results:mailbox.workspace_results
           ~on_not_run:finish ~boundary_error:Fun.id
+          ~cancelled:(envelope (Ask_followup_finished (request,submission,
+            Error "Answer follow-up observation cancelled; any received sources are retained.")))
           ~progress:(fun (event,received_ns) -> envelope (Ask_followup_observed (request,submission,event,received_ns)))
           ~deliver:(fun result -> envelope (Ask_followup_finished (request,submission,result)))
           (fun publish -> Fun.protect ~finally:finish (fun () ->

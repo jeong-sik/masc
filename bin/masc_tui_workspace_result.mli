@@ -63,6 +63,7 @@ val launch_observation :
   ?on_not_run:(unit -> unit) ->
   Masc_tui_types.state -> results:'message t ->
   boundary_error:(string -> 'error) ->
+  cancelled:'message ->
   progress:('part -> 'message) ->
   deliver:(('a, 'error) result -> 'message) ->
   (('part -> unit) -> ('a, 'error) result) -> unit
@@ -76,7 +77,16 @@ val launch_observation :
     [progress] only forms the original message/scope; no UI effects. Producer
     protocol validation, source ordering, received timestamps and source/error
     meaning remain with the caller. No coalescing, dropping or numeric cap.
-    [on_not_run] also releases caller metadata when workspace withdrawal wins
-    before the worker enters, without manufacturing a terminal result. Actual
-    worker cancellation, cleanup and ownership use the existing workspace job.
-    Work/callbacks may still block; cancellation still propagates. *)
+    [cancelled] is the caller's already formed original terminal observation,
+    including its captured source/request/scope and explicit cancellation cause.
+    Raw cancellation (also before worker entry) publishes it once through that
+    same registration, after any published parts, and still propagates the
+    original cancellation/backtrace. It is never success or a mutation receipt.
+    An ended result session discards it. The UI must admit/settle the original
+    request; publication itself changes no UI state or source authority.
+
+    [on_not_run] also releases caller metadata when the switch is already
+    cancelled before dispatch or workspace withdrawal wins before worker entry.
+    Actual worker cancellation, cleanup and ownership use the existing workspace
+    job; a terminal observation is not physical
+    registration-release proof. Work/callbacks may still block. *)

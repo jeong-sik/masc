@@ -500,6 +500,11 @@ the existing answer reader keeps the full prompt, choices and draft. With only
 one content row, the selected preview takes that row; with none, no extra hidden
 count is drawn beyond the available space.
 
+Answer follow-up reads show the reason when interrupted or incomplete alongside
+any received source observations. A cancelled read releases its original reading
+state when its outcome is admitted, allowing the next read to start. Original
+Task status and stored evidence remain independently observed.
+
 ## Work / Task Review
 
 | Keys | What it does |

@@ -83,6 +83,16 @@ val call_exported_tool_with_principal : principal:Lane_addon_call_context.princi
   (Mcp_protocol.Mcp_types.tool_result, tool_call_error) result
 (** Trusted host boundary only: principal must come from verified credentials,
     never from caller-supplied tool arguments. [access] still controls visibility. *)
+type browser_service = private {instance_id:string;owner:Lane_addon_tool_export.owner}
+val browser_services : config:Workspace.config -> access:Lane_addon_sources.access -> browser_service list
+val call_browser_service : config:Workspace.config -> access:Lane_addon_sources.access ->
+  service:browser_service -> command:Browser_addon_wire.command ->
+  (Browser_addon_wire.reply, Browser_addon_client.error) result
+(** Trusted host transport boundary, not a Keeper tool. The server first admits
+    the caller and pins host registrations to this original handle. Every call
+    revalidates visibility and exact connection ownership on the owner domain;
+    no replacement lookup or retry. Selected tool middleware belongs at the
+    eventual browser tool bridge, before this low-level transport boundary. *)
 val call_exported_tool : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> export:tool_export -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result, tool_call_error) result
@@ -263,6 +273,7 @@ module For_testing : sig
         from start success. [None] means this is a native host process. *)
     host : host_port option;
     (** [Some] for a package that waits on the host. *)
+    browser : Browser_addon_client.t option;
   }
   type backend = {
     start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> installation_id:string -> package:Lane_addon_types.package -> binding:Yojson.Safe.t ->

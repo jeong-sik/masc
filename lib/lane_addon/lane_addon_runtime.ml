@@ -16,6 +16,7 @@ exception Worker_detached
 exception Action_persistence_failed of string
 type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
+type browser_service = {instance_id:string;owner:Lane_addon_tool_export.owner}
 type tool_call_error = Unavailable of string | Outcome_unknown of string
   | Host_refusal of Lane_addon_call_context.host_refusal
 let tool_change_handler = ref (fun () -> ())
@@ -39,6 +40,7 @@ type connection = {
   resource : Lifecycle.resource;
   resolved_image : Lane_addon_engine.image_identity option;
   host : host_port option;
+  browser : Browser_addon_client.t option;
 }
 type backend = {
   start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> installation_id:string -> package:package -> binding:Yojson.Safe.t ->
@@ -584,7 +586,9 @@ let rec await_settled (e : entry) =
      | Lifecycle.Failed failed -> Error (Lifecycle.failed_to_string failed)
      | Lifecycle.Detached _ | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ -> Ok ())
   else (Eio.Condition.await_no_mutex e.changed; await_settled e)
-let fork_isolated ~sw f = Eio.Fiber.fork ~sw (fun () ->
+let fork_isolated ~sw f =
+  Eio.Switch.check sw;
+  Eio.Fiber.fork ~sw (fun () ->
   try f () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Log.Misc.error "Lane Add-on background boundary: %s" (Printexc.to_string exn))
@@ -637,6 +641,7 @@ let stop_entry ~sw ~backend m e =
     match cleanup with
     | None -> ()
     | Some (resource, stop) ->
+        Eio.Switch.check sw;
         e.cleanup_running <- true;
         fork_isolated ~sw (fun () ->
           Fun.protect
@@ -1184,7 +1189,11 @@ let native_result result = Result.map_error (fun error ->
 let native_settled claim =
   let* status = offload (fun () -> Native_addon_lease.status claim) |> native_result in
   match status with
-  | Native_addon_lease.Settled -> Ok ()
+  | Native_addon_lease.Settled ->
+      (match Native_addon_lease.directories claim with
+       | directory::_ -> offload (fun () -> Browser_addon_socket.cleanup ~admission:claim ~directory)
+           |> Result.map_error (fun detail -> Lifecycle.Cleanup_unconfirmed detail)
+       | [] -> Error (Lifecycle.Cleanup_unconfirmed "native claim has no host slot"))
   | Awaiting_exec | Live _ | Cleanup_pending _ ->
       Error (Lifecycle.Cleanup_unconfirmed "native claim has not settled")
 let native_recover ~store ~installation_id ~instance_id =
@@ -1193,7 +1202,7 @@ let native_recover ~store ~installation_id ~instance_id =
   let* () = offload (fun () -> Native_addon_lease.request_termination claim) |> native_result in
   let* () = native_settled claim in
   Ok (Lifecycle.Native_released {installation_id;instance_id})
-let prepare_native ~store ~installation_id ~instance_id ~is_live_instance =
+let prepare_native ~store ~installation_id ~instance_id ~cleanup_context ~is_live_instance =
   let* () = offload (fun () ->
     try
       let root = native_claim_root store in
@@ -1222,7 +1231,7 @@ let prepare_native ~store ~installation_id ~instance_id ~is_live_instance =
              between preparing it and saving its binding. Never re-admit it. *)
           let* () = offload (fun () -> Native_addon_lease.request_termination claim) |> native_result in
           native_settled claim in
-  offload (fun () -> Native_addon_lease.prepare ~directories ~instance_id) |> native_result
+  offload (fun () -> Native_addon_lease.prepare ~directories ~instance_id ~cleanup_context) |> native_result
 let native_launcher () =
   try
     let name = "masc-native-addon-launcher" in
@@ -1274,17 +1283,61 @@ let backend ~store () = match !override with
             let* command = match package.command with
               | [] -> Error (Lifecycle.Worker_failed "native command is empty")
               | executable::arguments -> Ok {Lane_addon_native_worker.executable;arguments} in
-            let* admission = prepare_native ~store ~installation_id ~instance_id ~is_live_instance in
+            let* cleanup_context=match package.worker_service with
+              | Mcp_tools -> Ok None
+              | Browser_service -> offload (fun () -> Browser_addon_socket.context ~instance_id)
+                  |> Result.map Option.some |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
+            let* admission = prepare_native ~store ~installation_id ~instance_id ~cleanup_context ~is_live_instance in
             let retire () = offload (fun () -> Native_addon_lease.retire admission) |> native_result in
+            (try
+            Eio.Switch.check sw;
             let* () = match on_authority (Lifecycle.Native_admission {installation_id}) with
               | Ok () -> Ok ()
               | Error detail ->
                   let* () = retire () in Error (Lifecycle.Persistence_failed detail) in
-            let wrap worker =
+            let* socket=match package.worker_service with
+              | Mcp_tools -> Ok None
+              | Browser_service ->
+                  let directory=List.hd (Native_addon_lease.directories admission) in
+                  (match Eio.Cancel.protect (fun () -> offload (fun () -> Browser_addon_socket.acquire ~admission ~directory)) with
+                   | Ok socket -> Ok (Some socket)
+                   | Error detail -> let* ()=retire () in
+                       let* ()=native_settled admission in Error (Lifecycle.Worker_failed detail)) in
+            let command=match socket with None -> command | Some socket ->
+              {command with arguments=command.arguments @ Browser_addon_socket.arguments socket
+                ~max_message_bytes:(Lane_addon_types.max_reply_bytes package)} in
+            let browser_client=ref None and combined_release=ref None in
+            let stop_worker worker=match !combined_release with
+              | Some receipt -> Ok receipt
+              | None ->
+                Option.iter Browser_addon_client.revoke !browser_client;
+                let* _receipt=Lane_addon_native_worker.stop worker
+                  |> Result.map_error (fun error -> Lifecycle.Cleanup_unconfirmed (Lane_addon_native_worker.error_to_string error)) in
+                let* ()=native_settled admission in
+                let receipt=Lifecycle.Native_released {installation_id;instance_id} in
+                combined_release:=Some receipt;Ok receipt in
+            let wrap ~ready worker =
+              let* browser=match !browser_client,socket with
+                | Some client,Some _ -> Ok (Some client)
+                | None,None -> Ok None
+                | Some _,None -> Error "native browser socket ownership changed"
+                | None,Some socket ->
+                    let* client=Browser_addon_client.create ~socket_path:(Browser_addon_socket.socket_path socket)
+                      ~incarnation:instance_id ~max_message_bytes:(Lane_addon_types.max_reply_bytes package)
+                      ~control_timeout_sec ~available:(fun () -> Lane_addon_native_worker.phase worker=Lane_addon_native_worker.Serving) in
+                    browser_client:=Some client;Ok (Some client) in
+              let check_browser ()=match browser with
+                | None -> Ok ()
+                | Some client ->
+                    (match Browser_addon_client.call client ~on_cancel_after_dispatch:(fun () -> ()) Browser_addon_wire.Snapshot with
+                     | Ok (Browser_addon_wire.Snapshot_result _) -> Ok ()
+                     | Ok (Poll_result _|Receipt|Issue_result _|Service_refusal _) -> Error "browser service readiness was refused"
+                     | Error (Browser_addon_client.Unavailable detail|Outcome_unknown detail) -> Error detail) in
+              let* ()=if ready then check_browser () else Ok () in
               let* resource = Option.to_result ~none:"native child identity is unavailable"
                 (Lane_addon_native_worker.process_identity worker) in
               Ok {
-                resource;
+                resource;browser;
                 resolved_image=None;
                 exported_tools=(fun () -> Lane_addon_native_worker.exported_tools worker);
                 action_schema=(fun () -> Lane_addon_native_worker.action_schema worker);
@@ -1297,28 +1350,37 @@ let backend ~store () = match !override with
                       | Cleanup_unconfirmed _ | Stopped) as error ->
                         Lane_addon_call_context.Transport_error (Lane_addon_native_worker.error_to_string error)));
                 act=(fun ~arguments -> Lane_addon_native_worker.act worker ~arguments |> Result.map_error Lane_addon_native_worker.error_to_string);
-                observe=(fun ~binding ~sources -> Lane_addon_native_worker.observe worker ~binding ~sources |> Result.map_error Lane_addon_native_worker.error_to_string);
+                observe=(fun ~binding ~sources ->
+                  let* ()=check_browser () in
+                  Lane_addon_native_worker.observe worker ~binding ~sources |> Result.map_error Lane_addon_native_worker.error_to_string);
                 host=(if not (uses_host_requests package) then None else Some {
                   list_requests=(fun () -> Lane_addon_native_worker.host_requests worker |> Result.map_error Lane_addon_native_worker.error_to_string);
                   deliver=(fun ~arguments -> Lane_addon_native_worker.host_result worker ~arguments |> Result.map_error Lane_addon_native_worker.error_to_string) });
-                stop=(fun () ->
-                  let* _receipt = Lane_addon_native_worker.stop worker
-                    |> Result.map_error (fun error -> Lifecycle.Cleanup_unconfirmed (Lane_addon_native_worker.error_to_string error)) in
-                  Ok (Lifecycle.Native_released {installation_id;instance_id}));
+                stop=(fun () -> stop_worker worker);
               } in
-            (try
                match Lane_addon_native_worker.start ~sw ~clock ~admission ~launcher ~contract ~command
                  ~grace_seconds:Process_eio.child_exit_grace_seconds ~cwd:Eio.Path.(fs / package.directory)
                  ~artifact_store:store ~on_created:(fun worker ->
-                   let* connection = wrap worker in on_created connection;Ok ()) () with
-               | Ok worker -> wrap worker |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail)
+                   let* connection = wrap ~ready:false worker in on_created connection;Ok ()) () with
+               | Ok worker ->
+                   (match wrap ~ready:true worker with
+                    | Ok connection -> Ok connection
+                    | Error detail -> let* _receipt=stop_worker worker in
+                        Error (Lifecycle.Worker_failed detail))
                | Error error -> let* () = retire () in
+                   let* () = native_settled admission in
                    Error (match error with
                     | Lane_addon_native_worker.Cleanup_unconfirmed detail -> Lifecycle.Cleanup_unconfirmed detail
                     | (Invalid_specification _ | Start_failed _ | Admission _ | Protocol _ | Stopped) as error ->
                         Lifecycle.Worker_failed (Lane_addon_native_worker.error_to_string error))
              with Eio.Cancel.Cancelled _ as exn ->
-               Eio.Cancel.protect (fun () -> ignore (retire () : (unit,Lifecycle.failure) result));raise exn)
+               Eio.Cancel.protect (fun () ->
+                 match retire () with
+                 | Error failure -> Log.Misc.error "Cancelled native retirement: %s" (Lifecycle.failure_detail failure)
+                 | Ok () -> match native_settled admission with
+                   | Ok () -> ()
+                   | Error failure -> Log.Misc.error "Cancelled native resources remain retained: %s" (Lifecycle.failure_detail failure));
+               raise exn)
         | Container container ->
           let* sampling_handler = prepare_sampling_handler ~sw ~store ~instance_id ~package ~binding
             |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
@@ -1329,6 +1391,7 @@ let backend ~store () = match !override with
           let wrap worker = {
             resource=Lifecycle.Container_resource (Lane_addon_worker.container_id worker);
              resolved_image=Some (Lane_addon_worker.image_identity worker);
+            browser=None;
             exported_tools=(fun () -> Lane_addon_worker.exported_tools worker);
             call_exported_tool=(fun ~on_result ~authorize ~principal ~name ~arguments ->
               Lane_addon_worker.call_exported_tool ~on_result ?authorize ~principal worker ~name ~arguments
@@ -1460,6 +1523,60 @@ let with_tool_call_owner work =
   with Eio.Cancel.Cancelled _ as exn ->
     ignore (Eio.Promise.try_resolve signal_cancelled exn);
     raise exn
+
+let browser_services ~config ~access = Eio_context.run_on_owner_domain (fun () ->
+  let root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  match Hashtbl.find_opt managers root with
+  | None -> []
+  | Some m -> entries m |> List.filter_map (fun e ->
+      if not e.started || e.stopping || not (can_read access e.visibility) then None
+      else match phase_of e,e.connection with
+      | (Attached|Observing),Some connection when Option.is_some connection.worker.browser ->
+          Some {instance_id=e.instance_id;owner=connection.export_owner}
+      | (Attached|Observing|Failed _|Detaching|Detached),(None|Some _) -> None))
+let call_browser_service ~config ~access ~(service:browser_service) ~command =
+  with_tool_call_owner (fun () ->
+    let root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    let* m=match Hashtbl.find_opt managers root with
+      | Some m -> Ok m | None -> Error (Browser_addon_client.Unavailable "browser Add-on owner is unavailable") in
+    let* e,client=match Hashtbl.find_opt m.entries service.instance_id with
+      | Some ({connection=Some connection;_} as e)
+        when e.started && not e.stopping && can_read access e.visibility
+          && Lane_addon_tool_export.equal_owner connection.export_owner service.owner ->
+          (match phase_of e,connection.worker.browser with
+           | (Attached|Observing),Some client -> Ok (e,client)
+           | (Attached|Observing|Failed _|Detaching|Detached),(None|Some _) ->
+               Error (Browser_addon_client.Unavailable "original browser Add-on is unavailable"))
+      | None|Some _ -> Error (Browser_addon_client.Unavailable "original browser Add-on was retired") in
+    let* sw=match Eio_context.get_root_switch_opt () with
+      | Some sw -> Ok sw
+      | None -> Error (Browser_addon_client.Unavailable "browser Add-on background owner is unavailable") in
+    let on_cancel_after_dispatch ()=match command with
+      | Browser_addon_wire.Issue _ ->
+        Browser_addon_client.revoke client;
+        e.stopping<-true;
+        e.state<-fail_state e (Lifecycle.Effect_outcome_unknown "browser call cancelled after dispatch; effect outcome unknown");
+        notify_tool_change e.package;
+        (match persist m e with Ok () -> () | Error detail ->
+          Log.Misc.error "Cancelled browser Add-on state persistence: %s" detail);
+        stop_entry ~sw ~backend:(backend ~store:m.store ()) m e
+      | Snapshot|Poll _|Deliver _|Disconnect _ -> () in
+    e.active_tool_calls<-e.active_tool_calls+1;
+    Fun.protect ~finally:(fun () -> e.active_tool_calls<-e.active_tool_calls-1) (fun () ->
+      let result=Browser_addon_client.call client ~on_cancel_after_dispatch command in
+      (match result with
+       | Ok reply ->
+           let changed=match reply with
+             | Browser_addon_wire.Poll_result {state_id;_} -> Browser_addon_client.notice_poll_state client ~state_id
+             | Issue_result _ -> true
+             | Receipt -> (match command with Browser_addon_wire.Disconnect _ -> true
+                 | Snapshot|Poll _|Deliver _|Issue _ -> false)
+             | Snapshot_result _|Service_refusal _ -> false in
+           if changed && not e.stopping then wake e
+       | Error (Browser_addon_client.Unavailable _) -> ()
+       | Error (Browser_addon_client.Outcome_unknown detail) ->
+           if not e.stopping then (failed m e (Lifecycle.Effect_outcome_unknown detail);wake e));
+      result))
 
 let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
   with_tool_call_owner (fun () ->
@@ -3347,6 +3464,7 @@ module For_testing = struct
     resource : Lifecycle.resource;
   resolved_image : Lane_addon_engine.image_identity option;
     host : host_port option;
+    browser : Browser_addon_client.t option;
   }
   type nonrec backend = backend = {
     start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> installation_id:string -> package:package -> binding:Yojson.Safe.t ->

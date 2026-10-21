@@ -79,7 +79,7 @@ let make_backend ?observe_step () =
         match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String name;
           "inputSchema",`Assoc ["type",`String "object"]]) with
         | Ok tool -> tool | Error message -> fail message) package.exported_tools in
-      let connection : Runtime.For_testing.connection = {
+      let connection : Runtime.For_testing.connection = {browser=None;
         resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
           | Ok image -> Some image | Error detail -> Alcotest.fail detail);
                 host = None; resource = Lifecycle.Container_resource (Store.digest instance_id);

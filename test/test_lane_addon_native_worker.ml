@@ -4,7 +4,7 @@ module Native = Lane_addon_native_worker
 module Protocol = Lane_addon_worker_protocol
 let launcher = ref ""
 let admission root instance_id =
-  Eio_unix.run_in_systhread (fun () -> Native_addon_lease.prepare
+  Eio_unix.run_in_systhread (fun () -> Native_addon_lease.prepare ~cleanup_context:None
     ~directories:[Filename.concat root "slot"] ~instance_id)
   |> (function Ok value -> value | Error error -> fail (Native_addon_lease.error_to_string error))
 

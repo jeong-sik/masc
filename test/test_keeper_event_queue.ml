@@ -129,7 +129,7 @@ let persist_event_queue_test_meta ~base_path keeper_name =
    | Error detail -> Alcotest.fail detail);
   meta
 
-let with_strict_executor f =
+let with_strict_executor ?(domain_count=1) f =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -137,7 +137,7 @@ let with_strict_executor f =
   let pool =
     Domain_pool.create
       ~sw
-      ~domain_count:1
+      ~domain_count
       (Eio.Stdenv.domain_mgr env)
   in
   Executor_pool_ref.For_testing.with_pool
@@ -208,6 +208,105 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~operation_id =
    | Error detail ->
      Alcotest.fail
        (Masc.Keeper_registry_event_queue.transfer_pending_error_to_string detail))
+
+let test_async_transition_page ~source =
+  let module Supervisor = Server_transition_outbox_recovery in
+  let module Recovery = Masc.Keeper_event_queue_recovery in
+  let module Fence = Masc.Keeper_shutdown_intake_fence in
+  let exception Observer_failed_after_page in
+  let base_path = temp_dir "transition-page-async" in
+  Fun.protect ~finally:(fun () -> rm_rf base_path) (fun () ->
+    let sources = ["a-source";"b-source";"c-source"] in
+    let original keeper = {source with Keeper_event_queue.post_id=keeper ^ "-original"} in
+    List.iter (fun from_keeper ->
+      stage_transfer ~base_path ~from_keeper ~to_keeper:"z-target"
+        ~source:(original from_keeper) ~operation_id:(from_keeper ^ "-transfer")) sources;
+    let pending_transitions keeper =
+      load_queue_state ~base_path ~keeper_name:keeper
+      |> Keeper_event_queue_state.transition_outbox in
+    (* Two executor domains permit the original page and independent durable
+       work to share actual capacity; no physical overlap is inferred for a
+       saturated single-worker deployment. *)
+    with_strict_executor ~domain_count:2 (fun () ->
+      let budget = match Recovery.owner_budget ~max_owners:1 with
+        | Ok budget -> budget
+        | Error error -> Alcotest.fail (Recovery.owner_budget_error_to_string error) in
+      let pages = Eio.Stream.create 0 in
+      let recovery = Supervisor.create ~base_path ~budget
+        ~on_page:(fun ~source ~base_path page ->
+          Eio.Stream.add pages (source,base_path,page);
+          match source with
+          | Supervisor.Startup -> raise Observer_failed_after_page
+          | Supervisor.Maintenance -> ()) () in
+      let check_page keeper (actual_source,actual_base,(page : Recovery.sweep_page)) =
+        Alcotest.(check string) "page retains original workspace" base_path actual_base;
+        Alcotest.(check (list string)) "actual deterministic owner page" [keeper]
+          (List.map (fun (entry : Recovery.owner_projection) -> entry.keeper_name) page.report.projections);
+        actual_source,page.report in
+      let first = Eio.Switch.run (fun sw ->
+        (match Fence.run_durable_intake_if_open ~base_path ~keeper_name:"a-source" (fun _ ->
+          Supervisor.pulse ~sw recovery Supervisor.Startup;
+          let independent = {source with Keeper_event_queue.post_id="independent-original"} in
+          (match Masc.Keeper_registry_event_queue.enqueue_durable_result
+              ~base_path "y-independent" independent with
+           | Ok () -> () | Error detail -> Alcotest.fail detail);
+          Alcotest.(check bool) "independent canonical queue progresses while page cannot finish" true
+            (registry_snapshot ~base_path "y-independent"
+             |> Keeper_event_queue.to_list
+             |> List.exists (Keeper_event_queue.stimulus_identity_equal independent));
+          Alcotest.(check int) "locked original transition remains durable" 1
+            (List.length (pending_transitions "a-source"));
+          Supervisor.pulse ~sw recovery Supervisor.Maintenance) with
+         | Fence.Intake_committed () -> ()
+         | Fence.Intake_shutdown_reserved _ -> Alcotest.fail "fresh source was shutdown-fenced");
+        Eio.Stream.take pages) in
+      let actual_source,first_report = check_page "a-source" first in
+      (match actual_source with
+       | Supervisor.Startup -> ()
+       | Supervisor.Maintenance -> Alcotest.fail "active pulse replaced original source");
+      Alcotest.(check int) "first original transfer converged" 1 first_report.converged;
+      Alcotest.(check int) "first source retired only after target projection" 0
+        (List.length (pending_transitions "a-source"));
+      let next keeper =
+        Eio.Switch.run (fun sw ->
+          Supervisor.pulse ~sw recovery Supervisor.Maintenance;
+          Eio.Stream.take pages)
+        |> check_page keeper |> snd in
+      let shutdown_operation = Masc.Keeper_shutdown_types.Operation_id.generate () in
+      (match Fence.begin_shutdown ~base_path ~keeper_name:"b-source" ~operation_id:shutdown_operation with
+       | Fence.Reserved _ -> ()
+       | Fence.Already_reserved _ -> Alcotest.fail "fresh second source was reserved");
+      Fun.protect ~finally:(fun () ->
+        ignore (Fence.rollback_shutdown ~base_path ~keeper_name:"b-source"
+          ~operation_id:shutdown_operation : Fence.rollback_result)) (fun () ->
+        (* The failing first observer cannot roll the committed cursor back. *)
+        let blocked = next "b-source" in
+        (match blocked.projections with
+         | [{outcome=Error (Recovery.Owner_shutdown_reserved actual);_}] ->
+           Alcotest.(check bool) "page retains exact shutdown operation" true
+             (Masc.Keeper_shutdown_types.Operation_id.equal shutdown_operation actual)
+         | [] | _ :: _ -> Alcotest.fail "second page lost typed shutdown refusal");
+        Alcotest.(check int) "fenced original transition retained" 1
+          (List.length (pending_transitions "b-source"));
+        let third = next "c-source" in
+        Alcotest.(check int) "cursor continues beyond fenced owner" 1 third.converged);
+      (* Complete the real lexical sweep and wrap to the original refused owner. *)
+      List.iter (fun keeper -> ignore (next keeper : Recovery.sweep_report))
+        ["y-independent";"z-target";"a-source"];
+      let retried = next "b-source" in
+      Alcotest.(check int) "fresh original owner converges after rollback" 1 retried.converged;
+      List.iter (fun keeper -> Alcotest.(check int) "original source outbox retired" 0
+        (List.length (pending_transitions keeper))) sources;
+      let target () = registry_snapshot ~base_path "z-target" |> Keeper_event_queue.to_list in
+      List.iter (fun keeper ->
+        let stimulus = original keeper in
+        Alcotest.(check int) "each original source appears once in target queue" 1
+          (List.filter (Keeper_event_queue.stimulus_identity_equal stimulus) (target ()) |> List.length)) sources;
+      let fresh = next "c-source" in
+      Alcotest.(check int) "settled original owner has no pending transition" 1 fresh.no_pending;
+      Alcotest.(check int) "fresh sweep does not duplicate transferred stimuli" 3
+        (List.length (target ()))))
+;;
 
 (* Keeper world event rows render their title and preview from prompt templates
    under the keeper.world.event_rows key space, which now live in config/prompts
@@ -845,6 +944,7 @@ let () =
   let board_stim =
     { post_id = "p1"; urgency = Normal; arrived_at = 0.0; payload = board_payload () }
   in
+  test_async_transition_page ~source:board_stim;
   let bootstrap_stim =
     { post_id = "bootstrap"; urgency = Normal; arrived_at = 0.0; payload = Bootstrap }
   in

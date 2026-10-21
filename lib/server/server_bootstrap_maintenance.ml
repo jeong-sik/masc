@@ -192,94 +192,6 @@ let run_schedule_runner_tick ~clock config ~previously_held =
   held_after_tick
 ;;
 
-type transition_outbox_projection_source =
-  | Startup_projection
-  | Maintenance_projection
-
-let transition_outbox_projection_source_to_string = function
-  | Startup_projection -> "startup"
-  | Maintenance_projection -> "maintenance"
-;;
-
-let project_keeper_transition_outboxes ~source ~base_path ~budget ~cursor =
-  let page =
-    Keeper_event_queue_recovery.project_discovered_bounded
-      ~base_path
-      ~budget
-      ~cursor
-  in
-  let report = page.report in
-  let source_label = transition_outbox_projection_source_to_string source in
-  Option.iter
-    (fun error ->
-       Log.Server.error
-         "keeper transition outbox %s discovery retained error=%s"
-         source_label
-         (Keeper_event_queue_recovery.discovery_error_to_string error))
-    report.discovery_error;
-  List.iter
-    (fun (failure : Keeper_event_queue_recovery.owner_failure) ->
-       Log.Server.error
-         "keeper transition outbox %s retained keeper=%s error=%s"
-         source_label
-         failure.keeper_name
-         (Keeper_event_queue_recovery.projection_error_to_string failure.error))
-    report.failures;
-  let should_log =
-    match source with
-    | Startup_projection -> true
-    | Maintenance_projection ->
-      report.converged > 0
-      || report.claim_busy > 0
-      || report.shutdown_reserved > 0
-      || report.failures <> []
-      || Option.is_some report.discovery_error
-  in
-  if should_log
-  then
-    Log.Server.info
-      "keeper transition outbox %s discovered=%d processed=%d deferred=%d \
-       converged=%d no_pending=%d claim_busy=%d shutdown_reserved=%d failures=%d"
-      source_label
-      report.discovered
-      report.processed
-      report.deferred
-      report.converged
-      report.no_pending
-      report.claim_busy
-      report.shutdown_reserved
-      (List.length report.failures);
-  page
-;;
-
-(* A leases term sat between these two. It could not contribute since #25969
-   moved production to peek/ack and left [State.of_yojson] restoring no leases.
-
-   The owner-recovery half that read that demand is gone. Across 1,038 logged
-   passes it only ever re-woke an owner already classified [Executable]; the
-   supervise arm never ran once, and eleven Keepers that stopped for fifteen
-   hours were not recovered by any of them. It carried no capability of its
-   own either: new durable work wakes its owner as [wakeup_keeper ~stimulus]
-   enqueues it, and a restart runs a cycle on boot. What is left is the
-   transition-outbox projection, which converges durable transitions and is
-   why this pass still exists. *)
-let project_keeper_transition_outbox_page
-      ~source
-      ~budget
-      ~cursor
-      ~commit_cursor
-      ctx
-  =
-  let page =
-    project_keeper_transition_outboxes
-      ~source
-      ~base_path:ctx.Keeper_types_profile.config.base_path
-      ~budget
-      ~cursor
-  in
-  commit_cursor page.next_cursor
-;;
-
 let latest_keeper_msg_recovery = Atomic.make None
 
 (* One archive-first task-only GC pass on the 24h maintenance cadence
@@ -730,15 +642,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     (* Operations the audit has reported: each settled operation is audited
        once per process life. *)
     let chat_journal_audited = ref Keeper_chat_journal_audit.Audited.empty in
-    let transition_projection_cursor =
-      ref Keeper_event_queue_recovery.initial_sweep_cursor
-    in
-    let transition_projection_budget =
+    let transition_projection =
       match
         Keeper_event_queue_recovery.owner_budget
           ~max_owners:(Keeper_config.keeper_batch_limit ())
       with
-      | Ok budget -> Some budget
+      | Ok budget -> Some (Server_transition_outbox_recovery.create
+          ~base_path:config.base_path ~budget ())
       | Error error ->
         Log.Server.error
           "keeper transition outbox maintenance disabled: %s"
@@ -747,15 +657,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     in
     let project_transition_outboxes source =
       Option.iter
-        (fun budget ->
-           project_keeper_transition_outbox_page
-             ~source
-             ~budget
-             ~cursor:!transition_projection_cursor
-             ~commit_cursor:(fun next_cursor ->
-               transition_projection_cursor := next_cursor)
-             recovery_ctx)
-        transition_projection_budget
+        (fun recovery -> Server_transition_outbox_recovery.pulse ~sw recovery source)
+        transition_projection
     in
     let delivery_recovery = Server_maintenance_delivery_recovery.create () in
     let reconcile_broadcast_mentions () =
@@ -802,7 +705,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     reconcile_owned_job_completions ();
     reconcile_prepared_continuations ();
     reconcile_ask_answers ();
-    project_transition_outboxes Startup_projection;
+    project_transition_outboxes Server_transition_outbox_recovery.Startup;
     (* Restore MCP transport sessions from disk before first cleanup cycle.
        Grace period timestamps survive server restart, so recently-active
        clients can reconnect without "Unknown Mcp-Session-Id" errors. *)
@@ -818,7 +721,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          is tried again on this tick. It comes before the work below so that a
          step that raises cannot skip the retry. *)
       Candle_payout_worker.pulse ();
-      project_transition_outboxes Maintenance_projection;
+      project_transition_outboxes Server_transition_outbox_recovery.Maintenance;
       reconcile_broadcast_mentions ();
       reconcile_goal_events ();
       reconcile_composition_completions ();

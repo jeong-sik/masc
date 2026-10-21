@@ -1,0 +1,35 @@
+id = "workspace-curator"
+revision = "0.1.0"
+title = "Workspace Curator worker"
+contributions = ["derive"]
+image = "masc-lane-workspace-curator:0.1.0"
+command = ["python3", "server.py", "--state", "/state"]
+
+[world.state]
+mode = "persistent"
+
+[world.tools]
+export = ["curate"]
+invocation = "host_context"
+hooks = ["validate_input", "validate_output"]
+
+[world.exact_outputs.classification]
+schema = "schemas/classification.json"
+request_schema = true
+
+[world.exact_outputs.briefing]
+schema = "schemas/briefing.json"
+request_schema = true
+
+[world.outputs.requests]
+lanes = ["workspace/curator"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304
+
+[interface]
+binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","maxItems":0,"items":{"type":"object","properties":{},"additionalProperties":false}}},"required":["sources"],"additionalProperties":false}'''
+presentation = '''{"description":"Original Curator executions; ledger and briefing commits remain host-owned","readings":[{"lane_id":"workspace/curator","path":["pending"],"label":"Pending requests","unit":"requests","format":"number"},{"lane_id":"workspace/curator","path":["finished"],"label":"Retained results","unit":"requests","format":"number"}]}'''

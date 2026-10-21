@@ -3,8 +3,8 @@
     It is one row, always drawn, and it answers two questions before a key is
     ever pressed: which keeper a message would reach, and whether it could be
     sent at all. Those are the two facts an operator cannot recover after the
-    fact, and the roster surface is where the answer changes under them — the
-    cursor moves on its own when a refresh drops a row.
+    fact. The idle row follows roster selection; a live draft keeps its bound
+    recipient even when a refresh moves the roster cursor.
 
     Focus is separate from presence. The surfaces bind single letters to
     lifecycle and navigation, so a row that swallowed every printable key would
@@ -103,14 +103,14 @@ val can_send : t -> bool
 
 (** What a keypress does to the composer. *)
 type key_outcome =
-  | Take_focus
+  | Take_focus of string
   | Release_focus
-  | Send
-  | Start_listening
+  | Send of string
+  | Start_listening of string
       (** The row asks for a microphone capture. Classification only — this
           module performs no I/O, and the caller runs the capture and puts the
           transcript in the draft. *)
-  | Toggle_continuous
+  | Toggle_continuous of string
       (** The row asks to start or stop capturing repeatedly. The caller holds
           that mode; this only reports the keypress. *)
   | Edit
@@ -118,10 +118,16 @@ type key_outcome =
   | Pass_to_surface
       (** The key is not the composer's; the surface handles it as before. *)
 
-val classify_key : t -> string -> key_outcome
+val classify_key :
+  focus:focus -> target:(unit -> target) -> draft:(unit -> string) ->
+  string -> key_outcome
 (** Route one keypress. An unfocused composer claims only {!focus_key}, and
     only when it has somewhere to send; everything else reaches the surface, so
-    no existing binding changes while the row sits idle. *)
+    no existing binding changes while the row sits idle. Reads are synchronous
+    and demand-driven: ordinary edits, release and unrelated idle keys need no
+    target or draft; Enter reads a reachable target before the draft. Resolved
+    actions carry that recipient for this key only. Observation is not input
+    authority, and no renderer snapshot is reused. *)
 
 val cursor_column : prompt_cells:int -> draft_cells:int -> terminal_cols:int -> int
 (** One-based terminal column for the text cursor, clamped inside the row. *)

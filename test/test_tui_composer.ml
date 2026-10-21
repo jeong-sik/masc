@@ -12,18 +12,20 @@ let outcome_testable =
     (fun fmt outcome ->
        Format.pp_print_string fmt
          (match outcome with
-          | Composer.Take_focus -> "take_focus"
+          | Composer.Take_focus keeper -> "take_focus(" ^ keeper ^ ")"
           | Composer.Release_focus -> "release_focus"
-          | Composer.Send -> "send"
-          | Composer.Start_listening -> "start_listening"
-          | Composer.Toggle_continuous -> "toggle_continuous"
+          | Composer.Send keeper -> "send(" ^ keeper ^ ")"
+          | Composer.Start_listening keeper -> "start_listening(" ^ keeper ^ ")"
+          | Composer.Toggle_continuous keeper -> "toggle_continuous(" ^ keeper ^ ")"
           | Composer.Edit -> "edit"
           | Composer.Pass_to_surface -> "pass"))
     ( = )
 
 let check_key ?(label = "key") composer key expected =
   Alcotest.(check outcome_testable) label expected
-    (Composer.classify_key composer key)
+    (Composer.classify_key ~focus:composer.Composer.focus
+       ~target:(fun () -> composer.Composer.target)
+       ~draft:(fun () -> composer.Composer.draft) key)
 
 let test_unreachable_target_keeps_its_name_and_reason () =
   let composer =
@@ -42,7 +44,7 @@ let test_unreachable_target_keeps_its_name_and_reason () =
 let test_idle_composer_claims_only_its_focus_key () =
   let composer = make () in
   check_key ~label:"the focus key" composer Composer.focus_key
-    Composer.Take_focus;
+    (Composer.Take_focus "analyst");
   List.iter
     (fun key -> check_key ~label:key composer key Composer.Pass_to_surface)
     [ "p"; "s"; "w"; "q"; "j"; "k"; "l"; "c"; "r"; "\r"; "\t"; "esc"; "2" ]
@@ -71,7 +73,7 @@ let test_focused_composer_releases_and_sends () =
      and the keypress should read as a no-op rather than a dispatch. *)
   check_key ~label:"enter on empty" empty "\r" Composer.Edit;
   let typed = make ~focus:Composer.Focused ~draft:"안녕" () in
-  check_key ~label:"enter on a draft" typed "\r" Composer.Send;
+  check_key ~label:"enter on a draft" typed "\r" (Composer.Send "analyst");
   let blank = make ~focus:Composer.Focused ~draft:"   \n  " () in
   check_key ~label:"enter on whitespace" blank "\r" Composer.Edit
 
@@ -103,7 +105,7 @@ let test_focused_composer_claims_the_listen_key () =
     ~label:"ctrl-y starts a capture"
     (make ~focus:Composer.Focused ())
     Composer.listen_key
-    Composer.Start_listening
+    (Composer.Start_listening "analyst")
 ;;
 
 (* A transcript needs somewhere to go. Capturing into a row with no recipient
@@ -144,7 +146,7 @@ let test_focused_composer_claims_the_continuous_key () =
     ~label:"ctrl-a toggles continuous capture"
     (make ~focus:Composer.Focused ())
     Composer.continuous_key
-    Composer.Toggle_continuous
+    (Composer.Toggle_continuous "analyst")
 ;;
 
 let test_continuous_key_needs_a_recipient () =

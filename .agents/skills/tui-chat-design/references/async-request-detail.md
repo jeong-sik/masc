@@ -52,6 +52,10 @@
 - 전역 입력창의 행과 cursor는 같은 동기 frame에서 대상·음성 prompt·escaped 초안 window를
   한 번 준비해 함께 반환한다. 다음 frame이나 key handler로 대상/초안을 캐시하지 않고,
   실제 입력은 그때의 원래 판정을 새로 읽는다. 준비 횟수 감소는 실측 입력·paint 속도가 아니다.
+- 살아 있는 composer(채팅 또는 focused 행)는 원래 `msg_target_keeper_name`의 가용성을
+  새로 읽는다. 목록 cursor 갱신으로 초안·음성·전송 대상을 바꾸지 않는다. 비활성 행만
+  roster 선택을 따르고, key 판정은 필요한 대상/초안만 동기 조회한다. 결정에 담긴 같은
+  Keeper 이름을 실제 동작에 넘기며 표시용 관측·attachment 수를 key마다 준비하지 않는다.
 - Task 표시 준비는 원래 consumer/요청/run/Task·workspace·폭·ticket에 귀속해 시작, worker
   진입/반환, caller 관측, UI 적용/거절, 소유권 철회, 취소 요청과 실제 등록 해제를 별도로 남긴다.
   같은 요청의 원자적 사실만 준비 단계 안내에 쓰며, 미관측 단계는 null로 남긴다. worker 반환을

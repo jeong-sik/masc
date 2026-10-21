@@ -63,6 +63,7 @@ let test_focus_and_draft_are_projected_together () =
   check focus_testable "initially unfocused" Composer.Unfocused
     unfocused.focus;
   check string "initially empty" "" unfocused.draft;
+  state.msg_target_keeper_name <- Some keeper.k_name;
   state.composer_focused <- true;
   Masc_tui_message_input.insert state.msg_input "draft for analyst";
   let focused = Projection.of_state state in

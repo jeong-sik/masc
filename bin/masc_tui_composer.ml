@@ -86,10 +86,12 @@ let accepts_input composer =
   | Focused, Ready _ -> true
   | Focused, (No_target | Unreachable _) | Unfocused, _ -> false
 
+let has_draft_text draft = String.trim draft <> ""
+
 let can_send composer =
   match composer.target with
   | No_target | Unreachable _ -> false
-  | Ready _ -> String.trim composer.draft <> ""
+  | Ready _ -> has_draft_text composer.draft
 
 (* The key that sends. Named so a caller that has to send without a keypress
    -- a voice capture that ends the sentence itself -- can hand it to
@@ -99,22 +101,27 @@ let send_key = "\r"
 let is_send_key key = String.equal key send_key
 
 type key_outcome =
-  | Take_focus
+  | Take_focus of string
   | Release_focus
-  | Send
-  | Start_listening
-  | Toggle_continuous
+  | Send of string
+  | Start_listening of string
+  | Toggle_continuous of string
   | Edit
   | Pass_to_surface
 
-let classify_key composer key =
-  match composer.focus with
+let classify_key ~focus ~target ~draft key =
+  let for_target action fallback =
+    match target () with
+    | Ready keeper -> action keeper
+    | No_target | Unreachable _ -> fallback
+  in
+  match focus with
   | Unfocused ->
       (* Idle, the row claims one key, and only when pressing it would lead
          somewhere. Claiming more would take letters the surfaces already bind
          to lifecycle and navigation. *)
-      if String.equal key focus_key && accepts_input { composer with focus = Focused }
-      then Take_focus
+      if String.equal key focus_key
+      then for_target (fun keeper -> Take_focus keeper) Pass_to_surface
       else Pass_to_surface
   | Focused ->
       if String.equal key release_key then Release_focus
@@ -122,11 +129,12 @@ let classify_key composer key =
       then
         (* The recipient is what makes a capture worth taking: a transcript
            with nowhere to go is a recording the operator cannot send. *)
-        (if can_send { composer with draft = "x" } then Start_listening else Edit)
+        for_target (fun keeper -> Start_listening keeper) Edit
       else if String.equal key continuous_key
       then
-        (if can_send { composer with draft = "x" } then Toggle_continuous else Edit)
-      else if is_send_key key then if can_send composer then Send else Edit
+        for_target (fun keeper -> Toggle_continuous keeper) Edit
+      else if is_send_key key then
+        for_target (fun keeper -> if has_draft_text (draft ()) then Send keeper else Edit) Edit
       else Edit
 
 let cursor_column ~prompt_cells ~draft_cells ~terminal_cols =

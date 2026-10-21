@@ -16873,27 +16873,18 @@ let handle_composer_key state ~base_path ~mailbox key =
      || Option.is_some (browser_lane_on_screen state)
   then false
   else
-  let composer = Composer_projection.of_state state in
-  match Composer.classify_key composer key with
+  match Composer_projection.classify_key state key with
   | Composer.Pass_to_surface -> false
-  | Composer.Take_focus ->
-      (match composer.Composer.target with
-       | Composer.Ready keeper_name ->
-           (* Taking focus is what names the recipient: the draft that follows
-              belongs to the keeper the row showed at that moment. *)
-           state.msg_return <- Keeper_chat_return_detail;
-           (* Focus first: the retarget drains the queue, and a line for the
-              keeper the row now aims at is held only while the row is live
-              ([composing_for_keeper]). *)
-           state.composer_focused <- true;
-           if
-             state.msg_target_keeper_name <> Some keeper_name
-           then
-             open_message_for_keeper state keeper_name ~drain_queue:(fun () ->
-                 drain_queued_message state ~base_path ~mailbox)
-       | Composer.No_target | Composer.Unreachable _ -> ());
+  | Composer.Take_focus keeper_name ->
+      (* Taking focus names the recipient for the draft, independently of
+         later roster cursor movement. Focus before the retarget's drain. *)
+      state.msg_return <- Keeper_chat_return_detail;
+      state.composer_focused <- true;
+      (if state.msg_target_keeper_name <> Some keeper_name then
+         open_message_for_keeper state keeper_name ~drain_queue:(fun () ->
+           drain_queued_message state ~base_path ~mailbox));
       true
-  | Composer.Start_listening ->
+  | Composer.Start_listening keeper_name ->
       (* Pressing it while continuous mode is on turns the mode off. That is
          the only way out: a mode that re-arms itself needs a key that stops
          it, and the key that started it is the one the operator will reach
@@ -16909,20 +16900,18 @@ let handle_composer_key state ~base_path ~mailbox key =
          The second press stops the running one, which is what the row has
          been telling the operator it does. It used to start another instead,
          leaving two recorders on one device with no way to end either. *)
-      (match state.voice_capture, composer.Composer.target with
-       | Some _, _ ->
+      (match state.voice_capture with
+       | Some _ ->
            request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
            state.last_action <- Some ("voice: stopping", Unix.gettimeofday ())
-       | None, Composer.Ready keeper_name ->
-           launch_voice_capture state ~mailbox ~keeper:keeper_name
-       | None, (Composer.No_target | Composer.Unreachable _) -> ()));
+       | None -> launch_voice_capture state ~mailbox ~keeper:keeper_name));
       true
-  | Composer.Toggle_continuous ->
-      (match state.voice_continuous, composer.Composer.target with
-       | Some _, _ ->
+  | Composer.Toggle_continuous keeper_name ->
+      (match state.voice_continuous with
+       | Some _ ->
            state.voice_continuous <- None;
            state.last_action <- Some ("voice: continuous off", Unix.gettimeofday ())
-       | None, Composer.Ready _ when Option.is_some state.voice_capture ->
+       | None when Option.is_some state.voice_capture ->
            (* A manual or withdrawn capture still owns the microphone. The
               noise-floor probe must wait for its completion too. *)
            let notice =
@@ -16930,7 +16919,7 @@ let handle_composer_key state ~base_path ~mailbox key =
              then "voice: discarding previous capture"
              else "voice: recording in progress" in
            state.last_action <- Some (notice, Unix.gettimeofday ())
-       | None, Composer.Ready keeper_name ->
+       | None ->
            (* The floor is measured once here rather than per capture, which is
               what makes the gap between utterances short enough to speak
               across. It is dropped when the mode ends, so a session that moves
@@ -16939,8 +16928,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            state.voice_floor <- Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper_name ();
            state.last_action <- Some ("voice: continuous on", Unix.gettimeofday ());
            if state.voice_capture = None
-           then launch_voice_capture state ~mailbox ~keeper:keeper_name
-       | None, (Composer.No_target | Composer.Unreachable _) -> ());
+           then launch_voice_capture state ~mailbox ~keeper:keeper_name);
       true
   | Composer.Release_focus ->
       (* A running capture is the innermost thing Esc can leave, so it goes
@@ -16958,7 +16946,7 @@ let handle_composer_key state ~base_path ~mailbox key =
               keeper never has. *)
            drain_queued_message state ~base_path ~mailbox);
       true
-  | Composer.Send ->
+  | Composer.Send keeper_name ->
       if recovered_paste_send_locked state then begin
         report_action state "system"
           "Recovered draft protected; press Ctrl-G to enable Enter";
@@ -17050,7 +17038,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            (* A command keeps the surface: the operator asked the TUI, not
               the keeper, and the answer lands in the session log. *)
            ());
-      send_operator_text state ~base_path ~mailbox text;
+      send_operator_text ~keeper_name state ~base_path ~mailbox text;
       true
       end
   | Composer.Edit ->

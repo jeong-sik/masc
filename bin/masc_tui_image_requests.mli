@@ -7,11 +7,13 @@ type source =
 
 val load :
   host:string -> port:int -> cache_dir:(unit -> string) ->
-  diagram_width:int -> diagram_colors:(string * string) option -> source ->
-  (string, string) result
+  diagram_width:int -> diagram_colors:(string * string) option ->
+  display:Masc_tui_image_cache.display -> source ->
+  (Masc_tui_image_cache.presentation, string) result
 (** Fetch the authenticated peer in an Eio fiber. Run retained-payload
     verification, base64 decoding, remote downloads and image conversion on a
-    system thread. Returns PNG bytes or the acquisition/decoder refusal. *)
+    system thread. Prepare the captured pixel or character-cell presentation
+    there as well; the caller owns all terminal writes and stale-result checks. *)
 (* Declared SVG uses the offline renderer after decoding. A retained format
    comes from the original attachment metadata, distinct from its base64 wire
    blob's MIME. Byte count and digest verification precede rendering. *)

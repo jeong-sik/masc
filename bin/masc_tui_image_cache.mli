@@ -126,6 +126,23 @@ val prepare_payload :
     other formats use the same converters as remote images. Cache publication
     is atomic and addressed by the payload, not its display label. *)
 
+type display = Pixel_graphics | Character_cells of { columns : int; rows : int }
+(** Captured presentation and available body box in terminal cells. *)
+
+type presentation =
+  | Png of string
+  | Rgba of { columns : int; pixel_rows : int; bytes : string }
+(** A prepared image. RGBA has two pixel rows per character row; its dimensions
+    and exact byte length are validated before it reaches the terminal owner. *)
+
+val prepare_presentation :
+  run:(string -> Unix.process_status) -> cache_dir:string -> display -> string ->
+  (presentation, string) result
+(** Prepare PNG bytes for the captured display. Character cells use the existing
+    aspect-preserving mosaic grid and one ffmpeg RGBA frame. All temporary files
+    belong to this attempt and are removed on success or failure. Blocking: call
+    only from the image acquisition worker. Original bytes are never replaced. *)
+
 val invalidate_download : cache_dir:string -> string -> unit
 (** Explicit user refresh only: remove this URL's input and derived PNG so
     a previously refused body can be fetched again. *)

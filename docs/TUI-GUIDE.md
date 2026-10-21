@@ -1733,6 +1733,13 @@ events. Task rows name the typed actor role (`claimed by`, `submitted by`,
 `completed by`, or `cancelled by`) and the latest handoff author and summary
 when present.
 
+Task cancellation requires a reason and the TUI's authenticated operator
+credential. It can cancel another agent's active Task without taking ownership;
+the cancellation records the operator and clears the former owner's Task cache.
+Completed Tasks cannot be cancelled. A missing or insufficient credential is
+refused. If the response is lost, the TUI reports the result as unconfirmed and
+refreshes the captured workspace; it does not claim the cancellation failed.
+
 In a goal detail, `c` requests completion, `x` drops, `o` reopens. Each is
 armed rather than pressed - the first press shows what the same key again
 would send, any other key disarms - and the server owns the phase rules: a

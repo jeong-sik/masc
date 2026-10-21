@@ -344,20 +344,3 @@ let resource_contents_of_body ~request_id body =
       if contents = [] then Error "MCP answered with no readable contents"
       else Ok contents
   | Some _ | None -> Error "MCP answered with no contents"
-
-(* Cancel is an exit-class action on the masc_transition contract: it wants
-   [reason] and a non-empty [handoff_context.summary]. The one operator-typed
-   reason serves as both, and this stays a pure function so the test suite can
-   pin the contract without a transport. *)
-let task_cancel_arguments ~task_id ~reason ~expected_workspace =
-  [ ("task_id", `String task_id)
-  ; ("action", `String "cancel")
-  ; ("reason", `String reason)
-  ; ("handoff_context", `Assoc [ ("summary", `String reason) ])
-  ; ("expected_workspace", `Assoc
-       [ ("base_path",
-          `String (Masc.Tui_decode.Canonical_path.to_string
-                     expected_workspace.Masc.Tui_decode.sid_base_path))
-       ; ("masc_root",
-          `String (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root)) ])
-  ]

@@ -2805,6 +2805,20 @@ let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_cancel"
     ~body:(Yojson.Safe.to_string payload)
 
+(** The operator token is supplied by [post_json_outcome], never by a body actor.
+    The server checks the captured workspace before committing. *)
+let cancel_task ~host ~port ~task_id ~reason ~expected_workspace =
+  let body = Yojson.Safe.to_string (`Assoc
+    [ "task_id", `String task_id; "reason", `String reason
+    ; expected_workspace_field expected_workspace ]) in
+  match post_json_outcome ~host ~port ~path:"/api/v1/dashboard/tasks/cancel" ~body with
+  | Post_answered (`Assoc fields) ->
+    (match List.assoc_opt "ok" fields, List.assoc_opt "message" fields with
+     | Some (`Bool true), Some (`String _) -> Post_answered (`Assoc fields)
+     | _ -> Post_unanswered "Invalid operator task cancellation response")
+  | Post_answered _ -> Post_unanswered "Invalid operator task cancellation response"
+  | (Post_refused _ | Post_unanswered _) as outcome -> outcome
+
 (** POST /api/v1/verification/verdict — the operator's verdict on a task
     awaiting verification. The route demands a reason with a reject and takes
     none with an approve, so the variant carries it only where it rides.

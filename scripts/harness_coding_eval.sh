@@ -674,6 +674,7 @@ run_one() {
 
   local finish_status="ok" error_text="" verify_exit_json="null" regression_exit_json="null"
   local build_exit_json="null" edited_source_json="null" edited_target_json="null"
+  local operation_id_json="null"
   local tool_calls_json='[]' input_tokens_json="null" output_tokens_json="null"
   local cost_usd_json="null"
   local memory_seeded=0
@@ -740,7 +741,7 @@ run_one() {
         error_text="failed to inject live context probe for ${keeper_name}"
       fi
     fi
-    local message request_json request_id
+    local message request_json
     message="$(printf '%s\n\nWorkspace directory (relative to your working root): workspace\nRun the check inside that directory.' \
       "${prompt}")"
     if [[ "${finish_status}" == "ok" ]]; then
@@ -757,11 +758,12 @@ run_one() {
       # description names this contract). Terminal states are Succeeded /
       # Failed / Cancelled.
         local operation_id
-        operation_id="$(printf '%s' "${request_json}" | jq -r '.operation_id // empty')"
-        if [[ -z "${operation_id}" ]]; then
+        if ! operation_id_json="$(printf '%s' "${request_json}" | coding_eval_operation_id)"; then
+          operation_id_json="null"
           finish_status="transport_error"
-          error_text="keeper_msg returned no operation_id"
+          error_text="keeper_msg returned no operation_id string"
         else
+          operation_id="$(printf '%s' "${operation_id_json}" | jq -r '.')"
           local poll_deadline result_json op_state
           poll_deadline=$(( start_epoch + timeout_sec ))
           result_json=""
@@ -921,7 +923,7 @@ run_one() {
     "${tool_calls_json}" "${input_tokens_json}" "${output_tokens_json}" \
     "${cost_usd_json}" "$(json_string_or_null "${error_text}")" \
     "${regression_exit_json}" "${edited_source_json}" "${edited_target_json}" \
-    "${build_exit_json}")"
+    "${build_exit_json}" "${operation_id_json}")"
   append_row "${row}" "${evidence_path}"
   echo "[coding-eval] ${run_id}: status=${finish_status} verify_exit=${verify_exit_json} regression_exit=${regression_exit_json} edited_target=${edited_target_json} build=${build_exit_json}" >&2
 }

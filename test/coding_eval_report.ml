@@ -36,6 +36,9 @@ type row = {
   case_id : string;
   run_index : int;
   run_id : string;
+  operation_id : Keeper_operation_id.t option;
+  (* The accepted chat operation, observed from the admission response. None
+     means no accepted identity was observed; never reconstructed from run_id. *)
   provider : string;
   model : string;
   status : run_status;
@@ -66,6 +69,7 @@ let row_keys =
   [ "case_id"
   ; "run_index"
   ; "run_id"
+  ; "operation_id"
   ; "provider"
   ; "model"
   ; "status"
@@ -135,6 +139,13 @@ let row_of_json json =
     let* case_id = str "case_id" in
     let* run_index = int "run_index" in
     let* run_id = str "run_id" in
+    let* operation_id =
+      match List.assoc_opt "operation_id" fields with
+      | None | Some `Null -> Ok None
+      | Some (`String value) ->
+        Keeper_operation_id.of_string value |> Result.map Option.some
+      | Some _ -> Error "operation_id must be a string or null"
+    in
     let* provider = str "provider" in
     let* model = str "model" in
     let* status_raw = str "status" in
@@ -216,6 +227,7 @@ let row_of_json json =
       { case_id
       ; run_index
       ; run_id
+      ; operation_id
       ; provider
       ; model
       ; status

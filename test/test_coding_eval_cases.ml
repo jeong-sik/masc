@@ -215,9 +215,9 @@ let test_report_decodes_real_harness_rows () =
   let dir = temp_dir "coding_eval_emitted_" in
   let runs_path = Filename.concat dir "runs.jsonl" in
   List.iteri
-    (fun index (status, verify_exit, regression_exit) ->
+    (fun index (status, verify_exit, regression_exit, acceptance) ->
        let args =
-         [ helper; "l1-calc-add"; string_of_int (index + 1); "observed-run"
+         [ helper; acceptance; "l1-calc-add"; string_of_int (index + 1); "observed-run"
          ; "provider"; "model"; status; verify_exit; "100"; "1234"
          ; "[]"; "null"; "null"; "null"; "null"; regression_exit
          ; "1"; "1"; "null"
@@ -225,14 +225,22 @@ let test_report_decodes_real_harness_rows () =
        in
        let command =
          "bash -c "
-         ^ Filename.quote "set -euo pipefail; source \"$1\"; shift; evidence_row \"$@\""
+         ^ Filename.quote
+             "set -euo pipefail; source \"$1\"; acceptance=\"$2\"; shift 2; \
+              operation_id=null; if [[ \"$acceptance\" != null ]]; then \
+              operation_id=\"$(printf '%s' \"$acceptance\" | coding_eval_operation_id)\"; fi; \
+              evidence_row \"$@\" \"$operation_id\""
          ^ " coding-eval-emitter "
          ^ String.concat " " (List.map Filename.quote args)
          ^ " >> " ^ Filename.quote runs_path
        in
        check int "real row producer succeeds" 0 (Sys.command command))
-    [ "ok", "0", "0"; "ok", "1", "0"; "ok", "0", "1"
-    ; "provider_error", "0", "0"
+    [ "ok", "0", "0", {|{"operation_id":"kmsg-observed-1","state":"Queued"}|}
+    ; "ok", "1", "0", {|{"operation_id":"kmsg-observed-2","state":"Queued"}|}
+    ; "ok", "0", "1", {|{"operation_id":"kmsg-observed-3","state":"Queued"}|}
+    ; "timeout", "null", "null", {|{"operation_id":"kmsg-observed-4","state":"Queued"}|}
+    ; "provider_error", "1", "null", {|{"operation_id":"kmsg-observed-5","state":"Queued"}|}
+    ; "transport_error", "null", "null", "null"
     ];
   let rows =
     match Coding_eval_report.rows_of_jsonl_file runs_path with
@@ -240,8 +248,15 @@ let test_report_decodes_real_harness_rows () =
     | Ok rows -> rows
   in
   check (list bool) "only settled green verification passes"
-    [ true; false; false; false ]
+    [ true; false; false; false; false; false ]
     (List.map (fun (row : Coding_eval_report.row) -> row.passed) rows);
+  check (list (option string)) "accepted identities survive later verification failure"
+    [ Some "kmsg-observed-1"; Some "kmsg-observed-2"; Some "kmsg-observed-3"
+    ; Some "kmsg-observed-4"; Some "kmsg-observed-5"; None ]
+    (List.map
+       (fun (row : Coding_eval_report.row) ->
+          Option.map Keeper_operation_id.to_string row.operation_id)
+       rows);
   List.iter
     (fun (row : Coding_eval_report.row) ->
        check string "model stays model identity" "model" row.model;
@@ -251,8 +266,40 @@ let test_report_decodes_real_harness_rows () =
   match Coding_eval_report.build_suite ~cases:(loaded_cases ()) ~rows ~k:1 with
   | Error message -> fail message
   | Ok report ->
-    check int "all actual emitted rows enter the report" 4 report.suite.total_runs;
-    check (float 0.0001) "one passing coding evaluation" 0.25 report.suite.overall_pass_rate
+    check int "all actual emitted rows enter the report" 6 report.suite.total_runs;
+    check (float 0.0001) "one passing coding evaluation" (1.0 /. 6.0) report.suite.overall_pass_rate
+;;
+
+let test_admission_without_operation_identity_is_refused () =
+  let helper = Filename.concat (source_root ()) "scripts/harness/lib/coding_eval_evidence.sh" in
+  List.iter
+    (fun response ->
+       let command =
+         "bash -c "
+         ^ Filename.quote "set -euo pipefail; source \"$1\"; printf '%s' \"$2\" | coding_eval_operation_id"
+         ^ " coding-eval-admission " ^ Filename.quote helper ^ " " ^ Filename.quote response
+       in
+       check bool "malformed admission never manufactures an identity" true
+         (run_quiet command <> 0))
+    [ {|{}|}; {|{"operation_id":null}|}; {|{"operation_id":42}|}
+    ; {|{"operation_id":""}|}
+    ]
+;;
+
+let test_report_rejects_invalid_operation_identity () =
+  let row = row_json ~run_index:1 ~status:"ok" ~verify_exit:(Some 0) ~passed:true () in
+  let fields = match row with `Assoc fields -> fields | _ -> fail "expected row object" in
+  List.iter
+    (fun value ->
+       match Coding_eval_report.row_of_json (`Assoc (("operation_id", value) :: fields)) with
+       | Error _ -> ()
+       | Ok _ -> fail "invalid operation identity was accepted")
+    [ `String ""; `String "../other"; `Int 42 ];
+  match Coding_eval_report.row_of_json row with
+  | Error message -> fail message
+  | Ok decoded ->
+    check (option string) "missing observation does not infer from run id" None
+      (Option.map Keeper_operation_id.to_string decoded.operation_id)
 ;;
 
 let test_row_disagreeing_with_its_verdict_is_refused () =
@@ -517,6 +564,10 @@ let () =
     ; ( "report"
       , [ test_case "fixed rows pipeline" `Quick test_report_pipeline_on_fixed_rows
         ; test_case "real harness rows decode" `Quick test_report_decodes_real_harness_rows
+        ; test_case "operation identity is observed, never inferred" `Quick
+            test_report_rejects_invalid_operation_identity
+        ; test_case "admission must return an operation identity" `Quick
+            test_admission_without_operation_identity_is_refused
         ; test_case
             "inconsistent row refused"
             `Quick

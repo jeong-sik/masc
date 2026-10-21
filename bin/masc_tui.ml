@@ -1075,14 +1075,14 @@ let image_preview_candidates (state : state) logs =
                  (* The tagged row is the source-owned media remainder the
                     pane actually draws. Recovering the unfiltered history
                     row would put covered diagrams back into this catalog. *)
-                 (match tag with
-                  | Tagged_row row ->
+                 (match message_of_tag tag with
+                  | Some row ->
                       (match row.me_role with
                       | Message_thinking -> None
                       | Message_user _ | Message_keeper | Message_autonomous
                       | Message_status | Message_local | Message_error | Message_tool
                       | Message_skill _ | Message_memory -> Some (anchor, row.me_images))
-                  | Tagged_child _ | Tagged_block _ -> None)
+                  | None -> None)
              | Some (Search_journal { source; origin; _ } as anchor) ->
                  Option.bind (List.assoc_opt source logs) (fun items ->
                    Option.map (fun preview -> anchor, preview) (List.assoc_opt origin items))

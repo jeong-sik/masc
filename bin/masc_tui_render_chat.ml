@@ -3609,6 +3609,10 @@ let search_reply_source (message : msg_entry) =
     | Message_tool | Message_skill _ | Message_thinking | Message_memory), _
   | (Message_keeper | Message_autonomous), (Turn_input | Turn_progress | Turn_tool) -> None
 
+let message_of_tag = function
+  | Tagged_row message -> Some message
+  | Tagged_child _ | Tagged_block _ -> None
+
 let search_anchor_of_tag = function
   | Tagged_child anchor -> Some (Search_child anchor)
   | Tagged_row message -> Some (Search_history {

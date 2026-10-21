@@ -458,6 +458,115 @@ let test_live_disk_check_reports_unreadable_as_error () =
         check bool "order does not matter: unreadable still outranks" true
           (Result.is_error (hold dir [ beta_cred; rotated_alpha ]))))
 
+(* #44247: the credential a caller read first can be stale by the time it is
+   checked. The owner's file decides. The same token with a role or expiry an
+   operator edited meanwhile is the same credential, answered with the file's
+   current values; a token replaced or removed is [InvalidToken]. *)
+let test_canonical_credential_follows_the_owners_file () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let token = create_token_for dir ~agent_name:"alpha" ~role:Masc_domain.Worker in
+        let snapshot =
+          match Auth.find_credential_by_token dir ~token with
+          | Ok cred -> cred
+          | Error e -> fail ("alpha did not resolve: " ^ Masc_domain.masc_error_to_string e)
+        in
+        let canonical = Auth_credential_token.For_testing.canonical_credential_of_token in
+        let invalid label = function
+          | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) -> ()
+          | Error e -> fail (label ^ ": " ^ Masc_domain.masc_error_to_string e)
+          | Ok _ -> fail (label ^ ": accepted") in
+        let edited = { snapshot with Masc_domain.role = Masc_domain.Admin; expires_at = None } in
+        Auth.save_credential dir edited;
+        (match canonical dir snapshot with
+         | Ok fresh ->
+           check bool "the file's current role is answered" true
+             (fresh.Masc_domain.role = Masc_domain.Admin);
+           check (option string) "the file's current expiry is answered" None
+             fresh.Masc_domain.expires_at
+         | Error e ->
+           fail ("a role and expiry edit was refused: " ^ Masc_domain.masc_error_to_string e));
+        (match Auth.verify_token dir ~agent_name:"alpha" ~token with
+         | Ok cred ->
+           check bool "verify_token answers the edited role" true
+             (cred.Masc_domain.role = Masc_domain.Admin)
+         | Error e ->
+           fail ("verify_token refused an edited credential: " ^ Masc_domain.masc_error_to_string e));
+        Auth.save_credential dir { edited with Masc_domain.token = "rotated-credential-material" };
+        invalid "a replaced token" (canonical dir snapshot);
+        invalid "verify_token with a replaced token" (Auth.verify_token dir ~agent_name:"alpha" ~token);
+        Auth.delete_credential dir "alpha";
+        invalid "a removed credential" (canonical dir snapshot)))
+
+(* The same helper behind a stale read. A stored alias leads to the id-named
+   payload; the owner's named file is then replaced by hand with the same
+   token and a lower role. The old comparison refused that answer outright. The
+   owner's file decides, so the alias answers the lower role. *)
+let test_a_stale_alias_read_answers_the_owners_current_role () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let name = "operator" in
+        let token, worker =
+          match Auth.ensure_keeper_credential dir ~agent_name:name with
+          | Ok pair -> pair
+          | Error e -> fail ("keeper credential: " ^ Masc_domain.masc_error_to_string e)
+        in
+        let admin = { worker with Masc_domain.role = Masc_domain.Admin } in
+        Auth.save_credential dir admin;
+        (match
+           Auth.ensure_credential_alias dir ~canonical_name:name ~alias_name:"short-operator"
+         with
+         | Ok () -> ()
+         | Error e -> fail ("alias: " ^ Masc_domain.masc_error_to_string e));
+        (match Auth.verify_token dir ~agent_name:"short-operator" ~token with
+         | Ok cred ->
+           check bool "the alias answers Admin while the owner's file says Admin" true
+             (cred.Masc_domain.role = Masc_domain.Admin)
+         | Error e -> fail ("alias refused before the edit: " ^ Masc_domain.masc_error_to_string e));
+        let demoted =
+          { admin with Masc_domain.id = None; role = Masc_domain.Worker }
+        in
+        Auth.save_private_text_file (Auth.credential_file dir name)
+          (Masc_domain.agent_credential_to_yojson demoted |> Yojson.Safe.to_string);
+        match Auth.verify_token dir ~agent_name:"short-operator" ~token with
+        | Ok cred ->
+          check bool "the alias answers the owner's current role" true
+            (cred.Masc_domain.role = Masc_domain.Worker)
+        | Error e ->
+          fail ("a demoted owner file refused its own token: "
+                ^ Masc_domain.masc_error_to_string e)))
+
+(* An owner file that cannot be read is a read failure, not a verdict on the
+   token: [canonical_credential_of_token] must pass the error through. Root
+   opens a mode-0 file, so there is nothing to make unreadable. *)
+let test_canonical_credential_reports_unreadable_as_error () =
+  if Unix.geteuid () = 0 then skip ();
+  let dir = setup_test_workspace () in
+  let alpha_file = Auth.credential_file dir "alpha" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.chmod alpha_file 0o600 with Unix.Unix_error _ -> ());
+      cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let token = create_token_for dir ~agent_name:"alpha" ~role:Masc_domain.Worker in
+        let snapshot =
+          match Auth.find_credential_by_token dir ~token with
+          | Ok cred -> cred
+          | Error e -> fail ("alpha did not resolve: " ^ Masc_domain.masc_error_to_string e)
+        in
+        Unix.chmod alpha_file 0o000;
+        match Auth_credential_token.For_testing.canonical_credential_of_token dir snapshot with
+        | Error (Masc_domain.System _) -> ()
+        | Error _ -> fail "an unreadable owner file answered a non-system error"
+        | Ok _ -> fail "an unreadable owner file was accepted"))
+
 (* [verify_token] reads the named file, not the token index: an unreadable
    file is a read failure (503 downstream), not an undecodable credential
    (401). *)
@@ -529,6 +638,12 @@ let () =
           `Slow test_unreadable_credential_recovers_after_the_retry_bound
         ; test_case "live-disk check reports unreadable as error"
           `Quick test_live_disk_check_reports_unreadable_as_error
+        ; test_case "canonical credential follows the owner's file"
+          `Quick test_canonical_credential_follows_the_owners_file
+        ; test_case "a stale alias read answers the owner's current role"
+          `Quick test_a_stale_alias_read_answers_the_owners_current_role
+        ; test_case "canonical credential reports unreadable as error"
+          `Quick test_canonical_credential_reports_unreadable_as_error
         ; test_case "verify_token reports unreadable as read failure"
           `Quick test_verify_token_reports_unreadable_as_read_failure
         ; test_case "unreadable-window miss is counted apart"

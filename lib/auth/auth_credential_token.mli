@@ -167,13 +167,23 @@ val verify_token_owner_alias :
 
 val verify_token :
   string -> agent_name:string -> token:string -> (agent_credential, masc_error) result
-(** Static verification through a UUID or stored redirect alias requires the
-    complete credential to still match its owner's current named binding.
-    Direct UUID data reads do not grant independent bearer authority. *)
+(** Static verification through a UUID or stored redirect alias requires its
+    owner's current named binding to still hold the same token, and answers
+    with that binding, so a role or expiry edited since the read is the one
+    returned. A replaced or removed binding is [InvalidToken]. Direct UUID
+    data reads do not grant independent bearer authority. *)
 
 (** {1 Testing} *)
 
 module For_testing : sig
+  val canonical_credential_of_token :
+    string -> agent_credential -> (agent_credential, masc_error) result
+  (** The credential in the owner's own file when it still holds the token of
+      the given one for the same owner, with that file's current role and
+      expiry; [Error (Auth (InvalidToken _))] when the file is gone, cannot be
+      decoded, or holds another token or owner; [Error] when it could not be
+      read. *)
+
   val credential_matches_live_disk :
     string -> agent_credential -> (bool, masc_error) result
   (** [Ok true] when the named file still holds the credential, [Ok false]

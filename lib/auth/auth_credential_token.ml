@@ -720,6 +720,40 @@ let verify_token_owner_alias config ~agent_name ~token =
   | Error e -> Error e
 ;;
 
+(* HIGH-RISK-UNREVIEWED: decides whether a bearer token still authenticates.
+
+   [cred] was read under the name the caller gave, which can be an id-named
+   file or a stored alias. The credential that name stands for is the one in
+   [cred.agent_name]'s own file, so that file is read again and answers.
+
+   - It no longer holds this token for this owner, is gone, or cannot be
+     decoded: the token was replaced, and the binding that vouched for it is
+     stale. [Error InvalidToken], for good.
+   - It holds this token with another role or expiry: an operator edited the
+     credential after the first read. The token is the same credential, so the
+     answer carries the file's current values and is not refused. Refusing it
+     made a valid token read as invalid, and a client that clears a token on
+     that answer lost a token that still worked.
+   - It could not be read: [Error], which the caller answers with a retry. *)
+let canonical_credential_of_token config (cred : agent_credential)
+  : (agent_credential, masc_error) result
+  =
+  match load_credential_checked config cred.agent_name with
+  | Error _ as error -> error
+  | Ok None ->
+    Error
+      (Auth
+         (Auth_error.InvalidToken
+            "The owner's credential is gone or cannot be decoded, so the binding that \
+             vouched for this token is stale"))
+  | Ok (Some current) ->
+    if String.equal current.agent_name cred.agent_name
+       && constant_time_string_equal current.token cred.token
+    then Ok current
+    else
+      Error (Auth (Auth_error.InvalidToken "Credential replaced during token verification"))
+;;
+
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
   (* A read failure is not an absent credential: [load_credential_checked]
      keeps the two apart so an unreadable file answers 503 downstream
@@ -771,19 +805,13 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
                  }))
        | Ok None -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
        | Error error -> Error error)
-    else (
-      let open Result.Syntax in
-      let* credential = require_live_credential ~now:(Time_compat.now ()) cred in
-      (match credential_matches_live_disk config credential with
-       | Ok true -> Ok credential
-       | Ok false ->
-         Error (Auth (Auth_error.InvalidToken "Credential changed during token verification"))
-       (* No index to rebuild against on this path; the 503 asks the client
-          to retry, which re-reads. *)
-       | Error error -> Error error))
+    else
+      let* canonical = canonical_credential_of_token config cred in
+      require_live_credential ~now:(Time_compat.now ()) canonical
 ;;
 
 module For_testing = struct
+  let canonical_credential_of_token = canonical_credential_of_token
   let credential_matches_live_disk = credential_matches_live_disk
   let live_matches_hold = live_matches_hold
 end

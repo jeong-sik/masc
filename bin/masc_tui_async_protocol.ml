@@ -874,7 +874,7 @@ end = struct
 end
 
 let rec workspace_message_is_read = function
-  | Code_draft_saved _ -> false
+  | Code_draft_saved _ | Board_attachment_saved _ -> false
   | Keeper_logs_loaded _ -> true
   | Chat_search_finished _ -> true
   | Workspace_scoped (_, _, message)
@@ -973,7 +973,7 @@ let rec workspace_message_is_read = function
   | Keeper_schedules_loaded _
   | System_logs_loaded _
   | Ask_followup_observed _ | Ask_followup_finished _
-  | Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded _
+  | Board_attachment_loaded _ | Board_attachment_prepared _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded _
   | Goal_timeline_loaded _
   | Task_history_loaded _
   | Verification_evidence_loaded _
@@ -1184,7 +1184,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
     | System_logs_loaded _ | Schedule_cancel_done (_, _)
     | Verification_verdict_done _ | Harness_label_done _
-    | Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
+    | Board_attachment_loaded _ | Board_attachment_prepared _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
     | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
     | Verification_evidence_loaded (_, _) | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
     | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
@@ -1202,7 +1202,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Play_room_received (_, _) | Play_invites_listed (_, _)
     | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _)
     | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _)
-    | Code_draft_saved _ | Code_catalog_loaded _ | Code_finder_file_loaded _
+    | Code_draft_saved _ | Board_attachment_saved _ | Code_catalog_loaded _ | Code_finder_file_loaded _
     | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
     | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
     | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)
@@ -1321,7 +1321,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
   | System_logs_loaded _ | Schedule_cancel_done (_, _)
   | Verification_verdict_done _ | Harness_label_done _
-  | Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
+  | Board_attachment_loaded _ | Board_attachment_prepared _ | Chat_call_loaded _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ | Keeper_calls_loaded (_, _, _) | Goal_timeline_loaded (_, _)
   | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
   | Verification_evidence_loaded (_, _) | Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
   | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
@@ -1339,7 +1339,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Play_room_received (_, _) | Play_invites_listed (_, _)
   | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _)
   | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _)
-  | Code_draft_saved _ | Code_catalog_loaded _ | Code_finder_file_loaded _
+  | Code_draft_saved _ | Board_attachment_saved _ | Code_catalog_loaded _ | Code_finder_file_loaded _
   | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
   | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
   | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)

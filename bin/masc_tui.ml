@@ -19085,9 +19085,10 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
   | Board_attachment_prepared (request,result) ->
       if Option.is_some (current_board_reader state) then
         state.board_reader <- Masc_tui_board_reader.complete_preparation state.board_reader request result
-  | Board_attachment_saved (request,result) ->
-      if Option.is_some (current_board_reader state) && Masc_tui_board_reader.owns state.board_reader request then
-        (match result with Ok text -> report_action state "system" text | Error error -> report_action state "error" error)
+  | Board_attachment_saved (_request,result) ->
+      (* The original workspace operation envelope admits this receipt.
+         Closing or retiring its read view cannot revoke a completed save. *)
+      (match result with Ok text -> report_action state "system" text | Error error -> report_action state "error" error)
   | Chat_call_loaded (request, result) ->
       ignore (complete_chat_call_read state request result)
   | Keeper_calls_loaded (generation, keeper_name, result) -> (

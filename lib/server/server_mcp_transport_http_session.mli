@@ -165,8 +165,10 @@ val reap_stale_sessions :
   base_path:string ->
   is_active_session:(string -> bool) -> int
 (** [reap_stale_sessions ~base_path ~is_active_session] removes session
-    entries whose [session_id] returns [false] from
-    [is_active_session].  Returns the number of reaped entries.
+    entries whose [session_id] returns [false] from [is_active_session] and
+    whose existing grace period has expired. Returns the number of reaped entries.
+    Active refresh checks current protocol presence in the registry CAS; a
+    session forgotten after the captured cohort does not regain orphan activity.
 
     Called periodically by the cleanup loop with
     {!Server_mcp_transport_http_conn.is_active_sse_session} as

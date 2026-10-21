@@ -77,6 +77,8 @@ let make_backend ?observe_step () =
           "inputSchema",`Assoc ["type",`String "object"]]) with
         | Ok tool -> tool | Error message -> fail message) package.exported_tools in
       let connection : Runtime.For_testing.connection = {
+        resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
+          | Ok image -> image | Error detail -> Alcotest.fail detail);
         host = None; container_id = Store.digest instance_id;
         exported_tools = (fun () -> exported_tools);
         call_exported_tool = (fun ~on_result:_ ~authorize ~principal ~name:_ ~arguments:_ ->
@@ -321,6 +323,31 @@ let test_a_cleanup_that_is_cut_short_can_run_again () =
     detach config id;
     await_phase clock config id "detached";
     check Alcotest.int "the second Detach ran the cleanup again" 2 (Hashtbl.find state.stops id))
+
+let test_resolved_image_survives_detach_and_restart () =
+  with_fixture (fun env _ config dir _ ->
+    let clock = Eio.Stdenv.clock env in
+    let expected = `Assoc ["runtime", `String "docker";
+      "digest", `String ("sha256:" ^ String.make 64 'a')] in
+    List.iter (fun mode ->
+      let id = attach config dir mode in
+      await clock (fun () -> member "resolved_image" (instance config id) <> `Null);
+      if mode = "good" then
+        await clock (fun () -> int "observation_seq" (instance config id) = 1);
+      let captured = instance config id in
+      check bool "resolved immutable image belongs to this generation" true
+        (member "resolved_image" captured = expected);
+      check string "requested reference is retained separately" "fixture/image"
+        (text "image" (member "package" captured));
+      if mode = "start-hang" then
+        check Alcotest.int "resolution does not claim an observation or successful start" 0
+          (int "observation_seq" captured);
+      detach config id; await_phase clock config id "detached";
+      check bool "detach preserves the resolution" true
+        (member "resolved_image" (instance config id) = expected);
+      Runtime.For_testing.reset ();
+      check bool "retained record preserves the resolution after restart" true
+        (member "resolved_image" (instance config id) = expected)) ["good"; "start-hang"])
 
 let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
   with_fixture (fun env _ config dir state ->
@@ -1996,4 +2023,6 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "a cleanup that is cut short can run again" `Quick test_a_cleanup_that_is_cut_short_can_run_again;
   test_case "Detach waits for a start that fails under it" `Quick test_detach_waits_for_a_start_that_fails_under_it;
   test_case "evidence remains optional and durable across detach" `Quick test_evidence_is_optional_retained_and_delivery_is_only_acceptance;
+  test_case "resolved image is retained independently of start and detach" `Quick
+    test_resolved_image_survives_detach_and_restart;
 ]]

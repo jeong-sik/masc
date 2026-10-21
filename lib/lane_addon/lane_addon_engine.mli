@@ -6,6 +6,9 @@ type image_identity
     runtime. This observation belongs to one start, not to a mutable tag. *)
 val image_of_inspect : Lane_addon_types.runtime -> string -> (image_identity, string) result
 val image_digest : image_identity -> string
+val image_identity_to_json : image_identity -> Yojson.Safe.t
+(** Runtime and immutable digest observed during image resolution. This is not
+    evidence that the container passed verification or started. *)
 val image_create_reference : image_identity -> requested:string -> string
 (** Docker creates by the observed immutable ID. Apple retains its requested
     reference and must prove the same manifest digest before process start. *)

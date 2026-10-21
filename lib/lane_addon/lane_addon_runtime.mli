@@ -248,6 +248,8 @@ module For_testing : sig
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (unit, Lane_addon_lifecycle.failure) result;
     container_id : string;
+    resolved_image : Lane_addon_engine.image_identity;
+    (** The pre-create resolution, retained separately from start success. *)
     host : host_port option;
     (** [Some] for a package that waits on the host. *)
   }

@@ -4,6 +4,9 @@ type mount = { source : string; destination : string }
 type lookup = Name of string | Id of string
 type image_identity = Docker_image_id of string | Apple_manifest_digest of string
 let image_digest = function Docker_image_id value | Apple_manifest_digest value -> value
+let image_identity_to_json image =
+  let runtime = match image with Docker_image_id _ -> Docker | Apple_manifest_digest _ -> Apple_container in
+  `Assoc ["runtime", `String (runtime_to_string runtime); "digest", `String (image_digest image)]
 let image_create_reference image ~requested = match image with
   | Docker_image_id id -> id
   | Apple_manifest_digest _ -> requested

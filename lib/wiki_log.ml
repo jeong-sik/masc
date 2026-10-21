@@ -46,37 +46,22 @@ let read_fields rest =
   | _ -> `Unreadable
 ;;
 
-(* The Unix time at the start of the stamped minute. The writer stamps
-   [Unix.localtime], so the stamp is read back in the same time zone.
-   [Unix.mktime] moves an out-of-range field into the next one, so the
-   ranges are checked first. *)
-let stamp_time stamp =
+(* The time at the start of the stamped minute, through [minute_time]. The
+   fields are range-checked here first, so the conversion is only asked about
+   a minute that can exist on the calendar; the conversion itself (the host's
+   local time zone, day overflow) lives outside the wiki core. *)
+let stamp_time ~minute_time stamp =
   match
     Scanf.sscanf_opt stamp "%4u-%2u-%2u %2u:%2u%!" (fun year month day hour minute ->
       year, month, day, hour, minute)
   with
   | Some (year, month, day, hour, minute)
     when month >= 1 && month <= 12 && day >= 1 && day <= 31 && hour <= 23 && minute <= 59 ->
-    (match
-       Unix.mktime
-         { Unix.tm_sec = 0
-         ; tm_min = minute
-         ; tm_hour = hour
-         ; tm_mday = day
-         ; tm_mon = month - 1
-         ; tm_year = year - 1900
-         ; tm_wday = 0
-         ; tm_yday = 0
-         ; tm_isdst = false
-         }
-     with
-     | seconds, normalized when normalized.Unix.tm_mday = day -> Some seconds
-     | _ -> None
-     | exception Unix.Unix_error _ -> None)
+    minute_time ~year ~month ~day ~hour ~minute
   | Some _ | None -> None
 ;;
 
-let read_line text =
+let read_line ~minute_time text =
   if not (String.starts_with ~prefix:header text)
   then `Unreadable
   else (
@@ -90,7 +75,7 @@ let read_line text =
          (match read_fields rest with
           | `Unreadable -> `Unreadable
           | `Read (action, revision, page) ->
-            (match stamp_time (String.sub text (String.length header) (close - String.length header)) with
+            (match stamp_time ~minute_time (String.sub text (String.length header) (close - String.length header)) with
              | None -> `Unreadable
              | Some written_at ->
                if List.exists (String.equal action) known_actions
@@ -100,11 +85,11 @@ let read_line text =
 
 let add_line accumulator line = { accumulator with lines = line :: accumulator.lines }
 
-let parse content =
+let parse ~minute_time content =
   let counted =
     List.fold_left
       (fun accumulator text ->
-         match read_line text with
+         match read_line ~minute_time text with
          | `Read (written_at, action, revision, page) ->
            add_line accumulator { written_at; action; revision; page }
          | `Unknown -> { accumulator with unknown_action = accumulator.unknown_action + 1 }

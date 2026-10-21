@@ -10,8 +10,11 @@
     read is counted, not raised, so "nothing is wrong" and "nothing could be
     read" stay different answers.
 
-    No file is read or written here; the stamp is read in the host's local
-    time zone. {!Tool_wiki} reads the file and hands the text to {!parse}. *)
+    No file is read or written here, and no clock or time zone is consulted:
+    the caller passes the conversion from a stamped minute to a time
+    ({!Wiki_log_clock.local_minute} reads it in the host's local time zone, as
+    the writer stamps it). {!Tool_wiki} reads the file and hands the text to
+    {!parse}. *)
 
 type line =
   { written_at : float
@@ -41,7 +44,13 @@ type t =
 val empty : t
 (** No lines, nothing counted: what a wiki with no [log.md] yet gives. *)
 
-val parse : string -> t
-(** [parse content] reads the whole log file. The order of {!t.lines} is the
+val parse
+  :  minute_time:(year:int -> month:int -> day:int -> hour:int -> minute:int -> float option)
+  -> string
+  -> t
+(** [parse ~minute_time content] reads the whole log file. [minute_time] turns
+    a stamp whose fields are in range into the time at the start of that
+    minute, or [None] when that minute does not exist (a day past the end of
+    its month); a line whose stamp gives [None] is unreadable. The order of {!t.lines} is the
     order of the file: the minute in the timestamp is not fine enough to
     order two lines, so it is not used for that. *)

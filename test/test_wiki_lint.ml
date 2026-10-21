@@ -7,7 +7,11 @@ open Alcotest
 module G = Masc.Wiki_graph
 module Journal = Masc.Wiki_journal
 module Link = Masc.Wiki_link
-module Log = Masc.Wiki_log
+module Log = struct
+  include Masc.Wiki_log
+
+  let parse = parse ~minute_time:Masc.Wiki_log_clock.local_minute
+end
 module Report = Masc.Wiki_lint_report
 module Lint = Masc.Wiki_lint
 module Sources = Masc.Wiki_sources

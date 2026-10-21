@@ -97,7 +97,12 @@ sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
 
 macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이상**이 필요합니다. 설치기가 해당 CPU의 Python과 실행 라이브러리를 검증해 릴리스 파일과 함께 설치합니다. Homebrew나 Xcode 명령줄 도구를 설치하지 않습니다.
 
-기본 sandbox에는 실행 중인 Docker 엔진이 필요하고, 모델 연결에는 해당 CLI 로그인이나 API 인증이 필요합니다. 둘 다 미리 준비해 두면 좋지만, 없어도 설정 화면이 무엇이 빠졌는지 알려주고 설치를 제안합니다.
+설정 화면에서 sandbox 서비스를 확인하고 빠진 준비물의 설치·시작 동작을 제안합니다.
+macOS에서는 공식 다운로드나 안내 페이지를 열며 MASC가 업체 설치기의 서명이나 체크섬을
+검증하는 것은 아닙니다. Linux에서는 제안된 패키지 명령을 실행합니다. 지원되는 Apple
+Silicon Mac에서는 Apple Container를, macOS와 Linux에서는 Docker를 선택할 수 있습니다.
+모델 연결에는 해당 제공자의 구독이나 API 사용 권한이 필요합니다. Claude Code와 Codex는
+연결 검사가 실패했을 때 모델 선택을 유지한 채 로그인 화면을 열 수 있습니다.
 
 시작에 실패하면 설치기가 표시하는 실행 파일 경로와 stderr 원문을 확인하세요. `SIGABRT` 같은 종료 신호만으로 누락 라이브러리라고 단정할 수는 없습니다. `--force`는 workspace 설정을 보존하면서 릴리스 파일을 다시 설치하며, 지원하지 않는 OS를 호환되게 만들지는 않습니다.
 

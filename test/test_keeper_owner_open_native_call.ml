@@ -506,6 +506,152 @@ let test_stopping_owner_leaves_the_active_call_for_restart_recovery () =
           | Ok (Native.No_native_call | Native.Terminal_unacknowledged _) | Error _ -> false))
 ;;
 
+(* These cases exercise the actual child mailbox, retained filesystem and
+   SQLite input/native journal. They do not fake a provider run or prove the
+   complete direct-turn/HTTP/UI path. Lifecycle and native run IDs deliberately
+   differ: they are bound by the exact published checkpoint, not string equality. *)
+type input_wait_fixture = Owned_wait | Consumed_input | Missing_retained | Corrupt_retained | Changed_retained | Foreign_scope
+
+let test_owned_input_wait fixture () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let root = Filename.temp_dir "owner-input-wait-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) @@ fun () ->
+  let path = Filename.concat root Store.database_file in
+  let name = "owned-input-wait" in
+  let meta = make_meta name in
+  let session_root = Filename.concat root "traces" in
+  let session_dir = Filename.concat session_root (Keeper_id.Trace_id.to_string meta.runtime.trace_id) in
+  Fs_compat.mkdir_p session_dir;
+  let id = operation_id "owned-input-wait-original" in
+  let later = operation_id "owned-input-wait-independent" in
+  let pending : Agent_core.Agent_input_request.pending =
+    {run_id="lifecycle-original-input";request={request_id="question-original";
+      participant_name=Some "operator";question="Which original choice?";
+      schema=Some (`Assoc ["type",`String "string"]);timeout_s=Some 0.1;created_at=1.}} in
+  let owned = ref None in
+  Eio.Switch.run (fun sw ->
+    let owner_cell = ref None and first = ref true and ready = ref true in
+    let finished,notify_finished = Eio.Promise.create () in
+    let hold,release = Eio.Promise.create () in
+    let execute ~sw:_ ~keeper_name:_ ~claim =
+      let operation : Chat_operation.t = match owner_ok (claim ()) with Some operation -> operation | None -> fail "no claimed original" in
+      let owner = Option.get !owner_cell in
+      if not !first then Owner.Operation_succeeded {outcome_ref="independent actual result"}
+      else begin
+        first := false;
+        let initial = Keeper_context_core.create ~eio:true ~system_prompt:"original input fixture"
+          |> Keeper_context_core.checkpoint_of_context in
+        let frame_scope = match fixture with Foreign_scope -> later
+          | Owned_wait | Consumed_input | Missing_retained | Corrupt_retained | Changed_retained -> id in
+        let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+            (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation frame_scope))
+          |> Result.map_error Keeper_repetition_snapshot.error_to_string |> Result.get_ok in
+        Keeper_repetition_context.save initial.context frame;
+        let seed = {initial with Agent_core.Checkpoint.session_id=Keeper_id.Trace_id.to_string meta.runtime.trace_id;
+          turn_count=1;messages=[Agent_core.Types.user_msg "original admitted input"]} in
+        let retain checkpoint =
+          let snapshot = Keeper_checkpoint_store.exact_snapshot_of_value ~expected_session_id:meta.runtime.trace_id checkpoint
+            |> Result.map_error Keeper_checkpoint_store.checkpoint_ref_load_error_to_string |> Result.get_ok in
+          Keeper_checkpoint_store.retain_exact_snapshot ~session_dir snapshot
+            |> Keeper_checkpoint_store.require_confirmed_installation
+            |> function Ok reference -> reference | Error _ -> fail "actual retention was not confirmed" in
+        let seed_reference = retain seed in
+        let call = Native.create ~call_id ~runtime_id:"native.primary" ~operation_digest:operation.execution_digest
+            ~api:(Native.New_input {seed_message_count=1}) ~seed_checkpoint:seed_reference ~locator
+          |> Result.get_ok in
+        owner_ok (Owner.bind_direct_native_call owner ~operation_id:id
+          ~execution_digest:operation.execution_digest ~observed:Native.No_native_call ~call);
+        let writer = owner_ok (Owner.begin_input_checkpoint owner ~trace_id:meta.runtime.trace_id) in
+        let checkpoint = {seed with Agent_core.Checkpoint.pending_input=(match fixture with
+          | Consumed_input -> None
+          | Owned_wait | Missing_retained | Corrupt_retained | Changed_retained | Foreign_scope -> Some pending)} in
+        let reference = retain checkpoint in
+        owned := Some reference;
+        ignore (owner_ok (Owner.advance_direct_input_checkpoint owner ~writer ~operation_id:id
+          ~execution_digest:operation.execution_digest ~call_id ~observed:seed_reference ~checkpoint:reference));
+        owner_ok (Owner.terminal_direct_native_call owner ~operation_id:id ~execution_digest:operation.execution_digest
+          ~call_id ~disposition:{Agent.outcome=Agent.Terminal_succeeded;recovery=Agent.Retire});
+        (* A readable old pending canonical cannot substitute for retained evidence. *)
+        let canonical = {checkpoint with pending_input=Some pending} in
+        (match Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0 canonical with
+         | Ok (Keeper_checkpoint_store.Saved _) -> ()
+         | Ok (Stale_noop _) -> fail "fixture canonical did not install"
+         | Error detail -> fail detail);
+        let readable = Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir
+            ~session_id:canonical.session_id
+          |> Result.map_error Keeper_checkpoint_store.checkpoint_ref_load_error_to_string |> Result.get_ok in
+        check bool "canonical fallback is readable before retained fault" true
+          ((Keeper_checkpoint_store.exact_snapshot_checkpoint readable).pending_input=Some pending);
+        let retained = Filename.concat (Filename.concat session_dir Keeper_checkpoint_store.retained_dirname)
+            (reference.sha256 ^ ".json") in
+        (match fixture with
+         | Owned_wait -> Fs_compat.save_file
+             (Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:canonical.session_id) "corrupt canonical"
+         | Missing_retained -> Unix.unlink retained
+         | Corrupt_retained -> Fs_compat.save_file retained "corrupt retained"
+         | Changed_retained -> Fs_compat.save_file retained ("\n" ^ Fs_compat.load_file retained)
+         | Consumed_input | Foreign_scope -> ());
+        let result = Owner.defer_direct_input_wait owner ~operation_id:id in
+        Eio.Promise.resolve notify_finished result;
+        match fixture with
+        | Owned_wait -> ignore (owner_ok result); Owner.Operation_deferred
+        | Consumed_input | Missing_retained | Corrupt_retained | Changed_retained | Foreign_scope ->
+          ready := false;
+          ignore (Eio.Promise.await hold);
+          Owner.Operation_failed {kind=Chat_operation.Turn_invariant;detail="fixture rejection observed";outcome_ref=None}
+      end in
+    let owner = start_owner ~sw ~path ~name ~runner:(runner ~ready execute) in
+    owner_cell := Some owner;
+    submit owner id "original admitted input";
+    let result = Eio.Promise.await finished in
+    (match fixture,result with
+     | Owned_wait,Ok _ ->
+       let waiting = owner_ok (Owner.direct_input_wait owner ~operation_id:id) |> Option.get in
+       check bool "question comes from exact owned bytes" true
+         (Yojson.Safe.equal (Agent_core.Agent_input_request.pending_to_json pending)
+            (Agent_core.Agent_input_request.pending_to_json waiting.pending));
+       check bool "same original checkpoint" true (Keeper_checkpoint_ref.equal (Option.get !owned) waiting.checkpoint);
+       check bool "retirement acknowledged with wait" true (native_state owner id=Native.No_native_call);
+       (match Owner.defer_direct_input_wait owner ~operation_id:id with
+        | Error (Owner.Operation_rejected (Store.Invalid_input _)) -> ()
+        | Error error -> fail (Owner.error_to_string error) | Ok _ -> fail "outside fiber acquired child authority");
+       submit owner later "independent input";
+       ignore (await_terminal ~clock:env#clock owner later);
+       check bool "original remains queued after child settlement" true
+         ((operation_of owner id).state=Chat_operation.Queued);
+       check bool "unresolved wait does not become claimable" false
+         (Owner.operation_projection owner).has_claimable_queued
+     | (Consumed_input | Missing_retained | Corrupt_retained | Changed_retained | Foreign_scope),
+         Error (Owner.Operation_rejected (Store.Invalid_input _)) ->
+       check bool "refusal leaves original running" true (is_running (operation_of owner id));
+       check bool "refusal mints no wait" true (owner_ok (Owner.direct_input_wait owner ~operation_id:id)=None);
+       check bool "refusal preserves native receipt" true (match native_state owner id with
+         | Native.Terminal_unacknowledged _ -> true | No_native_call | Active _ -> false);
+       check bool "refusal preserves exact input owner" true
+         ((owner_ok (Owner.current_input_checkpoint owner)).observation=Store.Input_observed (Option.get !owned));
+       Eio.Promise.resolve release ()
+     | (Owned_wait | Consumed_input | Missing_retained | Corrupt_retained | Changed_retained | Foreign_scope),Error error ->
+       fail (Owner.error_to_string error)
+     | (Consumed_input | Missing_retained | Corrupt_retained | Changed_retained | Foreign_scope),Ok _ ->
+       fail "unavailable or foreign input was accepted"));
+  (match fixture with
+   | Owned_wait ->
+     Eio.Switch.run (fun sw ->
+       let ready = ref false in
+       let owner = start_owner ~sw ~path ~name ~runner:(runner ~ready (fun ~sw:_ ~keeper_name:_ ~claim:_ ->
+         fail "unresolved input was redispatched after restart")) in
+       check bool "original wait survives actual Owner reopen" true
+         (Option.is_some (owner_ok (Owner.direct_input_wait owner ~operation_id:id)));
+       check bool "restarted wait remains blocked" false (Owner.operation_projection owner).has_claimable_queued;
+       ignore (owner_ok (Owner.cancel_queued_operation owner id));
+       check bool "cancellation settles original wait" true
+         (owner_ok (Owner.direct_input_wait owner ~operation_id:id)=None);
+       check bool "cancellation preserves global input fact" true
+         ((owner_ok (Owner.current_input_checkpoint owner)).observation=Store.Input_observed (Option.get !owned)))
+   | Consumed_input | Missing_retained | Corrupt_retained | Changed_retained | Foreign_scope -> ())
+;;
+
 let () =
   run
     "keeper-owner-open-native-call"
@@ -524,6 +670,12 @@ let () =
             test_recorded_disposition_settles_as_before
         ; test_case "success without a disposition is not recorded" `Quick
             test_success_without_a_disposition_is_not_recorded
+        ; test_case "owned input wait blocks original while independent work and restart survive" `Quick (test_owned_input_wait Owned_wait)
+        ; test_case "consumed input cannot be deferred as waiting" `Quick (test_owned_input_wait Consumed_input)
+        ; test_case "missing retained input refuses despite readable canonical" `Quick (test_owned_input_wait Missing_retained)
+        ; test_case "corrupt retained input refuses despite readable canonical" `Quick (test_owned_input_wait Corrupt_retained)
+        ; test_case "changed retained bytes refuse despite readable canonical" `Quick (test_owned_input_wait Changed_retained)
+        ; test_case "foreign original operation scope refuses input wait" `Quick (test_owned_input_wait Foreign_scope)
         ; test_case "stopping Owner leaves the call for restart recovery" `Quick
             test_stopping_owner_leaves_the_active_call_for_restart_recovery
         ] )

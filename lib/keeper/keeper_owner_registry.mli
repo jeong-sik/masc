@@ -213,6 +213,14 @@ val terminal_direct_native_call : base_path:string -> keeper_name:string -> oper
   call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition -> (unit, command_error) result
 val defer_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Keeper_owner.Chat_operation.t, command_error) result
+val direct_input_wait : base_path:string -> keeper_name:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.input_wait option, command_error) result
+val defer_direct_input_wait : base_path:string -> keeper_name:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Keeper_chat_operation.t, command_error) result
+(** Existing-Owner receipt lookup. Deferral still requires the original live
+    chat child; neither lookup nor a pending question grants dispatch rights. *)
 val resume_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   observed:Keeper_semantic_execution.gate_checkpoint -> (unit, command_error) result
 

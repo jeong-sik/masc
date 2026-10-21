@@ -457,6 +457,16 @@ val terminal_direct_native_call : t -> operation_id:Chat_operation.Operation_id.
   call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition -> (unit, error) result
 val defer_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Chat_operation.t, error) result
+val direct_input_wait : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.input_wait option, error) result
+val defer_direct_input_wait : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Chat_operation.t, error) result
+(** Only the original executing chat child may defer its operation. The Owner
+    derives the complete pending request from its exact retained input payload,
+    checks the original trace, invocation and repetition scope, then commits
+    native retirement and waiting together. No caller-supplied question or
+    canonical/history fallback; an uncertain result grants no retry authority.
+    Reads/receipt publication can reach the existing draining Owner. *)
 val resume_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t ->
   observed:Keeper_semantic_execution.gate_checkpoint -> (unit, error) result
 

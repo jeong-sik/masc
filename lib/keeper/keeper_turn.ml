@@ -1012,7 +1012,15 @@ let run_keeper_invocation_turn_admitted_inner
               in
               let checkpoint_yield = Keeper_turn_outcome.equal result.turn_outcome
                   Keeper_turn_outcome.Continuation_checkpoint in
-              let retained = if checkpoint_yield then
+              let retained = match result.stop_reason with
+                | Runtime_agent.InputRequired _ ->
+                  Keeper_owner_registry.defer_direct_input_wait
+                    ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
+                  |> Result.map_error Keeper_owner_registry.command_error_to_string
+                  |> Result.map (fun _ -> ())
+                | Runtime_agent.Completed | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
+                | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _ ->
+                if checkpoint_yield then
                   match result.checkpoint with
                   | Some checkpoint -> Keeper_direct_checkpoint_continuation.defer
                       ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id

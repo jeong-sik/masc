@@ -23,6 +23,8 @@ val discharge : config:Workspace.config -> keeper_name:string -> operation_id:Ke
 (** A checkpoint-less Gate reconciliation is nonterminal but cannot supply a
     resume reference. The original request and obligations remain durable. *)
 type pending = Bound_checkpoint of Keeper_checkpoint_ref.t | Bound_official_client of Keeper_semantic_execution.official_client_checkpoint | Checkpoint_reconciliation
+  | Input_wait of Keeper_semantic_execution.input_wait
+(** Input_wait is a nonterminal original operation, not a resumable checkpoint. *)
 val pending : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   (pending option, string) result
 

@@ -806,6 +806,12 @@ let direct_checkpoint ~base_path ~keeper_name ~operation_id =
 let defer_direct_checkpoint ~base_path ~keeper_name ~operation_id ~execution_digest ~checkpoint =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.defer_direct_checkpoint owner ~operation_id ~execution_digest ~checkpoint)
+let direct_input_wait ~base_path ~keeper_name ~operation_id =
+  with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.direct_input_wait owner ~operation_id)
+let defer_direct_input_wait ~base_path ~keeper_name ~operation_id =
+  with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.defer_direct_input_wait owner ~operation_id)
 let direct_native_call ~base_path ~keeper_name ~operation_id =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner -> Keeper_owner.direct_native_call owner ~operation_id)
 (* Binding admits a native call for dispatch, fresh or resumed, so it stays

@@ -2014,6 +2014,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
         Some (Keeper_semantic_execution.Agent_core reference)
       | Some (Keeper_direct_gate_continuation.Bound_official_client checkpoint) ->
         Some (Keeper_semantic_execution.Official_client checkpoint)
+      | Some (Keeper_direct_gate_continuation.Input_wait _)
       | Some Keeper_direct_gate_continuation.Checkpoint_reconciliation | None -> None) in
   let persist_operation_attempt ~settlement ?(tool_calls=[]) ?blocks ?turn_ref
       ?stream_lifecycle () =

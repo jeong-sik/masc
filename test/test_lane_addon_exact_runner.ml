@@ -130,6 +130,110 @@ let test_every_answer_outside_the_schema_is_invalid_output () =
       (match run_request ~base_path ~store "a3" with Exact.Final (Exact.Call_final (Exact.Invalid_output _)) -> true | _ -> false);
     check int "one call" 1 (F.post_count server))
 
+let limited_response =
+  {|{"id":"output-limit","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":"{\"question\":\"partial\"}"},"finish_reason":"length"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}|}
+
+let test_output_limit_retains_an_original_distinct_terminal () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let server=F.start_server ~sw ~net ~clock (F.Reply limited_response) in
+    publish ~base_path [{F.id="limited";base_url=server.base_url}];
+    let original=run_request ~base_path ~store "original-output-limit" in
+    let wire=match original with
+      | Exact.Final (Exact.Call_final (Exact.Output_limit_reached _) as final) -> Exact.final_to_json final
+      | Exact.Final _ | Exact.Not_final _ -> fail "an actual provider output limit must keep its typed terminal" in
+    check bool "strict original result codec round trips the terminal" true
+      (match Exact.final_of_json ~schema wire with
+       | Ok (Exact.Call_final (Exact.Output_limit_reached _)) -> true
+       | Ok _ | Error _ -> false);
+    (match wire with
+     | `Assoc fields -> check bool "unknown terminal fields are refused" true
+         (Result.is_error (Exact.final_of_json ~schema (`Assoc (("permission",`Bool true)::fields))))
+     | _ -> fail "terminal wire must be an object");
+    check bool "blank output-limit detail is not a valid shared terminal" true
+      (Result.is_error (Exact.final_of_json ~schema (`Assoc ["status",`String "output_limit_reached";"detail",`String " "])));
+    let reopened=Lane_addon_store.create ~root:(Lane_addon_store.root store) in
+    check bool "reopened original retains the terminal" true
+      (original=run_request ~base_path ~store:reopened "original-output-limit");
+    check int "recovery never redispatches that original request" 1 (F.post_count server))
+
+let test_output_limit_still_advances_to_a_valid_http_candidate () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let limited=F.start_server ~sw ~net ~clock (F.Reply limited_response) in
+    let valid=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response question)) in
+    publish ~base_path [{F.id="limited";base_url=limited.base_url};{F.id="valid";base_url=valid.base_url}];
+    (match answered_by (run_request ~base_path ~store "limit-then-valid") with
+     | Some (_,slot,_) -> check string "the original walk advances" "valid" slot
+     | None -> fail "a valid later candidate must still answer");
+    check int "the limited candidate ran once" 1 (F.post_count limited))
+
+type remaining_slot = Busy | Auth | Configuration | Input
+let test_output_limit_does_not_override_another_refusal kind () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let limited=F.start_server ~sw ~net ~clock (F.Reply limited_response) in
+    let status,body=match kind with
+      | Busy -> `Too_many_requests,refusal_body "rate_limit_error"
+      | Auth -> `Unauthorized,refusal_body "authentication_error"
+      | Configuration -> `Not_found,refusal_body "not_found_error"
+      | Input -> `Bad_request,refusal_body "invalid_request_error" in
+    let other=F.start_server ~sw ~net ~clock (F.Reply_with (fun _ _ -> status,body)) in
+    publish ~base_path [{F.id="limited";base_url=limited.base_url};{F.id="other";base_url=other.base_url}];
+    let outcome=run_request ~base_path ~store "limit-priority" in
+    let expected=match kind,outcome with
+      | Busy,Exact.Not_final (Exact.Provider_refused (Exact.Provider_unavailable _))
+      | Auth,Exact.Not_final (Exact.Provider_refused (Exact.Provider_auth_refused _))
+      | Configuration,Exact.Not_final (Exact.Provider_refused (Exact.Provider_configuration_refused _))
+      | Input,Exact.Final (Exact.Call_final (Exact.Input_refused Exact.Invalid_request)) -> true
+      | (Busy|Auth|Configuration|Input),(Exact.Final _|Exact.Not_final _) -> false in
+    check bool "the original refusal priority is preserved" true expected)
+
+let test_measurement_failure_is_not_a_terminal_input_size_refusal () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let server=F.start_server ~sw ~net ~clock (F.Reply "not-a-token-measurement") in
+    ignore (F.publish_registry ~lane_id ~slot_ids:["measurement"]
+      (F.resolver_snapshot ~requires_token_measurement:true ~source:base_path
+        [{F.id="measurement";base_url=server.base_url}]) : Runtime_exact_output_registry.t);
+    (match run_request ~base_path ~store "measurement-unavailable" with
+     | Exact.Not_final (Exact.Provider_refused (Exact.Provider_unavailable _)) -> ()
+     | Exact.Final _ | Exact.Not_final _ -> fail "missing measurement is not proof that input is too big");
+    check (list string) "only token measurement was dispatched" ["/v1/messages/count_tokens"] (F.request_paths server))
+
+let test_output_limit_keeps_the_original_cli_tail ~valid () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let server=F.start_server ~sw ~net ~clock (F.Reply limited_response) in
+    publish ~base_path ~cli_slots:[F.cli_primary_runtime] [{F.id="limited";base_url=server.base_url}];
+    let calls=ref 0 in
+    let cli_runner : Keeper_lane_cli_oneshot.runner = fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+      incr calls;Ok (if valid then Yojson.Safe.to_string question else "not JSON; output_limit_reached is only text here") in
+    let runner=Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner in
+    let outcome=run_request ~runner ~base_path ~store "output-limit-cli" in
+    if valid then check bool "the later official client can still answer" true (Option.is_some (answered_by outcome))
+    else check bool "an invalid later answer does not erase the actual output limit" true
+      (match outcome with Exact.Final (Exact.Call_final (Exact.Output_limit_reached _)) -> true
+       | Exact.Final _ | Exact.Not_final _ -> false);
+    check int "the declared official-client candidate runs once" 1 !calls)
+
+type capacity_evidence = Expired | Not_yet_valid | Boundary_unknown | Input_rejected
+let test_original_capacity_evidence_keeps_its_retry_meaning kind () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let serving_constraint : F.serving_constraint = match kind with
+      | Expired -> {checked_at_unix_s=0;expires_at_unix_s=1;accepted_through_tokens=1;rejected_from_tokens=3}
+      | Not_yet_valid -> {checked_at_unix_s=1900000000;expires_at_unix_s=2000000000;accepted_through_tokens=1;rejected_from_tokens=3}
+      | Boundary_unknown | Input_rejected ->
+        {checked_at_unix_s=0;expires_at_unix_s=2000000000;accepted_through_tokens=1;rejected_from_tokens=3} in
+    let measured=match kind with Input_rejected -> 3 | Expired | Not_yet_valid | Boundary_unknown -> 2 in
+    let server=F.start_server ~sw ~net ~clock
+      (F.Reply (Yojson.Safe.to_string (`Assoc ["input_tokens",`Int measured]))) in
+    ignore (F.publish_registry ~lane_id ~slot_ids:["capacity-evidence"]
+      (F.resolver_snapshot ~requires_token_measurement:true ~serving_constraint ~source:base_path
+        [{F.id="capacity-evidence";base_url=server.base_url}]) : Runtime_exact_output_registry.t);
+    let outcome=run_request ~base_path ~store "original-capacity-evidence" in
+    let expected=match kind,outcome with
+      | Input_rejected,Exact.Final (Exact.Call_final (Exact.Input_refused Exact.Input_capacity))
+      | (Expired|Not_yet_valid|Boundary_unknown),Exact.Not_final (Exact.Provider_refused (Exact.Provider_unavailable _)) -> true
+      | (Expired|Not_yet_valid|Boundary_unknown|Input_rejected),(Exact.Final _|Exact.Not_final _) -> false in
+    check bool "only an actual input rejection is terminal" true expected;
+    check (list string) "no generation was dispatched" ["/v1/messages/count_tokens"] (F.request_paths server))
+
 let test_a_refused_input_is_final () =
   with_case (fun ~sw ~net ~clock ~base_path ~store ->
     let server =
@@ -481,6 +585,19 @@ let () =
         ; test_case "an answer outside the schema advances" `Quick test_an_answer_outside_the_schema_advances
         ; test_case "every answer outside the schema is invalid_output" `Quick
             test_every_answer_outside_the_schema_is_invalid_output
+        ; test_case "output limit retains its original strict terminal" `Quick test_output_limit_retains_an_original_distinct_terminal
+        ; test_case "output limit advances to the later HTTP candidate" `Quick test_output_limit_still_advances_to_a_valid_http_candidate
+        ; test_case "transient outranks output limit" `Quick (test_output_limit_does_not_override_another_refusal Busy)
+        ; test_case "authentication outranks output limit" `Quick (test_output_limit_does_not_override_another_refusal Auth)
+        ; test_case "configuration outranks output limit" `Quick (test_output_limit_does_not_override_another_refusal Configuration)
+        ; test_case "input refusal outranks output limit" `Quick (test_output_limit_does_not_override_another_refusal Input)
+        ; test_case "missing measurement does not prove oversized input" `Quick test_measurement_failure_is_not_a_terminal_input_size_refusal
+        ; test_case "output limit still allows the original CLI answer" `Quick (test_output_limit_keeps_the_original_cli_tail ~valid:true)
+        ; test_case "an unusable CLI answer retains original output-limit evidence" `Quick (test_output_limit_keeps_the_original_cli_tail ~valid:false)
+        ; test_case "expired evidence is not a terminal input refusal" `Quick (test_original_capacity_evidence_keeps_its_retry_meaning Expired)
+        ; test_case "future evidence is not a terminal input refusal" `Quick (test_original_capacity_evidence_keeps_its_retry_meaning Not_yet_valid)
+        ; test_case "unknown capacity boundary is not a terminal input refusal" `Quick (test_original_capacity_evidence_keeps_its_retry_meaning Boundary_unknown)
+        ; test_case "measured input rejection stays terminal" `Quick (test_original_capacity_evidence_keeps_its_retry_meaning Input_rejected)
         ; test_case "a refused input is final" `Quick test_a_refused_input_is_final
         ; test_case "a rate limit is not final and is sent again" `Quick test_a_rate_limit_is_not_final_and_is_sent_again
         ; test_case "an auth refusal is not final" `Quick test_an_auth_refusal_is_not_final

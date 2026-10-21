@@ -104,7 +104,7 @@ let decode_result ~output ~request result =
         | Exact.Call_final (Answered {output=answer;slot;usage}) ->
             let* answer = Exact.validate_answer ~output request (Exact.checked_json answer) in
             Ok (Exact.Call_final (Answered {output=answer;slot;usage}))
-        | (Call_final (Invalid_output _|Input_refused _)|Outcome_unknown|Not_allowed _|Request_id_reused) as final -> Ok final in
+        | (Call_final (Invalid_output _|Input_refused _|Output_limit_reached _)|Outcome_unknown|Not_allowed _|Request_id_reused) as final -> Ok final in
       Ok (Final final)
 let delivery_arguments = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=["request_id";"result"] ->

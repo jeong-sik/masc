@@ -107,6 +107,25 @@ let test_unknown_judgment_is_terminal_even_after_an_event () =
       | _ -> fail "uncertainty lost its observer status")
   | _ -> fail "one original judgment must retain one observer identity"
 
+let test_output_limit_retains_failed_original_appraisal_evidence () =
+  with_workspace @@ fun base_path ->
+  let registry=Runs.create () in
+  let final=`Assoc ["status",`String "output_limit_reached";"detail",`String "original provider limit"] in
+  let call ~arguments=
+    check string "the original final is only read" "read" (operation arguments);
+    reply (request_id arguments) "finished" ["result",final] in
+  List.iter (fun () -> match runner ~registry ~base_path ~call grade with
+    | Error (A.Invalid_response _) -> ()
+    | Ok _ | Error (A.Execution_rejected _ | A.Transport_unavailable _) ->
+      fail "an output limit must stay a failed original appraisal") [();()];
+  match Runs.list_runs registry with
+  | [run] -> (match run.status with
+      | Runs.Completed {outcome=Runs.Failed {code="candle_appraisal_rejected";_};output;_} ->
+        check bool "failed appraisal preserves the typed provider terminal" true
+          (Yojson.Safe.equal (Json.member "result" output) final)
+      | _ -> fail "output exhaustion cannot become a successful grade")
+  | _ -> fail "the original appraisal must keep one observer identity"
+
 let stored_run registry run_id =
   match Runs.get registry ~run_id with
   | Some run -> run
@@ -278,6 +297,7 @@ let () = run "Candle Add-on consumer"
   ["original judgment", [
     test_case "lost submit reply resumes original after restart" `Quick test_lost_submit_reply_reads_the_retained_original_after_restart;
     test_case "unknown judgment stays terminal" `Quick test_unknown_judgment_is_terminal_even_after_an_event;
+    test_case "output limit preserves the failed original appraisal evidence" `Quick test_output_limit_retains_failed_original_appraisal_evidence;
     test_case "terminal reread and restart preserve first receipt" `Quick test_terminal_reread_and_restart_preserve_the_first_receipt;
     test_case "failed receipt append retains first terminal time" `Quick test_failed_receipt_append_retries_the_first_terminal_time;
     test_case "missing terminal payload stays unavailable" `Quick test_missing_terminal_payload_is_not_silently_repaired_by_reread;

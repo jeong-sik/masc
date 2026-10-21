@@ -165,7 +165,7 @@ let run_with ~registry ~base_path ~retain ~call ~identity request =
            |> Result.map_error (fun detail -> A.Invalid_response detail) in
          let* () = complete ?usage:(Option.map usage reported_usage) ~slot:(Some slot) Runs.Succeeded raw in
          Ok {A.decision;trace})
-    | Exact.Call_final (Exact.Invalid_output {detail}) ->
+    | Exact.Call_final (Exact.Invalid_output {detail} | Exact.Output_limit_reached {detail}) ->
       reject ~slot:None ~code:"candle_appraisal_rejected" (A.Invalid_response detail) (Exact.final_to_json final)
     | Exact.Call_final (Exact.Input_refused refusal) ->
       reject ~slot:None ~code:"candle_appraisal_execution_rejected"

@@ -27,6 +27,10 @@ type t =
       (** The provider refused this input itself. The same input cannot pass. *)
   | Output_unusable
       (** The provider answered, and the answer cannot be used. *)
+  | Output_limit
+      (** The provider specifically exhausted its output limit. It cannot
+          answer this original attempt again. This is not an incomplete,
+          malformed or oversized transport response. *)
 
 val is_transient : t -> bool
 (** Only [Transient]: the same request may be sent again unchanged. *)
@@ -35,7 +39,9 @@ val execution : Agent_core.Exact_output.execution_error_cause -> t
 (** An HTTP slot's failed call. *)
 
 val candidate : Agent_core.Exact_output.candidate_rejection_receipt -> t
-(** An HTTP slot refused before the call was sent. *)
+(** An HTTP slot refused before the call was sent. Actual context/token input
+    rejection is [Input_refused]; absent/expired/not-yet-valid measurement or
+    capacity evidence is [Transient], not evidence that this input is too big. *)
 
 val cli_failure : Keeper_lane_cli_oneshot.failure -> t
 (** An official-client slot's failed one-shot turn. *)

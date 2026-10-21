@@ -108,7 +108,7 @@ let terminal ~capture ~record final =
   | Exact.Call_final (Exact.Answered {output;_}) ->
     let* expected=rejected (Capture.validate_output capture (Exact.checked_json output)) in
     Ok (Judgment {capture;record;final;expected})
-  | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _)
+  | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
   | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused -> Ok (Terminal (final,record))
 let resume_with ~store ~base_path ~request_id ~call =
   let* original=Eio_unix.run_in_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
@@ -132,7 +132,7 @@ let resume_with ~store ~base_path ~request_id ~call =
     let* _=terminal ~capture ~record:original final in
     let event=match final with
       | Exact.Call_final (Exact.Answered _) -> Progress.Judgment_retained (Exact.final_to_json final)
-      | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _)
+      | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
       | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused ->
         Progress.Refused {stage=Progress.Execution;evidence=Exact.final_to_json final} in
     let* published=publish original event in
@@ -168,7 +168,7 @@ let resume_with ~store ~base_path ~request_id ~call =
     let* final=rejected (Exact.final_of_json ~schema:(Capture.output_schema capture) judgment) in
     (match final with
      | Exact.Call_final (Exact.Answered _) -> terminal ~capture ~record:original final
-     | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _)
+     | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
      | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused ->
        Error (Rejected "Original judgment does not contain an answered domain result"))
   | Progress.Committing _ | Progress.Commit_unknown _ -> Ok (Commit_pending original)
@@ -176,7 +176,7 @@ let resume_with ~store ~base_path ~request_id ~call =
     let* final=rejected (Exact.final_of_json ~schema:(Capture.output_schema capture) evidence) in
     (match final with
      | Exact.Call_final (Exact.Answered _) -> Error (Rejected "Refused original work cannot contain an answered judgment")
-     | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _)
+     | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
      | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused -> terminal ~capture ~record:original final)
   | Progress.Finished _ | Progress.Conflicted _ | Progress.Rejected {stage=Progress.Before_dispatch;_} -> Ok (Settled original)
   | Progress.Captured | Progress.Admission_wait _ ->
@@ -222,7 +222,7 @@ let commit_plan capture judgment =
   let* final=rejected (Exact.final_of_json ~schema:(Capture.output_schema capture) judgment) in
   let* expected=match final with
     | Exact.Call_final (Exact.Answered {output;_}) -> rejected (Capture.validate_output capture (Exact.checked_json output))
-    | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _)
+    | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
     | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused ->
       Error (Rejected "Domain commit requires the original answered judgment") in
   let* change=match Capture.work capture,expected with

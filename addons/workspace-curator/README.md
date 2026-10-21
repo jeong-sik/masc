@@ -26,7 +26,10 @@ route does not attach or configure this package.
 Pending and terminal requests live under the installation's persistent state in
 `workspace-curator`. New worker processes read the same original records. An ID
 cannot change its input or overwrite its terminal. `outcome_unknown` is terminal
-and is never relisted as model work. A failed directory sync stops that writer
+and is never relisted as model work. The shared Exact codec also retains
+`output_limit_reached` with its nonblank detail, separately from `invalid_output`.
+It never relists that original request. Any whole-batch size successor belongs
+to the serialized host owner, not this worker. A failed directory sync stops that writer
 from announcing an unconfirmed result; a new owner must inspect original state.
 Worker absence or an absent record never grants authority to replay an uncertain
 host request. The serialized host owner must make that decision from its journal.

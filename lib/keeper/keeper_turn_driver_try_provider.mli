@@ -455,6 +455,10 @@ val apply_accept :
   accept:(Agent_core.Types.api_response -> bool) ->
   Runtime_agent.run_result ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
+(** Cooperative yields retain their continuation. A repetition stop instead
+    ends this invocation with its typed host cause; it must not enter the
+    ordinary checkpoint/requeue path. This does not authorize replay or
+    provider rotation after effects. *)
 
 val complete_saved_tool_terminal :
   tool_results_saved_in_attempt:bool ->

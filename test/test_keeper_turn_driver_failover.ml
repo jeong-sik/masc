@@ -6086,6 +6086,46 @@ let test_a_chat_operation_resumes_after_attributed_empty_completion () =
     ]
 ;;
 
+(* A loop stop owns its terminal cause. Saving tool results is evidence of
+   effects, not permission to requeue the invocation that produced the loop. *)
+let test_repetition_stop_does_not_resume_saved_operation () =
+  List.iter (fun (stop_reason, expected_stop) ->
+    let stopped = { (completed_run_result ()) with Runtime_agent.stop_reason } in
+    let error = match Try_provider.apply_accept ~runtime_id:"only"
+        ~accept:(fun _ -> Alcotest.fail "a loop is not an answer to accept") stopped with
+      | Ok _ -> Alcotest.fail "repetition became a runnable checkpoint"
+      | Error error -> error in
+    (match Driver.classify_masc_internal_error error with
+     | Some (Driver.Host_stopped_turn {runtime_id; stop}) ->
+       Alcotest.(check string) "originating runtime" "only" runtime_id;
+       Alcotest.(check bool) "typed repetition cause" true (stop = expected_stop)
+     | Some _ | None -> Alcotest.fail "repetition lost its typed stop cause");
+    let attempts = ref [] in
+    let result, hints, rows = same_path_walk ~continuation:resume_chat_operation
+        ["only"; "next"] (fun ~save candidate ->
+          attempts := candidate :: !attempts;
+          save Agent_core.Agent.After_tool_results_appended Wrote;
+          error) in
+    (match result with Error _ -> () | Ok _ -> Alcotest.fail "loop succeeded");
+    Alcotest.(check (list string)) "no second provider replays the invocation"
+      ["only"] (List.rev !attempts);
+    Alcotest.(check int) "no saved-operation retry" 0 (List.length hints);
+    Alcotest.(check (list string)) "no continuation decision" [] rows)
+    [ Runtime_agent.Yielded_after_repeated_tool_call
+        {turns_used=2; tool_name="masc_board_list"; repeated_count=3},
+        Driver.Repeated_tool_call
+    ; Runtime_agent.Yielded_after_repeated_assistant_text
+        {turns_used=2; repeated_count=3}, Driver.Repeated_assistant_text ];
+  List.iter (fun stop_reason ->
+    let stopped = { (completed_run_result ()) with Runtime_agent.stop_reason } in
+    match Try_provider.apply_accept ~runtime_id:"only" ~accept:(fun _ -> false) stopped with
+    | Ok observed -> Alcotest.(check bool) "cooperative yield retains its checkpoint"
+        true (observed = stopped)
+    | Error _ -> Alcotest.fail "cooperative yield became a failure")
+    [Runtime_agent.Yielded_to_operation_queued {turns_used=2};
+     Runtime_agent.Yielded_to_durable_stimulus {turns_used=2}]
+;;
+
 let guarded_accept_rejection ?(content = []) stop_reason =
   let result = completed_run_result () in
   let response = { result.response with content; stop_reason } in
@@ -7385,6 +7425,9 @@ let () =
             test_a_chat_operation_resumes_after_attributed_empty_completion;
           Alcotest.test_case "unmodeled response does not replay candidates" `Quick
             test_unmodeled_empty_response_does_not_replay_candidates;
+          Alcotest.test_case
+            "repetition cannot requeue a saved operation or replay on another provider"
+            `Quick test_repetition_stop_does_not_resume_saved_operation;
           Alcotest.test_case
             "guarded empty MaxTokens resumes the saved operation"
             `Quick

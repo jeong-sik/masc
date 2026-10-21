@@ -616,14 +616,22 @@ let apply_accept
   match run_result.stop_reason with
   | Runtime_agent.InputRequired _
   | Runtime_agent.Yielded_to_operation_queued _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Yielded_after_repeated_tool_call _
-  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
     (* These are typed host-control terminals, not model deliverables. Running
        the normal response accept predicate over their question/blank carrier
        would turn them into [Accept_rejected] and incorrectly rotate providers,
        discarding typed control evidence. *)
     Ok run_result
+  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
+    Error
+      (Keeper_internal_error.core_error_of_masc_internal_error
+         (Keeper_internal_error.Host_stopped_turn
+            { runtime_id; stop = Keeper_internal_error.Repeated_tool_call }))
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
+    Error
+      (Keeper_internal_error.core_error_of_masc_internal_error
+         (Keeper_internal_error.Host_stopped_turn
+            { runtime_id; stop = Keeper_internal_error.Repeated_assistant_text }))
   | Runtime_agent.Completed ->
     if accept run_result.response
     then Ok run_result

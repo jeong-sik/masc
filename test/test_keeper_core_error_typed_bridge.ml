@@ -698,6 +698,8 @@ let test_runtime_stops_round_trip_through_the_codec () =
         { runtime_id = "codex_app_server"
         ; stop = KTD.Runtime_reported_interrupt
         }
+    ; KTD.Host_stopped_turn {runtime_id="muse"; stop=KTD.Repeated_tool_call}
+    ; KTD.Host_stopped_turn {runtime_id="muse"; stop=KTD.Repeated_assistant_text}
     ; connection_closed
     ; KTD.Runtime_connection_closed
         { runtime_id = "claude_code"; detail = "exit 1"; turn_accepted = false }

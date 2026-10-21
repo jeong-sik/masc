@@ -272,6 +272,14 @@ Queued continuations do not trigger another handoff, so two paused operations
 do not repeatedly yield to one another. Active tools must finish before the
 scheduling notice can be sent; provider cooperation determines the delay.
 
+A host stop caused by repeated tool calls or repeated assistant text is an
+invocation failure, not a scheduling handoff. It records `host_stopped_turn`
+with `repeated_tool_call` or `repeated_assistant_text` and does not automatically
+requeue the same operation. The vendor conversation and completed-effect
+evidence are retained; another provider is not authorized to replay the work.
+New requests can still run. Automatic replanning of the failed operation is
+not part of this continuation protocol.
+
 If a terminal posting tool publishes progress during handoff, its delivery
 receipt remains evidence rather than completing the original operation. MASC
 returns that result, refuses further host tools in the closing turn, and waits

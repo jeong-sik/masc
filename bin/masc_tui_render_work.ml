@@ -239,6 +239,7 @@ let render_work_tasks (state : state) =
     ~title:(screen_title " MASC Work / Tasks")
     ~hints:Masc_tui_keys.footer_hints_work_tasks
     ~body:(fun ~budget c ->
+      Option.iter c.push (local_source_pending_note state Local_work);
       (match state.local_workspace, state.task_flow with
        | Local_workspace_unread, _ ->
            c.push "  Active tasks · not observed"

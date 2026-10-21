@@ -472,10 +472,14 @@ type local_reading =
    after the actual I/O submission and cache lock have returned. *)
 let prepare_local_workspace (request : local_workspace_request) (reading : local_reading) =
   match Masc_tui_task_payloads.prepare ~previous:request.lwr_previous_tasks reading.lr_task_payloads with
-  | Immediate payloads -> {reading with lr_task_payloads=payloads}
+  | Immediate payloads ->
+    Masc_tui_local_read_observation.observe request.lwr_observation (Comparison_decided Immediate);
+    {reading with lr_task_payloads=payloads}
   | Compare comparison ->
-    Masc_tui_response_decode.run ~name:"local.work.task_payloads.reuse_wait" (fun () ->
-      {reading with lr_task_payloads=Masc_tui_task_payloads.finish comparison})
+    Masc_tui_local_read_observation.observe request.lwr_observation (Comparison_decided Compare);
+    Masc_tui_local_read_observation.compare_tasks request.lwr_observation
+      ~name:"local.work.task_payloads.reuse_wait" (fun () ->
+        {reading with lr_task_payloads=Masc_tui_task_payloads.finish comparison})
 
 type local_keeper_reading =
   { lkr_keepers : keeper list

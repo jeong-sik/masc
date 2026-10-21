@@ -13304,7 +13304,9 @@ let launch_local_source state ~mailbox ~intent ~source ~read ~prepare ~message b
       let token = ref () in
       let superseded, supersede = Eio.Promise.create () in
       supersede_local_source_read state source
-        (Some (token, fun () -> ignore (Eio.Promise.try_resolve supersede ())));
+        (Some (token, fun () ->
+          Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve supersede ()))
+            (fun () -> Local_read_observation.observe request.lwr_observation Cancellation_requested)));
       Log.Transport.info "tui_local_workspace_started source=%s intent=%s request=%d demand_revision=%s started_ns=%Ld"
         (local_read_source_name source) (local_read_intent_name request.lwr_intent)
         (Local_read_order.request_id request.lwr_request)
@@ -13317,8 +13319,8 @@ let launch_local_source state ~mailbox ~intent ~source ~read ~prepare ~message b
           (fun () -> Eio.Fiber.first
             (fun () ->
               let result = try
-                  let reading=Domain_pool_ref.submit_io_or_inline (fun () -> read request.lwr_base_path) in
-                  Ok (prepare request reading)
+                  Ok (Local_read_observation.run request.lwr_observation
+                    ~read:(fun () -> read request.lwr_base_path) ~prepare:(prepare request))
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn -> Error (Printexc.to_string exn) in
@@ -13333,13 +13335,27 @@ let launch_local_source state ~mailbox ~intent ~source ~read ~prepare ~message b
                 (Mtime_clock.elapsed_ns ()))) in
       (match Eio_context.get_switch_opt () with
        | None ->
+           Local_read_observation.observe request.lwr_observation (Caller_observed Not_started);
            finish_local_source_read state source token;
            deliver (Error "Eio switch is unavailable for local workspace reading")
        | Some sw ->
-           (match fork_workspace_job ~observation:true state ~sw run with
+           (match fork_workspace_job ~observation:true
+              ~observe:(function
+                | Masc_tui_workspace_job.Cancellation_requested ->
+                    Local_read_observation.observe request.lwr_observation Cancellation_requested
+                | Registration_released ->
+                    Local_read_observation.observe request.lwr_observation Registration_released)
+              ~on_withdrawn:(fun () ->
+                Local_read_observation.observe request.lwr_observation (Caller_observed Not_started);
+                finish_local_source_read state source token)
+              state ~sw run with
             | () -> ()
-            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception (Eio.Cancel.Cancelled _ as exn) ->
+                let bt=Printexc.get_raw_backtrace () in
+                Local_read_observation.observe request.lwr_observation (Caller_observed (Caller_failed Interrupted));
+                Printexc.raise_with_backtrace exn bt
             | exception exn ->
+                Local_read_observation.observe request.lwr_observation (Caller_observed (Caller_failed Raised));
                 finish_local_source_read state source token;
                 deliver (Error (Printexc.to_string exn))))
 
@@ -21511,7 +21527,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
        | Some result ->
            (match result with
             | Error detail -> report_action state "error" ("Local work read failed: " ^ detail)
-            | Ok reading -> Masc_tui_loader.apply_local_workspace state reading);
+            | Ok reading -> Local_read_observation.apply request.lwr_observation
+                (Masc_tui_loader.apply_local_workspace state) reading);
            launch_local_source_followup state ~mailbox Local_work)
   | Local_keepers_read (request, result) ->
       (match observe_local_source state ~source:Local_keepers request result with
@@ -21520,7 +21537,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            (match result with
             | Error detail -> report_action state "error" ("Keeper metadata read failed: " ^ detail)
             | Ok reading ->
-                Masc_tui_loader.apply_local_keepers state reading;
+                Local_read_observation.apply request.lwr_observation
+                  (Masc_tui_loader.apply_local_keepers state) reading;
                 refresh_visible_detail_after_authority_recovery state ~mailbox
                   ~previous_authority:state.detail_read_authority;
                 resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight

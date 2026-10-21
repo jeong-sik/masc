@@ -961,6 +961,13 @@ module type LOGGER = sig
     string ->
     unit
 
+  val routine_lazy :
+    ?details:Yojson.Safe.t ->
+    ?keeper_name:string ->
+    ?turn_id:int ->
+    ?category:category ->
+    (unit -> string) -> unit
+
   val routine :
     ?details:Yojson.Safe.t ->
     ?keeper_name:string ->
@@ -1028,6 +1035,13 @@ module Make (M : sig val name : string end) = struct
 
   let log_module level ?keeper_name ?turn_id ?category fmt =
     Printf.ksprintf (fun msg -> emit level ?keeper_name ?turn_id ?category msg) fmt
+
+  let routine_lazy ?(details = `Null) ?keeper_name ?turn_id ?category message =
+    match routine_level () with
+    | Some level when should_log_module level ->
+        emit level ~details:(details_with_event_class Routine details)
+          ?keeper_name ?turn_id ?category (message ())
+    | Some _ | None -> ()
 
   let routine ?(details = `Null) ?keeper_name ?turn_id ?category fmt =
     Printf.ksprintf

@@ -41,6 +41,21 @@ module Frame_presenter = Masc_tui_frame_presenter
 module Status = Masc.Keeper_status_runtime
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Keeper_control = Masc_tui_keeper_control
+
+let local_source_pending_note state source =
+  Option.map (fun phase ->
+    let step=match phase with
+      | Local_read_observation.Awaiting_start -> "starting read"
+      | Io_queued -> "waiting for I/O worker"
+      | Io_running -> "reading local files"
+      | Io_returning -> "returning I/O result"
+      | Preparing -> "preparing snapshot"
+      | Comparison_queued -> "waiting for Task comparison worker"
+      | Comparison_running -> "comparing Task values"
+      | Comparison_returning -> "returning Task comparison"
+      | Awaiting_ui -> "result awaiting state application" in
+    let name=match source with Local_keepers -> "Keeper metadata" | Local_work -> "Work" in
+    "  " ^ name ^ " · " ^ step) (local_source_pending state source)
 module Markdown = Masc_tui_markdown
 module Message_layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows

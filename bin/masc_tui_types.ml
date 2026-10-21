@@ -4483,7 +4483,9 @@ type keeper_roster_observation = {
      Masc_tui_keeper_control.roster_failure) result;
 }
 
-type local_read_source = Local_keepers | Local_work
+module Local_read_observation = Masc_tui_local_read_observation
+
+type local_read_source = Local_read_observation.source = Local_keepers | Local_work
 
 let local_read_source_name = function
   | Local_keepers -> "keepers"
@@ -4497,6 +4499,7 @@ type local_workspace_request = {
   lwr_request: Local_read_order.request;
   lwr_started_ns: int64;
   lwr_previous_tasks: Task_payloads.t;
+  lwr_observation: Local_read_observation.t;
 }
 
 type keeper_creation_wait = {
@@ -8618,6 +8621,8 @@ type state = {
   mutable keeper_roster_error: string option;
   mutable keeper_roster_read: Snapshot_read.t;
   mutable local_workspace_read_order: Local_read_order.t;
+  mutable local_work_observation: Local_read_observation.t option;
+  mutable local_keeper_observation: Local_read_observation.t option;
   mutable local_keeper_read_order: Local_read_order.t;
   mutable local_keeper_read_cancel: (unit ref * (unit -> unit)) option;
   mutable local_work_read_cancel: (unit ref * (unit -> unit)) option;
@@ -10116,6 +10121,20 @@ let set_local_source_order (state : state) source reading =
   | Local_keepers -> state.local_keeper_read_order <- reading
   | Local_work -> state.local_workspace_read_order <- reading
 
+let local_source_observation (state : state) = function
+  | Local_keepers -> state.local_keeper_observation
+  | Local_work -> state.local_work_observation
+
+let set_local_source_observation (state : state) source observation =
+  match source with
+  | Local_keepers -> state.local_keeper_observation <- observation
+  | Local_work -> state.local_work_observation <- observation
+
+let local_source_pending state source =
+  if Local_read_order.in_flight (local_source_order state source) then
+    Option.map Local_read_observation.pending (local_source_observation state source)
+  else None
+
 let local_source_cancellation (state : state) = function
   | Local_keepers -> state.local_keeper_read_cancel
   | Local_work -> state.local_work_read_cancel
@@ -10136,6 +10155,9 @@ let finish_local_source_read state source token =
   | Some _ | None -> ()
 
 let invalidate_local_source_read state source =
+  Option.iter (fun observation -> Local_read_observation.observe observation (Retired Read_invalidated))
+    (local_source_observation state source);
+  set_local_source_observation state source None;
   set_local_source_order state source (Local_read_order.invalidate (local_source_order state source));
   supersede_local_source_read state source None
 
@@ -10147,27 +10169,44 @@ let begin_local_workspace_read (state : state) ~intent ~source ~base_path ~start
         (local_source_order state source) in
     set_local_source_order state source reading;
     Option.map (fun (lwr_request, actual_intent) ->
-        { lwr_source = source; lwr_intent = actual_intent; lwr_authority = state.workspace_authority;
+        Option.iter (fun observation -> Local_read_observation.observe observation (Retired Replaced))
+          (local_source_observation state source);
+        let Workspace_authority workspace_revision=state.workspace_authority in
+        let workspace_fingerprint=Option.map (fun (identity : Tui_decode.server_identity) ->
+          Digestif.SHA256.(digest_string (Yojson.Safe.to_string (`List
+            [`String (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path);`String (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)])) |> to_hex)) state.server_identity in
+        let lwr_observation=Local_read_observation.create ~requested_ns:started_ns
+          {source;intent=(match actual_intent with Snapshot_read.Poll -> Poll | Refresh -> Refresh);
+           request_id=Local_read_order.request_id lwr_request;
+           demand_revision=Local_read_order.revision_to_string (Local_read_order.request_revision lwr_request);
+           workspace_revision;workspace_fingerprint} in
+        set_local_source_observation state source (Some lwr_observation);
+        { lwr_observation; lwr_source = source; lwr_intent = actual_intent; lwr_authority = state.workspace_authority;
           lwr_base_path = base_path; lwr_request; lwr_started_ns = started_ns;
           lwr_previous_tasks = (match source with
             | Local_work -> state.task_payloads | Local_keepers -> Task_payloads.empty) }) request
 
 let take_local_workspace_read (state : state) ~source request result =
-  if source <> request.lwr_source
-     || state.workspace_identity <> Workspace_identity_match
+  let observation=request.lwr_observation in
+  let reject reason = Local_read_observation.observe observation (Ui_admission (Rejected reason));None in
+  if source <> request.lwr_source then reject Wrong_source
+  else if state.workspace_identity <> Workspace_identity_match
      || request.lwr_authority <> state.workspace_authority
-     || not (String.equal request.lwr_base_path state.local_base_path) then None
+     || not (String.equal request.lwr_base_path state.local_base_path) then reject Workspace_withdrawn
   else match Local_read_order.settle (local_source_order state source) request.lwr_request
       ~observed:(Result.is_ok result) with
-    | None -> None
+    | None -> reject Superseded
     | Some reading ->
         set_local_source_order state source reading;
+        Local_read_observation.observe observation (Ui_admission
+          (match result with Ok _ -> Accepted | Error _ -> Accepted_failure));
         (match result with
          | Ok _ -> ()
          | Error detail ->
              (match source with
               | Local_keepers -> state.local_keepers <- Local_workspace_failed detail
-              | Local_work -> state.local_workspace <- Local_workspace_failed detail));
+              | Local_work -> state.local_workspace <- Local_workspace_failed detail);
+             Local_read_observation.observe observation (Ui_application Read_failure_applied));
         Some result
 
 let keeper_log_equal_key left right =
@@ -14801,6 +14840,8 @@ let create_state
   keeper_roster_error = None;
   keeper_roster_read = Snapshot_read.idle;
   local_workspace_read_order = Local_read_order.idle;
+  local_work_observation = None;
+  local_keeper_observation = None;
   local_keeper_read_order = Local_read_order.idle;
   local_keeper_read_cancel = None;
   local_work_read_cancel = None;

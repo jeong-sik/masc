@@ -129,7 +129,13 @@ let prepare ~keeper_name ~upload_paths tool json =
       let* request=surface fields in
       let* url=absolute_url (List.assoc_opt "url" fields) in
       prepared request Raw (B.Page_goto {url;tab_id=request.tab_id})
-let restamp ~tool_name ~start_time = function
+(* The scrutinee type must be named here: the disposition type parameters are
+   free in a bare [function], so [data with tool_name] has no record to update.
+   [Tool_result.result] pins the completed/deferred payload to [output_payload]
+   and the failed one to [failure_payload]; both carry [tool_name] and
+   [duration_ms]. *)
+let restamp ~tool_name ~start_time (result : Tool_result.result) =
+  match result with
   | Tool_result.Completed data -> Tool_result.Completed {data with tool_name;duration_ms=Tool_timing.elapsed_ms start_time}
   | Deferred data -> Tool_result.Deferred {data with tool_name;duration_ms=Tool_timing.elapsed_ms start_time}
   | Failed data -> Tool_result.Failed {data with tool_name;duration_ms=Tool_timing.elapsed_ms start_time}

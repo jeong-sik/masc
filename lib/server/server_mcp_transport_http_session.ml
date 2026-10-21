@@ -266,11 +266,69 @@ let write_sessions path =
    before capturing its immutable maps, and retain the lock through rename. *)
 let persistence_mutex = Stdlib.Mutex.create ()
 
+type persistence_state =
+  | Restore_pending of unit ref
+  | Ready
+  | Restore_refused
+
+(* Refusal belongs to the actual persistence path, not the process-wide live
+   registry. It survives later maintenance and explicit reloads in this process.
+   Atomic transitions do not block the owner domain on a worker-held mutex. *)
+let persistence_by_path : persistence_state SMap.t Atomic.t =
+  Atomic.make SMap.empty
+
+let refuse_restore path =
+  Atomic_util.update persistence_by_path (SMap.add path Restore_refused)
+
+let begin_restore path token =
+  Atomic_util.update persistence_by_path (fun states ->
+    match SMap.find_opt path states with
+    | Some Restore_refused -> states
+    | None | Some Ready | Some (Restore_pending _) ->
+        SMap.add path (Restore_pending token) states)
+
+let finish_restore path token =
+  Atomic_util.update persistence_by_path (fun states ->
+    match SMap.find_opt path states with
+    | Some (Restore_pending owner) when owner == token ->
+        SMap.add path Ready states
+    | None | Some Ready | Some Restore_refused | Some (Restore_pending _) -> states)
+
+let owns_restore path token =
+  match SMap.find_opt path (Atomic.get persistence_by_path) with
+  | Some (Restore_pending owner) -> owner == token
+  | None | Some Ready | Some Restore_refused -> false
+
+(* Called only under [persistence_mutex] in the host worker. A save-first
+   caller may create a missing file, but cannot overwrite an unrestored one. *)
+let can_save_sessions path =
+  match SMap.find_opt path (Atomic.get persistence_by_path) with
+  | Some Ready -> true
+  | Some (Restore_pending _) | Some Restore_refused -> false
+  | None ->
+      (match Unix.lstat path with
+       | _ -> false
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+           let rec admit_missing () =
+             let states = Atomic.get persistence_by_path in
+             match SMap.find_opt path states with
+             | None ->
+                 if Atomic.compare_and_set persistence_by_path states (SMap.add path Ready states)
+                 then true else admit_missing ()
+             | Some Ready -> true
+             | Some (Restore_pending _) | Some Restore_refused -> false
+           in
+           admit_missing ()
+       | exception Unix.Unix_error _ -> refuse_restore path; false)
+
 let save_sessions_to_file ~base_path () =
   let path = sessions_file_path ~base_path () in
-  Eio_guard.run_in_systhread ~label:"mcp-session-save" (fun () ->
-    Stdlib.Mutex.protect persistence_mutex (fun () -> write_sessions path));
-  Eio_guard.check_if_ready ()
+  let saved = Eio_guard.run_in_systhread ~label:"mcp-session-save" (fun () ->
+    Stdlib.Mutex.protect persistence_mutex (fun () ->
+      if can_save_sessions path then (write_sessions path; true) else false)) in
+  Eio_guard.check_if_ready ();
+  if not saved then
+    Log.Server.warn "session persist preserved unrestored snapshot path=%S" path
 
 type restored_sessions =
   { versions : string SMap.t
@@ -376,20 +434,36 @@ let merge_restored values registry =
 
 let load_sessions_from_file ~base_path () =
   let path = sessions_file_path ~base_path () in
-  let restored = Eio_guard.run_in_systhread ~label:"mcp-session-load" (fun () -> read_sessions path) in
+  let token = ref () in
+  begin_restore path token;
+  let restored = Eio_guard.run_in_systhread ~label:"mcp-session-load" (fun () ->
+    Stdlib.Mutex.protect persistence_mutex (fun () ->
+      let restored = read_sessions path in
+      (match restored with
+       | Read_failed _ | Json_failed _ | Shape_rejected -> refuse_restore path
+       | Missing | Restored _ -> ());
+      restored)) in
   Eio_guard.check_if_ready ();
   match restored with
-  | Missing -> Log.Server.debug "session restore absent path=%S" path
+  | Missing when owns_restore path token ->
+      finish_restore path token;
+      Log.Server.debug "session restore absent path=%S" path
   | Read_failed detail -> Log.Server.warn "session restore unreadable path=%S error=%s" path detail
   | Json_failed detail -> Log.Server.warn "session restore invalid JSON path=%S error=%s" path detail
   | Shape_rejected -> Log.Server.warn "session restore rejected root path=%S" path
-  | Restored sessions ->
+  | Restored sessions when owns_restore path token ->
+      (* Owner activation publishes these maps without yielding after the
+         cancellation/ownership checks; an older suspended load cannot apply
+         after a newer load has claimed this path on the owner domain. *)
       merge_restored sessions.versions protocol_version_by_session;
       merge_restored sessions.profiles mcp_profile_by_session;
       merge_restored sessions.timestamps session_last_active_sse;
       merge_restored sessions.started session_started_at;
       merge_restored sessions.transports session_transport_context;
+      finish_restore path token;
       Log.Server.debug "session restore applied path=%S entries=%d" path sessions.decoded_entries
+  | Missing | Restored _ ->
+      Log.Server.warn "session restore superseded or previously refused path=%S" path
 
 (** Reap session entries whose session_id has no active SSE connection
     AND whose grace period has expired.

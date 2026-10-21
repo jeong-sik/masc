@@ -1701,7 +1701,7 @@ let test_release_sources_reach_the_next_owner () =
               (before.task_status = after.task_status);
             check bool "refusal does not change the handoff" true
               (before.handoff_context = after.handoff_context))
-         [ `List [ `String "" ]; `List [ `String "/host/draft.md" ]; `String "note:draft" ];
+         [ `Null; `List [ `String "" ]; `List [ `String "/host/draft.md" ]; `String "note:draft" ];
        let refs = [ "artifact:reports/draft.md"; "note:source bundle observed before handoff" ] in
        check bool "valid handoff is accepted" true
          (accepted (release (`List (List.map (fun value -> `String value) refs))));
@@ -1713,6 +1713,10 @@ let test_release_sources_reach_the_next_owner () =
        check (option string) "outgoing author is recorded" (Some owner.name) prior.updated_by;
        check bool "successor claims the same task" true
          (accepted (call successor "keeper_task_claim" (`Assoc [ "task_id", `String "task-001" ])));
+       check bool "successor starts the same task" true
+         (match (task ()).task_status with
+          | Masc_domain.InProgress { assignee; _ } -> assignee = successor.name
+          | _ -> false);
        let after = match (task ()).handoff_context with
          | Some handoff -> handoff
          | None -> fail "claim and auto-start must preserve the handoff"

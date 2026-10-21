@@ -995,7 +995,7 @@ let handle_keeper_task_tool_with_outcome
             table, fix not started'.")
     else (
       let evidence_refs_field =
-        match Json_util.assoc_member "evidence_refs" args with
+        match Json_util.assoc_member_opt "evidence_refs" args with
         | None -> []
         | Some refs -> [ "evidence_refs", refs ]
       in

@@ -39,6 +39,13 @@ val take_ready_found_file : Masc_tui_types.state -> input_pending:bool -> bool
 val apply_file : ?intent:Masc_tui_types.code_file_load_intent ->
   Masc_tui_types.state -> string Masc_tui_fetched.request ->
   (string, string) result -> unit
+val copy_file_source : Masc_tui_types.state -> ((string * string), string) result
+(** The current readable file's path and original response bytes, without
+    display sanitation, syntax colours, gutters or line-ending reconstruction.
+    Requires confirmed workspace authority and focused file content; initial,
+    failed and suspended readings or file overlays never supply clipboard bytes.
+    A same-file refresh retains the readable source until new bytes arrive.
+    The caller owns OSC 52 delivery and cannot infer terminal acknowledgement. *)
 val apply_blame : Masc_tui_types.state -> string Masc_tui_fetched.request ->
   (Masc.Tui_decode.blame_block list, string) result -> unit
 val start_lsp_question : ?line:int -> Masc_tui_types.state -> question:string -> symbol:string ->

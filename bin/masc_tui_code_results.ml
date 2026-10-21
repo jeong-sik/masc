@@ -26,7 +26,8 @@ type return_followup =
 
 let restore_position state target =
   let last_line = match Masc_tui_fetched.current state.code_file with
-    | Some (_, (Masc_tui_fetched.Ready rows | Masc_tui_fetched.Stale (rows, _))) ->
+    | Some (_, (Masc_tui_fetched.Ready { cfd_rows = rows; _ }
+               | Masc_tui_fetched.Stale ({ cfd_rows = rows; _ }, _))) ->
         max 0 (Array.length rows - 1)
     | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
                     | Masc_tui_fetched.Failed _)) -> 0 in
@@ -180,7 +181,7 @@ let apply_open_file ~preserve_view (state : state) request result = (
          the array. *)
       state.code_file <-
         Masc_tui_fetched.complete ~equal:String.equal state.code_file request
-          (Ok (Array.of_list rows));
+          (Ok { cfd_source = content; cfd_rows = Array.of_list rows });
       (* The jump that asked for this file may have named a line; the
          reset and the jump live together so neither overwrites the
          other. Consumed once -- the next plain open starts at the top. *)
@@ -252,6 +253,18 @@ let apply_file ?(intent = Open_code_file) state request result =
   | Open_code_file -> apply_open_file ~preserve_view:false state request result
   | Refresh_code_file -> apply_open_file ~preserve_view:true state request result
   | Navigate_code_file owner -> apply_navigation_file state owner request result
+
+let copy_file_source (state : state) =
+  if not (server_authority_ready state) then
+    Error "Confirm the workspace before copying file source"
+  else if state.view <> Code || state.code_focus_file <> Right_pane
+          || state.code_history_open || state.code_diff_open || state.code_notes_open then
+    Error "Focus file content to copy its source"
+  else match Masc_tui_fetched.current state.code_file with
+    | Some (path, Masc_tui_fetched.Ready document) -> Ok (path, document.cfd_source)
+    | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                     | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _)) ->
+        Error "File source is not currently readable"
 
 let take_ready_navigation_file state ~input_pending =
   if input_pending then false
@@ -370,7 +383,7 @@ let follow_lsp_location (state : state) ~symbol (location : Masc.Tui_decode.lsp_
         (Printf.sprintf "%s: %s:%d" symbol location.ll_path
            location.ll_line);
     match Masc_tui_fetched.current state.code_file with
-    | Some (open_path, Masc_tui_fetched.Ready rows)
+    | Some (open_path, Masc_tui_fetched.Ready { cfd_rows = rows; _ })
       when String.equal open_path location.ll_path ->
         push_code_jump state;
         state.code_file <- Masc_tui_fetched.cancel_pending

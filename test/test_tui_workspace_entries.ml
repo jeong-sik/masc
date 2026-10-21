@@ -1404,10 +1404,81 @@ let test_outside_location_is_an_address_without_a_workspace_read () =
      && Option.is_none state.code_navigation && Option.is_some state.code_lsp_note
      && not state.palette_open)
 
+let test_source_copy_preserves_response_bytes () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  confirm_code_workspace state;
+  let source = "\tlet label = \"한글🙂 cafe\204\129\"\r\n  (* \027[31m raw *)\r\n" in
+  let next, request = start_read ~equal:String.equal state.code_file "source.ml" in
+  state.code_file <- next;
+  Code_results.apply_file state request (Ok source);
+  let copied () = match Code_results.copy_file_source state with
+    | Ok (path, text) -> check_string "source address" "source.ml" path; text
+    | Error detail -> Alcotest.fail detail in
+  check_string "copy keeps source bytes, not sanitized coloured rows" source (copied ());
+  let next, refresh = start_read ~equal:String.equal state.code_file "source.ml" in
+  state.code_file <- next;
+  check_string "same-file refresh retains the source still being read" source (copied ());
+  Code_results.apply_file ~intent:Refresh_code_file state refresh (Ok "replacement");
+  check_string "successful refresh replaces its source atomically" "replacement" (copied ());
+  let next, obsolete = start_read ~equal:String.equal state.code_file "other.ml" in
+  let next, current = start_read ~equal:String.equal next "replacement.ml" in
+  state.code_file <- next;
+  Code_results.apply_file state obsolete (Ok "late unrelated bytes");
+  Alcotest.(check bool) "pending replacement cannot copy previous or late bytes" true
+    (Result.is_error (Code_results.copy_file_source state));
+  Code_results.apply_file state current (Ok "new\r\n");
+  Alcotest.(check (result (pair string string) string)) "new reading owns the copy"
+    (Ok ("replacement.ml", "new\r\n")) (Code_results.copy_file_source state)
+
+let test_source_copy_respects_read_ownership () =
+  let fresh () =
+    let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    confirm_code_workspace state;
+    let next, request = start_read ~equal:String.equal state.code_file "source.ml" in
+    state.code_file <- next;
+    Code_results.apply_file state request (Ok "original");
+    state in
+  List.iter (fun withdraw ->
+    let state = fresh () in withdraw state;
+    Alcotest.(check bool) "withdrawn owner supplies no clipboard bytes" true
+      (Result.is_error (Code_results.copy_file_source state)))
+    [ (fun state -> state.server_identity <- None)
+    ; (fun state -> state.workspace_identity <- Workspace_identity_match_unconfirmed "reconnecting")
+    ; (fun state ->
+        let refreshing, _ = start_read ~equal:String.equal state.code_file "source.ml" in
+        state.code_file <- Fetched.suspend refreshing)
+    ; (fun state -> set_code_scope state (Code_scope_keeper "different"))
+    ; (fun state -> state.code_focus_file <- Left_pane)
+    ; (fun state -> state.code_history_open <- true)
+    ; (fun state -> state.code_diff_open <- true)
+    ; (fun state -> state.code_notes_open <- true)
+    ; (fun state -> state.view <- Repositories)
+    ; (fun state ->
+        let next, request = start_read ~equal:String.equal state.code_file "source.ml" in
+        state.code_file <- next;
+        Code_results.apply_file ~intent:Refresh_code_file state request (Error "unavailable"))
+    ];
+  let state = fresh () in
+  state.code_file <- Fetched.suspend state.code_file;
+  Alcotest.(check (result (pair string string) string))
+    "suspending no pending work preserves the settled source"
+    (Ok ("source.ml", "original")) (Code_results.copy_file_source state);
+  let next, request = start_read ~equal:String.equal state.code_file "empty.ml" in
+  state.code_file <- next;
+  Code_results.apply_file state request (Ok "");
+  Alcotest.(check (result (pair string string) string)) "empty file is a readable source"
+    (Ok ("empty.ml", "")) (Code_results.copy_file_source state)
+
 let () =
   Alcotest.run
     "masc-tui-workspace-entries"
-    [ ( "location choices"
+    [ ( "source copy"
+      , [ Alcotest.test_case "original response bytes and replacement ownership" `Quick
+            test_source_copy_preserves_response_bytes
+        ; Alcotest.test_case "withdrawn read authority never supplies clipboard bytes" `Quick
+            test_source_copy_respects_read_ownership
+        ] )
+    ; ( "location choices"
       , [ Alcotest.test_case "pending status follows accepted request lifetime" `Quick
             test_lsp_pending_status_follows_request_lifetime
         ; Alcotest.test_case "pending status includes same-question refresh and retry" `Quick

@@ -5605,6 +5605,11 @@ type code_file_load_intent =
   | Refresh_code_file
   | Navigate_code_file of code_navigation_owner
 
+type code_file_document = {
+  cfd_source : string;
+  cfd_rows : (string * string) list array;
+}
+
 type code_location_offer = {
   clo_origin : code_finder_origin;
   clo_query : code_lsp_query Masc_tui_fetched.request;
@@ -9390,7 +9395,7 @@ type state = {
      An array, not a list: the diff pane resolves a drawn row's colouring by
      that row's line number in the whole file, so the lookups are scattered
      rather than sequential and a list walked from the front on every one. *)
-  mutable code_file: (string, (string * string) list array) Masc_tui_fetched.t;
+  mutable code_file: (string, code_file_document) Masc_tui_fetched.t;
   mutable code_file_resume_intent: code_file_load_intent;
   mutable code_file_scroll: int;
   (* The line the pane's cursor is on (0-based), the anchor a language-server

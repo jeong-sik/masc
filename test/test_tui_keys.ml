@@ -1189,7 +1189,11 @@ let test_code_search_count_tracks_fetched_source () =
     match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
     | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
     | Masc_tui_fetched.Started (next, request) ->
-        state.code_file <- Masc_tui_fetched.complete ~equal:String.equal next request (Ok rows)
+        let source = Array.to_list rows
+          |> List.map (fun segments -> String.concat "" (List.map fst segments))
+          |> String.concat "\n" in
+        state.code_file <- Masc_tui_fetched.complete ~equal:String.equal next request
+          (Ok { cfd_source = source; cfd_rows = rows })
   in
   let count query = Masc_tui_surface_search.surface_search_count state Code ~query in
   load "large.ml" (Array.init 20_000 (fun index ->

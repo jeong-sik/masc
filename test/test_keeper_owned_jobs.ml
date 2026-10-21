@@ -1514,7 +1514,10 @@ let test_original_evidence_repair_reactivates_continuation ~skill_publication ()
     outcome in
   let backend_before = List.length (calls fixture) in
   Eio.Switch.run (fun sw ->
-    let notify () = Wake.For_testing.notify_result_ready ~resume:initial_resume ~sw supervisor in
+    let job = load fixture parked.job_id in
+    let notification : Journal.result_notification =
+      {base_path=job.base_path;keeper_name=job.keeper_name;dependency=Dependency.Owned_job job.job_id} in
+    let notify () = Wake.For_testing.notify_result_ready ~resume:initial_resume ~sw supervisor notification in
     notify_again := notify;
     notify ();
     notify ());
@@ -5627,6 +5630,12 @@ let test_prepared_discovery_demand_survives_observer_failure () =
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-before-prepared-discovery" ~turn:52 "keeper_job_status" (argument parked.job_id)));
   let original_job = load fixture parked.job_id in
+  let job_notification : Journal.result_notification =
+    {base_path=original_job.base_path;keeper_name=original_job.keeper_name;
+     dependency=Dependency.Owned_job original_job.job_id} in
+  let child_notification : Journal.result_notification =
+    {base_path=fixture.base_path;keeper_name=keeper;
+     dependency=Dependency.Composition_result parked.binding} in
   let child_source = Journal.continuation_source parked.child_continuation
   and parent_source = Journal.continuation_source parked.parent_continuation in
   let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
@@ -5687,7 +5696,7 @@ let test_prepared_discovery_demand_survives_observer_failure () =
       ~finally:(fun () -> if not (Eio.Promise.is_resolved released) then Eio.Promise.resolve release ())
       (fun () ->
         Wake.pulse ~sw supervisor;
-        Wake.notify_result_ready ~sw supervisor;
+        Wake.notify_result_ready ~sw supervisor job_notification;
         Event_registry.enqueue_durable_result ~base_path:fixture.base_path keeper independent
           |> require "independent durable work before discovery observation";
         let base_path,result = Eio.Stream.take observed in
@@ -5703,7 +5712,7 @@ let test_prepared_discovery_demand_survives_observer_failure () =
         write (Filename.concat directory "malformed-marker.json") "not-json\n";
         (* Both triggers arrive while the original error observer is still
            active. Its ordinary failure must leave a fresh original pass due. *)
-        Wake.notify_result_ready ~sw supervisor;
+        Wake.notify_result_ready ~sw supervisor job_notification;
         Wake.pulse ~sw supervisor;
         Eio.Promise.resolve release ();
         require_returned ();
@@ -5712,7 +5721,7 @@ let test_prepared_discovery_demand_survives_observer_failure () =
         check bool "fresh discovery resumes the original named child" true child_ok;
         ignore (Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path
           |> require "publish original child terminal result");
-        Wake.notify_result_ready ~sw supervisor;
+        Wake.notify_result_ready ~sw supervisor child_notification;
         require_returned ();
         let parent_request = accepted parent parked.parent_continuation in
         let parent_ok,completed_parent,parent_entry = await_composition env fixture parent_request in
@@ -5739,6 +5748,108 @@ let test_prepared_discovery_demand_survives_observer_failure () =
    | [],[name,Journal.Invalid_continuation_marker _] ->
        check string "partial marker failure remains explicit" "malformed-marker.json" name
    | _ -> fail "original continuations remained ready or partial damage disappeared")
+
+let test_prepared_result_scope_preserves_original_resources () =
+  with_fixture @@ fun env _initialize fixture ->
+  with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
+  with_parked_named_producer env fixture @@ fun parked ->
+  let module Wake = Masc.Keeper_composition_continuation_wake in
+  let module Async = Masc.Keeper_msg_async in
+  set_source fixture ~task_id:"independent-task" ~turn:80;
+  let peer_id = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"result-scope-independent-job" ~turn:80 "keeper_job_start"
+      (`Assoc ["argv",`List [`String "fixture-program"]])) |> job_id in
+  let notification (record : Store.record) : Journal.result_notification =
+    {base_path=record.base_path;keeper_name=record.keeper_name;
+     dependency=Dependency.Owned_job record.job_id} in
+  let original_hint = notification (load fixture parked.job_id) in
+  let discover hint = Journal.discover_pending_continuations
+      ~scope:(Journal.Result_notifications [hint]) ~on_ready:ignore
+      ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness
+      ~base_path:fixture.base_path |> require "actual scoped pending discovery" in
+  let not_ready = discover original_hint in
+  check (list string) "a hint cannot make a still-running result ready" []
+    (List.map Journal.continuation_request_id not_ready.ready);
+  check bool "original job wait remains canonically waiting" true (not_ready.waiting > 0);
+  check bool "parent's distinct result dependency stays explicitly unselected" true (not_ready.unselected > 0);
+  control fixture (`Assoc ["state",`String "exited"]);
+  List.iter (fun id -> ignore (with_bundle fixture (fun bundle ->
+    invoke fixture bundle ~tool_use_id:("collect-scoped-" ^ id) ~turn:81
+      "keeper_job_status" (argument id)))) [parked.job_id;peer_id];
+  let original_job = load fixture parked.job_id and peer = load fixture peer_id in
+  check bool "both distinct actual jobs have durable usable results" true
+    (original_job.job_id <> peer.job_id && Store.result_ready original_job && Store.result_ready peer);
+  let peer_bytes = read (owner_path fixture peer_id) in
+  let other_root = Filename.concat fixture.base_path "another-result-workspace" in
+  Unix.mkdir other_root 0o700;
+  List.iter (fun hint ->
+    let report = discover hint in
+    check (list string) "unrelated original coordinates admit no ready candidate" []
+      (List.map Journal.continuation_request_id report.ready);
+    check bool "unselected is distinct from proved waiting" true (report.unselected > 0);
+    check int "unrelated valid marker authority remains readable" 0 (List.length report.failures))
+    [notification peer; {original_hint with base_path=other_root};
+     {original_hint with keeper_name="another-result-keeper"}];
+  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path
+      ~base_path:fixture.base_path keeper in
+  Fs_compat.mkdir_p (Filename.dirname declaration);
+  write declaration "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Original result-scoped continuation fixture\"\n";
+  let context : _ Masc.Keeper_types_profile.context =
+    {config=parked.config;agent_name="result-scoped-maintenance";
+     sw=Async.server_background_switch () |> require "result-scoped background lifetime";
+     clock=Eio.Stdenv.clock env;proc_mgr=Some (Eio.Stdenv.process_mgr env);net=None;
+     publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
+  let observations = Eio.Stream.create 0 and results = Eio.Stream.create 0 in
+  let supervisor = Wake.create ~context
+      ~on_discovery:(fun ~base_path result -> Eio.Stream.add observations (base_path,result))
+      ~on_result:(fun candidate outcome -> Eio.Stream.add results (candidate,outcome)) () in
+  let observed () =
+    let root,result = Eio.Stream.take observations in
+    check string "scope observations retain original workspace" fixture.base_path root;
+    result |> require "result-scoped original discovery returned" in
+  let accepted original =
+    let candidate,outcome = Eio.Stream.take results in
+    check string "selected intake keeps exact original canonical request"
+      (Journal.continuation_request_id original) (Journal.continuation_request_id candidate);
+    check (option string) "selected intake keeps original Task after unrelated work" (Some "task-A")
+      (Journal.continuation_source candidate).source_task_id;
+    match outcome with
+    | Ok (Tool_result.Completed _ as result) -> Tool_result.data result
+    | Ok (Tool_result.Deferred _ | Tool_result.Failed _) | Error _ -> fail "selected original intake refused" in
+  let child_result,parent_result = Eio.Switch.run (fun sw ->
+    (* Real unrelated and related notifications coalesce before discovery.
+       The scope can select the original child without admitting its parent. *)
+    Wake.notify_result_ready ~sw supervisor (notification peer);
+    Wake.notify_result_ready ~sw supervisor original_hint;
+    observed ();
+    let child_request = accepted parked.child_continuation in
+    let child_ok,child_result,_ = await_composition env fixture child_request in
+    check bool "original child finishes from its saved job result" true child_ok;
+    ignore (Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path
+      |> require "durably publish original named child result");
+    let child_hint : Journal.result_notification =
+      {base_path=fixture.base_path;keeper_name=keeper;
+       dependency=Dependency.Composition_result parked.binding} in
+    Wake.notify_result_ready ~sw supervisor child_hint;
+    observed ();
+    let parent_request = accepted parked.parent_continuation in
+    let parent_ok,parent_result,_ = await_composition env fixture parent_request in
+    check bool "original parent consumes its exact named child result" true parent_ok;
+    child_result,parent_result) in
+  let stdout_sha = child_result |> member "exports" |> member "stdout" |> member "value" |> to_string in
+  let stdout = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"read-result-scoped-original-stdout" ~turn:82 "keeper_artifact_read"
+      (`Assoc ["sha256",`String stdout_sha])) in
+  check_json "selected original result remains useful" (`String stdout_bytes) (stdout |> member "content");
+  check_json "parent's usable result retains the original child" (`Bool true)
+    (parent_result |> member "exports" |> member "child_result" |> member "available");
+  check string "unrelated job's actual durable owner bytes survive both scoped intakes"
+    peer_bytes (read (owner_path fixture peer_id));
+  let after = load fixture parked.job_id in
+  check bool "original job handle, phase, source and output authority are retained" true
+    (after.job_id=original_job.job_id && after.phase=original_job.phase
+     && after.source=original_job.source && after.outputs=original_job.outputs)
+
 
 let test_completion_discovery_failure_preserves_original_result () =
   let channel = Keeper_continuation_channel.dashboard ~thread_id:"discovery-original-thread"
@@ -6531,6 +6642,8 @@ let () = match Array.to_list Sys.argv with
           test_completion_discovery_failure_preserves_original_result
       ; test_case "prepared discovery preserves new demand through observer failure and resumes original child and parent" `Quick
           test_prepared_discovery_demand_survives_observer_failure
+      ; test_case "typed result scope preserves two actual jobs and original child-parent results" `Quick
+          test_prepared_result_scope_preserves_original_resources
       ; test_case "cancelled recovery retains original output and a fresh scope delivers once and cleans" `Quick
           test_completion_cancelled_round_preserves_original_result
       ; test_case "held absence uses a presence hint and reactivates only original authority" `Quick

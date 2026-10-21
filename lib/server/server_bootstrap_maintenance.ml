@@ -679,8 +679,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       Keeper_composition_continuation_wake.pulse ~sw prepared_continuations
     in
     let owned_job_completions = Keeper_owned_job_completion_wake.create ~config
-        ~on_result_ready:(fun _ ->
-          Keeper_composition_continuation_wake.notify_result_ready ~sw prepared_continuations) () in
+        ~on_result_ready:(fun record ->
+          Keeper_composition_continuation_wake.notify_result_ready ~sw prepared_continuations
+            {base_path=record.base_path;keeper_name=record.keeper_name;
+             dependency=Keeper_composition_dependency.Owned_job record.job_id}) () in
     let reconcile_owned_job_completions () =
       Keeper_owned_job_completion_wake.pulse ~sw owned_job_completions
     in

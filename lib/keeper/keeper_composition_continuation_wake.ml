@@ -210,10 +210,10 @@ let recovery_readiness ~base_path candidate cause =
      | Ok _ | Error _ -> Continue_holding cause)
   | Explicit_recovery_required _ -> Continue_holding cause
 
-type discovery_trigger = Maintenance | Result_ready
+type discovery_trigger = Maintenance | Result_ready of Journal.result_notification
 type discovery_boundary = Discovery_unfinished | Discovery_drained | Discovery_cancelled | Discovery_raised
 type discovery_drain =
-  { mutable follow_up : bool
+  { mutable pending : Journal.discovery_scope option
   ; mutable notifications : int
   ; mutable maintenance_pulses : int
   ; mutable discovery_started : int
@@ -252,7 +252,7 @@ let log_discovery ~base_path = function
 let create ~(context : 'a Keeper_types_profile.context) ?(on_result=log_result ~base_path:context.config.base_path) ?(on_discovery=log_discovery) () =
   {context;on_result;on_discovery;active=Run_set.empty;held=Run_map.empty;discovery=None}
 
-let discover_and_schedule ~resume ~sw supervisor =
+let discover_and_schedule ~scope ~resume ~sw supervisor =
   Eio.Switch.check sw;
   (* One immutable declaration projection belongs to this pulse, never to the
      supervisor. Eio.Lazy shares in-flight I/O and restarts a cancelled read for
@@ -316,23 +316,31 @@ let discover_and_schedule ~resume ~sw supervisor =
       with exn ->
         supervisor.active <- Run_set.remove key supervisor.active;
         raise exn) in
-  let* pending = Journal.discover_pending_continuations ~on_ready
+  let* pending = Journal.discover_pending_continuations ~scope ~on_ready
       ~read_composition_result:Keeper_composition_dependency_result.readiness
       ~base_path:supervisor.context.config.base_path in
   List.iter (fun (identity,error) -> Log.Server.warn "prepared continuation discovery retained request=%s error=%s base_path=%S"
       identity (Journal.error_to_string error) supervisor.context.config.base_path) pending.failures;
-  Ok ()
+  Ok pending
 
 type discovery_phase =
-  | Reserved | Started | Settled of (unit,Journal.error) result | Interrupted | Raised
+  | Reserved | Started of Journal.discovery_scope
+  | Settled of (Journal.pending_continuations,Journal.error) result | Interrupted | Raised
 
 let observe_discovery ~base_path ~reserved_ns request phase =
   let emit () = try Log.Server.routine_lazy (fun () ->
       let phase,detail = match phase with
         | Reserved -> "reserved", ""
-        | Started -> "started", ""
+        | Started Journal.All_pending -> "started", " scope=all_pending"
+        | Started (Journal.Result_notifications notifications) -> "started",
+            Printf.sprintf " scope=result_notifications result_hints=%d" (List.length notifications)
         | Settled result -> "settled",
-            (match result with Ok () -> " outcome=returned" | Error _ -> " outcome=failed")
+            (match result with
+             | Ok pending -> Printf.sprintf
+                 " outcome=returned inspected=%d ready=%d waiting=%d unselected=%d retired=%d failures=%d"
+                 pending.inspected (List.length pending.ready) pending.waiting pending.unselected
+                 pending.retired (List.length pending.failures)
+             | Error _ -> " outcome=failed")
         | Interrupted -> "interrupted", ""
         | Raised -> "raised", "" in
       Printf.sprintf "prepared_continuation_discovery reserved_ns=%Ld pass=%d phase=%s at_ns=%Ld%s base_path=%S"
@@ -349,13 +357,17 @@ let request_discovery ~trigger ~resume ~sw supervisor =
   let record_demand request =
     (match trigger with
      | Maintenance -> request.maintenance_pulses <- request.maintenance_pulses + 1
-     | Result_ready -> request.notifications <- request.notifications + 1);
-    request.follow_up <- true in
+     | Result_ready _ -> request.notifications <- request.notifications + 1);
+    request.pending <- Some (match trigger,request.pending with
+      | Maintenance,_ | Result_ready _,Some Journal.All_pending -> Journal.All_pending
+      | Result_ready notification,None -> Journal.Result_notifications [notification]
+      | Result_ready notification,Some (Journal.Result_notifications prior) ->
+          Journal.Result_notifications (notification::prior)) in
   match supervisor.discovery with
   | Some request ->
     record_demand request
   | None ->
-    let request = {follow_up=false;notifications=0;maintenance_pulses=0;discovery_started=0;
+    let request = {pending=None;notifications=0;maintenance_pulses=0;discovery_started=0;
       discovery_settled=0;discovery_errors=0;discovery_raised=0;boundary=Discovery_unfinished} in
     record_demand request;
     supervisor.discovery <- Some request;
@@ -373,19 +385,22 @@ let request_discovery ~trigger ~resume ~sw supervisor =
         Log.Server.debug
           "prepared_continuation_discovery_drain boundary=%s maintenance=%d notifications=%d discovery_started=%d discovery_settled=%d discovery_errors=%d discovery_raised=%d follow_up=%b base_path=%S"
           boundary request.maintenance_pulses request.notifications request.discovery_started
-          request.discovery_settled request.discovery_errors request.discovery_raised request.follow_up base_path
+          request.discovery_settled request.discovery_errors request.discovery_raised
+          (Option.is_some request.pending) base_path
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | _ -> () in
       Eio.Cancel.protect emit in
-    let rec drain () =
-      (* Consume only the demand that preceded this read. A durable result
-         arriving while it yields must survive for a fresh subsequent pulse. *)
-      request.follow_up <- false;
+    let rec drain () = match request.pending with
+      | None -> ()
+      | Some scope ->
+      (* Consume only this immutable demand scope. Notifications or maintenance
+         arriving while reads/observation yield belong to a fresh next pass. *)
+      request.pending <- None;
       request.discovery_started <- request.discovery_started + 1;
-      observe Started;
+      observe (Started scope);
       let returned =
-        try Some (discover_and_schedule ~resume ~sw supervisor) with
+        try Some (discover_and_schedule ~scope ~resume ~sw supervisor) with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             request.discovery_raised <- request.discovery_raised + 1;
@@ -394,14 +409,14 @@ let request_discovery ~trigger ~resume ~sw supervisor =
             None in
       Option.iter (fun result ->
         request.discovery_settled <- request.discovery_settled + 1;
-        (match result with Ok () -> () | Error _ ->
+        (match result with Ok _ -> () | Error _ ->
           request.discovery_errors <- request.discovery_errors + 1);
         observe (Settled result);
-        try supervisor.on_discovery ~base_path result with
+        try supervisor.on_discovery ~base_path (Result.map (fun _ -> ()) result) with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Log.Server.warn "prepared continuation discovery observer failed: %s base_path=%S"
             (Printexc.to_string exn) base_path) returned;
-      if request.follow_up then drain () in
+      drain () in
     (try
        observe Reserved;
        Eio.Switch.check sw;
@@ -440,13 +455,13 @@ let pulse ~sw supervisor =
   request_discovery ~trigger:Maintenance ~resume:(fun ~on_recovery_held ~profiles ~context candidate ->
     resume_with_profiles ~on_recovery_held ~profiles ~context candidate) ~sw supervisor
 
-let notify_result_ready ~sw supervisor =
-  request_discovery ~trigger:Result_ready ~resume:(fun ~on_recovery_held ~profiles ~context candidate ->
+let notify_result_ready ~sw supervisor notification =
+  request_discovery ~trigger:(Result_ready notification) ~resume:(fun ~on_recovery_held ~profiles ~context candidate ->
     resume_with_profiles ~on_recovery_held ~profiles ~context candidate) ~sw supervisor
 
 module For_testing = struct
-  let notify_result_ready ~resume ~sw supervisor =
-    request_discovery ~trigger:Result_ready ~resume ~sw supervisor
+  let notify_result_ready ~resume ~sw supervisor notification =
+    request_discovery ~trigger:(Result_ready notification) ~resume ~sw supervisor
   let pulse ~resume ~sw supervisor =
     request_discovery ~trigger:Maintenance ~resume ~sw supervisor
 end

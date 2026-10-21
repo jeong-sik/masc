@@ -157,8 +157,14 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
 
 - 준비된 Composition의 maintenance `pulse`와 원래 owned-job 결과가 durable해진 뒤의
   `notify_result_ready`는 같은 발견 drain에 수요를 남기고 반환한다. 첫 조회 전 수요는
-  공유하고 조회·관측 중 수요는 후속 fresh pass로 남긴다. 실제 결과는 원래 base path와
-  typed `Journal.error`를 유지한 `on_discovery`에서 관측한다. 예외로 반환하지 못한 pass를
+  공유하고 조회·관측 중 수요는 후속 fresh pass로 남긴다. 알림에는 원래 canonical workspace·
+  Keeper·typed result 의존성을 남긴다. 결과 알림 pass도 모든 marker·journal·terminal 권위를
+  확인하고, 해당 원래 의존성을 가진 실행만 모든 결과의 readiness를 새로 읽는다. 의존성 없는
+  Lost 복구는 보수적으로 포함한다. 정기 maintenance가 대기 알림을 전체 검사로 승격한다.
+  선택 밖의 결과는 미조회 `unselected`로 관측하며 waiting·성공으로 바꾸지 않는다. 전체 marker
+  탐색·회차별 typed-key index 구성/조회·중복 알림 보관 비용은 남는다. index 순서로 marker를
+  재정렬하거나 다음 회차에 재사용하지 않고 전체 오류 관측은 maintenance에서 이어진다.
+  실제 결과는 원래 base path와 typed `Journal.error`를 유지한 `on_discovery`에서 관측한다. 예외로 반환하지 못한 pass를
   정상/오류 반환 횟수에 넣지 않고 raised로 구분한다. observer의 일반 실패 뒤에도 새 수요를
   확인한다. 각 pass의 첫 실제 수요에서 선언 projection을 새로 공유하며 다음 pass에 빌리지
   않는다. 알림 도착을 intake·Task 재개·효과 허가로 기록하지 않는다. drain의 identity와

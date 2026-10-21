@@ -808,7 +808,8 @@ let defer_direct_checkpoint ~base_path ~keeper_name ~operation_id ~execution_dig
     Keeper_owner.defer_direct_checkpoint owner ~operation_id ~execution_digest ~checkpoint)
 let direct_native_call ~base_path ~keeper_name ~operation_id =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner -> Keeper_owner.direct_native_call owner ~operation_id)
-(* Binding starts a new native call, so it stays behind the stop fence. *)
+(* Binding admits a native call for dispatch, fresh or resumed, so it stays
+   behind the stop fence; a stopping Owner refuses it as well. *)
 let bind_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~observed ~call =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.bind_direct_native_call owner ~operation_id ~execution_digest ~observed ~call)

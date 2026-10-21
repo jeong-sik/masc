@@ -167,8 +167,10 @@ val direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:K
 (** [direct_native_call], [checkpoint_direct_native_call] and
     [terminal_direct_native_call] still reach an installed Owner after
     [begin_stopping_all] has fenced the inventory, so the child that Owner is
-    draining records its native call receipt. [bind_direct_native_call] starts
-    a new call and is refused with [Inventory_stopping] once the fence is up. *)
+    draining records its native call receipt. [bind_direct_native_call] admits
+    a call for dispatch, a fresh one or a resumed one. It is refused with
+    [Inventory_stopping] once the fence is up, and a stopping Owner refuses it
+    with [Owner_stopping]. *)
 val direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   (Keeper_native_call.state, command_error) result
 val bind_direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->

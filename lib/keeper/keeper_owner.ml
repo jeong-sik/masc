@@ -1738,9 +1738,16 @@ let start
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
         | Command (Update_direct_native_call {operation_id; execution_digest; change}, resolve) ->
-          let response = run_operation_command t ~label:"persist direct native execution" (fun () ->
+          let persist () = run_operation_command t ~label:"persist direct native execution" (fun () ->
             Chat_operation_store.update_direct_native_call t.operation_store ~now:(t.now ())
               ~operation_id ~execution_digest change) |> Result.map fst in
+          (* Bind admits a call for dispatch, a fresh one or a resumed one, so a
+             stopping owner refuses it. Checkpoint and Terminal record what the
+             bound call already did; its cancelled child still reports them
+             while the owner drains, and the settlement reads them. *)
+          let response = match change with
+            | Keeper_native_call.Bind _ -> reject_if_stopping state persist
+            | Keeper_native_call.Checkpoint _ | Keeper_native_call.Terminal _ -> persist () in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
         | Command (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint}, resolve) ->

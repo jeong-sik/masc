@@ -190,9 +190,11 @@ port = 9222
 서버는 Keeper 가 BiDi 만 하는 일(지금은 hover·drag, `Trusted_hover`·`Trusted_drag`)을 부탁했는데
 그 일을 할 BiDi 연결이 목록에 없을 때 다시 켠다(운영자 결정, §8 의 2).
 
-- 켜기를 부탁하는 거절은 넷이다: 연결이 하나도 없음(`no_live_client`), 고른 연결이 끊김(`selected_client_disconnected`),
-  고른 연결이 그 일을 못 함(`live_transport_unsupported`), 연결이 여럿이라 골라야 함(`ambiguous_browser_clients`).
+- 켜기를 부탁하는 거절은 둘이다: 고른 연결이 끊김(`selected_client_disconnected`),
+  고른 연결이 그 일을 못 함(`live_transport_unsupported`).
   어느 경우든 목록의 어떤 연결도 그 일을 못 할 때만이다. 그 일을 하는 연결이 있으면 그 연결을 고르는 것이 할 일이다.
+  hover·drag 는 탭을 적어야 하고 탭은 본 연결을 가리키므로, 연결이 하나도 없거나(`no_live_client`) 여럿이라 골라야 하는
+  (`ambiguous_browser_clients`) 거절은 이 요청에 오지 않는다.
 - 요청 때마다 그때의 `runtime.toml` 을 읽는다. 표가 없거나 lane 이 꺼져 있으면 켜지도 멈추지도 않고, 답은 지금과 같다.
 - 답의 거절 이름은 그대로 둔다.
   - 연결이 보이면 `bidiConnection` 에 그 연결과 무엇을 켰는지(`started`: Firefox 와 host / host 만 / 없음)를 싣는다.

@@ -17,10 +17,10 @@
     seconds for a host that wrote its ending and is still exiting.
 
     While the server runs, a Keeper's request for work only a BiDi
-    connection serves, with none listed, starts what is missing the same
-    way and waits for the connection ({!Browser_keeper_firefox_starter},
-    §3.5). One start runs at a time; a request that comes while one runs is
-    answered with it. [configuration] is read at the server start and again
+    connection serves, naming a connection that is gone or cannot serve it,
+    starts what is missing the same way and waits for the connection
+    ({!Browser_keeper_firefox_starter}, §3.5). One start runs at a time; a
+    request that comes while one runs is answered with it. [configuration] is read at the server start and again
     at each request. *)
 
 val start :

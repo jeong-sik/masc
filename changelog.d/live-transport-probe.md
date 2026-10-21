@@ -1,2 +1,0 @@
-### Added
-- A read-only probe of an existing server verifies authenticated HTTP MCP, Dashboard WebSocket replies and observer SSE delivery, recording runtime identity and cleaning up temporary sessions without synthetic Keeper traffic.

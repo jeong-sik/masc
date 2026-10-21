@@ -1,4 +1,6 @@
-let render ~cache_dir ~max_width ~colors source =
+type format = Mermaid | Svg
+
+let render ~format ~cache_dir ~max_width ~colors source =
   let paths = ref [] in
   let temporary suffix =
     let path = Filename.temp_file ~temp_dir:cache_dir "pele-" suffix in
@@ -12,7 +14,8 @@ let render ~cache_dir ~max_width ~colors source =
       let input = temporary ".json" in
       let output = temporary ".png" in
       let errors = temporary ".err" in
-      let fields = ["source", `String source; "maxWidth", `Int max_width] in
+      let fields = ["format", `String (match format with Mermaid -> "mermaid" | Svg -> "svg");
+                    "source", `String source; "maxWidth", `Int max_width] in
       let fields = match colors with
         | None -> fields
         | Some (foreground, background) ->

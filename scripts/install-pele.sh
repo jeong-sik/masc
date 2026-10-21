@@ -39,7 +39,7 @@ if [ ! -d "$support_dir" ]; then
     install -m 644 "$repo_root/tools/pele/$file" "$staging/$file"
   done
   pnpm --dir "$staging" install --prod --frozen-lockfile --ignore-scripts
-  printf '%s\n' '{"source":"flowchart TD\n A --> B","maxWidth":640}' |
+  printf '%s\n' '{"format":"mermaid","source":"flowchart TD\n A --> B","maxWidth":640}' |
     node "$staging/render.mjs" >/dev/null
   # A concurrent installer may already have published the identical runtime.
   node --input-type=module - "$staging" "$support_dir" <<'PUBLISH'

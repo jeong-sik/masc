@@ -60,7 +60,43 @@ function color(value, name) {
   return value;
 }
 
-export function renderDiagram(request) {
+function retainedSvg(source) {
+  const document = new DOMParser({ onError() { throw new Error('Malformed SVG XML'); } })
+    .parseFromString(source, 'image/svg+xml');
+  const root = document.documentElement;
+  if (!root || root.localName !== 'svg' || root.namespaceURI !== 'http://www.w3.org/2000/svg') {
+    throw new TypeError('source must be an SVG document');
+  }
+  function inspect(node) {
+    switch (node.nodeType) {
+      case 1:
+        if (node.namespaceURI !== 'http://www.w3.org/2000/svg') {
+          throw new Error('Foreign content is unavailable in terminal SVG');
+        }
+        switch (node.localName) {
+          case 'script': case 'image': case 'feImage': case 'foreignObject':
+            throw new Error('Scripts, images and HTML content are unavailable in terminal SVG');
+        }
+        for (const attribute of Array.from(node.attributes)) {
+          // SVG's href and XLink href may only refer to this document's IDs.
+          if (attribute.localName === 'href' && !attribute.value.trim().startsWith('#')) {
+            throw new Error('External references are unavailable in terminal SVG');
+          }
+          if (attribute.localName.startsWith('on')) {
+            throw new Error('Event handlers are unavailable in terminal SVG');
+          }
+        }
+        break;
+      case 7: case 10:
+        throw new Error('Processing instructions and DOCTYPE are unavailable in terminal SVG');
+    }
+    for (const child of Array.from(node.childNodes ?? [])) inspect(child);
+  }
+  inspect(document);
+  return source;
+}
+
+export function renderDocument(request) {
   if (typeof request?.source !== 'string') throw new TypeError('source must be a string');
   if (!Number.isSafeInteger(request.maxWidth) || request.maxWidth <= 0) {
     throw new TypeError('maxWidth must be a positive pixel width');
@@ -73,15 +109,31 @@ export function renderDiagram(request) {
     for (const name of ['fg', 'line', 'muted', 'border']) colors.set(`--pele-${name}`, fg);
     for (const name of ['bg', 'surface', 'surface-alt']) colors.set(`--pele-${name}`, background);
   }
-  const result = render(request.source, {
-    maxWidth: request.maxWidth, images: false, links: false,
-    responsive: false, fontFamily: 'sans-serif',
-  });
-  const svg = concreteSvg(result.svg, colors);
-  const renderer = new Resvg(svg, {
-    background: background ?? '#ffffff',
-    fitTo: { mode: 'width', value: Math.min(Math.ceil(result.width), request.maxWidth) },
-  });
+  let result, svg, renderer;
+  switch (request.format) {
+    case 'mermaid':
+      result = render(request.source, {
+        maxWidth: request.maxWidth, images: false, links: false,
+        responsive: false, fontFamily: 'sans-serif',
+      });
+      svg = concreteSvg(result.svg, colors);
+      renderer = new Resvg(svg, {
+        background: background ?? '#ffffff',
+        fitTo: { mode: 'width', value: Math.min(Math.ceil(result.width), request.maxWidth) },
+      });
+      break;
+    case 'svg': {
+      svg = retainedSvg(request.source);
+      const original = new Resvg(svg, { background });
+      result = { width: original.width, height: original.height };
+      renderer = original.width <= request.maxWidth ? original : new Resvg(svg, {
+        background, fitTo: { mode: 'width', value: request.maxWidth },
+      });
+      break;
+    }
+    default:
+      throw new TypeError('format must be mermaid or svg');
+  }
   if (renderer.imagesToResolve().length) throw new Error('Diagram contains unresolved images');
   return { ...result, svg, png: renderer.render().asPng() };
 }

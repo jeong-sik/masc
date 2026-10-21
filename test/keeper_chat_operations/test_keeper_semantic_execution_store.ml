@@ -348,7 +348,9 @@ let test_offline_copy_commit_uncertainty_does_not_confirm_preparation () =
     convert_fixture_to_exact_v2 source_path;
     let before = raw_file source_path in
     with_db source_path (fun source_db ->
-      let destination = Sqlite3.db_open ":memory:" in
+      (* The production copy requires DELETE journaling; an in-memory database
+         refuses that mode before reaching either injected commit fault. *)
+      let destination = Sqlite3.db_open (Filename.concat (Filename.dirname source_path) "uncertain-copy.sqlite3") in
       Fun.protect ~finally:(fun () -> check bool "destination closed" true (Sqlite3.db_close destination)) @@ fun () ->
       Store.For_testing.fail_next_commit fault;
       assert_execution_error (Store.Offline.prepare_v2_copy ~source:source_db ~destination);

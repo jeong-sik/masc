@@ -114,6 +114,29 @@ let test_lost_save_receipt_after_publication ()=with_workspace (fun base_path st
   (* After wins even when source freshness changes while the owner is down. *)
   commit_facts base_path [];
   settle ~save:no_save base_path store record |> accepted |> committed |> ignore)
+let test_save_exception_preserves_original_intent ()=with_workspace (fun base_path store ->
+  let capture,output=classification base_path ["Original fact before save exception"] in
+  let record=retain store capture output in
+  let raised expected=get (save base_path expected);raise Exit in
+  (match settle ~save:raised base_path store record with
+   | Ok _ | Error _ -> fail "original save exception was swallowed"
+   | exception Exit -> ());
+  settle ~save:no_save base_path store record |> accepted |> committed |> ignore)
+let test_malformed_domain_retains_one_uncertainty ()=with_workspace (fun base_path store ->
+  let capture,output=classification base_path ["Original fact before corrupt domain read"] in
+  let record=retain store capture output in
+  let directory=Ledger.directory ~base_path in
+  Fs_compat.mkdir_p directory;
+  let path=Filename.concat directory "ledger.json" in
+  Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel "malformed domain state");
+  let read ()=check bool "unreadable domain is uncertain, never a before-state" true
+    (match settle ~save:no_save base_path store record with
+     | Error (Consumer.Uncertain _) -> true | Ok _ | Error (Consumer.Rejected _ | Consumer.Unavailable _) -> false) in
+  let current ()=match owned (Owner.load ~store ~scope:Capture.scope ~request_id:record.request_id) with
+    | Some record -> Progress.to_json record.progress | None -> fail "uncertainty lost original record" in
+  read ();let first=current () in
+  List.iter (fun () -> read ();check json "equal unreadable-state evidence does not grow the journal" first (current ())) [();();()];
+  check string "malformed domain bytes are untouched" "malformed domain state" (In_channel.with_open_bin path In_channel.input_all))
 let test_refused_write_and_recovered_intent retry_only ()=with_workspace (fun base_path store ->
   let capture,output=classification base_path ["Original fact before interrupted commit"] in
   let record=retain store capture output in
@@ -221,6 +244,8 @@ let test_briefing_pass modification ()=with_workspace (fun base_path store ->
 let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "classification applies once and survives journal reopen" `Quick test_classification_commit_and_reopen;
   test_case "real save with lost receipt confirms after without another write" `Quick test_lost_save_receipt_after_publication;
+  test_case "save exception preserves intent and propagates before recovery" `Quick test_save_exception_preserves_original_intent;
+  test_case "malformed domain preserves one original uncertainty without writing" `Quick test_malformed_domain_retains_one_uncertainty;
   test_case "save-edge refusal retries only from freshly recorded before" `Quick (test_refused_write_and_recovered_intent false);
   test_case "recovered intent records unknown and fresh retry before write" `Quick (test_refused_write_and_recovered_intent true);
   test_case "changed selected source conflicts without writing" `Quick (test_changed_or_unreadable_sources false);

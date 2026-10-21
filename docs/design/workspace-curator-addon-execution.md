@@ -222,6 +222,14 @@ and other execution refusals retain their original final as an Execution refusal
 they need no worker on replay. Domain judgments also restore without a live
 worker; commit states are returned to the original owner without applying them.
 
+Consecutive equal pending, missing-after-dispatch or transport-unknown
+observations return the original record without appending or replacing it.
+Changed kind/evidence and nonconsecutive recurrence remain distinct facts.
+Explicit capacity non-admission and terminal refusal retain their separate
+lifecycles. Equal commit-read uncertainty also reuses its original evidence.
+Strict fresh journal/workspace/worker reads and their durability verification
+still run; deduplication is not a freshness cache or a new admission permission.
+
 This adapter does not create another scheduler or model runner. The current
 production Curator scheduler has **not yet switched** to it. That switch must
 still prioritize accepted-work recovery even while Off, preserve input/output

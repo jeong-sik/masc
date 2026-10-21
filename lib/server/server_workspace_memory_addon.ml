@@ -286,8 +286,12 @@ let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
       else Error (Rejected "Recorded commit differs from its original captured domain states") in
   let publish original event=Eio_unix.run_in_systhread (fun () -> advance ~store original event) in
   let uncertain original detail =
-    let* _=publish original (Progress.Commit_uncertain (`Assoc ["detail",`String detail])) in
-    Error (Uncertain detail) in
+    let evidence=`Assoc ["detail",`String detail] in
+    match Progress.phase original.progress with
+    | Progress.Commit_unknown (_,previous) when Yojson.Safe.equal previous evidence -> Error (Uncertain detail)
+    | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
+    | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _ | Progress.Rejected _ ->
+      let* _=publish original (Progress.Commit_uncertain evidence) in Error (Uncertain detail) in
   let observe original event ctor =
     let* published=publish original event in Ok (ctor (record published)) in
   let fresh ()=Eio_unix.run_in_systhread (fun () -> load_domain ~base_path expected) in

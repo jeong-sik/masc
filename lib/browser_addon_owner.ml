@@ -132,9 +132,12 @@ let cleanup t =
     let automation,stagehand = Eio.Fiber.pair
         (fun () -> settle t.automation) (fun () -> settle t.stagehand) in
     let uploads=cleanup_uploads t in
-    let downloads=match automation,stagehand with
-      | Ok (),Ok () -> cleanup_downloads t
-      | (Error _),(Ok ()|Error _) | Ok (),(Error _) -> Error "download cleanup requires confirmed backend teardown" in
+    let downloads=match t.downloads with
+      | None -> Ok ()
+      | Some _ -> (match automation,stagehand with
+          | Ok (),Ok () -> cleanup_downloads t
+          | (Error _),(Ok ()|Error _) | Ok (),(Error _) ->
+              Error "download cleanup requires confirmed backend teardown") in
     let errors=List.filter_map (function Ok () -> None | Error detail -> Some detail)
       [automation;stagehand;uploads;downloads] in
     match errors with [] -> W.Receipt

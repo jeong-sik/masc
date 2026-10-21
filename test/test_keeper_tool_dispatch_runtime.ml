@@ -10261,9 +10261,35 @@ let test_peer_artifact_materializes_exact_binary () =
       | _ -> fail "export omitted its durable result manifest" in
     let exported_json = Yojson.Safe.Util.member "artifact"
         (structured_tool_output_exn ~base_path:config.base_path exported.content) in
+    let validate_input name args =
+      let schema = match Masc.Keeper_tool_descriptor.descriptors_for_internal name with
+        | [descriptor] -> descriptor.input_schema
+        | _ -> fail ("canonical descriptor is missing: " ^ name) in
+      match Masc.Tool_input_validation.validate_args ~schema ~name ~args () with
+      | Ok forwarded -> forwarded
+      | Error result -> fail (Tool_result.message result) in
+    let delegate_args artifact =
+      `Assoc ["target", `Assoc ["kind", `String "keeper"; "name", `String peer.name];
+              "prompt", `String "Reuse this PNG"; "artifacts", `List [artifact]] in
+    let delegate_input = validate_input "masc_keeper_delegate" (delegate_args exported_json) in
+    let open Yojson.Safe.Util in
+    let blob_fields = exported_json |> member "blob" |> member "_blob" |> to_assoc in
+    let without_preview = `Assoc
+        (("blob", `Assoc ["_blob", `Assoc (List.remove_assoc "preview" blob_fields)])
+         :: List.remove_assoc "blob" (to_assoc exported_json)) in
+    List.iter (fun (artifact, detail) ->
+      match Masc.Keeper_invocation_contract.request_of_json (delegate_args artifact) with
+      | Ok _ -> fail "malformed exported reference was accepted"
+      | Error error ->
+        let message = Masc.Keeper_invocation_contract.request_error_to_string error in
+        check bool "rejection identifies the artifact item" true
+          (String_util.contains_substring message "artifacts[0]");
+        check bool "rejection retains the actual descriptor correction" true
+          (String_util.contains_substring message detail))
+      [ `Assoc ["artifact", exported_json], "exactly blob, filename and purpose";
+        without_preview, "expected exact _blob fields bytes, mime, preview, and sha256" ];
     let request = match Masc.Keeper_invocation_contract.request_of_json
-        (`Assoc ["target", `Assoc ["kind", `String "keeper"; "name", `String peer.name];
-                 "prompt", `String "Reuse this PNG"; "artifacts", `List [exported_json]]) with
+        delegate_input with
       | Ok request -> request | Error _ -> fail "typed artifact delegation rejected" in
     let reference = match Masc.Keeper_invocation_contract.artifacts request with
       | [reference] -> reference | _ -> fail "delegation lost reference" in
@@ -10273,8 +10299,9 @@ let test_peer_artifact_materializes_exact_binary () =
     let write args = Masc.Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
         ~turn_sandbox_factory:None ~config ~meta:peer ~publication_recovery:recovery ~args () in
     let invoke path = Masc.Keeper_peer_artifact.handle ~config ~meta:peer
-        ~turn_sandbox_factory:None ~write ~args:(`Assoc ["action", `String "materialize";
-          "path", `String path; "artifact", Masc.Keeper_peer_artifact_ref.to_json reference]) in
+        ~turn_sandbox_factory:None ~write ~args:(validate_input "keeper_artifact_transfer"
+          (`Assoc ["action", `String "materialize"; "path", `String path;
+                   "artifact", Masc.Keeper_peer_artifact_ref.to_json reference])) in
     let result = invoke "received.png" in
     check bool "write completed" true (result.disposition = Tool_result.Completed ());
     let path = Filename.concat (Masc.Keeper_sandbox.host_root_abs_of_meta ~config peer) "received.png" in

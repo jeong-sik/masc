@@ -223,8 +223,13 @@ preserve the outgoing author's handoff and attribution. The recipient can read
 it through `keeper_tasks_list` with `task_ids` and `projection="full"`.
 
 References do not move file bytes or grant access to a peer's sandbox. Export
-files with `keeper_artifact_transfer`, then send the exact exported objects in
-`masc_keeper_delegate`'s `artifacts`. The recipient materializes them in its own
+files with `keeper_artifact_transfer`. If the export returns a result-manifest
+reference, read it with `keeper_artifact_read` and copy its
+`structured_content.artifact` into `masc_keeper_delegate`'s `artifacts` array.
+Each item has `blob`, `filename`, and `purpose`; keep the entire `blob._blob`,
+including `preview` even when empty. The outer `artifact` key and the result
+manifest's reference are not the exported file descriptor.
+The recipient materializes the descriptor in its own
 sandbox and claims the released Task. A release or a message being queued is
 not completion; the finished work still goes through independent verification.
 

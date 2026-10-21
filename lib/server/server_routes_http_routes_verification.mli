@@ -31,6 +31,12 @@ val add_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 
 module For_testing : sig
+  (** The route authenticates CanAdmin before calling this shared parser/commit.
+      Body actor overrides and missing workspace preconditions are refused. *)
+  val commit_operator_cancel_json :
+    config:Workspace.config -> operator_id:string -> Yojson.Safe.t ->
+    (Workspace.transition_outcome, Masc_domain.masc_error) result
+
   val commit_goal_confirmation_json : config:Workspace.config -> operator_id:string ->
     Yojson.Safe.t -> (Yojson.Safe.t, confirmation_error) result
   val confirmation_error_to_string : confirmation_error -> string

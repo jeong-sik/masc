@@ -59,6 +59,14 @@ val decide
           held or unclaimed — is refused without one. *)
   -> (decision, invalid) result
 
+(** Cancel under an authenticated operator's authority. This decision does not
+    authenticate the caller. It preserves the actual canceller, requires a
+    nonblank reason, accepts all nonterminal states, and leaves Cancelled
+    unchanged. Done cannot be cancelled. Agent [decide] ownership is unchanged. *)
+val decide_operator_cancel :
+  operator_id:string -> task_status:Masc_domain.task_status -> now:string ->
+  reason:string option -> (decision, invalid) result
+
 (** A verdict decision plus the typed authority provenance the caller records.
     The authority is returned as a sum rather than reconstructed from a
     free-form string, so a system-LLM judge or HITL operator cannot be

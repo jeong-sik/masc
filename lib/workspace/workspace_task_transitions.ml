@@ -83,11 +83,14 @@ let transition_broadcast_content ~new_status ~task_id ~(stated_reason : string o
   | Masc_domain.Done _ -> None
 ;;
 
-let transition_task_outcome_r
+type transition_request =
+  | Agent_action of { agent_name : string; action : Masc_domain.task_action }
+  | Operator_cancel of { operator_id : string }
+
+let perform_task_transition
       config
-      ~agent_name
+      ~request
       ~task_id
-      ~action
       ?prepare_verification_request
       ?expected_version
       ?(notes = "")
@@ -96,6 +99,11 @@ let transition_task_outcome_r
       ()
   : transition_outcome Masc_domain.masc_result
   =
+  let agent_name, action, actor_kind =
+    match request with
+    | Agent_action { agent_name; action } -> agent_name, action, Agent
+    | Operator_cancel { operator_id } -> operator_id, Masc_domain.Cancel, Operator
+  in
   let module Transaction = struct
     type t =
       | Noop of transition_outcome
@@ -176,6 +184,11 @@ let transition_task_outcome_r
           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
           | Some task -> Ok task
         in
+        let projection_owner =
+          match request with
+          | Agent_action { agent_name; _ } -> Some agent_name
+          | Operator_cancel _ -> task_assignee_of_status task.task_status
+        in
         (* The workspace FSM owns lifecycle and identity invariants. Completion
            evidence is submitted for an out-of-band authority verdict. *)
         let* () =
@@ -224,7 +237,11 @@ let transition_task_outcome_r
         in
         let action_s = Masc_domain.task_action_to_string action in
         let* decision =
-          match
+          let decision = match request with
+          | Operator_cancel { operator_id } ->
+            Workspace_task_lifecycle.decide_operator_cancel
+              ~operator_id ~task_status:task.task_status ~now ~reason:stated_reason
+          | Agent_action _ ->
             Workspace_task_lifecycle.decide
               ~new_verification_id:(fun () -> Random_id.prefixed ~prefix:"vrf-" ~bytes:16)
               ~same_agent:(same_task_actor config agent_name)
@@ -235,7 +252,8 @@ let transition_task_outcome_r
               ~now
               ~notes
               ~reason:stated_reason
-          with
+          in
+          match decision with
           | Ok decision -> Ok decision
           | Error Workspace_task_lifecycle.Verification_submission_required ->
             Error
@@ -380,6 +398,19 @@ let transition_task_outcome_r
               ~new_status
               ~handoff_context
           in
+          (* An operator stops the Task, rather than authoring its owner's
+             handoff. Keep the owner's evidence and provenance intact. *)
+          let backlog_update =
+            match request with
+            | Agent_action _ -> backlog_update
+            | Operator_cancel _ ->
+              let backlog = backlog_update.backlog in
+              { backlog_update with backlog = { backlog with tasks =
+                  List.map (fun (updated : task) ->
+                    if String.equal updated.id task_id then
+                      { updated with handoff_context = task.handoff_context }
+                    else updated) backlog.tasks } }
+          in
           let backlog_update =
             match action with
             | Masc_domain.Claim | Masc_domain.Start -> backlog_update
@@ -455,22 +486,25 @@ let transition_task_outcome_r
                  commit so agents that cache the task don't emit stale broadcasts
                  referencing the old status. *)
               run_post_commit "task_cache" (fun () ->
-              Task_cache_invariant.clear_stale_agent_task config
-                ~cause:Task_cache_invariant.After_commit
-                ~agent_name ~task_id ~status:new_status
-                ~module_name:"transition_task_r");
+                Option.iter (fun agent_name ->
+                  Task_cache_invariant.clear_stale_agent_task config
+                    ~cause:Task_cache_invariant.After_commit
+                    ~agent_name ~task_id ~status:new_status
+                    ~module_name:"transition_task_r") projection_owner);
               run_post_commit "agent_state" (fun () ->
+              Option.iter (fun agent_name ->
               update_local_agent_state config ~agent_name (fun agent ->
                 match set_current with
                 | Some _ -> { agent with status = Busy; current_task = Some task_id }
                 | None ->
                   if agent.current_task = Some task_id
                   then { agent with status = Active; current_task = None }
-                  else agent));
+                  else agent)) projection_owner);
               run_post_commit "transition_log" (fun () ->
               log_event
                 config
                 (transition_log_event
+                   ~actor_kind
                    ~agent_name
                    ~task_id
                    ~from_status:task.task_status
@@ -529,6 +563,7 @@ let transition_task_outcome_r
                    ~payload:(`Assoc [ "task_id", `String task_id; ("notes", if notes = "" then `Null else `String notes) ])
                | Masc_domain.Cancelled _ ->
                  emit_task_activity
+                   ~actor_kind
                    config
                    ~agent_name
                    ~task_id
@@ -617,7 +652,11 @@ let transition_task_outcome_r
                   try
                     (Atomic.get Workspace_hooks.task_terminal_committed_fn)
                       config
-                      ~agent_name
+                      ~actor:(match request with
+                        | Agent_action { agent_name; _ } ->
+                          Workspace_hooks.Task_terminal_agent agent_name
+                        | Operator_cancel { operator_id } ->
+                          Workspace_hooks.Task_terminal_operator operator_id)
                       ~task_id
                   with
                   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -679,7 +718,10 @@ let transition_task_outcome_r
                | Masc_domain.Cancelled _ -> ());
               (match action with
                | Masc_domain.Cancel ->
-                 Workspace_task_cleanup.run_cancel_hooks config ~agent_name
+                 run_post_commit "cancel_hooks" (fun () ->
+                   Option.iter
+                     (fun agent_name -> Workspace_task_cleanup.run_cancel_hooks config ~agent_name)
+                     projection_owner)
                | Masc_domain.Done_action
                | Masc_domain.Release
                | Masc_domain.Claim
@@ -751,6 +793,18 @@ let transition_task_outcome_r
             verification_id
             (Printexc.to_string exn)));
     result
+;;
+
+let transition_task_outcome_r config ~agent_name ~task_id ~action
+    ?prepare_verification_request ?expected_version ?notes ?reason ?handoff_context () =
+  perform_task_transition config ~request:(Agent_action { agent_name; action })
+    ~task_id ?prepare_verification_request ?expected_version ?notes ?reason
+    ?handoff_context ()
+;;
+
+let cancel_task_as_operator_r config ~operator_id ~task_id ~reason ?expected_version () =
+  perform_task_transition config ~request:(Operator_cancel { operator_id })
+    ~task_id ~reason ?expected_version ()
 ;;
 
 let transition_task_r
@@ -976,7 +1030,11 @@ let commit_verdict_r
                 match
                   (Atomic.get Workspace_hooks.task_terminal_committed_fn)
                     config
-                    ~agent_name:producer
+                    ~actor:(match authority with
+                      | Masc_domain.Human_operator { operator_id } ->
+                        Workspace_hooks.Task_terminal_operator operator_id
+                      | Masc_domain.System_llm_agent _ ->
+                        Workspace_hooks.Task_terminal_system authority_actor)
                     ~task_id
                 with
                 | Workspace_hooks.Task_terminal_delivered -> ()

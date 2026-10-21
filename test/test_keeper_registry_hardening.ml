@@ -698,12 +698,12 @@ let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
                ^ Masc_domain.masc_error_to_string error))
        in
        terminal_with
-         (fun _config ~agent_name:_ ~task_id:_ ->
+         (fun _config ~actor:_ ~task_id:_ ->
             Workspace_hooks.Task_terminal_delivery_degraded
               { kind = "injected"; detail = "delivery unavailable" })
          "typed delivery degradation";
        terminal_with
-         (fun _config ~agent_name:_ ~task_id:_ ->
+         (fun _config ~actor:_ ~task_id:_ ->
             failwith "injected hook exception")
          "hook exception";
        let cancellation_title = "hook cancellation" in
@@ -726,7 +726,7 @@ let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
         | Ok _ -> ()
         | Error error -> fail (Masc_domain.masc_error_to_string error));
        Atomic.set Workspace_hooks.task_terminal_committed_fn
-         (fun _config ~agent_name:_ ~task_id:_ ->
+         (fun _config ~actor:_ ~task_id:_ ->
             raise
               (Eio.Cancel.Cancelled
                  (Failure "injected post-commit cancellation")));

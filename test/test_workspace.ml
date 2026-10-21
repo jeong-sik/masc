@@ -1438,8 +1438,8 @@ let with_verdict_projection_recorders f =
   let notifications = ref [] in
   let previous_terminal =
     Atomic.exchange Workspace_hooks.task_terminal_committed_fn
-      (fun _config ~agent_name ~task_id ->
-        terminal := (agent_name, task_id) :: !terminal;
+      (fun _config ~actor ~task_id ->
+        terminal := (actor, task_id) :: !terminal;
         Workspace_hooks.Task_terminal_delivered)
   in
   let previous_notification =
@@ -1486,10 +1486,12 @@ let test_approve_completion_credits_assignee () =
          still credit the producer. *)
       Alcotest.(check (list string))
         "approve completion credits assignee" [ test_agent_a ] !recorded;
-      Alcotest.(check (list (pair string string)))
-        "terminal reconciliation credits producer"
-        [ test_agent_a, "task-001" ]
-        !terminal;
+      Alcotest.(check bool)
+        "terminal reconciliation retains operator provenance"
+        true
+        (match !terminal with
+         | [ Workspace_hooks.Task_terminal_operator "operator-test", "task-001" ] -> true
+         | _ -> false);
       Alcotest.(check int)
         "authority verdict notification emitted once"
         1
@@ -1705,6 +1707,106 @@ let test_cancel_takes_its_reason_from_the_handoff_summary () =
       (cancelled_reason config "task-001");
     Alcotest.(check bool) "the summary is what the message log announces" true
       (message_log_has config "Cancelled task-001 - the premise this rests on is gone"))
+
+let operator_cancel_body config =
+  [ "task_id", `String "task-001"
+  ; "reason", `String "wrong scope"
+  ; "expected_workspace", `Assoc
+      [ "base_path", `String (Unix.realpath config.Workspace.base_path)
+      ; "masc_root", `String (Unix.realpath (Workspace.masc_dir config)) ] ]
+
+let test_operator_cancel_clears_owner_and_is_idempotent () =
+  with_test_env (fun config ->
+    ignore (Workspace.add_task config ~title:"Operator cancel" ~priority:1 ~description:"");
+    ignore (Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] ());
+    ignore (Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001");
+    let require_ok = function
+      | Ok value -> value
+      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+    in
+    ignore (require_ok (Workspace.transition_task_r config ~agent_name:test_agent_a
+      ~task_id:"task-001" ~action:Masc_domain.Start ()));
+    (* An ordinary different agent still cannot cancel this Task. *)
+    Alcotest.(check bool) "agent ownership is preserved" true
+      (Result.is_error (Workspace.transition_task_r config ~agent_name:"masc-tui"
+        ~task_id:"task-001" ~action:Masc_domain.Cancel ~reason:"wrong scope" ()));
+    let body = `Assoc (operator_cancel_body config) in
+    let commit () =
+      Server_routes_http_routes_verification.For_testing.commit_operator_cancel_json
+        ~config ~operator_id:"operator-test" body |> require_ok
+    in
+    let cancelled_workers = ref [] in
+    let previous_hook = Atomic.exchange Workspace_hooks.hebbian_on_task_cancelled_fn
+      (fun _config ~agent_name ~active_agents:_ ->
+        cancelled_workers := agent_name :: !cancelled_workers) in
+    let outcome = Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.hebbian_on_task_cancelled_fn previous_hook)
+      commit in
+    Alcotest.(check (list string)) "worker cleanup targets the former owner"
+      [test_agent_a] !cancelled_workers;
+    Alcotest.(check bool) "cancellation committed" false outcome.Workspace.noop;
+    (match find_task config "task-001" with
+     | Some { task_status = Masc_domain.Cancelled { cancelled_by; reason; _ }; _ } ->
+       Alcotest.(check string) "actual operator" "operator-test" cancelled_by;
+       Alcotest.(check (option string)) "operator reason" (Some "wrong scope") reason
+     | Some _ | None -> Alcotest.fail "Task was not cancelled");
+    let owner_path = Filename.concat (Workspace.agents_dir config)
+      (Workspace.safe_filename test_agent_a ^ ".json") in
+    (match Workspace.read_json config owner_path |> Masc_domain.agent_of_yojson with
+     | Ok owner -> Alcotest.(check (option string)) "former owner released" None owner.current_task
+     | Error message -> Alcotest.fail message);
+    let committed = Workspace.read_backlog config in
+    let retry = commit () in
+    Alcotest.(check bool) "retry is a no-op" true retry.Workspace.noop;
+    Alcotest.(check int) "retry does not write" committed.version
+      (Workspace.read_backlog config).version)
+
+let test_operator_cancel_refuses_invalid_requests_without_write () =
+  with_test_env (fun config ->
+    ignore (Workspace.add_task config ~title:"Keep me" ~priority:1 ~description:"");
+    let fields = operator_cancel_body config in
+    let before = Workspace.read_backlog config in
+    List.iter (fun fields ->
+      let result = Server_routes_http_routes_verification.For_testing.commit_operator_cancel_json
+        ~config ~operator_id:"operator-test" (`Assoc fields) in
+      Alcotest.(check bool) "request refused" true (Result.is_error result);
+      Alcotest.(check int) "refusal has no write" before.version
+        (Workspace.read_backlog config).version)
+      [ List.remove_assoc "expected_workspace" fields
+      ; ("reason", `String "   ") :: List.remove_assoc "reason" fields
+      ; ("operator_id", `String test_agent_a) :: fields
+      ; ("agent_name", `String test_agent_a) :: fields
+      ; ("task_id", `String "task-002") :: fields
+      ; ("expected_workspace", `Assoc [ "base_path", `String "/different";
+           "masc_root", `String "/different/.masc" ]) ::
+          List.remove_assoc "expected_workspace" fields ])
+
+let test_operator_cancel_pending_submission_refuses_late_verdict () =
+  with_test_env (fun config ->
+    ignore (Workspace.add_task config ~title:"Withdraw evidence" ~priority:1 ~description:"");
+    ignore (Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] ());
+    ignore (Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001");
+    (match Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+      ~action:Masc_domain.Submit_for_verification ~notes:"evidence"
+      ~handoff_context:{ summary = "owner evidence"; reason = None; next_step = None;
+        failure_mode = None; reclaim_policy = None; evidence_refs = [];
+        updated_at = Some "2026-10-21T00:00:00Z"; updated_by = Some test_agent_a }
+      ~prepare_verification_request:(fun ~task ~assignee ~verification_id ~claim ->
+        Verification_protocol.create_submit_request ~config ~task ~assignee ~verification_id ~claim) () with
+     | Ok _ -> () | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
+    let verification_id = verification_id_for_task config "task-001" in
+    let before = find_task config "task-001" in
+    (match Workspace.cancel_task_as_operator_r config ~operator_id:"operator-test"
+      ~task_id:"task-001" ~reason:"wrong scope" () with
+     | Ok _ -> () | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
+    Alcotest.(check bool) "owner handoff evidence is preserved" true
+      (Option.map (fun (task : Masc_domain.task) -> task.handoff_context) before
+       = Option.map (fun (task : Masc_domain.task) -> task.handoff_context)
+           (find_task config "task-001"));
+    Alcotest.(check bool) "late verdict cannot undo cancellation" true
+      (Result.is_error (Workspace.commit_verdict_r config ~task_id:"task-001" ~verification_id
+        ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
+        ~verdict:Masc_domain.Verdict_approved ())))
 
 let test_operator_verdict_boundary_is_reachable () =
   with_test_env (fun config ->
@@ -3464,6 +3566,12 @@ let () =
     ];
 
     "cancel", [
+      Alcotest.test_case "operator cancel clears owner and is idempotent" `Quick
+        test_operator_cancel_clears_owner_and_is_idempotent;
+      Alcotest.test_case "operator cancel rejects invalid requests without writes" `Quick
+        test_operator_cancel_refuses_invalid_requests_without_write;
+      Alcotest.test_case "operator cancel pending evidence refuses late verdict" `Quick
+        test_operator_cancel_pending_submission_refuses_late_verdict;
       Alcotest.test_case "holder cancel ends the task" `Quick
         test_holder_cancel_ends_the_task;
       Alcotest.test_case "holder cancel of a pending submission ends the task" `Quick

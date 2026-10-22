@@ -287,13 +287,18 @@ let browser_lane_check ~configuration base_path =
   let host = Browser_bidi_host_status.observe ~base_path ~configuration in
   let observation = host.lane in
   let message = Browser_lane_launcher.message observation in
+  let report condition = [check Browser_lane condition message [Inspect_configuration]] in
+  (* No browser Add-on, or one switched off, is a step the operator has not
+     taken yet. One declared on that the server does not run, or a lane the
+     launcher misdescribes, is broken. An Add-on this server cannot read
+     leaves the lane unconfirmed, as no server does. *)
   (match Browser_lane_launcher.verdict observation with
    | Browser_lane_launcher.Absent -> []
-   | Browser_lane_launcher.Connected | Browser_lane_launcher.Aligned ->
-     [check Browser_lane Satisfied message [Inspect_configuration]]
-   | Browser_lane_launcher.Unverified ->
-     [check Browser_lane Needs_verification message [Inspect_configuration]]
-   | Browser_lane_launcher.Misconfigured -> [check Browser_lane Invalid message [Inspect_configuration]])
+   | Browser_lane_launcher.Connected | Browser_lane_launcher.Aligned -> report Satisfied
+   | Browser_lane_launcher.Addon_missing | Browser_lane_launcher.Addon_off -> report Needs_setup
+   | Browser_lane_launcher.Addon_unreadable | Browser_lane_launcher.Unverified ->
+     report Needs_verification
+   | Browser_lane_launcher.Addon_not_running | Browser_lane_launcher.Misconfigured -> report Invalid)
   @ browser_bidi_host_check host
 
 let inspected ~sandbox ~browser ~base_path =

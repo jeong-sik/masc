@@ -310,7 +310,8 @@ does next:
     That is where hover and drag are served.
   - `needs_verification`: a host runs and that is all that is known. It is
     still connecting, the check runs outside a server as `masc doctor` does,
-    or the answering server does not list the host's client.
+    or the answering server does not list the host's client: its browser
+    Add-on lists another client, lists none, or cannot be read.
   - `needs_setup`: none runs.
   - `invalid`: the record or its lock cannot be read.
 

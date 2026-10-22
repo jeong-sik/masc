@@ -105,9 +105,8 @@ does; otherwise it retries where it is. `MASC_HTTP_BASE_URL` or
 A result is sent again only when its request may not have reached the server;
 a result the server answered with any status is logged and the host returns to
 polling. The command also writes `launch.json` beside the launcher with the
-launcher's SHA-256, which the onboarding check and the browser tools read to
-say where the host takes its address from; a launcher edited afterwards no
-longer matches it. If a host was installed before `launch.json` existed, its
+launcher's SHA-256, which the onboarding check reads to say where the host
+takes its address from; a launcher edited afterwards no longer matches it. If a host was installed before `launch.json` existed, its
 launcher may fix a port: run the command again for that workspace and reload
 the extension. To point a running host at a server on another port, save that
 port with `masc workspace-connection --port PORT --save` and reload the

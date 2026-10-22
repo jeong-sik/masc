@@ -29,8 +29,9 @@ type observation =
   ; keeper : keeper
   }
 
-(** Reads the manual host record and launcher, then asks this process's server.
-    Reading can let other fibers
+(** Reads the manual host record and launcher, then asks this process's server,
+    which in a serving process reads the browser Add-on's published clients
+    ({!Browser_lane_launcher.current_server}). Reading can let other fibers
     run, so the server is asked last: a host that attached during the reads
     is in the list the observation holds. [configuration] is the one this
     process loaded, or the workspace's [runtime.toml] read for it. *)
@@ -46,8 +47,9 @@ type verdict =
           connection, so hover and drag are served there. *)
   | Host_unverified
       (** A host's status is unverified: its record is missing while its lock
-          is held, it is still connecting, no server is observed here, or the
-          observed one does not list the client its record names. *)
+          is held, it is still connecting, no server is observed here, the
+          observed one does not read the browser Add-on or the Add-on lists no
+          host, or the Add-on does not list the client its record names. *)
   | Host_not_running
       (** None runs: the last one ended or died, or none has run where a
           lane is installed. *)

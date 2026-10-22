@@ -56,14 +56,16 @@ type row = { id : string; label : string; purpose : string;
              selection : selection; state : state }
 type t
 val snapshot : config:Workspace.config -> t
+
+(** The browser Add-on reading the browser rows of {!snapshot} are made from,
+    for the browser lane check. It reads the Lane directory off the server
+    fiber and the Add-on's cached observation on the owner domain. *)
+val browser_presence : config:Workspace.config -> Browser_addon_presence.t
 val to_json : t -> Yojson.Safe.t
 module For_testing : sig
   val machine_publication :
     (Lane_addon_runtime.export_observation option, Lane_addon_runtime.export_refusal) result -> machine_publication
-  val browser_reading : declarations:Lane_addon_config.declaration list ->
-    (Lane_addon_runtime.export_observation option, Lane_addon_runtime.export_refusal) result ->
-    Browser_addon_observation.published browser_reading
-  val browser_state : activity:Browser_lane.activity -> Browser_addon_observation.published browser_reading ->
+  val browser_state : activity:Browser_lane.activity -> Browser_addon_presence.t ->
     Browser_lane.Lane_name.t -> state
   val package_rows : declarations:Lane_addon_config.snapshot ->
     instances:Lane_addon_runtime.inventory_instance list ->

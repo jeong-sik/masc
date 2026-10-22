@@ -1,8 +1,9 @@
 (** Where an installed browser-lane host sends its polls, beside the port the
     workspace connection names and what this process observes of the lane it
-    serves. It reads files and this process's lane state only. [masc doctor]
-    and the dashboard's onboarding check answer from this one observation and
-    its {!verdict}. *)
+    serves. It reads files and, in a serving process, the browser Add-on's
+    last published observation through the reader the server installed.
+    [masc doctor] and the dashboard's onboarding check answer from this one
+    observation and its {!verdict}. *)
 
 (** What a lane installation left under [<base-path>/.masc/browser-lane/host]:
     the [launch] script Firefox runs and the [launch.json] declaration the
@@ -31,16 +32,44 @@ type launcher =
           server still answers the lane, and moves only to an address that
           answers. *)
 
+(** Why the browser Add-on lists no host for this server. *)
+type unlisted =
+  | No_browser_addon  (** The workspace declares no browser Add-on. *)
+  | Browser_addon_off  (** A browser Add-on is declared and switched off. *)
+  | Browser_addon_not_running
+      (** One is declared on and the server runs no installation of it. *)
+  | Browser_addon_unreadable of string
+      (** Its observation, or the declarations, could not be read; why, in
+          words any caller may be shown: {!message} and the BiDi host
+          paragraph that carries it reach a read-state route. *)
+
+(** Which browser hosts poll this server. Browser hosts register with the
+    browser Add-on's worker, not with the server process, so this is what
+    the Add-on last published. *)
+type polling =
+  | Polling of Browser_lane.client_info list
+      (** The hosts whose poll lease is current, as the Add-on published them. *)
+  | Unlisted of unlisted
+  | Not_observed
+      (** This serving process has no browser Add-on reader installed, so
+          which hosts poll it is not observed. *)
+
 (** What this process observes of the lane it serves. *)
 type server =
   | Not_serving
       (** No bound listener is known in this process: [masc doctor], or a
           server before its listener binds. Which port a host should reach
           is not observed here. *)
-  | Serving of { port : int; polling : Browser_lane.client_info list }
-      (** The port this server's listener bound and the browser hosts whose
-          poll lease on it is current. *)
+  | Serving of { port : int; polling : polling }
+      (** The port this server's listener bound and which browser hosts poll it. *)
 
+(** The server installs how it reads the browser Add-on, as it installs the
+    port it bound ({!Browser_lane.install_serving_port}). [None] removes it. *)
+val install_browser_addon_reader : (unit -> polling) option -> unit
+
+(** [Not_serving] while no bound port is installed; the reader is not asked
+    then. With a bound port it asks the installed reader, and without one it
+    answers [Not_observed]. *)
 val current_server : unit -> server
 
 type t =
@@ -56,12 +85,22 @@ val observe : base_path:string -> server:server -> t
 type verdict =
   | Absent  (** No launcher is installed and no browser host polls here. *)
   | Connected  (** A browser host polls this server now. *)
+  | Addon_missing
+      (** A launcher is installed, no host polls, and the workspace declares
+          no browser Add-on, so no host can register with this server. *)
+  | Addon_off  (** The same with the browser Add-on declared and switched off. *)
+  | Addon_not_running
+      (** The same with the browser Add-on declared on and not run by this server. *)
+  | Addon_unreadable
+      (** A launcher is installed, and this server cannot read whether a host
+          polls it. *)
   | Aligned
       (** No host polls, and the declared launcher's host would start on the
           workspace port, which is the port this server bound. *)
   | Unverified
       (** The declared launcher follows a readable workspace port, and no
-          server in this process says which port a host should reach. *)
+          server in this process says which port a host should reach, or the
+          server installed no browser Add-on reader. *)
   | Misconfigured
       (** No host polls here, and the launcher is undeclared, unreadable or
           declared for other contents, the workspace port cannot be read, or
@@ -71,6 +110,11 @@ val verdict : t -> verdict
 
 (** One operator sentence naming the cause and the change that resolves it. *)
 val message : t -> string
+
+(** What the operator is told when the browser Add-on lists no host for this
+    server, with what they do about it. {!message} says it for the verdicts
+    it decides. *)
+val unlisted_message : base_path:string -> unlisted -> string
 
 (** Where this workspace's [launch] script is, or will be once the lane is
     installed. *)

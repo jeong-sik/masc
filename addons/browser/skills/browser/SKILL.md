@@ -35,14 +35,37 @@ permission to act. Preserve its documentId/nodeId and perform the normal guarded
 interaction only when the user's task authorizes it. A truncated scene does not
 establish that every match was found. If locate is disabled or its model route
 is unavailable, inspect that configuration rather than moving the tab to another
-browser. Act/extract still require Stagehand and are not supplied by this worker.
+browser. Model-backed act/extract require the observed `lane = "stagehand"`
+and this installation's selected `stagehand` Exact Output. They do not move an
+existing Gecko or live tab to Chrome. Availability depends on the configured
+backend and host model route. These model commands are separate from native
+`page.act` inputs.
 
 Read the entire result before deciding the next action. `isError`, private
 refusal disposition and backend partial-effect payloads have distinct meanings.
 After a lost reply or unknown outcome, observe the original page before further
 input. Never repeat a click, drag or tab creation merely because its reply failed.
 
-Available work depends on the connected adapter. Native hosts connect through
-the authenticated workspace HTTP bridge. Owned-browser startup and file-transfer
-brokers are still being integrated. Upload paths and download listing are currently refused by this
-tool before dispatch. This package is not yet an operator browser replacement.
+Available work depends on the connected adapter and attached installation.
+Native hosts connect through the authenticated workspace HTTP bridge; configured
+owned Firefox, Gecko and Chrome backends start inside the attached worker.
+Inspect inventory and configuration issues before choosing a connection.
+
+Owned Gecko uploads use the public BrowserAct tool with the observed
+`lane = "automation"` and `tabId`. The host must first authorize and snapshot
+the requested files through the Keeper's file-read context. A raw path sent to
+`browser_command` is not that authority. Never invent an `uploadId` or reuse a
+grant from another call.
+
+For owned Gecko downloads, read `page.downloads` with the observed automation
+lane and tab ID, or use BrowserRead with `mode = "downloads"`. Read completed
+files only when their row contains a finalized artifact; invoke its returned
+`keeper_artifact_read` reader and arguments. Completion without that reference
+does not prove that bytes were retained. Pending or failed downloads are not
+completed artifacts; worker paths are not file-read grants.
+
+Input validation, successful-output validation and model outputs are selected
+independently by the installation. Turning these optional middleware off does
+not change caller, upload, artifact, document, viewport or cleanup authority.
+Source support and advertised capabilities do not prove that the current page
+accepted an action. Confirm its result on the original connection.

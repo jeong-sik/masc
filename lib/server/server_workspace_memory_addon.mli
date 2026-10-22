@@ -68,6 +68,21 @@ val narrow : config:Workspace.config -> request_id:string -> (successor_result, 
     permission to mint another child. No worker RPC, domain write or automatic
     scheduling runs here. Briefing preserves its original prepared state.
     Caller holds the workspace process lease throughout, including retries. *)
+type observation = {
+  original : Lane_addon_tool_request_owner.retained;
+  registration : Workspace_memory_observation_receipt.registration;
+  completion : Workspace_memory_observation_receipt.completion option;
+}
+val prepare_observation : config:Workspace.config -> request_id:string ->
+  (observation, error) Stdlib.result
+(** Fresh physical capture/ancestry restore precedes immutable observer intent
+    preparation. Reuse and revalidate existing pending/acknowledged receipts;
+    obtain time only for a new intent. Existing domain progress can finish
+    while observer registration remains pending. No registry read/write, model,
+    worker, domain save, successor, live admission or scheduler runs here.
+    Available while Off for an existing owner; it cannot create a new request.
+    Uncertain publication requires fresh reload. Caller holds the original
+    workspace process lease and serializes the complete operation. *)
 module For_testing : sig
   val resume : store:Lane_addon_store.t -> base_path:string -> request_id:string ->
     call:(arguments:Yojson.Safe.t -> (Mcp_protocol.Mcp_types.tool_result, error) Stdlib.result) ->
@@ -84,4 +99,8 @@ module For_testing : sig
     (successor_result, error) Stdlib.result
   (** Same actual strict parent/child journal and ancestry; no substituted
       publication edge or worker. *)
+  val prepare_observation : store:Lane_addon_store.t -> base_path:string ->
+    request_id:string -> now:(unit -> float) -> (observation, error) Stdlib.result
+  (** Same real journal and strict restore; only the first observer clock edge
+      is supplied. This is not registry delivery or measured provider time. *)
 end

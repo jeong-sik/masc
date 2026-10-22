@@ -26,9 +26,12 @@ type work = Classification of {ledger : Ledger.t; batch : Request.batch} | Brief
 type t = {id : Request_id.t; predecessor : Request_id.t option; workspace : workspace; destination : destination;
   prompt : Prompt_registry.prompt_resolution; work : work; input_text : string}
 let scope = "workspace-curator"
+let package_id = "workspace-curator"
+let tool = "curate"
 let request_id t = t.id
 let predecessor t = t.predecessor
 let destination t = t.destination
+let base_path t = t.workspace.path
 let work t = t.work
 let input_text t = t.input_text
 let input = function Classification {batch;_} -> batch.Request.input | Briefing batch -> Brief.input batch
@@ -247,3 +250,21 @@ let validate_output t raw = match t.work with
   | Briefing batch ->
     let* text = Brief.decode_output raw in
     Brief.accept batch ~text |> Result.map (fun state -> Briefing_commit state)
+let commit_plan t ~judgment =
+  let* final = Exact.final_of_json ~schema:(output_schema t) judgment in
+  let* expected = match final with
+    | Exact.Call_final (Exact.Answered {output;_}) -> validate_output t (Exact.checked_json output)
+    | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
+    | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused ->
+      Error "Domain commit requires the original answered judgment" in
+  let domain kind state = `Assoc ["kind",`String kind;"state",state] in
+  let* change = match t.work,expected with
+    | Classification {ledger;_},Classification_commit after ->
+      Ok {Progress.before=domain "classification" (Ledger.to_json ledger);
+        after=domain "classification" (Ledger.to_json after)}
+    | Briefing batch,Briefing_commit after ->
+      Ok {Progress.before=domain "briefing" (Brief.to_json (Brief.prepared_state batch));
+        after=domain "briefing" (Brief.to_json after)}
+    | Classification _,Briefing_commit _ | Briefing _,Classification_commit _ ->
+      Error "Original commit domain differs" in
+  Ok (expected,change)

@@ -116,7 +116,32 @@ let scenario () = Eio_main.run (fun env ->
       (Lane_addon_tool_result.failure result=(Tool_result.Workflow_rejection,Tool_result.Proven_post_effect));
     let no_more=send (W.Poll {client;window_sec=0.001}) in
     check bool "anonymous and partial calls have no hidden replay" true
-      (match no_more with W.Poll_result {command=None;_} -> true | _ -> false))))
+      (match no_more with W.Poll_result {command=None;_} -> true | _ -> false);
+    List.iter (fun (label,phase,expected) ->
+      let read=B.Page_read {tab_id=Some 7;max_chars=Some 12000} in
+      let pending=Eio.Fiber.fork_promise ~sw (fun () ->
+        Tool.invoke ~owner ~principal:(Context.Keeper "browser-tester") (arguments read)) in
+      let issued=match send (W.Poll {client;window_sec=2.}) with
+        | W.Poll_result {command=Some command;_} -> command
+        | _ -> fail "expected one dispatched browser read" in
+      let payload=`Assoc (["ok",`Bool false;"error",`String label;
+        "data",`Assoc ["retained_evidence",`Bool true]] @
+        Option.to_list (Option.map (fun value -> "effectPhase",`String value) phase)) in
+      check bool (label ^ ": original read receipt delivered") true
+        (send (W.Deliver {client_id;id=issued.id;payload})=W.Receipt);
+      let result=Eio.Promise.await_exn pending in
+      check (option bool) (label ^ ": read remains failed") (Some true) result.is_error;
+      check bool (label ^ ": original read payload retained") true
+        (Option.exists (fun data -> Yojson.Safe.Util.(data |> member "answer" |> member "payload")=payload)
+          result.structured_content);
+      check bool (label ^ ": read retains receipt effect disposition") true
+        (Lane_addon_tool_result.failure result=(Tool_result.Workflow_rejection,expected)))
+      ["partial read",Some "partial",Tool_result.Proven_post_effect;
+       "uncertain read",None,Tool_result.Effect_outcome_unknown;
+       "unstarted read",Some "not_started",Tool_result.Proven_pre_effect];
+    check bool "failed reads are not silently replayed" true
+      (match send (W.Poll {client;window_sec=0.001}) with
+       | W.Poll_result {command=None;_} -> true | _ -> false))))
 let ()=run "browser addon exported tool" ["contract",[
   test_case "selected hooks accept rich arguments and preserve closed boundaries" `Quick hook_contract];
   "execution",[test_case "caller running observation and partial receipt" `Quick scenario]]

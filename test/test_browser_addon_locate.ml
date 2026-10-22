@@ -80,8 +80,8 @@ let scenario manifest =
           `Assoc ["nodeId",`String node_id;"description",`String "The menu control"]]]])) |> ok in
       let failed pending=let (result:Mcp_protocol.Mcp_types.tool_result)=Eio.Promise.await_exn pending in
         check bool "stale or unobserved model selection is refused" true (result.is_error=Some true);
-        check bool "read-only failure cannot claim browser input" true
-          (snd (Lane_addon_tool_result.failure result)=Tool_result.Proven_pre_effect) in
+        check bool "locate refusal retains its original effect uncertainty" true
+          (snd (Lane_addon_tool_result.failure result)=Tool_result.Effect_outcome_unknown) in
       let pending,id=start () in
       (* The locate command is now waiting on its model. That wait must not hold
          the session lock or the active count: an idle document observation

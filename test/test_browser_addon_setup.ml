@@ -27,10 +27,14 @@ let with_workspace ?(config = true) f =
       remove dir)
     (fun () ->
        let base = Unix.realpath dir in
+       (* A config root is a directory holding runtime.toml, prompts/ or
+          keepers/ (Config_dir_resolver); an empty one is not a workspace. *)
        if config
        then (
          Unix.mkdir (Filename.concat base ".masc") 0o700;
-         Unix.mkdir (Filename.concat base ".masc/config") 0o700);
+         Unix.mkdir (Filename.concat base ".masc/config") 0o700;
+         Out_channel.with_open_bin (Filename.concat base ".masc/config/runtime.toml")
+           (fun out -> output_string out "# scratch workspace\n"));
        f base)
 
 let read path = In_channel.with_open_bin path In_channel.input_all

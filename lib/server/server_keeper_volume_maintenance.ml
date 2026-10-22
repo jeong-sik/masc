@@ -100,7 +100,12 @@ let report ~keeper_name ~previous (observation : Watch.observation) =
          "keeper volume filesystem clean again keeper=%s volume=%s"
          keeper_name
          observation.volume
-     | Some { Watch.result = Ok Fs.Clean | Error (Watch.Inspect_refused _ | Watch.Image_unreadable _); _ }
+     | Some
+         { Watch.result =
+             ( Ok Fs.Clean
+             | Error (Watch.Inspect_refused _ | Watch.Inspect_unparsed _ | Watch.Image_unreadable _) )
+         ; _
+         }
      | None -> ())
   | Error failure ->
     (match previous with
@@ -108,7 +113,7 @@ let report ~keeper_name ~previous (observation : Watch.observation) =
      | Some
          { Watch.result =
              ( Ok (Fs.Clean | Fs.Errors_recorded _)
-             | Error (Watch.Inspect_refused _ | Watch.Image_unreadable _) )
+             | Error (Watch.Inspect_refused _ | Watch.Inspect_unparsed _ | Watch.Image_unreadable _) )
          ; _
          }
      | None ->
@@ -117,6 +122,22 @@ let report ~keeper_name ~previous (observation : Watch.observation) =
          keeper_name
          observation.volume
          (Watch.failure_to_string failure))
+;;
+
+let observe_volume ~keeper_name volume =
+  try
+    let previous, observation =
+      Watch.observe ~now:(Time_compat.now ()) ~inspect ~read_image ~volume
+    in
+    report ~keeper_name ~previous observation
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Server.warn
+      "keeper volume filesystem sweep keeper=%s volume=%s: %s"
+      keeper_name
+      volume
+      (Printexc.to_string exn)
 ;;
 
 let sweep ~(config : Workspace.config) () =
@@ -128,22 +149,12 @@ let sweep ~(config : Workspace.config) () =
          match projection.meta with
          | None -> ()
          | Some meta ->
-           List.iter
-             (fun volume ->
-                try
-                  let previous, observation =
-                    Watch.observe ~now:(Time_compat.now ()) ~inspect ~read_image ~volume
-                  in
-                  report ~keeper_name:meta.name ~previous observation
-                with
-                | Eio.Cancel.Cancelled _ as exn -> raise exn
-                | exn ->
-                  Log.Server.warn
-                    "keeper volume filesystem sweep keeper=%s volume=%s: %s"
-                    meta.name
-                    volume
-                    (Printexc.to_string exn))
-             (Watch.volumes_of_meta meta))
+           (match Watch.volumes_of_durable_meta ~base_path:config.base_path meta with
+            | Ok volumes -> List.iter (observe_volume ~keeper_name:meta.name) volumes
+            | Error detail ->
+              (* Keeper status reports the invalid profile; until it loads
+                 there is no volume to name. *)
+              Log.Server.debug "keeper volume filesystem sweep keeper=%s: %s" meta.name detail))
       projections
 ;;
 

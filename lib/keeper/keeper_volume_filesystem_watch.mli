@@ -7,7 +7,8 @@
 
 type failure =
   | Inspect_refused of string
-      (** [container volume inspect] failed or did not name an ext4 image. *)
+      (** [container volume inspect] failed or printed no JSON. *)
+  | Inspect_unparsed of Keeper_volume_filesystem.inspect_failure
   | Image_unreadable of Keeper_volume_filesystem.read_failure
 
 type observation =
@@ -20,7 +21,15 @@ type observation =
 val volumes_of_meta : Keeper_meta_contract.keeper_meta -> string list
 (** The volumes an image-backed Keeper owns: the work and build volumes of a
     [Micro_vm] Keeper on [Apple_container]. Other profiles and backends keep
-    their tree in host directories, which have no superblock to read. *)
+    their tree in host directories, which have no superblock to read.
+    [meta] must be effective: see {!volumes_of_durable_meta}. *)
+
+val volumes_of_durable_meta :
+  base_path:string -> Keeper_meta_contract.keeper_meta -> (string list, string) result
+(** {!volumes_of_meta} after the Keeper's TOML is overlaid. Durable meta (a
+    persisted snapshot, the Owner projection) carries a placeholder
+    [sandbox_profile], so {!volumes_of_meta} on it finds no volume. [Error]
+    is an invalid Keeper profile. *)
 
 val observe :
   now:float ->

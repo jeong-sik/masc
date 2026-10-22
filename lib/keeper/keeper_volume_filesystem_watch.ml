@@ -3,6 +3,7 @@ module Volume_map = Map.Make (String)
 
 type failure =
   | Inspect_refused of string
+  | Inspect_unparsed of Fs.inspect_failure
   | Image_unreadable of Fs.read_failure
 
 type observation =
@@ -32,6 +33,10 @@ let volumes_of_meta (meta : Keeper_meta_contract.keeper_meta) =
           | Keeper_microvm_backend.Nerdctl_kata ) ) ) -> []
 ;;
 
+let volumes_of_durable_meta ~base_path meta =
+  Result.map volumes_of_meta (Keeper_meta_contract.effective_meta_result ~base_path meta)
+;;
+
 (* Only the map changes inside the CAS: a retry re-runs this, so the read and
    the clock stay outside. *)
 let rec record observation =
@@ -49,18 +54,25 @@ let latest ~volume = Volume_map.find_opt volume (Atomic.get latest_by_volume)
 let image_source ~inspect ~volume =
   match latest ~volume with
   | Some { source = Some source; result = Ok (Fs.Clean | Fs.Errors_recorded _); _ } -> Ok source
-  | Some { source = Some _; result = Error (Inspect_refused _ | Image_unreadable _); _ }
+  | Some
+      { source = Some _
+      ; result = Error (Inspect_refused _ | Inspect_unparsed _ | Image_unreadable _)
+      ; _
+      }
   | Some { source = None; _ }
   | None ->
     (match inspect ~volume with
-     | Error detail -> Error detail
-     | Ok json -> Result.map (fun (image : Fs.image) -> image.source) (Fs.image_of_inspect json))
+     | Error detail -> Error (Inspect_refused detail)
+     | Ok json ->
+       (match Fs.image_of_inspect json with
+        | Ok image -> Ok image.source
+        | Error failure -> Error (Inspect_unparsed failure)))
 ;;
 
 let observe ~now ~inspect ~read_image ~volume =
   let source, result =
     match image_source ~inspect ~volume with
-    | Error detail -> None, Error (Inspect_refused detail)
+    | Error failure -> None, Error failure
     | Ok source ->
       Some source, Result.map_error (fun failure -> Image_unreadable failure) (read_image ~path:source)
   in
@@ -71,7 +83,7 @@ let observe ~now ~inspect ~read_image ~volume =
 let damaged (observation : observation) =
   match observation.result with
   | Ok (Fs.Errors_recorded _) -> true
-  | Ok Fs.Clean | Error (Inspect_refused _ | Image_unreadable _) -> false
+  | Ok Fs.Clean | Error (Inspect_refused _ | Inspect_unparsed _ | Image_unreadable _) -> false
 ;;
 
 let damage_appeared ~previous current =
@@ -80,6 +92,7 @@ let damage_appeared ~previous current =
 
 let failure_to_string = function
   | Inspect_refused detail -> "volume inspect refused: " ^ detail
+  | Inspect_unparsed failure -> Fs.inspect_failure_to_string failure
   | Image_unreadable failure -> Fs.read_failure_to_string failure
 ;;
 
@@ -91,7 +104,7 @@ let observation_to_yojson observation =
     ; ( "filesystem"
       , match observation.result with
         | Ok state -> Fs.state_to_yojson state
-        | Error (Inspect_refused _ | Image_unreadable _) -> `Null )
+        | Error (Inspect_refused _ | Inspect_unparsed _ | Image_unreadable _) -> `Null )
     ; ( "observation_failed"
       , match observation.result with
         | Ok (Fs.Clean | Fs.Errors_recorded _) -> `Null

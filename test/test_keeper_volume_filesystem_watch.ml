@@ -87,6 +87,18 @@ let test_damage_appears_once () =
   check bool "damaged again after a clean read" true (appeared ())
 ;;
 
+let test_an_unparsed_inspect_is_typed () =
+  let volume = "watch-inspect-unparsed" in
+  let inspect ~volume:_ = Ok (`List []) in
+  let read_image ~path:_ = fail "no image to read" in
+  let _, observation = observe ~inspect ~read_image ~volume in
+  check
+    bool
+    "no entry"
+    true
+    (observation.Watch.result = Error (Watch.Inspect_unparsed (Fs.Entries { count = 0 })))
+;;
+
 let test_latest_is_what_status_reads () =
   let volume = "watch-latest" in
   let _, inspect, read_image = fakes [ Ok damaged ] in
@@ -104,6 +116,7 @@ let () =
       , [ test_case "image path inspected once" `Quick test_the_image_path_is_inspected_once
         ; test_case "failed read inspects again" `Quick test_a_failed_read_inspects_again
         ; test_case "inspect failure kept" `Quick test_an_inspect_failure_is_kept_as_such
+        ; test_case "unparsed inspect typed" `Quick test_an_unparsed_inspect_is_typed
         ; test_case "damage appears once" `Quick test_damage_appears_once
         ; test_case "latest is what status reads" `Quick test_latest_is_what_status_reads
         ] )

@@ -12,6 +12,7 @@ type t = {
   mutable stagehand : cleanup option;
   mutable models : Browser_addon_models.t option;
   mutable uploads : Browser_addon_uploads.t option;
+  mutable downloads : Browser_addon_downloads.t option;
   retired : unit Eio.Promise.t;
   retire : unit Eio.Promise.u;
 }
@@ -25,7 +26,7 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;models=None;uploads=None;retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;models=None;uploads=None;downloads=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
         | Serving,B.Lane_name.Automation -> if Option.is_some t.automation then B.Enabled else B.Disabled
@@ -62,6 +63,18 @@ let admitted_uploads t incarnation = with_admission t incarnation (fun () ->
 let cleanup_uploads t = match t.uploads with
   | None -> Ok ()
   | Some uploads -> Eio_unix.run_in_systhread (fun () -> Browser_addon_uploads.cleanup uploads)
+let attach_downloads t downloads =
+  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.downloads with
+    | Retired,_ -> Error "browser owner is retired"
+    | Serving,Some _ -> Error "browser download broker is already attached"
+    | Serving,None -> t.downloads<-Some downloads;Ok ())
+let publish_download t path = match t.phase,t.downloads with
+  | Retired,_ -> Error "browser download broker is retired"
+  | Serving,None -> Error "browser download broker is unavailable"
+  | Serving,Some downloads -> Browser_addon_downloads.publish downloads path
+let cleanup_downloads t = match t.downloads with
+  | None -> Ok ()
+  | Some downloads -> Eio_unix.run_in_systhread (fun () -> Browser_addon_downloads.cleanup downloads)
 let admitted_models t =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.models with
     | Retired,_ -> Error Browser_addon_models.Retired
@@ -101,6 +114,7 @@ let revoke t =
       t.phase <- Retired;
       Option.iter Browser_addon_models.retire t.models;
       Option.iter Browser_addon_uploads.revoke t.uploads;
+      Option.iter Browser_addon_downloads.revoke t.downloads;
       B.install_automation_executor None;
       B.install_server_session_observer B.Server_automation None;
       B.install_automation_document_observer None;
@@ -118,17 +132,37 @@ let cleanup t =
     let automation,stagehand = Eio.Fiber.pair
         (fun () -> settle t.automation) (fun () -> settle t.stagehand) in
     let uploads=cleanup_uploads t in
+    let downloads=match t.downloads with
+      | None -> Ok ()
+      | Some _ -> (match automation,stagehand with
+          | Ok (),Ok () -> cleanup_downloads t
+          | (Error _),(Ok ()|Error _) | Ok (),(Error _) ->
+              Error "download cleanup requires confirmed backend teardown") in
     let errors=List.filter_map (function Ok () -> None | Error detail -> Some detail)
-      [automation;stagehand;uploads] in
+      [automation;stagehand;uploads;downloads] in
     match errors with [] -> W.Receipt
       | _::_ -> refusal ~disposition:W.Outcome_unknown (String.concat "; " errors))
 let waiting t ~disposition run =
   Watched_work.run run ~watcher:(fun () ->
     Eio.Promise.await t.retired;
     refusal ~disposition "browser worker retired during the request")
+let bind_downloads t ~actor ~route ~verb answer = match verb,answer with
+  | B.Page_downloads _,Ok (B.Answered (`Assoc fields)) ->
+      (match actor,t.downloads,List.assoc_opt "ok" fields,List.assoc_opt "data" fields with
+       | Some actor,Some downloads,Some (`Bool true),Some data ->
+           (match Eio_unix.run_in_systhread (fun () -> Browser_addon_downloads.bind downloads ~actor ~route ~verb data) with
+            | Ok data -> Ok (B.Answered (`Assoc (List.map (fun (key,value) -> key,(if key="data" then data else value)) fields)))
+            | Error detail -> Ok (B.Refused ("download transfer preparation failed: " ^ detail)))
+       | (Some _|None),(Some _|None),(Some _|None),(Some _|None) -> answer)
+  | (B.Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_interact _
+    |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _
+    |Page_context _|Page_instruct _|Page_locate _|Page_extract _),
+    (Ok (B.Answered _|Lane_absent|Timed_out|Refused _|Rejected_before_effect _)|Error _) -> answer
 type upload_admission = Ordinary | Scoped_upload
 let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~only_if_idle =
   let allowed=match verb,upload_admission with
+    | B.Page_downloads _,(Ordinary|Scoped_upload) when Option.is_none actor || Option.is_none t.downloads ->
+        Error (refusal "downloads require the original host caller and attached artifact broker")
     | B.Page_act (B.Action.On_tab {interaction=B.Action.Upload _;_}),Ordinary ->
         Error (refusal "upload requires its private host snapshot grant")
     | (B.Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_interact _
@@ -153,7 +187,8 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
            | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _
            | Page_context _|Page_instruct _|Page_locate _|Page_extract _ ->
              Ok (B.Rejected_before_effect "idle admission supports document reads only")
-         else B.issue_for_actor ~actor ~target ~verb ~timeout_sec)))
+         else B.issue_for_actor ~actor ~target ~verb ~timeout_sec
+         |> bind_downloads t ~actor ~route ~verb)))
 
 let dispatch_upload t ~id ~actor ~route ~verb =
   match admitted_uploads t t.incarnation with
@@ -190,6 +225,27 @@ let dispatch t (request : W.request) =
     (match admitted_uploads t request.incarnation with
      | Error reply -> reply
      | Ok uploads -> Eio_unix.run_in_systhread (fun () -> Browser_addon_uploads.discard uploads ~id);W.Receipt)
+  | W.Download_claim {id;actor;route;verb} ->
+    (match with_admission t request.incarnation (fun () ->
+      match t.downloads with Some downloads -> Ok downloads
+      | None -> Error (refusal "browser download broker is unavailable")) with
+     | Error reply -> reply
+     | Ok downloads -> (match Eio_unix.run_in_systhread (fun () -> Browser_addon_downloads.claim downloads ~id ~actor ~route ~verb) with
+         | Ok claim -> W.Download_reply claim | Error detail -> refusal detail))
+  | W.Download_commit {id;actor;route;verb;receipt} ->
+    if request.incarnation<>t.incarnation then refusal "wrong browser worker incarnation"
+    else (match t.downloads with
+      | None -> refusal "browser download broker is unavailable"
+      | Some downloads -> (match Eio_unix.run_in_systhread (fun () ->
+          Browser_addon_downloads.commit downloads ~id ~actor ~route ~verb ~receipt) with
+          | Ok () -> W.Receipt | Error detail -> refusal ~disposition:W.Outcome_unknown detail))
+  | W.Download_release {id;actor;route;verb} ->
+    if request.incarnation<>t.incarnation then refusal "wrong browser worker incarnation"
+    else (match t.downloads with
+      | None -> refusal "browser download broker is unavailable"
+      | Some downloads -> (match Eio_unix.run_in_systhread (fun () ->
+          Browser_addon_downloads.release downloads ~id ~actor ~route ~verb) with
+          | Ok () -> W.Receipt | Error detail -> refusal ~disposition:W.Outcome_unknown detail))
   | W.Model_requests -> model_port t request.incarnation Browser_addon_models.listing
   | W.Model_result arguments -> model_port t request.incarnation (fun models ->
       Browser_addon_models.deliver models ~arguments

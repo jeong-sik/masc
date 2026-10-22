@@ -574,6 +574,36 @@ let test_status_reports_an_undelivered_answer () =
     (text "ended" status)
 ;;
 
+let test_status_keeps_first_end_during_shutdown () =
+  let entered,enter=Eio.Promise.create () and released,release=Eio.Promise.create () in
+  with_backend ~shutdown:(fun _ ->
+    ignore (Eio.Promise.try_resolve enter ());
+    Eio.Promise.await released;Ok ()) (fun h ->
+    Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve release ())) (fun () ->
+      ignore (data (Backend.execute h.backend open_));
+      let first=the_session h in
+      first.log (Session.Connection_ended "Chromium exited");
+      Eio.Promise.await entered;
+      let status=data (Backend.execute h.backend Lane.Session_status) in
+      check bool "shutdown is still in progress" true (flag "closing" status);
+      check string "pending shutdown keeps the original reason"
+        "the connection ended: Chromium exited" (text "ended" status);
+      check bool "status does not certify pending cleanup" true (Result.is_error (Backend.settlement h.backend));
+      first.log (Session.Reply_not_delivered "later teardown reply failed");
+      check string "later shutdown events do not replace the first reason"
+        "the connection ended: Chromium exited"
+        (text "ended" (data (Backend.execute h.backend Lane.Session_status)));
+      Eio.Promise.resolve release ();
+      h.settle ();
+      let status=data (Backend.execute h.backend Lane.Session_status) in
+      check bool "confirmed shutdown is closed" false (flag "open" status);
+      check string "joined shutdown retains the same reason"
+        "the connection ended: Chromium exited" (text "ended" status);
+      ignore (data (Backend.execute h.backend open_));
+      check bool "a new session starts with no previous end reason" true
+        (Yojson.Safe.Util.member "ended" (data (Backend.execute h.backend Lane.Session_status))=`Null)))
+;;
+
 let test_uncertain_opening_is_retained () =
   List.iter (fun opening ->
     with_backend ~configure:(fun behaviour -> behaviour.opening<-opening) (fun h ->
@@ -671,6 +701,7 @@ let () =
       test_case "a close that raises still closes" `Quick test_close_that_raises_still_closes;
       test_case "an ended session is let go" `Quick test_an_ended_session_is_let_go;
       test_case "status reports an answer the session could not deliver" `Quick test_status_reports_an_undelivered_answer;
+      test_case "status keeps the first end reason through pending shutdown" `Quick test_status_keeps_first_end_during_shutdown;
     ];
     ( "callers",
       [ test_case "an unanswered sentence whose caller left retires its session" `Quick

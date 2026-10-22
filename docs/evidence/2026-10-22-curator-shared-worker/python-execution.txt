@@ -1,0 +1,13 @@
+$ python3 -m unittest discover -s addons/tests -p test_candle_appraiser.py
+.............
+----------------------------------------------------------------------
+Ran 13 tests in 0.735s
+
+OK
+
+$ python3 -m unittest discover -s addons/tests -p test_workspace_curator.py
+......
+----------------------------------------------------------------------
+Ran 6 tests in 0.610s
+
+OK

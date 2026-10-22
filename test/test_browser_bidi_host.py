@@ -199,6 +199,9 @@ dragSource.onpointerup=e=>{const box=dropTarget.getBoundingClientRect();
                     assert shot["ok"], shot
                     return shot
 
+            def named(elements, text):
+                return [element for element in elements if element["text"] == text]
+
             tabs = call("tabs.list", {})
             assert tabs["ok"], tabs
             matching = [tab for tab in tabs["data"] if tab["url"] == fixture_url]
@@ -354,9 +357,13 @@ dragSource.onpointerup=e=>{const box=dropTarget.getBoundingClientRect();
                 assert listed["ok"] and listed["data"]["tabId"] == first, listed
                 return listed["data"]["elements"]
 
-            def named(elements, text):
-                return [element for element in elements if element["text"] == text]
 
+            # The hover on the opened tab left Firefox's pointer over this
+            # tab's message row as well; park it on empty page space first.
+            parking = capture(first)["data"]
+            parked = call("page.interact", {"tabId": first, "action": "hover_at", "expectedUrl": parking["url"],
+                "viewport": parking["viewport"], "point": {"x": .02, "y": .95}})
+            assert parked["ok"], parked
             hidden = inventory()
             assert named(hidden, "Observed destination") and not named(hidden, "Add reaction"), hidden
             # A control's text is cut at 500 characters. The cut falls inside
@@ -387,12 +394,15 @@ dragSource.onpointerup=e=>{const box=dropTarget.getBoundingClientRect();
             assert pressed["ok"], pressed
             reacted = call("page.read", {"tabId": first})
             assert reacted["data"]["text"].count("reaction:true") == 1, reacted
-            # The inventory's selector is the one the DOM actions take.
+            # The inventory's selector is the one the actions take. On BiDi a
+            # click on a selector is native pointer input, so the page sees a
+            # trusted click.
+            assert revealed[0]["selector"] == "#react", revealed
             scripted = call("page.interact", {"tabId": first, "action": "click", "expectedUrl": here,
                 "selector": revealed[0]["selector"]})
             assert scripted["ok"], scripted
             both = call("page.read", {"tabId": first})
-            assert "reaction:true reaction:false" in both["data"]["text"], both
+            assert "reaction:true reaction:true" in both["data"]["text"], both
             # Native pointer-capture drag is supported. HTML draggable/drop
             # remains a Firefox limitation (Mozilla bug 1515879); do not
             # treat an accepted input sequence as proof of an HTML drop.
@@ -412,6 +422,45 @@ dragSource.onpointerup=e=>{const box=dropTarget.getBoundingClientRect();
             assert drop_read["ok"] and "pointer-drag:true:true:true" in drop_read["data"]["text"], drop_read
             other = call("page.read", {"tabId": second})
             assert other["ok"] and other["data"] == before["data"]
+            # within keeps the inventory to one region. The page's CSS engine
+            # reads it: a hidden control inside the match is still left out,
+            # and a control that matches is kept with its unique id as the
+            # whole selector.
+            whole = call("page.elements", {"tabId": first})
+            assert whole["ok"] and "within" not in whole["data"], whole
+            hidden_scope = call("page.elements", {"tabId": first, "within": "#message"})
+            assert hidden_scope["ok"] and hidden_scope["data"]["withinMatches"] == 1, hidden_scope
+            assert hidden_scope["data"]["total"] == 0, hidden_scope
+            long_scope = call("page.elements", {"tabId": first, "within": "#long"})
+            assert long_scope["ok"] and long_scope["data"]["total"] == 1, long_scope
+            assert long_scope["data"]["elements"][0]["selector"] == "#long", long_scope
+            missing_scope = call("page.elements", {"tabId": first, "within": "#nothing-here"})
+            assert missing_scope["ok"] and missing_scope["data"]["withinMatches"] == 0, missing_scope
+            invalid_scope = call("page.elements", {"tabId": first, "within": "#message(("})
+            assert invalid_scope["ok"] is False and "invalid_css_selector" in invalid_scope["error"], invalid_scope
+            print(json.dumps({"elementsBytes": len(json.dumps(whole["data"])),
+                              "withinBytes": len(json.dumps(long_scope["data"])),
+                              "wholeTotal": whole["data"]["total"],
+                              "selectors": [item["selector"] for item in whole["data"]["elements"]]}))
+            # A tab the operator opened is never navigated; the tab this
+            # connection opened goes to the URL and reports where it landed.
+            refused_goto = call("page.goto", {"tabId": first, "url": fixture_url + "?moved=1"})
+            assert refused_goto["ok"] is False, refused_goto
+            assert call("page.read", {"tabId": first})["data"]["url"] == here
+            went = call("page.goto", {"tabId": new_tab, "url": fixture_url + "?went=1"})
+            assert went["ok"] and went["data"]["url"] == fixture_url + "?went=1", went
+            # Activation brings a tab in the background to the front.
+            rows = call("tabs.list", {})["data"]
+            background = [row for row in rows if row["id"] in (first, second) and not row["active"]]
+            assert background, rows
+            target = background[0]
+            activated = call("page.interact", {"tabId": target["id"], "action": "activate_tab",
+                "expectedUrl": target["url"]})
+            assert activated["ok"] and activated["data"]["active"] is True, activated
+            fronted = {row["id"]: row["active"] for row in call("tabs.list", {})["data"]}
+            assert fronted[target["id"]] is True, fronted
+            assert sum(1 for active in fronted.values() if active) == 1, fronted
+            print(json.dumps({"activated": target["id"], "tabsActive": fronted, "goto": went["data"]}))
             assert len({row[0] for row in metadata}) == 1 and all(row[1] for row in metadata)
             assert all(row[2] == "webdriver_bidi" for row in metadata), metadata
             # A workspace has one BiDi host. A second one for it is refused

@@ -34,6 +34,11 @@ domain commit identity. The actual Curator owner must validate the full captured
 answer, reload authoritative state and bind its target before recording them.
 The module performs no RPC, Ledger/Briefing save, publication or observer finish.
 
+The [observer receipt axis](addon-original-observer-receipts.md) retains first
+registration/terminal intents and exact acknowledgements alongside execution.
+It preserves the original primary phase and never authorizes an effect. Actual
+domain receipt validation and registry reconcile/delivery remain separate work.
+
 Retain compares only immutable scope/request/destination/canonical input and
 digest, preserving any existing history. Advance rereads and compares the entire
 expected record. A different tail conflicts; an exact already-stored next

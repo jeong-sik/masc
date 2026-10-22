@@ -6,7 +6,13 @@
   "actual": "selected binaries compiled; three interrupted-link commit-suite cases failed because fresh and restored row object key order rendered different child input_text/prompt bytes",
   "repair_head": "7093af4a5c50aa8c5593de5debc1043f55a1c7ed",
   "repair": "canonicalize internal captured work while separately preserving original parent substitution bytes; exact child identity comparison remains strict",
-  "repair_execution": "not yet observed",
+  "repair_execution": {
+    "run": 39682010920,
+    "head": "866233b4d86f068afbbb67165ef3ea9996ccc90a",
+    "conclusion": "success",
+    "scope": "combined descendant source includes709 product repair; commit34 cases all pass, including the3 previously failing cases",
+    "receipt": "../2026-10-22-curator-retained-host-read/selected-execution.json"
+  },
   "preceding_run": {
     "id": 39679243670,
     "head": "4ac521f27a34d4999e89c6fc1dce292fa95946ec",
@@ -15,5 +21,5 @@
     "actual": "Unbound module Mcp_protocol before selected tests",
     "repair_head": "062bea30dd9a0a7c030ceb9944076c535ba38457"
   },
-  "limits": "No success for repair or current source, no production scheduler, live provider/Off lifecycle or installed UI claim"
+  "limits": "Original062/4ac failures remain historical facts. New866 selected fixture success is separate; no production scheduler, live provider/Off lifecycle or installed UI claim."
 }

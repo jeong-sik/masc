@@ -42,6 +42,44 @@ let test_exit_status () =
     (managers env)
 ;;
 
+let test_original_birth_survives_reap () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Time.with_timeout_exn clock 10. @@ fun () ->
+  List.iter (fun mgr -> Eio.Switch.run @@ fun sw ->
+    let input, release = Eio_unix.pipe sw in
+    let proc = Eio.Process.spawn ~sw mgr ~stdin:input
+        ["/bin/sh"; "-c"; "read release; exit 7"] in
+    let started = Posix_spawn_process_mgr.original_start proc in
+    check bool "live original birth was captured" true (Option.is_some started);
+    check (option string) "capture belongs to the still-owned original child"
+      (Posix_spawn_detached.process_start (Eio.Process.pid proc)) started;
+    Eio.Flow.copy_string "exit\n" release;
+    (match Eio.Process.await proc with
+     | `Exited code -> check int "original child exits" 7 code
+     | `Signaled _ -> fail "original child was signalled");
+    (match Unix.waitpid [Unix.WNOHANG] (Eio.Process.pid proc) with
+     | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+     | _ -> fail "original child is not yet reaped");
+    check (option string) "original handle retains birth after PID release"
+      started (Posix_spawn_process_mgr.original_start proc);
+    (* A child may finish before [spawn] returns. Its retained observation is
+       either the original birth or an explicit absence, never a later lookup. *)
+    let fast = Eio.Process.spawn ~sw mgr ["/bin/sh"; "-c"; "exit 3"] in
+    let original = Posix_spawn_process_mgr.original_start fast in
+    ignore (Eio.Process.await fast);
+    check (option string) "fast-exit handle keeps the original observation"
+      original (Posix_spawn_process_mgr.original_start fast))
+    [Posix_spawn_process_mgr.mgr;
+     Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:2.];
+  Eio.Switch.run @@ fun sw ->
+  let foreign = Eio.Process.spawn ~sw (Eio.Stdenv.process_mgr env)
+      ["/bin/sh"; "-c"; "exit 0"] in
+  ignore (Eio.Process.await foreign);
+  check (option string) "unsupported manager does not synthesize an identity"
+    None (Posix_spawn_process_mgr.original_start foreign)
+;;
+
 let test_cwd_and_env () =
   Eio_main.run
   @@ fun env ->
@@ -505,6 +543,9 @@ let () =
             test_live_member_is_a_refusal
         ; test_case "a group needs the leader this process owns" `Quick
             test_group_without_its_owned_leader_is_not_ours ])
+    ; ( "original process identity",
+        [ test_case "birth observation survives original child reap" `Quick
+            test_original_birth_survives_reap ])
     ; ( "foreground group ownership",
         [ test_case "observer cancellation cannot strand physical reap or its owner promise" `Quick
             test_observation_cancel_preserves_physical_reap

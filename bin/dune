@@ -628,6 +628,12 @@
  (libraries masc masc_tui_keeper_chat_projection yojson))
 
 (library
+ (name masc_tui_resource_images)
+ (wrapped false)
+ (modules masc_tui_resource_images)
+ (libraries masc_tui_mcp masc_tui_image_preview))
+
+(library
  (name masc_tui_acting)
  (wrapped false)
  (modules masc_tui_acting)
@@ -2607,6 +2613,7 @@
   masc_tui_text_block
   masc_tui_preset_text
   masc_tui_mcp
+  masc_tui_resource_images
   masc_tui_keeper_chat_transcript
   masc_tui_composer
   masc_tui_audio_device

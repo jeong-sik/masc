@@ -953,7 +953,7 @@ let test_resource_read_keeps_each_part_type () =
         }
       ; { rc_uri = Some "masc://proof.bin"
         ; rc_mime_type = Some "application/octet-stream"
-        ; rc_kind = Mcp.Resource_blob { base64_bytes = 8 }
+        ; rc_kind = Mcp.Resource_blob { base64 = "QUJDRA==" }
         }
       ] ->
       ()

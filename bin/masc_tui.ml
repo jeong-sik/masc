@@ -10700,15 +10700,29 @@ let conversation_image_sources state =
   in
   Masc_tui_image_preview.prioritize_sources ~newly_observed candidates
 
+let image_notice (state : state) ~view ~keeper_name ~kind text =
+  if view = Resources then report_action state "resources" text
+  else if view = Tools then
+    report_action state (match kind with Notice_failure -> "error" | Notice_reply -> "system") text
+  else chat_notice state ~keeper_name ~kind text
+
+let resource_image_reading_is_current (state : state) (pending : sent_image_read) =
+  pending.sir_view <> Resources
+  || (Masc_tui_resource_images.same_reading pending.sir_resource state.resource_content
+      && Option.is_none state.resource_pending_uri
+      && Option.is_none state.resource_content_error)
+
 (* Settle the exact interrupted preview without replacing a newer selection. *)
 let settle_retired_sent_image state =
   match state.sent_image_read with
-  | Some pending when pending.sir_authority != state.workspace_read_authority ->
+  | Some pending when pending.sir_authority != state.workspace_read_authority
+      || not (resource_image_reading_is_current state pending) ->
       state.sent_image_read <- None;
       if not state.msx_open && pending.sir_generation = state.image_request_generation
-         && pending.sir_view = state.view && pending.sir_keeper = state.msg_target_keeper_name then
-        chat_notice state ~keeper_name:pending.sir_keeper ~kind:Notice_failure
-          (Printf.sprintf "sent image %s: preview interrupted by workspace reconnection; reopen the image after reconnecting"
+         && pending.sir_view = state.view
+         && (pending.sir_view = Resources || pending.sir_keeper = state.msg_target_keeper_name) then
+        image_notice state ~view:pending.sir_view ~keeper_name:pending.sir_keeper ~kind:Notice_failure
+          (Printf.sprintf "Image %s: source changed; reopen its preview"
              pending.sir_name)
   | Some _ | None -> ()
 
@@ -10722,11 +10736,12 @@ let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
   else begin
     notice ~kind:Notice_reply (Printf.sprintf "Loading image (any key cancels): %s" name);
     let port = state.port in
-    let keeper_name = state.msg_target_keeper_name in
+    let keeper_name = if state.view = Resources then None else state.msg_target_keeper_name in
     let generation = state.image_request_generation in
     let view = state.view in
     state.sent_image_read <- Some {sir_generation=generation; sir_view=view;
-      sir_keeper=keeper_name; sir_name=name; sir_authority=state.workspace_read_authority};
+      sir_keeper=keeper_name; sir_name=name; sir_authority=state.workspace_read_authority;
+      sir_resource=(if view = Resources then state.resource_content else None)};
     let _, columns = Masc_tui_ansi.get_terminal_size () in
     (* When the terminal supplies no pixel geometry, use the half-em advance
        of Pele's 16px default font as a logical layout width. The existing
@@ -10757,6 +10772,28 @@ let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
         notice ~kind:Notice_failure "image preview requires an active connection"
   end
   end
+
+let current_resource_images (state : state) =
+  match state.resource_content, state.resource_pending_uri, state.resource_content_error with
+  | Some (uri, contents), None, None ->
+    let mime_type = Option.bind state.resources_list (fun resources ->
+      Option.bind (List.find_opt (fun (resource : Masc_tui_mcp.resource) ->
+        String.equal resource.uri uri) resources) (fun resource -> resource.mime_type)) in
+    Masc_tui_resource_images.images ~mime_type contents
+  | (Some _ | None), (Some _ | None), (Some _ | None) -> []
+
+let step_resource_image (state : state) ~delta =
+  let count = List.length (current_resource_images state) in
+  state.resource_image_cursor <- max 0 (min (count - 1) (state.resource_image_cursor + delta))
+
+let open_resource_image (state : state) ~mailbox =
+  let notice = image_notice state ~view:Resources ~keeper_name:state.msg_target_keeper_name in
+  let images = current_resource_images state in
+  match List.nth_opt images state.resource_image_cursor with
+  | Some (_, Masc_tui_image_preview.Output_image {name;source}) ->
+    open_message_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
+  | Some (_, (Named_path _ | Staged _ | Stored_attachment _ | Unavailable_image _ | No_image))
+  | None -> notice ~kind:Notice_failure "No image in the current resource reading"
 
 let open_selected_image state ~mailbox preview =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
@@ -13368,6 +13405,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resource_content_error <- None;
   state.resource_pending_uri <- None;
   state.resource_scroll <- 0;
+  state.resource_image_cursor <- 0;
   state.observer_cursor <- None;
   state.observer_replay <- Observer_replay_unobserved;
   state.acting <- [];
@@ -20134,22 +20172,23 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
   | Sent_image_ready { generation; view; keeper_name; name; skill_reference; result } ->
-      (match state.sent_image_read with
+      let owned = match state.sent_image_read with
        | Some pending when pending.sir_generation = generation
            && pending.sir_view = view && pending.sir_keeper = keeper_name
-           && pending.sir_name = name -> state.sent_image_read <- None
-       | Some _ | None -> ());
+           && pending.sir_name = name ->
+         state.sent_image_read <- None;
+         pending.sir_authority == state.workspace_read_authority
+         && resource_image_reading_is_current state pending
+       | Some _ | None -> false in
       let same_skill = match skill_reference with
         | None -> true
         | Some reference ->
             (match selected_tools_skill_profile state with
              | Some profile -> Skill_reference.equal reference profile.esp_reference
              | None -> false) in
-      if not state.msx_open && generation = state.image_request_generation
-         && view = state.view && keeper_name = state.msg_target_keeper_name && same_skill then begin
-        let notice = if view = Tools then
-            (fun ~kind text -> report_action state (match kind with Notice_failure -> "error" | Notice_reply -> "system") text)
-          else chat_notice state ~keeper_name in
+      if owned && not state.msx_open && generation = state.image_request_generation
+         && view = state.view && (view = Resources || keeper_name = state.msg_target_keeper_name) && same_skill then begin
+        let notice = image_notice state ~view ~keeper_name in
         let refuse reason =
           notice ~kind:Notice_failure (Printf.sprintf "sent image %s: %s" name reason)
         in
@@ -28800,6 +28839,11 @@ and is loaded on demand through keeper_skill.
        | Some (("[" | "]") as bracket) when state.view = Changes ->
            cycle_changes_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
+       | Some "\015" when state.view = Resources && state.resource_focus = Right_pane ->
+           open_resource_image state ~mailbox:async_messages
+       | Some (("," | ".") as direction)
+         when state.view = Resources && state.resource_focus = Right_pane ->
+           step_resource_image state ~delta:(if direction = "." then 1 else -1)
        | Some (("[" | "]") as bracket)
          when state.view = Resources && state.resource_focus = Right_pane ->
            step_detail_cursor

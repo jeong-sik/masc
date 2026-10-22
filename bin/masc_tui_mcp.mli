@@ -94,15 +94,15 @@ val resources_list_all :
 
 type resource_content_kind =
   | Resource_text of string
-  | Resource_blob of { base64_bytes : int }
+  | Resource_blob of { base64 : string }
 
 type resource_content = {
   rc_uri : string option;
   rc_mime_type : string option;
   rc_kind : resource_content_kind;
 }
-(** One content part from [resources/read]. Blob bytes are not decoded or
-    rendered, but their encoded length remains visible to the operator. *)
+(** One content part from [resources/read]. Keep the original encoded blob;
+    decoding and image conversion belong to an explicitly requested preview. *)
 
 val resource_contents_of_body :
   request_id:string -> string -> (resource_content list, string) result

@@ -8142,6 +8142,7 @@ type sent_image_read =
   ; sir_keeper : string option
   ; sir_name : string
   ; sir_authority : unit ref
+  ; sir_resource : (string * Masc_tui_mcp.resource_content list) option
   }
 
 type lane_nested_read =
@@ -8537,6 +8538,7 @@ type state = {
   mutable resource_pending_uri: string option;
   mutable resource_scroll: int;
   mutable resource_focus: pane_focus;
+  mutable resource_image_cursor: int;
   (* The Config surface owns the files the server reads. runtime.toml is one;
      the prompt registry is the other, and a prompt is edited the same way —
      $EDITOR over the effective text, the server persists what comes back. *)
@@ -15251,6 +15253,7 @@ let create_state
   resource_pending_uri = None;
   resource_scroll = 0;
   resource_focus = Left_pane;
+  resource_image_cursor = 0;
   config_pane = Config_runtime;
   tools_pane = Tools_surface;
   theme_choice = None;

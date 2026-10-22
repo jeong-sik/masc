@@ -161,7 +161,7 @@ let display_name (resource : resource) =
 
 type resource_content_kind =
   | Resource_text of string
-  | Resource_blob of { base64_bytes : int }
+  | Resource_blob of { base64 : string }
 
 type resource_content = {
   rc_uri : string option;
@@ -316,31 +316,28 @@ let resource_contents_of_body ~request_id body =
   let* result = result_of_body ~request_id ~label:"MCP" body in
   match List.assoc_opt "contents" result with
   | Some (`List parts) ->
-      let contents =
-        List.filter_map
-          (fun part ->
-            match part with
-            | `Assoc fields -> (
-                match string_field fields "text" with
-                | Some text ->
-                    Some
-                      { rc_uri = string_field fields "uri"
-                      ; rc_mime_type = string_field fields "mimeType"
-                      ; rc_kind = Resource_text text
-                      }
-                | None -> (
-                    match string_field fields "blob" with
-                    | Some blob ->
-                        Some
-                          { rc_uri = string_field fields "uri"
-                          ; rc_mime_type = string_field fields "mimeType"
-                          ; rc_kind =
-                              Resource_blob { base64_bytes = String.length blob }
-                          }
-                    | None -> None))
-            | _ -> None)
-          parts
+      let invalid index =
+        Error (Printf.sprintf "MCP resource content part %d must contain exactly one text or blob string" index)
       in
-      if contents = [] then Error "MCP answered with no readable contents"
-      else Ok contents
+      let rec decode index acc = function
+        | [] ->
+            if acc = [] then Error "MCP answered with no readable contents"
+            else Ok (List.rev acc)
+        | `Assoc fields :: rest ->
+            let kinds = List.filter (fun (key, _) -> key = "text" || key = "blob") fields in
+            let kind = match kinds with
+              | ["text", `String text] -> Some (Resource_text text)
+              | ["blob", `String base64] -> Some (Resource_blob {base64})
+              | _ -> None in
+            (match kind with
+             | None -> invalid index
+             | Some rc_kind ->
+                 let content =
+                   { rc_uri = string_field fields "uri"
+                   ; rc_mime_type = string_field fields "mimeType"
+                   ; rc_kind } in
+                 decode (index + 1) (content :: acc) rest)
+        | _ :: _ -> invalid index
+      in
+      decode 1 [] parts
   | Some _ | None -> Error "MCP answered with no contents"

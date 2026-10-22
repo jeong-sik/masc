@@ -41,6 +41,7 @@ let output_image ~name ~src =
 ;;
 
 let inline_svg ~name svg = Output_image { name; source = Inline_svg svg }
+let inline_payload ~name ~base64 = Output_image { name; source = Inline_data base64 }
 let mermaid ~name source = Output_image { name; source = Inline_mermaid source }
 let mermaid_source source = Inline_mermaid source
 

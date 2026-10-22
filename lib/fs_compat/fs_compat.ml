@@ -4115,6 +4115,62 @@ let read_private_jsonl_rows_locked_with_io_for_testing ~io path =
   read_private_jsonl_rows_locked_with_io ~io path
 ;;
 
+module Private_jsonl_fold = struct
+  type 'a t =
+    | Missing
+    | Present of { value : 'a; rows_end : int; end_offset : int }
+
+  type error =
+    | Read_error of Private_jsonl_rows.error
+    | Snapshot_changed
+end
+
+let fold_private_jsonl_locked_result path ~init ~f =
+  let open Private_jsonl_fold in
+  let folded = read_private_jsonl_locked_with_io
+    ~io:private_jsonl_transaction_unix_io ~missing:(Ok Missing) path (fun fd ->
+      let before = Unix.fstat fd in
+      let binding_matches () =
+        match Unix.stat path with
+        | current -> same_file_snapshot before current
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false in
+      if not (binding_matches ()) then Error Snapshot_changed else
+      let buffer = Bytes.create 65536 and row = Buffer.create 256 in
+      let value = ref init and end_offset = ref 0 and rows_end = ref 0 in
+      let rec read () =
+        let remaining = before.Unix.st_size - !end_offset in
+        let length = if remaining <= 0 then 0
+          else Unix.read fd buffer 0 (min remaining (Bytes.length buffer)) in
+        if length > 0 then (
+          let start = ref 0 in
+          for index = 0 to length - 1 do
+            if Bytes.get buffer index = '\n' then (
+              Buffer.add_subbytes row buffer !start (index - !start);
+              value := f !value (Buffer.contents row);
+              Buffer.clear row;
+              rows_end := !end_offset + index + 1;
+              start := index + 1)
+          done;
+          Buffer.add_subbytes row buffer !start (length - !start);
+          end_offset := !end_offset + length;
+          read ()) in
+      read ();
+      if not (same_file_snapshot before (Unix.fstat fd))
+          || not (binding_matches ()) || !end_offset <> before.Unix.st_size
+      then Error Snapshot_changed
+      else Ok (Present {value= !value;rows_end= !rows_end;end_offset= !end_offset})) in
+  match folded with
+  | Private_file_succeeded (Ok value) -> Private_file_succeeded value
+  | Private_file_succeeded (Error error) -> Private_file_failed error
+  | Private_file_succeeded_with_cleanup_failure {value=Ok value;cleanup_failure} ->
+    Private_file_succeeded_with_cleanup_failure {value;cleanup_failure}
+  | Private_file_succeeded_with_cleanup_failure {value=Error error;cleanup_failure} ->
+    Private_file_failed_with_cleanup_failure {error;cleanup_failure}
+  | Private_file_failed error -> Private_file_failed (Read_error error)
+  | Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
+    Private_file_failed_with_cleanup_failure {error=Read_error error;cleanup_failure}
+;;
+
 module Private_jsonl_window = struct
   type t =
     | Window_missing

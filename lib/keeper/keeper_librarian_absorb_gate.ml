@@ -962,12 +962,11 @@ module Replay = struct
 
   (* Object order is immaterial; duplicate members remain visible and cannot
      equal an encoder's unique member set. Preserve array and attempt order. *)
-  let rec ordered = function
+  let rec ordered (json : Yojson.Safe.t) : Yojson.Safe.t =
+    match json with
     | `Assoc fields -> `Assoc (List.sort (fun (a, _) (b, _) -> String.compare a b)
         (List.map (fun (key, value) -> key, ordered value) fields))
     | `List values -> `List (List.map ordered values)
-    | `Tuple values -> `Tuple (List.map ordered values)
-    | `Variant (tag, value) -> `Variant (tag, Option.map ordered value)
     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value -> value
 
   let same left right =

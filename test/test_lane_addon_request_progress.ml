@@ -106,7 +106,7 @@ let test_commit_recovery_uses_original_before_after_and_judgment () = with_store
      Alcotest.check json "original judgment remains bound to commit" judgment commit.judgment;
      Alcotest.check json "original before-state survives recovery" before commit.change.before;
      Alcotest.check json "original expected after-state survives recovery" after commit.change.after
-   | Progress.Captured | Progress.Dispatch_pending _ | Progress.Judged _ | Progress.Committing _
+   | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _ | Progress.Committing _
    | Progress.Commit_unknown _ | Progress.Conflicted _ | Progress.Rejected _ -> Alcotest.fail "commit not confirmed");
   (match updated (advance store retry (Progress.Commit_observed (read ()))) with
    | Owner.Already_stored record -> check_events "lost terminal acknowledgement is idempotent" (events finished) record
@@ -126,7 +126,7 @@ let test_conflict_and_refusal_are_terminal_facts () = with_store (fun _ store ->
    | Progress.Conflicted (commit,current) ->
      Alcotest.check json "conflict preserves observed state" observed current;
      Alcotest.check json "conflict preserves original judgment" judgment commit.judgment
-   | Progress.Captured | Progress.Dispatch_pending _ | Progress.Judged _ | Progress.Committing _
+   | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _ | Progress.Committing _
    | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Rejected _ -> Alcotest.fail "conflict lost"));
   with_store (fun _ store ->
     owned (retain store);
@@ -187,10 +187,31 @@ let test_missing_original_cannot_be_recreated_by_update () = with_store (fun roo
   Alcotest.(check bool) "update did not mint a new capture" true
     (owned (Owner.load ~store ~scope ~request_id) = None))
 
+let test_explicit_capacity_preserves_original_admission_without_replaying_unknown () = with_store (fun root store ->
+  let pending=dispatch store in
+  let capacity=stored store pending (Progress.Admission_declined (evidence "worker refused before retention")) in
+  let reopened=load (Store.create ~root) in
+  Alcotest.(check bool) "restart preserves explicit non-admission" true
+    (Progress.phase reopened.progress=Progress.Admission_wait (evidence "worker refused before retention"));
+  let retry=stored store reopened Progress.Dispatch_intended in
+  Alcotest.(check string) "capacity retries the same original request" capacity.request_id retry.request_id;
+  Alcotest.check json "capacity preserves original input" capacity.request retry.request;
+  let waiting=stored store retry (Progress.Execution_observed (Progress.Waiting (evidence "accepted"))) in
+  invalid store waiting (Progress.Admission_declined (evidence "late capacity cannot undo admission"));
+  let unknown=stored store waiting (Progress.Execution_observed (Progress.Outcome_unknown (evidence "reply lost"))) in
+  invalid store unknown (Progress.Admission_declined (evidence "unknown is not a non-admission receipt"));
+  invalid store unknown Progress.Dispatch_intended;
+  let absent=stored store unknown (Progress.Execution_observed (Progress.Absent (evidence "original no longer listed"))) in
+  invalid store absent (Progress.Admission_declined (evidence "absence is not capacity"));
+  invalid store absent Progress.Dispatch_intended;
+  check_events "capacity and uncertainty history survives another handle" (events absent) (load (Store.create ~root)))
+
 let () = Alcotest.run "Original Add-on request progress" ["owner",[
   Alcotest.test_case "restart keeps unknown and late original result" `Quick test_restart_preserves_unknown_and_late_original_result;
   Alcotest.test_case "whole expected history and exact acknowledgement" `Quick test_expected_history_and_exact_uncertain_ack_are_distinct;
   Alcotest.test_case "commit resumes original before after and judgment" `Quick test_commit_recovery_uses_original_before_after_and_judgment;
   Alcotest.test_case "conflict and refusal remain terminal" `Quick test_conflict_and_refusal_are_terminal_facts;
   Alcotest.test_case "malformed history is not absence or replacement" `Quick test_strict_load_rejects_invalid_or_tampered_history;
-  Alcotest.test_case "missing original cannot be recreated" `Quick test_missing_original_cannot_be_recreated_by_update]]
+  Alcotest.test_case "missing original cannot be recreated" `Quick test_missing_original_cannot_be_recreated_by_update;
+  Alcotest.test_case "only explicit capacity permits original admission retry" `Quick
+    test_explicit_capacity_preserves_original_admission_without_replaying_unknown]]

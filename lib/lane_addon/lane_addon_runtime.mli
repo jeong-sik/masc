@@ -79,6 +79,25 @@ val retain_tool_request_owner : config:Workspace.config -> access:Lane_addon_sou
     a replacement installation cannot claim absence and cause redispatch.
     Current export authority is checked here and still rechecked by each call.
     This binding neither executes work nor uses an observer receipt as authority. *)
+type tool_request_destination = private {
+  installation_id : string;
+  package_id : string;
+  tool : string;
+  source_revision : string;
+  configuration_revision : string;
+}
+val capture_tool_request_owner : config:Workspace.config -> access:Lane_addon_sources.access ->
+  reserved:string list -> export:tool_export -> scope:string -> request_id:string ->
+  capture:(tool_request_destination -> ('a * Yojson.Safe.t, string) result) ->
+  ('a, tool_call_error) result
+(** New configured work only. Under the original action serializer, revalidate
+    the live export and matching enabled declaration, invoke the pure host
+    capture factory with its original destination/revisions, and durably retain
+    that exact JSON before returning the host value. The callback must not yield,
+    perform effects or call Runtime. A failed publication may already be visible;
+    discover the original ID rather than minting another one. This does not
+    dispatch, commit or authorize a later RPC. Manual/missing/conflicting
+    configuration is refused rather than supplying invented revisions. *)
 val call_exported_tool_with_authority : on_complete:(unit -> unit) -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal option ->
   config:Workspace.config -> access:Lane_addon_sources.access -> reserved:string list ->
   export:tool_export -> arguments:Yojson.Safe.t ->

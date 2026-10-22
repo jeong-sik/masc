@@ -9,6 +9,7 @@ type change = { before : Yojson.Safe.t; after : Yojson.Safe.t }
 type commit = { judgment : Yojson.Safe.t; change : change }
 type event =
   | Dispatch_intended
+  | Admission_declined of Yojson.Safe.t
   | Execution_observed of observation
   | Judgment_retained of Yojson.Safe.t
   | Commit_intended of change
@@ -17,7 +18,7 @@ type event =
   | Commit_observed of Yojson.Safe.t
   | Commit_conflicted of Yojson.Safe.t
   | Refused of refusal
-type phase = Captured | Dispatch_pending of observation option
+type phase = Captured | Admission_wait of Yojson.Safe.t | Dispatch_pending of observation option
   | Judged of Yojson.Safe.t | Committing of commit
   | Commit_unknown of commit * Yojson.Safe.t | Finished of commit
   | Conflicted of commit * Yojson.Safe.t | Rejected of refusal
@@ -27,7 +28,10 @@ val phase : t -> phase
 val events : t -> event list
 val append : t -> event -> (t, string) result
 (** Canonicalize payloads and validate the next transition. Dispatch is recorded
-    only once. Waiting, unknown and worker absence never permit redispatch.
+    before each admission RPC. Only an explicit pre-admission capacity refusal
+    allows a later admission of the same captured request. Waiting, unknown and
+    worker absence never permit redispatch. A capacity refusal is accepted only
+    immediately after dispatch intent, before any execution observation.
     A late original judgment preserves earlier observations in the history.
     Commit retry requires a fresh exact before-state observation; confirmation
     requires the exact captured after-state. Neither observation performs I/O. *)

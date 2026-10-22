@@ -77,6 +77,11 @@ type call_final =
       (** Every slot answered and no answer matched the schema. *)
   | Input_refused of input_refusal
       (** A provider refused this input itself; the same input cannot pass. *)
+  | Output_limit_reached of { detail : string }
+      (** The admitted candidates exhausted the provider's output limit.
+          Kept distinct from invalid JSON, incomplete output and schema/domain
+          rejection. This final never permits replay of the original request;
+          any smaller successor is a separate consumer-owned decision. *)
 
 (** What a package receives. Each one ends the request. *)
 type final =

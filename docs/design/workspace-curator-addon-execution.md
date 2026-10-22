@@ -340,3 +340,50 @@ into #44944 itself, rather than relying on an upper layer to make it safe.
 Its intermediate `e3d28089451b475ae5c475ae017528ab9e84a591` received formal source
 approval; that approval is not certification of the subsequent compiler repair.
 A selected execution on the new published head is separate evidence.
+
+
+## Typed size refusal before production owner switching
+
+The common Exact final now preserves `Output_limit_reached {detail}` as the
+strict wire object `{"status":"output_limit_reached","detail":<nonblank text>}`.
+Only Agent Core's typed `Output_limit_reached` maps to the new shared
+`Exact_lane_failure.Output_limit`. Invalid JSON, schema/domain rejection,
+incomplete/missing output and an oversized transport response stay separate.
+The common worker codec, retained host replay, original Curator refusal journal,
+Candle appraisal and Browser/Stagehand consumers all explicitly consume it.
+Operator Quiz maps it to its existing failed-author / waiting-grade policy;
+it does not reduce input or create another request for this output result.
+
+The original candidate walk still tries its admitted HTTP and official-client
+tail. A later valid answer wins. Otherwise transient, configuration and auth
+failures outrank a terminal; input refusal keeps its existing priority, then
+output-limit evidence, then ordinary invalid output. No new size cap is imposed.
+
+Before dispatch, actual context overflow and measured input rejection preserve
+`Input_refused Input_capacity`. Missing token measurement or expired,
+not-yet-valid or ambiguous capacity evidence is `Transient`: none proves that
+smaller input is required. Old retained terminals are read as originally stored,
+without inference from detail text and without redispatch.
+
+The production Curator switch must consume these typed facts with its original
+policy: classification can narrow whole rows on actual input or output-size
+refusal; briefing narrows only on input-size refusal. Invalid_request, generic
+invalid output, pending and unknown never grant that narrowing. A successor
+needs its own retained child capture and durable predecessor link. Those owner
+and successor changes remain pending; this layer does not create a second
+scheduler or claim production extraction.
+
+Verification maps changed interfaces to their direct consumers:
+
+| Changed boundary | Consumer and focused verification |
+| --- | --- |
+| Shared failure classification and Exact final codec | `test_exact_lane_failure`, `test_lane_addon_exact`, real HTTP/CLI-edge and capacity-evidence cases in `test_lane_addon_exact_runner` |
+| Original Curator terminal/refused restoration | `test_workspace_curator_addon_contract`: actual journal reopen, original refusal, no worker replay, no replacement write |
+| Candle and browser final translation | `test_candle_appraiser_transport`, `test_browser_addon_models`, `test_browser_addon_locate`, `test_browser_addon_stagehand_model` |
+| Actual shared-worker persistence and separate Quiz consumer | Python Curator 7, Candle 14, Quiz Flow 68 cases passed on hashed working-tree Python source; actual worker subprocess restarts, controlled model answers |
+
+The earlier [eight-suite run39674624863](../evidence/2026-10-22-curator-owner-wakes/selected-execution.json)
+is completed/success at exact `af9e1eeefe9b8b17fe82c643e9344aa3df87416a`, 147 cases,
+including seven new owner-wake cases. It verifies the prior admission/commit/wake
+candidate, not this newer size-refusal layer, a live provider, browser or UI.
+A selected compiled execution for this layer is separate evidence.

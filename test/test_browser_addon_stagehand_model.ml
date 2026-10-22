@@ -98,6 +98,10 @@ let scenario manifest fixture =
       let waiting,request=begin_call () in
       deliver request (Exact.final_to_json Outcome_unknown);
       check bool "an uncertain model outcome refuses the original call" true (Result.is_error (Eio.Promise.await_exn waiting));
+      let waiting,request=begin_call () in
+      deliver request (Exact.final_to_json (Call_final (Output_limit_reached {detail="fixture provider output limit"})));
+      check bool "output exhaustion refuses the original Stagehand call" true
+        (Result.is_error (Eio.Promise.await_exn waiting));
       check int "no hidden retry reaches the provider" 1 (F.post_count server);
       let before=state () in
       ignore (Eio.Fiber.first (fun () -> ignore (model params))

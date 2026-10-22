@@ -157,7 +157,9 @@ let with_installation ?await_change ?before_listing ?before_stop ?exported_tool 
                 Board_dispatch.reset_for_test ();
                 Board_dispatch.init_jsonl ();
                 let state = { mode = ref mode; resolutions = ref 0 } in
-                Runtime.register_exact_runner (make_runner state);
+                Runtime.register_exact_runner
+                  ~validate_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ -> Ok (fun _ -> Ok ()))
+                  (make_runner state);
                 let config = Workspace.default_config root in
                 Runtime.For_testing.with_backend (backend ?await_change ?before_listing ?before_stop ?exported_tool worker) (fun () ->
                   ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);

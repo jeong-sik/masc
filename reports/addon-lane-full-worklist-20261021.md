@@ -111,7 +111,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
-| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | capture exact d4d54ed의 7-suite39653626146은92건 PASS. original-owner progress exact c231ab1의 5-suite39657204150도70건 PASS(새 progress6 포함). strict scope 발견·hashed key/전체 history 검증·known-ID 동일 no-follow descriptor read/fsync 및 settled absence를 후속 source 구현, 실제 삭제/교체·link·sync/권한 실패7검사 추가. 새 발견8-suite39660035294는 기존 worker fixture의 누락 request_schema로 compile FAIL(검사 실행 전); fixture에 typed Package_schema_only 명시. 수정 head 실행·production owner/semantic flow/wake/worker 통합과 실제 중지·재개는 남음 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
+| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | capture exact d4d54ed의 7-suite39653626146은92건 PASS. original-owner progress exact c231ab1의 5-suite39657204150도70건 PASS(새 progress6 포함). strict scope 발견·hashed key/전체 history 검증·known-ID 동일 no-follow descriptor read/fsync 및 settled absence를 후속 source 구현, 실제 삭제/교체·link·sync/권한 실패7검사 추가. 새 발견8-suite39660035294는 기존 worker fixture의 누락 request_schema로 compile FAIL(검사 실행 전); fixture에 typed Package_schema_only 명시. 수정fab00b7의8-suite39661318402는190건 PASS(발견7 포함). semantic acceptance source 연결 후 별도 실행 필요; production owner/wake/worker 통합과 실제 중지·재개는 남음 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
 | E05 | Board Attention 실행의 Addon 경계 검토·추출 | 조사·설계, Required | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
@@ -378,3 +378,18 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 
 - exact61c6014의 [8-suite39660035294](https://github.com/jeong-sik/masc/actions/runs/39660035294)는 completed/failure다. `test_lane_addon_worker.ml:537`의 기존 exact output에 필수 `request_schema`가 없어 컴파일에서 멈췄으며, 선택된 발견 검사도 실행되지 않았다. [실제 실패 발췌와 원본 해시](../docs/evidence/2026-10-22-curator-discovery/initial-compile-failure.json)를 보존한다.
 - 기존 worker-port fixture는 요청별 schema를 사용하지 않으므로 `request_schema=Types.Package_schema_only`를 명시했다. 파싱 성공을 compiled 실행으로 세지 않으며, 같은8-suite의 수정 후보 결과를 별도로 확인한다. A01–H06의54개 작업과 완료 기준은 유지한다.
+
+### E02 원래 semantic acceptance의 공통 Exact 연결
+
+- 기존 공통 Exact owner에 trusted `validate_request`를 필수 인자로 연결했다. Runtime은 기존 runner와 함께 등록하고 server bootstrap은 원래 host capture·물리 workspace·canonical installation/package/tool·전체 Exact request digest를 검증하는 authority를 제공한다. 같은 capture를 다른 package로 바꾸어도 우회하지 않는다. package/request 스키마 뒤 원래 classification decode/apply 또는 briefing decode/accept를 HTTP/CLI candidate acceptance 전에 검사하고, retained answer도 fresh authority로 재검증한다.
+- 실제 loopback HTTP와 기존 CLI walk의 5시나리오를 추가했다. 완전 fact 분류·없는 claim으로 join하는 판단·briefing 공백·capture/installation/package/physical workspace 불일치·schema-only terminal 재전달을 다룬다. 파싱과 source review를 compiled 실행으로 세지 않는다. 모든 Exact 요청에 strict Curator namespace lookup이 추가되며 malformed authority는 다른 package에서도 absent로 바꾸지 않는다.
+- [설계와 명시적 한계](../docs/design/workspace-curator-semantic-validation.md): production Curator metadata/owner·worker·commit recovery·wake·실제 두 UI/Off/On은 남아 있다. 원래 A01–H06의54개 작업 이름과 완료 기준은 그대로다.
+
+- 발견 수리 exact `fab00b72a44b65a611bb97bddfa56c45f78e8a4e`의 [39661318402](https://github.com/jeong-sik/masc/actions/runs/39661318402)는 completed/success다. 실제 checkout·minimal/posix·8개 suite 원문과 성공행에서 발견7·progress6·request capture5·execution capture5·host cycle44·Candle transport10·fs_compat42·worker71, 합190건을 확인했다. [발췌·원문 해시](../docs/evidence/2026-10-22-curator-discovery/corrected-selected-execution.json)를 보존했다. 이 결과는 새 semantic port 소스나 production/실제 재시작/UI 성공으로 이월하지 않는다.
+
+
+### E02 semantic 선택 실행의 실제 실패와 fixture 수리
+
+- exact `8b7b57b580c083c8f89fa5143af205c2ece669cd`의 [39662676800](https://github.com/jeong-sik/masc/actions/runs/39662676800)은 completed/failure다. [원래 실패 발췌·해시](../docs/evidence/2026-10-22-curator-semantic/initial-selected-failure.json)를 보존한다. runner18건 중 roles1·Curator4가 실패했고, 별도로 worker71건 중 selected-hooks case5가 기존 Docker create 1초 timeout으로 실패했다. worker timeout의 원인은 아직 확정하지 않았다.
+- 실제 common Exact는 Json_syntax에서 원래 대화 뒤 schema instruction User를 붙인다. fixture가 원래 모든 role/text prefix와 정확한 지시문을 검사하도록 수정했다. Curator baseline도 fieldless object가 아닌 실제 Decision/Briefing 출력 스키마로 선언했다. schema-only terminal 사례는 seed가 실제 Answered임을 먼저 확인해 거짓 양성을 막는다. production validator·provider·timeout은 바꾸지 않는다.
+- 파싱·독립 소스 대조와 수정된 compiled 실행은 구분한다. 수정 후보 결과·production Curator owner/metadata/commit/wake·실제 두 UI와 54개 전체 완료는 남아 있다. 원래 A01–H06의 작업 이름·완료 기준은 유지한다.

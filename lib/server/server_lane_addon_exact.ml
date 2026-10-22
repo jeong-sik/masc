@@ -225,6 +225,7 @@ let runner_with ~cli_runner ~base_path : Addon.runner =
     (resolve ~lane_key)
 
 let runner ~base_path = runner_with ~cli_runner:None ~base_path
+let validate_request ~base_path = Server_workspace_memory_addon_validation.authorize ~base_path
 
 module For_testing = struct
   let runner ~base_path ~cli_runner = runner_with ~cli_runner:(Some cli_runner) ~base_path

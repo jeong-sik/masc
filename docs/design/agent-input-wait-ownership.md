@@ -479,8 +479,8 @@ checking canonical G bytes and global G reference. The Store suite separately
 checks promotion commit faults, strict destination parsing and the branch pin
 through actual SQLite phase consumption.
 
-Public Owner response admission still requires global input W and explicitly
-selects Canonical_input. Enabling a branch Accepted response before replacing
+At the physical-primitive checkpoint, public Owner response admission still
+required global input W and explicitly selected Canonical_input. Enabling a branch Accepted response before replacing
 the old shared-canonical loader/Producer/sinks would let generic claim dispatch
 fail the original invocation. This layer therefore adds the actual physical and
 SQLite primitives without activating that unsupported public path. No new
@@ -714,7 +714,7 @@ That is actual evidence for the adapter-level scenario at that head. The shared
 fixture extraction and admitted Keeper/AgentRun scenarios below still need
 execution on their new head.
 
-## Admitted Keeper/AgentRun branch scenarios (source, not executed)
+## Admitted Keeper/AgentRun branch scenarios
 
 The physical original-input setup is now shared between the native-context and
 real Keeper-ingress suites. Its immutable invocation carries the original
@@ -746,7 +746,48 @@ checked during provider dispatch and after terminal Owner handling; branch
 retirement is checked after that handling. Branch mode is recorded separately
 in the executable evidence, rather than conflated with canonical-mode results.
 
-These are unexecuted source scenarios. Passing them would establish their
-specified admitted Keeper/AgentRun paths, not every fallback/error path, public
-response admission, unknown external-effect recovery, autonomous waiting or
+The minimal run [39725038444](https://github.com/jeong-sik/masc/actions/runs/39725038444)
+checked out `867e996a8cf1bbe33229e98eab40290138362f98`, compiled, and passed
+all twelve cases: six native-context and six admitted Keeper-ingress cases.
+The raw log distinguishes branch and canonical modes and records actual
+ToolResult and post-finalizer process cuts, replay without another durable
+person-note effect, and exact G preservation. This establishes those specified
+admitted Keeper/AgentRun paths at that head. Setup at that head used the private
+response primitive; it is not evidence for public response admission, every
+fallback/error path, unknown external-effect recovery, autonomous waiting or
 persistent/reconnected Acting/TUI behavior.
+
+## Public original-branch response admission (source, not executed)
+
+The Owner now chooses the destination after verifying the exact complete wait,
+operation, execution digest, original unpaused maintenance child and trace. A
+confirmed global input equal to W keeps canonical admission; a different
+confirmed global input selects the original operation branch. An existing
+branch must name W exactly, and an existing branch or recorded Operation_input
+intent cannot fall back to canonical admission. Unobserved or unavailable input
+ownership remains a refusal. This change leaves the transactional Store checks,
+sealed physical receipt comparison and uncertain-commit errors intact.
+
+The shared real Core/Owner/Producer setup now calls the public response API
+instead of installing C through the private SQL primitive. It refuses a forged
+question and a duplicate response, checks original branch identity and G bytes,
+and holds the setup runner unready so only the actual continuation runner can
+claim C. The same native-context and admitted Keeper/AgentRun crash/finalizer
+scenarios consume that publicly accepted C.
+
+HTTP scenarios additionally publish G through a different actual autonomous
+Owner child and Producer, and exercise Answer, Declined and explicit Timeout.
+The branch must retain the original history and exactly one typed response. The original HTTP response must preserve all G bytes,
+global input reference, Context/history and G's distinct pending question; the
+host inventory continues to observe G while the original branch consumes its
+own input. Real before/after-intent SQLite commit faults must return a server
+error, keep the original wait blocked and preserve G. Closing and reopening the
+actual Owner/store must recover only the recorded response, refuse a different
+response kind and reject duplicate acceptance after consumption.
+
+These changed public paths and HTTP cases are parsed source only until a new
+exact-head execution completes. The earlier twelve passing cases do not certify
+this new public API connection. Full resolution-fault promotion, every fallback
+and unknown-effect path, execution of all public-branch response variants, durable autonomous waiting, dedicated waiting outcomes, snapshot/SSE revision
+and incarnation reconciliation, and persistent/reconnected Acting/TUI acceptance
+remain part of #38005.

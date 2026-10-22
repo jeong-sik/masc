@@ -357,11 +357,10 @@ let test_operation_response_preserves_producer_g ?(gate_case=None) ~canonical_in
        ignore (Keeper_input_checkpoint_producer.publish_autonomous producer newer |> prepared);
        save newer) with
      | Ok (`Ran ()) -> () | Ok (`Busy _ | `Interrupted) | Error _ -> fail "independent Producer did not publish G");
-    (* Do not expose a successful response before the native branch path exists. *)
-    (match Keeper_owner.respond_direct_input_wait owner ~net:env#net ~operation_id ~observed:waiting ~response:Core.Hooks.Declined with
-     | Error (Keeper_owner.Response_owner_error (Keeper_owner.Operation_rejected (Journal.Invalid_input _))) -> ()
-     | Error _ | Ok _ -> fail "public Owner accepted an unsupported branch continuation");
-    check bool "guard preserves the original exact waiting operation" true
+    (* The primitive fault scenarios below install their own sealed response.
+       Public response and its actual continuation run in the shared native and
+       admitted-Keeper fixtures, without this deliberate private setup. *)
+    check bool "independent Producer preserves the original exact waiting operation" true
       (Option.equal Semantic.equal_input_wait (Some waiting) (Keeper_owner.direct_input_wait owner ~operation_id |> prepared));
     ignore (Keeper_owner.begin_stopping owner |> prepared));
   let g_bytes=Fs_compat.load_file canonical in

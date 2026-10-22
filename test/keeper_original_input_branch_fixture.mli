@@ -2,7 +2,7 @@ open Masc
 
 (** Shared setup for real original-input branch integration scenarios.
     The initial wait is produced by Core. Another Owner child publishes G;
-    the stored response primitive installs C. Public acceptance remains guarded. *)
+    the public Owner response installs C through its exclusive maintenance child. *)
 type invocation = {
   keeper_name : string;
   session_id : string;
@@ -21,9 +21,9 @@ val prepare :
   workspace:Workspace.config -> session_dir:string -> invocation -> unit
 (** Caller initializes the native execution runtime, workspace and keeper meta.
     Run actual Core InputRequired W, defer through its original Owner, publish
-    independent G from a separate autonomous child, close that Owner, then
-    commit exact operation-owned response C. Does not dispatch C or authorize
-    public response acceptance. Failures raise an Alcotest assertion. *)
+    independent G from a separate autonomous child, respond through the public
+    Owner API, then close that Owner. C is queued until the next actual runner
+    is ready. Does not dispatch C. Failures raise an Alcotest assertion. *)
 
 val expected_global_checkpoint_bytes : workspace:Workspace.config -> string
 (** Read fixture bytes captured immediately after actual G publication. This is

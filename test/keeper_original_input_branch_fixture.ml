@@ -6,9 +6,9 @@ let require label=function Ok value -> value | Error _ -> Alcotest.fail (label ^
 let fail=Alcotest.fail
 
 (* Build W through an actual Core input pause, publish independent G from a
-   different Owner child, then install C through the stored response primitive.
-   The public response guard stays intact; this fixture proves the native
-   branch crash/reopen path, not public acceptance or AgentRun finalization. *)
+   different Owner child, then accept C through the public Owner response API.
+   The original runner is no longer ready, so C stays queued for the actual
+   continuation runner installed by the native/AgentRun scenario. *)
 type invocation = {
   keeper_name:string; session_id:string; runtime_id:string;
   operation_id:Keeper_chat_operation.Operation_id.t;
@@ -21,14 +21,14 @@ let expected_global_checkpoint_bytes ~workspace=Fs_compat.load_file (expected_gl
 let prepare ~net ~clock ~workspace ~session_dir
     {keeper_name;session_id;runtime_id;operation_id;source;input;message;input_metadata;system_prompt;provider_cfg} =
   let module Store=Keeper_checkpoint_store in
-  let module Journal=Keeper_chat_operation_store in
-  let module Response=Keeper_input_wait_response in
   let root=workspace.Workspace.base_path in
   let trace_id=Keeper_id.Trace_id.of_string session_id |> require "branch trace" in
-  let waiting=Eio.Switch.run (fun setup_sw ->
+  Eio.Switch.run (fun setup_sw ->
+    let ready=ref true in
     let settled,resolve_settled=Eio.Promise.create () in
     let execute ~sw:turn_sw ~keeper_name:_ ~claim =
       let operation:Keeper_chat_operation.t=claim () |> require "claim initial input" |> Option.get in
+      ready:=false;
       let context=Agent_core.Context.create () in
       let frame=Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
         (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation operation_id))
@@ -64,7 +64,7 @@ let prepare ~net ~clock ~workspace ~session_dir
       let owner=Registry.get ~base_path:root ~keeper_name |> require "initial input Owner" in
       Owner.defer_direct_input_wait owner ~operation_id ~request |> require "defer original W" |> ignore;
       Owner.Operation_deferred in
-    let runner:Owner.operation_runner={ready=(fun ~keeper_name:_ -> true);execute;
+    let runner:Owner.operation_runner={ready=(fun ~keeper_name:_ -> !ready);execute;
       on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution ->
         Eio.Promise.resolve resolve_settled execution)} in
     Registry.install_from_store ~sw:setup_sw ~operation_runner:(Some runner) ~on_turn_slot_released:None workspace
@@ -102,18 +102,31 @@ let prepare ~net ~clock ~workspace ~session_dir
       let path=Store.agent_core_checkpoint_path ~session_dir ~session_id in
       Fs_compat.save_file (expected_global_path workspace) (Fs_compat.load_file path)) with
      | Ok (`Ran ()) -> () | Ok (`Busy _ | `Interrupted) | Error _ -> fail "independent G child did not run");
-    Owner.begin_stopping owner |> require "close initial Owner";
-    waiting) in
-  let path=Journal.path_for_keeper ~keepers_runtime_dir:(Workspace.keepers_runtime_dir workspace) ~keeper_name in
-  let journal=Journal.open_or_create ~path |> require "response journal" in
-  Fun.protect ~finally:(fun () -> Journal.close journal |> require "close response journal") (fun () ->
-    let operation=Journal.get journal operation_id |> require "original operation" |> Option.get in
-    let authority=Response.authorize ~session_root:(Filename.dirname session_dir) ~operation_id ~waiting
-      ~destination:Keeper_semantic_execution.Operation_input ~recorded:None in
-    let plan=Response.prepare_installation ~net:net ~authority ~response:Agent_core.Hooks.Declined
-      |> require "prepare original response C" in
-    Journal.prepare_direct_input_response journal ~now:3. ~operation_id ~execution_digest:operation.execution_digest
-      ~intent:(Response.planned_intent plan) |> require "record exact response intent";
-    let receipt=Response.install plan |> require "install original response C" in
-    Journal.resolve_direct_input_wait journal ~now:4. ~operation_id ~execution_digest:operation.execution_digest
-      ~observed:waiting ~checkpoint:(Response.installed_checkpoint receipt) |> require "commit original branch C")
+    let expected=expected_global_checkpoint_bytes ~workspace in
+    let forged={waiting.pending with request={waiting.pending.request with question="Another branch question?"}} in
+    let forged=Keeper_semantic_execution.input_wait ~checkpoint:waiting.checkpoint ~pending:forged
+      |> require "foreign question proof" in
+    (match Owner.respond_direct_input_wait owner ~net ~operation_id ~observed:forged
+        ~response:Agent_core.Hooks.Declined with
+     | Error (Owner.Response_owner_error (Owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input _))) -> ()
+     | Error error -> fail (Owner.input_response_error_to_string error)
+     | Ok _ -> fail "foreign original question acquired public branch authority");
+    (match Owner.respond_direct_input_wait owner ~net ~operation_id ~observed:waiting
+        ~response:Agent_core.Hooks.Declined with
+     | Ok `Accepted -> ()
+     | Ok (`Busy _) -> fail "idle original branch response was busy"
+     | Error error -> fail (Owner.input_response_error_to_string error));
+    Alcotest.check Alcotest.string "public response preserves independent G bytes" expected
+      (Fs_compat.load_file (Store.agent_core_checkpoint_path ~session_dir ~session_id));
+    let branch=Owner.direct_input_branch owner ~operation_id |> require "public original branch" |> Option.get in
+    Alcotest.check Alcotest.bool "public response preserves exact original wait binding" true
+      (Keeper_semantic_execution.equal_input_wait branch.origin waiting);
+    Alcotest.check Alcotest.bool "public response consumes only the original wait" true
+      (Owner.direct_input_wait owner ~operation_id |> require "public wait consumed"=None);
+    let duplicate=Owner.respond_direct_input_wait owner ~net ~operation_id ~observed:waiting
+      ~response:Agent_core.Hooks.Declined in
+    (match duplicate with
+     | Error (Owner.Response_owner_error (Owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input _))) -> ()
+     | Error error -> fail (Owner.input_response_error_to_string error)
+     | Ok _ -> fail "public branch response was accepted twice");
+    Owner.begin_stopping owner |> require "close initial Owner")

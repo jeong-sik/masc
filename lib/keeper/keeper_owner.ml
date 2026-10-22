@@ -1219,6 +1219,21 @@ let validate_retired_branch_cut t ~operation_id ~cut ~observed ~(call:Keeper_nat
     validate_retained_branch_scope ~operation_id (Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot))
     (Ok ()) [native;source;candidate;seed]
 
+let direct_response_destination ~(waiting:Keeper_semantic_execution.input_wait)
+    ~(branch:Keeper_semantic_execution.input_branch option)
+    ~(recorded:Keeper_semantic_execution.input_response_intent option) input =
+  let module Semantic=Keeper_semantic_execution in
+  match input,branch,recorded with
+  | Chat_operation_store.Input_observed _,Some branch,(Some _ | None) ->
+    if Keeper_checkpoint_ref.equal branch.checkpoint waiting.checkpoint then Ok Semantic.Operation_input
+    else Error (Chat_operation_store.Invalid_input "response lost its original operation branch input")
+  | Input_observed _,None,Some {Semantic.destination=Operation_input;_} -> Ok Semantic.Operation_input
+  | Input_observed reference,None,(None | Some {Semantic.destination=Canonical_input;_}) ->
+    Ok (if Keeper_checkpoint_ref.equal reference waiting.checkpoint then Semantic.Canonical_input
+      else Semantic.Operation_input)
+  | (Input_unobserved | Prior_input_unavailable),(Some _ | None),(Some _ | None) ->
+    Error (Chat_operation_store.Invalid_input "response requires a confirmed input observation")
+
 let capture_input_checkpoint_target t ~lane ~trace_id =
   let ( let* ) = Result.bind in
   let global () =
@@ -2250,14 +2265,15 @@ let start
                   let* waiting = Chat_operation_store.direct_input_wait t.operation_store ~operation_id in
                   let* input = Chat_operation_store.input_checkpoint t.operation_store ~trace_id:meta.runtime.trace_id in
                   let* recorded = Chat_operation_store.direct_input_response_intent t.operation_store ~operation_id in
-                  match waiting,input with
-                  | Some waiting,Chat_operation_store.Input_observed reference
-                      when Keeper_semantic_execution.equal_input_wait waiting observed
-                        && Keeper_checkpoint_ref.equal reference waiting.checkpoint ->
-                    Ok {response_child=child;response_operation=operation_id;response_digest=operation.execution_digest;
-                      response_authority=Keeper_input_wait_response.authorize ~session_root:t.session_root ~operation_id ~waiting ~destination:Keeper_semantic_execution.Canonical_input ~recorded}
-                  | (Some _ | None),(Input_observed _ | Input_unobserved | Prior_input_unavailable) ->
-                    Error (Chat_operation_store.Invalid_input "response no longer names the exact original wait and input owner"))
+                  let* waiting=match waiting with
+                    | Some waiting when Keeper_semantic_execution.equal_input_wait waiting observed -> Ok waiting
+                    | Some _ | None -> Error (Chat_operation_store.Invalid_input
+                        "response no longer names the exact original wait") in
+                  let* branch=Chat_operation_store.direct_input_branch t.operation_store ~operation_id in
+                  let* destination=direct_response_destination ~waiting ~branch ~recorded input in
+                  Ok {response_child=child;response_operation=operation_id;response_digest=operation.execution_digest;
+                    response_authority=Keeper_input_wait_response.authorize ~session_root:t.session_root
+                      ~operation_id ~waiting ~destination ~recorded})
               | (Some _ | None),(Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),(Some _ | None) ->
                 Error (Operation_rejected (Chat_operation_store.Invalid_input
                   "response admission requires its unpaused original maintenance child and trace")))) in

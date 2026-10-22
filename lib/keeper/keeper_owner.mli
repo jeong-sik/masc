@@ -507,8 +507,12 @@ val respond_direct_input_wait : t -> net:Eio_context.eio_net ->
   ([ `Accepted | `Busy of autonomous_block ], input_response_error) result
 (** Explicit response under an exclusive original Owner maintenance child. Busy
     means no response effects began. Acceptance consumes the exact wait/input
-    witness and enables only the original operation continuation. Partial file
-    installation or uncertain journal acknowledgement remains Error. *)
+    witness and enables only the original operation continuation. If a distinct
+    global input G is already observed, the response continues on its original
+    operation-owned retained branch and preserves G's payload and reference.
+    An existing branch or recorded branch response never falls back to global
+    publication. Partial installation or uncertain journal acknowledgement
+    remains Error. *)
 val direct_input_wait : t -> operation_id:Chat_operation.Operation_id.t ->
   (Keeper_semantic_execution.input_wait option, error) result
 val defer_direct_input_wait : t -> operation_id:Chat_operation.Operation_id.t ->

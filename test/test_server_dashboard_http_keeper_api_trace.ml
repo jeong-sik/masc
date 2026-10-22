@@ -970,7 +970,8 @@ let check_unavailable_inventory kind observed =
 type response_commit_fault = No_response_fault | Before_response_intent | After_response_intent
   | Before_response_resolution | After_response_resolution
 
-let test_input_response_http_accepts_only_original_wait ~commit_fault () =
+let test_input_response_http_accepts_only_original_wait ?(independent_global=false)
+    ?(response=Agent_core.Hooks.Declined) ~commit_fault () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   with_temp_dir @@ fun dir -> Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
@@ -1072,10 +1073,52 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
   let restart ()=stop_owner ();start_owner () in
   start_owner ();
   Fun.protect ~finally:stop_owner (fun () ->
+  let canonical_path=Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  let global_reference,global_pending=if independent_global then begin
+    let owner=Keeper_owner_registry.get ~base_path:dir ~keeper_name
+      |> Result.map_error Keeper_owner_registry.lookup_error_to_string |> ok in
+    match Keeper_owner.run_autonomous_if_idle owner (fun () ->
+      let context=Agent_core.Context.copy checkpoint.context ~eio:false in
+      let scope=Keeper_execution_scope_id.autonomous_admission
+        (Uuidm.of_string "00000000-0000-4000-8000-000000000041" |> Option.get) in
+      let frame=Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+        (Keeper_repetition_snapshot.Fresh scope) |> Result.get_ok in
+      Keeper_repetition_context.save context frame;
+      Agent_core.Context.set context "independent-http-G" (`String "preserve original global context");
+      let pending=inventory_pending ~run_id:"independent-http-G-run"
+        ~request_id:"independent-http-G-request" ~question:"Independent HTTP G question?" in
+      let newer={checkpoint with Agent_core.Checkpoint.context;turn_count=checkpoint.turn_count+1;
+        messages=checkpoint.messages @ [Agent_core.Types.user_msg "Independent HTTP G history"];
+        pending_input=Some pending;working_context=Some (`Assoc ["independent-http-G",`Bool true])} in
+      let producer=Keeper_input_checkpoint_producer.prepare ~base_path:dir ~keeper_name ~session_dir
+        ~trace_id:meta.runtime.trace_id ~source:(Some checkpoint)
+        |> Result.map_error Keeper_input_checkpoint_producer.error_to_string |> ok in
+      Keeper_input_checkpoint_producer.publish_autonomous producer newer
+        |> Result.map_error Keeper_input_checkpoint_producer.error_to_string |> ok |> ignore;
+      (match Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0 newer with
+       | Ok (Keeper_checkpoint_store.Saved _) -> ()
+       | Ok (Stale_noop _) | Error _ -> fail "independent HTTP G checkpoint was not saved");
+      let snapshot=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id
+        |> Result.get_ok in
+      Keeper_checkpoint_store.exact_snapshot_reference snapshot,Some pending) with
+    | Ok (`Ran value) -> value
+    | Ok (`Busy _ | `Interrupted) | Error _ -> fail "independent HTTP G child did not publish"
+  end else reference,checkpoint.pending_input in
+  let global_bytes=Fs_compat.load_file canonical_path in
+  let check_global ()=if independent_global then begin
+    check string "public HTTP response preserves all independent G bytes" global_bytes (Fs_compat.load_file canonical_path);
+    check bool "public HTTP response preserves independent G input ownership" true
+      (Keeper_owner_registry.input_checkpoint ~base_path:dir ~keeper_name ~trace_id:meta.runtime.trace_id
+        |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok=Journal.Input_observed global_reference)
+  end in
+  let response_json=match response with
+    | Agent_core.Hooks.Answer value -> `Assoc ["kind",`String "answer";"value",value]
+    | Declined -> `Assoc ["kind",`String "declined"]
+    | Timeout -> `Assoc ["kind",`String "timeout"] in
   let fields=["action",`String "respond_input";
     "operation_id",`String (Keeper_chat_operation.Operation_id.to_string operation_id);
     "checkpoint_ref",`Assoc ["trace_id",`String trace_id;"turn_count",`Int reference.turn_count;"sha256",`String reference.sha256];
-    "pending_input",Agent_core.Agent_input_request.pending_to_json pending;"response",`Assoc ["kind",`String "declined"]] in
+    "pending_input",Agent_core.Agent_input_request.pending_to_json pending;"response",response_json] in
   let post_fields fields =
     let body=Yojson.Safe.to_string (`Assoc fields) in
     checkpoint_http_response ~meth:"POST" ~keeper_name ~body (fun reqd ->
@@ -1083,7 +1126,7 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
   let post ()=post_fields fields in
   let wrong_response ()=post_fields (("response",`Assoc ["kind",`String "timeout"])::List.remove_assoc "response" fields) in
   (match commit_fault with
-   | No_response_fault ->
+   | No_response_fault when not independent_global ->
      let canonical_path=Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
      let canonical_bytes=Fs_compat.load_file canonical_path in
      let displaced=canonical_path ^ ".fixture-unavailable" in
@@ -1106,7 +1149,7 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
      let before=Fs_compat.load_file canonical_path in
      let status,_=wrong_response () in check int "consumed canonical cannot authorize another response kind" 409 status;
      check string "wrong recovery response preserves consumed canonical evidence" before (Fs_compat.load_file canonical_path)
-   | Before_response_intent | After_response_intent | After_response_resolution -> ());
+   | No_response_fault | Before_response_intent | After_response_intent | After_response_resolution -> ());
   let status,json=Fun.protect ~finally:Journal.For_testing.clear_commit_fault (fun () ->
     (* Intent confirmation is now the first journal commit of an actual response.
        Resolution faults were established explicitly with real SQLite above. *)
@@ -1120,8 +1163,9 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
      check int "unconfirmed intent is a server failure before canonical mutation" 500 status;
      check bool "uncertain intent is not acceptance" false Yojson.Safe.Util.(json |> member "ok" |> to_bool);
      let canonical=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id |> Result.get_ok in
-     check bool "intent failure leaves canonical W unchanged" true
-       (Keeper_checkpoint_ref.equal reference (Keeper_checkpoint_store.exact_snapshot_reference canonical));
+     check bool "intent failure leaves the observed global checkpoint unchanged" true
+       (Keeper_checkpoint_ref.equal global_reference (Keeper_checkpoint_store.exact_snapshot_reference canonical));
+     check_global ();
      check bool "intent failure keeps original wait blocked" true
        (Option.equal Keeper_semantic_execution.equal_input_wait (Some waiting)
          (Keeper_owner_registry.direct_input_wait ~base_path:dir ~keeper_name ~operation_id
@@ -1166,9 +1210,32 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
        |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok in
      check bool "HTTP acceptance enables only original checkpoint continuation" true (Option.is_some next);
      let status,json=get_checkpoint_inventory state ~keeper_name in check int "current input remains observable" 200 status;
-     check string "host snapshot agrees input consumed" "owned_none"
+     if independent_global then
+       check_owned_inventory ~status:"owned_pending"
+         ~pending:(Agent_core.Agent_input_request.pending_to_json (Option.get global_pending))
+         ~reference:global_reference (Yojson.Safe.Util.member "input_wait_observation" json)
+     else check string "host snapshot agrees input consumed" "owned_none"
        Yojson.Safe.Util.(json |> member "input_wait_observation" |> member "status" |> to_string);
-     let status,_=post () in check int "same HTTP response is not admitted twice" 409 status))
+     let status,_=post () in check int "same HTTP response is not admitted twice" 409 status);
+  check_global ();
+  if independent_global then begin
+    let branch=Keeper_owner_registry.direct_input_branch ~base_path:dir ~keeper_name ~operation_id
+      |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok |> Option.get in
+    check bool "HTTP response retains exact original branch origin" true
+      (Keeper_semantic_execution.equal_input_wait branch.origin waiting);
+    let candidate=Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:branch.checkpoint
+      |> Result.get_ok |> Keeper_checkpoint_store.exact_snapshot_checkpoint in
+    check bool "HTTP branch response consumes its own pending request" true (candidate.pending_input=None);
+    let response_message=match response with
+      | Agent_core.Hooks.Answer value -> "[User input] " ^ pending.request.question ^ ": " ^ Yojson.Safe.to_string value
+      | Declined -> "[Input declined] " ^ pending.request.question
+      | Timeout -> "[Input timed out] " ^ pending.request.question in
+    check bool "HTTP branch retains original history and the typed response exactly once" true
+      (candidate.messages=checkpoint.messages @ [Agent_core.Types.user_msg response_message]);
+    restart ();check_global ();
+    let status,_=post () in check int "fresh Owner refuses duplicate original branch response" 409 status;
+    check_global ()
+  end)
 
 ;;
 
@@ -1703,6 +1770,18 @@ let () =
             (test_input_response_http_accepts_only_original_wait ~commit_fault:Before_response_resolution)
         ; test_case "fresh Owner observes actually committed uncertain SQLite resolution" `Quick
             (test_input_response_http_accepts_only_original_wait ~commit_fault:After_response_resolution)
+        ; test_case "HTTP original branch response preserves independent G and its pending input" `Quick
+            (test_input_response_http_accepts_only_original_wait ~independent_global:true ~commit_fault:No_response_fault)
+        ; test_case "HTTP original branch Answer preserves G and original response history" `Quick
+            (test_input_response_http_accepts_only_original_wait ~independent_global:true
+              ~response:(Agent_core.Hooks.Answer (`Assoc ["choice",`String "original"])) ~commit_fault:No_response_fault)
+        ; test_case "HTTP original branch explicit Timeout preserves G without expiring its question" `Quick
+            (test_input_response_http_accepts_only_original_wait ~independent_global:true
+              ~response:Agent_core.Hooks.Timeout ~commit_fault:No_response_fault)
+        ; test_case "HTTP branch intent precommit failure preserves G and recovers under fresh Owner" `Quick
+            (test_input_response_http_accepts_only_original_wait ~independent_global:true ~commit_fault:Before_response_intent)
+        ; test_case "HTTP uncertain branch intent survives restart without replacing G" `Quick
+            (test_input_response_http_accepts_only_original_wait ~independent_global:true ~commit_fault:After_response_intent)
         ; test_case "input response requires exact explicit proof and an existing Owner" `Quick test_input_response_http_requires_explicit_exact_proof
         ; test_case "owned input ignores missing corrupt or stale canonical" `Quick test_input_wait_inventory_ignores_canonical_drift
         ; test_case "input wait never borrows unavailable retained or historical state" `Quick test_input_wait_inventory_refuses_unavailable_retained

@@ -13,6 +13,14 @@ Source inspected on 2026-10-21:
   for the consumer request-schema grant. That grant is an unmerged dependency,
   not an API available in the inspected main revision.
 
+The table below describes that inspection point. Later implementation and
+qualification are tracked in the worklist. The current E03 implementation
+boundary, including the absorption, admission-policy and failure-evidence gaps,
+is [Librarian execution as an Addon](librarian-addon-execution.md), inspected at
+`db31e62fe17f92aea4919de7765f1ace65914772` on 2026-10-22. In particular,
+`infer_memory_step` already calls the host absorption judge; absence of a Memory
+write does not make it a raw worker-compute boundary.
+
 ## Common ownership
 
 The host owns workspace admission, caller identity, credentials, provider

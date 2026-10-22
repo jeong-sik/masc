@@ -361,8 +361,12 @@ let run_queue ~base_path ~keeper_name =
     | part::rest ->
       let* inventory=io (fun () -> discover ~store ~owner) in
       (match evaluate ~store ~config ~reserved ~owner ~inventory part with
-       | Error detail -> finish ~committed ~reason:detail
-       | Ok (Waiting reason) -> finish ~committed ~reason
+       | Error detail -> Error detail
+       | Ok (Waiting reason) ->
+         (* A new tail cannot run while this immutable frontier is unresolved.
+            Only a completed walk may request another immediate queue pass;
+            actual Runtime/candidate events wake waiting originals. *)
+         Ok (if committed then Settled {has_more=false} else Pending reason)
        | Ok (Terminal (_,did_commit)) -> walk ~committed:(committed || did_commit) rest
        | Ok (Children (left,right)) -> walk ~committed (left::right::rest)) in
   walk ~committed:false parts

@@ -673,6 +673,21 @@ type keeper_portrait = Keeper_portrait_equipment.reading =
   | Ready of Keeper_portrait_look.equipment
   | Unavailable of string
 
+type keeper_failure_cause =
+  | Keeper_failure_heartbeat
+  | Keeper_failure_turn
+  | Keeper_failure_provider
+  | Keeper_failure_configuration
+  | Keeper_failure_client_recovery
+  | Keeper_failure_fiber
+  | Keeper_failure_exception
+  | Keeper_failure_operator_interrupt
+
+type keeper_failure = {
+  kf_cause : keeper_failure_cause;
+  kf_at_unix : float option;
+}
+
 type keeper_runtime = {
   kr_name : string;
   kr_identity : (keeper_identity, string) result;
@@ -693,6 +708,8 @@ type keeper_runtime = {
   kr_sandbox_profile : string;
   kr_runtime_blocker_summary : string option;
   (** Current registry failure; [None] means the roster observed no blocker. *)
+  kr_last_failure : keeper_failure option;
+  (** Typed last failure and observation time, independent of current health. *)
   kr_runtime_blocker_signature : string option;
   (** The machine wire behind a summary that replaced it with a human
       sentence (the fenced empty assistant turn), [None] on every other
@@ -1217,6 +1234,7 @@ type keeper_preview_position = {
 type keeper_turn_preview = {
   ktp_text_position : keeper_preview_position;
   ktp_status_text : string;
+  ktp_activity : Keeper_turn_preview.activity option;
   ktp_updated_at_unix : float;
   ktp_text_tail : string;
       (** Tail of the newest response text this turn has produced. *)
@@ -1254,6 +1272,24 @@ type keeper_turn_row = {
   ktr_chat_control_token : string option;
   ktr_state : keeper_turn_state;
 }
+
+type keeper_current_activity =
+  | Keeper_activity_waiting
+  | Keeper_activity_running
+  | Keeper_activity_streaming
+  | Keeper_activity_tool
+  | Keeper_activity_preparing
+  | Keeper_activity_unknown
+
+type keeper_failure_status = {
+  kfs_current_activity : keeper_current_activity;
+  kfs_last_failure : keeper_failure option;
+}
+
+val keeper_current_activity_of_turn : keeper_turn_state -> keeper_current_activity
+val keeper_failure_status_of_readings :
+  health:keeper_health option -> turn:keeper_turn_state option ->
+  runtime:keeper_runtime option -> keeper_failure_status option
 
 val decode_keeper_turns :
   Yojson.Safe.t -> (keeper_turn_row list, string) result

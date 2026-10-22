@@ -314,7 +314,10 @@ let replace_heartbeat_failure_reason expected replacement =
       match latest.last_failure_reason with
       | Some (Heartbeat_consecutive_failures _) ->
         replaced := true;
-        { latest with last_failure_reason = replacement }
+        { latest with
+          last_failure_reason = replacement
+        ; last_failure_at = Option.map (fun _ -> Time_compat.now ()) replacement
+        }
       | None | Some (Turn_consecutive_failures _) | Some (Provider_runtime_error _)
       | Some (Turn_configuration_error _) | Some (Official_client_recovery_required _)
       | Some (Fiber_unresolved _) | Some (Exception _) | Some (Operator_interrupt) ->

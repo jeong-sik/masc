@@ -109,6 +109,21 @@ type keeper_portrait = Keeper_portrait_equipment.reading =
   | Ready of Keeper_portrait_look.equipment
   | Unavailable of string
 
+type keeper_failure_cause =
+  | Keeper_failure_heartbeat
+  | Keeper_failure_turn
+  | Keeper_failure_provider
+  | Keeper_failure_configuration
+  | Keeper_failure_client_recovery
+  | Keeper_failure_fiber
+  | Keeper_failure_exception
+  | Keeper_failure_operator_interrupt
+
+type keeper_failure = {
+  kf_cause : keeper_failure_cause;
+  kf_at_unix : float option;
+}
+
 type keeper_runtime = {
   kr_name : string;
   kr_identity : (keeper_identity, string) result;
@@ -128,6 +143,7 @@ type keeper_runtime = {
      actually ran there is a different reading and lives with the call. *)
   kr_sandbox_profile : string;
   kr_runtime_blocker_summary : string option;
+  kr_last_failure : keeper_failure option;
   (** Current registry failure; [None] means the roster observed no blocker. *)
   kr_runtime_blocker_signature : string option;
   (** The machine wire behind a summary that replaced it with a human
@@ -2979,6 +2995,33 @@ let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
   let* kr_runtime_blocker_summary =
     required_nullable_string_field json "runtime_blocker_summary"
   in
+  let* kr_last_failure =
+    match Json_util.assoc_member_opt "last_failure" json with
+    | None | Some `Null -> Ok None
+    | Some (`Assoc _ as failure) ->
+      let* raw_cause = required_string_field failure "cause" in
+      let* kf_cause =
+        match raw_cause with
+        | "heartbeat" -> Ok Keeper_failure_heartbeat
+        | "turn" -> Ok Keeper_failure_turn
+        | "provider" -> Ok Keeper_failure_provider
+        | "configuration" -> Ok Keeper_failure_configuration
+        | "client_recovery" -> Ok Keeper_failure_client_recovery
+        | "fiber" -> Ok Keeper_failure_fiber
+        | "exception" -> Ok Keeper_failure_exception
+        | "operator_interrupt" -> Ok Keeper_failure_operator_interrupt
+        | _ -> Error (Printf.sprintf "unknown keeper failure cause %S" raw_cause)
+      in
+      let* kf_at_unix =
+        match Json_util.assoc_member_opt "at_unix" failure with
+        | Some `Null | None -> Ok None
+        | Some (`Float value) when Float.is_finite value -> Ok (Some value)
+        | Some (`Int value) -> Ok (Some (Float.of_int value))
+        | Some other -> field_type_error "last_failure.at_unix" "a finite number or null" other
+      in
+      Ok (Some { kf_cause; kf_at_unix })
+    | Some other -> field_type_error "last_failure" "an object or null" other
+  in
   let* kr_runtime_blocker_signature =
     Tui_decode_fields.optional_nullable_string_field json
       "runtime_blocker_signature"
@@ -3019,6 +3062,7 @@ let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
     ; kr_phase
     ; kr_sandbox_profile
     ; kr_runtime_blocker_summary
+    ; kr_last_failure
     ; kr_runtime_blocker_signature
     ; kr_runtime_lane_observation
     }
@@ -4429,6 +4473,7 @@ type keeper_preview_position = {
 type keeper_turn_preview = {
   ktp_text_position : keeper_preview_position;
   ktp_status_text : string;
+  ktp_activity : Keeper_turn_preview.activity option;
   ktp_updated_at_unix : float;
   ktp_text_tail : string;
   ktp_last_tool : string option;
@@ -4453,6 +4498,43 @@ type keeper_turn_row = {
   ktr_chat_control_token : string option;
   ktr_state : keeper_turn_state;
 }
+
+type keeper_current_activity =
+  | Keeper_activity_waiting
+  | Keeper_activity_running
+  | Keeper_activity_streaming
+  | Keeper_activity_tool
+  | Keeper_activity_preparing
+  | Keeper_activity_unknown
+
+type keeper_failure_status = {
+  kfs_current_activity : keeper_current_activity;
+  kfs_last_failure : keeper_failure option;
+}
+
+let keeper_current_activity_of_turn = function
+  | Keeper_turn_idle -> Keeper_activity_waiting
+  | Keeper_turn_unavailable _ -> Keeper_activity_unknown
+  | Keeper_turn_running {preview=Some {ktp_activity=Some activity;_};_} ->
+      (match activity with
+       | Keeper_turn_preview.Awaiting_response -> Keeper_activity_waiting
+       | Keeper_turn_preview.Receiving_response -> Keeper_activity_streaming
+       | Keeper_turn_preview.Tool_observed -> Keeper_activity_tool
+       | Keeper_turn_preview.Preparing -> Keeper_activity_preparing
+       | Keeper_turn_preview.Failed -> Keeper_activity_running)
+  | Keeper_turn_running _ -> Keeper_activity_running
+
+let keeper_failure_status_of_readings ~health ~turn ~runtime =
+  match health with
+  | Some value when keeper_health_reading value = Health_failing ->
+      Some
+        { kfs_current_activity =
+            (match turn with
+             | Some state -> keeper_current_activity_of_turn state
+             | None -> Keeper_activity_unknown)
+        ; kfs_last_failure = Option.bind runtime (fun row -> row.kr_last_failure)
+        }
+  | None | Some _ -> None
 
 let decode_keeper_turn_row json =
   let* ktr_keeper_name = required_string_field json "keeper_name" in
@@ -4529,6 +4611,17 @@ let decode_keeper_turn_row json =
                   required_nullable_string_field preview_json "last_tool"
                 in
                 let* ktp_status_text = required_string_field preview_json "status_text" in
+                let* ktp_activity =
+                  match Json_util.assoc_member_opt "activity" preview_json with
+                  | None | Some `Null -> Ok None
+                  | Some (`String "preparing") -> Ok (Some Keeper_turn_preview.Preparing)
+                  | Some (`String "waiting") -> Ok (Some Keeper_turn_preview.Awaiting_response)
+                  | Some (`String "streaming") -> Ok (Some Keeper_turn_preview.Receiving_response)
+                  | Some (`String "tool") -> Ok (Some Keeper_turn_preview.Tool_observed)
+                  | Some (`String "failed") -> Ok (Some Keeper_turn_preview.Failed)
+                  | Some (`String value) -> Error (Printf.sprintf "unknown keeper turn activity %S" value)
+                  | Some other -> field_type_error "turn preview activity" "text or null" other
+                in
                 let* ktp_updated_at_unix =
                   match Json_util.assoc_member_opt "updated_at_unix" preview_json with
                   | Some (`Float value) when Float.is_finite value -> Ok value
@@ -4545,7 +4638,7 @@ let decode_keeper_turn_row json =
                 let* ktp_preparation_timeline = unique_nullable "preparation_timeline"
                     Keeper_turn_preview.preparation_timeline_of_json in
                 let* ktp_execution_scope = unique_nullable "execution_scope" Keeper_execution_scope_id.of_json in
-                Ok (Some { ktp_text_position; ktp_text_tail; ktp_last_tool; ktp_status_text; ktp_updated_at_unix;
+                Ok (Some { ktp_text_position; ktp_text_tail; ktp_last_tool; ktp_status_text; ktp_activity; ktp_updated_at_unix;
                   ktp_preparation;ktp_preparation_timeline;ktp_execution_scope })
             | Some other ->
                 Error

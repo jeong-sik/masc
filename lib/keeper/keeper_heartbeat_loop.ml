@@ -486,7 +486,10 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
    crash through the same [Turn_failed] telemetry channel as other failures. *)
 let set_failure_reason_exact registry_entry ~site reason =
   Keeper_registry.update_entry_exact registry_entry (fun latest ->
-    { latest with last_failure_reason = reason })
+    { latest with
+      last_failure_reason = reason
+    ; last_failure_at = Option.map (fun _ -> Time_compat.now ()) reason
+    })
   |> Keeper_registry.exact_update_succeeded registry_entry ~site
 ;;
 
@@ -782,6 +785,15 @@ let refresh_failure_reason_after_turn ~registry_entry ~turn_fail_count =
             failure_reason_after_turn_status
               ~turn_fail_count
               latest.last_failure_reason
+        ; last_failure_at =
+            (let reason =
+               failure_reason_after_turn_status
+                 ~turn_fail_count
+                 latest.last_failure_reason
+             in
+             if Option.equal (=) reason latest.last_failure_reason
+             then latest.last_failure_at
+             else Option.map (fun _ -> Time_compat.now ()) reason)
         })
     in
     let _committed =

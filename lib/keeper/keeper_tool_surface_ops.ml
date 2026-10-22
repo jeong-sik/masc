@@ -231,6 +231,16 @@ let keeper_list_error_row_json ~runtime_class config name err =
      ]
      @ persisted_fields)
 
+let keeper_failure_cause = function
+  | Keeper_registry.Heartbeat_consecutive_failures _ -> "heartbeat"
+  | Keeper_registry.Turn_consecutive_failures _ -> "turn"
+  | Keeper_registry.Provider_runtime_error _ -> "provider"
+  | Keeper_registry.Turn_configuration_error _ -> "configuration"
+  | Keeper_registry.Official_client_recovery_required _ -> "client_recovery"
+  | Keeper_registry.Fiber_unresolved _ -> "fiber"
+  | Keeper_registry.Exception _ -> "exception"
+  | Keeper_registry.Operator_interrupt -> "operator_interrupt"
+
 let keeper_list_row_json ~runtime_class config name =
   match read_effective_meta config name with
   | Error err -> Some (keeper_list_error_row_json ~runtime_class config name err)
@@ -241,6 +251,16 @@ let keeper_list_row_json ~runtime_class config name =
          reading. The last recorded error is a different observation. *)
       let registry_entry = Keeper_registry.get ~base_path:config.base_path meta.name in
       let registry_phase = Option.map (fun entry -> entry.Keeper_registry.phase) registry_entry in
+      let last_failure =
+        Option.bind registry_entry (fun entry ->
+          Option.map
+            (fun reason ->
+              `Assoc
+                [ ("cause", `String (keeper_failure_cause reason))
+                ; ("at_unix", Option.fold entry.Keeper_registry.last_failure_at ~none:`Null ~some:(fun value -> `Float value))
+                ])
+            entry.Keeper_registry.last_failure_reason)
+      in
       let runtime_blocker =
         Option.bind registry_entry (fun entry ->
           Option.bind entry.Keeper_registry.last_failure_reason
@@ -315,6 +335,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("health", `String health);
             ("paused", `Bool meta.paused);
             ("next_action", next_action);
+            ("last_failure", Option.value last_failure ~default:`Null);
             ("runtime_blocker_summary", Json_util.string_opt_to_json runtime_blocker_summary);
             ("runtime_blocker_signature", Json_util.string_opt_to_json runtime_blocker_signature);
             ("runtime_lane_observation", runtime_lane_observation);

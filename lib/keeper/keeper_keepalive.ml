@@ -822,7 +822,10 @@ let record_keeper_crashed
     in
     ignore
       (update_exact (fun current ->
-         { current with last_failure_reason = Some failure_reason })
+         { current with
+           last_failure_reason = Some failure_reason
+         ; last_failure_at = Some (Time_compat.now ())
+         })
        |> Keeper_registry.exact_update_succeeded
             entry
             ~site:"record_keeper_crashed.failure_reason");
@@ -1191,6 +1194,7 @@ let rec start_keepalive
              (fun current ->
                 { current with
                   last_failure_reason = Some (Keeper_registry.Exception reason)
+                ; last_failure_at = Some (Time_compat.now ())
                 })
            |> Keeper_registry.exact_update_succeeded
                 reg

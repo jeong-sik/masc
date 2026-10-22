@@ -19,7 +19,7 @@ let health raw =
 let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = false)
     ?(next_action = None) ?(activation_mode = Decode.Activation_autonomous)
     ?(runtime_id = "anthropic.claude-opus-5-5") ?(phase = phase "running")
-    ?(sandbox_profile = "docker") name :
+    ?(sandbox_profile = "docker") ?(last_failure = None) name :
     Decode.keeper_runtime =
   { kr_name = name
   ; kr_identity = Ok { k_trace_id = "trace-" ^ name;
@@ -36,9 +36,77 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
   ; kr_phase = phase
   ; kr_sandbox_profile = sandbox_profile
   ; kr_runtime_blocker_summary = None
+  ; kr_last_failure = last_failure
   ; kr_runtime_blocker_signature = None
   ; kr_runtime_lane_observation = None
   }
+
+let running_turn activity : Decode.keeper_turn_state =
+  Decode.Keeper_turn_running
+    { lane = Decode.Turn_lane_autonomous
+    ; started_at_unix = 10.
+    ; interrupt_token = "token"
+    ; turn_ref = None
+    ; preview = Some
+        { ktp_text_position = { kpp_generation = 0; kpp_start_byte = 0 }
+        ; ktp_status_text = "active"
+        ; ktp_activity = Some activity
+        ; ktp_updated_at_unix = 20.
+        ; ktp_text_tail = ""
+        ; ktp_last_tool = None
+        ; ktp_preparation = None
+        ; ktp_preparation_timeline = None
+        ; ktp_execution_scope = None
+        }
+    }
+
+let failure cause at_unix : Decode.keeper_failure =
+  { kf_cause = cause; kf_at_unix = at_unix }
+
+let test_failing_status_projection () =
+  let failed = failure Decode.Keeper_failure_provider (Some 18.) in
+  let row = runtime ~health:(health "failing") ~last_failure:(Some failed) "analyst" in
+  let waiting = Decode.keeper_failure_status_of_readings
+      ~health:(Some row.kr_health) ~turn:(Some Decode.Keeper_turn_idle) ~runtime:(Some row) in
+  (match waiting with
+   | Some status ->
+       Alcotest.(check bool) "no turn means waiting" true
+         (status.kfs_current_activity = Decode.Keeper_activity_waiting);
+       Alcotest.(check bool) "keeps the typed failure" true
+         (status.kfs_last_failure = Some failed)
+   | None -> Alcotest.fail "failing health must produce a status projection");
+  let streaming = Decode.keeper_failure_status_of_readings
+      ~health:(Some row.kr_health)
+      ~turn:(Some (running_turn Masc.Keeper_turn_preview.Receiving_response))
+      ~runtime:(Some row) in
+  (match streaming with
+   | Some status -> Alcotest.(check bool) "streaming remains current activity" true
+       (status.kfs_current_activity = Decode.Keeper_activity_streaming)
+   | None -> Alcotest.fail "failing health must produce a status projection");
+  let tool = Decode.keeper_failure_status_of_readings
+      ~health:(Some row.kr_health)
+      ~turn:(Some (running_turn Masc.Keeper_turn_preview.Tool_observed))
+      ~runtime:(Some row) in
+  (match tool with
+   | Some status -> Alcotest.(check bool) "tool event remains distinguishable" true
+       (status.kfs_current_activity = Decode.Keeper_activity_tool)
+   | None -> Alcotest.fail "failing health must produce a status projection")
+
+let test_healthy_status_is_silent_and_unknown_failure_is_preserved () =
+  let row = runtime "analyst" in
+  Alcotest.(check bool) "healthy keeper has no failure status" true
+    (Decode.keeper_failure_status_of_readings
+       ~health:(Some row.kr_health) ~turn:(Some Decode.Keeper_turn_idle) ~runtime:(Some row)
+     = None);
+  let failing = runtime ~health:(health "failing") "analyst" in
+  match Decode.keeper_failure_status_of_readings
+      ~health:(Some failing.kr_health) ~turn:None ~runtime:(Some failing) with
+  | Some status ->
+      Alcotest.(check bool) "unknown failure cause stays absent" true
+        (status.kfs_last_failure = None);
+      Alcotest.(check bool) "unobserved current state stays unknown" true
+        (status.kfs_current_activity = Decode.Keeper_activity_unknown)
+  | None -> Alcotest.fail "failing keeper with missing cause still needs a status"
 
 let complete rows = Control.Roster_complete rows
 
@@ -1199,6 +1267,10 @@ let () =
             test_roster_decode_keeps_the_axes_apart
         ; Alcotest.test_case "a failing keeper reads failing" `Quick
             test_roster_decode_reads_a_failing_keeper
+        ; Alcotest.test_case "failing status separates last failure and current activity" `Quick
+            test_failing_status_projection
+        ; Alcotest.test_case "healthy is quiet and missing failure stays unknown" `Quick
+            test_healthy_status_is_silent_and_unknown_failure_is_preserved
         ; Alcotest.test_case "a null action decodes to None" `Quick
             test_roster_decode_null_action_is_none
         ; Alcotest.test_case "an unknown action is rejected" `Quick

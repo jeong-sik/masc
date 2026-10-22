@@ -464,8 +464,16 @@ let status_text preview =
        ; Option.map (fun name -> "last observed tool: " ^ name) preview.last_tool
        ; Option.map (fun detail -> "last failure: " ^ detail) preview.last_failure ])
 
+let activity_to_json = function
+  | Preparing -> `String "preparing"
+  | Awaiting_response -> `String "waiting"
+  | Receiving_response -> `String "streaming"
+  | Tool_observed -> `String "tool"
+  | Failed -> `String "failed"
+
 let to_json ?(include_preparation_timeline = false) preview =
   `Assoc ["status_text", `String (status_text preview);
+    "activity", activity_to_json preview.activity;
     "text_tail", `String preview.text_tail;
     "text_position", `Assoc ["generation", `Int preview.text_position.generation;
       "start_byte", `Int preview.text_position.start_byte];

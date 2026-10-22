@@ -33,8 +33,8 @@ universal speed or completeness on every site. The instruction and runtime revis
 separately from this package change.
 
 The `BrowserGoto` descriptor declares the `url` and `title` object produced by
-`Browser_webdriver.page_summary`, plus the browser identity and capability
-fields that `Tool_misc_browser_lane` adds to every owned-browser answer.
+`Browser_webdriver.page_summary`, plus the browser identity fields that
+`Browser_binding.annotate` adds to every browser answer.
 Without that output contract, the Skill's
 `/url` reference is rejected during catalog loading and its callable tool is
 absent. The shipped Skill test parses the actual file against runtime descriptors,

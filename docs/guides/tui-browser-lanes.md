@@ -200,15 +200,6 @@ shown. What keeps its place depends on whether the rows report a host:
   screen has rows left. A workspace that has not run a BiDi host sees every
   row it saw before these existed.
 
-In a Keeper's chat, the tool results view shows a refused browser call as its
-case, what the connection leaves out and how many connected browsers serve it,
-for example `BrowserInteract · failed · live_transport_unsupported ·
-WebExtension: no hover · 0 connections serve it`. Other browser refusals that
-sent nothing (`no_live_client`, `ambiguous_browser_clients`,
-`selected_client_disconnected`, `browser_lane_off`,
-`browser_activity_unavailable`) show their case and the refusal's next-step
-sentence.
-
 The URL editor accepts bracketed paste, Unicode backspace and Ctrl-U. Typing
 belongs to the editor and cannot trigger Browser commands or the Keeper composer.
 The URL editor controls the isolated automation session. Keepers can separately

@@ -28,13 +28,6 @@ let observe ~base_path ~configuration =
   let lane = Launcher.observe ~base_path ~server:Launcher.Not_serving in
   { lane = { lane with server = Launcher.current_server () }; record; keeper }
 
-(* A process that bound no listener was not asked for its connections, so
-   they are listed here: once, either way. *)
-let listed_clients { lane; _ } =
-  match lane.server with
-  | Launcher.Serving { polling; _ } -> polling
-  | Launcher.Not_serving -> Browser_lane.active_clients ()
-
 type launcher_standing = Launcher_installed | Launcher_not_installed | Launcher_needs_reinstall
 
 type attach = { launcher : string; arguments : string; standing : launcher_standing }
@@ -447,12 +440,6 @@ let report_to_json { state; attach; keeper; message } =
     ]
 
 let to_json observation = report_to_json (report observation)
-
-let summary_to_json observation =
-  `Assoc
-    [ "state", `String (state_name observation.record)
-    ; "message", `String (message observation)
-    ]
 
 (* Exactly the fields the writer writes: one more, one fewer or one twice
    is another layout, and is refused rather than read around. *)

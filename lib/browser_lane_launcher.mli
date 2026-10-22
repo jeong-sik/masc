@@ -1,8 +1,8 @@
 (** Where an installed browser-lane host sends its polls, beside the port the
     workspace connection names and what this process observes of the lane it
-    serves. It reads files and this process's lane state only. [masc doctor],
-    the dashboard's onboarding check and the browser tools answer from this
-    one observation and its {!verdict}. *)
+    serves. It reads files and this process's lane state only. [masc doctor]
+    and the dashboard's onboarding check answer from this one observation and
+    its {!verdict}. *)
 
 (** What a lane installation left under [<base-path>/.masc/browser-lane/host]:
     the [launch] script Firefox runs and the [launch.json] declaration the
@@ -104,8 +104,3 @@ val route_name : route -> string
 (** The command that installs the lane for this workspace for a route, as the
     words that follow "the operator runs". *)
 val install : route:route -> base_path:string -> string
-
-(** [launcher], [workspace_port], [workspace_port_error], [serving_port],
-    [polling_hosts], [verdict] and [message], for a tool result a Keeper
-    reads. The two server fields are null when no server is observed. *)
-val to_json : t -> Yojson.Safe.t

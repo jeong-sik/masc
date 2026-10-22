@@ -270,9 +270,6 @@ let browser_bidi_host_check (host:Browser_bidi_host_status.observation) =
   | Browser_bidi_host_status.Host_not_running -> report Needs_setup
   | Browser_bidi_host_status.Host_unreadable -> report Invalid
 
-(* The browser tools read the same observation when no browser answers, so an
-   operator and a Keeper are told the same cause. One observation answers both
-   checks, so they say of one launcher and one list of connections. *)
 (* The browser tables of the workspace's runtime.toml, for a reader with no
    server: only when the whole file loads, as a server loads it, since a
    server that refuses the file has no browser configuration either. [None]
@@ -284,6 +281,8 @@ let browser_configuration config_path =
     | Error _ -> None
     | Ok _ -> Result.to_option (Browser_configuration.of_file config_path)
 
+(* One observation answers both checks, so they say of one launcher and one
+   list of connections. *)
 let browser_lane_check ~configuration base_path =
   let host = Browser_bidi_host_status.observe ~base_path ~configuration in
   let observation = host.lane in

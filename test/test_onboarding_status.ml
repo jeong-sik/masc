@@ -848,14 +848,7 @@ let a_bidi_host_report_reads_back_as_written () =
   refused "a last_start field on Addon configuration"
     (with_managed "last_start" (`Assoc [ "kind", `String "absent" ]));
   refused "a keeper field written twice"
-    (with_keeper_json (`Assoc (managed_fields @ [ "port", `Int 9222 ])));
-  (* A Keeper is sent the state and the paragraph, not the record. *)
-  let ended_observation = observation (Record.Ended (ended, ending)) in
-  check bool "the summary is the state and its message" true
-    (Status.summary_to_json ended_observation
-     = `Assoc
-         [ "state", `String "ended"
-         ; "message", `String (Status.message ended_observation) ])
+    (with_keeper_json (`Assoc (managed_fields @ [ "port", `Int 9222 ])))
 
 (* The front door opened imp's history only when no check at all was Invalid, so
    a browser lane launcher left on an old port sent an operator with a working

@@ -111,7 +111,7 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
 4. 새 screenshot의 `viewport`와 그 컨트롤 위의 `point`로 `click_at` 한다.
 5. 다시 읽어 결과를 확인한다.
 
-연결이 `web_extension`뿐이면 이 일은 할 수 없다. 거절의 `retry`를 운영자에게 전한다.
+연결이 `web_extension`뿐이면 이 일은 할 수 없다. `webdriver_bidi` 연결이 필요하다고 운영자에게 알린다.
 
 화면 확인이 필요하면 관측된 `tabId`로 `BrowserRead mode=screenshot`을 호출한다.
 Keeper 응답의 `artifact`를 `keeper_analyze_image`에 넘긴다. 텍스트만 읽고 이미지의

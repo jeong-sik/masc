@@ -52,6 +52,38 @@ for line in sys.stdin:
     else: raise RuntimeError(method)
     print(json.dumps({"jsonrpc":"2.0","id":req["id"],"result":result}),flush=True)
 |}
+(* The failure class and effect phase the scripted adapter reports for a
+   lane answer, read from the answer as the browser host wrote it. *)
+let answer_result ~lane ~tool_name ~start_time = function
+  | B.Answered (`Assoc fields) ->
+    (match List.assoc_opt "ok" fields, List.assoc_opt "data" fields with
+     | Some (`Bool true), Some data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
+     | Some (`Bool false), _ ->
+       let message = match List.assoc_opt "error" fields with
+         | Some (`String message) -> message
+         | _ -> "browser backend failed without an error message" in
+       let effect_disposition = match List.assoc_opt "effectPhase" fields with
+         | Some (`String "not_started") -> Tool_result.Proven_pre_effect
+         | Some (`String "partial") -> Tool_result.Proven_post_effect
+         | Some _ | None -> Tool_result.Effect_outcome_unknown in
+       Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
+         ?data:(List.assoc_opt "data" fields) ~effect_disposition message
+     | _ -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+         "invalid browser backend response")
+  | B.Answered _ ->
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+      "invalid browser backend response"
+  | B.Lane_absent ->
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable
+      ~effect_disposition:Tool_result.Proven_pre_effect (B.lane_absent_message lane)
+  | B.Timed_out ->
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable
+      "the browser lane did not answer in time; the dispatched outcome is unknown"
+  | B.Rejected_before_effect reason ->
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
+      ~effect_disposition:Tool_result.Proven_pre_effect reason
+  | B.Refused reason ->
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection reason
 let response ~clients ~route verb answer =
   let selected={Browser_selection.route;reason=Browser_selection.Explicit_browser} in
   let connection=match route with
@@ -64,7 +96,7 @@ let response ~clients ~route verb answer =
     | `Assoc fields -> `Assoc (fields @ ["browserSelection",Browser_selection.to_json selected;
         "browserConnection",`Assoc connection])
     | _ -> failwith "fixture expected issue receipt" in
-  let typed=Tool_misc_browser_lane.answer_to_result ~lane:(B.route_lane_name route)
+  let typed=answer_result ~lane:(B.route_lane_name route)
     ~tool_name:(B.verb_to_string verb) ~start_time:(Tool_timing.start ()) answer in
   Mcp_protocol.Mcp_types.tool_result_to_yojson {
     content=[];is_error=Some (Tool_result.is_failed typed);structured_content=Some data;

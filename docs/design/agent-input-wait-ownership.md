@@ -14,19 +14,17 @@ exist with or without an event-bus subscriber. Request IDs use the existing
 fresh-ID source rather than agent name, turn and timestamp.
 
 `Agent.provide_input` takes this proof, checks both IDs under the Agent's state
-lock, uses the owner's canonical question, appends an Answer message if needed,
-and consumes the pending wait in the same mutation. Declined and Timeout are
-explicit settlements without synthetic messages. The live callback and restored
-Agent both use this Core contract: only Answer adds model-visible history;
-Declined/Timeout consume the pending request without telling the model which of
-those two responses was selected. This does not guarantee the model will avoid
-asking again. Request schemas are preserved but Core currently does not validate
-Answer JSON against them; no schema-validation guarantee is made here. An old,
-foreign or repeated response returns a typed refusal and leaves the current
-request and messages unchanged. A Timeout response is not automatic wall-clock
-expiry. Distinct model-visible Declined/Timeout observations in shared Core
-remain required before this response feature ships; all three response kinds
-must remain supported in both the live and restored continuation paths.
+lock, uses the owner's canonical question, appends one User response observation,
+and consumes the pending wait in the same mutation. Answer keeps its JSON
+rendering. Declined and Timeout produce distinct explicit observations for the
+canonical question without inventing an answer. The synchronous callback and
+restored Agent use the same mandatory-message Core formatter; all three response
+kinds reach model-input preparation and durable restored history. This does not
+guarantee the model will avoid asking again. Request schemas are preserved but
+Core currently does not validate Answer JSON against them; no schema-validation
+guarantee is made here. An old, foreign or repeated response returns a typed
+refusal and leaves the current request and messages unchanged. A Timeout response
+reports the caller's explicit settlement; Core adds no timer or wall-clock expiry.
 
 Publishing Started is not an accepted resume: input/callback validation can
 still refuse the call. The shared input stage consumes only its captured
@@ -307,7 +305,7 @@ Enabling official-client input later requires its own continuation authority.
 The existing unified success receipt precedes durable wait admission; a later
 admission error does not rewrite that earlier run receipt into operation success.
 
-All layers remain Draft. Shared Core Declined/Timeout observations, autonomous
+All layers remain Draft. Autonomous
 waiting, dedicated input-wait classification,
 canonical/live/retained divergence reconciliation, snapshot/SSE invalidation and
 persistent/reconnected Acting/TUI are still required for #38005 acceptance.
@@ -375,6 +373,27 @@ Actual independent Producer publication of newer global input G still needs
 typed lineage reconciliation preserving its history, context and other pending
 request; refusing G here is not that recovery. The canonical history-extension
 fixture keeps global input W and must not be cited as that independent integration.
-R1 remains incomplete. Shared Core R2, autonomous waiting, dedicated classification,
+R1 remains incomplete. Autonomous waiting, dedicated classification,
 snapshot/SSE and persistent/reconnected Acting/TUI also remain mandatory, and all
 layers stay Draft without installation or merge.
+
+## Shared Core explicit settlement observations (R2)
+
+The shared formatter always returns one User message. The live callback appends
+it before parameter preparation, while the owned restored path saves it together
+with consumed pending ownership before in-memory publication. Decline and timeout
+are distinct model-visible facts, never fabricated Answer JSON. Their typed
+responses remain distinct in events, intent storage, comparison and admission.
+
+The integrated Core scenario exercises all three responses through the callback
+and through actual checkpoint save/close/reopen, then compares their real
+`Agent_turn.prepare_turn` effective input before provider dispatch. It also
+supplies a forged display question to the restored API, which must use the owned
+canonical question. Keeper Response and original Owner scenarios retain complete
+metadata and original prompt history while adding each explicit observation.
+These are input preparation and storage checks, not evidence that a provider
+changes its behavior or that an installed runtime has adopted this layer.
+
+Independent Producer G reconciliation, autonomous waiting, dedicated outcome and
+status consumers, snapshot/SSE invalidation and persistent/reconnected Acting/TUI
+remain mandatory for #38005. All layers remain Draft without installation or merge.

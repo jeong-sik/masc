@@ -15,14 +15,14 @@ let input_required_of_request
   }
 ;;
 
-let message_of_response ?(metadata = []) ~question = function
-  | Hooks.Answer json ->
-    let text =
+let message_of_response ?(metadata = []) ~question response =
+  let text = match response with
+    | Hooks.Answer json ->
       Printf.sprintf "[User input] %s: %s" question (Yojson.Safe.to_string json)
-    in
-    Some
-      { role = User; content = [ Text text ]; name = None; tool_call_id = None; metadata }
-  | Hooks.Declined | Hooks.Timeout -> None
+    | Hooks.Declined -> Printf.sprintf "[Input declined] %s" question
+    | Hooks.Timeout -> Printf.sprintf "[Input timed out] %s" question
+  in
+  { role = User; content = [ Text text ]; name = None; tool_call_id = None; metadata }
 ;;
 
 let apply_response ?metadata agent supplied response =

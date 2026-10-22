@@ -12,7 +12,7 @@ val consume :
 
 val respond :
   Agent_types.t -> Agent_input_request.pending ->
-  message:(Agent_input_request.pending -> Types.message option) ->
+  message:(Agent_input_request.pending -> Types.message) ->
   (unit, Agent_types.input_response_error) result
-(** Build any answer from the canonical owned question, then save the candidate
-    messages and consumed wait together before updating the Agent. *)
+(** Build the response observation from the canonical owned question, then save
+    the candidate messages and consumed wait together before updating the Agent. *)

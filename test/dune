@@ -5637,6 +5637,11 @@
  (libraries masc masc.agent_core masc.lane_addon_call_context mcp_protocol alcotest eio eio_main yojson))
 
 (test
+ (name test_resource_requirement)
+ (modules test_resource_requirement)
+ (libraries alcotest unix masc.resource_requirement))
+
+(test
  (name test_native_addon_lease)
  (modules test_native_addon_lease)
  (libraries alcotest unix yojson digestif masc.native_addon_lease masc_process)

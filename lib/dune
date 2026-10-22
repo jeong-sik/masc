@@ -104,6 +104,7 @@
   masc.machine_configuration
   masc.lane_addon_tool_result masc.lane_addon_call_context
   masc.native_addon_lease
+  masc.resource_requirement
   masc.browser_process_owner
   masc.tool_input_contract
   masc.machine_input_history masc.machine_controller_contract masc.msx_tool

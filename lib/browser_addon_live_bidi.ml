@@ -2,6 +2,7 @@ module B = Browser_lane
 module W = Browser_addon_wire
 module Peer = Browser_bidi_peer
 module Lease = Native_addon_lease
+module Requirement = Resource_requirement
 type identity = { device:int; inode:int }
 type validation_phase = Idle | Validating
 type configuration = { firefox:string; profile:string; port:int; launcher:string;
@@ -13,32 +14,33 @@ let protect work = try work () with
 let lease result = Result.map_error Lease.error_to_string result
 let absolute path = path<>"" && not (Filename.is_relative path) && not (String.contains path '\000')
 let shared_slot profile = Filename.concat profile ".masc-firefox-profile-claim"
-let identity ~directory path =
-  let stat=Unix.lstat path in
-  if stat.Unix.st_kind=(if directory then Unix.S_DIR else Unix.S_REG)
-     && stat.st_uid=Unix.geteuid () && stat.st_perm=(if directory then 0o700 else 0o600)
-     && (directory || stat.st_nlink=1)
-  then Ok {device=stat.st_dev;inode=stat.st_ino}
-  else Error "Firefox profile claim is not private and host-owned"
+let profile_label = "Firefox profile"
+let slot_label = "Firefox profile claim directory"
+let gate_label = "Firefox profile claim gate"
+let lease_label = "Firefox profile claim lease"
+let identity ~label ~directory path =
+  let* stat=Requirement.lstat ~label
+    (if directory then Requirement.private_directory else Requirement.private_file) path in
+  Ok {device=stat.st_dev;inode=stat.st_ino}
 let verify c = protect (fun () ->
   let* ()=if Unix.realpath c.profile=c.profile then Ok () else Error "Firefox profile canonical path changed" in
-  List.fold_left (fun result (path,directory,expected) -> let* ()=result in
-    let* actual=identity ~directory path in
+  List.fold_left (fun result (label,path,directory,expected) -> let* ()=result in
+    let* actual=identity ~label ~directory path in
     if actual=expected then Ok () else Error "Firefox profile or stable claim inode changed") (Ok ())
-    [c.profile,true,c.root;shared_slot c.profile,true,c.slot;
-     Filename.concat (shared_slot c.profile) "gate",false,c.gate;
-     Filename.concat (shared_slot c.profile) "lease",false,c.lease])
+    [profile_label,c.profile,true,c.root;slot_label,shared_slot c.profile,true,c.slot;
+     gate_label,Filename.concat (shared_slot c.profile) "gate",false,c.gate;
+     lease_label,Filename.concat (shared_slot c.profile) "lease",false,c.lease])
 let configuration ~(browser:Browser_configuration.live_bidi) ~launcher ~guardian ~claim_directory = protect (fun () ->
   let* ()=if List.for_all absolute [browser.firefox;browser.profile;launcher;guardian;claim_directory]
     && browser.port>0 && browser.port<=65535 then Ok () else Error "invalid owned Firefox resources" in
   let profile=Unix.realpath browser.profile in
-  let* root=identity ~directory:true profile in
+  let* root=identity ~label:profile_label ~directory:true profile in
   let slot_path=shared_slot profile in
   (try Unix.mkdir slot_path 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
-  let* slot=identity ~directory:true slot_path in
+  let* slot=identity ~label:slot_label ~directory:true slot_path in
   let* _=lease (Lease.recover_preparation ~directory:slot_path) in
-  let* gate=identity ~directory:false (Filename.concat slot_path "gate") in
-  let* claim_lease=identity ~directory:false (Filename.concat slot_path "lease") in
+  let* gate=identity ~label:gate_label ~directory:false (Filename.concat slot_path "gate") in
+  let* claim_lease=identity ~label:lease_label ~directory:false (Filename.concat slot_path "lease") in
   let c={firefox=browser.firefox;profile;port=browser.port;launcher;guardian;claim_directory;
     root;slot;gate;lease=claim_lease} in
   let* ()=verify c in Ok c)

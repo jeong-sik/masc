@@ -30,15 +30,18 @@ test('a complete capture plan keeps raw packet order and integer clocks, pre-rol
   assert.equal(prepared.format,'capture-session');assert.equal(plan.schemaVersion,3)
   assert.equal(plan.ump.clock.origin,packets[1].hostTime);assert.deepEqual(plan.ump.packets,packets)
   assert.equal(plan.assets[0].frames,4800);assert.equal(plan.regions[0].startSeconds,.12);assert.equal(plan.duration,.27)
+  assert.equal(prepared.timelineOffsetSeconds,-.02)
+  assert.ok(Math.abs(plan.regions[0].startSeconds+prepared.timelineOffsetSeconds-.1)<=manifest.clock.numer/manifest.clock.denom/1e9)
   assert.deepEqual(prepared.bindings,[{port:0,destination:'42'},{port:1,destination:'-43'}])
   assert.deepEqual(await readFile(plan.assets[0].path),wave);assert.equal(await readFile(join(input,'midi.ump.jsonl'),'utf8'),midi)
   await rm(input,{recursive:true});assert.deepEqual(await readFile(plan.assets[0].path),wave)
   assert.equal(manifest.clock.requestedStart,'9007199254740993123')
 }))
-test('capture route admission refuses missing/unused/duplicate source bindings and removes its private root',async()=>fixture(async({root,input})=>{
+test('capture route admission refuses missing/unused/duplicate source bindings and removes its private root',async()=>fixture(async({root,input,manifest})=>{
   const before=await readdir(root)
   for(const options of [{},{midiOutput:'01'},{sourceBindings:[{source:'A',destination:'42'},{source:'A',destination:'43'}]},
-    {midiOutput:'42',sourceBindings:[{source:'missing',destination:'43'}]}]) {
+    {midiOutput:'42',sourceBindings:[{source:'missing',destination:'43'}]},
+    {midiOutput:'42',expectedManifest:{...manifest,clock:{...manifest.clock,requestedStart:'0'}}}]) {
     await assert.rejects(prepareCapturedPlayback(input,{directory:root,...options}))
     assert.deepEqual(await readdir(root),before)
   }
@@ -46,9 +49,13 @@ test('capture route admission refuses missing/unused/duplicate source bindings a
   await assert.rejects(prepareCapturedPlayback(input,{directory:root,midiOutput:'42',signal:abort.signal}),{name:'AbortError'})
   assert.deepEqual(await readdir(root),before)
 }))
-test('selected-output WAV audition owns a native source snapshot independently of original capture files',async()=>fixture(async({root,input,wave})=>{
-  const prepared=await prepareCapturedWave(input,{directory:root})
+test('selected-output WAV audition owns a native source snapshot independently of original capture files',async()=>fixture(async({root,input,wave,manifest})=>{
+  const before=await readdir(root)
+  await assert.rejects(prepareCapturedWave(input,{directory:root,expectedManifest:{...manifest,clock:{...manifest.clock,requestedStart:'0'}}}),/Captured take changed/)
+  assert.deepEqual(await readdir(root),before)
+  const prepared=await prepareCapturedWave(input,{directory:root,expectedManifest:manifest})
   assert.equal(prepared.format,'wave');assert.deepEqual(await readFile(prepared.path),wave)
+  assert.equal(prepared.timelineOffsetSeconds,.1)
   await rm(input,{recursive:true});assert.deepEqual(await readFile(prepared.path),wave)
   assert.ok(dirname(prepared.path).startsWith(root))
 }))

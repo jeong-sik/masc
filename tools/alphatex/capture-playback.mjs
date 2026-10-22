@@ -1,8 +1,10 @@
-import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { importArrangementCapture, importArrangementWave } from './arrangement-files.mjs'
 import { newArrangement } from './arrangement.mjs'
-import { jsonLines, unpackMidi } from './session-data.mjs'
+import { captureClock, jsonLines, unpackMidi } from './session-data.mjs'
+import { validateCaptureManifest } from './captured-source.mjs'
 import { readWaveMetadata } from './wave-file.mjs'
 import { captureRange } from './capture-time.mjs'
 
@@ -18,7 +20,7 @@ function seconds(host, origin, clock) {
   const delta = BigInt(host) - origin, denom = BigInt(clock.denom)
   return (Number(delta / denom) * clock.numer + Number(delta % denom) * clock.numer / clock.denom) / 1e9
 }
-export async function prepareCapturedPlayback(input, { directory, midiOutput, sourceBindings = [], signal } = {}) {
+export async function prepareCapturedPlayback(input, { directory, midiOutput, sourceBindings = [], expectedManifest, signal } = {}) {
   signal?.throwIfAborted()
   if (!Array.isArray(sourceBindings) || new Set(sourceBindings.map(binding => binding?.source)).size !== sourceBindings.length) throw new Error('Invalid captured source bindings')
   if (midiOutput !== undefined) destination(midiOutput)
@@ -27,6 +29,7 @@ export async function prepareCapturedPlayback(input, { directory, midiOutput, so
   try {
     const imported = await importArrangementCapture(newArrangement(), input, { projectPath: join(temporary, 'project.json'), signal })
     const asset = imported.project.assets[0], manifest = asset.manifest, packets = [], used = new Set()
+    if (expectedManifest !== undefined && !isDeepStrictEqual(manifest, expectedManifest)) throw new Error('Captured take changed; reopen it before playback')
     const origin = BigInt(captureRange(asset).origin)
     for await (const row of jsonLines(join(temporary, asset.parts.midi.file), { signal })) {
       unpackMidi(row)
@@ -50,17 +53,23 @@ export async function prepareCapturedPlayback(input, { directory, midiOutput, so
     const path = join(temporary, 'plan.json');signal?.throwIfAborted()
     await writeFile(path, JSON.stringify(plan), { flag: 'wx', mode: 0o600, signal });signal?.throwIfAborted()
     const ports = [...new Set(bindings.map(binding => binding.destination))].map((destination, port) => ({ port, destination }))
-    return { path, duration, format: 'capture-session', midiOutput: ports[0].destination, bindings: ports }
+    return { path, duration, format: 'capture-session', midiOutput: ports[0].destination, bindings: ports,
+      timelineOffsetSeconds: captureClock(manifest.clock)(String(origin)) }
   } catch (error) { await rm(temporary, { recursive: true, force: true });throw error }
 }
 
 // WAV-only audition uses the selected native output and owns an immutable WAV
 // snapshot. Choosing this route is explicit; it does not stand in for UMP replay.
-export async function prepareCapturedWave(input, { directory, signal } = {}) {
+export async function prepareCapturedWave(input, { directory, expectedManifest, signal } = {}) {
   signal?.throwIfAborted()
   const temporary = await mkdtemp(join(directory, 'capture-wave-'))
   try {
+    const manifest = validateCaptureManifest(JSON.parse(await readFile(join(input, 'session.json'), { encoding: 'utf8', signal })))
+    if (expectedManifest !== undefined && !isDeepStrictEqual(manifest, expectedManifest)) throw new Error('Captured take changed; reopen it before playback')
+    if (manifest.clock.firstAudioHostTime === null) throw new Error('Captured WAV has no audio origin')
     const { project } = await importArrangementWave(newArrangement(), join(input, 'audio.wav'), { projectPath: join(temporary, 'project.json'), signal })
-    return { path: join(temporary, project.assets[0].file), format: 'wave' }
+    const path = join(temporary, project.assets[0].file)
+    await readWaveMetadata(path, { sampleRate: manifest.sampleRate, channels: manifest.channels, frames: BigInt(manifest.audioFrames) }, { signal })
+    return { path, format: 'wave', timelineOffsetSeconds: captureClock(manifest.clock)(manifest.clock.firstAudioHostTime) }
   } catch (error) { await rm(temporary, { recursive: true, force: true });throw error }
 }

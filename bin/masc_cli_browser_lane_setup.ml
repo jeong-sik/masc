@@ -223,27 +223,28 @@ let print_automation ~runtime_config_path plan =
 
 (* Every route runs in the browser Add-on, so every mode declares it. *)
 let print_addon (installed : Addon_setup.installed) =
-  let manifest = Filename.concat installed.package_directory "lane.toml" in
   Printf.printf "Browser Add-on package  %s (%s)\n" installed.package_directory
     (match installed.files_written, installed.files_removed with
-     | 0, 0 -> "already this build's"
-     | written, 0 -> Printf.sprintf "%d files written" written
-     | written, removed -> Printf.sprintf "%d files written, %d removed" written removed);
+     | 0, [] -> "already this build's"
+     | written, [] -> Printf.sprintf "%d files written" written
+     | written, removed ->
+       Printf.sprintf "%d files written, %d removed" written (List.length removed));
+  List.iter (Printf.printf "  removed %s\n") installed.files_removed;
   (match installed.declaration with
    | Addon_setup.Created { path } ->
      Printf.printf "Declared the browser Add-on in %s\n" path;
      print_endline
        "The MASC server attaches it when it starts and on its maintenance pass; set \
         enabled = false there to keep it detached."
-   | Addon_setup.Present { path; manifest_path; this_build; enabled } ->
+   | Addon_setup.Present { path; manifest_path = named; this_build; enabled } ->
      Printf.printf "The browser Add-on is declared in %s\n" path;
      if not this_build
      then
        Printf.printf
          "It names the package %s, not the one this masc carries, and is left as it is. To \
           use this build's package, write %s there.\n"
-         manifest_path
-         (Toml_line_editor.scalar_line ~key:"manifest_path" ~value:manifest);
+         named
+         (Toml_line_editor.scalar_line ~key:"manifest_path" ~value:installed.manifest_path);
      if not enabled then print_endline "Its enabled = false keeps it detached.");
   match installed.missing_programs with
   | [] -> ()

@@ -32,7 +32,8 @@ def executable(path, text):
 # without copying the host; one that holds "moves" makes it register the lane
 # somewhere else, as the real command does with a path it trims or strips a
 # trailing .masc from. A --mode addon call is recorded in addon-calls instead,
-# and exits 5 for a workspace whose path holds "addon-refused". The real
+# and exits 5 for a workspace whose path holds "addon-refused" and 3, as for a
+# workspace with no config root yet, for one that holds "addon-unconfigured". The real
 # command is run by test_browser_lane_setup_cli.py. Any other call only says
 # which binary it is.
 FAKE_MASC = '''#!{python}
@@ -48,7 +49,9 @@ base = Path(options["--base-path"])
 if options["--mode"] == "addon":
     with open(here / "addon-calls", "a") as log:
         log.write(json.dumps(args) + "\\n")
-    sys.exit(5 if "addon-refused" in str(base) else 0)
+    if "addon-refused" in str(base):
+        sys.exit(5)
+    sys.exit(3 if "addon-unconfigured" in str(base) else 0)
 with open(here / "lane-calls", "a") as log:
     log.write(json.dumps(args) + "\\n")
 if "fails" in str(base):
@@ -339,6 +342,44 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertEqual(lane_calls(prefix), [host_call(prefix, base)])
             self.assertEqual((base / ".masc/browser-lane/host/masc-browser-host").read_bytes(),
                              (prefix / "masc-browser-host").read_bytes())
+
+    def run_addon_install(self, root, base):
+        build = root / "build"
+        build.mkdir()
+        binaries(build)
+        fake_masc(build / "main_eio.exe")
+        preflight_helper(build)
+        prefix = root / "prefix"
+        result = subprocess.run(
+            ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+             "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+             "--base-path", str(base)],
+            env=unnamed_env(root), capture_output=True, text=True)
+        return result, prefix
+
+    # The first server start writes the config root, so the install goes on
+    # and says what to run after it.
+    def test_a_workspace_without_a_config_root_yet_is_noted_and_installed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            base = root / "addon-unconfigured workspace"
+            base.mkdir()
+            result, prefix = self.run_addon_install(root, base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(addon_calls(prefix)), 1)
+            self.assertIn("browser Add-on is not declared yet", result.stdout)
+            self.assertIn(f"--mode addon --base-path {base}", result.stdout)
+
+    def test_a_refused_addon_and_a_failed_refresh_are_both_reported(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            base = root / "addon-refused fails workspace"
+            base.mkdir()
+            install_lane(base)
+            result, _ = self.run_addon_install(root, base)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn(f"could not refresh browser lane host for {base}", result.stderr)
+            self.assertIn(f"the browser Add-on of {base} is not set up", result.stderr)
 
     def test_a_workspace_that_does_not_exist_yet_gets_no_addon_declaration(self):
         with tempfile.TemporaryDirectory() as temporary:

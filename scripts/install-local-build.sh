@@ -462,21 +462,29 @@ fi
 # The masc just installed writes the browser Add-on package it carries into
 # the workspace and declares it when the workspace has none, so the server
 # attaches a package of this build. An existing declaration is left as it is
-# and reported. A workspace that does not exist yet is not created here. A
-# failure is reported after the browser hosts below are refreshed, so one
-# workspace's Lane directory never leaves every host on the old build.
+# and reported. A workspace that does not exist yet is not created here, and
+# one without a config root yet (setup exits 3) is left for the first server
+# start to create it. A failure is reported after the browser hosts below are
+# refreshed, so one workspace's Lane directory never leaves every host on the
+# old build.
 addon_failed=false
+addon_no_config_root_status=3
 if [ "$browser_addon" = false ]; then
   echo "install-local-build: the browser Add-on is left as it is (--no-browser-addon)"
 elif [ "$workspace_kind" = directory ]; then
-  if ! "$prefix/masc" browser-lane-setup --mode addon --base-path "$workspace_root"; then
+  addon_status=0
+  "$prefix/masc" browser-lane-setup --mode addon --base-path "$workspace_root" || addon_status=$?
+  if [ "$addon_status" -eq "$addon_no_config_root_status" ]; then
+    echo "install-local-build: the browser Add-on is not declared yet: $workspace_root has no config root; the first server start writes one, then run masc browser-lane-setup --mode addon --base-path $workspace_root"
+  elif [ "$addon_status" -ne 0 ]; then
     addon_failed=true
   fi
 else
   echo "install-local-build: the browser Add-on is not declared: workspace $workspace_root does not exist yet; run masc browser-lane-setup --mode addon --base-path $workspace_root once it does"
 fi
 
-python3 - "$prefix/masc" "$prefix/masc-browser-host" "$manifest_dir" "$workspace_root" "$browser_addon" <<'PY'
+refresh_failed=false
+if ! python3 - "$prefix/masc" "$prefix/masc-browser-host" "$manifest_dir" "$workspace_root" "$browser_addon" <<'PY'
 import fcntl
 import filecmp
 import json
@@ -685,9 +693,14 @@ if failures:
         print(f"install-local-build: could not refresh {failure}", file=sys.stderr)
     sys.exit(1)
 PY
+then
+  refresh_failed=true
+fi
 
 if [ "$addon_failed" = true ]; then
-  echo "install-local-build: the browser Add-on of $workspace_root is not set up; the programs above are installed and the browser hosts refreshed" >&2
+  echo "install-local-build: the browser Add-on of $workspace_root is not set up; the programs above are installed" >&2
+fi
+if [ "$addon_failed" = true ] || [ "$refresh_failed" = true ]; then
   exit 1
 fi
 

@@ -186,17 +186,21 @@ let restore_record ~workspace (retained : Owner.retained) =
 let classification_size originals =
   let answered = List.filter_map (fun (t, (phase : Progress.phase)) ->
       match t.work, phase with
-      | Classification {batch;_}, (Finished _ | Conflicted _) -> Some (t, List.length batch.selected)
+      | Classification {batch;_}, (Finished _ | Conflicted _) -> Some (t, batch)
       | Classification _, (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
                           | Commit_unknown _ | Rejected _ | Subdividing _ | Subdivided _)
       | Briefing _, _ -> None) originals in
-  let latest = List.fold_left (fun latest (t, count) -> match latest with
+  let latest = List.fold_left (fun latest (t, batch) -> match latest with
       | Some (newer, _) when Request_id.compare newer.id t.id > 0 -> latest
-      | Some _ | None -> Some (t, count)) None answered in
+      | Some _ | None -> Some (t, batch)) None answered in
   match latest with
   | None -> Request.Fill_frame
-  | Some ({predecessor = Some _; _}, count) -> Request.Up_to count
-  | Some ({predecessor = None; _}, count) -> Request.Up_to (2 * count)
+  | Some ({predecessor = Some _; _}, (batch : Request.batch)) -> Request.Up_to (List.length batch.selected)
+  | Some ({predecessor = None; _}, batch) ->
+    (match batch.size with
+     | Request.Fill_frame -> Request.Fill_frame
+     | Request.Up_to target when List.length batch.selected < target -> Request.Up_to target
+     | Request.Up_to target -> Request.Up_to (2 * target))
 let narrow ~request_id ~final t =
   let* () = if Request_id.to_string request_id <> Request_id.to_string t.id then Ok ()
     else Error "a successor must have its own original request ID" in

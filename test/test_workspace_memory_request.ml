@@ -189,6 +189,9 @@ let test_snapshot_is_bound_to_the_captured_ledger () =
                    | Exceeds_frame _ | Invalid_size _) ->
       Alcotest.fail (label ^ " was restored") in
   let input = member "input" snapshot in
+  Alcotest.check json "a frame-filled batch has no count bound" `Null (member "up_to" snapshot);
+  refused "a zero fact count" (replace "up_to" (`Int 0) snapshot);
+  refused "a fact count written as text" (replace "up_to" (`String "3") snapshot);
   refused "a changed membership" (replace "input" (map_list "facts" (fun fact ->
     if member "member_of" fact = `String "c1" then replace "member_of" `Null fact else fact) input) snapshot);
   refused "a changed claim text" (replace "input" (map_list "claims" (fun claim ->
@@ -266,11 +269,22 @@ let test_next_batch_takes_at_most_the_answered_size () =
   Alcotest.(check bool) "an answered size of three takes the three oldest facts" true
     (batch.selected = List.take 3 facts);
   Alcotest.(check int) "and ranks only those three" 3 batch.index_stats.queries_executed;
-  let batch = get (within (Request.Up_to 8) (5 * per_fact)) in
+  (* Six is not a power of two, so filling the frame by doubling would rank
+     eight facts here. *)
+  let batch = get (within (Request.Up_to 6) (5 * per_fact)) in
   Alcotest.(check bool) "a frame below the answered size still bounds the batch" true
     (batch.selected = List.take 5 facts);
   Alcotest.(check bool) "without ranking past the answered size" true
-    (batch.index_stats.queries_executed <= 8);
+    (batch.index_stats.queries_executed <= 6);
+  Alcotest.(check bool) "the batch keeps the size it was prepared for, not what the frame held" true
+    (batch.size = Request.Up_to 6);
+  (match Request.narrow ~render ~ledger:Ledger.empty batch with
+   | Ok (Some child) -> Alcotest.(check bool) "a narrowed child keeps its parent's size" true
+                          (child.size = Request.Up_to 6)
+   | Ok None | Error _ -> Alcotest.fail "a five-row batch did not narrow");
+  (match Request.batch_of_json ~ledger:Ledger.empty (Request.batch_to_json batch) with
+   | Ok restored -> Alcotest.(check bool) "the snapshot keeps the size" true (restored.size = Request.Up_to 6)
+   | Error error -> Alcotest.fail (Request.error_to_string error));
   Alcotest.(check int) "an answered size above the backlog takes the backlog" 40
     (List.length (get (within (Request.Up_to 100) every_fact)).selected);
   (match within (Request.Up_to 4) (per_fact - 1) with

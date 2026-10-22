@@ -395,6 +395,30 @@ let test_existing_intent_recovers_locally_off_then_runs_on ()=
       && ready_summary base_path && Curator.For_testing.is_idle ~base_path);
     check bool "original child ID completes after actual reattachment" true
       (List.exists (fun record -> record.Owner.request_id=intent.request_id && is_finished record) (records store)))
+let test_the_next_root_takes_the_size_its_last_answer_supports ()=
+  let claims=List.init 5 (fun i -> "Size-evidence original source " ^ string_of_int i) in
+  with_fixture ~start_owner:false ~claims
+    (fun ~sw ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server:_ ~urls:_ ~mode:_ ~delivery:_ ->
+    await clock (fun () -> (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[]);
+    (* A root of all five facts that the provider refused for its size. *)
+    ignore (seed_size_refusal store (capture_classification config));
+    Curator.start ~sw ~config;
+    await_owner clock base_path (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=5
+      && Curator.For_testing.is_idle ~base_path);
+    let size=testable (fun format -> function
+        | Request.Fill_frame -> Format.pp_print_string format "Fill_frame"
+        | Request.Up_to count -> Format.fprintf format "Up_to %d" count) ( = ) in
+    let classifications=captures base_path store |> List.filter_map (fun (_,capture) ->
+        match Capture.work capture with
+        | Capture.Classification {batch;_} -> Some (Capture.request_id capture,batch)
+        | Capture.Briefing _ -> None)
+      |> List.sort (fun (a,_) (b,_) -> Capture.Request_id.compare a b)
+      |> List.map (fun (_,(batch:Request.batch)) -> batch.size,List.length batch.selected) in
+    (* The child of two is answered, so the next root takes two of the three
+       left, though the frame holds all three. That root held its size, so the
+       last one may take four and finds one. *)
+    check (list (pair size int)) "classifications in mint order"
+      [Request.Fill_frame,5;Request.Fill_frame,2;Request.Up_to 2,2;Request.Up_to 4,1] classifications)
 let test_capture_refuses_a_batch_over_the_destination_frame ()=
   with_fixture ~start_owner:false
     (fun ~sw:_ ~clock ~base_path:_ ~config ~store ~source:_ ~declaration:_ ~server:_ ~urls:_ ~mode:_ ~delivery:_ ->
@@ -871,6 +895,8 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "new child rejects changed canonical worker inputs" `Quick test_new_child_rejects_changed_worker_inputs;
   test_case "existing successor intent recovers locally Off and completes after On" `Quick test_existing_intent_recovers_locally_off_then_runs_on;
   test_case "accepted retained host terminal commits Off without another provider" `Quick test_accepted_host_terminal_commits_off_without_worker;
+  test_case "the next root takes the size its last answer supports" `Quick
+    test_the_next_root_takes_the_size_its_last_answer_supports;
   test_case "capture refuses a classification over the destination frame" `Quick
     test_capture_refuses_a_batch_over_the_destination_frame;
   test_case "idle subscription observes queued and already completed wakes" `Quick test_idle_barrier_has_no_lost_wake;

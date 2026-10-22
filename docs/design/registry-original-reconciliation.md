@@ -69,3 +69,12 @@ The failed case stopped before Off with an original-owner strict-read refusal,
 no retained Exact record and zero HTTP posts. It does not execute the later
 discovery-retry repair, and it does not establish a corrected publication/read
 serialization or actual provider/UI/install behavior.
+
+After the discovery-retry repair and the separate original-store serializer,
+[run39707346202](../evidence/2026-10-22-curator-original-delivery/selected-execution-serialization.json)
+executed exact `47b9e716607b74d4948e38608f09460b1ccb45b5`: ten selected suites,
+226 cases passed. This includes original reconciliation12, Owner ACK/commit61,
+production13 and strict discovery8. The historical042 failure remains in its
+original receipt. The whole executed tree equals the externally merged Candle
+branch commit `65727f4998ee9a0152d38b977d53ca2cfa95f2ca`; main, real-provider,
+both UIs and installed-runtime evidence remain separate unfinished work.

@@ -40,3 +40,13 @@ remain refusal checks. The public production fixture still drives the configured
 Python/MCP worker and common Exact HTTP path without injecting a host terminal.
 Parser/source review alone does not establish a successful compiled execution,
 real Docker/provider behavior, installed runtime or either UI.
+
+The [executed ten-suite receipt](../evidence/2026-10-22-curator-original-delivery/selected-execution-serialization.json)
+records exact `47b9e716607b74d4948e38608f09460b1ccb45b5`,226 actual passing
+cases, including discovery8 and production13. The production case that failed
+before now reaches its actual retained terminal and Off settlement. The original
+namespace obstruction/maintenance recovery and held-descriptor/alias scenarios
+also pass. This selected scope is distinct from full regression, a measured
+historical syscall race and actual provider/UI/installed runtime behavior.
+Native Stack44994 was externally merged into the Candle branch, whose whole
+tree equals this executed candidate; main integration is not established.

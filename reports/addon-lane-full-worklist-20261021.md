@@ -609,3 +609,10 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 실제39705408417의 host admission 거절 경계에 대응해 [원래 Store 직렬화](../docs/design/addon-original-store-serialization.md)를 추가했다. 기존 공용 cross-context mutex를 물리 parent·store·scope로 공유하며 별도 Store/parent alias의 알려진 ID 읽기·완전 inventory·publication을 같은 짧은 구간으로 묶는다. no-follow·owner·single-link·descriptor 및 실제 fsync 검사는 유지한다. 원래 domain CAS·workspace lease·execution 권한으로 확대하지 않고 새 registry/잠금 파일/주기 재시도를 만들지 않는다.
 
 실제 descriptor를 열린 채 유지해 alias writer의 대기를 확인하고, 다른 scope publication 뒤 이전 read bytes와 새 원래 progress를 확인하는 회귀를 추가했다. 기존 외부 교체/소유권 거절과 public owner의 Off 시나리오도 유지한다. 새 소스의 parser 검사는 실행 성공이 아니며 정확한 후보의 독립 리뷰와 선택 CI는 별도다. 원래 A01–H06의54개 이름·완료 기준과 실제 provider·두 UI·운영 설치 미완료 경계를 유지한다.
+
+
+## E02 原本 전달·scope 직렬화 선택 실행 확인 · 2026-10-22
+
+- [실제10-suite 실행39707346202](../docs/evidence/2026-10-22-curator-original-delivery/selected-execution-serialization.json)은 exact47b9e716607b74d4948e38608f09460b1ccb45b5에서226건 모두 PASS다. reconcile12·Core current13·Owner commit61·production13·기존 Exact37·Fusion14·concurrent6·strict discovery8·request progress11·host cycle51을 실제 원문과 대조했다. 원래 실패했던 host terminal→Off 정산, namespace 불가 후 maintenance ACK 회복, held descriptor/alias writer와 독립 scope 진행을 포함한다. 이전042의155건 중1건 실패는 별도 원문으로 보존한다.
+- 외부 세션이 Stack44994의 네 층 #44989/#44993/#45002/#45005를 01:44:44–48Z에 실제 Candle 브랜치로 병합했다. top merge65727f4998ee9a0152d38b977d53ca2cfa95f2ca의 전체 tree가 실행47b9와 동일함을 직접 확인했다. 이 세션은 병합 요청을 하지 않았으며 #45005의 당시 reviews API는 빈 배열이다. 독립 source/response PASS를 정식 승인으로 바꾸어 말하지 않는다. main 포함·운영 설치는 증명되지 않았다.
+- 아직 남은 Curator builtin route/config와 두 UI 연결 정리, permanent restart audit, 실제 provider·두 UI·설치 및 원래 A01–H06 전체 요구를 유지한다. 이번226건은 전체 회귀나 전체 E02/G03 완료가 아니다. 원래54개 항목명·완료 기준을 바꾸지 않았다.

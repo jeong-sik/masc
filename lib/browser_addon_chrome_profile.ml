@@ -1,5 +1,5 @@
 module Requirement = Resource_requirement
-type identity = { device:int; inode:int }
+type identity = Requirement.identity = { device:int; inode:int }
 type persistent = { path:string; root:identity; slot:identity; gate:identity;
   lease:identity; anchor:identity }
 type t = Private | Persistent of persistent
@@ -54,16 +54,22 @@ let load_anchor path =
     (match selected with Persistent p -> Ok (Some p)
      | Private -> Error "persistent Chrome anchor cannot select a private allocation")
 let verify p = protect (fun () ->
-  let* ()=if Unix.realpath p.path=p.path then Ok () else Error "Chrome profile path identity changed" in
+  let* ()=Requirement.canonical ~label:profile_label p.path in
   let resources=[profile_label,p.path,true,p.root;slot_label,claim_directory p,true,p.slot;
     gate_label,Filename.concat (claim_directory p) "gate",false,p.gate;
     lease_label,Filename.concat (claim_directory p) "lease",false,p.lease;
     anchor_label,anchor_path p.path,false,p.anchor] in
   let* ()=List.fold_left (fun result (label,path,directory,expected) ->
     let* ()=result in let* observed=owned ~label ~directory path in
-    if observed=expected then Ok () else Error "Chrome profile or stable claim inode was replaced") (Ok ()) resources in
+    if observed=expected then Ok ()
+    else Error (Requirement.replaced ~label ~path ~expected ~observed)) (Ok ()) resources in
   let* anchor=load_anchor p.path in
-  if anchor=Some p then Ok () else Error "Chrome profile anchor changed")
+  let required=Yojson.Safe.to_string (to_json (Persistent p)) in
+  match anchor with
+  | Some recorded when recorded=p -> Ok ()
+  | Some recorded -> Error (Printf.sprintf "%s %s must record %s; it records %s" anchor_label
+      (anchor_path p.path) required (Yojson.Safe.to_string (to_json (Persistent recorded))))
+  | None -> Error (Printf.sprintf "%s %s must record %s; it is missing" anchor_label (anchor_path p.path) required))
 let sync path =
   let fd=Unix.openfile path [Unix.O_RDONLY;Unix.O_CLOEXEC] 0 in
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)

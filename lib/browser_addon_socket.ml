@@ -25,34 +25,34 @@ let context ~instance_id ~automation ~stagehand ~live_bidi ~models = protect (fu
     "live_bidi",(match live_bidi with None -> `Null | Some c -> Browser_addon_live_bidi.configuration_to_json c);
     "models",(match models with None -> `Null | Some configuration -> Browser_addon_models.configuration_to_json configuration);
     "automation",(match automation with None -> `Null | Some configuration -> Browser_addon_automation.configuration_to_json configuration)]))
+let cleanup_descriptor_label = "native cleanup descriptor"
+let cleanup_descriptor_keys = ["automation";"directory";"kind";"live_bidi";"models";"stagehand"]
 let context_of_json ~instance_id = function
   | None -> Ok None
-  | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=["automation";"directory";"kind";"live_bidi";"models";"stagehand"] ->
-    (match List.assoc_opt "kind" fields,List.assoc_opt "directory" fields with
-     | Some (`String "browser_socket"),Some (`String root) ->
+  | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=cleanup_descriptor_keys ->
+    (match List.assoc "kind" fields,List.assoc "directory" fields with
+     | `String "browser_socket",`String root ->
        let* expected=leaf instance_id in
        if Filename.is_relative root || Filename.basename root<>expected
-         || Unix.realpath (Filename.dirname root)<>Filename.dirname root then Error "invalid browser allocation path"
+         || Unix.realpath (Filename.dirname root)<>Filename.dirname root then
+         Error (Printf.sprintf "browser allocation directory %s must be an absolute path named %s under its own canonical parent"
+           root expected)
        else
-         let* automation=match List.assoc_opt "automation" fields with
-           | Some `Null -> Ok None
-           | Some value -> Browser_addon_automation.configuration_of_json value |> Result.map Option.some
-           | None -> Error "missing automation descriptor" in
-         let* models=match List.assoc_opt "models" fields with
-           | Some `Null -> Ok None
-           | Some value -> Browser_addon_models.configuration_of_json value |> Result.map Option.some
-           | None -> Error "missing model broker descriptor" in
-         let* stagehand=match List.assoc_opt "stagehand" fields with
-           | Some `Null -> Ok None
-           | Some value -> Browser_addon_stagehand.configuration_of_json value |> Result.map Option.some
-           | None -> Error "missing Chrome descriptor" in
-         let* live_bidi=match List.assoc_opt "live_bidi" fields with
-           | Some `Null -> Ok None
-           | Some value -> Browser_addon_live_bidi.configuration_of_json value |> Result.map Option.some
-           | None -> Error "missing live BiDi descriptor" in
+         let optional decode name=match List.assoc name fields with
+           | `Null -> Ok None
+           | value -> decode value |> Result.map Option.some in
+         let* automation=optional Browser_addon_automation.configuration_of_json "automation" in
+         let* models=optional Browser_addon_models.configuration_of_json "models" in
+         let* stagehand=optional Browser_addon_stagehand.configuration_of_json "stagehand" in
+         let* live_bidi=optional Browser_addon_live_bidi.configuration_of_json "live_bidi" in
          Ok (Some (root,automation,models,stagehand,live_bidi))
-     | _ -> Error "unknown native cleanup descriptor")
-  | Some _ -> Error "invalid native cleanup descriptor"
+     | kind,directory ->
+       Error (Printf.sprintf "%s must have kind \"browser_socket\" and a string directory; it has kind %s and directory %s"
+         cleanup_descriptor_label (Yojson.Safe.to_string kind) (Yojson.Safe.to_string directory)))
+  | Some (`Assoc fields) ->
+    Error (Requirement.keys ~label:cleanup_descriptor_label ~found:(List.map fst fields) ~required:cleanup_descriptor_keys)
+  | Some value ->
+    Error (Printf.sprintf "%s must be a JSON object; it is %s" cleanup_descriptor_label (Yojson.Safe.to_string value))
 let context_path admission =
   let* context=Native_addon_lease.cleanup_context admission |> Result.map_error Native_addon_lease.error_to_string in
   context_of_json ~instance_id:(Native_addon_lease.instance_id admission) context
@@ -61,7 +61,8 @@ let slot admission directory =
   if List.mem directory (Native_addon_lease.directories admission) then
     let* _=Requirement.lstat ~label:"browser claim slot" Requirement.private_directory directory in
     Ok directory
-  else Error "browser resource is outside its native claim"
+  else Error (Printf.sprintf "browser claim slot %s must be one of its native claim's directories %s"
+    directory (String.concat ", " (Native_addon_lease.directories admission)))
 let record_of_instance instance_id directory = Filename.concat directory
   ("browser-" ^ Digestif.SHA256.(to_hex (digest_string instance_id)) ^ ".json")
 let record admission directory = record_of_instance (Native_addon_lease.instance_id admission) directory
@@ -275,7 +276,8 @@ let cleanup ~admission ~directory = protect (fun () ->
             else Error "unconfirmed browser acquisition contains resources"
           | Acquired (device,inode)|Cleaning (device,inode) ->
             if info.st_dev=device && info.st_ino=inode then Ok ()
-            else Error "browser socket directory identity changed" in
+            else Error (Requirement.replaced ~label:socket_directory_label ~path:root
+              ~expected:{Requirement.device;inode} ~observed:(Requirement.identity info)) in
         let confirmed=match identity with Cleaning _ -> true | Missing|Acquired _|Released -> false in
         let confirm ()=if confirmed then Ok () else
           Fs_compat.save_file_atomic_strict file

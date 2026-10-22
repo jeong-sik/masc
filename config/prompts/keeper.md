@@ -209,6 +209,12 @@ The current Goal set is unknown. Continue independent work; do not infer that th
 ### world.active_goals.verifying_annotation
 [증명 대기 중 — verifier가 proof를 검토 중]
 
+### world.active_goals.yours_annotation
+[yours — 지금 잡은 Task 가 이 Goal 에 연결됨]
+
+### world.active_goals.held_task_link_unreadable_annotation
+[Task 연결을 읽지 못함 — 지금 잡은 Task 가 이 Goal 에 연결됐는지 모름]
+
 ### world.autonomous_trigger.heading
 ### Autonomous Trigger
 

@@ -182,6 +182,14 @@ let format_own_recent_actions_turn ~current_task_id (turn : Keeper_own_recent_ac
 ;;
 
 
+(* Whether this turn's held task is linked to a goal. [Held_task_link_unreadable]
+   is a held task whose goal-task link registry could not be read: the answer is
+   unknown, so the row says so instead of reading as unlinked. *)
+type held_task_link =
+  | Served_by_held_task
+  | Not_served_by_held_task
+  | Held_task_link_unreadable
+
 (* What the prompt knows about one active goal. [phase] is [None] only when the
    id does not resolve in the store (a dangling assignment — kept visible, per
    [active_goal_summaries]). RFC-0387 stage 2 carries the phase so a [Verifying]
@@ -193,6 +201,7 @@ type goal_summary =
   ; summary_phase : Goal_phase.t option
   ; summary_criterion : Goal_store.criterion option
   ; summary_review_note : string option
+  ; summary_held_task_link : held_task_link
   }
 
 (** Format active goals with their titles (RFC-0315). The only rendering of
@@ -241,6 +250,16 @@ let format_goal_summaries (summaries : goal_summary list) : string =
           | Some (Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
                  | Goal_phase.Paused _ | Goal_phase.Blocked _) | None
             -> base
+          in
+          let base = match summary.summary_held_task_link with
+            | Served_by_held_task ->
+              base ^ " "
+              ^ render_fragment Prompt_names.keeper_world_active_goals_yours_annotation []
+            | Held_task_link_unreadable ->
+              base ^ " "
+              ^ render_fragment
+                  Prompt_names.keeper_world_active_goals_held_task_link_unreadable_annotation []
+            | Not_served_by_held_task -> base
           in
           String.concat "\n" (base :: details))
        summaries)
@@ -1025,52 +1044,64 @@ let effective_instructions
   | Some d -> Option.value d.instructions ~default:meta.instructions
   | None -> meta.instructions
 ;;
-(* Titles and phases for the Goals this turn's task is linked to, read from
-   the store under the same phase predicate the world observation uses. The
-   phase rides along so the Active Goals block can annotate a [Verifying]
-   goal (RFC-0387 stage 2: the gate must not make the goal read as ordinary
-   open work, nor disappear — review P0-1).
+(* Titles, phases and stored criteria of every Goal still open to progress,
+   read from the store under the same phase predicate the world observation
+   uses. The phase rides along so the Active Goals block can annotate a
+   [Verifying] goal (RFC-0387 stage 2: the gate must not make the goal read as
+   ordinary open work, nor disappear — review P0-1).
 
-   A Goal is shared intent and names no keeper, so the store answers the same
-   list for everyone. What makes it this turn's context is the task the
-   keeper holds: the link registry says which Goals that task serves, and a
-   turn with no task carries no Goals here — [masc_goal_list] answers the
-   rest. *)
-let active_goal_summaries_for_task
+   A Goal is shared intent and names no keeper, so every turn carries the same
+   list whether or not the keeper holds a task, and whichever task it holds.
+   The keeper chooses which Goal its work advances. The held task only marks
+   the Goals its link registry entry names, and an unreadable registry marks
+   every row as unknown rather than as unlinked. *)
+let active_goal_summaries
       ~(config : Workspace.config)
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)
   =
-  let task_id =
+  let held_task_id =
     match current_task with
     | Keeper_world_observation_inputs.Current_task task
     | Keeper_world_observation_inputs.Recovered_current_task { task; _ } ->
       Some task.Masc_domain.id
-    | Keeper_world_observation_inputs.No_current_task
-    | Keeper_world_observation_inputs.Current_task_missing _
-    | Keeper_world_observation_inputs.Current_task_unavailable _ -> None
+    | Keeper_world_observation_inputs.Current_task_missing { task_id; _ }
+    | Keeper_world_observation_inputs.Current_task_unavailable { task_id; _ } ->
+      Some (Keeper_id.Task_id.to_string task_id)
+    | Keeper_world_observation_inputs.No_current_task -> None
   in
-  match task_id with
-  | None -> Ok []
-  | Some task_id ->
-    let linked =
-      Workspace_goal_index.goals_for_task
-        (Workspace_goal_index.build_task_goal_index_for_config config)
-        ~task_id
-    in
-    Result.map (List.filter_map
-      (fun (goal : Goal_store.goal) ->
-         if List.exists (String.equal goal.id) linked
-            && Goal_phase.admits_self_directed_progress goal.phase
-         then
-           Some
-             { summary_goal_id = goal.id
-             ; summary_title = goal.title
-             ; summary_phase = Some goal.phase
-             ; summary_criterion = Some (Goal_store.criterion_of_goal goal)
-             ; summary_review_note = goal.last_review_note
-             }
-         else None)
-      ) (Goal_store.list_goals_result config ())
+  let held_task_link =
+    match held_task_id with
+    | None -> fun _goal_id -> Not_served_by_held_task
+    | Some task_id ->
+      (match Workspace_goal_index.read_goal_task_links_authoritative_r config with
+       | Ok links ->
+         fun goal_id ->
+           if List.exists
+                (fun (linked_goal, tasks) ->
+                   String.equal linked_goal goal_id && List.mem task_id tasks)
+                links
+           then Served_by_held_task
+           else Not_served_by_held_task
+       | Error detail ->
+         Log.Keeper.warn
+           "active goals: goal-task links unreadable for held task %s: %s"
+           task_id detail;
+         fun _goal_id -> Held_task_link_unreadable)
+  in
+  Result.map (List.filter_map
+    (fun (goal : Goal_store.goal) ->
+       if Goal_phase.admits_self_directed_progress goal.phase
+       then
+         Some
+           { summary_goal_id = goal.id
+           ; summary_title = goal.title
+           ; summary_phase = Some goal.phase
+           ; summary_criterion = Some (Goal_store.criterion_of_goal goal)
+           ; summary_review_note = goal.last_review_note
+           ; summary_held_task_link = held_task_link goal.id
+           }
+       else None)
+    ) (Goal_store.list_goals_result config ())
 ;;
 
 (* RFC-0444 §2.3 row 6: the one projection of an unreadable goal store onto

@@ -78,6 +78,15 @@ val effective_instructions :
 (** Resolve the instruction body: the profile default when the keeper TOML
     states one, else the persisted keeper instructions. *)
 
+(** Whether the task this turn holds is linked to the goal.
+    [Held_task_link_unreadable]: the keeper holds a task but the goal-task
+    link registry could not be read, so the answer is unknown. A turn with no
+    held task is [Not_served_by_held_task] for every goal. *)
+type held_task_link =
+  | Served_by_held_task
+  | Not_served_by_held_task
+  | Held_task_link_unreadable
+
 (** Stored criterion and review note travel with the goal, so the model can
     pursue its success conditions without a second read. [summary_criterion]
     is [None] only when no stored goal was resolved.
@@ -92,23 +101,24 @@ type goal_summary = {
   summary_phase : Goal_phase.t option;
   summary_criterion : Goal_store.criterion option;
   summary_review_note : string option;
+  summary_held_task_link : held_task_link;
 }
 
-val active_goal_summaries_for_task :
+val active_goal_summaries :
   config:Workspace.config ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   (goal_summary list, Goal_store.unavailable) result
-(** The Goals this turn's task is linked to and still open enough to progress.
-    [Error] is the typed store failure (RFC-0444 §2.3 row 6); the Active
-    Goals layer renders it with reason, file, mirror and reset step.
+(** Every Goal still open enough to progress. [Error] is the typed store
+    failure (RFC-0444 §2.3 row 6); the Active Goals layer renders it with
+    reason, file, mirror and reset step.
 
-    A Goal is shared intent and names no keeper, so the store answers the same
-    list for everyone; the task the keeper holds is what makes a subset of it
-    this turn's context. {!Goal_phase.admits_self_directed_progress} decides
-    which of the linked Goals stay -- [Verifying] stays in (the gate holds the
-    phase, not the work) and terminal phases drop out. A turn holding no task
-    carries none of them; [masc_goal_list] answers the rest. An unreadable
-    primary returns [Error] without using or repairing the recovery copy. *)
+    A Goal is shared intent and names no keeper, so every turn carries the
+    same Goals, with or without a held task. [current_task] only sets
+    [summary_held_task_link] from the authoritative link registry; it never
+    removes a Goal. {!Goal_phase.admits_self_directed_progress} decides which
+    Goals stay -- [Verifying] stays in (the gate holds the phase, not the work)
+    and terminal phases drop out. An unreadable primary returns [Error]
+    without using or repairing the recovery copy. *)
 
 val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -206,13 +216,13 @@ val build_prompt :
     - [current_task] renders the held task or its explicit missing/unavailable
       state. [No_current_task] omits the layer.
     - [?active_goal_summaries]: the Active Goals layer, with a proof-pending
-      annotation on [Verifying] goals (RFC-0387 stage 2). These are the goals
-      linked to this turn's task ({!active_goal_summaries_for_task}). Omitted
-      or [Ok []], the layer is absent when the world Goal source is available.
+      annotation on [Verifying] goals (RFC-0387 stage 2) and a [yours]
+      annotation on goals the held task serves. These are the
+      workspace's open goals ({!active_goal_summaries}). Omitted or [Ok []],
+      the layer is absent when the world Goal source is available.
       [Error] is the typed store failure ({!Goal_store.unavailable}, RFC-0444
-      §2.3 row 6): a failed world or task-linked source renders its reason,
-      file, mirror and reset step without blocking other context. A Keeper
-      holding no task reaches Goals through [masc_goal_list].
+      §2.3 row 6): a failed world or summary source renders its reason,
+      file, mirror and reset step without blocking other context.
     - [?recent_work]: recent attributed conversation and the latest autonomous
       conclusion, read from the selected Keeper trace. Historical context only;
       missing history and unavailable sources do not infer work completion.

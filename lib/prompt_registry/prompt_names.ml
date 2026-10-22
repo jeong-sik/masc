@@ -181,6 +181,14 @@ let keeper_world_active_goals_verifying_annotation =
   "keeper.world.active_goals.verifying_annotation"
 ;;
 
+let keeper_world_active_goals_yours_annotation =
+  "keeper.world.active_goals.yours_annotation"
+;;
+
+let keeper_world_active_goals_held_task_link_unreadable_annotation =
+  "keeper.world.active_goals.held_task_link_unreadable_annotation"
+;;
+
 let keeper_world_current_task_heading_held = "keeper.world.current_task.heading.held"
 
 let keeper_world_current_task_heading_submitted =

@@ -889,9 +889,7 @@ let run_keeper_cycle
                      ~held_task_skills:observation.held_task_skills)
                in
                let active_goal_summaries =
-                 Keeper_unified_prompt.active_goal_summaries_for_task
-                   ~config
-                   ~current_task
+                 Keeper_unified_prompt.active_goal_summaries ~config ~current_task
                in
                let {Keeper_turn_shared_inputs.lane_updates;workspace_memory;wiki_contents} =
                  Keeper_turn_shared_inputs.observe ~preview ~config ~keeper_name:meta.name () in

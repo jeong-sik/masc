@@ -198,6 +198,8 @@ val keeper_world_active_goals_review : string
 val keeper_world_active_goals_row : string
 val keeper_world_active_goals_row_untitled : string
 val keeper_world_active_goals_verifying_annotation : string
+val keeper_world_active_goals_yours_annotation : string
+val keeper_world_active_goals_held_task_link_unreadable_annotation : string
 val keeper_world_current_task_heading_held : string
 val keeper_world_current_task_heading_submitted : string
 val keeper_world_current_task_heading_recovery : string

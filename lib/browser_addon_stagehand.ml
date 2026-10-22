@@ -28,16 +28,16 @@ let configuration_label = "Chrome Add-on configuration"
 let configuration_keys = ["chrome";"claim_directory";"extension";"guardian";"launcher";"profile"]
 let configuration_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=configuration_keys ->
-    let field name=match List.assoc_opt name fields with
-      | Some (`String path) when absolute path -> Ok path
-      | None | Some _ -> Error ("invalid Chrome resource: " ^ name) in
+    let field name=match List.assoc name fields with
+      | `String path when absolute path -> Ok path
+      | value -> Error (Printf.sprintf "%s field %s must be an absolute path without NUL; it is %s"
+          configuration_label name (Yojson.Safe.to_string value)) in
     let* chrome=field "chrome" in
     let* extension=field "extension" in
     let* launcher=field "launcher" in
     let* guardian=field "guardian" in
     let* claim_directory=field "claim_directory" in
-    let* profile=match List.assoc_opt "profile" fields with
-      | Some value -> Profile.of_json value | None -> Error "missing Chrome profile lifetime" in
+    let* profile=Profile.of_json (List.assoc "profile" fields) in
     Ok {chrome;extension;launcher;guardian;claim_directory;profile}
   | `Assoc fields ->
     Error (Requirement.keys ~label:configuration_label ~found:(List.map fst fields) ~required:configuration_keys)

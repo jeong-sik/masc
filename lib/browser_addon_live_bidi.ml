@@ -61,6 +61,9 @@ let configuration_keys =
 let field_refusal name requirement value = Printf.sprintf "%s field %s must be %s; it is %s"
   configuration_label name requirement (Yojson.Safe.to_string value)
 let identity_requirement = "an object with exactly the integer keys device and inode"
+let integer = function
+  | `Int value -> Some value
+  | `Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> None
 let configuration_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=configuration_keys ->
     let path name=match List.assoc name fields with
@@ -68,9 +71,9 @@ let configuration_of_json = function
       | value -> Error (field_refusal name "an absolute path without NUL" value) in
     let read name=match List.assoc name fields with
       | `Assoc pair as value when List.sort String.compare (List.map fst pair)=["device";"inode"] ->
-        (match List.assoc "device" pair,List.assoc "inode" pair with
-         | `Int device,`Int inode -> Ok {device;inode}
-         | _ -> Error (field_refusal name identity_requirement value))
+        (match integer (List.assoc "device" pair),integer (List.assoc "inode" pair) with
+         | Some device,Some inode -> Ok {device;inode}
+         | None,(Some _ | None) | Some _,None -> Error (field_refusal name identity_requirement value))
       | value -> Error (field_refusal name identity_requirement value) in
     let* firefox=path "firefox" in let* profile=path "profile" in let* launcher=path "launcher" in
     let* guardian=path "guardian" in let* claim_directory=path "claim_directory" in

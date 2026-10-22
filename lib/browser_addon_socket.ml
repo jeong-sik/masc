@@ -213,6 +213,7 @@ let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi 
         Error (Printf.sprintf "browser socket directory entry %s is an unexpected %s"
           path (Requirement.kind_name kind))) (Ok ())
     (Sys.readdir root |> Array.to_list)
+let socket_record_keys = ["device";"directory";"incarnation";"inode";"state"]
 (* The socket acquisition record [cleanup] reads in the installation slot. *)
 let acquisition ~instance_id ~root ~file ~directory =
   let* value=match Unix.lstat file with
@@ -226,17 +227,29 @@ let acquisition ~instance_id ~root ~file ~directory =
   | None -> Ok Missing
   | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=["state"]
       && List.assoc_opt "state" fields=Some (`String "released") -> Ok Released
-  | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=
-      ["device";"directory";"incarnation";"inode";"state"] ->
-    (match List.assoc_opt "incarnation" fields,List.assoc_opt "directory" fields,
-      List.assoc_opt "device" fields,List.assoc_opt "inode" fields,List.assoc_opt "state" fields with
-     | Some (`String incarnation),Some (`String known),Some (`Int device),Some (`Int inode),Some (`String state)
-       when incarnation=instance_id && root=known ->
-         (match state with "acquired" -> Ok (Acquired (device,inode))
-          | "cleaning" -> Ok (Cleaning (device,inode))
-          | _ -> Error "invalid browser allocation state")
-     | _ -> Error "invalid browser socket resource identity")
-  | Some _ -> Error "invalid browser socket resource record"
+  | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=socket_record_keys ->
+    let refuse name requirement found = Error (Printf.sprintf "browser socket record %s field %s must be %s; it is %s"
+      file name requirement (Yojson.Safe.to_string found)) in
+    let text name=match List.assoc name fields with
+      | `String value -> Ok value
+      | found -> refuse name "a string" found in
+    let number name=match List.assoc name fields with
+      | `Int value -> Ok value
+      | found -> refuse name "an integer" found in
+    let* incarnation=text "incarnation" in
+    let* known=text "directory" in
+    let* device=number "device" in
+    let* inode=number "inode" in
+    let* state=text "state" in
+    if incarnation<>instance_id then refuse "incarnation" (Printf.sprintf "%S" instance_id) (`String incarnation)
+    else if root<>known then refuse "directory" (Printf.sprintf "%S" root) (`String known)
+    else (match state with
+      | "acquired" -> Ok (Acquired (device,inode))
+      | "cleaning" -> Ok (Cleaning (device,inode))
+      | other -> refuse "state" "\"acquired\" or \"cleaning\"" (`String other))
+  | Some value -> Error (Printf.sprintf
+      "browser socket record %s must be {\"state\":\"released\"} or an object with exactly the keys %s; it is %s"
+      file (String.concat ", " socket_record_keys) (Yojson.Safe.to_string value))
 let check_retained ~instance_id ~slot context = protect (fun () ->
   let* root=context_of_json ~instance_id context in
   match root with

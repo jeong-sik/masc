@@ -8,11 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from adapter import Adapter, DOCUMENT_FIELDS
-
-
-def document(session_id):
-    return {"session_id": session_id, **{key: "d-%s" % key for key in DOCUMENT_FIELDS}}
+from adapter import Adapter
 
 
 class FakeClient:
@@ -107,6 +103,23 @@ class MissingSessionTest(unittest.TestCase):
                 self.assertEqual(len(client.delivered), 1)
                 self.assertEqual(client.delivered[0]["operation_id"], "op-1")
                 self.assertTrue(client.delivered[0]["ok"])
+            finally:
+                adapter.close()
+
+
+class FailCloseTest(unittest.TestCase):
+    def test_step_dequeues_no_new_work_without_a_liveness_contract(self):
+        # The host offers a queued poll command, but no reviewed session
+        # liveness contract exists, so step must not dequeue or record it.
+        with tempfile.TemporaryDirectory() as directory:
+            client = FakeClient()
+            client.poll_commands["s-1"] = {"id": "op-new", "session_id": "s-1"}
+            adapter = Adapter(client, FakeFigma(), Path(directory))
+            try:
+                adapter.step()
+                self.assertEqual(client.delivered, [])
+                self.assertEqual(
+                    adapter.db.execute("SELECT COUNT(*) FROM deliveries").fetchone()[0], 0)
             finally:
                 adapter.close()
 

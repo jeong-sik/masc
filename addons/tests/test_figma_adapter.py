@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import sys
@@ -14,6 +15,7 @@ from mcp_client import ApplicationRefused, TransportError, encode
 
 COMMAND = {"id": "edit", "session_id": "session", "kind": "apply", "root_id": "root",
            "expected_tree_json": "{}", "ops": [{"op": "rename"}]}
+REST_COMMAND = {"id": "edit", "file_key": "file", "root_id": "root"}
 
 
 class Host:
@@ -50,7 +52,7 @@ class Api:
 
     def __init__(self):
         self.submits, self.operations = [], {}
-        self.bad_protocol, self.lose_submit = False, False
+        self.bad_protocol = False
 
     def info(self):
         if self.bad_protocol:
@@ -60,19 +62,9 @@ class Api:
     def call(self, path, body):
         if path == "/v1/status":
             return {"sessions": [{"session_id": "session", "name": "doc", "page_id": "page", "selection": [],
-                                  "editor_type": "figma", "mode": "default", "can_edit": True,
-                                  "future_additive_field": {"allowed": True}}]}
-        if path == "/v1/operations":
-            self.submits.append(body)
-            self.operations[body["operation_id"]] = {"service_id": "service-boot", "state": "dispatched"}
-            if self.lose_submit:
-                self.lose_submit = False
-                raise TransportError("POST reply lost")
-            return {}
+                                  "editor_type": "figma", "mode": "default", "can_edit": True}]}
         if path == "/v1/operation":
-            return self.operations[body["operation_id"]]
-        if path == "/v1/rest-capture":
-            return {"snapshot_id": "snapshot", "tree_json": "{}", "preview": None}
+            return self.operations.get(body["operation_id"], {"service_id": "service-boot", "state": "prepared"})
         raise AssertionError(path)
 
     def finish(self):
@@ -80,6 +72,13 @@ class Api:
 
     def readback(self, identity):
         return {"ok": True, "payload": {"completed": [{"index": 7, "node_id": "node:1", "op": "rename"}], "tree_json": "x" * 10000}}
+
+
+def submit(adapter, command=COMMAND, *, kind="plugin", boot="host-boot", service="service-boot"):
+    with adapter.db:
+        adapter.db.execute(
+            "INSERT INTO deliveries VALUES (?,?,?,?,?,'submitted',NULL)",
+            (command["id"], boot, service, kind, json.dumps(command, sort_keys=True)))
 
 
 class AdapterTests(unittest.TestCase):
@@ -92,6 +91,17 @@ class AdapterTests(unittest.TestCase):
     def tearDown(self):
         self.adapter.close()
         self.temp.cleanup()
+
+    def test_step_dequeues_no_new_work_without_a_liveness_contract(self):
+        # The host offers a plugin and a REST command, and the service
+        # reports a live session, but no reviewed liveness contract exists,
+        # so step must not dequeue, submit, or announce anything.
+        self.host.rest_commands = [REST_COMMAND]
+        self.adapter.step()
+        self.assertEqual(self.host.calls, ["status"])
+        self.assertEqual(self.api.submits, [])
+        self.assertEqual(
+            self.adapter.db.execute("SELECT COUNT(*) FROM deliveries").fetchone()[0], 0)
 
     def test_protocol_refused_before_host_dequeue(self):
         self.api.bad_protocol = True
@@ -129,8 +139,8 @@ class AdapterTests(unittest.TestCase):
             thread.join()
 
     def test_rest_and_plugin_operation_ids_are_independent(self):
-        self.host.rest_commands = [{"id": "edit", "file_key": "file", "root_id": "root"}]
-        self.adapter.step()
+        submit(self.adapter, kind="plugin")
+        submit(self.adapter, REST_COMMAND, kind="rest")
         self.api.finish()
         self.adapter.step()
         rows = self.adapter.db.execute("SELECT kind,state FROM deliveries ORDER BY kind").fetchall()
@@ -157,6 +167,16 @@ class AdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(TransportError, "offset"):
             api.readback("op")
 
+    def test_service_witness_fields_flow_to_the_receipt(self):
+        # A dispatch witness the service adds to its readback payload must
+        # reach the Keeper receipt unchanged; the adapter invents none.
+        self.api.readback = lambda identity: {
+            "ok": True, "payload": {"completed": [], "dispatched_at": "2026-10-22T12:00:00Z"}}
+        self.api.finish()
+        submit(self.adapter)
+        self.adapter.step()
+        self.assertEqual(self.host.receipts[0]["payload"]["dispatched_at"], "2026-10-22T12:00:00Z")
+
     def test_malformed_or_newer_protocol_is_refused(self):
         api = FigmaApi(Api.url, Api.token)
         for protocol, capabilities in [("figma-studio/2", []), (PROTOCOL, None), (PROTOCOL, [[]])]:
@@ -164,21 +184,25 @@ class AdapterTests(unittest.TestCase):
             with self.assertRaises(ServiceRefused):
                 api.info()
 
-    def test_lost_submission_reply_reconciles_without_replaying_edit(self):
-        self.api.lose_submit = True
-        with self.assertRaises(TransportError):
-            self.adapter.step()
+    def test_uncertain_operation_is_reconciled_without_replaying_edit(self):
+        # A submitted operation whose POST reply was lost stays submitted
+        # while the service still reports prepared/dispatched, and settles
+        # from the terminal read alone; no edit is submitted twice.
+        submit(self.adapter)
+        self.adapter.step()
+        self.assertEqual(
+            self.adapter.db.execute("SELECT state FROM deliveries").fetchone()[0], "submitted")
+        self.api.finish()
         self.adapter.close()
         self.adapter = Adapter(self.host, self.api, self.path)
-        self.api.finish()
         self.adapter.step()
-        self.assertEqual(len(self.api.submits), 1)
+        self.assertEqual(self.api.submits, [])
         self.assertEqual(len(self.host.receipts), 1)
         self.assertTrue(self.host.receipts[0]["ok"])
 
     def test_lost_ack_retries_identical_compacted_receipt_after_restart(self):
-        self.adapter.step()
         self.api.finish()
+        submit(self.adapter)
         self.host.limit, self.host.lose_ack = 500, True
         with self.assertRaises(TransportError):
             self.adapter.step()
@@ -189,18 +213,17 @@ class AdapterTests(unittest.TestCase):
         self.host.limit = 100000
         self.adapter.step()
         self.assertEqual(self.host.receipts, [first, first])
-        self.assertEqual(len(self.api.submits), 1)
+        self.assertEqual(self.api.submits, [])
 
     def test_stale_host_refusal_does_not_replay_or_relabel(self):
-        self.adapter.step()
         self.api.finish()
+        submit(self.adapter)
         self.host.refuse = True
         self.adapter.step()
         self.host.refuse = False
         self.adapter.step()
         self.assertEqual(len(self.host.receipts), 1)
         self.assertEqual(self.host.receipts[0]["worker_boot_id"], "host-boot")
-        self.assertEqual(len(self.api.submits), 1)
         self.assertEqual(self.adapter.db.execute("SELECT state FROM deliveries").fetchone()[0], "obsolete")
 
     def test_exclusive_writer_and_immutable_destination(self):
@@ -214,24 +237,22 @@ class AdapterTests(unittest.TestCase):
         self.adapter = Adapter(self.host, self.api, self.path)
 
     def test_rotating_both_credentials_retains_uncertain_delivery_without_replay(self):
-        self.api.lose_submit = True
-        with self.assertRaises(TransportError):
-            self.adapter.step()
+        submit(self.adapter)
         self.adapter.close()
         self.host.token = "rotated-host-token"
         self.api.token = "rotated-service-token"
         self.adapter = Adapter(self.host, self.api, self.path)
         self.api.finish()
         self.adapter.step()
-        self.assertEqual(len(self.api.submits), 1)
+        self.assertEqual(self.api.submits, [])
         self.assertEqual(len(self.host.receipts), 1)
         self.assertEqual(self.host.receipts[0]["operation_id"], COMMAND["id"])
         self.assertEqual(self.host.receipts[0]["worker_boot_id"], "host-boot")
         self.assertEqual(self.adapter.db.execute("SELECT state FROM deliveries").fetchone()[0], "acknowledged")
 
     def test_rotating_credentials_retries_retained_result_after_lost_ack(self):
-        self.adapter.step()
         self.api.finish()
+        submit(self.adapter)
         self.host.lose_ack = True
         with self.assertRaises(TransportError):
             self.adapter.step()
@@ -242,7 +263,7 @@ class AdapterTests(unittest.TestCase):
         self.adapter = Adapter(self.host, self.api, self.path)
         self.adapter.step()
         self.assertEqual(self.host.receipts, [first, first])
-        self.assertEqual(len(self.api.submits), 1)
+        self.assertEqual(self.api.submits, [])
 
 
 if __name__ == "__main__":

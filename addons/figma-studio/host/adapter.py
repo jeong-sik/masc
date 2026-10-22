@@ -23,7 +23,6 @@ from private_state import PrivateState
 
 PROTOCOL = "figma-studio/1"
 REQUIRED = {"native.capture", "native.apply", "snapshot.read", "operation.readback", "rest.capture"}
-DOCUMENT_FIELDS = ("name", "page_id", "selection", "editor_type", "mode", "can_edit")
 
 
 class ServiceRefused(RuntimeError):
@@ -188,18 +187,6 @@ class Adapter:
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO metadata VALUES ('binding',?)", (binding,))
 
-    def remember(self, command, boot, service, kind):
-        identity = command["id"]
-        prior = self.db.execute("SELECT * FROM deliveries WHERE kind=? AND id=?", (kind, identity)).fetchone()
-        if prior:
-            if (prior["boot"], prior["service"], prior["kind"], prior["command"]) != (boot, service, kind, json.dumps(command, sort_keys=True)):
-                raise ServiceRefused("Operation identity was reused across different input or incarnations")
-            return False
-        with self.db:
-            self.db.execute("INSERT INTO deliveries VALUES (?,?,?,?,?,'submitted',NULL)",
-                            (identity, boot, service, kind, json.dumps(command, sort_keys=True)))
-        return True
-
     def store_result(self, kind, identity, result):
         with self.db:
             self.db.execute("UPDATE deliveries SET state='result',result=? WHERE kind=? AND id=?",
@@ -258,43 +245,13 @@ class Adapter:
 
     def step(self):
         # Version negotiation precedes any host dequeue or external write.
-        info = self.figma.info()
+        self.figma.info()
         status = self.client.call("masc_figma_relay", {"kind": "status"})
-        boot = status["worker_boot_id"]
         self.client.max_bytes = status["max_request_bytes"]
-        self.collect()
-        sessions = self.figma.call("/v1/status", {}).get("sessions", [])
-        for session in sessions:
-            if not isinstance(session, dict) or not all(key in session for key in (*DOCUMENT_FIELDS, "session_id")):
-                raise ServiceRefused("Figma service session is missing its document context")
-            document = {key: session[key] for key in DOCUMENT_FIELDS}
-            self.client.call("masc_figma_relay", {"kind": "session", "worker_boot_id": boot,
-                             "session_id": session["session_id"], "document": document})
-            answer = self.client.call("masc_figma_relay", {"kind": "poll", "worker_boot_id": boot,
-                                      "session_id": session["session_id"]})
-            command = answer.get("command")
-            if command is None:
-                continue
-            if self.remember(command, boot, info["service_id"], "plugin"):
-                request = {key: value for key, value in command.items() if key != "id"}
-                try:
-                    self.figma.call("/v1/operations", {**request, "service_id": info["service_id"],
-                                    "operation_id": command["id"]})
-                except ServiceRefused as error:
-                    self.store_result("plugin", command["id"], self.failure(error))
-                # Transport uncertainty remains submitted and is reconciled by reads.
-        answer = self.client.call("masc_figma_relay", {"kind": "rest_poll", "worker_boot_id": boot})
-        command = answer.get("command")
-        if command is not None and self.remember(command, boot, info["service_id"], "rest"):
-            try:
-                payload = self.figma.call("/v1/rest-capture", {key: value for key, value in command.items() if key != "id"})
-                payload.pop("snapshot_id", None)
-                if payload.get("preview"):
-                    payload["preview"].pop("sha256", None)
-                result = {"ok": True, "payload": payload}
-            except (ServiceRefused, TransportError) as error:
-                result = self.failure(error)
-            self.store_result("rest", command["id"], result)
+        # Fail-close: there is no reviewed session-liveness contract yet, and
+        # /v1/status presence does not prove the Plugin is connected. No new
+        # work is dequeued or submitted. Already-submitted operations are
+        # still reconciled by collect().
         self.collect()
 
 

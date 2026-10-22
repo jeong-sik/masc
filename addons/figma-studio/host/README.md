@@ -36,10 +36,11 @@ python3 addons/figma-studio/host/adapter.py --config /path/to/private/adapter.to
 ```
 
 Configure the same registered agent as `relay_agent` in the Addon binding. The
-adapter announces service sessions; the configured Keeper must explicitly bind
-the intended document before submitting work. The adapter validates protocol
-and capabilities before dequeuing any work. Unsupported versions fail before
-any Figma operation is submitted.
+adapter validates protocol and capabilities first. No new work is dequeued:
+there is no reviewed session-liveness contract yet, and `/v1/status` presence
+does not prove the Plugin is connected, so the admission path stays closed
+until such a contract exists. Already-submitted operations are still queried
+by operation ID.
 
 State is private, has one writer and binds to the configured endpoints.
 Credential rotation retains the same ledger; credentials are not part of its
@@ -55,10 +56,11 @@ There is a crash gap between receiving a dequeued request and persisting it;
 the adapter cannot recover that request from its ledger if it stops in that gap.
 
 This is a deferred experiment. The current service has no reviewed session
-liveness or remote cancellation contract. Session presence in `/v1/status` does
-not prove the Plugin is connected; absence does not prove a queued operation
-cannot execute. Prepared/dispatched operations remain submitted and are queried
-by operation ID until the service supplies a terminal result. The adapter cannot
+liveness or remote cancellation contract, so the adapter dequeues no new work.
+Session presence in `/v1/status` does not prove the Plugin is connected;
+absence does not prove a queued operation cannot execute. Prepared/dispatched
+operations remain submitted and are queried by operation ID until the service
+supplies a terminal result. The adapter cannot
 claim closure or prevent delayed edits after reconnect on its own. Do not merge
 or install this experiment as a completed product.
 

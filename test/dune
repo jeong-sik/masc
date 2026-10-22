@@ -5904,7 +5904,8 @@
 (test
  (name test_lane_addon_host_cycle)
  (modules test_lane_addon_host_cycle)
- (libraries masc_test_deps exact_output_fixture mcp_protocol eio eio_main yojson unix base64))
+ (deps ../config/prompts/workspace_memory_curator.md ../config/prompts/workspace_memory_briefing.md)
+ (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol eio eio_main yojson unix base64))
 
 (test
  (name test_lane_addon_host_request)

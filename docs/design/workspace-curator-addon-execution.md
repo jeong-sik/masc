@@ -7,7 +7,8 @@ and [shared host semantic port](workspace-curator-semantic-validation.md) are no
 implemented. The original admission consumer now captures actual Runtime
 provenance and reads/submits/restores the original worker result. Its separate
 commit consumer now applies and recovers original Ledger/Briefing judgments;
-production scheduler switching and wake integration remain.
+scoped lifecycle/result wake delivery now signals the existing owner. Production
+scheduler switching remains.
 This is not a claim of completed extraction or an installed replacement.
 
 Source baseline: `3145acf9fc32ab77c25d97ab7e5710194cd270cf`.
@@ -152,14 +153,44 @@ installation cannot claim authoritative absence and repeat it. An explicit
 replacement must preserve the original terminal/conflict/unknown state and admit
 any successor as a distinct host decision, not silently change the destination.
 
-Reuse the existing Curator wake owner and common Addon change/result events.
-There is a concrete integration gap: Curator currently subscribes only to memory
-commits and exact-lane publication. Addon export On/result changes are not proven
-to wake it. `register_tool_change_handler` is a single server notification bridge;
-do not replace that bridge with a Curator callback or execute storage/provider
-work while a lifecycle lock is held. Provide shared owner-safe event delivery,
-with unsubscribe tied to the server switch, before claiming reconnect resumes
-pending work without an unrelated memory commit.
+`Lane_addon_runtime.subscribe_owner_events` now signals the existing Curator
+owner for the actual served Store root and `workspace-curator` package. It keeps
+`register_tool_change_handler`, the single MCP inventory bridge, intact. Typed
+hints distinguish export inventory changes, matching configuration publication
+and accepted original Exact-result delivery. These are hints to reload state,
+not worker readiness, provider completion, or domain commit authority.
+
+A worker can become ready before `configuration_status` contains its declaration.
+Configuration notification follows that metadata assignment and mutex release.
+Its change identity includes the directory, completeness and the package's actual
+declaration id/path/source revision/desired revision/enabled values. An unchanged
+maintenance pulse does not publish another configuration hint. Removing or
+changing a declaration can wake the previously associated package as well.
+
+Exact-result hints require a strictly decoded `accepted=true` response and the
+same live original authority after the worker RPC returns. Fresh and restored
+terminal deliveries share this edge; a restored hint does not rerun the model.
+An unaccepted, malformed, failed or non-Exact delivery cannot invent this fact.
+Raw exported-tool `on_result` callbacks do not publish accepted host-result hints.
+
+Subscribers synchronously signal only: no I/O, yielding, or reentry into Runtime
+and worker locks. They run outside the subscription mutex; lifecycle publishers
+can still hold their own locks. A failing or separately cancelled subscriber is
+isolated, while cancellation of the publishing fiber propagates. Unsubscribe
+removes only its original registration and is idempotent. The Curator fences its
+stopped owner before switch cleanup unsubscribes; copied callback snapshots
+therefore cannot revive it. Registration neither replays state nor starts a
+worker, so the original initial drain remains necessary.
+
+The server passes its actual `Workspace.config` to Curator startup. The real
+host-cycle fixture includes the ready-before-metadata race, workspace/package
+isolation, MCP coexistence, accepted/restored Exact replies, observer failure and
+negative receipts. A separate case parks the real Curator with an existing fact,
+changes its controlled admission predicate without signalling, then changes an
+actual Addon declaration. The resulting metadata hint must cause the original
+owner to classify that fact without another memory commit. Only the predicate
+and model answers are injected. This does not prove the production Addon
+admission/settlement loop or an installed browser/UI.
 
 Activation, availability of a worker and selection of a model route remain
 independent observations. Curator stays Optional, while the Required contracts
@@ -187,7 +218,7 @@ for HITL and Board Attention are unaffected.
 
 Next coding boundary: switch the existing serialized production owner to the
 original admission and domain commit consumers, preserve typed size refusal and
-whole-batch successors, and connect scoped result/export wakes.
+whole-batch successors, and consume the scoped result/export wakes in that recovery path.
 Keep domain authority on the host throughout; the current scheduler has not
 switched to the incomplete extraction.
 
@@ -200,7 +231,7 @@ lifecycle integration. Subsequent [host capture](workspace-curator-host-capture.
 [semantic port](workspace-curator-semantic-validation.md) provide those distinct
 foundations. The admission consumer below now captures actual Runtime metadata
 and restores original worker results. None of these individual foundations
-establishes the remaining production scheduler or wake integration.
+establishes the remaining production scheduler integration.
 
 
 ## Original admission consumer implementation
@@ -234,8 +265,8 @@ This adapter does not create another scheduler or model runner. The current
 production Curator scheduler has **not yet switched** to it. That switch must
 still prioritize accepted-work recovery even while Off, preserve input/output
 size refusal and whole-batch successor linkage, call the original domain commit
-consumer under its existing workspace lease, and subscribe to original result
-and export events without replacing the existing MCP inventory callback.
+consumer under its existing workspace lease. Scoped original result/export
+hints are now subscribed alongside the existing MCP inventory callback.
 `capture_*` publication failure still requires original discovery, not another
 fresh request. No extraction, production recovery or Off/On completion follows
 from this source alone.
@@ -284,8 +315,9 @@ publication. Only the final original chunk replaces it.
 retaining model work. The production owner must preserve its existing initial
 prepared-state save and confirmation before capture/submission. This adapter
 does not invent a pre-prepare state or create the prepared pass after inference.
-Initial-save/capture crash recovery, restart drain priority, observer receipts,
-successor linkage and result/export wakes must still be connected by that owner.
+Initial-save/capture crash recovery, restart drain priority, observer receipts
+and successor linkage must still be connected by that owner. Result/export
+hints now wake it; a wake does not itself recover accepted work.
 
 `test_workspace_curator_addon_commit` uses actual Keeper snapshots, host record
 reopening, Ledger/Briefing writes and fresh domain reads. Save-edge refusal/lost
@@ -293,3 +325,18 @@ receipt cases inject a boundary outcome around actual storage; they do not prove
 an actual pre/post-rename filesystem failure. These scenarios, source parsing,
 independent review and CI execution are separate evidence layers. They do not
 establish production scheduler, installed UI or real provider completion.
+
+
+## Actual selected-execution failure and repair
+
+The seven-suite selected run
+[39671034185](https://github.com/jeong-sik/masc/actions/runs/39671034185)
+on `ea9f86ff1f5b5b46cd5375f39885dbb71e5b212a` completed with failure before tests:
+`observe original.progress` lacked an `Owner.retained` parameter annotation.
+The annotation belongs to the original admission layer, PR #44944. The equivalent
+first use in commit `uncertain` is annotated in PR #44948 as well. The prior
+consecutive-observation fix and its real file identity/bytes fixture were moved
+into #44944 itself, rather than relying on an upper layer to make it safe.
+Its intermediate `e3d28089451b475ae5c475ae017528ab9e84a591` received formal source
+approval; that approval is not certification of the subsequent compiler repair.
+A selected execution on the new published head is separate evidence.

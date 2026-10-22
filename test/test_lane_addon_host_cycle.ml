@@ -66,22 +66,26 @@ let runner state : Exact.runner = fun ~lane_key:_ ~schema:_ _ ->
         | Ok output -> Exact.Call_ended (Exact.Answered { output; slot = "fixture"; usage = None })
         | Error detail -> Exact.Call_ended (Exact.Invalid_output { detail }))
 
-let port ?await_change ?(before_listing = fun _ -> ()) worker : Runtime.For_testing.host_port = {
+let port ?await_change ?deliver_reply ?(during_delivery=fun _ -> ()) ?(before_listing = fun _ -> ()) worker : Runtime.For_testing.host_port = {
   await_change;
   list_requests = (fun () ->
     let requests= !(worker.listing) in
     before_listing requests;
     Ok (`Assoc [ "requests", `List requests ]));
   deliver = (fun ~arguments ->
+    during_delivery true;
+    Fun.protect ~finally:(fun () -> during_delivery false) (fun () ->
     worker.delivered := arguments :: !(worker.delivered);
     let request_id = text "request_id" arguments in
     if !(worker.consume) then
       worker.listing := List.filter (fun request -> text "request_id" request <> request_id) !(worker.listing);
     !(worker.on_deliver) arguments;
-    Ok (`Assoc [ "accepted", `Bool !(worker.consume) ]));
+    match deliver_reply with
+    | None -> Ok (`Assoc [ "accepted", `Bool !(worker.consume) ])
+    | Some reply -> reply arguments));
 }
 
-let backend ?await_change ?before_listing ?exported_tool ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend = {
+let backend ?await_change ?deliver_reply ?during_delivery ?before_listing ?exported_tool ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend = {
   start = (fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~package:_ ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {browser=None;
         resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
@@ -99,7 +103,8 @@ let backend ?await_change ?before_listing ?exported_tool ?(before_stop = fun () 
       action_schema = (fun () -> None); act = (fun ~arguments:_ -> Error "read-only");
       stop = (fun () -> before_stop (); Ok (Lane_addon_lifecycle.Released
         { engine = Lane_addon_lifecycle.Docker_engine "fixture-engine"; container_id = Some instance_id }));
-      resource = Lane_addon_lifecycle.Container_resource instance_id; host = Some (port ?await_change ?before_listing worker) } in
+      resource = Lane_addon_lifecycle.Container_resource instance_id;
+      host = Some (port ?await_change ?deliver_reply ?during_delivery ?before_listing worker) } in
     ignore (on_authority (Lane_addon_lifecycle.Container_authority
       { runtime = Lane_addon_types.Docker; engine = Lane_addon_lifecycle.Docker_engine "fixture-engine" }));
     on_created connection; Ok connection);
@@ -133,7 +138,7 @@ let cycles config = match member "cycles" (host_requests config) with `Int n -> 
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 
-let with_installation ?await_change ?before_listing ?before_stop ?exported_tool ?(make_runner = runner) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
+let with_installation ?await_change ?deliver_reply ?during_delivery ?owner_setup ?before_listing ?before_stop ?exported_tool ?(make_runner = runner) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
   let root = Filename.temp_dir "lane-host-cycle-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let config_root = Filename.concat root ".masc/config" in
@@ -161,13 +166,15 @@ let with_installation ?await_change ?before_listing ?before_stop ?exported_tool 
                   ~validate_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ -> Ok (fun _ -> Ok ()))
                   (make_runner state);
                 let config = Workspace.default_config root in
-                Runtime.For_testing.with_backend (backend ?await_change ?before_listing ?before_stop ?exported_tool worker) (fun () ->
+                Runtime.For_testing.with_backend (backend ?await_change ?deliver_reply ?during_delivery ?before_listing ?before_stop ?exported_tool worker) (fun () ->
+                  let unsubscribe=match owner_setup with None -> (fun () -> ()) | Some setup -> setup clock config in
+                  Fun.protect ~finally:unsubscribe (fun () ->
                   ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
                   f clock config worker state root;
                   let source = Filename.concat directory "quiz.toml" in
                   if Sys.file_exists source then Sys.remove source;
                   ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
-                  await clock (fun () -> host_requests config = `Null))))))))))
+                  await clock (fun () -> host_requests config = `Null)))))))))))
 
 (* Event 4. The registry is process-wide, so each call names a new slot: a
    publication that changes nothing about the lane wakes no one. *)
@@ -179,6 +186,135 @@ let publish_lane_change () =
   ignore (F.publish_registry ~lane_id:"quiz/author" ~slot_ids:[ slot ] snapshot : Runtime_exact_output_registry.t)
 
 let delivered_status arguments = text "status" (member "result" arguments)
+
+let test_scoped_owner_wakes_preserve_mcp_and_metadata_publication () =
+  let events=ref [] and ready=ref false and other_scope=ref 0 and other_package=ref 0 and peer=ref 0 in
+  let stop=ref (fun () -> ()) and mcp=ref 0 in
+  let tool=Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String "queue_question";
+    "inputSchema",`Assoc ["type",`String "object"]]) |> unwrap in
+  let owner_setup clock config =
+    let unsubscribe=Runtime.subscribe_owner_events ~config ~package_id:"quiz-package" (fun event ->
+      events:=event :: !events;
+      match event with Runtime.Export_inventory_changed -> ready:=true
+      | Configuration_observed | Exact_result_delivered _ -> ()) in
+    stop:=unsubscribe;
+    let peer=Runtime.subscribe_owner_events ~config ~package_id:"quiz-package" (fun _ -> incr peer) in
+    let other=Runtime.subscribe_owner_events ~config:{config with Workspace.base_path=Filename.concat config.base_path "another"}
+      ~package_id:"quiz-package" (fun _ -> incr other_scope) in
+    let package=Runtime.subscribe_owner_events ~config ~package_id:"another-package" (fun _ -> incr other_package) in
+    (* Hold actual metadata publication until the worker's export-ready event.
+       This orders the real startup race without a timer or fake metadata. *)
+    Runtime.register_skill_export_handler (fun ~config:_ _ -> await clock (fun () -> !ready);Ok ());
+    fun () -> unsubscribe ();peer ();other ();package () in
+  Runtime.For_testing.with_tool_change_handler (fun () -> incr mcp) (fun () ->
+    with_installation ~owner_setup ~manifest:(manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n")
+      ~exported_tool:(tool,(fun _ -> Ok (Mcp_protocol.Mcp_types.tool_result_of_text "unused")))
+      (fun clock config _ _ _ ->
+        await clock (fun () -> cycles config>=1);
+        check bool "the original MCP bridge still receives export changes" true (!mcp>0);
+        check bool "worker readiness is followed by actual metadata publication" true
+          (List.take 2 (List.rev !events) = [Runtime.Export_inventory_changed;Runtime.Configuration_observed]);
+        let metadata ()=List.filter (function Runtime.Configuration_observed -> true
+          | Export_inventory_changed | Exact_result_delivered _ -> false) !events |> List.length in
+        let before=metadata () in
+        ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> unwrap);
+        check int "an unchanged reconciliation does not signal metadata again" before (metadata ());
+        let count=List.length !events and previous_peer= !peer in
+        (!stop) ();(!stop) ();
+        let source=Filename.concat (Runtime.configuration_directory config) "quiz.toml" in
+        write source ("enabled=false\n" ^ declaration);
+        ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> unwrap);
+        await clock (fun () -> !peer>previous_peer);
+        check int "unsubscribe removes only its original registration" count (List.length !events);
+        check int "another workspace receives no hint" 0 !other_scope;
+        check int "another package receives no hint" 0 !other_package))
+
+let test_exact_result_wakes_after_rpc_and_isolates_observer_failure () =
+  let received=ref [] and inside_rpc=ref false in
+  let owner_setup _clock config =
+    let collect=Runtime.subscribe_owner_events ~config ~package_id:"quiz-package" (function
+      | Runtime.Exact_result_delivered receipt ->
+        check bool "owner callback runs after the worker RPC returns" false !inside_rpc;
+        received:=(receipt.installation_id,receipt.instance_id,receipt.request_id) :: !received
+      | Export_inventory_changed | Configuration_observed -> ()) in
+    let failed=Runtime.subscribe_owner_events ~config ~package_id:"quiz-package" (function
+      | Runtime.Exact_result_delivered _ -> raise Exit
+      | Export_inventory_changed | Configuration_observed -> ()) in
+    let cancelled=Runtime.subscribe_owner_events ~config ~package_id:"quiz-package" (function
+      | Runtime.Exact_result_delivered _ -> Eio.Cancel.sub (fun context ->
+          Eio.Cancel.cancel context Exit;Eio.Fiber.check ())
+      | Export_inventory_changed | Configuration_observed -> ()) in
+    fun () -> collect ();failed ();cancelled () in
+  with_installation ~owner_setup ~during_delivery:(fun state -> inside_rpc:=state)
+    ~listing:[exact "original-owner-result"] (fun clock config worker state _ ->
+      await clock (fun () -> cycles config>=1);
+      let expected=Lane_addon_tool_request_owner.installation_id (Lane_addon_tool_request_owner.Configuration "quiz") in
+      (match !received with
+       | [(installation,instance,request)] ->
+         check string "accepted receipt retains configured installation identity" expected installation;
+         check string "accepted receipt retains original request" "original-owner-result" request;
+         check bool "receipt names the actual instance" true (instance<>"")
+       | _ -> fail "an accepted result must reach the healthy owner despite observer failure");
+      worker.listing:=[exact "original-owner-result"];
+      publish_lane_change ();
+      await clock (fun () -> List.length !received=2);
+      check int "retained result restoration does not rerun the model" 1 !(state.resolutions);
+      check bool "restored delivery retains original instance and request" true
+        (match !received with [restored;original] -> restored=original | _ -> false))
+
+type owner_delivery = Unaccepted | Malformed | Transport_failed | Non_exact
+let test_only_accepted_exact_results_wake_owner kind () =
+  let received=ref 0 in
+  let owner_setup _clock config = Runtime.subscribe_owner_events ~config ~package_id:"quiz-package" (function
+    | Runtime.Exact_result_delivered _ -> incr received
+    | Export_inventory_changed | Configuration_observed -> ()) in
+  let listing=match kind with
+    | Non_exact -> [`Assoc ["kind",`String "read_records";"request_id",`String "original-read";"source_id",`String "missing"]]
+    | Unaccepted | Malformed | Transport_failed -> [exact "original-unaccepted"] in
+  let deliver_reply _=match kind with
+    | Unaccepted -> Ok (`Assoc ["accepted",`Bool false])
+    | Malformed -> Ok (`Assoc ["accepted",`String "true"])
+    | Transport_failed -> Error "simulated lost result receipt"
+    | Non_exact -> Ok (`Assoc ["accepted",`Bool true]) in
+  with_installation ~owner_setup ~deliver_reply ~listing (fun clock config _ _ _ ->
+    await clock (fun () -> cycles config>=1);
+    check int "no successful Exact delivery fact is invented" 0 !received)
+
+let test_addon_metadata_wakes_the_original_curator_without_a_memory_commit () =
+  let allowed=ref false and calls=ref 0 in
+  let owner_setup _clock config =
+    Prompt_registry.set_markdown_dir "../config/prompts";Prompt_defaults.init ();
+    let base_path=config.Workspace.base_path in
+    let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    let fact=Keeper_memory_os_types.observed ~claim:"Fact present before the Addon metadata wake"
+      ~category:Keeper_memory_os_types.Fact ~now:1_700_000_000.
+      ~origin:{kind=Keeper_memory_os_types.Authored;trace_id="addon-owner-wake"} in
+    ignore (Keeper_memory_os_current.replace ~keepers_dir ~keeper_id:"writer" ~expected_revision:None
+      ~now:1_700_000_000. ~source:{kind=Keeper_memory_os_current.Librarian;trace_id="addon-owner-wake"}
+      ~facts:[fact] () |> unwrap);
+    let execute ~rendered_prompt:_ ~selected ~ledger:_ =
+      incr calls;
+      let decisions=List.map (fun (pending : Workspace_memory_ledger.pending_fact) ->
+        `Assoc ["fact_id",`String (Workspace_memory_request.fact_id pending.fact);
+          "kind",`String "create_claim";"value",`String pending.claim]) selected in
+      Ok (`Assoc ["decisions",`List decisions],"original-fixture",None) in
+    let summarize ~batch:_=Ok (`Assoc ["briefing",`String "The original fact was classified."],"original-fixture",None) in
+    let sw=match Eio_context.get_root_switch_opt () with Some sw -> sw | None -> fail "missing actual owner switch" in
+    Server_workspace_memory_curator.For_testing.start_with_enabled ~sw ~base_path ~enabled:(fun () -> !allowed) ~execute ~summarize;
+    fun () -> Server_workspace_memory_curator.For_testing.stop ~base_path in
+  let curator_manifest=Printf.sprintf "id=\"workspace-curator\"\n%s"
+    (String.concat "\n" (List.tl (String.split_on_char '\n' manifest))) in
+  with_installation ~owner_setup ~manifest:curator_manifest (fun clock config _ _ _ ->
+    let base_path=config.Workspace.base_path in
+    await clock (fun () -> Server_workspace_memory_curator.For_testing.is_idle ~base_path);
+    check int "disabled owner parks without classifying" 0 !calls;
+    allowed:=true;
+    let source=Filename.concat (Runtime.configuration_directory config) "quiz.toml" in
+    write source (declaration ^ "\n# a new actual capture source revision\n");
+    ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> unwrap);
+    await clock (fun () -> !calls=1 && Server_workspace_memory_curator.For_testing.is_idle ~base_path);
+    check int "the original owner classified the existing fact without a new commit" 1
+      (List.length (Workspace_memory_ledger.dispositions (Workspace_memory_ledger.load ~base_path |> unwrap))))
 
 let test_withdrawal_event_before_stale_listing () =
   let revision=ref 0 and ids=ref [] and changed=Eio.Condition.create () in
@@ -1278,6 +1414,21 @@ let () =
             test_a_result_larger_than_the_frame_is_delivered_as_its_size
         ; test_case "a listing with an unknown kind is refused whole" `Quick
             test_a_listing_with_an_unknown_kind_is_refused_whole ] )
+    ; ( "owner wakes"
+      , [ test_case "scope, metadata publication and the existing MCP bridge" `Quick
+            test_scoped_owner_wakes_preserve_mcp_and_metadata_publication
+        ; test_case "accepted original and restored results wake outside the RPC" `Quick
+            test_exact_result_wakes_after_rpc_and_isolates_observer_failure
+        ; test_case "an unaccepted result does not wake its owner" `Quick
+            (test_only_accepted_exact_results_wake_owner Unaccepted)
+        ; test_case "a malformed receipt does not wake its owner" `Quick
+            (test_only_accepted_exact_results_wake_owner Malformed)
+        ; test_case "a lost receipt does not wake its owner" `Quick
+            (test_only_accepted_exact_results_wake_owner Transport_failed)
+        ; test_case "an accepted non-Exact request does not wake an Exact owner" `Quick
+            (test_only_accepted_exact_results_wake_owner Non_exact)
+        ; test_case "actual metadata wakes the parked original Curator" `Quick
+            test_addon_metadata_wakes_the_original_curator_without_a_memory_commit ] )
     ; ( "grants"
       , [ test_case "an operator declaration attaches with its grants" `Quick
             test_an_operator_declaration_attaches_with_its_grants

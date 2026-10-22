@@ -529,6 +529,15 @@ let test_interactions () =
     check bool "the requested button reaches the runtime's click" true
       (List.exists (function Wire.Page_click { button = sent; _ } -> sent = button | _ -> false) fake.sent))
     [ Lane.Pointer.Middle; Lane.Pointer.Secondary ];
+  List.iter (fun action ->
+    fake.evaluated <- None;
+    fake.sent <- [];
+    check bool "touch is refused before effect" true
+      (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
+        (Lane.Page_interact { tab_id = 0; expected_url; action })));
+    check bool "and nothing was sent" true (fake.sent = []))
+    [ Lane.Tap_at { point; viewport = observed_viewport };
+      Lane.Swipe { from = point; to_ = point; viewport = observed_viewport; via = []; duration_ms = 0 } ];
   fake.evaluated <- None;
   fake.sent <- [];
   ignore (served (Executor.execute ~tabs ~call:(call fake)

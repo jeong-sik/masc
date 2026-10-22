@@ -848,6 +848,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | Trusted_double_click -> interact (Double_click_at {point;viewport})
       | Trusted_button_click -> interact (Click_at {point;viewport;button=Pointer.Secondary})
       | Viewport_resize -> interact (Set_viewport (Fit {width=800;height=600}))
+      | Touch_input -> interact (Swipe {from=point;to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0})
       | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
       | Browser_zoom -> interact (Set_zoom {factor=1.5})
       | Tab_history -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Back})

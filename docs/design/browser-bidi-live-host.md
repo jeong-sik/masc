@@ -650,6 +650,13 @@ input is sent. A
 `secondary` click opens whatever the page binds to the context menu; observe the
 page afterwards, the receipt does not say what it did.
 
+`tap_at` and `swipe` send the same WebDriver pointer sequences as `click_at`
+and `drag`, from a pointer whose `pointerType` is `touch`. Firefox 158 reported
+`pointerdown`, `touchstart`, `pointerup` and `touchend` to the page for a tap,
+each trusted, followed by the mouse events and a click (probed 2026-10-22), and
+`pointermove` events through a swipe. Stagehand has no touch call and the
+WebExtension clicks through the DOM, so both refuse before any effect.
+
 `back`, `forward`, `reload` and `close_tab` act on a top-level tab only if this
 connection opened it with `open_tab`. A tab the operator opened is refused before
 any browser call: it holds pages and unsaved state this host never saw, and these

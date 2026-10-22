@@ -145,6 +145,15 @@ let test_tab_history_and_close_table () =
     check bool (Cap.operation_name operation ^ " is not claimed for Safari") false (reaches Cap.Safari_unavailable operation))
     [Cap.Back; Cap.Forward; Cap.Reload; Cap.Close_tab]
 
+let test_touch_table () =
+  let reaches backend = match Cap.support backend Cap.Touch with
+    | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
+  check bool "live BiDi sends touch" true (reaches (Cap.Connected Lane.Webdriver_bidi));
+  check bool "the owned Firefox sends touch" true (reaches Cap.Owned_gecko);
+  check bool "Stagehand has no touch" false (reaches Cap.Owned_chromium);
+  check bool "the extension has no touch" false (reaches (Cap.Connected Lane.Web_extension));
+  check bool "Safari has no touch" false (reaches Cap.Safari_unavailable)
+
 let () = run "task-aware browser choice" ["scenarios",[
   test_case "HTML5, frames/downloads and hover/typing discovery" `Quick test_task_choice;
   test_case "zoom, impossible requirements and immutable explicit owners" `Quick test_zoom_and_impossible;
@@ -152,4 +161,5 @@ let () = run "task-aware browser choice" ["scenarios",[
   test_case "selected model consumer is required before discovery and open" `Quick test_model_selection;
   test_case "right and middle click are claimed only where a button is pressed" `Quick test_button_click_table;
   test_case "viewport resize is claimed only where a size can be set" `Quick test_resize_viewport_table;
-  test_case "history and close are claimed on every backend that acts on tabs" `Quick test_tab_history_and_close_table]]
+  test_case "history and close are claimed on every backend that acts on tabs" `Quick test_tab_history_and_close_table;
+  test_case "touch is claimed only where a touch pointer is sent" `Quick test_touch_table]]

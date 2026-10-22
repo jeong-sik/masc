@@ -416,17 +416,21 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
         | Browser_lane.Activate_tab | Browser_lane.Click _ | Browser_lane.Fill _
         | Browser_lane.Scroll _ | Browser_lane.Hover _ | Browser_lane.Drag_to _
         | Browser_lane.Hover_at _ | Browser_lane.Click_at _ | Browser_lane.Scroll_at _
+        | Browser_lane.Tap_at _ | Browser_lane.Swipe _
         | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _ -> Ok action in
       let* url = string_field ~method_:"page.evaluate" "url" resolved |> guard_result in
       Ok (action, Some url)
     | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
     | Browser_lane.Activate_tab | Browser_lane.Fill _
     | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+    | Browser_lane.Tap_at _ | Browser_lane.Swipe _
     | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
     | Browser_lane.Fill_node _ -> Ok (action, expected_url) in
   let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
   match (action : Browser_lane.interaction) with
   | Browser_lane.Set_zoom _ -> Error (Browser_lane.Rejected_before_effect "set_zoom requires a connected WebExtension browser")
+  | Browser_lane.Tap_at _ | Browser_lane.Swipe _ ->
+    Error (Browser_lane.Rejected_before_effect "touch input requires automation or a live BiDi connection; Stagehand has no touch call")
   | Browser_lane.Set_viewport Browser_lane.Browser_default ->
     Error (Browser_lane.Rejected_before_effect
       "restoring the browser's own viewport size requires a live BiDi connection; Stagehand only sets a size")

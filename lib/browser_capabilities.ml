@@ -181,7 +181,16 @@ let support backend operation = match backend with
       | Owned_gecko -> Unsupported "The owned Firefox driver sets no viewport; use a live BiDi connection or Stagehand."
       | Connected Browser_lane.Web_extension -> Unsupported "WebExtension cannot set the page viewport; the selected tab must not be silently moved to another browser."
       | Safari_unavailable -> missing)
-    | Pointer_down | Pointer_up | Touch
+    | Touch -> (match backend with
+      | Connected Browser_lane.Webdriver_bidi | Owned_gecko -> conditional ~action:"tap_at" Interact
+          [observed;geometry;
+           "tap_at is a touch press and release at the observed point; swipe is a held touch from one observed point to another, with the same via and durationMs as drag.";
+           "Native touch pointer input: the page sees pointer and touch events. Firefox 158 followed a tap with the mouse events and a click; observe the page afterward."]
+      | Owned_chromium -> Unsupported "Stagehand has no touch call."
+      | Connected Browser_lane.Web_extension -> Unsupported
+          "WebExtension clicks through the DOM and cannot send touch input; the selected tab must not be silently moved to another browser."
+      | Safari_unavailable -> missing)
+    | Pointer_down | Pointer_up
     | Read_clipboard | Write_clipboard | Read_network | Intercept_network | Read_console
     | Read_storage | Write_storage -> missing
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations

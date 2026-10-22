@@ -48,7 +48,7 @@ let parse = function
         | _ -> "key" :: "modifiers" :: keys) in
       let keys = match List.assoc_opt "action" fields with
         | Some (`String "drag_to") -> keys
-        | Some (`String "drag") -> "source" :: "destination" :: keys
+        | Some (`String ("drag" | "swipe")) -> "source" :: "destination" :: keys
         | _ -> "source" :: "destination" :: "via" :: "durationMs" :: keys in
       let keys = match List.assoc_opt "action" fields with
         | Some (`String "click_at") -> keys
@@ -186,6 +186,20 @@ let parse = function
         let* point = geometry Browser_lane.Pointer.point_of_json "point" in
         let* x = integer "x" in let* y = integer "y" in
         Ok (Browser_lane.Scroll_at {point;viewport;x;y})
+      | Some (`String "tap_at") ->
+        let* () = excludes ["selector";"text";"documentId";"nodeId";"x";"y";"from";"to"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "tap_at requires expectedUrl" in
+        let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
+        let* point = geometry Browser_lane.Pointer.point_of_json "point" in
+        Ok (Browser_lane.Tap_at {point;viewport})
+      | Some (`String "swipe") ->
+        let* () = excludes ["selector";"text";"documentId";"nodeId";"x";"y";"point"] in
+        let* () = match expected_url with Some _ -> Ok () | None -> Error "swipe requires expectedUrl" in
+        let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
+        let* from = geometry Browser_lane.Pointer.point_of_json "from" in
+        let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
+        let* via,duration_ms = drag_options () in
+        Ok (Browser_lane.Swipe {from;to_;viewport;via;duration_ms})
       | Some (`String ("hover_at" | "double_click_at" as action)) ->
         let* () = excludes ["selector";"text";"documentId";"nodeId";"x";"y";"from";"to"] in
         let* () = match expected_url with Some _ -> Ok () | None -> Error (action ^ " requires expectedUrl") in
@@ -213,7 +227,7 @@ let parse = function
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           let* via,duration_ms = drag_options () in
           Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
-      | _ -> Error "action must be set_zoom, set_viewport, activate_tab, click, double_click, double_click_at, type_text, press_key, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
+      | _ -> Error "action must be set_zoom, set_viewport, activate_tab, tap_at, swipe, click, double_click, double_click_at, type_text, press_key, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
     Ok { route = base.route; tab_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
@@ -596,6 +610,7 @@ let resolve_pointer_action action = function
      | Browser_lane.Activate_tab | Browser_lane.Fill _
      | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
      | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+     | Browser_lane.Tap_at _ | Browser_lane.Swipe _
      | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
      | Browser_lane.Fill_node _ -> Error "semantic pointer action required")
   | _ -> Error "invalid pointer target resolution"

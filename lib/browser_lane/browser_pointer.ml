@@ -53,6 +53,8 @@ type gesture =
   | Double_click
   | Drag of { via : point list; destination : point; duration_ms : int }
   | Wheel of { x : int; y : int }
+  | Tap
+  | Swipe of { via : point list; destination : point; duration_ms : int }
 
 let input_sources ~pointer_id ~wheel_id ~viewport ~start gesture =
   let coords (point : point) =
@@ -63,24 +65,33 @@ let input_sources ~pointer_id ~wheel_id ~viewport ~start gesture =
      ; "duration", `Int duration_ms ] @ coords point) in
   let button ?(which = Primary) kind =
     `Assoc ["type", `String kind; "button", `Int (button_number which)] in
-  let pointer actions = `Assoc
-    [ "type", `String "pointer"; "id", `String pointer_id
-    ; "parameters", `Assoc ["pointerType", `String "mouse"]
+  (* A WebDriver input source keeps its pointer type for as long as the browser holds its state, and a hover
+     sends no releaseActions. A touch gesture that reused the mouse source's id after a hover would be
+     sent as a mouse, so touch has an id of its own. *)
+  let pointer ?(pointer_type = "mouse") actions = `Assoc
+    [ "type", `String "pointer"
+    ; "id", `String (if String.equal pointer_type "mouse" then pointer_id else pointer_id ^ "-" ^ pointer_type)
+    ; "parameters", `Assoc ["pointerType", `String pointer_type]
     ; "actions", `List actions ] in
+  (* A press, the moves while it is held, and the release. A drag and a swipe are the same sequence; only
+     the pointer that makes it differs. *)
+  let held ?pointer_type ~start ~via ~destination ~duration_ms () =
+    let via = match via with
+      | [] -> [{x=(start.x +. destination.x) /. 2.; y=(start.y +. destination.y) /. 2.}]
+      | _::_ -> via in
+    pointer ?pointer_type
+      ([move ~duration_ms:0 start; button "pointerDown"]
+       @ List.map (move ~duration_ms) (via @ [destination])
+       @ [move ~duration_ms:0 destination; button "pointerUp"]) in
   let source = match gesture with
     | Hover -> pointer [move ~duration_ms:0 start]
     | Click which ->
         pointer [move ~duration_ms:0 start; button ~which "pointerDown"; button ~which "pointerUp"]
     | Double_click -> pointer [move ~duration_ms:0 start; button "pointerDown"; button "pointerUp";
         button "pointerDown"; button "pointerUp"]
-    | Drag {via;destination;duration_ms} ->
-      let via = match via with
-        | [] -> [{x=(start.x +. destination.x) /. 2.; y=(start.y +. destination.y) /. 2.}]
-        | _::_ -> via in
-      pointer
-        ([move ~duration_ms:0 start; button "pointerDown"]
-         @ List.map (move ~duration_ms) (via @ [destination])
-         @ [move ~duration_ms:0 destination; button "pointerUp"])
+    | Drag {via;destination;duration_ms} -> held ~start ~via ~destination ~duration_ms ()
+    | Swipe {via;destination;duration_ms} -> held ~pointer_type:"touch" ~start ~via ~destination ~duration_ms ()
+    | Tap -> pointer ~pointer_type:"touch" [move ~duration_ms:0 start; button "pointerDown"; button "pointerUp"]
     | Wheel {x;y} -> `Assoc
         [ "type", `String "wheel"; "id", `String wheel_id
         ; "actions", `List [`Assoc

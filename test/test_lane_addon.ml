@@ -1868,8 +1868,8 @@ let test_http_caller_marker_stays_out_of_export_arguments () = with_fixture (fun
   let path = manifest dir "closed-export" in
   let original = In_channel.with_open_bin path In_channel.input_all in
   write path (original ^ "\n[world.tools]\nexport = [\"masc_msx_step\"]\n");
-  ignore (unwrap (dispatch config Runtime.Attach ["manifest_path",`String path;
-    "run_id",`String "world";"binding",`Assoc ["sources",`List []]]));
+  let id = unwrap (dispatch config Runtime.Attach ["manifest_path",`String path;
+    "run_id",`String "world";"binding",`Assoc ["sources",`List []]]) |> text "instance_id" in
   await clock (fun () ->
     match Runtime.tool_exports ~config ~access ~reserved:[] with Ok [_] -> true | _ -> false);
   let server = Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
@@ -1892,7 +1892,8 @@ let test_http_caller_marker_stays_out_of_export_arguments () = with_fixture (fun
   check bool "a closed export schema accepts the call" true
     (result <> `Null && member "isError" result <> `Bool true);
   check bool "the worker receives the arguments without the caller marker" true
-    (!(state.export_arguments) = [`Assoc []]))
+    (!(state.export_arguments) = [`Assoc []]);
+  detach config id; await_phase clock config id "detached")
 
 let test_machine_dependencies_reject_cycles () = with_fixture (fun env _sw config dir state ->
   let attach_machine ~id ~export ~source =

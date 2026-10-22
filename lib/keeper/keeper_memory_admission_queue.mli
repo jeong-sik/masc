@@ -23,6 +23,25 @@ val candidate_ids : batch -> Keeper_memory_os_current.explicit_candidate_id list
     exact candidate JSON object (sequence, request ID, full fact/provenance),
     not an array. Original sparse sequence numbers are preserved. *)
 
+val batch_to_json : batch -> Yojson.Safe.t
+val batch_of_json :
+  expected_candidate_ids:Keeper_memory_os_current.explicit_candidate_id list ->
+  Yojson.Safe.t -> (batch, string) result
+(** Preserve and restore a nonempty original batch without reading today's
+    queue. The closed envelope carries its generation and complete ordered
+    candidates, including fact provenance and sparse sequence numbers.
+    Restoration requires exact equality with the independently retained original
+    candidate identities, in order: generation, request ID, sequence and full
+    candidate payload digest. Unknown/duplicate fields, nonascending rows,
+    duplicate request IDs and missing/extra/changed candidates are refused.
+
+    The expected identities must come from the trusted original host capture,
+    never the worker or this JSON itself. This only restores input data; the
+    original consumer must separately restore workspace/Keeper/installation
+    ownership, Memory inputs and request ancestry. It neither authorizes a model
+    call nor consumes a candidate. Commit and ACK still use the existing locked
+    Memory disposition and verified committed candidate receipts. *)
+
 val split : batch -> (batch * batch) option
 (** After an actual size refusal, partition into two nonempty disjoint halves
     of complete candidates in original order. A singleton cannot split. This

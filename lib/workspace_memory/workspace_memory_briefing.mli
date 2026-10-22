@@ -40,6 +40,10 @@ val prepared_state : batch -> t
     New additions wait for the next pass; removal or modification of a target
     source resets the pass on the next [prepare]. *)
 
+val batch_contract : batch -> (string, string) result
+(** Original prepared pass contract. An inconsistent batch with no active pass
+    is an error; the current prompt registry is not consulted. *)
+
 val batch_to_json : batch -> Yojson.Safe.t
 val batch_of_json : Yojson.Safe.t -> (batch, string) result
 (** Restore the captured original chunk without re-preparing or publishing it.

@@ -98,6 +98,7 @@ async function controller(options={}){
   }
   const slot=`arrange-controller-${randomUUID()}`
   globalThis[slot]={ StatusReader,process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
+    observeTransport(value){observed.transport=value},
     defaultStateDirectory:()=>'/synthetic-state',pickerFooter,selectionLabel,
     InstrumentPicker:class {
       constructor(callbacks){this.callbacks=callbacks;this.view=null;observed.pickers.push(this)}
@@ -182,6 +183,7 @@ async function controller(options={}){
     saveArrangement:async(path,project,revision,extra)=>{observed.recovered.push({path,project,revision,...extra})},
   }
   const source=(await readFile(new URL('../arrangement-tui.mjs',import.meta.url),'utf8')).replace(/^import .*$/gm,'')
+    .replace('function draw() {','function draw() { observeTransport(transport);')
     .replace("new URL('./arrangement-worker.mjs', import.meta.url)","new URL('file:///worker')")
     .replace("await import('./sequencer-tui.mjs')",'await Promise.resolve({viewSequencer:openSequencer})')
     .replace("await import('./ump-tui.mjs')",'await Promise.resolve({viewUmpEditor:openUmpEditor})')
@@ -390,6 +392,58 @@ function instrumentFixture() {
   project=editorAPI.arrangementCommand(editorAPI.arrangementEditor(project),'place asset-1 0').editor.project
   return {project,sound,selection}
 }
+test('VST progress belongs only to the active preparation id and immutable project until its terminal reply',async()=>{
+  const fixture=instrumentFixture()
+  const project=editorAPI.arrangementSound(editorAPI.arrangementEditor(fixture.project),'asset-1',fixture.sound).project
+  const view=await controller({project})
+  const progress=(id,value)=>view.worker.emit('message',{kind:'progress',id,progress:value})
+  try{
+    view.command('output explicit-audio');await flush()
+    view.key('space');await flush()
+    const first=view.observed.requests.find(job=>job.kind==='prepare-vst')
+    progress(first.id+1,{kind:'vst-render',completed:1,total:2})
+    assert.equal(view.observed.transport.progress,undefined)
+    progress(first.id,{kind:'vst-projection'})
+    assert.deepEqual(view.observed.transport.progress,{kind:'vst-projection'})
+    progress(first.id,{kind:'vst-render',completed:1,total:2})
+    assert.deepEqual(view.observed.transport.progress,{kind:'vst-render',completed:1,total:2})
+    assert.equal(view.observed.players.length,0)
+    view.key('space');await flush() // Cancel while the worker still owns its cleanup.
+    progress(first.id,{kind:'vst-mix',completed:2,total:2})
+    assert.equal(view.observed.transport.kind,'stopped')
+    assert.equal(view.observed.transport.progress,undefined)
+    view.key('space');await flush()
+    const second=view.observed.requests.filter(job=>job.kind==='prepare-vst').at(-1)
+    progress(first.id,{kind:'vst-render',completed:2,total:2})
+    assert.equal(view.observed.transport.progress,undefined)
+    progress(second.id,{kind:'vst-render',completed:0,total:3})
+    assert.equal(view.observed.transport.progress.total,3)
+    view.command('title Different project');await flush()
+    progress(second.id,{kind:'vst-mix',completed:3,total:3})
+    assert.equal(view.observed.transport.kind,'stopped')
+    view.key('space');await flush()
+    const third=view.observed.requests.filter(job=>job.kind==='prepare-vst').at(-1)
+    view.worker.emit('message',{id:third.id,ok:true,result:{path:'/owned-recovery/progress/plan.json',format:'wave-arrangement'}})
+    await flush();await flush()
+    assert.equal(view.observed.players.length,1)
+    progress(third.id,{kind:'vst-mix',completed:99,total:99})
+    assert.equal(view.observed.transport.kind,'playing')
+    assert.equal(view.observed.transport.progress,undefined)
+    view.command('stop');view.key('space');await flush()
+    const fourth=view.observed.requests.filter(job=>job.kind==='prepare-vst').at(-1)
+    assert.ok(fourth.id>third.id)
+    progress(fourth.id,{kind:'vst-mix',completed:2,total:2})
+    view.worker.emit('message',{id:fourth.id,ok:true,result:{path:'/owned-recovery/held-progress/plan.json',format:'wave-arrangement'}})
+    await flush()
+    // The preceding player still owns its close. A completed render cannot
+    // remain current progress while that independent owner is draining.
+    assert.equal(view.observed.players.length,1)
+    assert.equal(view.observed.transport.kind,'preparing')
+    assert.equal(view.observed.transport.progress,undefined)
+    progress(fourth.id,{kind:'vst-render',completed:0,total:99})
+    assert.equal(view.observed.transport.progress,undefined)
+  }finally{await closeController(view)}
+})
 test('arrangement picker captures the selected asset sound and sends it to audio preparation; undo restores MIDI unchanged',async()=>{
   const fixture=instrumentFixture(),before=exportMidiSource(fixture.project.assets[0].source),view=await controller(fixture)
   try {

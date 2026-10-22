@@ -51,7 +51,10 @@ parentPort.on('message', async job => {
       case 'practice-passes': case 'practice-pass': result = await inspectPracticePasses(job.project, job.asset, job.pass, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'prepare-mixed': result = await prepareArrangementMixed(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal, midiOutput: job.midiOutput, portBindings: job.portBindings }); break
       case 'prepare-midi': result = await prepareArrangementMidi(job.project, { directory: job.directory, signal, midiOutput: job.midiOutput, portBindings: job.portBindings }); break
-      case 'prepare-vst': result = await prepareArrangementInstrument(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
+      case 'prepare-vst': result = await prepareArrangementInstrument(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal,
+        onProgress(progress) {
+          if (!signal.aborted && active.get(job.id) === controller) parentPort.postMessage({ kind: 'progress', id: job.id, progress })
+        } }); break
       case 'prepare-audio': result = await prepareArrangementAudio(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'prepare-wave': result = await prepareArrangementWave(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'import-wave': result = await importArrangementWave(job.project, job.path, { projectPath: job.projectPath, signal }); break

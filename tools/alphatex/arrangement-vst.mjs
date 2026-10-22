@@ -131,7 +131,8 @@ export async function prepareArrangementVstMidi(project, { directory, signal, ex
 // Each source port/region owns a fresh native instance. Render one at a time,
 // then sum their float WAVs on the common sample grid. MIDI prefix chasing is
 // performed before synthesis, rather than by trimming already rendered audio.
-export async function prepareArrangementVst(project, { directory, signal, executable = midiTransportPath, run = nativeJob } = {}) {
+/** @typedef {{kind:'vst-projection'} | {kind:'vst-render',completed:number,total:number} | {kind:'vst-mix',completed:number,total:number}} VstPreparationProgress */
+export async function prepareArrangementVst(project, { directory, signal, executable = midiTransportPath, run = nativeJob, onProgress } = {}) {
   signal?.throwIfAborted()
   const temporary = await mkdtemp(join(directory, 'vst-play-'))
   let job = null
@@ -144,8 +145,13 @@ export async function prepareArrangementVst(project, { directory, signal, execut
     finally { if (job === owned) job = null }
   }
   try {
+    onProgress?.({ kind: 'vst-projection' })
     const selected = await prepareArrangementVstMidi(project, { directory: temporary, signal, executable })
     const tail = selected.loop ? 0 : 1, rendered = []
+    // The total belongs to the verified native region/port projection, rather
+    // than a guess from the project's clip or asset count.
+    const total = selected.parts.length
+    onProgress?.({ kind: 'vst-render', completed: 0, total })
     for (const part of selected.parts) {
       signal?.throwIfAborted()
       const path = join(temporary, `instance-${part.id}.wav`)
@@ -158,8 +164,10 @@ export async function prepareArrangementVst(project, { directory, signal, execut
           || result.timeline_sha256 !== part.sha256 || result.timeline_event_count !== part.eventCount
           || !Number.isFinite(result.peak) || result.peak < 0) throw new Error('VST instance receipt differs from its admitted region')
       rendered.push(result)
+      onProgress?.({ kind: 'vst-render', completed: rendered.length, total })
     }
     signal?.throwIfAborted()
+    onProgress?.({ kind: 'vst-mix', completed: rendered.length, total })
     const audioPath = join(temporary, 'backing.wav'), frames = pcmFrame([selected.plan.duration, tail], true)
     const mixed = await wait(run({ operation: 'mix', parts: rendered, output_path: audioPath, sample_rate: sampleRate, frames }))
     if (mixed.output_path !== audioPath || mixed.sample_rate !== sampleRate || mixed.frames !== frames

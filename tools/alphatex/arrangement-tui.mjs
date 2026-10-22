@@ -314,11 +314,11 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     })()
     draw()
   }
-  function request(value, issued) {
+  function request(value, issued, onProgress) {
     if (workerFailure) return Promise.reject(workerFailure)
     const id = ++sequence
     return new Promise((resolve, reject) => {
-      jobs.set(id, { resolve, reject })
+      jobs.set(id, { resolve, reject, onProgress })
       issued?.(id)
       try { worker.postMessage({ ...value, id }) }
       catch (error) { jobs.delete(id); reject(error) }
@@ -335,6 +335,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   worker.on('message', message => {
     const job = jobs.get(message.id)
     if (!job) return
+    if (message.kind === 'progress') { job.onProgress?.(message.progress, message.id); return }
     jobs.delete(message.id)
     if (message.ok) job.resolve(message.result)
     else { const error = new Error(message.error); error.name = message.cancelled ? 'AbortError' : 'Error'; job.reject(error) }
@@ -392,17 +393,35 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     let resolveStart, rejectStart
     const started = new Promise((yes, no) => { resolveStart = yes; rejectStart = no })
     started.catch(() => {})
-    const expected = ++generation, project = editor.project, output = selection.output
+    const expected = ++generation, project = editor.project, projectPath = path, output = selection.output
     transport = { kind: 'preparing' }; status = 'Preparing arrangement sources…'
     const sound = selection.kind === 'prepare-sound' ? startSoundArrangement({ project, route, sourceRoot, directory, request,
       cancelRequest: id => { if (!workerFailure) worker.postMessage({ kind: 'cancel', request: id }) } }) : null
     if (sound) preparing = { kind: 'sound', handle: sound }
-    const prepared = sound ? sound.promise : request({ ...selection, project, sourceRoot, directory }, id => { preparing = { kind: 'worker', id } })
+    const prepared = sound ? sound.promise : request({ ...selection, project, sourceRoot, directory }, id => { preparing = { kind: 'worker', id } }, (progress, id) => {
+      if (!accepting || closed || suspended || generation !== expected || preparing?.kind !== 'worker' || preparing.id !== id
+          || editor.project !== project || path !== projectPath || transport.kind !== 'preparing' || selection.kind !== 'prepare-vst') return
+      switch (progress.kind) {
+        case 'vst-projection': status = 'Projecting VST MIDI sources…'; break
+        case 'vst-render': status = `Rendering VST instances ${progress.completed}/${progress.total} complete`; break
+        case 'vst-mix': status = `Mixing ${progress.total} VST instances…`; break
+        default: return
+      }
+      transport = { ...transport, progress }
+      draw()
+    })
     const preparation = (async () => {
       let result, playbackCompletion, playbackHandle, startedPlaying = false
       try {
         result = await prepared
-        if (generation === expected) preparing = null
+        if (generation === expected) {
+          preparing = null
+          if (transport.progress) {
+            transport = { kind: 'preparing' }
+            status = 'VST backing prepared; waiting for playback ownership…'
+            draw()
+          }
+        }
         await Promise.allSettled([...players.values()])
         if (!accepting || generation !== expected) return
         const admitted = await transitionLiveMidi(async () => {

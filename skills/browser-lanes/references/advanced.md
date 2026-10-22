@@ -8,8 +8,9 @@
 
 `framePath`는 automation의 `BrowserRead` text/elements/frames 읽기, `BrowserAct upload`,
 `BrowserInteract`의 selector 기반 click/fill/select_option/scroll에 사용한다.
-`BrowserInteract`의 `expectedUrl`은 안쪽 frame 문서의 URL이다. live 연결, 확장,
-Stagehand는 `framePath`가 있는 요청을 효과 전에 거절하므로 최상위 문서만 조작할 수 있다.
+`BrowserInteract`의 `expectedUrl`은 안쪽 frame 문서의 URL이다. 자동화 Firefox와
+live BiDi 연결이 처리한다. 확장과 Stagehand는 `framePath`가 있는 요청을 효과 전에
+거절하므로 최상위 문서만 조작할 수 있다.
 탭 이동, 히스토리, JS 대화상자와 screenshot에는 넣지 않는다. screenshot은
 최상위 viewport를 캡처하므로 스크롤한 프레임의 입력란이 화면 밖일 수 있다.
 

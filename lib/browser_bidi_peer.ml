@@ -191,6 +191,39 @@ let evaluate t context body args =
   Result.map_error evaluation_failure_message (evaluate_typed t context body args)
 let script t context body args = evaluate t context ("arguments[0]=JSON.parse(arguments[0]);\n" ^ body) args
 let scene t context args = script t context "return browserScene(arguments[0]);" args
+(* BiDi names a frame's document by its own browsing context. The iframe
+   element's [contentWindow] comes back as a window remote value that carries
+   that context id, for a cross-origin frame too. Input then targets the child
+   context, whose viewport coordinates are the frame's own (probed on Firefox
+   158 with a same-origin and a cross-origin iframe). *)
+let frame_declaration = {js|function(selector) {
+  let frames;
+  try { frames = document.querySelectorAll(selector); }
+  catch { throw new Error("invalid_css_selector"); }
+  if (frames.length !== 1) throw new Error(frames.length === 0 ? "frame_not_found" : "frame_selector_is_ambiguous");
+  const frame = frames[0];
+  if (frame.localName !== "iframe" && frame.localName !== "frame") throw new Error("frame_selector_is_not_a_frame");
+  if (!frame.contentWindow) throw new Error("frame_has_no_document");
+  return frame.contentWindow;
+}|js}
+let frame_context t context selectors =
+  let enter context selector =
+    let* result = Result.map_error (fun reason -> "script.callFunction: " ^ refusal_message reason)
+      (t.ask "script.callFunction" (obj [
+        "functionDeclaration",str frame_declaration;"target",obj ["context",str context];
+        "awaitPromise",`Bool false;"arguments",`List [obj ["type",str "string";"value",str selector]]])) in
+    match field "type" result with
+    | Some (`String "success") ->
+      let* value = required "result" result in
+      (match field "type" value, Option.bind (field "value" value) (field "context") with
+       | Some (`String "window"), Some (`String child) -> Ok child
+       | _ -> Error "the frame selector did not resolve to a frame window")
+    | Some (`String "exception") ->
+      let detail = match Option.bind (field "exceptionDetails" result) (field "text") with
+        | Some (`String text) -> text | _ -> "the frame selector was rejected" in
+      Error detail
+    | _ -> Error "invalid BiDi frame answer" in
+  List.fold_left (fun acc selector -> let* context = acc in enter context selector) (Ok context) selectors
 let tab_metadata t context = script t context
   "return {url:location.href,title:document.title,active:document.visibilityState==='visible'};" (obj [])
 (* Capture guards need document identity and geometry, never page text. Read
@@ -580,9 +613,7 @@ let dispatch ?actor ?request_id t ~verb args =
   | Page_interact -> on_tab (fun context id ->
       let* fields=pre (match args with `Assoc xs->Ok xs|_->Error "invalid interaction") in
       let* request=pre (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live))::fields))) in
-      let* () = match request.frame_path with
-        | [] -> Ok ()
-        | _ :: _ -> Error (Before_effect "framePath is not supported on a live BiDi connection yet; the page input runs in the top document only") in
+      let* context = pre (frame_context t context request.frame_path) in
       let* expected_url,action = match request.action with
         | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
           let* resolved = pre (script t context Browser_interaction.pointer_target_script args) in
@@ -623,8 +654,13 @@ let dispatch ?actor ?request_id t ~verb args =
       | Browser_lane.Set_zoom _ -> Error (Before_effect "set_zoom requires a connected WebExtension browser")
       | Browser_lane.Activate_tab -> activate t context id args in
       let receipt = match receipt with
-        | `Assoc fields -> obj (("action",str (Browser_lane.interaction_verb request.action))
-            :: List.remove_assoc "action" fields)
+        | `Assoc fields ->
+          (* The receipt's url is the frame document's; name the frame chain. *)
+          let framed = match request.frame_path with
+            | [] -> []
+            | path -> ["framePath",`List (List.map str path)] in
+          obj (("action",str (Browser_lane.interaction_verb request.action))
+            :: framed @ List.remove_assoc "action" fields)
         | other -> other in
       Result.map_error (fun detail -> Outcome_unknown detail) (with_tab id receipt))
 

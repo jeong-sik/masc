@@ -1001,8 +1001,9 @@ carry the execution argument across the Owner handoff under their original scope
 
 This is physical execution identity and repetition isolation. The Owner journal
 boundary below binds it to admission, atomic wait publication and typed settlement;
-production heartbeat intake, source exclusion and explicit independent seed
-selection are not yet connected. In particular, canonical checkpoint
+production semantic admission and explicit independent seed selection are not
+yet connected. Heartbeat source exclusion now reads the Owner journal as
+described below. In particular, canonical checkpoint
 fallback can still expose parked A's pending input to independent B; an explicit
 Owner-validated fork plus A's retained semantic ownership is required before that
 path is complete. Neither a new UUID nor these source tests prove A wait -> restart
@@ -1038,6 +1039,36 @@ They also cover a forged equal scope object, stale writer, wrong retained scope,
 duplicate wait, typed checkpoint, post-wait exception and commit uncertainty.
 These are not actual provider/Core wait or production canonical-fallback tests.
 Heartbeat must still freeze freshly validated original input/source membership,
-call this admission before dispatch, exclude parked original sources, select an
+call this admission before dispatch, select an
 explicit independent fork seed and carry typed settlement through AgentRun.
 Autonomous response/resume and current/reconnected Acting/SSE remain outstanding.
+
+### Heartbeat intake of independently owned sources
+
+The heartbeat reads reserved original/current source membership through its
+Owner mailbox and passes that result into intake. The strict primary query
+includes every nonterminal execution, including an input wait, suspension or
+interrupted reconciliation; terminal records contribute no ownership.
+
+Intake excludes matching selections before readiness, connector conversation
+selection, source reads and cleanup. Source identity uses the queue's existing
+full typed snapshot digest, post identity and admission revision. A new revision
+or changed snapshot remains independent work. Checkpoint retention counts do
+not create another source lifetime. Filtering preserves the order and durable
+queue entries and never ACKs the held original input.
+
+An unavailable ownership observation is an explicit failed pending-source
+intake; it is not empty ownership. An empty queue needs no such decision and
+keeps ordinary cadence. This read and filtering do not grant provider dispatch,
+semantic admission, checkpoint response or fork authority. The production
+heartbeat still needs frozen intake admission and an Owner-validated independent
+seed before canonical checkpoint fallback can safely serve new work while an
+original full pending request remains parked.
+
+The Registry/Producer boundary fixture now uses real A/B queue selections, an
+Owner-admitted A source and retained pending bytes, and exercises actual intake
+with the Owner's ownership read. Changed source revisions/snapshots are checked
+as projection cases; unavailable ownership is supplied as an explicit failed
+observation. Existing Board/Connector intake fixtures supply their explicit
+empty ownership data and do not prove journal integration. None of these
+fixtures executes an autonomous provider/Core wait or the production seed path.

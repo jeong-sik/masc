@@ -12,6 +12,35 @@ let stimuli batch =
 let count = function Empty -> 0 | Selected (_, rest) -> 1 + List.length rest
 let first = function Empty -> None | Selected (first, _) -> Some first
 
+let semantic_member (selection:Keeper_event_queue_state.pending_selection) =
+  Keeper_semantic_execution.source_member ~post_id:selection.source.post_id
+    ~admitted_revision:selection.admitted_revision
+    ~checkpoint_retentions:selection.checkpoint_retentions
+    ~source_sha256:(Keeper_event_queue_state.source_snapshot_ref selection.source)
+
+let semantic_members batch =
+  let rec collect acc = function
+    | [] -> Ok (List.rev acc)
+    | selection::rest ->
+      match semantic_member selection with
+      | Error _ as error -> error
+      | Ok member -> collect (member::acc) rest in
+  collect [] (selections batch)
+
+let exclude_owned ~owned batch =
+  let rec keep acc = function
+    | [] -> Ok (of_selections (List.rev acc))
+    | selection::rest ->
+      match semantic_member selection with
+      | Error _ as error -> error
+      | Ok member ->
+        if List.exists (Keeper_semantic_execution.same_source member) owned
+        then keep acc rest
+        else keep (selection::acc) rest in
+  match owned with
+  | [] -> Ok batch
+  | _::_ -> keep [] (selections batch)
+
 let observed_sources_to_yojson batch =
   `List
     (List.map

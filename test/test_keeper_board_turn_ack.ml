@@ -300,7 +300,7 @@ data: [DONE]
        stimulus_id settled.matched_record_count settled.event_queue_cancelled_seen);
   (* Inspect the next intake only: an empty queue does not forbid unrelated
      autonomous work, so another model turn would not itself prove redelivery. *)
-  let third = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+  let third = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
     ~ctx ~meta_after_triage:second.meta ~pending_board_events:[] in
   require (Keeper_heartbeat_source_batch.count third.source_batch = 0)
     "the completed source was admitted again";
@@ -330,7 +330,7 @@ data: [DONE]
   let replay = match replay with Some event -> event | None -> failwith "comment replay missing" in
   let intake = Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS"
       (Some (string_of_int (List.length pending))) (fun () ->
-        Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+        Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
           ~ctx ~meta_after_triage:second.meta ~pending_board_events:[replay]) in
   require (Keeper_heartbeat_source_batch.count intake.source_batch = 4)
     "actual intake did not admit all four sources";

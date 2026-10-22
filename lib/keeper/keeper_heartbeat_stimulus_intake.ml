@@ -759,6 +759,7 @@ let reconcile_spent_selection
 
 let heartbeat_event_intake
       ~ctx
+      ~owned_sources
       ~meta_after_triage
       ~pending_board_events
   =
@@ -1111,15 +1112,25 @@ let heartbeat_event_intake
         keeper_name
         message;
       [], [], None, Some (None, Pending_selection_failed message)
+    | Ok [] -> [],[],None,None
     | Ok selections ->
-      let batch = ready_batch selections in
-      let observations, selections, withdrawn, error =
-        consume_batch batch
-      in
-      ( observations
-      , selections
-      , withdrawn
-      , Option.map (fun (selection, error) -> Some selection, error) error )
+      let available =
+        let ( let* ) = Result.bind in
+        let* owned = owned_sources in
+        Keeper_heartbeat_source_batch.exclude_owned ~owned
+          (Keeper_heartbeat_source_batch.of_selections selections)
+        |> Result.map Keeper_heartbeat_source_batch.selections in
+      (match available with
+       | Error detail ->
+         let message="original source ownership unavailable: " ^ detail in
+         Log.Keeper.error "turn entry: source ownership read failed keeper=%s: %s"
+           keeper_name detail;
+         [],[],None,Some (None,Pending_selection_failed message)
+       | Ok selections ->
+         let batch = ready_batch selections in
+         let observations, selections, withdrawn, error = consume_batch batch in
+         ( observations,selections,withdrawn,
+           Option.map (fun (selection,error) -> Some selection,error) error ))
   in
   let source_batch = Keeper_heartbeat_source_batch.of_selections consumed_selections in
   let diagnostic_selection =

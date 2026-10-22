@@ -11,6 +11,10 @@ type source_member = private
 val source_member :
   post_id:string -> admitted_revision:int64 -> checkpoint_retentions:int ->
   source_sha256:string -> (source_member, string) result
+val same_source : source_member -> source_member -> bool
+(** Exact original source identity: post, admission revision and full typed
+    source snapshot hash. Checkpoint retention counts are bookkeeping, not a
+    new source incarnation or permission to consume it again. *)
 
 type runtime_retry = private
   { checkpoint : Keeper_checkpoint_ref.t

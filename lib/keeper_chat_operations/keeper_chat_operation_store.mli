@@ -492,6 +492,11 @@ type semantic_admission = Semantic_created of Semantic.t | Semantic_existing of 
 val semantic_error_to_string : semantic_error -> string
 val semantic_get : t -> Keeper_execution_scope_id.t -> (Semantic.t option, semantic_error) result
 val semantic_outstanding : t -> (Semantic.t list, semantic_error) result
+val semantic_reserved_sources : t -> (Semantic.source_member list, semantic_error) result
+(** Strict primary read of original and current sources held by nonterminal
+    semantic executions. Waiting, suspended and reconciliation records keep
+    ownership; terminal settlement releases it. This is observation only,
+    never permission to dispatch or resume an execution. *)
 val semantic_prepare :
   t -> id:Keeper_execution_scope_id.t -> input:Yojson.Safe.t -> sources:Semantic.source_member list -> now:float ->
   (semantic_admission, semantic_error) result

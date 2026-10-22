@@ -341,7 +341,7 @@ let test_one_intake_admits_every_ready_non_connector_in_queue_order () =
     let sources = schedules @ board @ [ bootstrap ] in
     List.iter (enqueue_exn ~base_path keeper_name) sources;
     let intake =
-      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
         ~ctx
         ~meta_after_triage:meta
         ~pending_board_events:[]
@@ -378,7 +378,7 @@ let test_unread_connector_sources_survive_other_completed_work ~failure () =
          | `Unreadable -> Sys.rename path backup; Unix.mkdir path 0o700
          | `Missing_file -> Sys.rename path backup
          | `Missing_rows -> Fs_compat.save_file path "");
-        let intake () = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+        let intake () = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
           ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
         let assert_read_failure intake =
           match intake.Keeper_heartbeat_stimulus_intake.event_queue_intake_error with
@@ -505,7 +505,7 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
            ~reason:"fixture withdrawal" ~now:202. with
         | Ok () -> ()
         | Error error -> fail (Keeper_ask_store.withdraw_failure_to_string error)));
-    let intake () = Intake.heartbeat_event_intake ~ctx ~meta_after_triage:meta
+    let intake () = Intake.heartbeat_event_intake ~owned_sources:(Ok []) ~ctx ~meta_after_triage:meta
         ~pending_board_events:[] in
     (* A store read/decode failure is transient: the same log can read on a
        later heartbeat. A missing log or row and an Open/Withdrawn resolution
@@ -717,7 +717,7 @@ let test_missing_prefix_does_not_starve_readable_connector ~cross_conversation (
     let bootstrap : Q.stimulus =
       { post_id="independent-work"; urgency=Q.Low; arrived_at=5.; payload=Q.Bootstrap } in
     List.iter (enqueue_exn ~base_path keeper_name) (messages @ [readable; bootstrap; later]);
-    let intake () = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+    let intake () = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
       ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
     let pending_ids () =
       match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
@@ -796,7 +796,7 @@ let test_failed_connector_batch_skips_shared_store_without_starving_other_work (
     Fs_compat.save_file path (Fs_compat.load_file path ^ "{");
     let cursor = match Log.Ring.recent ~limit:1 () with
       | entry :: _ -> entry.Log.Ring.seq | [] -> -1 in
-    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
       ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
     let warnings = Log.Ring.recent ~since_seq:cursor ~module_filter:"Keeper" ()
       |> List.filter (fun (entry : Log.Ring.entry) -> entry.level = Log.Warn) in
@@ -857,7 +857,7 @@ let test_proactive_yields_only_to_ready_intake () =
          (Option.map (fun (source : Q.stimulus) -> source.post_id) summary.head)
      | Some {Keeper_agent_run.reason = Operation_queued} | None ->
        fail "ready event did not request the next intake");
-    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
         ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
     check (list string) "intake agrees with proactive readiness" [ready.post_id]
       (List.map (fun (source : Q.stimulus) -> source.post_id)
@@ -923,7 +923,7 @@ let test_one_intake_admits_only_one_hitl_resolution () =
       | Error detail -> fail detail
     in
     let intake =
-      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
         ~ctx
         ~meta_after_triage:meta
         ~pending_board_events:[]
@@ -968,7 +968,7 @@ let test_one_intake_admits_only_one_hitl_resolution () =
       [ second.post_id ]
       (List.map (fun (source : Q.stimulus) -> source.post_id) queued);
     let next =
-      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
         ~ctx
         ~meta_after_triage:meta
         ~pending_board_events:[]
@@ -1096,7 +1096,7 @@ let test_batch_admits_same_conversation_in_arrival_order_leaves_other_channel_qu
     in
     List.iter (enqueue_exn ~base_path keeper_name) [ a1; b1; a2; b2; a3 ];
     let intake =
-      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
         ~ctx
         ~meta_after_triage:meta
         ~pending_board_events:[]
@@ -1162,7 +1162,7 @@ let test_batch_retires_permanent_board_poison_between_connector_matches () =
     in
     List.iter (enqueue_exn ~base_path keeper_name) [ a1; board; a2 ];
     let intake =
-      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
         ~ctx
         ~meta_after_triage:meta
         ~pending_board_events:[]
@@ -1212,7 +1212,7 @@ let test_batch_turn_failure_leaves_every_member_queued () =
     in
     List.iter (enqueue_exn ~base_path keeper_name) [ a1; a2; a3 ];
     let intake =
-      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
         ~ctx
         ~meta_after_triage:meta
         ~pending_board_events:[]
@@ -1319,7 +1319,7 @@ let test_batch_completion_acks_every_member () =
     in
     List.iter (enqueue_exn ~base_path keeper_name) [ a1; a2; a3 ];
     let intake =
-      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
         ~ctx
         ~meta_after_triage:meta
         ~pending_board_events:[]
@@ -1406,7 +1406,7 @@ let test_exact_mixed_bindings_reach_dispatch_and_settlement () =
       ()) [first, direct; second, autonomous];
     let expected = Persistence.pending_selections_result ~base_path ~keeper_name
       |> require "bound selections" in
-    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+    let intake = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
       ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
     check bool "successful intake has no diagnostic authority" true
       (Option.is_none intake.diagnostic_selection);

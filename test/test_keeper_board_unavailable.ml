@@ -200,7 +200,7 @@ let test_poison_durable_source_is_retired_during_intake () =
    | Ok () -> ()
    | Error message -> failf "failed to seed durable poison: %s" message);
   let intake =
-    Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+    Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
       ~ctx
       ~meta_after_triage:meta
       ~pending_board_events:[]
@@ -273,7 +273,7 @@ let with_intake_sources ~max_events f =
     post_id
   in
   let intake () =
-    Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+    Keeper_heartbeat_stimulus_intake.heartbeat_event_intake ~owned_sources:(Ok [])
       ~ctx ~meta_after_triage:meta ~pending_board_events:[]
   in
   let pending () =

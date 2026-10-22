@@ -7,6 +7,16 @@ val selections : t -> Keeper_event_queue_state.pending_selection list
 val stimuli : t -> Keeper_event_queue.stimulus list
 val count : t -> int
 val first : t -> Keeper_event_queue_state.pending_selection option
+val semantic_members : t -> (Keeper_semantic_execution.source_member list, string) result
+(** Exact source identity from the queue's full typed source snapshot digest,
+    admission revision and retention bookkeeping. Preserves selection order;
+    diagnostics alone never provide the original source payload or authority. *)
+val exclude_owned : owned:Keeper_semantic_execution.source_member list ->
+  t -> (t, string) result
+(** Keep only exact selections not reserved by the journal, preserving order.
+    A changed admission revision or snapshot is new work; retention bookkeeping
+    cannot turn the original waiting source into new work. Does not ACK,
+    mutate the queue, render observations, or authorize provider dispatch. *)
 
 val observed_sources_to_yojson : t -> Yojson.Safe.t
 (** Private diagnostic projection of every exact intake selection, in order:

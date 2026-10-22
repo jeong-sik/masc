@@ -946,6 +946,9 @@ let run_keepalive_unified_turn
       let event_intake =
         heartbeat_event_intake
           ~ctx
+          ~owned_sources:(Keeper_owner_registry.reserved_sources
+            ~base_path:ctx.config.base_path ~keeper_name:meta_after_triage.name
+            |> Result.map_error Keeper_owner_registry.command_error_to_string)
           ~meta_after_triage
           ~pending_board_events
       in

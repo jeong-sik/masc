@@ -854,6 +854,8 @@ let advance_autonomous_input_checkpoint ~base_path ~keeper_name ~writer ~checkpo
 let start_autonomous_execution ~base_path ~keeper_name ~execution ~input ~sources =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.start_autonomous_execution owner ~execution ~input ~sources)
+let reserved_sources ~base_path ~keeper_name =
+  with_owner_command ~base_path ~keeper_name Keeper_owner.reserved_sources
 let finish_autonomous_execution ~base_path ~keeper_name ~execution ~ending =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.finish_autonomous_execution owner ~execution ~ending)

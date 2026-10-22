@@ -54,6 +54,7 @@ val classify_turn_intake_admission :
 
 val heartbeat_event_intake :
   ctx:'a context ->
+  owned_sources:(Keeper_semantic_execution.source_member list, string) result ->
   meta_after_triage:keeper_meta ->
   pending_board_events:Keeper_world_observation.pending_board_event list ->
   heartbeat_event_intake

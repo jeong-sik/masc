@@ -78,7 +78,7 @@ let prepare execution =
      execution_outcome=Tool_result.Ok;typed_outcome=None;latency_ms=0.;
      task_id=None;route_evidence=None;input_fingerprint=None;output_fingerprint=None};
   context
-let retain root checkpoint =
+let retain root (checkpoint:Core.Checkpoint.t) =
   let trace_id=Keeper_id.Trace_id.of_string checkpoint.Core.Checkpoint.session_id |> value in
   let session_dir=Filename.concat root checkpoint.session_id in
   if not (Sys.file_exists session_dir) then Unix.mkdir session_dir 0o700;
@@ -259,6 +259,8 @@ let test_registry_producer_wait () = with_root @@ fun root ->
   ignore (Workspace.init workspace ~agent_name:(Some "owner-journal-test"));
   let meta=meta () in
   Keeper_meta_store.replace_snapshot workspace meta |> value;
+  ignore (Keeper_registry.For_testing.register ~base_path:root meta.name meta);
+  Eio.Switch.on_release sw (fun () -> Keeper_registry.For_testing.clear ());
   Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
     ~on_turn_slot_released:None workspace
   |> Result.map_error Keeper_owner_registry.install_error_to_string |> value |> ignore;
@@ -268,13 +270,31 @@ let test_registry_producer_wait () = with_root @@ fun root ->
   let session_dir=Filename.concat (Keeper_fs.session_store_path workspace)
       (Keeper_id.Trace_id.to_string meta.runtime.trace_id) in
   Eio.Path.mkdirs ~exists_ok:true ~perm:0o700 Eio.Path.(env#fs / session_dir);
-  Keeper_owner_registry.run_autonomous_if_idle ~base_path:root ~keeper_name:meta.name (fun execution ->
+  let ctx : _ Keeper_types_profile.context =
+    {config=workspace;agent_name="original-source-intake";sw;clock=env#clock;
+     proc_mgr=None;net=None;publication_recovery_provider=
+       Masc_test_deps.non_runtime_publication_recovery_provider} in
+  let intake owned_sources = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~owned_sources ~meta_after_triage:meta ~pending_board_events:[] in
+  let idle=intake (Error "ownership store unavailable") in
+  check bool "empty queue does not gate unrelated cadence on ownership read" true
+    (idle.event_queue_intake_error=None && Keeper_heartbeat_source_batch.count idle.source_batch=0);
+  let stimulus post_id arrived_at : Keeper_event_queue.stimulus =
+    {post_id;arrived_at;urgency=Keeper_event_queue.Normal;payload=Keeper_event_queue.Bootstrap} in
+  List.iter (fun source -> Keeper_registry_event_queue.enqueue_durable_result
+    ~base_path:root meta.name source |> value) [stimulus "original-source-A" 1.;stimulus "independent-source-B" 2.];
+  let selections () = Keeper_registry_event_queue.pending_selections_result ~base_path:root meta.name |> value in
+  let original=List.find (fun (selection:Keeper_event_queue_state.pending_selection) ->
+    selection.source.post_id="original-source-A") (selections ()) in
+  let original_sources=Keeper_heartbeat_source_batch.semantic_members
+      (Keeper_heartbeat_source_batch.of_selections [original]) |> value in
+  (Keeper_owner_registry.run_autonomous_if_idle ~base_path:root ~keeper_name:meta.name (fun execution ->
     let context=prepare execution in
     let producer=Keeper_input_checkpoint_producer.prepare ~base_path:root ~keeper_name:meta.name
         ~session_dir ~trace_id:meta.runtime.trace_id ~source:None
       |> Result.map_error Keeper_input_checkpoint_producer.error_to_string |> value in
     Keeper_owner_registry.start_autonomous_execution ~base_path:root ~keeper_name:meta.name
-      ~execution ~input:(`String "producer-original") ~sources:[source "producer-original"]
+      ~execution ~input:(`String "producer-original") ~sources:original_sources
     |> registry_value |> created |> ignore;
     let payload=checkpoint context in
     (match Keeper_input_checkpoint_producer.publish_autonomous producer payload with
@@ -292,7 +312,33 @@ let test_registry_producer_wait () = with_root @@ fun root ->
       (Physical.exact_snapshot_checkpoint retained |> Core.Checkpoint.to_string))
   |> registry_value |> function
   | `Ran () -> ()
-  | `Busy _ | `Interrupted -> fail "Registry did not run original Producer child"
+  | `Busy _ | `Interrupted -> fail "Registry did not run original Producer child");
+  let owned () = Keeper_owner_registry.reserved_sources ~base_path:root ~keeper_name:meta.name
+      |> Result.map_error Keeper_owner_registry.command_error_to_string in
+  let selected_ids observed = Keeper_heartbeat_source_batch.selections observed.Keeper_heartbeat_stimulus_intake.source_batch
+      |> List.map (fun (selection:Keeper_event_queue_state.pending_selection) -> selection.source.post_id) in
+  check (list string) "actual intake excludes A's wait and admits independent B"
+    ["independent-source-B"] (selected_ids (intake (owned ())));
+  ignore (Keeper_registry_event_queue.note_checkpoint_retention_result ~base_path:root meta.name
+    ~selection:original () |> value);
+  check (list string) "retention bookkeeping cannot re-admit original A"
+    ["independent-source-B"] (selected_ids (intake (owned ())));
+  let held=owned () |> value in
+  let changed_revision={original with admitted_revision=Int64.succ original.admitted_revision} in
+  let changed_snapshot={original with source={original.source with arrived_at=3.}} in
+  List.iter (fun selection ->
+    let batch=Keeper_heartbeat_source_batch.of_selections [selection] in
+    let available=Keeper_heartbeat_source_batch.exclude_owned ~owned:held batch |> value in
+    check int "different source incarnation or full snapshot remains eligible" 1
+      (Keeper_heartbeat_source_batch.count available)) [changed_revision;changed_snapshot];
+  let before=selections () in
+  let unavailable=intake (Error "ownership primary unreadable") in
+  check bool "unavailable ownership is an explicit failed intake" true
+    (Option.is_some unavailable.event_queue_intake_error);
+  check int "unavailable ownership admits no queue sources" 0
+    (Keeper_heartbeat_source_batch.count unavailable.source_batch);
+  check bool "intake never ACKs or mutates the parked original queue source" true
+    (before=selections ())
 
 let () = run "autonomous Owner journal"
   ["original ownership",[

@@ -326,6 +326,10 @@ val start_autonomous_execution : t -> execution:Keeper_repetition_scope.Executio
     execution object issued to it. Commit original input/source ownership and
     Running together. The trusted producer must freshly validate frozen intake
     before the first provider dispatch. Existing admission is observation only. *)
+val reserved_sources : t -> (Keeper_semantic_execution.source_member list, error) result
+(** Read original/current nonterminal source ownership from this Owner's
+    journal. Failure remains unavailable, never an empty ownership snapshot.
+    Intake observation does not replace atomic admission or resume authority. *)
 val finish_autonomous_execution : t -> execution:Keeper_repetition_scope.Execution.t ->
   ending:Keeper_chat_operation_store.autonomous_execution_end ->
   (Keeper_semantic_execution.t, error) result

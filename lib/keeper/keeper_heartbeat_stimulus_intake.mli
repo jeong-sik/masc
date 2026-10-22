@@ -189,7 +189,13 @@ val reconcile_spent_selection
     [Absent_grant_retired]: reading again cannot change that answer, and a
     turn spent on it fails at the same replay lookup every cycle. *)
 
-(** [heartbeat_event_intake ~ctx ~meta_after_triage
+val heartbeat_event_intake
+  :  ctx:'a context
+  -> owned_sources:(Keeper_semantic_execution.source_member list, string) result
+  -> meta_after_triage:keeper_meta
+  -> pending_board_events:Keeper_world_observation.pending_board_event list
+  -> heartbeat_event_intake
+(** [heartbeat_event_intake ~ctx ~owned_sources ~meta_after_triage
      ~pending_board_events] reads one exact durable queue snapshot in queue
     order, until the configured number of sources is admitted, a hard error
     occurs, or the snapshot ends. Retiring an absent Board source or a spent grant does not
@@ -222,9 +228,11 @@ val reconcile_spent_selection
     the exact pending selection is acknowledged (like a Board source with no
     remaining observation), sets no intake error, and does not spend an
     admission slot. A later recorded answer reaches the Keeper through answer
-    recovery, which enqueues a fresh pointer. *)
-val heartbeat_event_intake
-  :  ctx:'a context
-  -> meta_after_triage:keeper_meta
-  -> pending_board_events:Keeper_world_observation.pending_board_event list
-  -> heartbeat_event_intake
+    recovery, which enqueues a fresh pointer.
+
+    [owned_sources] is the Owner journal observation supplied by the heartbeat.
+    Before readiness, conversation selection, source reads or terminal cleanup,
+    omit exact sources reserved by nonterminal semantic executions. Unavailable
+    ownership admits no pending queue source and performs no source cleanup.
+    An empty queue requires no ownership decision and retains ordinary cadence.
+    This snapshot is not semantic admission or checkpoint/fork authority. *)

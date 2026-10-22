@@ -21,6 +21,10 @@ let source_member ~post_id ~admitted_revision ~checkpoint_retentions ~source_sha
   else if not (canonical_sha source_sha256) then Error "source hash must be canonical SHA-256"
   else Ok { post_id; admitted_revision; checkpoint_retentions; source_sha256 }
 
+let same_source (left:source_member) (right:source_member) =
+  left.post_id=right.post_id && left.admitted_revision=right.admitted_revision
+  && left.source_sha256=right.source_sha256
+
 let valid_time value = Float.is_finite value && value >= 0.
 
 type runtime_retry =

@@ -2282,14 +2282,15 @@ let semantic_outstanding store =
   let* () = ensure_open store |> semantic_store_result in
   semantic_rows store.db ~active_only:true |> semantic_store_result
 ;;
+let semantic_reserved_sources store =
+  let* executions = semantic_outstanding store in
+  Ok (List.concat_map (fun (execution:Semantic.t) ->
+    execution.sources @ execution.current_sources) executions)
+;;
 let with_semantic_transaction store f =
   let* () = ensure_open store |> semantic_store_result in
   in_transaction store ~begin_operation:"begin semantic operation transaction"
     ~store_error:(fun error -> Semantic_store_error error) f
-;;
-let same_source (left : Semantic.source_member) (right : Semantic.source_member) =
-  left.post_id = right.post_id && left.admitted_revision = right.admitted_revision
-  && left.source_sha256 = right.source_sha256
 ;;
 let semantic_prepare store ~id ~input ~sources ~now =
   let* candidate = Semantic.create ~id ~input ~sources ~now |> Result.map_error (fun error -> Invalid_execution error) in
@@ -2301,7 +2302,7 @@ let semantic_prepare store ~id ~input ~sources ~now =
     | None ->
         let* outstanding = semantic_rows store.db ~active_only:true |> semantic_store_result in
         let owners = List.filter (fun (execution : Semantic.t) ->
-          List.exists (fun selected -> List.exists (same_source selected)
+          List.exists (fun selected -> List.exists (Semantic.same_source selected)
             (execution.sources @ execution.current_sources)) sources) outstanding in
         if owners <> [] then Error (Sources_owned (List.map (fun (execution : Semantic.t) -> execution.id) owners))
         else
@@ -2331,7 +2332,7 @@ let start_autonomous_execution store ~id ~input ~sources ~now =
     | None ->
       let* outstanding = semantic_rows store.db ~active_only:true |> semantic_store_result in
       let owners = List.filter (fun (execution : Semantic.t) ->
-        List.exists (fun selected -> List.exists (same_source selected)
+        List.exists (fun selected -> List.exists (Semantic.same_source selected)
           (execution.sources @ execution.current_sources)) sources) outstanding in
       if owners <> [] then Error (Sources_owned (List.map (fun (execution : Semantic.t) -> execution.id) owners))
       else

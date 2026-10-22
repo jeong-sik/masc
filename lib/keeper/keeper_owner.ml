@@ -269,6 +269,7 @@ type _ command =
       caller:Keeper_interrupt_token.t; input:Yojson.Safe.t;
       sources:Keeper_semantic_execution.source_member list} ->
       (Chat_operation_store.semantic_admission,error) result command
+  | Reserved_sources : (Keeper_semantic_execution.source_member list,error) result command
   | Finish_autonomous_execution : {execution:Keeper_repetition_scope.Execution.t;
       caller:Keeper_interrupt_token.t; ending:Chat_operation_store.autonomous_execution_end} ->
       (Keeper_semantic_execution.t,error) result command
@@ -690,6 +691,7 @@ let answer : type response. response command -> answer = function
   | Direct_native_call _ | Direct_input_wait _ | Defer_direct_input_wait _ -> In_its_drain_step
   | Current_input_checkpoint | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _
   | Start_autonomous_execution _ | Finish_autonomous_execution _ | Park_autonomous_input_wait _
+  | Reserved_sources
   | Checkpoint_operation_input_branch _
   | Begin_history_clear _ | Commit_history_clear _ -> In_its_drain_step
   | Update_direct_native_call _ | Bind_retired_input_cut _ -> In_its_drain_step
@@ -2198,6 +2200,11 @@ let start
                 "history clear receipt no longer belongs to its original maintenance child and trace")) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Reserved_sources, resolve) ->
+          let response = run_operation_read t ~label:"read reserved original source ownership" (fun () ->
+            Chat_operation_store.semantic_reserved_sources t.operation_store |> autonomous_semantic_result) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Start_autonomous_execution {execution;caller;input;sources}, resolve) ->
           let response = reject_if_stopping state (fun () ->
             reject_if_shutdown shutdown_operation_id (fun () ->
@@ -3225,6 +3232,7 @@ let start_autonomous_execution t ~execution ~input ~sources =
   | Some caller -> request t (Start_autonomous_execution {execution;caller;input;sources})
   | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
       "autonomous admission requires its inherited original child"))
+let reserved_sources t = request t Reserved_sources
 let finish_autonomous_execution t ~execution ~ending =
   match Keeper_turn_preview_owner.current () with
   | Some caller -> request t (Finish_autonomous_execution {execution;caller;ending})

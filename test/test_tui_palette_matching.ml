@@ -531,7 +531,7 @@ let test_an_installation_that_asked_has_one_results_row () =
       | _, ( Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
            | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons
            | Palette_goto _ | Palette_usage_scope _ | Palette_config _
-           | Palette_gate_mode _ | Palette_chat _ | Palette_task _
+           | Palette_gate_mode _ | Palette_chat _ | Palette_task _ | Palette_task_creation _
            | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
            | Palette_code_file _ | Palette_code_location _ ) -> None)
       (palette_entries state) in

@@ -24,6 +24,10 @@ type palette_action =
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
   | Palette_chat of string
   | Palette_task of string
+  | Palette_task_creation of Masc_tui_types.task_dispatch_request
+      (** The exact completed creation retained by the selected composer Keeper.
+          Activation must recheck original membership and workspace. This opens
+          reading only; it does not consume or restore the composer draft. *)
   | Palette_board_hearth of string option
   | Palette_board_post of string
   (* (question, symbol): a language-server question about a name on the

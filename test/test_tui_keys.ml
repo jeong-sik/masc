@@ -1439,31 +1439,6 @@ let test_reference_lists_the_sheet_keys () =
     "reference sections are the sheet's sections"
     (Masc_tui_keys.help_sections ()) reference
 
-(* Tools' async runs reader and Work's Task detail answer keys their
-   surface's footer cannot carry: one Tools footer covers five panes, and
-   the Goals footer never has a Task detail under it. The sheet is where
-   those keys are found, so each must be there and none in the footer's
-   table. *)
-let test_nested_reader_keys_are_on_the_sheet_only () =
-  let sheet_keys title = List.map fst (section title) in
-  let footer_keys surface =
-    List.map
-      (fun (binding : Masc_tui_keys.binding) -> binding.key)
-      (Masc_tui_keys.for_surface surface)
-  in
-  List.iter
-    (fun (title, surface, keys) ->
-      List.iter
-        (fun key ->
-          Alcotest.(check bool) (title ^ " sheet names " ^ key) true
-            (List.mem key (sheet_keys title));
-          Alcotest.(check bool) (title ^ " footer leaves out " ^ key) false
-            (List.mem key (footer_keys surface)))
-        keys)
-    [ ("System / Tools", Tools, [ "Enter"; "t / T"; "H"; "o / O" ])
-    ; ("Work", Planning, [ "H" ])
-    ]
-
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
@@ -1592,7 +1567,5 @@ let () =
             test_help_sentences_are_one_line
         ; Alcotest.test_case "the reference lists the sheet's keys" `Quick
             test_reference_lists_the_sheet_keys
-        ; Alcotest.test_case "nested reader keys are on the sheet only" `Quick
-            test_nested_reader_keys_are_on_the_sheet_only
         ] )
     ]

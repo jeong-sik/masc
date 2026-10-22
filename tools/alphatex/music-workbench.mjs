@@ -12,7 +12,8 @@ const actions = [
   { kind: 'arrangement', name: 'New arrangement' },
   { kind: 'recording', name: 'Record audio / MIDI' },
 ]
-const identity = entry => JSON.stringify([entry.kind, entry.path ?? null])
+const identity = entry => entry ? JSON.stringify([entry.kind, entry.path ?? null]) : null
+const searchable = text => text.normalize('NFC').toLowerCase()
 
 export async function musicLibrary({ projectRoot, sessionRoot }, { signal } = {}) {
   const read = async (root, kind) => {
@@ -65,9 +66,38 @@ export class MusicWorkbench {
   constructor({ projectRoot = resolve('music-projects'), sessionRoot = resolve('music-sessions'),
     open = openMusicEntry, read = musicLibrary, inspect = inspectMusicEntry, changed = () => {}, ...options } = {}) {
     Object.assign(this, { projectRoot: resolve(projectRoot), sessionRoot: resolve(sessionRoot), open, read, inspect, changed, options })
-    this.entries = [...actions]; this.errors = []; this.cursor = 0
+    this.inventory = [...actions]; this.entries = [...actions]; this.errors = []; this.cursor = 0
+    this.query = ''; this.search = null
     this.status = ''; this.closed = false; this.child = null; this.reads = new Set(); this.loading = false
     this.inspection = null; this.inspectionOwner = null; this.inspections = new Map()
+  }
+  updateEntries(selected = identity(this.entries[this.cursor])) {
+    const query = searchable(this.query)
+    this.entries = this.inventory.filter(entry =>
+      searchable(entry.name).includes(query) || searchable(entry.path ?? '').includes(query))
+    this.cursor = Math.max(0, this.entries.findIndex(entry => identity(entry) === selected))
+    this.inspectSelected()
+  }
+  setQuery(query) {
+    if (this.closed || this.child || query === this.query) return
+    this.query = query
+    this.updateEntries()
+    this.changed()
+  }
+  beginSearch() {
+    if (this.closed || this.child || this.search) return
+    this.search = { query: this.query, selected: identity(this.entries[this.cursor]) }
+    this.changed()
+  }
+  finishSearch({ cancel = false } = {}) {
+    if (this.closed || this.child || !this.search) return
+    const previous = this.search
+    this.search = null
+    if (cancel) {
+      this.query = previous.query
+      this.updateEntries(previous.selected)
+    }
+    this.changed()
   }
   inspectSelected() {
     this.inspectionOwner?.job?.cancel()
@@ -106,10 +136,8 @@ export class MusicWorkbench {
     try {
       const result = await pending
       if (this.closed || this.reader !== reader || reader.signal.aborted) return
-      const selected = identity(this.entries[this.cursor])
-      this.entries = result.entries; this.errors = result.errors
-      this.cursor = Math.max(0, this.entries.findIndex(entry => identity(entry) === selected))
-      this.inspectSelected()
+      this.inventory = result.entries; this.errors = result.errors
+      this.updateEntries()
     } catch (error) {
       if (!this.closed && this.reader === reader && !reader.signal.aborted) this.status = error.message
     } finally {
@@ -158,6 +186,7 @@ export async function viewMusic(options = {}) {
   const model = new MusicWorkbench({ ...options, changed: draw })
   const statusReader = new StatusReader()
   const statusBody = () => [model.status, ...model.errors.map(error => `${error.root}: ${error.message}`),
+    `Search: ${model.query}`, `${model.entries.length}/${model.inventory.length} library entries`,
     '', ...details(), '', `Projects: ${model.projectRoot}`, `Takes: ${model.sessionRoot}`].join('\n')
   function details() {
     const selected = model.inspection
@@ -193,11 +222,13 @@ export async function viewMusic(options = {}) {
     if (reading !== null) { process.stdout.write(reading); return }
     const rows = process.stdout.rows || 24, columns = process.stdout.columns || 80
     const detail = details()
-    const available = Math.max(1, rows - 9 - (detail.length ? detail.length + 1 : 0))
+    const available = Math.max(1, rows - 10 - (detail.length ? detail.length + 1 : 0))
     const first = Math.max(0, model.cursor - available + 1)
-    const lines = ['Music', 'Phrase · arrangement · audio / MIDI recording', '',
+    const lines = ['Music', 'Phrase · arrangement · audio / MIDI recording',
+      model.query ? `Search: ${model.query} · ${model.entries.length}/${model.inventory.length} entries` : '', '',
       ...model.entries.slice(first, first + available).map((entry, index) =>
         `${first + index === model.cursor ? '›' : ' '} ${entry.name}${entry.kind === 'project' ? '  · project' : entry.kind === 'session' ? '  · take' : ''}`),
+      ...(model.entries.length ? [] : ['No matching library entries']),
       ...(detail.length ? ['', ...detail] : []), '', model.loading ? 'Reading library…' : model.status,
       ...model.errors.map(error => `${error.root}: ${error.message}`),
       `Projects: ${model.projectRoot}`, `Takes: ${model.sessionRoot}`]
@@ -207,20 +238,31 @@ export async function viewMusic(options = {}) {
     lines.slice(0, rows - 2).forEach((line, row) => {
       output += `\x1b[${row + 1};1H${cliTruncate(safeText(line), Math.max(0, columns - 1))}`
     })
-    const footer = prompt === null ? '↑/↓ choose · Enter open · r refresh · :open PATH · :midi PATH · :session PATH' : ':' + prompt
+    const footer = model.search ? `/${model.query} · ↑/↓ choose · Enter open · Esc cancel · Ctrl-U clear`
+      : prompt === null ? '↑/↓ choose · Enter open · / search · r refresh · :open PATH · :midi PATH · :session PATH' : ':' + prompt
     output += `\x1b[${rows - 1};1H${cliTruncate(safeText(footer), Math.max(0, columns - 1))}`
-    output += `\x1b[${rows};1H${cliTruncate('Ctrl-L:status · q / Esc: return', Math.max(0, columns - 1))}`
+    const statusKeys = model.search ? 'Ctrl-L:status'
+      : model.query ? 'Ctrl-L:status · q: return · Esc: clear search' : 'Ctrl-L:status · q / Esc: return'
+    output += `\x1b[${rows};1H${cliTruncate(statusKeys, Math.max(0, columns - 1))}`
     process.stdout.write(output)
   }
   function keypress(text, key = {}) {
     if (model.closed || model.child) return
     if (key.ctrl && key.name === 'c') { finish(); return }
     if (statusReader.keypress(text, key, process.stdout)) { draw(); return }
-    if (key.ctrl && key.name === 'l' || prompt === null && text === '!') {
+    if (key.ctrl && key.name === 'l' || prompt === null && !model.search && text === '!') {
       statusReader.open('Music library status at open', statusBody())
       draw(); return
     }
-    if (prompt !== null) {
+    if (model.search) {
+      if (key.name === 'escape') model.finishSearch({ cancel: true })
+      else if (key.name === 'return') { model.finishSearch(); model.activate() }
+      else if (key.name === 'up') model.move(-1)
+      else if (key.name === 'down') model.move(1)
+      else if (key.ctrl && key.name === 'u') model.setQuery('')
+      else if (key.name === 'backspace') model.setQuery([...model.query].slice(0, -1).join(''))
+      else if (text && !key.ctrl && !key.meta) model.setQuery(model.query + text)
+    } else if (prompt !== null) {
       if (key.name === 'escape') prompt = null
       else if (key.name === 'backspace') prompt = [...prompt].slice(0, -1).join('')
       else if (key.name === 'return') {
@@ -234,7 +276,9 @@ export async function viewMusic(options = {}) {
           model.activate({ kind: kinds[command], path: expanded, name: basename(expanded) })
         } else model.status = 'Use :open PROJECT.json, :midi SOURCE.mid or :session TAKE_DIRECTORY'
       } else if (text && !key.ctrl && !key.meta) prompt += text
-    } else if (['q', 'escape'].includes(key.name)) finish()
+    } else if (key.name === 'escape' && model.query) model.setQuery('')
+    else if (['q', 'escape'].includes(key.name)) finish()
+    else if (text === '/') model.beginSearch()
     else if (text === ':') prompt = ''
     else if (['up', 'k'].includes(key.name)) model.move(-1)
     else if (['down', 'j'].includes(key.name)) model.move(1)

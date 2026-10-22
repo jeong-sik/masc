@@ -75,7 +75,7 @@ let parse json =
   Ok (preference,verb,required_actions,upload_id)
 let command arguments = parse arguments |> Result.map (fun (_,verb,_,_) -> verb)
 let bound = function
-  | B.Page_read {tab_id;_}|Page_elements {tab_id} -> Option.is_some tab_id
+  | B.Page_read {tab_id;_}|Page_elements {tab_id;_} -> Option.is_some tab_id
   | Page_act (B.Action.Open_tab _) | Tabs_list | Session_open _ | Session_status -> false
   | Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_interact _|Session_close
   | Page_goto _|Page_act (B.Action.On_tab _)|Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> true

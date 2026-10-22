@@ -4,6 +4,7 @@ module C = Browser_capabilities
 module Legacy = Tool_misc_browser_lane
 let ( let* ) = Result.bind
 type projection = Raw | Inventory | Session | Scene of Browser_scene.request | Screenshot of int
+  | Scoped_elements of string
 type prepared = {preference:Browser_selection.preference;verb:B.verb;
   required_actions:C.operation list;projection:projection}
 let fields allowed = function
@@ -32,13 +33,20 @@ let absolute_url = function
   | None|Some _ -> Error "url is required"
 let prepare_read ~keeper_name json =
   let* fields=fields ["lane";"clientId";"tabId";"maxChars";"mode";"framePath";
-    "scope";"expectedUrl";"navigationSource"] json in
+    "scope";"expectedUrl";"navigationSource";"within"] json in
   let* request=surface fields in
   let* ()=bound request in
   let* frame_path=B.Action.parse_frame_path json in
   let* mode=Legacy.read_mode_of_args json in
   let* cap=optional_int "maxChars" fields in
   let* max_chars=Browser_page_script.text_cap cap in
+  let* within=Browser_page_script.within_of_json (List.assoc_opt "within" fields) in
+  let* ()=match mode,within with
+    | `Elements,(None|Some _)
+    | (`Text|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),None -> Ok ()
+    | (`Text|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),Some _ ->
+        Error "within applies to mode elements only" in
+  let elements_projection=match within with None -> Raw | Some selector -> Scoped_elements selector in
   let top_scene=frame_path=[] && (match mode with `Scene|`Regions -> true
     | `Text|`Elements|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog -> false) in
   let* ()=if not top_scene && List.exists (fun key -> List.mem_assoc key fields)
@@ -51,10 +59,12 @@ let prepare_read ~keeper_name json =
       | Automatic|Exact (Live_route _|Stagehand_route) -> Error "frame and dialog reads require automation" in
     let* tab_id=tab request in
     let* mode=match mode with
-      | `Text -> Ok (`Text max_chars) | `Elements -> Ok `Elements | `Frames -> Ok `Frames
+      | `Text -> Ok (`Text max_chars) | `Elements -> Ok (`Elements within) | `Frames -> Ok `Frames
       | `Dialog when frame_path=[] -> Ok `Dialog
       | `Dialog|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies -> Error "framePath supports text, elements and frames" in
-    prepared request Raw (B.Page_context {tab_id;frame_path;mode})
+    let projection=match mode with `Elements _ -> elements_projection
+      | `Text _|`Frames|`Dialog -> Raw in
+    prepared request projection (B.Page_context {tab_id;frame_path;mode})
   else match mode with
   | (`Scene|`Regions as scene_mode) ->
       let view=match scene_mode with `Regions -> "regions" | `Scene -> "content" in
@@ -82,7 +92,7 @@ let prepare_read ~keeper_name json =
         | Automatic|Exact (Live_route _|Stagehand_route) -> Error "cookie reads require automation" in
       let* tab_id=tab request in prepared request Raw (B.Page_cookies {tab_id})
   | `Text -> prepared request Raw (B.Page_read {tab_id=request.tab_id;max_chars=Some max_chars})
-  | `Elements -> prepared request Raw (B.Page_elements {tab_id=request.tab_id})
+  | `Elements -> prepared request elements_projection (B.Page_elements {tab_id=request.tab_id;within})
   | `Frames|`Dialog -> Error "contextual read requires a frame or dialog mode"
 let prepare ~keeper_name ~upload_paths tool json =
   let* _=Lane_addon_action.canonical json in
@@ -160,6 +170,9 @@ let project ~base_path ~keeper_name ~started request (receipt:Host.receipt) =
       with_capabilities (annotate data)
   | Session -> with_capabilities (annotate receipt.data)
   | Scene scene -> Browser_scene.project scene ~binding:receipt.binding ~started receipt.data
+  | Scoped_elements selector ->
+      let* data=Browser_page_script.check_scoped_elements ~within:(Some selector) receipt.data in
+      Ok (annotate data)
   | Screenshot tab_id ->
       let* keeper_name=Option.to_result ~none:"screenshot requires an owning Keeper" keeper_name in
       let* data=Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data
@@ -181,7 +194,7 @@ let handle ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool
                  | Error detail ->
                      let effect_disposition=match request.projection with
                        | Session -> Tool_result.Effect_outcome_unknown
-                       | Raw|Inventory|Scene _|Screenshot _ -> Tool_result.Proven_pre_effect in
+                       | Raw|Inventory|Scene _|Screenshot _|Scoped_elements _ -> Tool_result.Proven_pre_effect in
                      Tool_result.make_err ~tool_name ~start_time
                      ~class_:Tool_result.Runtime_failure ~effect_disposition
                      ?metadata:receipt.raw_result._meta

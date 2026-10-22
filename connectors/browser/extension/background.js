@@ -633,6 +633,9 @@ async function pageElements(args) {
   const tabId = typeof args?.tabId === "number" ? args.tabId
     : (await browser.tabs.query({active:true,currentWindow:true}))[0]?.id;
   if (!Number.isInteger(tabId) || tabId < 0) throw new Error("invalid_tab_id");
+  const within = args?.within;
+  if (within !== undefined && (typeof within !== "string" || within === ""))
+    throw new Error("invalid_within");
   const [page] = await browser.tabs.executeScript(tabId, {
     runAt: "document_end",
     code: '(' + (function () {
@@ -642,7 +645,17 @@ const ariaRoles = new Set('alert alertdialog application article banner blockquo
 const effectiveRole = element => (element.getAttribute('role') || '').split(/\s+/)
   .find(role => ariaRoles.has(role)) || null;
 const actionRoles = new Set('button link checkbox radio switch menuitem menuitemcheckbox menuitemradio tab option combobox'.split(' '));
-const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'));
+// [within] is a CSS selector read by the page's own engine: only controls that
+// match it, or sit inside an element that matches it, are observed. An invalid
+// selector is refused rather than read as the whole page.
+const within = (arguments[0] || {}).within;
+let withinMatches = null;
+if (within !== undefined) {
+  try { withinMatches = document.querySelectorAll(within).length; }
+  catch { throw new Error('invalid_css_selector'); }
+}
+const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'))
+  .filter(el => within === undefined || el.closest(within) !== null);
 function selector(el) {
   const parts=[];
   for (let node=el; node && node.nodeType===1; node=node.parentElement) {
@@ -734,9 +747,11 @@ function observe(el) {
   }
   return result;
 }
-return {url:location.href,title:document.title,total:visible.length,truncated:visible.length>200,
+return {url:location.href,title:document.title,
+  ...(within === undefined ? {} : {within,withinMatches}),
+  total:visible.length,truncated:visible.length>200,
   elements:visible.slice(0,200).map(observe)};
-}).toString() + ')()'
+}).toString() + ')(' + JSON.stringify(within === undefined ? {} : {within}) + ')'
   });
   if (!page) throw new Error("page_unavailable");
   return {tabId,...page};

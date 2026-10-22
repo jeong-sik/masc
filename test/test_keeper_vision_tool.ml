@@ -2248,7 +2248,7 @@ let test_browser_screenshot_reaches_vision_reader () =
               | Browser_lane.Page_capture {tab_id=73} -> `Assoc ["tabId",`Int 73;
                   "url",`String "https://example.org/form";"title",`String "Form";
                   "mimeType",`String "image/png";"viewport",viewport;"data",`String encoded]
-              | Page_elements {tab_id=Some 73} -> `Assoc ["tabId",`Int 73;"elements",`List []]
+              | Page_elements {tab_id=Some 73;_} -> `Assoc ["tabId",`Int 73;"elements",`List []]
               | _ -> failwith "unexpected screenshot command" in
             Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data]) in
           Browser_addon_fixture.with_worker ~env ~config ~clients:[first;second] ~respond (fun _browser ->

@@ -74,6 +74,8 @@ TUI Browser Lane에 여러 관측 탭이 보이면 `1`–`9`로 표시된 탭을
 
 다음 판단에 필요한 읽기 하나를 고른다. 본문과 참조가 함께 필요하면 scene,
 텍스트만 필요하면 text, 추가 컨트롤 정보가 필요하면 elements를 사용한다.
+elements에 `within`(CSS selector)을 주면 그 요소와 그 안의 컨트롤만 돌려준다.
+응답의 `withinMatches`가 0이면 selector가 아무 요소도 고르지 못한 것이다.
 관측된 역할·이름·문맥과 main/article/이름 있는 section 등 의미 영역으로 대상을 고른다.
 태그만으로 본문이라고 단정하지 않으며, 전체 div나 긴 selector 목록부터 읽지 않는다.
 

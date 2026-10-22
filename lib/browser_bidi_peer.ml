@@ -446,7 +446,9 @@ let dispatch ?actor ?request_id t ~verb args =
   | Page_elements -> on_tab (fun context id -> pre (
         (* The inventory the automation lane reads, so its selectors mean the
            same thing to the DOM interactions below. *)
-        let* p=parsed_document t context Browser_page_script.elements (obj []) in with_tab id p))
+        let* within=Browser_page_script.within_of_json (field "within" args) in
+        let* p=parsed_document t context Browser_page_script.elements
+            (Browser_page_script.elements_args within) in with_tab id p))
   | Page_read -> on_tab (fun context id -> pre (let* p=read t context args in with_tab id p))
   | Page_scene -> on_tab (fun context id -> pre (let* fields=match args with `Assoc xs->Ok xs|_->Error "invalid scene arguments" in
         let* p=scene t context (obj (("mode",str "read")::fields)) in with_tab id p))

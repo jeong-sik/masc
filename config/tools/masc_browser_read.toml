@@ -44,6 +44,11 @@ items = { type = "string" }
 description = "Automation text/elements/frames only, explicit tabId: observed outer-to-inner selectors; preserve CSS escapes. Omit for top-level."
 
 [[params]]
+name = "within"
+type = "string"
+description = "elements only: CSS selector; returns only controls that match it or sit inside a match, and withinMatches counts the matches (0 means it chose nothing). Invalid CSS is refused."
+
+[[params]]
 name = "clientId"
 type = "string"
 description = "Retain the observed live clientId on every subsequent tab read/action; stale IDs fail without fallback. Omit for a work browser."

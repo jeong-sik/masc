@@ -111,7 +111,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
-| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 설계 필요 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
+| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 원래 batch·briefing pass·설치 결속·commit recovery·wake의 [구체 추출 계약](../docs/design/workspace-curator-addon-execution.md) 작성. durable host capture·typed pending/unknown·terminal 전 semantic fallback·실제 worker/owner 연결은 아직 구현 필요 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
 | E05 | Board Attention 실행의 Addon 경계 검토·추출 | 조사·설계, Required | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
@@ -148,7 +148,7 @@ Safari 및 넓은 행동군 후속은 기존 #44023과 연결해 중복 구현�
 | --- | --- | --- | --- |
 | G01 | 패키지·설치·worker·모델·도구·Skill의 연결을 한곳에서 보기 | Stack #44803의 #44801·#44802·#44830 main 병합 확인(770ca204·912f1108·1a8c3744). host application 연결과 historical62/후속92건 증거 구분 보존. 새 main 조합의 native/UI·설치 증거는 별도 | 원하는 설정/실제 적용/연결 존재/실행/관측 준비/실패를 구분하고 원래 상세로 이동 |
 | G02 | 입력→Hook→worker→모델→출력/소비자의 연결 관계 표시 | 일부 Flow 있음 | 실제 연결 reference에 근거해 표시; 관측 그래프를 실행 허가로 사용하지 않음 |
-| G03 | 요청부터 종료·정리까지 원래 timeline/trace 연결 | 부분 구현; Dashboard가 버리던 host_requests를 원래 worker/incarnation에 결속해 보존·표시하는 후속 구현. 모델 lane/provider/operator/source 대기와 전달·기록 실패를 닫힌 타입으로 읽고, 손상 진단은 worker·결과와 분리. 전체 요청 이력·실제 화면·설치 검증 필요 | request/run/instance/revision, 대기 이유·결과·실패·정리 증거를 같은 원래 작업으로 추적 |
+| G03 | 요청부터 종료·정리까지 원래 timeline/trace 연결 | Candle 동일 종단 재조회가 elapsed를 덮는 실제 결함을 #44920에서 수리: 첫 receipt 보존·실패 append 재시도·읽기 불가 payload 보존. source 독립 PASS, 신규 3개 포함 선택 검사 요청·결과 미확인. 부분 구현; Dashboard가 버리던 host_requests를 원래 worker/incarnation에 결속해 보존·표시하는 후속 구현. 모델 lane/provider/operator/source 대기와 전달·기록 실패를 닫힌 타입으로 읽고, 손상 진단은 worker·결과와 분리. 전체 요청 이력·실제 화면·설치 검증 필요 | request/run/instance/revision, 대기 이유·결과·실패·정리 증거를 같은 원래 작업으로 추적 |
 | G04 | 교체·경로/ID 변경·이전 소유자 이력 표시 | 후속 소스 구현: 같은 ID worker와 같은 TOML 경로의 다른 ID를 두 UI에서 분리. Dashboard 3파일62건·tsc PASS, TUI 관측 모델 parser PASS; 독립 리뷰·OCaml 실행·실제 UI 별도 | 새 worker와 과거 worker 구분, 다른 ID의 같은 파일 이전 owner 정리 기록도 별도 접근 |
 | G05 | 에이전트 작업 중 표시와 현재 포인터/입력 활동 표시 | 범위별 재확인 필요 | 실제 동작 이벤트 기반으로 작업자·활동·포인터 위치 표시; 완료·중단·해제 때 표시 정리 |
 | G06 | 두 UI의 편집·새로 읽기·부분 실패·workspace 변경 일관화 | 6f68 bare global Slice HTTP200·retained refresh·cross-run 거절·복구 관측. #44895 exactd06에서 Evidence 보존 뒤 원래 row/selection/receipt와 Slice EOF 유지·장애 해제 후 정상 보존 실측. application 관측 보존 독립 SOURCE PASS; 모든 workspace/revision 경계 미완료 | draft·원래 receipt 보존, 늦은 응답 거절, stale/unknown 표기, 화면에서 복구 경로 사용 가능 |
@@ -348,3 +348,12 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - G03 후속 결함: 원래 성공한 Grade를 다음 단계에서 다시 읽으면 관측 elapsed_s가 60.03초(공개 영수증 68)에서 180.05초(72)로 덮였다. 모델 중복 실행 근거는 없고, 원래 종단 시각을 보존하는 수리가 필요하다. 이 항목을 현재 잔여 작업으로 유지한다.
 - Browser #44168 67층 eb484의 이전 독립 census는 모든 층 mergeable·현재 범위 결속 승인0/67이었다. 이 과거 census를 현재 승인으로 이월하지 않는다. #44911의 첫 게시에서는 installed gh stack link의 append가 실패해 기존 top #44702를 base로 둔 일반 branch였다. pr-updater의 후속 처리 뒤 현재 REST census에서 native #44168의 68/68 membership을 확인했다. 편입은 각 층의 현재 승인이나 병합 완료가 아니다. 기존67층을 개별 병합하거나 기존 top을 retarget하지 않는다.
 - 54개 항목·완료 기준은 유지한다. E02–E12, 넓은 Browser 능력·실제 Agent 접근·모든 실패 경계·운영 설치·현재 head의 전체 통합/승인은 이 제한된 E01 실측의 성공 범위 밖이다.
+
+
+### G03 종단 관측 수리와 E02 다음 실행 경계
+
+- #44920 source `8057614cc68a1901f140a5190d4b0d6d38581263`는 E01 실제 영수증 68/72에서 드러난 재조회 시 elapsed 덮어쓰기를 수리했다. 현재 원래 worker read·권한·전체 domain decode를 유지하고, 동일한 durable receipt는 다시 append하지 않는다. 읽기 불가 payload는 typed 실패로 남기며 같은 persistence failure의 최초 elapsed로 기록만 재시도한다. replay-only restart marker는 실제 결과로 교체 가능하다.
+- 독립 source 검토는 위 4파일 delta에 P0–P2 없이 PASS다. 이어진 `b8a16015e47f3ea355f434f3ce67d86d19fa57af`는 changelog만 추가한다. parser3개·diff-check PASS는 compile이나 실행 PASS가 아니다. 실제 전체 스택/설치 증거는 이 소스로 이월하지 않는다.
+- exact b8a160 branch의 선택 실행 [39646732161](https://github.com/jeong-sik/masc/actions/runs/39646732161)을 한 번 요청했다. `test_candle_appraiser_transport,test_candle_appraiser_contract,test_candle_appraisal_flow`, minimal true, posix 범위다. 신규 3개를 포함한 transport10건의 실행 결과와 전체 선택 suite 결과는 아직 미확인이다. CI를 watch하거나 반복 조회하지 않는다.
+- E02는 별도 추출 계약에서 현재 API의 실질 갭을 명시했다. request-owner binding은 digest/destination만 저장해 원래 batch 복구를 대신하지 못하고, 기존 generic execution failure는 pending/unknown을 표현하지 못하며, Addon On/result가 현재 Curator owner를 깨운다는 증거도 없다. 추가 독립 대조에서 현재 HTTP/CLI candidate의 host semantic validation과 Reject_and_advance가 common Addon schema-only runner에는 아직 연결되지 않은 점을 확인했다. schema-valid/domain-invalid 답을 terminal로 먼저 고정하지 않도록 원래 flow 안의 trusted semantic validation port도 구현해야 한다. 이 경계를 구현하기 전에 단순 callback 교체로 추출 완료라 부르지 않는다.
+- 기존 A01–H06의 54개 작업과 완료 기준은 그대로 유지한다. 이번 수리와 설계 문서는 E02 실제 추출·나머지 행동군·현재 stack 승인·운영 설치를 완료한 것이 아니다.

@@ -64,13 +64,16 @@ let observe_owner ~base_path ~keepers_dir ~keeper_id =
   let* canonical_keeper=match Keeper_identity.Keeper_id.of_string keeper_id with
     | Some id when Keeper_identity.Keeper_id.to_string id=keeper_id && Keeper_config_text.validate_name keeper_id -> Ok keeper_id
     | Some _ | None -> Error "Original Librarian owner requires a canonical Keeper ID" in
+  (* The epoch file is read below the held keepers root, so it is named by its
+     components from that root, not by a path spelled from [keepers_dir]. *)
+  let* epoch_entry=Fs_compat.owned_relative_path
+    [Filename.basename (Current.epoch_path ~keepers_dir ~keeper_id:canonical_keeper)] in
   let physical root=let stat=Fs_compat.owned_inventory_root_stat root in
     {path=Fs_compat.owned_inventory_root_path root;device=stat.Unix.st_dev;inode=stat.Unix.st_ino} in
   let observed=Fs_compat.with_owned_inventory_root base_path (fun workspace ->
     Fs_compat.with_owned_inventory_root keepers_dir (fun keepers ->
       let workspace=physical workspace and keepers_identity=physical keepers in
-      let epoch_name=Filename.basename (Current.epoch_path ~keepers_dir:keepers_identity.path ~keeper_id:canonical_keeper) in
-      Fs_compat.with_owned_inventory_regular_file ~owner_uid:(Unix.getuid ()) keepers epoch_name
+      Fs_compat.with_owned_inventory_regular_file ~owner_uid:(Unix.getuid ()) keepers epoch_entry
         (fun ~file ~parent:_ ~stat ->
           let bytes=Bytes.create stat.Unix.st_size in
           let rec read position =

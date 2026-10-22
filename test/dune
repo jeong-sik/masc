@@ -247,6 +247,11 @@
  (libraries alcotest masc masc.sse_wire masc.time_compat masc_test_deps eio))
 
 (test
+ (name test_server_exact_lane_retention_observation)
+ (modules test_server_exact_lane_retention_observation)
+ (libraries alcotest masc masc.server masc.run_registry_core yojson))
+
+(test
  (name test_server_standalone_lane_projection)
  (modules test_server_standalone_lane_projection)
  (libraries alcotest masc masc.fs_compat masc.masc_goal masc.runtime masc.server masc.tool_types yojson))

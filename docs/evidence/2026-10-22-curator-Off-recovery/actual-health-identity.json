@@ -1,0 +1,37 @@
+{
+  "at": "2026-10-22T05:02:48.428781+00:00",
+  "http_status": 200,
+  "path": "/health?full=1",
+  "build": {
+    "release_version": "0.61.0",
+    "binary_version": "0.61.0",
+    "commit": "db31e62fe17f92aea4919de7765f1ace65914772",
+    "commit_source": "embedded",
+    "binary_commit": "db31e62fe17f92aea4919de7765f1ace65914772",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "739f1e21840c29cfe3a967918f50b20e98840be9d6d2e2a172895f8ecf587fde",
+    "binary_commit_unix_ts": 1792644262.0,
+    "binary_commit_age_seconds": 1106,
+    "executable_path": "/private/tmp/masc-addon-goal-resume-20261021/curator-native-db31-artifact/masc",
+    "executable_dir": "/private/tmp/masc-addon-goal-resume-20261021/curator-native-db31-artifact",
+    "runtime_instance_id": "01a161fd-3b5a-7000-87ec-60cfcf210046",
+    "started_at": "2026-10-22T05:02:28Z",
+    "uptime_seconds": 20
+  },
+  "paths": {
+    "cwd": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf",
+    "effective_base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf",
+    "effective_masc_root": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/.masc",
+    "current_task_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/.masc/current_task",
+    "current_task_shape": "absent",
+    "effective_has_masc_dir": true,
+    "roots_diverge": false,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf",
+    "env_masc_base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf",
+    "resolution_source": "explicit_cli"
+  }
+}

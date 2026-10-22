@@ -58,9 +58,10 @@ type t
 val snapshot : config:Workspace.config -> t
 val to_json : t -> Yojson.Safe.t
 module For_testing : sig
-  val machine_publication : (Lane_addon_runtime.export_observation option, string) result -> machine_publication
+  val machine_publication :
+    (Lane_addon_runtime.export_observation option, Lane_addon_runtime.export_refusal) result -> machine_publication
   val browser_reading : declarations:Lane_addon_config.declaration list ->
-    (Lane_addon_runtime.export_observation option, string) result ->
+    (Lane_addon_runtime.export_observation option, Lane_addon_runtime.export_refusal) result ->
     Browser_addon_observation.published browser_reading
   val browser_state : activity:Browser_lane.activity -> Browser_addon_observation.published browser_reading ->
     Browser_lane.Lane_name.t -> state

@@ -425,10 +425,20 @@ type export_observation = {
   refreshing : bool;
   output : Lane_addon_types.output;
 }
+(** Why the observation of an export cannot be read now. *)
+type export_refusal =
+  | Unready_installations of Lane_addon_unready.t * Lane_addon_unready.t list
+      (** The visible installation exporting the name cannot serve, or every
+          one that does is detaching with no replacement serving. *)
+  | Not_yet_observed of { installation : string; package_id : string }
+      (** The serving installation has not completed an observation yet. *)
+  | Ambiguous_installations of string list
+      (** More than one visible installation serves the name. *)
+val export_refusal_message : export_refusal -> string
 val observation_for_export :
   config:Workspace.config -> access:Lane_addon_sources.access -> name:string ->
-  (export_observation option, string) result
+  (export_observation option, export_refusal) result
 (** Read the last completed observation of the visible installation exporting
     [name], without an RPC or starting a worker. No installation is [None];
-    ambiguous, failed, starting, stopping or not-yet-observed installations are
-    errors, and so is a detaching one that no replacement serves. *)
+    the refusal tells a starting or failed installation from one that is
+    serving and not yet observed, and from an ambiguous name. *)

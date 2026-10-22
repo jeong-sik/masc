@@ -311,7 +311,8 @@ let answer_from_publication source ~since = function
 let live_json ~config source ~since =
   let name = match source with Machine_lane.Msx -> "masc_msx_screen" | Dos -> "masc_dos_screen" in
   let* snapshot = Lane_addon_runtime.observation_for_export ~config
-    ~access:Lane_addon_sources.Unauthenticated ~name in
+    ~access:Lane_addon_sources.Unauthenticated ~name
+    |> Result.map_error Lane_addon_runtime.export_refusal_message in
   match snapshot with
   | None -> Error "No attached shared machine worker is available"
   | Some snapshot ->
@@ -328,7 +329,8 @@ let live_json ~config source ~since =
       (* Blob I/O yields: an installation can detach or publish a newer frame
          before these bytes return. Only publish the still-current observation. *)
       let* current = Lane_addon_runtime.observation_for_export ~config
-        ~access:Lane_addon_sources.Unauthenticated ~name in
+        ~access:Lane_addon_sources.Unauthenticated ~name
+        |> Result.map_error Lane_addon_runtime.export_refusal_message in
       let* refreshing = match current with
         | Some current when current.instance_id = snapshot.instance_id
             && current.observation_seq = snapshot.observation_seq ->

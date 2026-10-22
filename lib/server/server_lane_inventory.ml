@@ -96,7 +96,7 @@ let package_rows ~(declarations : Config.snapshot) ~(instances : Addon.inventory
   declared @ manual
 
 let machine_publication = function
-  | Error _ -> Publication_unavailable
+  | Error (Addon.Unready_installations _ | Not_yet_observed _ | Ambiguous_installations _) -> Publication_unavailable
   | Ok None -> No_screen
   | Ok (Some (snapshot : Addon.export_observation)) ->
       let loaded = List.filter_map (fun (row : Lane_addon_types.row) ->
@@ -131,7 +131,8 @@ let browser_absence (declarations : Config.declaration list) =
   if List.exists (fun (d : Config.declaration) -> d.enabled) browsers then Browser_addon_not_running
   else match browsers with [] -> Browser_addon_absent | _ :: _ -> Browser_addon_off
 let browser_reading ~declarations = function
-  | Error detail -> Browser_addon_unavailable detail
+  | Error (Addon.Unready_installations _ | Not_yet_observed _ | Ambiguous_installations _ as refusal) ->
+      Browser_addon_unavailable (Addon.export_refusal_message refusal)
   | Ok None -> browser_absence declarations
   | Ok (Some (snapshot : Addon.export_observation)) ->
       (match Browser_addon_observation.read snapshot.output with

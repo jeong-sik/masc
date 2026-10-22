@@ -301,10 +301,23 @@ let attach_exporting config dir mode names =
 
 (* A failed installation exports nothing, and the same read names it with its
    failure instead of leaving the callers to report that none exists. *)
-let test_a_failed_installation_is_read_as_unready () = with_fixture (fun env _ config dir _ ->
+let test_a_failed_installation_is_read_as_unready () = with_fixture (fun env _ config dir state ->
   let clock = Eio.Stdenv.clock env in
+  let observed name = Runtime.observation_for_export ~config ~access:Lane_addon_sources.Unauthenticated ~name in
+  let starting = attach_exporting config dir "start-hang" ["masc_msx_screen"] in
+  await clock (fun () -> Hashtbl.mem state.modes starting);
+  check bool "a starting installation's observation is refused as starting, not failed" true
+    (match observed "masc_msx_screen" with
+     | Error (Runtime.Unready_installations ({reason=Starting;_}, [])) -> true
+     | Error (Runtime.Unready_installations _ | Not_yet_observed _ | Ambiguous_installations _) | Ok _ -> false);
+  detach config starting;
+  await_phase clock config starting "detached";
   let id = attach_exporting config dir "start-error" ["masc_msx_step"] in
   await_phase clock config id "failed";
+  check bool "a failed installation's observation is refused with its failure" true
+    (match observed "masc_msx_step" with
+     | Error (Runtime.Unready_installations ({reason=Failed _;_}, [])) -> true
+     | Error (Runtime.Unready_installations _ | Not_yet_observed _ | Ambiguous_installations _) | Ok _ -> false);
   let reading = unwrap (Runtime.tool_export_reading ~config
     ~access:Lane_addon_sources.Unauthenticated ~reserved:[]) in
   check Alcotest.int "a failed installation exports nothing" 0 (List.length reading.exports);
@@ -1717,7 +1730,8 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   let first = attach_export "good" in
   await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
   await clock (fun () -> int "observation_seq" (instance config first) > 0);
-  let cached () = unwrap (Runtime.observation_for_export ~config ~access ~name:"masc_msx_step") in
+  let cached () = unwrap (Runtime.observation_for_export ~config ~access ~name:"masc_msx_step"
+    |> Result.map_error Runtime.export_refusal_message) in
   let calls_before = Hashtbl.find state.calls first in
   let snapshot = match cached () with Some snapshot -> snapshot | None -> fail "missing attached observation" in
   check bool "completed observation is stable while worker remains alive" false snapshot.refreshing;

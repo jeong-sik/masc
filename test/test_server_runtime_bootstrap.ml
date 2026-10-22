@@ -3897,17 +3897,17 @@ let test_health_response_full_query_uses_snapshot_cache () =
             Server_routes_http_runtime.make_health_response_json request
           in
           Alcotest.(check string)
-            "invalidated snapshot cannot retain ready overall status"
-            "warming"
-            (invalidated |> member "overall_status" |> to_string);
+            "invalidation preserves the last measured fleet inventory"
+            (refreshed |> member "keeper_waiting_inventory" |> Yojson.Safe.to_string)
+            (invalidated |> member "keeper_waiting_inventory" |> Yojson.Safe.to_string);
           Alcotest.(check string)
             "the fallback skill_catalog keeps its schema"
             "masc.skill_catalog.v1"
             (invalidated |> member "skill_catalog" |> member "schema"
              |> to_string);
           Alcotest.(check string)
-            "invalidated snapshot reports warming"
-            "warming"
+            "invalidated observation reports stale"
+            "stale"
             (invalidated |> member "full_health_snapshot" |> member "status"
              |> to_string);
           Alcotest.(check bool)
@@ -3915,6 +3915,26 @@ let test_health_response_full_query_uses_snapshot_cache () =
             true
             (invalidated |> member "full_health_snapshot"
              |> member "refresh_requested" |> to_bool);
+          Alcotest.(check bool) "invalidation retains a last-good observation" true
+            (invalidated |> member "full_health_snapshot"
+             |> member "last_good_available" |> to_bool);
+          Alcotest.(check string) "invalidation retains measurement time"
+            (refreshed |> member "full_health_snapshot" |> member "computed_at_unix"
+             |> Yojson.Safe.to_string)
+            (invalidated |> member "full_health_snapshot" |> member "computed_at_unix"
+             |> Yojson.Safe.to_string);
+          Alcotest.(check string) "invalidation explains freshness loss" "invalidated"
+            (invalidated |> member "full_health_snapshot" |> member "stale_reason"
+             |> to_string);
+          (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
+          let invalidated_again =
+            Server_routes_http_runtime.make_health_response_json request
+          in
+          Alcotest.(check string) "repeated invalidation keeps first stale timestamp"
+            (invalidated |> member "full_health_snapshot" |> member "stale_since_ts"
+             |> Yojson.Safe.to_string)
+            (invalidated_again |> member "full_health_snapshot" |> member "stale_since_ts"
+             |> Yojson.Safe.to_string);
           Alcotest.(check int)
             "full health publishes its bounded wake coalescing window"
             100
@@ -3953,7 +3973,8 @@ let test_full_health_refresh_worker_survives_waiter_cancellation () =
       let compute () =
         incr compute_count;
         Eio.Promise.resolve resolve_worker_started ();
-        Eio.Promise.await release_worker
+        Eio.Promise.await release_worker;
+        Ok ()
       in
       Eio.Fiber.fork ~sw (fun () ->
           let outcome =
@@ -3997,9 +4018,12 @@ let test_full_health_refresh_worker_survives_waiter_cancellation () =
       Alcotest.(check bool) "late worker publishes current result" true snapshot_present;
       Alcotest.(check bool) "settled result needs no retry" false refresh_requested)
 
-let test_full_health_refresh_worker_discards_dirty_generation () =
+let test_full_health_refresh_worker_discards_dirty_generation ~has_last_good =
   Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
   Eio.Switch.run (fun sw ->
+      if has_last_good then
+        Server_routes_http_runtime.For_testing.run_full_health_refresh_worker
+          ~sw ~compute:(fun () -> Ok ());
       let worker_started, resolve_worker_started = Eio.Promise.create () in
       let release_worker, resolve_release_worker = Eio.Promise.create () in
       let worker_done, resolve_worker_done = Eio.Promise.create () in
@@ -4008,7 +4032,8 @@ let test_full_health_refresh_worker_discards_dirty_generation () =
             ~sw
             ~compute:(fun () ->
               Eio.Promise.resolve resolve_worker_started ();
-              Eio.Promise.await release_worker);
+              Eio.Promise.await release_worker;
+              Ok ());
           Eio.Promise.resolve resolve_worker_done ());
       Eio.Promise.await worker_started;
       Server_routes_http_runtime.invalidate_full_health_snapshot ();
@@ -4018,25 +4043,104 @@ let test_full_health_refresh_worker_discards_dirty_generation () =
           refresh_requested =
         Server_routes_http_runtime.For_testing.full_health_refresh_worker_stats ()
       in
-      Alcotest.(check int) "dirty worker submitted once" 1 submissions;
+      let prior_submissions = if has_last_good then 1 else 0 in
+      Alcotest.(check int) "dirty worker submitted once" (prior_submissions + 1) submissions;
       Alcotest.(check int) "dirty worker had no join" 0 joins;
       Alcotest.(check bool) "dirty worker settles" false active;
       Alcotest.(check int) "invalidation advances generation" 1 generation;
-      Alcotest.(check bool) "dirty result is discarded" false snapshot_present;
+      Alcotest.(check bool) "dirty result cannot replace last observation"
+        has_last_good snapshot_present;
       Alcotest.(check bool) "dirty result requests retry" true refresh_requested;
       Server_routes_http_runtime.For_testing.run_full_health_refresh_worker
         ~sw
-        ~compute:Fun.id;
+        ~compute:(fun () -> Ok ());
       let submissions, _, active, generation, snapshot_present,
           refresh_requested =
         Server_routes_http_runtime.For_testing.full_health_refresh_worker_stats ()
       in
-      Alcotest.(check int) "retry submits one successor" 2 submissions;
+      Alcotest.(check int) "retry submits one successor" (prior_submissions + 2) submissions;
       Alcotest.(check bool) "successor settles" false active;
       Alcotest.(check int) "successor uses current generation" 1 generation;
       Alcotest.(check bool) "successor publishes current result" true snapshot_present;
       Alcotest.(check bool) "successor clears retry request" false refresh_requested);
   Server_routes_http_runtime.For_testing.reset_full_health_snapshot ()
+
+let test_full_health_returned_failure_preserves_observation ~has_last_good ~dirty =
+  let module Refresh = Server_routes_http_runtime.For_testing in
+  Refresh.reset_full_health_snapshot ();
+  Fun.protect ~finally:Refresh.reset_full_health_snapshot (fun () ->
+      let request = Httpun.Request.create `GET "/health?full=1" in
+      if has_last_good then Refresh.refresh_full_health_snapshot_now request;
+      let before = Server_routes_http_runtime.make_health_response_json request in
+      let open Yojson.Safe.Util in
+      let metadata json = json |> member "full_health_snapshot" in
+      Alcotest.(check bool) "seed is a last-good observation exactly when requested"
+        has_last_good (before |> metadata |> member "last_good_available" |> to_bool);
+      let failure = Proactive_refresh.Raised (Failure "returned refresh failure") in
+      Eio.Switch.run (fun sw ->
+          Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () ->
+              if dirty then Server_routes_http_runtime.invalidate_full_health_snapshot ();
+              Error failure);
+          let _, _, active, _, _, requested = Refresh.full_health_refresh_worker_stats () in
+          Alcotest.(check bool) "returned failure settles worker" false active;
+          Alcotest.(check bool) "dirty failed result retains successor request" dirty requested;
+          let after = Server_routes_http_runtime.make_health_response_json request in
+          Alcotest.(check bool) "failure preserves last-good availability"
+            has_last_good (after |> metadata |> member "last_good_available" |> to_bool);
+          Alcotest.(check string) "failed compute remains visible"
+            (Proactive_refresh.failure_message failure)
+            (after |> metadata |> member "error" |> to_string);
+          Alcotest.(check string) "failed compute is stale with a prior measurement"
+            (if has_last_good then "stale" else "error")
+            (after |> metadata |> member "status" |> to_string);
+          if has_last_good then begin
+            Alcotest.(check string) "failure preserves measured component fields"
+              (before |> member "keeper_reaction_ledger" |> Yojson.Safe.to_string)
+              (after |> member "keeper_reaction_ledger" |> Yojson.Safe.to_string);
+            Alcotest.(check string) "failure preserves measurement timestamp"
+              (before |> metadata |> member "computed_at_unix" |> Yojson.Safe.to_string)
+              (after |> metadata |> member "computed_at_unix" |> Yojson.Safe.to_string)
+          end;
+          Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () -> Error failure);
+          let repeated = Server_routes_http_runtime.make_health_response_json request in
+          Alcotest.(check string) "repeated returned failures retain first stale time"
+            (after |> metadata |> member "stale_since_ts" |> Yojson.Safe.to_string)
+            (repeated |> metadata |> member "stale_since_ts" |> Yojson.Safe.to_string);
+          Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () -> Ok ());
+          let recovered = Server_routes_http_runtime.make_health_response_json request in
+          Alcotest.(check string) "successful successor restores current observation" "ready"
+            (recovered |> metadata |> member "status" |> to_string);
+          Alcotest.(check bool) "successful successor clears error" true
+            (recovered |> metadata |> member "error" = `Null);
+          Alcotest.(check bool) "successful successor clears stale time" true
+            (recovered |> metadata |> member "stale_since_ts" = `Null)))
+
+let test_full_health_returned_failure_after_wait_timeout () =
+  let module Refresh = Server_routes_http_runtime.For_testing in
+  Refresh.reset_full_health_snapshot ();
+  Fun.protect ~finally:Refresh.reset_full_health_snapshot (fun () ->
+      let request = Httpun.Request.create `GET "/health?full=1" in
+      Refresh.refresh_full_health_snapshot_now request;
+      let timeout = Proactive_refresh.Timed_out
+        { label = "full_health_snapshot"; phase = Proactive_refresh.Refresh;
+          timeout_s = 16.0; elapsed_s = 17.0 }
+      in
+      Eio.Switch.run (fun sw ->
+          Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () ->
+              Refresh.mark_full_health_refresh_wait_failure timeout;
+              Server_routes_http_runtime.invalidate_full_health_snapshot ();
+              Error (Proactive_refresh.Raised (Failure "late returned failure"))));
+      let _, _, active, _, _, requested = Refresh.full_health_refresh_worker_stats () in
+      Alcotest.(check bool) "timed-out worker eventually settles" false active;
+      Alcotest.(check bool) "invalidation still requests a successor" true requested;
+      let after = Server_routes_http_runtime.make_health_response_json request in
+      let open Yojson.Safe.Util in
+      let metadata = after |> member "full_health_snapshot" in
+      Alcotest.(check bool) "timeout keeps last-good observation" true
+        (metadata |> member "last_good_available" |> to_bool);
+      Alcotest.(check string) "failed attempt keeps its already recorded timeout"
+        (Proactive_refresh.failure_message timeout)
+        (metadata |> member "error" |> to_string))
 
 let test_full_health_refresh_timeout_preserves_last_snapshot () =
   Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
@@ -6530,7 +6634,24 @@ let () =
             test_full_health_refresh_worker_survives_waiter_cancellation;
           Alcotest.test_case
             "full health worker discards dirty generation" `Quick
-            test_full_health_refresh_worker_discards_dirty_generation;
+            (fun () -> test_full_health_refresh_worker_discards_dirty_generation ~has_last_good:false);
+          Alcotest.test_case
+            "dirty full health worker retains the last observation" `Quick
+            (fun () -> test_full_health_refresh_worker_discards_dirty_generation ~has_last_good:true);
+          Alcotest.test_case "cold returned failure" `Quick
+            (fun () -> test_full_health_returned_failure_preserves_observation
+                ~has_last_good:false ~dirty:false);
+          Alcotest.test_case "cold dirty returned failure" `Quick
+            (fun () -> test_full_health_returned_failure_preserves_observation
+                ~has_last_good:false ~dirty:true);
+          Alcotest.test_case "returned failure retains last observation" `Quick
+            (fun () -> test_full_health_returned_failure_preserves_observation
+                ~has_last_good:true ~dirty:false);
+          Alcotest.test_case "dirty returned failure retains last observation" `Quick
+            (fun () -> test_full_health_returned_failure_preserves_observation
+                ~has_last_good:true ~dirty:true);
+          Alcotest.test_case "returned failure after waiter timeout is recorded once" `Quick
+            test_full_health_returned_failure_after_wait_timeout;
           Alcotest.test_case
             "full health refresh timeout preserves last snapshot" `Quick
             test_full_health_refresh_timeout_preserves_last_snapshot;

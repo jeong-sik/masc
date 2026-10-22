@@ -77,6 +77,24 @@ it('focuses the same Exact Lane again after another Runtime settings section', a
   await waitFor(() => expect(document.activeElement).toBe(selected))
 })
 
+it('reads original Curator history when current configuration observations are unavailable', async () => {
+  api.fetchStandaloneLanes.mockRejectedValue(new Error('configuration observation unavailable'))
+  replaceRoute('monitoring', laneTargetParams({ kind: 'run_history', lane: 'workspace_curator_exact', workspace: '/fixture/navigation' }))
+  render(html`<${InternalAgentsMonitor} />`)
+  await screen.findByRole('button', { name: /succeeded Workspace Curator/ })
+  expect(api.fetchExactLaneRuns).toHaveBeenCalledWith({ lane: 'workspace_curator_exact' })
+  expect(route.value.params.section).toBe('internal-agents')
+  expect(route.value.params.view).toBeUndefined()
+  expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
+})
+
+it('does not read another workspace through a retained history link', async () => {
+  replaceRoute('monitoring', laneTargetParams({ kind: 'run_history', lane: 'workspace_curator_exact', workspace: '/fixture/other' }))
+  render(html`<${InternalAgentsMonitor} />`)
+  expect(api.fetchExactLaneRuns).not.toHaveBeenCalled()
+  expect(api.fetchVerificationRuns).not.toHaveBeenCalled()
+})
+
 it('retries the selected declaration file after its installation identity is restored', async () => {
   const directory = '/fixture/navigation/.masc/config/lane-addons', path = `${directory}/pkg.toml`
   const document = { file_name: 'pkg.toml', source_path: path, source_text: 'id = "replacement"\n',

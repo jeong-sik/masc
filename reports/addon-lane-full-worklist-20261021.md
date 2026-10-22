@@ -623,6 +623,11 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - 실제 파일에 저장한 Curator 관측을 재열고 server page/detail→TUI decoder로 읽는 기존 시나리오를 확장했다. 원래 run ID와 측정/미측정 duration을 보존한다. 파싱·독립 소스 검토와 새 compiled 실행을 구분하며 과거226건을 새 타입 변경의 성공 증거로 이월하지 않는다.
 - [설계와 후속 경계](../docs/design/lane-retained-observation-identity.md): 이 선행 layer에는 builtin Curator 설정/행을 유지한다. 실제 Addon 모델 projection과 두 UI의 원래 관측 진입을 연결한 뒤 제거해야 한다. Addon 설정 scope의 run ID와 Owner 요청의 원본 관측 ID를 이름으로 합성하지 않는다. 원래 A01–H06의54개 항목명·완료 기준과 실제 provider·UI·설치 요구는 유지한다.
 
+## E02/G03 Dashboard 보존 이력의 독립 진입 · 2026-10-22
+
+- Dashboard `run_history` target은 보존 관측 identity를 쓰고, current builtin 설정의 `exact` target과 분리한다. 진단 링크에서 한 번 변환하며 Runtime 설정 화면은 history target을 받지 않는다. Internal Agents는 current config matrix 부재/실패와 무관하게 원래 filtered history를 읽고 기존 workspace authority와 stale/result 처리를 유지한다.
+- 실제 router·component와 mocked API를 쓰는 선택4개 suite91건, 전체 TypeScript, 변경6개 파일 lint가 통과했다. 처음 실패한 기존 fixture8건은 격리된 base689369c0 실행에서도 재현했으며, 필수 completion_origin/usage를 fixture에 명시하고 production parser는 완화하지 않았다. 실제 서버·브라우저·설치·TUI history 진입과 builtin Curator retirement 완료는 별도다. 원래 A01–H06의54개 항목명·완료 기준은 유지한다.
+
 
 ## 실행 증거와 이후 상위 재배치의 분리 · 2026-10-22
 

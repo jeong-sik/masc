@@ -135,7 +135,7 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
 
 type RunReading = 'loading' | 'ready' | 'stale' | 'unavailable'
 type RunSource = Row['source']
-type SelectedLane = Extract<LaneNavigationTarget, { kind: 'exact' }>['lane']
+type SelectedLane = Extract<LaneNavigationTarget, { kind: 'run_history' }>['lane']
 type SelectedLaneRuns = { lane: SelectedLane; rows: Row[]; reading: RunReading }
 
 // Where a selected Lane's runs are kept. Exact-lane runs never name
@@ -751,15 +751,15 @@ function resolvedOwner(row: Row, roster: readonly KeeperIdentity[]): string | nu
 }
 
 export function InternalAgentsMonitor() {
-  const navigation = useLaneNavigation(['exact'])
+  const navigation = useLaneNavigation(['run_history'])
   if (navigation.error || navigation.pending) return html`<${LaneNavigationNotice}
     message=${navigation.error ?? 'Verify the workspace before reading this Lane target.'} pending=${navigation.pending} />`
-  const target = navigation.target?.kind === 'exact' ? navigation.target : undefined
+  const target = navigation.target?.kind === 'run_history' ? navigation.target : undefined
   return html`<${InternalAgentsMonitorContent} target=${target}
     key=${navigation.authority ? JSON.stringify([navigation.authority.workspaceRoot, navigation.authority.epoch]) : undefined} />`
 }
 
-function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigationTarget, { kind: 'exact' }> }) {
+function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigationTarget, { kind: 'run_history' }> }) {
   const [rows, setRows] = useState<Row[]>([])
   const targetLane = target?.lane
   const [laneRuns, setLaneRuns] = useState<SelectedLaneRuns | null>(null)
@@ -900,7 +900,6 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
     <section class="v2-monitoring-surface ia-wrap" data-testid="internal-agents-monitor">
       ${target && html`<p role="status">Selected Lane: ${target.lane}. The run list is limited to this Lane; other Lane observations remain visible in the matrix.
         <button type="button" onClick=${() => setFilter('all')}>Show all Lane runs</button></p>`}
-      ${target && laneMatrix && !laneMatrix.lanes.some(lane => lane.laneId === target.lane) && html`<p role="alert">The selected Lane is absent from this reading.</p>`}
       <div class="ia-head">
         <h3>Internal execution evidence</h3>
         <span class="ia-count mono">${completeReading ? rows.length : "—"} runs · ${keepers.length} Keeper owners${allFresh ? "" : " · incomplete or stale"}</span>

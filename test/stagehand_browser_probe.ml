@@ -1,9 +1,6 @@
-(* This standalone fixture explicitly enables new Browser work. *)
-let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
-
 (* The Stagehand lane end to end in a real Chromium (RFC-browser-lane-stagehand
-   §6.2): the server's own opener, backend, executor and Keeper tool handlers,
-   with a scripted model in place of a provider, since CI holds no provider
+   §6.2): the installed native browser Add-on, public tool contracts and shared
+   Exact Output runner, with a loopback scripted provider, since CI holds no provider
    key. scripts/probe-stagehand.py serves the fixture page and runs this.
 
    The scripted model answers from what reached it: the page text for
@@ -11,11 +8,10 @@ let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Ena
    act. So a passing run shows the page reached the model and the model's
    choice reached the page, not only that the wire carries messages. *)
 
-module Model = Masc.Browser_stagehand_model
-module Wire = Masc.Browser_stagehand_wire
-module Session = Masc.Browser_stagehand_session
-module Backend = Masc.Browser_stagehand_backend
-module Tools = Masc.Tool_misc_browser_lane
+open Masc
+module R = Lane_addon_runtime
+module F = Exact_output_fixture
+module Tools = Browser_addon_tools
 
 let failures = ref []
 let steps = ref []
@@ -53,67 +49,44 @@ let element_id line =
   | Some _, (Some _ | None) | None, (Some _ | None) -> None
 ;;
 
-let prompt_text (request : Model.request) =
-  request.messages
-  |> List.concat_map (fun (message : Model.message) ->
-    List.filter_map (function Model.Text text -> Some text | Model.Unserved _ -> None) message.content)
-  |> String.concat "\n"
-;;
-
 let properties schema =
   match Yojson.Safe.Util.member "properties" schema with
   | `Assoc fields -> List.map fst fields
   | _ -> []
 ;;
 
-let answer value =
-  Ok
-    (`Assoc
-      [ "role", `String "assistant"
-      ; "content", `Assoc [ "type", `String "text"; "text", `String (Yojson.Safe.to_string value) ]
-      ; "output_format", `String "json_schema"
-      ; "structured_content", value
-      ])
+let scripted_value ~schema ~text =
+  let props = properties schema in
+  if List.mem "heading" props && List.mem "plan_price" props then
+    if contains ~sub:"Order form" text && contains ~sub:"42 USD" text then
+      Ok (`Assoc ["heading",`String "Order form";"plan_price",`String "42 USD"])
+    else Error "page text did not reach the shared model runner"
+  else if List.mem "completed" props then Ok (`Assoc ["progress",`String "read";"completed",`Bool true])
+  else if List.mem "action" props || List.mem "elements" props then
+    (match List.find_map (fun line ->
+       if contains ~sub:"button: Submit order" line then element_id line else None)
+       (String.split_on_char '\n' text) with
+     | None -> Error "no Submit order button in the page the model was shown"
+     | Some id ->
+       let button=`Assoc ["elementId",`String id;"description",`String "Submit order button";
+         "method",`String "click";"arguments",`List []] in
+       if List.mem "action" props then Ok (`Assoc ["action",button;"twoStep",`Bool false])
+       else Ok (`Assoc ["elements",`List [button]]))
+  else Error ("no scripted answer for " ^ String.concat "," props)
 ;;
 
-let refuse message = Error { Wire.code = Wire.host_refused; message }
-let model_requests = ref 0
-
-let scripted_model params =
-  incr model_requests;
-  match Model.parse_params params with
-  | Error detail -> refuse ("probe model: " ^ detail)
-  | Ok request ->
-    let text = prompt_text request in
-    (match request.generation with
-     | Model.Structured { schema; _ } ->
-       let props = properties schema in
-       if List.mem "heading" props && List.mem "plan_price" props then
-         if contains ~sub:"Order form" text && contains ~sub:"42 USD" text then
-           answer (`Assoc [ "heading", `String "Order form"; "plan_price", `String "42 USD" ])
-         else refuse "probe model: the page text did not reach the model"
-       else if List.mem "completed" props then answer (`Assoc [ "progress", `String "read"; "completed", `Bool true ])
-       else if List.mem "action" props || List.mem "elements" props then (
-         match
-           List.find_map
-             (fun line -> if contains ~sub:"button: Submit order" line then element_id line else None)
-             (String.split_on_char '\n' text)
-         with
-         | Some id ->
-           let button =
-             `Assoc
-               [ "elementId", `String id
-               ; "description", `String "Submit order button"
-               ; "method", `String "click"
-               ; "arguments", `List []
-               ]
-           in
-           (* act asks for one action; observe for the elements that match. *)
-           if List.mem "action" props then answer (`Assoc [ "action", button; "twoStep", `Bool false ])
-           else answer (`Assoc [ "elements", `List [ button ] ])
-         | None -> refuse "probe model: no Submit order button in the page the model was shown")
-       else refuse ("probe model: no scripted answer for " ^ String.concat "," props)
-     | Model.Text_generation | Model.Tool_generation _ -> refuse "probe model: only structured requests are scripted")
+let scripted_http body =
+  try
+    let request=Yojson.Safe.from_string body in
+    let open Yojson.Safe.Util in
+    let schema=request |> member "response_format" |> member "json_schema" |> member "schema" in
+    let text=request |> member "messages" |> to_list
+      |> List.map (fun message -> message |> member "content" |> to_string) |> String.concat "\n" in
+    match scripted_value ~schema ~text with
+    | Ok value -> `OK,F.openai_response value
+    | Error message -> `Bad_request,Yojson.Safe.to_string (`Assoc ["error",`Assoc ["message",`String message]])
+  with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+    `Bad_request,{|{"error":{"message":"invalid fixture model request"}}|}
 ;;
 
 let tool name result =
@@ -150,42 +123,99 @@ let () =
   and extension = argument "--extension"
   and fixture_url = argument "--fixture-url"
   and out = argument "--out" in
-  let masc_root = Filename.concat out "masc-root" in
+  let manifest=Unix.realpath (argument "--manifest") in
+  let base_path=Filename.temp_dir "masc-browser-addon-probe-" "" |> Unix.realpath in
+  let config_root=Filename.concat base_path ".masc/config" in
+  Fs_compat.mkdir_p config_root;
+  Unix.putenv Env_config_core.base_path_env_key base_path;
+  Unix.putenv Env_config_core.config_dir_env_key config_root;
+  let bin=Filename.concat base_path "bin" in Unix.mkdir bin 0o700;
+  List.iter (fun (flag,name) -> Unix.symlink (Unix.realpath (argument flag)) (Filename.concat bin name))
+    ["--launcher","masc-native-addon-launcher";"--guardian","masc-browser-process-owner";
+     "--worker","masc-browser-addon-worker"];
+  Unix.putenv "PATH" (bin ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH"));
+  Unix.mkdir (Filename.concat base_path "fixture-skills") 0o700;
+  let runtime_path=Filename.concat config_root "runtime.toml" in
+  Out_channel.with_open_bin runtime_path (fun channel ->
+    output_string channel (F.official_client_runtime_fixture ^ Printf.sprintf
+      "\n[skills]\n[[skills.sources]]\nid=\"probe-local\"\nanchor=\"base-path\"\npath=\"fixture-skills\"\naccess=\"read-only\"\n[browser.live]\nenabled=false\n[browser.automation]\nenabled=false\n[browser.stagehand]\nenabled=true\nchrome=%S\nextension=%S\n" chrome extension));
+  (match Runtime.init_default ~config_path:runtime_path with Ok () -> () | Error detail -> failwith detail);
+  Mirage_crypto_rng_unix.use_default ();
   let failed = Eio_main.run
   @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
-  Time_compat.set_clock clock;
-  Eio.Switch.run
-  @@ fun sw ->
-  let config = { Browser_configuration.chrome; extension; profile = None } in
-  let opened_session = ref None in
-  let backend =
-    Backend.create ~sw ~clock
-      ~open_session:(fun ~sw ~headless ~log ->
-        Server_browser_stagehand.open_ ~sw ~env ~masc_root ~config ~headless ~model:scripted_model ~log
-        |> Result.map (fun (opened, init) ->
-          opened_session := Some (Server_browser_stagehand.session opened);
-          Eio.Switch.on_release sw (fun () -> opened_session := None);
-          opened, init))
-      ~call:(fun stagehand -> Session.call (Server_browser_stagehand.session stagehand))
-      ~pid:Server_browser_stagehand.pid ~log:Server_browser_stagehand.log_event
-  in
-  Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
-  Eio.Switch.on_release sw (fun () -> Browser_lane.install_activity_observer None);
-  Browser_lane.install_stagehand_executor (Some (fun ~actor verb -> Backend.execute backend ?actor verb));
+  let clock = Eio.Stdenv.clock env and net=Eio.Stdenv.net env in
+  Time_compat.set_clock clock;Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~sw ~clock ~net ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
+  let config=Workspace.default_config base_path in
+  let access=Lane_addon_sources.Operator_configuration in
+  let principal=Lane_addon_call_context.Host_actor "stagehand-probe" in
+  let held,resolve_held=Eio.Promise.create () and released,release=Eio.Promise.create () in
+  let hold=ref false in
+  let provider=F.start_server ~sw ~net ~clock (F.Reply_with (fun _ body ->
+    if !hold then (ignore (Eio.Promise.try_resolve resolve_held ());Eio.Promise.await released);
+    scripted_http body)) in
+  ignore (F.publish_registry ~lane_id:"browser/stagehand" ~slot_ids:["probe"]
+    (F.resolver_snapshot ~source:base_path [{F.id="probe";base_url=provider.base_url}]) : Runtime_exact_output_registry.t);
+  R.register_exact_runner (Server_lane_addon_exact.runner ~base_path);
+  let directory=R.configuration_directory config in Fs_compat.mkdir_p directory;
+  let declaration=Filename.concat directory "browser.toml" in
+  let require = function Ok value -> value | Error detail -> failwith detail in
+  let inventory ()=R.inventory ~config in
+  let rec await f=match f () with Some value -> value | None -> Eio.Time.sleep clock 0.01;await f in
+  let observation=Runtime.load_config_observation ~runtime_config_path:runtime_path () |> require in
+  let publication=Server_skill_snapshot_runtime.refresh_from_observation ~base_path observation
+    |> Result.map_error Server_skill_snapshot_runtime.error_to_string |> require in
+  (match publication with
+   | Skill_catalog_snapshot_service.Published _|Unchanged _ -> ()
+   | Workspace_retired -> failwith "fixture Skill workspace was retired");
+  R.register_skill_export_handler Server_skill_snapshot_runtime.publish_lane_skills;
+  R.start_configuration_service ~config ~sw ~clock;
+  let attach () =
+    Out_channel.with_open_bin declaration (fun channel -> output_string channel (Printf.sprintf
+      "id=\"browser\"\nrun_id=\"stagehand-probe\"\nmanifest_path=%S\nexact_outputs=[\"stagehand\"]\ntool_hooks=[\"validate_input\",\"validate_output\"]\n[binding]\nsources=[]\n" manifest));
+    ignore (R.reconcile_configuration ~config ~directory |> require);
+    await (fun () ->
+      let snapshot=inventory () in
+      List.iter (fun (item:R.inventory_instance) -> match item.phase with
+        | Lane_addon_types.Failed detail -> failwith detail
+        | Attached|Observing|Detaching|Detached -> ()) snapshot.instances;
+      match R.browser_services ~config ~access with
+      | [service] -> Some service
+      | [] -> None | _::_::_ -> failwith "ambiguous fixture browser Add-ons") in
+  let first=attach () in
+  let host=Browser_addon_host.connect ~config ~access ~principal ~reserved:[]
+    |> Result.map_error (function R.Unavailable s|Outcome_unknown s -> s
+      | Host_refusal _ -> "host refused the fixture principal") |> require in
+  let detach id =
+    let* _=R.dispatch ~caller:"stagehand-probe" ~access ~config ~operation:R.Detach
+      (`Assoc ["instance_id",`String id]) |> Result.map_error R.error_to_string in
+    await (fun () -> let snapshot=inventory () in
+      match List.find_opt (fun (item:R.inventory_instance) -> item.instance_id=id) snapshot.instances with
+      | Some {phase=Lane_addon_types.Detached;_} -> Some (Ok `Null)
+      | Some {phase=Failed detail;_} -> Some (Error detail)
+      | Some {phase=Attached|Observing|Detaching;_} | None -> None) in
   let args fields = `Assoc fields in
   let lane = "lane", `String "stagehand" in
-  let tabs () = tool "BrowserTabs" (Tools.handle_tabs ~base_path:out ~tool_name:"masc_browser_tabs" ~start_time:(Tool_timing.start ()) (args [ lane ])) in
-  let session action = tool "BrowserSession" (Tools.handle_session ~tool_name:"masc_browser_session" ~start_time:(Tool_timing.start ()) (args [ "action", `String action; lane ])) in
-  let instruct fields = tool "BrowserInstruct" (Tools.handle_instruct ~tool_name:"masc_browser_instruct" ~start_time:(Tool_timing.start ()) (args fields)) in
+  let handle tool_name tool_kind fields=tool tool_name (Tools.handle ~config ~access ~principal ~reserved:[]
+    ~keeper_name:None ~tool:tool_kind ~tool_name ~start_time:(Tool_timing.start ()) (args fields)) in
+  let tabs ()=handle "BrowserTabs" Browser_capabilities.Tabs [lane] in
+  let session action=handle "BrowserSession" Browser_capabilities.Session ["action",`String action;lane] in
+  let instruct fields=handle "BrowserInstruct" Browser_capabilities.Instruct (lane::fields) in
+  let feedback_before=ref None in
+  let observation name =
+    let path=Filename.concat out (name ^ ".json") in
+    if Sys.file_exists path then
+      (try Some (Yojson.Safe.from_file path) with Yojson.Json_error _ -> None)
+    else None in
   let interact fields =
-    tool "BrowserInteract"
-      (Tools.handle_interact ~actor:"stagehand-probe" ~base_path:out ~tool_name:"masc_browser_interact" ~start_time:(Tool_timing.start ()) (args (lane :: fields)))
-  in
-  let goto_fixture () =
-    tool "BrowserGoto"
-      (Tools.handle_goto ~tool_name:"masc_browser_goto" ~start_time:(Tool_timing.start ()) (args [ "url", `String fixture_url; lane ]))
-  in
+    feedback_before:=Option.bind (observation "pointer-feedback") (string_at ["requestId"]);
+    handle "BrowserInteract" Browser_capabilities.Interact (lane::fields) in
+  let capture tab_id =
+    Browser_addon_host.issue host ~preference:(Browser_selection.Exact Browser_lane.Stagehand_route)
+      (Browser_lane.Page_capture {tab_id}) |> Result.map (fun receipt -> receipt.Browser_addon_host.data)
+      |> Result.map_error Tool_result.message in
+  let goto_fixture ()=handle "BrowserGoto" Browser_capabilities.Goto ["url",`String fixture_url;lane] in
   let title_at tab_id expected =
     let* listed = tabs () in
     let* _, observed = tab_for ~url:fixture_url listed in
@@ -194,51 +224,19 @@ let () =
     | Some title -> Error (Printf.sprintf "tab %d has title %s, expected %s" tab_id title expected)
     | None -> Error "the tab has no title"
   in
-  (* Wheel dispatch acknowledges native input before the asynchronous scroll
-     event necessarily runs. Observe the fixture's document-owned promise via
-     Stagehand's existing awaitPromise evaluation, without generating another
-     event or moving the page. The script's existing PROBE_TIMEOUT_S bounds a
-     missing event; no polling interval or additional deadline is introduced. *)
-  let await_fixture_scroll () =
-    let* opened = Option.to_result ~none:"the fixture session is not open" !opened_session in
-    let call request =
-      Session.call opened request
-      |> Result.map_error Masc.Browser_stagehand_executor.failure_message
-    in
-    let* active = call Wire.Context_active_page in
-    let* page_id = Option.to_result ~none:"the fixture has no active page"
-        (string_at [ "page_id" ] active) in
-    let expression = Printf.sprintf
-      "(() => { if (location.href !== %s || !(window.stagehandProbeScrollObserved instanceof Promise)) throw new Error('scroll fixture changed'); return window.stagehandProbeScrollObserved; })()"
-      (Yojson.Safe.to_string (`String fixture_url)) in
-    let* reply = call (Wire.Page_evaluate { page_id; expression }) in
-    match Yojson.Safe.Util.member "value" reply with
-    | `Bool true -> Ok ()
-    | _ -> Error "the fixture scroll event did not acknowledge its observation"
-  in
-  let observe_actor_feedback () =
-    let* opened = Option.to_result ~none:"the fixture session is not open" !opened_session in
-    let call request = Session.call opened request
-      |> Result.map_error Masc.Browser_stagehand_executor.failure_message in
-    let* active = call Wire.Context_active_page in
-    let* page_id = Option.to_result ~none:"the fixture has no active page" (string_at ["page_id"] active) in
-    let expression = {js|(() => {
-      const state=window[Symbol.for('masc.browser.pointer.feedback.v1')];
-      const host=document.querySelector('[data-masc-browser-overlay]');
-      return {actor:state?.actor,phase:state?.phase,action:state?.action,requestId:state?.requestId,
-        observedPointer:!!state?.pointer && Number.isFinite(state.pointer.x) && Number.isFinite(state.pointer.y),
-        inert:host?.inert === true,hidden:host?.getAttribute('aria-hidden') === 'true',
-        ignoresPointer:!!host && getComputedStyle(host).pointerEvents === 'none'};
-    })()|js} in
-    let* reply = call (Wire.Page_evaluate {page_id;expression}) in
-    let value = Yojson.Safe.Util.member "value" reply in
-    let flag name = Yojson.Safe.Util.member name value = `Bool true in
-    if string_at ["actor"] value = Some "stagehand-probe"
-      && string_at ["phase"] value = Some "finished" && string_at ["action"] value = Some "click"
-      && Option.is_some (string_at ["requestId"] value)
-      && List.for_all flag ["observedPointer";"inert";"hidden";"ignoresPointer"]
-    then Ok value else Error ("owned native pointer feedback was not observed: " ^ Yojson.Safe.to_string value)
-  in
+  (* The fixture publishes its own observed events through loopback HTTP.
+     This never evaluates arbitrary JavaScript through a separate session. *)
+  let await_fixture_scroll () = await (fun () -> match observation "scroll-observed" with
+    | Some value when string_at ["url"] value=Some fixture_url -> Some (Ok ())
+    | Some _ | None -> None) in
+  let observe_actor_feedback () = await (fun () -> match observation "pointer-feedback" with
+    | Some value when string_at ["requestId"] value<> !feedback_before
+        && string_at ["actor"] value=Some "stagehand-probe"
+        && string_at ["phase"] value=Some "finished" && string_at ["action"] value=Some "click" ->
+      let flag name=Yojson.Safe.Util.member name value=`Bool true in
+      Some (if List.for_all flag ["observedPointer";"inert";"hidden";"ignoresPointer"]
+        then Ok value else Error ("owned native pointer feedback was not observed: " ^ Yojson.Safe.to_string value))
+    | Some _ | None -> None) in
   record "open" (session "open");
   let pid =
     match session "status" with
@@ -254,17 +252,13 @@ let () =
    | Ok (tab_id, _) ->
      let read mode =
        tool "BrowserRead"
-         (Tools.handle_read ~base_path:out ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
+         (Tools.handle ~config ~access ~principal ~reserved:[] ~keeper_name:None
+            ~tool:Browser_capabilities.Read ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
             (args [ lane; "tabId", `Int tab_id; "mode", `String mode ]))
      in
      let observed_viewport () =
        let* capture =
-         match Masc.Browser_surface.capture
-                 { Masc.Browser_surface.route = Masc.Browser_selection.Exact Browser_lane.Stagehand_route
-                 ; tab_id = Some tab_id }
-         with
-         | Ok data -> Ok data
-         | Error failure -> Error (Masc.Browser_surface.failure_message failure)
+         capture tab_id
        in
        let viewport = Yojson.Safe.Util.member "viewport" capture in
        let* geometry = Browser_lane.Pointer.viewport_of_json viewport in
@@ -314,7 +308,8 @@ let () =
      record "a page script's throw reaches the caller by its reason"
        (match
           tool "BrowserRead"
-            (Tools.handle_read ~base_path:out ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
+            (Tools.handle ~config ~access ~principal ~reserved:[] ~keeper_name:None ~tool:Browser_capabilities.Read
+            ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
                (args
                   [ lane; "tabId", `Int tab_id; "mode", `String "scene"
                   ; "scope", `Assoc [ "documentId", `String "stale-document"; "nodeId", `String "n0" ]
@@ -426,8 +421,8 @@ let () =
         | Some title -> Error ("the page title after act is " ^ title)
         | None -> Error "the tab has no title after act");
      record "screenshot passes the surface"
-       (match Masc.Browser_surface.capture { Masc.Browser_surface.route = Masc.Browser_selection.Exact Browser_lane.Stagehand_route; tab_id = Some tab_id } with
-        | Error failure -> Error (Masc.Browser_surface.failure_message failure)
+       (match capture tab_id with
+        | Error detail -> Error detail
         | Ok data ->
           (match string_at [ "data" ] data with
            | Some image ->
@@ -443,16 +438,42 @@ let () =
     (match pid with
      | Some pid when alive pid -> Error (Printf.sprintf "Chromium pid %d still runs" pid)
      | Some _ | None -> Ok `Null);
-  let proof =
-    `Assoc
-      [ "steps", `List (List.rev_map (fun (name, ok) -> `Assoc [ "step", `String name; "ok", `Bool ok ]) !steps)
-      ; "model_requests", `Int !model_requests
-      ]
-  in
+  record "reopen on the original attached worker" (session "open");
+  record "navigate after reopen" (goto_fixture ());
+  let current_tab=Result.bind (tabs ()) (tab_for ~url:fixture_url) in
+  (match current_tab with
+   | Error detail -> record "in-flight detach preflight" (Error detail)
+   | Ok (tab_id,_) ->
+     hold:=true;
+     let before=F.post_count provider in
+     let pending=Eio.Fiber.fork_promise ~sw (fun () -> instruct ["action",`String "extract";
+       "instruction",`String "the page heading and the plan price";"tabId",`Int tab_id;
+       "schema",`String {|{"type":"object","properties":{"heading":{"type":"string"},"plan_price":{"type":"string"}},"required":["heading","plan_price"]}|}]) in
+     Eio.Promise.await held;
+     record "detach cancels an in-flight browser/model command" (detach first.instance_id);
+     ignore (Eio.Promise.try_resolve release ());hold:=false;
+     record "departed command never reports success" (match Eio.Promise.await_exn pending with
+       | Error _ -> Ok `Null | Ok _ -> Error "detached command reported success");
+     record "no replay of the held provider request" (if F.post_count provider=before+1 then Ok `Null
+       else Error "unexpected provider request after detach"));
+  record "stale original browser handle is refused"
+    (match Browser_addon_host.issue host ~preference:(Browser_selection.Exact Browser_lane.Stagehand_route) Browser_lane.Tabs_list with
+     | Error _ -> Ok `Null | Ok _ -> Error "detached handle reached a browser");
+  let replacement=attach () in
+  record "reattach owns a fresh incarnation" (if replacement.instance_id<>first.instance_id then Ok `Null
+    else Error "reattach reused the retired instance");
+  record "open after fresh attach" (session "open");
+  record "navigate after fresh attach" (goto_fixture ());
+  record "close replacement browser" (session "close");
+  record "detach confirms replacement cleanup" (detach replacement.instance_id);
+  let proof = `Assoc [
+    "steps",`List (List.rev_map (fun (name,ok) -> `Assoc ["step",`String name;"ok",`Bool ok]) !steps);
+    "model_requests",`Int (F.post_count provider);"isolated_base_path",`String base_path;
+    "first_instance",`String first.instance_id;"replacement_instance",`String replacement.instance_id;
+    "model_transport",`String "shared Exact Output runner through loopback HTTP"] in
   Out_channel.with_open_bin (Filename.concat out "stagehand-proof.json") (fun channel ->
     Out_channel.output_string channel (Yojson.Safe.pretty_to_string proof));
-  Browser_lane.install_stagehand_executor None;
-  List.rev !failures
+  List.rev !failures)
   in
   match failed with
   | [] -> ()

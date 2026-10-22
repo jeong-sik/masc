@@ -179,7 +179,7 @@ let open_session ~sw ~env ~owner ~directory ~configuration:c ~model ~headless ~l
     input:=Some keepalive_write;
     let argv=[c.launcher;"--instance";instance_id;"--slot";c.claim_directory;"--";
       c.guardian;"--instance";instance_id;"--"] @
-      Process.argv ~chrome:c.chrome ~profile:(Process.Server_profile profile) ~extension_id ~headless in
+      Process.argv ~chrome:c.chrome ~profile:(Process.Private_profile profile) ~extension_id ~headless in
     Eio.Switch.check sw;
     let child=Eio.Process.spawn ~sw
       (Posix_spawn_process_mgr.foreground_mgr ~clock:(Eio.Stdenv.clock env) ~grace_seconds:stop_grace_s)

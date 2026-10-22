@@ -627,6 +627,7 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 
 - Dashboard `run_history` target은 보존 관측 identity를 쓰고, current builtin 설정의 `exact` target과 분리한다. 진단 링크에서 한 번 변환하며 Runtime 설정 화면은 history target을 받지 않는다. Internal Agents는 current config matrix 부재/실패와 무관하게 원래 filtered history를 읽고 기존 workspace authority와 stale/result 처리를 유지한다.
 - 실제 router·component와 mocked API를 쓰는 선택4개 suite91건, 전체 TypeScript, 변경6개 파일 lint가 통과했다. 처음 실패한 기존 fixture8건은 격리된 base689369c0 실행에서도 재현했으며, 필수 completion_origin/usage를 fixture에 명시하고 production parser는 완화하지 않았다. 실제 서버·브라우저·설치·TUI history 진입과 builtin Curator retirement 완료는 별도다. 원래 A01–H06의54개 항목명·완료 기준은 유지한다.
+- 선행 identity source `689369c0bc938c1056cf6a21dd0c1b67d7d5f692`는 [선택 CI 39710832458](https://github.com/jeong-sik/masc/actions/runs/39710832458)의5개 suite453건과 [native CI 39710835575](https://github.com/jeong-sik/masc/actions/runs/39710835575)의29건이 실제 완료 성공했다. native는 TUI·key generator·matching server를 빌드했으며 artifact의 source/TUI/server/key-reference 해시를 대조했다. [실행 영수증](../docs/evidence/2026-10-22-curator-original-delivery/retained-identity-execution.json)은 workflow source와 feature source를 구분한다. 이 결과는 후속 Dashboard 변경·전체 회귀·설치/UI·54개 완료 증거가 아니다.
 
 
 ## 실행 증거와 이후 상위 재배치의 분리 · 2026-10-22

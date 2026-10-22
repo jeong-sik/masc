@@ -54,3 +54,20 @@ state producer origin and absent usage; running rows omit both. The production
 parser remains strict. The four selected suites pass 91 cases; TypeScript and
 changed-file lint pass. TUI history discovery and Curator builtin retirement
 remain follow-up work.
+
+## Executed identity source
+
+Exact source `689369c0bc938c1056cf6a21dd0c1b67d7d5f692` completed
+[targeted CI](https://github.com/jeong-sik/masc/actions/runs/39710832458) with
+five suites and 453 passing cases, including real-file Curator replay through
+the server/TUI decoders. The same source completed
+[native macOS CI](https://github.com/jeong-sik/masc/actions/runs/39710835575),
+building the TUI, key-reference generator and server plus two suites with 29
+passing cases. The artifact receipt's source and TUI/server/key-reference
+byte hashes were checked independently.
+
+[The execution receipt](../evidence/2026-10-22-curator-original-delivery/retained-identity-execution.json)
+records source versus workflow identities, exact targets, log hashes and limits.
+These runs execute the identity layer, not the later Dashboard navigation
+delta. Its focused 91 cases and TypeScript/lint results are separate local
+evidence. No installed-runtime or visible-UI verification is claimed.

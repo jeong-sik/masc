@@ -639,3 +639,11 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - 팔레트의 typed history 목적지는 현재 설정 행·설치된 Addon 없이 원래 관측 identity를 찾는다. 기존 Lanes 비동기 조회와 workspace/generation 검사를 유지한다. 정상 inventory 조회도 별도로 시작하며 history가 그 성공을 기다리지는 않는다.
 - 독립 working-diff 리뷰에서 같은 Lanes의 기존 slot editor가 숨은 채 키를 받아 원래 모델 설정을 변경할 수 있는 P2를 찾았다. 실제 history 진입 함수가 transient editor/picker/notice를 닫도록 수리하고 idle·posting·receipt 재조회 상태에서 삭제 계획 거절과 원래 설정·초안·저장 상태 보존 검사를 추가했다. 현재 parser·diff 검사만 통과했으며 새 source의 compiled 실행·실제 화면은 아직 미검증이다.
 - 이 진입 구현은 실제 Curator Addon 모델 projection이나 builtin 설정 제거를 대신하지 않는다. 원래 A01–H06의54개 항목명·완료 기준과 provider·두 UI·설치 요구를 유지한다.
+
+## E02/G01 설치별 Addon 모델 관측 후속 · 2026-10-22
+
+- 서버가 보내던 `exact_outputs`를 Dashboard decoder가 버려 설치별 모델 설정이 보이지 않는 결함을 실제 새 API 검사 FAIL로 재현하고 수리했다. 선언 출력/남은 설정표·HTTP/CLI 후보·드롭·설정 오류/Off를 원래 설치 ID 아래 보존한다. 현재 worker나 package activity로 모델 상태를 추정하지 않는다.
+- Curator 안내는 실제 Addon의 `classification`·`briefing` 모델 설정을 가리킨다. `workspace_curator_exact`는 원래 관측 ID로 남는다. 기존 Runtime 설정 편집기로 가는 일반 링크이며 특정 설치의 모델 저장·실제 provider 호출을 검증한 것은 아니다.
+- Dashboard source79e8a662의 선택3개 suite37건, 전체 TypeScript, 변경6파일 ESLint가 실제 통과했다. 실제 Chromium에서 production component를 synthetic API로 열어 모델 상세를 확인하고 screenshot·GET/표시 관측을 보존했다. [공개 실행 근거](../docs/evidence/2026-10-22-addon-model-observation/README.md)는 실제 운영 Dashboard·worker·provider와 이 fixture를 구분한다.
+- TUI history parent a0d3f319의 [선택 실행39713823343](https://github.com/jeong-sik/masc/actions/runs/39713823343)은19+46=65건 실제 성공했다. 이 선택 검사는 main TUI 실행 파일을 빌드하지 않고 이후 Dashboard 변경을 실행하지 않는다. Native 결과는 별도 영수증으로 확인한다. 원래54개 기준과 builtin Curator retirement·실제 provider·두 UI lifecycle·통합·설치는 미완료로 유지한다.
+- 같은 TUI parent의 [native 실행39713826631](https://github.com/jeong-sik/masc/actions/runs/39713826631)도 실제 성공했다. matching TUI/server/key generator와 관련24+5=29건을 빌드·실행했으며 artifact12398028976의 실제 TUI/server/key-reference 해시를 영수증과 대조했다. workflow38b63과 featurea0d3를 구분한다. 이 결과도 대화형 화면·설치나 이후 Dashboard 실행의 증거는 아니다.

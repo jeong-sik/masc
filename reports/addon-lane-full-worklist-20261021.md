@@ -111,7 +111,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
-| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 원래 batch/briefing 복원·complete request·host capture 구현. exact d4d54ed의 7-suite39653626146은 92건 PASS(초기 compile FAIL과77c88c3 수리 포함). 후속 original-owner progress는 capture와 같은 record에 누적 실행/commit 이력, full expected-record 검사·exact ACK·uncertain publication·before/after 관측을 source 구현했고 실제 Store 재개 등 6검사 추가. 새 progress compiled 검증·strict 발견·실제 owner/semantic flow/wake/worker 통합은 남음 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
+| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | capture exact d4d54ed의 7-suite39653626146은92건 PASS. original-owner progress exact c231ab1의 5-suite39657204150도70건 PASS(새 progress6 포함). strict scope 발견·hashed key/전체 history 검증·known-ID 동일 no-follow descriptor read/fsync 및 settled absence를 후속 source 구현, 실제 삭제/교체·link·sync/권한 실패7검사 추가. 새 발견8-suite39660035294는 기존 worker fixture의 누락 request_schema로 compile FAIL(검사 실행 전); fixture에 typed Package_schema_only 명시. 수정 head 실행·production owner/semantic flow/wake/worker 통합과 실제 중지·재개는 남음 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
 | E05 | Board Attention 실행의 Addon 경계 검토·추출 | 조사·설계, Required | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
@@ -366,3 +366,15 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - 같은 original owner record에 capture+Captured를 한 번에 저장하고 [host progress](../docs/design/addon-original-request-progress.md)를 누적한다. immutable retain은 이력을 보존하고, advance는 전체 expected record와 정확한 next tail만 구분한다. Stored/Already_stored/Unconfirmed를 나눠 ACK를 새 RPC 허가로 쓰지 않으며, worker absence와 unknown은 재-dispatch를 허용하지 않는다.
 - 원래 judgment·before/after를 commit 의도에 보존하고 uncertain 뒤 exact 관측만 기록한다. 실제 Store의 새 handle·stale writer·late original result·commit recovery·terminal conflict/refusal·손상 history·사라진 original을 다루는 6개 시나리오를 추가했다. 새 progress의 parser/source 검토와 compiled execution, 실제 domain save/worker 재개는 구분한다.
 - strict restart inventory와 물리 record/durability 결속, production owner capture·원래 semantic acceptance·Addon wake·worker/두 UI 및 54개 전체 완료는 계속 남는다. 원래 A01–H06의 작업 이름·완료 기준은 변경하지 않는다.
+
+### 2026-10-22 E02 원래 요청 발견 후속
+
+- 정확한 c231ab19f12981429a7442696c9f2c02c81104d5의 progress 선택 실행39657204150은 completed/success다. 실제 로그에서 progress6·request capture5·host capture5·host cycle44·Candle transport10, 합70건을 확인하고 [원본 발췌·해시 영수증](../docs/evidence/2026-10-22-curator-progress/selected-execution.json)을 보존했다. 이 성공을 새 discovery source에 이월하지 않는다.
+- [원래 요청 발견](../docs/design/addon-original-request-discovery.md)은 기존 owner namespace의 전체 발행 기록을 엄격하게 읽고 scope/ID/hash filename/input/progress를 검사한다. 기존 Fs traversal의 callback 전체에 root·모든 ancestor descriptor를 유지하고, 같은 no-follow file/parent FD에서 실제 read→fsync→동일 bytes/final identity 검증을 한다. known-ID load도 같은 경계를 쓴다.
+- 처음 없는 child만 owned ancestor settlement 후 빈 관측이며, missing/unsafe anchor·listed 소실·심볼릭 링크·다중 hardlink·비정규 파일·sync/read/parse 실패는 오류다. 새 handle의 원래 input/progress·scope, 실제 파일/부모 교체와 권한 변경 등 7개 검사 시나리오를 추가했다. canonical staging만 미발행으로 제외하고 별도 registry나 읽기 중 디렉터리를 만들지 않는다.
+- 이것은 atomic multi-record snapshot이나 실제 process/worker 재시작 증거가 아니다. known-ID도 현재 namespace 이름 읽기 비용을 내며 실제 효과 전에 원래 owner의 fresh authority/record 검증이 필요하다. production Curator metadata·원래 semantic acceptance·uncertain domain commit·wake/worker/두 UI와 A01–H06의 전체 완료는 남아 있다.
+
+### E02 발견 선택 실행의 기존 worker fixture 수리
+
+- exact61c6014의 [8-suite39660035294](https://github.com/jeong-sik/masc/actions/runs/39660035294)는 completed/failure다. `test_lane_addon_worker.ml:537`의 기존 exact output에 필수 `request_schema`가 없어 컴파일에서 멈췄으며, 선택된 발견 검사도 실행되지 않았다. [실제 실패 발췌와 원본 해시](../docs/evidence/2026-10-22-curator-discovery/initial-compile-failure.json)를 보존한다.
+- 기존 worker-port fixture는 요청별 schema를 사용하지 않으므로 `request_schema=Types.Package_schema_only`를 명시했다. 파싱 성공을 compiled 실행으로 세지 않으며, 같은8-suite의 수정 후보 결과를 별도로 확인한다. A01–H06의54개 작업과 완료 기준은 유지한다.

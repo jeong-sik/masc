@@ -48,6 +48,25 @@ let load ~store ~scope ~request_id =
   | None -> Ok None
   | Some json -> decode ~scope ~request_id json
       |> Result.map Option.some |> Result.map_error (fun detail -> Store_unavailable detail)
+let discover ~store ~scope =
+  let* () = validate_identity ["scope",scope] in
+  let* rows = Lane_addon_store.tool_request_owner_inventory store ~scope
+    |> Result.map_error (fun detail -> Store_unavailable detail) in
+  let rec restore records = function
+    | [] -> Ok (List.rev records)
+    | (name,json) :: rest ->
+      let* request_id = (match json with
+        | `Assoc fields -> (match List.assoc_opt "request_id" fields with
+            | Some (`String value) when String.trim value <> "" -> Ok value
+            | _ -> Error "missing original request ID")
+        | _ -> Error "invalid original request record")
+        |> Result.map_error (fun detail -> Store_unavailable detail) in
+      let* record = decode ~scope ~request_id json
+        |> Result.map_error (fun detail -> Store_unavailable detail) in
+      if not (String.equal name (Lane_addon_store.digest request_id ^ ".json"))
+      then Error (Store_unavailable "original request filename does not match its ID")
+      else restore (record :: records) rest in
+  restore [] rows
 let retain ~store ~scope ~request_id ~installation_id ~package_id ~tool ~request =
   let* () = validate_identity ["scope", scope; "request_id", request_id;
     "installation_id", installation_id; "package_id", package_id; "tool", tool] in

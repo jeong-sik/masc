@@ -47,11 +47,16 @@ handles for unknown/late-result recovery, immutable retain, stale writers and
 exact acknowledgements, original before/after commit recovery, terminal conflict
 and refusal, malformed history and a removed original. The commit scenario uses
 a separate real state file to distinguish recording observations from writing
-domain state. They do not inject post-rename durability failure or prove a
-production Curator recovery. Parser/source results are separate from execution.
+domain state. Exact `c231ab19f12981429a7442696c9f2c02c81104d5` run
+[39657204150](https://github.com/jeong-sik/masc/actions/runs/39657204150)
+completed successfully: these six scenarios and four directly related suites,
+70 tests total. They do not inject post-rename durability failure or prove a
+production Curator recovery. The following discovery implementation was not
+part of that source; it needs its own execution evidence.
 
-Next E02 boundaries are strict restart discovery anchored to the original store,
-physical record/durability identity, production metadata capture and serialized
+The [original request discovery](addon-original-request-discovery.md) follow-up
+adds scoped inventory and physical record/durability identity. It does not wire
+production recovery. Next E02 boundaries are production metadata capture and serialized
 owner integration, semantic acceptance inside the original HTTP/CLI flow,
 Addon wake/worker delivery and actual Off/reconnect with both UIs. This history
 is the known-ID persistence foundation for that work, not completed extraction.

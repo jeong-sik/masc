@@ -24,6 +24,10 @@ Modes:
                                        writing a fragment (a release PR, which
                                        bumps the version or assembles
                                        fragments, may)
+  lane-guard --base B [--head H]       refuse a PR that stops accepting an
+                                       exact-output lane id in runtime.toml
+                                       unless its fragment has an `Upgrade
+                                       notes` bullet naming that id
   check-files [FRAGMENT ...]           refuse a listed fragment that misses
                                        its citation. The CI workflow lists the
                                        fragments a pull request changes, so a
@@ -56,6 +60,15 @@ SECTIONS = (
     "Documentation",
     "Internal",
 )
+
+UPGRADE_NOTES = "Upgrade notes"
+
+# The closed list of lane ids a runtime.toml `[runtime.exact_output_lanes.<id>]`
+# table may name, and the file that spells each id.
+STANDALONE_LANE = "lib/runtime/standalone_lane.ml"
+LANE_IDENTITY = "lib/runtime/lane_run_identity.ml"
+LANE_TYPE = re.compile(r"(?ms)^type t =\n((?:  \| [A-Z][A-Za-z_]*\n)+)\[@@deriving enumerate\]")
+LANE_CONSTRUCTOR = re.compile(r"  \| ([A-Z][A-Za-z_]*)\n")
 
 FRAGMENT_NAME = re.compile(r"^([1-9][0-9]*)\.md$")
 VERSION_LINE = re.compile(r"(?m)^\(version ([^)]+)\)$")
@@ -299,6 +312,75 @@ def pr_guard(base: str, head: str) -> int:
     return 1
 
 
+def accepted_lane_ids(rev: str) -> set[str]:
+    """Lane ids a runtime.toml exact-output table may name at `rev`.
+
+    Reads the constructors of `Standalone_lane.t` and the id each one has in
+    `to_id`, which sat in standalone_lane.ml before it moved to
+    lane_run_identity.ml. A shape this cannot read is an error, not an empty
+    set: a guard that skips what it cannot parse never fires.
+    """
+    lane_source = git_show(rev, STANDALONE_LANE)
+    block = LANE_TYPE.search(lane_source)
+    if block is None:
+        raise FragmentError(f"{STANDALONE_LANE} at {rev}: no `type t = | ... [@@deriving enumerate]`")
+    constructors = LANE_CONSTRUCTOR.findall(block.group(1))
+    exists = subprocess.run(["git", "cat-file", "-e", f"{rev}:{LANE_IDENTITY}"],
+                            capture_output=True).returncode == 0
+    spelling = lane_source + ("\n" + git_show(rev, LANE_IDENTITY) if exists else "")
+    ids: set[str] = set()
+    for constructor in constructors:
+        found = re.search(rf'\| {constructor} -> "([a-z_]+)"', spelling)
+        if found is None:
+            raise FragmentError(
+                f"{STANDALONE_LANE} at {rev}: no `| {constructor} -> \"<id>\"` in "
+                f"{STANDALONE_LANE} or {LANE_IDENTITY}"
+            )
+        ids.add(found.group(1))
+    return ids
+
+
+def lane_guard(base: str, head: str) -> int:
+    """Refuse a PR that stops accepting a lane id without telling the operator.
+
+    A live runtime.toml is operator-owned and never rewritten by a release. A
+    table under an id the new build no longer accepts makes the build refuse
+    the whole file, and the operator learns it at deploy time with nothing said
+    about what replaced it (#44911 removed `workspace_curator_exact` that way).
+    Other retired runtime.toml keys are not covered here.
+
+    `base` is the commit the PR is measured against, not a merge base: for a
+    stacked PR it is the parent layer's head.
+    """
+    dropped = sorted(accepted_lane_ids(base) - accepted_lane_ids(head))
+    if not dropped:
+        return 0
+    changed = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=AM", base, head, "--", FRAGMENT_DIR],
+        text=True, capture_output=True, check=True).stdout.split()
+    notes: list[str] = []
+    for name in changed:
+        path = pathlib.Path(name)
+        if path.name == "README.md":
+            continue
+        notes += parse_fragment(path).get(UPGRADE_NOTES, [])
+    unannounced = [lane for lane in dropped if not any(lane in note for note in notes)]
+    if not unannounced:
+        print(f"lane id(s) no longer accepted, each named in an {UPGRADE_NOTES} bullet: "
+              f"{', '.join(dropped)}")
+        return 0
+    for lane in unannounced:
+        print(
+            f"{STANDALONE_LANE}: `{lane}` is no longer an accepted exact-output lane id, "
+            f"so a live runtime.toml with `[runtime.exact_output_lanes.{lane}]` is refused "
+            f"at deploy. Add a `### {UPGRADE_NOTES}` bullet to this PR's "
+            f"{FRAGMENT_DIR}/<PR number>.md that names `{lane}`, says to delete that table, "
+            f"and says where the setting lives now.",
+            file=sys.stderr,
+        )
+    return 1
+
+
 def merged_squashes(base: str, head: str) -> list[tuple[int, str]]:
     """[(PR number, subject)] of squash commits merged into `head` since `base`.
 
@@ -406,6 +488,9 @@ def main() -> int:
     guard = sub.add_parser("pr-guard")
     guard.add_argument("--base", required=True)
     guard.add_argument("--head", default="HEAD")
+    lanes = sub.add_parser("lane-guard")
+    lanes.add_argument("--base", required=True)
+    lanes.add_argument("--head", default="HEAD")
     listed = sub.add_parser("check-files")
     listed.add_argument("files", nargs="*", metavar="FRAGMENT")
     args = parser.parse_args()
@@ -414,6 +499,8 @@ def main() -> int:
             loaded = load_all(pathlib.Path(args.dir))
             print(f"{len(loaded)} changelog fragment(s) OK")
             return 0
+        if args.mode == "lane-guard":
+            return lane_guard(args.base, args.head)
         if args.mode == "check-files":
             return check_files(args.files)
         if args.mode == "assemble":

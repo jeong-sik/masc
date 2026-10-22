@@ -9,6 +9,9 @@ on:
     paths:
       - "changelog.d/**"
       - "scripts/changelog-fragments.py"
+      - "scripts/ci/tests/test_changelog_fragments_lane_guard.py"
+      - "lib/runtime/standalone_lane.ml"
+      - "lib/runtime/lane_run_identity.ml"
 
 permissions:
   contents: read
@@ -37,6 +40,19 @@ jobs:
             "$PR_URL/files?per_page=100")
           files=$(printf '%s\n' "$listing" | grep '^changelog\.d/' || true)
           python3 scripts/changelog-fragments.py check-files $files
+      - name: Name every exact-output lane id this pull request stops accepting
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # The base is the branch this PR targets (the parent layer of a
+          # stack), so only this PR's own change is measured.
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          python3 scripts/changelog-fragments.py lane-guard --base "$BASE_SHA"
+      - name: Test the lane id guard
+        if: github.event_name == 'pull_request'
+        run: python3 -I scripts/ci/tests/test_changelog_fragments_lane_guard.py
       - name: Check every fragment cites its own pull request
         if: github.event_name == 'workflow_dispatch'
         run: python3 scripts/changelog-fragments.py check --dir changelog.d

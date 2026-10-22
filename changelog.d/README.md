@@ -21,3 +21,8 @@ file, so merging one does not make the other conflict.
   `python3 scripts/changelog-fragments.py assemble`, which folds every
   fragment into `## [Unreleased]` of `CHANGELOG.md` (grouped by section, in
   pull request order, duplicates dropped) and deletes the fragments.
+- A pull request that removes an exact-output lane id from
+  `lib/runtime/standalone_lane.ml` names that id in an `Upgrade notes` bullet
+  (delete the `[runtime.exact_output_lanes.<id>]` table, and where the setting
+  lives now). `python3 scripts/changelog-fragments.py lane-guard --base <ref>`
+  checks it; a live `runtime.toml` is not rewritten by a release.

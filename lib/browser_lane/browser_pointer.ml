@@ -65,8 +65,12 @@ let input_sources ~pointer_id ~wheel_id ~viewport ~start gesture =
      ; "duration", `Int duration_ms ] @ coords point) in
   let button ?(which = Primary) kind =
     `Assoc ["type", `String kind; "button", `Int (button_number which)] in
+  (* A WebDriver input source keeps its pointer type for as long as the browser holds its state, and a hover
+     sends no releaseActions. A touch gesture that reused the mouse source's id after a hover would be
+     sent as a mouse, so touch has an id of its own. *)
   let pointer ?(pointer_type = "mouse") actions = `Assoc
-    [ "type", `String "pointer"; "id", `String pointer_id
+    [ "type", `String "pointer"
+    ; "id", `String (if String.equal pointer_type "mouse" then pointer_id else pointer_id ^ "-" ^ pointer_type)
     ; "parameters", `Assoc ["pointerType", `String pointer_type]
     ; "actions", `List actions ] in
   (* A press, the moves while it is held, and the release. A drag and a swipe are the same sequence; only

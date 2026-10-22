@@ -297,7 +297,12 @@ let test_touch_sources_use_a_touch_pointer () =
   check string "a click stays a mouse pointer" "mouse" (pointer_type (Browser_lane.Pointer.Click Browser_lane.Pointer.Primary));
   check string "a drag stays a mouse pointer" "mouse" (pointer_type drag);
   check (list string) "a tap presses and releases once" ["pointerMove";"pointerDown";"pointerUp"] (types Browser_lane.Pointer.Tap);
-  check (list string) "a swipe moves as a drag does" (types drag) (types swipe)
+  check (list string) "a swipe moves as a drag does" (types drag) (types swipe);
+  let id gesture = Yojson.Safe.Util.(source gesture |> member "id" |> to_string) in
+  check bool "a tap does not reuse the hover's source id" true (id Browser_lane.Pointer.Tap <> id Browser_lane.Pointer.Hover);
+  check bool "a swipe does not reuse the drag's source id" true (id swipe <> id drag);
+  check string "a tap and a swipe share the touch source" (id Browser_lane.Pointer.Tap) (id swipe);
+  check string "a click, a hover and a drag share the mouse source" (id Browser_lane.Pointer.Hover) (id drag)
 let () = run "browser interaction" ["typed boundary", [
   test_case "browser zoom boundary" `Quick test_browser_zoom_boundary;
   test_case "native keyboard and double click parser" `Quick test_native_keyboard_parser;

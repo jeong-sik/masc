@@ -180,6 +180,10 @@ let run ~config ~on_inventory ~on_observation_failure =
   let classify=run_domain ~config ~on_inventory ~on_observation_failure Classification in
   let synthesize=run_domain ~config ~on_inventory ~on_observation_failure Synthesis in
   let changed=function Ok changed -> changed | Error detail ->
+    (* Domain progression is not proof that observation discovery completed.
+       Preserve maintenance demand when an earlier read/step refused before
+       [observe], including a subsequent failure while ACKs are pending. *)
+    on_observation_failure ();
     Log.Server.error "workspace curator original owner: %s" detail;false in
   let classified=changed classify and synthesized=changed synthesize in
   classified || synthesized

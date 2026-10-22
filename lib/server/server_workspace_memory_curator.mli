@@ -7,7 +7,9 @@ val start : sw:Eio.Switch.t -> config:Workspace.config -> unit
     independently of primary effects. Delivery failures remain pending. *)
 val retry_pending_observations : base_path:string -> unit
 (** Existing server maintenance calls this bounded wake-only edge. It wakes an
-    existing owner only when its prior pass could not settle observations; the
+    existing owner only when its prior pass could not settle observations or
+    complete its authoritative discovery. A failed subsequent pass preserves
+    this demand; only a completed pass without observation errors clears it. The
     owner freshly reads original authority before retrying. The physical workspace
     path is resolved in the existing host-I/O executor. No timer, journal read,
     provider or domain work runs here, and shutdown owners stay stopped. *)

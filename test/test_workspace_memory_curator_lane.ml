@@ -407,7 +407,7 @@ let test_accepted_host_terminal_commits_off_without_worker ()=
     ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
     settle_all clock base_path store 1;
     check int "reattach only synthesizes the pending Briefing" 2 (F.post_count server))
-let test_pending_observation_recovers_on_existing_maintenance ()=
+let test_pending_observation_recovers_on_existing_maintenance ?(unavailable_namespace=false) ()=
   with_fixture ~start_owner:false (fun ~sw ~clock ~base_path ~config ~store ~source ~declaration ~server
       ~urls:_ ~mode:_ ~delivery:_ ->
     reconcile_until_export clock ~config;
@@ -436,6 +436,23 @@ let test_pending_observation_recovers_on_existing_maintenance ()=
        | Lane_addon_request_receipt.Pending _,Pending _ -> true
        | (Unobserved | Acknowledged _),_ | Pending _,(Unobserved | Acknowledged _) -> false);
     write path before;
+    if unavailable_namespace then (
+      let namespace=Filename.concat (Store.root store)
+        (Filename.concat "tool-request-owners" (Store.digest Capture.scope)) in
+      let retained=Filename.concat base_path "unavailable-original-namespace" in
+      let original_path=Filename.concat namespace (Store.digest request_id ^ ".json") in
+      let original_bytes=In_channel.with_open_bin original_path In_channel.input_all in
+      Unix.rename namespace retained;
+      write namespace "original namespace is temporarily not a directory";
+      Fun.protect ~finally:(fun () -> Unix.unlink namespace;Unix.rename retained namespace) (fun () ->
+        (match Consumer.discover ~config with
+         | Error _ -> ()
+         | Ok _ -> fail "unavailable original namespace must not become an empty successful discovery");
+        Curator.retry_pending_observations ~base_path;
+        await clock (fun () -> Curator.For_testing.is_idle ~base_path);
+        check int "failed discovery starts no provider" 0 (F.post_count server));
+      check string "failed discovery preserves the original pending receipt bytes" original_bytes
+        (In_channel.with_open_bin original_path In_channel.input_all));
     Curator.retry_pending_observations ~base_path:(Filename.concat base_path ".");
     await clock (fun () -> Curator.For_testing.is_idle ~base_path
       && observer_acknowledged (original_record store capture));
@@ -538,7 +555,10 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "actual Addon On wakes sources parked while Off" `Quick test_off_then_actual_metadata_on;
   test_case "actual output publication resumes the same original request" `Quick test_original_waits_for_actual_route_publication;
   test_case "unrelated source never remints a refused original" `Quick test_refused_identity_does_not_remint_on_unrelated_fact;
-  test_case "pending Off observation recovers on existing maintenance" `Quick test_pending_observation_recovers_on_existing_maintenance;
+  test_case "pending Off observation recovers on existing maintenance" `Quick
+    (fun () -> test_pending_observation_recovers_on_existing_maintenance ());
+  test_case "pending Off observation survives a failed discovery pass" `Quick
+    (test_pending_observation_recovers_on_existing_maintenance ~unavailable_namespace:true);
   test_case "finished source can return as new pending work after actual removal" `Quick test_finished_identity_readded_after_observed_removal;
   test_case "only the current semantic destination supplies a size successor" `Quick test_successor_frontier_ignores_an_old_semantic_destination;
   test_case "complete malformed original inventory blocks replacement" `Quick test_complete_discovery_blocks_malformed_original;

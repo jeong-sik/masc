@@ -39,8 +39,10 @@ delivery after eviction. Pending completion may republish that same original if
 its registration was evicted. Success confirms historical publication even if
 ordinary per-lane retention immediately removes the run from the current page.
 
-Observer failures leave the owner eligible for a wake from the existing server
-maintenance tick. The wake resolves its physical workspace and signals only that
+Observer and authoritative discovery failures leave the owner eligible for a
+wake from the existing server maintenance tick. A later failed pass preserves
+this demand, including a temporarily unavailable original namespace; only a
+completed pass without observation errors clears it. The wake resolves its physical workspace and signals only that
 existing owner; it performs no journal/provider/domain work. Fresh owner authority
 still governs every subsequent action. There is no new timer, retry cap or busy
 loop. Unknown provider duration and extended cache/cost usage remain absent; the
@@ -59,3 +61,11 @@ recovery. Parser checks establish syntax only. The earlier successful
 [11-case production diagnostic run](https://github.com/jeong-sik/masc/actions/runs/39699404401)
 executed source `a650bad6dc7a5133c9d0de516f15a54e42cf3b8b`; it does not execute
 this subsequent reconciliation implementation.
+
+The subsequent [seven-suite execution](../evidence/2026-10-22-curator-original-delivery/selected-execution.json)
+compiled source `042b1361931d43cf3768e6ee6bb0673911c91590`. Six suites passed
+143 cases and the production fixture passed 11 of 12, so the complete run failed.
+The failed case stopped before Off with an original-owner strict-read refusal,
+no retained Exact record and zero HTTP posts. It does not execute the later
+discovery-retry repair, and it does not establish a corrected publication/read
+serialization or actual provider/UI/install behavior.

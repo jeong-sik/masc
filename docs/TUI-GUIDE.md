@@ -1844,8 +1844,12 @@ new messages arrive; `/images` reads a fresh list. A Keeper or workspace change
 requires a new list before using its numbers. Without a previous list,
 `/images N` captures the current sources. This includes every retained image attachment and closed
 diagram within one reply, and staged composer images. The catalog covers the
-currently loaded conversation and selected live speech, excluding thinking and
-superseded attempts. Names remain labels; opening uses the retained source.
+currently loaded conversation, selected live speech and generated media,
+excluding thinking and superseded attempts. A generated image becomes available
+once its original response has persisted the completed block, including while
+the same operation continues through a tool call. Generated audio is available
+through `/listen`. Replayed events retain their original response ownership;
+a late block from a closed or superseded response cannot replace current media. Names remain labels; opening uses the retained source.
 An unavailable image keeps its number and reports why it cannot be opened.
 The selected source is frozen before fetching or rendering. At capture, a
 draft's existing priority relative to conversation arrivals also applies to

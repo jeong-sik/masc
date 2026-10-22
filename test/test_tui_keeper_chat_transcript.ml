@@ -432,14 +432,16 @@ let test_runtime_attempt_restarts_the_per_attempt_totals () =
       check bool "the first attempt's text is still readable" true
         (List.exists
            (function
-             | Transcript.Trail_text text ->
+             | Transcript.Trail_media media -> Yojson.Safe.to_string (Masc.Keeper_chat_events.generated_media_to_json media)
+  | Transcript.Trail_text text ->
                  String_util.contains_substring text "failed reply"
              | _ -> false)
            first);
       check bool "the second attempt's text is still readable" true
         (List.exists
            (function
-             | Transcript.Trail_text text ->
+             | Transcript.Trail_media media -> Yojson.Safe.to_string (Masc.Keeper_chat_events.generated_media_to_json media)
+  | Transcript.Trail_text text ->
                  String_util.contains_substring text "fallback reply"
              | _ -> false)
            second)
@@ -488,6 +490,7 @@ let drawn_to_string (item : Transcript.drawn_item) =
   | Transcript.Drawn_skill skills ->
       "skill:" ^ String.concat "," (List.map (fun (s : Transcript.skill_activity) -> s.skill_name) skills)
   | Transcript.Drawn_tools block -> "tools:" ^ String.concat "|" (Transcript.project_tool_block Transcript.Full block).Transcript.details
+  | Transcript.Drawn_media media -> Yojson.Safe.to_string (Masc.Keeper_chat_events.generated_media_to_json media)
   | Transcript.Drawn_text text -> "text:" ^ text
   | Transcript.Drawn_reply text -> "reply:" ^ text
   | Transcript.Drawn_status text -> "status:" ^ text
@@ -1939,6 +1942,7 @@ let rec trail_item_to_string : Transcript.trail_item -> string = function
       ^ ")"
   | Transcript.Trail_tools block ->
       "tools(" ^ String.concat "\\n" (full_tool_rows block) ^ ")"
+  | Transcript.Trail_media media -> Yojson.Safe.to_string (Masc.Keeper_chat_events.generated_media_to_json media)
   | Transcript.Trail_text text -> "text(" ^ text ^ ")"
   | Transcript.Trail_superseded { attempt; items; runtime_id } ->
       Printf.sprintf "superseded(%d,%s,[%s])" attempt
@@ -2158,6 +2162,7 @@ let drawn_shape (item : Transcript.drawn_item) =
              block.activities)
       ^ "]"
   | Transcript.Drawn_thinking _ -> "thinking"
+  | Transcript.Drawn_media _ -> "media"
   | Transcript.Drawn_text _ -> "text"
   | Transcript.Drawn_reply _ -> "reply"
   | Transcript.Drawn_skill _ -> "skill"

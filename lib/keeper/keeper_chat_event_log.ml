@@ -266,14 +266,8 @@ let keeper_chat_event_to_json event =
     type_tag
       "agent_core_thinking_signature_delta"
       [ "index", `Int index; "signature_bytes", `Int signature_bytes ]
-  | Agent_core_media_delta { index; media_type; source_type; media_ref } ->
-    type_tag
-      "agent_core_media_delta"
-      [ "index", `Int index
-      ; "media_type", `String media_type
-      ; "source_type", `String (Agent_core.Types.media_source_kind_to_string source_type)
-      ; "media_ref", `String media_ref
-      ]
+  | Agent_core_media_delta media ->
+    type_tag "agent_core_media_delta" (Yojson.Safe.Util.to_assoc (generated_media_to_json media))
   | Agent_core_stream_protocol_error error ->
     type_tag
       "agent_core_stream_protocol_error"
@@ -554,21 +548,9 @@ let keeper_chat_event_of_json json =
            ; signature_bytes = json |> member "signature_bytes" |> to_int
            })
     | "agent_core_media_delta" ->
-      let source_raw = json |> member "source_type" |> to_string in
-      let* source_type =
-        match Agent_core.Types.media_source_kind_of_string source_raw with
-        | Some kind -> Ok kind
-        | None ->
-          Error
-            (Printf.sprintf "agent_core_media_delta: unknown source_type %S" source_raw)
-      in
-      Ok
-        (Agent_core_media_delta
-           { index = json |> member "index" |> to_int
-           ; media_type = json |> member "media_type" |> to_string
-           ; source_type
-           ; media_ref = json |> member "media_ref" |> to_string
-           })
+      let value = `Assoc (List.filter (fun (key, _) -> key <> "type") (json |> to_assoc)) in
+      let* media = generated_media_of_json value in
+      Ok (Agent_core_media_delta media)
     | "agent_core_stream_protocol_error" ->
       let* error = stream_protocol_error_of_json (json |> member "error") in
       Ok (Agent_core_stream_protocol_error error)

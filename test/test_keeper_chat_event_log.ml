@@ -114,6 +114,7 @@ let all_events : E.keeper_chat_event list =
       ; media_type = "image/png"
       ; source_type = Agent_core.Types.Base64
       ; media_ref = "/api/v1/media/tok-1"
+      ; response = {response_generation=3; response_scope=2}
       }
   ; E.Agent_core_stream_protocol_error protocol_error_full
   ; E.Agent_core_stream_protocol_error protocol_error_sparse
@@ -1105,6 +1106,7 @@ let golden_events : E.keeper_chat_event list =
       ; media_type = "image/png"
       ; source_type = Agent_core.Types.Url
       ; media_ref = "/api/v1/media/tok-golden"
+      ; response = {response_generation=0; response_scope=0}
       }
   ; E.Agent_core_stream_protocol_error protocol_error_full
   ; E.Agent_core_runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }

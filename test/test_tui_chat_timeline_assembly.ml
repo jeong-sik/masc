@@ -485,7 +485,7 @@ let test_source_scoped_row_check_matches_full_held_scan () =
     List.filter_map
       (fun (entry : Tui_types.msg_entry) ->
         if List.exists (fun turn -> Tui_types.log_draws_row turn entry) held
-        then Tui_types.media_remainder ~diagrams:[] entry
+        then fst (Tui_types.media_remainder_with_coverage ~diagrams:[] ~generated:[] entry)
         else Some entry)
       rows
   in

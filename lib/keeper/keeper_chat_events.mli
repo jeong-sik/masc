@@ -10,6 +10,16 @@
 
 type response_identity = Ag_ui.response_identity = { response_generation : int; response_scope : int }
 
+(** A persisted generated block owned by its original producer response.
+    [index] is local to that response; [media_ref] names the stored payload. *)
+type generated_media =
+  { index : int
+  ; media_type : string
+  ; source_type : Agent_core.Types.media_source_kind
+  ; media_ref : string
+  ; response : response_identity
+  }
+
 type text_response = Ag_ui.text_response =
   | Unobserved_scope of int option
   | Observed_response of response_identity
@@ -172,14 +182,7 @@ type keeper_chat_event =
   | Model_content_activity of model_content_activity
   | Agent_core_thinking_delta of { index : int; delta : string; response : response_identity option }
   | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
-  | Agent_core_media_delta of
-      { index : int
-      ; media_type : string
-      ; source_type : Agent_core.Types.media_source_kind
-      ; media_ref : string
-          (** RFC-0301: reader-facing URL of the persisted media
-              ([/api/v1/media/<token>]), replacing the pre-RFC byte count. *)
-      }
+  | Agent_core_media_delta of generated_media
   | Agent_core_stream_protocol_error of stream_protocol_error
   | Tool_call_start of
       { occurrence : tool_stream_occurrence
@@ -439,6 +442,11 @@ val publish_with_sequence : t -> keeper_chat_event -> int
     is an indivisible generation/scope pair; malformed or partial objects reject. *)
 val response_identity_to_json : response_identity -> Yojson.Safe.t
 val response_identity_of_json : Yojson.Safe.t -> (response_identity, string) result
+
+val generated_media_to_json : generated_media -> Yojson.Safe.t
+val generated_media_of_json : Yojson.Safe.t -> (generated_media, string) result
+(** Strict wire and journal value codec. Missing ownership, duplicate or
+    unknown fields and invalid block coordinates are rejected. *)
 
 (** Absent response is explicitly unobserved; duplicate, null or malformed
     supplied response fields reject instead of weakening ownership. *)

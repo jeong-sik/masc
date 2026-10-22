@@ -7,6 +7,16 @@ type t =
   | Svg of Masc.Keeper_chat_blocks.svg_block
   | Mermaid of Masc.Keeper_chat_blocks.mermaid_block
 
+val of_generated : Masc.Keeper_chat_events.generated_media -> t
+(** The same persisted reference and media category as the durable chat block. *)
+
+val without_drawn_generated : covered:Masc.Keeper_chat_events.generated_media list ->
+  t list -> Masc_tui_image_preview.preview list ->
+  t list * Masc_tui_image_preview.preview list * Masc.Keeper_chat_events.generated_media list
+(** Consume one exact generated occurrence per matching durable media block.
+    Preview coverage uses the same original occurrences independently. The
+    returned coverage is the unused block occurrences for subsequent rows. *)
+
 val of_json : Yojson.Safe.t -> t list
 val append_text : text:string -> t list -> string
 (** Retain original prose and whitespace, followed by visible media metadata.

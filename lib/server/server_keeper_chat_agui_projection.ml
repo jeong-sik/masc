@@ -220,17 +220,8 @@ let project ~timestamp ~redact_text state event =
                         [ "index", `Int index
                         ; "signature_bytes", `Int signature_bytes
                         ]))
-  | Agent_core_media_delta { index; media_type; source_type; media_ref } ->
-      state, Some (custom ~timestamp state Media_delta
-                     (`Assoc
-                        [ "index", `Int index
-                        ; "media_type", `String media_type
-                        ; ( "source_type"
-                          , `String
-                              (Agent_core.Types.media_source_kind_to_string
-                                 source_type) )
-                        ; "media_ref", `String media_ref
-                        ]))
+  | Agent_core_media_delta media ->
+      state, Some (custom ~timestamp state Media_delta (generated_media_to_json media))
   | Agent_core_stream_protocol_error error ->
       state, Some (custom ~timestamp state Stream_protocol_error
                      (stream_protocol_error_to_json error))

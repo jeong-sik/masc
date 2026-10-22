@@ -7,6 +7,16 @@ type t =
   | Svg of Blocks.svg_block
   | Mermaid of Blocks.mermaid_block
 
+let of_generated (media : Masc.Keeper_chat_events.generated_media) =
+  match Masc.Keeper_chat_media_store.category_of_media_type media.media_type with
+  | Masc.Keeper_chat_media_store.Image -> Image {src=media.media_ref; cap=None}
+  | Masc.Keeper_chat_media_store.Audio ->
+      Voice {secs=None; wave=None; via=None; size=None; transcript=None; src=Some media.media_ref}
+  | Masc.Keeper_chat_media_store.Document | Masc.Keeper_chat_media_store.Other ->
+      Attach {name="generated media"; dims=None; src=Some media.media_ref; svg=None;
+        ph=None; via=None; size=None; data=None; mime_type=Some media.media_type;
+        size_bytes=None; kind=None}
+
 let of_json json =
   match Blocks.blocks_of_yojson json with
   | None -> []
@@ -102,6 +112,22 @@ let images media =
     | Mermaid diagram -> Some (Masc_tui_image_preview.mermaid
         ~name:(Option.value diagram.caption ~default:"Mermaid") diagram.source)
     | Voice _ -> None)
+;;
+
+let without_drawn_generated ~covered media previews =
+  let rec consume matches = function
+    | [] -> None
+    | head :: tail when matches head -> Some tail
+    | head :: tail -> Option.map (List.cons head) (consume matches tail) in
+  let remaining, kept = List.fold_left (fun (remaining, kept) block ->
+    match consume (fun observed -> of_generated observed = block) remaining with
+    | None -> remaining, block :: kept
+    | Some remaining -> remaining, kept) (covered, []) media in
+  let _, kept_previews = List.fold_left (fun (remaining, kept) preview ->
+    match consume (fun observed -> List.mem preview (images [of_generated observed])) remaining with
+    | None -> remaining, preview :: kept
+    | Some remaining -> remaining, kept) (covered, []) previews in
+  List.rev kept, List.rev kept_previews, remaining
 ;;
 
 let newest_image media =

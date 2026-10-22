@@ -2108,6 +2108,7 @@ let polled_turn_output_with_anchors (state : state) ~keeper_name ~role_label_col
             match item.drawn with
             | Masc_tui_keeper_chat_transcript.Drawn_text _
             | Masc_tui_keeper_chat_transcript.Drawn_reply _ -> true
+            | Masc_tui_keeper_chat_transcript.Drawn_media _
             | Masc_tui_keeper_chat_transcript.Drawn_thinking _
             | Masc_tui_keeper_chat_transcript.Drawn_skill _
             | Masc_tui_keeper_chat_transcript.Drawn_tools _
@@ -2138,7 +2139,7 @@ let polled_turn_output_with_anchors (state : state) ~keeper_name ~role_label_col
                        && List.exists (fun (item : Keeper_chat_transcript.drawn_item) ->
                          match item.drawn with
                          | Drawn_text _ | Drawn_reply _ -> true
-                         | Drawn_thinking _ | Drawn_tools _ | Drawn_skill _ | Drawn_status _ | Drawn_error _ -> false)
+                         | Drawn_media _ | Drawn_thinking _ | Drawn_tools _ | Drawn_skill _ | Drawn_status _ | Drawn_error _ -> false)
                          (Keeper_chat_transcript.drawn log.tl_transcript))) turn_ref)) ->
         let style = Message_layout.Keeper in
         let label = keeper_name in
@@ -3035,7 +3036,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                   { le_at = timeline_at; le_origin = Some item.origin;
                     le_is_reply = (match item.drawn with
                       | Keeper_chat_transcript.Drawn_reply _ -> true
-                      | Drawn_text _ | Drawn_thinking _ | Drawn_tools _
+                      | Drawn_media _ | Drawn_text _ | Drawn_thinking _ | Drawn_tools _
                       | Drawn_skill _ | Drawn_status _ | Drawn_error _ -> false);
                     le_entry = ({ delivery_state = None; style;
                      heading_boundary;
@@ -3062,6 +3063,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                         | Keeper_chat_transcript.Admission_of_request _ -> Message_layout.Rail_none
                         | Keeper_chat_transcript.Unstreamed_skills
                         | Keeper_chat_transcript.Text_stretch _
+                        | Keeper_chat_transcript.Media_stretch _
                         | Keeper_chat_transcript.Thinking_stretch _
                         | Keeper_chat_transcript.Tool_stretch _
                         | Keeper_chat_transcript.Reply_of_segment _
@@ -3104,6 +3106,11 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                        (Keeper_chat_transcript.skill_rows
                           ~full:(state.msg_tool_visibility = Masc_tui_types.Tools_full)
                           skills))
+              | Keeper_chat_transcript.Drawn_media media ->
+                  let body = Masc_tui_chat_media.append_text ~text:""
+                      [Masc_tui_chat_media.of_generated media]
+                    |> Keeper_chat.terminal_safe_text in
+                  entry Message_layout.Keeper (label keeper_label) body
               | Keeper_chat_transcript.Drawn_text text
               | Keeper_chat_transcript.Drawn_reply text ->
                   (* No name on the heading, as on the committed rows:
@@ -3124,7 +3131,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                           queue or control state. Keep that distinction in
                           the body too, where narrow gutters cannot hide it. *)
                        entry Message_layout.Status "RECEIPT" ("접수 당시: " ^ text)
-                   | Text_stretch _ | Thinking_stretch _ | Tool_stretch _
+                   | Text_stretch _ | Media_stretch _ | Thinking_stretch _ | Tool_stretch _
                    | Unstreamed_skills | Reply_of_segment _ | Error_of_segment _ ->
                        entry Message_layout.Status (label "STATUS") text)
               | Keeper_chat_transcript.Drawn_error _
@@ -3145,7 +3152,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                  (preludes @ List.filter (fun (item : Keeper_chat_transcript.drawn_item) ->
                       match item.origin with
                         | Admission_of_request _ -> false
-                        | Text_stretch _ | Thinking_stretch _ | Tool_stretch _ | Unstreamed_skills
+                        | Text_stretch _ | Media_stretch _ | Thinking_stretch _ | Tool_stretch _ | Unstreamed_skills
                         | Reply_of_segment _ | Error_of_segment _ -> true)
                     (Keeper_chat_transcript.drawn transcript))))
     in
@@ -3445,7 +3452,8 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
           , ( None
             | Some
                 ( Keeper_chat_transcript.Text_stretch _
-                | Keeper_chat_transcript.Thinking_stretch _
+                | Keeper_chat_transcript.Media_stretch _
+                        | Keeper_chat_transcript.Thinking_stretch _
                 | Keeper_chat_transcript.Tool_stretch _
                 | Keeper_chat_transcript.Unstreamed_skills
                 | Keeper_chat_transcript.Reply_of_segment _
@@ -3623,7 +3631,8 @@ let search_anchor_of_tag = function
       ( log
       , Some
           (( Keeper_chat_transcript.Text_stretch _
-           | Keeper_chat_transcript.Thinking_stretch _
+           | Keeper_chat_transcript.Media_stretch _
+                        | Keeper_chat_transcript.Thinking_stretch _
            | Keeper_chat_transcript.Tool_stretch _
            | Keeper_chat_transcript.Unstreamed_skills
            | Keeper_chat_transcript.Reply_of_segment _
@@ -3667,6 +3676,7 @@ let projection_index_of_anchor projection =
                | Some (Keeper_chat_transcript.Admission_of_request request_id) ->
                    add (Admission_request request_id) at
                | None | Some (Keeper_chat_transcript.Text_stretch _)
+               | Some (Keeper_chat_transcript.Media_stretch _)
                | Some (Keeper_chat_transcript.Thinking_stretch _)
                | Some (Keeper_chat_transcript.Tool_stretch _)
                | Some (Keeper_chat_transcript.Unstreamed_skills)

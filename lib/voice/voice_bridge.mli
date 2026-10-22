@@ -286,7 +286,7 @@ val amplitude_of_db : float -> float
 
 (** {1 Microphone record + transcribe} *)
 
-val recorder_refusal_message : Process_eio.spawn_refusal -> string
+val recorder_refusal_message : ?device:string -> Process_eio.spawn_refusal -> string
 (** What {!record_and_transcribe} answers when its recorder never started.
     A missing executable is named with the command that installs it -- a fresh
     mac has no sox, which carries [rec] -- and every other refusal keeps the
@@ -405,16 +405,32 @@ type capture_level =
     A measured zero amplitude is [Level_observed neg_infinity]; an unreadable
     recording is [Level_unavailable], never a fabricated silent measurement. *)
 
+val resolved_audio_device :
+  ?env:string array -> pick:string option -> unit -> string option
+(** The device a capture opens, resolved once: an [AUDIODEV] in [env] wins
+    when it names a device, a blank one is no name and falls through, and
+    the stored pick is next. [env] defaults to this process's environment.
+    The panel and every capture resolve through this one place, so what the
+    panel names is what sox opens. [None] leaves the fallback to the caller
+    (the panel probes the platform; a capture opens the default). *)
+
 val record_and_transcribe :
   agent_id:string ->
   ?timeout_sec:float ->
   ?language_code:string ->
   ?noise_floor:float ->
+  ?audio_device:string ->
   ?on_level:(capture_level -> unit) ->
   ?should_stop:(unit -> stop_request option) ->
   unit ->
   (Yojson.Safe.t, string) result
 (** Record from the microphone (with beep tones) and transcribe via STT.
+
+    [audio_device] is passed to the recorder as AUDIODEV, the way sox reads a
+    device when its [rec] alias is used. [None] records whatever the
+    operating system calls the default input, exactly as before this option
+    existed. A device the system no longer has fails the capture, and that
+    failure carries sox's own sentence plus the device it was asked for.
 
     Where the recording ends is decided here rather than by sox: the level is
     re-read ten times a second while the file is being written, speech starts

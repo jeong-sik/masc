@@ -22,6 +22,7 @@ type t = {
   send_on_stop : bool option;
   user_input_priority_next : bool option;
   midi_soundfont : string option;
+  audio_input_device : string option;
 }
 
 let runtime_toml_path ~base_path =
@@ -220,6 +221,16 @@ let send_on_stop_of_text text =
     Option.map (fun stt -> stt.Voice_config.send_on_stop) config.Voice_config.stt
   | Ok None | Error _ -> None
 
+(* The input device captures open, [tui].audio_input_device. Pure, so a test
+   can hand it a parsed doc without a file; absent reads as "no stored pick",
+   the same way theme reads, and so does a blank value: the changelog's "set
+   it to \"\"" turns the pick off, and a blank name passed on would reach the
+   recorder as an empty AUDIODEV. *)
+let audio_input_device_of_doc doc =
+  match Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".audio_input_device") with
+  | Some device when String.trim device <> "" -> Some (String.trim device)
+  | Some _ | None -> None
+
 let load ~base_path =
   let path = runtime_toml_path ~base_path in
   (* One read of the file, two parsers over it: the [tui] keys through the
@@ -267,6 +278,7 @@ let load ~base_path =
     midi_soundfont =
       read (fun doc ->
           Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".midi_soundfont"));
+    audio_input_device = read audio_input_device_of_doc;
   }
 
 type startup_snapshot = {
@@ -333,6 +345,25 @@ let set_tui_string ~base_path ~key value =
 
 let set_board_sort ~base_path sort = set_tui_string ~base_path ~key:"board_sort" sort
 let set_candle ~base_path candle = set_tui_string ~base_path ~key:"candle" candle
+
+let text_with_audio_input_device content ~device =
+  Toml_line_editor.edit_table_scalar content
+    ~path:tui_table ~key:"audio_input_device" ~value:device
+
+(* Store the input device captures open, [tui].audio_input_device, in the same
+   runtime.toml {!load} reads and under the same write lock as the theme pick.
+   [None] withdraws a stored device, so captures go back to whatever the
+   operating system calls the default input. The error is returned rather than
+   swallowed: the next capture opens on whatever the file still says, and an
+   operator who is not told would take the notice as proof it was stored. *)
+let set_audio_input_device ~base_path device =
+  match
+    Runtime.edit_config_text
+      ~runtime_config_path:(runtime_toml_path ~base_path)
+      (fun content -> text_with_audio_input_device content ~device)
+  with
+  | Ok (_ : Runtime.config_commit_receipt) -> Ok ()
+  | Error message -> Error message
 
 (* [tui].help_hint_shown = true, written once when the first input retires
    the opening screen's help-door line, under the same lock and in the same

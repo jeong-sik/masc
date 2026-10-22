@@ -2903,6 +2903,35 @@ let launch_voice_agent_voice_save state ~mailbox
        enqueue_async mailbox (Voice_agent_voice_saved (Error "Eio switch is unavailable")))
 ;;
 
+(* The input device captures open, read at boot from [tui].audio_input_device
+   (the same load as the soundfont). The wizard lists it and every capture
+   launches with it; an AUDIODEV in the operator's environment still wins, so
+   an explicit export keeps meaning what sox reads it to mean. *)
+let boot_audio_input_device : string option ref = ref None
+
+(* One resolution for the panel and every capture: the environment wins when
+   it names a device (the way sox reads AUDIODEV), the stored pick is next,
+   and only a panel asked to name a device falls back to the probe. Both go
+   through {!Masc.Voice_bridge.resolved_audio_device}, so what the panel
+   names is what the recorder opens. *)
+let resolved_audio_input_device ~for_display =
+  match Masc.Voice_bridge.resolved_audio_device ~pick:!boot_audio_input_device () with
+  | Some device -> Some device
+  | None when not for_display -> None
+  | None ->
+    (match Masc_tui_audio_device.default_input () with
+     | Masc_tui_audio_device.Default_input name -> Some name
+     (* The panel shows "unknown" for each of these; the log keeps them
+        apart, because a machine with no input selected and a probe
+        that could not read the report call for different fixes. *)
+     | Masc_tui_audio_device.No_default_input ->
+       Log.Transport.info "voice: the audio report marks no device as the default input";
+       None
+     | Masc_tui_audio_device.Probe_failed reason ->
+       Log.Transport.warn "voice: the default input device could not be read: %s" reason;
+       None
+     | Masc_tui_audio_device.No_probe_on_this_platform -> None)
+
 let launch_voice_config_load state ~mailbox =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
@@ -2919,25 +2948,7 @@ let launch_voice_config_load state ~mailbox =
         Error (Masc_tui_http.named_refusal "voice config" ~status:code ~body)
       | Error message -> Error message
     in
-    let device =
-      (* AUDIODEV wins when set, the way sox reads it; otherwise CoreAudio's
-         default, which is what an unset AUDIODEV means. *)
-      match Sys.getenv_opt "AUDIODEV" with
-      | Some device when String.trim device <> "" -> Some (String.trim device)
-      | Some _ | None ->
-        (match Masc_tui_audio_device.default_input () with
-         | Masc_tui_audio_device.Default_input name -> Some name
-         (* The panel shows "unknown" for each of these; the log keeps them
-            apart, because a machine with no input selected and a probe
-            that could not read the report call for different fixes. *)
-         | Masc_tui_audio_device.No_default_input ->
-           Log.Transport.info "voice: the audio report marks no device as the default input";
-           None
-         | Masc_tui_audio_device.Probe_failed reason ->
-           Log.Transport.warn "voice: the default input device could not be read: %s" reason;
-           None
-         | Masc_tui_audio_device.No_probe_on_this_platform -> None)
-    in
+    let device = resolved_audio_input_device ~for_display:true in
     (* The admin read, which names each endpoint. The public config route above
        answers three booleans and no identity, so a panel built only on it can
        say that a fallback exists and not which one. *)
@@ -16939,6 +16950,10 @@ let launch_voice_capture ?(calibrate = false) state ~mailbox ~keeper =
   let capture noise_floor =
     match Masc.Voice_bridge.record_and_transcribe
         ~agent_id:keeper ?noise_floor
+        (* The operator's stored pick travels to the recorder, so a capture
+           from the panel opens the device the config names, not whatever the
+           OS currently calls the default input. *)
+        ?audio_device:(resolved_audio_input_device ~for_display:false)
         ~on_level:(fun level -> enqueue_async mailbox (Voice_level { keeper; level }))
         ~should_stop:(fun () -> state.voice_stop_requested) () with
     | Error error -> Voice_failed { keeper; error }
@@ -22067,6 +22082,7 @@ let apply_startup_settings state (tui_settings : Masc_tui_config.t) =
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
   boot_midi_soundfont := tui_settings.midi_soundfont;
+  boot_audio_input_device := tui_settings.audio_input_device;
   (match tui_settings.last_chat_keeper with
    | Ok None -> ()
    | Ok (Some keeper) -> state.home_last_chat <- Recorded_chat keeper

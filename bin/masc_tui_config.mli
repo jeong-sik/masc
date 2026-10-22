@@ -21,6 +21,11 @@ type t = private {
       attachments with. [None] where the file, the table or the key is
       absent — MIDI playback then hands the file to the local app and says
       the setting is missing. *)
+  audio_input_device : string option;
+  (** [tui].audio_input_device: the input device voice captures open. [None]
+      where the file, the table or the key is absent — captures then record
+      whatever the operating system calls the default input, exactly as they
+      did before the key existed. *)
 }
 
 val opening_keeper_of_doc :
@@ -153,7 +158,33 @@ val user_input_priority_next_of_doc : Keeper_toml_loader.toml_doc -> bool option
     requests first place after the server confirms its admission.
     [None] where absent -- defaults to [false]. *)
 
+val audio_input_device_of_doc : Keeper_toml_loader.toml_doc -> string option
+(** [tui].audio_input_device, given an already-parsed runtime.toml document.
+    [None] when the key (or the [tui] table) is absent. Pure, so the caller's
+    file read stays separate from the extraction. *)
+
 val set_board_sort : base_path:string -> string -> (unit, string) result
+
+val set_audio_input_device :
+  base_path:string -> string option -> (unit, string) result
+(** Store the input device voice captures open, [tui].audio_input_device, in
+    the same runtime.toml {!load} reads, under the same lock and in the same
+    file as {!set_theme}. [None] withdraws a stored device, so the next
+    capture records whatever the operating system calls the default input.
+    [Error] carries what stopped the write; the next capture opens on
+    whatever the file still says, so the caller has to say which of the two
+    happened. Captures resolve their device once through
+    {!Masc.Voice_bridge.resolved_audio_device} — environment, this pick,
+    then the platform probe — so the panel, the capture and sox open the
+    same one. A write whose durability could not be confirmed is [Ok], the
+    way {!set_theme} treats the same case. *)
+
+val text_with_audio_input_device :
+  string -> device:string option -> string
+(** runtime.toml text with [tui].audio_input_device set to [device], or
+    without the key when [device] is [None]. The [tui] table is created when
+    absent; comments and every other line are kept. Pure; the commit is
+    {!set_audio_input_device}'s. *)
 
 val set_candle : base_path:string -> string -> (unit, string) result
 (** Store how /about draws the candle, [\[tui\].candle], under

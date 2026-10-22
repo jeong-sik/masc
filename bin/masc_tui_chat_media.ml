@@ -8,14 +8,17 @@ type t =
   | Mermaid of Blocks.mermaid_block
 
 let of_generated (media : Masc.Keeper_chat_events.generated_media) =
+  let attachment name =
+    Attach {name; dims=None; src=Some media.media_ref; svg=None;
+      ph=None; via=None; size=None; data=None; mime_type=Some media.media_type;
+      size_bytes=None; kind=None} in
   match Masc.Keeper_chat_media_store.category_of_media_type media.media_type with
   | Masc.Keeper_chat_media_store.Image -> Image {src=media.media_ref; cap=None}
   | Masc.Keeper_chat_media_store.Audio ->
       Voice {secs=None; wave=None; via=None; size=None; transcript=None; src=Some media.media_ref}
+  | Masc.Keeper_chat_media_store.Midi -> attachment "generated.mid"
   | Masc.Keeper_chat_media_store.Document | Masc.Keeper_chat_media_store.Other ->
-      Attach {name="generated media"; dims=None; src=Some media.media_ref; svg=None;
-        ph=None; via=None; size=None; data=None; mime_type=Some media.media_type;
-        size_bytes=None; kind=None}
+      attachment "generated media"
 
 let of_json json =
   match Blocks.blocks_of_yojson json with

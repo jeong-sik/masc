@@ -20,6 +20,7 @@ type persist_error =
 type media_category =
   | Image
   | Audio
+  | Midi
   | Document
   | Other
 

@@ -1847,8 +1847,11 @@ diagram within one reply, and staged composer images. The catalog covers the
 currently loaded conversation, selected live speech and generated media,
 excluding thinking and superseded attempts. A generated image becomes available
 once its original response has persisted the completed block, including while
-the same operation continues through a tool call. Generated audio is available
-through `/listen`. Preparing audio or MIDI runs in the background, including the
+the same operation continues through a tool call. Generated audio and Standard
+MIDI files (`audio/midi` or `audio/x-midi`) are available through `/listen`.
+Generated MIDI retains its `.mid` attachment and original peer source in live
+chat and saved history; it uses the configured MIDI synth. Preparing audio or
+MIDI runs in the background, including the
 workspace-bound peer download, local byte read, cache save and MIDI metadata.
 A newer `/listen`, leaving chat, changing Keeper, or workspace reconnection retires
 the pending playback authority. Returning to the original Keeper does not revive

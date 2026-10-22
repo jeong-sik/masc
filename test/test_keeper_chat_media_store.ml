@@ -132,6 +132,7 @@ let media_category_testable =
         (match c with
          | M.Image -> "Image"
          | M.Audio -> "Audio"
+         | M.Midi -> "Midi"
          | M.Document -> "Document"
          | M.Other -> "Other"))
     ( = )

@@ -26,6 +26,7 @@ type persist_error =
 type media_category =
   | Image
   | Audio
+  | Midi
   | Document
   | Other
 
@@ -52,6 +53,8 @@ let known_media =
   ; { media_type = "audio/wav"; ext = "wav"; content_type = "audio/wav"; category = Audio }
   ; { media_type = "audio/x-wav"; ext = "wav"; content_type = "audio/wav"; category = Audio }
   ; { media_type = "audio/ogg"; ext = "ogg"; content_type = "audio/ogg"; category = Audio }
+  ; { media_type = "audio/midi"; ext = "mid"; content_type = "audio/midi"; category = Midi }
+  ; { media_type = "audio/x-midi"; ext = "mid"; content_type = "audio/midi"; category = Midi }
   ; { media_type = "application/pdf"; ext = "pdf"; content_type = "application/pdf"; category = Document }
   ]
 

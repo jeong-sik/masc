@@ -99,8 +99,47 @@ let test_persisted_occurrence_coverage_and_playback () =
      | Some {source=`Server_path reference;_} -> reference="/api/v1/media/audio"
      | _ -> false)
 
+let test_generated_midi_live_and_reload_playback () =
+  let raw = "MThd\000\000\000\006\000\000\000\001\001\224"
+    ^ "MTrk\000\000\000\016\000\192\032\000\144\060\064"
+    ^ "\131\096\128\060\000\000\255\047\000" in
+  let base_dir = Filename.temp_dir "generated_midi_" "" in
+  List.iter (fun mime ->
+    let accum = Keeper_stream_media_accum.create () in
+    Keeper_stream_media_accum.on_event accum
+      (Agent_core.Types.ContentBlockDelta {index=0; delta=MediaDelta
+        {media_type=mime;source_type=Base64;data=Base64.encode_string raw}});
+    Keeper_stream_media_accum.on_event accum (Agent_core.Types.ContentBlockStop {index=0});
+    let blocks = Keeper_stream_media_accum.to_chat_blocks ~base_dir accum in
+    let reference = match blocks with
+      | [Masc.Keeper_chat_blocks.Attach {src=Some reference;mime_type=Some observed;_}]
+          when String.equal mime observed -> reference
+      | _ -> fail "generated MIDI lost its retained attachment source/type" in
+    let original = media ~mime reference in
+    let streamed = Live.feed (Live.create ()) (wire (E.Agent_core_media_delta original)) in
+    let live = match streamed with
+      | [{Live.delta=Live.Media observed;_}] -> Media.of_generated observed
+      | _ -> fail "generated MIDI did not reach the live consumer" in
+    let reloaded = Media.of_json (Masc.Keeper_chat_blocks.blocks_to_yojson blocks) in
+    check bool "live and reload retain exactly the same MIDI source" true (reloaded=[live]);
+    List.iter (fun values -> match Media.newest_playable values with
+      | Some {kind=`Midi;source=`Server_path path;_} ->
+          check string "MIDI playback reads the original peer source" reference path
+      | _ -> fail "retained generated MIDI was skipped or routed to an audio player")
+      [[live];reloaded];
+    let token = Filename.basename reference in
+    match Masc.Keeper_chat_media_store.file_path_of_token ~base_dir ~token with
+    | None -> fail "generated MIDI source disappeared from the store"
+    | Some path ->
+        check string "served MIDI type stays canonical" "audio/midi"
+          (Masc.Keeper_chat_media_store.content_type_of_path path);
+        check string "stored MIDI keeps all original bytes" raw
+          (In_channel.with_open_bin path In_channel.input_all))
+    ["audio/midi";"audio/x-midi"]
+
 let () = run "Generated media response ownership" ["transport",[
   test_case "wire journal and duplicate replay" `Quick test_wire_journal_and_chunked_replay;
   test_case "malformed media cannot acquire ownership" `Quick test_malformed_media_has_no_ownership];
   "operation",[test_case "response attempt and terminal ownership" `Quick test_response_and_attempt_authority;
+  test_case "generated MIDI live and reload playback" `Quick test_generated_midi_live_and_reload_playback;
   test_case "durable occurrence coverage and peer playback" `Quick test_persisted_occurrence_coverage_and_playback]]

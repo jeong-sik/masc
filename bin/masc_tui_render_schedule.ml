@@ -179,7 +179,7 @@ let keeper_columns_used_width columns =
    ([antigravity_subscription.claude-opus-4-6-thinking]), so every long id was
    elided while the slack the row had left went on to the task column -- 49
    cells of it, for an id this file's own note calls short by construction. *)
-let allocate_keeper_columns ~inner_width ~widest_runtime =
+let allocate_keeper_columns ~prioritize_runtime ~inner_width ~widest_runtime =
   let inner_width = max 0 inner_width in
   let show_flags = inner_width >= keeper_flags_minimum_inner_width in
   let show_runtime = inner_width >= keeper_runtime_minimum_inner_width in
@@ -194,19 +194,24 @@ let allocate_keeper_columns ~inner_width ~widest_runtime =
   let slack = inner_width - keeper_columns_used_width base in
   if slack <= 0 then base
   else
-    let take budget available = (min budget available, available - budget) in
-    let name_growth, slack =
-      take
-        (min (keeper_maximum_name_width - keeper_minimum_name_width) slack)
-        slack
+    let take budget available =
+      let taken = min budget available in
+      taken, available - taken
     in
+    let name_budget = keeper_maximum_name_width - keeper_minimum_name_width in
     let runtime_ceiling = max keeper_minimum_runtime_width widest_runtime in
-    let runtime_growth, slack =
-      if show_runtime then
-        take
-          (min (runtime_ceiling - keeper_minimum_runtime_width) slack)
-          slack
-      else (0, slack)
+    let runtime_budget = runtime_ceiling - keeper_minimum_runtime_width in
+    let name_growth, runtime_growth, slack =
+      if prioritize_runtime && show_runtime then
+        let runtime_growth, slack = take runtime_budget slack in
+        let name_growth, slack = take name_budget slack in
+        name_growth, runtime_growth, slack
+      else
+        let name_growth, slack = take name_budget slack in
+        let runtime_growth, slack =
+          if show_runtime then take runtime_budget slack else 0, slack
+        in
+        name_growth, runtime_growth, slack
     in
     { base with
       kcol_name = base.kcol_name + name_growth

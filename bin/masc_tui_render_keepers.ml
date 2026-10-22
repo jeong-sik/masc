@@ -79,28 +79,55 @@ let keeper_runtime_cells (runtime : keeper_runtime option) =
       Message_layout.display_width phase
       + Message_layout.display_width runtime_id
 
-let keeper_runtime_cell ~width (runtime : keeper_runtime option) =
-  match runtime with
-  | None -> fit_width Masc_tui_theme.Glyph.no_value width
-  | Some row ->
-      (* Running is the normal lifecycle and stays silent — eleven rows all
-         reading "running" said nothing any row could act on; the cells go to
-         the runtime identity instead. Every other phase keeps its word. *)
-      (* A paused keeper says so instead of saying its phase. [kr_paused] is
-         a separate reading from [kr_phase] and the two disagree in practice:
-         on the live gate, two of sixteen keepers report phase offline with
-         paused true, and a third reports offline with paused false. The word
-         "offline" drew all three the same, and the difference is the one an
-         operator acts on -- a person stopped that one, so nothing is wrong
-         with it. The phase this replaces is still on the chat header, which
-         draws [kr_phase] unconditionally. *)
-      let phase, runtime_id = keeper_runtime_parts row in
-      let phase_width = Message_layout.display_width phase in
-      if phase_width >= width then fit_width (keeper_runtime_label runtime) width
-      else
-        fit_width
-          (phase ^ fit_runtime_id (width - phase_width) runtime_id)
-          width
+let keeper_failure_cause_word = function
+  | Keeper_failure_heartbeat -> "heartbeat"
+  | Keeper_failure_turn -> "turn"
+  | Keeper_failure_provider -> "provider"
+  | Keeper_failure_configuration -> "config"
+  | Keeper_failure_client_recovery -> "client recovery"
+  | Keeper_failure_fiber -> "fiber"
+  | Keeper_failure_exception -> "exception"
+  | Keeper_failure_operator_interrupt -> "operator interrupt"
+
+let keeper_current_activity_word = function
+  | Keeper_activity_idle -> "idle"
+  | Keeper_activity_waiting -> "waiting"
+  | Keeper_activity_running -> "running"
+  | Keeper_activity_streaming -> "streaming"
+  | Keeper_activity_tool -> "tool"
+  | Keeper_activity_preparing -> "preparing"
+  | Keeper_activity_attempt_failed -> "attempt failed"
+  | Keeper_activity_unknown -> "unknown"
+
+let keeper_failure_context ~now status =
+  let cause, age =
+    match status.kfs_last_failure with
+    | None -> ("unknown", "unknown time")
+    | Some failure ->
+        ( keeper_failure_cause_word failure.kf_cause
+        , match failure.kf_at_unix with
+          | None -> "unknown time"
+          | Some since -> Option.value (Message_layout.age_text ~now ~since) ~default:"unknown time" )
+  in
+  keeper_current_activity_word status.kfs_current_activity
+  ^ " · last failed · " ^ cause ^ " · " ^ age
+
+let keeper_runtime_cell ~width ?failure_context (runtime : keeper_runtime option) =
+  match failure_context with
+  | Some text -> fit_width text width
+  | None ->
+      (match runtime with
+       | None -> fit_width Masc_tui_theme.Glyph.no_value width
+       | Some row ->
+           (* Running is the normal lifecycle and stays silent; the cell goes
+              to the runtime identity unless failure context takes priority. *)
+           let phase, runtime_id = keeper_runtime_parts row in
+           let phase_width = Message_layout.display_width phase in
+           if phase_width >= width then fit_width (keeper_runtime_label runtime) width
+           else
+             fit_width
+               (phase ^ fit_runtime_id (width - phase_width) runtime_id)
+               width)
 
 (* One activation mode and the sandbox declaration from the roster row. *)
 let keeper_flag_cell (runtime : keeper_runtime option) =
@@ -198,6 +225,10 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     Message_layout.fit_middle columns.kcol_name
       (Terminal_text.single_line keeper.k_name)
   in
+  let failure_context =
+    Option.map (keeper_failure_context ~now)
+      (Tui_decode.keeper_failure_status_of_readings ~health ~turn ~runtime)
+  in
   let task =
     fit_width
       (match keeper.k_activity with
@@ -246,7 +277,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
          Ansi.reset)
     ; (if columns.kcol_show_runtime then
          " " ^ (Theme.recede ())
-         ^ keeper_runtime_cell ~width:columns.kcol_runtime runtime
+         ^ keeper_runtime_cell ~width:columns.kcol_runtime ?failure_context runtime
          ^ Ansi.reset
        else "")
     ; " "
@@ -525,6 +556,15 @@ let render_keeper_list (state : state) =
 
   (* Measured over every reading rather than the rows on screen, so the
      columns do not move while a reader scrolls. *)
+  let has_failing_keeper =
+    List.exists
+      (fun (reading : Keeper_control.reading) ->
+        match Keeper_control.health reading with
+        | Some value ->
+            Tui_decode.keeper_health_reading value = Tui_decode.Health_failing
+        | None -> false)
+      readings
+  in
   let widest_runtime =
     List.fold_left
       (fun widest (reading : Keeper_control.reading) ->
@@ -534,11 +574,18 @@ let render_keeper_list (state : state) =
           | Keeper_control.Absent | Keeper_control.Unobserved
           | Keeper_control.Invalid _ -> None
         in
-        max widest (keeper_runtime_cells runtime))
+        let failure_context_width =
+          match Keeper_control.health reading with
+          | Some value when
+              Tui_decode.keeper_health_reading value = Tui_decode.Health_failing -> 60
+          | None | Some _ -> 0
+        in
+        max widest (max failure_context_width (keeper_runtime_cells runtime)))
       0 readings
   in
   let columns =
-    Render_schedule.allocate_keeper_columns ~inner_width:inner ~widest_runtime
+    Render_schedule.allocate_keeper_columns
+      ~prioritize_runtime:has_failing_keeper ~inner_width:inner ~widest_runtime
   in
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
 

@@ -135,6 +135,7 @@ let launch_supervised_fiber_body
               (fun current ->
                 { current with
                   last_failure_reason = Some (Keeper_registry.Exception detail)
+                ; last_failure_at = Some (Time_compat.now ())
                 })
             |> Keeper_registry.exact_update_succeeded
                  reg
@@ -615,6 +616,7 @@ let launch_supervised_fiber
          (fun current ->
             { current with
               last_failure_reason = Some (Keeper_registry.Exception reason)
+            ; last_failure_at = Some (Time_compat.now ())
             })
        |> Keeper_registry.exact_update_succeeded
             reg

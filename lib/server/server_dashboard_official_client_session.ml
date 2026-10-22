@@ -308,7 +308,7 @@ let clear_matching_registry_recovery ~base_path ~keeper_name ~runtime_id ~recove
                })
           when String.equal current_runtime_id runtime_id
                && String.equal current_recovery_id recovery_id ->
-          { current with last_failure_reason = None }
+          { current with last_failure_reason = None; last_failure_at = None }
         | Some
             ( Keeper_registry.Official_client_recovery_required _
             | Keeper_registry.Heartbeat_consecutive_failures _

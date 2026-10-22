@@ -26,7 +26,11 @@ let clear_error ~base_path name ~update_entry =
 ;;
 
 let set_failure_reason ~base_path name reason ~update_entry =
-  update_entry ~base_path name (fun e -> { e with last_failure_reason = reason })
+  update_entry ~base_path name (fun e ->
+    { e with
+      last_failure_reason = reason
+    ; last_failure_at = Option.map (fun _ -> Time_compat.now ()) reason
+    })
 ;;
 
 let set_last_correlation_id ~base_path name cid ~update_entry =
@@ -50,5 +54,6 @@ let restore_supervisor_state
       restart_count
     ; crash_log
     ; last_failure_reason = None
+    ; last_failure_at = None
     })
 ;;

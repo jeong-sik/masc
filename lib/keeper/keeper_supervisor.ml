@@ -347,6 +347,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
                           restart_count = attempt
                         ; crash_log = keep_last_n 5 (now, crash_msg) old_crash_log
                         ; last_failure_reason = None
+                        ; last_failure_at = None
                         })
                     : Keeper_registry.exact_update_result);
                 launch_supervised_fiber

@@ -103,6 +103,7 @@ type registry_entry =
   ; crash_log : (float * string) list
   ; last_error : string option
   ; last_failure_reason : failure_reason option
+  ; last_failure_at : float option
   ; turn_consecutive_failures : int
   ; turn_attempt_state : turn_attempt_state option Atomic.t
   ; current_turn_switch : Eio.Switch.t option Atomic.t

@@ -219,6 +219,7 @@ describe('InternalAgentsMonitor', () => {
         run_id: 'jev-board-answer', run_kind: 'exact_output', lane: 'board_attention_exact',
         subject_id: 'board-candidate-1', actor: 'keeper-a', started_at: 1,
         status, elapsed_s: 0.1, selected_slot: null, ...persistence,
+        completion_origin: 'producer', usage: null,
         skill_evidence: { state: 'no_keeper_skills' },
         payload_availability: { input: { state: 'available' }, output: { state: 'available' } },
         input: { kind: 'exact', payload: { candidate_id: 'board-candidate-1' } },
@@ -815,6 +816,7 @@ describe('InternalAgentsMonitor', () => {
         run_id: 'payload-native', run_kind: 'exact_output', lane: 'librarian_exact',
         subject_id: null, actor: 'keeper-fixture', started_at: 1, status: 'succeeded',
         elapsed_s: 0.4, selected_slot: null, skill_evidence: { state: 'no_keeper_skills' },
+        completion_origin: 'producer', usage: null,
         input: { kind: 'exact', payload: {
           request: 'input-original',
           actual_input: {
@@ -834,6 +836,8 @@ describe('InternalAgentsMonitor', () => {
         delete raw.output
         delete raw.elapsed_s
         delete raw.selected_slot
+        delete raw.completion_origin
+        delete raw.usage
       }
       const run = parseExactLaneRunResponse({ generated_at: '2026-09-08T00:00:00Z', run: raw })
       api.fetchExactLaneRun.mockResolvedValue(run)
@@ -878,6 +882,7 @@ describe('InternalAgentsMonitor', () => {
         run_id: 'failed-exact', run_kind: 'exact_output', lane: 'librarian_exact',
         subject_id: null, actor: 'keeper-fixture', started_at: 1, status: 'failed',
         elapsed_s: 0.1, selected_slot: 'glm-coding.glm-5.3-flash',
+        completion_origin: 'producer', usage: null,
         code: 'missing_deadline', detail: 'target has no finite request window',
         input: { kind: 'exact', payload: { request: 'input' } },
         output: { state: 'failed' },

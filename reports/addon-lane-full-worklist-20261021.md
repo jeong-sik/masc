@@ -94,7 +94,7 @@ A의 이번 Addon 변경 닫기는 대상 범위가 다르며, 같은 수정이�
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | D01 | Addon별 모델 route와 기능 활성화의 독립 선택 검증 확장 | Browser broker 있음 | LLM 없는 동작은 독립 실행되고, 설치/출력별 선택 모델이 실제 호출에 반영 |
-| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | [#44768](https://github.com/jeong-sik/masc/pull/44768)·[#44769](https://github.com/jeong-sik/masc/pull/44769)에 원래 요청 identity·grant·완전 domain decode·terminal unknown 처리 source 구현. 독립 source/response 검토 PASS; OCaml 실행 검사는 아직 미완료 | `Consumer_request_schema` 권한·package baseline·요청 digest 재사용; Grade enum·keeper 집합·weight 상한은 Candle 완전 domain decode로 검증 |
+| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | [#44768](https://github.com/jeong-sik/masc/pull/44768)·[#44769](https://github.com/jeong-sik/masc/pull/44769)에 원래 요청 identity·grant·완전 domain decode·terminal unknown 처리 source 구현. 독립 source/response 검토 PASS; OCaml 실행 검사는 아직 미완료 | `Consumer_request_schema`의 권한·package baseline·요청 digest를 재사용; Grade enum·keeper 집합·weight 상한은 Candle의 완전한 domain decode로 검증 |
 | D03 | 모델 호출 전 요청 보존 및 원래 identity 결속 | 기반 있음 | request·stage·input·schema·route·trace를 보존한 뒤 한 번 dispatch |
 | D04 | 오류·거절·불확실 결과의 typed 처리 일관화 | 도메인별 차이 있음 | transport 불가/잘못된 출력/실행 거절/효과 불확실의 재시도 의미를 유지 |
 | D05 | credential·provider admission·동시 실행 권한을 host에 유지 | Browser 검증 있음 | worker/child에 비밀 유출 없음; 실제 provider별 queue·취소·동시성 동작 확인 |
@@ -636,6 +636,12 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - `Lane_run_identity`는 원래 작업의 관측 ID와 label만 소유한다. 현재 builtin 모델 설정은 `Standalone_lane`, 둘의 연결은 current route → retained identity 단방향이다. Exact registry replay·HTTP history filter·TUI list/detail와 비동기 응답의 타입을 관측 identity로 바꿨다. Verifier/Stagehand를 Exact registry에 허용하지 않는다.
 - 실제 파일에 저장한 Curator 관측을 재열고 server page/detail→TUI decoder로 읽는 기존 시나리오를 확장했다. 원래 run ID와 측정/미측정 duration을 보존한다. 파싱·독립 소스 검토와 새 compiled 실행을 구분하며 과거226건을 새 타입 변경의 성공 증거로 이월하지 않는다.
 - [설계와 후속 경계](../docs/design/lane-retained-observation-identity.md): 이 선행 layer에는 builtin Curator 설정/행을 유지한다. 실제 Addon 모델 projection과 두 UI의 원래 관측 진입을 연결한 뒤 제거해야 한다. Addon 설정 scope의 run ID와 Owner 요청의 원본 관측 ID를 이름으로 합성하지 않는다. 원래 A01–H06의54개 항목명·완료 기준과 실제 provider·UI·설치 요구는 유지한다.
+
+## E02/G03 Dashboard 보존 이력의 독립 진입 · 2026-10-22
+
+- Dashboard `run_history` target은 보존 관측 identity를 쓰고, current builtin 설정의 `exact` target과 분리한다. 진단 링크에서 한 번 변환하며 Runtime 설정 화면은 history target을 받지 않는다. Internal Agents는 current config matrix 부재/실패와 무관하게 원래 filtered history를 읽고 기존 workspace authority와 stale/result 처리를 유지한다.
+- 실제 router·component와 mocked API를 쓰는 선택4개 suite91건, 전체 TypeScript, 변경6개 파일 lint가 통과했다. 처음 실패한 기존 fixture8건은 격리된 base689369c0 실행에서도 재현했으며, 필수 completion_origin/usage를 fixture에 명시하고 production parser는 완화하지 않았다. 실제 서버·브라우저·설치·TUI history 진입과 builtin Curator retirement 완료는 별도다. 원래 A01–H06의54개 항목명·완료 기준은 유지한다.
+- 선행 identity source `689369c0bc938c1056cf6a21dd0c1b67d7d5f692`는 [선택 CI 39710832458](https://github.com/jeong-sik/masc/actions/runs/39710832458)의5개 suite453건과 [native CI 39710835575](https://github.com/jeong-sik/masc/actions/runs/39710835575)의29건이 실제 완료 성공했다. native는 TUI·key generator·matching server를 빌드했으며 artifact의 source/TUI/server/key-reference 해시를 대조했다. [실행 영수증](../docs/evidence/2026-10-22-curator-original-delivery/retained-identity-execution.json)은 workflow source와 feature source를 구분한다. 이 결과는 후속 Dashboard 변경·전체 회귀·설치/UI·54개 완료 증거가 아니다.
 
 
 ## 실행 증거와 이후 상위 재배치의 분리 · 2026-10-22

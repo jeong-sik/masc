@@ -4390,6 +4390,7 @@ type 'a private_jsonl_recovered =
   | Recovery_result of 'a
 
 let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?tail_bytes
+    ?(confirm_existing=(fun () -> false)) ?(verify_content=false)
     ?(append_io=durable_append_unix_io) ~io path decide =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in
@@ -4454,7 +4455,25 @@ let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?
              || Char.equal (private_jsonl_read_byte fd (Bytes.create 1) (from - 1)) '\n'
            in
            ignore (Unix.lseek fd from Unix.SEEK_SET : int);
+           let before_read = Unix.fstat fd in
            let existing = read_fd_chunks fd in
+           let same_snapshot left right =
+             left.Unix.st_dev=right.Unix.st_dev && left.st_ino=right.st_ino
+             && left.st_size=right.st_size && left.st_mtime=right.st_mtime
+             && left.st_ctime=right.st_ctime in
+           let require_snapshot expected =
+             validate_binding ();
+             if verify_content && not (same_snapshot expected (Unix.fstat fd)) then
+               raise (Sys_error "private file changed during reconciliation") in
+           require_snapshot before_read;
+           let verify_bytes expected =
+             validate_binding ();
+             let before = Unix.fstat fd in
+             ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+             let actual = read_fd_chunks fd in
+             if not (String.equal expected actual) then
+               raise (Sys_error "private file contents changed during reconciliation");
+             require_snapshot before in
            let existing =
              if starts_at_row then existing
              else match String.index_opt existing '\n' with
@@ -4489,8 +4508,16 @@ let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?
            validate_binding ();
            let suffix, result = decide existing in
            validate_binding ();
+           if verify_content then (require_snapshot before_read; verify_bytes existing);
            match suffix with
-            | None -> Ok result
+            | None ->
+              if not (confirm_existing ()) then Ok result else
+              run_unix_io ~operation:Append_fsync (fun () -> append_io.fsync fd)
+              |> Result.map_error (fun append_failure -> {append_failure;rollback_failures=[]})
+              |> Result.map (fun () ->
+                validate_binding ();
+                if verify_content then (require_snapshot before_read; verify_bytes existing);
+                result)
             | Some suffix ->
               (* See Unix.lseek: only the file-position side effect is required. *)
               let original_length = Unix.lseek fd 0 Unix.SEEK_END in
@@ -4499,7 +4526,31 @@ let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?
                 ~fd
                 ~original_length
                 suffix
-              |> Result.map (fun () -> validate_binding (); result)))))
+              |> Result.map (fun () ->
+                validate_binding ();
+                if verify_content then verify_bytes (existing ^ suffix);
+                result)))))
+;;
+
+type 'a private_file_decision =
+  | Refuse_update of 'a
+  | Confirm_existing of 'a
+  | Append_confirmed of string * 'a
+
+let reconcile_private_file_durable_locked_with_append_io_for_testing ~append_io path decide =
+  let confirmation = ref false in
+  update_private_file_durable_locked_with_io
+    ~verify_content:true ~confirm_existing:(fun () -> !confirmation) ~append_io
+    ~io:private_jsonl_transaction_unix_io path (fun existing ->
+      match decide existing with
+      | Refuse_update result -> None,result
+      | Confirm_existing result -> confirmation := true; None,result
+      | Append_confirmed (suffix,result) -> Some suffix,result)
+;;
+
+let reconcile_private_file_durable_locked_result path decide =
+  reconcile_private_file_durable_locked_with_append_io_for_testing
+    ~append_io:durable_append_unix_io path decide
 ;;
 
 let update_private_file_durable_locked_result ?(create=true) path decide =

@@ -1628,6 +1628,25 @@ val update_private_file_durable_locked_result :
   (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome
 
+type 'a private_file_decision =
+  | Refuse_update of 'a
+  | Confirm_existing of 'a
+  | Append_confirmed of string * 'a
+
+val reconcile_private_file_durable_locked_result :
+  string -> (string -> 'a private_file_decision) ->
+  ('a, durable_append_error) private_file_transaction_outcome
+(** The same complete-byte, path-mutex and exclusive data-descriptor transaction
+    as {!update_private_file_durable_locked_result}. [Refuse_update] returns
+    without a data sync; [Confirm_existing] fsyncs the actual held file and
+    revalidates its binding; [Append_confirmed] uses the existing durable append
+    and rollback. The parent is synced during setup in all cases. Refusal does
+    not repair, truncate or append bytes. Setup may create an empty private log.
+    The callback runs in the blocking worker and must not perform Eio effects or
+    re-enter this path. Existing-file confirmation failure means durability is
+    unknown, irrespective of the append rollback field. A successful value with
+    cleanup failure still establishes the data/parent durability boundary. *)
+
 (** Bounded-tail admission transaction using the same path mutex and descriptor
     lock as the strict JSONL readers and appenders. [decide] receives at most
     [max_bytes] of the existing suffix, dropping the first boundary fragment, while
@@ -1772,6 +1791,13 @@ type durable_append_io_for_testing =
   ; ftruncate : Unix.file_descr -> int -> unit
   ; fsync : Unix.file_descr -> unit
   }
+
+val reconcile_private_file_durable_locked_with_append_io_for_testing :
+  append_io:durable_append_io_for_testing -> string ->
+  (string -> 'a private_file_decision) ->
+  ('a, durable_append_error) private_file_transaction_outcome
+(** The production confirmation/append transaction with only data-descriptor
+    write, fsync and rollback calls replaced for actual fault-stage tests. *)
 
 val update_private_file_tail_durable_locked_with_append_io_for_testing :
   append_io:durable_append_io_for_testing ->

@@ -211,6 +211,43 @@ val mark_completed_unmeasured
 
 val list_runs : t -> run list
 
+type original_completion = {
+  outcome : outcome;
+  elapsed_s : float option;
+  output : Yojson.Safe.t;
+  selected_slot : string option;
+  usage : usage option;
+}
+type reconciliation_error =
+  | Invalid_original of string
+  | Original_registration_conflict
+  | Original_completion_conflict
+  | Failed_completion_conflict
+  | Reconciliation_unavailable of string
+  | Reconciliation_persistence_failed of persistence_failure
+val reconciliation_error_to_string : reconciliation_error -> string
+val reconcile_original :
+  t -> run_id:string -> lane:lane -> actor:string -> started_at:float ->
+  input:run_input -> completion:original_completion option ->
+  (unit, reconciliation_error) result
+(** Validate the complete original intent before publication. Strict current
+    log observation, full owned payload verification and durability settlement,
+    equality and conditional publication share the observation/core/file locks.
+    Equal registrations and genuine producer terminals are confirmed without
+    appending; conflicts and unavailable payloads never overwrite them. Only a
+    typed [Restart_replay] completion may be corrected by the original producer
+    terminal. Its former row remains in raw history until ordinary compaction;
+    this API does not promise permanent superseded-restart audit retention.
+    JSON null is a real payload, distinct from unavailable bytes. Conflicting
+    diagnostic overlays remain visible and refuse confirmation. Matching overlays
+    are cleared only after durable confirmation. Volatile/uninitialized or
+    incomplete histories cannot confirm. A pending original may be republished
+    at the same ID after genuine absence; already ACKed history must not call
+    this API merely because it was later evicted. Success proves historical
+    publication, including immediate ordinary retention eviction, not domain
+    completion, execution permission or permanent list membership. No callback,
+    worker, provider or domain operation runs here. *)
+
 (** A page of retained runs, newest first. [total] counts every retained run so
     a caller can report "50 of 5,908" without asking for the rest. *)
 type run_page =

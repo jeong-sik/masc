@@ -25,6 +25,19 @@ let member=Yojson.Safe.Util.member
 let json=testable Yojson.Safe.pp Yojson.Safe.equal
 let ()=Mirage_crypto_rng_unix.use_default ()
 let write path bytes=Fs_compat.mkdir_p (Filename.dirname path);Out_channel.with_open_bin path (fun c -> output_string c bytes)
+(* One real process-global observation registry, as production bootstrap
+   installs. Fixture workspaces remain separate original actors/owners. *)
+module Runs = Exact_lane_run_registry
+let registry_directory=Filename.temp_dir "curator-production-registry-" ""
+let ()=
+  at_exit (fun () -> Fs_compat.remove_tree registry_directory);
+  match Runs.install_global (Runs.replay (Filename.concat registry_directory Runs.storage_filename)) with
+  | Ok () -> () | Error Runs.Already_installed -> fail "production fixture registry was already installed"
+let observer_acknowledged record=
+  let observer=Lane_addon_request_progress.observer record.Owner.progress in
+  let acknowledged=function Lane_addon_request_receipt.Acknowledged _ -> true
+    | Unobserved | Pending _ -> false in
+  acknowledged observer.registration && acknowledged observer.completion
 let protocol_error = function
   | Protocol.Invalid_contract s | Protocol.Protocol_failed s | Protocol.Invalid_observation s -> s
   | Host_refusal (Lane_addon_call_context.Rejected s | Unavailable s | Activity_disabled s | Activity_unobserved s) -> s
@@ -64,7 +77,7 @@ let ready_summary base_path=
     ~contract:(Briefing.contract ~template:(Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective) state)
 let settle_all clock base_path store count=await clock (fun () ->
   List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=count && ready_summary base_path
-  && Curator.For_testing.is_idle ~base_path && List.for_all is_finished (records store))
+  && Curator.For_testing.is_idle ~base_path && List.for_all (fun record -> is_finished record && observer_acknowledged record) (records store))
 let publish_routes base_path urls =
   let slots=List.mapi (fun i url -> {F.id="candidate-" ^ string_of_int i;base_url=url}) urls in
   let lanes=List.map (fun output ->
@@ -394,6 +407,41 @@ let test_accepted_host_terminal_commits_off_without_worker ()=
     ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
     settle_all clock base_path store 1;
     check int "reattach only synthesizes the pending Briefing" 2 (F.post_count server))
+let test_pending_observation_recovers_on_existing_maintenance ()=
+  with_fixture ~start_owner:false (fun ~sw ~clock ~base_path ~config ~store ~source ~declaration ~server
+      ~urls:_ ~mode:_ ~delivery:_ ->
+    reconcile_until_export clock ~config;
+    let capture=capture_classification config in
+    let request_id=Capture.Request_id.to_string (Capture.request_id capture) in
+    let destination=Capture.destination capture in
+    owned (Owner.retain ~store ~scope:Capture.scope ~request_id
+      ~installation_id:destination.installation_id ~package_id:Capture.package_id
+      ~tool:Capture.tool ~request:(Capture.to_json capture));
+    let original=original_record store capture in
+    ignore (match Owner.advance ~store ~expected:original
+      ~event:(Progress.Refused {stage=Progress.Before_dispatch;evidence=`Assoc ["reason",`String "original host refusal"]})
+        |> Result.map_error Owner.update_error_to_string |> get with
+      | Owner.Stored record | Already_stored record -> record
+      | Unconfirmed detail -> fail detail);
+    save_source config source (declaration false);
+    ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
+    let path=Filename.concat registry_directory Runs.storage_filename in
+    let before=match Fs_compat.load_file_opt path with Some bytes -> bytes | None -> "" in
+    write path (before ^ "{controlled-incomplete-history");
+    Curator.start ~sw ~config;
+    await clock (fun () -> Curator.For_testing.is_idle ~base_path);
+    let observer=Progress.observer (original_record store capture).progress in
+    check bool "failed actual observation leaves original receipt pending" true
+      (match observer.registration,observer.completion with
+       | Lane_addon_request_receipt.Pending _,Pending _ -> true
+       | (Unobserved | Acknowledged _),_ | Pending _,(Unobserved | Acknowledged _) -> false);
+    write path before;
+    Curator.retry_pending_observations ~base_path:(Filename.concat base_path ".");
+    await clock (fun () -> Curator.For_testing.is_idle ~base_path
+      && observer_acknowledged (original_record store capture));
+    check int "Off observer recovery never asks the provider" 0 (F.post_count server);
+    check int "observer retry never applies a domain judgment" 0
+      (List.length (Ledger.dispositions (get (Ledger.load ~base_path)))))
 let test_finished_identity_readded_after_observed_removal ()=
   let claim="A completed source that is removed and later restored" in
   with_fixture ~claims:[claim]
@@ -490,6 +538,7 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "actual Addon On wakes sources parked while Off" `Quick test_off_then_actual_metadata_on;
   test_case "actual output publication resumes the same original request" `Quick test_original_waits_for_actual_route_publication;
   test_case "unrelated source never remints a refused original" `Quick test_refused_identity_does_not_remint_on_unrelated_fact;
+  test_case "pending Off observation recovers on existing maintenance" `Quick test_pending_observation_recovers_on_existing_maintenance;
   test_case "finished source can return as new pending work after actual removal" `Quick test_finished_identity_readded_after_observed_removal;
   test_case "only the current semantic destination supplies a size successor" `Quick test_successor_frontier_ignores_an_old_semantic_destination;
   test_case "complete malformed original inventory blocks replacement" `Quick test_complete_discovery_blocks_malformed_original;

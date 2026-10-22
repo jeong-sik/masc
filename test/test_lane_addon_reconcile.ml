@@ -291,6 +291,15 @@ let await_detached clock config id =
 let detach clock config id =
   ignore (dispatch config Runtime.Detach ["instance_id", `String id]);
   await_detached clock config id
+(* A start that fails turns its phase Failed before its run fiber has
+   finished persisting that failure. A beat in that gap leaves the entry to
+   its still-running fiber and does nothing else, so the failed attempt is
+   retired one beat later than a test expects. Observe is refused once the
+   fiber has stopped, so the next beat a test sends sees the ended attempt. *)
+let await_failed_start clock config id =
+  await clock (fun () -> phase (instance config id) = "failed");
+  await clock (fun () -> Result.is_error
+    (Runtime.dispatch ~config ~operation:Runtime.Observe (`Assoc ["instance_id", `String id])))
 
 let with_fixture f =
   let root = Filename.temp_dir "lane-reconcile-" "" in
@@ -1463,7 +1472,7 @@ let test_a_failed_start_keeps_its_first_cause_through_a_failed_cleanup () =
     state.create_refusal := Some "container name is already in use";
     ignore (reconcile config directory);
     let first_id = declared_instance config "observer" |> text "instance_id" in
-    await clock (fun () -> phase (instance config first_id) = "failed");
+    await_failed_start clock config first_id;
     state.cleanup_available := false;
     ignore (reconcile config directory);
     await clock (fun () ->
@@ -1496,7 +1505,7 @@ let test_a_waiting_failure_is_probed_and_not_retried () =
     Fake.set_up state.home false;
     ignore (reconcile config directory);
     let failed_id = declared_instance config "observer" |> text "instance_id" in
-    await clock (fun () -> phase (instance config failed_id) = "failed");
+    await_failed_start clock config failed_id;
     check string "the failure says the engine is unreachable" "engine_unreachable"
       (failed_record (instance config failed_id) |> member "cause" |> text "kind");
     check int "one attempt so far" 1 (attempts state);
@@ -1668,7 +1677,7 @@ let test_a_foreign_holder_makes_the_attempt_wait_for_the_holder_to_change () =
     write path (declaration ~id:"observer" ~manifest ());
     ignore (reconcile config directory);
     let failed_id = declared_instance config "observer" |> text "instance_id" in
-    await clock (fun () -> phase (instance config failed_id) = "failed");
+    await_failed_start clock config failed_id;
     let cause = failed_record (instance config failed_id) |> member "cause" in
     check string "the cause is a foreign slot holder" "slot_foreign" (text "kind" cause);
     check string "it names the container" "foreign-container"

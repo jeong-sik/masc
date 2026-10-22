@@ -1,5 +1,5 @@
-(** Immutable host-side destination binding, independent of execution history.
-    Caller holds the workspace process lease and serializes competing retains. *)
+(** Original host-side request and progress in one durable record. Caller holds
+    the workspace process lease and serializes retains and progress updates. *)
 type error = Binding_conflict | Store_unavailable of string | Invalid_identity of string
   | Invalid_request of string
 type retained = private {
@@ -10,6 +10,7 @@ type retained = private {
   tool : string;
   request_digest : string;
   request : Yojson.Safe.t;
+  progress : Lane_addon_request_progress.t;
 }
 val load : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   (retained option, error) result
@@ -20,7 +21,22 @@ val load : store:Lane_addon_store.t -> scope:string -> request_id:string ->
 val retain : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   installation_id:string -> package_id:string -> tool:string -> request:Yojson.Safe.t -> (unit, error) result
 (** Persist the complete canonical request before dispatch. Same input and
-    original destination is idempotent; replacement never changes the fence.
+    original destination is idempotent and preserves advanced progress.
     Invalid JSON is refused before writing. Publication failure is not proof
     of absence: a retry strictly reads the original record again. *)
+type update_error = Ownership_error of error | State_conflict | Invalid_transition of string
+type publication = Stored of retained | Already_stored of retained | Unconfirmed of string
+val advance : store:Lane_addon_store.t -> expected:retained ->
+  event:Lane_addon_request_progress.event -> (publication, update_error) result
+(** Check the entire original expected record before appending a canonical
+    event. An exact already-stored next history is acknowledged without writing;
+    [Already_stored] does not permit another dispatch or effect. Any other tail
+    is [State_conflict]. This is an expected-record check under the caller's
+    lease and serialization, not a filesystem or cross-process CAS.
+
+    [Unconfirmed] means save failed and publication may already be visible.
+    Reload the original key; never infer absence or invent a replacement ID.
+    Cancellation propagates and likewise does not prove publication absent.
+    This API records trusted host facts; it performs no worker/domain effects. *)
+val update_error_to_string : update_error -> string
 val error_to_string : error -> string

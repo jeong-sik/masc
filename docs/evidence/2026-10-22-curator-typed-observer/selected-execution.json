@@ -1,0 +1,34 @@
+{
+  "run": 39685010894,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39685010894",
+  "head": "28b5c904f635495eaec38140d11f4fb839fc7263",
+  "status": "completed",
+  "conclusion": "success",
+  "selection": {
+    "minimal": true,
+    "eio_backend": "posix",
+    "suites": {
+      "test_workspace_curator_addon_commit": 43,
+      "test_workspace_memory_execution_capture": 5,
+      "test_lane_addon_request_progress": 11,
+      "test_workspace_curator_addon_contract": 6
+    }
+  },
+  "tests": 65,
+  "test_source_hashes": {
+    "test_workspace_curator_addon_commit": "0f78d9555512d35890e3950a866ba0cbfd76c2099059dbf92787fd269a6a11a3",
+    "test_workspace_memory_execution_capture": "a8a77ca92c3458aca76d13a60b22a2043ebe3d06105d581a525b81ce9da6f91e",
+    "test_lane_addon_request_progress": "b12f24c76ffce54bb8322d70a5aadd63aaeb11a6f7d76bfa73a487cf04a03d68",
+    "test_workspace_curator_addon_contract": "744186bff6c99c95a87fb3db926b8c6527cd8f8561ff6f6be1eed98eeffb1e9e"
+  },
+  "full_log_sha256": "2adeff5db8f03aa48b09e94f82df80b007034155a1a5f67c304501801316c8f7",
+  "extract": [
+    "test suite\tCheckout\t2026-10-21T22:14:23.6590792Z   ref: 28b5c904f635495eaec38140d11f4fb839fc7263",
+    "test suite\tTest\t2026-10-21T22:15:34.9169068Z [targeted] dune build test/test_workspace_curator_addon_commit.exe test/test_workspace_memory_execution_capture.exe test/test_lane_addon_request_progress.exe test/test_workspace_curator_addon_contract.exe addons/workspace-curator/lane.toml addons/workspace-curator/schemas/classification.json addons/workspace-curator/schemas/briefing.json addons/workspace-curator/Dockerfile addons/workspace-curator/README.md addons/workspace-curator/lane.toml addons/workspace-curator/schemas/briefing.json addons/workspace-curator/schemas/classification.json addons/workspace-curator/server.py addons/protocol.py addons/exact_worker.py",
+    "test suite\tTest\t2026-10-21T22:18:08.4322657Z Test Successful in 0.865s. 43 tests run.",
+    "test suite\tTest\t2026-10-21T22:18:08.5432802Z Test Successful in 0.027s. 5 tests run.",
+    "test suite\tTest\t2026-10-21T22:18:08.7393428Z Test Successful in 0.114s. 11 tests run.",
+    "test suite\tTest\t2026-10-21T22:18:09.8643420Z Test Successful in 1.002s. 6 tests run."
+  ],
+  "limits": "Only 28b5 original four selected suites. The actual source/contract eligibility conflict wrapper was not covered and is repaired after this head. No registry delivery, production cutover, provider/Off/UI/installation or original 54-task completion."
+}

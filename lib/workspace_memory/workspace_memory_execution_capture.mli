@@ -34,11 +34,15 @@ val briefing : request_id:Request_id.t -> workspace:workspace -> destination:des
     revisions and prompt resolution must be supplied by the trusted host owner;
     these constructors do not establish their external provenance or ownership. *)
 val scope : string
+val package_id : string
+val tool : string
 val request_id : t -> Request_id.t
 val predecessor : t -> Request_id.t option
 (** None identifies an original root capture. A successor keeps its original
     parent ID; [restore] verifies the complete acknowledged ancestry. *)
 val destination : t -> destination
+val base_path : t -> string
+(** The physically captured workspace path, never today's inferred setting. *)
 val work : t -> work
 val input_text : t -> string
 val rendered_prompt : t -> string
@@ -70,3 +74,7 @@ type expected_commit =
 val validate_output : t -> Yojson.Safe.t -> (expected_commit, string) result
 (** Original pure full-domain decision validation and expected state only.
     Does not save, publish, mark an observer complete or authorize a retry. *)
+val commit_plan : t -> judgment:Yojson.Safe.t ->
+  (expected_commit * Lane_addon_request_progress.change, string) result
+(** Strict original Answered final, full domain validation and exact before/after
+    plan. Shared by settlement and observation; no current domain read or write. *)

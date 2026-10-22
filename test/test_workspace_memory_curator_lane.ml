@@ -154,7 +154,7 @@ let backend env base_path delivery : Runtime.For_testing.backend = {
           else Protocol.host_result protocol ~arguments |> Result.map_error protocol_error)}} in
     on_created connection;Ok connection);
   package_ready=(fun ~package:_ -> Ok ());
-  acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+  acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~read_browser_document:_ ~binding:_ -> Ok (`List []));
   recover_stop=(fun ~state_owner:_ ~instance_id:_ ~authority ~resource -> match authority,resource with
     | Lane_addon_lifecycle.Container_authority {engine;_},Some (Lane_addon_lifecycle.Container_resource id) ->
       Ok (Lane_addon_lifecycle.Released {engine;container_id=Some id})

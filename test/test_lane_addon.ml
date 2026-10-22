@@ -148,7 +148,7 @@ let make_backend ?observe_step () =
       end);
     package_ready = (fun ~package ->
       if package.id = "image-missing" then Error "image fixture/image is not on this host" else Ok ());
-    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ ->
+    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~read_browser_document:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
     recover_stop = (fun ~state_owner:_ ~instance_id ~authority ~resource ->
       match authority,resource with
@@ -804,10 +804,10 @@ let test_capture_cannot_rewrite_detach_failure () =
   let released, release = Eio.Promise.create () in
   let returned, return = Eio.Promise.create () in
   let captures = ref 0 in
-  let acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~binding =
+  let acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~read_browser_document ~binding =
     incr captures;
     if !captures=2 then (Eio.Promise.resolve enter (); Eio.Promise.await released);
-    let result = Lane_addon_sources.acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~binding in
+    let result = Lane_addon_sources.acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~read_browser_document ~binding in
     if !captures=2 then Eio.Promise.resolve return ();
     result in
   with_fixture ~acquire (fun env _sw config dir state ->

@@ -83,6 +83,7 @@ type backend = {
   acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
     resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
+    read_browser_document:(route:Browser_lane.route -> tab_id:int -> (Browser_lane.answer, string) result) ->
     binding:Yojson.Safe.t ->
     (Yojson.Safe.t, string) result;
   recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string ->
@@ -1211,7 +1212,7 @@ let observing m e =
    was left by a process that died, which is the only server on this base path. *)
 let is_live_instance m id = Hashtbl.mem m.entries id || Hashtbl.mem m.recovering id
 
-let run ~sw backend m e =
+let run ~sw ~read_browser_document backend m e =
   fork_isolated ~sw (fun () ->
     let work () = try
       Eio.Switch.run (fun worker_sw ->
@@ -1304,7 +1305,8 @@ let run ~sw backend m e =
                     let result =
                       let* sources = backend.acquire ~access:e.source_access ~store:m.store ~package:e.package ~binding:e.binding
                         ~resolve_machine_output:(resolve_machine_output m ~consumer_id:e.instance_id)
-                        ~resolve_lane_output:(resolve_lane_output m ~access:e.source_access ~visibility:e.visibility ~run_id:e.run_id) in
+                        ~resolve_lane_output:(resolve_lane_output m ~access:e.source_access ~visibility:e.visibility ~run_id:e.run_id)
+                        ~read_browser_document:(read_browser_document ~access:e.source_access) in
                       if e.stopping then Ok () else
                       let* fingerprint = match e.package.refresh_policy with
                         | Source_changes -> Lane_addon_sources.refresh_fingerprint e.refresh_interest sources
@@ -1806,25 +1808,23 @@ let with_tool_call_owner work =
     raise exn
 
 type browser_reading = { services : browser_service list; unready : Lane_addon_unready.t list }
-let browser_service_reading ~config ~access = Eio_context.run_on_owner_domain (fun () ->
-  let reading = current_reading ~config ~access in
+let browser_reading (reading : live_reading) =
   let services = reading.ready |> List.filter_map (fun ((e : entry), connection) ->
     match connection.worker.browser with
     | Some _ -> Some {instance_id=e.instance_id;owner=connection.export_owner}
     | None -> None) in
   let unready = reading.unready |> List.filter (fun (unready : Lane_addon_unready.t) ->
     match unready.service with Browser_service -> true | Mcp_tools -> false) in
-  { services; unready })
+  { services; unready }
+let browser_service_reading ~config ~access = Eio_context.run_on_owner_domain (fun () ->
+  browser_reading (current_reading ~config ~access))
 let browser_services ~config ~access = (browser_service_reading ~config ~access).services
-let call_browser_service ~config ~access ~(service:browser_service) ~command =
-  with_tool_call_owner (fun () ->
+(* Runs on the owner domain; both callers enter it through [with_tool_call_owner]. *)
+let call_manager_browser_service m ~access ~(service:browser_service) ~command =
     let* ()=match command with
       | Browser_addon_wire.Retire | Download_claim _|Download_commit _|Download_release _|Model_requests | Model_result _ | Model_wait _ ->
           Error (Browser_addon_client.Unavailable "browser lifecycle and model ports belong to their host owner")
       | Snapshot|Upload_stage _|Upload_discard _|Poll _|Deliver _|Disconnect _|Issue _ -> Ok () in
-    let root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
-    let* m=match Hashtbl.find_opt managers root with
-      | Some m -> Ok m | None -> Error (Browser_addon_client.Unavailable "browser Add-on owner is unavailable") in
     let* e,client=match Hashtbl.find_opt m.entries service.instance_id with
       | Some ({connection=Some connection;_} as e)
         when e.started && not e.stopping && can_read access e.visibility
@@ -1840,8 +1840,15 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
     let* sw=match Eio_context.get_root_switch_opt () with
       | Some sw -> Ok sw
       | None -> Error (Browser_addon_client.Unavailable "browser Add-on background owner is unavailable") in
+    (* An idle document read starts no browser effect. The worker answers it,
+       refuses it as busy or times it out by itself, and its answer changes
+       nothing the browser installation observes. *)
+    let idle_document_read=match command with
+      | Browser_addon_wire.Issue {only_if_idle;_} -> only_if_idle
+      | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _ -> false in
     let on_cancel_after_dispatch ()=match command with
-      | Browser_addon_wire.Issue _ ->
+      | Browser_addon_wire.Issue {only_if_idle=true;_} -> ()
+      | Browser_addon_wire.Issue {only_if_idle=false;_} ->
         Browser_addon_client.revoke client;
         retire_admission e;
         e.state<-fail_state e (Lifecycle.Effect_outcome_unknown "browser call cancelled after dispatch; effect outcome unknown");
@@ -1857,7 +1864,7 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
        | Ok reply ->
            let changed=match reply with
              | Browser_addon_wire.Poll_result {state_id;_} -> Browser_addon_client.notice_poll_state client ~state_id
-             | Issue_result _ -> true
+             | Issue_result _ -> not idle_document_read
              | Receipt -> (match command with Browser_addon_wire.Disconnect _ -> true
                  | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Issue _ -> false)
              | Snapshot_result _|Model_reply _|Download_reply _|Service_refusal _ -> false in
@@ -1865,7 +1872,40 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
        | Error (Browser_addon_client.Unavailable _) -> ()
        | Error (Browser_addon_client.Outcome_unknown detail) ->
            if not e.stopping then (failed m e (Lifecycle.Effect_outcome_unknown detail);wake e));
-      result))
+      result)
+let call_browser_service ~config ~access ~service ~command =
+  with_tool_call_owner (fun () ->
+    let root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    match Hashtbl.find_opt managers root with
+    | Some m -> call_manager_browser_service m ~access ~service ~command
+    | None -> Error (Browser_addon_client.Unavailable "browser Add-on owner is unavailable"))
+(* A consuming installation's [browser_document] source. The browser Add-on
+   worker process holds the browser connections, so the read goes to the one
+   browser Add-on this installation may read. The answer and every refusal
+   become the consuming worker's input, which can reach Keepers, so an unready
+   installation is named by its caller rendering, never the operator's. *)
+let read_browser_document m ~access ~route ~tab_id =
+  with_tool_call_owner (fun () ->
+    let reading=browser_reading (live_reading m access) in
+    match reading.services with
+    | [service] ->
+        (* The existing transport deadline; the worker never creates a
+           session, selects another document or waits for a primary action. *)
+        let command=Browser_addon_wire.Issue {route;verb=Browser_lane.Page_document {tab_id};
+          actor=None;timeout_sec=Browser_lane.default_timeout_sec;only_if_idle=true} in
+        (match call_manager_browser_service m ~access ~service ~command with
+         | Ok (Browser_addon_wire.Issue_result (Ok answer)) -> Ok answer
+         | Ok (Browser_addon_wire.Issue_result (Error error)) -> Error (Browser_lane.selection_error_message error)
+         | Ok (Browser_addon_wire.Service_refusal {message;disposition=Browser_addon_wire.(Not_started|Outcome_unknown)}) ->
+             Error message
+         | Ok (Browser_addon_wire.(Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt)) ->
+             Error "the browser Add-on answered the document read with another kind of reply"
+         | Error (Browser_addon_client.(Unavailable detail|Outcome_unknown detail)) -> Error detail)
+    | [] ->
+        (match Lane_addon_unready.summary reading.unready with
+         | Some summary -> Error summary
+         | None -> Error "no browser Add-on is attached")
+    | _ :: _ :: _ -> Error "more than one browser Add-on is attached, so the document source cannot choose one")
 
 let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) ~scope ~request_id ~request =
   with_tool_call_owner (fun () ->
@@ -2745,7 +2785,8 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     ~instance_id:e.instance_id ~package ~binding in
   let* () = persist m e in
   Hashtbl.add m.entries e.instance_id e;
-  wake e; run ~sw (backend ~store:m.store ~artifact_store:m.artifact_store ()) m e;
+  wake e; run ~sw ~read_browser_document:(read_browser_document m)
+    (backend ~store:m.store ~artifact_store:m.artifact_store ()) m e;
   Ok (entry_json e)
 
 let detach_entry ~sw m e =
@@ -4008,6 +4049,7 @@ module For_testing = struct
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
       resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
+    read_browser_document:(route:Browser_lane.route -> tab_id:int -> (Browser_lane.answer, string) result) ->
       binding:Yojson.Safe.t ->
       (Yojson.Safe.t, string) result;
     recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string ->

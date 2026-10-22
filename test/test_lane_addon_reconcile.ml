@@ -165,7 +165,7 @@ let make_backend () =
                      Option.iter Eio.Promise.await !(state.startup_barrier);
                      Ok connection)
       end);
-    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~read_browser_document:_ ~binding:_ -> Ok (`List []));
     package_ready = (fun ~package:_ ->
       if !(state.image_available) then Ok () else Error "image is not on the host");
     recover_stop = (fun ~state_owner ~instance_id ~authority ~resource ->

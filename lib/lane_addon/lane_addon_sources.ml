@@ -466,17 +466,12 @@ let machine_capture ~store ~resolve_machine_output ~machine ~id =
     "input_cursor",cursor;"input_ledger",`Assoc ["format",`String format;
       "entry_count",`Int count;"evidence",evidence_json input_ledger]] @ extra) in
   Ok (envelope ~id ~incarnation ~cursor ~complete:true ~detail:`Null [observation])
-let browser_document ~store ~max_bytes ~id ~selection ~tab_id ~target_id ~environment ~request_id =
+let browser_document ~store ~max_bytes ~read_browser_document ~id ~selection ~tab_id ~target_id ~environment ~request_id =
   let route = match selection with
     | Live client -> Browser_lane.Live_route (Some client)
     | Automation -> Browser_lane.Automation_route in
-  let* target = Browser_lane.resolve_target ~verb:(Browser_lane.Page_document {tab_id}) route
-    |> Result.map_error Browser_lane.selection_error_message in
-  (* Reuse the existing transport deadline; never create a new session, select
-     a different document or wait for a primary browser action to finish. *)
-  let* fields = match Browser_lane.issue_document_if_idle ~target ~tab_id
-      ~timeout_sec:Browser_lane.default_timeout_sec with
-    | Error error -> Error (Browser_lane.selection_error_message error)
+  let* fields = match read_browser_document ~route ~tab_id with
+    | Error message -> Error message
     | Ok (Browser_lane.Answered (`Assoc envelope)) ->
         (match List.assoc_opt "ok" envelope, List.assoc_opt "data" envelope with
          | Some (`Bool true), Some (`Assoc fields) -> Ok fields
@@ -561,7 +556,8 @@ let lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id ~out
       ~cursor:(`String (string_of_int captured.observation_seq)) ~complete
       ~detail:(Option.fold ~none:`Null ~some:(fun value -> `String value) detail) [observation])
 
-let acquire ~access ~store ~(package : Lane_addon_types.package) ~resolve_machine_output ~resolve_lane_output ~binding =
+let acquire ~access ~store ~(package : Lane_addon_types.package) ~resolve_machine_output ~resolve_lane_output
+    ~read_browser_document ~binding =
   let* () = validate binding in
   let* sources = parse binding in
   let capture ~max_bytes source =
@@ -573,7 +569,7 @@ let acquire ~access ~store ~(package : Lane_addon_types.package) ~resolve_machin
       | Lane_output {id;installation_id;output_id} ->
           lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id ~output_id
       | Browser_document {id;selection;tab_id;target_id;environment;request_id} ->
-          browser_document ~store ~max_bytes ~id ~selection
+          browser_document ~store ~max_bytes ~read_browser_document ~id ~selection
             ~tab_id ~target_id ~environment ~request_id in
     match result with Ok json -> json | Error message -> unavailable source message in
   (* Reserve room for an honest unavailable result for every source before

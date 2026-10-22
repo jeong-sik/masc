@@ -144,11 +144,11 @@ let test_pending_notification_does_not_repeat_same_completed_input () =
   let entered,enter = Eio.Promise.create () and released,release = Eio.Promise.create () in
   let acquisitions = ref 0 and calls = ref 0 in
   let consumer binding = member "value" binding=`String "judge" in
-  let acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~binding =
+  let acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~read_browser_document ~binding =
     if consumer binding then (
       incr acquisitions;
       if !acquisitions=1 then (Eio.Promise.resolve enter (); Eio.Promise.await released));
-    Lane_addon_sources.acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~binding in
+    Lane_addon_sources.acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~read_browser_document ~binding in
   let produce ~binding ~sources:_ = if consumer binding then incr calls; output in
   with_fixture ~acquire ~produce (fun clock config root directory _received _stopped ->
     let producer_manifest = manifest ~name:"producer" root in

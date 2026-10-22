@@ -417,6 +417,7 @@ module For_testing : sig
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
       resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
+    read_browser_document:(route:Browser_lane.route -> tab_id:int -> (Browser_lane.answer, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
     recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string ->
       authority:Lane_addon_lifecycle.authority -> resource:Lane_addon_lifecycle.resource option ->

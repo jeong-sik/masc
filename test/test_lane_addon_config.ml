@@ -535,6 +535,7 @@ schema = "schemas/author.json"
       "a name starting with a digit", "[world.exact_outputs.2nd]\nschema = \"schemas/author.json\"\n";
       "a key beside schema", "[world.exact_outputs.author]\nschema = \"schemas/author.json\"\nmodel = \"x\"\n";
       "no schema", "[world.exact_outputs.author]\n";
+      "non-boolean schema grant", "[world.exact_outputs.author]\nschema = \"schemas/author.json\"\nrequest_schema = \"true\"\n";
       "an empty table", "[world.exact_outputs]\n";
       "a parent path", "[world.exact_outputs.author]\nschema = \"../outside.json\"\n";
       "an absolute path", Printf.sprintf "[world.exact_outputs.author]\nschema = %S\n" (Filename.concat root "outside.json");
@@ -550,6 +551,7 @@ let exact_outputs_are_selected_independently () = with_directory (fun _root pack
   write (Filename.concat packages "answer.json") schema;
   write manifest (package () ^ {|
 [world.tools]
+export = []
 hooks = ["validate_input", "validate_output"]
 [world.exact_outputs.plan]
 schema = "answer.json"
@@ -563,6 +565,9 @@ schema = "answer.json"
   let names (value:Config.declaration) = List.map
       (fun (output:Lane_addon_types.exact_output) -> output.name) value.package.exact_outputs in
   let default = unwrap (install "") in
+  check bool "a package grants only its fixed schema by default" true
+    (List.for_all (fun (output:Lane_addon_types.exact_output) -> output.request_schema=Package_schema_only)
+      default.package.exact_outputs);
   check (list string) "omission keeps package outputs" ["extract";"plan"] (names default);
   let all = unwrap (install {|exact_outputs = ["plan", "extract"]|}) in
   check string "explicit full selection has the same effective identity" default.revision all.revision;
@@ -594,6 +599,18 @@ tool_hooks = []|}) in
     | Error detail -> check bool "selection failure identifies exact output policy" true (contains detail "exact output" || contains detail "exact_outputs"))
     [ {|["unknown"]|}; {|["plan", "plan"]|}; {|["plan", 1]|}; {|[""]|};
       {|[" plan"]|}; "true"; {|"plan"|}; "{}" ];
+  write manifest (package () ^ {|
+[world.exact_outputs.plan]
+schema = "answer.json"
+[world.exact_outputs.extract]
+schema = "answer.json"
+request_schema = true
+|});
+  let granted=unwrap (install "") in
+  check bool "a schema grant changes effective worker identity" true (granted.revision<>default.revision);
+  let selected=unwrap (install {|exact_outputs = ["extract"]|}) in
+  check bool "selection preserves the package's schema authority" true
+    ((List.hd selected.package.exact_outputs).request_schema=Consumer_request_schema);
   write manifest (package ());
   check bool "selection cannot invent a package output" true
     (Result.is_error (install {|exact_outputs = ["plan"]|}));

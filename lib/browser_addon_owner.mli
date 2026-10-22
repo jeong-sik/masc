@@ -12,7 +12,7 @@ val snapshot : t -> Yojson.Safe.t
 val incarnation : t -> string
 val attach_models : t -> Browser_addon_models.t -> (unit, string) result
 val models_enabled : t -> bool
-val model_output_schema : t -> name:string -> Yojson.Safe.t option
+val model_output : t -> name:string -> Lane_addon_types.exact_output option
 val generate : t -> Lane_addon_exact.request ->
   (Browser_addon_models.outcome, Browser_addon_models.error) result
 (** An original browser command owns the waiting scope. Cancellation withdraws

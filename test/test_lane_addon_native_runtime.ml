@@ -432,7 +432,8 @@ hooks = ["validate_input", "validate_output"]
   Unix.mkdir browser_directory 0o700;
   let poll client=Browser_addon_ingress.poll ~config ~client ~window_sec:0.001 in
   check bool "native ingress registers its first original worker" true (poll client=Ok None);
-  let bidi_host=Browser_bidi_host_status.observe ~base_path:config.Workspace.base_path ~configuration:None in
+  let bidi_host=Browser_bidi_host_status.observe ~access:Lane_addon_sources.Unauthenticated
+    ~base_path:config.Workspace.base_path ~configuration:None in
   let inventory=Browser_addon_view.clients ~bidi_host host in
   check bool "view inventory reads worker clients rather than the core queue" true
     (Tool_result.is_success inventory &&

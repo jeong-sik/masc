@@ -237,9 +237,16 @@ published observation, the same reading the Lanes screen's browser rows show.
 follows the port the server bound. Before the launcher and the port it names a
 browser Add-on that cannot take a host: none declared or one switched off is
 `needs_setup` (the first is fixed by
-`masc browser-lane-setup --mode addon --base-path <path>`), one declared on
-that the server does not run is `invalid`, and one the server cannot read is
-`needs_verification`. A workspace with no launcher installed has no such line.
+`masc browser-lane-setup --mode addon --base-path <path>`). One declared on
+that the server does not run now is `needs_verification`, as is one the server
+cannot read: the next configuration maintenance pass may attach it, a
+replacement may be starting, or its attach failed, which the Lane Add-ons
+screen shows. A workspace with no launcher installed has no such line.
+
+The setup check reads the Add-on as the operator, as the native host poll
+does. The dashboard's client list (`GET /api/v1/dashboard/browser-lane/clients`)
+is a read-state route: its clients and its BiDi host paragraph both read the
+Add-on as an unauthenticated caller, so they name only Shared installations.
 
 `transport` is `web_extension`, `webdriver_bidi` or `ego_task_space`. The TUI
 browser picker displays WebExtension, BiDi or ego beside the browser name. When both hosts attach

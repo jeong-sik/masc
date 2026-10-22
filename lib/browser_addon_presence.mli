@@ -11,14 +11,20 @@ type unavailable =
   | Observation_unreadable of string
       (** The worker published an observation this build does not read; why. *)
   | Declarations_incomplete
-      (** There is no observation and the Lane Add-on declarations could not
-          all be read, so which absence it is is not known. *)
+      (** There is no observation, no readable browser declaration is
+          switched on, and the Lane Add-on declarations could not all be
+          read: one that was not read may be a browser Add-on switched on, so
+          which absence it is is not known. *)
 
 type t =
   | Observed of Browser_addon_observation.published
   | Absent  (** No browser Add-on is declared. *)
-  | Off  (** A browser Add-on is declared and switched off. *)
-  | Not_running  (** One is declared on and the runtime runs no installation of it. *)
+  | Off
+      (** A browser Add-on is declared and switched off, and every
+          declaration was read, so none is switched on. *)
+  | Not_running
+      (** One is declared on and the runtime runs no installation of it that
+          the reader can see. *)
   | Unavailable of unavailable
 
 (** Decide from what {!Lane_addon_runtime.observation_for_export} answered for
@@ -29,8 +35,14 @@ val of_export :
   (Lane_addon_runtime.export_observation option, Lane_addon_runtime.export_refusal) result -> t
 
 (** Ask the runtime for the browser Add-on's cached observation and decide.
-    It runs on the Lane Add-on owner domain and waits for no browser command. *)
-val read : config:Workspace.config -> declarations:Lane_addon_config.snapshot -> t
+    It runs on the Lane Add-on owner domain and waits for no browser command.
+    [access] is the reader's: an installation it cannot see is not read, so
+    the reading never names one to a caller who could not list it. Native
+    browser hosts register with the installation
+    {!Lane_addon_sources.Operator_configuration} sees. *)
+val read :
+  config:Workspace.config -> access:Lane_addon_sources.access ->
+  declarations:Lane_addon_config.snapshot -> t
 
 (** The reason in words any reader may be shown: a refusal through
     {!Lane_addon_runtime.export_refusal_message}. *)

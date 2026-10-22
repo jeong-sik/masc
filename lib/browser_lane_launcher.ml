@@ -20,19 +20,21 @@ type server =
   | Not_serving
   | Serving of { port : int; polling : polling }
 
-(* Installed by the server, so this module never depends on Lane Add-on
-   runtime code; the server's bootstrap installs it beside the port. *)
-let browser_addon_reader : (unit -> polling) option Atomic.t = Atomic.make None
+(* Installed by the server, so this module never reads Lane Add-on runtime
+   state itself; the server's bootstrap installs it beside the port. Each
+   surface passes the access of whoever reads it. *)
+let browser_addon_reader : (Lane_addon_sources.access -> polling) option Atomic.t =
+  Atomic.make None
 let install_browser_addon_reader reader = Atomic.set browser_addon_reader reader
 
-let current_server () =
+let current_server ~access =
   match Browser_lane.serving_port () with
   | Browser_lane.Serving_port_unknown -> Not_serving
   | Browser_lane.Serving_port port ->
       let polling =
         match Atomic.get browser_addon_reader with
         | None -> Not_observed
-        | Some read -> read ()
+        | Some read -> read access
       in
       Serving { port; polling }
 
@@ -214,8 +216,9 @@ let unlisted_message ~base_path unlisted =
         lane_addons
   | Browser_addon_not_running ->
       Printf.sprintf
-        "The browser Add-on is declared on, but this server runs no installation of it, so no \
-         browser host can register here. The operator reads why on %s."
+        "The browser Add-on is declared on, and this server runs no installation of it now, so \
+         no browser host can register here yet. The server attaches it on its next maintenance \
+         pass, or its last attach failed; the operator reads which on %s."
         lane_addons
   | Browser_addon_unreadable detail ->
       Printf.sprintf

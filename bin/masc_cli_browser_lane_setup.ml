@@ -197,7 +197,8 @@ let print_bidi_state ~base_path ~runtime_config_path =
   let configuration = Result.to_option (Browser_configuration.of_file runtime_config_path) in
   print_endline
     (Masc.Browser_bidi_host_status.message
-       (Masc.Browser_bidi_host_status.observe ~base_path ~configuration))
+       (Masc.Browser_bidi_host_status.observe ~access:Masc.Lane_addon_sources.Operator_configuration
+          ~base_path ~configuration))
 
 let automation_key_names keys = String.concat ", " (List.map Automation_setup.key_name keys)
 

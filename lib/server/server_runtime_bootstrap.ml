@@ -1428,9 +1428,10 @@ let start_post_ready_owner_lanes
     ~resume:resume_model_configuration;
   Candle_status.install_appraiser_check (Server_candle_appraiser.available ~config:(Mcp_server.workspace_config state));
   (* Browser hosts register with the browser Add-on's worker, so the browser
-     lane check reads which hosts poll this server from the Add-on. *)
-  Browser_lane_launcher.install_browser_addon_reader (Some (fun () ->
-    Server_lane_inventory.browser_presence ~config:(Mcp_server.workspace_config state)
+     lane check reads which hosts poll this server from the Add-on, as the
+     surface that asks may see it. *)
+  Browser_lane_launcher.install_browser_addon_reader (Some (fun access ->
+    Server_lane_inventory.browser_presence ~config:(Mcp_server.workspace_config state) ~access
     |> Browser_addon_presence.polling));
   Candle_status.report_at_start ~base_path:(Mcp_server.workspace_config state).base_path;
   let start_authority () =

@@ -25,9 +25,13 @@ let command ~config ~principal arguments =
       Mcp_protocol.Mcp_types.tool_result_to_yojson {
         content=[TextContent {type_="text";text=Tool_result.message failure;annotations=None}];
         is_error=Some true;structured_content=None;_meta=Lane_addon_tool_result.metadata failure}
+(* The dashboard's browser views see the browser Add-on as an
+   unauthenticated caller does, Shared installations only, since the
+   CanReadState routes among them serve any read-state caller. *)
+let view_access=Lane_addon_sources.Unauthenticated
 let shared_host ~config ~principal =
   let reserved=List.map (fun (schema:Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas in
-  Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated ~principal ~reserved
+  Browser_addon_host.connect ~config ~access:view_access ~principal ~reserved
 let view ~config ~principal operation json =
   let start_time=Tool_timing.start () in
   match shared_host ~config ~principal with
@@ -35,9 +39,11 @@ let view ~config ~principal operation json =
   | Error error -> Browser_addon_host.error_result ~start_time error
 (* The manual BiDi host record is on this server's disk, not in the Add-on
    worker: it is read here and answered beside the Add-on's clients, where the
-   TUI connection list reads it. *)
+   TUI connection list reads it. It reads the Add-on with the access the
+   clients do, so the response never names an installation they cannot see. *)
 let clients_listing ~config =
-  let bidi_host=Browser_bidi_host_status.observe ~base_path:config.Workspace.base_path
+  let bidi_host=Browser_bidi_host_status.observe ~access:view_access
+    ~base_path:config.Workspace.base_path
     ~configuration:(Runtime.browser_configuration ()) in
   view ~config ~principal:Lane_addon_call_context.Operator
     (fun host _ -> Browser_addon_view.clients ~bidi_host host) `Null

@@ -479,6 +479,15 @@ max_reply_bytes = 4096
     (read ("enabled = false\n" ^ declaration browser "browser-work") = Browser_addon_presence.Off);
   check bool "a browser Add-on declared on with no observation is not running" true
     (read (declaration browser "browser-work") = Browser_addon_presence.Not_running);
+  (* A switched-off browser Add-on beside a declaration that could not be read
+     is not proof that none is on: the unread one may be a browser switched on. *)
+  write path ("enabled = false\n" ^ declaration browser "browser-work");
+  let switched_off = Config.load ~directory in
+  check bool "a switched-off browser Add-on in an incomplete read is not taken for off" true
+    (match Browser_addon_presence.of_export ~declarations:{switched_off with complete=false} (Ok None) with
+     | Browser_addon_presence.Unavailable Browser_addon_presence.Declarations_incomplete -> true
+     | Browser_addon_presence.(Unavailable (Refused _ | Observation_unreadable _)
+       | Observed _ | Absent | Off | Not_running) -> false);
   (* Declarations that could not all be read prove no absence. *)
   check bool "an incomplete declaration read is not taken for no Add-on" true
     (match Browser_addon_presence.of_export

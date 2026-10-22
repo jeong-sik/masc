@@ -21,9 +21,10 @@ let absence (declarations : Lane_addon_config.snapshot) =
   match List.exists (fun (d : Lane_addon_config.declaration) -> d.enabled) browsers,
         browsers, declarations.complete with
   | true, _, (true | false) -> Not_running
-  | false, _ :: _, (true | false) -> Off
+  | false, _ :: _, true -> Off
   | false, [], true -> Absent
-  | false, [], false -> Unavailable Declarations_incomplete
+  (* A declaration that could not be read may be a browser one switched on. *)
+  | false, ([] | _ :: _), false -> Unavailable Declarations_incomplete
 
 let of_export ~declarations = function
   | Error (Lane_addon_runtime.(Unready_installations _ | Not_yet_observed _ | Ambiguous_installations _)
@@ -34,8 +35,8 @@ let of_export ~declarations = function
        | Ok published -> Observed published
        | Error detail -> Unavailable (Observation_unreadable detail))
 
-let read ~config ~declarations =
-  Lane_addon_runtime.observation_for_export ~config ~access:Lane_addon_sources.Operator_configuration
+let read ~config ~access ~declarations =
+  Lane_addon_runtime.observation_for_export ~config ~access
     ~name:Browser_addon_tool.definition.name
   |> of_export ~declarations
 

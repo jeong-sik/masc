@@ -24,6 +24,7 @@ type t =
   { pid : int
   ; started : string option
   ; exit_status : (Unix.process_status, exn) result Promise.t
+  ; reaper_failure : exn Promise.t
   ; lock : Stdlib.Mutex.t
   ; group : group_owner option
   }
@@ -151,6 +152,14 @@ let reap_owned t set_exit_status =
   | Some owner -> reap_group t owner set_exit_status
 ;;
 
+(* A protected caller may already be awaiting this handle when its switch is
+   cancelled. The switch cannot run release hooks until that caller finishes,
+   so the reaper must settle its original child before leaving cancellation. *)
+let stop_owned t set_exit_status =
+  signal t (match t.group with None -> Sys.sigkill | Some _ -> Sys.sigterm);
+  if not (Promise.is_resolved t.exit_status) then reap_owned t set_exit_status
+;;
+
 module Process_impl = struct
   type nonrec t = t
   type tag = [ `Generic | `Unix ]
@@ -158,10 +167,21 @@ module Process_impl = struct
   let pid t = t.pid
 
   let await t =
-    match Promise.await_exn t.exit_status with
-    | Unix.WEXITED code -> `Exited code
-    | Unix.WSIGNALED signal -> `Signaled signal
-    | Unix.WSTOPPED _ -> assert false
+    let observed = Fiber.first
+        (fun () -> Promise.await t.exit_status)
+        (fun () -> Error (Promise.await t.reaper_failure)) in
+    (* A release hook may subsequently finish the original reap after a
+       pre-reap failure. Prefer that physical result once it exists. Keep
+       errors as data inside [first], whose exception combiner could otherwise
+       replace a concurrently completed exit with the old reaper failure. *)
+    let status = match Promise.peek t.exit_status with
+      | Some status -> status
+      | None -> observed in
+    match status with
+    | Ok (Unix.WEXITED code) -> `Exited code
+    | Ok (Unix.WSIGNALED signal) -> `Signaled signal
+    | Ok (Unix.WSTOPPED _) -> assert false
+    | Error exn -> raise exn
   ;;
 
   let signal = signal
@@ -218,6 +238,7 @@ module Impl = struct
          domain spawn while the first is still installing. *)
       Eio_unix.Process.install_sigchld_handler ();
       let exit_status, set_exit_status = Promise.create () in
+      let reaper_failure, report_reaper_failure = Promise.create () in
       let child_fds = List.map (fun (child_fd, _, _) -> child_fd) fds in
       let modes = List.map (fun (_, _, mode) -> mode) fds in
       let pid =
@@ -232,17 +253,29 @@ module Impl = struct
          yield and release the original PID. Never reconstruct it from a PID
          after [spawn] returns. *)
       let started = Posix_spawn_detached.process_start pid in
-      let t = { pid; started; exit_status; lock = Stdlib.Mutex.create (); group } in
+      let t = { pid; started; exit_status; reaper_failure; lock = Stdlib.Mutex.create (); group } in
       let hook =
-        Switch.on_release_cancellable sw (fun () ->
-          signal t (match t.group with None -> Sys.sigkill | Some _ -> Sys.sigterm);
-          if not (Promise.is_resolved t.exit_status) then reap_owned t set_exit_status)
+        Switch.on_release_cancellable sw (fun () -> stop_owned t set_exit_status)
       in
       Exec_tap.record_lifecycle ~pid ~stage:(Spawned args) ();
       Fiber.fork_daemon ~sw (fun () ->
-        reap_owned t set_exit_status;
-        Switch.remove_hook hook;
-        `Stop_daemon);
+        let run () = match reap_owned t set_exit_status with
+          | () -> ()
+          | exception (Eio.Cancel.Cancelled _ as exn) ->
+            let bt = Printexc.get_raw_backtrace () in
+            Eio.Cancel.protect (fun () -> stop_owned t set_exit_status);
+            Printexc.raise_with_backtrace exn bt in
+        match run () with
+        | () -> Switch.remove_hook hook; `Stop_daemon
+        | exception exn ->
+          let bt = Printexc.get_raw_backtrace () in
+          (* An unsuccessful stop/reap must wake protected waiters too. This
+             is not physical exit: keep the original owner and release hook
+             so cleanup still runs rather than trusting a failed promise. *)
+          if not (Promise.is_resolved exit_status) then
+            Promise.resolve report_reaper_failure exn
+          else Switch.remove_hook hook;
+          Printexc.raise_with_backtrace exn bt);
       process t
     ;;
   end

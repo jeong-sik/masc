@@ -234,6 +234,38 @@ let test_save_served_artifact_boundary () =
       Alcotest.(check bool) "an oversized body never creates a saved file"
         false (Sys.file_exists target))
 
+let test_retired_writer_cannot_damage_prepared_audio () =
+  let nonce = Filename.temp_file "tui-listen-publication" "" in
+  let bytes = "complete prepared audio " ^ nonce in
+  let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let path = Action.target_path ~name:(Some "take.wav") ~sha256 in
+  let attachment : Masc_tui_types.board_attachment =
+    {ba_kind=Ak_audio; ba_name=Some "take.wav";
+     ba_source=As_artifact {sha256; bytes=String.length bytes}} in
+  let prepare () =
+    match Action.prepare ~fetch:(fun ~sha256:_ -> Ok bytes) attachment with
+    | Ok _ -> ()
+    | Error outcome -> Alcotest.fail (Action.describe_outcome outcome) in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists path then Sys.remove path;
+      if Sys.file_exists (Filename.dirname path) then Unix.rmdir (Filename.dirname path);
+      Sys.remove nonce)
+    (fun () ->
+      prepare ();
+      let retired_writer = Unix.openfile path [Unix.O_WRONLY] 0 in
+      Fun.protect ~finally:(fun () -> Unix.close retired_writer) (fun () ->
+        prepare ();
+        In_channel.with_open_bin path (fun player ->
+          (* A writer already holding the previous publication resumes only
+             after its successor has prepared and the player opened it. *)
+          Unix.ftruncate retired_writer 0;
+          ignore (Unix.write_substring retired_writer "partial" 0 7);
+          Alcotest.(check string) "retired writer cannot truncate the player source"
+            bytes (In_channel.input_all player));
+        Alcotest.(check string) "the published prepared source stays complete"
+          bytes (In_channel.with_open_bin path In_channel.input_all)))
+
 let listen_state () =
   let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935
     ~refresh_interval:2. () in
@@ -309,6 +341,8 @@ let () =
         ; Alcotest.test_case "surface withdrawal" `Quick
             test_listen_surface_withdrawal ] )
     ; ( "save"
-      , [ Alcotest.test_case "saving uses the authoritative served-byte boundary"
+      , [ Alcotest.test_case "retired writer cannot damage prepared audio" `Quick
+            test_retired_writer_cannot_damage_prepared_audio
+        ; Alcotest.test_case "saving uses the authoritative served-byte boundary"
             `Quick test_save_served_artifact_boundary ] )
     ]

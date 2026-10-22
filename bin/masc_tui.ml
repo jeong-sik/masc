@@ -10708,8 +10708,8 @@ let image_notice (state : state) ~view ~keeper_name ~kind text =
 
 let resource_image_reading_is_current (state : state) (pending : sent_image_read) =
   pending.sir_view <> Resources
-  || (Masc_tui_resource_images.same_reading pending.sir_resource state.resource_content
-      && Option.is_none state.resource_pending_uri
+  || (Masc_tui_resource_images.same_reading ~equal:Masc_tui_resource_catalog.equal_key pending.sir_resource state.resource_content
+      && Option.is_none state.resource_pending_key
       && Option.is_none state.resource_content_error)
 
 (* Settle the exact interrupted preview without replacing a newer selection. *)
@@ -10774,11 +10774,12 @@ let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
   end
 
 let current_resource_images (state : state) =
-  match state.resource_content, state.resource_pending_uri, state.resource_content_error with
+  match state.resource_content, state.resource_pending_key, state.resource_content_error with
   | Some (uri, contents), None, None ->
     let mime_type = Option.bind state.resources_list (fun resources ->
-      Option.bind (List.find_opt (fun (resource : Masc_tui_mcp.resource) ->
-        String.equal resource.uri uri) resources) (fun resource -> resource.mime_type)) in
+      Option.bind (List.find_opt (fun resource ->
+        Masc_tui_resource_catalog.equal_key (Masc_tui_resource_catalog.key resource) uri) resources)
+        (fun resource -> (Masc_tui_resource_catalog.metadata resource).mime_type)) in
     Masc_tui_resource_images.images ~mime_type contents
   | (Some _ | None), (Some _ | None), (Some _ | None) -> []
 
@@ -13403,7 +13404,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resources_cursor <- 0;
   state.resource_content <- None;
   state.resource_content_error <- None;
-  state.resource_pending_uri <- None;
+  state.resource_pending_key <- None;
   state.resource_scroll <- 0;
   state.resource_image_cursor <- 0;
   state.observer_cursor <- None;
@@ -15237,7 +15238,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
      | Resources -> Option.iter (fun uri ->
          Masc_tui_resources_requests.launch_read state ~host:server_peer_host
            ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
-           ~check:(capture_workspace_check state ~mailbox) ~uri) state.resource_pending_uri
+           ~check:(capture_workspace_check state ~mailbox) ~key:uri) state.resource_pending_key
      | Config when state.config_pane = Config_prompts ->
          (match state.prompts_librarian_input_requested, selected_prompt_for_state state with
           | Some prompt_key, Some row when String.equal row.Tui_decode.pr_key prompt_key ->
@@ -19597,8 +19598,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
       Code_results.apply_history state request result
   | Resources_listed result ->
       Masc_tui_resources_updates.listed state result
-  | Resource_read (uri, result) ->
-      Masc_tui_resources_updates.read_done state ~uri result
+  | Resource_read (key, result) ->
+      Masc_tui_resources_updates.read_done state ~key result
   | Github_identity_view_loaded (request, result) ->
       Masc_tui_identity_updates.github_view_loaded state request result
   | Identity_switch_set (keeper_name, provider_id, enabled, result) ->
@@ -28855,7 +28856,7 @@ and is loaded on demand through keeper_skill.
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun cursor -> state.resources_cursor <- cursor)
              ~reopen:(fun () ->
-               Masc_tui_resources_updates.open_selected state ~read:(fun ~uri -> Masc_tui_resources_requests.launch_read state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox:async_messages) ~uri))
+               Masc_tui_resources_updates.open_selected state ~read:(fun ~key -> Masc_tui_resources_requests.launch_read state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox:async_messages) ~key))
        | Some (("[" | "]") as bracket)
          when state.view = Lanes && state.lanes_mode = Lanes_overview ->
            (* A package row's exact outputs, chosen by name (RFC operator-quiz
@@ -28871,6 +28872,7 @@ and is loaded on demand through keeper_skill.
                | Some (_, name) ->
                  state.lanes_exact_output <- Some (row.Masc.Tui_decode_lane_inventory.id, name)
                | None -> ()))
+
        | Some "]" when state.view = Lanes ->
            (match state.lanes_mode, state.lane_runs_next, state.lane_runs_loading with
             | Lanes_run_list lane, Some before, false ->
@@ -28998,7 +29000,7 @@ and is loaded on demand through keeper_skill.
                 report_action state "system"
                   "Approval list changed; review the updated row before retrying")
        | Some "\r" when state.view = Resources ->
-           Masc_tui_resources_updates.open_selected state ~read:(fun ~uri -> Masc_tui_resources_requests.launch_read state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox:async_messages) ~uri)
+           Masc_tui_resources_updates.open_selected state ~read:(fun ~key -> Masc_tui_resources_requests.launch_read state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox:async_messages) ~key)
        | Some "J" when state.view = Resources ->
            state.resource_scroll <-
              Masc_tui_types.scroll_down_from state.resource_scroll ~by:1

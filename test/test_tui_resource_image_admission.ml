@@ -4,7 +4,9 @@ module Images = Masc_tui_resource_images
 module Updates = Masc_tui_resources_updates
 module Types = Masc_tui_types
 
-let uri = "masc://drawing"
+module Catalog = Masc_tui_resource_catalog
+let key = testable (fun fmt _ -> Format.pp_print_string fmt "resource key") Catalog.equal_key
+let uri = Catalog.Mcp_uri "masc://drawing"
 let svg = "<svg\twidth=\"10\" height=\"10\" xmlns=\"http://www.w3.org/2000/svg\">\r\n<text>A\tB</text>\r\n</svg>"
 let parts () =
   List.map Fun.id [{ Mcp.rc_uri = Some "masc://drawing?original=1";
@@ -21,18 +23,20 @@ let saved state =
 
 let test_original_admission () =
   let state = state () and original = parts () in
-  state.resource_pending_uri <- Some uri;
+  state.resource_pending_key <- Some uri;
   state.resource_image_cursor <- 1;
-  Updates.read_done state ~uri (Ok original);
+  Updates.read_done state ~key:uri (Ok original);
   let admitted = saved state in
-  check (option string) "pending consumed" None state.resource_pending_uri;
+  check (option key) "pending consumed" None state.resource_pending_key;
   check int "new image selection" 0 state.resource_image_cursor;
   check (list int) "multipart response order" [1;2]
     (List.map fst (Images.images ~mime_type:None admitted));
   (match Images.images ~mime_type:None admitted with
-   | (1,Masc_tui_image_preview.Output_image {source=Inline_svg raw;_}) :: _ ->
+   | (_,Masc_tui_image_preview.Output_image {source=Inline_svg raw;_}) :: _ ->
        check string "XML TAB and CRLF survive admission" svg raw
-   | _ -> fail "expected original SVG source");
+   | [] | (_, (Masc_tui_image_preview.Named_path _ | Staged _ | Stored_attachment _
+       | Output_image {source=(Inline_data _ | Inline_mermaid _ | Server_path _ | Remote_uri _);_}
+       | Unavailable_image _ | No_image)) :: _ -> fail "expected original SVG source");
   check bool "retain original immutable observation" true (original == admitted);
   match admitted with
   | part :: _ ->
@@ -43,32 +47,32 @@ let test_original_admission () =
 let test_wrong_pending () =
   let state = state () and original = parts () in
   state.resource_content <- Some (uri,original);
-  state.resource_pending_uri <- Some "masc://next";
-  Updates.read_done state ~uri (Ok (parts ()));
+  state.resource_pending_key <- Some (Catalog.Mcp_uri "masc://next");
+  Updates.read_done state ~key:uri (Ok (parts ()));
   check bool "late URI cannot replace content" true (saved state == original);
-  check (option string) "current request retained" (Some "masc://next") state.resource_pending_uri
+  check (option key) "current request retained" (Some (Catalog.Mcp_uri "masc://next")) state.resource_pending_key
 
 let test_failed_read () =
   let state = state () and original = parts () in
   state.resource_content <- Some (uri,original);
-  state.resource_pending_uri <- Some uri;
-  Updates.read_done state ~uri (Error "read refused");
+  state.resource_pending_key <- Some uri;
+  Updates.read_done state ~key:uri (Error "read refused");
   check bool "failure preserves original" true (saved state == original);
-  check (option (pair string string)) "explicit failure" (Some (uri,"read refused")) state.resource_content_error;
-  Updates.read_done state ~uri (Ok (parts ()));
+  check (option (pair key string)) "explicit failure" (Some (uri,"read refused")) state.resource_content_error;
+  Updates.read_done state ~key:uri (Ok (parts ()));
   check bool "detached completion cannot replace" true (saved state == original)
 
 let test_new_observation () =
   let state = state () and original = parts () in
   let old = Some (uri,original) in
   state.resource_content <- old;
-  state.resource_pending_uri <- Some uri;
+  state.resource_pending_key <- Some uri;
   state.resource_content_error <- Some (uri,"previous failure");
   let next = parts () in
-  Updates.read_done state ~uri (Ok next);
+  Updates.read_done state ~key:uri (Ok next);
   check bool "new response stored exactly" true (saved state == next);
-  check bool "equal new bytes retire old preview" false (Images.same_reading old state.resource_content);
-  check (option (pair string string)) "success clears previous error" None state.resource_content_error
+  check bool "equal new bytes retire old preview" false (Images.same_reading ~equal:Catalog.equal_key old state.resource_content);
+  check (option (pair key string)) "success clears previous error" None state.resource_content_error
 
 let () = run "resource image admission" ["stored source",[
   test_case "original SVG and multipart admission" `Quick test_original_admission;

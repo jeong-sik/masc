@@ -6,6 +6,7 @@
 
 open Masc_tui_types
 module Cat = Masc.Keeper_memory_os_types
+module Catalog = Masc_tui_resource_catalog
 
 let check = Alcotest.check
 let str = Alcotest.string
@@ -965,19 +966,19 @@ let test_lanes_search_texts_lead_with_the_standalone_labels () =
    The row text is the name the list actually draws -- the server's title
    when it sent one -- because a search that matches a name nothing on screen
    shows finds rows the reader cannot see. Both readers take it from
-   [Masc_tui_mcp.display_name]. *)
+   [Masc_tui_resource_catalog.display_name]. *)
 let resources_state () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Resources;
   state.resources_list <-
     Some
-      [ { Masc_tui_mcp.uri = "masc://board"; name = "board"
+      [ Catalog.Mcp { Masc_tui_mcp.uri = "masc://board"; name = "board"
         ; title = Some "Board posts"; description = None
         ; mime_type = None; size = None }
-      ; { Masc_tui_mcp.uri = "masc://keepers"; name = "keepers"
+      ; Catalog.Mcp { Masc_tui_mcp.uri = "masc://keepers"; name = "keepers"
         ; title = None; description = None
         ; mime_type = None; size = None }
-      ; { Masc_tui_mcp.uri = "masc://lanes"; name = "lanes"
+      ; Catalog.Mcp { Masc_tui_mcp.uri = "masc://lanes"; name = "lanes"
         ; title = Some "   "; description = None
         ; mime_type = None; size = None }
       ];

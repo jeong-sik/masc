@@ -1,26 +1,26 @@
-(** MCP resource requests. [launch] is the caller's workspace request boundary:
+(** MCP resource and published report requests. [launch] is the caller's workspace request boundary:
     it checks endpoint identity, owns cancellation and stamps completion. [check]
     rechecks the same captured authority after obtaining an MCP session. The
-    list boundary carries the walk's stop alongside the rows, so a listing the
-    walk cut short is not mistaken for the whole one. *)
+    list combines independent sources with their failure diagnostics. Reports
+    use the token-bound admin API with a fixed revision and verified original body. *)
 
 val launch_list
   :  Masc_tui_types.state
   -> host:string
   -> launch:
        (deliver:
-          ((Masc_tui_mcp.resource list * Masc_tui_mcp.resources_walk_stop, string) result
+          ((Masc_tui_resource_catalog.listing, string) result
            -> Masc_tui_async_protocol.async_msg)
         -> (unit
-            -> (Masc_tui_mcp.resource list * Masc_tui_mcp.resources_walk_stop, string) result)
+            -> (Masc_tui_resource_catalog.listing, string) result)
         -> unit)
   -> check:(unit -> (unit, string) result)
   -> unit
 
-(** Mark the pending URI before launching. Changing resources clears the old
+(** Mark the pending key before launching. Changing resources clears the old
     content, error and scroll; re-reading the same resource keeps its content.
     Selection is retained while authority is unconfirmed, without invoking
-    [launch] or [check]. Same-workspace recovery resumes the pending URI;
+    [launch] or [check]. Same-workspace recovery resumes the pending key;
     foreign-workspace reconciliation clears it. Resource_read failure
     attribution is applied exactly once. *)
 val launch_read
@@ -33,5 +33,5 @@ val launch_read
         -> (unit -> (Masc_tui_mcp.resource_content list, string) result)
         -> unit)
   -> check:(unit -> (unit, string) result)
-  -> uri:string
+  -> key:Masc_tui_resource_catalog.key
   -> unit

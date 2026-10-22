@@ -682,7 +682,7 @@ type async_msg =
   | Play_invite_revoked of Masc_tui_types.play_change_request * play_sink * string * play_revoke
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of
-      (Masc_tui_mcp.resource list * Masc_tui_mcp.resources_walk_stop, string) result
+      (Masc_tui_resource_catalog.listing, string) result
   (* The scope travels with the directory. Without it a reply names a
      relative path, which two scopes can both have, and the handler had no
      way to tell a late answer for the scope just left from an answer for the
@@ -720,7 +720,7 @@ type async_msg =
       Masc_tui_types.code_lsp_query Masc_tui_fetched.request
       * (Masc.Tui_decode.lsp_answer, string) result
   | Resource_read of
-      string * (Masc_tui_mcp.resource_content list, string) result
+      Masc_tui_resource_catalog.key * (Masc_tui_mcp.resource_content list, string) result
   | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Identity_providers_loaded of
       Masc_tui_types.detail_read_request * (Masc_tui_identity_model.identity_provider list, string) result

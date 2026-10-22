@@ -8142,7 +8142,7 @@ type sent_image_read =
   ; sir_keeper : string option
   ; sir_name : string
   ; sir_authority : unit ref
-  ; sir_resource : (string * Masc_tui_mcp.resource_content list) option
+  ; sir_resource : (Masc_tui_resource_catalog.key * Masc_tui_mcp.resource_content list) option
   }
 
 type lane_nested_read =
@@ -8503,8 +8503,8 @@ type state = {
      show one keeper's instructions under another's name. *)
   (* The Config surface: runtime.toml's path and text as the server read
      them, refreshed on entry and after every save. *)
-  (* The Resources surface: the MCP resource inventory, and the one read
-     the content pane shows, stamped with its uri. [resource_pending_uri]
+  (* The Resources surface: MCP resources and published reports, and the one read
+     the content pane shows, stamped with its typed authority key. [resource_pending_key]
      rejects a slow reply after the operator has stepped to another row. *)
   (* The Config surface's voice pane: the server's own answer about what
      loaded, and which input device the recorder would use. The device is read
@@ -8529,13 +8529,13 @@ type state = {
      for a save made by a session that has since closed cannot match the one
      open now. *)
   mutable voice_wizard_requests: int;
-  mutable resources_list: Masc_tui_mcp.resource list option;
+  mutable resources_list: Masc_tui_resource_catalog.t list option;
   mutable resources_error: string option;
   mutable resources_cursor: int;
   mutable resource_content:
-    (string * Masc_tui_mcp.resource_content list) option;
-  mutable resource_content_error: (string * string) option;
-  mutable resource_pending_uri: string option;
+    (Masc_tui_resource_catalog.key * Masc_tui_mcp.resource_content list) option;
+  mutable resource_content_error: (Masc_tui_resource_catalog.key * string) option;
+  mutable resource_pending_key: Masc_tui_resource_catalog.key option;
   mutable resource_scroll: int;
   mutable resource_focus: pane_focus;
   mutable resource_image_cursor: int;
@@ -10938,11 +10938,11 @@ let workspace_operation_reply state ~authority ~reading (receipt, observation) =
   in
   receipt, observation
 
-let retain_resource_read state ~uri =
+let retain_resource_read state ~key =
   let same_resource = match state.resource_content with
-    | Some (current, _) -> String.equal current uri
+    | Some (current, _) -> Masc_tui_resource_catalog.equal_key current key
     | None -> false in
-  state.resource_pending_uri <- Some uri;
+  state.resource_pending_key <- Some key;
   if not same_resource then begin
     state.resource_content <- None;
     state.resource_content_error <- None;
@@ -15250,7 +15250,7 @@ let create_state
   resources_cursor = 0;
   resource_content = None;
   resource_content_error = None;
-  resource_pending_uri = None;
+  resource_pending_key = None;
   resource_scroll = 0;
   resource_focus = Left_pane;
   resource_image_cursor = 0;
@@ -16139,7 +16139,7 @@ let keeper_rows_page (state : state) ~error =
    the list to [] before asking, so a read that answered with no resources and
    a read not answered yet were the same empty list, and both said
    "(loading...)" -- for good, on a server that exposes no resources. *)
-let resources_empty_note (list : Masc_tui_mcp.resource list option) =
+let resources_empty_note (list : Masc_tui_resource_catalog.t list option) =
   match list with
   | None -> Some " (loading\xe2\x80\xa6)"
   | Some [] -> Some " (no resources)"

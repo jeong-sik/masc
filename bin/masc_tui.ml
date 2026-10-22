@@ -7190,7 +7190,7 @@ let move_resource_document state movement =
 let search_row_cursor state =
   if state.view = Resources && state.resource_focus = Right_pane
      && not state.context_inspector_open && not state.repository_changes_open
-  then Some state.resource_search_cursor
+  then Some (Masc_tui_resource_reading.cursor state.resource_search_position)
   else Option.map (fun r -> r.rl_cursor) (row_list state)
 
 let place_row_cursor state index =
@@ -7222,7 +7222,8 @@ let show_lanes_action_error state detail =
 
 let search_jump ?(backwards = false) state ~query ~after =
   let query = surface_search_query state.view query in
-  match Masc_tui_surface_search.surface_row_texts ~cols:(snd (get_terminal_size ())) state state.view with
+  let _, cols = get_terminal_size () in
+  match Masc_tui_surface_search.surface_row_texts ~cols state state.view with
   | None -> ()
   | Some texts ->
       (* Into an array before the scan, not walked per index. The scan visits
@@ -7250,7 +7251,8 @@ let search_jump ?(backwards = false) state ~query ~after =
               end;
               if state.view = Resources && state.resource_focus = Right_pane
                  && not state.context_inspector_open && not state.repository_changes_open
-              then Masc_tui_resources_updates.place_search_match state ~count:total ~index
+              then Masc_tui_resources_updates.place_search_match state
+                ~cols:(resource_content_cols state ~cols) ~query ~count:total ~index
               else place_row_cursor state index
             end
             else scan (step + 1)
@@ -13542,6 +13544,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resource_read_owner <- None;
   state.resource_revision_history <- [];
   state.resource_scroll <- Masc_tui_scroll.Position.first;
+  state.resource_search_position <- Masc_tui_resource_reading.first;
   state.resource_image_cursor <- 0;
   state.resource_text_cursor <- 0;
   state.observer_cursor <- None;
@@ -29112,7 +29115,7 @@ and is loaded on demand through keeper_skill.
        | Some "i" when state.view = Resources && state.resource_focus = Right_pane ->
            state.resource_metadata_expanded <- not state.resource_metadata_expanded;
            state.resource_scroll <- Masc_tui_scroll.Position.first;
-           state.resource_search_cursor <- 0
+           state.resource_search_position <- Masc_tui_resource_reading.first
        | Some "\015" when state.view = Resources && state.resource_focus = Right_pane ->
            open_resource_image state ~mailbox:async_messages
        | Some (("(" | ")") as direction)

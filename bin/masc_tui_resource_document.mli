@@ -1,6 +1,6 @@
 (** The exact current Resources document. This projection reads state without
     changing retained bytes, request ownership, selection or scroll. *)
-type t
+type t = Masc_tui_resource_reading.t
 val current : Masc_tui_types.state -> t option
 (** [None] when no inventory entry owns the pending/error/content key. *)
 val entry : t -> Masc_tui_resource_catalog.t
@@ -20,6 +20,12 @@ val rows : cols:int -> t -> string list
     fencing/joining and terminal sanitization. HTML document whitespace follows
     HTML parsing; original parts and copy bytes are unchanged. Source mode
     keeps standalone CR escaped. *)
+val rows_with_search : cols:int -> Masc_tui_types.state -> t ->
+  (string * Masc_tui_detail_reading.search_mark) list
+(** Original rows and their current literal search marks at this pane width.
+    A current landing also requires the exact original reading and query.
+    It retains the last search result through ordinary scrolling.
+    Unadmitted content and list focus have no document marks. *)
 val search_rows : cols:int -> Masc_tui_types.state -> string list option
 (** Search only the currently displayed admitted content. Metadata-only,
     loading another key, failures and withdrawn inventory return [None].

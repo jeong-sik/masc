@@ -8557,7 +8557,7 @@ type state = {
   mutable resource_revision_history: Masc_tui_resource_catalog.report list;
   mutable resource_scroll: Masc_tui_scroll.Position.t;
   (* Logical search match is independent of last-page scroll clamping. *)
-  mutable resource_search_cursor: int;
+  mutable resource_search_position: Masc_tui_resource_reading.search_position;
   mutable resource_focus: pane_focus;
   mutable resource_image_cursor: int;
   mutable resource_text_cursor: int;
@@ -11019,7 +11019,7 @@ let retain_resource_read state ~key =
     state.resource_content <- None;
     state.resource_content_error <- None;
     state.resource_scroll <- Masc_tui_scroll.Position.first;
-    state.resource_search_cursor <- 0;
+    state.resource_search_position <- Masc_tui_resource_reading.first;
     state.resource_text_cursor <- 0
   end
 
@@ -15380,7 +15380,7 @@ let create_state
   resource_read_owner = None;
   resource_revision_history = [];
   resource_scroll = Masc_tui_scroll.Position.first;
-  resource_search_cursor = 0;
+  resource_search_position = Masc_tui_resource_reading.first;
   resource_focus = Left_pane;
   resource_image_cursor = 0;
   resource_text_cursor = 0;

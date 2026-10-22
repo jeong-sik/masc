@@ -135,7 +135,7 @@ let render_resources (state : state) =
            box_empty pane_buf pane_cols
          done
      | Some reading ->
-         let rendered = Masc_tui_resource_document.rows ~cols:pane_cols reading in
+         let rendered = Masc_tui_resource_document.rows_with_search ~cols:pane_cols state reading in
          let total_lines = List.length rendered in
          let position = Masc_tui_scroll.Position.clamp ~count:total_lines
              ~height:content_height state.resource_scroll in
@@ -147,7 +147,13 @@ let render_resources (state : state) =
          drawn_resource_scroll := position;
          for i = 0 to content_height - 1 do
            match Rows.at rendered_window (scroll + i) with
-           | Some line -> box_line pane_buf pane_cols ("  " ^ line)
+           | Some (line, mark) ->
+               (match mark with
+                | Masc_tui_detail_reading.Current_match ->
+                    box_line_selected pane_buf pane_cols ("> " ^ Masc_tui_theme.strip_sgr line)
+                | Match -> box_line_styled pane_buf pane_cols ~style:Ansi.underline
+                    ("* " ^ Masc_tui_theme.strip_sgr line)
+                | No_match -> box_line pane_buf pane_cols ("  " ^ line))
            | None -> box_empty pane_buf pane_cols
          done);
     box_bottom pane_buf pane_cols

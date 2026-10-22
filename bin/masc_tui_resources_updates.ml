@@ -23,7 +23,7 @@ let reconcile state =
       state.resource_content <- None;
       state.resource_content_error <- None;
       state.resource_scroll <- Masc_tui_scroll.Position.first;
-      state.resource_search_cursor <- 0;
+      state.resource_search_position <- Masc_tui_resource_reading.first;
       state.resource_text_cursor <- 0;
       state.resource_image_cursor <- 0;
       state.resource_focus <- Left_pane
@@ -88,7 +88,7 @@ let toggle_today state ~now =
 
 let reset_document_position state =
   state.resource_scroll <- Masc_tui_scroll.Position.first;
-  state.resource_search_cursor <- 0
+  state.resource_search_position <- Masc_tui_resource_reading.first
 
 let toggle_layout state =
   state.resource_layout <- (match state.resource_layout with
@@ -114,7 +114,7 @@ let read_done state ~(request : Catalog.read_request) result =
        state.resource_revision_history <- reading.revisions;
        state.resource_image_cursor <- 0;
        state.resource_text_cursor <- 0;
-       state.resource_search_cursor <- 0;
+       state.resource_search_position <- Masc_tui_resource_reading.first;
        state.resource_content_error <- None
      | Error detail -> state.resource_content_error <- Some (key, detail))
   | (Some _ | None), (Some _ | None) -> ()
@@ -137,11 +137,14 @@ let step_revision state ~direction ~read =
       (Catalog.adjacent_revision direction ~current:report state.resource_revision_history)
   | Some (Catalog.Mcp_uri _) | None -> ()
 
-let place_search_match state ~count ~index =
-  if state.resource_focus = Right_pane && index >= 0 && index < count then begin
-    state.resource_search_cursor <- index;
-    state.resource_scroll <- Masc_tui_scroll.Position.at index
-  end
+let place_search_match state ~cols ~query ~count ~index =
+  if state.resource_focus = Right_pane && query <> "" && index >= 0 && index < count then
+    match Masc_tui_resource_document.current state with
+    | Some reading when Masc_tui_resource_reading.searchable reading ->
+      state.resource_search_position <- Masc_tui_resource_reading.record_landing
+        ~cols ~query ~index reading;
+      state.resource_scroll <- Masc_tui_scroll.Position.at index
+    | Some _ | None -> ()
 
 let step_text_part state ~delta =
   if state.view = Resources && state.resource_focus = Right_pane then

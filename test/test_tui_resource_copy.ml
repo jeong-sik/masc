@@ -5,6 +5,7 @@ module Mcp = Masc_tui_mcp
 module Catalog = Masc_tui_resource_catalog
 module Doc = Masc_tui_resource_document
 module Updates = Masc_tui_resources_updates
+module Reading = Masc_tui_resource_reading
 
 let key = Catalog.Mcp_uri "masc://report"
 let text source = { Mcp.rc_uri=Some "file:///never-followed";
@@ -36,10 +37,11 @@ let unchanged s original =
 
 let exact_source () =
   let s=state () in
-  s.resource_scroll <- Masc_tui_scroll.Position.at 17;s.resource_search_cursor <- 23;
+  Updates.place_search_match s ~cols:120 ~query:"원문" ~count:30 ~index:23;
+  s.resource_scroll <- Masc_tui_scroll.Position.at 17;
   check string "original source bytes, not a display projection" raw (source s);
   check int "copy leaves scroll" 17 (Masc_tui_scroll.Position.offset ~count:40 ~height:1 s.resource_scroll);
-  check int "copy leaves logical match" 23 s.resource_search_cursor;
+  check int "copy leaves logical match" 23 (Reading.cursor s.resource_search_position);
   check int "copy leaves catalog selection" 0 s.resources_cursor;
   unchanged s parts
 let selection () =

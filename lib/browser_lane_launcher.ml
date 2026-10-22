@@ -5,10 +5,12 @@ type launcher =
   | Describes_another_launcher
   | Follows_workspace
 
+type not_running = Attach_failed | Attaching | Not_known
+
 type unlisted =
   | No_browser_addon
   | Browser_addon_off
-  | Browser_addon_not_running
+  | Browser_addon_not_running of not_running
   | Browser_addon_unreadable of string
 
 type polling =
@@ -50,7 +52,7 @@ type verdict =
   | Connected
   | Addon_missing
   | Addon_off
-  | Addon_not_running
+  | Addon_not_running of not_running
   | Addon_unreadable
   | Aligned
   | Unverified
@@ -143,7 +145,8 @@ let verdict t =
   | _, Not_installed, _ -> Absent
   | Serving { polling = Unlisted No_browser_addon; _ }, _, _ -> Addon_missing
   | Serving { polling = Unlisted Browser_addon_off; _ }, _, _ -> Addon_off
-  | Serving { polling = Unlisted Browser_addon_not_running; _ }, _, _ -> Addon_not_running
+  | Serving { polling = Unlisted (Browser_addon_not_running reason); _ }, _, _ ->
+      Addon_not_running reason
   | Serving { polling = Unlisted (Browser_addon_unreadable _); _ }, _, _ -> Addon_unreadable
   | (Not_serving | Serving { polling = Polling [] | Not_observed; _ }),
     (Undeclared | Unreadable | Describes_another_launcher), _
@@ -214,11 +217,21 @@ let unlisted_message ~base_path unlisted =
          this server. The operator sets enabled = true in its declaration, which %s shows; the \
          server attaches it on its next maintenance pass."
         lane_addons
-  | Browser_addon_not_running ->
+  | Browser_addon_not_running Attach_failed ->
       Printf.sprintf
-        "The browser Add-on is declared on, and this server runs no installation of it now, so \
-         no browser host can register here yet. The server attaches it on its next maintenance \
-         pass, or its last attach failed; the operator reads which on %s."
+        "The browser Add-on is declared on, and the server's last attempt to attach it failed, \
+         so no browser host can register here. The operator reads why on %s."
+        lane_addons
+  | Browser_addon_not_running Attaching ->
+      Printf.sprintf
+        "The browser Add-on is declared on, and the server is starting or replacing its worker \
+         now, so no browser host has registered here yet. The operator reads how it goes on %s."
+        lane_addons
+  | Browser_addon_not_running Not_known ->
+      Printf.sprintf
+        "The browser Add-on is declared on, and this check sees no installation of it running, \
+         so no browser host can register here yet. The server attaches it on its next \
+         maintenance pass, or its last attach failed; the operator reads which on %s."
         lane_addons
   | Browser_addon_unreadable detail ->
       Printf.sprintf

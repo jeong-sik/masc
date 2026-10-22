@@ -31,6 +31,7 @@ let with_browsers ?(models=true) ?(sessions=Lane.Browser_open) run = Eio_main.ru
   Lane.install_automation_executor (Some (fun _ -> incr dispatched;refused));
   List.iter (fun lane -> Lane.install_server_session_observer lane (Some (fun () -> sessions))) owned;
   Fun.protect ~finally:(fun () ->
+    Lane.install_activity_observer None;
     Lane.install_stagehand_executor None;Lane.install_automation_executor None;
     List.iter (fun lane -> Lane.install_server_session_observer lane None) owned;
     List.iter (fun (info:Lane.client_info) -> ignore (Lane.disconnect_client ~client_id:info.client_id))
@@ -44,7 +45,13 @@ let chosen = function
   | Ok (selected : Selection.selected) -> Some selected.route
   | Error (_ : Selection.error) -> None
 let live (info : Lane.client_info) = Some (Lane.Live_route (Some info.client_id))
-(* The worker admits an explicit browser, then checks the target it resolved. *)
+let none_serves = function
+  | Error (Selection.Required_actions_unavailable _) -> true
+  | Ok _ | Error (Selection.Binding_required | No_available_browser | Ambiguous_browsers _
+    | Unsupported_required_actions _) -> false
+(* The worker admits an explicit browser, then checks the target it resolved,
+   in this order (lib/browser_addon_tool.ml). The scripted Add-on the other
+   browser tests use answers commands itself, so it never runs this. *)
 let admitted names route =
   match Selection.resolve ~required_actions:(operations names) ~verb:Lane.Tabs_list ~bound:false
           (Selection.Exact route) with
@@ -84,12 +91,12 @@ let test_session_open_choice () = with_browsers ~sessions:Lane.Browser_closed (f
   check bool "a frame task opens the owned Firefox, not the configured Chromium" true
     (chosen (automatic ~verb:opening ["read_frames"]) = Some Lane.Automation_route);
   check bool "no owned browser zooms, so opening cannot fall to the operator's extension" true
-    (chosen (automatic ~verb:opening ["page_zoom"]) = None))
+    (none_serves (automatic ~verb:opening ["page_zoom"])))
 
 let test_sentence_actions_need_the_model () =
   with_browsers ~models:false (fun ~extension:_ ~bidi:_ ->
     check bool "with Stagehand's models off no browser is chosen for a sentence action" true
-      (chosen (automatic ["sentence_action"]) = None);
+      (none_serves (automatic ["sentence_action"]));
     check bool "an explicit Stagehand without models is refused" true
       (unsupported (admitted ["sentence_action"] Lane.Stagehand_route)));
   with_browsers ~models:true (fun ~extension:_ ~bidi:_ ->

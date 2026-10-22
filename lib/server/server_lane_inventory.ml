@@ -123,7 +123,8 @@ let browser_map f = function
   | Browser_addon_presence.Observed published -> Browser_observed (f published)
   | Browser_addon_presence.Absent -> Browser_addon_absent
   | Browser_addon_presence.Off -> Browser_addon_off
-  | Browser_addon_presence.Not_running -> Browser_addon_not_running
+  | Browser_addon_presence.Not_running
+      Browser_lane_launcher.(Attach_failed | Attaching | Not_known) -> Browser_addon_not_running
   (* The inventory is served to the operator alone (CanAdmin), so a failure is
      shown with its detail. *)
   | Browser_addon_presence.Unavailable reason ->

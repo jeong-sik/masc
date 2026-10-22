@@ -316,7 +316,8 @@ let the_launcher_verdict_reads_the_browser_addon_before_the_launcher () =
     ; "no browser Add-on", lane (Launcher.Unlisted Launcher.No_browser_addon), Launcher.Addon_missing
     ; "an Add-on switched off", lane (Launcher.Unlisted Launcher.Browser_addon_off), Launcher.Addon_off
     ; "an Add-on declared on and not run",
-      lane (Launcher.Unlisted Launcher.Browser_addon_not_running), Launcher.Addon_not_running
+      lane (Launcher.Unlisted (Launcher.Browser_addon_not_running Launcher.Not_known)),
+      Launcher.Addon_not_running Launcher.Not_known
     ; "an Add-on this server cannot read",
       lane (Launcher.Unlisted (Launcher.Browser_addon_unreadable "owner busy")), Launcher.Addon_unreadable
     ; "the Add-on comes before a launcher to reinstall",
@@ -351,8 +352,14 @@ let the_browser_lane_check_asks_the_browser_addon_only_when_serving () =
       Onboarding_status.Needs_setup
     ; "an Add-on switched off is a step to take", Launcher.Unlisted Launcher.Browser_addon_off,
       Onboarding_status.Needs_setup
-    ; "an Add-on declared on and not run yet is unconfirmed, not broken",
-      Launcher.Unlisted Launcher.Browser_addon_not_running, Onboarding_status.Needs_verification
+    ; "an Add-on whose attach failed is broken",
+      Launcher.Unlisted (Launcher.Browser_addon_not_running Launcher.Attach_failed), Onboarding_status.Invalid
+    ; "an Add-on being started is unconfirmed, not broken",
+      Launcher.Unlisted (Launcher.Browser_addon_not_running Launcher.Attaching),
+      Onboarding_status.Needs_verification
+    ; "an Add-on not run for a reason not known is unconfirmed, not broken",
+      Launcher.Unlisted (Launcher.Browser_addon_not_running Launcher.Not_known),
+      Onboarding_status.Needs_verification
     ; "an Add-on this server cannot read is unconfirmed",
       Launcher.Unlisted (Launcher.Browser_addon_unreadable "owner busy"), Onboarding_status.Needs_verification
     ; "a host the Add-on lists is connected", Launcher.Polling [ host ], Onboarding_status.Satisfied

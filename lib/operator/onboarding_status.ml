@@ -294,17 +294,20 @@ let browser_lane_check ~configuration base_path =
   let message = Browser_lane_launcher.message observation in
   let report condition = [check Browser_lane condition message [Inspect_configuration]] in
   (* No browser Add-on, or one switched off, is a step the operator has not
-     taken yet. A lane the launcher misdescribes is broken. One declared on
-     that the server does not run now is not known to be broken: the next
-     maintenance pass may attach it, or it may be between a replacement's
-     stop and start. It and an Add-on this server cannot read leave the lane
-     unconfirmed, as no server does. *)
+     taken yet. One declared on whose attach failed is broken, and so, once
+     the Add-on can take a host, is a lane the launcher misdescribes. One
+     declared on that is being started, or that this check knows nothing
+     more of, may still attach: it and an Add-on this server cannot read
+     leave the lane unconfirmed, as no server does. *)
   (match Browser_lane_launcher.verdict observation with
    | Browser_lane_launcher.Absent -> []
    | Browser_lane_launcher.Connected | Browser_lane_launcher.Aligned -> report Satisfied
    | Browser_lane_launcher.Addon_missing | Browser_lane_launcher.Addon_off -> report Needs_setup
-   | Browser_lane_launcher.Addon_not_running | Browser_lane_launcher.Addon_unreadable
-   | Browser_lane_launcher.Unverified -> report Needs_verification
+   | Browser_lane_launcher.Addon_not_running
+       (Browser_lane_launcher.Attaching | Browser_lane_launcher.Not_known)
+   | Browser_lane_launcher.Addon_unreadable | Browser_lane_launcher.Unverified ->
+     report Needs_verification
+   | Browser_lane_launcher.Addon_not_running Browser_lane_launcher.Attach_failed
    | Browser_lane_launcher.Misconfigured -> report Invalid)
   @ browser_bidi_host_check host
 

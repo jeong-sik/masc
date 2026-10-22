@@ -237,11 +237,13 @@ published observation, the same reading the Lanes screen's browser rows show.
 follows the port the server bound. Before the launcher and the port it names a
 browser Add-on that cannot take a host: none declared or one switched off is
 `needs_setup` (the first is fixed by
-`masc browser-lane-setup --mode addon --base-path <path>`). One declared on
-that the server does not run now is `needs_verification`, as is one the server
-cannot read: the next configuration maintenance pass may attach it, a
-replacement may be starting, or its attach failed, which the Lane Add-ons
-screen shows. A workspace with no launcher installed has no such line.
+`masc browser-lane-setup --mode addon --base-path <path>`). For one declared
+on that the server does not run now, the check reads how the configuration
+maintenance pass last applied its declaration: a failed attach is `invalid`,
+and a worker being started or replaced, or a declaration the pass has not
+applied yet, is `needs_verification`, as is an Add-on the server cannot read.
+The Lane Add-ons screen shows why an attach failed. A workspace with no
+launcher installed has no such line.
 
 The setup check reads the Add-on as the operator, as the native host poll
 does. The dashboard's client list (`GET /api/v1/dashboard/browser-lane/clients`)

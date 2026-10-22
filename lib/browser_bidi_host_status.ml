@@ -19,9 +19,8 @@ let keeper_of_configuration = function
 type observation = { lane : Launcher.t; record : Record.state; keeper : keeper }
 
 (* Reading the records and the launcher's files can let other fibers run.
-   The server is asked after them, so its connection list is the newest
-   thing in the observation: a host that attached during the reads is in
-   it. *)
+   The server is asked after them, but it answers with what the browser
+   Add-on last published, which a host that attached since is not in yet. *)
 let observe ~access ~base_path ~configuration =
   let record = Record.observe ~base_path in
   let keeper = keeper_of_configuration configuration in

@@ -22,16 +22,21 @@ type t =
   | Off
       (** A browser Add-on is declared and switched off, and every
           declaration was read, so none is switched on. *)
-  | Not_running
+  | Not_running of Browser_lane_launcher.not_running
       (** One is declared on and the runtime runs no installation of it that
-          the reader can see. *)
+          the reader can see, with what is known of why. *)
   | Unavailable of unavailable
 
 (** Decide from what {!Lane_addon_runtime.observation_for_export} answered for
     the browser tool. With no observation, the declarations say which absence
-    it is; an incomplete declaration snapshot proves none. *)
+    it is; an incomplete declaration snapshot proves none. [applications] is
+    asked only when a browser Add-on is declared on and none runs: it answers
+    how the configuration maintenance pass last applied each declaration
+    ({!Lane_addon_runtime.inventory}), or nothing for a reader that may not
+    see that. *)
 val of_export :
   declarations:Lane_addon_config.snapshot ->
+  applications:(unit -> Lane_addon_runtime.configuration_application list) ->
   (Lane_addon_runtime.export_observation option, Lane_addon_runtime.export_refusal) result -> t
 
 (** Ask the runtime for the browser Add-on's cached observation and decide.
@@ -39,7 +44,9 @@ val of_export :
     [access] is the reader's: an installation it cannot see is not read, so
     the reading never names one to a caller who could not list it. Native
     browser hosts register with the installation
-    {!Lane_addon_sources.Operator_configuration} sees. *)
+    {!Lane_addon_sources.Operator_configuration} sees. Only that access reads
+    how a declaration was applied, which is operator metadata, so only it
+    tells a failed attach. *)
 val read :
   config:Workspace.config -> access:Lane_addon_sources.access ->
   declarations:Lane_addon_config.snapshot -> t

@@ -107,15 +107,29 @@ Common Addon aggregate `Input_refused` or diagnostic text cannot reconstruct
 that proof. Preserve the actual host flow evidence in a typed original receipt
 before migrating those consumers. A worker's exhaustion claim is not authority.
 
-**Absorption recovery:** the gate exposes observation JSON but no authoritative
-strict `run_result` restore port. Claiming crash-safe gate continuation requires
-original state/questions/destination and trusted typed answers with a strict
-re-derived decision. Casting observer JSON into a gate result is insufficient.
-Any remaining gate reevaluation must be explicit; preserving a raw Memory
-proposal alone does not prove that no model call can repeat after a crash.
+**Absorption recovery:** the gate now exposes a separate canonical
+`evaluation_evidence_to_yojson` encoder for the existing after-evaluate hook and
+a pure `restore` port. The host must retain the original pre-dispatch request,
+returned typed response/refusal, original source/proposal inputs and captured
+availability with ordered destination identities. Restore rederives each exact
+request and the ordinary forward/reverse decisions, checking destination walks
+and successful outbound body digests. Live execution and restore share that
+decision code. Missing, pending, aborted, changed or extra evaluation evidence
+refuses without any provider/configuration fallback; observer JSON is not an
+authority format. Original partial failures and judgment-invalid typed answers
+remain unsuccessful rather than becoming permission to commit.
+
+The port does not persist or discover the original records itself, bind the
+physical journal or recover a provider response lost before its after-hook
+write. The eventual owner must retain original input bytes needed to reproduce
+the outbound request digest and strictly restore workspace, inputs and gate
+authority before calling it. Production Librarian still needs that integration;
+a raw Memory proposal or this pure port alone does not establish crash-safe
+gate continuation. Any later reevaluation needs an explicit original decision,
+not an automatic provider retry on a restore error.
 
 **Validation binding:** compose the new original-consumer validator with the
-existing Curator namespace checks in `Server_lane_addon_exact.validate_request`.
+existing Curator namespace checks in `Server_lane_addon_exact.authorize_request`.
 Direct Exact calls and retained delivery must not bypass an original binding by
 relabeling its package. Generic partial schema checks do not verify candidate
 coverage, surrogate identity, lineage or commit authority.

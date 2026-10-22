@@ -241,6 +241,36 @@ class LocalBuildInstall(unittest.TestCase):
                 "./bin/masc_browser_host.exe", "./bin/deployment_preflight_helper.exe",
                 *[f"./bin/{program}.exe" for program in BROWSER_ADDON_PROGRAMS]])
 
+    def test_declining_the_browser_addon_leaves_its_programs_off_the_build_line(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            checkout = root / "checkout"
+            scripts = checkout / "scripts"
+            scripts.mkdir(parents=True)
+            shutil.copy2(SCRIPT, scripts / SCRIPT.name)
+            record = root / "build-call"
+            guard = scripts / "dune-local.sh"
+            guard.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$RECORD"\nexit 1\n')
+            guard.chmod(0o755)
+            result = subprocess.run(
+                ["bash", str(scripts / SCRIPT.name), "--without-browser-addon", "--prefix",
+                 str(root / "prefix"), "--manifest-dir", str(root / "absent")],
+                env=dict(unnamed_env(root), RECORD=str(record)), capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(record.read_text().splitlines(), [
+                "build", "--root", str(checkout), "./bin/main_eio.exe", "./bin/masc_tui.exe",
+                "./bin/masc_browser_host.exe", "./bin/deployment_preflight_helper.exe"])
+
+    def test_the_removed_opt_in_option_is_an_unknown_option(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "--with-browser-addon", "--prefix", str(root / "prefix")],
+                env=unnamed_env(root), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("unknown option: --with-browser-addon", result.stderr)
+            self.assertFalse((root / "prefix").exists())
+
     # An install that cannot run the check stops before it replaces a binary or
     # cleans the build tree, so the selected workspace and the build stay.
     def test_a_build_without_a_current_helper_installs_and_cleans_nothing(self):

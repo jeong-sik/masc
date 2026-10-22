@@ -154,7 +154,7 @@ fi
 if [ "$browser_addon" = true ]; then
   for program in "${browser_addon_programs[@]}"; do
     if [ ! -f "$build_dir/$program.exe" ] || [ ! -x "$build_dir/$program.exe" ]; then
-      echo "install-local-build: browser Addon requires executable $build_dir/$program.exe; nothing installed" >&2
+      echo "install-local-build: browser Addon requires executable $build_dir/$program.exe; nothing installed. Build it into $build_dir, or pass --without-browser-addon to leave the Addon programs out." >&2
       exit 1
     fi
   done

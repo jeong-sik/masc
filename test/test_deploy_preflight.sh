@@ -80,12 +80,20 @@ echo "deploy preflight refuses runtime.toml before stopping prod"
 # binary, with the same refusing helper.
 cp "$ROOT_DIR/scripts/install-local-build.sh" \
     "$FIXTURE_DIR/repo/scripts/install-local-build.sh"
+# The installer builds and installs the browser Add-on programs by default and
+# refuses to start without all three.
 touch \
     "$FIXTURE_DIR/repo/_build/default/bin/masc_tui.exe" \
-    "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_host.exe"
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_host.exe" \
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_native_addon_launcher.exe" \
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_addon_worker.exe" \
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_process_owner.exe"
 chmod +x \
     "$FIXTURE_DIR/repo/_build/default/bin/masc_tui.exe" \
-    "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_host.exe"
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_host.exe" \
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_native_addon_launcher.exe" \
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_addon_worker.exe" \
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_process_owner.exe"
 
 INSTALL_ERR="$FIXTURE_DIR/install-local-build.err"
 if bash "$FIXTURE_DIR/repo/scripts/install-local-build.sh" \

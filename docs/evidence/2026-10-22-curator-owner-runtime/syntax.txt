@@ -9,4 +9,3 @@ lib/server/server_workspace_memory_curator.ml: exit 0
 test/test_prompt_registry_dune_fallback.ml: exit 0
 
 test/test_workspace_memory_curator_lane.ml: exit 0
-

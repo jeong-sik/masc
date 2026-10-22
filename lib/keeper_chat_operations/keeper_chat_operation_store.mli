@@ -336,6 +336,19 @@ val bind_direct_input_checkpoint : t -> now:float ->
     cut. Owner validates the transformation before using this storage primitive.
     Both predecessor comparisons are transactional; uncertain commits stay Error. *)
 
+val direct_input_wait : t -> operation_id:Operation.Operation_id.t ->
+  (Keeper_semantic_execution.input_wait option, error) result
+val defer_direct_input_wait : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  execution_digest:string -> waiting:Keeper_semantic_execution.input_wait -> (Operation.t, error) result
+(** Atomic original direct-operation input wait. The Owner must first validate
+    its original child, trace and exact retained request. The transaction checks
+    current input ownership, the execution digest and matching native Retire;
+    it acknowledges that receipt, records the wait and requeues the same input.
+    Active/unknown effects, stale references and conflicting waits are refused.
+    Waiting is blocked from claiming and priority indefinitely; no time-based
+    expiry or generic resume. An uncertain commit stays Error; read actual
+    state before reconciliation. This grants no response admission. *)
+
 val defer_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Operation.t, error) result
 val resume_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t ->

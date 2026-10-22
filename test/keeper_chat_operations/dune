@@ -42,3 +42,9 @@
  (name test_keeper_chat_operation_public)
  (modules test_keeper_chat_operation_public)
  (libraries alcotest masc.keeper_chat_operations yojson))
+
+(test
+ (name test_keeper_direct_input_wait)
+ (modules test_keeper_direct_input_wait)
+ (libraries alcotest masc.agent_core masc.keeper_chat_operations masc.keeper_execution_scope
+  masc.keeper_checkpoint_ref masc.keeper_registry unix yojson))

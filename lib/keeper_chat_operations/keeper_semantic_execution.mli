@@ -65,6 +65,15 @@ type gate_resolution = { obligation : gate_obligation; decision : gate_decision 
 type gate_wait_state = { waiting : gate_wait; resolution : gate_resolution option }
 val equal_gate_wait : gate_wait -> gate_wait -> bool
 val gate_binding_with_wait : binding:gate_binding -> waiting:gate_wait -> (gate_binding, string) result
+type input_wait = private
+  { checkpoint : Keeper_checkpoint_ref.t
+  ; pending : Agent_core.Agent_input_request.pending }
+val input_wait : checkpoint:Keeper_checkpoint_ref.t ->
+  pending:Agent_core.Agent_input_request.pending -> (input_wait, string) result
+val equal_input_wait : input_wait -> input_wait -> bool
+(** Exact owned input and complete canonical request. The serialized request is
+    validated; this value alone is not filesystem or response authority. The
+    Owner must read and compare its exact retained payload before admission. *)
 type terminal = Completed | Cancelled | Failed of string
 type recovery_origin =
   | Unconfirmed_sources
@@ -75,6 +84,7 @@ type recovery_origin =
   | Runtime_retry of runtime_retry
   | Gate_wait of gate_wait_state
   | Gate_binding of gate_binding
+  | Input_wait of input_wait
 type recovery = { origin : recovery_origin; diagnostic : string }
 type phase =
   | Preparing
@@ -125,6 +135,7 @@ type action =
   | Update_runtime_retry_wait of { observed : runtime_retry; replacement : runtime_retry }
   | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
+  | Suspend_input of input_wait
   | Reconcile_gate_binding of gate_binding * gate_wait
   | Resolve_gate of gate_resolution
   | Resume_gate of gate_wait * gate_resolution
@@ -169,7 +180,10 @@ val apply : now:float -> action -> t -> (t, error) result
     frame nor checkpoint presence proves a session/effect reconciliation.
     That future transition needs an actual adapter-owned witness. Repeated
     identical Require_reconciliation preserves origin and returns the same
-    record without spending a revision. *)
+    record without spending a revision. Input_wait is a blocked original
+    continuation, never a resumable checkpoint or a timer-expiring record.
+    Suspend_input acknowledges only settled Retire native evidence together
+    with the wait; generic resume and successful settlement cannot consume it. *)
 val update_native_call : now:float -> expected:Keeper_native_call.state ->
   replacement:Keeper_native_call.state -> t -> (t, error) result
 (** Direct-operation-only CAS. A terminal call remains evidence until the

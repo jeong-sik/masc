@@ -153,6 +153,21 @@ let gate_binding_with_wait ~binding ~(waiting : gate_wait) =
   then Error "unconfirmed Gate source does not preserve original obligations"
   else Ok {binding with unconfirmed_wait=Some waiting}
 
+type input_wait =
+  { checkpoint : Keeper_checkpoint_ref.t
+  ; pending : Agent_core.Agent_input_request.pending }
+let input_wait ~checkpoint ~pending =
+  let* pending = Agent_core.Agent_input_request.pending_of_json
+    (Agent_core.Agent_input_request.pending_to_json pending) in
+  let* _ = Keeper_chat_operation.canonical_json (Agent_core.Agent_input_request.pending_to_json pending)
+    |> Result.map_error (function
+      | Keeper_chat_operation.Duplicate_object_key key -> "duplicate pending request key: " ^ key
+      | Keeper_chat_operation.Non_finite_float -> "pending request contains a non-finite number") in
+  Ok {checkpoint;pending}
+let equal_input_wait left right = Keeper_checkpoint_ref.equal left.checkpoint right.checkpoint
+  && Yojson.Safe.equal (Agent_core.Agent_input_request.pending_to_json left.pending)
+       (Agent_core.Agent_input_request.pending_to_json right.pending)
+
 type terminal = Completed | Cancelled | Failed of string
 type recovery_origin =
   | Unconfirmed_sources
@@ -163,6 +178,7 @@ type recovery_origin =
   | Runtime_retry of runtime_retry
   | Gate_wait of gate_wait_state
   | Gate_binding of gate_binding
+  | Input_wait of input_wait
 type recovery = { origin : recovery_origin; diagnostic : string }
 type phase =
   | Preparing
@@ -206,6 +222,7 @@ type action =
   | Update_runtime_retry_wait of { observed : runtime_retry; replacement : runtime_retry }
   | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
+  | Suspend_input of input_wait
   | Reconcile_gate_binding of gate_binding * gate_wait
   | Resolve_gate of gate_resolution
   | Resume_gate of gate_wait * gate_resolution
@@ -249,7 +266,8 @@ let phase_checkpoints execution = match execution.phase with
      | Checkpointed reference -> [reference]
      | Runtime_retry retry -> [retry.checkpoint]
      | Gate_wait {waiting; _} -> gate_wait_retained waiting
-     | Gate_binding binding -> gate_binding_retained binding)
+     | Gate_binding binding -> gate_binding_retained binding
+     | Input_wait waiting -> [waiting.checkpoint])
 let checkpoint_references execution =
   Keeper_native_call.checkpoint_references execution.native_call @ phase_checkpoints execution
 let continuation_checkpoints execution =
@@ -271,7 +289,7 @@ let gate_approval_ids execution =
   | Recovering {origin; _} ->
     (match origin with
      | Unconfirmed_sources | Confirmed_undispatched | Checkpointed _ | Official_checkpointed _
-     | Interrupted_execution | Runtime_retry _ -> []
+     | Interrupted_execution | Runtime_retry _ | Input_wait _ -> []
      | Gate_wait {waiting; _} -> of_wait waiting
      | Gate_binding binding ->
        binding.approval_ids @ of_obligations binding.obligations
@@ -326,8 +344,14 @@ let validate_native_call ~id ~input_sha256 ~phase native_call =
     else match phase, native_call with
       | (Preparing | Ready | Suspended _), _ -> Error "native call has no running or terminal execution"
       | (Recovering _ | Settled _), Active _ -> Error "inactive execution retains an active native call"
+      | Recovering {origin=Input_wait _;_}, Terminal_unacknowledged _ ->
+        Error "accepted input wait retains an unacknowledged native call"
       | (Running | Resuming_runtime_retry _ | Resuming_gate _), _ -> Ok ()
-      | (Recovering _ | Settled _), (No_native_call | Terminal_unacknowledged _) -> Ok ()
+      | Recovering {origin=(Unconfirmed_sources | Confirmed_undispatched | Checkpointed _
+          | Official_checkpointed _ | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _);_},
+          (No_native_call | Terminal_unacknowledged _) -> Ok ()
+      | Recovering {origin=Input_wait _;_},No_native_call -> Ok ()
+      | Settled _,(No_native_call | Terminal_unacknowledged _) -> Ok ()
 
 let update_native_call ~now ~expected ~replacement current =
   let open Keeper_native_call in
@@ -380,7 +404,7 @@ let apply ~now action current =
                 if equal_gate_checkpoint (Official_client expected) (Official_client checkpoint)
                 then unchanged Running else reject ()
               | Unconfirmed_sources | Confirmed_undispatched | Checkpointed _
-              | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> reject ())
+              | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ | Input_wait _ -> reject ())
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
            | Suspended _ | Settled _ -> reject ())
       | Resume_checkpoint checkpoint ->
@@ -393,7 +417,7 @@ let apply ~now action current =
            | Recovering recovery ->
                (match recovery.origin with
                 | Checkpointed expected -> resume expected
-                | Official_checkpointed _ | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> reject ())
+                | Official_checkpointed _ | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ | Input_wait _ -> reject ())
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Settled _ -> reject ())
       | Suspend_official_checkpoint checkpoint ->
           (match current.phase, validate_official_client_checkpoint checkpoint with
@@ -420,14 +444,14 @@ let apply ~now action current =
              then unchanged (Recovering {origin = Runtime_retry replacement; diagnostic})
              else reject ()
            | Recovering {origin = (Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
-               | Confirmed_undispatched | Interrupted_execution | Gate_wait _ | Gate_binding _); _}
+               | Confirmed_undispatched | Interrupted_execution | Gate_wait _ | Gate_binding _ | Input_wait _); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Resume_runtime_retry observed ->
           (match current.phase with
            | Recovering {origin = Runtime_retry expected; _} ->
              if equal_runtime_retry expected observed then unchanged (Resuming_runtime_retry expected) else reject ()
            | Recovering {origin = (Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
-               | Confirmed_undispatched | Interrupted_execution | Gate_wait _ | Gate_binding _); _}
+               | Confirmed_undispatched | Interrupted_execution | Gate_wait _ | Gate_binding _ | Input_wait _); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Suspend_gate_reconciliation (binding, diagnostic) ->
           (match current.phase with
@@ -452,9 +476,17 @@ let apply ~now action current =
                   diagnostic="original exact Gate source is durably retained"})
               | Ok _ | Error _ -> reject ())
            | Recovering {origin=(Unconfirmed_sources | Confirmed_undispatched | Checkpointed _ | Official_checkpointed _
-               | Interrupted_execution | Runtime_retry _ | Gate_wait _); _}
+               | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Input_wait _); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
            | Suspended _ | Settled _ -> reject ())
+      | Suspend_input waiting ->
+          (match current.phase with
+           | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
+             if current.gate_obligations = [] then
+               unchanged (Recovering {origin=Input_wait waiting;
+                 diagnostic="original execution awaits its canonical input response"})
+             else reject ()
+           | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Suspend_gate waiting ->
           (match current.phase with
            | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
@@ -464,7 +496,7 @@ let apply ~now action current =
              else reject ()
            | Recovering {origin=Gate_wait state; _} when equal_gate_wait state.waiting waiting ->
              unchanged (Recovering {origin=Gate_wait {waiting; resolution=None}; diagnostic="Gate admission requires reconciliation"})
-           | Recovering {origin=(Gate_binding _ | Gate_wait _ | Runtime_retry _ | Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
+           | Recovering {origin=(Gate_binding _ | Input_wait _ | Gate_wait _ | Runtime_retry _ | Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
                | Confirmed_undispatched | Interrupted_execution); _}
            | Preparing | Ready | Suspended _ | Settled _ -> reject ())
       | Resolve_gate resolution ->
@@ -477,7 +509,7 @@ let apply ~now action current =
                | Some current when current <> resolution -> reject ()
                | Some _ | None -> unchanged (Recovering {origin=Gate_wait {state with resolution=Some resolution};
                    diagnostic="durable Gate resolution is ready for the original operation"}))
-           | Recovering {origin=(Gate_binding _ | Runtime_retry _ | Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
+           | Recovering {origin=(Gate_binding _ | Input_wait _ | Runtime_retry _ | Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
                | Confirmed_undispatched | Interrupted_execution); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Resume_gate (waiting, resolution) ->
@@ -485,7 +517,7 @@ let apply ~now action current =
            | Recovering {origin=Gate_wait state; _} ->
              if equal_gate_wait waiting state.waiting && state.resolution = Some resolution
              then unchanged (Resuming_gate (waiting, resolution)) else reject ()
-           | Recovering {origin=(Gate_binding _ | Runtime_retry _ | Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
+           | Recovering {origin=(Gate_binding _ | Input_wait _ | Runtime_retry _ | Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources
                | Confirmed_undispatched | Interrupted_execution); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Discharge_gate obligation ->
@@ -522,7 +554,7 @@ let apply ~now action current =
          | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
          | Require_reconciliation _ | Suspend _ | Suspend_official_checkpoint _
          | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
-         | Suspend_gate_reconciliation _ | Suspend_gate _ | Reconcile_gate_binding _
+         | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _ | Reconcile_gate_binding _
          | Resolve_gate _ | Resume_gate _ | Discharge_gate _ ->
            if phase <> current.phase then
              Error Native_call_unsettled
@@ -532,7 +564,7 @@ let apply ~now action current =
          | Agent_core.Agent.Retire ->
            (match action with
             | Suspend _ | Suspend_official_checkpoint _ | Suspend_runtime_retry _
-            | Suspend_gate _ | Suspend_gate_reconciliation _ ->
+            | Suspend_gate _ | Suspend_input _ | Suspend_gate_reconciliation _ ->
               (* Retirement commits together with the accepted continuation. *)
               Ok Keeper_native_call.No_native_call
             | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
@@ -545,7 +577,7 @@ let apply ~now action current =
               (* An unknown effect cannot complete. *)
               Error Native_call_unsettled
             | Suspend _ | Suspend_official_checkpoint _ | Suspend_runtime_retry _
-            | Suspend_gate _ | Suspend_gate_reconciliation _ ->
+            | Suspend_gate _ | Suspend_input _ | Suspend_gate_reconciliation _ ->
               (* An unknown effect cannot resume through another continuation. *)
               Error Native_call_unsettled
             | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
@@ -559,7 +591,7 @@ let apply ~now action current =
       | Settle _ -> []
       | Confirm_sources | Begin_execution | Resume_checkpoint _
       | Resume_official_checkpoint _ | Suspend_official_checkpoint _
-      | Require_reconciliation _ | Suspend _ | Suspend_runtime_retry _
+      | Require_reconciliation _ | Suspend _ | Suspend_input _ | Suspend_runtime_retry _
       | Resume_runtime_retry _ | Update_runtime_retry_wait _ | Resolve_gate _ | Resume_gate _ -> current.gate_obligations in
     if phase = current.phase && gate_obligations = current.gate_obligations
        && Keeper_native_call.equal_state native_call current.native_call
@@ -624,6 +656,9 @@ let recovery_origin_json = function
   | Official_checkpointed checkpoint -> `Assoc ["kind", `String "official_checkpointed";
       "official_client", official_client_checkpoint_json checkpoint]
   | Gate_binding binding -> `Assoc ["kind", `String "gate_binding"; "binding", gate_binding_json binding]
+  | Input_wait waiting -> `Assoc ["kind",`String "input_wait";
+      "checkpoint",checkpoint_json waiting.checkpoint;
+      "pending",Agent_core.Agent_input_request.pending_to_json waiting.pending]
   | Unconfirmed_sources -> `Assoc ["kind", `String "unconfirmed_sources"]
   | Confirmed_undispatched -> `Assoc ["kind", `String "confirmed_undispatched"]
   | Interrupted_execution -> `Assoc ["kind", `String "interrupted_execution"]
@@ -846,6 +881,11 @@ let recovery_origin_of_json json =
         | json -> gate_resolution_of_json json |> Result.map Option.some in
       if Option.fold ~none:true ~some:(fun r -> List.mem r.obligation waiting.obligations) resolution
       then Ok (Gate_wait {waiting; resolution}) else Error "Gate resolution is not an obligation"
+  | "input_wait" ->
+      let* fields = exact ["kind";"checkpoint";"pending"] json in
+      let* checkpoint = checkpoint_of_json (field "checkpoint" fields) in
+      let* pending = Agent_core.Agent_input_request.pending_of_json (field "pending" fields) in
+      input_wait ~checkpoint ~pending |> Result.map (fun waiting -> Input_wait waiting)
   | "gate_binding" ->
       let* fields = exact ["kind";"binding"] json in
       gate_binding_of_json (field "binding" fields) |> Result.map (fun binding -> Gate_binding binding)
@@ -880,7 +920,7 @@ let phase_of_json json =
       let* origin = recovery_origin_of_json (field "origin" fields) in
       (match origin with
        | Runtime_retry retry -> Ok (Resuming_runtime_retry retry)
-       | Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Gate_wait _ | Gate_binding _ ->
+       | Checkpointed _ | Official_checkpointed _ | Unconfirmed_sources | Confirmed_undispatched | Interrupted_execution | Gate_wait _ | Gate_binding _ | Input_wait _ ->
          Error "resuming runtime requires its frozen continuation")
   | "recovering" ->
       let* fields = exact ["kind";"origin";"detail"] json in
@@ -953,7 +993,9 @@ let of_json json =
         else Error "official continuation changed execution scope"
       | Preparing | Ready | Running | Resuming_runtime_retry _ | Suspended _ | Settled _
       | Recovering {origin=(Runtime_retry _ | Checkpointed _ | Interrupted_execution
-          | Unconfirmed_sources | Confirmed_undispatched); _} -> Ok () in
+          | Unconfirmed_sources | Confirmed_undispatched); _} -> Ok ()
+      | Recovering {origin=Input_wait _;_} ->
+        if gate_obligations=[] then Ok () else Error "input wait retains unresolved Gate obligations" in
     let* input_sha256 = string "input_sha256" fields in
     let* () = if canonical_sha input_sha256 then Ok () else Error "invalid admitted input digest" in
     let* () = validate_native_call ~id ~input_sha256 ~phase native_call in
@@ -982,7 +1024,7 @@ let of_json json =
           (match recovery.origin with
            | Unconfirmed_sources | Confirmed_undispatched -> revision >= 1L && observations = []
            | Checkpointed _ | Official_checkpointed _ | Interrupted_execution -> revision >= 2L
-           | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> revision >= 3L)
+           | Runtime_retry _ | Gate_wait _ | Gate_binding _ | Input_wait _ -> revision >= 3L)
       | Settled _ -> revision >= 1L in
     let* () = if coherent then Ok ()
       else Error "execution phase, revision and initial frame are incoherent" in

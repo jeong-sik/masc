@@ -1179,7 +1179,10 @@ prose uses the terminal foreground; tools and reasoning remain subdued.
 
 `Ctrl-F` cycles conversation → inline metadata → full origin headings →
 conversation. Inline metadata includes the minute clock, aligned speaker labels
-and turn rails; full headings give origins a row of their own. Technical request identity is available in expanded diagnostics after the body;
+and turn rails. When an entry is too narrow for its full metadata and a readable
+body, it uses the existing origin heading above the body. Widening restores
+inline placement automatically; the selected mode and draft stay unchanged.
+Full headings give origins a row of their own. Technical request identity is available in expanded diagnostics after the body;
 metadata modes never insert turn numbers or receipt claims into speech.
 The header labels only expanded modes (`metadata:inline`, `metadata:full`).
 Font size, letter spacing and line height come from your terminal settings.

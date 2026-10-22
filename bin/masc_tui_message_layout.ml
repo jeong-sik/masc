@@ -1463,8 +1463,8 @@ let wrap_body ?markdown ~max_cells ~sanitize text =
          match wrap_words ~max_cells line with [] -> [ "" ] | rows -> rows)
       safe_lines
 
-(* What a body keeps whatever else wants the width. Four cells is what
-   [rows_of_entry] has always floored it at. *)
+(* Defensive body floor for unsupported viewports. Supported inline metadata
+   moves to a heading before it consumes the readable body budget. *)
 let min_body_cells = 4
 
 (* Every row's clock takes the same cells. A settled row says "23:38" and the
@@ -1477,6 +1477,9 @@ let pad_clock text =
   let cells = display_width text in
   if cells >= chat_clock_column then text
   else String.make (chat_clock_column - cells) ' ' ^ text
+
+let inline_clock_cells entry =
+  Int.max chat_clock_column (display_width (short_clock entry.timestamp)) + 1
 
 (* [Origin_row] leaves the origin on a row of its own. The other two fold it
    into the body's left margin, which buys back a row per message -- eight
@@ -1509,7 +1512,7 @@ let shade_of_style : style -> shade = function
   | Tool | Skill _ | Status | Local | Journal -> Shade_quoted
   | User | Inbound | Keeper | Error | Thinking _ -> Shade_none
 
-let origin_gutter ~origin ~previous ~inner_width entry =
+let origin_gutter ~origin ~previous entry =
   match origin with
   | Origin_row -> None
   | Origin_bare ->
@@ -1539,83 +1542,25 @@ let origin_gutter ~origin ~previous ~inner_width entry =
          apart both read 10:52. The column is held either way, so nothing
          shifts when a minute repeats, and a continuation whose clock did move
          still shows the new time: that gap is what a reader checks here. *)
+      let now = short_clock entry.timestamp in
+      let unchanged =
+        match previous with
+        | None -> false
+        | Some previous -> String.equal (short_clock previous.timestamp) now
+      in
+      let clock_cells = inline_clock_cells entry in
       let clock =
-        match origin with
-        | Origin_inline ->
-            let now = short_clock entry.timestamp in
-            let unchanged =
-              match previous with
-              | None -> false
-              | Some previous ->
-                  String.equal (short_clock previous.timestamp) now
-            in
-            pad_clock (if unchanged then "" else now) ^ " "
-        | Origin_row | Origin_bare -> ""
+        if unchanged then String.make clock_cells ' ' else pad_clock now ^ " "
       in
-      (* The margin is taken from the body, so it cannot be wider than what
-         the body can spare. Left unbounded, one long keeper name on a narrow
-         pane drew a margin wider than the frame it sits in and the row
-         spilled past its own border. [min_body_cells] is what
-         {!rows_of_entry} floors the body at; the margin gets whatever is
-         left, and on a pane with nothing left it gets nothing rather than
-         pushing the messages out. *)
-      let spare = inner_width - 2 - min_body_cells in
-      let role_cells = display_width entry.role_label in
-      (* The rail is dropped before the name is, on the same reasoning the mark
-         is: a pane too narrow for both keeps the fact that says who is
-         talking. The bar is the whole label, not the rail's own two cells --
-         paying for the rail out of a margin that was already cutting the name
-         took the tail off exactly the identifiers a reader needs to tell two
-         keepers apart. Thirteen terminal cells drew "…aa" before and "…"
-         after.
-
-         The label arrives padded to one column, so every row on a pane
-         decides this the same way and the margin keeps one width. *)
-      let rail_cells =
-        if role_cells + turn_rail_cells <= spare then turn_rail_cells else 0
+      (* Responsive placement below only keeps inline metadata when this
+         complete margin and the readable body fit together. Names and clocks
+         no longer compete for the few cells left by an already narrow body. *)
+      let rail_cells = turn_rail_cells in
+      let filled = clock ^ entry.role_label in
+      let mark_cells =
+        Int.min (display_width entry.role_label)
+          (Int.max 0 entry.role_label_mark_cells)
       in
-      let ceiling = Int.max 0 (spare - rail_cells) in
-      let role_fits = role_cells <= ceiling in
-      let label, mark_cells =
-        if role_fits then
-          ( entry.role_label
-          , Int.min role_cells (Int.max 0 entry.role_label_mark_cells) )
-        else
-          (* [role_label_mark_cells] is the producer's typed boundary between
-             the speaker mark and the source. Once the whole aligned label no
-             longer fits, omit that mark and spend every gutter cell on the
-             source after it. Reusing the old boundary after [fit_middle]
-             would colour an ellipsis or source byte as though it were a mark. *)
-          let source =
-            String.trim
-              (drop_cells entry.role_label
-                 (Int.min role_cells (Int.max 0 entry.role_label_mark_cells)))
-          in
-          fit_middle ceiling source, 0
-      in
-      (* Only a complete aligned label earns a clock. A shortened source uses
-         the whole ceiling; at normal width both pieces still return exactly
-         [clock ^ entry.role_label], byte for byte. *)
-      let clock_cells =
-        if role_fits then
-          Int.min (display_width clock)
-            (Int.max 0 (ceiling - display_width label))
-        else 0
-      in
-      (* A partial clock is context, not an identifier. [fit_width] would put
-         its generic "…" over the final clock cell, producing gutters such as
-         [12:…keeper] that look like damaged chat. Keep the cell-safe prefix
-         and its alignment without inventing a truncation glyph. *)
-      let clock = take_cells clock clock_cells in
-      let clock =
-        clock ^ String.make (Int.max 0 (clock_cells - display_width clock)) ' '
-      in
-      let filled = clock ^ label in
-      (* Where the kind label starts: past the clock and past the speaker mark.
-         Computed here because this is where the clock is prepended; a renderer
-         deriving it would be measuring the same two things a second time.
-         [mark_cells] is zero for a shortened source, because that row no
-         longer contains the mark the original boundary described. *)
       let label_at = rail_cells + clock_cells + mark_cells in
 
       if continues_previous ~previous entry then
@@ -1667,22 +1612,39 @@ let body_cells_after_gutter ~origin ~inner_width gutter =
      instead of stretching prose across the whole display. *)
   if origin = Origin_bare then min 100 body_width else body_width
 
+(* Placement is derived from the complete inline margin before any body is
+   measured or rendered. The configured mode stays inline, so a wider pane
+   restores it without changing state. Continuations keep their opening
+   entry's margin budget even when the repeated label or clock is blank. *)
+let entry_origin ~origin ~inner_width entry =
+  match origin with
+  | Origin_inline ->
+      let margin_cells =
+        turn_rail_cells + inline_clock_cells entry + display_width entry.role_label
+      in
+      let body_cells = inner_width - inbound_indent entry - 2 - margin_cells in
+      if body_cells >= chat_readable_body_cells then Origin_inline else Origin_row
+  | Origin_row | Origin_bare -> origin
+
 (* Bare origin draws inbound rows flush with the pane. *)
 let entry_indent ~origin entry = if origin = Origin_bare then 0 else inbound_indent entry
 
 let entry_body_cells ~origin ~inner_width entry =
+  let origin = entry_origin ~origin ~inner_width entry in
   let inner_width = inner_width - entry_indent ~origin entry in
-  let gutter = origin_gutter ~origin ~previous:None ~inner_width entry in
+  let gutter = origin_gutter ~origin ~previous:None entry in
   body_cells_after_gutter ~origin ~inner_width gutter
 
 let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
+  let configured_origin = origin in
+  let origin = entry_origin ~origin ~inner_width entry in
   (* Everything after the indent is laid out in the column that is left, so
      the origin, the heading and the body fit the column rather than the
      pane. *)
   let indent = entry_indent ~origin entry in
   let pane_width = inner_width in
   let inner_width = pane_width - indent in
-  let gutter = origin_gutter ~origin ~previous ~inner_width entry in
+  let gutter = origin_gutter ~origin ~previous entry in
   let body_width = body_cells_after_gutter ~origin ~inner_width gutter in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this
      module keeps no terminal vocabulary; without it the body is wrapped as the
@@ -1813,6 +1775,14 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     match origin with
     | Origin_inline | Origin_bare -> body_with_diagnostics
     | Origin_row -> (
+        (* An inline predecessor did not open a separate heading. Do not
+           inherit one merely because both entries belong to the same turn. *)
+        let previous =
+          Option.bind previous (fun previous ->
+            if entry_origin ~origin:configured_origin ~inner_width:pane_width
+                 previous = Origin_row
+            then Some previous else None)
+        in
         match metadata_row ~previous ~inner_width ~indent entry with
         | None -> body_with_diagnostics
         | Some metadata -> metadata :: body_with_diagnostics))
@@ -1878,7 +1848,7 @@ let collapse_repeated_body_rows ~inner_width rows =
     (* The gap keeps the repeated row's margin, so its text budget is what
        the margin leaves -- fitting to the whole [inner_width] drew the row
        margin plus a full-width text and spilled past the border, exactly the
-       spill [origin_gutter] bounds its own margin against. *)
+       spill responsive origin placement prevents. *)
     { style = Status
     ; kind = Viewport_gap { hidden_rows = repeated_rows }
     ; shade = Shade_none

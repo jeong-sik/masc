@@ -171,6 +171,29 @@ let test_fallback_does_not_wait_on_the_mutation_lock () =
    | Error detail -> fail detail);
   Prompt_registry.clear ()
 
+let test_captured_template_replays_in_systhread () =
+  Prompt_registry.clear ();
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_guard.enable ();
+  Eio.Switch.on_release sw Eio_guard.disable;
+  let key = Prompt_names.workspace_memory_curator in
+  let captured = Prompt_registry.resolve_prompt key in
+  let vars = ["workspace_memory_changes", "{\"new_facts\":[]}"] in
+  let rendered = match Prompt_registry.render_resolved_prompt_template key captured vars with
+    | Ok rendered -> rendered | Error detail -> fail detail in
+  (match Prompt_registry.set_override key "Replacement {{workspace_memory_changes}}" with
+   | Ok () -> () | Error detail -> fail detail);
+  let replayed, missing = Eio_unix.run_in_systhread (fun () ->
+    Prompt_registry.render_resolved_prompt_template key captured vars,
+    Prompt_registry.render_resolved_prompt_template key captured []) in
+  (match replayed with
+   | Ok text -> check string "replay uses the captured bytes with runtime guards enabled" rendered text
+   | Error detail -> fail detail);
+  (match missing with
+   | Error _ -> () | Ok _ -> fail "captured replay accepted a missing substitution");
+  Prompt_registry.clear ()
+
 let () =
   run "prompt_registry_dune_fallback"
     [
@@ -192,5 +215,7 @@ let () =
             test_explicit_pin_loads_the_directory;
           test_case "the fallback does not wait on the mutation lock" `Quick
             test_fallback_does_not_wait_on_the_mutation_lock;
+          test_case "captured Curator template replays in a guarded system thread" `Quick
+            test_captured_template_replays_in_systhread;
         ] );
     ]

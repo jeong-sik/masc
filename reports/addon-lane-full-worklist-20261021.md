@@ -669,3 +669,12 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - `Lane_run_identity.Workspace_curator`·Exact registry replay·원래 observer delivery를 유지한다. 두 UI의 별도 history 진입은 현재 builtin row 없이 원래 기록을 읽는다. 설치 scope run ID에서 원래 관측 ID를 만들지 않는다.
 - Dashboard 선택7개 suite175건, 전체 TypeScript, 변경6개 TS 파일 ESLint와 ML/MLI19개 parser가 실제 통과했다. HTTP endpoint의 builtin write 거절, 실제 설치별 classification/briefing HTTP·CLI 분리, 원래 persisted Curator history→server→TUI 검사를 선택 실행 범위에 포함한다. 이 OCaml 시나리오는 아직 compiled 실행 전이며 parser 성공을 실행 성공으로 세지 않는다.
 - 원래 A01–H06의54개 항목명·완료 기준은 유지한다. 실제 provider·container Off/On·두 UI lifecycle·whole-stack 통합·운영 설치를 완료로 선언하지 않는다.
+
+
+## E02 실제 provider 입력과 production 오류 재현 · 2026-10-22
+
+- native `1196e280ee8b1b5d2381a59210fa51246affe76e` 서버·TUI와 같은 소스의 Dashboard를 격리 workspace에서 실제 실행했다. `/health?full=1`의 내장 SHA·실행 파일 해시·물리 base path를 읽었다. 운영 설치가 아니다.
+- 실제 Ollama 호출은 주간 사용 한도 HTTP429로 실패했다. 정상 설정 API로 격리 호스트의 모델을 GLM으로 바꾼 뒤, 실제 Keeper가 후보 `memory-admission-4b846287b1db9d8e4b0251c0ee400ce5`를 한 번 썼다. 실제 Librarian이 current revision1/fact1로 commit하고 원래 후보를 ACK했다. 원장·Current·모델 답변·관측 영수증을 직접 주입하지 않았다.
+- 그 뒤 Curator owner가 `Eio_guard.Non_eio_mutex_context(0)`로 실패했다. `Request.prepare`와 strict capture restore가 system thread에서 이미 캡처된 prompt를 렌더링할 때, renderer가 mutable metadata의 Eio mutex를 다시 읽는 경로다. 후속 소스는 이미 resolved된 renderer를 순수하게 만들고 metadata 관측은 live resolution으로 옮겼다. production fixture도 서버와 같은 guard를 켠다.
+- 별도 선택 run39717776023은 1009개 중1005 PASS·4 FAIL(owner2/3/11/12)이다. native run39717901525의 29 PASS와 섞지 않는다. 원래30초 관측 budget·13개 시나리오·assertion은 유지하고 idle checkpoint Promise 대기, 취소 정리와 실패 상태 출력 및2개 경계 시나리오를 추가했다. 두 사건의 동일 원인은 입증하지 않았다.
+- [실제 입력·실패·두 UI 증거](../docs/evidence/2026-10-22-curator-owner-runtime/README.md)를 보존한다. 새 수리의 compiled 실행, 수리된 native host에서 classification→briefing→원래 receipt, Off/On·재연결과 운영 설치는 남는다. A01–H06의 원래54개 완료 기준은 그대로다.

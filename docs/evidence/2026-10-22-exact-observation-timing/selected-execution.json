@@ -37,7 +37,10 @@
     "test/test_server_standalone_lane_projection.ml": "e6ad2ac48ee4ec7fc6012da94121b8ad8d4e349c979033bdcf8bcb39d4223a83",
     "test/test_candle_appraiser_transport.ml": "006ff14c077e0aec048fd6e732eefbea7a0c6c845a766a533100ac6e836ab66a",
     "test/test_keeper_librarian_absorb_gate.ml": "20da5f8828ef663b705ce43952d07497101b60ea081fb162d44450ac7083395e",
-    ".github/workflows/test.yml": "d42fa403248a85c314dc2dbedfd26b1d216ab24121eb86a654614fac8d387691"
+    ".github/workflows/test.yml": "d42fa403248a85c314dc2dbedfd26b1d216ab24121eb86a654614fac8d387691",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "scripts/ci-run-test-suite.sh": "36fdc226b32081d0b4a8e0e05bd5e76cf17a237657b56abb3f5955a281242733",
+    "dune-project": "11c3ae50aa9c8e797fca3c769d0a8249b4ae5642e852fae12d9a48e2a1b03dda"
   },
   "superseded_failure": {
     "run_id": 39694884916,
@@ -49,5 +52,11 @@
     "Does not execute the later current-disk API or diagnostic fixture.",
     "Does not repair the separate production owner terminal wait.",
     "Does not prove actual provider, rendered UI, install or full54 completion."
-  ]
+  ],
+  "request": {
+    "workflow": "test.yml",
+    "minimal": true,
+    "eio_backend": "posix",
+    "TARGET_SUITES": "test_exact_lane_run_registry,test_server_standalone_lane_projection,test_candle_appraiser_transport,test_keeper_librarian_absorb_gate"
+  }
 }

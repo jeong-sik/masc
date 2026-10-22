@@ -196,7 +196,10 @@ let support backend operation = match backend with
           "WebExtension clicks through the DOM and cannot send touch input; the selected tab must not be silently moved to another browser."
       | Safari_unavailable -> missing)
     | Pointer_down | Pointer_up
-    | Read_clipboard | Write_clipboard | Read_network | Intercept_network | Read_console
+    | Read_console -> gecko_only backend (invoke ~mode:"console" Read)
+        [observed;"Messages and uncaught errors since the session opened, for one tab, oldest first. At most 200 are kept and the reply says how many older ones were dropped; each text is cut at 4000 bytes and says so. Entries Firefox gave no tab for, and events that were not what BiDi documents, are counted in the reply and do not end the session.";
+         "The text is whatever the page printed, and a page can print anything."]
+    | Read_clipboard | Write_clipboard | Read_network | Intercept_network
     | Read_storage | Write_storage -> missing
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations
 let operation_name = function

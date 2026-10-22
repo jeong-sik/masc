@@ -60,6 +60,7 @@ type verb =
   | Page_read of { tab_id : int option; max_chars : int option }
   | Page_document of { tab_id : int }
   | Page_downloads of { tab_id : int }
+  | Page_console of { tab_id : int }
   | Page_capture of { tab_id : int }
   | Page_scene of { tab_id : int; max_chars : int; view : scene_view; scope : node_ref option }
   | Page_interact of { tab_id : int; expected_url : string option; action : interaction }
@@ -88,7 +89,7 @@ let reply_timeout_sec = function
   | Session_status -> 10.
   | Page_goto _ -> 45.
   | Page_act action -> Action.reply_timeout_sec action
-  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_capture _
   | Page_scene _ | Page_interact _ | Page_elements _ | Page_context _
   | Page_instruct _ | Page_locate _ | Page_extract _ -> default_timeout_sec
 
@@ -97,6 +98,7 @@ let verb_to_string = function
   | Page_read _ -> "page.read"
   | Page_document _ -> "page.document"
   | Page_downloads _ -> "page.downloads"
+  | Page_console _ -> "page.console"
   | Page_capture _ -> "page.capture"
   | Page_scene _ -> "page.scene"
   | Page_interact _ -> "page.interact"
@@ -208,6 +210,8 @@ let verb_json = function
       "args", `Assoc ["tabId", `Int tab_id; "includeHtml", `Bool true]]
   | Page_downloads {tab_id} ->
     `Assoc ["verb",`String "page.downloads";"args",`Assoc ["tabId",`Int tab_id]]
+  | Page_console {tab_id} ->
+    `Assoc ["verb",`String "page.console";"args",`Assoc ["tabId",`Int tab_id]]
   | Page_scene {tab_id;max_chars;view;scope} ->
     `Assoc ["verb",`String "page.scene";"args",scene_args ~tab_id ~max_chars ~view ~scope]
   | Page_capture { tab_id } ->
@@ -256,13 +260,13 @@ let verb_json = function
      supported. Session ownership and direct navigation remain with the
      automation backend. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _ | Page_downloads _
+  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _ | Page_downloads _ | Page_console _
   | Session_status | Page_locate _ | Page_extract _ -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ | Page_instruct _ -> false
 let verb_uses_model = function
   | Page_instruct _ | Page_locate _ | Page_extract _ -> true
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _
-  | Page_context _ | Page_downloads _ | Session_open _ | Session_close | Session_status
+  | Page_context _ | Page_downloads _ | Page_console _ | Session_open _ | Session_close | Session_status
   | Page_goto _ | Page_act _ | Page_interact _ -> false
 ;;
 
@@ -350,7 +354,7 @@ let live_capability = function
   | Page_act (Action.Open_tab _) -> Some Tab_creation
   | Page_act (Action.On_tab {interaction = (Action.Back | Action.Forward | Action.Reload); _}) -> Some Tab_history
   | Page_act (Action.On_tab {interaction = Action.Close_tab; _}) -> Some Tab_closing
-  | Page_context _ | Page_downloads _ -> None
+  | Page_context _ | Page_downloads _ | Page_console _ -> None
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
   | Session_open _ | Session_close | Session_status | Page_goto _
@@ -365,7 +369,7 @@ let verb_allowed_on_live verb = Option.is_some (live_capability verb)
 (* Model-assisted locate is admitted separately by the installed executor. *)
 let verb_allowed_on_automation = function
   | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _
-  | Page_downloads _ | Page_interact _ | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _
+  | Page_downloads _ | Page_console _ | Page_interact _ | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _
   | Page_locate _ -> true
   | Page_instruct _ | Page_extract _ -> false
 ;;
@@ -386,7 +390,7 @@ let verb_allowed_on_stagehand = function
      | Action.Back | Forward | Reload | Close_tab -> frame_path = []
      | Action.Click _ | Fill _ | Press _ | Select _ | Scroll _ | Upload _
      | Accept_dialog _ | Dismiss_dialog -> false)
-  | Page_document _ | Page_context _ | Page_downloads _ -> false
+  | Page_document _ | Page_context _ | Page_downloads _ | Page_console _ -> false
 ;;
 
 let verb_allowed (lane : Lane_name.t) verb =
@@ -424,7 +428,7 @@ let activity_rejection_message = function
 
 let activity_rejection lane = function
   | Session_close | Session_status -> None
-  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_capture _
   | Page_scene _ | Page_interact _ | Session_open _ | Page_goto _ | Page_elements _
   | Page_act _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ ->
     match activity lane with
@@ -846,7 +850,7 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
            | Page_interact {tab_id;action;_} -> Hashtbl.add client.interactions id
                {request_id=id;actor;action=interaction_verb action;tab_id;phase=Interaction_queued}
            | Session_open _|Session_close|Session_status|Tabs_list|Page_read _|Page_document _
-           | Page_downloads _|Page_capture _|Page_scene _|Page_goto _|Page_elements _|Page_act _
+           | Page_downloads _ | Page_console _|Page_capture _|Page_scene _|Page_goto _|Page_elements _|Page_act _
            | Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> ()); Ok ())) in
       Eio.Switch.on_release sw (fun () ->
         Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id; Hashtbl.remove client.interactions id));
@@ -892,7 +896,7 @@ let issue_automation_with ~activity_check ~verb ~timeout_sec =
        | Page_locate _ when not backend.locate -> Rejected_before_effect "browser locate Exact Output is not selected"
        | Page_locate _ -> backend.execute verb
        | Tabs_list|Page_read _|Page_document _|Page_elements _|Page_capture _|Page_scene _|Page_context _
-       | Page_downloads _|Page_interact _|Session_open _|Session_close|Session_status|Page_goto _|Page_act _
+       | Page_downloads _ | Page_console _|Page_interact _|Session_open _|Session_close|Session_status|Page_goto _|Page_act _
        | Page_instruct _|Page_extract _ ->
            Watched_work.run (fun () -> backend.execute verb)
              ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))
@@ -999,7 +1003,7 @@ end
 let stagehand_server_deadline verb ~timeout_sec =
   match verb with
   | Session_open _ -> None
-  | Session_close | Session_status | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
+  | Session_close | Session_status | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_capture _
   | Page_scene _ | Page_interact _ | Page_goto _ | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _
   | Page_locate _ | Page_extract _ -> Some timeout_sec
 ;;

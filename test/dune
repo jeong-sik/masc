@@ -5216,6 +5216,7 @@
 (include stanzas/test_browser_addon_chrome_profile.inc)
 (include stanzas/test_browser_stagehand_executor.inc)
 (include stanzas/test_browser_keyboard.inc)
+(include stanzas/test_browser_console.inc)
 (include stanzas/test_browser_stagehand_backend.inc)
 (include stanzas/test_browser_instruct.inc)
 (include stanzas/stagehand_browser_probe.inc)

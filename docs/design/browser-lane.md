@@ -78,6 +78,7 @@ checking rendered application state, and gathering evidence across tabs.
 | `hover_at` | normalized `point`, captured `viewport`, and `expectedUrl`; moves the trusted pointer without clicking | live BiDi or automation |
 | `click_at`, `scroll_at` | normalized `point` and captured `viewport`; scroll adds `x`/`y`; `click_at` also takes `button` (`primary` by default, `middle`, `secondary`) | live or automation; a `middle` or `secondary` click needs live BiDi, automation or Stagehand |
 | `drag` | normalized `from`/`to` and captured `viewport`; trusted pointer press, move and release | live BiDi or automation |
+| `page.console` (`BrowserRead mode=console`) | `tabId`; the tab's console messages and uncaught errors, oldest first, at most 200 kept with `dropped` counting the rest, each text cut at 4000 bytes (`textCut`) | automation only |
 | `tap_at`, `swipe` | like `click_at` and `drag` (`point`, or `from`/`to` with `via` and `durationMs`), sent by a touch pointer | live BiDi or automation |
 | `set_viewport` | `expectedUrl`, and `width`/`height` in CSS pixels (100 to 4096) given together; live BiDi with neither restores the browser's own size | live BiDi or Stagehand |
 | `activate_tab` | the selected live `clientId`/`tabId` | live WebExtension only |

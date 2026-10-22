@@ -1552,6 +1552,42 @@ let test_strict_single_file_reports_malformed_and_torn_rows () =
     | Error (Dated_jsonl.Io_error {operation=Read_file;_}) -> ()
     | Error _ | Ok _ -> fail "torn authority row was silently skipped")
 
+let test_strict_incremental_large_utf8_row_and_captured_extent () =
+  let path = Filename.temp_file "dated_strict_large_utf8" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let text = String.concat "" (List.init 24000 (fun _ -> "한글")) in
+    let first = `Assoc ["i", `Int 1; "text", `String text] in
+    Out_channel.with_open_bin path (fun oc ->
+      output_string oc (Yojson.Safe.to_string first);
+      output_string oc "\n \t\r\nmalformed\r\n");
+    let appended = ref false in
+    let read cursor =
+      Dated_jsonl.fold_file_appended_entries_result path ~cursor ~init:[]
+        ~f:(fun rows row ->
+          if not !appended then begin
+            appended := true;
+            Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 path
+              (fun oc -> output_string oc "{\"i\":2}\n")
+          end;
+          row :: rows)
+    in
+    let require = function
+      | Ok (Dated_jsonl.Appended (rows, cursor)) -> List.rev rows, cursor
+      | Ok Dated_jsonl.Cursor_invalidated -> fail "unexpected cursor invalidation"
+      | Error error -> fail (Dated_jsonl.read_error_to_string error)
+    in
+    let rows, cursor = require (read None) in
+    (match rows with
+     | [Dated_jsonl.Parsed actual; Dated_jsonl.Malformed_json _] ->
+       check bool "large UTF-8 row is preserved exactly" true (actual = first)
+     | _ -> fail "captured read changed physical row order or included a later append");
+    let rows, cursor = require (read (Some cursor)) in
+    (match rows with
+     | [Dated_jsonl.Parsed actual] -> check int "later append arrives once" 2 (json_i actual)
+     | _ -> fail "incremental read lost or replayed rows");
+    let rows, _ = require (read (Some cursor)) in
+    check int "unchanged complete extent has no rows" 0 (List.length rows))
+
 let () =
   run "Dated_jsonl"
     [
@@ -1559,6 +1595,8 @@ let () =
         [
           test_case "strict single file reports malformed and torn evidence" `Quick
             test_strict_single_file_reports_malformed_and_torn_rows;
+          test_case "large UTF-8 row preserves captured extent" `Quick
+            test_strict_incremental_large_utf8_row_and_captured_extent;
           test_case "creates dated file" `Quick test_append_creates_dated_file;
           test_case "append reports its commit point" `Quick
             test_notifying_commit_reports_durable_row;

@@ -3,13 +3,41 @@ import { parseLaneInventory } from './lane-inventory'
 import fixture from './fixtures/lane-inventory.json'
 
 describe('common Lane inventory wire', () => {
+  it('preserves each installation output model reading independently of worker presence', () => {
+    const exact_outputs = [
+      { output: 'classification', source: 'declared', configuration: { kind: 'configured',
+        admitted_slots: ['local.first'], cli_slots: ['cloud.cli'], declared_slots: ['local.first', 'unavailable'],
+        declared_cli_slots: ['cloud.cli'], dropped_slots: ['unavailable'], admission_error: 'one runtime refused' } },
+      { output: 'briefing', source: 'declared', configuration: { kind: 'unavailable', detail: 'registry unreadable' } },
+      { output: 'removed-output', source: 'table_only', configuration: { kind: 'off',
+        declared_slots: ['retained.model'], declared_cli_slots: [] } },
+    ]
+    const row = {
+      id: 'declaration//fixture/curator.toml', label: 'curator.toml', purpose: 'Curator',
+      selection: { kind: 'declaration', source_path: '/fixture/curator.toml' },
+      state: { kind: 'package', instances: [], declaration: { kind: 'valid', enabled: false,
+        installation_id: 'custom-curator', run_id: 'scope-not-observation', package_id: 'workspace-curator',
+        title: 'Curator', source_revision: 'source', desired_revision: 'desired',
+        application: { kind: 'inactive' }, exact_outputs } },
+    }
+    const parsed = parseLaneInventory({ ...fixture, rows: [...fixture.rows, row] })
+    expect(parsed.rows.at(-1)?.state).toMatchObject({ instances: [], declaration: {
+      installation_id: 'custom-curator', run_id: 'scope-not-observation', exact_outputs,
+    } })
+    const withOutputs = (outputs: unknown) => ({ ...fixture, rows: [...fixture.rows,
+      { ...row, state: { ...row.state, declaration: { ...row.state.declaration, exact_outputs: outputs } } }] })
+    for (const invalid of [undefined, null, [exact_outputs[0], exact_outputs[0]],
+      [{ ...exact_outputs[0], source: 'inferred' }], [{ ...exact_outputs[0], output: '' }],
+      [{ ...exact_outputs[0], configuration: { kind: 'ready' } }],
+    ]) expect(() => parseLaneInventory(withOutputs(invalid))).toThrow()
+  })
   it('retains host application independently of worker counts and rejects contradictory activity', () => {
     const row = (enabled: boolean, application: unknown) => ({
       id: 'declaration//fixture/off.toml', label: 'Off package', purpose: 'Observed application',
       selection: { kind: 'declaration', source_path: '/fixture/off.toml' },
       state: { kind: 'package', instances: [], declaration: { kind: 'valid', enabled,
         installation_id: 'off', run_id: 'world', package_id: 'observer', title: 'Observer',
-        source_revision: 'file-bytes', desired_revision: 'desired', application } },
+        source_revision: 'file-bytes', desired_revision: 'desired', exact_outputs: [], application } },
     })
     const parse = (enabled: boolean, application: unknown) =>
       parseLaneInventory({ ...fixture, rows: [...fixture.rows, row(enabled, application)] })
@@ -66,8 +94,8 @@ describe('common Lane inventory wire', () => {
   })
   it('reads the actual TUI fixture contract with every built-in and exact observation', () => {
     const parsed = parseLaneInventory(fixture)
-    expect(parsed.rows).toHaveLength(12)
-    expect(parsed.exact_snapshot.lanes).toHaveLength(7)
+    expect(parsed.rows).toHaveLength(11)
+    expect(parsed.exact_snapshot.lanes).toHaveLength(6)
   })
   it('keeps disabled candidates and running observations, rejecting contradictory activity', () => {
     const raw = structuredClone(fixture)
@@ -103,7 +131,7 @@ describe('common Lane inventory wire', () => {
     const packageRow = { id: 'declaration//fixture/lane-addons/demo.toml', label: 'demo.toml', purpose: 'Demo',
       selection: { kind: 'declaration', source_path: '/fixture/lane-addons/demo.toml' },
       state: { kind: 'package', declaration: { kind: 'valid', enabled: false, installation_id: 'demo',
-        run_id: 'world', package_id: 'demo-package', title: 'Demo', desired_revision: 'inputs', source_revision: 'source', application: { kind: 'cleaning' } },
+        run_id: 'world', package_id: 'demo-package', title: 'Demo', desired_revision: 'inputs', source_revision: 'source', exact_outputs: [], application: { kind: 'cleaning' } },
       instances: [{ instance_id: 'retained-1', incarnation: 'retained-1', run_id: 'world', package_id: 'demo-package',
         title: 'Demo', package_revision: 'package-rev', presence: 'retained', phase: { kind: 'failed', message: 'cleanup unconfirmed' },
         applied_revision: 'inputs' }] } }

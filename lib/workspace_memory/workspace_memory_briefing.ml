@@ -51,6 +51,9 @@ let rendered_prompt batch = batch.rendered_prompt
 let selected_count batch = List.length batch.selected
 let remaining_count batch = List.length batch.remaining
 let prepared_state batch = batch.state
+let batch_contract batch = match batch.state.building with
+  | Some building -> Ok building.contract
+  | None -> Error "briefing batch has no active pass"
 
 let validate_sources sources =
   let rec check seen = function
@@ -62,6 +65,15 @@ let validate_sources sources =
       then Error ("briefing repeats source id: " ^ source.id)
       else check (Set_util.StringSet.add source.id seen) rest in
   check Set_util.StringSet.empty sources
+
+let pass_is_current ~keys ~contract (building : building) =
+  String.equal building.contract contract && subset building.target keys
+let batch_is_current ~sources ~contract batch =
+  let* () = validate_sources sources in
+  match batch.state.building with
+  | None -> Error "briefing batch has no active pass"
+  | Some building ->
+    Ok (pass_is_current ~keys:(source_keys sources) ~contract building)
 
 let needs_refresh ~sources ~contract t =
   match sources with
@@ -110,7 +122,7 @@ let prepare ~sources ~contract ~render t =
     let sources = List.sort (fun (a : source) b -> String.compare a.id b.id) sources in
     let keys = source_keys sources in
     let building = match t.building with
-      | Some building when String.equal building.contract contract && subset building.target keys -> building
+      | Some building when pass_is_current ~keys ~contract building -> building
       | Some _ -> start_pass ~sources ~contract None
       | None -> start_pass ~sources ~contract t.published in
     let state = { t with building = Some building } in
@@ -227,6 +239,34 @@ let of_json json =
     let* building = option decode_building (List.assoc "building" fields) in
     Ok { published; building }
   | _ -> Error "unknown workspace briefing schema"
+
+let batch_to_json batch = `Assoc
+  ["schema", `String "workspace.memory.briefing-batch.v1";
+   "state", to_json batch.state;
+   "selected", `List (List.map source_json batch.selected);
+   "remaining", `List (List.map source_json batch.remaining);
+   "input", batch.input; "rendered_prompt", `String batch.rendered_prompt]
+
+let batch_of_json json =
+  let* fields = exact_fields "briefing batch"
+      ["schema"; "state"; "selected"; "remaining"; "input"; "rendered_prompt"] json in
+  let* () = match List.assoc "schema" fields with
+    | `String "workspace.memory.briefing-batch.v1" -> Ok ()
+    | _ -> Error "unknown workspace briefing batch schema" in
+  let* state = of_json (List.assoc "state" fields) in
+  let* selected = array decode_source (List.assoc "selected" fields) in
+  let* remaining = array decode_source (List.assoc "remaining" fields) in
+  let* () = validate_sources (selected @ remaining) in
+  let* rendered_prompt = string (List.assoc "rendered_prompt" fields) in
+  let input = List.assoc "input" fields in
+  match state.building with
+  | None -> Error "briefing batch snapshot has no active pass"
+  | Some building ->
+    if selected = [] || selected @ remaining <> building.remaining
+    then Error "briefing batch snapshot changes its original unconsumed partition"
+    else if not (Yojson.Safe.equal input (model_input building.text selected))
+    then Error "briefing batch snapshot input differs from the original pass"
+    else Ok {state;selected;remaining;input;rendered_prompt}
 
 let path ~directory = Filename.concat directory "briefing.json"
 let io f =

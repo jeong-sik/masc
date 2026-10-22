@@ -6605,7 +6605,7 @@ let launch_clients_load state ~mailbox =
   end
   end
 
-let launch_lane_runs_load ?before state ~mailbox ~(lane : Standalone_lane.t) =
+let launch_lane_runs_load ?before state ~mailbox ~(lane : Lane_run_identity.t) =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   state.lane_runs_generation <- state.lane_runs_generation + 1;
@@ -6633,20 +6633,14 @@ let launch_lane_run_detail_load state ~mailbox ~run_id =
 
   end
 
-(* Opening a standalone lane's runs drops the previous lane's list so a stale
-   answer can never draw under the new heading. *)
+(* History targets are logical observation identities. Opening one drops the
+   previous list; it never requires a current configuration/installation row. *)
 
-let open_lane_run_list state ~mailbox (lane : Tui_decode.standalone_lane) =
-  state.lanes_mode <- Lanes_run_list lane.sl_lane;
-  state.lane_runs <- None;
-  state.lane_runs_error <- None;
-  state.lane_runs_next <- None;
-  state.lane_runs_total <- None;
-  state.lane_runs_cursor <- 0;
-  state.lane_runs_scroll <- 0;
-  launch_lane_runs_load state ~mailbox ~lane:lane.sl_lane
+let open_lane_run_list state ~mailbox (lane : Lane_run_identity.t) =
+  begin_lane_run_list state lane;
+  launch_lane_runs_load state ~mailbox ~lane
 
-let open_lane_run_detail state ~mailbox ~(lane : Standalone_lane.t) ~run_id =
+let open_lane_run_detail state ~mailbox ~(lane : Lane_run_identity.t) ~run_id =
   state.lanes_mode <- Lanes_run_detail (lane, run_id);
   state.lane_run_detail <- None;
   state.lane_run_detail_error <- None;
@@ -14729,7 +14723,8 @@ let open_lane_inventory_selection state ~mailbox =
       match row.Inventory.selection with
       | Inventory.Exact _ ->
           (match selected_standalone_lane state with
-           | Some lane -> open_lane_run_list state ~mailbox lane
+           | Some lane -> open_lane_run_list state ~mailbox
+               (Standalone_lane.run_identity lane.sl_lane)
            | None -> show_lanes_action_error state "The exact Lane detail is absent from this inventory; r reads again")
       | Browser lane ->
           show_browser_lane state;
@@ -21911,7 +21906,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
   | Lane_runs_loaded (lane, generation, before, result) ->
       (match state.lanes_mode with
        | Lanes_run_list open_lane | Lanes_run_detail (open_lane, _)
-         when Standalone_lane.equal open_lane lane
+         when Lane_run_identity.equal open_lane lane
            && generation = state.lane_runs_generation
            && state.lane_runs_loading ->
            state.lane_runs_loading <- false;
@@ -28113,6 +28108,7 @@ and is loaded on demand through keeper_skill.
                         | Masc_tui_palette.Palette_dos
                         | Masc_tui_palette.Palette_lane_addons
                         | Masc_tui_palette.Palette_addon_results _
+                        | Masc_tui_palette.Palette_lane_history _
                         | Masc_tui_palette.Palette_goto _
                         | Masc_tui_palette.Palette_usage_scope _
                         | Masc_tui_palette.Palette_config _
@@ -28164,6 +28160,9 @@ and is loaded on demand through keeper_skill.
                        Masc_tui_lane_addons.Inspect
                  | Some (_, Masc_tui_palette.Palette_addon_results declaration_id) ->
                      open_installation_results state ~mailbox:async_messages declaration_id
+                 | Some (_, Masc_tui_palette.Palette_lane_history lane) ->
+                     goto_surface state ~mailbox:async_messages Lanes;
+                     open_lane_run_list state ~mailbox:async_messages lane
                  | Some (_, Masc_tui_palette.Palette_browser_lane) ->
                      open_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_connectors) ->

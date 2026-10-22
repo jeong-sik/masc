@@ -6944,11 +6944,15 @@ let test_runtime_routing_creates_and_removes_a_lane () =
     (refusal (post "append a declared slot" 400 append));
   check string "an exact lane the server does not run is refused"
     "unknown exact-output lane: verifer_exact (expected one of librarian_exact, \
-     hitl_auto_judge, board_attention_exact, workspace_curator_exact, verifier_exact, \
+     hitl_auto_judge, board_attention_exact, verifier_exact, \
      browser_stagehand_exact, candle_appraiser)"
     (refusal
        (post "append to a misspelled exact lane" 400
           {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"test_provider.test_model"}|}));
+  ignore (post "Curator observations grant no builtin write" 400
+    {|{"lane":"exact/workspace_curator_exact","action":"append","runtime_id":"test_provider.test_model"}|});
+  check bool "no Curator builtin table is created" false
+    (in_file "[runtime.exact_output_lanes.workspace_curator_exact]");
   check bool "the misspelled lane left no table" false (in_file "verifer_exact")
 
 let test_direct_assignment_intervening_write_fences_keeper_config_post () =

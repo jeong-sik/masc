@@ -1,62 +1,39 @@
-(** Server-owned changed-fact curation into the durable workspace ledger.
-    A configured exact-output lane is required. *)
-val start : sw:Eio.Switch.t -> base_path:string -> unit
-(** Retained facts are reconsidered when this lane's publication changes,
-    including an enabled declaration published after this owner parked, and
-    when a replacement fence that turned this owner away closes. Off remains a
-    new-work refusal; already accepted work can finish. *)
-
-(** Wake an existing owner, including after an explicit lane configuration
-    change. This performs no storage or provider work in the caller. *)
+(** One serialized Addon-backed Curator owner per physical workspace. *)
+val start : sw:Eio.Switch.t -> config:Workspace.config -> unit
+(** Discover/recover original work before new capture. Existing accepted local
+    settlement survives Off; new roots and successors use fresh configured
+    Runtime authority. Classification and Briefing keep separate durable
+    boundaries. Pending observer receipts are conditionally delivered and ACKed
+    independently of primary effects. Delivery failures remain pending. *)
+val retry_pending_observations : base_path:string -> unit
+(** Existing server maintenance calls this bounded wake-only edge. It wakes an
+    existing owner only when its prior pass could not settle observations or
+    complete its authoritative discovery. A failed subsequent pass preserves
+    this demand; only a completed pass without observation errors clears it. The
+    owner freshly reads original authority before retrying. The physical workspace
+    path is resolved in the existing host-I/O executor. No timer, journal read,
+    provider or domain work runs here, and shutdown owners stay stopped. *)
 type refresh = Queued | No_owner | Unavailable of string
-
 val request : base_path:string -> refresh
-
-val output_schema : Yojson.Safe.t
-
-type execution_failure =
-  | Input_too_large of string
-  | Output_too_large of string
-  | Execution_failed of string
-
+(** Signal the existing owner only; no storage or model work in the caller. *)
 module For_testing : sig
-  (** The production configuration predicate, with provider execution and
-      typed refusal evidence supplied by the fixture. *)
-  val start_configured
-    : sw:Eio.Switch.t
-    -> base_path:string
-    -> execute:(rendered_prompt:string -> selected:Workspace_memory_ledger.pending_fact list
-       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
-    -> summarize:(batch:Workspace_memory_briefing.batch -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
-    -> unit
-
-  (** The lane run itself: HTTP slots as one exact-output flow. *)
-  val execute
-    : resolved:Runtime_exact_output_registry.resolved_lane
-    -> rendered_prompt:string
-    -> selected:Workspace_memory_ledger.pending_fact list
-    -> ledger:Workspace_memory_ledger.t
-    -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, string) result
-
-  val execute_with_cli
-    : ?cli_runner:Keeper_lane_cli_oneshot.runner
-    -> ?base_path:string
-    -> resolved:Runtime_exact_output_registry.resolved_lane
-    -> rendered_prompt:string
-    -> selected:Workspace_memory_ledger.pending_fact list
-    -> ledger:Workspace_memory_ledger.t
-    -> unit
-    -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result
-
-  val configured : unit -> bool
-
-  val start
-    : sw:Eio.Switch.t
-    -> base_path:string
-    -> execute:(rendered_prompt:string -> selected:Workspace_memory_ledger.pending_fact list
-       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
-    -> summarize:(batch:Workspace_memory_briefing.batch -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
-    -> unit
+  type idle_checkpoint
+  type idle_result = Owner_idle of idle_checkpoint | Owner_stopped | Owner_missing
+  type snapshot =
+    { pending : bool
+    ; in_flight : bool
+    ; observation_retry : bool
+    ; stopped : bool
+    ; idle_waiters : int
+    }
+  val snapshot : base_path:string -> snapshot option
+  (** None means there is no owner for this physical workspace. *)
+  val await_idle : ?after:idle_checkpoint -> base_path:string -> unit -> idle_result
+  (** Atomically check idle and subscribe under the original owner mutex.
+      [after] waits for a later idle checkpoint, including one reached before
+      subscription. Cancellation removes only this waiter. No deadline, wake,
+      journal read, provider call or domain effect is introduced. A returned
+      checkpoint observes idle at that instant; it does not freeze the owner. *)
   val is_idle : base_path:string -> bool
   val stop : base_path:string -> unit
 end

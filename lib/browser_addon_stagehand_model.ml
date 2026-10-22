@@ -48,6 +48,7 @@ let generate owner params =
       Ok (Model.answer_of_output ?usage:(Option.map usage counts) (Exact.checked_json output))
   | Final (Call_final (Invalid_output _)) -> Error (refused "model output did not pass the declared contract")
   | Final (Call_final (Input_refused _)) -> Error (refused "model provider refused this input")
+  | Final (Call_final (Output_limit_reached _)) -> Error (refused "model provider exhausted its output limit")
   | Final Outcome_unknown -> Error (refused "model outcome is unknown; this call must not be replayed")
   | Final (Not_allowed _) -> Error (refused "model output authority was refused")
   | Final Request_id_reused -> Error (refused "model request identity was reused")

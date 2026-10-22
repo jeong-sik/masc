@@ -1,0 +1,33 @@
+{
+  "run_id": 39662676800,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39662676800",
+  "head": "8b7b57b580c083c8f89fa5143af205c2ece669cd",
+  "status": "completed",
+  "conclusion": "failure",
+  "original_failed_step_log_sha256": "3fa94399deabebb780704adad1d496be4b8f116a2c78a37d18208f69e5c559bc",
+  "excerpt_sha256": "5adefcdf5352fcfdc2c7fd42164a277abfec95a322b75d339a03761ca348c011",
+  "runner": {
+    "cases": 18,
+    "failed_cases": [
+      10,
+      13,
+      14,
+      15,
+      17
+    ],
+    "false_positive_case": 16
+  },
+  "worker": {
+    "cases": 71,
+    "failed_case": 5,
+    "reported_cause": "Docker create exceeded existing 1-second fixture control timeout",
+    "cause_scope": "not attributed to Curator; no timeout or production change in this repair"
+  },
+  "repair": "Use actual domain baseline schemas, verify unchanged original conversation plus common schema instruction, and require the retained schema-only seed to be Answered before rejecting replay.",
+  "unverified": [
+    "Corrected compiled execution",
+    "New shared-worker OCaml contract",
+    "Production Curator owner/metadata/commit/wake",
+    "Live provider/container/UI/full 54-item completion"
+  ]
+}

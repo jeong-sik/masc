@@ -1,0 +1,43 @@
+{
+  "at": "2026-10-21T17:12:29.079989+00:00",
+  "identity": "local-admin",
+  "method": "GET",
+  "path": "/api/v1/dashboard/tasks/detail?task_id=task-001",
+  "request": null,
+  "http_status": 200,
+  "response": {
+    "task": {
+      "completed_at": "2026-10-21T17:10:41Z",
+      "goal_id": "goal-candle-host-eb484-source-qualification",
+      "updated_at": "2026-10-21T17:10:41Z",
+      "assignee": "candle-host-qualifier",
+      "id": "task-001",
+      "title": "Compute and retain the exact Candle host consumer source measurement",
+      "description": "Compare lib/server/server_candle_appraiser.ml with exact Git source eb484b0aabe699b46740bcb787a935fb67bbfa8e and retain measurement.json. Expected SHA-256 b4e3984bdbf0fb70cf065c9313e8fa31b0f943cc403d3731a95c997447981078. This proves file identity only, not behavior or full54 completion.",
+      "priority": 3,
+      "files": [],
+      "created_at": "2026-10-21T16:58:06Z",
+      "created_by": "candle-host-qualifier",
+      "contract": {
+        "strict": true,
+        "completion_contract": [
+          "measurement.json records the exact source_commit and expected SHA-256 of the complete source file.",
+          "verified_count is 1 after comparing checkout bytes against the exact Git blob."
+        ],
+        "required_evidence": [
+          "artifact:measurement.json"
+        ]
+      },
+      "handoff_context": {
+        "summary": "Guest shim dependency repaired; the actual Keeper wrote and read back measurement.json in its owned running guest. The host performed the source-byte comparison; the Keeper only preserved that measurement.",
+        "evidence_refs": [
+          "artifact:measurement.json"
+        ],
+        "updated_at": "2026-10-21T17:10:26Z",
+        "updated_by": "candle-host-qualifier"
+      },
+      "status": "done",
+      "notes": "{\n  \"verification_request\": {\n    \"id\": \"vrf-5ee2e4f6674a8ccda7adaa075d60da5b\",\n    \"task_id\": \"task-001\",\n    \"worker\": \"candle-host-qualifier\",\n    \"created_at\": 1792602626.330383\n  },\n  \"submitted_evidence_metadata\": {\n    \"access\": \"available\",\n    \"request_id\": \"vrf-5ee2e4f6674a8ccda7adaa075d60da5b\",\n    \"task_id\": \"task-001\",\n    \"worker\": \"candle-host-qualifier\",\n    \"created_at\": 1792602626.330383,\n    \"items\": [\n      {\n        \"kind\": \"artifact\",\n        \"reference\": \"artifact:measurement.json\",\n        \"bytes\": 400,\n        \"truncated\": false\n      },\n      { \"kind\": \"note\", \"bytes\": 101 },\n      { \"kind\": \"note\", \"bytes\": 205 },\n      { \"kind\": \"note\", \"bytes\": 163 }\n    ]\n  },\n  \"review\": {\n    \"evaluator_runtime\": \"ollama_cloud.ollama-cloud-kimi-k3\",\n    \"generator_runtime\": null,\n    \"gate\": \"structured_tool\",\n    \"verdict\": \"approve\",\n    \"authority_kind\": \"system_llm_agent\",\n    \"authority_actor\": \"verifier_exact\",\n    \"unread_images\": []\n  }\n}"
+    }
+  }
+}

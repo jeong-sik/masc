@@ -225,8 +225,9 @@
  (modules test_workspace_memory_curator_lane)
  (deps ../config/prompts/workspace_memory_curator.md
        ../config/prompts/workspace_memory_briefing.md
-       ../config/prompts/keeper.md)
- (libraries alcotest masc masc.tool_types masc.agent_core masc.agent_core.llm_provider masc.server masc.masc_core masc.runtime masc.fs_compat masc.config_dir_resolver masc.prompt_registry exact_output_fixture yojson eio eio_main unix))
+       ../config/prompts/keeper.md
+       (source_tree ../addons/workspace-curator) ../addons/protocol.py ../addons/exact_worker.py)
+ (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol))
 
 (test
  (name test_msx_vision)
@@ -248,7 +249,7 @@
 (test
  (name test_server_standalone_lane_projection)
  (modules test_server_standalone_lane_projection)
- (libraries alcotest masc masc.masc_goal masc.runtime masc.server masc.tool_types yojson))
+ (libraries alcotest masc masc.fs_compat masc.masc_goal masc.runtime masc.server masc.tool_types yojson))
 
 (test
  (name test_keeper_effective_tool_surface)
@@ -3785,7 +3786,7 @@
 (test
  (name test_tui_palette_matching)
  (modules test_tui_palette_matching)
- (libraries masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched masc))
+ (libraries masc.runtime masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched masc))
 
 (test
  (name test_tui_workspace_entries)
@@ -4605,6 +4606,8 @@
 (include stanzas/test_verifier_exact_lane.inc)
 
 (include stanzas/test_run_registry_concurrent_mutation.inc)
+(include stanzas/test_run_registry_current_disk.inc)
+(include stanzas/test_exact_lane_original_reconciliation.inc)
 (include stanzas/test_exact_lane_run_registry.inc)
 (include stanzas/test_exact_output_runtime_deadline.inc)
 
@@ -5273,7 +5276,7 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries astring yojson masc_tui_runtime_config_receipt masc_tui_surface_search alcotest masc masc.server masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
+ (libraries astring yojson masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_surface_search alcotest masc masc.server masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 (rule
  (alias runtest-test_browser_elements)
@@ -5509,6 +5512,26 @@
  (name test_workspace_memory_request)
  (modules test_workspace_memory_request)
  (libraries alcotest digestif yojson masc))
+
+(test
+ (name test_workspace_memory_capture)
+ (modules test_workspace_memory_capture)
+ (libraries alcotest digestif yojson masc unix))
+
+(test
+ (name test_lane_addon_request_discovery)
+ (modules test_lane_addon_request_discovery)
+ (libraries alcotest yojson masc masc.fs_compat masc_process eio eio_main eio.unix threads unix))
+
+(test
+ (name test_lane_addon_request_progress)
+ (modules test_lane_addon_request_progress)
+ (libraries alcotest yojson masc masc.fs_compat unix))
+
+(test
+ (name test_workspace_memory_execution_capture)
+ (modules test_workspace_memory_execution_capture)
+ (libraries alcotest digestif yojson masc masc.fs_compat masc.prompt_registry unix))
 
 (test
  (name test_workspace_memory_log_reader)
@@ -5889,13 +5912,28 @@
 (test
  (name test_candle_appraiser_contract)
  (modules test_candle_appraiser_contract)
- (deps (source_tree ../addons/candle-appraiser) ../addons/protocol.py)
+ (deps (source_tree ../addons/candle-appraiser) ../addons/protocol.py ../addons/exact_worker.py)
  (libraries masc_test_deps masc.server masc_candle masc_candle_runtime masc_process mcp_protocol eio_main yojson unix))
+
+(test
+ (name test_workspace_curator_addon_contract)
+ (modules test_workspace_curator_addon_contract)
+ (deps (source_tree ../addons/workspace-curator) ../addons/protocol.py ../addons/exact_worker.py)
+ (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol))
+
+(test
+ (name test_workspace_curator_addon_commit)
+ (modules test_workspace_curator_addon_commit)
+ (deps ../addons/workspace-curator/lane.toml
+       ../addons/workspace-curator/schemas/classification.json
+       ../addons/workspace-curator/schemas/briefing.json)
+ (libraries masc_test_deps masc.server mcp_protocol))
 
 (test
  (name test_lane_addon_host_cycle)
  (modules test_lane_addon_host_cycle)
- (libraries masc_test_deps exact_output_fixture mcp_protocol eio eio_main yojson unix base64))
+ (deps ../config/prompts/workspace_memory_curator.md ../config/prompts/workspace_memory_briefing.md)
+ (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol eio eio_main yojson unix base64))
 
 (test
  (name test_lane_addon_host_request)

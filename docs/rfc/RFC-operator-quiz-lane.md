@@ -337,9 +337,12 @@ slots = ["ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
 - `answered {output; slot; usage?}`;
 - `invalid_output {detail}`: every slot answered and no answer matched the schema;
 - `input_refused {kind}`: a provider refused this input itself (input capacity, context overflow, invalid request, request body refused). The same input cannot succeed, so the package must change it;
+- `output_limit_reached {detail}`: an actual provider output limit exhausted the original candidate walk; this is distinct from malformed JSON, schema rejection, incomplete output and a transport response-size refusal. The original request stays terminal. Operator Quiz preserves its existing author failure / waiting-grade policy and does not reduce material for this result;
 - `outcome_unknown`: a call may have been sent and no outcome was retained. This includes a request the host retained before a restart and never finished: the host cannot tell whether the provider received it, so it does not call again.
 
 **Not final, so not delivered:** the lane is unconfigured, off or has no admitted slots; a provider refusal that may pass (rate limit, overload, network, timeout); an authentication or authorization refusal. The request stays listed, the Host requests view (K6) shows the reason, and the host tries it again on the next trigger (§4.4). Each attempt is retained as evidence. This follows `failure_keeps_evidence`: a failed delivery leaves evidence and does not consume the request (`docs/constitution.xml:250-253`).
+
+Missing, expired, not-yet-valid or ambiguous token-capacity evidence is not a refusal of the input. Such a candidate stays transient until actual admission evidence is available; it cannot authorize reducing material. Transient, configuration and authentication failures keep their existing not-final priority over input refusal, output limit and unusable-output terminals. Previously retained terminal records are never reclassified or replayed from their detail text.
 
 **No ceilings.** MASC adds no input or output size limit. `max_output_tokens` is the operator's optional lane key. If a provider refuses an input as too large, that typed refusal reaches the package as `input_refused`, and the package changes the input (§7).
 

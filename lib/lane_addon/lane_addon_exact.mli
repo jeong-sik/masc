@@ -77,6 +77,11 @@ type call_final =
       (** Every slot answered and no answer matched the schema. *)
   | Input_refused of input_refusal
       (** A provider refused this input itself; the same input cannot pass. *)
+  | Output_limit_reached of { detail : string }
+      (** The admitted candidates exhausted the provider's output limit.
+          Kept distinct from invalid JSON, incomplete output and schema/domain
+          rejection. This final never permits replay of the original request;
+          any smaller successor is a separate consumer-owned decision. *)
 
 (** What a package receives. Each one ends the request. *)
 type final =
@@ -138,40 +143,111 @@ type call_outcome =
   | Call_ended of call_final
   | Call_refused of provider_refusal
 
-type call = validate:(Yojson.Safe.t -> (checked, string) result) -> call_outcome
+type execution_result = {
+  outcome : call_outcome;
+  receipt : Keeper_exact_walk_receipt.t;
+}
+(** Host-created evidence of the original call. It is retained separately from
+    the unchanged worker outcome and cannot be supplied through worker JSON. *)
+
+type call = validate:(Yojson.Safe.t -> (checked, string) result) -> execution_result
 (** Sends the call. [validate] checks one answer against the package's
     declared schema. Raising other than [Eio.Cancel.Cancelled] is recorded as
     [Outcome_unknown]. *)
 
-type runner = lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
+type runner = admission_class:Agent_core.Llm_provider.Admission_class.t ->
+  lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
 (** Resolves the add-on lane [lane_key] for the permitted provider [schema]
     (package baseline or request schema). The supplied [validate] still checks
-    the package baseline independently. It sends nothing; the returned [call] does. *)
+    the package baseline independently. [admission_class] comes only from the
+    trusted host authority for this original request and is retained by the
+    returned call, never selected by worker data. It governs the HTTP Exact
+    flow, not an official client's separate process admission.
+    It sends nothing; the returned [call] does. *)
+
+type output_validator = Yojson.Safe.t -> (unit, string) result
+type request_authorization = {
+  admission_class : Agent_core.Llm_provider.Admission_class.t;
+  validate_output : output_validator;
+}
+type execution_authority =
+  store:Lane_addon_store.t -> declaration_id:string -> package:Lane_addon_types.package ->
+  request -> (request_authorization, string) result
+(** Trusted host binding to an original consumer's pure domain validator and
+    execution admission policy. Resolution may read host-owned state; the
+    returned validator must perform no effects. Both fields belong to the same
+    verified original request. Worker package/lane names are not policy grants.
+    A worker cannot supply this port or disable it through Hooks.
+    [Error] refuses both dispatch and delivery without replacing the original
+    result. Authority is resolved again on every [run], including replay;
+    delivering a retained result never invokes the runner. The authorization is
+    not serialized into the worker request or a durable admission-class audit. *)
+
+type retained_observation = Retained_absent | Retained_open | Retained_terminal of final
+
+type original_execution =
+  | No_completed_original
+  | Completed_original of execution_result
+
+val read_original_execution : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> attempt_ordinal:int -> request ->
+  (original_execution, string) result
+(** Read the original host call evidence under the caller's original Store,
+    request, schema and one-based attempt identity. Missing proof remains
+    unproven; malformed, conflicting and unreadable evidence returns [Error].
+    A complete proof may precede final publication. This read never claims,
+    writes, resolves a route, delivers to a worker or calls a provider. It grants
+    no Memory, queue-consumption or new execution authority. Proof identity
+    includes the original Store root; moving the workspace directory makes
+    that proof a conflicting identity and returns [Error]. Offload the whole
+    blocking scope to a system thread. *)
+val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> request -> (retained_observation, string) result
+(** Read only the original host Exact record under the caller's workspace
+    authority. Strictly check the complete canonical envelope, declaration and
+    request ID, original request/digest, attempt outcomes and terminal against
+    the caller's original schema. Missing/malformed/conflicting records remain
+    distinct. A started attempt without a final is [Retained_open], since this
+    read cannot determine whether its provider is still running. It does not
+    claim, write, resolve a route, call a provider or synthesize Outcome_unknown.
+
+    This is an observation for the trusted original consumer, including while
+    the worker is Off. It grants no package/worker delivery, new execution or
+    domain write authority. That consumer first restores its immutable capture
+    and acknowledged ancestry, supplies the original request/schema, validates
+    the full domain answer and rechecks authority before its separate effects.
+    Run the complete blocking read/validation scope on a system thread in Eio. *)
 
 val run :
   store:Lane_addon_store.t ->
   declaration_id:string ->
   package:Lane_addon_types.package ->
   runner:runner ->
+  authorize_request:execution_authority ->
   request ->
   (attempt, string) result
 (** Request-schema permission is checked before dispatch and delivery without
     replacing an already retained final. A retained [Answered] is checked against
     the current package baseline and the original request's partial required
-    shape before delivery. One that no longer matches is delivered as
+    shape and trusted consumer semantics before delivery. The same pure checks
+    are supplied inside the original HTTP/CLI candidate walk before acceptance.
+    One that no longer matches is delivered as
     [Invalid_output] and the provider is not called again.
 
     Request identity is checked before output selection. A refused output
     cannot reuse a retained id with another body. New refusals are retained;
     refusing delivery of an existing final records the refusal without
-    replacing the original final. A started attempt without an outcome is
-    retained as [Outcome_unknown] before selection is checked, so disabling an
+    replacing the original final. A started attempt without an outcome or
+    confirmed execution proof is retained as [Outcome_unknown] before selection is checked, so disabling an
     output cannot erase that uncertainty. Cancellation is checked after the started
     record is written and immediately before entering the provider call.
 
     [Error] when [declaration_id] cannot own an add-on lane, or when the
-    record cannot be read or written. Nothing is delivered then. If the
-    outcome of a sent call cannot be written, the started attempt stays, and
-    a later [run] reads it as [Outcome_unknown]. A cancelled call leaves its
+    record cannot be read or written. Nothing is delivered then. A returned
+    call's original host proof is saved and strictly confirmed before outcome
+    publication. Confirmed proof plus its original started marker permits
+    publication-only recovery without resolving or invoking a runner. Missing
+    proof keeps [Outcome_unknown]; invalid or unreadable proof refuses recovery.
+    A cancelled call leaves its
     attempt started too. An exception from the runner's resolution step
     propagates; nothing was sent and no attempt was written for it. *)

@@ -22,6 +22,16 @@ val fact_id : Workspace_memory_ledger.fact_ref -> string
 (** Stable id for one fact identity, including source-bound path. The model
     returns this instead of copying the full fact reference into each answer. *)
 
+val batch_to_json : batch -> Yojson.Safe.t
+val batch_of_json
+  : ledger:Workspace_memory_ledger.t -> Yojson.Safe.t -> (batch, error) result
+(** Strict snapshot of the complete original batch, not a new retrieval or
+    prompt render. Validates selected/remaining fact identities and input rows,
+    including each neighbor's related ledger entries and other-Keeper owner,
+    and rejects pending facts already disposed in that captured ledger.
+    The caller must retain
+    the original ledger and rendered-template identity with this snapshot. *)
+
 val prepare
   :  neighbor_limit:int
   -> render:(Yojson.Safe.t -> (string, string) result)
@@ -39,7 +49,7 @@ val narrow
   : render:(Yojson.Safe.t -> (string, string) result)
   -> batch
   -> (batch option, error) result
-(** Call only after an actual provider input-size refusal. Retain half the
+(** Call only after an actual provider input-size or classification output-limit refusal. Retain half the
     selected whole rows, including their complete neighbors and related ledger
     entries, and prepend the other selected facts to [remaining]. The index is
     not queried again. [Ok None] means only one indivisible row remains.

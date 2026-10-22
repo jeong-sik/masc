@@ -659,6 +659,9 @@ type generation_receipt_snapshot
 
 val generation_receipt_snapshot_phase : generation_receipt_snapshot -> effect_phase
 val generation_receipt_snapshot_dispatch_count : generation_receipt_snapshot -> int
+val generation_receipt_snapshot_generation_dispatched : generation_receipt_snapshot -> bool
+(** Immutable actual generation-dispatch fact; never inferred from measurement
+    activity, phase labels or billing assumptions. *)
 val generation_receipt_snapshot_call_id : generation_receipt_snapshot -> call_id
 val generation_receipt_snapshot_plan_fingerprint : generation_receipt_snapshot -> string
 

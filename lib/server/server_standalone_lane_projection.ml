@@ -23,14 +23,9 @@ type terminal_kind =
 
 type observed_terminal =
   { kind : terminal_kind
-  ; elapsed_s : float
-  ; elapsed_measured : bool
-    (** [false] when the duration was synthesised rather than measured — a
-        server-restart orphan is written back as Failed with
-        [now - started_at], an arbitrarily large value that must not enter
-        the latency percentile (lane audit W7). It keeps [last_terminal_at]
-        empty too: a finish time synthesised from the restart is the
-        restart's clock, and the lane detail draws that as an age. *)
+  ; elapsed_s : float option
+    (** Only an actual measured duration can supply latency/finish statistics.
+        Unknown and replay interruption durations remain absent. *)
   ; answered_by : answered_by
   }
 
@@ -55,8 +50,14 @@ type observed_status =
   | Running
   | Terminal of observed_terminal
 
+type observation_id =
+  | Exact_id of string
+  | Task_verification_id of string
+  | Goal_verification_id of string
+
 type observed_run =
-  { lane : Standalone_lane.t
+  { observation_id : observation_id
+  ; lane : Lane_run_identity.t
   ; started_at : float
   ; status : observed_status
   }
@@ -93,7 +94,6 @@ let lane_specs =
     [ Standalone_lane.Board_attention
     ; Standalone_lane.Hitl_auto_judge
     ; Standalone_lane.Librarian
-    ; Standalone_lane.Workspace_curator
     ; Standalone_lane.Verifier
     ; Standalone_lane.Browser_stagehand
     ; Standalone_lane.Candle_appraiser
@@ -153,9 +153,9 @@ let retained_run_id = function
 
 let retained_run_lane = function
   | Exact_run run ->
-    Standalone_lane.to_id (Exact_lane_run_registry.standalone_lane run.Exact_lane_run_registry.lane)
+    Exact_lane_run_registry.lane_id run.Exact_lane_run_registry.lane
   | Task_verification_run _ | Goal_verification_run _ ->
-    Standalone_lane.to_id Standalone_lane.Verifier
+    Lane_run_identity.to_id Lane_run_identity.Verifier
 ;;
 
 let retained_run_started_at = function
@@ -164,10 +164,7 @@ let retained_run_started_at = function
   | Goal_verification_run run -> run.Goal_verification_run_registry.started_at
 ;;
 
-let known_lane lane_id =
-  List.exists
-    (fun (spec : lane_spec) -> String.equal (Standalone_lane.to_id spec.lane) lane_id)
-    lane_specs
+let known_lane lane_id = Option.is_some (Lane_run_identity.of_id lane_id)
 ;;
 
 let selected_slot_field = function
@@ -185,7 +182,7 @@ let task_verification_summary_fields (run : Verification_run_registry.run) =
   in
   [ "run_id", `String run.verification_id
   ; "run_kind", `String "task_verification"
-  ; "lane", `String (Standalone_lane.to_id Standalone_lane.Verifier)
+  ; "lane", `String (Lane_run_identity.to_id Lane_run_identity.Verifier)
   ; "subject_id", `String run.task_id
   ; "actor", `String run.authority_actor
   ; "started_at", `Float run.started_at
@@ -204,7 +201,7 @@ let goal_verification_summary_fields (run : Goal_verification_run_registry.run) 
   in
   [ "run_id", `String run.run_id
   ; "run_kind", `String "goal_verification"
-  ; "lane", `String (Standalone_lane.to_id Standalone_lane.Verifier)
+  ; "lane", `String (Lane_run_identity.to_id Lane_run_identity.Verifier)
   ; "subject_id", `String run.goal_id
   ; "actor", `String run.authority_actor
   ; "started_at", `Float run.started_at
@@ -483,27 +480,15 @@ let terminal_of_exact_outcome = function
   | Exact_lane_run_registry.Failed _ -> Failed
 ;;
 
-let closed_by_restart = function
-  | Exact_lane_run_registry.Failed { code; _ } ->
-    String.equal code Exact_lane_run_registry.server_restarted_code
-  | Exact_lane_run_registry.Succeeded | Exact_lane_run_registry.Cancelled -> false
-;;
-
-let exact_answered_by ~lane ~outcome = function
-  | Some slot -> Slot slot
-  | None ->
-    (match lane, outcome with
-     | Exact_lane_run_registry.Board_attention, Exact_lane_run_registry.Succeeded ->
-       Vendor_system_one
-     | _, outcome when closed_by_restart outcome -> Closed_by_restart
-     | ( ( Exact_lane_run_registry.Board_attention
-         | Exact_lane_run_registry.Librarian
-         | Exact_lane_run_registry.Hitl_auto_judge
-         | Exact_lane_run_registry.Workspace_curator
-         | Exact_lane_run_registry.Candle_appraiser )
-       , ( Exact_lane_run_registry.Succeeded
-         | Exact_lane_run_registry.Cancelled
-         | Exact_lane_run_registry.Failed _ ) ) -> No_slot)
+let exact_answered_by ~lane ~outcome ~origin selected_slot =
+  match origin with
+  | Exact_lane_run_registry.Restart_replay -> Closed_by_restart
+  | Exact_lane_run_registry.Producer -> match selected_slot with
+    | Some slot -> Slot slot
+    | None -> match lane,outcome with
+      | Exact_lane_run_registry.Board_attention,Exact_lane_run_registry.Succeeded -> Vendor_system_one
+      | (Exact_lane_run_registry.Board_attention | Librarian | Hitl_auto_judge | Workspace_curator | Candle_appraiser),
+        (Exact_lane_run_registry.Succeeded | Cancelled | Failed _) -> No_slot
 ;;
 
 let optional_slot = function
@@ -515,12 +500,11 @@ let observed_exact_run (run : Exact_lane_run_registry.run) =
   let status =
     match run.status with
     | Exact_lane_run_registry.Running -> Running
-    | Exact_lane_run_registry.Completed { outcome; elapsed_s; selected_slot; _ } ->
+    | Exact_lane_run_registry.Completed { outcome; origin; elapsed_s; selected_slot; _ } ->
       Terminal
         { kind = terminal_of_exact_outcome outcome
         ; elapsed_s
-        ; elapsed_measured = not (closed_by_restart outcome)
-        ; answered_by = exact_answered_by ~lane:run.lane ~outcome selected_slot
+        ; answered_by = exact_answered_by ~lane:run.lane ~outcome ~origin selected_slot
         }
     | Exact_lane_run_registry.Completion_persistence_failed
         { intended_outcome; elapsed_s; selected_slot; _ } ->
@@ -529,12 +513,12 @@ let observed_exact_run (run : Exact_lane_run_registry.run) =
       Terminal
         { kind = Failed
         ; elapsed_s
-        ; elapsed_measured = true
         ; answered_by =
-            exact_answered_by ~lane:run.lane ~outcome:intended_outcome selected_slot
+            exact_answered_by ~lane:run.lane ~outcome:intended_outcome ~origin:Exact_lane_run_registry.Producer selected_slot
         }
   in
-  { lane = Exact_lane_run_registry.standalone_lane run.lane; started_at = run.started_at; status }
+  { observation_id = Exact_id run.run_id
+  ; lane = Exact_lane_run_registry.run_lane run.lane; started_at = run.started_at; status }
 ;;
 
 (* Success for this lane means A VERDICT WAS PRODUCED. [Not_reviewed] is
@@ -559,12 +543,12 @@ let observed_verification_run (run : Verification_run_registry.run) =
         { outcome; evaluator_runtime; elapsed_s; _ } ->
       Terminal
         { kind = terminal_of_verification_outcome outcome
-        ; elapsed_s
-        ; elapsed_measured = true
+        ; elapsed_s = Some elapsed_s
         ; answered_by = optional_slot evaluator_runtime
         }
   in
-  { lane = Standalone_lane.Verifier; started_at = run.started_at; status }
+  { observation_id = Task_verification_id run.verification_id
+  ; lane = Lane_run_identity.Verifier; started_at = run.started_at; status }
 ;;
 
 let terminal_of_goal_verification_outcome ~evaluated_verdict = function
@@ -587,12 +571,12 @@ let observed_goal_verification_run (run : Goal_verification_run_registry.run) =
         { outcome; evaluated_verdict; evaluator_runtime; elapsed_s; _ } ->
       Terminal
         { kind = terminal_of_goal_verification_outcome ~evaluated_verdict outcome
-        ; elapsed_s
-        ; elapsed_measured = true
+        ; elapsed_s = Some elapsed_s
         ; answered_by = optional_slot evaluator_runtime
         }
   in
-  { lane = Standalone_lane.Verifier; started_at = run.started_at; status }
+  { observation_id = Goal_verification_id run.run_id
+  ; lane = Lane_run_identity.Verifier; started_at = run.started_at; status }
 ;;
 
 let p50 values =
@@ -606,24 +590,29 @@ let latest_run runs =
     (fun latest run ->
        match latest with
        | None -> Some run
-       | Some current when run.started_at > current.started_at -> Some run
+       | Some current when run.started_at > current.started_at
+                            || (Float.equal run.started_at current.started_at
+                                && Stdlib.compare run.observation_id current.observation_id > 0) -> Some run
        | Some _ -> latest)
     None
     runs
 ;;
 
+(* A measured finish orders known completions. For an unmeasured terminal,
+   its registration is an ordering anchor only: first observation may occur
+   after execution completed. It is not a lower bound or finish timestamp.
+   [last_terminal_at] remains absent for that row. Stable source/id ties do not
+   depend on the input registry traversal order. *)
+let terminal_order run terminal = match terminal.elapsed_s with
+  | Some elapsed -> run.started_at +. elapsed
+  | None -> run.started_at
 let latest_terminal_run terminal_runs =
-  List.fold_left
-    (fun latest ((run, terminal) as candidate) ->
-       match latest with
-       | None -> Some candidate
-       | Some (current_run, current_terminal)
-         when run.started_at +. terminal.elapsed_s
-              > current_run.started_at +. current_terminal.elapsed_s ->
-         Some candidate
-       | Some _ -> latest)
-    None
-    terminal_runs
+  List.fold_left (fun latest ((run,terminal) as candidate) -> match latest with
+    | None -> Some candidate
+    | Some (current,current_terminal)
+        when let order = Float.compare (terminal_order run terminal) (terminal_order current current_terminal) in
+          order > 0 || (order = 0 && Stdlib.compare run.observation_id current.observation_id > 0) -> Some candidate
+    | Some _ -> latest) None terminal_runs
 ;;
 
 let slot_counts runs =
@@ -672,7 +661,7 @@ let lane_json
   =
   let runs =
     List.filter
-      (fun (run : observed_run) -> run.lane = spec.lane)
+      (fun (run : observed_run) -> Lane_run_identity.equal run.lane (Standalone_lane.run_identity spec.lane))
       all_runs
   in
   let running_count =
@@ -695,7 +684,7 @@ let lane_json
   let elapsed_values =
     List.filter_map
       (fun (_, terminal) ->
-         if terminal.elapsed_measured then Some terminal.elapsed_s else None)
+         terminal.elapsed_s)
       terminal_runs
   in
   let latest = latest_run runs in
@@ -738,24 +727,16 @@ let lane_json
        | Some (Succeeded | Cancelled) | None -> "idle")
   in
   let last_started_at = Option.map (fun run -> run.started_at) latest in
-  (* Only a measured finish. A server-restart orphan is written back with
-     [now - started_at], so started_at + elapsed_s lands on the moment the
-     server noticed rather than the moment the run ended -- and a reader
-     drawing "last run failed 3m ago" off it is reading the restart, not the
-     run. Same reason the percentile above refuses the synthesised value. *)
-  let last_terminal_at =
-    Option.bind latest_terminal (fun (run, terminal) ->
-      if terminal.elapsed_measured
-      then Some (run.started_at +. terminal.elapsed_s)
-      else None)
-  in
+  (* This is the selected original's measured finish, never the clock when
+     replay or another observer noticed that original. *)
+  let last_terminal_at = Option.bind latest_terminal (fun (run,terminal) ->
+    Option.map (fun elapsed -> run.started_at +. elapsed) terminal.elapsed_s) in
   let jev_field =
     match spec.lane with
     | Standalone_lane.Board_attention ->
       [ "jev", jev_readiness_json (jev_lane_readiness configuration jev_readiness) ]
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
-    | Standalone_lane.Workspace_curator
     | Standalone_lane.Candle_appraiser
     | Standalone_lane.Verifier
     | Standalone_lane.Browser_stagehand -> []
@@ -911,7 +892,6 @@ let live_lane_configuration registry lane_id =
           ( Runtime.Librarian
           | Runtime.Hitl_auto_judge
           | Runtime.Board_attention
-          | Runtime.Workspace_curator
           | Runtime.Candle_appraiser )
         , _
       | None, _ -> registry_admitted_catalog_slots, cli_slots, [], [], None

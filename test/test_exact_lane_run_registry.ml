@@ -89,10 +89,15 @@ let test_round_trip_preserves_exact_evidence () =
     (Yojson.Safe.to_string original)
     (R.get replayed_again ~run_id:"run-1" |> Option.get |> R.run_to_yojson
      |> Yojson.Safe.to_string);
-  (match R.get replayed ~run_id:"run-1" |> Option.get with
-   | { status = R.Completed { selected_slot = Some selected_slot; _ }; _ } ->
-     check string "selected slot" "librarian-primary" selected_slot
-   | _ -> fail "selected slot did not survive durable replay");
+  List.iter (fun retained ->
+    match R.get retained ~run_id:"run-1" |> Option.get with
+    | { status = R.Completed
+          { origin = R.Producer; elapsed_s = Some elapsed_s
+          ; selected_slot = Some selected_slot; _ }; _ } ->
+      check string "selected slot" "librarian-primary" selected_slot;
+      check (float 0.) "measured producer duration survives restart" 0.5 elapsed_s
+    | _ -> fail "producer origin and measured duration did not survive durable replay")
+    [registry; replayed; replayed_again];
   remove_if_exists path
 ;;
 
@@ -216,10 +221,7 @@ let test_usage_is_recorded_and_survives_replay () =
   remove_if_exists path
 ;;
 
-(* Two ways a run ends up with no usage: the producer passed none (the row
-   carries an explicit null), and a completion row written before the field
-   existed at all (the field is absent). Both replay as [usage = None] so
-   pre-change stores stay readable without a store version bump. *)
+(* A producer that has no usage still writes the required field as null. *)
 let test_completion_without_usage_replays_as_none () =
   let path = fresh_log_path "exact-lane-no-usage-" in
   remove_if_exists path;
@@ -238,27 +240,10 @@ let test_completion_without_usage_replays_as_none () =
     ~elapsed_s:0.5
     ~output:`Null;
   let lines = Fs_compat.load_file path |> String.split_on_char '\n' in
-  let completion_event =
-    match Yojson.Safe.from_string (List.nth lines 1) with
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (name, value) ->
-              if String.equal name "completion"
-              then (
-                match value with
-                | `Assoc completion_fields ->
-                  name, `Assoc (List.remove_assoc "usage" completion_fields)
-                | _ -> fail "completion event must carry an object payload")
-              else name, value)
-           fields)
-    | _ -> fail "completion event must be an object"
-  in
-  Fs_compat.save_file
-    path
-    (String.concat
-       "\n"
-       [ List.nth lines 0; Yojson.Safe.to_string completion_event; "" ]);
+  (match Yojson.Safe.Util.member "completion" (Yojson.Safe.from_string (List.nth lines 1)) with
+   | `Assoc fields -> check bool "absent provider usage is written as explicit null" true
+       (List.assoc_opt "usage" fields = Some `Null)
+   | _ -> fail "completion event must carry an object payload");
   let replayed = R.replay path in
   (match R.get replayed ~run_id:"run-none" with
    | Some { status = R.Completed { outcome = R.Succeeded; usage = None; _ }; _ } -> ()
@@ -523,7 +508,8 @@ let test_blank_selected_slot_is_rejected_before_write () =
   check bool "blank selected slot is a typed writer error" true
     (match result with
      | Error R.Invalid_selected_slot -> true
-     | Error R.Unknown_run | Error (R.Persistence_failed _) | Ok () -> false);
+     | Error R.Unknown_run | Error R.Invalid_elapsed_duration
+     | Error (R.Persistence_failed _) | Ok () -> false);
   check string "invalid completion leaves the registered run running" "running"
     (R.get registry ~run_id:"blank-slot" |> Option.get |> fun run -> R.status_label run.R.status)
 ;;
@@ -567,19 +553,24 @@ let test_replay_settles_running_as_server_restart_failure () =
        { status =
            R.Completed
              { outcome = R.Failed { code; detail }
+             ; origin
              ; elapsed_s
              ; output
              ; selected_slot
+             ; usage
              }
        ; _
        } ->
      check string "typed restart code" "server_restarted" code;
+     check bool "restart is an observation, not a producer completion" true
+       (origin = R.Restart_replay);
      check string
        "operator detail"
        "exact-output fibers do not survive server restart"
        detail;
-     check bool "elapsed time is retained" true (elapsed_s >= 2.0);
+     check (option (float 0.)) "replay does not invent a duration" None elapsed_s;
      check (option string) "no slot receipt is invented" None selected_slot;
+     check bool "no usage is invented" true (usage = None);
      check
        string
        "durable output names the interruption"
@@ -593,7 +584,7 @@ let test_replay_settles_running_as_server_restart_failure () =
   check bool "latest registration input survives both restarts" true
     (second.input = R.Exact_input (`Assoc [ "message_count", `Int 4 ]));
   (match second.status with
-   | R.Completed { output; _ } ->
+   | R.Completed { origin = R.Restart_replay; elapsed_s = None; output; _ } ->
      check string "restart completion body survives the second compaction"
        "server_restarted"
        (Yojson.Safe.Util.member "reason" output |> Yojson.Safe.Util.to_string)
@@ -608,7 +599,135 @@ let test_replay_settles_running_as_server_restart_failure () =
 ;;
 
 let test_current_storage_generation () =
-  check string "current store file" "exact-lane-runs-v6.jsonl" R.storage_filename
+  check string "current store file" "exact-lane-runs-v7.jsonl" R.storage_filename
+;;
+
+let test_replay_sweep_preserves_the_other_storage_generation () =
+  let path = fresh_log_path "exact-lane-generation-ownership-" in
+  let previous_root = Filename.concat (Filename.dirname path) "exact-lane-run-payloads" in
+  let previous_run = Filename.concat previous_root "old-original" in
+  Fs_compat.mkdir_p previous_run;
+  let sentinel = Filename.concat previous_run "output-original.json" in
+  let original_bytes = "{\"original\":\"previous generation evidence\"}" in
+  Fs_compat.save_file sentinel original_bytes;
+  let registry = R.create ~path () in
+  R.register_running registry ~run_id:"current-original" ~lane:R.Librarian
+    ~actor:"keeper-a" ~started_at:10.0 ~input:(R.Exact_input `Null);
+  mark_completed_exn registry ~run_id:"current-original" ~outcome:R.Succeeded
+    ~elapsed_s:0.5 ~output:(`String "current evidence");
+  let orphan = payload_run_dir path ~run_id:"current-unreferenced" in
+  Unix.mkdir orphan 0o700;
+  Fs_compat.save_file (Filename.concat orphan "input-0.json") "{}";
+  for _ = 1 to 2 do
+    let replayed = R.replay path in
+    check bool "current sweep actually removes its own unreferenced payload" false
+      (Sys.file_exists orphan);
+    check string "current replay cannot delete another generation's actual bytes"
+      original_bytes (Fs_compat.load_file sentinel);
+    match R.get replayed ~run_id:"current-original" with
+    | Some {output_availability=Some R.Available;_} -> ()
+    | _ -> fail "current generation evidence must remain readable after sweeping"
+  done;
+  remove_if_exists path
+;;
+
+let test_current_completion_requires_origin_and_nullable_duration () =
+  let path = fresh_log_path "exact-lane-completion-shape-" in
+  let registry = R.create ~path () in
+  R.register_running registry ~run_id:"completion-shape" ~lane:R.Librarian
+    ~actor:"keeper-a" ~started_at:10.0 ~input:(R.Exact_input `Null);
+  mark_completed_exn registry ~run_id:"completion-shape" ~outcome:R.Succeeded
+    ~elapsed_s:0.5 ~output:(`String "original output");
+  let rows = In_channel.with_open_text path In_channel.input_lines in
+  let registration = List.nth rows 0 in
+  let completion = Yojson.Safe.from_string (List.nth rows 1) in
+  let rewrite change = match completion with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "completion", `Assoc payload -> "completion", `Assoc (change payload)
+        | field -> field) fields)
+    | _ -> fail "completion row is not an object" in
+  let set key value fields = (key, value) :: List.remove_assoc key fields in
+  let check_rejected_bytes label row =
+    Fs_compat.save_file path (registration ^ "\n" ^ row ^ "\n");
+    let report = R.cut_replay_log ~execute:false path in
+    check int (label ^ ": both rows inspected") 2 report.Run_registry_core.lines_read;
+    check int (label ^ ": completion is malformed, not a terminal receipt")
+      1 report.Run_registry_core.malformed_lines in
+  let check_rejected (label, change) =
+    check_rejected_bytes label (Yojson.Safe.to_string (rewrite change)) in
+  List.iter check_rejected
+    [ "missing origin", List.remove_assoc "origin"
+    ; "unknown origin", set "origin" (`String "future_origin")
+    ; "null origin", set "origin" `Null
+    ; "missing duration", List.remove_assoc "elapsed_s"
+    ; "negative duration", set "elapsed_s" (`Float (-0.5))
+    ; "negative integer duration", set "elapsed_s" (`Int (-1))
+    ; "string duration", set "elapsed_s" (`String "0.5")
+    ; "boolean duration", set "elapsed_s" (`Bool false)
+    ; "missing usage", List.remove_assoc "usage"
+    ; "measured replay duration", set "origin" (`String "restart_replay")
+    ; "forged replay success", (fun fields ->
+        fields |> set "origin" (`String "restart_replay") |> set "elapsed_s" `Null)
+    ];
+  (* Safe writers correctly refuse nonstandard numbers. Raw literals are
+     deliberate invalid input bytes, so the finite decoder is actually reached. *)
+  let raw = Yojson.Raw.from_string (Yojson.Safe.to_string completion) in
+  List.iter (fun literal ->
+    let row = match raw with
+      | `Assoc fields -> `Assoc (List.map (function
+          | "completion", `Assoc payload ->
+            "completion", `Assoc (("elapsed_s", `Floatlit literal) :: List.remove_assoc "elapsed_s" payload)
+          | field -> field) fields)
+      | _ -> fail "expected original completion object" in
+    let bytes = Yojson.Raw.to_string row in
+    let parsed = Yojson.Safe.from_string bytes in
+    check bool (literal ^ ": malformed duration reaches the numeric codec") true
+      (match Yojson.Safe.Util.(member "elapsed_s" (member "completion" parsed)) with
+       | `Float value -> not (Float.is_finite value)
+       | _ -> false);
+    check_rejected_bytes (literal ^ " duration") bytes)
+    ["NaN"; "Infinity"; "-Infinity"];
+  (* Null is an explicit absence of measurement, not zero or a replay origin. *)
+  Fs_compat.save_file path (registration ^ "\n" ^
+    Yojson.Safe.to_string (rewrite (set "elapsed_s" `Null)) ^ "\n");
+  for _ = 1 to 2 do
+    let replayed = R.replay path in
+    match R.get replayed ~run_id:"completion-shape" with
+    | Some {status=R.Completed
+        {outcome=R.Succeeded;origin=R.Producer;elapsed_s=None;_};_} -> ()
+    | _ -> fail "explicit unknown producer duration changed origin or invented elapsed"
+  done;
+  remove_if_exists path
+;;
+
+let test_invalid_measured_duration_cannot_mutate_a_run () =
+  let path = fresh_log_path "exact-lane-invalid-duration-" in
+  let registry = R.create ~path () in
+  R.register_running registry ~run_id:"duration" ~lane:R.Librarian
+    ~actor:"keeper-a" ~started_at:10.0 ~input:(R.Exact_input `Null);
+  let verify_invalid () =
+    let before = Fs_compat.load_file path in
+    let original = R.get registry ~run_id:"duration" |> Option.get |> R.run_to_yojson in
+    let payloads = Sys.readdir (payload_run_dir path ~run_id:"duration")
+      |> Array.to_list |> List.sort String.compare in
+    List.iter (fun elapsed_s ->
+      (match R.mark_completed registry ~run_id:"duration" ~outcome:R.Succeeded
+         ~elapsed_s ~selected_slot:None ~output:(`String "must not be published") () with
+       | Error R.Invalid_elapsed_duration -> ()
+       | Error (R.Unknown_run | R.Invalid_selected_slot | R.Persistence_failed _) | Ok () ->
+         fail "invalid measured duration was not refused before publication");
+      check string "invalid measurement cannot append a completion" before (Fs_compat.load_file path);
+      check bool "invalid measurement cannot change the original run" true
+        (Yojson.Safe.equal original (R.get registry ~run_id:"duration" |> Option.get |> R.run_to_yojson));
+      check (list string) "invalid measurement cannot publish an output payload" payloads
+        (Sys.readdir (payload_run_dir path ~run_id:"duration")
+         |> Array.to_list |> List.sort String.compare))
+      [Float.nan; Float.infinity; Float.neg_infinity; -0.5] in
+  verify_invalid ();
+  mark_completed_exn registry ~run_id:"duration" ~outcome:R.Succeeded
+    ~elapsed_s:0.5 ~output:(`String "original completion");
+  verify_invalid ();
+  remove_if_exists path
 ;;
 
 (* The registration decoder is exact-field, so a row shape it stops accepting
@@ -637,7 +756,7 @@ let test_store_version_pins_the_registration_shape () =
     report.Run_registry_core.lines_read, report.Run_registry_core.malformed_lines
   in
   check string "the row shape below belongs to this store version"
-    "exact-lane-runs-v6.jsonl" R.storage_filename;
+    "exact-lane-runs-v7.jsonl" R.storage_filename;
   check (pair int int) "a registration row of this version is read and accepted"
     (1, 0) (malformed_lines current_registration_row);
   check (pair int int) "an input value inside the row is rejected, not read"
@@ -771,10 +890,10 @@ let test_exact_history_is_not_pruned_across_lanes () =
     (list string)
     "every registered lane survives replay"
     (recorded_lanes
-     |> List.map (fun lane -> Standalone_lane.to_id (R.standalone_lane lane))
+     |> List.map (fun lane -> R.lane_id lane)
      |> List.sort String.compare)
     (R.list_runs replayed
-     |> List.map (fun (run : R.run) -> Standalone_lane.to_id (R.standalone_lane run.lane))
+     |> List.map (fun (run : R.run) -> R.lane_id run.lane)
      |> List.sort_uniq String.compare);
   let permissions = (Unix.stat path).Unix.st_perm land 0o777 in
   check int "durable registry is private" 0o600 permissions;
@@ -825,7 +944,7 @@ let test_the_registry_refuses_unrecorded_lanes () =
     (fun lane ->
        check bool (Standalone_lane.to_id lane ^ " converts back to itself") true
          (match R.lane_of_standalone lane with
-          | Some recorded -> R.standalone_lane recorded = lane
+          | Some recorded -> Lane_run_identity.equal (R.run_lane recorded) (Standalone_lane.run_identity lane)
           | None -> lane = Standalone_lane.Verifier || lane = Standalone_lane.Browser_stagehand))
     Standalone_lane.all;
   let read_and_refused lane =
@@ -894,6 +1013,7 @@ let test_failed_durable_completion_is_explicitly_visible () =
        (String.trim failure.detail <> "")
    | Error R.Unknown_run -> fail "registered run became unknown"
    | Error R.Invalid_selected_slot -> fail "explicit None slot became invalid"
+   | Error R.Invalid_elapsed_duration -> fail "finite measured duration became invalid"
    | Ok () -> fail "directory unexpectedly received durable completion");
   let run = R.get registry ~run_id:"completion-not-published" |> Option.get in
   check bool "failed append keeps its actual output available" true
@@ -1422,6 +1542,12 @@ let () =
         ; test_case "restart settles running lane" `Quick
             test_replay_settles_running_as_server_restart_failure
         ; test_case "current storage generation" `Quick test_current_storage_generation
+        ; test_case "replay sweep preserves another storage generation" `Quick
+            test_replay_sweep_preserves_the_other_storage_generation
+        ; test_case "current completion requires origin and nullable duration" `Quick
+            test_current_completion_requires_origin_and_nullable_duration
+        ; test_case "invalid measured duration cannot mutate a run" `Quick
+            test_invalid_measured_duration_cannot_mutate_a_run
         ; test_case "store version pins the registration shape" `Quick
             test_store_version_pins_the_registration_shape
         ; test_case "exact history is not cross-lane pruned" `Quick

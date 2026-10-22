@@ -227,9 +227,25 @@ val with_owned_inventory_root
   -> (owned_inventory_root -> ('a, owned_regular_file_read_error) result)
   -> ('a, owned_regular_file_read_error) result
 val owned_inventory_root_path : owned_inventory_root -> string
+val owned_inventory_root_stat : owned_inventory_root -> Unix.stats
+(** The immutable descriptor observation captured when the held root opened.
+    Valid only within its callback. This is not a fresh permission check or
+    effect authority; the enclosing scope must return successfully before its
+    observation is used outside the callback. *)
 val owned_inventory_entry_kind
   : owned_inventory_root -> string
   -> (Unix.file_kind, owned_regular_file_read_error) result
+
+val with_owned_inventory_regular_file
+  : owner_uid:int -> owned_inventory_root -> string
+  -> (file:Unix.file_descr -> parent:Unix.file_descr -> stat:Unix.stats -> 'a)
+  -> ('a, owned_regular_file_read_error) result
+(** Existing regular file and its actual parent through the same no-follow
+    chain. Descriptors are borrowed for blocking I/O only: do not close, retain
+    or use them from another fiber. Fresh UID/permission, path/descriptor and
+    single-link and file-snapshot checks finish before returning the callback's result. The
+    callback may fsync those very descriptors; this scope does not itself make
+    data durable. Run the complete enclosing root scope on a system thread. *)
 
 type owned_regular_file_range_digest =
   { content : string
@@ -300,6 +316,19 @@ val read_owned_directory_if_present
     enumeration/final-validation failure, remains an error. [Some []] is an
     existing empty directory. Uses the same no-follow descriptors and cleanup
     contract as {!read_owned_directory}, never a separate pathname preflight. *)
+
+val with_owned_directory_inventory_if_present
+  : owner_uid:int -> inventory_root:owned_inventory_root
+  -> sync_directory:(Unix.file_descr -> unit)
+  -> string -> (owned_inventory_root -> string list -> 'a)
+  -> ('a option, owned_regular_file_read_error) result
+(** The same optional no-follow directory binding, retaining the root and every
+    ancestor descriptor throughout the callback and its entry reads. The nested
+    root is borrowed and must not escape. Initial child absence returns [None]
+    only after actual bound ancestors settle and pass fresh ownership checks.
+    Listed-directory disappearance, callback/settlement failures and replaced
+    ancestors are errors. The complete scope is blocking; callers supply their
+    original process lease and run it on one system thread. *)
 
 (** Eio-native, deterministically sorted directory inventory. *)
 val read_dir : string -> string list
@@ -1219,6 +1248,36 @@ val read_private_jsonl_rows_locked_result :
   , Private_jsonl_rows.error )
   private_file_transaction_outcome
 
+module Private_jsonl_fold : sig
+  type 'a t =
+    | Missing
+    | Present of { value : 'a; rows_end : int; end_offset : int }
+
+  type error =
+    | Read_error of Private_jsonl_rows.error
+    | Snapshot_changed
+end
+
+val fold_private_jsonl_locked_result
+  : string -> init:'a -> f:('a -> string -> 'a)
+  -> ('a Private_jsonl_fold.t, Private_jsonl_fold.error)
+       private_file_transaction_outcome
+(** Stream every newline-terminated row, including blank rows, under the same
+    in-process path mutex and shared descriptor lock as the private JSONL
+    reader. Retains a read buffer and the current row, not the whole file.
+    [f] runs in the blocking worker and must not use Eio effects or re-enter
+    this path. The final unterminated fragment is not passed to [f];
+    [rows_end < end_offset] reports it explicitly. An empty file is [Present],
+    while only the initial open's ENOENT produces [Missing].
+
+    The opened regular descriptor and the current path target must have the
+    same identity and unchanged size/mtime/ctime before and after the fold.
+    Symlinks to regular files retain the existing reader contract. A changed
+    binding is [Snapshot_changed], never [Missing]. The operation does not
+    create, chmod, truncate, append or fsync. It is a read snapshot, not proof
+    of durable publication or permission to mutate later. Cancellation
+    propagates; descriptor settlement uses the existing transaction outcome. *)
+
 module Private_jsonl_window : sig
   type t =
     | Window_missing  (** No file at the path. *)
@@ -1569,6 +1628,25 @@ val update_private_file_durable_locked_result :
   (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome
 
+type 'a private_file_decision =
+  | Refuse_update of 'a
+  | Confirm_existing of 'a
+  | Append_confirmed of string * 'a
+
+val reconcile_private_file_durable_locked_result :
+  string -> (string -> 'a private_file_decision) ->
+  ('a, durable_append_error) private_file_transaction_outcome
+(** The same complete-byte, path-mutex and exclusive data-descriptor transaction
+    as {!update_private_file_durable_locked_result}. [Refuse_update] returns
+    without a data sync; [Confirm_existing] fsyncs the actual held file and
+    revalidates its binding; [Append_confirmed] uses the existing durable append
+    and rollback. The parent is synced during setup in all cases. Refusal does
+    not repair, truncate or append bytes. Setup may create an empty private log.
+    The callback runs in the blocking worker and must not perform Eio effects or
+    re-enter this path. Existing-file confirmation failure means durability is
+    unknown, irrespective of the append rollback field. A successful value with
+    cleanup failure still establishes the data/parent durability boundary. *)
+
 (** Bounded-tail admission transaction using the same path mutex and descriptor
     lock as the strict JSONL readers and appenders. [decide] receives at most
     [max_bytes] of the existing suffix, dropping the first boundary fragment, while
@@ -1713,6 +1791,13 @@ type durable_append_io_for_testing =
   ; ftruncate : Unix.file_descr -> int -> unit
   ; fsync : Unix.file_descr -> unit
   }
+
+val reconcile_private_file_durable_locked_with_append_io_for_testing :
+  append_io:durable_append_io_for_testing -> string ->
+  (string -> 'a private_file_decision) ->
+  ('a, durable_append_error) private_file_transaction_outcome
+(** The production confirmation/append transaction with only data-descriptor
+    write, fsync and rollback calls replaced for actual fault-stage tests. *)
 
 val update_private_file_tail_durable_locked_with_append_io_for_testing :
   append_io:durable_append_io_for_testing ->

@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { laneAddonApplicationText } from './lane-addon-connection'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { fetchLaneInventory, type LaneInventory, type LaneInventoryRow } from '../api/lane-inventory'
+import { fetchLaneInventory, type AddonExactOutput, type LaneInventory, type LaneInventoryRow } from '../api/lane-inventory'
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 import { RouteLink } from './common/route-link'
 import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
@@ -51,6 +51,37 @@ function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
   }
 }
 
+function AddonModelRoutes({ installation, outputs }: { installation: string; outputs: readonly AddonExactOutput[] }) {
+  if (!outputs.length) return null
+  return html`<section aria-label="Exact-output model routes" class="space-y-2">
+    <h4 class="font-semibold">Exact-output model routes</h4>
+    <p>Installation: <code>${installation}</code></p>
+    <p>Models are configured per installation and output in${' '}
+      <code>runtime.addon_exact_lanes</code>. Package activity and worker presence are separate observations.</p>
+    ${outputs.map(output => {
+      const config = output.configuration
+      return html`<section key=${output.output} aria-label=${`Model route for ${output.output}`} class="space-y-1">
+        <h5>${output.output}</h5>
+        <p>${output.source === 'declared' ? 'Declared package output'
+          : 'Table only · no declared package output; not an execution capability'}</p>
+        ${config.kind === 'configured' ? html`
+          <p>Admitted HTTP: ${config.admitted_slots.join(' → ') || 'none'}</p>
+          <p>CLI fallbacks: ${config.cli_slots.join(' → ') || 'none'}</p>
+          <p>Declared HTTP: ${config.declared_slots.join(' → ') || 'none'}</p>
+          <p>Declared CLI: ${config.declared_cli_slots.join(' → ') || 'none'}</p>
+          ${config.dropped_slots.length ? html`<p>Dropped HTTP: ${config.dropped_slots.join(', ')}</p>` : null}
+          ${config.admission_error !== null ? html`<p role="status">${config.admission_error}</p>` : null}
+        ` : config.kind === 'off' ? html`
+          <p>Model route off · declared candidates retained</p>
+          <p>Declared HTTP: ${config.declared_slots.join(' → ') || 'none'}</p>
+          <p>Declared CLI: ${config.declared_cli_slots.join(' → ') || 'none'}</p>
+        ` : html`<p role="status">${config.kind}: ${config.detail}</p>`}
+      </section>`
+    })}
+    <${RouteLink} tab="monitoring" params=${{ section: 'runtime', view: 'config' }}>Open Runtime configuration<//>
+  </section>`
+}
+
 function LaneDetails({ row, snapshot, authority }: { row: LaneInventoryRow; snapshot: LaneInventory; authority: ExecutionWorkspaceAuthority }) {
   const selection = row.selection
   const target = laneTargetFor(row, authority.workspaceRoot)
@@ -59,6 +90,8 @@ function LaneDetails({ row, snapshot, authority }: { row: LaneInventoryRow; snap
   return html`<section aria-label=${`Details for ${row.label}`} class="rounded border border-[var(--color-border-default)] p-4 space-y-3">
     <h3 class="font-semibold">${row.label}</h3><p>${row.purpose}</p><code class="break-all">${row.id}</code>
     ${stateLines(row, snapshot).map(line => html`<p>${line}</p>`)}
+    ${row.state.kind === 'package' && row.state.declaration?.kind === 'valid'
+      ? html`<${AddonModelRoutes} installation=${row.state.declaration.installation_id} outputs=${row.state.declaration.exact_outputs} />` : null}
     ${exactLane ? html`<${ExactLaneActivityPanel} key=${exactLane.laneId} lane=${exactLane} />` : null}
     ${selection.kind === 'browser' ? html`<${BrowserLaneActivityPanel} key=${selection.lane} lane=${selection.lane} title=${row.label} />` : null}
     ${selection.kind === 'machine' ? html`<${MachineLaneActivityPanel} key=${selection.machine} lane=${selection.machine} title=${row.label} />` : null}

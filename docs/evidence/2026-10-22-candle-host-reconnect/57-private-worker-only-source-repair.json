@@ -1,0 +1,10 @@
+{
+  "at": "2026-10-21T17:16:09.875828+00:00",
+  "native_source": "eb484b0aabe699b46740bcb787a935fb67bbfa8e",
+  "worker_source": "/tmp/masc-candle-derive-observation-20261022",
+  "file": "addons/candle-appraiser/server.py",
+  "before": "93fc380ee8b61468389b31367b22c765bef6a0d1d7b35b2d0dcc54a557ad8c02",
+  "after": "c4099ecc5b50b0b267d2654a4e235cfa732df87e53d743b667da47d65f1e3e04",
+  "changed_while": "declaration Off, previous worker detached/released",
+  "scope": "Only the isolated mounted package source changed; same native server/TUI and persistent installation state. This is a mixed native/worker qualification, not a rebuilt native artifact."
+}

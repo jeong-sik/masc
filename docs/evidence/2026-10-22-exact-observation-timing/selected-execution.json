@@ -1,0 +1,62 @@
+{
+  "run_id": 39697203989,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39697203989",
+  "head": "8ccc43e4da0573bd17f3546b9334f28a6132e884",
+  "status": "completed",
+  "conclusion": "success",
+  "suites": [
+    {
+      "target": "test_exact_lane_run_registry",
+      "actual_cases": 37,
+      "conclusion": "success"
+    },
+    {
+      "target": "test_server_standalone_lane_projection",
+      "actual_cases": 17,
+      "conclusion": "success"
+    },
+    {
+      "target": "test_candle_appraiser_transport",
+      "actual_cases": 14,
+      "conclusion": "success"
+    },
+    {
+      "target": "test_keeper_librarian_absorb_gate",
+      "actual_cases": 55,
+      "conclusion": "success"
+    }
+  ],
+  "total_actual_cases": 123,
+  "raw_log_sha256": "9aad5a9e6b8e02f1c9871a2a1d214135aa0c2da648434a4d0a89caf1f2e7c6b0",
+  "source_sha256": {
+    "lib/exact_lane_run_registry.ml": "95d8f223df94c36aaf32088f8a8b1990107495c8ae2cbf344be6f4c5354db12b",
+    "lib/exact_lane_run_registry.mli": "7107e2e8403a7f6f301c5b4f05ec67cbef69d3e62d5e4d567b2e5a04e703242d",
+    "lib/server/server_standalone_lane_projection.ml": "b49e98cb4d236b797d6b0ad31ef2ab716804d04e47d61e41ebfc3af36906d738",
+    "lib/server/server_candle_appraiser.ml": "c3d341d3434531f9387fc420fac55b7235e417928f31d43c3fa3e7c8d1a0e77f",
+    "test/test_exact_lane_run_registry.ml": "f4510604f3eb79325ccfa1b212c7f461c73e81bbb5dbc3e098ea68394e54b184",
+    "test/test_server_standalone_lane_projection.ml": "e6ad2ac48ee4ec7fc6012da94121b8ad8d4e349c979033bdcf8bcb39d4223a83",
+    "test/test_candle_appraiser_transport.ml": "006ff14c077e0aec048fd6e732eefbea7a0c6c845a766a533100ac6e836ab66a",
+    "test/test_keeper_librarian_absorb_gate.ml": "20da5f8828ef663b705ce43952d07497101b60ea081fb162d44450ac7083395e",
+    ".github/workflows/test.yml": "d42fa403248a85c314dc2dbedfd26b1d216ab24121eb86a654614fac8d387691",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    "scripts/ci-run-test-suite.sh": "36fdc226b32081d0b4a8e0e05bd5e76cf17a237657b56abb3f5955a281242733",
+    "dune-project": "11c3ae50aa9c8e797fca3c769d0a8249b4ae5642e852fae12d9a48e2a1b03dda"
+  },
+  "superseded_failure": {
+    "run_id": 39694884916,
+    "head": "c7b42a1590974b99ebd87380c75cb248535364df",
+    "conclusion": "failure",
+    "detail": "NaN fixture raised in the Safe JSON writer before the finite decoder; only36 of37 registry cases succeeded."
+  },
+  "limits": [
+    "Does not execute the later current-disk API or diagnostic fixture.",
+    "Does not repair the separate production owner terminal wait.",
+    "Does not prove actual provider, rendered UI, install or full54 completion."
+  ],
+  "request": {
+    "workflow": "test.yml",
+    "minimal": true,
+    "eio_backend": "posix",
+    "TARGET_SUITES": "test_exact_lane_run_registry,test_server_standalone_lane_projection,test_candle_appraiser_transport,test_keeper_librarian_absorb_gate"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "at": "2026-10-21T17:09:28.594799+00:00",
+  "identity": "local-admin",
+  "method": "GET",
+  "path": "/api/v1/verification/evidence?task_id=task-001&verification_id=vrf-ccff94341a405e50b3fb9fda29c82e6c",
+  "request": null,
+  "http_status": 200,
+  "response": {
+    "ok": true,
+    "result": {
+      "task_id": "task-001",
+      "verification_id": "vrf-ccff94341a405e50b3fb9fda29c82e6c",
+      "producer": "candle-host-qualifier",
+      "authority_kind": "human_operator",
+      "authority_actor": "local-admin",
+      "evidence": {
+        "access": "available",
+        "request": {
+          "id": "vrf-ccff94341a405e50b3fb9fda29c82e6c",
+          "task_id": "task-001",
+          "worker": "candle-host-qualifier",
+          "created_at": 1792601917.284956
+        },
+        "items": [
+          {
+            "kind": "artifact_unreadable",
+            "reference": "artifact:measurement.json",
+            "reason": {
+              "code": "read_error",
+              "detail": "sandbox_backend_read: candle-host-qualifier: microvm_guest_not_running: keeper candle-host-qualifier's guest masc-keeper-vm-candle-host-qualifier-none-4470e7ec is not running; a read attaches to a running guest and never boots one"
+            }
+          },
+          {
+            "kind": "note",
+            "content": "Compared the complete source file with its exact Git blob and retained SHA-256 plus verified_count=1."
+          },
+          {
+            "kind": "note",
+            "content": "Exact source-byte audit completed; inspect the immutable measurement snapshot. No runtime behavior is claimed."
+          }
+        ]
+      }
+    }
+  }
+}

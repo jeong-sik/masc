@@ -76,9 +76,28 @@ val load_exact_request : t -> declaration_id:string -> request_id:string ->
     declaration id so a restarted worker finds what the host retained. Same
     durability and read verification as action receipts. *)
 val save_tool_request_owner : t -> scope:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
+(** Cooperative publication is serialized with known-ID reads and complete
+    inventories of the same original scope, across Store objects and aliases
+    of the existing physical parent. Uses the existing cross-context mutex
+    table; no lock files or new registry. This short store transaction is not
+    a multi-call Owner CAS or cross-process exclusion. Callers still hold the
+    workspace lease and serialize semantic progress updates. *)
 val load_tool_request_owner : t -> scope:string -> request_id:string -> (Yojson.Safe.t option, string) result
-(** Host consumer's original request destination. Uses the same verified
-    publication/read boundary as Exact records, in a separate namespace. *)
+(** Strict known-ID read under the existing store parent anchor. Initial child
+    absence is settled through owned ancestor descriptors; missing/replaced or
+    unsafe parent authority is an error. Reads use the same no-follow file and
+    parent descriptors for content, fsync and final verification. The same
+    original-scope serializer as publication excludes cooperative replacements
+    throughout these checks; external changes still refuse. *)
+val tool_request_owner_inventory : t -> scope:string -> ((string * Yojson.Safe.t) list, string) result
+(** Complete sorted published [.json] records in one scope, with filenames for
+    the consumer's exact key/schema validation. Missing descendants under an
+    existing owned parent return an empty list; errors and a listed file that
+    disappears never do. Every file is a regular single-link owned record.
+    The whole blocking scope runs on one system thread in Eio, under the same
+    original-scope serializer as publication and known-ID reads. This is not an
+    atomic multi-record transaction; callers retain their process lease and
+    serialization and revalidate the original record before effects. *)
 val save_sampling_request : t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
 val save_sampling_outcome : t -> instance_id:string -> request_id:string ->
@@ -173,6 +192,10 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
     published bytes for [keeper_artifact_read]. No message is sent here. *)
 
 module For_testing : sig
+  val tool_request_owner_inventory :
+    after_listing:(string -> unit) -> sync_file:(Unix.file_descr -> unit) ->
+    sync_parent:(Unix.file_descr -> unit) -> t -> scope:string ->
+    ((string * Yojson.Safe.t) list, string) result
   val remove_binding : sync_parent:(string -> unit) -> t -> instance_id:string -> (unit, string) result
   val binding_inventory : sync_parent:(string -> unit) -> root:string -> binding_inventory
   val issue_detail : Fs_compat.owned_regular_file_read_error -> string

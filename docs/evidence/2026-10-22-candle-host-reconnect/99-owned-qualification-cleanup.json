@@ -1,0 +1,21 @@
+{
+  "at": "2026-10-21T17:28:38.907065+00:00",
+  "process_checks": {
+    "server": {
+      "pid": 89650,
+      "process_exists": false,
+      "comm": ""
+    },
+    "tui": {
+      "pid": 91544,
+      "process_exists": false,
+      "comm": ""
+    }
+  },
+  "owned_proxy_stop_requested": 95216,
+  "owned_browser_space_finished": 30,
+  "addon_declaration_off": true,
+  "all_three_addon_workers_released": true,
+  "keeper_shutdown": "finalized; no visible owned microVM guest",
+  "retained": "Original Task, Goal, ledger, images, guest work volume, installation state and evidence preserved. No operator process was stopped."
+}

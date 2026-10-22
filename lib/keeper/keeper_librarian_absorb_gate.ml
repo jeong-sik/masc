@@ -744,6 +744,20 @@ type observation =
   | Incomplete of evaluation list
   | Complete of run_result
 
+(* Execution and restoration use one decision policy. Only their evaluation
+   ports differ: live requests versus original-bound returned evidence. *)
+let derive ~evaluate ~new_observations ~facts ~new_claims ~superseding ~absorbed =
+  let outcome = judge ~evaluate:(evaluate Forward) ~new_observations ~facts ~new_claims ~absorbed in
+  let copy_checks = match outcome with
+    | Judged judged ->
+      judge_copies ~evaluate:(evaluate Reverse) ~facts ~new_claims ~superseding ~absorbed
+        ~applied:judged.absorbed
+    | Failed { absorbed = applied; _ } ->
+      not_judged_checks (copy_candidates ~new_claims ~absorbed ~applied) Gate_judgment_failed
+  in
+  outcome, copy_checks
+;;
+
 let request_shas evaluations =
   String.concat
     ","
@@ -877,6 +891,231 @@ let evaluation_request_to_yojson ~direction ~destinations ~state ~questions =
                questions)
         ]
     ]
+;;
+
+type replay_authority =
+  | Gate_available of Typesafeai_client.destination_id * Typesafeai_client.destination_id list
+  | Gate_unavailable of Typesafeai_config.unavailable_reason
+
+type retained_evaluation =
+  { request : Yojson.Safe.t
+  ; returned : Yojson.Safe.t option
+  }
+
+type replay_error =
+  | Invalid_evidence of { index : int; detail : string }
+  | Incomplete_evaluation of int
+  | Missing_evaluation of int
+  | Extra_evaluations of int
+
+let replay_error_to_string = function
+  | Invalid_evidence { index; detail } ->
+    Printf.sprintf "absorb gate evaluation %d: %s" index detail
+  | Incomplete_evaluation index -> Printf.sprintf "absorb gate evaluation %d has not returned" index
+  | Missing_evaluation index -> Printf.sprintf "absorb gate evaluation %d is missing" index
+  | Extra_evaluations count -> Printf.sprintf "absorb gate has %d surplus evaluations" count
+;;
+
+let response_evidence_to_yojson (response : Typesafeai_types.eval_response) =
+  `Assoc
+    [ "model", `String response.model
+    ; "answers", `Assoc (List.map (fun (id, answer) ->
+        id, Typesafeai_types.answer_to_yojson answer) response.answers)
+    ; "usage", (match response.usage with
+        | None -> `Null
+        | Some usage -> `Assoc [ "input_tokens", `Int usage.input_tokens
+                               ; "output_tokens", `Int usage.output_tokens ])
+    ]
+;;
+
+let evaluation_evidence_to_yojson (evaluation : evaluation) =
+  let result = match evaluation.result with
+    | Error failure -> `Assoc [ "status", `String "failed"
+                              ; "failure", Typesafeai_client.failure_to_yojson failure ]
+    | Ok evaluated -> `Assoc
+        [ "status", `String "answered"
+        ; "response", response_evidence_to_yojson evaluated.response
+        ; "destination", Typesafeai_client.destination_id_to_yojson evaluated.destination
+        ; "request_body_sha256", `String evaluated.request_body_sha256
+        ; "passed_over", `List (List.map Typesafeai_client.attempt_to_yojson evaluated.passed_over) ]
+  in
+  `Assoc [ "version", `Int 1
+         ; "request", evaluation_request_to_yojson ~direction:evaluation.direction
+             ~destinations:evaluation.destinations ~state:evaluation.state ~questions:evaluation.questions
+         ; "result", result ]
+;;
+
+(* A separate canonical codec: observer projections contain derived decisions
+   and intentionally have no inverse authority. No provider/configuration port
+   is available here, including on incomplete or malformed evidence. *)
+module Replay = struct
+  exception Rejected of replay_error
+
+  let reject index detail = raise (Rejected (Invalid_evidence { index; detail }))
+  let field index name = function
+    | `Assoc fields -> (match List.assoc_opt name fields with
+        | Some value -> value | None -> reject index ("missing " ^ name))
+    | _ -> reject index "expected an object"
+  let string index = function `String value -> value | _ -> reject index "expected a string"
+  let integer index = function `Int value -> value | _ -> reject index "expected an integer"
+  let list index = function `List values -> values | _ -> reject index "expected a list"
+
+  (* Object order is immaterial; duplicate members remain visible and cannot
+     equal an encoder's unique member set. Preserve array and attempt order. *)
+  let rec ordered (json : Yojson.Safe.t) : Yojson.Safe.t =
+    match json with
+    | `Assoc fields -> `Assoc (List.sort (fun (a, _) (b, _) -> String.compare a b)
+        (List.map (fun (key, value) -> key, ordered value) fields))
+    | `List values -> `List (List.map ordered values)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value -> value
+
+  let same left right =
+    (* The host may carry Intlit before writing it; compare the JSON bytes'
+       parsed representation, as the original persistence roundtrip does. *)
+    Yojson.Safe.equal (ordered (Yojson.Safe.from_string (Yojson.Safe.to_string left)))
+      (ordered (Yojson.Safe.from_string (Yojson.Safe.to_string right)))
+
+  let require index condition detail = if not condition then reject index detail
+  let canonical index original encoded =
+    require index (same original encoded) "noncanonical, unknown or duplicate evidence fields"
+
+  let destination index json : Typesafeai_client.destination_id =
+    let destination_uri = field index "destination_uri" json |> string index in
+    let model = field index "model" json |> string index in
+    let destination : Typesafeai_client.destination_id = { destination_uri; model } in
+    require index (String.trim destination_uri <> "" && String.trim model <> "") "blank destination";
+    require index (Typesafeai_client.endpoint_for_observation destination_uri = destination_uri)
+      "destination contains non-observational URI fields";
+    canonical index json (Typesafeai_client.destination_id_to_yojson destination);
+    destination
+
+  let refusal index json : Typesafeai_client.refusal =
+    let result = match field index "kind" json |> string index with
+      | "transport" -> Typesafeai_client.Transport_failure (field index "detail" json |> string index)
+      | "http_response" ->
+        let body_json = field index "body" json in
+        let body = match body_json with
+          | `String body -> body
+          | `Assoc _ ->
+            require index (field index "encoding" body_json = `String "base64") "unknown body encoding";
+            let encoded = field index "content" body_json |> string index in
+            (match Base64.decode encoded with
+             | Ok body ->
+               require index (String.length body = (field index "total_bytes" body_json |> integer index))
+                 "refusal body length differs";
+               body
+             | Error (`Msg detail) -> reject index ("invalid refusal body: " ^ detail))
+          | _ -> reject index "invalid refusal body"
+        in
+        Typesafeai_client.Http_response_failure
+          { status = field index "status" json |> integer index
+          ; destination_uri = field index "destination_uri" json |> string index
+          ; body; detail = field index "detail" json |> string index }
+      | _ -> reject index "unknown refusal kind"
+    in
+    canonical index json (Typesafeai_client.refusal_to_yojson result);
+    result
+
+  let attempt index json : Typesafeai_client.attempt =
+    let destination = destination index (`Assoc
+      [ "destination_uri", field index "destination_uri" json; "model", field index "model" json ]) in
+    let refusal = refusal index (field index "refusal" json) in
+    (match refusal with
+     | Typesafeai_client.Transport_failure _ -> ()
+     | Typesafeai_client.Http_response_failure { destination_uri; _ } ->
+       require index (destination_uri = destination.destination_uri) "refusal destination differs");
+    let attempt : Typesafeai_client.attempt =
+      { destination_uri = destination.destination_uri; model = destination.model; refusal } in
+    canonical index json (Typesafeai_client.attempt_to_yojson attempt);
+    attempt
+
+  let attempt_destination (attempt : Typesafeai_client.attempt) : Typesafeai_client.destination_id =
+    { destination_uri = attempt.destination_uri; model = attempt.model }
+
+  let returned index ~direction ~destinations ~state ~questions json =
+    let request = evaluation_request_to_yojson ~direction ~destinations ~state ~questions in
+    require index (field index "version" json = `Int 1) "unknown evidence version";
+    require index (same (field index "request" json) request) "returned request differs from original";
+    let result_json = field index "result" json in
+    let result = match field index "status" result_json |> string index with
+      | "failed" ->
+        let failure_json = field index "failure" result_json in
+        require index (field index "kind" failure_json = `String "every_destination_refused") "unknown failure kind";
+        let attempts = field index "attempts" failure_json |> list index |> List.map (attempt index) in
+        let failure : Typesafeai_client.failure = match attempts with
+          | [] -> reject index "empty destination failure"
+          | first_attempt :: later_attempts -> { first_attempt; later_attempts } in
+        require index (List.map attempt_destination attempts = destinations) "failed destination walk differs";
+        canonical index failure_json (Typesafeai_client.failure_to_yojson failure);
+        Error failure
+      | "answered" ->
+        let destination = destination index (field index "destination" result_json) in
+        let passed_over = field index "passed_over" result_json |> list index |> List.map (attempt index) in
+        let rec follows skipped armed = match skipped, armed with
+          | [], next :: _ -> next = destination
+          | previous :: tail, next :: rest -> previous = next && follows tail rest
+          | [], [] | _ :: _, [] -> false in
+        require index (follows (List.map attempt_destination passed_over) destinations) "answered destination walk differs";
+        let response_json = field index "response" result_json in
+        let response = match Typesafeai_types.eval_response_of_yojson response_json with
+          | Ok response -> response | Error detail -> reject index ("invalid typed response: " ^ detail) in
+        canonical index response_json (response_evidence_to_yojson response);
+        require index (List.for_all (fun (id, _) -> List.mem_assoc id questions) response.answers)
+          "response contains an unrequested answer";
+        let request_body_sha256 = field index "request_body_sha256" result_json |> string index in
+        let body = Typesafeai_types.request_to_yojson ~model:destination.model ~state ~questions |> Yojson.Safe.to_string in
+        require index (request_body_sha256 = Digestif.SHA256.(digest_string body |> to_hex)) "request body digest differs";
+        Ok { Typesafeai_client.response; destination; request_body_sha256; passed_over }
+      | _ -> reject index "evaluation did not return a typed response or refusal"
+    in
+    let evaluation = { direction; destinations; state; questions; result } in
+    canonical index json (evaluation_evidence_to_yojson evaluation);
+    evaluation
+end
+
+let restore ~authority ~new_observations ~facts ~new_claims ~superseding ~absorbed ~evaluations =
+  try
+    let remaining = ref evaluations in
+    let completed = ref [] in
+    let count = ref 0 in
+    let finish result = match !remaining with
+      | [] -> Ok result
+      | extra -> Error (Extra_evaluations (List.length extra)) in
+    match absorbed, authority with
+    | [], (Gate_available _ | Gate_unavailable _) -> finish (Skipped { reason = No_absorptions; absorbed })
+    | _ :: _, Gate_unavailable reason ->
+      let applied = match reason with
+        | Typesafeai_config.Absorb_gate_disabled | Typesafeai_config.Keeper_excluded -> absorbed
+        | Typesafeai_config.Lane_disabled | Typesafeai_config.No_armed_destination
+        | Typesafeai_config.Board_attention_disabled | Typesafeai_config.Context_review_disabled
+        | Typesafeai_config.Skill_applicability_disabled | Typesafeai_config.Librarian_preflight_disabled
+        | Typesafeai_config.Workspace_memory_selection_disabled -> [] in
+      finish (Skipped { reason = Unavailable reason; absorbed = applied })
+    | _ :: _, Gate_available (first, rest) ->
+      let destinations = first :: rest in
+      List.iter (fun destination -> ignore (Replay.destination 0 (Typesafeai_client.destination_id_to_yojson destination))) destinations;
+      let evaluate direction ~state ~questions =
+        let index = !count in
+        let retained = match !remaining with
+          | [] -> raise (Replay.Rejected (Missing_evaluation index))
+          | first :: rest -> remaining := rest; first in
+        let request = evaluation_request_to_yojson ~direction ~destinations ~state ~questions in
+        Replay.require index (Replay.same retained.request request) "pre-dispatch request differs from original inputs";
+        let returned = match retained.returned with
+          | None -> raise (Replay.Rejected (Incomplete_evaluation index))
+          | Some json -> json in
+        let evaluation = Replay.returned index ~direction ~destinations ~state ~questions returned in
+        incr count;
+        completed := evaluation :: !completed;
+        Result.map (fun evaluated -> evaluated.Typesafeai_client.response) evaluation.result
+        |> Result.map_error Typesafeai_client.failure_to_string
+      in
+      let outcome, copy_checks =
+        derive ~evaluate ~new_observations ~facts ~new_claims ~superseding ~absorbed in
+      finish (Evaluated { outcome; copy_checks; evaluations = List.rev !completed })
+  with
+  | Replay.Rejected error -> Error error
+  | Yojson.Json_error detail -> Error (Invalid_evidence { index = 0; detail = "invalid JSON value: " ^ detail })
 ;;
 
 let evaluation_to_yojson { direction; destinations; state; questions; result } =
@@ -1170,21 +1409,8 @@ let run
          Result.map (fun evaluated -> evaluated.Typesafeai_client.response) result
          |> Result.map_error Typesafeai_client.failure_to_string
        in
-       let outcome = judge ~evaluate:(evaluate Forward) ~new_observations ~facts ~new_claims ~absorbed in
-       (* The reverse question goes to the same judge through the same
-          [evaluate], so its requests are in [evaluations] beside the
-          forward ones. A forward judgment that failed leaves the lane in
-          doubt; the runtime leaves the Memory range pending. *)
-       let copy_checks =
-         match outcome with
-         | Judged judged ->
-           judge_copies ~evaluate:(evaluate Reverse) ~facts ~new_claims ~superseding ~absorbed
-             ~applied:judged.absorbed
-         | Failed { absorbed = applied; _ } ->
-           not_judged_checks
-             (copy_candidates ~new_claims ~absorbed ~applied)
-             Gate_judgment_failed
-       in
+       let outcome, copy_checks =
+         derive ~evaluate ~new_observations ~facts ~new_claims ~superseding ~absorbed in
        let evaluations = List.rev !evaluations in
        let shas () = request_shas evaluations in
        (match outcome with

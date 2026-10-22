@@ -6,9 +6,12 @@ val error_to_string : error -> string
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
-val register_exact_runner : Lane_addon_exact.runner -> unit
-(** Server-owned runner for packages' exact-output requests, registered before
-    configuration maintenance. Without it a declared installation's exact
+val register_exact_runner : authorize_request:Lane_addon_exact.execution_authority -> Lane_addon_exact.runner -> unit
+(** Server-owned runner and mandatory host execution authority for packages'
+    exact-output requests, registered together before
+    configuration maintenance. The authority binds the pure output validator
+    and typed admission class to the original request; worker data cannot select
+    provider priority. Without it a declared installation's exact
     request ends its host request cycle with [no_exact_runner]. Retirement
     cancels its current exact call independently of worker cleanup; a pending
     provider outcome is not replayed and no later request is dispatched. *)
@@ -56,6 +59,23 @@ val authorize_retained_read : bindings:Yojson.Safe.t list -> access:Lane_addon_s
 val register_tool_change_handler : (unit -> unit) -> unit
 (** Server notification bridge. Callbacks signal clients to refresh their
     authorized inventories and must not acquire worker lifecycle locks. *)
+type owner_event = Export_inventory_changed | Configuration_observed
+  | Exact_result_delivered of { installation_id:string; instance_id:string; request_id:string }
+val subscribe_owner_events : config:Workspace.config -> package_id:string ->
+  (owner_event -> unit) -> (unit -> unit)
+(** Ephemeral hints scoped to this served workspace Store root and package.
+    Keeps the MCP tool-change bridge intact. The callback must synchronously
+    signal its existing owner only: no I/O, yield or Runtime/worker lock entry.
+    Callbacks run outside the subscription lock; lifecycle publishers can hold
+    their own locks. Registration does not replay state or start a worker; the
+    owner keeps its initial drain and strictly reloads original authority.
+    Configuration signals follow actual matching metadata publication, not
+    every reconciliation. Result signals require the original Exact request's
+    accepted=true reply, after the worker RPC lock has unwound; they are not
+    provider completion or domain commit receipts. Observer failure/cancellation
+    is isolated; publisher's own cancellation propagates. The returned closure
+    idempotently removes only this registration. Fence the original owner before
+    unsubscribe, since a copied callback snapshot can still be delivered. *)
 
 type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
@@ -78,6 +98,39 @@ val retain_tool_request_owner : config:Workspace.config -> access:Lane_addon_sou
     a replacement installation cannot claim absence and cause redispatch.
     Current export authority is checked here and still rechecked by each call.
     This binding neither executes work nor uses an observer receipt as authority. *)
+type tool_request_destination = private {
+  installation_id : string;
+  package_id : string;
+  tool : string;
+  source_revision : string;
+  configuration_revision : string;
+}
+val with_tool_request_destination : config:Workspace.config -> access:Lane_addon_sources.access ->
+  reserved:string list -> export:tool_export ->
+  publish:(tool_request_destination -> ('a, tool_call_error) result) ->
+  ('a, tool_call_error) result
+(** Trusted host publication of new configured work. Hold configuration then
+    action serialization; strictly reread the actual complete declaration set
+    and revalidate its enabled state, semantic revision, package and live export
+    before invoking [publish]. A committed Off/save cannot borrow a stale cached
+    reconciliation. The callback may yield only for local original journal
+    publication/recovery, never call Runtime or execute a worker/model/domain
+    effect. It runs cancellation-protected after lock acquisition; exceptions
+    release the locks without poisoning the shared action serializer. An error
+    may follow publication, requiring strict original recovery. The destination
+    is not authority for an effect after the callback returns. *)
+val capture_tool_request_owner : config:Workspace.config -> access:Lane_addon_sources.access ->
+  reserved:string list -> export:tool_export -> scope:string -> request_id:string ->
+  capture:(tool_request_destination -> ('a * Yojson.Safe.t, string) result) ->
+  ('a, tool_call_error) result
+(** New configured work only. Under the shared configuration/action serializers,
+    revalidate the live export and freshly read enabled declaration, invoke the pure host
+    capture factory with its original destination/revisions, and durably retain
+    that exact JSON before returning the host value. The callback must not yield,
+    perform effects or call Runtime. A failed publication may already be visible;
+    discover the original ID rather than minting another one. This does not
+    dispatch, commit or authorize a later RPC. Manual/missing/conflicting
+    configuration is refused rather than supplying invented revisions. *)
 val call_exported_tool_with_authority : on_complete:(unit -> unit) -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal option ->
   config:Workspace.config -> access:Lane_addon_sources.access -> reserved:string list ->
   export:tool_export -> arguments:Yojson.Safe.t ->
@@ -274,6 +327,9 @@ val host_issue_to_json : host_issue -> Yojson.Safe.t
 (** The [issue] of an instance's [host_requests] in the inspect payload. *)
 
 module For_testing : sig
+  val with_tool_change_handler : (unit -> unit) -> (unit -> 'a) -> 'a
+  (** Temporarily observe the original MCP bridge without replacing owner
+      subscriptions; restores the preceding handler on exit. *)
   val with_cleanup_writer :
     (store:Lane_addon_store.t -> instance_id:string -> Yojson.Safe.t option ->
       (unit, string) result) -> (unit -> 'a) -> 'a

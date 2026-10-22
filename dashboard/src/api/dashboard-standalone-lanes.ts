@@ -5,7 +5,6 @@ export type StandaloneLaneId =
   | 'board_attention_exact'
   | 'hitl_auto_judge'
   | 'librarian_exact'
-  | 'workspace_curator_exact'
   | 'candle_appraiser'
   | 'verifier_exact'
   | 'browser_stagehand_exact'
@@ -89,7 +88,6 @@ export const LANE_IDS = [
   'board_attention_exact',
   'hitl_auto_judge',
   'librarian_exact',
-  'workspace_curator_exact',
   'candle_appraiser',
   'verifier_exact',
   'browser_stagehand_exact',

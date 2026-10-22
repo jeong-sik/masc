@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import stat
 import sys
@@ -11,6 +12,8 @@ import unittest
 from unittest.mock import patch
 
 from stdio_fixture import run_stdio
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import exact_worker
 
 ADDONS = Path(__file__).resolve().parents[1]
 SERVER = ADDONS / "candle-appraiser" / "server.py"
@@ -45,9 +48,11 @@ def read(request_id):
     return admitted({"kind": "read", "request_id": request_id})
 
 
-def observe(incarnation):
-    return call("lane_observe", {"context": {"instance_id": incarnation, "incarnation": incarnation},
-                                 "binding": {"sources": []}, "sources": []})
+def observe():
+    # The host sends context only to packages declaring an action tool.
+    # Candle is a derive-only package, even though its exported tools use
+    # the separate host-admitted caller envelope.
+    return call("lane_observe", {"binding": {"sources": []}, "sources": []})
 
 
 def listing():
@@ -79,7 +84,8 @@ class CandleWorker(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
             original = request()
-            first = self.run_worker(state, [observe("worker-old"), submit(original), listing()])
+            first = self.run_worker(state, [observe(), submit(original), listing()])
+            self.assertEqual(self.output(first[0])["rows"][0]["fields"]["pending"], 0)
             self.assertEqual(self.output(first[1])["state"], "pending")
             exact = self.output(first[2])["requests"]
             self.assertEqual(exact, [{"kind": "exact_output", "request_id": "grade-1", "output": "grade",
@@ -87,8 +93,9 @@ class CandleWorker(unittest.TestCase):
                                       "messages": [{"role": "user", "text": original["prompt"]}]}])
             answer = {"status": "answered", "output": {"grade": "A"}, "slot": "original-slot",
                       "usage": {"input_tokens": 11, "output_tokens": 3}}
-            second = self.run_worker(state, [observe("worker-new"), listing(), deliver("grade-1", answer),
+            second = self.run_worker(state, [observe(), listing(), deliver("grade-1", answer),
                                              read("grade-1"), listing()])
+            self.assertEqual(self.output(second[0])["rows"][0]["fields"]["pending"], 1)
             self.assertEqual(self.output(second[1])["requests"], exact)
             self.assertEqual(self.output(second[2]), {"accepted": True})
             self.assertEqual(self.output(second[3]), {"request_id": "grade-1", "state": "finished", "result": answer})
@@ -122,6 +129,16 @@ class CandleWorker(unittest.TestCase):
             self.assertEqual(requests[0]["messages"], requests[1]["messages"])
             for item in requests:
                 self.assertEqual(set(item), {"kind", "request_id", "output", "messages", "schema"})
+
+    def test_output_limit_is_retained_without_another_appraisal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            terminal = {"status": "output_limit_reached", "detail": "provider output limit"}
+            self.run_worker(state, [submit(request()), deliver("grade-1", terminal)])
+            result = self.run_worker(state, [submit(request()), listing(), read("grade-1")])
+            self.assertEqual(self.output(result[0])["result"], terminal)
+            self.assertEqual(self.output(result[1]), {"requests": []})
+            self.assertEqual(self.output(result[2])["result"], terminal)
 
     def test_unknown_outcome_is_terminal_and_never_relisted_after_restart(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -159,14 +176,14 @@ class CandleWorker(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         with tempfile.TemporaryDirectory() as directory:
-            worker = module.Worker(Path(directory), 4194304)
+            worker = exact_worker.Worker(Path(directory), 4194304, module.CONTRACT)
             worker.invoke({"kind": "submit", "request": request()}, {"kind": "operator"})
-            original_fsync = module.os.fsync
+            original_fsync = os.fsync
             def failed_directory_sync(fd):
-                if stat.S_ISDIR(module.os.fstat(fd).st_mode):
+                if stat.S_ISDIR(os.fstat(fd).st_mode):
                     raise OSError("directory persistence unconfirmed")
                 return original_fsync(fd)
-            with patch.object(module.os, "fsync", side_effect=failed_directory_sync):
+            with patch.object(os, "fsync", side_effect=failed_directory_sync):
                 with self.assertRaises(OSError):
                     worker.host_result({"request_id": "grade-1", "result": {"status": "outcome_unknown"}})
             with self.assertRaises(module.InvalidInput):
@@ -179,12 +196,12 @@ class CandleWorker(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         with tempfile.TemporaryDirectory() as directory:
-            worker = module.Worker(Path(directory), 4194304)
+            worker = exact_worker.Worker(Path(directory), 4194304, module.CONTRACT)
             one, two = request("one"), request("two")
             original = worker.invoke({"kind": "submit", "request": one}, {"kind": "operator"})
             envelope = {"jsonrpc": "2.0", "id": 2 ** 53,
-                        "result": module.tool_result({"requests": [worker.host_request(one)]})}
-            worker.max_reply_bytes = len((module.encode_output(envelope) + "\n").encode("utf-8"))
+                        "result": exact_worker.tool_result({"requests": [worker.host_request(one)]})}
+            worker.max_reply_bytes = len((exact_worker.encode_output(envelope) + "\n").encode("utf-8"))
             self.assertEqual(original["state"], "pending")
             waiting = worker.invoke({"kind": "submit", "request": two}, {"kind": "operator"})
             self.assertEqual(waiting["state"], "capacity_wait")
@@ -199,7 +216,7 @@ class CandleWorker(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         with tempfile.TemporaryDirectory() as directory:
-            worker = module.Worker(Path(directory), 4194304)
+            worker = exact_worker.Worker(Path(directory), 4194304, module.CONTRACT)
             worker.store.directory.rmdir()
             with self.assertRaises(FileNotFoundError):
                 worker.host_requests({})
@@ -213,7 +230,7 @@ class CandleWorker(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         with tempfile.TemporaryDirectory() as directory:
-            worker = module.Worker(Path(directory), 4194304)
+            worker = exact_worker.Worker(Path(directory), 4194304, module.CONTRACT)
             worker.invoke({"kind": "submit", "request": request()}, {"kind": "operator"})
             worker.store.directory.rename(Path(directory) / "original-store")
             worker.store.directory.mkdir()
@@ -229,15 +246,15 @@ class CandleWorker(unittest.TestCase):
         spec.loader.exec_module(module)
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory).stat()
-            original_fsync = module.os.fsync
+            original_fsync = os.fsync
             def fail_parent_sync(fd):
-                info = module.os.fstat(fd)
+                info = os.fstat(fd)
                 if (info.st_dev, info.st_ino) == (parent.st_dev, parent.st_ino):
                     raise OSError("state parent persistence unconfirmed")
                 return original_fsync(fd)
-            with patch.object(module.os, "fsync", side_effect=fail_parent_sync):
+            with patch.object(os, "fsync", side_effect=fail_parent_sync):
                 with self.assertRaises(OSError):
-                    module.Worker(Path(directory), 4194304)
+                    exact_worker.Worker(Path(directory), 4194304, module.CONTRACT)
             self.assertEqual(list((Path(directory) / "candle-appraiser").iterdir()), [])
 
 

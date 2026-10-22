@@ -182,11 +182,79 @@ module Make (Payload : Payload) : sig
       hydrate them and report whether that read succeeded. [None] means the
       id is not retained. Unrelated mutations preserve this entry's identity. *)
   val get : t -> id:string -> entry option
+  type current_read_error =
+    | Volatile_store
+    | Not_initialized
+    | Incomplete_startup of replay_report
+    | Non_regular_history of Unix.file_kind
+    | Invalid_history of string
+    | Incomplete_history
+    | Snapshot_changed
+    | Read_failed of string
+    | Read_cleanup_failed of { primary : current_read_error option; detail : string }
+
+  val read_current_from_log
+    : t -> id:string -> (entry option, current_read_error) result
+  (** Fresh strict read of the complete current log under the mutation lock.
+      [Ok None] means this id has no registration in the observed history,
+      including a genuinely absent log. [Some] retains the full latest
+      registration and its [Running] or [Completed] status, without shedding
+      payloads or synthesizing a restart completion. A later registration
+      resets the previous lifecycle. Malformed unrelated rows, orphan
+      completions, incomplete tails and source changes refuse the whole read.
+
+      A pathless store, a [create] instance without startup replay, and an
+      incomplete startup replay are explicit errors. A clean startup permits
+      this fresh read; it does not prove its success or durability. Cancellation
+      propagates. [Read_cleanup_failed] retains a simultaneous source failure
+      in [primary]; [None] means the source read succeeded but descriptor
+      settlement did not. This read does not compact, repair, append, alter the live
+      projection or confirm fsync. Its result is not an ACK or a capability
+      for a later conditional write: that write must reacquire the serializer,
+      revalidate its source and confirm publication durability. The caller must
+      retain exclusive ownership of the log, as for [replay]. *)
   val completed_from_log : t -> id:string -> (entry option, string) result
   (** Strict streamed lookup of the latest registration lifecycle for one id.
       A later register resets an earlier completion. Running/missing ids return
       [Ok None]; malformed rows, partial tails and I/O failures return [Error].
       Reads only the durable log, retaining one requested entry in memory. *)
+
+  type reconciliation_change =
+    | Confirm_current
+    | Register_original of {
+        started_at : float;
+        registration : Payload.registration;
+        completion : Payload.completion option;
+      }
+    | Complete_original of Payload.completion
+
+  type 'error reconciliation_error =
+    | Current_source_unavailable of current_read_error
+    | Decision_refused of 'error
+    | Invalid_change of string
+    | Publication_failed of persistence_failure
+
+  val reconcile_current :
+    t -> id:string ->
+    decide:(entry option -> (reconciliation_change * 'a, 'error) result) ->
+    ('a, 'error reconciliation_error) result
+  (** Strictly parse the complete current history, decide, and confirm/append
+      under the mutation mutex and the same exclusive data-file/path lock used
+      by all writers. Refuse every malformed/orphan row or incomplete tail before
+      calling [decide]. No repair, compaction or restart synthesis occurs.
+      [Register_original] requires actual absence; [Complete_original] requires
+      an actual registration. The caller owns payload equality/provenance policy.
+      [Confirm_current] requires an actual entry and fsyncs it without appending.
+      The callback runs in a blocking worker: local blocking payload validation
+      is allowed, Eio effects or registry re-entry are not. Cancellation propagates.
+
+      Confirmed full disk state is adopted into the ordinary shed projection,
+      including retention, only after the durable transaction succeeds. Success
+      confirms historical publication even if that retention immediately evicts
+      the entry. It grants neither domain effects nor perpetual retention.
+      This transaction uses the existing complete-byte updater and temporarily
+      retains the complete log string; it is not a streamed-read optimization.
+      Startup authority restrictions match [read_current_from_log]. *)
   val cut_replay_log : execute:bool -> string -> cut_report
   (** Rewrites [path] from the state a replay of it produces. A hard-cut field
       leaves rows that can never decode again; [replay] declines to compact

@@ -6,6 +6,20 @@ open Alcotest
 open Masc
 module Runtime = Lane_addon_runtime
 module Exact = Lane_addon_exact
+
+(* These fixtures exercise host publication, not real provider capture. Their
+   explicit synthetic CLI success never claims API-only failure coverage. *)
+let executed outcome =
+  let module Receipt = Masc.Keeper_exact_walk_receipt in
+  let declared_cli, dispatched, result = match outcome with
+    | Exact.Call_ended (Exact.Answered {slot; _}) -> [slot], [slot], Receipt.Answered slot
+    | Exact.Call_ended (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
+    | Exact.Call_refused _ -> [], [], Receipt.Not_reached in
+  let receipt = match Receipt.make ~declared_http:[] ~excluded_http:[] ~declared_cli
+      ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture")
+      ~cli:(Receipt.cli ~visited:dispatched ~dispatched ~failures:[] ~result) with
+    | Ok receipt -> receipt | Error detail -> Alcotest.fail detail in
+  {Exact.outcome; receipt}
 module F = Exact_output_fixture
 
 let member = Yojson.Safe.Util.member
@@ -56,32 +70,36 @@ type worker = {
 type runner_mode = Answer of Yojson.Safe.t | Off
 type runner_state = { mode : runner_mode ref; resolutions : int ref }
 
-let runner state : Exact.runner = fun ~lane_key:_ ~schema:_ _ ->
+let runner state : Exact.runner = fun ~admission_class:_ ~lane_key:_ ~schema:_ _ ->
   incr state.resolutions;
   match !(state.mode) with
   | Off -> Error Exact.Lane_off
   | Answer json ->
       Ok (fun ~validate ->
         match validate json with
-        | Ok output -> Exact.Call_ended (Exact.Answered { output; slot = "fixture"; usage = None })
-        | Error detail -> Exact.Call_ended (Exact.Invalid_output { detail }))
+        | Ok output -> executed (Exact.Call_ended (Exact.Answered { output; slot = "fixture"; usage = None }))
+        | Error detail -> executed (Exact.Call_ended (Exact.Invalid_output { detail })))
 
-let port ?await_change ?(before_listing = fun _ -> ()) worker : Runtime.For_testing.host_port = {
+let port ?await_change ?deliver_reply ?(during_delivery=fun _ -> ()) ?(before_listing = fun _ -> ()) worker : Runtime.For_testing.host_port = {
   await_change;
   list_requests = (fun () ->
     let requests= !(worker.listing) in
     before_listing requests;
     Ok (`Assoc [ "requests", `List requests ]));
   deliver = (fun ~arguments ->
+    during_delivery true;
+    Fun.protect ~finally:(fun () -> during_delivery false) (fun () ->
     worker.delivered := arguments :: !(worker.delivered);
     let request_id = text "request_id" arguments in
     if !(worker.consume) then
       worker.listing := List.filter (fun request -> text "request_id" request <> request_id) !(worker.listing);
     !(worker.on_deliver) arguments;
-    Ok (`Assoc [ "accepted", `Bool !(worker.consume) ]));
+    match deliver_reply with
+    | None -> Ok (`Assoc [ "accepted", `Bool !(worker.consume) ])
+    | Some reply -> reply arguments));
 }
 
-let backend ?await_change ?before_listing ?exported_tool ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend = {
+let backend ?await_change ?deliver_reply ?during_delivery ?before_listing ?exported_tool ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend = {
   start = (fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~package:_ ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {browser=None;
         resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
@@ -99,7 +117,8 @@ let backend ?await_change ?before_listing ?exported_tool ?(before_stop = fun () 
       action_schema = (fun () -> None); act = (fun ~arguments:_ -> Error "read-only");
       stop = (fun () -> before_stop (); Ok (Lane_addon_lifecycle.Released
         { engine = Lane_addon_lifecycle.Docker_engine "fixture-engine"; container_id = Some instance_id }));
-      resource = Lane_addon_lifecycle.Container_resource instance_id; host = Some (port ?await_change ?before_listing worker) } in
+      resource = Lane_addon_lifecycle.Container_resource instance_id;
+      host = Some (port ?await_change ?deliver_reply ?during_delivery ?before_listing worker) } in
     ignore (on_authority (Lane_addon_lifecycle.Container_authority
       { runtime = Lane_addon_types.Docker; engine = Lane_addon_lifecycle.Docker_engine "fixture-engine" }));
     on_created connection; Ok connection);
@@ -133,7 +152,7 @@ let cycles config = match member "cycles" (host_requests config) with `Int n -> 
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 
-let with_installation ?await_change ?before_listing ?before_stop ?exported_tool ?(make_runner = runner) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
+let with_installation ?await_change ?deliver_reply ?during_delivery ?owner_setup ?before_listing ?before_stop ?exported_tool ?(make_runner = runner) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
   let root = Filename.temp_dir "lane-host-cycle-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let config_root = Filename.concat root ".masc/config" in
@@ -157,15 +176,21 @@ let with_installation ?await_change ?before_listing ?before_stop ?exported_tool 
                 Board_dispatch.reset_for_test ();
                 Board_dispatch.init_jsonl ();
                 let state = { mode = ref mode; resolutions = ref 0 } in
-                Runtime.register_exact_runner (make_runner state);
+                Runtime.register_exact_runner
+                  ~authorize_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ ->
+                    Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
+                        validate_output=(fun _ -> Ok ())})
+                  (make_runner state);
                 let config = Workspace.default_config root in
-                Runtime.For_testing.with_backend (backend ?await_change ?before_listing ?before_stop ?exported_tool worker) (fun () ->
+                Runtime.For_testing.with_backend (backend ?await_change ?deliver_reply ?during_delivery ?before_listing ?before_stop ?exported_tool worker) (fun () ->
+                  let unsubscribe=match owner_setup with None -> (fun () -> ()) | Some setup -> setup clock config in
+                  Fun.protect ~finally:unsubscribe (fun () ->
                   ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
                   f clock config worker state root;
                   let source = Filename.concat directory "quiz.toml" in
                   if Sys.file_exists source then Sys.remove source;
                   ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
-                  await clock (fun () -> host_requests config = `Null))))))))))
+                  await clock (fun () -> host_requests config = `Null)))))))))))
 
 (* Event 4. The registry is process-wide, so each call names a new slot: a
    publication that changes nothing about the lane wakes no one. *)
@@ -177,6 +202,100 @@ let publish_lane_change () =
   ignore (F.publish_registry ~lane_id:"quiz/author" ~slot_ids:[ slot ] snapshot : Runtime_exact_output_registry.t)
 
 let delivered_status arguments = text "status" (member "result" arguments)
+
+let test_scoped_owner_wakes_preserve_mcp_and_metadata_publication () =
+  let events=ref [] and ready=ref false and other_scope=ref 0 and other_package=ref 0 and peer=ref 0 in
+  let stop=ref (fun () -> ()) and mcp=ref 0 in
+  let tool=Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String "queue_question";
+    "inputSchema",`Assoc ["type",`String "object"]]) |> unwrap in
+  let owner_setup clock config =
+    let unsubscribe=Runtime.subscribe_owner_events ~config ~package_id:"quiz-package" (fun event ->
+      events:=event :: !events;
+      match event with Runtime.Export_inventory_changed -> ready:=true
+      | Configuration_observed | Exact_result_delivered _ -> ()) in
+    stop:=unsubscribe;
+    let peer=Runtime.subscribe_owner_events ~config ~package_id:"quiz-package" (fun _ -> incr peer) in
+    let other=Runtime.subscribe_owner_events ~config:{config with Workspace.base_path=Filename.concat config.base_path "another"}
+      ~package_id:"quiz-package" (fun _ -> incr other_scope) in
+    let package=Runtime.subscribe_owner_events ~config ~package_id:"another-package" (fun _ -> incr other_package) in
+    (* Hold actual metadata publication until the worker's export-ready event.
+       This orders the real startup race without a timer or fake metadata. *)
+    Runtime.register_skill_export_handler (fun ~config:_ _ -> await clock (fun () -> !ready);Ok ());
+    fun () -> unsubscribe ();peer ();other ();package () in
+  Runtime.For_testing.with_tool_change_handler (fun () -> incr mcp) (fun () ->
+    with_installation ~owner_setup ~manifest:(manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n")
+      ~exported_tool:(tool,(fun _ -> Ok (Mcp_protocol.Mcp_types.tool_result_of_text "unused")))
+      (fun clock config _ _ _ ->
+        await clock (fun () -> cycles config>=1);
+        check bool "the original MCP bridge still receives export changes" true (!mcp>0);
+        check bool "worker readiness is followed by actual metadata publication" true
+          (List.take 2 (List.rev !events) = [Runtime.Export_inventory_changed;Runtime.Configuration_observed]);
+        let metadata ()=List.filter (function Runtime.Configuration_observed -> true
+          | Export_inventory_changed | Exact_result_delivered _ -> false) !events |> List.length in
+        let before=metadata () in
+        ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> unwrap);
+        check int "an unchanged reconciliation does not signal metadata again" before (metadata ());
+        let count=List.length !events and previous_peer= !peer in
+        (!stop) ();(!stop) ();
+        let source=Filename.concat (Runtime.configuration_directory config) "quiz.toml" in
+        write source ("enabled=false\n" ^ declaration);
+        ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> unwrap);
+        await clock (fun () -> !peer>previous_peer);
+        check int "unsubscribe removes only its original registration" count (List.length !events);
+        check int "another workspace receives no hint" 0 !other_scope;
+        check int "another package receives no hint" 0 !other_package))
+
+let test_exact_result_wakes_after_rpc_and_isolates_observer_failure () =
+  let received=ref [] and inside_rpc=ref false in
+  let owner_setup _clock config =
+    let collect=Runtime.subscribe_owner_events ~config ~package_id:"quiz-package" (function
+      | Runtime.Exact_result_delivered receipt ->
+        check bool "owner callback runs after the worker RPC returns" false !inside_rpc;
+        received:=(receipt.installation_id,receipt.instance_id,receipt.request_id) :: !received
+      | Export_inventory_changed | Configuration_observed -> ()) in
+    let failed=Runtime.subscribe_owner_events ~config ~package_id:"quiz-package" (function
+      | Runtime.Exact_result_delivered _ -> raise Exit
+      | Export_inventory_changed | Configuration_observed -> ()) in
+    let cancelled=Runtime.subscribe_owner_events ~config ~package_id:"quiz-package" (function
+      | Runtime.Exact_result_delivered _ -> Eio.Cancel.sub (fun context ->
+          Eio.Cancel.cancel context Exit;Eio.Fiber.check ())
+      | Export_inventory_changed | Configuration_observed -> ()) in
+    fun () -> collect ();failed ();cancelled () in
+  with_installation ~owner_setup ~during_delivery:(fun state -> inside_rpc:=state)
+    ~listing:[exact "original-owner-result"] (fun clock config worker state _ ->
+      await clock (fun () -> cycles config>=1);
+      let expected=Lane_addon_tool_request_owner.installation_id (Lane_addon_tool_request_owner.Configuration "quiz") in
+      (match !received with
+       | [(installation,instance,request)] ->
+         check string "accepted receipt retains configured installation identity" expected installation;
+         check string "accepted receipt retains original request" "original-owner-result" request;
+         check bool "receipt names the actual instance" true (instance<>"")
+       | _ -> fail "an accepted result must reach the healthy owner despite observer failure");
+      worker.listing:=[exact "original-owner-result"];
+      publish_lane_change ();
+      await clock (fun () -> List.length !received=2);
+      check int "retained result restoration does not rerun the model" 1 !(state.resolutions);
+      check bool "restored delivery retains original instance and request" true
+        (match !received with [restored;original] -> restored=original | _ -> false))
+
+type owner_delivery = Unaccepted | Malformed | Transport_failed | Non_exact
+let test_only_accepted_exact_results_wake_owner kind () =
+  let received=ref 0 in
+  let owner_setup _clock config = Runtime.subscribe_owner_events ~config ~package_id:"quiz-package" (function
+    | Runtime.Exact_result_delivered _ -> incr received
+    | Export_inventory_changed | Configuration_observed -> ()) in
+  let listing=match kind with
+    | Non_exact -> [`Assoc ["kind",`String "read_records";"request_id",`String "original-read";"source_id",`String "missing"]]
+    | Unaccepted | Malformed | Transport_failed -> [exact "original-unaccepted"] in
+  let deliver_reply _=match kind with
+    | Unaccepted -> Ok (`Assoc ["accepted",`Bool false])
+    | Malformed -> Ok (`Assoc ["accepted",`String "true"])
+    | Transport_failed -> Error "simulated lost result receipt"
+    | Non_exact -> Ok (`Assoc ["accepted",`Bool true]) in
+  with_installation ~owner_setup ~deliver_reply ~listing (fun clock config _ _ _ ->
+    await clock (fun () -> cycles config>=1);
+    check int "no successful Exact delivery fact is invented" 0 !received)
+
 
 let test_withdrawal_event_before_stale_listing () =
   let revision=ref 0 and ids=ref [] and changed=Eio.Condition.create () in
@@ -212,13 +331,13 @@ let test_model_events_admit_and_withdraw_an_exact_scope () =
     let state=availability () in if after=Some state.revision then None else Some (Ok state)) in
   let cancelled, cancel=Eio.Promise.create () in
   let entered, enter=Eio.Promise.create () in
-  let make_runner state ~lane_key:_ ~schema:_ (request:Exact.request) =
+  let make_runner state ~admission_class ~lane_key:_ ~schema:_ (request:Exact.request) =
     incr state.resolutions;
     if request.request_id="withdraw" then Ok (fun ~validate:_ ->
       Fun.protect ~finally:(fun () -> Eio.Promise.resolve cancel ()) (fun () ->
         Eio.Promise.resolve enter ();
         Eio.Fiber.await_cancel ()))
-    else runner {state with resolutions=ref 0} ~lane_key:"fixture" ~schema:(`Assoc []) request in
+    else runner {state with resolutions=ref 0} ~admission_class ~lane_key:"fixture" ~schema:(`Assoc []) request in
   with_installation ~await_change ~make_runner (fun clock config worker state _root ->
     await clock (fun () -> cycles config>=1);
     let publish requests =
@@ -240,7 +359,7 @@ let test_model_events_admit_and_withdraw_an_exact_scope () =
 let test_retirement_cancels_exact_before_worker_cleanup_finishes () =
   let entered, enter = Eio.Promise.create () and finished, finish = Eio.Promise.create () in
   let cleaning, clean = Eio.Promise.create () and released, release = Eio.Promise.create () in
-  let make_runner state ~lane_key:_ ~schema:_ _ =
+  let make_runner state ~admission_class:_ ~lane_key:_ ~schema:_ _ =
     incr state.resolutions;
     Ok (fun ~validate:_ ->
       Fun.protect ~finally:(fun () -> Eio.Promise.resolve finish ()) (fun () ->
@@ -362,6 +481,74 @@ sources=[]
      | Error (Runtime.Unavailable _) -> ()
      | Ok () | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) -> fail "a stale worker handle retained authority");
     check int "binding never invokes a worker tool" 0 !calls)
+
+let test_capture_factory_uses_actual_live_declaration_before_any_rpc () =
+  let tool=Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String "queue_question";
+    "inputSchema",`Assoc ["type",`String "object"]]) |> unwrap in
+  let calls=ref 0 in
+  let invoke _=incr calls;Ok (Mcp_protocol.Mcp_types.tool_result_of_text "unused") in
+  let manifest=manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n" in
+  with_installation ~manifest ~exported_tool:(tool,invoke) (fun clock config _worker _state _root ->
+    let access=Lane_addon_sources.Operator_configuration in
+    let current ()=match Runtime.tool_exports ~config ~access ~reserved:[] |> unwrap with
+      | [export] -> Some export | _ -> None in
+    await clock (fun () -> Option.is_some (current ()));
+    let export=Option.get (current ()) in
+    let source=Filename.concat (Runtime.configuration_directory config) "quiz.toml" in
+    let declaration=Lane_addon_config.load_file ~path:source |> unwrap in
+    let capture (destination : Runtime.tool_request_destination) =
+      let json=`Assoc ["installation",`String destination.installation_id;
+        "package",`String destination.package_id;"tool",`String destination.tool;
+        "source_revision",`String destination.source_revision;
+        "configuration_revision",`String destination.configuration_revision] in Ok (json,json) in
+    let captured=match Runtime.capture_tool_request_owner ~config ~access ~reserved:[] ~export
+      ~scope:"trusted-capture" ~request_id:"original" ~capture with
+      | Ok json -> json | Error _ -> fail "live configured capture was refused" in
+    check string "source bytes come from the actual declaration" declaration.source_revision (text "source_revision" captured);
+    check string "configuration comes from the admitted payload" declaration.revision (text "configuration_revision" captured);
+    check string "configured logical identity uses the original codec"
+      (Lane_addon_tool_request_owner.installation_id (Lane_addon_tool_request_owner.Configuration declaration.id))
+      (text "installation" captured);
+    let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    (match Lane_addon_tool_request_owner.load ~store ~scope:"trusted-capture" ~request_id:"original" with
+     | Ok (Some record) -> check bool "factory output is durably retained before return" true (Yojson.Safe.equal record.request captured)
+     | Ok None | Error _ -> fail "capture returned before retaining its original request");
+    (match Runtime.with_tool_request_destination ~config ~access ~reserved:[] ~export
+      ~publish:(fun _ -> Error (Runtime.Outcome_unknown "controlled local publication uncertainty")) with
+     | Error (Runtime.Outcome_unknown _) -> ()
+     | Ok _ | Error (Runtime.Unavailable _ | Runtime.Host_refusal _) -> fail "publication uncertainty lost its typed meaning");
+    (match Runtime.with_tool_request_destination ~config ~access ~reserved:[] ~export
+      ~publish:(fun _ -> Eio.Fiber.yield ();raise (Sys_error "controlled local publication interruption")) with
+     | exception Sys_error _ -> ()
+     | Ok _ | Error _ -> fail "publication interruption was silently converted");
+    (match Runtime.capture_tool_request_owner ~config ~access ~reserved:[] ~export
+       ~scope:"trusted-capture" ~request_id:"original" ~capture with
+     | Ok replay -> check bool "serializer survives journal callback failure and reuses original ID" true
+         (Yojson.Safe.equal replay captured)
+     | Error _ -> fail "local publication exception poisoned configured admission");
+    let forbidden _=fail "stale or conflicting export called the capture factory" in
+    (match Runtime.capture_tool_request_owner ~config ~access ~reserved:["queue_question"] ~export
+       ~scope:"trusted-capture" ~request_id:"collision" ~capture:forbidden with
+     | Error (Runtime.Unavailable _) -> ()
+     | Ok _ | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) -> fail "reserved name admitted capture");
+    let document=Runtime.read_declaration ~access ~config (`Assoc ["source_path",`String source])
+      |> Result.map_error (fun error -> error.Lane_addon_declaration.message) |> unwrap in
+    Runtime.save_declaration ~access ~config (`Assoc ["mode",`String "save";"file_name",`String "quiz.toml";
+      "expected_source_revision",member "source_revision" document;
+      "source_text",`String ("enabled=false\n" ^ In_channel.with_open_bin source In_channel.input_all)])
+      |> Result.map_error (fun error -> error.Lane_addon_declaration.message) |> unwrap |> ignore;
+    check bool "saved Off has not yet been reconciled out of the cached export" true (Option.is_some (current ()));
+    (match Runtime.capture_tool_request_owner ~config ~access ~reserved:[] ~export
+       ~scope:"trusted-capture" ~request_id:"off-before-reconcile" ~capture:forbidden with
+     | Error (Runtime.Unavailable _) -> ()
+     | Ok _ | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) -> fail "committed Off reused stale configured authority");
+    ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> unwrap);
+    await clock (fun () -> current ()=None);
+    (match Runtime.capture_tool_request_owner ~config ~access ~reserved:[] ~export
+       ~scope:"trusted-capture" ~request_id:"off" ~capture:forbidden with
+     | Error (Runtime.Unavailable _) -> ()
+     | Ok _ | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) -> fail "Off export admitted capture");
+    check int "capture and refusal perform no worker RPC" 0 !calls)
 
 let test_a_request_that_is_not_final_waits_for_the_next_event () =
   with_installation ~listing:[ exact "r2" ] ~mode:Off (fun clock config worker state  _root->
@@ -1221,6 +1408,8 @@ let () =
         ; test_case "retirement cancels exact before worker cleanup finishes" `Quick test_retirement_cancels_exact_before_worker_cleanup_finishes
         ; test_case "original tool destination survives replacement and reattachment" `Quick
             test_original_tool_destination_survives_replacement_and_reattachment
+        ; test_case "capture uses actual live provenance before RPC" `Quick
+            test_capture_factory_uses_actual_live_declaration_before_any_rpc
         ; test_case "a request that is not final waits for the next event" `Quick
             test_a_request_that_is_not_final_waits_for_the_next_event
         ; test_case "a request listed again after delivery ends the cycle" `Quick
@@ -1229,6 +1418,20 @@ let () =
             test_a_result_larger_than_the_frame_is_delivered_as_its_size
         ; test_case "a listing with an unknown kind is refused whole" `Quick
             test_a_listing_with_an_unknown_kind_is_refused_whole ] )
+    ; ( "owner wakes"
+      , [ test_case "scope, metadata publication and the existing MCP bridge" `Quick
+            test_scoped_owner_wakes_preserve_mcp_and_metadata_publication
+        ; test_case "accepted original and restored results wake outside the RPC" `Quick
+            test_exact_result_wakes_after_rpc_and_isolates_observer_failure
+        ; test_case "an unaccepted result does not wake its owner" `Quick
+            (test_only_accepted_exact_results_wake_owner Unaccepted)
+        ; test_case "a malformed receipt does not wake its owner" `Quick
+            (test_only_accepted_exact_results_wake_owner Malformed)
+        ; test_case "a lost receipt does not wake its owner" `Quick
+            (test_only_accepted_exact_results_wake_owner Transport_failed)
+        ; test_case "an accepted non-Exact request does not wake an Exact owner" `Quick
+            (test_only_accepted_exact_results_wake_owner Non_exact)
+        ] )
     ; ( "grants"
       , [ test_case "an operator declaration attaches with its grants" `Quick
             test_an_operator_declaration_attaches_with_its_grants

@@ -55,7 +55,7 @@ beforeEach(() => {
   api.fetchStandaloneLanes.mockResolvedValue({ schema: 'masc.standalone_llm_lanes.v2', generatedAt: 'now',
     observedAtUnix: 1, observationOnly: true, exactRunProjectionCount: 0, exactRunSourceTotal: 0,
     exactRunProjectionTruncated: false, lanes: [] })
-  replaceRoute('monitoring', laneTargetParams({ kind: 'exact', lane: 'workspace_curator_exact', workspace: '/fixture/navigation' }, true))
+  replaceRoute('monitoring', laneTargetParams({ kind: 'run_history', lane: 'workspace_curator_exact', workspace: '/fixture/navigation' }))
 })
 afterEach(() => {
   cleanup(); replaceRoute('overview', {}); vi.clearAllMocks()
@@ -75,6 +75,24 @@ it('focuses the same Exact Lane again after another Runtime settings section', a
   screen.getByRole('button', { name: 'Other section' }).focus()
   rendered.rerender(view(lane.laneId))
   await waitFor(() => expect(document.activeElement).toBe(selected))
+})
+
+it('reads original Curator history when current configuration observations are unavailable', async () => {
+  api.fetchStandaloneLanes.mockRejectedValue(new Error('configuration observation unavailable'))
+  replaceRoute('monitoring', laneTargetParams({ kind: 'run_history', lane: 'workspace_curator_exact', workspace: '/fixture/navigation' }))
+  render(html`<${InternalAgentsMonitor} />`)
+  await screen.findByRole('button', { name: /succeeded Workspace Curator/ })
+  expect(api.fetchExactLaneRuns).toHaveBeenCalledWith({ lane: 'workspace_curator_exact' })
+  expect(route.value.params.section).toBe('internal-agents')
+  expect(route.value.params.view).toBeUndefined()
+  expect(files.saveLaneDeclaration).not.toHaveBeenCalled()
+})
+
+it('does not read another workspace through a retained history link', async () => {
+  replaceRoute('monitoring', laneTargetParams({ kind: 'run_history', lane: 'workspace_curator_exact', workspace: '/fixture/other' }))
+  render(html`<${InternalAgentsMonitor} />`)
+  expect(api.fetchExactLaneRuns).not.toHaveBeenCalled()
+  expect(api.fetchVerificationRuns).not.toHaveBeenCalled()
 })
 
 it('retries the selected declaration file after its installation identity is restored', async () => {
@@ -261,7 +279,7 @@ it('shows all Lane runs when leaving a target with the Show all action', async (
   render(html`<${InternalAgentsMonitor} />`)
   const filters = within(screen.getByRole('group', { name: 'Internal agent filters' }))
   fireEvent.click(await filters.findByRole('button', { name: 'Fusion 0' }))
-  replaceRoute('monitoring', laneTargetParams({ kind: 'exact', lane: 'workspace_curator_exact', workspace: '/fixture/navigation' }, true))
+  replaceRoute('monitoring', laneTargetParams({ kind: 'run_history', lane: 'workspace_curator_exact', workspace: '/fixture/navigation' }))
   await screen.findByRole('button', { name: /succeeded Workspace Curator/ })
   fireEvent.click(screen.getByRole('button', { name: 'Show all Lane runs' }))
   await waitFor(() => expect(route.value.params.lane_target).toBeUndefined())

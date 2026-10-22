@@ -312,8 +312,17 @@ let save_exact_request t ~declaration_id ~request_id json =
   save_record_with ~sync_parent:sync_parent_directory t (exact_request_path ~declaration_id ~request_id) json
 let tool_request_owner_path ~scope ~request_id =
   Filename.concat "tool-request-owners" (Filename.concat (digest scope) (digest request_id ^ ".json"))
+let with_tool_request_owner_serialization t ~scope work =
+  (* The parent is the existing authority anchor, even before the store/scope
+     exists. Resolve its aliases without creating missing authority. Store and
+     descriptor checks inside [work] still reject external replacement. *)
+  let parent=Unix.realpath (Filename.dirname t.root) in
+  let key=Filename.concat parent (Filename.concat (Filename.basename t.root)
+    (Filename.concat "tool-request-owners" (digest scope))) in
+  File_lock_eio.with_mutex key work
 let save_tool_request_owner t ~scope ~request_id json =
-  save_record_with ~sync_parent:sync_parent_directory t (tool_request_owner_path ~scope ~request_id) json
+  protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
+    save_record_with ~sync_parent:sync_parent_directory t (tool_request_owner_path ~scope ~request_id) json))
 let broadcast_path ~instance_id ~request_id =
   Filename.concat "broadcasts" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
 let save_broadcast t ~instance_id ~request_id json =
@@ -465,26 +474,28 @@ let with_record_fd path fn =
     let backtrace=Printexc.get_raw_backtrace () in
     (try Unix.close fd with Unix.Unix_error _ -> ());
     Printexc.raise_with_backtrace exn backtrace
+let verify_record_bytes path fd stat bytes =
+  let _offset=Unix.lseek fd 0 Unix.SEEK_SET in
+  let* verified=record_bytes fd stat.Unix.st_size in
+  if verified<>bytes then Error "retained file changed during sync"
+  else if same_file stat (Unix.stat path) then Ok bytes
+  else Error "retained file changed during verification"
+let settle_verified_record ~sync_file ~sync_parent path fd stat bytes parent_fd =
+  let parent=Filename.dirname path in
+  let parent_stat=Unix.fstat parent_fd in
+  if parent_stat.Unix.st_kind<>Unix.S_DIR then Error "retained file parent is not a directory"
+  else (
+    sync_file fd;sync_parent parent_fd;
+    let* bytes=verify_record_bytes path fd stat bytes in
+    if same_file parent_stat (Unix.stat parent) then Ok bytes
+    else Error "retained file parent changed during sync")
 let read_verified_record ~sync_file ~sync_parent ~verification path fd stat =
   let* bytes=record_bytes fd stat.Unix.st_size in
-  let verify_bytes () =
-    let _offset=Unix.lseek fd 0 Unix.SEEK_SET in
-    let* verified=record_bytes fd stat.Unix.st_size in
-    if verified<>bytes then Error "retained file changed during sync"
-    else if same_file stat (Unix.stat path) then Ok bytes
-    else Error "retained file changed during verification" in
   match verification with
-  | Visible -> verify_bytes ()
+  | Visible -> verify_record_bytes path fd stat bytes
   | Durable ->
     let parent=Filename.dirname path in
-    with_record_fd parent (fun parent_fd ->
-      let parent_stat=Unix.fstat parent_fd in
-      if parent_stat.Unix.st_kind<>Unix.S_DIR then Error "retained file parent is not a directory"
-      else (
-        sync_file fd;sync_parent parent_fd;
-        let* bytes=verify_bytes () in
-        if same_file parent_stat (Unix.stat parent) then Ok bytes
-        else Error "retained file parent changed during sync"))
+    with_record_fd parent (settle_verified_record ~sync_file ~sync_parent path fd stat bytes)
 let bounded_file_with ~sync_file ~sync_parent ~verification ~max_bytes path = protect (fun () ->
   with_record_fd path (fun fd ->
     let stat = Unix.fstat fd in
@@ -512,9 +523,63 @@ let load_exact_request t ~declaration_id ~request_id =
   load_record_with ~what:"exact request record" ~sync_file:Unix.fsync ~sync_parent:Unix.fsync t
     (exact_request_path ~declaration_id ~request_id)
 
+let owned_result value = Result.map_error Fs_compat.owned_regular_file_read_error_to_string value
+let with_tool_request_owner_scope ~sync_parent t ~scope fn =
+  let blocking () = protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
+    let* result = Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
+      let result =
+        let owner_uid = Unix.geteuid () in
+        let parent = Fs_compat.owned_inventory_root_path anchor in
+        let root = Filename.concat parent (Filename.basename t.root) in
+        let directory = Filename.concat root (Filename.concat "tool-request-owners" (digest scope)) in
+        let* observed = Fs_compat.with_owned_directory_inventory_if_present ~owner_uid
+          ~inventory_root:anchor ~sync_directory:sync_parent directory (fun held names ->
+            let* value = fn ~owner_uid held names in
+            let* current = Fs_compat.read_owned_directory ~owner_uid ~inventory_root:held
+              ~ownership_root:directory directory |> owned_result in
+            if current <> names then Error "original request directory changed during inventory"
+            else Ok value) |> owned_result in
+        match observed with
+        | None -> Ok None
+        | Some result -> Result.map Option.some result in
+      Ok result) |> owned_result in
+    result)) in
+  match Fs_compat.execution_context () with
+  | Fs_compat.Non_eio -> blocking ()
+  | Fs_compat.Eio_fiber ->
+    let result = Eio_unix.run_in_systhread ~label:"addon-original-request-read" blocking in
+    Eio.Fiber.check (); result
+let read_owned_tool_request ~sync_file ~sync_parent ~owner_uid held name =
+  let path = Filename.concat (Fs_compat.owned_inventory_root_path held) name in
+  let* result = Fs_compat.with_owned_inventory_regular_file ~owner_uid held path
+    (fun ~file ~parent ~stat -> protect (fun () ->
+      let* bytes = record_bytes file stat.Unix.st_size in
+      let* bytes = settle_verified_record ~sync_file ~sync_parent path file stat bytes parent in
+      Ok (Yojson.Safe.from_string bytes))) |> owned_result in
+  result
 let load_tool_request_owner t ~scope ~request_id =
-  load_record_with ~what:"tool request owner" ~sync_file:Unix.fsync ~sync_parent:Unix.fsync t
-    (tool_request_owner_path ~scope ~request_id)
+  let name = digest request_id ^ ".json" in
+  let* result = with_tool_request_owner_scope ~sync_parent:Unix.fsync t ~scope
+    (fun ~owner_uid held names ->
+      if not (List.mem name names) then Ok None
+      else read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name
+        |> Result.map Option.some) in
+  Ok (Option.join result)
+let tool_request_owner_inventory_with ~after_listing ~sync_file ~sync_parent t ~scope =
+  let* result = with_tool_request_owner_scope ~sync_parent t ~scope
+    (fun ~owner_uid held names ->
+      after_listing (Fs_compat.owned_inventory_root_path held);
+      let rec read records = function
+        | [] -> Ok (List.rev records)
+        | name :: rest ->
+          if Fs_compat.is_atomic_orphan_name name then read records rest
+          else if not (Filename.check_suffix name ".json") then Error "unknown entry in original request namespace"
+          else let* json = read_owned_tool_request ~sync_file ~sync_parent ~owner_uid held name in
+            read ((name,json) :: records) rest in
+      read [] names) in
+  Ok (match result with None -> [] | Some records -> records)
+let tool_request_owner_inventory = tool_request_owner_inventory_with
+  ~after_listing:(fun _ -> ()) ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 
 let host_result_path ~instance_id ~request_id =
   Filename.concat "host-results" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
@@ -941,6 +1006,7 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
 
 module For_testing = struct
+  let tool_request_owner_inventory = tool_request_owner_inventory_with
   let remove_binding = remove_binding_with
   let binding_inventory = binding_inventory_with
   let issue_detail = issue_detail

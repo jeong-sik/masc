@@ -7,6 +7,11 @@ val declaration_change_probe : config:Workspace.config -> unit -> (unit -> bool)
     Absence retains the last observed generation. Retained terminal judgments
     are still read under their original request ID, never dispatched anew. *)
 val run : config:Workspace.config -> Candle_appraisal.runner
+(** Every return still reads the original worker result and validates the full
+    domain decision. Rereading an identical durable terminal receipt preserves
+    its first observed elapsed time; retrying a failed receipt append preserves
+    that first time too. A replay-only restart marker may still be replaced by
+    the actual worker result. *)
 module For_testing : sig
   val run : registry:Exact_lane_run_registry.t -> base_path:string
     -> retain:(request_id:string -> request:Yojson.Safe.t -> (unit, Lane_addon_runtime.tool_call_error) result)

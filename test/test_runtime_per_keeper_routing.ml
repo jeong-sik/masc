@@ -987,7 +987,7 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         match exact_lane with
         | Runtime.Verifier -> true
         | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
-        | Runtime.Workspace_curator | Runtime.Browser_stagehand | Runtime.Candle_appraiser -> false
+        | Runtime.Browser_stagehand | Runtime.Candle_appraiser -> false
       in
       let expected =
         if is_verifier && not judges
@@ -1016,13 +1016,10 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         Alcotest.(check (list string)) (id ^ " CLI slots") expected_cli lane.cli_slot_ids)
       (List.filter
          (function
-           | Runtime.Workspace_curator | Runtime.Browser_stagehand | Runtime.Candle_appraiser -> false
+           | Runtime.Browser_stagehand | Runtime.Candle_appraiser -> false
            | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
            | Runtime.Verifier -> true)
          Standalone_lane.all);
-    Alcotest.(check bool) "shared-memory curator is explicitly configured" false
-      (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal (Runtime_schema.exact_lane_key lane.owner) "workspace_curator_exact") config.exact_output_lane_decls);
     Alcotest.(check bool) "Candle appraisal is explicitly configured" false
       (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
          String.equal (Runtime_schema.exact_lane_key lane.owner) (Standalone_lane.to_id Standalone_lane.Candle_appraiser))
@@ -2073,24 +2070,6 @@ let test_exact_cli_replacement_preserves_declared_groups () =
         ~names:["within its HTTP or CLI group"] (fun () ->
           Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
             ~lane:Runtime.Board_attention ~slot:"absent" ~replacement:"codex.codex" ()))
-;;
-
-(* The curator lane walks its CLI slots after its HTTP slots, as every exact
-   lane does, so an official client appended there joins [cli_slots] and the
-   HTTP slots stay in front of it. *)
-let test_an_official_client_joins_the_curator_cli_slots () =
-  with_official_client_runtime_file
-    ~lane:"[runtime.exact_output_lanes.workspace_curator_exact]\nslots = [\"openai.gpt\"]"
-    (fun path ->
-       Runtime.append_exact_output_lane_slot ~runtime_config_path:path
-         ~lane:Runtime.Workspace_curator ~slot:"codex.codex" ()
-       |> lane_write_ok "append an official client to the curator lane";
-       Alcotest.(check (list string)) "the client is a CLI slot of the curator"
-         [ "codex.codex" ]
-         (exact_lane_cli_slots path "workspace_curator_exact");
-       Alcotest.(check (list string)) "the curator's HTTP slots are unchanged"
-         [ "openai.gpt" ]
-         (exact_lane_slots path "workspace_curator_exact"))
 ;;
 
 let test_candle_appraiser_is_explicitly_configured_with_both_transports () =
@@ -4444,10 +4423,6 @@ let () =
             "an exact drop and move edit the CLI slots"
             `Quick
             test_an_exact_drop_and_move_edit_the_cli_slots
-        ; Alcotest.test_case
-            "an official client joins the curator CLI slots"
-            `Quick
-            test_an_official_client_joins_the_curator_cli_slots
         ; Alcotest.test_case
             "an inline exact lane is refused"
             `Quick

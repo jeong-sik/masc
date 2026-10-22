@@ -199,7 +199,8 @@ let () =
     status,response)) in
   ignore (F.publish_registry ~lane_id:"browser/stagehand" ~slot_ids:["probe"]
     (F.resolver_snapshot ~source:base_path [{F.id="probe";base_url=provider.base_url}]) : Runtime_exact_output_registry.t);
-  R.register_exact_runner (Server_lane_addon_exact.runner ~base_path);
+  R.register_exact_runner ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path)
+    (Server_lane_addon_exact.runner ~base_path);
   let directory=R.configuration_directory config in Fs_compat.mkdir_p directory;
   let declaration=Filename.concat directory "browser.toml" in
   let require = function Ok value -> value | Error detail -> failwith detail in

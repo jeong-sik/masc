@@ -1435,7 +1435,7 @@ let start_post_ready_owner_lanes
       ~appraiser_declaration_changed:(Server_candle_appraiser.declaration_change_probe ~config:(Mcp_server.workspace_config state) ())
       ~appraise:(Server_candle_appraiser.run ~config:(Mcp_server.workspace_config state)) ();
     Server_workspace_memory_curator.start ~sw
-      ~base_path:(Mcp_server.workspace_config state).base_path
+      ~config:(Mcp_server.workspace_config state)
   in
   if Runtime_startup_state.requires_setup () then
     Eio.Fiber.fork ~sw (fun () ->

@@ -107,10 +107,40 @@ let run_with ~registry ~base_path ~retain ~call ~identity request =
     | Absent -> invoke (Intent.submit_arguments intent)
     | Pending | Capacity_wait | Finished _ -> Ok state in
   let complete ?usage ~slot outcome result =
-    Runs.mark_completed registry ~run_id ~outcome
-      ~elapsed_s:(max 0. (Time_compat.now () -. started_at)) ~selected_slot:slot ?usage
-      ~output:(`Assoc ["result", result; "semantic_verification", `String "not_performed"]) ()
-    |> Result.map_error (fun error -> A.Transport_unavailable (Runs.completion_error_to_string error)) in
+    let output = `Assoc ["result", result; "semantic_verification", `String "not_performed"] in
+    let same_receipt ~recorded_outcome ~recorded_output ~recorded_slot ~recorded_usage =
+      recorded_outcome = outcome && Yojson.Safe.equal recorded_output output
+      && recorded_slot = slot && recorded_usage = usage in
+    let write elapsed_s =
+      (match elapsed_s with
+       | Some elapsed_s -> Runs.mark_completed registry ~run_id ~outcome ~elapsed_s ~selected_slot:slot ?usage ~output ()
+       | None -> Runs.mark_completed_unmeasured registry ~run_id ~outcome ~selected_slot:slot ?usage ~output ())
+      |> Result.map_error (fun error -> A.Transport_unavailable (Runs.completion_error_to_string error)) in
+    let readable = function
+      | Some Runs.Available -> Ok ()
+      | Some (Runs.Unavailable error) ->
+        Error (A.Transport_unavailable (Runs.payload_read_error_to_string error))
+      | None | Some Runs.Not_loaded ->
+        Error (A.Transport_unavailable "Candle terminal receipt output was not observed") in
+    let elapsed_now () = max 0. (Time_compat.now () -. started_at) in
+    match Runs.get registry ~run_id with
+    | None | Some {status=Runs.Running;_} -> write (Some (elapsed_now ()))
+    | Some {status=Runs.Completed recorded;output_availability;_} ->
+      let* () = readable output_availability in
+      (* A retained judgment is read again while later payout stages progress.
+         This is no new completion. Compare the whole receipt so a replay-only
+         restart marker can still yield to the actual worker's terminal. *)
+      if same_receipt ~recorded_outcome:recorded.outcome ~recorded_output:recorded.output
+          ~recorded_slot:recorded.selected_slot ~recorded_usage:recorded.usage then Ok ()
+      else (match recorded.origin with
+        | Runs.Restart_replay -> write None
+        | Runs.Producer -> Error (A.Transport_unavailable "Original Candle producer receipt conflicts with the retained terminal"))
+    | Some {status=Runs.Completion_persistence_failed recorded;output_availability;_} ->
+      let* () = readable output_availability in
+      if same_receipt ~recorded_outcome:recorded.intended_outcome ~recorded_output:recorded.output
+          ~recorded_slot:recorded.selected_slot ~recorded_usage:recorded.usage then
+        write recorded.elapsed_s
+      else Error (A.Transport_unavailable "Original Candle pending producer receipt conflicts with the retained terminal") in
   let reject ~slot ~code error result =
     (* A failed observer write cannot change a terminal judgment into a
        retryable dispatch. The retained worker result remains authoritative. *)
@@ -138,7 +168,7 @@ let run_with ~registry ~base_path ~retain ~call ~identity request =
            |> Result.map_error (fun detail -> A.Invalid_response detail) in
          let* () = complete ?usage:(Option.map usage reported_usage) ~slot:(Some slot) Runs.Succeeded raw in
          Ok {A.decision;trace})
-    | Exact.Call_final (Exact.Invalid_output {detail}) ->
+    | Exact.Call_final (Exact.Invalid_output {detail} | Exact.Output_limit_reached {detail}) ->
       reject ~slot:None ~code:"candle_appraisal_rejected" (A.Invalid_response detail) (Exact.final_to_json final)
     | Exact.Call_final (Exact.Input_refused refusal) ->
       reject ~slot:None ~code:"candle_appraisal_execution_rejected"

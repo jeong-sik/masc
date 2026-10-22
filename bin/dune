@@ -1965,7 +1965,7 @@
  (name masc_tui_palette)
  (wrapped false)
  (modules masc_tui_palette)
- (libraries masc_tui_overview_providers masc_tui_fetched masc_tui_types masc_tui_pick_list masc_tui_rows masc_tui_task_dispatch
+ (libraries masc.runtime masc_tui_overview_providers masc_tui_fetched masc_tui_types masc_tui_pick_list masc_tui_rows masc_tui_task_dispatch
   masc_tui_message_layout masc_tui_code_lexer masc_tui_lane_addons masc.keeper_contract masc))
 
 (library

@@ -27,6 +27,31 @@ let tool_change_handler = ref (fun () -> ())
 let register_tool_change_handler handler = tool_change_handler := handler
 let notify_tool_change (package : package) =
   if package.exported_tools <> [] then !tool_change_handler ()
+type owner_event = Export_inventory_changed | Configuration_observed
+  | Exact_result_delivered of { installation_id:string; instance_id:string; request_id:string }
+type owner_subscription = { root:string; package_id:string; signal:owner_event -> unit }
+let owner_subscriptions_mutex=Stdlib.Mutex.create ()
+let owner_subscriptions : owner_subscription list ref=ref []
+let subscribe_owner_events ~config ~package_id signal =
+  let root=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")
+    |> Lane_addon_store.root in
+  let subscription={root;package_id;signal} in
+  Stdlib.Mutex.protect owner_subscriptions_mutex (fun () ->
+    owner_subscriptions:=subscription :: !owner_subscriptions);
+  fun () -> Stdlib.Mutex.protect owner_subscriptions_mutex (fun () ->
+    owner_subscriptions:=List.filter (fun current -> current != subscription) !owner_subscriptions)
+let publish_owner_event ~root ~package_id event =
+  Eio.Fiber.check ();
+  let subscriptions=Stdlib.Mutex.protect owner_subscriptions_mutex (fun () ->
+    List.filter (fun subscription -> subscription.root=root && subscription.package_id=package_id) !owner_subscriptions) in
+  List.iter (fun subscription ->
+    Eio.Fiber.check ();
+    try subscription.signal event with
+    | Eio.Cancel.Cancelled _ as exn ->
+      Eio.Fiber.check ();
+      Log.Misc.warn "Lane Add-on owner observer cancelled package=%s: %s" package_id (Printexc.to_string exn)
+    | exn -> Log.Misc.warn "Lane Add-on owner observer failed package=%s: %s" package_id (Printexc.to_string exn)) subscriptions;
+  Eio.Fiber.check ()
 (* The two private tools of a worker whose package waits on the host (RFC
    operator-quiz §4.4). Their answers are decoded by the cycle. *)
 type host_port = {
@@ -207,6 +232,12 @@ type manager = { store : Lane_addon_store.t; base_path : string; artifact_store 
   sweep_retries : (runtime, sweep_retry list) Hashtbl.t;
   sweep_warned : (runtime, (string * string option * Lifecycle.failure) list) Hashtbl.t }
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
+let installation_id (e : entry) = Lane_addon_tool_request_owner.installation_id (match e.configuration with
+  | Some owner -> Lane_addon_tool_request_owner.Configuration owner.id
+  | None -> Lane_addon_tool_request_owner.Manual e.instance_id)
+let notify_exports m e =
+  publish_owner_event ~root:(Lane_addon_store.root m.store) ~package_id:e.package.id Export_inventory_changed;
+  notify_tool_change e.package
 let override : backend option ref = ref None
 type fleet_backend = {
   snapshot : config:Workspace.config -> caller:string -> access:Lane_addon_sources.access -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
@@ -219,8 +250,8 @@ let delivery_handler = ref None
 let register_delivery_handler handler = delivery_handler := Some handler
 let sampling_factory = ref None
 let register_sampling_factory factory = sampling_factory := Some factory
-let exact_runner : Lane_addon_exact.runner option ref = ref None
-let register_exact_runner runner = exact_runner := Some runner
+let exact_runner : (Lane_addon_exact.runner * Lane_addon_exact.execution_authority) option ref = ref None
+let register_exact_runner ~authorize_request runner = exact_runner := Some (runner, authorize_request)
 let github_reader : Lane_addon_records.github ref = ref (fun ~repository_id:_ -> Error "this host has no GitHub reader")
 let register_github_reader reader = github_reader := reader
 let prepare_sampling_handler ~sw ~store ~instance_id ~(package : package) ~binding =
@@ -254,9 +285,9 @@ let state_owner_for ~store ~instance_id ~package_id ~configuration state_storage
   match state_storage with
   | Ephemeral -> Ok None
   | Persistent ->
-      let installation_id = Yojson.Safe.to_string (match configuration with
-        | Some (owner : configuration_owner) -> `List [`String "configuration"; `String owner.id]
-        | None -> `List [`String "manual"; `String instance_id]) in
+      let installation_id = Lane_addon_tool_request_owner.installation_id (match configuration with
+        | Some (owner : configuration_owner) -> Lane_addon_tool_request_owner.Configuration owner.id
+        | None -> Lane_addon_tool_request_owner.Manual instance_id) in
       offload (fun () -> Lane_addon_worker_state.create_owner
         ~workspace_root:(Lane_addon_store.root store) ~installation_id ~package_id)
       |> Result.map Option.some
@@ -572,7 +603,7 @@ let fail_state (e : entry) cause = match e.state with
   | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching None | Lifecycle.Detached _ ->
       Lifecycle.Failed (Lifecycle.failed cause)
 let failed m e cause =
-  if not e.stopping then (e.state <- fail_state e cause; notify_tool_change e.package);
+  if not e.stopping then (e.state <- fail_state e cause; notify_exports m e);
   match persist m e with Ok () -> wake_dependents m e | Error error ->
     if not e.stopping then
       e.state <- fail_state e (Lifecycle.Persistence_failed (Lifecycle.failure_to_string cause ^ "; binding persistence: " ^ error))
@@ -933,7 +964,7 @@ let run_host_cycle m e (port : host_port) =
               (* A manual Attach has no declaration id, so it owns no add-on lane. *)
               Ok (Lane_addon_exact.Not_final (Lane_addon_exact.Lane_unavailable Lane_addon_exact.Lane_unconfigured))
           | Some _, None -> Error No_exact_runner
-          | Some owner, Some runner ->
+          | Some owner, Some (runner, authorize_request) ->
              let result =
                try Eio.Cancel.sub (fun cancellation ->
                  e.cancel_exact <- Some (Eio.Cancel.cancel cancellation);
@@ -952,7 +983,8 @@ let run_host_cycle m e (port : host_port) =
                         if not (List.exists (fun request ->
                             Lane_addon_host_request.request_id request=exact.Lane_addon_exact.request_id) requests)
                         then raise Host_cycle_stopped else Ok () in
-                   Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package ~runner exact))
+                   Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package
+                     ~runner ~authorize_request exact))
                with Eio.Cancel.Cancelled (Worker_detached | Host_request_withdrawn) ->
                  (* Consume only retirement/withdrawal of this exact call. Worker/root
                     cancellation must still propagate through this boundary. *)
@@ -1035,22 +1067,28 @@ let run_host_cycle m e (port : host_port) =
         | Lane_addon_host_delivery.Refused detail | Storage_failed detail -> Result_delivery_failed {request_id; detail}) in
     check_live ();
     match retained with Some arguments -> Ok (Restore arguments) | None -> produce request in
-  let deliver_arguments ~request_id arguments =
+  let deliver_arguments request arguments =
+    let request_id=Lane_addon_host_request.request_id request in
     let* () = if e.stopping || (current_owner ()).authority <> owner.authority then
         Error (Result_delivery_failed {request_id; detail="installation authority changed before result delivery"})
       else Ok () in
     let* answer = port.deliver ~arguments
       |> Result.map_error (fun detail -> Result_delivery_failed {request_id; detail}) in
-    Lane_addon_host_request.accepted_of_json answer
-    |> Result.map (fun (_accepted : bool) -> ())
-    |> Result.map_error (fun detail -> Result_delivery_failed {request_id; detail}) in
+    let* accepted=Lane_addon_host_request.accepted_of_json answer
+      |> Result.map_error (fun detail -> Result_delivery_failed {request_id; detail}) in
+    if accepted && not e.stopping && (current_owner ()).authority=owner.authority then (match request with
+      | Lane_addon_host_request.Exact_output _ ->
+        publish_owner_event ~root:(Lane_addon_store.root m.store) ~package_id:e.package.id
+          (Exact_result_delivered {installation_id=installation_id e;instance_id=e.instance_id;request_id})
+      | Lane_addon_host_request.Read_records _ | Read_file _ | Read_result _ | Ask _ | Withdraw_ask _ -> ());
+    Ok () in
   let deliver request result =
     let request_id = Lane_addon_host_request.request_id request in
     let* arguments = offload (fun () -> Lane_addon_host_delivery.arguments ~store:m.store ~owner ~request
         ~max_bytes:(Lane_addon_types.max_reply_bytes e.package) ~result)
       |> Result.map_error (function
         | Lane_addon_host_delivery.Refused detail | Storage_failed detail -> Result_delivery_failed {request_id; detail}) in
-    deliver_arguments ~request_id arguments in
+    deliver_arguments request arguments in
   let rec pass () =
     check_live ();
     let* listing = port.list_requests () |> Result.map_error (fun detail -> Listing_failed detail) in
@@ -1067,7 +1105,7 @@ let run_host_cycle m e (port : host_port) =
             let* attempt = try_request request in
             match attempt with
             | Restore arguments ->
-                let* () = deliver_arguments ~request_id arguments in
+                let* () = deliver_arguments request arguments in
                 Hashtbl.replace delivered request_id ();
                 each true rest
             | Deliver result ->
@@ -1113,11 +1151,11 @@ let run_host_watch ~sw ~cleanup_sw ~backend m e port await_change =
           stop_entry ~sw:cleanup_sw ~backend m e) in
     watch None)
 
-let observing e =
+let observing m e =
   let recovering = match e.state with Lifecycle.Failed _ -> true
     | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ | Lifecycle.Detached _ -> false in
   e.state <- Lifecycle.Observing;
-  if recovering then notify_tool_change e.package
+  if recovering then notify_exports m e
 
 (* An incarnation is live in this process while it has an entry or a cleanup
    in progress. A container of any other incarnation of the same installation
@@ -1156,7 +1194,7 @@ let run ~sw backend m e =
             else failed m e failure
         | Ok c ->
             e.connection <- Some {export_owner;worker=c}; e.started <- true;
-            notify_tool_change e.package;
+            notify_exports m e;
             Option.iter (fun port -> Option.iter
               (run_host_watch ~sw:worker_sw ~cleanup_sw:sw ~backend m e port) port.await_change) c.host;
             (match c.host, e.configuration with
@@ -1213,7 +1251,7 @@ let run ~sw backend m e =
                     ()
                   else (
                     let previous_state = e.state in
-                    if request=Observe_now then observing e;
+                    if request=Observe_now then observing m e;
                     let result =
                       let* sources = backend.acquire ~access:e.source_access ~store:m.store ~package:e.package ~binding:e.binding
                         ~resolve_machine_output:(resolve_machine_output m ~consumer_id:e.instance_id)
@@ -1228,7 +1266,7 @@ let run ~sw backend m e =
                         e.unchanged_source_refreshes <- e.unchanged_source_refreshes + 1;
                         Ok ())
                       else (
-                        observing e;
+                        observing m e;
                         let* output = c.observe ~binding:e.binding ~sources in
                         let* () = commit_output m e ~sources output in
                         e.last_committed_sources <- fingerprint;
@@ -1691,7 +1729,7 @@ let call_browser_service ~config ~access ~(service:browser_service) ~command =
         Browser_addon_client.revoke client;
         retire_admission e;
         e.state<-fail_state e (Lifecycle.Effect_outcome_unknown "browser call cancelled after dispatch; effect outcome unknown");
-        notify_tool_change e.package;
+        notify_exports m e;
         (match persist m e with Ok () -> () | Error detail ->
           Log.Misc.error "Cancelled browser Add-on state persistence: %s" detail);
         stop_entry ~sw ~backend:(backend ~store:m.store ~artifact_store:m.artifact_store ()) m e
@@ -1724,16 +1762,72 @@ let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) 
       then Ok () else Error (Unavailable "Add-on tool installation is no longer available") in
     let* e = match Hashtbl.find_opt m.entries export.instance_id with
       | Some e -> Ok e | None -> Error (Unavailable "Add-on tool connection is unavailable") in
-    let installation_id = Yojson.Safe.to_string (match e.configuration with
-      | Some owner -> `List [`String "configuration";`String owner.id]
-      | None -> `List [`String "manual";`String e.instance_id]) in
+    let installation_id = Lane_addon_tool_request_owner.installation_id (match e.configuration with
+      | Some owner -> Lane_addon_tool_request_owner.Configuration owner.id
+      | None -> Lane_addon_tool_request_owner.Manual e.instance_id) in
     Eio.Mutex.use_rw ~protect:true m.action_mutex (fun () ->
       offload (fun () -> Lane_addon_tool_request_owner.retain ~store:m.store ~scope ~request_id
         ~installation_id ~package_id:e.package.id ~tool:export.tool.name ~request)
       |> Result.map_error (function
         | Lane_addon_tool_request_owner.Store_unavailable detail -> Unavailable detail
-        | (Binding_conflict | Invalid_identity _) as error ->
+        | (Binding_conflict | Invalid_identity _ | Invalid_request _) as error ->
           Host_refusal (Lane_addon_call_context.Rejected (Lane_addon_tool_request_owner.error_to_string error)))))
+
+type tool_request_destination = {
+  installation_id : string; package_id : string; tool : string;
+  source_revision : string; configuration_revision : string;
+}
+let with_tool_request_destination ~config ~access ~reserved ~(export : tool_export) ~publish =
+  with_tool_call_owner (fun () ->
+    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    let* m = match Hashtbl.find_opt managers root with
+      | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
+    Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+    Eio.Mutex.use_ro m.action_mutex (fun () ->
+    Eio.Cancel.protect (fun () ->
+      (* Acquiring the serializer can yield. Inspect authority only afterwards. *)
+      let snapshot = Lane_addon_tool_export.isolate ~reserved (live_exports m access) in
+      let* () = if List.exists (fun (current : tool_export) ->
+          Lane_addon_tool_export.equal_owner current.owner export.owner && current.tool=export.tool) snapshot.exports
+        then Ok () else Error (Unavailable "Add-on tool installation is no longer available") in
+      let* e, owner = match Hashtbl.find_opt m.entries export.instance_id with
+        | Some ({configuration=Some owner;connection=Some connection;_} as e)
+          when Lane_addon_tool_export.equal_owner connection.export_owner export.owner -> Ok (e,owner)
+        | _ -> Error (Unavailable "New captured work requires its configured live installation") in
+      let* directory = match m.configuration_status with
+        | None -> Error (Unavailable "Add-on configuration has not been observed")
+        | Some reading -> Ok reading.directory in
+      let snapshot = offload (fun () -> Lane_addon_config.load ~directory) in
+      let* () = if snapshot.complete then Ok ()
+        else Error (Unavailable "New work requires a complete fresh Add-on declaration reading") in
+      let* declaration = match List.find_opt (fun (d : Lane_addon_config.declaration) ->
+          d.id=owner.id && d.source_path=owner.source_path && d.revision=owner.revision
+          && d.enabled && d.package=e.package) snapshot.declarations with
+        | Some declaration -> Ok declaration
+        | None -> Error (Unavailable "Fresh Add-on declaration no longer permits the configured installation") in
+      let current=Lane_addon_tool_export.isolate ~reserved (live_exports m access) in
+      let* ()=if List.exists (fun (candidate : tool_export) ->
+          Lane_addon_tool_export.equal_owner candidate.owner export.owner && candidate.tool=export.tool) current.exports
+        then Ok () else Error (Unavailable "Add-on export ended during declaration confirmation") in
+      let destination = {
+        installation_id=Lane_addon_tool_request_owner.installation_id
+          (Lane_addon_tool_request_owner.Configuration owner.id);
+        package_id=e.package.id;tool=export.tool.name;
+        source_revision=declaration.source_revision;configuration_revision=owner.revision} in
+      publish destination))))
+let capture_tool_request_owner ~config ~access ~reserved ~export ~scope ~request_id ~capture =
+  with_tool_request_destination ~config ~access ~reserved ~export ~publish:(fun destination ->
+    let* value,request = capture destination |> Result.map_error (fun detail ->
+      Host_refusal (Lane_addon_call_context.Rejected detail)) in
+    let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let* () = offload (fun () -> Lane_addon_tool_request_owner.retain ~store ~scope ~request_id
+      ~installation_id:destination.installation_id ~package_id:destination.package_id
+      ~tool:destination.tool ~request)
+      |> Result.map_error (function
+        | Lane_addon_tool_request_owner.Store_unavailable detail -> Unavailable detail
+        | (Binding_conflict | Invalid_identity _ | Invalid_request _) as error ->
+          Host_refusal (Lane_addon_call_context.Rejected (Lane_addon_tool_request_owner.error_to_string error))) in
+    Ok value)
 
 let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
   with_tool_call_owner (fun () ->
@@ -1787,7 +1881,7 @@ let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~princi
       Eio.Cancel.protect (fun () ->
         retire_admission e;
         e.state <- fail_state e (Lifecycle.Effect_outcome_unknown "exported tool call cancelled; effect outcome unknown");
-        notify_tool_change e.package;
+        notify_exports m e;
         (match persist m e with Ok () -> () | Error detail ->
           Log.Misc.error "Cancelled Add-on tool state persistence: %s" detail);
         stop_entry ~sw ~backend:worker_backend m e);
@@ -2447,7 +2541,7 @@ let detach_entry ~sw m e =
       | Lifecycle.Failed failed | Lifecycle.Detaching (Some failed) -> Some failed
       | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching None | Lifecycle.Detached _ -> None in
     retire_admission e;
-    e.state <- Lifecycle.Detaching earlier; notify_tool_change e.package; wake e;
+    e.state <- Lifecycle.Detaching earlier; notify_exports m e; wake e;
     wake_dependents m e;
     stop_entry ~sw ~backend:(backend ~store:m.store ~artifact_store:m.artifact_store ()) m e);
   let* () = persist m e in Ok (entry_json e)
@@ -3208,9 +3302,21 @@ let retain_configured_document_owner m (d : Lane_addon_config.declaration) visib
         else Lane_addon_document_owner.complete ~root ~source_path:d.source_path ~keeper
           ~source_revision:current.source_revision)
 
+let configuration_event_packages m previous (current : configuration_reading) =
+  let packages (reading : configuration_reading)=
+    List.map (fun (d : Lane_addon_config.declaration) -> d.package.id) reading.snapshot.declarations in
+  let candidates=packages current @ (match previous with None -> [] | Some reading -> packages reading)
+    @ List.map (fun (e : entry) -> e.package.id) (entries m) |> List.sort_uniq String.compare in
+  let identity package_id (reading : configuration_reading) =
+    reading.directory,reading.snapshot.complete,
+    List.filter_map (fun (d : Lane_addon_config.declaration) ->
+      if d.package.id=package_id then Some (d.id,d.source_path,d.source_revision,d.revision,d.enabled) else None)
+      reading.snapshot.declarations in
+  List.filter (fun package_id -> match previous with
+    | None -> true | Some before -> identity package_id before <> identity package_id current) candidates
 let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain (fun () ->
   let m = manager config in
-  Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+  let* result,changed=Eio.Mutex.use_ro m.configuration_mutex (fun () ->
     let snapshot = offload (fun () -> Lane_addon_config.load ~directory) in
     let rec desired_visibility visiting (d : Lane_addon_config.declaration) =
       if List.mem d.id visiting then Error "Lane output connection cycle"
@@ -3556,8 +3662,12 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
      | Some publish ->
          (match publish ~config exports with
           | Ok () -> () | Error message -> add_issue directory message));
-    m.configuration_status <- Some {directory;snapshot;issues=List.rev !issues};
-    Ok (configuration_json m ~access:Lane_addon_sources.Operator_configuration)))
+    let reading={directory;snapshot;issues=List.rev !issues} in
+    let changed=configuration_event_packages m m.configuration_status reading in
+    m.configuration_status <- Some reading;
+    Ok (configuration_json m ~access:Lane_addon_sources.Operator_configuration,changed)) in
+  List.iter (fun package_id -> publish_owner_event ~root:(Lane_addon_store.root m.store) ~package_id Configuration_observed) changed;
+  Ok result)
 
 let fleet_services : (string,unit -> unit) Hashtbl.t = Hashtbl.create 4
 let start_fleet_service ~config ~sw ~clock =
@@ -3644,6 +3754,10 @@ let installation_questions ~config =
         Ok ((declaration_id, rows) :: acc)) ids (Ok [])))
 
 module For_testing = struct
+  let with_tool_change_handler handler f =
+    let previous= !tool_change_handler in
+    tool_change_handler:=handler;
+    Fun.protect ~finally:(fun () -> tool_change_handler:=previous) f
   let with_cleanup_writer writer f = Eio.Fiber.with_binding cleanup_writer_key writer f
   let with_declaration_writer writer f = Eio.Fiber.with_binding declaration_writer_key writer f
   type nonrec host_port = host_port = {

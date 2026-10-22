@@ -578,6 +578,45 @@ let slot_plan_text = function
       slot
   | Refuse_slot_edit notice -> notice_text (Some notice)
 
+let test_history_replaces_the_editor_without_replacing_its_work () =
+  List.iter (fun write ->
+    let state = slot_editor_state ~cursor:1 () in
+    state.view <- Lanes;
+    (match plan_slot_edit state Drop_slot with
+     | Send_slot_write _ -> ()
+     | Refuse_slot_edit _ -> Alcotest.fail "the original editor cannot edit its slot");
+    open_runtime_lane_pick state (Pick_exact_lane Standalone_lane.Librarian);
+    state.runtime_lane_notice <- Some (Lane_write_committed committed_receipt);
+    state.runtime_lane_write <- write;
+    let draft = Masc_tui_runtime_config_edit.open_document
+      { path = "runtime.toml"; source_text = "original"; source_revision = "source-7" }
+      |> Masc_tui_runtime_config_edit.edit "unsaved draft" in
+    state.runtime_config_edits <-
+      [{ rce_workspace = ("workspace", "workspace/.masc"); rce_session = draft;
+         rce_rows = []; rce_view = Config_edit_draft }];
+    let original_configuration = state.standalone_lanes in
+    let original_drafts = state.runtime_config_edits in
+    let original_generation = state.lane_runs_generation in
+    begin_lane_run_list state Lane_run_identity.Workspace_curator;
+    Alcotest.(check bool) "the requested original observation owns history" true
+      (state.lanes_mode = Lanes_run_list Lane_run_identity.Workspace_curator);
+    Alcotest.(check bool) "no hidden editor or picker can intercept history keys" true
+      (Option.is_none state.slot_editor && Option.is_none state.runtime_lane_pick);
+    (match plan_slot_edit state Drop_slot with
+     | Refuse_slot_edit _ -> ()
+     | Send_slot_write _ -> Alcotest.fail "history can still mutate the hidden editor");
+    Alcotest.(check bool) "the previous editor notice is dismissed" true
+      (Option.is_none state.runtime_lane_notice);
+    Alcotest.(check bool) "the original model reading and draft are preserved" true
+      (state.standalone_lanes == original_configuration
+       && state.runtime_config_edits == original_drafts);
+    Alcotest.(check bool) "the original write and its receipt still settle" true
+      (state.runtime_lane_write = write);
+    Alcotest.(check int) "navigation does not grant or dispatch a read"
+      original_generation state.lane_runs_generation)
+    [ Lane_write_idle; Lane_write_posting;
+      Lane_write_rereading (Standalone_lanes_list, 7, committed_receipt) ]
+
 let test_the_slot_editor_edits_the_declared_order () =
   let state = slot_editor_state () in
   Alcotest.(check (list string)) "a rejected slot keeps its place"
@@ -1380,7 +1419,9 @@ let test_default_lane_route_counts_unassigned_keepers () =
     (names (keepers_for_runtime_with_lanes state ~lanes:[ "primary" ] "b"))
 
 let () = Alcotest.run "runtime list geometry"
-  ["operator states", [ Alcotest.test_case "dismissed commit stays dismissed after reread" `Quick test_dismissed_commit_stays_dismissed_after_reread;
+  ["operator states", [ Alcotest.test_case "history replaces an editor and preserves its work" `Quick
+        test_history_replaces_the_editor_without_replacing_its_work;
+       Alcotest.test_case "dismissed commit stays dismissed after reread" `Quick test_dismissed_commit_stays_dismissed_after_reread;
        Alcotest.test_case "commit application survives successful and failed rereads" `Quick test_commit_application_survives_reread;
       Alcotest.test_case "refusing runtimes are de-emphasized without changing order" `Quick
         test_refusing_runtimes_are_deemphasized_and_toggle_keeps_order;

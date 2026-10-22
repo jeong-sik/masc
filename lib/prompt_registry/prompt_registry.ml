@@ -764,11 +764,26 @@ let compare_prompt_items a b =
   in
   String.compare (get_key a) (get_key b)
 
+(* Template metadata is a live registry observation. Diagnose it while resolving
+   the snapshot, so later rendering/replay never needs an Eio mutex. *)
+let warn_template_metadata_drift key meta effective =
+  match meta with
+  | None -> ()
+  | Some meta ->
+    let metadata_variables = meta.Types.template_variables
+      |> List.map String.trim |> List.filter (fun name -> name <> "")
+      |> List.sort_uniq String.compare in
+    let effective_variables = extract_variables effective in
+    if metadata_variables <> [] && metadata_variables <> effective_variables then
+      Log.Misc.warn
+        "Prompt '%s' metadata template_variables drift from effective template: metadata=[%s] effective=[%s]"
+        key (String.concat ", " metadata_variables) (String.concat ", " effective_variables)
+
 (** Resolve a prompt. Resolution: override > file > missing. *)
 let resolve_prompt key =
   let file_path = prompt_source_path key in
   let file_value = file_value_of_key key in
-  with_mutex (fun () ->
+  let resolved, meta = with_mutex (fun () ->
     let override_value =
       Hashtbl.find_opt override_tbl key
       |> Option.map (fun (entry : Prompt_override_persistence.entry) ->
@@ -781,7 +796,9 @@ let resolve_prompt key =
       effective; source; file_value; override_value;
       file_path; file_exists = Option.is_some file_value;
       has_override = Option.is_some override_value;
-    })
+    }, Hashtbl.find_opt meta_tbl key) in
+  warn_template_metadata_drift key meta resolved.effective;
+  resolved
 
 (** Get a prompt value. Resolution: override > file > missing *)
 let get_prompt key = (resolve_prompt key).effective
@@ -790,32 +807,7 @@ let render_resolved_prompt_template key resolved vars =
   if String.trim resolved.effective = "" then
     Error (Printf.sprintf "Prompt '%s' is missing" key)
   else
-    let effective_variables = extract_variables resolved.effective in
-    let metadata_variables =
-      with_mutex (fun () ->
-          match Hashtbl.find_opt meta_tbl key with
-          | None -> None
-          | Some meta -> (
-              match meta.template_variables with
-              | [] -> None
-              | variables -> Some variables))
-    in
-    (match metadata_variables with
-     | None -> ()
-     | Some variables ->
-         let metadata_variables =
-           variables
-           |> List.map String.trim
-           |> List.filter (fun name -> name <> "")
-           |> List.sort_uniq String.compare
-         in
-         if metadata_variables <> effective_variables then
-           Log.Misc.warn
-             "Prompt '%s' metadata template_variables drift from effective template: metadata=[%s] effective=[%s]"
-             key (String.concat ", " metadata_variables)
-             (String.concat ", " effective_variables));
-    render_template
-      ~template_variables:effective_variables
+    render_template ~template_variables:(extract_variables resolved.effective)
       ~template:resolved.effective ~vars ()
 
 let resolve_and_render_prompt_template key vars =

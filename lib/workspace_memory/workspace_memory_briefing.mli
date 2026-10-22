@@ -15,6 +15,9 @@ val load : directory:string -> (t, string) result
 val save : directory:string -> t -> (unit, string) result
 (** Missing file is [empty]; malformed state and I/O failures are errors.
     Writes use strict atomic replacement. Eio cancellation propagates. *)
+val to_json : t -> Yojson.Safe.t
+val of_json : Yojson.Safe.t -> (t, string) result
+(** Complete strict state codec, also used by original commit recovery. *)
 
 val observe : sources:source list -> contract:string -> t -> observation
 (** Freshness requires the current prompt/schema contract and exact set of
@@ -39,6 +42,21 @@ val prepared_state : batch -> t
 (** Save this state before calling the model to retain the fixed pass target.
     New additions wait for the next pass; removal or modification of a target
     source resets the pass on the next [prepare]. *)
+
+val batch_contract : batch -> (string, string) result
+(** Original prepared pass contract. An inconsistent batch with no active pass
+    is an error; the current prompt registry is not consulted. *)
+val batch_is_current : sources:source list -> contract:string -> batch -> (bool, string) result
+(** Same pass-preservation rule as [prepare]: additions can wait, but a removed
+    or changed target or a changed contract invalidates this original batch.
+    Does not render, prepare, accept or publish another request. *)
+
+val batch_to_json : batch -> Yojson.Safe.t
+val batch_of_json : Yojson.Safe.t -> (batch, string) result
+(** Restore the captured original chunk without re-preparing or publishing it.
+    Requires selected plus remaining to be the exact unconsumed pass entries,
+    and input to agree with the prior semantic summary and selected sources.
+    Prompt/contract provenance remains the host request owner's responsibility. *)
 
 type preparation = Unchanged | Cleanup of t | Prepared of batch
 

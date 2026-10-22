@@ -1,339 +1,226 @@
 module Context = Workspace_memory_context
 module Ledger = Workspace_memory_ledger
 module Request = Workspace_memory_request
-module Decision = Workspace_memory_decision
 module Briefing = Workspace_memory_briefing
-module Exact = Agent_core.Exact_output
-module Runs = Exact_lane_run_registry
-
-let lane_id = Standalone_lane.to_id Standalone_lane.Workspace_curator
+module Capture = Workspace_memory_execution_capture
+module Consumer = Server_workspace_memory_addon
+module Owner = Lane_addon_tool_request_owner
+module Progress = Lane_addon_request_progress
+module Exact = Lane_addon_exact
 let ( let* ) = Result.bind
+let io work=Eio_unix.run_in_systhread work
+let consumer value=Result.map_error Consumer.error_to_string value
+let id (original : Consumer.original)=original.record.request_id
+let phase (original : Consumer.original)=Progress.phase original.record.progress
+type kind = Classification | Synthesis
+let kind (original : Consumer.original)=match Capture.work original.capture with
+  | Capture.Classification _ -> Classification | Capture.Briefing _ -> Synthesis
+let active = function
+  | Progress.Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ -> true
+  | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false
+let leaves originals=List.filter (fun original -> match phase original with
+  | Progress.Subdividing _ | Subdivided _ -> false
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Rejected _ -> true) originals
+let size_refusal (original : Consumer.original)=match phase original with
+  | Progress.Rejected {stage=Progress.Execution;evidence} ->
+    let* final=Exact.final_of_json ~schema:(Capture.output_schema original.capture) evidence in
+    (match final with
+     | Exact.Call_final (Exact.Input_refused (Exact.Input_capacity | Context_overflow | Request_body_refused)) -> Ok true
+     | Exact.Call_final (Exact.Output_limit_reached _) ->
+       (match Capture.work original.capture with Capture.Classification _ -> Ok true | Capture.Briefing _ -> Ok false)
+     | Exact.Call_final (Exact.Answered _ | Invalid_output _ | Input_refused Invalid_request)
+     | Exact.Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok false)
+  | Progress.Rejected {stage=Progress.Before_dispatch;_}
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok false
+let divisible (original : Consumer.original)=match Capture.work original.capture with
+  | Capture.Classification {batch;_} -> (match batch.selected with _::_::_ -> true | [] | [_] -> false)
+  | Capture.Briefing batch -> Briefing.selected_count batch > 1
+let changed original record=phase original <> Progress.phase record.Owner.progress
+let narrow ~config original =
+  let* result=Consumer.narrow ~config ~request_id:(id original) |> consumer in
+  match result with
+  | Consumer.Successor_ready _ -> Ok true
+  | Indivisible record | Successor_waiting record -> Ok (changed original record)
+let step ~config original =
+  let* result=Consumer.resume ~config ~request_id:(id original) |> consumer in
+  match result with
+  | Consumer.Judgment _ | Commit_pending _ ->
+    let* settled=Consumer.settle ~config ~request_id:(id original) |> consumer in
+    (match settled with
+     | Consumer.Committed record | Commit_conflict record | Commit_waiting record -> Ok (changed original record))
+  | Consumer.Awaiting (_,record) | Settled record -> Ok (changed original record)
+  | Consumer.Terminal (_,record) ->
+    let* fresh=Consumer.discover ~config |> consumer in
+    let* current=match List.find_opt (fun current -> id current=id original) fresh with
+      | Some current -> Ok current | None -> Error "Original Curator terminal vanished before successor evaluation" in
+    let* eligible=size_refusal current in
+    if eligible && divisible current then narrow ~config current else Ok (changed original record)
+let observe ~config ~on_observation_failure originals =
+  List.fold_left (fun complete original ->
+    match Consumer.deliver_observation ~config ~request_id:(id original) with
+    | Ok _ -> complete
+    | Error (Consumer.Registry_delivery_failed _ as error) ->
+      on_observation_failure ();
+      Log.Server.warn "workspace curator registry observation %s: %s" (id original)
+        (Consumer.observation_error_to_string error);
+      complete
+    | Error (Consumer.Original_observation_failed _ as error) ->
+      on_observation_failure ();
+      Log.Server.error "workspace curator original observation %s: %s" (id original)
+        (Consumer.observation_error_to_string error);
+      false) true originals
+let one_active originals=match List.filter (fun original -> active (phase original)) originals with
+  | [] -> Ok None | [original] -> Ok (Some original)
+  | _::_::_ -> Error "Multiple active Curator originals have no unique domain frontier"
+let one_successor ~config originals =
+  let rec collect acc = function
+    | [] -> (match acc with [] -> Ok None | [original] -> Ok (Some original)
+        | _::_::_ -> Error "Multiple original size refusals have no unique successor frontier")
+    | original::rest ->
+      let* size=size_refusal original in
+      let* current=if size && divisible original then
+        Consumer.successor_is_current ~config ~capture:original.capture |> consumer
+        else Ok false in
+      collect (if current then original::acc else acc) rest in
+  collect [] originals
+let classification_blocked originals (fact:Ledger.pending_fact) =
+  List.exists (fun (original : Consumer.original) -> match Capture.work original.capture with
+    | Capture.Briefing _ -> false
+    | Capture.Classification {batch;_} -> match phase original with
+      | Progress.Rejected _ ->
+        List.exists (fun (pending : Ledger.pending_fact) -> pending.fact=fact.Ledger.fact) batch.selected
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+      | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> false) originals
+let classify_new ~config ~originals ~new_work =
+  let base_path=config.Workspace.base_path in
+  let* context,ledger=io (fun () -> let* context=Context.collect ~base_path in
+    let* ledger=Ledger.load ~base_path in Ok (context,ledger)) in
+  let change=Ledger.reconcile ledger (Context.keepers context) in
+  let* ()=if change.vanished=[] then Ok () else io (fun () -> Ledger.save ~base_path change.ledger) in
+  (* Finished work already has a disposition in its confirmed after-state.
+     Only fresh reconciliation can make that identity pending again, after
+     its disposition was removed. A rejected original still fences its facts. *)
+  let pending=List.filter (fun fact -> not (classification_blocked originals fact)) change.new_facts in
+  if pending=[] || not new_work then Ok false else
+  let resolution=Prompt_registry.resolve_prompt Prompt_names.workspace_memory_curator in
+  let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
+    resolution ["workspace_memory_changes",Yojson.Safe.to_string input] in
+  let* batch=io (fun () -> Request.prepare ~neighbor_limit:(max 0 (List.length (Context.keepers context)-1))
+    ~render ~ledger:change.ledger ~current:change.current_facts ~pending
+    |> Result.map_error Request.error_to_string) in
+  match batch with
+  | None -> Ok false
+  | Some batch -> let* _=Consumer.capture_classification ~config ~prompt:resolution ~ledger:change.ledger ~batch |> consumer in
+    Ok true
+let briefing_blocked ~sources ~contract ~state originals =
+  let rec loop = function
+    | [] -> Ok false
+    | (original : Consumer.original)::rest ->
+      (match Capture.work original.capture with
+       | Capture.Classification _ -> loop rest
+       | Capture.Briefing batch -> match phase original with
+         | Progress.Rejected _ | Finished _ ->
+           let* current=Briefing.batch_is_current ~sources ~contract batch in
+           if current && Yojson.Safe.equal (Briefing.to_json state) (Briefing.to_json (Briefing.prepared_state batch))
+           then Ok true else loop rest
+         | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+         | Conflicted _ | Subdividing _ | Subdivided _ -> loop rest) in loop originals
+let briefing_new ~config ~originals ~new_work ~busy =
+  let base_path=config.Workspace.base_path in
+  let directory=Ledger.directory ~base_path in
+  let* ledger,state=io (fun () -> let* ledger=Ledger.load ~base_path in
+    let* state=Briefing.load ~directory in Ok (ledger,state)) in
+  let sources=Ledger.briefing_sources ledger in
+  let resolution=Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing in
+  let contract=Briefing.contract ~template:resolution.effective in
+  let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_briefing
+    resolution ["workspace_memory_briefing",Yojson.Safe.to_string input] in
+  let* prepared=Briefing.prepare ~sources ~contract ~render state in
+  match prepared with
+  | Briefing.Unchanged -> Ok false
+  | Cleanup cleaned -> let* ()=io (fun () -> Briefing.save ~directory cleaned) in Ok true
+  | Prepared batch ->
+    let* blocked=briefing_blocked ~sources ~contract ~state originals in
+    if busy || blocked || not new_work then Ok false else
+    let prepared=Briefing.prepared_state batch in
+    let* ()=if Yojson.Safe.equal (Briefing.to_json state) (Briefing.to_json prepared) then Ok ()
+      else io (fun () -> Briefing.save ~directory prepared) in
+    let* _=Consumer.capture_briefing ~config ~prompt:resolution ~batch |> consumer in Ok true
+let run_domain ~config ~on_inventory ~on_observation_failure domain =
+  let* originals=Consumer.discover ~config |> consumer in
+  on_inventory originals;
+  let new_work=observe ~config ~on_observation_failure originals in
+  let selected=leaves originals |> List.filter (fun original -> kind original=domain) in
+  let* running=one_active selected in
+  match running with
+  | Some original ->
+    let result=step ~config original in
+    (match domain with
+     | Classification -> result
+     | Synthesis -> let* progressed=result in
+       let* cleaned=briefing_new ~config ~originals:selected ~new_work:false ~busy:true in Ok (progressed || cleaned))
+  | None ->
+    let* successor=one_successor ~config selected in
+    let prepare ~originals ~new_work=match domain with
+      | Classification -> classify_new ~config ~originals ~new_work
+      | Synthesis -> briefing_new ~config ~originals ~new_work ~busy:false in
+    match successor with
+    | None -> prepare ~originals:selected ~new_work
+    | Some original ->
+      match narrow ~config original with
+      | Ok true -> Ok true
+      | Ok false | Error _ as result ->
+        (match result with Ok _ -> () | Error detail -> Log.Server.error "workspace curator successor: %s" detail);
+        (* A failed publication is not absence. Rediscover before any new root;
+           a recovered child is now runnable on the next pass, never alongside
+           another capture derived from the previous frontier. *)
+        let* fresh=Consumer.discover ~config |> consumer in
+        on_inventory fresh;
+        let new_work=observe ~config ~on_observation_failure fresh in
+        let selected=leaves fresh |> List.filter (fun original -> kind original=domain) in
+        let* running=one_active selected in
+        match running with Some _ -> Ok true | None -> prepare ~originals:selected ~new_work
+let run ~config ~on_inventory ~on_observation_failure =
+  let classify=run_domain ~config ~on_inventory ~on_observation_failure Classification in
+  let synthesize=run_domain ~config ~on_inventory ~on_observation_failure Synthesis in
+  let changed=function Ok changed -> changed | Error detail ->
+    (* Domain progression is not proof that observation discovery completed.
+       Preserve maintenance demand when an earlier read/step refused before
+       [observe], including a subsequent failure while ACKs are pending. *)
+    on_observation_failure ();
+    Log.Server.error "workspace curator original owner: %s" detail;false in
+  let classified=changed classify and synthesized=changed synthesize in
+  classified || synthesized
 
-let output_schema = Decision.output_schema
-
-type execution_failure =
-  | Input_too_large of string
-  | Output_too_large of string
-  | Execution_failed of string
-
-let execution_failure_detail = function
-  | Input_too_large detail | Output_too_large detail | Execution_failed detail -> detail
-
-let execution_failure_fields failure =
-  let input_too_large, output_too_large = match failure with
-    | Input_too_large _ -> true, false
-    | Output_too_large _ -> false, true
-    | Execution_failed _ -> false, false in
-  ["error", `String (execution_failure_detail failure);
-   "input_too_large", `Bool input_too_large;
-   "output_too_large", `Bool output_too_large]
-
-let size_rejection (disposition : Exact.candidate_rejection_disposition) =
-  match disposition with
-  | Exact.Input_capacity (Exact.Context_window_exceeded _
-      | Exact.Token_capacity_rejected (Exact.Capacity_input_rejected _)) -> true
-  | Exact.Runtime_slot_unavailable | Exact.Runtime_contract_rejected
-  | Exact.Input_contract_rejected | Exact.Output_requirement_rejected
-  | Exact.Input_capacity (Exact.Token_measurement_required _
-      | Exact.Token_capacity_rejected (Exact.Capacity_evidence_not_yet_valid _
-          | Exact.Capacity_evidence_expired _ | Exact.Capacity_boundary_unknown _))
-  | Exact.Request_preparation_failed -> false
-
-let size_execution_failure (error : Exact.execution_error) =
-  match error.cause with
-  | Exact.Provider_response_refused
-      { refusal = (Exact.Context_overflow | Exact.Request_body_refused | Exact.Input_capacity); _ } -> true
-  | Exact.Provider_response_refused
-      { refusal =
-          ( Exact.Refusal_body_not_received | Exact.Rate_limited | Exact.Overloaded
-          | Exact.Server_error | Exact.Auth_failed | Exact.Authorization_refused
-          | Exact.Payment_required | Exact.Invalid_request | Exact.Not_found
-          | Exact.Network_error | Exact.Timeout )
-      ; _
-      }
-  | Exact.Completion_failed _
-  | Exact.Response_body_deadline_exceeded | Exact.Incomplete_output | Exact.Output_limit_reached
-  | Exact.Missing_output | Exact.Ambiguous_output _ | Exact.Unexpected_output_content
-  | Exact.Invalid_json_output -> false
-
-let size_candidate_failure = function
-  | Exact.Flow_candidate_rejected rejection ->
-    size_rejection (Exact.candidate_rejection_disposition rejection)
-  | Exact.Flow_candidate_execution_failed { cause; _ } -> size_execution_failure cause
-
-let candidate_failure_detail = function
-  | Exact.Flow_candidate_rejected rejection -> Exact.candidate_rejection_reason rejection
-  | Exact.Flow_candidate_execution_failed { cause; _ } ->
-    Exact.execution_error_cause_to_string cause.cause
-
-let output_limit_failure (error : Exact.execution_error) =
-  match error.cause with
-  | Exact.Output_limit_reached -> true
-  | Exact.Provider_response_refused _ | Exact.Completion_failed _
-  | Exact.Response_body_deadline_exceeded | Exact.Incomplete_output
-  | Exact.Missing_output | Exact.Ambiguous_output _ | Exact.Unexpected_output_content
-  | Exact.Invalid_json_output -> false
-
-let output_limit_candidate_failure = function
-  | Exact.Flow_candidate_rejected _ -> false
-  | Exact.Flow_candidate_execution_failed { cause; _ } -> output_limit_failure cause
-
-let output_limit_terminal_failure = function
-  | Exact.Flow_exact_execution_failed { cause; _ } -> output_limit_failure cause
-  | Exact.Flow_candidates_exhausted _ | Exact.Flow_attempt_already_started _
-  | Exact.Flow_attempt_start_failed _ | Exact.Flow_measurement_start_failed _
-  | Exact.Flow_before_measurement_dispatch_callback_failed _
-  | Exact.Flow_measurement_terminal_callback_failed _ | Exact.Flow_before_dispatch_callback_failed _
-  | Exact.Flow_before_advance_callback_failed _ -> false
-
-let size_terminal_failure = function
-  | Exact.Flow_candidates_exhausted { rejection; _ } ->
-    size_rejection (Exact.candidate_rejection_disposition rejection)
-  | Exact.Flow_exact_execution_failed { cause; _ } -> size_execution_failure cause
-  | Exact.Flow_attempt_already_started _ | Exact.Flow_attempt_start_failed _
-  | Exact.Flow_measurement_start_failed _ | Exact.Flow_before_measurement_dispatch_callback_failed _
-  | Exact.Flow_measurement_terminal_callback_failed _ | Exact.Flow_before_dispatch_callback_failed _
-  | Exact.Flow_before_advance_callback_failed _ -> false
-
-let validate ~selected ~ledger raw =
-  let* assignments = Decision.decode ~selected raw in
-  Ledger.apply ledger ~selected assignments
-  |> Result.map_error Ledger.apply_error_to_string
-  |> Result.map (fun _ -> raw)
-
-(* The curator's flow callbacks never fail ([Ok ()]); their error type is
-   string, which the renderer prints unchanged. *)
-let flow_failure =
-  Exact.flow_execution_error_to_string
-    ~callback_error_to_string:Fun.id
-    ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt
-
-(* How the lane's HTTP slots ended when none of them answered. *)
-type http_failure =
-  | No_http_slot
-  | Http_failed of execution_failure
-
-(* The lane's HTTP slots, as one exact-output flow. *)
-let execute_http ~(resolved : Runtime_exact_output_registry.resolved_lane) ~requirement
-    ~rendered_prompt ~validate_output =
-  let failed result = Result.map_error (fun detail -> Http_failed (Execution_failed detail)) result in
-  let rec candidates = function
-    | [] -> Ok []
-    | (slot : Runtime_exact_output_registry.selected_slot) :: rest ->
-      let* candidate = Exact.make_flow_candidate ~id:slot.slot_id
-        ~admitted_target:slot.admitted_target
-        |> Result.map_error (function Exact.Blank_flow_candidate_id -> "blank candidate identity") in
-      let* rest = candidates rest in
-      Ok (candidate :: rest)
-  in
-  (* Ordered here, not in [prepare_execution]: the declared order is part of
-     the published configuration, and a rest must not change its identity. *)
-  let* candidates =
-    candidates (Runtime_exact_lane_backpressure.order resolved).selected_slots |> failed in
-  let* first, rest = match candidates with
-    | [] -> Error No_http_slot
-    | first :: rest -> Ok (first, rest) in
-  let messages = Agent_core.Types.[
-    make_message ~role:User [Text rendered_prompt] ] in
-  let* snapshot = Exact.snapshot_flow ~first ~rest ~messages requirement
-    |> Result.map_error (function Exact.Duplicate_flow_candidate_id { candidate_id; _ } ->
-      "duplicate candidate: " ^ candidate_id) |> failed in
-  let* attempt =
-    Exact.start_flow
-      ~admission_class:(Standalone_lane.admission_class Workspace_curator)
-      snapshot
-    |> Result.map_error (function Exact.Flow_id_generation_failed detail -> detail) |> failed in
-  match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
-  | Some net, Some clock ->
-    let validate success =
-      let raw = (Exact.flow_success_output success).output in
-      match validate_output raw with
-      | Ok _ -> Exact.Accept raw
-      | Error detail -> Exact.Reject_and_advance detail in
-    let size_refusals = ref [] in
-    let output_refusals = ref [] in
-    let flow = Exact.execute_flow_once ~net ~clock
-       ~before_measurement_dispatch:(fun _ -> Ok ())
-       ~on_measurement_terminal:(fun _ -> Ok ())
-       ~before_dispatch:(fun _ -> Ok ())
-       ~before_advance:(fun ~failed ~next:_ ->
-         if size_candidate_failure failed then
-           size_refusals := candidate_failure_detail failed :: !size_refusals;
-         if output_limit_candidate_failure failed then
-           output_refusals := candidate_failure_detail failed :: !output_refusals;
-         Ok ()) ~validate attempt in
-    Runtime_exact_lane_backpressure.observe ~resolved flow;
-    (match flow with
-     | Ok success ->
-       let candidate = Exact.flow_success_candidate success.transport_success in
-       Ok
-         ( success.accepted
-         , candidate.visit.identity.candidate_id
-         , (Exact.flow_success_output success.transport_success).usage
-           |> Option.map Runs.usage_of_api_usage )
-     | Error (Exact.Flow_execution_terminal { cause; _ }) ->
-       let detail = String.concat "; "
-         (List.rev !size_refusals @ List.rev !output_refusals @ [flow_failure cause]) in
-       let failure = match Exact.flow_execution_terminal_kind cause with
-         | Exact.Advanceable_candidates_exhausted when !size_refusals <> [] || size_terminal_failure cause ->
-           Input_too_large detail
-         | Exact.Advanceable_candidates_exhausted when !output_refusals <> [] || output_limit_terminal_failure cause ->
-           Output_too_large detail
-         | Exact.Advanceable_candidates_exhausted | Exact.Non_advanceable_terminal -> Execution_failed detail in
-       Error (Http_failed failure)
-     | Error (Exact.Flow_semantic_candidates_exhausted { rejections; _ }) ->
-       let detail = String.concat "; " (List.rev !size_refusals @ List.rev !output_refusals @
-         List.map (fun rejection -> rejection.Exact.rejection) (rejections.first :: rejections.rest)) in
-       let failure = if !size_refusals <> [] then Input_too_large detail
-         else if !output_refusals <> [] then Output_too_large detail
-         else Execution_failed detail in
-       Error (Http_failed failure))
-  | _ -> Error (Http_failed (Execution_failed "workspace curator execution context unavailable"))
-
-(* Exact owns provider admission and size evidence. Curator does not convert
-   a token window into a byte budget. *)
-let system_prompt =
-  "Return one JSON object matching the exact output schema."
-
-let execute_cli
-    ~cli_runner
-    ~base_path
-    ~cli_slots
-    ~requirement
-    ~rendered_prompt
-    ~validate_output
-    ~prior_size_refused
-    ~prior_output_refused
-    ~prior_details
-  =
-  let size_refused = ref prior_size_refused in
-  let on_failure failure =
-    if Keeper_lane_cli_oneshot.refused_for_input_size failure
-    then size_refused := true
-  in
-  match
-    Keeper_lane_cli_oneshot.walk
-      ?runner:cli_runner
-      ~base_dir:base_path
-      ~cli_slots
-      ~system_prompt
-      ~requirement
-      ~prompt:rendered_prompt
-      ~validate:validate_output
-      ~on_failure
-      ()
-  with
-  | Ok (runtime_id, accepted) -> Ok (accepted, runtime_id, None)
-  | Error cli_failures ->
-    let detail =
-      String.concat
-        "; "
-        (prior_details
-         @ List.map Keeper_lane_cli_oneshot.failure_to_string cli_failures)
-    in
-    if !size_refused
-    then Error (Input_too_large detail)
-    else if prior_output_refused
-    then Error (Output_too_large detail)
-    else Error (Execution_failed detail)
-
-let execute_output
-    ~cli_runner
-    ~base_path
-    ~(resolved : Runtime_exact_output_registry.resolved_lane)
-    ~schema
-    ~rendered_prompt
-    ~validate_output
-  =
-  let requirement = Exact.make_output_requirement ~schema
-      ~minimum_guarantee:Exact.Json_syntax in
-  let cli_admission =
-    Keeper_lane_cli_oneshot.partition_cli_slots
-      ~lane:(Runtime.requirement_of_exact_lane ~schema Runtime.Workspace_curator)
-      resolved.cli_slots
-  in
-  let refused_cli_details =
-    List.map
-      (fun ({ slot; refusal } : Keeper_lane_cli_oneshot.refused_slot) ->
-         Printf.sprintf
-           "cli lane slot %s refused admission: %s"
-           slot
-           (Runtime.refusal_to_string refusal))
-      cli_admission.refused_cli_slots
-  in
-  match execute_http ~resolved ~requirement ~rendered_prompt ~validate_output with
-  | Ok answer -> Ok answer
-  | Error No_http_slot ->
-    if resolved.cli_slots = []
-    then Error (Execution_failed "workspace curator has no admitted exact-output HTTP slot")
-    else if cli_admission.cli_slots = []
-    then Error (Execution_failed (String.concat "; " refused_cli_details))
-    else
-      execute_cli
-        ~cli_runner
-        ~base_path
-        ~cli_slots:cli_admission.cli_slots
-        ~requirement
-        ~rendered_prompt
-        ~validate_output
-        ~prior_size_refused:false
-        ~prior_output_refused:false
-        ~prior_details:refused_cli_details
-  | Error (Http_failed http_err) ->
-    if resolved.cli_slots = []
-    then Error http_err
-    else (
-      let prior_size_refused, prior_output_refused =
-        match http_err with
-        | Input_too_large _ -> true, false
-        | Output_too_large _ -> false, true
-        | Execution_failed _ -> false, false
-      in
-      let prior_details = execution_failure_detail http_err :: refused_cli_details in
-      if cli_admission.cli_slots = []
-      then (
-        let detail = String.concat "; " prior_details in
-        if prior_size_refused
-        then Error (Input_too_large detail)
-        else if prior_output_refused
-        then Error (Output_too_large detail)
-        else Error (Execution_failed detail))
-      else
-        execute_cli
-          ~cli_runner
-          ~base_path
-          ~cli_slots:cli_admission.cli_slots
-          ~requirement
-          ~rendered_prompt
-          ~validate_output
-          ~prior_size_refused
-          ~prior_output_refused
-          ~prior_details)
-
-let execute_with_options ~cli_runner ~base_path ~resolved ~rendered_prompt ~selected ~ledger =
-  execute_output ~cli_runner ~base_path ~resolved ~schema:output_schema ~rendered_prompt
-    ~validate_output:(validate ~selected ~ledger)
-
-let execute ~resolved ~rendered_prompt ~selected ~ledger =
-  execute_with_options ~cli_runner:None ~base_path:"." ~resolved ~rendered_prompt ~selected ~ledger
-
-let summarize ~base_path ~resolved ~batch =
-  execute_output ~cli_runner:None ~base_path ~resolved ~schema:Briefing.output_schema
-    ~rendered_prompt:(Briefing.rendered_prompt batch)
-    ~validate_output:(fun raw ->
-      let* text = Briefing.decode_output raw in
-      let* _ = Briefing.accept batch ~text in
-      Ok raw)
+type idle_checkpoint = unit ref
+type idle_result = Owner_idle of idle_checkpoint | Owner_stopped | Owner_missing
 
 type owner =
   { mutex : Stdlib.Mutex.t
   ; mutable pending : bool
   ; mutable in_flight : bool
   ; mutable stopped : bool
+  ; mutable observation_retry : bool
   ; mutable wake : unit Eio.Promise.u option
+  ; mutable idle_checkpoint : idle_checkpoint
+  ; mutable idle_waiters : idle_result Eio.Promise.u list
   ; in_flight_revisions :
       (string * Keeper_memory_commit_notifications.store, int) Hashtbl.t
   }
+
+(* The caller holds [owner.mutex]. Resolving promises happens after releasing
+   it: an idle observation is not a lease against a subsequent wake. *)
+let take_idle_waiters owner =
+  if owner.stopped || (not owner.pending && not owner.in_flight) then (
+    let result=if owner.stopped then Owner_stopped else Owner_idle owner.idle_checkpoint in
+    let waiters=owner.idle_waiters in
+    owner.idle_waiters <- [];
+    List.map (fun waiter -> waiter,result) waiters)
+  else []
+let resolve_idle_waiters waiters =
+  List.iter (fun (waiter,result) -> ignore (Eio.Promise.try_resolve waiter result)) waiters
 
 let owners_mutex = Stdlib.Mutex.create ()
 let owners : (string, owner) Hashtbl.t = Hashtbl.create 4
@@ -379,262 +266,21 @@ let request ~base_path =
   | exception Unix.Unix_error (error, operation, _) ->
     Unavailable (operation ^ ": " ^ Unix.error_message error)
 
-type execution =
-  { configuration : Yojson.Safe.t
-  ; execute : rendered_prompt:string -> selected:Ledger.pending_fact list
-      -> ledger:Ledger.t -> (Yojson.Safe.t * string * Runs.usage option, execution_failure) result
-  ; summarize : batch:Briefing.batch -> (Yojson.Safe.t * string * Runs.usage option, execution_failure) result
-  }
+let retry_pending_observations ~base_path =
+  match Eio_guard.run_in_systhread ~label:"curator-retry-workspace" (fun () -> Unix.realpath base_path) with
+  | base_path ->
+  let owner=Stdlib.Mutex.protect owners_mutex (fun () -> Hashtbl.find_opt owners base_path) in
+  (match owner with
+  | None -> ()
+  | Some owner ->
+    let pending=Stdlib.Mutex.protect owner.mutex (fun () -> owner.observation_retry && not owner.stopped) in
+    if pending then ignore (wake owner))
+  | exception Unix.Unix_error (error,operation,_) ->
+    Log.Server.warn "workspace curator retry identity %s: %s: %s" base_path operation (Unix.error_message error)
 
-let prepare_execution ~base_path =
-  let* registry = Runtime_exact_output_registry.current ()
-    |> Result.map_error Runtime_exact_output_registry.publication_error_to_string in
-  let* resolved = Runtime_exact_output_registry.resolve_lane registry ~lane_id
-    |> Result.map_error Runtime_exact_output_registry.lane_resolution_error_to_string in
-  let cli_admission =
-    Keeper_lane_cli_oneshot.partition_cli_slots
-      ~lane:(Runtime.requirement_of_exact_lane ~schema:output_schema Runtime.Workspace_curator)
-      resolved.cli_slots
-  in
-  let resolved = { resolved with cli_slots = cli_admission.cli_slots } in
-  let refused_cli_json =
-    List.map
-      (fun ({ slot; refusal } : Keeper_lane_cli_oneshot.refused_slot) ->
-         `Assoc
-           [ "slot", `String slot
-           ; "refusal", `String (Runtime.refusal_to_string refusal)
-           ])
-      cli_admission.refused_cli_slots
-  in
-  let configuration = `Assoc
-    [ "catalog_generation", `String (Runtime_exact_output_registry.catalog_generation_fingerprint registry)
-    ; "slots", `List (List.map (fun (slot : Runtime_exact_output_registry.selected_slot) -> `String slot.slot_id) resolved.selected_slots)
-    ; "cli_slots", `List (List.map (fun id -> `String id) resolved.cli_slots)
-    ; "refused_cli_slots", `List refused_cli_json ] in
-  Ok { configuration;
-       execute = execute_with_options ~cli_runner:None ~base_path ~resolved;
-       summarize = summarize ~base_path ~resolved }
-
-type classification_error = Inventory_failed of string | Curation_failed of string
-
-let classify ~base_path ~prepare =
-  let initial = Domain_pool_ref.submit_io_or_inline (fun () ->
-    let* context = Context.collect ~base_path in
-    let* ledger = Ledger.load ~base_path in
-    let change = Ledger.reconcile ledger (Context.keepers context) in
-    let* () = if change.vanished = [] then Ok ()
-      else Ledger.save ~base_path change.ledger in
-    Ok (context, change)) in
-  match initial with
-  | Error detail -> Error (Inventory_failed detail)
-  | Ok (_, { Ledger.new_facts = []; _ }) -> Ok false
-  | Ok (context, change) ->
-    let prepared =
-      let* execution = prepare () in
-      let key = Prompt_names.workspace_memory_curator in
-      let resolution = Prompt_registry.resolve_prompt key in
-      let render json = Prompt_registry.render_resolved_prompt_template key resolution
-        ["workspace_memory_changes", Yojson.Safe.to_string json] in
-      let owner_count = List.length (Context.keepers context) in
-      let* batch = Request.prepare ~neighbor_limit:(max 0 (owner_count - 1)) ~render ~ledger:change.ledger
-        ~current:change.current_facts ~pending:change.new_facts
-        |> Result.map_error Request.error_to_string in
-      match batch with
-      | None -> Error "workspace curator found pending facts but prepared no batch"
-      | Some batch -> Ok (execution, resolution, render, batch)
-    in
-    (match prepared with
-     | Error detail -> Error (Curation_failed detail)
-     | Ok (execution, resolution, render, batch) ->
-       let rec attempt (batch : Request.batch) =
-       let registry = Runs.global () in
-       let run_id = Random_id.prefixed ~prefix:"workspace-curator-" ~bytes:16 in
-       let started_at = Time_compat.now () in
-       let monotonic_start = Mtime_clock.now () in
-       let sha text = Digestif.SHA256.(digest_string text |> to_hex) in
-       let input = `Assoc
-         [ "context_sha256", `String (Context.fingerprint context)
-         ; "ledger_before_sha256", `String (sha (Yojson.Safe.to_string (Ledger.to_json change.ledger)))
-         ; "actual_input", batch.input
-         ; "prompt", `Assoc
-             [ "key", `String Prompt_names.workspace_memory_curator
-             ; "source", `String (Prompt_registry.prompt_source_to_string resolution.source)
-             ; "file_path", (match resolution.file_path with None -> `Null | Some path -> `String path)
-             ; "effective_template", `String resolution.effective
-             ; "rendered", `String batch.rendered_prompt
-             ; "rendered_sha256", `String (sha batch.rendered_prompt) ]
-         ; "output_schema", output_schema
-         ; "configuration", execution.configuration
-         ; "rendered_bytes", `Int (String.length batch.rendered_prompt)
-         ; "selected_count", `Int (List.length batch.selected) ] in
-       (* Durable exact input precedes every provider call. *)
-       Runs.register_running registry ~run_id ~lane:Runs.Workspace_curator
-         ~actor:base_path ~started_at ~input:(Runs.Exact_input input);
-       let complete ?selected_slot ?usage outcome output =
-         match Runs.mark_completed registry ~run_id ~outcome
-           ~elapsed_s:(Mtime.Span.to_float_ns (Mtime.span monotonic_start (Mtime_clock.now ())) /. 1e9)
-           ~selected_slot ?usage ~output () with
-         | Ok () -> ()
-         | Error error -> Log.Server.error "workspace curator completion %s: %s"
-             run_id (Runs.completion_error_to_string error) in
-       let fail failure =
-         let detail = execution_failure_detail failure in
-         complete (Runs.Failed { code = "workspace_curator_failed"; detail })
-           (`Assoc (execution_failure_fields failure @ ["semantic_verification", `String "not_performed"]));
-         Error (Curation_failed detail) in
-       let outcome = try
-         match execution.execute ~rendered_prompt:batch.rendered_prompt
-             ~selected:batch.selected ~ledger:change.ledger with
-         | Error ((Input_too_large _ | Output_too_large _) as failure) ->
-           ignore (fail failure);
-           `Refused (execution_failure_detail failure)
-         | Error (Execution_failed _ as failure) -> `Done (fail failure)
-         | Ok (raw, slot, usage) ->
-         let result =
-           let* assignments = Decision.decode ~selected:batch.selected raw in
-           let* updated = Ledger.apply change.ledger ~selected:batch.selected assignments
-             |> Result.map_error Ledger.apply_error_to_string in
-           let* () = Domain_pool_ref.submit_io_or_inline (fun () -> Ledger.save ~base_path updated) in
-           Ok (raw, slot, updated) in
-         `Done (match result with
-          | Error detail -> fail (Execution_failed detail)
-          | Ok (raw, slot, updated) ->
-            complete ~selected_slot:slot ?usage Runs.Succeeded
-              (`Assoc [ "decision", raw
-                      ; "ledger_sha256", `String (sha (Yojson.Safe.to_string (Ledger.to_json updated)))
-                      ; "remaining_count", `Int (List.length batch.remaining)
-                      ; "semantic_verification", `String "not_performed" ]);
-            Ok (batch.remaining <> []))
-       with
-       | Eio.Cancel.Cancelled _ as error ->
-         Eio.Cancel.protect (fun () -> complete Runs.Cancelled (`Assoc ["cancelled", `Bool true]));
-         raise error
-       | exn -> `Done (fail (Execution_failed (Printexc.to_string exn)))
-       in
-       match outcome with
-       | `Done result -> result
-       | `Refused detail ->
-         (match Request.narrow ~render batch with
-          | Error error -> Error (Curation_failed (Request.error_to_string error))
-          | Ok None -> Error (Curation_failed detail)
-          | Ok (Some smaller) -> attempt smaller)
-       in attempt batch)
-
-(* Classification and synthesis have separate durable boundaries. In
-   particular, an existing ledger and a deletion-only reconciliation need a
-   briefing even when there are no facts left to classify. *)
-let refresh_briefing ~base_path ~prepare =
-  let directory = Ledger.directory ~base_path in
-  let* ledger, state = Domain_pool_ref.submit_io_or_inline (fun () ->
-    let* ledger = Ledger.load ~base_path in
-    let* state = Briefing.load ~directory in
-    Ok (ledger, state)) in
-  let sources = Ledger.briefing_sources ledger in
-  let key = Prompt_names.workspace_memory_briefing in
-  let resolution = Prompt_registry.resolve_prompt key in
-  let sha text = Digestif.SHA256.(digest_string text |> to_hex) in
-  let contract = Briefing.contract ~template:resolution.effective in
-  let render json = Prompt_registry.render_resolved_prompt_template key resolution
-      ["workspace_memory_briefing", Yojson.Safe.to_string json] in
-  let* preparation = Briefing.prepare ~sources ~contract ~render state in
-  match preparation with
-  | Briefing.Unchanged -> Ok false
-  | Briefing.Cleanup cleaned ->
-    let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
-      Briefing.save ~directory cleaned) in
-    Ok false
-  | Briefing.Prepared batch ->
-    let* execution = prepare () in
-    let rec attempt batch =
-      let* () = Domain_pool_ref.submit_io_or_inline (fun () ->
-        Briefing.save ~directory (Briefing.prepared_state batch)) in
-      let registry = Runs.global () in
-      let run_id = Random_id.prefixed ~prefix:"workspace-briefing-" ~bytes:16 in
-      let started_at = Time_compat.now () in
-      let monotonic_start = Mtime_clock.now () in
-      let input = `Assoc
-        [ "phase", `String "briefing"
-        ; "ledger_sha256", `String (sha (Yojson.Safe.to_string (Ledger.to_json ledger)))
-        ; "contract_sha256", `String contract
-        ; "actual_input", Briefing.input batch
-        ; "prompt", `Assoc
-          [ "key", `String key
-          ; "effective_template", `String resolution.effective
-          ; "rendered", `String (Briefing.rendered_prompt batch)
-          ; "rendered_sha256", `String (sha (Briefing.rendered_prompt batch)) ]
-        ; "output_schema", Briefing.output_schema
-        ; "configuration", execution.configuration
-        ; "rendered_bytes", `Int (String.length (Briefing.rendered_prompt batch))
-        ; "selected_count", `Int (Briefing.selected_count batch)
-        ; "remaining_count", `Int (Briefing.remaining_count batch) ] in
-      Runs.register_running registry ~run_id ~lane:Runs.Workspace_curator
-        ~actor:base_path ~started_at ~input:(Runs.Exact_input input);
-      let complete ?selected_slot ?usage outcome output =
-        match Runs.mark_completed registry ~run_id ~outcome
-          ~elapsed_s:(Mtime.Span.to_float_ns (Mtime.span monotonic_start (Mtime_clock.now ())) /. 1e9)
-          ~selected_slot ?usage ~output () with
-        | Ok () -> ()
-        | Error error -> Log.Server.error "workspace briefing completion %s: %s"
-            run_id (Runs.completion_error_to_string error) in
-      let fail failure =
-        let detail = execution_failure_detail failure in
-        complete (Runs.Failed { code = "workspace_curator_briefing_failed"; detail })
-          (`Assoc (execution_failure_fields failure));
-        Error detail in
-      let outcome = try
-        match execution.summarize ~batch with
-        | Error (Input_too_large detail) ->
-          ignore (fail (Input_too_large detail));
-          `Refused detail
-        | Error ((Execution_failed _ | Output_too_large _) as failure) -> `Done (fail failure)
-        | Ok (raw, slot, usage) ->
-        let result =
-          let* text = Briefing.decode_output raw in
-          let* updated = Briefing.accept batch ~text in
-          let* () = Domain_pool_ref.submit_io_or_inline (fun () -> Briefing.save ~directory updated) in
-          Ok (text, slot, updated) in
-        `Done (match result with
-         | Error detail -> fail (Execution_failed detail)
-         | Ok (text, slot, updated) ->
-           let more = Briefing.needs_refresh ~sources ~contract updated in
-           complete ~selected_slot:slot ?usage Runs.Succeeded
-             (`Assoc [ "phase", `String "briefing"
-                     ; "briefing", `String text
-                     ; "briefing_bytes", `Int (String.length text)
-                     ; "source_refresh_pending", `Bool more
-                     ; "semantic_verification", `String "not_performed" ]);
-           Ok more)
-      with
-      | Eio.Cancel.Cancelled _ as error ->
-        Eio.Cancel.protect (fun () -> complete Runs.Cancelled (`Assoc ["cancelled", `Bool true]));
-        raise error
-      | exn -> `Done (fail (Execution_failed (Printexc.to_string exn)))
-      in
-      match outcome with
-      | `Done result -> result
-      | `Refused detail ->
-        let* smaller = Briefing.narrow ~render batch in
-        (match smaller with None -> Error detail | Some smaller -> attempt smaller)
-    in attempt batch
-
-let run ~base_path ~enabled ~prepare =
-  let finish classification_pending =
-    if not (enabled ()) then classification_pending
-    else match refresh_briefing ~base_path ~prepare with
-      | Ok briefing_pending -> classification_pending || briefing_pending
-      | Error detail ->
-        Log.Server.error "workspace curator briefing: %s" detail;
-        classification_pending in
-  match classify ~base_path ~prepare with
-  | Error (Inventory_failed detail) ->
-    Log.Server.error "workspace curator inventory: %s" detail; false
-  | Error (Curation_failed detail) ->
-    Log.Server.error "workspace curator classification: %s" detail;
-    finish false
-  | Ok pending -> finish pending
-
-let start_with ~sw ~base_path ~enabled ~prepare =
-  let base_path = Unix.realpath base_path in
+let start ~sw ~config =
+  Eio.Switch.check sw;
+  let base_path = Unix.realpath config.Workspace.base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   (* A missing directory is an inventory failure, not an empty workspace.
      Creating it here could reconcile every durable ledger member away. *)
@@ -645,7 +291,10 @@ let start_with ~sw ~base_path ~enabled ~prepare =
     ; pending = true
     ; in_flight = false
     ; stopped = false
+    ; observation_retry = false
     ; wake = None
+    ; idle_checkpoint = ref ()
+    ; idle_waiters = []
     ; in_flight_revisions = Hashtbl.create 8
     }
   in
@@ -653,17 +302,39 @@ let start_with ~sw ~base_path ~enabled ~prepare =
     if Hashtbl.mem owners base_path then false
     else (Hashtbl.add owners base_path owner; true)) in
   if admitted then (
-    let unsubscribe_configuration =
-      Runtime_exact_output_registry.subscribe_lane_changes ~lane_id (fun () ->
-        (* fire-and-forget: publication signals the owner; it never runs a model here. *)
-        ignore (wake owner)) in
+    let routes=ref [] in
+    let sync_routes originals =
+      let inventory=Lane_addon_runtime.inventory ~config in
+      let installed=List.filter_map (fun (item : Lane_addon_runtime.inventory_instance) ->
+        if item.package_id=Capture.package_id then Option.map (fun owner -> owner.Lane_addon_runtime.id) item.configuration
+        else None) inventory.instances in
+      let retained=List.filter_map (fun (original : Consumer.original) ->
+        match Owner.installation_of_id original.record.installation_id with
+        | Ok (Owner.Configuration id) -> Some id
+        | Ok (Owner.Manual _) | Error _ -> None) originals in
+      let wanted=List.sort_uniq String.compare (installed @ retained)
+        |> List.concat_map (fun id -> [id ^ "/classification";id ^ "/briefing"]) in
+      List.iter (fun (id,stop) -> if not (List.mem id wanted) then stop ()) !routes;
+      routes:=List.filter (fun (id,_) -> List.mem id wanted) !routes;
+      List.iter (fun id -> if not (List.mem_assoc id !routes) then
+        routes:=(id,Runtime_exact_output_registry.subscribe_lane_changes ~lane_id:id
+          (fun () -> ignore (wake owner))) :: !routes) wanted in
     let unsubscribe = Keeper_memory_commit_notifications.subscribe (fun event ->
       (* fire-and-forget: wake reports admission only; notifications have no response consumer. *)
       if String.equal event.keepers_dir keepers_dir then ignore (wake_for_commit owner event)) in
+    let unsubscribe_addon=Lane_addon_runtime.subscribe_owner_events ~config
+      ~package_id:Server_workspace_memory_addon_validation.package_id (fun event ->
+        match event with
+        | Lane_addon_runtime.Export_inventory_changed | Configuration_observed | Exact_result_delivered _ ->
+          ignore (wake owner)) in
     Eio.Switch.on_release sw (fun () ->
-      Stdlib.Mutex.protect owner.mutex (fun () -> owner.stopped <- true; owner.wake <- None);
-      unsubscribe_configuration ();
+      let waiters=Stdlib.Mutex.protect owner.mutex (fun () ->
+        owner.stopped <- true; owner.wake <- None; take_idle_waiters owner) in
+      resolve_idle_waiters waiters;
+      List.iter (fun (_,stop) -> stop ()) !routes;
+      routes:=[];
       unsubscribe ();
+      unsubscribe_addon ();
       Stdlib.Mutex.protect owners_mutex (fun () -> Hashtbl.remove owners base_path));
     (* A daemon, because the switch is this owner's whole life and the loop
        parks on [owner.wake] whenever the backlog is empty. Nothing wakes it on
@@ -685,54 +356,38 @@ let start_with ~sw ~base_path ~enabled ~prepare =
         | `Wait promise -> Eio.Promise.await promise; drain ()
         | `Run ->
           (* fire-and-forget: remaining facts queue another pulse; stopped owners need none. *)
-          (try if enabled () && run ~base_path ~enabled ~prepare then ignore (wake owner) with
+          (try
+             let retry=ref false in
+             let progressed=run ~config ~on_inventory:sync_routes
+               ~on_observation_failure:(fun () -> retry:=true) in
+             Stdlib.Mutex.protect owner.mutex (fun () -> owner.observation_retry <- !retry);
+             if progressed then ignore (wake owner)
+           with
            | Eio.Cancel.Cancelled _ as error -> raise error
-           | exn -> Log.Server.error "workspace curator owner %s: %s" base_path (Printexc.to_string exn));
-          Stdlib.Mutex.protect owner.mutex (fun () ->
+           | exn ->
+             Stdlib.Mutex.protect owner.mutex (fun () -> owner.observation_retry <- true);
+             Log.Server.error "workspace curator owner %s: %s" base_path (Printexc.to_string exn));
+          let waiters=Stdlib.Mutex.protect owner.mutex (fun () ->
             owner.in_flight <- false;
-            Hashtbl.clear owner.in_flight_revisions);
+            Hashtbl.clear owner.in_flight_revisions;
+            if not owner.pending then owner.idle_checkpoint <- ref ();
+            take_idle_waiters owner) in
+          resolve_idle_waiters waiters;
           drain () in
       drain ();
       `Stop_daemon))
 
-(* Runtime.report_exact_output_registry logs a publication warning once when
-   workspace_curator_exact has no admitted slots, and TUI lane inventory
-   surfaces "no admitted slots" with dropped/refused slot details. Returning
-   false here parks the background drain loop instead of emitting a repeated
-   error log on every Keeper memory commit. *)
-let configured () = match Runtime_exact_output_registry.current () with
-    | Error _ -> false
-    | Ok registry ->
-      (match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-       | Error (Runtime_exact_output_registry.Exact_lane_off _)
-       | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _)
-       | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> false
-       | Ok _ -> true)
-
-let start ~sw ~base_path =
-  start_with ~sw ~base_path ~enabled:configured ~prepare:(fun () -> prepare_execution ~base_path)
 
 module For_testing = struct
-  let configured = configured
-
-  let execute_with_cli ?cli_runner ?(base_path = ".") ~resolved ~rendered_prompt ~selected ~ledger () =
-    execute_with_options ~cli_runner ~base_path ~resolved ~rendered_prompt ~selected ~ledger
-
-  let execute ~resolved ~rendered_prompt ~selected ~ledger =
-    execute ~resolved ~rendered_prompt ~selected ~ledger
-    |> Result.map_error execution_failure_detail
-
-  let start_with_enabled ~sw ~base_path ~enabled ~execute ~summarize =
-    start_with ~sw ~base_path ~enabled
-      ~prepare:(fun () -> Ok { configuration = `Assoc ["injected_runner", `Bool true];
-                              execute; summarize })
-
-  let start ~sw ~base_path ~execute ~summarize =
-    start_with_enabled ~sw ~base_path ~enabled:(fun () -> true) ~execute ~summarize
-
-  let start_configured ~sw ~base_path ~execute ~summarize =
-    start_with_enabled ~sw ~base_path ~enabled:configured ~execute ~summarize
-
+  type nonrec idle_checkpoint = idle_checkpoint
+  type nonrec idle_result = idle_result = Owner_idle of idle_checkpoint | Owner_stopped | Owner_missing
+  type snapshot =
+    { pending : bool
+    ; in_flight : bool
+    ; observation_retry : bool
+    ; stopped : bool
+    ; idle_waiters : int
+    }
   let find ~base_path =
     let base_path = Unix.realpath base_path in
     Stdlib.Mutex.protect owners_mutex (fun () -> Hashtbl.find_opt owners base_path)
@@ -741,9 +396,35 @@ module For_testing = struct
     | None -> true
     | Some owner -> Stdlib.Mutex.protect owner.mutex (fun () -> not owner.pending && not owner.in_flight)
 
+  let snapshot ~base_path = Option.map (fun (owner:owner) ->
+    Stdlib.Mutex.protect owner.mutex (fun () ->
+      {pending=owner.pending;in_flight=owner.in_flight;observation_retry=owner.observation_retry;
+       stopped=owner.stopped;idle_waiters=List.length owner.idle_waiters})) (find ~base_path)
+
+  let await_idle ?after ~base_path () =
+    Eio.Fiber.check ();
+    match find ~base_path with
+    | None -> Owner_missing
+    | Some owner ->
+      let promise,resolver=Eio.Promise.create () in
+      let ready=Stdlib.Mutex.protect owner.mutex (fun () ->
+        if owner.stopped then Some Owner_stopped
+        else if not owner.pending && not owner.in_flight
+          && (match after with None -> true | Some previous -> previous != owner.idle_checkpoint)
+        then Some (Owner_idle owner.idle_checkpoint)
+        else (owner.idle_waiters <- resolver::owner.idle_waiters;None)) in
+      match ready with
+      | Some result -> result
+      | None ->
+        Fun.protect ~finally:(fun () ->
+          Stdlib.Mutex.protect owner.mutex (fun () ->
+            owner.idle_waiters <- List.filter (fun waiter -> waiter != resolver) owner.idle_waiters))
+          (fun () -> Eio.Promise.await promise)
+
   let stop ~base_path = Option.iter (fun owner ->
-    let resolver = Stdlib.Mutex.protect owner.mutex (fun () ->
+    let resolver,waiters = Stdlib.Mutex.protect owner.mutex (fun () ->
       owner.stopped <- true;
-      let resolver = owner.wake in owner.wake <- None; resolver) in
+      let resolver = owner.wake in owner.wake <- None; resolver,take_idle_waiters owner) in
+    resolve_idle_waiters waiters;
     Option.iter (fun resolver -> Eio.Promise.resolve resolver ()) resolver) (find ~base_path)
 end

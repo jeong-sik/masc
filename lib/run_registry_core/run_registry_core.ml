@@ -676,6 +676,187 @@ module Make (Payload : Payload) = struct
     get_metadata t ~id |> Option.map (full_entry_from_disk t)
   ;;
 
+  type current_read_error =
+    | Volatile_store
+    | Not_initialized
+    | Incomplete_startup of replay_report
+    | Non_regular_history of Unix.file_kind
+    | Invalid_history of string
+    | Incomplete_history
+    | Snapshot_changed
+    | Read_failed of string
+    | Read_cleanup_failed of { primary : current_read_error option; detail : string }
+
+  let read_current_from_log t ~id =
+    Cross_context_mutex.with_lock t.mutation_mutex (fun () ->
+      match t.path, t.replay_status with
+      | None, (Not_replayed | Log_absent | Replayed _) -> Error Volatile_store
+      | Some _, Not_replayed -> Error Not_initialized
+      | Some _, Replayed report
+          when report.malformed_lines <> 0 || not report.reached_end ->
+        Error (Incomplete_startup report)
+      | Some path, (Log_absent | Replayed _) ->
+        (* Track every registration identity to reject unrelated orphan
+           completions, but retain full payloads only for the requested id.
+           Never reuse the append-only index as current-source authority. *)
+        let folded = Fs_compat.fold_private_jsonl_locked_result path
+          ~init:(Ok (Id_map.empty, None), 1)
+          ~f:(fun (reading, line_no) line ->
+            let reading = Result.bind reading (fun (registered, selected) ->
+              match parse_event_line ~path ~line_no line with
+              | Error detail -> Error (Invalid_history detail)
+              | Ok None -> Ok (registered, selected)
+              | Ok (Some (Register r)) ->
+                let selected = if String.equal r.id id then
+                    Some {id=r.id;started_at=r.started_at;registration=r.registration;status=Running}
+                  else selected in
+                Ok (Id_map.add r.id () registered, selected)
+              | Ok (Some (Complete c)) ->
+                if not (Id_map.mem c.id registered) then
+                  Error (Invalid_history (Printf.sprintf "%s:%d: completion has no matching registration" path line_no))
+                else if String.equal c.id id then
+                  (match selected with
+                   | Some entry -> Ok (registered, Some {entry with status=Completed c.completion})
+                   | None -> Error (Invalid_history "requested completion has no selected registration"))
+                else Ok (registered, selected)) in
+            reading, line_no + 1) in
+        let read_error = function
+          | Fs_compat.Private_jsonl_fold.Snapshot_changed -> Snapshot_changed
+          | Read_error (Fs_compat.Private_jsonl_rows.Non_regular_file kind) -> Non_regular_history kind
+          | Read_error (Io_failed exn) -> Read_failed (Printexc.to_string exn) in
+        let observed = function
+          | Fs_compat.Private_jsonl_fold.Missing -> Ok None
+          | Present {value=(reading,_);rows_end;end_offset} ->
+            if rows_end <> end_offset then Error Incomplete_history
+            else Result.map snd reading in
+        match folded with
+        | Fs_compat.Private_file_failed error -> Error (read_error error)
+        | Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
+          Error (Read_cleanup_failed {primary=Some (read_error error);
+            detail=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure})
+        | Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
+          let primary = match observed value with Ok (Some _ | None) -> None | Error error -> Some error in
+          Error (Read_cleanup_failed {primary;
+            detail=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure})
+        | Private_file_succeeded value -> observed value)
+  ;;
+
+  type reconciliation_change =
+    | Confirm_current
+    | Register_original of { started_at:float; registration:Payload.registration;
+        completion:Payload.completion option }
+    | Complete_original of Payload.completion
+
+  type 'error reconciliation_error =
+    | Current_source_unavailable of current_read_error
+    | Decision_refused of 'error
+    | Invalid_change of string
+    | Publication_failed of persistence_failure
+
+  let strict_current_bytes ~path ~id bytes =
+    let length=String.length bytes in
+    if length>0 && not (Char.equal bytes.[length-1] '\n') then Error Incomplete_history else
+    let rec rows offset line_no registered selected =
+      match String.index_from_opt bytes offset '\n' with
+      | None -> Ok selected
+      | Some newline ->
+        let line=String.sub bytes offset (newline-offset) in
+        let* event=parse_event_line ~path ~line_no line |> Result.map_error (fun e -> Invalid_history e) in
+        let* registered,selected=match event with
+          | None -> Ok (registered,selected)
+          | Some (Register r) ->
+            if not (Float.is_finite r.started_at) || r.started_at<0. then
+              Error (Invalid_history "registration time must be finite and nonnegative") else
+            let selected=if String.equal r.id id then
+                Some {id=r.id;started_at=r.started_at;registration=r.registration;status=Running}
+              else selected in
+            Ok (Id_map.add r.id () registered,selected)
+          | Some (Complete c) ->
+            if not (Id_map.mem c.id registered) then
+              Error (Invalid_history (Printf.sprintf "%s:%d: orphan completion" path line_no))
+            else if not (String.equal c.id id) then Ok (registered,selected)
+            else match selected with
+              | None -> Error (Invalid_history "selected completion has no registration")
+              | Some entry -> Ok (registered,Some {entry with status=Completed c.completion}) in
+        rows (newline+1) (line_no+1) registered selected in
+    rows 0 1 Id_map.empty None
+  ;;
+
+  let reconcile_current t ~id ~decide =
+    match Cross_context_mutex.with_durable_lock t.mutation_mutex (fun () ->
+      match t.path,t.replay_status with
+      | None,(Not_replayed | Log_absent | Replayed _) -> Error (Current_source_unavailable Volatile_store)
+      | Some _,Not_replayed -> Error (Current_source_unavailable Not_initialized)
+      | Some _,Replayed report when report.malformed_lines<>0 || not report.reached_end ->
+        Error (Current_source_unavailable (Incomplete_startup report))
+      | Some path,(Log_absent | Replayed _) ->
+        let attempted_append=ref false in
+        let transaction=Fs_compat.reconcile_private_file_durable_locked_result path (fun bytes ->
+          let reject error=Fs_compat.Refuse_update (Error error) in
+          match strict_current_bytes ~path ~id bytes with
+          | Error error -> reject (Current_source_unavailable error)
+          | Ok current ->
+            match decide current with
+            | Error error -> reject (Decision_refused error)
+            | Ok (change,value) ->
+              let planned=match change,current with
+                | Confirm_current,Some entry -> Ok (entry,[])
+                | Confirm_current,None -> Error "absent history cannot be confirmed"
+                | Register_original _,Some _ -> Error "registration cannot reset an existing original"
+                | Complete_original _,None -> Error "completion requires an original registration"
+                | Register_original r,None ->
+                  if not (Float.is_finite r.started_at) || r.started_at<0. then
+                    Error "original registration time must be finite and nonnegative" else
+                  let entry={id;started_at=r.started_at;registration=r.registration;
+                    status=(match r.completion with None -> Running | Some c -> Completed c)} in
+                  let events=Register {id;started_at=r.started_at;registration=r.registration} ::
+                    (match r.completion with None -> [] | Some completion -> [Complete {id;completion}]) in
+                  Ok (entry,events)
+                | Complete_original completion,Some entry ->
+                  Ok ({entry with status=Completed completion},[Complete {id;completion}]) in
+              match planned with
+              | Error detail -> reject (Invalid_change detail)
+              | Ok (entry,events) ->
+                let serialized=List.map (fun event ->
+                  let json=event_to_yojson event in
+                  let* ()=validate_event_json json in
+                  Ok (Yojson.Safe.to_string json ^ "\n")) events in
+                let rec combine acc = function
+                  | [] -> Ok (String.concat "" (List.rev acc))
+                  | Ok row::rest -> combine (row::acc) rest
+                  | Error detail::_ -> Error detail in
+                match combine [] serialized with
+                | Error detail -> reject (Invalid_change detail)
+                | Ok suffix ->
+                  if events=[] then Fs_compat.Confirm_existing (Ok (entry,value))
+                  else (attempted_append:=true; Fs_compat.Append_confirmed (suffix,Ok (entry,value)))) in
+        let failure error=Publication_failed {detail=Fs_compat.durable_append_error_to_string error;
+          state=(if !attempted_append && error.Fs_compat.rollback_failures=[] then Not_persisted
+            else Durability_unknown)} in
+        let settled=match transaction with
+          | Fs_compat.Private_file_succeeded value -> value
+          | Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
+            Log.Misc.error "%s reconciliation descriptor settlement: %s" Payload.name
+              (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure); value
+          | Private_file_failed error -> Error (failure error)
+          | Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
+            let error=failure error in
+            Log.Misc.error "%s failed reconciliation descriptor settlement: %s" Payload.name
+              (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+            Error error in
+        match settled with
+        | Error error -> Error error
+        | Ok (entry,value) ->
+          let status=match entry.status with Running -> Running
+            | Completed c -> Completed (Payload.shed_completion c) in
+          replace_entry_locked t {entry with registration=Payload.shed_registration entry.registration;status};
+          t.observer_index <- None;
+          Ok value) with
+    | result -> result
+    | exception ((Sys_error _ | Unix.Unix_error _) as exn) ->
+      Error (Publication_failed {detail=Printexc.to_string exn;state=Durability_unknown})
+  ;;
+
   let completed_from_log t ~id =
     Cross_context_mutex.with_lock t.mutation_mutex (fun () ->
       match t.path with
@@ -738,15 +919,23 @@ module Make (Payload : Payload) = struct
     then unread
     else (
       try
-        let (entries, rows, malformed, line_no), boundary =
+        let (entries, rows, _registered, malformed, line_no), boundary =
           Fs_compat.fold_appended_lines
             ~path
             ~from:0
-            ~init:([], Id_map.empty, [], 1)
-            ~f:(fun (entries, rows, malformed, line_no) line ->
+            ~init:([], Id_map.empty, Id_map.empty, [], 1)
+            ~f:(fun (entries, rows, registered, malformed, line_no) line ->
               match parse_event_line ~path ~line_no line with
-              | Ok None -> entries, rows, malformed, line_no + 1
+              | Ok None -> entries, rows, registered, malformed, line_no + 1
               | Ok (Some event) ->
+                (* Track all valid registrations, independently of projection
+                   retention. An orphan must prevent compaction/sweep and cannot
+                   disappear before a later strict conditional transaction. *)
+                let registered,malformed=match event with
+                  | Register {id;_} -> Id_map.add id () registered,malformed
+                  | Complete {id;_} -> registered,
+                    (if Id_map.mem id registered then malformed else
+                       Printf.sprintf "%s:%d: completion has no matching registration" path line_no :: malformed) in
                 let entries = apply_event entries event in
                 let entries = if retain_completed_history then prune entries else entries in
                 let rows = if retain_completed_history then Id_map.empty else
@@ -759,8 +948,8 @@ module Make (Payload : Payload) = struct
                       (Option.map (fun source ->
                          { source with completion_row = Some line_no })) rows
                 in
-                entries, rows, malformed, line_no + 1
-              | Error message -> entries, rows, message :: malformed, line_no + 1)
+                entries, rows, registered, malformed, line_no + 1
+              | Error message -> entries, rows, registered, message :: malformed, line_no + 1)
         in
         let reached_end =
           match Fs_compat.file_size path with

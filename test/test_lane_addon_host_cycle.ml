@@ -248,6 +248,44 @@ let test_original_exact_semantic_dispatch_authority () =
     check bool "an incomplete fresh read grants no dispatch" true (Result.is_error (guard ()));
     write source declaration)
 
+(* Review 5612102961: a submit that lands between the retirement of one
+   worker and the attach of its replacement never reaches a worker. The
+   Runtime refusal is Not_sent, so the submit-once journal declines the
+   intent and the next pass submits the same request to the reattached worker. *)
+let test_submit_in_the_replacement_gap_is_not_sent_and_reaches_the_next_worker () =
+  let calls=ref 0 in
+  let tool=Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String "queue_question";
+    "inputSchema",`Assoc ["type",`String "object"]]) |> unwrap in
+  with_installation ~manifest:(manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n")
+    ~exported_tool:(tool,(fun _ -> incr calls;Ok (Mcp_protocol.Mcp_types.tool_result_of_text "admitted")))
+    (fun clock config _worker _state root ->
+      let directory=Filename.concat root ".masc/config/lane-addons" in
+      let source=Filename.concat directory "quiz.toml" in
+      let export ()=Runtime.tool_exports ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]
+        |> unwrap |> List.find_opt (fun (export : Runtime.tool_export) -> export.tool.name="queue_question") in
+      let submit export=Runtime.call_exported_tool_with_principal ~principal:(Some Lane_addon_call_context.Operator)
+        ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[] ~export ~arguments:(`Assoc [])
+        |> Result.map_error Lane_addon_submit_once.call_error_of_runtime in
+      await clock (fun () -> Option.is_some (export ()));
+      let retired=match export () with Some export -> export | None -> fail "the original tool must be exported" in
+      write source ("enabled=false\n" ^ declaration);
+      ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
+      await clock (fun () -> Option.is_none (export ()));
+      (match submit retired with
+       | Error (Lane_addon_submit_once.Not_sent _) -> ()
+       | Error (Lane_addon_submit_once.Sent_unknown _) | Ok _ ->
+         fail "a submit in the replacement gap must be refused before sending");
+      check int "the retired worker received nothing" 0 !calls;
+      write source declaration;
+      ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
+      await clock (fun () -> Option.is_some (export ()));
+      let attached=match export () with Some export -> export | None -> fail "the replacement must export the tool" in
+      (match submit attached with
+       | Ok _ -> ()
+       | Error (Lane_addon_submit_once.Not_sent _ | Lane_addon_submit_once.Sent_unknown _) ->
+         fail "the reattached worker must receive the next submit");
+      check int "the next pass delivers exactly one submit" 1 !calls)
+
 let test_scoped_owner_wakes_preserve_mcp_and_metadata_publication () =
   let events=ref [] and ready=ref false and other_scope=ref 0 and other_package=ref 0 and peer=ref 0 in
   let stop=ref (fun () -> ()) and mcp=ref 0 in
@@ -1553,6 +1591,8 @@ let () =
   run "lane add-on host request cycle"
     [ ( "cycle"
       , [ test_case "fresh semantic authority precedes original Exact dispatch" `Quick test_original_exact_semantic_dispatch_authority
+        ; test_case "a submit in the replacement gap is not sent and reaches the next worker" `Quick
+            test_submit_in_the_replacement_gap_is_not_sent_and_reaches_the_next_worker
         ; test_case "a started worker gets its final result once" `Quick test_a_started_worker_gets_its_final_result_once
         ; test_case "an unowned request ends and the cycle goes on" `Quick test_an_unowned_request_ends_and_the_cycle_goes_on
         ; test_case "an exported reply starts its pending host work" `Quick

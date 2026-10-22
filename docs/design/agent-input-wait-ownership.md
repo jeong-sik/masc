@@ -676,7 +676,7 @@ durable replay recovery, and completion of the previously failing fresh branch
 case. This establishes the scoped repairs and Gate scenarios at that head;
 it does not execute the new branch process-restart scenario below.
 
-## Actual original-branch process restart scenario (source, not executed)
+## Actual original-branch process restart scenario
 
 The native-context restart suite now has a branch mode in addition to its
 existing canonical mode. Setup drives an actual Core BeforeTurn input pause,
@@ -698,8 +698,55 @@ native and branch references must agree before Owner acceptance; only Owner
 completion retires the branch. G canonical bytes and its global reference are
 checked across publication, process restart, replay and completion.
 
-This is a source scenario until the new exact head is executed. It uses real
-native journals, SQLite, response artifacts, process exit and Owner restart,
+This scenario uses real native journals, SQLite, response artifacts, process
+exit and Owner restart,
 with a loopback provider and an in-process tool. It does not yet establish
 public response acceptance, production AgentRun/finalizer behavior, a crash
 after an unknown external effect, or the remaining autonomous/UI requirements.
+
+
+The minimal run [39723963986](https://github.com/jeong-sik/masc/actions/runs/39723963986)
+checked out `3b97ccd22a20a69988115f4b129cd4c66b87bd9f`, compiled, and passed
+all six native-context cases. Its raw log includes the real process cut before
+the tool, fresh Owner restart, resumed tool/hook/injector once, exact G byte and
+global-reference preservation, and branch retirement after Owner completion.
+That is actual evidence for the adapter-level scenario at that head. The shared
+fixture extraction and admitted Keeper/AgentRun scenarios below still need
+execution on their new head.
+
+## Admitted Keeper/AgentRun branch scenarios (source, not executed)
+
+The physical original-input setup is now shared between the native-context and
+real Keeper-ingress suites. Its immutable invocation carries the original
+operation ID, source, input, message metadata, runtime and provider. The setup
+still uses an actual Core input pause and separate Owner/Producer G publication;
+only response C installation uses the stored response primitive. Public Owner
+response acceptance remains guarded. Native-context behavior and its actual
+process-crash boundary remain covered after extracting this shared fixture.
+
+The real ingress suite adds three branch scenarios through the actual
+Keeper_turn.handle_keeper_msg_admitted and AgentRun, with the existing durable
+person-note tool and real tool-load, approval and post-result hooks:
+
+- Exit immediately after the target ToolResult commits to the native journal,
+  before its checkpoint append. A new Owner lifetime must recover that exact
+  result, avoid repeating the note effect, and reach actual AgentRun finalization.
+- Exit after the admitted turn and finalizer return, before Owner receipt
+  acknowledgement. Restart must retain interruption evidence and refuse
+  redispatch of the terminal invocation, while preserving G.
+- Exercise the existing known-empty-terminal saved-tool completion path and
+  actual finalizer without replaying the durable effect or replacing G.
+
+Each provider request must retain the original explicit decline and exclude
+independent G history. Before Owner completion, the latest retained branch must
+preserve the native settled ToolResult, original speaker/input and repetition
+scope. A strictly decoded actual Checkpoint_saved manifest must link that
+retained branch artifact. Canonical G bytes and its global input reference are
+checked during provider dispatch and after terminal Owner handling; branch
+retirement is checked after that handling. Branch mode is recorded separately
+in the executable evidence, rather than conflated with canonical-mode results.
+
+These are unexecuted source scenarios. Passing them would establish their
+specified admitted Keeper/AgentRun paths, not every fallback/error path, public
+response admission, unknown external-effect recovery, autonomous waiting or
+persistent/reconnected Acting/TUI behavior.

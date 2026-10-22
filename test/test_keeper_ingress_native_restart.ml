@@ -57,10 +57,11 @@ let executable_sha256 () =
       | size -> loop (Digestif.SHA256.feed_bytes context ~off:0 ~len:size buffer) in
     loop Digestif.SHA256.empty)
 
-let emit_evidence ~root ~cut ~executable_sha256 ~note_rows ~target_tool_log_rows =
+let emit_evidence ~operation_branch ~root ~cut ~executable_sha256 ~note_rows ~target_tool_log_rows =
   let json = `Assoc [
     "evidence", `String "keeper-ingress-native-restart";
     "case", `String (cut_name cut);
+    "operation_input_branch", `Bool operation_branch;
     "candidate_sha", (match Sys.getenv_opt "GITHUB_SHA" with
       | None -> `Null | Some sha -> `String sha);
     "executable_sha256", `String executable_sha256;
@@ -184,7 +185,7 @@ let check_resume_authority ~env ~root binding =
   check_effect_counts root;
   {original_call=call; canonical_result=List.hd results}
 
-let run_phase ?(empty_terminal = false) ~child ~cut root =
+let run_phase ?(operation_branch=false) ?(empty_terminal = false) ~child ~cut root =
   let fresh = child || empty_terminal in
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -208,9 +209,31 @@ let run_phase ?(empty_terminal = false) ~child ~cut root =
     "[[models]]\nid_prefix=%S\nprovider_name=\"fixture\"\nbase=\"openai_chat\"\nmax_context_tokens=400000\nmax_output_tokens=256\nsupports_tools=true\nsupports_native_streaming=false\n" model_id in
   Llm_provider.Model_catalog.of_toml_string ~source:"ingress-restart" catalog
     |> require "catalog" |> Llm_provider.Model_catalog.set_global;
+  let config=Workspace.default_config root in
+  let session_dir=Keeper_fs.keeper_session_dir config session_id in
+  let expected_g=ref None in
+  let check_g ()=match !expected_g with
+    | None -> ()
+    | Some bytes ->
+      check string "admitted AgentRun and finalizer preserve independent canonical G" bytes
+        (read (Checkpoint.agent_core_checkpoint_path ~session_dir ~session_id));
+      let trace_id=Keeper_id.Trace_id.of_string session_id |> require "G trace" in
+      let expected=Checkpoint.exact_snapshot_of_canonical_bytes ~expected_session_id:trace_id bytes
+        |> require "exact frozen G" |> Checkpoint.exact_snapshot_reference in
+      check bool "admitted AgentRun preserves independent global G reference" true
+        (Registry.input_checkpoint ~base_path:root ~keeper_name ~trace_id |> require "G input owner"
+          =Keeper_chat_operation_store.Input_observed expected) in
   let resumed_proof = ref None in
   let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
       (Exact_output_fixture.Reply_with (fun index body ->
+        check_g ();
+        if operation_branch then (
+          let messages=Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "messages" |> to_list) in
+          check bool "production provider sees original explicit decline" true
+            (List.exists (fun row -> Yojson.Safe.Util.member "role" row=`String "user"
+              && Yojson.Safe.Util.member "content" row=`String "[Input declined] Original branch question?") messages);
+          check bool "production provider excludes unrelated G history" false
+            (List.exists (fun row -> Yojson.Safe.Util.member "content" row=`String "Independent G history") messages));
         record root "provider";
         if fresh then (`OK, match index with
           | 0 -> tool_response "ingress-load-call" "keeper_tool_search" (`Assoc ["names", `List [`String tool_name]])
@@ -258,7 +281,6 @@ streaming = false
 is-default = true
 |} server.base_url model_id);
   Runtime.init_default ~config_path:runtime_path |> require "runtime";
-  let config = Workspace.default_config root in
   if fresh then (
     ignore (Workspace.init config ~agent_name:(Some "ingress-fixture"));
     (* The admitted turn validates the complete Docker profile even though
@@ -283,7 +305,17 @@ is-default = true
   let meta = Keeper_meta_store.read_meta config keeper_name |> require "load meta" |> Option.get in
   ignore (Keeper_registry.For_testing.register ~base_path:root keeper_name meta);
   Eio.Switch.on_release sw (fun () -> Keeper_registry.For_testing.unregister ~base_path:root keeper_name);
-  let session_dir = Keeper_fs.keeper_session_dir config session_id in
+  if fresh && operation_branch then (
+    Fs_compat.mkdir_p session_dir;
+    let provider_cfg=Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~provider_id:"fixture" ~model_id ~base_url:server.base_url ~request_path:"/v1/chat/completions" () in
+    Keeper_original_input_branch_fixture.prepare ~net:env#net ~clock:env#clock ~workspace:config ~session_dir
+      {keeper_name;session_id;runtime_id;operation_id;provider_cfg;source;input=original_input ();
+       message=goal;input_metadata=Keeper_input_speaker.metadata speaker;
+       system_prompt="Preserve the original invocation."};
+    check int "original production-fixture input pause precedes provider requests" 0 (count root "provider"));
+  if operation_branch then expected_g:=Some
+    (Keeper_original_input_branch_fixture.expected_global_checkpoint_bytes ~workspace:config);
   Masc_test_deps.with_publication_recovery_registry ~sw ~fs:env#fs ~registry_root:root
   @@ fun publication_registry ->
   let publication_recovery_provider = Masc_test_deps.publication_recovery_provider publication_registry in
@@ -292,6 +324,7 @@ is-default = true
     record root "ingress";
     if not fresh && cut = Returned_turn then fail "Owner redispatched a terminal native operation";
     let operation : Keeper_chat_operation.t = claim () |> require "claim" |> Option.get in
+    check_g ();
     check bool "Owner claims the original input" true (operation.input = Some (original_input ()));
     check bool "Owner preserves original source" true (operation.source = source);
     check bool "Owner preserves original ID" true
@@ -299,8 +332,13 @@ is-default = true
     let digest_path = Filename.concat root "original-execution-digest" in
     if fresh then write digest_path operation.execution_digest
     else check string "execution digest is unchanged after restart" (read digest_path) operation.execution_digest;
+    let trace_id=Keeper_id.Trace_id.of_string session_id |> require "original trace" in
+    let destination=if operation_branch then
+      Keeper_checkpoint_destination.capture_direct ~base_path:root ~keeper_name ~session_dir ~trace_id ~operation_id
+      |> require "capture real ingress branch destination"
+      else Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir in
     let binding : Native.binding = {base_path=root;keeper_name;operation_id;
-      execution_digest=operation.execution_digest;session_dir;session_id; checkpoint_destination=Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir} in
+      execution_digest=operation.execution_digest;session_dir;session_id;checkpoint_destination=destination} in
     if not fresh then resumed_proof := Some (check_resume_authority ~env ~root binding);
     let gate = Keeper_tool_approval_gate.create
         ~registry:(Keeper_tool_approval_registry.create ())
@@ -359,6 +397,26 @@ is-default = true
          (target_results checkpoint = [proof.canonical_result]));
     check_repetition checkpoint;
     check_effect_counts root;
+    if operation_branch then (
+      let branch=Registry.direct_input_branch ~base_path:root ~keeper_name ~operation_id
+        |> require "actual finalized branch" |> Option.get in
+      let final=retained ~session_dir branch.checkpoint in
+      check_original_input final;
+      check bool "AgentRun finalizer preserves native settled tool evidence" true
+        (target_results final=target_results checkpoint);
+      check bool "AgentRun finalizer excludes independent G Context" true
+        (Agent_core.Context.get final.context "independent-G"=None);
+      check_repetition final;
+      let manifests=lines (Keeper_runtime_manifest.path_for_trace config ~keeper_name ~trace_id:session_id)
+        |> List.filter_map (fun line -> match Keeper_runtime_manifest.decode_persisted_row (Yojson.Safe.from_string line)
+            |> require "decode actual runtime manifest" with
+          | Keeper_runtime_manifest.Active_row row -> Some row
+          | Unsupported_row _ -> None) in
+      let expected_path=Checkpoint.retained_checkpoint_path ~session_dir branch.checkpoint in
+      check bool "actual finalizer manifest links the retained original branch artifact" true
+        (List.exists (fun (row:Keeper_runtime_manifest.t) -> row.event=Keeper_runtime_manifest.Checkpoint_saved
+          && row.links.checkpoint_path=Some expected_path) manifests);
+      check_g ());
     if child then Unix._exit (exit_code cut);
     Owner.Operation_succeeded {outcome_ref="real-ingress-native-recovered"}
   in
@@ -367,7 +425,7 @@ is-default = true
       Eio.Promise.resolve resolve_completed execution)} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner) ~on_turn_slot_released:None config
     |> require "install real Owner" |> ignore;
-  if fresh then Registry.submit_operation ~base_path:root ~keeper_name ~operation_id ~source ~input:(original_input ())
+  if fresh && not operation_branch then Registry.submit_operation ~base_path:root ~keeper_name ~operation_id ~source ~input:(original_input ())
     |> require "submit original operation" |> ignore;
   if child || cut = Settled_result then (
     (match Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
@@ -410,32 +468,36 @@ is-default = true
     check int "terminal restart does not invoke ingress again" 1 (count root "ingress");
     check int "terminal restart admits no provider request" 0 (Exact_output_fixture.post_count server));
   check_effect_counts root;
+  check_g ();
+  if operation_branch then check bool "original branch retires after actual Owner terminal handling" true
+    (Registry.direct_input_branch ~base_path:root ~keeper_name ~operation_id |> require "terminal branch"=None);
   effect_counts root
 
-let test_restart cut () =
+let test_restart ?(operation_branch=false) cut () =
   let root = Filename.temp_dir "keeper-ingress-restart-" "" in
   let executable_before = executable_sha256 () in
   Fun.protect ~finally:(fun () ->
     Eio_main.run (fun env -> Eio.Path.rmtree ~missing_ok:true Eio.Path.(env#fs / root))) (fun () ->
     Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       let process = Eio.Process.spawn ~sw env#process_mgr
-          [Sys.executable_name; "--ingress-native-child"; cut_name cut; root] in
+          [Sys.executable_name;
+           (if operation_branch then "--ingress-branch-child" else "--ingress-native-child");cut_name cut;root] in
       match Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
           (fun () -> Eio.Process.await process) with
       | `Exited code -> check int "hard process cut at the requested boundary" (exit_code cut) code
       | `Signaled signal -> failf "child died from signal %d" signal));
-    let note_rows, target_tool_log_rows = run_phase ~child:false ~cut root in
+    let note_rows, target_tool_log_rows = run_phase ~operation_branch ~child:false ~cut root in
     check int "only two original requests and one final response" 3 (count root "provider");
     let executable_after = executable_sha256 () in
     check string "the child and parent used an unchanged executable" executable_before executable_after;
-    emit_evidence ~root ~cut ~executable_sha256:executable_after ~note_rows ~target_tool_log_rows)
+    emit_evidence ~operation_branch ~root ~cut ~executable_sha256:executable_after ~note_rows ~target_tool_log_rows)
 
-let test_empty_terminal_completes_message_without_replay () =
+let test_empty_terminal_completes_message_without_replay ?(operation_branch=false) () =
   let root = Filename.temp_dir "keeper-ingress-empty-terminal-" "" in
   Fun.protect ~finally:(fun () ->
     Eio_main.run (fun env -> Eio.Path.rmtree ~missing_ok:true Eio.Path.(env#fs / root))) (fun () ->
     let note_rows, target_tool_log_rows =
-      run_phase ~empty_terminal:true ~child:false ~cut:Settled_result root in
+      run_phase ~operation_branch ~empty_terminal:true ~child:false ~cut:Settled_result root in
     check int "loader, target tool, then empty terminal" 3 (count root "provider");
     check int "one admitted message execution" 1 (count root "ingress");
     check int "one durable tool effect" 1 note_rows;
@@ -458,8 +520,16 @@ let test_empty_terminal_completes_message_without_replay () =
 let () = match Array.to_list Sys.argv with
   | [_; "--ingress-native-child"; "settled"; root] -> ignore (run_phase ~child:true ~cut:Settled_result root)
   | [_; "--ingress-native-child"; "terminal"; root] -> ignore (run_phase ~child:true ~cut:Returned_turn root)
+  | [_; "--ingress-branch-child"; "settled"; root] -> ignore (run_phase ~operation_branch:true ~child:true ~cut:Settled_result root)
+  | [_; "--ingress-branch-child"; "terminal"; root] -> ignore (run_phase ~operation_branch:true ~child:true ~cut:Returned_turn root)
   | _ -> run "Keeper direct ingress native restart" ["real ingress", [
       test_case "settled result resumes through the original Keeper turn" `Quick (test_restart Settled_result);
       test_case "unacknowledged terminal does not reexecute ingress" `Quick (test_restart Returned_turn);
       test_case "empty terminal completes the original message without tool replay" `Quick
-        test_empty_terminal_completes_message_without_replay]]
+        (test_empty_terminal_completes_message_without_replay ~operation_branch:false);
+      test_case "original input branch resumes through AgentRun finalization preserving G" `Quick
+        (test_restart ~operation_branch:true Settled_result);
+      test_case "original input branch terminal cut preserves G without redispatch" `Quick
+        (test_restart ~operation_branch:true Returned_turn);
+      test_case "original input branch empty terminal finalizes without replay or replacing G" `Quick
+        (test_empty_terminal_completes_message_without_replay ~operation_branch:true)]]

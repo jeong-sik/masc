@@ -2112,6 +2112,15 @@
  (modules exact_output_fixture)
  (libraries masc_test_deps unix))
 
+; Physical W/G/C setup shared by native-adapter and admitted-Keeper scenarios.
+(library
+ (name keeper_original_input_branch_fixture)
+ (wrapped false)
+ (modules keeper_original_input_branch_fixture)
+ (libraries masc_test_deps exact_output_fixture masc.masc_core masc.agent_core
+  masc.agent_core.llm_provider masc.keeper_chat_operations masc.keeper_registry
+  masc.keeper_checkpoint_ref eio fs_compat uuidm yojson alcotest))
+
 ; No client-side gate stands between the composed request and the peer: a
 ; large body reaches the real HTTP peer, and only the peer's refusal moves the
 ; lane to its next candidate.

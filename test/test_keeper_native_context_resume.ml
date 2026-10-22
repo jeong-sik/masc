@@ -22,112 +22,6 @@ let tool_reply =
 let final_reply =
   {|{"id":"context-final","model":"native-context-model","choices":[{"index":0,"message":{"role":"assistant","content":"context saved"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
 
-(* Build W through an actual Core input pause, publish independent G from a
-   different Owner child, then install C through the stored response primitive.
-   The public response guard stays intact; this fixture proves the native
-   branch crash/reopen path, not public acceptance or AgentRun finalization. *)
-let prepare_original_branch ~env ~provider_cfg ~workspace ~session_dir =
-  let module Store=Keeper_checkpoint_store in
-  let module Journal=Keeper_chat_operation_store in
-  let module Response=Keeper_input_wait_response in
-  let root=workspace.Workspace.base_path in
-  let trace_id=Keeper_id.Trace_id.of_string session_id |> require "branch trace" in
-  let waiting=Eio.Switch.run (fun setup_sw ->
-    let settled,resolve_settled=Eio.Promise.create () in
-    let execute ~sw:turn_sw ~keeper_name:_ ~claim =
-      let operation:Keeper_chat_operation.t=claim () |> require "claim initial input" |> Option.get in
-      let context=Agent_core.Context.create () in
-      let frame=Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
-        (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation operation_id))
-        |> require "initial input scope" in
-      Keeper_repetition_scope.save context frame;
-      Agent_core.Context.set context "before-restart" (`String "retained");
-      let request:Agent_core.Hooks.elicitation_request=
-        {question="Original branch question?";schema=None;timeout_s=None} in
-      let hooks={Agent_core.Hooks.empty with before_turn=Some (fun _ -> Agent_core.Hooks.ElicitInput request)} in
-      let checkpoint_sink (snapshot:Agent_core.Agent.checkpoint_snapshot)=
-        match Store.save_agent_core_classified ~session_dir ~history_retained:0 snapshot.checkpoint with
-        | Ok (Store.Saved _) -> Ok ()
-        | Ok (Stale_noop _) -> Error "initial waiting checkpoint was not saved"
-        | Error _ as error -> error in
-      let config=Runtime_agent.default_config ~name:keeper_name ~provider_cfg
-        ~system_prompt:"Persist the shared context." ~tools:[] in
-      let config={config with context=Some context;hooks=Some hooks;session_id=Some session_id;
-        checkpoint_sink=Some checkpoint_sink} in
-      let binding:Native.binding={base_path=root;keeper_name;operation_id;session_dir;session_id;
-        execution_digest=operation.execution_digest;
-        checkpoint_destination=Keeper_checkpoint_destination.canonical ~keeper_name ~session_dir} in
-      let agent_ref=ref None in
-      let prepared=Native.prepare ~binding ~runtime_id ~config ~agent_core_checkpoint:None
-        ~input:(Native.New_input {blocks=[Agent_core.Types.Text goal];metadata=[]}) ~agent_ref ()
-        |> require "initial input native prepare" in
-      let result=Runtime_agent.run_blocks ~sw:turn_sw ~net:env#net ~config:(Native.config prepared)
-        ~agent_ref [Agent_core.Types.Text goal] |> require "actual original input pause" in
-      let request=match result.stop_reason with
-        | Runtime_agent.InputRequired {request;_} -> request
-        | Completed | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
-        | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _ ->
-          fail "original invocation did not wait for input" in
-      let owner=Registry.get ~base_path:root ~keeper_name |> require "initial input Owner" in
-      Owner.defer_direct_input_wait owner ~operation_id ~request |> require "defer original W" |> ignore;
-      Owner.Operation_deferred in
-    let runner:Owner.operation_runner={ready=(fun ~keeper_name:_ -> true);execute;
-      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution ->
-        Eio.Promise.resolve resolve_settled execution)} in
-    Registry.install_from_store ~sw:setup_sw ~operation_runner:(Some runner) ~on_turn_slot_released:None workspace
-      |> require "initial input Owner registry" |> ignore;
-    let input=Keeper_chat_operation_payload.input_to_json ~message:goal ~user_blocks:[]
-      ~turn_instructions:None ~surface_context:None ~attachments:[]
-      |> Keeper_chat_operation.canonical_json |> require "initial operation input" in
-    Registry.submit_operation ~base_path:root ~keeper_name ~operation_id
-      ~source:(`Assoc ["kind",`String "branch-crash-fixture"]) ~input |> require "submit initial input" |> ignore;
-    (match Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
-        (fun () -> Eio.Promise.await settled) with
-     | Owner.Operation_deferred -> ()
-     | Operation_failed {detail;_} -> fail detail
-     | Operation_succeeded _ -> fail "waiting invocation completed prematurely");
-    let owner=Registry.get ~base_path:root ~keeper_name |> require "waiting Owner" in
-    let waiting=Owner.direct_input_wait owner ~operation_id |> require "original complete wait" |> Option.get in
-    let original=Store.load_retained_exact_snapshot ~session_dir ~reference:waiting.checkpoint
-      |> require "actual retained W" |> Store.exact_snapshot_checkpoint in
-    (match Owner.run_autonomous_if_idle owner (fun () ->
-      let context=Agent_core.Context.copy original.context ~eio:false in
-      let scope=Keeper_execution_scope_id.autonomous_admission
-        (Uuidm.of_string "00000000-0000-4000-8000-000000000010" |> Option.get) in
-      let frame=Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
-        (Keeper_repetition_snapshot.Fresh scope) |> require "independent G scope" in
-      Keeper_repetition_scope.save context frame;
-      Agent_core.Context.set context "independent-G" (`String "preserve across original crash");
-      let pending:Agent_core.Agent_input_request.pending={run_id="independent-G-run";
-        request={request_id="independent-G-request";participant_name=Some "operator";
-          question="Independent G question?";schema=None;timeout_s=None;created_at=2.0}} in
-      let newer={original with Agent_core.Checkpoint.context;turn_count=original.turn_count+1;
-        messages=original.messages @ [Agent_core.Types.user_msg "Independent G history"];
-        pending_input=Some pending;working_context=Some (`Assoc ["independent-G",`Bool true])} in
-      let producer=Keeper_input_checkpoint_producer.prepare ~base_path:root ~keeper_name ~session_dir
-        ~trace_id ~source:(Some original) |> require "independent Owner Producer" in
-      Keeper_input_checkpoint_producer.publish_autonomous producer newer |> require "publish actual G" |> ignore;
-      (match Store.save_agent_core_classified ~session_dir ~history_retained:0 newer with
-       | Ok (Store.Saved _) -> () | Ok (Stale_noop _) | Error _ -> fail "save independent G");
-      let path=Store.agent_core_checkpoint_path ~session_dir ~session_id in
-      Fs_compat.save_file (Filename.concat root "expected-G.json") (Fs_compat.load_file path)) with
-     | Ok (`Ran ()) -> () | Ok (`Busy _ | `Interrupted) | Error _ -> fail "independent G child did not run");
-    Owner.begin_stopping owner |> require "close initial Owner";
-    waiting) in
-  let path=Journal.path_for_keeper ~keepers_runtime_dir:(Workspace.keepers_runtime_dir workspace) ~keeper_name in
-  let journal=Journal.open_or_create ~path |> require "response journal" in
-  Fun.protect ~finally:(fun () -> Journal.close journal |> require "close response journal") (fun () ->
-    let operation=Journal.get journal operation_id |> require "original operation" |> Option.get in
-    let authority=Response.authorize ~session_root:(Filename.dirname session_dir) ~operation_id ~waiting
-      ~destination:Keeper_semantic_execution.Operation_input ~recorded:None in
-    let plan=Response.prepare_installation ~net:env#net ~authority ~response:Agent_core.Hooks.Declined
-      |> require "prepare original response C" in
-    Journal.prepare_direct_input_response journal ~now:3. ~operation_id ~execution_digest:operation.execution_digest
-      ~intent:(Response.planned_intent plan) |> require "record exact response intent";
-    let receipt=Response.install plan |> require "install original response C" in
-    Journal.resolve_direct_input_wait journal ~now:4. ~operation_id ~execution_digest:operation.execution_digest
-      ~observed:waiting ~checkpoint:(Response.installed_checkpoint receipt) |> require "commit original branch C")
-
 let run_phase ?(operation_branch=false) ~child root =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -163,9 +57,15 @@ let run_phase ?(operation_branch=false) ~child root =
     Keeper_meta_store.replace_snapshot workspace meta |> require "persist meta";
     Fs_compat.mkdir_p session_dir);
   if child && operation_branch then (
-    prepare_original_branch ~env ~provider_cfg ~workspace ~session_dir;
+    let input=Keeper_chat_operation_payload.input_to_json ~message:goal ~user_blocks:[]
+      ~turn_instructions:None ~surface_context:None ~attachments:[]
+      |> Keeper_chat_operation.canonical_json |> require "initial operation input" in
+    Keeper_original_input_branch_fixture.prepare ~net:env#net ~clock:env#clock ~workspace ~session_dir
+      {keeper_name;session_id;runtime_id;operation_id;provider_cfg;input;message=goal;
+       source=`Assoc ["kind",`String "branch-crash-fixture"];input_metadata=[];
+       system_prompt="Persist the shared context."};
     check int "original Core input pause needed no provider request" 0 !provider_calls);
-  let expected_g=if operation_branch then Some (Fs_compat.load_file (Filename.concat root "expected-G.json")) else None in
+  let expected_g=if operation_branch then Some (Keeper_original_input_branch_fixture.expected_global_checkpoint_bytes ~workspace) else None in
   let check_g ()=match expected_g with
     | None -> ()
     | Some bytes ->

@@ -109,6 +109,15 @@ let support backend operation = match backend with
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko -> Unsupported
           "Native pointer drag exists, but the tested Firefox HTML5 DataTransfer/drop scenario fails; no synthetic fallback."
       | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
+    | Right_click | Middle_click -> (match backend with
+      | Connected Browser_lane.Webdriver_bidi | Owned_gecko -> conditional ~action:"click_at" Interact
+          [observed;geometry;
+           "Pass button \"secondary\" (right) or \"middle\". Only click_at takes a button; selector and node targets do not.";
+           "Native pointer input at the observed point; a context menu or application behavior must be observed afterward."]
+      | Owned_chromium -> Unsupported "The Stagehand runtime is not known to take a click button."
+      | Connected Browser_lane.Web_extension -> Unsupported
+          "WebExtension clicks through the DOM and cannot press the middle or secondary button; the selected tab must not be silently moved to another browser."
+      | Safari_unavailable -> missing)
     | Scroll_page -> conditional ~action:"scroll" Interact [observed;"Scrolls the page; use scroll_at for a nested pane."]
     | Scroll_at -> conditional ~action:"scroll_at" Interact [observed;geometry;"Scrolls the pane at the observed viewport point."]
     | Fill -> conditional ~action:"fill" Interact
@@ -145,7 +154,7 @@ let support backend operation = match backend with
       | Owned_chromium -> conditional ~action:"act" Instruct
           [observed;"Model-mediated sentence action; not a substitute for guaranteed native keyboard, double-click or zoom support. observe/extract are separate read actions."]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Safari_unavailable -> missing)
-    | Right_click | Middle_click | Pointer_down | Pointer_up | Resize_viewport | Touch
+    | Pointer_down | Pointer_up | Resize_viewport | Touch
     | Read_clipboard | Write_clipboard | Read_network | Intercept_network | Read_console
     | Read_storage | Write_storage -> missing
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations

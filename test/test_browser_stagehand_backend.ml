@@ -452,7 +452,7 @@ let test_pointer_guard_and_input_keep_the_verb_slot () =
     Eio.Fiber.fork_promise ~sw:callers (fun () ->
       Backend.execute h.backend
         (Lane.Page_interact
-           { tab_id = 0; expected_url = Some url; action = Lane.Click_at { point; viewport } }))
+           { tab_id = 0; expected_url = Some url; action = Lane.Click_at { point; viewport; button = Lane.Pointer.Primary } }))
   in
   Eio.Promise.await guard_entered;
   let navigation =

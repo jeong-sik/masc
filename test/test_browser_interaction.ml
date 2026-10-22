@@ -161,6 +161,64 @@ let test_pointer_actions () =
      `Assoc ["x",`Float (-0.1);"y",`Float 0.];
      `Assoc ["x",`Float nan;"y",`Float 0.];
      `Assoc ["x",`Int 0;"y",`Int 0;"x",`Int 0]]
+let test_click_button () =
+  let viewport = `Assoc ["documentId",`String "fixture";"width",`Int 800;
+    "height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0] in
+  let point = `Assoc ["x",`Float 0.25;"y",`Float 0.5] in
+  let click extra = fields "click_at" @ ["expectedUrl",`String "https://example.org";
+    "viewport",viewport;"point",point] @ extra in
+  let button_of extra = match (parsed (click extra)).action with
+    | Browser_lane.Click_at {button;_} -> button
+    | _ -> fail "click_at parsed as another action" in
+  check bool "no button means the primary one" true
+    (button_of [] = Browser_lane.Pointer.Primary);
+  List.iter (fun (raw,expected) ->
+    check bool ("button " ^ raw) true (button_of ["button",`String raw] = expected);
+    let request = parsed (click ["button",`String raw]) in
+    let wire = Browser_lane.interaction_args ~tab_id:request.tab_id
+      ~expected_url:request.expected_url request.action in
+    check bool ("button " ^ raw ^ " survives the wire round trip") true
+      ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action))
+    ["primary",Browser_lane.Pointer.Primary;"middle",Browser_lane.Pointer.Middle;
+     "secondary",Browser_lane.Pointer.Secondary];
+  List.iter (fun bad ->
+    check bool "unknown or mistyped button rejected" true
+      (Result.is_error (Interaction.parse (`Assoc (click ["button",bad])))))
+    [`String "left";`String "";`String "Middle";`Int 1;`Null];
+  check bool "button is refused on an action that has no button" true
+    (Result.is_error (Interaction.parse (`Assoc (fields "hover_at"
+      @ ["expectedUrl",`String "https://example.org";"viewport",viewport;"point",point;
+         "button",`String "middle"]))))
+let test_click_button_capability () =
+  let click button = Browser_lane.Page_interact {tab_id=1; expected_url=Some "https://example.org";
+    action=Browser_lane.Click_at {point={x=0.5;y=0.5};
+      viewport={document_id="d";width=100.;height=100.;scroll_x=0.;scroll_y=0.}; button}} in
+  check bool "primary click keeps the plain pointer capability" true
+    (Browser_lane.live_capability (click Browser_lane.Pointer.Primary) = Some Browser_lane.Point_click);
+  List.iter (fun button ->
+    check bool "middle and secondary ask for the button capability" true
+      (Browser_lane.live_capability (click button) = Some Browser_lane.Trusted_button_click))
+    [Browser_lane.Pointer.Middle;Browser_lane.Pointer.Secondary];
+  check bool "the extension cannot serve a non-primary button" false
+    (Browser_lane.live_transport_serves Browser_lane.Web_extension Browser_lane.Trusted_button_click);
+  check bool "a live BiDi connection serves it" true
+    (Browser_lane.live_transport_serves Browser_lane.Webdriver_bidi Browser_lane.Trusted_button_click)
+let test_click_button_wire_numbers () =
+  let viewport : Browser_lane.Pointer.viewport =
+    {document_id="d";width=100.;height=100.;scroll_x=0.;scroll_y=0.} in
+  let numbers button =
+    let sources = Browser_lane.Pointer.input_sources ~pointer_id:"p" ~wheel_id:"w" ~viewport
+      ~start:{x=0.5;y=0.5} (Browser_lane.Pointer.Click button) in
+    match sources with
+    | `List [source] ->
+      Yojson.Safe.Util.(source |> member "actions" |> to_list
+        |> List.filter_map (fun action -> match member "type" action with
+          | `String ("pointerDown" | "pointerUp") -> Some (member "button" action |> to_int)
+          | _ -> None))
+    | _ -> fail "one pointer source required" in
+  check (list int) "primary presses and releases button 0" [0;0] (numbers Browser_lane.Pointer.Primary);
+  check (list int) "middle presses and releases button 1" [1;1] (numbers Browser_lane.Pointer.Middle);
+  check (list int) "secondary presses and releases button 2" [2;2] (numbers Browser_lane.Pointer.Secondary)
 let () = run "browser interaction" ["typed boundary", [
   test_case "browser zoom boundary" `Quick test_browser_zoom_boundary;
   test_case "native keyboard and double click parser" `Quick test_native_keyboard_parser;
@@ -168,6 +226,9 @@ let () = run "browser interaction" ["typed boundary", [
   test_case "drag path and timing contract" `Quick test_drag_options;
   test_case "explicit live tab activation" `Quick test_activate_tab;
   test_case "screenshot pointer actions" `Quick test_pointer_actions;
+  test_case "click button parses and round trips" `Quick test_click_button;
+  test_case "click button picks the live capability" `Quick test_click_button_capability;
+  test_case "click button uses the WebDriver button numbers" `Quick test_click_button_wire_numbers;
   test_case "source hints preserve scope and reject malformed paths" `Quick test_source_context;
   test_case "observed node reference contract" `Quick test_scene_reference;
   test_case "closed live write actions" `Quick test_typed_actions;

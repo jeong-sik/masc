@@ -841,11 +841,12 @@ let test_peer_serves_what_the_lane_table_says () =
       | Viewport_capture -> Page_capture {tab_id=1}
       | Scene_read -> Page_scene {tab_id=1; max_chars=1000; view=Content; scope=None}
       | Dom_interaction -> interact (Click "#button")
-      | Point_click -> interact (Click_at {point;viewport})
+      | Point_click -> interact (Click_at {point;viewport;button=Pointer.Primary})
       | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})
       | Trusted_hover -> interact (Hover_at {point;viewport})
       | Trusted_drag -> interact (Drag {from=point;to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0})
       | Trusted_double_click -> interact (Double_click_at {point;viewport})
+      | Trusted_button_click -> interact (Click_at {point;viewport;button=Pointer.Secondary})
       | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
       | Browser_zoom -> interact (Set_zoom {factor=1.5})
       | Tab_activation -> interact Activate_tab

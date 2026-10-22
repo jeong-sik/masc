@@ -640,6 +640,13 @@ node, and `double_click_at` on a captured viewport point. Stagehand sends native
 press/release pairs in one owned input sequence. These actions use the same
 visibility, disabled-control, document, viewport, and URL guards as native click.
 
+`click_at` takes an optional `button`: `primary` (the default), `middle` or
+`secondary`. WebDriver and BiDi press and release the matching pointer button
+(0, 1 or 2) at the observed point. Stagehand and the WebExtension refuse a
+non-primary button before any input is sent, because neither can press it. A
+`secondary` click opens whatever the page binds to the context menu; observe the
+page afterwards, the receipt does not say what it did.
+
 `type_text` sends Unicode text into the currently focused editable control.
 `press_key` sends one named key or Unicode scalar, optionally with explicit
 `Control`, `Meta`, `Alt`, and `Shift` modifiers. Both require the observed

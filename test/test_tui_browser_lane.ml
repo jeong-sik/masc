@@ -188,7 +188,7 @@ let test_pointer_decision () =
   let shot ?(source="live") client = success (decode_screenshot (screenshot_response ~source ~client ())) in
   let drag (shot : screenshot) =
     Browser_lane.Drag {from={x=0.1;y=0.1}; to_={x=0.2;y=0.2}; viewport=shot.viewport;via=[];duration_ms=0} in
-  let click (shot : screenshot) = Browser_lane.Click_at {point={x=0.1;y=0.1}; viewport=shot.viewport} in
+  let click (shot : screenshot) = Browser_lane.Click_at {point={x=0.1;y=0.1}; viewport=shot.viewport; button=Browser_lane.Pointer.Primary} in
   let wheel (shot : screenshot) =
     Browser_lane.Scroll_at {point={x=0.5;y=0.5}; viewport=shot.viewport; x=0; y=120} in
   let sends view (shot : screenshot) action =
@@ -429,7 +429,7 @@ let test_visual_scroll_ownership () =
 
 let test_visual_pointer_navigation () =
   let shot = match decode_screenshot (screenshot_response ()) with Ok shot -> shot | Error e -> failwith e in
-  let action = Browser_lane.Click_at {point={x=0.5;y=0.5};viewport=shot.viewport} in
+  let action = Browser_lane.Click_at {point={x=0.5;y=0.5};viewport=shot.viewport;button=Browser_lane.Pointer.Primary} in
   let pending = {(loaded ()) with load=Loading (52,Viewport_pointer {
     tab_id=2;expected_url=shot.url;action})} in
   let next = {shot with url="https://example.org/channel"} in

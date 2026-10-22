@@ -5934,6 +5934,7 @@ module Browser_lane_view = struct
     | Trusted_hover -> "hover"
     | Trusted_drag -> "drag"
     | Trusted_double_click -> "double click"
+    | Trusted_button_click -> "middle/right click"
     | Trusted_keyboard -> "native keys"
     | Browser_zoom -> "browser zoom"
     | Tab_activation -> "tab switch"

@@ -4,7 +4,7 @@ type request = { route : Browser_selection.preference; tab_id : int;
 let ( let* ) = Result.bind
 let parse = function
   | `Assoc fields ->
-    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"] in
+    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"] in
     let* () = if List.for_all (fun (key, _) -> List.mem key allowed) fields
       && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       then Ok () else Error "unknown or duplicate browser interaction argument" in
@@ -50,6 +50,9 @@ let parse = function
         | Some (`String "drag_to") -> keys
         | Some (`String "drag") -> "source" :: "destination" :: keys
         | _ -> "source" :: "destination" :: "via" :: "durationMs" :: keys in
+      let keys = match List.assoc_opt "action" fields with
+        | Some (`String "click_at") -> keys
+        | _ -> "button" :: keys in
       if List.exists (fun key -> List.mem_assoc key fields) keys
       then Error "arguments do not match the selected interaction action" else Ok () in
     let required key = match List.assoc_opt key fields with
@@ -179,7 +182,14 @@ let parse = function
         let* viewport = geometry Browser_lane.Pointer.viewport_of_json "viewport" in
         if action = "click_at" then
           let* point = geometry Browser_lane.Pointer.point_of_json "point" in
-          Ok (Browser_lane.Click_at {point;viewport})
+          let* button = match List.assoc_opt "button" fields with
+            | None -> Ok Browser_lane.Pointer.Primary
+            | Some (`String raw) ->
+              (match Browser_lane.Pointer.button_of_string raw with
+               | Some button -> Ok button
+               | None -> Error "button must be primary, middle or secondary")
+            | Some _ -> Error "button must be primary, middle or secondary" in
+          Ok (Browser_lane.Click_at {point;viewport;button})
         else
           let* from = geometry Browser_lane.Pointer.point_of_json "from" in
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
@@ -551,7 +561,8 @@ let resolve_pointer_action action = function
      | Browser_lane.Double_click _ -> let* point = point "point" in Ok (Browser_lane.Double_click_at {point;viewport})
      | Browser_lane.Hover _ -> let* point = point "point" in Ok (Browser_lane.Hover_at {point;viewport})
      | Browser_lane.Click _ | Browser_lane.Click_node _ ->
-       let* point = point "point" in Ok (Browser_lane.Click_at {point;viewport})
+       let* point = point "point" in
+       Ok (Browser_lane.Click_at {point;viewport;button=Browser_lane.Pointer.Primary})
      | Browser_lane.Drag_to {via;duration_ms;_} -> let* from = point "from" in let* to_ = point "to" in
        Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
      | Browser_lane.Activate_tab | Browser_lane.Fill _

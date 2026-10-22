@@ -419,7 +419,7 @@ let test_pointer_release_recovery () =
     let point : Lane.Pointer.point = {x=0.5;y=0.5} in
     let viewport : Lane.Pointer.viewport = {document_id="fixture";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
     let click = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
-      action=Lane.Click_at {point;viewport}} in
+      action=Lane.Click_at {point;viewport;button=Lane.Pointer.Primary}} in
     let wheel = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Scroll_at {point;viewport;x=0;y=120}} in
     check bool "successful wheel is not overridden by failing release endpoint" true

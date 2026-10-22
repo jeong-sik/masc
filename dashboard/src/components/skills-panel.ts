@@ -421,9 +421,9 @@ interface SkillSourceEditorProps {
 }
 
 type SkillMutationResult =
-  | { kind: 'created'; receipt: SkillCreateReceipt }
+  | { kind: 'created'; identity: SkillIdentity; receipt: SkillCreateReceipt }
   | { kind: 'saved'; reference: SkillReference; receipt: SkillEditorSaveReceipt }
-  | { kind: 'request_error'; operation: 'create' | 'save'; detail: string }
+  | { kind: 'request_error'; request: { operation: 'create'; identity: SkillIdentity } | { operation: 'save'; reference: SkillReference }; detail: string }
 
 const REVISION_CONFLICT_GUIDANCE = 'This Skill changed after you loaded it. Copy this draft, reload the Skills workspace, then reapply it to the latest revision before saving.'
 
@@ -646,7 +646,7 @@ export function SkillSourceEditor({ reference, onPublished, onMutation, observat
                               }
                             }
                           } catch (cause) {
-                            if (!received) onMutation?.({ kind: 'request_error', operation: 'save',
+                            if (!received) onMutation?.({ kind: 'request_error', request: { operation: 'save', reference: requestedReference },
                               detail: cause instanceof Error ? cause.message : String(cause) })
                             if (!requestIsCurrent(generation, requestedReference, requestedSource)) {
                               return
@@ -698,13 +698,22 @@ interface SkillsObservationOwner {
   readonly authority: ExecutionWorkspaceAuthority | null
 }
 
+function identityLabel(identity: SkillIdentity): string {
+  return `${identity.source_id}/${identity.package_id}/${identity.name}`
+}
+
 function mutationMessage(result: SkillMutationResult): string {
   switch (result.kind) {
-    case 'created': return `Create response: ${createReceiptMessage(result.receipt)}`
+    case 'created': return `Create response for ${identityLabel(result.identity)}: ${createReceiptMessage(result.receipt)}`
     case 'saved': return result.receipt.status === 'saved_but_unpublished'
-      ? `Save response: saved but not published: ${result.receipt.reason}`
-      : `Save response: ${result.receipt.status}`
-    case 'request_error': return `${result.operation} request returned an error; effect not confirmed: ${result.detail}`
+      ? `Save response for ${identityLabel(result.reference.identity)} @ ${result.reference.content_revision}: saved but not published: ${result.receipt.reason}`
+      : `Save response for ${identityLabel(result.reference.identity)} @ ${result.reference.content_revision}: ${result.receipt.status}`
+    case 'request_error': {
+      const target = result.request.operation === 'create'
+        ? identityLabel(result.request.identity)
+        : `${identityLabel(result.request.reference.identity)} @ ${result.request.reference.content_revision}`
+      return `${result.request.operation} request for ${target} returned an error; effect not confirmed: ${result.detail}`
+    }
   }
 }
 
@@ -874,20 +883,21 @@ function SkillsObservationPanel({ owner, onMutation }: {
           if (!current()) return
           createStatus.value = 'Validating and publishing…'
           let received = false
+          const requestedIdentity: SkillIdentity = { source_id: createSource.value, package_id: createName.value, name: createName.value }
           try {
             const sourceText = skillTemplate(createKind.value, createName.value, createDescription.value, createBody.value)
             const receipt = await createSkill({
-              source_id: createSource.value,
-              package_id: createName.value,
+              source_id: requestedIdentity.source_id,
+              package_id: requestedIdentity.package_id,
               source_text: sourceText,
             })
             received = true
-            onMutation({ kind: 'created', receipt })
+            onMutation({ kind: 'created', identity: requestedIdentity, receipt })
             if (!current()) return
             createStatus.value = createReceiptMessage(receipt)
             await load()
           } catch (cause) {
-            if (!received) onMutation({ kind: 'request_error', operation: 'create',
+            if (!received) onMutation({ kind: 'request_error', request: { operation: 'create', identity: requestedIdentity },
               detail: cause instanceof Error ? cause.message : String(cause) })
             if (!current()) return
             createStatus.value = cause instanceof Error ? cause.message : String(cause)

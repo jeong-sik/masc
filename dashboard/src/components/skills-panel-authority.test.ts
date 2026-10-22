@@ -53,11 +53,11 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); clearStoredToken() })
 
-async function startCreate() {
+async function startCreate(name = 'created') {
   api.fetchWritableSkillSources.mockResolvedValue([{ source_id: 'workspace' }])
   fireEvent.click(await screen.findByRole('button', { name: '+ New Skill' }))
   await screen.findByRole('option', { name: 'workspace' })
-  fireEvent.input(screen.getByPlaceholderText('skill-name'), { target: { value: 'created' } })
+  fireEvent.input(screen.getByPlaceholderText('skill-name'), { target: { value: name } })
   fireEvent.input(screen.getByPlaceholderText('When should an agent use this?'), { target: { value: 'description' } })
   fireEvent.submit(screen.getByTestId('skill-create'))
   await waitFor(() => expect(api.createSkill).toHaveBeenCalledTimes(1))
@@ -208,7 +208,7 @@ describe('Skills observation owner', () => {
     await act(async () => setStoredToken('credential-b'))
     await screen.findByRole('button', { name: 'Read instructions for fresh' })
     await act(async () => sent.resolve({ status: 'saved_and_published', preview: preview(), snapshot_revision: 'next' }))
-    expect(screen.getByTestId('skill-mutation-receipts').textContent).toContain('saved_and_published')
+    expect(screen.getByTestId('skill-mutation-receipts').textContent).toContain('workspace/alpha/alpha @ revision-alpha: saved_and_published')
     expect(api.fetchSkills).toHaveBeenCalledTimes(2)
     expect(api.saveSkillSource).toHaveBeenCalledTimes(1)
   })
@@ -220,10 +220,26 @@ describe('Skills observation owner', () => {
     await startSave()
     await act(async () => { workspace.current.value = null })
     await act(async () => sent.reject(new Error('transport stopped after send')))
+    expect(screen.getByTestId('skill-mutation-receipts').textContent).toContain('save request for workspace/alpha/alpha @ revision-alpha')
     expect(screen.getByTestId('skill-mutation-receipts').textContent).toContain('effect not confirmed')
     expect(screen.getByTestId('skill-mutation-receipts').textContent).toContain('transport stopped after send')
     expect(api.fetchSkills).toHaveBeenCalledTimes(1)
     expect(api.saveSkillSource).toHaveBeenCalledTimes(1)
   })
 
+})
+
+it('identifies reversed create successes and errors by their original submitted Skill', async () => {
+  const first = pending<{ status: 'created_and_published' }>(), second = pending<never>()
+  api.createSkill.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+  render(html`<${SkillsPanel} />`)
+  await startCreate('first')
+  fireEvent.input(screen.getByPlaceholderText('skill-name'), { target: { value: 'second' } })
+  fireEvent.submit(screen.getByTestId('skill-create'))
+  await waitFor(() => expect(api.createSkill).toHaveBeenCalledTimes(2))
+  await act(async () => second.reject(new Error('second transport failure')))
+  await act(async () => first.resolve({ status: 'created_and_published' }))
+  const receipts = screen.getByTestId('skill-mutation-receipts').textContent
+  expect(receipts).toContain('create request for workspace/second/second returned an error; effect not confirmed: second transport failure')
+  expect(receipts).toContain('Create response for workspace/first/first: created and published')
 })

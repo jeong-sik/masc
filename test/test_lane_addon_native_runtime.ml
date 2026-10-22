@@ -174,16 +174,19 @@ p.add_argument("--socket");p.add_argument("--incarnation");p.add_argument("--max
 a=p.parse_args()
 s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.bind(a.socket);s.listen()
 with open(os.path.join(a.root,"endpoint-"+a.incarnation),"w") as out: out.write(a.socket)
-event=threading.Event();payload=None;running=False
+event=threading.Event();payload=None;running=False;clients={}
 def handle(conn):
     global payload,running
     with conn:
         req=json.loads(conn.makefile("rb").readline())
         if req["incarnation"]!=a.incarnation: raise RuntimeError("wrong owner")
         op=req["operation"]
-        if op=="snapshot": result={"reply":"receipt"} if a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running}}
-        elif op=="poll": result={"reply":"poll","command":None,"state_id":hashlib.sha256(json.dumps({"command_running":running}).encode()).hexdigest()}
-        elif op=="disconnect": result={"reply":"receipt"}
+        if op=="snapshot": result={"reply":"receipt"} if a.mode=="bad_ready" or os.path.exists(os.path.join(a.root,"reject-snapshot-"+a.incarnation)) else {"reply":"snapshot","snapshot":{"command_running":running,"state":"serving","clients":list(clients.values()),"owned_backends":"unavailable"}}
+        elif op=="poll":
+            client=dict(req["client"]);client["interactions"]=[];clients[client["clientId"]]=client
+            result={"reply":"poll","command":None,"state_id":hashlib.sha256(json.dumps({"command_running":running}).encode()).hexdigest()}
+        elif op=="disconnect":
+            clients.pop(req["clientId"],None);result={"reply":"receipt"}
         elif op=="issue":
             event.clear()
             with open(os.path.join(a.root,"issued-"+a.incarnation),"w") as out: out.write("issued")
@@ -209,12 +212,13 @@ for line in sys.stdin:
         if req["params"]["name"]=="lane_call":
             if req["params"]["arguments"]["tool"]!="browser_command": raise RuntimeError("wrong export")
             with open(os.path.join(a.root,"caller-"+a.incarnation),"w") as out: json.dump(req["params"]["arguments"]["caller"],out)
+            with open(os.path.join(a.root,"arguments-"+a.incarnation),"w") as out: json.dump(req["params"]["arguments"]["arguments"],out)
             event.clear();running=True
             with open(os.path.join(a.root,"issued-"+a.incarnation),"w") as out: out.write("issued")
             with open(os.path.join(a.root,"toolcalls-"+a.incarnation),"a") as out: out.write("once\n")
             event.wait();running=False
             failed=not payload["ok"]
-            value={"reply":"issue","answer":{"status":"answered","payload":payload},"browserSelection":{"lane":"live","clientId":"0c000000-0000-4000-8000-000000000001","reason":"explicit_browser"}}
+            value={"reply":"issue","answer":{"status":"answered","payload":payload},"browserSelection":{"lane":"live","clientId":"0c000000-0000-4000-8000-000000000001","reason":"explicit_browser"},"browserConnection":{"clientId":"0c000000-0000-4000-8000-000000000001","transport":"webdriver_bidi"}}
             if os.path.exists(os.path.join(a.root,"reject-tool-output-"+a.incarnation)): value={}
             result={"content":[],"structuredContent":value,"isError":failed}
             if failed:
@@ -288,6 +292,11 @@ hooks = ["validate_input", "validate_output"]
   Unix.mkdir browser_directory 0o700;
   let poll client=Browser_addon_ingress.poll ~config ~client ~window_sec:0.001 in
   check bool "native ingress registers its first original worker" true (poll client=Ok None);
+  let inventory=Browser_addon_view.clients host in
+  check bool "view inventory reads worker clients rather than the core queue" true
+    (Tool_result.is_success inventory &&
+      (member "clients" (Tool_result.data inventory) |> Yojson.Safe.Util.to_list
+        |> List.map (text "clientId"))=[Browser_lane.client_id_to_string client_id]);
   let reject_snapshot=Filename.concat root ("reject-snapshot-"^id) in
   write reject_snapshot "reject";
   ignore (dispatch config R.Observe ["instance_id",`String id]);
@@ -317,7 +326,9 @@ hooks = ["validate_input", "validate_output"]
         |> member "rows" |> Yojson.Safe.Util.to_list
         |> List.exists (fun row -> member "command_running" (member "fields" row)=`Bool true));
       check bool "running observation commits before MCP call settles" true
-        (call original Browser_addon_wire.Snapshot=Ok (Browser_addon_wire.Snapshot_result (`Assoc ["command_running",`Bool true])));
+        (match call original Browser_addon_wire.Snapshot with
+         | Ok (Browser_addon_wire.Snapshot_result value) -> member "command_running" value=`Bool true
+         | Ok _|Error _ -> false);
       write reject_snapshot "reject";
       ignore (dispatch config R.Observe ["instance_id",`String id]);
       wait clock (fun () -> inspect id |> member "phase" |> text "kind"="failed");
@@ -329,6 +340,11 @@ hooks = ["validate_input", "validate_output"]
     | R.Browser_ready _ -> true | Browser_refresh_needed _|Browser_unavailable|Browser_retired -> false);
   check string "long MCP export dispatched once" "once\n"
     (In_channel.with_open_bin (Filename.concat root ("toolcalls-"^id)) In_channel.input_all);
+  let unbound=Browser_addon_view.read host (`Assoc ["lane",`String "live";"tabId",`Int 7]) in
+  check bool "tab read requires its original client before discovery" true
+    (Tool_result.failure_class unbound=Some Tool_result.Policy_rejection);
+  check string "missing tab binding issues no discovery command" "once\n"
+    (In_channel.with_open_bin (Filename.concat root ("toolcalls-"^id)) In_channel.input_all);
   check bool "public command receives host-verified actor" true
     (Yojson.Safe.from_file (Filename.concat root ("caller-"^id))=
       `Assoc ["kind",`String "host_actor";"name",`String "dashboard-tester"]);
@@ -338,6 +354,29 @@ hooks = ["validate_input", "validate_output"]
     (fun () -> wait clock (fun () -> Sys.file_exists (issued id));
       check bool "reverse channel works beside waiting issue" true
         (call original (Browser_addon_wire.Deliver {client_id;id="fixture";payload})=Ok Browser_addon_wire.Receipt));
+  Unix.unlink (issued id);
+  let tab=`Assoc ["id",`Int 7;"title",`String "Fixture";"url",`String "https://example.org/";"active",`Bool true] in
+  let complete payload=`Assoc ["ok",`Bool true;"data",payload] in
+  let calls expected=In_channel.with_open_bin (Filename.concat root ("toolcalls-"^id)) In_channel.input_all=expected in
+  Eio.Fiber.both (fun () ->
+    let view=Browser_addon_view.read host (`Assoc []) in
+    check bool "view reads the original active page" true (Tool_result.is_success view);
+    let data=Tool_result.data view in
+    check string "view retains worker-selected client" (Browser_lane.client_id_to_string client_id) (text "clientId" data);
+    check string "view projection retains page text" "hello" (text "text" (member "page" data)))
+    (fun () ->
+      wait clock (fun () -> calls "once\nonce\n");
+      check bool "view starts with tab discovery" true
+        (Yojson.Safe.from_file (Filename.concat root ("arguments-"^id)) |> member "command" |> text "verb"="tabs.list");
+      check bool "view tab result settled" true
+        (Browser_addon_ingress.deliver ~config ~client ~id:"fixture" ~payload:(complete (`List [tab]))=Ok ());
+      wait clock (fun () -> calls "once\nonce\nonce\n");
+      let request=Yojson.Safe.from_file (Filename.concat root ("arguments-"^id)) in
+      check string "second read pins the first connection" (Browser_lane.client_id_to_string client_id) (text "clientId" request);
+      check bool "view page result settled" true
+        (Browser_addon_ingress.deliver ~config ~client ~id:"fixture" ~payload:(complete (`Assoc [
+          "url",`String "https://example.org/";"title",`String "Fixture";
+          "text",`String "hello";"chars",`Int 5;"truncated",`Bool false]))=Ok ()));
   Unix.unlink (issued id);
   write (Filename.concat root ("reject-tool-output-"^id)) "reject";
   Eio.Fiber.both (fun () ->
@@ -349,7 +388,7 @@ hooks = ["validate_input", "validate_output"]
       check bool "malformed output does not prevent original settlement" true
         (Browser_addon_ingress.deliver ~config ~client ~id:"fixture"
           ~payload:(`Assoc ["ok",`Bool true;"data",`Assoc []])=Ok ()));
-  check string "output refusal does not replay browser call" "once\nonce\n"
+  check string "output refusal does not replay browser call" "once\nonce\nonce\nonce\n"
     (In_channel.with_open_bin (Filename.concat root ("toolcalls-"^id)) In_channel.input_all);
   ignore (dispatch config R.Detach ["instance_id",`String id]);
   wait clock (fun () -> let item=inspect id in

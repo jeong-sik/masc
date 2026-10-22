@@ -357,6 +357,133 @@ class CheckOnlyCase(GuardHarness):
         self.assertIn(f"WOULD APPROVE #41487 head {HEAD} policy source", r.stdout)
 
 
+class VerdictWithdrawalCase(GuardHarness):
+    def negative_review(self, *, rid=88, state="CHANGES_REQUESTED",
+                        login="reviewer-account", submitted="2026-10-08T03:45:54Z"):
+        return {"id": rid, "state": state, "author_association": "COLLABORATOR",
+                "body": f"verdict: FAIL head: {HEAD} by: reviewer-keeper\nsource findings",
+                "commit_id": HEAD, "user": {"login": login}, "submitted_at": submitted}
+
+    def reviews(self, *reviews):
+        (self.data / "reviews.json").write_text(json.dumps(reviews))
+
+    def replacement_check(self, *, replace_id="88", diff=DIFF, body_head=HEAD):
+        body = self.tmp / "replacement.md"
+        body.write_text(f"verdict: PASS head: {body_head} by: reviewer-keeper\nsource review notes\n")
+        args = ["--check", "--review-base", BASE, "--review-diff", diff, "--body", str(body)]
+        if replace_id is not None:
+            args += ["--replace-own-cr", replace_id]
+        return self.run_guard(*args)
+
+    def test_dismissed_fail_does_not_block_a_bound_approval(self):
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        self.reviews(approval, self.negative_review(state="DISMISSED", login="withdrawn-reviewer"))
+        for mode in ("--source-receipt", "--merge-check"):
+            with self.subTest(mode=mode):
+                r = self.run_guard(mode)
+                self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads((self.data / "comments.json").read_text()), [])
+
+    def test_exact_owned_open_request_can_be_replaced_without_a_pass_comment(self):
+        request = self.negative_review()
+        self.reviews(request)
+        r = self.replacement_check()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"WOULD APPROVE #41487 head {HEAD} policy source", r.stdout)
+        self.assertEqual(json.loads((self.data / "reviews.json").read_text()), [request])
+        self.assertEqual(json.loads((self.data / "comments.json").read_text()), [])
+
+    def test_owned_request_requires_an_explicit_replacement(self):
+        self.reviews(self.negative_review())
+        r = self.replacement_check(replace_id=None)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("open CHANGES_REQUESTED", r.stderr)
+
+    def test_foreign_or_superseded_replacement_id_is_refused(self):
+        for request in (self.negative_review(login="another-reviewer"),
+                        self.negative_review(rid=89)):
+            with self.subTest(request=request):
+                self.reviews(request)
+                r = self.replacement_check()
+                self.assertEqual(r.returncode, 2)
+                self.assertIn("open CHANGES_REQUESTED", r.stderr)
+                self.assertEqual(r.stdout, "")
+
+    def test_replacement_does_not_hide_a_separate_newer_fail_review(self):
+        for login in ("reviewer-account", "another-reviewer"):
+            with self.subTest(login=login):
+                self.reviews(self.negative_review(), self.negative_review(
+                    rid=89, state="COMMENTED", login=login, submitted="2026-10-09T03:45:54Z"))
+                r = self.replacement_check()
+                self.assertEqual(r.returncode, 2)
+                self.assertIn("latest structured verdict is FAIL", r.stderr)
+
+    def test_edited_fail_comment_with_the_same_id_still_blocks_replacement(self):
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        self.reviews(approval, self.negative_review())
+        # Creation predates PASS; the negative edit must still outrank it.
+        (self.data / "comments.json").write_text(json.dumps([{
+            "id": 88, "body": f"verdict: FAIL head: {HEAD} by: reviewer-keeper",
+            "user": {"login": "reviewer-account"}, "author_association": "COLLABORATOR",
+            "created_at": "2026-10-06T03:45:54Z", "updated_at": "2026-10-09T03:45:54Z"}]))
+        r = self.replacement_check()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("latest structured verdict is FAIL", r.stderr)
+
+    def test_dismissing_a_review_does_not_withdraw_its_matching_issue_comment(self):
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        self.reviews(approval, self.negative_review(state="DISMISSED"))
+        (self.data / "comments.json").write_text(json.dumps([{
+            "id": 88, "body": f"verdict: FAIL head: {HEAD} by: reviewer-keeper",
+            "user": {"login": "reviewer-account"}, "author_association": "COLLABORATOR",
+            "created_at": "2026-10-08T03:45:54Z", "updated_at": "2026-10-08T03:45:54Z"}]))
+        r = self.run_guard("--source-receipt")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("latest structured verdict is FAIL", r.stderr)
+
+    def test_replacement_does_not_relax_reviewed_diff_or_body_binding(self):
+        self.reviews(self.negative_review())
+        for kwargs, reason in (({"diff": "e" * 64}, "current complete diff differs"),
+                               ({"body_head": "a" * 40}, "verdict names another head")):
+            with self.subTest(kwargs=kwargs):
+                r = self.replacement_check(**kwargs)
+                self.assertEqual(r.returncode, 2)
+                self.assertIn(reason, r.stderr)
+
+    def test_replacement_never_authorizes_merge_or_source_receipt(self):
+        self.reviews(self.negative_review())
+        for mode in ("--merge-check", "--source-receipt"):
+            with self.subTest(mode=mode):
+                r = self.run_guard(mode, "--replace-own-cr", "88")
+                self.assertEqual(r.returncode, 2)
+                self.assertEqual(r.stdout, "")
+
+    def test_replacement_still_refuses_unreadable_comments(self):
+        self.reviews(self.negative_review())
+        (self.data / "comments.json").unlink()
+        r = self.replacement_check()
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("approve-guard: verdict read failed", r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_replacement_still_refuses_failed_review_read_after_validation(self):
+        self.reviews(self.negative_review())
+        gh = self.tmp / "gh"
+        gh.write_text(gh.read_text().replace(
+            '  repos/*/pulls/*/reviews*) f="$FAKE_DIR/reviews.json";;',
+            '''  repos/*/pulls/*/reviews*)
+    [ ! -f "$FAKE_DIR/reviews-already-read" ] || exit 7
+    touch "$FAKE_DIR/reviews-already-read"
+    f="$FAKE_DIR/reviews.json";;'''))
+        r = self.replacement_check()
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("approve-guard: verdict read failed", r.stderr)
+        self.assertEqual(r.stdout, "")
+
+
 class PrintFooterCase(GuardHarness):
     def setUp(self):
         super().setUp()

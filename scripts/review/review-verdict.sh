@@ -1,11 +1,18 @@
 # Shared structured verdict reader. Caller supplies GH and repo; read-only.
 # Newest structured verdict for this head; malformed evidence never grants PASS.
-verdict_for() { # pr head
-  local lines
+verdict_for() { # pr head [validated own open change-request review id]
+  local lines exclude_review="${3:-}"
+  [ -z "$exclude_review" ] || [[ "$exclude_review" =~ ^[1-9][0-9]*$ ]] || {
+    echo "approve-guard: invalid replacement review id" >&2; return 1;
+  }
   lines=$( { "$GH" api --paginate "repos/$repo/issues/$1/comments" --jq '.[] | [.created_at, .body, (.author_association // "UNKNOWN"), (.updated_at // .created_at)] | @tsv' &&
-             "$GH" api --paginate "repos/$repo/pulls/$1/reviews" --jq '.[] | [.submitted_at, .body, (.author_association // "UNKNOWN")] | @tsv'; } ) || { echo "approve-guard: verdict read failed: comments/reviews of PR $1" >&2; return 1; }
-  printf '%s\n' "$lines" | awk -F'\t' -v head="$2" '
-    { body=$2; sub(/\\n.*/, "", body); sub(/\\r$/, "", body)
+             "$GH" api --paginate "repos/$repo/pulls/$1/reviews" --jq '.[] | [.submitted_at, .body, (.author_association // "UNKNOWN"), "", .state, (.id|tostring)] | @tsv'; } ) || { echo "approve-guard: verdict read failed: comments/reviews of PR $1" >&2; return 1; }
+  printf '%s\n' "$lines" | awk -F'\t' -v head="$2" -v exclude_review="$exclude_review" '
+    { # Columns 5/6 exist only for reviews. Column 4 remains comment edit time.
+      # A replacement is validated by approve-guard before every read; it
+      # withdraws only that exact open CR, never a comment or another review.
+      if ($5=="DISMISSED" || (exclude_review!="" && $5=="CHANGES_REQUESTED" && ("id:" $6)==("id:" exclude_review))) next
+      body=$2; sub(/\\n.*/, "", body); sub(/\\r$/, "", body)
       n=split(body, w, " ")
       names_head=0; head_fields=0
       for (i=3; i<n; i++) if (w[i]=="head:") {

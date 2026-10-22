@@ -82,4 +82,3 @@ AssertionError: expected { kind: 'package', …(2) } to match object { Object (i
       Tests  1 failed | 7 skipped (8)
    Start at  11:56:12
    Duration  846ms (import 33%, environment 27%, setup 23%, transform 16%, tests 1%, worker 1%)
-

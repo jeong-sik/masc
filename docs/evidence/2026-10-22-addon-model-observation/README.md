@@ -13,6 +13,8 @@ is retained. After repair, [three selected suites](selected-dashboard-tests.txt)
 pass 37 cases. Whole Dashboard TypeScript and six changed-file ESLint checks
 also return zero. Commands, source blob hashes and artifact hashes are in
 [the execution receipt](execution.json).
+Published text logs omit only terminal blank lines; their artifact hashes and
+the original raw command-output hashes are recorded separately.
 
 ## Browser scope
 

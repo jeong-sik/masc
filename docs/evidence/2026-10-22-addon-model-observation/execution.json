@@ -27,7 +27,9 @@
         "src/components/tools/prompt-registry-panel.test.ts"
       ],
       "exit_code": 0,
-      "sha256": "d31a40c2b7fccba0334de8aaa5590d54876f1f4a686e8a409942b8ef6f3f3112"
+      "sha256": "d31a40c2b7fccba0334de8aaa5590d54876f1f4a686e8a409942b8ef6f3f3112",
+      "published_log": "selected-dashboard-tests.txt",
+      "published_log_sha256": "21a72cc2a9b2df8a5d3fd009f37db5e0875566c51903769a671664b0f6722bbc"
     },
     "typescript": {
       "command": [
@@ -62,7 +64,8 @@
     "production_source": "a0d3f3197fb88005bd9f920ded9d915d2c8dccea",
     "method": "New regression fixture executed before modifying the production decoder",
     "log": "baseline-decoder-failure.txt",
-    "result": "failed: parser dropped exact_outputs"
+    "result": "failed: parser dropped exact_outputs",
+    "raw_log_sha256": "0c1a32d7deb54c22d3cf2fe558323243ed3434c3775de205071e5ce89385b545"
   },
   "browser": {
     "scope": "Production LaneInventoryPanel and decoder rendered in Chromium with synthetic API fixture, not the live Dashboard application",
@@ -91,11 +94,11 @@
     ]
   },
   "artifact_sha256": {
-    "baseline-decoder-failure.txt": "0c1a32d7deb54c22d3cf2fe558323243ed3434c3775de205071e5ce89385b545",
+    "baseline-decoder-failure.txt": "4db6d70780264120470936b35b633f8e03b9970115a00a3052a11fcb90292efc",
     "browser-fixture.html": "81a5e79f2bd14d1ff4c272b4c1de0d43ce6e8c86ba95cc47825154f7a806eae6",
     "browser-observation.json": "6c39fce998f66730f7e63dbed28e88ed329884318f5dc0ca0293140f53e6505f",
     "model-routes-fixture.png": "95dfd4711c075d94604d24fb5826d5199c7ab943c3ba8fddfb44e1e0a795d6ac",
-    "selected-dashboard-tests.txt": "d31a40c2b7fccba0334de8aaa5590d54876f1f4a686e8a409942b8ef6f3f3112",
+    "selected-dashboard-tests.txt": "21a72cc2a9b2df8a5d3fd009f37db5e0875566c51903769a671664b0f6722bbc",
     "native-tui-parent-receipt.json": "af5a7876113cb4979ca06b5e6d76f9ab349544c944a1a7f4b535edee2c79b9c2",
     "original54-contract-audit.json": "335c513b6ac2641a40b2d894ea7de713f2ea7a48e4fe05b5893204de7dbdd3e2"
   },
@@ -117,5 +120,6 @@
       "Does not execute Dashboard delta",
       "No installed runtime or visible TUI verification"
     ]
-  }
+  },
+  "public_log_normalization": "Only terminal blank lines removed from published text logs; raw command-output hashes remain separately recorded."
 }

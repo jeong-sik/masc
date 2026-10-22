@@ -1,6 +1,6 @@
 ---
 name: ocaml-coding
-description: "masc 저장소의 lib/·bin/·test/ OCaml 5.5 + Eio 코드를 작성·수정할 때 쓴다. typed 오류·취소와 자원 수명, 준비·Skill 권한과 job의 물리 workspace identity, durable 결과의 switch 수명 관측과 공유 비동기 발견, 실제 worker 정리, .mli 우선 변경과 검증 경계를 안내한다. 준비·예약·실행·UI 관측을 구분한다."
+description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, 변경 검증, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 막히는 I/O 와 executor의 실제 worker 정리, .mli 먼저 고치기, 있을 거라고 착각하기 쉬운 표준 라이브러리 호출을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
 ---
 
 # masc OCaml 점검표
@@ -13,6 +13,10 @@ description: "masc 저장소의 lib/·bin/·test/ OCaml 5.5 + Eio 코드를 작�
 - Eio: opam 스위치의 `lib/eio/*.mli`, 또는 https://ocaml.org/p/eio/latest/doc/Eio/index.html
 
 규칙의 원본은 `docs/constitution.xml` 이다. 이 문서와 헌법이 다르면 헌법이 맞다.
+
+이 점검표에는 여러 기능에 두루 통하는 OCaml·Eio 규칙만 둔다. 한 기능의 설계와 경계는
+그 모듈의 `.mli` 에 적는다. 본문이 `Common.max_tool_result_wire_bytes` 를 넘으면
+`keeper_skill` 이 이 Skill 을 통째로 거절해서 모든 Keeper 가 읽지 못한다.
 
 ## 1. 상태와 오류는 닫힌 합타입
 
@@ -61,138 +65,18 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
 
 ## 3. 변경 검증
 
-- 준비 중 파일을 직접 여는 코드도 확인한다. 이미지 카탈로그의 load/load_for_change는
-  host 파일의 open/read/close만 공통 systhread guard로 보낸다. 순수 해석·factory 상태·
-  이미지 선택은 원래 caller가 소유하고, 저장의 최신 byte 비교와 durable lock은 그대로 둔다.
-  비동기 파일 관측을 권한 허가나 물리 실행 시작으로 바꾸어 쓰지 않는다. Non-Eio fallback과
-  보호된 factory lock의 대기는 유지되므로 전체 준비나 취소가 즉시 끝난다고 주장하지 않는다.
-
-- 세션·snapshot 영속화는 실제 owner 경로의 host I/O와 순수 해석을 공용 executor에 두고,
-  취소·소유권 확인 뒤 owner가 상태를 적용한다. 준비 완료와 물리 I/O·caller·UI 관측을 구분한다.
-  관련 필드는 한 불변 atomic registry로 게시하고 저장은 한 committed 상태를 캡처한다.
-  profile-only와 초기화 권한, 원래 optional/default/중복 정책과 unrelated live key를 보존한다.
-  CAS 안에는 순수 map 변환만 두고 clock·로그·외부 lifecycle 효과는 밖에 둔다. 별개 API 호출과
-  외부 효과까지 transaction이라 부르지 않는다. 재시도·경합·준비 비용을 실측에서 빼지 않는다.
-  파일 교체는 공용 `Fs_compat` atomic writer와 canonical 임시 이름을 재사용한다. 기존 host
-  worker에서는 inline 경로를 쓰고 재생성 가능한 파일만 rename-only로 저장한다. 원래 예외와
-  backtrace가 필요한 caller는 staged 결과를 사용해 예상 host 실패만 타입으로 처리하고,
-  취소·예상 밖 오류는 전파한다. 새 임시 파일 프로토콜을 복제하지 않는다. 입력·목적지 종류,
-  descriptor identity, 복원 거절의 최초 원인·token·경로 보존은 저장 완료와 별개로 확인한다.
-  agent 세션의 디렉터리 발견은 worker에서 불변 이름만 만들고 owner에 dispatch한다.
-  조회 중 들어온 실제 연결·대기 알림은 현재 state에서 보존하며 없는 이름만 복원한다.
-  조회마다 수명을 묶어 열려 있는 동안 처리된 삭제(일시 등록 후 삭제 포함)를 적용 때 보존한다.
-  성공·실패·취소에 정리하고 actor 종료는 미적용 조회도 무효화한다. 영구 tombstone은 두지 않는다.
-  caller 취소 전 owner가 claim했는지 구분하며, 이후 취소를 publication 취소나 물리 I/O 종료로 부르지 않는다.
-  실제 읽기 뒤 owner 적용 전의 테스트 경계는 실제 연결·삭제·알림·actor 수명만 순서 짓고
-  storage 대체·private state 관측·호출 횟수 검사로 바꾸지 않는다.
-  현재 protocol/resource 시나리오와 한계는 해당 audit에 두고 Skill에는 재사용할 규율을 적는다.
-
-- Ask 답변 복구의 사전 증거는 같은 회차·Keeper·canonical answer의 UTC-day window에서만
-  공유한다. 실제 첫 수요에서 캡처하고 원본 답변 행이 하나뿐인 window의 큰 proof 집합은 보관하지 않는다.
-  기존 파일 cursor cache와 회차의 불변 snapshot을 구분하며, 실패한 window를 다른 날짜나
-  Keeper에 빌리지 않는다. 순서·원래 답변/Task 연결은 유지하고 실제 enqueue는 owner lock의
-  최신 증거·lifecycle fence를 다시 확인한다. window capture 수는 파일 I/O·작업 진척이 아니다.
-
-- 서버 Ask 복구는 같은 수명의 `Keeper_ask_answer_wake` supervisor와 switch를 사용한다.
-  `pulse` 반환은 discovery child 예약이며 실제 성공이 아니다. 원래 발견·owner 예약 결과는
-  원래 base path와 함께 `on_discovery`로 전달하고 전체 읽기 실패도 같은 타입으로 남긴다.
-  discovery는 observer·정리까지 하나만 활성화하며 실제 읽기 전에 yield한다. 미완료를
-  `Ok`나 빈 목록으로 바꾸지 않고, 일부 불가 log의 진단과 정상 owner 복구를 함께 유지한다.
-  발견한 원래 Keeper별로 active 작업을 한 번만 예약하고, worker는 양보한 뒤 원래 행 순서로
-  복구한다. 다른 Keeper의 intake/파일 잠금을 maintenance나 독립 Keeper가 함께 기다리지 않는다.
-  active 중 발견한 새 답변은 현재 batch를 덮지 않고 후속 pulse가 fresh하게 읽는다.
-  예약·시작·batch 결과·중단을 구분하며, 취소 정리 전 active를 해제하거나 전달을 Task 진척으로
-  부르지 않는다. discovery 자체·같은 Keeper의 직렬 대기·보호된 물리 I/O 정리는 여전히 남는다.
-
-- Composition 완료 복구도 원래 server switch의 supervisor를 사용한다. `pulse` 반환은
-  discovery 예약이며 원래 outbox 발견·owner 예약의 실제 결과만 `on_discovery`로 전달한다.
-  전체 읽기 실패와 일부 손상 의무의 진단을 구분하고, discovery는 observer·정리까지 하나만
-  활성화하며 읽기 전에 yield한다. 예약을 성공·전달·물리 종료로 바꾸어 기록하지 않는다.
-  기본 복구 경고와 기존 단계·중단 관측에는 원래 supervisor 경로를 함께 남긴다.
-  routine의 lazy 정책을 유지하고 추가 경로 바이트와 eager 로그의 형식화 비용도 센다.
-  outbox에서 검증한 원래 root·요청·수신자를 Keeper별 worker로 전달하고,
-  실제 전달 전 obligation을 다시 읽어
-  identity 변경을 거절한다. 기존 canonical terminal·journal·waiting proof와 durable ACK는
-  같은 core를 사용한다. 이미 ACK된 힌트는 권한이 아니며 active 중의 새 의무는 후속 pulse가
-  다시 발견한다. 발견/재읽기 비용을 포함하고, batch 결과·observer·worker 정리를 구분한다.
-  준비된 DAG의 waiting attempt를 logical 완료로 알리거나 물리 작업을 재실행하지 않는다.
-
-- Goal·명시적 Broadcast outbox의 maintenance도 원래 drain을 server switch 소유
-  worker에 예약한다. 종류별 active 예약은 observer·취소 정리까지 유지하고 실제 작업 전
-  yield한다. 예약한 pulse의 workspace 설정만 쓰며 새 scope나 다음 pulse로 결과를 넘기지
-  않는다. Goal의 원래 잠금·수신자 snapshot·ACK, Broadcast의 순서·대상별 선행 조건·ACK를
-  유지한다. drain 반환·worker 정리·Keeper 소비·원본 Task 진척은 서로 다른 증거다.
-
-- transition outbox maintenance는 기존 strict executor의 원래 발견·owner 페이지를
-  server switch 소유 worker에서 실행한다. 실제 반환된 페이지의 cursor만 관측 콜백 전에
-  갱신하고, 결과를 못 받으면 이전 cursor로 durable 상태를 다시 읽는다. active 페이지는
-  observer·취소 정리까지 유지한다. 원래 owner claim·shutdown fence·target 선행 전달과
-  source retirement·순회 순서·executor 미가용 결과를 보존하며 inline fallback을 만들지 않는다.
-
 - 제공받은 switch로 자동 복구 fiber를 예약할 때는 discovery 전과 실제 예약 직전에
   `Eio.Switch.check`를 한다. `Cancel.protect`도 취소된 switch를 다시 켜지 않는다.
   `fork`가 callback 없이 반환하면 active 예약만 남을 수 있다. 취소를 저장소/저널 오류나
   정상 접수로 바꾸지 않고, 다음 정상 scope가 원래 durable owner를 다시 읽을 수 있게 한다.
-  owned-job pending marker는 검증된 행부터 발견 child 문맥에서 예약하되, filesystem 오류
-  변환 안에 예약 callback을 넣지 않는다. 뒤쪽 discovery 실패에도 먼저 예약한 worker의
-  원래 owner 검증·취소 정리를 지키고, held hint는 전체 스캔 성공 뒤에만 정리한다.
-  Composition은 원래 journal·종단 proof·의존 결과를 검증한 ready candidate부터
-  발견 drain에 전달한다. callback 예약은 filesystem 오류 변환·marker transaction 밖에서
-  수행하고, 캡처된 candidate를 실제 intake의 최신 권한 검사로 바꾸어 쓰지 않는다.
-  선언 projection은 같은 pulse의 첫 실제 수요에서 공유하며 다음 pulse로 넘기지 않는다.
-  두 controller의 child는 원래 `Fun.protect` 정리 안에서 먼저 yield한 뒤 owner 복구·held
-  증거 검사·선언 읽기에 들어간다. 진입 취소도 active 예약을 해제한다. owned-job의 발견은
-  예약된 발견 child에서, 준비된 Composition은 maintenance·결과 알림이 공유하는 drain에서 수행한다.
-  발견 중 I/O가 job/intake child를 실행할 수 있으므로 전체 발견 뒤 실행을 보장한다고
-  쓰지 않는다. owned-job 진입 취소로 제거된 process-local held hint는
-  다음 회차에 전체 재검사를 요구할 수 있지만 원래 durable 결과와 전달 의무는 유지한다.
 
-- owned-job의 명시적 base 입력은 caller에서 절대 경로로 정규화한 뒤 기존 물리
-  디렉터리로 해석한다. 상위 디렉터리 alias는 같은 workspace를 가리키지만 root 자체의
-  symlink는 거부한다. 생성·조회·invocation binding·backend 준비가 같은 물리 identity를
-  쓰고, 관측용 원래 설정 경로는 바꾸지 않는다. Missing·I/O 오류를 lexical fallback으로
-  허용하거나 다른 root의 복사 journal에 권한을 주지 않는다. 경로 해석은 effect 허가가
-  아니며 기존 owner·nofollow·device/inode·daemon·입력·출력 검증을 유지한다.
-  추가 root I/O 비용과 취소·실패·미시작 표본도 기록한다.
+- `Atomic.compare_and_set` 재시도 안에는 순수한 값 변환만 둔다. 경합하면 변환이 다시
+  돌기 때문에 clock 읽기·로그·외부 lifecycle 효과는 CAS 밖에서 한다.
 
-- owned-job maintenance `pulse`는 같은 server switch의 발견 child를 예약하고 반환한다.
-  실제 marker 발견·job 예약 결과는 원래 base path와 typed `Store.error`를 유지한
-  `on_discovery`에서 관측한다. `Ok ()`도 일부 손상 marker를 숨기거나 전달 완료를 뜻하지
-  않는다. 발견 예약·시작·실제 반환·중단을 구분하고 observer·취소 정리까지 발견을 하나만
-  유지한다. 활성 중 pulse는 합쳐지며 새 의무는 다음 maintenance가 fresh하게 읽는다.
-  원래 marker 순서·부분 오류·완전 스캔 뒤 held hint 정리·회차별 backend presence를
-  보존하고, 발견 실패나 observer 실패로 이미 예약한 원래 job을 취소하지 않는다.
-
-- 준비된 Composition의 maintenance `pulse`와 원래 owned-job 결과가 durable해진 뒤의
-  `notify_result_ready`는 같은 발견 drain에 수요를 남기고 반환한다. 첫 조회 전 수요는
-  공유하고 조회·관측 중 수요는 후속 fresh pass로 남긴다. 알림에는 원래 canonical workspace·
-  Keeper·typed result 의존성을 남긴다. 결과 알림 pass도 모든 marker·journal·terminal 권위를
-  확인하고, 해당 원래 의존성을 가진 실행만 모든 결과의 readiness를 새로 읽는다. 의존성 없는
-  Lost 복구는 보수적으로 포함한다. 정기 maintenance가 대기 알림을 전체 검사로 승격한다.
-  선택 밖의 결과는 미조회 `unselected`로 관측하며 waiting·성공으로 바꾸지 않는다. 전체 marker
-  탐색·회차별 typed-key index 구성/조회·중복 알림 보관 비용은 남는다. index 순서로 marker를
-  재정렬하거나 다음 회차에 재사용하지 않고 전체 오류 관측은 maintenance에서 이어진다.
-  실제 결과는 원래 base path와 typed `Journal.error`를 유지한 `on_discovery`에서 관측한다. 예외로 반환하지 못한 pass를
-  정상/오류 반환 횟수에 넣지 않고 raised로 구분한다. observer의 일반 실패 뒤에도 새 수요를
-  확인한다. 각 pass의 첫 실제 수요에서 선언 projection을 새로 공유하며 다음 pass에 빌리지
-  않는다. 알림 도착을 intake·Task 재개·효과 허가로 기록하지 않는다. drain의 identity와
-  순수한 예약 해제·취소 정리를 지키고 같은 lifetime switch를 사용한다. 유지보수/알림 횟수는
-  관측일 뿐 제한값이 아니다. timer·재시도 간격·결과/프로필 cache를 만들지 않는다.
-  Composition의 직접 완료와 outbox 복구는 같은 원래 completion 관측을 전달하고 durable
-  queue 전달 뒤 ACK 전에 첫 admitted Named result binding을 투영한다. 후속 물리 request ID나
-  현재 Task로 대체하지 않는다. 미확정·unadmitted·복구 중 물리 완료는 알림을 만들지 않는다.
-  typed observer는 실제 workspace와 server switch에 묶고 자기 등록만 해제한다. 다른 observer의
-  취소는 현재 publisher의 취소 검사 뒤 격리하며, publisher 자신의 취소는 전파한다. binding
-  투영 실패를 전달 실패나 새 실행 허가로 바꾸지 않고 maintenance의 원래 재검증을 유지한다.
+- 파일 교체는 공용 `Fs_compat.save_file_atomic` 계열 writer 를 재사용한다. 새 임시 파일
+  프로토콜을 따로 만들지 않는다.
 
 소스 패턴이나 임의 개수 상한으로 구현을 제한하지 않는다. 타입 검사와 실제 동작 테스트로 변경을 검증하고, 로컬 빌드와 CI 실행 시점은 헌법의 실행 프로토콜을 따른다.
-
-- 원래 Task 생성의 client 요청 identity는 opaque 타입으로 경계에서 검증하고 Task와
-  같은 backlog primary 교체에서 생성 사실을 기록한다. 같은 요청 identity도 실제
-  재호출은 별개 생성이며 중복 억제로 바꾸지 않는다. 생성 사실 조회는 엄격한 primary를
-  읽고 미관측·기록됨·복수 기록을 닫힌 타입으로 구분한다. 삭제·archive 뒤의 사실과
-  예약된 Task ID를 유지하며 결과를 현재 상태·완료·재실행 권한으로 쓰지 않는다.
-  원래 Goal/잠금/취소 보호와 post-commit 효과는 유지하고 추가 보관·조회 비용을 남긴다.
 
 ## 4. Mutex 고르기
 
@@ -209,10 +93,6 @@ Eio 인터페이스(`eio_mutex.mli`)가 말하는 차이: `Stdlib.Mutex` 는 기
 - `Eio.Mutex.use_rw ~protect t fn`: `fn` 이 예외를 내면 mutex 가 못 쓰게 된다(`Poisoned`).
   `~protect:true` 는 잠근 구간을 취소에서 보호한다. 잠금을 기다리는 동안은 보호하지 않는다.
 - 취소 중에도 반드시 끝내야 하는 짧은 등록 해제는 mutex를 잡기 전부터 보호한다.
-  `keeper_msg_async`의 종료 경로는 terminal 저장·알림을 예외 안전한 정리로 감싸고,
-  닫힌 request switch 등록을 제거한다. 실제 switch 해제, canonical terminal 저장,
-  알림 callback의 취소와 등록 해제를 각각 구분한다. 알림 실패를 원래 결과의 실패나
-  worker 중단으로 바꾸지 않고, 이 bookkeeping 수정을 실행 시간 개선으로 기록하지 않는다.
 - `Eio.Mutex.use_ro t fn`: 읽기만 할 때. 예외가 나도 풀고 넘어간다.
 - 한 도메인 안에서만 도는 코드는 막히는 연산을 하기 전에는 fiber 가 바뀌지 않는다. mutex 가 필요 없을 수 있다.
 - mutex 로 감싸는 방식을 바꾸면 `rg -n '<함수 이름>' test/` 로 테스트 호출을 전부 센다.

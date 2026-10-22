@@ -57,7 +57,8 @@ reconciliation, request-bound settlement relay, or Acting's standing run state.
 Those consumers must read the owned continuation and retain server incarnation,
 original invocation and request identity. Historical feed events alone cannot
 prove a current wait after a replay gap. Keeper quiet/member state stays
-independent. #38005 remains open until those paths and their behavior are proven.
+independent. Acceptance for #38005 remains incomplete until those paths and their behavior
+are proven, independently of the issue tracker lifecycle.
 
 ## Input transition persistence
 
@@ -534,3 +535,41 @@ response admission retains its exact global-W and Canonical_input restriction
 until those paths are connected and tested together. That restriction is not
 the intended final recovery behavior. No whole R1/R2/TUI acceptance, installation
 or feature merge is claimed by this checkpoint.
+
+
+## Typed host checkpoint publication (integration work in progress)
+
+A dispatch captures one closed canonical or operation destination from actual
+Owner evidence. The operation destination retains a private copy of its latest
+confirmed payload and original child writer. Native and host writes fence this
+local state before fallible retention, publication or observation; only exact
+confirmed success restores it. Errors and exceptions, including cancellation,
+leave subsequent reads and writes unconfirmed. Exceptions propagate unchanged.
+No failed write is retried or converted to success by reading it back.
+
+Ordinary host changes preserve the entire original message prefix, complete
+pending input, turn/trace and repetition snapshot. Explicit replay projection
+uses the existing direct-turn policy and also retains every original ordinary
+User message and message bearing a ToolUse/ToolResult in order. Incomplete
+Assistant cuts reuse the existing exact typed cut. Each proof binds source and
+candidate references, checked again against the actual retained artifacts by
+the original Owner child. Candidate Context is privately frozen before proof
+validation and reference encoding. The existing pure replay and Assistant patch
+implementations now live together below Owner so this proof creates no module
+cycle and existing consumers keep the same implementation.
+
+The actual Core Retire reference N remains unchanged after host publication H.
+For a pending-input wait, Owner proves exact retained N-to-H prefix, complete
+pending and repetition preservation. The journal transaction then rechecks
+current branch H and same-trace/same-turn Retire N and acknowledges only N as
+it queues H. The global path continues requiring the identical input/native
+reference. Same turn alone is never physical proof of this relationship.
+
+The source fixture covers cancelled host publication, immutable confirmed
+Context, edited-candidate proof refusal, lost response/repetition refusal,
+pre-native host admission, actual Owner/Producer publications and separate
+Retire N plus host H waiting, preserving independent G. It still does not invoke
+Core's native runtime. This dispatch service is not yet wired through the actual
+native adapter, Gate/approval, all host saves or finalizer. Those integrations,
+real invocation/crash behavior and public operation response acceptance remain
+required. Source parsing and review are not execution or whole-issue acceptance.

@@ -431,6 +431,16 @@ val input_checkpoint_destination : input_checkpoint_writer -> input_checkpoint_d
 (** Captured by the original child from the actual journal. Callers cannot
     select or change this destination, including after an independent global
     input has been published. *)
+val checkpoint_operation_input_branch : t -> writer:input_checkpoint_writer ->
+  observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t ->
+  transformation:Keeper_checkpoint_host_transform.t ->
+  (unit, error) result
+(** Publish a host checkpoint only to this writer's original operation branch.
+    Recheck the inherited executing child, trace/op/digest and retained source
+    and candidate, the exact typed host transformation, unchanged complete
+    pending ownership and repetition evidence, and original scope.
+    Native execution/settlement and branch CAS are checked transactionally.
+    Uncertain retention or commit never authorizes retry or borrowing global G. *)
 val begin_input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
   (input_checkpoint_writer, error) result
 val input_checkpoint_reference : input_checkpoint_writer -> Keeper_checkpoint_ref.t option

@@ -195,6 +195,11 @@ val begin_input_checkpoint : base_path:string -> keeper_name:string -> trace_id:
   (Keeper_owner.input_checkpoint_writer, command_error) result
 val input_checkpoint : base_path:string -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
   (Keeper_chat_operation_store.input_checkpoint_observation, command_error) result
+val checkpoint_operation_input_branch : base_path:string -> keeper_name:string ->
+  writer:Keeper_owner.input_checkpoint_writer -> observed:Keeper_checkpoint_ref.t ->
+  checkpoint:Keeper_checkpoint_ref.t -> transformation:Keeper_checkpoint_host_transform.t ->
+  (unit, command_error) result
+(** Existing original Owner receipt lookup, including while draining. *)
 val advance_autonomous_input_checkpoint : base_path:string -> keeper_name:string ->
   writer:Keeper_owner.input_checkpoint_writer -> checkpoint:Keeper_checkpoint_ref.t ->
   (Keeper_owner.input_checkpoint_writer, command_error) result

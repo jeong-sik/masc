@@ -661,7 +661,7 @@ let test_branch_native_publication_is_atomic_and_repeats_wait () = with_path @@ 
     check_native_branch_pair store next_wait_checkpoint;
     publish_branch_native store operation (Native.Terminal {call_id=call.call_id;
       disposition={Agent.outcome=Agent.Terminal_succeeded;recovery=Agent.Retire}}) |> ok;
-    let second_pending={pending with run_id="execution-run-original-branch-next";
+    let second_pending:Agent_core.Agent_input_request.pending={run_id="execution-run-original-branch-next";
       request={pending.request with request_id="branch-next-question";question="Original branch next question?"}} in
     let second_wait=Semantic.input_wait ~checkpoint:next_wait_checkpoint ~pending:second_pending |> value in
     ignore (Store.defer_direct_input_wait store ~now:16. ~operation_id:original
@@ -701,8 +701,81 @@ let test_branch_native_commit_uncertainty ~binding after_commit () = with_path @
     if not (binding && not after_commit) then check_native_branch_pair store expected;
     actual_global store newer)
 
+let publish_host_branch store operation ~observed ~checkpoint =
+  Store.checkpoint_direct_input_branch store ~now:18. ~operation_id:original
+    ~execution_digest:operation.Operation.execution_digest ~observed ~checkpoint
+let test_branch_host_checkpoint_preserves_native_retirement () = with_path @@ fun path ->
+  let newer,host=with_store path (fun store ->
+    let operation,newer=actual_running_branch store in
+    let admitted=response_checkpoint response_candidate.turn_count "branch pre-dispatch host admission" in
+    publish_host_branch store operation ~observed:response_candidate ~checkpoint:admitted |> ok;
+    check bool "host admission advances the branch without native dispatch" true
+      (Keeper_checkpoint_ref.equal (branch_head store) admitted && native store=Native.No_native_call);
+    rejected (publish_host_branch store operation ~observed:response_candidate ~checkpoint:admitted);
+    let call=branch_native_call operation in
+    publish_branch_native store operation (Native.Bind {observed=Native.No_native_call;call}) |> ok;
+    let active_edit=response_checkpoint branch_native_seed.turn_count "host cannot edit an active native checkpoint" in
+    (match publish_host_branch store operation ~observed:branch_native_seed ~checkpoint:active_edit with
+     | Error Store.Native_call_unsettled -> () | Error _ | Ok () -> fail "active native call admitted a host history edit");
+    publish_branch_native store operation
+      (Native.Checkpoint {call_id=call.call_id;observed=branch_native_seed;checkpoint=branch_native_next}) |> ok;
+    publish_host_branch store operation ~observed:branch_native_next ~checkpoint:branch_native_next |> ok;
+    publish_branch_native store operation (Native.Terminal {call_id=call.call_id;
+      disposition={Agent.outcome=Agent.Terminal_succeeded;recovery=Agent.Retire}}) |> ok;
+    let host=response_checkpoint branch_native_next.turn_count "host finalizes the original retired branch" in
+    rejected (publish_host_branch store operation ~observed:branch_native_next
+      ~checkpoint:(response_checkpoint (branch_native_next.turn_count+1) "host cannot invent a later native turn"));
+    publish_host_branch store operation ~observed:branch_native_next ~checkpoint:host |> ok;
+    let before=(semantic store).revision in
+    publish_host_branch store operation ~observed:host ~checkpoint:host |> ok;
+    check int64 "same host checkpoint does not spend a semantic revision" before (semantic store).revision;
+    check bool "host result is the retained branch head" true (Keeper_checkpoint_ref.equal (branch_head store) host);
+    check bool "host metadata does not masquerade as native execution evidence" true
+      (match native store with
+       | Native.Terminal_unacknowledged (actual,{Agent.recovery=Retire;_}) ->
+         Keeper_checkpoint_ref.equal actual.checkpoint branch_native_next
+       | No_native_call | Active _
+       | Terminal_unacknowledged (_, {Agent.recovery=(Retire | Operator_repair_required Effect_outcome_unknown);_}) -> false);
+    actual_global store newer;newer,host) in
+  with_store path (fun store ->
+    check bool "post-native host checkpoint survives actual SQLite reopen" true (Keeper_checkpoint_ref.equal (branch_head store) host);
+    check bool "native evidence remains separately retained" true (names branch_native_next (Semantic.checkpoint_references (semantic store)));
+    actual_global store newer)
+let test_branch_host_checkpoint_rejects_unknown_effect () = with_path @@ fun path -> with_store path @@ fun store ->
+  let operation,newer=actual_running_branch store in
+  let call=branch_native_call operation in
+  publish_branch_native store operation (Native.Bind {observed=Native.No_native_call;call}) |> ok;
+  publish_branch_native store operation (Native.Terminal {call_id=call.call_id;
+    disposition={Agent.outcome=Agent.Terminal_failed;recovery=Agent.Operator_repair_required Agent.Effect_outcome_unknown}}) |> ok;
+  let before=Semantic.to_json (semantic store) in
+  rejected (publish_host_branch store operation ~observed:branch_native_seed ~checkpoint:branch_native_seed);
+  rejected (publish_host_branch store operation ~observed:branch_native_seed
+    ~checkpoint:(response_checkpoint branch_native_seed.turn_count "cannot finalize an unknown native effect"));
+  check bool "unknown native effect preserves all original facts" true (before=Semantic.to_json (semantic store));
+  actual_global store newer
+let test_branch_host_checkpoint_commit_uncertainty after_commit () = with_path @@ fun path ->
+  let newer,expected=with_store path (fun store ->
+    let operation,newer=actual_running_branch store in
+    let host=response_checkpoint response_candidate.turn_count "exact retained host admission" in
+    ignore (Store.take_released_checkpoints store);
+    Store.For_testing.fail_next_commit (if after_commit then Fail_after_commit else Fail_before_commit);
+    (match publish_host_branch store operation ~observed:response_candidate ~checkpoint:host with
+     | Error (Store.Store_unavailable _) -> () | Error _ | Ok () -> fail "uncertain host checkpoint minted acknowledgement");
+    Store.For_testing.clear_commit_fault ();
+    let expected=if after_commit then host else response_candidate in
+    check bool "host head reflects actual commit" true (Keeper_checkpoint_ref.equal (branch_head store) expected);
+    check int "host checkpoint uncertainty grants no cleanup" 0 (List.length (Store.take_released_checkpoints store));
+    actual_global store newer;newer,expected) in
+  with_store path (fun store ->
+    check bool "actual host checkpoint commit survives reopen" true (Keeper_checkpoint_ref.equal (branch_head store) expected);
+    actual_global store newer)
+
 let () = run "durable original input wait"
   ["store",[
+    test_case "host checkpoint preserves exact native retirement and independent input" `Quick test_branch_host_checkpoint_preserves_native_retirement;
+    test_case "host checkpoint cannot hide unknown native effects" `Quick test_branch_host_checkpoint_rejects_unknown_effect;
+    test_case "host checkpoint precommit failure grants no receipt" `Quick (test_branch_host_checkpoint_commit_uncertainty false);
+    test_case "host checkpoint uncertain commit stays an error after reopen" `Quick (test_branch_host_checkpoint_commit_uncertainty true);
     test_case "native seed and later branch checkpoints publish atomically and wait again" `Quick test_branch_native_publication_is_atomic_and_repeats_wait;
     test_case "branch native Bind precommit failure grants no receipt" `Quick (test_branch_native_commit_uncertainty ~binding:true false);
     test_case "branch native Bind uncertain commit stays an error after reopen" `Quick (test_branch_native_commit_uncertainty ~binding:true true);

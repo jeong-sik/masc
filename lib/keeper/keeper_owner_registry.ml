@@ -845,6 +845,9 @@ let begin_input_checkpoint ~base_path ~keeper_name ~trace_id =
   with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.begin_input_checkpoint owner ~trace_id)
 let input_checkpoint ~base_path ~keeper_name ~trace_id =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner -> Keeper_owner.input_checkpoint owner ~trace_id)
+let checkpoint_operation_input_branch ~base_path ~keeper_name ~writer ~observed ~checkpoint ~transformation =
+  with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.checkpoint_operation_input_branch owner ~writer ~observed ~checkpoint ~transformation)
 let advance_autonomous_input_checkpoint ~base_path ~keeper_name ~writer ~checkpoint =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint)

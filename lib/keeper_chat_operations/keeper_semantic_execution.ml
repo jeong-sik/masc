@@ -467,6 +467,38 @@ let validate_input_branch ~id ~revision ~phase ~native_call ~intent = function
           && Keeper_checkpoint_ref.equal intent.waiting.checkpoint branch.checkpoint then Ok ()
       else Error "input branch response intent names another input head"
 
+let checkpoint_input_branch ~now ~(observed:Keeper_checkpoint_ref.t)
+    ~(checkpoint:Keeper_checkpoint_ref.t) (current:t) =
+  let invalid detail = Error (Invalid_transition detail) in
+  let* branch=match current.input_branch with
+    | Some branch when Keeper_checkpoint_ref.equal branch.checkpoint observed -> Ok branch
+    | Some _ | None -> invalid "host checkpoint lost its operation branch predecessor" in
+  let* ()=if valid_time now && Keeper_id.Trace_id.equal observed.trace_id checkpoint.trace_id
+      && checkpoint.turn_count=observed.turn_count then Ok ()
+    else invalid "host branch checkpoint changed trace or turn" in
+  let* ()=match current.phase with
+    | Running | Resuming_runtime_retry _ | Resuming_gate _ -> Ok ()
+    | Preparing | Ready | Recovering _ | Suspended _ | Settled _ ->
+      invalid "host branch checkpoint requires a running operation" in
+  let* ()=match current.native_call with
+    | Keeper_native_call.No_native_call -> Ok ()
+    | Active call when Keeper_checkpoint_ref.equal call.checkpoint checkpoint
+        && Keeper_checkpoint_ref.equal observed checkpoint -> Ok ()
+    | Terminal_unacknowledged (call,{Agent_core.Agent.recovery=Retire;_})
+        when call.checkpoint.turn_count=checkpoint.turn_count -> Ok ()
+    | Active _
+    | Terminal_unacknowledged (_, {Agent_core.Agent.recovery=
+        (Retire | Operator_repair_required Effect_outcome_unknown);_}) -> Error Native_call_unsettled in
+  if Keeper_checkpoint_ref.equal observed checkpoint then Ok current
+  else if current.revision=Int64.max_int then Error Revision_exhausted
+  else
+    let next={current with revision=Int64.succ current.revision;
+      input_branch=Some {branch with checkpoint};updated_at=now} in
+    let* ()=validate_input_branch ~id:next.id ~revision:next.revision ~phase:next.phase
+        ~native_call:next.native_call ~intent:next.input_response_intent next.input_branch
+      |> Result.map_error (fun detail -> Invalid_transition detail) in
+    Ok next
+
 let update_native_call ~now ~expected ~replacement current =
   let open Keeper_native_call in
   let invalid detail = Error (Invalid_transition detail) in

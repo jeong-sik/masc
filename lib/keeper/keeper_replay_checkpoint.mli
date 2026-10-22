@@ -1,6 +1,6 @@
 (** Canonical replay checkpoint projection and response-capture policy. *)
 
-type replay_suffix_prune_reason
+type replay_suffix_prune_reason = Keeper_checkpoint_replay_projection.replay_suffix_prune_reason
 
 val replay_suffix_prune_reason_to_string :
   replay_suffix_prune_reason -> string

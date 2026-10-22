@@ -366,6 +366,12 @@ val defer_direct_input_wait : t -> now:float -> operation_id:Operation.Operation
     expiry or generic resume. An uncertain commit stays Error; read actual
     state before reconciliation. This grants no response admission. *)
 
+(** For an operation branch, a same-turn retained host checkpoint may follow
+    the actual Retire receipt. Owner must prove the exact physical N -> H
+    relation, pending ownership and history/repetition preservation first. The
+    transaction rechecks branch H and Retire N and acknowledges only N; the
+    global path still requires the exact native/input reference. *)
+
 val direct_input_response_intent : t -> operation_id:Operation.Operation_id.t ->
   (Keeper_semantic_execution.input_response_intent option, error) result
 (** The actual persisted intent, or None when no intent is recorded. Files or
@@ -373,6 +379,14 @@ val direct_input_response_intent : t -> operation_id:Operation.Operation_id.t ->
 val direct_input_branch : t -> operation_id:Operation.Operation_id.t ->
   (Keeper_semantic_execution.input_branch option, error) result
 (** Read this exact operation's stored branch, never the trace's global head. *)
+val checkpoint_direct_input_branch : t -> now:float ->
+  operation_id:Operation.Operation_id.t -> execution_digest:string ->
+  observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t ->
+  (unit, error) result
+(** CAS of a retained host checkpoint, with exact running operation/digest and
+    native settlement checks. This never reads or writes global input. Physical
+    retention, pending and original child/scope validation belong to the caller.
+    Commit uncertainty remains Error and grants no deletion/retry authority. *)
 val prepare_direct_input_response : t -> now:float -> operation_id:Operation.Operation_id.t ->
   execution_digest:string -> intent:Keeper_semantic_execution.input_response_intent ->
   (unit, error) result

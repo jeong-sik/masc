@@ -7,7 +7,7 @@ open Alcotest
 module S = Masc.Browser_addon_setup
 module Config = Masc.Lane_addon_config
 
-let with_workspace f =
+let with_workspace ?(config = true) f =
   let dir = Filename.temp_file "browser-addon-setup" "" in
   Sys.remove dir;
   Unix.mkdir dir 0o700;
@@ -27,8 +27,10 @@ let with_workspace f =
       remove dir)
     (fun () ->
        let base = Unix.realpath dir in
-       Unix.mkdir (Filename.concat base ".masc") 0o700;
-       Unix.mkdir (Filename.concat base ".masc/config") 0o700;
+       if config
+       then (
+         Unix.mkdir (Filename.concat base ".masc") 0o700;
+         Unix.mkdir (Filename.concat base ".masc/config") 0o700);
        f base)
 
 let read path = In_channel.with_open_bin path In_channel.input_all
@@ -135,7 +137,7 @@ let test_an_existing_declaration_of_the_package_is_left_as_it_is () =
     let result = installed base in
     (match result.declaration with
      | S.Created _ -> fail "a second declaration of the package was created"
-     | S.Present { path; manifest_path = named; this_build } ->
+     | S.Present { path; manifest_path = named; this_build; _ } ->
        check string "the operator's declaration" own path;
        check string "its own package" (Unix.realpath manifest_path) named;
        check bool "not this build's package" false this_build);
@@ -160,6 +162,70 @@ let test_two_declarations_of_the_package_are_refused () =
         (Sys.file_exists (S.package_directory ~base_path:base))
     | Error error -> failf "refused for another reason: %s" (S.error_message error))
 
+let rec remove_tree path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Array.iter (fun entry -> remove_tree (Filename.concat path entry)) (Sys.readdir path);
+    Unix.rmdir path
+  | _ -> Sys.remove path
+
+let test_a_declaration_whose_package_was_removed_is_kept () =
+  with_workspace (fun base ->
+    let path =
+      match (installed base).declaration with
+      | S.Created { path } -> path
+      | S.Present _ -> fail "a fresh workspace already had a declaration"
+    in
+    let declared = read path in
+    remove_tree (S.package_directory ~base_path:base);
+    let again = installed base in
+    (match again.declaration with
+     | S.Present { path = present; this_build; enabled; _ } ->
+       check string "the same declaration" path present;
+       check bool "it names this build's package" true this_build;
+       check bool "enabled" true enabled
+     | S.Created _ -> fail "a second declaration was created");
+    check string "the declaration bytes are unchanged" declared (read path))
+
+let test_an_unloadable_declaration_of_the_id_is_left_and_reported () =
+  with_workspace (fun base ->
+    let broken = Filename.concat (lane_directory base) "browser-checkout.toml" in
+    let text =
+      declaration_text ~id:"browser" ~manifest_path:(Filename.concat base "gone/lane.toml")
+    in
+    write broken text;
+    (match Result.bind (S.plan ~base_path:base) S.apply with
+     | Error (S.Declaration_unloadable { path; _ }) -> check string "the broken file" broken path
+     | Ok _ -> fail "a second declaration with the same id was accepted"
+     | Error error -> failf "refused for another reason: %s" (S.error_message error));
+    check bool "no browser.toml" false
+      (Sys.file_exists (Filename.concat (lane_directory base) "browser.toml"));
+    check string "the broken file is unchanged" text (read broken))
+
+let test_a_workspace_without_a_config_root_is_refused () =
+  with_workspace ~config:false (fun base ->
+    (match S.plan ~base_path:base with
+     | Error (S.Config_root_missing _) -> ()
+     | Ok _ -> fail "a workspace without a config root was planned"
+     | Error error -> failf "refused for another reason: %s" (S.error_message error));
+    check bool "no .masc was created" false (Sys.file_exists (Filename.concat base ".masc")))
+
+let test_a_file_this_build_does_not_carry_is_removed () =
+  with_workspace (fun base ->
+    let (_ : S.installed) = installed base in
+    let package = S.package_directory ~base_path:base in
+    let leftover = Filename.concat package "skills/retired/SKILL.md" in
+    write leftover "a skill an older build carried\n";
+    let again = installed base in
+    check int "one file removed" 1 again.files_removed;
+    check bool "the file is gone" false (Sys.file_exists leftover);
+    check bool "its emptied directory is gone" false
+      (Sys.file_exists (Filename.dirname leftover));
+    List.iter
+      (fun (name, contents) ->
+         check string ("package file " ^ name) contents (read (Filename.concat package name)))
+      (embedded_files ()))
+
 let test_a_relative_base_path_is_refused () =
   match S.plan ~base_path:"relative/workspace" with
   | Error (S.Base_path_not_absolute _) -> ()
@@ -178,6 +244,14 @@ let () =
             test_an_existing_declaration_of_the_package_is_left_as_it_is
         ; test_case "two declarations of the package are refused" `Quick
             test_two_declarations_of_the_package_are_refused
+        ; test_case "a declaration whose package was removed is kept" `Quick
+            test_a_declaration_whose_package_was_removed_is_kept
+        ; test_case "an unloadable declaration of the id is left and reported" `Quick
+            test_an_unloadable_declaration_of_the_id_is_left_and_reported
+        ; test_case "a workspace without a config root is refused" `Quick
+            test_a_workspace_without_a_config_root_is_refused
+        ; test_case "a file this build does not carry is removed" `Quick
+            test_a_file_this_build_does_not_carry_is_removed
         ; test_case "a relative base path is refused" `Quick test_a_relative_base_path_is_refused
         ] )
     ]

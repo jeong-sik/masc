@@ -12,6 +12,11 @@ related: []
 
 # RFC: exact lane 실행 기록의 payload 는 로그 밖에 둔다
 
+현재 저장 계약은 [origin과 측정 시간](../design/exact-observation-origin-and-timing.md)을
+따른다. 로그는 `exact-lane-runs-v7.jsonl`, payload root는
+`exact-lane-run-payloads-v7`이며 정리는 같은 세대 안에서만 수행한다. 아래 v6 설계와
+측정은 최초 추출 당시 기록이다.
+
 ## 0. 요약
 
 `exact-lane-runs-v5.jsonl` 한 파일에 실행 기록(누가, 어느 lane, 결과)과 payload(프롬프트

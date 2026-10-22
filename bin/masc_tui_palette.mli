@@ -16,6 +16,9 @@ type palette_action =
   | Palette_msx
   | Palette_dos
   | Palette_lane_addons
+  | Palette_lane_history of Lane_run_identity.t
+      (** Retained logical observations, independent of current settings rows
+          and installed Addons. Selection does not grant read authority. *)
   | Palette_addon_results of string
       (** One installation's Results, by its declaration id. *)
   | Palette_goto of Masc_tui_types.surface

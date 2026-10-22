@@ -56,8 +56,28 @@ were reproduced against isolated base `689369c0bc938c1056cf6a21dd0c1b67d7d5f692`
 terminal rows omitted required `completion_origin` and `usage`. Fixtures now
 state producer origin and absent usage; running rows omit both. The production
 parser remains strict. The four selected suites pass 91 cases; TypeScript and
-changed-file lint pass. TUI history discovery and Curator builtin retirement
-remain follow-up work.
+changed-file lint pass. That Dashboard source does not implement TUI history
+discovery or Curator builtin retirement.
+
+## TUI navigation
+
+The command palette offers each `Lane_run_identity` as a retained-history
+destination without reading current configuration rows or installed Addons.
+Selection enters the existing Lanes run list and starts the existing filtered
+read, with workspace authority, generation and original run detail unchanged.
+The normal inventory read is still launched independently on surface navigation;
+its success is not a prerequisite for the history result.
+
+History entry closes the transient slot editor, runtime picker and editor
+notice even when navigation stays on Lanes. Otherwise their key handlers could
+mutate an invisible original model configuration. Outstanding writes, retained
+receipts and configuration drafts keep their original owners. The state
+transition fixture covers idle, posting and receipt/read-back phases and checks
+that a hidden slot deletion can no longer be planned. The palette fixture checks
+typed Curator/Verifier destinations with no configuration or inventory reading.
+These fixtures require execution on this source; earlier identity builds do not
+validate this navigation delta. Actual native/UI use and Curator builtin
+retirement remain separate work.
 
 ## Executed identity source
 

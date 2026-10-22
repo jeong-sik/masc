@@ -3,6 +3,10 @@
     deletions, Cheat sheet, Agenda, Answering, Terminal-too-small, Account
     login, Collab, and Lane add-ons) and their viewport calculators. *)
 
+val detail_reading_width : int -> int
+(** Content width in terminal cells for a detail reader, given the terminal's
+    column count. Async preparation and the overlay renderer share this value. *)
+
 val detail_reading_viewport :
   Masc_tui_types.state -> Masc_tui_detail_reading.t -> int * int
 

@@ -2,7 +2,8 @@ module Html = Masc_tui_artifact_html
 module Layout = Masc_tui_message_layout
 module Ansi = Masc_tui_ansi
 
-let render ~width (projection : Html.t) =
+type image_action = Preview_image | No_image_action
+let render ?(image_action=Preview_image) ~width (projection : Html.t) =
   let width = max 1 width in
   let plain value = Ansi.Terminal_text.single_line value in
   let wrap value = Layout.wrap_words ~max_cells:width (plain value) in
@@ -34,6 +35,8 @@ let render ~width (projection : Html.t) =
         then style Ansi.Ansi.bold lines else lines) rows
     | Image image ->
       wrap ("▧ " ^ image.label ^ " · " ^ (match image.source with
-        | Html.Embedded_base64 _ -> "Ctrl-O: embedded image"
+        | Html.Embedded_base64 _ -> (match image_action with
+          | Preview_image -> "Ctrl-O: embedded image"
+          | No_image_action -> "embedded image")
         | Unavailable reason -> reason)) in
   projection.blocks |> List.concat_map (fun value -> block value @ [""])

@@ -606,6 +606,9 @@ type async_msg =
   | Verification_verdict_done of (string * bool, string) result
   | Harness_label_done of (string, string) result
   | Chat_call_loaded of chat_call_request * (Masc.Tui_decode.keeper_call, string) result
+  | Board_attachment_loaded of Masc_tui_board_reader.request * (Masc_tui_board_reader.content, string) result
+  | Board_attachment_prepared of Masc_tui_board_reader.preparation_request * (Masc_tui_detail_reading.row list, string) result
+  | Board_attachment_saved of Masc_tui_board_reader.request * (string, string) result
   | Keeper_calls_loaded of
       int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Goal_timeline_loaded of

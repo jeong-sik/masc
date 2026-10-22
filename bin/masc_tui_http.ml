@@ -666,7 +666,7 @@ let kept_reads : Yojson.Safe.t Masc_tui_kept_reads.t = Masc_tui_kept_reads.creat
 let start_read_generation () = Masc_tui_kept_reads.start_generation kept_reads
 
 (* [http_get] with request headers of the caller's and the response headers. *)
-let http_get_response ~(host : string) ~(port : int) ~(path : string) ~headers :
+let http_get_response_with_body_limit ~max_body_bytes ~(host : string) ~(port : int) ~(path : string) ~headers :
     (Masc_http_client.response, string) result =
   let url = url_of ~host ~port ~path in
   timed_with
@@ -680,11 +680,18 @@ let http_get_response ~(host : string) ~(port : int) ~(path : string) ~headers :
   @@ fun () ->
   match
     Masc_http_client.get_response_sync ?clock:(request_clock ())
-      ~timeout_sec:(request_timeout_sec ()) ~url
+      ~timeout_sec:(request_timeout_sec ()) ?max_body_bytes ~url
       ~headers:(headers @ auth_headers ()) ()
   with
   | Ok response -> Ok response
   | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
+
+let http_get_response = http_get_response_with_body_limit ~max_body_bytes:None
+
+let get_workspace_bytes ~max_body_bytes ~host ~port ~path =
+  Masc_tui_workspace_read.read_bytes ~host ~port ~path
+    ~send:(fun ~path -> http_get_response_with_body_limit
+      ~max_body_bytes:(Some max_body_bytes) ~host ~port ~path ~headers:[])
 
 let get_json_decoded ~decode ~(host : string) ~(port : int) ~(path : string) :
     (Yojson.Safe.t, string) result =

@@ -654,6 +654,8 @@ let frame_choice (state : state) ~terminal_rows =
   | Some view -> `Collab view
   | None -> match state.lane_addons with
   | Some view -> `Lane_addons view
+  | None -> match current_board_reader state with
+  | Some reader -> `Detail_reading (Masc_tui_board_reader.document reader)
   | None -> match current_chat_call_reader state with
   | Some reader -> `Detail_reading (Masc_tui_chat_call_reader.document reader)
   | None -> match current_task_inspector state with

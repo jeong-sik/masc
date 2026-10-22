@@ -1,15 +1,22 @@
 type section = { heading : string; body : string }
 type document_kind = Captured | Observation
-type t = { title : string; sections : section list; offset : int; kind : document_kind }
 type row = Heading of string | Content of string | Note of string
+type t = { title : string; sections : section list; offset : int;
+  kind : document_kind; prepared : (int * row list) option; hints : string option }
 type movement = First | Last | By of int
 
-let create ~title sections = { title; sections; offset = 0; kind = Captured }
-let create_observation ~title sections = { title; sections; offset = 0; kind = Observation }
-let replace ~title sections reading = {reading with title;sections}
+let create ~title sections = { title; sections; offset = 0; kind = Captured; prepared=None; hints=None }
+let create_observation ~title sections = { title; sections; offset = 0; kind = Observation; prepared=None; hints=None }
+let replace ~title sections reading = {reading with title;sections;prepared=None;hints=None}
 let title reading = reading.title
+let hints reading = reading.hints
+let replace_prepared ~title ~hints ~width rows reading =
+  {reading with title;sections=[];prepared=Some (width,rows);hints=Some hints}
 
-let rows ~width reading =
+let rows ~width reading = match reading.prepared with
+  | Some (prepared_width, rows) when prepared_width=width -> rows
+  | Some _ -> [Note "Preparing document for this width…"]
+  | None ->
   let wrap text =
     Masc_tui_text_block.lines text
     |> List.concat_map (fun line ->

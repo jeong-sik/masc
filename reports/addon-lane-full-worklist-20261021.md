@@ -700,3 +700,12 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - source db31의 MLI·실제 caller를 읽고 [Librarian Addon 구현 경계](../docs/design/librarian-addon-execution.md)를 구체화했다. `infer_memory_step`은 저장만 하지 않을 뿐 실제 absorption judge를 호출하므로 worker wrapper로 옮기지 않는다. 첫 구현 단위는 기존 Memory lane에서 pending 후보의 원래 capture→persistent worker→raw proposal→host absorption/locked disposition→receipt 확인/ACK까지 연결하는 것이다.
 - builtin Background와 common Addon Standard의 admission 차이, 실제 API-only exhausted walk의 typed 증거 부재, gate observation과 authoritative recovery의 차이를 확인했다. 단순 aggregate refusal·worker gate JSON으로 기억 소비/lineage 권한을 만들지 않는다.
 - 이는 구현 전 경계와 검증 계획이며 pending 후보 단위만으로 E03 전체를 완료하지 않는다. 원래 checkpoint/official/continuity/message-floor/absorption/Memory lineage와 실제 Keeper 기억 연속성 기준을 모두 유지한다. A01–H06의 원래54개 항목명·완료 기준은 바꾸지 않았다.
+
+
+## 2026-10-22 Curator 원래 Briefing Off 복구와 실제 재연결
+
+- 수리 소스 `db31e62fe17f92aea4919de7765f1ace65914772`의 선택 CI `39724191606`은 production owner16+commit/recovery63, 총79건 실제 PASS다. native `39724191562`는 TUI24+application5 PASS, matching server/TUI의 내장 소스와 SHA256을 확인했다. 전체 회귀·운영 설치와 구분한다.
+- 같은 기존 격리 workspace에서 worker Off·Docker0을 유지한 채 기존 실제 GLM Briefing의 Committing을 복구했다. 원래 요청·모델 응답으로 commit+observer ACK와 Briefing 게시가 끝났다. 기존17 Exact payload는 바이트 동일하며 새1개는 같은 원래 Briefing의 observer completion이다. 새 모델 실행으로 기록하지 않는다.
+- 같은 설치를 정상 Dashboard On으로 켜 새 incarnation `01a16200-c0ae-7000-b20e-0f22a1378663`을 확인했다. 실제 Keeper가 새 pending 후보를1회 기록했고 기존 host Librarian이 revision2에 반영/ACK했다. 일반 이력 pass의 추가 constraint까지 revision3·3fact·3claim·3source Briefing으로 처리되어 전체6원래 요청 모두 commit+observer ACK다. 최초2종단 journal은 frozen 복구 결과와 동일하다.
+- matching Dashboard/TUI에서 Off 복구 결과와 새 worker·최종 이력을 실제 관측했다. 정상 final Off 뒤 owned Docker0, Memory/원래 결과 보존을 확인했다. [공개 실행 근거](../docs/evidence/2026-10-22-curator-Off-recovery/README.md)에 실제 파일·로그·화면·해시를 보존한다.
+- E02의 실제 provider/Off 복구/재연결 경계는 이 후보에서 확인됐으나 모든 실패 경계·main 통합·운영 설치와 전체54개 완료를 뜻하지 않는다. E03의 worker 추출은 아직 구현되지 않았으며 기존54개 항목명·완료 기준은 유지한다.

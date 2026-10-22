@@ -62,14 +62,22 @@ builtin Exact route are no longer production model-selection authority.
 
 ## Observation and verification limits
 
-Original registration/completion intents remain independently durable. Registry
-compare/reconcile/delivery and durable ACK are still pending; removing the old
-direct executor also removes its old registry writes. Until that follow-up is
-implemented, these Curator runs do not have complete Exact registry/Dashboard/TUI
-observation parity. The old builtin Curator lane/configuration projections also
-need removal or explicit Addon ownership in the same integration follow-up;
-they are no longer an executable model-selection path. No elapsed time, provider-start, cache usage or cost is
-invented to fill that gap. No old direct provider route is kept as a workaround.
+Original registration/completion intents remain independently durable. The
+shared observer port reconciles each original logical run into
+`Exact_lane_run_registry.Workspace_curator` and ACKs only after confirmed
+registration/completion delivery. The independent `Lane_run_identity` keeps
+`workspace_curator_exact` available to Dashboard and TUI history even when no
+current builtin route exists. These records do not grant configuration or
+execution authority, and Addon installation `run_id` is not an original run ID.
+
+The current builtin Curator constructor, configuration writes and overview row
+are removed. The actual installation's `classification` and `briefing` outputs
+select models through `runtime.addon_exact_lanes`; the common inventory retains
+both model observations separately from worker/application state. No elapsed
+time, provider-start, cache usage or cost is invented. Original observer,
+history navigation and decoder execution evidence is bounded to its recorded
+source; real provider/container lifecycle, installed UI and deployment still
+need verification.
 
 The replacement fixture starts the actual public owner, real configured Runtime,
 real persistent Python worker/MCP protocol, shared Exact semantic selection and

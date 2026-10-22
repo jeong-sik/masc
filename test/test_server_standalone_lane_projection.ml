@@ -535,12 +535,12 @@ let test_latest_terminal_uses_completion_time () =
 ;;
 
 let test_unmeasured_terminal_uses_observation_anchor_without_inventing_finish () =
-  let measured = exact_run ~run_id:"measured" ~lane:Exact.Workspace_curator ~started_at:90.
+  let measured = exact_run ~run_id:"measured" ~lane:Exact.Librarian ~started_at:90.
     ~status:(Exact.Completed { origin=Exact.Producer; outcome=Exact.Succeeded; elapsed_s=Some 20.;
       output=`Null; selected_slot=Some "slot"; usage=None }) in
   (* The original request was already terminal when observation first recorded
      it at 200. That registration cannot be treated as its execution start. *)
-  let late = exact_run ~run_id:"z-late-observation" ~lane:Exact.Workspace_curator ~started_at:200.
+  let late = exact_run ~run_id:"z-late-observation" ~lane:Exact.Librarian ~started_at:200.
     ~status:(Exact.Completed { origin=Exact.Producer;
       outcome=Exact.Failed {code="original_failure";detail="retained terminal"}; elapsed_s=None;
       output=`Null; selected_slot=None; usage=None }) in
@@ -551,7 +551,7 @@ let test_unmeasured_terminal_uses_observation_anchor_without_inventing_finish ()
     ~resolve_lane:(fun _ -> Projection.Unconfigured "not configured")
     ~jev_readiness:Typesafeai.Off ~exact_runs_total:(List.length runs) ~exact_runs:runs
     ~verification_runs:[] ~goal_verification_runs:[]
-    |> fun json -> lane_by_id json "workspace_curator_exact" in
+    |> fun json -> lane_by_id json "librarian_exact" in
   List.iter (fun runs ->
     let row=project runs in
     check (option (float 0.)) "unknown finish stays absent" None

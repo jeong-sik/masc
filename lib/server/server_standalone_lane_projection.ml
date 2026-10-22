@@ -94,7 +94,6 @@ let lane_specs =
     [ Standalone_lane.Board_attention
     ; Standalone_lane.Hitl_auto_judge
     ; Standalone_lane.Librarian
-    ; Standalone_lane.Workspace_curator
     ; Standalone_lane.Verifier
     ; Standalone_lane.Browser_stagehand
     ; Standalone_lane.Candle_appraiser
@@ -738,7 +737,6 @@ let lane_json
       [ "jev", jev_readiness_json (jev_lane_readiness configuration jev_readiness) ]
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
-    | Standalone_lane.Workspace_curator
     | Standalone_lane.Candle_appraiser
     | Standalone_lane.Verifier
     | Standalone_lane.Browser_stagehand -> []
@@ -894,7 +892,6 @@ let live_lane_configuration registry lane_id =
           ( Runtime.Librarian
           | Runtime.Hitl_auto_judge
           | Runtime.Board_attention
-          | Runtime.Workspace_curator
           | Runtime.Candle_appraiser )
         , _
       | None, _ -> registry_admitted_catalog_slots, cli_slots, [], [], None

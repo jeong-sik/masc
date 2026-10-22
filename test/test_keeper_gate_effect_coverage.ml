@@ -497,7 +497,7 @@ let test_a_lane_that_reads_no_preference_is_refused () =
         detail
   in
   expect_refusal "verifier_exact";
-  expect_refusal "workspace_curator_exact";
+  expect_refusal "candle_appraiser";
   match
     ( Keeper_exact_lane_preference.all ~base_path:config.base_path
     , Keeper_exact_lane_preference.set
@@ -514,7 +514,7 @@ let test_a_lane_that_reads_no_preference_is_refused () =
          "unknown exact-output lane %S; expected one of %s"
          "verifier_made_up"
          "librarian_exact, hitl_auto_judge, board_attention_exact, \
-          workspace_curator_exact, verifier_exact, browser_stagehand_exact, candle_appraiser")
+          verifier_exact, browser_stagehand_exact, candle_appraiser")
       detail;
     check int "a refusal stores no row" 0 (List.length rows)
   | _ -> fail "an unknown lane did not meet the refusal contract"
@@ -530,7 +530,7 @@ let test_a_stale_preference_stays_clearable () =
     `List
       [ `Assoc
           [ "keeper_name", `String "echo"
-          ; "lane_id", `String "workspace_curator_exact"
+          ; "lane_id", `String "candle_appraiser"
           ; "slot_id", `String "glm.turbo"
           ; "updated_by", `String "test"
           ; "updated_at", `String "2026-08-28T00:00:00Z"
@@ -548,7 +548,7 @@ let test_a_stale_preference_stays_clearable () =
       config
       ~actor:"test"
       ~keeper_name:"echo"
-      ~lane_id:"workspace_curator_exact"
+      ~lane_id:"candle_appraiser"
       None
   with
   | Ok None ->

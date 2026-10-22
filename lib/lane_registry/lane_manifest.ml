@@ -14,9 +14,6 @@ let purpose : Lane_id.builtin -> string = function
     "Produces the structured judgment for one held approval."
   | Lane_id.Exact Standalone_lane.Librarian ->
     "Selects the next Memory OS snapshot from immutable Keeper history."
-  | Lane_id.Exact Standalone_lane.Workspace_curator ->
-    "Synthesizes attributed proposals after committed workspace memory changes; semantic \
-     verification is not performed."
   | Lane_id.Exact Standalone_lane.Verifier ->
     "Reviews Task completion and Goal proof evidence."
   | Lane_id.Exact Standalone_lane.Browser_stagehand ->

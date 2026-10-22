@@ -50,7 +50,7 @@ type installation_error =
       { retained : Keeper_checkpoint_ref.t
       ; canonical : Keeper_checkpoint_ref.t
       }
-let authorize ~session_root ~operation_id ~waiting ~recorded =
+let authorize ~session_root ~operation_id ~(waiting:Semantic.input_wait) ~recorded =
   {session_dir=Filename.concat session_root (Keeper_id.Trace_id.to_string waiting.Semantic.checkpoint.trace_id);
    operation_id;waiting;recorded}
 let waiting (authority:authority) = authority.waiting

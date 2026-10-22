@@ -425,7 +425,7 @@ let test_branch_native_cas_and_second_response () = with_path @@ fun path -> wit
       ~replacement:(Native.Terminal_unacknowledged (advanced_call,disposition)) next
     |> Result.map_error Semantic.error_to_string |> value in
   rejected (Semantic.apply ~now:24. (Semantic.Advance_input_branch {observed=second_checkpoint;checkpoint=second_checkpoint}) terminal);
-  let second_pending={pending with run_id="second-invocation";request={pending.request with request_id="second-question";question="Second choice?"}} in
+  let second_pending={Agent_core.Agent_input_request.run_id="second-invocation";request={pending.request with request_id="second-question";question="Second choice?"}} in
   let second_wait=Semantic.input_wait ~checkpoint:second_checkpoint ~pending:second_pending |> value in
   let waiting_again=transition (Semantic.Suspend_input second_wait) terminal |> roundtrip in
   let second_candidate=response_checkpoint 4 "second consumed response" in

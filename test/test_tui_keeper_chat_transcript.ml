@@ -432,16 +432,16 @@ let test_runtime_attempt_restarts_the_per_attempt_totals () =
       check bool "the first attempt's text is still readable" true
         (List.exists
            (function
-             | Transcript.Trail_media media -> Yojson.Safe.to_string (Masc.Keeper_chat_events.generated_media_to_json media)
-  | Transcript.Trail_text text ->
+             | Transcript.Trail_media _ -> false
+             | Transcript.Trail_text text ->
                  String_util.contains_substring text "failed reply"
              | _ -> false)
            first);
       check bool "the second attempt's text is still readable" true
         (List.exists
            (function
-             | Transcript.Trail_media media -> Yojson.Safe.to_string (Masc.Keeper_chat_events.generated_media_to_json media)
-  | Transcript.Trail_text text ->
+             | Transcript.Trail_media _ -> false
+             | Transcript.Trail_text text ->
                  String_util.contains_substring text "fallback reply"
              | _ -> false)
            second)

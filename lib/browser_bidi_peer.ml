@@ -654,8 +654,13 @@ let dispatch ?actor ?request_id t ~verb args =
       | Browser_lane.Set_zoom _ -> Error (Before_effect "set_zoom requires a connected WebExtension browser")
       | Browser_lane.Activate_tab -> activate t context id args in
       let receipt = match receipt with
-        | `Assoc fields -> obj (("action",str (Browser_lane.interaction_verb request.action))
-            :: List.remove_assoc "action" fields)
+        | `Assoc fields ->
+          (* The receipt's url is the frame document's; name the frame chain. *)
+          let framed = match request.frame_path with
+            | [] -> []
+            | path -> ["framePath",`List (List.map str path)] in
+          obj (("action",str (Browser_lane.interaction_verb request.action))
+            :: framed @ List.remove_assoc "action" fields)
         | other -> other in
       Result.map_error (fun detail -> Outcome_unknown detail) (with_tab id receipt))
 

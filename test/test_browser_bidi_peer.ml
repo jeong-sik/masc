@@ -764,7 +764,7 @@ let test_semantic_click_uses_native_input () =
 
 let test_framed_interaction_runs_in_the_child_context () =
   Eio_main.run (fun _ ->
-    let targets = ref [] and frame_calls = ref 0 and frame_found = ref true in
+    let targets = ref [] and lookups = ref [] and missing_at = ref None in
     let command method_ args = match method_ with
       | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
       | "script.callFunction" ->
@@ -772,31 +772,33 @@ let test_framed_interaction_runs_in_the_child_context () =
         let context = args |> member "target" |> member "context" |> to_string in
         let declaration = args |> member "functionDeclaration" |> to_string in
         if String.length declaration > 20 && String.sub declaration 0 20 = "function(selector) {" then begin
-          incr frame_calls;
-          check string "the frame is looked up in its parent" "owned" context;
-          check string "the selector travels as an argument" "iframe[name=inner]"
-            (args |> member "arguments" |> index 0 |> member "value" |> to_string);
-          if !frame_found
-          then Ok (obj ["type",`String "success";"result",obj ["type",`String "window";
-                 "value",obj ["context",`String "child"]]])
-          else Ok (obj ["type",`String "exception";"exceptionDetails",obj ["text",`String "Error: frame_not_found"]])
+          let selector = args |> member "arguments" |> index 0 |> member "value" |> to_string in
+          lookups := (context, selector) :: !lookups;
+          if !missing_at = Some selector
+          then Ok (obj ["type",`String "exception";"exceptionDetails",obj ["text",`String "Error: frame_not_found"]])
+          else Ok (obj ["type",`String "success";"result",obj ["type",`String "window";
+                 "value",obj ["context",`String ("in:" ^ selector)]]])
         end else begin
           targets := context :: !targets;
           Ok (script_value (obj ["action",`String "fill";"url",`String "https://example.test/frame"]))
         end
       | _ -> fail ("unexpected command: " ^ method_) in
     let peer = peer_of command in
-    let fill = obj ["tabId",`Int 1;"action",`String "fill";"selector",`String "#q";"text",`String "x";
-      "framePath",`List [`String "iframe[name=inner]"]] in
-    (match Peer.dispatch peer ~verb:Peer.Page_interact fill with
-     | Ok _ -> ()
+    let fill path = obj ["tabId",`Int 1;"action",`String "fill";"selector",`String "#q";"text",`String "x";
+      "framePath",`List (List.map (fun s -> `String s) path)] in
+    (match Peer.dispatch peer ~verb:Peer.Page_interact (fill ["iframe[name=outer]";"iframe[name=inner]"]) with
+     | Ok receipt ->
+       check bool "the receipt names the frame chain" true
+         (Yojson.Safe.Util.member "framePath" receipt
+          = `List [`String "iframe[name=outer]";`String "iframe[name=inner]"])
      | Error _ -> fail "a framed fill must succeed");
-    check int "the frame is resolved once" 1 !frame_calls;
-    check (list string) "the page script runs in the child context only" ["child"] !targets;
-    targets := []; frame_found := false;
-    (match Peer.dispatch peer ~verb:Peer.Page_interact fill with
+    check (list (pair string string)) "each frame is looked up in the previous frame's context"
+      [("owned","iframe[name=outer]");("in:iframe[name=outer]","iframe[name=inner]")] (List.rev !lookups);
+    check (list string) "the page script runs in the innermost context only" ["in:iframe[name=inner]"] !targets;
+    targets := []; lookups := []; missing_at := Some "iframe[name=inner]";
+    (match Peer.dispatch peer ~verb:Peer.Page_interact (fill ["iframe[name=outer]";"iframe[name=inner]"]) with
      | Error (Peer.Before_effect _) -> ()
-     | Ok _ | Error _ -> fail "an unknown frame must be refused before any effect");
+     | Ok _ | Error _ -> fail "an unknown inner frame must be refused before any effect");
     check (list string) "no page script runs after a missing frame" [] !targets)
 
 let test_hover_without_click () =

@@ -455,6 +455,45 @@ let test_native_seed_is_history_not_current_input_authority () =
         | Ok _ -> fail "unsafe native history was accepted"))
     [None,false;Some (Core.Agent.Operator_repair_required Core.Agent.Effect_outcome_unknown),false;
      Some Core.Agent.Retire,true]
+let test_native_adoption_rechecks_retained_evidence () =
+  List.iter (fun edit -> with_input_result ~pending:true
+    ~before_close:(native_input_fixture ~terminal:(Some Core.Agent.Retire) ~conflicting_seed:false)
+    (fun ~base_path ~run_dir ~path ~session_dir ~canonical:_ ~metadata:_ ~snapshot ~bundle:_ result ->
+      let observed = ok result in
+      let selected = input_retained_path session_dir snapshot in
+      let latest = Checkpoint.exact_snapshot_checkpoint snapshot in
+      let seed_value = {latest with pending_input=(input_checkpoint false).pending_input} in
+      let seed_snapshot = match Checkpoint.exact_snapshot_of_value
+        ~expected_session_id:(Checkpoint.exact_snapshot_reference snapshot).trace_id seed_value with
+        | Ok value -> value | Error cause -> fail (Checkpoint.checkpoint_ref_load_error_to_string cause) in
+      let seed = input_retained_path session_dir seed_snapshot in
+      let original = contents path in
+      let changed = ref None in
+      let result = Journal.For_testing.adopt_input ~run_dir
+        ~expected_checkpoint_sha256:(Journal.input_checkpoint_sha256 observed) observed
+        ~before_publication:(fun () -> changed := Some (edit ~selected ~seed))
+        ~sync_manifest_parent:sync_directory in
+      let changed_path,changed_bytes = match !changed with
+        | Some value -> value | None -> fail "adoption did not reach the publication boundary" in
+      expect_failure (Journal.Input_source_changed changed_path) result;
+      check string "later retained evidence survives refusal" changed_bytes (contents changed_path);
+      check string "refused adoption leaves the live journal unchanged" original (contents path);
+      let id = match result with
+        | Error {Journal.bundle_id=Some id;_} -> id
+        | Error {bundle_id=None;_} | Ok _ -> fail "partial adoption identity was lost" in
+      check bool "changed retained evidence cannot publish an adoption manifest" false
+        (Sys.file_exists (Filename.concat (input_directory base_path id) "manifest.json"))))
+    [(fun ~selected ~seed:_ ->
+        let changed = contents selected ^ " " in write selected changed; selected,changed);
+     (fun ~selected:_ ~seed ->
+        let changed = contents seed ^ " " in write seed changed; seed,changed);
+     (fun ~selected:_ ~seed ->
+        let original = contents seed in
+        (match Fs_compat.write_file_atomic_strict_staged_blocking seed
+          ~write:(fun out -> Unix.fchmod (Unix.descr_of_out_channel out) 0o600; output_string out original) with
+         | Ok () -> ()
+         | Error cause -> fail (Fs_compat.atomic_replace_failure_to_string cause));
+        seed,original)]
 let test_retention_post_commit_cancel_propagates_with_evidence () =
   with_input ~pending:true (fun ~base_path:_ ~run_dir:_ ~path:_ ~session_dir ~canonical:_
       ~metadata:_ ~snapshot ~bundle:_ _ ->
@@ -509,4 +548,5 @@ let () = run "Keeper journal offline bundles"
     test_case "corrupt retained input is never repaired" `Quick test_input_corrupt_retention_is_not_repaired;
     test_case "rehashed derivative cannot hide changed source cells" `Quick test_input_rehash_cannot_hide_changed_derivative;
     test_case "native seed history differs from current input authority" `Quick test_native_seed_is_history_not_current_input_authority;
+    test_case "native adoption refuses late retained payload and identity edits" `Quick test_native_adoption_rechecks_retained_evidence;
     test_case "post-commit cancellation preserves exception and durable artifact" `Quick test_retention_post_commit_cancel_propagates_with_evidence]]

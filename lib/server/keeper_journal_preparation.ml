@@ -319,6 +319,9 @@ let unchanged ~base_path (path,(before : Fs_compat.owned_regular_file_contents))
 let rec unchanged_files ~base_path = function
   | [] -> Ok ()
   | file::rest -> let* () = unchanged ~base_path file in unchanged_files ~base_path rest
+let refresh_retained_witness ~path ~retained files =
+  List.map (fun (captured,file) ->
+    if captured=path then captured,retained else captured,file) files
 type bundle_part = Original_journal | Prepared_journal | Bundle_manifest
 let bundle_part_name = function Original_journal -> "original.sqlite3"
   | Prepared_journal -> "prepared.sqlite3" | Bundle_manifest -> "manifest.json"
@@ -446,6 +449,12 @@ let adopt_input_using ~before_publication
           ~session_dir:(session_dir base_path reference.trace_id) plan.ip_checkpoint
           |> confirm_input_retention in
         let* retained,_ = read_reference ~base_path ~path:(retained_path base_path reference) reference in
+        (* Retention atomically republishes even an already retained checkpoint.
+           Its exact bytes were revalidated above. Refresh every alias of only
+           this file, including native latest/phase references; keep all other
+           assessed witnesses for the final freshness check. *)
+        let plan = {plan with ip_related=refresh_retained_witness
+          ~path:(retained_path base_path reference) ~retained plan.ip_related} in
         let metadata_path = Filename.concat directory "metadata.json" in
         let checkpoint_path = Filename.concat directory "checkpoint.json" in
         let* () = write metadata_path (snd plan.ip_metadata).content |> written metadata_path in

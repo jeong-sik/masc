@@ -210,8 +210,162 @@ let test_response_commit_uncertainty after_commit () = with_path @@ fun path ->
     check bool "actual response commit survives reopen" after_commit (wait store=None);
     check bool "claimability follows actual response commit" after_commit (Store.has_claimable_queued store ~now:8. |> ok))
 
+(* These refs deliberately permit S to extend W. They are journal identity
+   fixtures, not proof of a valid physical checkpoint transformation. *)
+let response_checkpoint turn bytes = Keeper_checkpoint_ref.create ~trace_id:owned.trace_id
+  ~turn_count:turn ~canonical_checkpoint_bytes:bytes
+  |> function Ok reference -> reference | Error _ -> fail "invalid response reference"
+let response_source=response_checkpoint 3 "canonical extended original history"
+let response_candidate=response_checkpoint 3 "frozen consumed response"
+let response_intent = Semantic.input_response_intent ~waiting ~source:response_source
+  ~candidate:response_candidate ~response:(Agent_core.Hooks.Answer (`Assoc ["z",`Int 2;"choice",`String "original"])) |> value
+let prepare store operation intent = Store.prepare_direct_input_response store ~now:7. ~operation_id:original
+  ~execution_digest:operation.Operation.execution_digest ~intent
+let intent store = Store.direct_input_response_intent store ~operation_id:original |> ok
+let check_intent store = check bool "one exact response intent survives" true
+  (Option.equal Semantic.equal_input_response_intent (Some response_intent) (intent store))
+let stage_wait store =
+  let operation=admit store in retire store operation Agent.Retire;
+  ignore (defer store operation waiting |> ok);operation
+let names reference rows = List.exists (fun (row:Keeper_checkpoint_ref.t) ->
+  Keeper_checkpoint_ref.equal row reference) rows
+let test_intent_survives_restart_without_resuming () = with_path @@ fun path ->
+  with_store path (fun store ->
+    let operation=stage_wait store in
+    let before=semantic store in prepare store operation response_intent |> ok;
+    check int64 "new intent spends one revision" (Int64.succ before.revision) (semantic store).revision;
+    let recorded=semantic store in prepare store operation response_intent |> ok;
+    check bool "same intent is the same semantic fact" true (recorded=semantic store);
+    check_wait store;check_owner store;
+    check bool "intent cannot expire or claim" true (Store.claim_next store ~now:1e12 |> ok=None);
+    rejected (Store.move_queued_to_front store ~now:9. ~operation_id:original);
+    List.iter (fun action -> rejected (Semantic.apply ~now:9. action recorded))
+      [Semantic.Begin_execution;Semantic.Resume_checkpoint response_candidate;Semantic.Settle Semantic.Completed];
+    let reconciled=Semantic.apply ~now:9. (Semantic.Require_reconciliation "original physical response requires validation") recorded
+      |> Result.map_error Semantic.error_to_string |> value in
+    check bool "diagnostic reconciliation preserves intent" true
+      (Option.equal Semantic.equal_input_response_intent recorded.input_response_intent reconciled.input_response_intent));
+  with_store path (fun store ->
+    ignore (Store.settle_running_after_restart store ~now:1e12 |> ok);
+    check_wait store;check_intent store;check_owner store;
+    check bool "response kind and canonical answer survive journal reopen" true
+      (match intent store with Some {response=Agent_core.Hooks.Answer answer;_} ->
+        Yojson.Safe.equal answer (`Assoc ["choice",`String "original";"z",`Int 2]) | _ -> false);
+    let execution=semantic store in
+    List.iter (fun reference ->
+      check bool "source and candidate retained by actual reopened semantic row" true (names reference (Semantic.checkpoint_references execution));
+      check bool "source and candidate confer no ordinary continuation authority" false (names reference (Semantic.continuation_checkpoints execution)))
+      [response_source;response_candidate];
+    check bool "original wait remains the pending authority" true (names owned (Semantic.continuation_checkpoints execution)))
+let test_intent_conflicts_and_newer_input_preserve_facts () = with_path @@ fun path -> with_store path @@ fun store ->
+  let operation=stage_wait store in prepare store operation response_intent |> ok;
+  let changed ~waiting ~source ~candidate ~response = Semantic.input_response_intent ~waiting ~source ~candidate ~response |> value in
+  let forged_wait=Semantic.input_wait ~checkpoint:owned ~pending:{pending with request={pending.request with question="another original question"}} |> value in
+  List.iter (fun different -> rejected (prepare store operation different)) [
+    changed ~waiting ~source:response_source ~candidate:response_candidate ~response:Agent_core.Hooks.Timeout;
+    changed ~waiting ~source:(response_checkpoint 3 "another source") ~candidate:response_candidate ~response:response_intent.response;
+    changed ~waiting ~source:response_source ~candidate:(response_checkpoint 3 "another candidate") ~response:response_intent.response;
+    changed ~waiting:forged_wait ~source:response_source ~candidate:response_candidate ~response:response_intent.response];
+  rejected (Store.prepare_direct_input_response store ~now:8. ~operation_id:original ~execution_digest:"foreign" ~intent:response_intent);
+  let newer=response_checkpoint 4 "actual newer published global input" in
+  (match Store.update_input_checkpoint store ~observed:(Some owned) ~checkpoint:newer |> ok with
+   | Store.Input_checkpoint_updated -> () | Input_checkpoint_source_changed _ -> fail "new input fixture did not publish");
+  rejected (prepare store operation response_intent);
+  check_intent store;check_wait store;
+  check bool "refusal never overwrites independent newer global input" true
+    (Store.input_checkpoint store ~trace_id:owned.trace_id |> ok=Store.Input_observed newer)
+let test_intent_commit_uncertainty after_commit () = with_path @@ fun path ->
+  with_store path (fun store ->
+    let operation=stage_wait store in ignore (Store.take_released_checkpoints store);
+    Store.For_testing.fail_next_commit (if after_commit then Fail_after_commit else Fail_before_commit);
+    (match prepare store operation response_intent with
+     | Error (Store.Store_unavailable _) -> () | _ -> fail "intent commit uncertainty was accepted");
+    Store.For_testing.clear_commit_fault ();
+    check bool "intent reflects actual commit, not acknowledgement" after_commit (Option.is_some (intent store));
+    check int "uncertain intent grants no deletion authority" 0 (List.length (Store.take_released_checkpoints store));
+    check_wait store;check_owner store);
+  with_store path (fun store ->
+    check bool "intent actual commit survives reopen" after_commit (Option.is_some (intent store));
+    check_wait store;check_owner store;
+    check bool "uncertainty does not enable a continuation" true (Store.claim_next store ~now:9. |> ok=None);
+    List.iter (fun reference -> check bool "retention follows actual commit" after_commit
+      (names reference (Semantic.checkpoint_references (semantic store)))) [response_source;response_candidate])
+let test_intent_pins_exact_candidate_for_original () = with_path @@ fun path -> with_store path @@ fun store ->
+  let operation=stage_wait store in prepare store operation response_intent |> ok;
+  rejected (respond store operation waiting (response_checkpoint 3 "unbound consumed response"));
+  check_intent store;check_wait store;check_owner store;
+  ignore (Store.take_released_checkpoints store);
+  respond store operation waiting response_candidate |> ok;
+  check bool "successful exact resolution retires intent" true (intent store=None);
+  check bool "original exact continuation enabled" true
+    (Store.direct_checkpoint store ~operation_id:original |> ok=Some (Semantic.Agent_core response_candidate));
+  let released=Store.take_released_checkpoints store |> List.map Store.released_reference in
+  check bool "source released after confirmed original resolution" true (List.exists (Keeper_checkpoint_ref.equal response_source) released);
+  check bool "accepted candidate remains live" false (List.exists (Keeper_checkpoint_ref.equal response_candidate) released);
+  let claimed=Store.claim_next store ~now:8. |> ok |> Option.get in
+  check bool "only the original admitted operation claims" true (Operation.Operation_id.equal claimed.operation_id original)
+let test_cancel_releases_intent_but_keeps_input () = with_path @@ fun path ->
+  with_store path (fun store ->
+    let operation=stage_wait store in prepare store operation response_intent |> ok;
+    ignore (Store.take_released_checkpoints store);
+    Store.cancel_queued store ~now:8. ~operation_id:original |> ok |> ignore;
+    check bool "cancellation retires intent" true (intent store=None);
+    let released=Store.take_released_checkpoints store |> List.map Store.released_reference in
+    List.iter (fun reference -> check bool "intent-only evidence released on confirmed cancellation" true
+      (List.exists (Keeper_checkpoint_ref.equal reference) released)) [response_source;response_candidate];
+    check bool "current input retains its own evidence" false (List.exists (Keeper_checkpoint_ref.equal owned) released);
+    check_owner store);
+  with_store path (fun store -> check_owner store;check bool "terminal intent remains absent" true (intent store=None))
+let test_intent_strict_codec_and_reference_domain () = with_path @@ fun path -> with_store path @@ fun store ->
+  let operation=stage_wait store in prepare store operation response_intent |> ok;
+  let fields = function `Assoc fields -> fields | _ -> fail "expected encoded object" in
+  let replace name value json = `Assoc ((name,value)::List.remove_assoc name (fields json)) in
+  let encoded=Semantic.to_json (semantic store) in
+  let fact=List.assoc "input_response_intent" (fields encoded) in
+  let malformed_response response=replace "input_response_intent" (replace "response" response fact) encoded in
+  let other_wait=Semantic.input_wait ~checkpoint:owned ~pending:{pending with run_id="other-run"} |> value in
+  let other_fact=Semantic.input_response_intent ~waiting:other_wait ~source:response_source ~candidate:response_candidate
+      ~response:Agent_core.Hooks.Declined |> value in
+  (* Strict persisted facts cannot be attached to a different wait or phase. *)
+  let mutated_wait=replace "pending" (Agent_core.Agent_input_request.pending_to_json other_fact.waiting.pending)
+      (List.assoc "waiting" (fields fact)) in
+  List.iter (fun json -> rejected (Semantic.of_json json)) [
+    `Assoc (("input_response_intent",fact)::fields encoded);
+    replace "input_response_intent" `Null encoded;
+    replace "revision" (`Int 3) encoded;
+    replace "input_response_intent" (`Assoc (("unknown",`Null)::fields fact)) encoded;
+    malformed_response (`Assoc ["kind",`String "later"]);
+    malformed_response (`Assoc ["kind",`String "timeout";"value",`Int 1]);
+    malformed_response (`Assoc ["kind",`String "answer";"value",`Assoc ["a",`Int 1;"a",`Int 2]]);
+    malformed_response (`Assoc ["kind",`String "answer";"value",`Float Float.nan]);
+    replace "input_response_intent" (replace "waiting" mutated_wait fact) encoded;
+    replace "phase" (`Assoc ["kind",`String "ready"]) encoded];
+  List.iter (fun response ->
+    let intent=Semantic.input_response_intent ~waiting ~source:response_source ~candidate:response_candidate ~response |> value in
+    let unprepared=Semantic.of_json (`Assoc (List.remove_assoc "input_response_intent" (fields encoded)))
+      |> Result.map_error Semantic.error_to_string |> value in
+    let prepared=Semantic.apply ~now:7. (Semantic.Prepare_input_response intent) unprepared
+        |> Result.map_error Semantic.error_to_string |> value in
+    let restored=Semantic.of_json (Semantic.to_json prepared) |> Result.map_error Semantic.error_to_string |> value in
+    check bool "all three response kinds retain their exact identity" true
+      (Option.equal Semantic.equal_input_response_intent (Some intent) restored.input_response_intent))
+    [Agent_core.Hooks.Answer (`Assoc ["choice",`String "yes"]);Agent_core.Hooks.Declined;Agent_core.Hooks.Timeout];
+  let foreign=Keeper_checkpoint_ref.create ~trace_id:(Keeper_id.Trace_id.of_string "foreign-trace" |> value)
+      ~turn_count:3 ~canonical_checkpoint_bytes:"foreign candidate" |> Result.get_ok in
+  List.iter (fun (source,candidate) -> rejected (Semantic.input_response_intent ~waiting ~source ~candidate ~response:Agent_core.Hooks.Declined))
+    [response_source,foreign;response_source,response_source;response_source,owned;
+     response_checkpoint 1 "regressed source",response_checkpoint 1 "regressed candidate";
+     response_source,response_checkpoint 4 "response changed model turn"]
+
 let () = run "durable original input wait"
   ["store",[
+    test_case "prepared response survives restart and stays blocked" `Quick test_intent_survives_restart_without_resuming;
+    test_case "conflicting intents and newer input preserve original facts" `Quick test_intent_conflicts_and_newer_input_preserve_facts;
+    test_case "intent precommit failure does not invent retained intent" `Quick (test_intent_commit_uncertainty false);
+    test_case "uncertain committed intent persists without acknowledgement" `Quick (test_intent_commit_uncertainty true);
+    test_case "prepared intent pins the original exact consumed candidate" `Quick test_intent_pins_exact_candidate_for_original;
+    test_case "cancellation releases response evidence but keeps owned input" `Quick test_cancel_releases_intent_but_keeps_input;
+    test_case "persisted intent has a strict response and reference domain" `Quick test_intent_strict_codec_and_reference_domain;
     test_case "accepted response atomically enables original continuation and survives reopen" `Quick test_response_advances_original_and_input_together;
     test_case "stale response wait digest and input refuse atomically" `Quick test_response_stale_wait_digest_and_input_refuse;
     test_case "response before-commit failure preserves wait and input" `Quick (test_response_commit_uncertainty false);

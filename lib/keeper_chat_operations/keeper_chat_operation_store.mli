@@ -349,6 +349,21 @@ val defer_direct_input_wait : t -> now:float -> operation_id:Operation.Operation
     expiry or generic resume. An uncertain commit stays Error; read actual
     state before reconciliation. This grants no response admission. *)
 
+val direct_input_response_intent : t -> operation_id:Operation.Operation_id.t ->
+  (Keeper_semantic_execution.input_response_intent option, error) result
+(** The actual persisted intent, or None when no intent is recorded. Files or
+    matching checkpoint hashes never supply a missing intent. *)
+val prepare_direct_input_response : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  execution_digest:string -> intent:Keeper_semantic_execution.input_response_intent ->
+  (unit, error) result
+(** Record one response intent under the original queued operation/digest/wait,
+    acknowledged native state and current input predecessor in one transaction.
+    The Owner must first validate its original child, canonical source and frozen
+    candidate and confirm candidate retention. This primitive does no checkpoint filesystem I/O
+    and grants no response acceptance or resume. Source/candidate join semantic
+    retention; duplicates preserve the fact, conflicting intents refuse. Commit
+    uncertainty stays Error without readback-to-success or cleanup authority. *)
+
 val resolve_direct_input_wait : t -> now:float -> operation_id:Operation.Operation_id.t ->
   execution_digest:string -> observed:Keeper_semantic_execution.input_wait ->
   checkpoint:Keeper_checkpoint_ref.t -> (unit, error) result
@@ -356,6 +371,7 @@ val resolve_direct_input_wait : t -> now:float -> operation_id:Operation.Operati
     installation receipt. One transaction consumes the exact queued wait and
     current input predecessor, publishes its consumed checkpoint and enables the
     same operation's checkpoint continuation. This is never a new prompt.
+    A prepared intent, when present, pins the exact consumed candidate.
     Duplicate/stale responses refuse; uncertain commit acknowledgement stays
     Error and grants no retry or retained-file deletion authority. *)
 

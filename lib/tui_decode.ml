@@ -7050,12 +7050,17 @@ let decode_workspace_file_catalog json =
   in
   Ok { wfc_root; wfc_files }
 
-(* /api/v1/workspace/file answers {ok, content}; anything else is a decode
-   failure, not an empty file. *)
+type workspace_file_source = { wfs_content : string; wfs_revision : string }
+
 let decode_workspace_file json =
   let* ok = required_bool_field json "ok" in
   if not ok then Error "workspace file answered ok=false"
-  else required_string_field json "content"
+  else
+    let* wfs_content = required_string_field json "content" in
+    let* wfs_revision = required_string_field json "revision" in
+    let* _ = Tool_output.validate_sha256 wfs_revision
+      |> Result.map_error Tool_output.invalid_sha256_to_string in
+    Ok { wfs_content; wfs_revision }
 
 type git_diff_row_kind =
   | Gd_context

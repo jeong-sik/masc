@@ -10,6 +10,13 @@ module Decode = Masc.Tui_decode
 module Fetched = Masc_tui_fetched
 module Code_results = Masc_tui_code_results
 
+let file_source text : Decode.workspace_file_source =
+  { wfs_content = text; wfs_revision = String.make 64 'a' }
+let apply_file ?intent state request result =
+  Code_results.apply_file ?intent state request (Result.map file_source result)
+let apply_found_file ?input_pending state request result =
+  Code_results.apply_found_file ?input_pending state request (Result.map file_source result)
+
 let start_read ~equal fetched key =
   match Fetched.start ~equal fetched ~key with
   | Fetched.Started (next, request) -> next, request
@@ -100,7 +107,7 @@ let test_activity_file_starts_without_old_overlays () =
      its overlays or blame next to the failure. *)
   let file, request = start_read ~equal:String.equal state.code_file "repos/masc/lib/new.ml" in
   state.code_file <- file;
-  Code_results.apply_file state request (Error "unreadable");
+  apply_file state request (Error "unreadable");
   Code_results.apply_history state old_history
     (Ok {chl_entries = []; chl_git_error = None; chl_activity_note = "old file"});
   Code_results.apply_diff state old_diff (Error "old diff");
@@ -203,10 +210,10 @@ let test_file_reply_and_lsp_navigation_share_current_content () =
   let old, old_request = start_read ~equal:String.equal state.code_file "old.ml" in
   let current, request = start_read ~equal:String.equal old "new.ml" in
   state.code_file <- current;
-  Code_results.apply_file state request (Ok "let first = 1\nlet second = 2");
+  apply_file state request (Ok "let first = 1\nlet second = 2");
   state.code_file_cursor <- 1;
   let shown = state.code_file in
-  Code_results.apply_file state old_request (Ok "old bytes");
+  apply_file state old_request (Ok "old bytes");
   Alcotest.(check bool) "late file does not replace current content" true
     (state.code_file = shown);
   Alcotest.(check int) "late file does not reset the selected line" 1 state.code_file_cursor;
@@ -245,7 +252,7 @@ let test_file_recovery_preserves_nested_readers () =
     let initial, opened = start_read ~equal:String.equal state.code_file "source.ml" in
     state.code_file <- initial;
     if had_content then
-      Code_results.apply_file state opened (Ok "let first = 1\nlet second = 2")
+      apply_file state opened (Ok "let first = 1\nlet second = 2")
     else state.code_target_line <- Some 2;
     state.code_file_cursor <- (if had_content then 1 else 0);
     state.code_file_scroll <- (if had_content then 1 else 0);
@@ -273,7 +280,7 @@ let test_file_recovery_preserves_nested_readers () =
       ignore (Code_results.apply_lsp_answer state lsp
         (Ok (Decode.Lsp_hover (Some "recovered hover")))) in
     if nested_first then complete_nested ();
-    Code_results.apply_file ~intent:Refresh_code_file state recovered
+    apply_file ~intent:Refresh_code_file state recovered
       (Ok "let first = 3\nlet second = 4");
     if not nested_first then complete_nested ();
     Alcotest.(check bool) "history and diff stay open in either completion order" true
@@ -295,12 +302,12 @@ let test_file_recovery_preserves_nested_readers () =
       None state.code_target_line;
     let short, shortened = start_read ~equal:String.equal state.code_file "source.ml" in
     state.code_file <- short;
-    Code_results.apply_file ~intent:Refresh_code_file state shortened (Ok "x");
+    apply_file ~intent:Refresh_code_file state shortened (Ok "x");
     Alcotest.(check bool) "shorter content clamps both row and horizontal coordinates" true
       (state.code_file_cursor=0 && state.code_file_scroll=0 && state.code_file_hscroll=0);
     let next, different_file = start_read ~equal:String.equal state.code_file "other.ml" in
     state.code_file <- next;
-    Code_results.apply_file state different_file (Ok "let other = 0");
+    apply_file state different_file (Ok "let other = 0");
     Alcotest.(check bool) "new file still closes old nested readers" true
       (not state.code_history_open && not state.code_diff_open
        && Option.is_none (Fetched.current state.code_blame));
@@ -314,7 +321,7 @@ let test_lsp_replies_belong_to_their_source_reading () =
   let read path =
     let next, request = start_read ~equal:String.equal state.code_file path in
     state.code_file <- next;
-    Code_results.apply_file state request (Ok "let first = 1\nlet second = 2")
+    apply_file state request (Ok "let first = 1\nlet second = 2")
   in
   let ask question =
     match Code_results.start_lsp_question state ~question ~symbol:"first" with
@@ -396,7 +403,7 @@ let test_interrupted_new_file_open_resets_old_readers () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   let old, old_request = start_read ~equal:String.equal state.code_file "old.ml" in
   state.code_file <- old;
-  Code_results.apply_file state old_request (Ok "let old = 1");
+  apply_file state old_request (Ok "let old = 1");
   let history, _ = start_read ~equal:code_scope_path_equal state.code_history
       (state.code_scope, "old.ml") in
   state.code_history <- history;
@@ -415,7 +422,7 @@ let test_interrupted_new_file_open_resets_old_readers () =
     (state.code_file_resume_intent = Open_code_file);
   let reading, request = start_read ~equal:String.equal state.code_file "new.ml" in
   state.code_file <- reading;
-  Code_results.apply_file ~intent:state.code_file_resume_intent state request (Ok "let new_value = 2");
+  apply_file ~intent:state.code_file_resume_intent state request (Ok "let new_value = 2");
   Alcotest.(check bool) "new content closes previous file readers and resets navigation" true
     (not state.code_history_open && not state.code_diff_open
      && state.code_file_cursor = 0 && state.code_file_scroll = 0
@@ -431,7 +438,7 @@ let finder_fixture () =
   state.code_dir <- "src";
   let file, request = start_read ~equal:String.equal state.code_file "src/old.ml" in
   state.code_file <- file;
-  Code_results.apply_file state request (Ok "let a = 1\nlet b = 2\nlet c = 3");
+  apply_file state request (Ok "let a = 1\nlet b = 2\nlet c = 3");
   state.code_file_cursor <- 2;
   state.code_file_scroll <- 2;
   let origin = {cfo_workspace=state.workspace_authority;
@@ -460,7 +467,7 @@ let test_finder_commits_navigation_only_after_success () =
   Alcotest.(check bool) "pending read retains original file" true (before == state.code_file);
   Alcotest.(check int) "pending read retains cursor" 2 state.code_file_cursor;
   Alcotest.(check bool) "successful owned read commits once" true
-    (Code_results.apply_found_file state request (Ok "let new_value = 4"));
+    (apply_found_file state request (Ok "let new_value = 4"));
   Alcotest.(check (option string)) "new file" (Some "lib/new.ml")
     (Fetched.current_key state.code_file);
   check_string "new containing directory" "lib" state.code_dir;
@@ -471,14 +478,14 @@ let test_finder_commits_navigation_only_after_success () =
          && target.cj_file = Some "src/old.ml" && target.cj_cursor = 2 && target.cj_scroll = 2
      | [] | _ :: _ -> false);
   Alcotest.(check bool) "duplicate completion cannot reopen" false
-    (Code_results.apply_found_file state request (Ok "different bytes"))
+    (apply_found_file state request (Ok "different bytes"))
 
 let test_finder_failure_and_cancel_preserve_original () =
   let state, origin = finder_fixture () in
   let before = state.code_file in
   let failed = finder_select state "lib/new.ml" in
   Alcotest.(check bool) "failed read does not navigate" false
-    (Code_results.apply_found_file state failed (Error "file disappeared"));
+    (apply_found_file state failed (Error "file disappeared"));
   Alcotest.(check bool) "failure retains file and cursor" true
     (before == state.code_file && state.code_file_cursor = 2 && state.code_dir = "src");
   let cancelled = finder_select state "lib/new.ml" in
@@ -487,7 +494,7 @@ let test_finder_failure_and_cancel_preserve_original () =
   state.palette_mode <- Palette_files origin;
   let replacement = finder_select state "lib/new.ml" in
   Alcotest.(check bool) "same-path reopen does not borrow cancelled generation" false
-    (Code_results.apply_found_file state cancelled (Ok "cancelled bytes"));
+    (apply_found_file state cancelled (Ok "cancelled bytes"));
   Alcotest.(check bool) "late cleanup did not retire replacement" true
     (Fetched.is_current ~equal:code_scope_path_equal state.code_finder_file replacement);
   Alcotest.(check bool) "cancel retained original file" true (before == state.code_file)
@@ -500,7 +507,7 @@ let test_finder_does_not_borrow_changed_owners () =
       change state;
       let before = state.code_file in
       Alcotest.(check bool) "late read cannot commit under a changed owner" false
-        (Code_results.apply_found_file state request (Ok "late bytes"));
+        (apply_found_file state request (Ok "late bytes"));
       Alcotest.(check bool) "current file and navigation untouched" true
         (before == state.code_file && state.code_jump_back = []))
     [ (fun state -> set_code_scope state (Code_scope_repo "other"))
@@ -517,7 +524,7 @@ let test_finder_success_yields_to_pending_input () =
   let before = state.code_file in
   let request = finder_select state "lib/new.ml" in
   Alcotest.(check bool) "publication yields to a queued key or paste" false
-    (Code_results.apply_found_file ~input_pending:true state request (Ok "let new_value = 4"));
+    (apply_found_file ~input_pending:true state request (Ok "let new_value = 4"));
   Alcotest.(check bool) "original file remains while input is pending" true
     (before == state.code_file && state.palette_open);
   Alcotest.(check bool) "an incomplete terminal sequence also defers" false
@@ -528,7 +535,7 @@ let test_finder_success_yields_to_pending_input () =
   Alcotest.(check bool) "Esc retained original file" true (before == state.code_file);
   let state, _ = finder_fixture () in
   let request = finder_select state "lib/new.ml" in
-  ignore (Code_results.apply_found_file ~input_pending:true state request (Ok "let next = 4"));
+  ignore (apply_found_file ~input_pending:true state request (Ok "let next = 4"));
   Alcotest.(check bool) "success resumes after input has drained" true
     (Code_results.take_ready_found_file state ~input_pending:false);
   Alcotest.(check bool) "ready result is consumed once" false
@@ -552,7 +559,7 @@ let test_catalog_decoder_keeps_identity_and_rejects_missing_data () =
 let test_finder_ready_content_cannot_borrow_reconfirmed_authority () =
   let state, _ = finder_fixture () in
   let request = finder_select state "lib/new.ml" in
-  ignore (Code_results.apply_found_file ~input_pending:true state request (Ok "old authority bytes"));
+  ignore (apply_found_file ~input_pending:true state request (Ok "old authority bytes"));
   let identity = state.server_identity in
   suspend_workspace_readings state;
   state.server_identity <- identity;
@@ -580,7 +587,7 @@ let return_fixture () =
   state.code_dir <- "lib";
   let file, request = start_read ~equal:String.equal state.code_file "lib/new.ml" in
   state.code_file <- file;
-  Code_results.apply_file state request (Ok "let current = true");
+  apply_file state request (Ok "let current = true");
   state
 
 let start_return_read state =
@@ -603,7 +610,7 @@ let test_return_restores_reading_after_success () =
     (match Code_results.start_return state with
      | Code_results.No_return -> true
      | Code_results.Return_committed | Code_results.Read_navigation_file _ -> false);
-  Code_results.apply_file ~intent:(Navigate_code_file owner) state request
+  apply_file ~intent:(Navigate_code_file owner) state request
     (Ok "let first_line = 1\nlet second_line = 2\nlet third_line = 3");
   Alcotest.(check bool) "publication leaves current file intact" true (state.code_file == current);
   Alcotest.(check bool) "queued input defers navigation" false
@@ -623,15 +630,15 @@ let test_return_failure_retry_and_cancel () =
   let state = return_fixture () in
   let current = state.code_file and history = state.code_jump_back in
   let old_owner, old_request = start_return_read state in
-  Code_results.apply_file ~intent:(Navigate_code_file old_owner) state old_request (Error "gone");
+  apply_file ~intent:(Navigate_code_file old_owner) state old_request (Error "gone");
   Alcotest.(check bool) "failure retains reading and unconsumed history" true
     (state.code_file == current && state.code_jump_back == history
      && state.code_dir = "lib" && Option.is_none state.code_navigation);
   let owner, request = start_return_read state in
-  Code_results.apply_file ~intent:(Navigate_code_file old_owner) state old_request (Ok "stale");
+  apply_file ~intent:(Navigate_code_file old_owner) state old_request (Ok "stale");
   Alcotest.(check bool) "old same-path generation cannot satisfy retry" false
     (Code_results.take_ready_navigation_file state ~input_pending:false);
-  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "retry");
+  apply_file ~intent:(Navigate_code_file owner) state request (Ok "retry");
   state.code_navigation <- None;
   Alcotest.(check bool) "cancellation wins over an already published success" false
     (Code_results.take_ready_navigation_file state ~input_pending:false);
@@ -642,7 +649,7 @@ let test_return_owners_cannot_be_borrowed () =
   List.iter (fun change ->
     let state = return_fixture () in
     let owner, request = start_return_read state in
-    Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "late content");
+    apply_file ~intent:(Navigate_code_file owner) state request (Ok "late content");
     change state;
     let current = state.code_file and history = state.code_jump_back in
     Alcotest.(check bool) "ready old return cannot navigate under a new owner" false
@@ -666,7 +673,7 @@ let test_return_owners_cannot_be_borrowed () =
 let test_return_clamps_changed_content_and_restores_current_file () =
   let state = return_fixture () in
   let owner, request = start_return_read state in
-  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "ab");
+  apply_file ~intent:(Navigate_code_file owner) state request (Ok "ab");
   ignore (Code_results.take_ready_navigation_file state ~input_pending:false);
   Alcotest.(check bool) "shorter file clamps cursor and both offsets" true
     (state.code_file_cursor = 0 && state.code_file_scroll = 0 && state.code_file_hscroll = 1);
@@ -689,7 +696,7 @@ let test_return_to_tree_needs_no_file () =
   Code_results.push_code_jump state;
   let next, request = start_read ~equal:String.equal state.code_file "lib/new.ml" in
   state.code_file <- next;
-  Code_results.apply_file state request (Ok "new");
+  apply_file state request (Ok "new");
   state.code_dir <- "lib";
   Alcotest.(check bool) "tree history commits without a file request" true
     (match Code_results.start_return state with
@@ -731,7 +738,7 @@ let test_same_file_return_retires_an_ordinary_open_refresh () =
       (Fetched.is_current ~equal:String.equal state.code_file ordinary);
     Alcotest.(check bool) "return retains previously read content without a pending read" true
       (Fetched.current state.code_file = reading && not (Fetched.in_flight state.code_file));
-    Code_results.apply_file ~intent:Open_code_file state ordinary late_result;
+    apply_file ~intent:Open_code_file state ordinary late_result;
     Alcotest.(check bool) "late ordinary result cannot reset the restored reading" true
       (state.code_file == returned && state.code_file_cursor = 2
        && state.code_file_scroll = 1 && state.code_file_hscroll = 6
@@ -748,7 +755,7 @@ let test_pending_return_retires_other_ordinary_file_reads () =
       if stale then begin
         let refreshing, failed = start_read ~equal:String.equal state.code_file "lib/new.ml" in
         state.code_file <- refreshing;
-        Code_results.apply_file ~intent:Refresh_code_file state failed (Error "unavailable")
+        apply_file ~intent:Refresh_code_file state failed (Error "unavailable")
       end else state.code_file <- Fetched.clear state.code_file;
       let refreshing, ordinary = start_read ~equal:String.equal state.code_file "lib/new.ml" in
       state.code_file <- refreshing;
@@ -770,11 +777,11 @@ let test_pending_return_retires_other_ordinary_file_reads () =
            | Some (_, Fetched.Failed _) -> true
            | None | Some (_, (Fetched.Absent | Fetched.Loading | Fetched.Ready _
                             | Fetched.Stale _)) -> false);
-      Code_results.apply_file ~intent:Open_code_file state ordinary late_result;
+      apply_file ~intent:Open_code_file state ordinary late_result;
       Alcotest.(check bool) "late ordinary callback cannot alter the pending return's source" true
         (state.code_file == current && state.code_jump_back == history
          && Option.is_some state.code_navigation && state.code_dir = "lib");
-      Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "returned");
+      apply_file ~intent:(Navigate_code_file owner) state request (Ok "returned");
       Alcotest.(check bool) "the separately owned return can still commit" true
         (Code_results.take_ready_navigation_file state ~input_pending:false))
       [Ok "late replacement"; Error "late failure"])
@@ -803,21 +810,21 @@ let test_navigation_activity_preserves_settled_observations () =
   Alcotest.(check bool) "accepted return retains the settled observation and source" true
     (active owner request && state.code_lsp_note == observation
      && state.code_file == source && state.code_jump_back == history);
-  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "received");
+  apply_file ~intent:(Navigate_code_file owner) state request (Ok "received");
   Alcotest.(check bool) "received navigation still yields to queued input" false
     (Code_results.take_ready_navigation_file state ~input_pending:true);
   Alcotest.(check bool) "activity remains owned until destination admission" true
     (active owner request && state.code_lsp_note == observation);
   state.code_navigation <- None;
-  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Error "late cancellation");
+  apply_file ~intent:(Navigate_code_file owner) state request (Error "late cancellation");
   Alcotest.(check bool) "cancellation retires activity without losing observed state" true
     (Option.is_none (code_pending_navigation state) && state.code_lsp_note == observation
      && state.code_file == source && state.code_jump_back == history);
   let retry_owner, retry = start_return_read state in
-  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "obsolete");
+  apply_file ~intent:(Navigate_code_file owner) state request (Ok "obsolete");
   Alcotest.(check bool) "an old success cannot settle the replacement" true
     (active retry_owner retry && state.code_lsp_note == observation);
-  Code_results.apply_file ~intent:(Navigate_code_file retry_owner) state retry (Error "unavailable");
+  apply_file ~intent:(Navigate_code_file retry_owner) state retry (Error "unavailable");
   let failure = state.code_lsp_note in
   Alcotest.(check bool) "failure ends activity and preserves source and history" true
     (Option.is_none (code_pending_navigation state) && Option.is_some failure
@@ -825,7 +832,7 @@ let test_navigation_activity_preserves_settled_observations () =
   let final_owner, final_request = start_return_read state in
   Alcotest.(check bool) "retry retains the observed failure while pending" true
     (active final_owner final_request && state.code_lsp_note == failure);
-  Code_results.apply_file ~intent:(Navigate_code_file final_owner) state final_request
+  apply_file ~intent:(Navigate_code_file final_owner) state final_request
     (Ok "let a = 1\nlet b = 2\nlet c = 3");
   Alcotest.(check bool) "idle admits the destination" true
     (Code_results.take_ready_navigation_file state ~input_pending:false);
@@ -861,13 +868,13 @@ let test_navigation_activity_belongs_to_the_original_source () =
        | Some (current, path) -> current == owner && current.cno_action = action
            && path = Fetched.request_key request
        | None -> false);
-    Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "destination");
+    apply_file ~intent:(Navigate_code_file owner) state request (Ok "destination");
     change state;
     let source = state.code_file and history = state.code_jump_back in
     let observation = state.code_lsp_note in
     Alcotest.(check bool) "changed source cannot borrow pending activity" true
       (Option.is_none (code_pending_navigation state));
-    Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Error "late failure");
+    apply_file ~intent:(Navigate_code_file owner) state request (Error "late failure");
     Alcotest.(check bool) "changed source rejects the already received destination" false
       (Code_results.take_ready_navigation_file state ~input_pending:false);
     Alcotest.(check bool) "late work preserves current source, history and observation" true
@@ -885,7 +892,7 @@ let test_location_commits_history_only_on_success () =
     (state.code_file == current && state.code_jump_back == history && state.code_dir = "src");
   Alcotest.(check bool) "destination retains repository scope" true
     (owner.cno_destination.cj_scope = Code_scope_repo "example");
-  Code_results.apply_file ~intent:(Navigate_code_file owner) state request
+  apply_file ~intent:(Navigate_code_file owner) state request
     (Ok "let first = 0\nlet target = 1\nlet last = 2");
   Alcotest.(check bool) "queued input precedes location success" false
     (Code_results.take_ready_navigation_file state ~input_pending:true);
@@ -901,7 +908,7 @@ let test_location_commits_history_only_on_success () =
          && target.cj_scroll = 2 && target.cj_hscroll = 4 && target.cj_dir = "src"
      | [] | _ :: _ -> false);
   let owner, request = start_return_read state in
-  Code_results.apply_file ~intent:(Navigate_code_file owner) state request
+  apply_file ~intent:(Navigate_code_file owner) state request
     (Ok "let a = 1\nlet b = 2\nlet c = 3");
   ignore (Code_results.take_ready_navigation_file state ~input_pending:false);
   Alcotest.(check bool) "B returns through the successfully recorded location" true
@@ -913,21 +920,21 @@ let test_location_failure_cancel_and_replacement_preserve_source () =
   close_code_finder state;
   let current = state.code_file and history = state.code_jump_back in
   let old_owner, old_request = start_location_read state "lib/target.ml" 99 in
-  Code_results.apply_file ~intent:(Navigate_code_file old_owner) state old_request (Error "missing file");
+  apply_file ~intent:(Navigate_code_file old_owner) state old_request (Error "missing file");
   Alcotest.(check bool) "failed location retains source and creates no history" true
     (state.code_file == current && state.code_jump_back == history && state.code_dir = "src");
   let owner, request = start_location_read state "lib/target.ml" 99 in
-  Code_results.apply_file ~intent:(Navigate_code_file old_owner) state old_request (Ok "late old read");
+  apply_file ~intent:(Navigate_code_file old_owner) state old_request (Ok "late old read");
   Alcotest.(check bool) "old same-path location cannot complete the retry" false
     (Code_results.take_ready_navigation_file state ~input_pending:false);
-  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "short");
+  apply_file ~intent:(Navigate_code_file owner) state request (Ok "short");
   state.code_navigation <- None;
   Alcotest.(check bool) "cancelled ready location cannot navigate" false
     (Code_results.take_ready_navigation_file state ~input_pending:false);
   Alcotest.(check bool) "cancel retains source and history" true
     (state.code_file == current && state.code_jump_back == history);
   let owner, request = start_location_read state "lib/target.ml" 99 in
-  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "short");
+  apply_file ~intent:(Navigate_code_file owner) state request (Ok "short");
   ignore (Code_results.take_ready_navigation_file state ~input_pending:false);
   Alcotest.(check int) "destination beyond new EOF clamps to actual content" 0 state.code_file_cursor
 
@@ -938,7 +945,7 @@ let test_return_replaces_pending_location_without_consuming_history () =
   let return_owner, _ = start_return_read state in
   Alcotest.(check bool) "B owns a return rather than sharing an unrelated location" true
     (return_owner.cno_action = Return_to_history);
-  Code_results.apply_file ~intent:(Navigate_code_file location_owner) state location_request (Ok "obsolete");
+  apply_file ~intent:(Navigate_code_file location_owner) state location_request (Ok "obsolete");
   Alcotest.(check bool) "late location cannot replace B's request" true
     (match state.code_navigation with
      | Some reading -> reading.cnr_owner == return_owner
@@ -951,7 +958,7 @@ let test_location_cannot_borrow_changed_authority () =
     let state, _ = finder_fixture () in
     close_code_finder state;
     let owner, request = start_location_read state "lib/target.ml" 3 in
-    Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "destination");
+    apply_file ~intent:(Navigate_code_file owner) state request (Ok "destination");
     change state;
     let current = state.code_file and history = state.code_jump_back in
     Alcotest.(check bool) "changed owner refuses an already received location" false
@@ -985,7 +992,7 @@ let test_locations_retire_ordinary_source_callbacks () =
       let followup = Code_results.take_ready_lsp_locations state ~input_pending:false in
       let before = state.code_file, state.code_file_cursor, state.code_file_scroll,
         state.code_file_hscroll, state.code_focus_file, state.code_jump_back in
-      Code_results.apply_file ~intent:Open_code_file state ordinary late_result;
+      apply_file ~intent:Open_code_file state ordinary late_result;
       Alcotest.(check bool) "late ordinary source cannot reset location or pending source" true
         (before = (state.code_file, state.code_file_cursor, state.code_file_scroll,
           state.code_file_hscroll, state.code_focus_file, state.code_jump_back));
@@ -997,7 +1004,7 @@ let test_locations_retire_ordinary_source_callbacks () =
             (same_file && state.code_file_cursor = 0 && state.code_file_hscroll = 0)
       | Code_results.Read_location_file (owner, request) ->
           Alcotest.(check bool) "different file uses a distinct owner" false same_file;
-          Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "target");
+          apply_file ~intent:(Navigate_code_file owner) state request (Ok "target");
           ignore (Code_results.take_ready_navigation_file state ~input_pending:false);
           Alcotest.(check (option string)) "owned location still completes" (Some "lib/target.ml")
             (Fetched.current_key state.code_file)
@@ -1134,7 +1141,7 @@ let resume_question_after_workspace_confirmation state =
   let resumed = Option.bind question (fun query ->
     Code_results.start_lsp_question ~line:query.clq_line state
       ~question:query.clq_question ~symbol:query.clq_symbol) in
-  Code_results.apply_file ~intent:Refresh_code_file state file_request
+  apply_file ~intent:Refresh_code_file state file_request
     (Ok "let a = 1\nlet b = 2\nlet c = 3");
   resumed
 
@@ -1229,7 +1236,7 @@ let test_location_picker_survives_finder_idle_and_late_replies () =
     Code_results.apply_catalog state catalog_request
       (Result.map (fun _ -> {Decode.wfc_root=""; wfc_files=["lib/new.ml"]}) late_result);
     Alcotest.(check bool) "late finder success or failure cannot navigate from locations" false
-      (Code_results.apply_found_file state finder_request late_result);
+      (apply_found_file state finder_request late_result);
     Alcotest.(check bool) "late finder callbacks cannot publish into location selection" true
       (state.code_catalog == current_catalog && state.code_finder_file == current_finder);
     Alcotest.(check bool) "callbacks retain the offer, its filter and the source reading" true
@@ -1275,7 +1282,7 @@ let test_multiple_locations_choose_the_filtered_destination () =
     (Fetched.request_key request);
   Alcotest.(check bool) "selection keeps source and history until successful read" true
     (state.code_file == current && state.code_jump_back = [] && not state.palette_open);
-  Code_results.apply_file ~intent:(Navigate_code_file owner) state request (Ok "first\nsecond\nthird");
+  apply_file ~intent:(Navigate_code_file owner) state request (Ok "first\nsecond\nthird");
   Alcotest.(check bool) "destination commits through the existing input-priority boundary" true
     (Code_results.take_ready_navigation_file state ~input_pending:false);
   Alcotest.(check bool) "destination directory and selected line commit together" true
@@ -1346,7 +1353,7 @@ let test_location_offers_do_not_borrow_other_owners () =
     ; (fun state ->
         let next, request = start_read ~equal:String.equal state.code_file "src/old.ml" in
         state.code_file <- next;
-        Code_results.apply_file state request (Ok "same-path replacement"))
+        apply_file state request (Ok "same-path replacement"))
     ; suspend_workspace_readings
     ] in
   List.iter (fun change ->
@@ -1410,7 +1417,7 @@ let test_source_copy_preserves_response_bytes () =
   let source = "\tlet label = \"한글🙂 cafe\204\129\"\r\n  (* \027[31m raw *)\r\n" in
   let next, request = start_read ~equal:String.equal state.code_file "source.ml" in
   state.code_file <- next;
-  Code_results.apply_file state request (Ok source);
+  apply_file state request (Ok source);
   let copied () = match Code_results.copy_file_source state with
     | Ok (path, text) -> check_string "source address" "source.ml" path; text
     | Error detail -> Alcotest.fail detail in
@@ -1418,15 +1425,15 @@ let test_source_copy_preserves_response_bytes () =
   let next, refresh = start_read ~equal:String.equal state.code_file "source.ml" in
   state.code_file <- next;
   check_string "same-file refresh retains the source still being read" source (copied ());
-  Code_results.apply_file ~intent:Refresh_code_file state refresh (Ok "replacement");
+  apply_file ~intent:Refresh_code_file state refresh (Ok "replacement");
   check_string "successful refresh replaces its source atomically" "replacement" (copied ());
   let next, obsolete = start_read ~equal:String.equal state.code_file "other.ml" in
   let next, current = start_read ~equal:String.equal next "replacement.ml" in
   state.code_file <- next;
-  Code_results.apply_file state obsolete (Ok "late unrelated bytes");
+  apply_file state obsolete (Ok "late unrelated bytes");
   Alcotest.(check bool) "pending replacement cannot copy previous or late bytes" true
     (Result.is_error (Code_results.copy_file_source state));
-  Code_results.apply_file state current (Ok "new\r\n");
+  apply_file state current (Ok "new\r\n");
   Alcotest.(check (result (pair string string) string)) "new reading owns the copy"
     (Ok ("replacement.ml", "new\r\n")) (Code_results.copy_file_source state)
 
@@ -1436,7 +1443,7 @@ let test_source_copy_respects_read_ownership () =
     confirm_code_workspace state;
     let next, request = start_read ~equal:String.equal state.code_file "source.ml" in
     state.code_file <- next;
-    Code_results.apply_file state request (Ok "original");
+    apply_file state request (Ok "original");
     state in
   List.iter (fun withdraw ->
     let state = fresh () in withdraw state;
@@ -1456,7 +1463,7 @@ let test_source_copy_respects_read_ownership () =
     ; (fun state ->
         let next, request = start_read ~equal:String.equal state.code_file "source.ml" in
         state.code_file <- next;
-        Code_results.apply_file ~intent:Refresh_code_file state request (Error "unavailable"))
+        apply_file ~intent:Refresh_code_file state request (Error "unavailable"))
     ];
   let state = fresh () in
   state.code_file <- Fetched.suspend state.code_file;
@@ -1465,14 +1472,75 @@ let test_source_copy_respects_read_ownership () =
     (Ok ("source.ml", "original")) (Code_results.copy_file_source state);
   let next, request = start_read ~equal:String.equal state.code_file "empty.ml" in
   state.code_file <- next;
-  Code_results.apply_file state request (Ok "");
+  apply_file state request (Ok "");
   Alcotest.(check (result (pair string string) string)) "empty file is a readable source"
     (Ok ("empty.ml", "")) (Code_results.copy_file_source state)
+
+let test_revision_read_and_draft_reconciliation () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  confirm_code_workspace state;
+  state.workspace_identity <- Workspace_identity_match;
+  let source text character : Decode.workspace_file_source =
+    { wfs_content=text; wfs_revision=String.make 64 character } in
+  let read text character =
+    let next, request = start_read ~equal:String.equal state.code_file "source.ml" in
+    state.code_file <- next;
+    Code_results.apply_file ~intent:Refresh_code_file state request (Ok (source text character));
+    request in
+  ignore (read "original\r\n" 'a');
+  state.code_focus_file <- Right_pane;
+  let must = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let draft = must (Code_results.prepare_draft state) in
+  ignore (must (Code_results.edit_draft state draft "candidate\r\n"));
+  let saving, _ = must (Code_results.begin_draft_save state) in
+  let next, earlier_read = start_read ~equal:String.equal state.code_file "source.ml" in
+  state.code_file <- next;
+  ignore (Code_results.complete_draft_save state saving
+    (Masc_tui_code_draft.Save_uncertain "response lost"));
+  Code_results.apply_file ~intent:Refresh_code_file state earlier_read (Ok (source "other" 'b'));
+  Alcotest.(check bool) "a pre-save read cannot authorize adopting a new revision" true
+    (Result.is_error (Code_results.adopt_draft_revision state));
+  let owner = Option.get (current_code_draft state) in
+  let next, comparison = start_read ~equal:String.equal state.code_file "source.ml" in
+  state.code_file <- next; state.code_draft_review <- Some (owner, comparison);
+  Code_results.apply_file ~intent:Refresh_code_file state comparison (Ok (source "other" 'b'));
+  ignore (must (Code_results.adopt_draft_revision state));
+  let current = Option.get (current_code_draft state) in
+  check_string "candidate survives explicit comparison" "candidate\r\n" (Masc_tui_code_draft.text current);
+  check_string "only explicit adoption changes the save revision" (String.make 64 'b')
+    (Masc_tui_code_draft.base current).revision;
+  let submitted, _ = must (Code_results.begin_draft_save state) in
+  let next, newer_read = start_read ~equal:String.equal state.code_file "source.ml" in
+  state.code_file <- next;
+  Alcotest.(check bool) "save acknowledgement cannot supersede a newer read" false
+    (Code_results.complete_draft_save state submitted (Masc_tui_code_draft.Save_succeeded (String.make 64 'c')));
+  Alcotest.(check (option string)) "post-save verification waits for the newer read" None
+    (Code_results.saved_refresh_path state ~input_pending:false);
+  Code_results.apply_file ~intent:Refresh_code_file state newer_read (Ok (source "other" 'b'));
+  Alcotest.(check (option string)) "queued input precedes post-save read" None
+    (Code_results.saved_refresh_path state ~input_pending:true);
+  Alcotest.(check (option string)) "a settled old read leaves one fresh verification demand" (Some "source.ml")
+    (Code_results.saved_refresh_path state ~input_pending:false)
+
+let test_workspace_source_decoder_requires_revision () =
+  let revision = String.make 64 'd' in
+  let content = "\t한글\r\n" in
+  (match Decode.decode_workspace_file (`Assoc ["ok",`Bool true;"content",`String content;"revision",`String revision]) with
+   | Ok source -> check_string "wire bytes" content source.wfs_content;
+       check_string "wire revision" revision source.wfs_revision
+   | Error detail -> Alcotest.fail detail);
+  List.iter (fun json -> Alcotest.(check bool) "missing/invalid revisions are not editable sources" true
+    (Result.is_error (Decode.decode_workspace_file json)))
+    [`Assoc ["ok",`Bool true;"content",`String content];
+     `Assoc ["ok",`Bool true;"content",`String content;"revision",`String "unknown"]]
 
 let () =
   Alcotest.run
     "masc-tui-workspace-entries"
-    [ ( "source copy"
+    [ ( "revision-bound drafts", [
+        Alcotest.test_case "paired source and revision decoder" `Quick test_workspace_source_decoder_requires_revision;
+        Alcotest.test_case "owned comparison and deferred save verification" `Quick test_revision_read_and_draft_reconciliation ] )
+    ; ( "source copy"
       , [ Alcotest.test_case "original response bytes and replacement ownership" `Quick
             test_source_copy_preserves_response_bytes
         ; Alcotest.test_case "withdrawn read authority never supplies clipboard bytes" `Quick

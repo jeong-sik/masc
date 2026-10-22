@@ -30,7 +30,7 @@ val apply_catalog : Masc_tui_types.state ->
   (Masc.Tui_decode.workspace_file_catalog, string) result -> unit
 val apply_found_file : ?input_pending:bool -> Masc_tui_types.state ->
   (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
-  (string, string) result -> bool
+  (Masc.Tui_decode.workspace_file_source, string) result -> bool
 (** [true] only when successful navigation was committed. Failure and stale
     replies preserve the original file, sibling panes, cursor and directory. *)
 val take_ready_found_file : Masc_tui_types.state -> input_pending:bool -> bool
@@ -38,7 +38,7 @@ val take_ready_found_file : Masc_tui_types.state -> input_pending:bool -> bool
     incomplete terminal sequences have had the opportunity to retire it. *)
 val apply_file : ?intent:Masc_tui_types.code_file_load_intent ->
   Masc_tui_types.state -> string Masc_tui_fetched.request ->
-  (string, string) result -> unit
+  (Masc.Tui_decode.workspace_file_source, string) result -> unit
 val copy_file_source : Masc_tui_types.state -> ((string * string), string) result
 (** The current readable file's path and original response bytes, without
     display sanitation, syntax colours, gutters or line-ending reconstruction.
@@ -75,3 +75,16 @@ val apply_diff : Masc_tui_types.state -> string Masc_tui_fetched.request ->
 val apply_history : Masc_tui_types.state ->
   (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
   (Masc_tui_types.code_history_listing, string) result -> unit
+
+val prepare_draft : Masc_tui_types.state -> (Masc_tui_code_draft.t, string) result
+val edit_draft : Masc_tui_types.state -> Masc_tui_code_draft.t -> string -> (unit, string) result
+val discard_draft : Masc_tui_types.state -> (unit, string) result
+val adopt_draft_revision : Masc_tui_types.state -> (unit, string) result
+val begin_draft_save : Masc_tui_types.state -> (Masc_tui_types.code_save_request * Masc_tui_code_draft.t, string) result
+val complete_draft_save : Masc_tui_types.state -> Masc_tui_types.code_save_request -> Masc_tui_code_draft.outcome -> bool
+(** Settle only the submitted draft regardless of the current view. [true] means
+    the original reading still owns an optional post-save refresh. *)
+
+val saved_refresh_path : Masc_tui_types.state -> input_pending:bool -> string option
+(** One post-save read demand waits for queued input and newer navigation/read
+    ownership. It is consumed by a newly dispatched file read, never by an old reply. *)

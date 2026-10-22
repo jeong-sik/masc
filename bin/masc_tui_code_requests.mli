@@ -81,3 +81,13 @@ val start_lsp_question
   -> question:string
   -> symbol:string
   -> unit
+
+val save_draft : Masc_tui_types.state -> host:string ->
+  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> (unit, string) result
+(** Deliver this effect acknowledgement unwrapped so navigation cannot lose the
+    submitted draft's outcome. The UI still settles only its original ticket. *)
+
+val reread_draft : Masc_tui_types.state -> host:string ->
+  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> (unit, string) result
+(** Supersede an earlier file read and own a new comparison request after a
+    conflict/uncertainty. A pre-submission GET cannot supply that comparison. *)

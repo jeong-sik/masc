@@ -19,7 +19,7 @@ terminal clipboard support is unconfirmed. An initial read, a failed or suspende
 reading, or an unconfirmed workspace cannot supply copy bytes. A same-file
 refresh keeps the previously observed source until the new bytes arrive. Close History,
 Diff or Notes before copying the file. Mouse selection still copies displayed
-rows. Code remains read-only; copying does not save or edit a workspace file.
+rows. Copying does not save or edit a workspace file.
 
 Returning to another file keeps the current reading on screen until the
 destination read succeeds. A missing file or unavailable workspace leaves the
@@ -68,6 +68,39 @@ Definition, hover and references requests keep the selected name's position
 when Korean text, emoji or other Unicode characters precede it on the line.
 Malformed source encoding is reported as a failed question.
 
+## Editing and saving
+
+With readable file content focused, `e` edits its exact server source in your
+configured `$EDITOR` (or `$VISUAL`). The editor receives a temporary file;
+Keeper/repository paths are never opened as local editor targets. The TUI keeps
+the returned draft together with its original revision and confirmed server
+workspace, repository/Keeper scope and path. Tabs, CRLF, final-newline changes,
+Unicode and explicitly empty files retain their exact bytes.
+
+`V` opens/closes the draft comparison, `e` reopens the draft in the editor, and
+`S` explicitly submits it. The comparison includes byte counts and EOF newline
+state, including changes that have identical displayed lines. `Esc` closes the
+comparison without losing edits. Drafts survive navigation in this TUI session;
+`X` explicitly discards the current local draft. A submitted draft cannot be
+edited or discarded until its own acknowledgement settles. Drafts are not
+persisted across process exit; the existing quit confirmation reports their
+count and possible uncertainty of pending saves.
+
+A rejected save retains the draft. After a revision conflict or an uncertain
+response, `r` in the comparison starts a new bound server read. An older read
+cannot stand in for that comparison. Review server-current → draft, then use
+`A` to explicitly adopt the compared server revision. `A` preserves the edited
+candidate; it does not merge it or write anything. Reopen `e` to incorporate the
+server changes before explicitly saving again with `S`. No automatic retry or
+baseline replacement occurs. A missing response never proves that saving
+failed; reread before deciding whether to submit again.
+
+The save reply settles only its submitted draft, even after navigating to
+another file or workspace. Success schedules a fresh source read; queued input,
+newer navigation and an existing file read retain priority. A source GET begun
+before that acknowledgement cannot consume the post-save verification demand.
+Close History, Diff, Notes and other overlays before editing the underlying file.
+
 ## Workspace file revision and save API
 
 The Code editor integration uses `GET /api/v1/workspace/file?path=...` with the
@@ -114,5 +147,6 @@ candidate needs no replacement; an explicitly empty candidate remains valid.
 On success, the response returns the revision of the committed bytes. A failure
 after publication may have started, including a lane-release failure, uses `workspace_file_save_uncertain`: retain the draft and reread
 before considering another save. A missing response likewise does not establish
-whether a write happened. This API does not by itself add a Code edit key,
-retained drafts or a conflict comparison view; those remain separate TUI work.
+whether a write happened. The TUI uses this API for the explicit draft flow above. Source review,
+semantic draft/editor tests, a native TUI/server build and observed interactive
+editing are distinct verification scopes.

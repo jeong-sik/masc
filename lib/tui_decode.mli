@@ -2314,8 +2314,9 @@ val decode_workspace_file_catalog :
 (** Strict catalog response from [/api/v1/workspace/files]. Exact path strings
     are retained for selection; terminal escaping belongs to rendering. *)
 
-(** The whole file from [/api/v1/workspace/file]'s [{ok, content}]. *)
-val decode_workspace_file : Yojson.Safe.t -> (string, string) result
+type workspace_file_source = { wfs_content : string; wfs_revision : string }
+(** Exact source bytes and their server revision are admitted together. *)
+val decode_workspace_file : Yojson.Safe.t -> (workspace_file_source, string) result
 
 type git_diff_row_kind =
   | Gd_context

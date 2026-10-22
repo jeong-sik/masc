@@ -121,17 +121,24 @@ let launch_file_load ?(intent = Open_code_file) state ~host ~deliver ~path =
   else begin
   state.code_navigation <- None;
   let scope = state.code_scope in
+  let expected_workspace = state.server_identity in
   match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
     state.code_file <- next;
+    Option.iter (fun address -> state.code_saved_refreshes <- List.filter
+      (fun pending -> not (Masc_tui_code_draft.equal_address address pending)) state.code_saved_refreshes)
+      (code_draft_address state);
     state.code_file_resume_intent <- intent;
     let port = state.port in
     Masc_tui_async_read.launch
       ~deliver:(fun result -> deliver (Code_file_loaded (intent, request, result)))
       (fun () ->
          let keeper, repo = code_scope_axes_of scope in
-         Masc_tui_http.fetch_workspace_file ?keeper ?repo ~host ~port ~path ())
+         match expected_workspace with
+         | None -> Error "Code has no confirmed workspace identity"
+         | Some expected_workspace -> Masc_tui_http.fetch_workspace_file ?keeper ?repo
+             ~expected_workspace ~host ~port ~path ())
   end
 
 ;;
@@ -335,3 +342,36 @@ let start_lsp_question
   end
 
 ;;
+
+let save_draft state ~host ~deliver =
+  let ( let* ) = Result.bind in
+  let* request, draft = Masc_tui_code_results.begin_draft_save state in
+  let authority = state.workspace_authority in
+  let reading = state.workspace_read_authority in
+  let port = state.port in
+  Masc_tui_async_read.launch
+    ~deliver:(fun result -> deliver (Code_draft_saved (request,
+      match result with Ok outcome -> outcome | Error detail -> Masc_tui_code_draft.Save_uncertain detail)))
+    (fun () ->
+      if authority <> state.workspace_authority || reading != state.workspace_read_authority then
+        Ok (Masc_tui_code_draft.Save_refused "Workspace authority changed before sending the save")
+      else match write_authority_refusal state authority with
+        | Some detail -> Ok (Masc_tui_code_draft.Save_refused detail)
+        | None -> Ok (Masc_tui_http.save_workspace_file_draft ~host ~port draft));
+  Ok ()
+
+let reread_draft state ~host ~deliver =
+  match current_code_draft state with
+  | None -> Error "No draft for this file"
+  | Some _ when not (server_authority_ready state) ->
+    Error "Confirm the workspace before rereading the draft's file"
+  | Some draft -> match Masc_tui_code_draft.phase draft with
+    | Masc_tui_code_draft.Saving _ -> Error "Wait for the submitted save before rereading"
+    | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _ | Masc_tui_code_draft.Needs_review _ ->
+      state.code_file <- Masc_tui_fetched.cancel_pending
+        ~reason:"Superseded by draft comparison" state.code_file;
+      let address = Masc_tui_code_draft.address draft in
+      launch_file_load ~intent:Refresh_code_file state ~host ~deliver ~path:address.path;
+      state.code_draft_review <- Option.map (fun request -> draft, request)
+        (Masc_tui_fetched.current_request state.code_file);
+      Ok ()

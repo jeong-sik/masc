@@ -13,3 +13,6 @@ val toggle_history_change : Masc_tui_types.state -> bool
     even when another record has the same payload. *)
 val render_code : Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
+val code_draft_rows : Masc_tui_types.state -> cols:int -> string list
+(** The same draft comparison rows supply drawing and scrolling. *)

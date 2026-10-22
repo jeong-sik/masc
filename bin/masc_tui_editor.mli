@@ -1,4 +1,4 @@
-(** $EDITOR round-trip for a JSON settings payload. See the implementation
+(** $EDITOR round-trip for exact source text or a JSON settings payload. See the implementation
     for the terminal-handshake contract. *)
 
 val editor_command : unit -> string option

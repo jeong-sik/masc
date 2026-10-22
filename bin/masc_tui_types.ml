@@ -5067,7 +5067,7 @@ type inflight =
    through its own query axis: a keeper's playground via [?keeper=] (where a
    Changes row's clone-relative path lives), a registered repository via
    [?repo_id=] (what a Repositories row names). *)
-type code_workspace_scope =
+type code_workspace_scope = Masc_tui_code_draft.scope =
   | Code_scope_project
   | Code_scope_keeper of string
   | Code_scope_repo of string
@@ -5597,7 +5597,7 @@ type code_navigation_owner = {
 
 type code_navigation_reading = {
   cnr_owner : code_navigation_owner;
-  cnr_file : (string, string) Masc_tui_fetched.t;
+  cnr_file : (string, Tui_decode.workspace_file_source) Masc_tui_fetched.t;
 }
 
 type code_file_load_intent =
@@ -5607,7 +5607,14 @@ type code_file_load_intent =
 
 type code_file_document = {
   cfd_source : string;
+  cfd_revision : string;
   cfd_rows : (string * string) list array;
+}
+
+type code_save_request = {
+  csr_address : Masc_tui_code_draft.address;
+  csr_ticket : Masc_tui_code_draft.ticket;
+  csr_file : string Masc_tui_fetched.request option;
 }
 
 type code_location_offer = {
@@ -9384,7 +9391,7 @@ type state = {
   mutable code_catalog:
     (code_workspace_scope * string, Tui_decode.workspace_file_catalog) Masc_tui_fetched.t;
   mutable code_finder_file:
-    (code_workspace_scope * string, string) Masc_tui_fetched.t;
+    (code_workspace_scope * string, Tui_decode.workspace_file_source) Masc_tui_fetched.t;
   mutable code_cursor: int;
   (* The open file's lexed rows, keyed by its path. One value rather than a
      pair of options: the pair could not say "reading", so a file being
@@ -9397,6 +9404,11 @@ type state = {
      rather than sequential and a list walked from the front on every one. *)
   mutable code_file: (string, code_file_document) Masc_tui_fetched.t;
   mutable code_file_resume_intent: code_file_load_intent;
+  mutable code_drafts: Masc_tui_code_draft.t list;
+  mutable code_draft_open: bool;
+  mutable code_draft_scroll: int;
+  mutable code_draft_review: (Masc_tui_code_draft.t * string Masc_tui_fetched.request) option;
+  mutable code_saved_refreshes: Masc_tui_code_draft.address list;
   mutable code_file_scroll: int;
   (* The line the pane's cursor is on (0-based), the anchor a language-server
      question is asked at. j/k move it; the scroll follows to keep it
@@ -10489,6 +10501,28 @@ let server_authority_ready state =
       && not (Canonical_path.is_empty identity.sid_base_path)
       && not (Canonical_path.is_empty identity.sid_masc_root)
   | None -> false
+
+let code_draft_address state =
+  match state.server_identity, Masc_tui_fetched.current_key state.code_file with
+  | Some workspace, Some path -> Some {
+      Masc_tui_code_draft.base_path = Canonical_path.to_string workspace.Tui_decode.sid_base_path;
+      masc_root = Canonical_path.to_string workspace.sid_masc_root; scope = state.code_scope; path }
+  | None, _ | Some _, None -> None
+
+let current_code_draft state =
+  Option.bind (code_draft_address state) (fun address ->
+    List.find_opt (fun draft -> Masc_tui_code_draft.equal_address address
+      (Masc_tui_code_draft.address draft)) state.code_drafts)
+
+let put_code_draft state draft =
+  let address = Masc_tui_code_draft.address draft in
+  state.code_drafts <- draft :: List.filter (fun previous ->
+    not (Masc_tui_code_draft.equal_address address (Masc_tui_code_draft.address previous))) state.code_drafts
+
+let code_edit_focus state =
+  state.view = Code && state.code_focus_file = Right_pane
+  && not state.repository_changes_open && not state.code_history_open && not state.code_diff_open && not state.code_notes_open
+
 
 let chat_call_origin_current state origin =
   origin.cco_authority = state.workspace_authority
@@ -13942,6 +13976,7 @@ let apply_workspace_activity_read state request result =
 
 let set_code_scope state scope =
   if state.code_scope <> scope then begin
+    state.code_draft_open <- false;
     state.code_catalog <- Masc_tui_fetched.clear state.code_catalog;
     state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
     state.code_navigation <- None;
@@ -15685,6 +15720,7 @@ let create_state
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
   code_file_resume_intent = Refresh_code_file;
+  code_drafts = []; code_draft_open = false; code_draft_scroll = 0; code_draft_review = None; code_saved_refreshes = [];
   code_file_scroll = 0;
   code_file_cursor = 0;
   code_lsp_note = None;

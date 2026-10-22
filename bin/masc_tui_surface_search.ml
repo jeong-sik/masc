@@ -5,7 +5,7 @@ open Masc_tui_types
 let code_file_search_focused (state : state) =
   not state.repository_changes_open
   && state.code_focus_file = Right_pane
-  && not state.code_history_open && not state.code_diff_open && not state.code_notes_open
+  && not state.code_draft_open && not state.code_history_open && not state.code_diff_open && not state.code_notes_open
 
 (* The Git changes overlay before the surface it is drawn over. It draws over
    three surfaces -- [scrolled_surface_rows] names them -- and an arm per

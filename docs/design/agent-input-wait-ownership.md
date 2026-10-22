@@ -200,7 +200,7 @@ Dedicated input-wait surface classification, durable autonomous waiting,
 Owner-serialized response admission/CAS and continuation, live/retained
 reconciliation, SSE invalidation and persistent TUI projection remain required.
 Caller and response integration must ship together before this stack can become
-ready. All #38005 layers remain Draft; this contract does not authorize
+ready. PR Draft/Ready state does not certify this contract or authorize
 installation, merge or whole-issue completion.
 
 ## Explicit direct response admission
@@ -399,7 +399,8 @@ changes its behavior or that an installed runtime has adopted this layer.
 
 Independent Producer G reconciliation, autonomous waiting, dedicated outcome and
 status consumers, snapshot/SSE invalidation and persistent/reconnected Acting/TUI
-remain mandatory for #38005. All layers remain Draft without installation or merge.
+remain mandatory for #38005. PR readiness does not authorize installation or merge
+of an unfinished feature.
 
 
 ## Independent operation input branch foundation
@@ -489,3 +490,47 @@ all later checkpoint/error/fallback saves and actual original invocation resume.
 The primitive tests do not prove that continuation, HTTP branch acceptance,
 autonomous input waiting, current-state/SSE reconciliation or the final Acting
 behavior. R1 and #38005 remain incomplete.
+
+## Operation branch native publication and retained loaders
+
+An operation branch's native Bind or Checkpoint and branch-head advance now
+share one SQLite semantic CAS. The native seed may include admitted setup
+context beyond response C; no separately visible native/branch publication
+window is required. Branch publication keeps commit uncertainty as Error rather
+than turning a later readback into acknowledgement. The global input publication
+and retired-history-cut APIs refuse a branched operation.
+
+The original executing Owner child captures an opaque input writer whose
+destination comes from its actual running operation and journal branch. It
+binds child token, trace, operation and execution digest. Branch input changes
+compare both actual native and branch predecessors in the same transaction;
+ordinary native progress may have advanced since the writer was captured.
+Neither that capture nor branch publication reads or writes global input G.
+Generic native receipts for a branch also require the inherited current original
+chat child. A foreign, missing or ended child cannot reuse the writer or publish
+another operation's native receipt. A later wait validates the branch's exact
+retained pending request and retired native receipt instead of substituting G.
+
+Cooperative and runtime retry loaders with a branch load its exact retained
+continuation and original operation scope. The branch head must equal the
+phase-specific checkpoint and belong to the admitted session. They do not read,
+rewrite or append original input to canonical G. Their deferral adapters likewise
+read the retained branch. Non-branch continuations keep their existing shared
+canonical-history admission.
+
+Source fixtures add actual SQLite pre/post-commit Bind/Checkpoint faults and
+reopen comparisons, plus an actual Registry/Owner child that consumes a retained
+cooperative admission, binds and advances native receipts, publishes a second
+pending input and defers that same original operation. It checks outside-child
+publication refusal, exact branch/native references and unchanged independent
+G bytes/input through reopen. It does not invoke Core's native runtime. These
+fixtures have only been parsed locally; their execution and typing remain
+unverified at this integration checkpoint.
+
+This is still one unfinished native integration unit. Gate/approval admission,
+all ordinary/error/fallback/rejected-response/finalization persistence, actual
+original native invocation and crash acceptance remain required. Public Owner
+response admission retains its exact global-W and Canonical_input restriction
+until those paths are connected and tested together. That restriction is not
+the intended final recovery behavior. No whole R1/R2/TUI acceptance, installation
+or feature merge is claimed by this checkpoint.

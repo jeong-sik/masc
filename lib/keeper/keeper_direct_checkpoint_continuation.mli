@@ -1,4 +1,4 @@
-(** Cooperative direct-turn continuation from retained canonical checkpoint bytes.
+(** Cooperative direct-turn continuation from retained exact checkpoint bytes.
     No provider retry is invented and the admitted input is not appended again. *)
 type admission
 val checkpoint : admission -> Agent_core.Checkpoint.t option
@@ -8,6 +8,10 @@ val official_client_original_turn : admission -> Keeper_semantic_execution.offic
 val official_resume_message : operation_id:Keeper_chat_operation.Operation_id.t -> string
 val load : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   session_dir:string -> session_id:string -> (admission option, string) result
+(** An independent input branch loads its exact retained head and original
+    scope without reading or rewriting the global canonical checkpoint.
+    Branch/head disagreement refuses admission rather than borrowing global
+    history. Non-branch continuations retain shared canonical history. *)
 val consume : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   admission -> (unit, string) result
 val defer : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->

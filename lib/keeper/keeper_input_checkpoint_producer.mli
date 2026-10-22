@@ -10,6 +10,8 @@ type error =
   | Retention_unconfirmed of Keeper_checkpoint_store.checkpoint_installation
 
 val error_to_string : error -> string
+val destination : t -> Keeper_owner.input_checkpoint_destination
+(** The closed destination captured by the original executing Owner child. *)
 val prepare : base_path:string -> keeper_name:string -> session_dir:string ->
   trace_id:Keeper_id.Trace_id.t -> source:Agent_core.Checkpoint.t option -> (t, error) result
 (** Capture the child and predecessor before dispatch. If input ownership is

@@ -409,7 +409,110 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
     (match Journal.resolve_direct_input_wait journal ~now:11. ~operation_id ~execution_digest:operation.execution_digest
         ~observed:waiting ~checkpoint:branched.candidate with
      | Error _ -> () | Ok () -> fail "duplicate branch response was accepted");
-    check_g journal)
+    check_g journal);
+  (* Exercise actual Owner child authority and both direct loader/publication
+     adapters once. Native records here are real Owner/SQLite receipts, but no
+     Core native invocation is dispatched by this fixture. *)
+  match canonical_intent,fault with
+  | true,(Some _ | None) | false,Some _ -> ()
+  | false,None ->
+    let ready=ref false in
+    let owner_cell=ref None in
+    let writer_cell=ref None in
+    let execution_result=ref None in
+    let settled,resolve_settled=Eio.Promise.create () in
+    let owner_ok result=Result.map_error Keeper_owner.error_to_string result |> value in
+    let execute ~sw:_ ~keeper_name:_ ~claim =
+      ready:=false;
+      let result = try
+        let claimed=claim () |> owner_ok |> Option.get in
+        check bool "same original operation claims its branch" true
+          (Keeper_chat_operation.Operation_id.equal claimed.operation_id operation_id);
+        let owner=Option.get !owner_cell in
+        let admission=Keeper_direct_checkpoint_continuation.load ~base_path:root ~keeper_name ~operation_id
+            ~session_dir ~session_id:original.session_id |> value |> Option.get in
+        let consumed=Keeper_direct_checkpoint_continuation.checkpoint admission |> Option.get in
+        check bool "cooperative admission uses retained C, not independent G" true
+          (Keeper_checkpoint_ref.equal (Store.exact_snapshot_reference (exact consumed)) branched.candidate);
+        check string "branch loading preserves global canonical bytes" g_bytes (Fs_compat.load_file canonical);
+        Keeper_direct_checkpoint_continuation.consume ~base_path:root ~keeper_name ~operation_id admission |> value;
+        let producer=Keeper_input_checkpoint_producer.prepare ~base_path:root ~keeper_name ~session_dir
+            ~trace_id:meta.runtime.trace_id ~source:(Some consumed) |> prepared in
+        (match Keeper_input_checkpoint_producer.destination producer with
+         | Keeper_owner.Operation_input actual when Keeper_chat_operation.Operation_id.equal actual operation_id -> ()
+         | Operation_input _ | Global_input -> fail "branch child borrowed global input destination");
+        let writer=Keeper_owner.begin_input_checkpoint owner ~trace_id:meta.runtime.trace_id |> owner_ok in
+        writer_cell:=Some writer;
+        let context=Core.Context.copy consumed.context in
+        Core.Context.set context "original-native-setup" (`Bool true);
+        let seed={consumed with Core.Checkpoint.context} in
+        let seed_ref=Store.retain_exact_snapshot ~session_dir (exact seed)
+            |> Store.require_confirmed_installation |> Result.get_ok in
+        let call_id="019a0010-1000-7000-8000-000000000053" in
+        let locator=Core.Agent.execution_locator_of_yojson
+            (`Assoc ["version",`Int 1;"run_id",`String "execution-run-owner-branch-continuation"]) |> value in
+        let call=Native.create ~call_id ~runtime_id:"native.primary" ~operation_digest:operation.execution_digest
+            ~api:Native.Continue_from_checkpoint ~seed_checkpoint:seed_ref ~locator |> value in
+        Keeper_owner.bind_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+            ~observed:Native.No_native_call ~call |> owner_ok;
+        let ordinary={seed with Core.Checkpoint.turn_count=seed.turn_count+1;
+          messages=seed.messages @ [Core.Types.assistant_msg "original branch continued"]} in
+        let ordinary_ref=Store.retain_exact_snapshot ~session_dir (exact ordinary)
+            |> Store.require_confirmed_installation |> Result.get_ok in
+        Keeper_owner.checkpoint_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+            ~call_id ~observed:seed_ref ~checkpoint:ordinary_ref |> owner_ok;
+        let next_pending=pending ~run_id:"original-owner-second-run" ~request_id:"original-owner-second-request" in
+        let next={ordinary with Core.Checkpoint.pending_input=Some next_pending} in
+        let _,next_ref=Keeper_input_checkpoint_producer.publish_direct producer ~operation_id
+            ~execution_digest:operation.execution_digest ~call_id ~observed:ordinary_ref next |> prepared in
+        (* The producer was captured at C. Ordinary native advancement to seed
+           and then ordinary_ref must not make it overwrite or borrow G. *)
+        let branch=Keeper_owner.direct_input_branch owner ~operation_id |> owner_ok |> Option.get in
+        check bool "Owner input and native advance to the same exact branch head" true
+          (Keeper_checkpoint_ref.equal branch.checkpoint next_ref);
+        (match Keeper_owner.direct_native_call owner ~operation_id |> owner_ok with
+         | Native.Active actual -> check bool "actual native receipt matches second input" true
+             (Keeper_checkpoint_ref.equal actual.checkpoint next_ref)
+         | No_native_call | Terminal_unacknowledged _ -> fail "native receipt disappeared");
+        Keeper_owner.terminal_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+            ~call_id ~disposition:{Core.Agent.outcome=Core.Agent.Terminal_succeeded;recovery=Core.Agent.Retire} |> owner_ok;
+        ignore (Keeper_owner.defer_direct_input_wait owner ~operation_id ~request:next_pending.request |> owner_ok);
+        Ok next_ref
+      with exn -> Error exn in
+      execution_result:=Some result;
+      Keeper_owner.Operation_deferred in
+    Eio.Switch.run (fun owner_sw ->
+      let runner={Keeper_owner.ready=(fun ~keeper_name:_ -> !ready);execute;
+        on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ -> Eio.Promise.resolve resolve_settled ())} in
+      Keeper_owner_registry.install_from_store ~sw:owner_sw ~operation_runner:(Some runner)
+        ~on_turn_slot_released:None workspace |> prepared |> ignore;
+      let owner=Keeper_owner_registry.get ~base_path:root ~keeper_name |> prepared in
+      owner_cell:=Some owner;ready:=true;
+      Keeper_owner.wake_operation_drain owner |> owner_ok;
+      Eio.Promise.await settled;
+      let next_ref=match !execution_result with Some (Ok reference) -> reference
+        | Some (Error exn) -> raise exn | None -> fail "original child did not execute" in
+      let writer=Option.get !writer_cell in
+      (match Keeper_owner.advance_direct_input_checkpoint owner ~writer ~operation_id
+          ~execution_digest:operation.execution_digest ~call_id:"019a0010-1000-7000-8000-000000000053"
+          ~observed:next_ref ~checkpoint:next_ref with
+       | Error (Keeper_owner.Operation_rejected (Journal.Invalid_input _)) -> ()
+       | Error _ | Ok _ -> fail "non-child caller reused the captured branch writer");
+      (match Keeper_owner.checkpoint_direct_native_call owner ~operation_id
+          ~execution_digest:operation.execution_digest ~call_id:"019a0010-1000-7000-8000-000000000053"
+          ~observed:next_ref ~checkpoint:next_ref with
+       | Error (Keeper_owner.Operation_rejected (Journal.Invalid_input _)) -> ()
+       | Error _ | Ok _ -> fail "non-child caller published a native branch receipt");
+      let next_wait=Keeper_owner.direct_input_wait owner ~operation_id |> owner_ok |> Option.get in
+      check bool "repeated wait owns the branch, not independent global B" true
+        (Keeper_checkpoint_ref.equal next_wait.checkpoint next_ref);
+      check bool "Owner child preserves global input G" true
+        (Keeper_owner.input_checkpoint owner ~trace_id:meta.runtime.trace_id |> owner_ok=Journal.Input_observed g);
+      check string "Owner child preserves all canonical G bytes" g_bytes (Fs_compat.load_file canonical);
+      ignore (Keeper_owner.begin_stopping owner |> owner_ok));
+    with_journal (fun journal -> check_g journal;
+      check bool "reopen preserves original branch's second pending wait" true
+        (Option.is_some (Journal.direct_input_wait journal ~operation_id |> journal_ok)))
 
 let () =
   run "Keeper stored input response"

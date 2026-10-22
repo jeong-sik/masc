@@ -14,6 +14,8 @@ type error =
   | Snapshot_failed of Store.checkpoint_ref_load_error
   | Retention_unconfirmed of Store.checkpoint_installation
 
+let destination t = Keeper_owner.input_checkpoint_destination t.writer
+
 let error_to_string = function
   | Owner_failed error -> Registry.command_error_to_string error
   | Source_missing -> "observed input owner requires its admitted source checkpoint"

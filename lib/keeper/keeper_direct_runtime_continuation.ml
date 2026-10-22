@@ -22,9 +22,15 @@ let validate_scope ~operation_id (checkpoint : Agent_core.Checkpoint.t) =
       (Keeper_execution_scope_id.direct_operation operation_id) -> Ok ()
   | Some _ | None -> Error "checkpoint does not own this direct operation's active execution scope"
 
-let load_owned ~operation_id ~session_dir ~session_id =
-  let* snapshot = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
-    |> Result.map_error (fun _ -> "direct continuation canonical checkpoint is unavailable or invalid") in
+let load_owned ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
+  let* branch=Owner.direct_input_branch ~base_path ~keeper_name ~operation_id |> owner_result in
+  let* snapshot = match branch with
+    | None -> Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
+        |> Result.map_error (fun _ -> "direct continuation canonical checkpoint is unavailable or invalid")
+    | Some branch when String.equal (Keeper_id.Trace_id.to_string branch.checkpoint.trace_id) session_id ->
+      Checkpoint.load_retained_exact_snapshot ~session_dir ~reference:branch.checkpoint
+        |> Result.map_error (fun _ -> "direct continuation retained branch is unavailable or invalid")
+    | Some _ -> Error "direct continuation branch belongs to another trace" in
   let* () = validate_scope ~operation_id (Checkpoint.exact_snapshot_checkpoint snapshot) in
   Ok snapshot
 
@@ -117,6 +123,14 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
         observed.checkpoint.turn_count observed.checkpoint.sha256) in
     let original_checkpoint = Checkpoint.exact_snapshot_checkpoint original in
     let* () = validate_scope ~operation_id original_checkpoint in
+    let* branch=Owner.direct_input_branch ~base_path ~keeper_name ~operation_id |> owner_result in
+    let* checkpoint=match branch with
+    | Some branch ->
+      if Keeper_checkpoint_ref.equal branch.checkpoint observed.checkpoint
+          && String.equal original_checkpoint.session_id session_id
+      then Ok original_checkpoint
+      else Error "runtime branch no longer owns its exact retained retry and trace"
+    | None ->
     let* current = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
       |> Result.map_error (fun _ -> "current direct runtime checkpoint is unavailable") in
     let checkpoint = Checkpoint.exact_snapshot_checkpoint current in
@@ -153,6 +167,7 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
       | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
       | Checkpoint.Installed _ | Checkpoint.Not_installed _ ->
         Error "current-history direct runtime admission is not durably confirmed" in
+    Ok checkpoint in
     (* The checkpoint owns input and effects. A changed assignment owns the
        next dispatch, including when a restart discarded the live witness. *)
     let* dispatch_retry = restore_retry ~keeper_name observed in
@@ -190,7 +205,7 @@ let retry_not_before ~now (lane : Keeper_turn_driver.deferred_runtime_lane) =
 
 let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~dispatch_snapshot
     (lane : Keeper_turn_driver.deferred_runtime_lane) =
-  let* snapshot = load_owned ~operation_id ~session_dir ~session_id in
+  let* snapshot = load_owned ~base_path ~keeper_name ~operation_id ~session_dir ~session_id in
   let* () = match Checkpoint.retain_exact_snapshot ~session_dir snapshot with
     | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
     | Checkpoint.Installed _ | Checkpoint.Not_installed _ ->

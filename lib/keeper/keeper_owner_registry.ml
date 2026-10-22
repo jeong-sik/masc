@@ -812,6 +812,9 @@ let direct_checkpoint ~base_path ~keeper_name ~operation_id =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.direct_checkpoint owner ~operation_id)
 ;;
+let direct_input_branch ~base_path ~keeper_name ~operation_id =
+  with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.direct_input_branch owner ~operation_id)
 let defer_direct_checkpoint ~base_path ~keeper_name ~operation_id ~execution_digest ~checkpoint =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.defer_direct_checkpoint owner ~operation_id ~execution_digest ~checkpoint)

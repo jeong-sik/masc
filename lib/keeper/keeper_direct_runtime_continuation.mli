@@ -9,6 +9,9 @@ val checkpoint : admission -> Agent_core.Checkpoint.t
 val lane : admission -> Keeper_turn_driver.deferred_runtime_lane
 val load : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   session_dir:string -> session_id:string -> (admission option, string) result
+(** An independent input branch resumes only its exact retained retry head.
+    It neither borrows shared canonical history nor appends the original input
+    again. Missing/mismatched branch evidence refuses dispatch. *)
 val consume : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   admission -> (unit, string) result
 val defer : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->

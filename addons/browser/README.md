@@ -95,6 +95,15 @@ driver and descendant settlement before releasing that allocation. Stagehand
 Chrome ownership and built-in live browser startup remain to be moved. This is
 not yet a complete operator-browser replacement.
 
+The worker owner can register automation and Stagehand independently. Each
+registration includes its session observation and original resource cleanup;
+registration alone does not establish an open browser. Retirement fences both
+routes and removes both executors before starting their cleanups concurrently.
+It joins both cleanups even if one fails. Concurrent or repeated retire requests
+observe the same cleanup result; an error or exception prevents a successful
+retirement receipt. An interrupted issued command remains uncertain and is not
+replayed. This ownership interface does not yet start an owned Chrome session.
+
 Input/output middleware validates tool contracts without calling an LLM. LLM
 Exact Output is selected separately through a package's declared outputs and an
 installation's `exact_outputs` override. For selected outputs, the host supplies

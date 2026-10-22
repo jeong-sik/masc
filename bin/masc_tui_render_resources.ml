@@ -8,11 +8,12 @@ module Rows = Masc_tui_rows
 module Catalog = Masc_tui_resource_catalog
 
 let entry_rows = 3
+let save_prompt_height state = if Option.is_some state.resource_save_prompt then 3 else 0
 
 let list_viewport state ~rows =
   let status = Option.is_some state.resources_error
     || Option.is_some (resources_empty_note (visible_resources state)) in
-  let budget = max 0 (pane_surface_content_height ~rows - 1
+  let budget = max 0 (pane_surface_content_height ~rows - save_prompt_height state - 1
     - (if status then 1 else 0)) in
   budget, max 1 (budget / entry_rows)
 
@@ -23,7 +24,7 @@ let document_viewport state ~rows ~cols =
   let count = match Masc_tui_resource_document.current state with
     | None -> 0
     | Some reading -> List.length (Masc_tui_resource_document.rows ~cols:pane_cols reading) in
-  count, pane_surface_content_height ~rows
+  count, max 0 (pane_surface_content_height ~rows - save_prompt_height state)
 
 let render_resources (state : state) =
   let drawn_resource_scroll = ref state.resource_scroll in
@@ -32,7 +33,18 @@ let render_resources (state : state) =
   let buf = Buffer.create 4096 in
   let split = resource_split state ~cols in
   pane_surface_header buf cols state ~name:"Artifacts / Resources" ~split;
-  let pane_rows = pane_surface_content_height ~rows in
+  let pane_rows = max 0 (pane_surface_content_height ~rows - save_prompt_height state) in
+  Option.iter (fun prompt ->
+    let input = prompt.rsp_path in
+    let text = Terminal_text.single_line (Masc_tui_message_input.contents input) in
+    let before = Terminal_text.single_line (Masc_tui_message_input.before_cursor input) in
+    let visible, cursor = Masc_tui_message_layout.input_window
+      ~max_cells:(max 0 (cols - 10)) ~cursor:(String.length before) text in
+    let left, right = Masc_tui_message_layout.split_at_cells visible cursor in
+    box_line buf cols ("Save original · " ^ Masc_tui_resource_export.label prompt.rsp_document);
+    box_line buf cols ("Path: " ^ left ^ Ansi.reverse ^ " " ^ Ansi.reset ^ right);
+    box_line buf cols "Enter: create file · Ctrl-U: clear path · Esc: cancel · existing files are preserved")
+    state.resource_save_prompt;
   let rows_list =
     match visible_resources state with Some rows -> rows | None -> []
   in

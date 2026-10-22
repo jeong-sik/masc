@@ -70,6 +70,15 @@ let copy_source state =
           Ok (Printf.sprintf "%s · part %d" (Catalog.display_name entry) part, source)
       | None -> Error "No selected text part in the current resource reading"
 
+let export_source state =
+  let ( let* ) = Result.bind in
+  let* _label, _source = copy_source state in
+  match admitted_text_parts state with
+  | Some (Catalog.Report report, [(_, source)]) ->
+      Masc_tui_resource_export.create ~report ~source
+  | Some (Catalog.Mcp _, _) -> Error "Select a published report revision"
+  | Some (Catalog.Report _, _) | None -> Error "The report has no single admitted original body"
+
 let fenced_pretty_json text =
   let pretty =
     match Yojson.Safe.from_string text with

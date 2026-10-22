@@ -113,9 +113,10 @@ let launch_registered ~cancellation ~dispatch ~on_not_run ~results ~boundary_err
            Printexc.raise_with_backtrace exn backtrace)
        | exception exn -> not_run ~error:boundary_error (Printexc.to_string exn))
 
-let launch ?key ?(observation = false) ?observe_job ?(on_not_run = fun () -> ())
+let launch ?key ?(observation = false) ?cancelled ?observe_job ?(on_not_run = fun () -> ())
     state ~results ~boundary_error ~deliver perform =
-  launch_registered ~cancellation:Propagate ~results ~on_not_run ~boundary_error ~not_started_error:boundary_error ~deliver
+  let cancellation = match cancelled with None -> Propagate | Some message -> Publish_cancelled message in
+  launch_registered ~cancellation ~results ~on_not_run ~boundary_error ~not_started_error:boundary_error ~deliver
     ~dispatch:(fun ~sw ~on_withdrawn run ->
       Masc_tui_workspace_job.fork ?key ~observation ?observe:observe_job
         ~on_withdrawn state ~sw run) (fun _publish -> perform ())

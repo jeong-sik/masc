@@ -17,6 +17,7 @@ val close : 'message t -> unit
 
 val launch :
   ?key:unit ref -> ?observation:bool ->
+  ?cancelled:'message ->
   ?observe_job:(Masc_tui_workspace_job.event -> unit) ->
   ?on_not_run:(unit -> unit) ->
   Masc_tui_types.state -> results:'message t ->
@@ -29,7 +30,9 @@ val launch :
     existing boundary error. A closed result owner starts no work and invokes
     [on_not_run] without forming a message for the ended session.
 
-    Cancellation propagates without synthesizing success/failure. Worker and
+    Cancellation propagates. An explicit [cancelled] receipt is published before
+    propagation when the caller must retain an interrupted operation's uncertain
+    outcome. Omitting it preserves cancellation without a synthesized result. Worker and
     synchronous-launch cleanup retire only an unpublished registration; an
     already published result remains until claimed or session close. Actual
     workspace-job cancellation/registration ownership stays with the existing

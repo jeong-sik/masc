@@ -1003,6 +1003,10 @@ let for_surface = function
           ~help:"open the selected image from the retained resource bytes"
       ; b Navigate "( / )" "text part" ~detail:Detail_only
           ~help:"select the previous or next original text part for copying"
+      ; b Act "s" "save original" ~detail:Detail_only
+          ~help:"choose a local destination; exclusively create the selected report revision's exact bytes"
+      ; b Act "o" "open Dashboard" ~detail:Detail_only
+          ~help:"open the selected fixed report revision; the browser uses its own authentication"
       ; b Act "y" "copy source" ~detail:Detail_only
           ~help:"send the selected text part's original bytes via OSC 52; terminal support is unconfirmed"
       ; b Act "Esc" "back"

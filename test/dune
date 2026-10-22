@@ -6387,6 +6387,12 @@
   masc_tui_artifact_checks masc_tui_fetched masc_tui_types masc_tui_resources_updates masc_tui_mcp))
 
 (test
+ (name test_tui_resource_export)
+ (modules test_tui_resource_export)
+ (libraries masc_tui_resource_export masc_tui_resource_catalog masc masc.masc_tool_blob_store alcotest
+  digestif uri eio eio_main unix))
+
+(test
  (name test_tui_resource_document_search)
  (modules test_tui_resource_document_search)
  (libraries masc_tui_resource_reading masc_tui_scroll alcotest masc_tui_types masc_tui_resource_document

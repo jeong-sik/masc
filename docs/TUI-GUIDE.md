@@ -427,6 +427,14 @@ joined, pretty-printed or decoded for copying; JSON, HTML, tabs and line endings
 stay as received. Pending reads, refusals, withdrawn inventory and an unconfirmed
 workspace cannot copy a retained old body. Terminal clipboard support is
 unconfirmed; this action reports delivery of the request, not clipboard success.
+For a loaded published report, `s` opens a local destination field. Edit or paste
+the path, use `Ctrl-U` to clear it, then Enter to create the file or Esc to cancel.
+The existing parent directory must be present. Saving uses the verified original
+UTF-8 bytes and creates a private file without replacing an existing file or
+symlink. A failed or interrupted save may have created an incomplete file; inspect
+the reported destination before retrying. `o` explicitly opens the same report
+revision in Dashboard using the browser's own authentication. Neither action
+turns a rendered document into source or changes to the newest revision.
 Other binary parts report their encoded size. Previews use the retained content,
 not the resource URI as a local path, and require terminal image support.
 Reading the resource again, opening another resource or changing workspace withdraws the earlier

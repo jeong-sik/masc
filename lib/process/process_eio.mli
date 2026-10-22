@@ -50,6 +50,11 @@ val exit_reason_of_status : Unix.process_status -> exit_reason
     origin lookup timed out would have been skipped from discovery instead of
     aborting it (#28651). *)
 
+val signal_name : int -> string
+(** The name of a signal a status or Eio carries in OCaml's numbering, such
+    as ["SIGTERM"] for [Sys.sigterm]; one the runtime does not name is
+    ["signal N"] with the host's number. *)
+
 val timed_out_status : Unix.process_status
 (** The status this module synthesizes for [Timed_out]. Exposed for the tests
     and callers that construct one; classify with [exit_reason_of_status]

@@ -12,3 +12,26 @@ let verb_of_wire = function
   | "page.capture" -> Some Page_capture | "page.interact" -> Some Page_interact | "page.act" -> Some Page_act
   | "page.goto" -> Some Page_goto
   | _ -> None
+let ( let* ) = Result.bind
+let decode (issued : Browser_lane.issued) =
+  let* fields = match issued.verb_json with `Assoc fields -> Ok fields | _ -> Error "invalid live command" in
+  let* () = if List.for_all (fun (name,_) -> List.mem name ["verb";"args";"actor"]) fields
+      && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
+    then Ok () else Error "invalid live command fields" in
+  let* verb = match List.assoc_opt "verb" fields with
+    | Some (`String name) -> Option.to_result ~none:"unsupported live verb" (verb_of_wire name)
+    | None | Some _ -> Error "missing live verb" in
+  let* args = match List.assoc_opt "args" fields with
+    | Some (`Assoc _ as args) -> Ok args
+    | None | Some _ -> Error "invalid live command arguments" in
+  let* actor = match List.assoc_opt "actor" fields with
+    | None -> Ok None
+    | Some (`String actor) when String.trim actor <> "" -> Ok (Some actor)
+    | Some _ -> Error "invalid live command actor" in
+  Ok (verb, args, actor)
+let payload = function
+  | Ok data -> `Assoc ["ok",`Bool true;"data",data]
+  | Error (Before_effect detail) -> `Assoc ["ok",`Bool false;"error",`String detail;"effectPhase",`String "not_started"]
+  | Error (Partial_failure {message;receipt;_}) -> `Assoc ["ok",`Bool false;"error",`String message;
+      "effectPhase",`String "partial";"data",receipt]
+  | Error (Outcome_unknown detail) -> `Assoc ["ok",`Bool false;"error",`String detail]

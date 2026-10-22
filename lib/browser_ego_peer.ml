@@ -4,8 +4,19 @@ let field name = function `Assoc fields -> List.assoc_opt name fields | _ -> Non
 let obj fields = `Assoc fields
 let str value = `String value
 
-type run_failure = Exited of { code : int; output : string } | Timed_out | Unstarted of string
+type run_failure = Exited of { code : int; output : string } | Signaled of int | Timed_out | Output_exceeded
+  | Unstarted of string
 type runner = string -> (string, run_failure) result
+
+(* The same answers as the BiDi connection: what a page script reads on one
+   live connection it reads on the other. ego 0.6.0.16 carried a 3,000,003
+   unit answer line whole (2026-10-22). *)
+let answer_limit_units = Browser_bidi_peer.script_answer_limit_units
+(* The answer line carries the page's JSON text as one JSON string, at most
+   three bytes a UTF-16 unit, as on the BiDi socket. The rest is the frame
+   and ego's own lines, such as its update notice. *)
+let output_frame_bytes = 65_536
+let output_limit_bytes = 3 * answer_limit_units + output_frame_bytes
 
 (* At most this much of what ego wrote reaches a Keeper, cut where a UTF-8
    character starts. ego's own error for a page step repeats the whole
@@ -30,7 +41,9 @@ let head message =
 
 let run_failure_message = function
   | Exited {code; output} -> Printf.sprintf "ego-browser nodejs exited with code %d: %s" code (tail output)
+  | Signaled signal -> "ego-browser nodejs was ended by " ^ Process_eio.signal_name signal
   | Timed_out -> "ego-browser nodejs did not finish in time and was stopped"
+  | Output_exceeded -> Printf.sprintf "ego-browser nodejs wrote more than %d bytes and was stopped" output_limit_bytes
   | Unstarted detail -> "ego-browser nodejs did not start: " ^ detail
 
 let result_marker = "masc-ego-result "
@@ -175,10 +188,6 @@ let on_page body = String.concat "\n" [
   body;
   "  }" ]
 
-(* The same answers as the BiDi connection: what a page script reads on one
-   live connection it reads on the other. ego 0.6.0.16 carried a 3,000,003
-   unit answer line whole (2026-10-22). *)
-let answer_limit_units = Browser_bidi_peer.script_answer_limit_units
 let page_function body =
   Browser_scene_script.page_function ~answer_limit_units ("arguments[0]=JSON.parse(arguments[0]);\n" ^ body)
 

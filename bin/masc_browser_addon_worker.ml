@@ -1,10 +1,12 @@
 let () =
   let socket = ref None and incarnation = ref None and bound = ref None and automation = ref false and models = ref false
-    and stagehand = ref false and live_bidi = ref false in
+    and stagehand = ref false and live_bidi = ref false and live_ego_command = ref None and live_ego_space = ref None in
   Arg.parse [
     "--automation",Arg.Set automation,"Start the host-selected owned Gecko backend";
     "--stagehand",Arg.Set stagehand,"Register the host-selected owned Chrome backend";
     "--live-bidi",Arg.Set live_bidi,"Start the host-selected owned live Firefox connection";
+    "--live-ego-command",Arg.String (fun value -> live_ego_command:=Some value),"Serve an ego lite task space with this ego-browser";
+    "--live-ego-space",Arg.String (fun value -> live_ego_space:=Some value),"The ego lite task space to serve";
     "--models",Arg.Set models,"Attach the host-selected model request broker";
     "--socket",Arg.String (fun value -> socket:=Some value),"Host-selected private Unix socket";
     "--incarnation",Arg.String (fun value -> incarnation:=Some value),"Host-selected worker UUID";
@@ -13,6 +15,10 @@ let () =
   let socket_path,incarnation,max_message_bytes = match !socket,!incarnation,!bound with
     | Some path,Some id,Some bytes -> path,id,bytes
     | _ -> raise (Arg.Bad "--socket, --incarnation and --max-message-bytes are required") in
+  let live_ego = match !live_ego_command,!live_ego_space with
+    | Some command,Some space -> Some {Browser_configuration.command;space}
+    | None,None -> None
+    | Some _,None | None,Some _ -> raise (Arg.Bad "--live-ego-command and --live-ego-space are given together") in
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
@@ -68,8 +74,11 @@ let () =
       (fun () -> Masc.Browser_addon_service.serve ~net:(Eio.Stdenv.net env) ~owner
         ~socket_path ~max_message_bytes)
       until_stop in
+    let ego ()=match live_ego with
+      | Some configuration -> Masc.Browser_addon_live_ego.run ~env ~owner configuration serve
+      | None -> serve () in
     let live ()=if !live_bidi then Masc.Browser_addon_live_bidi.run ~env ~owner
-      ~directory:(Filename.dirname socket_path) serve else serve () in
+      ~directory:(Filename.dirname socket_path) ego else ego () in
     let chrome ()=if !stagehand then Masc.Browser_addon_stagehand.run ~env ~owner
       ~directory:(Filename.dirname socket_path) live else live () in
     if !automation then Masc.Browser_addon_automation.run ~env ~owner

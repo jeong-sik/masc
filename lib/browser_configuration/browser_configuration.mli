@@ -17,7 +17,12 @@
     is the Firefox executable, [profile] the operator-owned profile it opens,
     which keeps the operator's logins, and [port] its
     [--remote-debugging-port]. Both paths are required; [port] defaults to
-    {!default_live_bidi_port}. *)
+    {!default_live_bidi_port}.
+
+    [live_ego] ([\[browser.live.ego\]], RFC-browser-live-ego §7): the ego
+    lite task space the browser Add-on serves as a live connection.
+    [command] is the absolute path of [ego-browser]; [space] names the task
+    space, one per installation. Both are required. *)
 
 type automation = { driver : string; binary : string option }
 [@@deriving show, eq]
@@ -25,10 +30,13 @@ type stagehand = { chrome : string; extension : string; profile : string option 
 [@@deriving show, eq]
 type live_bidi = { firefox : string; profile : string; port : int }
 [@@deriving show, eq]
+type live_ego = { command : string; space : string }
+[@@deriving show, eq]
 type t = {
   automation : automation option;
   stagehand : stagehand option;
   live_bidi : live_bidi option;
+  live_ego : live_ego option;
   live_enabled : bool;
   automation_enabled : bool;
   stagehand_enabled : bool;

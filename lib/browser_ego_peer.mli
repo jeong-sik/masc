@@ -7,13 +7,21 @@
     refused before any read. *)
 
 (** Why a run gave no output to read. [Exited]: it ended with a non-zero
-    code; [output] is the end of what it wrote. [Timed_out]: it did not end
-    within the runner's window and was stopped, so whatever it started in
-    the browser may still be going on. [Unstarted]: it never ran. *)
+    code; [output] is the end of what it wrote. [Signaled]: a signal ended
+    it. [Timed_out]: it did not end within the runner's window and was
+    stopped, so whatever it started in the browser may still be going on.
+    [Output_exceeded]: it wrote more than {!output_limit_bytes} and was
+    stopped. [Unstarted]: it never ran. *)
 type run_failure =
   | Exited of { code : int; output : string }
+  | Signaled of int
   | Timed_out
+  | Output_exceeded
   | Unstarted of string
+
+(** The most a runner keeps of one run's output: the one answer line of the
+    largest page answer this peer accepts, and the frame around it. *)
+val output_limit_bytes : int
 
 val run_failure_message : run_failure -> string
 

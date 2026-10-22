@@ -1478,10 +1478,16 @@ let backend ~store ~artifact_store () = match !override with
             let env=match package.worker_service with
               | Mcp_tools -> None
               | Browser_service -> Some (Browser_addon_environment.project (Unix.environment ())) in
-            let* cleanup_context=match package.worker_service with
-              | Mcp_tools -> Ok None
+            let* cleanup_context,live_ego=match package.worker_service with
+              | Mcp_tools -> Ok (None,None)
               | Browser_service -> offload (fun () ->
                   let configuration=Runtime.browser_configuration () in
+                  (* Nothing in an ego connection needs cleanup after the
+                     worker, so it rides the worker's arguments. *)
+                  let live_ego=match configuration with
+                    | Some {live_enabled=true;live_ego=Some ego;_} -> Some ego
+                    | None | Some {live_enabled=false;_}
+                    | Some {live_enabled=true;live_ego=None;_} -> None in
                   let* stagehand=match configuration with
                     | Some {stagehand_enabled=true;stagehand=Some browser;_} ->
                       let* guardian=Native_addon_program.(locate Browser_process_owner) in
@@ -1504,8 +1510,9 @@ let backend ~store ~artifact_store () = match !override with
                       outputs=package.exact_outputs})
                     ~automation:(match configuration with
                       | Some configuration when configuration.automation_enabled -> configuration.automation
-                      | None|Some _ -> None))
-                  |> Result.map Option.some |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
+                      | None|Some _ -> None)
+                  |> Result.map (fun context -> Some context,live_ego))
+                  |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
             let* admission = prepare_native ~store ~installation_id ~instance_id ~cleanup_context ~is_live_instance in
             let retire () = offload (fun () -> Native_addon_lease.retire admission) |> native_result in
             (try
@@ -1524,7 +1531,8 @@ let backend ~store ~artifact_store () = match !override with
                        let* ()=native_settled admission in Error (Lifecycle.Worker_failed detail)) in
             let command=match socket with None -> command | Some socket ->
               {command with arguments=command.arguments @ Browser_addon_socket.arguments socket
-                ~max_message_bytes:(Lane_addon_types.max_reply_bytes package)} in
+                ~max_message_bytes:(Lane_addon_types.max_reply_bytes package)
+                @ (match live_ego with Some ego -> Browser_addon_live_ego.arguments ego | None -> [])} in
             let browser_client=ref None and combined_release=ref None in
             let stop_worker worker=match !combined_release with
               | Some receipt -> Ok receipt

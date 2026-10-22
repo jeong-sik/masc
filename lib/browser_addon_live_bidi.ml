@@ -1,5 +1,4 @@
 module B = Browser_lane
-module W = Browser_addon_wire
 module Peer = Browser_bidi_peer
 module Lease = Native_addon_lease
 module Requirement = Resource_requirement
@@ -154,31 +153,6 @@ let ready ~env ~process ~port =
     (fun () -> match Eio.Time.with_timeout clock firefox_ready_timeout_s (fun () -> Ok (poll ())) with
       | Ok result -> result | Error `Timeout -> Error "owned Firefox did not open its debugging port")
     (fun () -> ignore (Eio.Process.await process);Error "original Firefox owner exited before readiness")
-let fields = function `Assoc fields -> Ok fields | _ -> Error "invalid owned BiDi command"
-let decode (issued:B.issued) =
-  let* fields=fields issued.verb_json in
-  let* ()=if List.for_all (fun (name,_) -> List.mem name ["verb";"args";"actor"]) fields
-      && List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields))
-    then Ok () else Error "invalid owned BiDi command fields" in
-  let* verb=match List.assoc_opt "verb" fields with Some (`String name) ->
-      Option.to_result ~none:"unsupported owned BiDi verb" (Peer.verb_of_wire name)
-    | None|Some _ -> Error "missing owned BiDi verb" in
-  let* args=match List.assoc_opt "args" fields with Some (`Assoc _ as args) -> Ok args
-    | None|Some _ -> Error "invalid owned BiDi arguments" in
-  let* actor=match List.assoc_opt "actor" fields with None -> Ok None
-    | Some (`String actor) when String.trim actor<>"" -> Ok (Some actor)
-    | Some _ -> Error "invalid owned BiDi actor" in
-  Ok (verb,args,actor)
-let payload = function
-  | Ok data -> `Assoc ["ok",`Bool true;"data",data]
-  | Error (Peer.Before_effect detail) -> `Assoc ["ok",`Bool false;"error",`String detail;"effectPhase",`String "not_started"]
-  | Error (Peer.Partial_failure {message;receipt;_}) -> `Assoc ["ok",`Bool false;"error",`String message;
-      "effectPhase",`String "partial";"data",receipt]
-  | Error (Peer.Outcome_unknown detail) -> `Assoc ["ok",`Bool false;"error",`String detail]
-let accepted = function
-  | W.Receipt -> Ok ()
-  | W.Service_refusal {message;_} -> Error message
-  | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _ -> Error "unexpected owned BiDi receipt"
 let run_with ~before_command_validation ~env ~owner ~directory work =
   let c=match Eio_unix.run_in_systhread (fun () ->
     let* text=Fs_compat.load_owned_regular_file ~ownership_root:directory (Filename.concat directory "live-bidi.json")
@@ -187,7 +161,6 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
     protect (fun () -> configuration_of_json (Yojson.Safe.from_string text))) with
     | Ok c -> c | Error detail -> invalid_arg detail in
   let incarnation=Browser_addon_owner.incarnation owner in
-  let dispatch command=Browser_addon_owner.dispatch owner {W.incarnation;command} in
   let startup,started=Eio.Promise.create () and stopping,stop=Eio.Promise.create ()
       and stopped,finish=Eio.Promise.create () in
   Eio.Switch.run (fun lifetime ->
@@ -282,11 +255,7 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
             | Ok version ->
               let client_id=Uuidm.v4_gen (Random.State.make_self_init ()) () in
               let client={B.client_id;browser=B.Firefox;version;engine_version=version;transport=B.Webdriver_bidi} in
-              let poll window_sec=match dispatch (W.Poll {client;window_sec}) with
-                | W.Poll_result {command;_} -> Ok command
-                | Service_refusal {message;_} ->
-                  if Browser_addon_owner.is_retired owner then Ok None else Error message
-                | Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> Error "unexpected owned BiDi poll" in
+              let poll window_sec=Browser_addon_owner.poll_live owner ~client ~window_sec in
               let* first=poll 0. in
               let* ()=if Option.is_none first then Ok () else Error "owned BiDi received input before attachment" in
               let* ()=Browser_addon_owner.attach_live owner ~client_id ~cleanup:(fun () ->
@@ -297,9 +266,9 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
                 let* ()=match command with None -> Ok () | Some command ->
                   let result=let* ()=check ~before:before_command_validation ()
                       |> Result.map_error (fun detail -> Peer.Before_effect detail) in
-                    let* verb,args,actor=decode command |> Result.map_error (fun detail -> Peer.Before_effect detail) in
+                    let* verb,args,actor=Browser_live_peer.decode command |> Result.map_error (fun detail -> Peer.Before_effect detail) in
                     Peer.dispatch ?actor ~request_id:command.id peer ~verb args in
-                  let* ()=accepted (dispatch (W.Deliver {client_id;id=command.id;payload=payload result})) in
+                  let* ()=Browser_addon_owner.deliver_live owner ~client_id ~id:command.id ~payload:(Browser_live_peer.payload result) in
                   (match result with Error (Peer.Outcome_unknown detail) -> Error detail
                     | Ok _|Error (Before_effect _|Partial_failure _) -> Ok ()) in
                 if Browser_addon_owner.is_retired owner then Ok () else serve () in
@@ -307,7 +276,7 @@ let run_with ~before_command_validation ~env ~owner ~directory work =
                 Eio.Fiber.first
                   (fun () -> Eio.Promise.await stopping;Ok ())
                   (fun () -> Error (Eio.Promise.await ended))) in
-              ignore (dispatch (W.Disconnect client_id));
+              Browser_addon_owner.disconnect_live owner client_id;
               match result with Error _ -> result | Ok () ->
                 let orderly () =
                   (* Admission has been revoked. Only the already verified

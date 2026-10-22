@@ -101,6 +101,19 @@ observation reports its owned Firefox and in-process peer
 ([how](../design/browser-bidi-live-host.md)). The external host record remains
 independent of that worker. Rows refresh with the connection list (`r`).
 
+An ego lite connection also belongs to the attached browser Add-on. The
+operator names it in `runtime.toml` and attaches the Add-on again:
+
+```toml
+[browser.live.ego]
+command = "/Users/me/.local/bin/ego-browser"
+space = "masc"
+```
+
+The picker then lists it as `ego lite · ego`. It reads and captures the pages
+of that one task space; it does not click or type
+([what it serves](../design/browser-lane.md#what-each-live-connection-serves)).
+
 | The host | First row |
 |---|---|
 | never ran for this workspace | `BiDi host: none has run for this workspace` |

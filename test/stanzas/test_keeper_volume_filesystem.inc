@@ -4,4 +4,4 @@
  (name test_keeper_volume_filesystem)
  (modules test_keeper_volume_filesystem)
  (deps fixtures/ext4-superblock-errors.hex fixtures/ext4-superblock-clean.hex)
- (libraries alcotest masc yojson))
+ (libraries alcotest masc unix yojson))

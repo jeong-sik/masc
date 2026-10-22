@@ -38,7 +38,9 @@ type error_code =
 
 type error_site =
   { at : float  (** Seconds since the epoch, from the 40-bit time field. *)
-  ; func : string  (** Kernel function that reported the error. *)
+  ; func : string
+        (** Kernel function that reported the error, OCaml-escaped: a C
+            identifier reads as itself, other bytes as escapes. *)
   ; line : int
   ; inode : int  (** 0 when the error named no inode. *)
   ; block : Int64.t  (** 0 when the error named no block. *)
@@ -59,7 +61,20 @@ type state =
 type read_failure =
   | Not_ext4 of { magic : int }  (** The magic field is not 0xEF53. *)
   | Truncated of { bytes : int }  (** Fewer superblock bytes than its size. *)
+  | Not_regular_file of { kind : Unix.file_kind }
   | Unreadable of string  (** The image could not be opened or read. *)
+
+(** Why [container volume inspect] output names no ext4 image. *)
+type inspect_failure =
+  | Not_an_array
+  | Entries of { count : int }  (** The array does not hold exactly one entry. *)
+  | Entry_without_configuration
+  | Configuration_without_fields  (** No string [name], [format] and [source]. *)
+  | Empty_source of { volume : string }
+  | Not_ext4_format of
+      { volume : string
+      ; format : string
+      }  (** A volume of another format has no superblock to read. *)
 
 (** The host image behind one [container] volume. *)
 type image =
@@ -73,20 +88,22 @@ val superblock_offset : int
 val superblock_size : int
 
 val of_superblock : string -> (state, read_failure) result
-(** Decode one superblock. The argument is exactly the [superblock_size]
-    bytes read at [superblock_offset]; a shorter string is [Truncated]. *)
+(** Decode one superblock: the first [superblock_size] bytes of the
+    argument, read at [superblock_offset]. A shorter string is [Truncated]. *)
 
 val read_image : path:string -> (state, read_failure) result
-(** Read and decode the superblock of the image at [path]. Blocking file
-    I/O of one superblock; a caller on an Eio domain runs it off the
-    scheduler. *)
+(** Read and decode the superblock of the image at [path]. Anything but a
+    regular file is [Not_regular_file], and a named pipe is refused without
+    waiting for a writer. Blocking file I/O of one superblock; a caller on an
+    Eio domain runs it off the scheduler. *)
 
-val image_of_inspect : Yojson.Safe.t -> (image, string) result
+val image_of_inspect : Yojson.Safe.t -> (image, inspect_failure) result
 (** The image named by [container volume inspect <volume>] output: an array
     holding one object whose [configuration] carries [name], [format] and
-    [source]. A volume whose format is not [ext4] has no superblock to read
-    and is an [Error]. *)
+    [source]. *)
 
 val error_code_to_string : error_code -> string
 val state_to_yojson : state -> Yojson.Safe.t
+(** A site's [block] is an unsigned 64-bit integer literal. *)
 val read_failure_to_string : read_failure -> string
+val inspect_failure_to_string : inspect_failure -> string

@@ -39,7 +39,19 @@ type state =
 type read_failure =
   | Not_ext4 of { magic : int }
   | Truncated of { bytes : int }
+  | Not_regular_file of { kind : Unix.file_kind }
   | Unreadable of string
+
+type inspect_failure =
+  | Not_an_array
+  | Entries of { count : int }
+  | Entry_without_configuration
+  | Configuration_without_fields
+  | Empty_source of { volume : string }
+  | Not_ext4_format of
+      { volume : string
+      ; format : string
+      }
 
 type image =
   { volume : string
@@ -141,11 +153,15 @@ let error_code_to_string = function
 
 let u32 superblock offset = Int32.to_int (String.get_int32_le superblock offset) land u32_mask
 
+(* The kernel NUL-pads the name. A damaged superblock can hold any bytes
+   here, so the name is kept OCaml-escaped: a C identifier is unchanged, and
+   other bytes cannot reach JSON or a Board post as invalid UTF-8. *)
 let func_name superblock offset =
   let raw = String.sub superblock offset error_func_bytes in
-  match String.index_opt raw '\000' with
-  | Some nul -> String.sub raw 0 nul
-  | None -> raw
+  String.escaped
+    (match String.index_opt raw '\000' with
+     | Some nul -> String.sub raw 0 nul
+     | None -> raw)
 ;;
 
 let site superblock layout =
@@ -185,22 +201,48 @@ let of_superblock superblock =
            }))
 ;;
 
+let rec read_into fd buffer ~filled =
+  if filled = Bytes.length buffer
+  then filled
+  else (
+    match Unix.read fd buffer filled (Bytes.length buffer - filled) with
+    | 0 -> filled
+    | count -> read_into fd buffer ~filled:(filled + count))
+;;
+
+let read_superblock fd =
+  let stats = Unix.fstat fd in
+  match stats.st_kind with
+  | Unix.S_REG ->
+    let available = stats.st_size - superblock_offset in
+    if available < superblock_size
+    then Error (Truncated { bytes = Int.max 0 available })
+    else (
+      let (_ : int) = Unix.lseek fd superblock_offset Unix.SEEK_SET in
+      let buffer = Bytes.create superblock_size in
+      match read_into fd buffer ~filled:0 with
+      | filled when filled = superblock_size -> of_superblock (Bytes.to_string buffer)
+      | filled -> Error (Truncated { bytes = filled }))
+  | (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK) as kind ->
+    Error (Not_regular_file { kind })
+;;
+
+(* O_NONBLOCK so that opening a FIFO returns at once; the kind check then
+   refuses it. The kind is read from the open descriptor, so the file that
+   is checked is the file that is read. *)
 let read_image ~path =
-  match
-    In_channel.with_open_bin path (fun channel ->
-      let available =
-        Int64.to_int (Int64.sub (In_channel.length channel) (Int64.of_int superblock_offset))
-      in
-      if available < superblock_size
-      then Error (Truncated { bytes = Int.max 0 available })
-      else (
-        In_channel.seek channel (Int64.of_int superblock_offset);
-        match In_channel.really_input_string channel superblock_size with
-        | Some superblock -> of_superblock superblock
-        | None -> Error (Truncated { bytes = available })))
-  with
-  | result -> result
-  | exception Sys_error detail -> Error (Unreadable detail)
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error (error, _, _) -> Error (Unreadable (Unix.error_message error))
+  | fd ->
+    let result =
+      match read_superblock fd with
+      | result -> result
+      | exception Unix.Unix_error (error, _, _) -> Error (Unreadable (Unix.error_message error))
+    in
+    (* The descriptor was only read, so a failed close loses nothing. *)
+    (try Unix.close fd with
+     | Unix.Unix_error _ -> ());
+    result
 ;;
 
 let image_of_inspect = function
@@ -215,14 +257,14 @@ let image_of_inspect = function
         | Some (`String volume), Some (`String "ext4"), Some (`String source)
           when source <> "" -> Ok { volume; source }
         | Some (`String volume), Some (`String "ext4"), Some (`String _) ->
-          Error (Printf.sprintf "volume %s has an empty image source" volume)
+          Error (Empty_source { volume })
         | Some (`String volume), Some (`String format), Some (`String _) ->
-          Error (Printf.sprintf "volume %s is %s, not ext4" volume format)
-        | _ -> Error "volume inspect configuration lacks a string name, format and source")
-     | Some _ | None -> Error "volume inspect entry has no configuration object")
-  | `List entries ->
-    Error (Printf.sprintf "volume inspect returned %d entries, expected one" (List.length entries))
-  | _ -> Error "volume inspect output is not an array"
+          Error (Not_ext4_format { volume; format })
+        | _ -> Error Configuration_without_fields)
+     | Some _ | None -> Error Entry_without_configuration)
+  | `List [ _ ] -> Error Entry_without_configuration
+  | `List entries -> Error (Entries { count = List.length entries })
+  | _ -> Error Not_an_array
 ;;
 
 let site_to_yojson = function
@@ -233,7 +275,7 @@ let site_to_yojson = function
       ; "func", `String site.func
       ; "line", `Int site.line
       ; "inode", `Int site.inode
-      ; "block", `Int (Int64.to_int site.block)
+      ; "block", `Intlit (Printf.sprintf "%Lu" site.block)
       ; "code", `String (error_code_to_string site.code)
       ]
 ;;
@@ -253,5 +295,26 @@ let read_failure_to_string = function
   | Not_ext4 { magic } -> Printf.sprintf "superblock magic 0x%04X is not ext4" magic
   | Truncated { bytes } ->
     Printf.sprintf "image holds %d of the %d superblock bytes" bytes superblock_size
+  | Not_regular_file { kind } ->
+    Printf.sprintf
+      "image is a %s, not a regular file"
+      (match kind with
+       | Unix.S_REG -> "regular file"
+       | Unix.S_DIR -> "directory"
+       | Unix.S_CHR -> "character device"
+       | Unix.S_BLK -> "block device"
+       | Unix.S_LNK -> "symbolic link"
+       | Unix.S_FIFO -> "named pipe"
+       | Unix.S_SOCK -> "socket")
   | Unreadable detail -> "image unreadable: " ^ detail
+;;
+
+let inspect_failure_to_string = function
+  | Not_an_array -> "volume inspect output is not an array"
+  | Entries { count } -> Printf.sprintf "volume inspect returned %d entries, expected one" count
+  | Entry_without_configuration -> "volume inspect entry has no configuration object"
+  | Configuration_without_fields ->
+    "volume inspect configuration lacks a string name, format and source"
+  | Empty_source { volume } -> Printf.sprintf "volume %s has an empty image source" volume
+  | Not_ext4_format { volume; format } -> Printf.sprintf "volume %s is %s, not ext4" volume format
 ;;

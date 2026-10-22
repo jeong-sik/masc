@@ -89,3 +89,7 @@ The operational choice supported here is to retain WS for persistent Dashboard
 interactions while retaining Streamable HTTP for authenticated MCP. Large
 snapshot/download and browser-render decisions still need their own workload
 measurements; this result does not justify migrating every request to WS.
+
+[Live browser follow-up](BROWSER.md) records a separate Overview observation,
+including the served Dashboard/server source mismatch. It does not extend the
+isolated transport verdict to matching-bundle UI performance.

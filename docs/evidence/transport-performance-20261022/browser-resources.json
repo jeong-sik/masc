@@ -1,0 +1,225 @@
+{
+  "recorded_at": "2026-10-22T01:43:43.854Z",
+  "url": "http://127.0.0.1:8935/dashboard",
+  "visibility": "visible",
+  "navigation": [
+    {
+      "start": 0,
+      "response_end": 7.8999998569488525,
+      "dom_interactive": 20.299999952316284,
+      "dom_complete": 233.29999995231628,
+      "load_end": 233.29999995231628,
+      "type": "navigate",
+      "transfer": 678,
+      "decoded": 621
+    }
+  ],
+  "resources": [
+    {
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "initiator": "fetch",
+      "start_ms": 285.5,
+      "duration_ms": 1964.2000000476837,
+      "transfer_bytes": 24860,
+      "decoded_bytes": 136927
+    },
+    {
+      "path": "/api/v1/dashboard/goals",
+      "initiator": "fetch",
+      "start_ms": 359.5,
+      "duration_ms": 610.7999999523163,
+      "transfer_bytes": 39292,
+      "decoded_bytes": 161622
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-probe",
+      "initiator": "fetch",
+      "start_ms": 60248.09999990463,
+      "duration_ms": 439.2000000476837,
+      "transfer_bytes": 4036,
+      "decoded_bytes": 63623
+    },
+    {
+      "path": "/api/v1/dashboard/execution",
+      "initiator": "fetch",
+      "start_ms": 303.59999990463257,
+      "duration_ms": 335,
+      "transfer_bytes": 107217,
+      "decoded_bytes": 644856
+    },
+    {
+      "path": "/api/v1/dashboard/briefing",
+      "initiator": "fetch",
+      "start_ms": 359.5,
+      "duration_ms": 316.39999985694885,
+      "transfer_bytes": 9254,
+      "decoded_bytes": 128580
+    },
+    {
+      "path": "/api/v1/keepers/:keeper/tool-calls",
+      "initiator": "fetch",
+      "start_ms": 6442.799999952316,
+      "duration_ms": 144.09999990463257,
+      "transfer_bytes": 124421,
+      "decoded_bytes": 1370759
+    },
+    {
+      "path": "/api/v1/dashboard/planning",
+      "initiator": "fetch",
+      "start_ms": 359.2999999523163,
+      "duration_ms": 111.70000004768372,
+      "transfer_bytes": 27234,
+      "decoded_bytes": 90124
+    },
+    {
+      "path": "/api/v1/dashboard/gate",
+      "initiator": "fetch",
+      "start_ms": 297.7000000476837,
+      "duration_ms": 107,
+      "transfer_bytes": 697,
+      "decoded_bytes": 823
+    },
+    {
+      "path": "/api/v1/keepers/:keeper/tool-calls",
+      "initiator": "fetch",
+      "start_ms": 18166.89999985695,
+      "duration_ms": 103.5,
+      "transfer_bytes": 123383,
+      "decoded_bytes": 1358620
+    },
+    {
+      "path": "/api/v1/keepers/:keeper/tool-calls",
+      "initiator": "fetch",
+      "start_ms": 13350.200000047684,
+      "duration_ms": 99.59999990463257,
+      "transfer_bytes": 123609,
+      "decoded_bytes": 1367281
+    },
+    {
+      "path": "/api/v1/keepers/:keeper/tool-calls",
+      "initiator": "fetch",
+      "start_ms": 17942.200000047684,
+      "duration_ms": 95.5,
+      "transfer_bytes": 124394,
+      "decoded_bytes": 1362890
+    },
+    {
+      "path": "/api/v1/dashboard/dev-token",
+      "initiator": "fetch",
+      "start_ms": 143.59999990463257,
+      "duration_ms": 86.29999995231628,
+      "transfer_bytes": 402,
+      "decoded_bytes": 111
+    },
+    {
+      "path": "/api/v1/dashboard/telemetry",
+      "initiator": "fetch",
+      "start_ms": 284.5,
+      "duration_ms": 32.200000047683716,
+      "transfer_bytes": 28497,
+      "decoded_bytes": 227898
+    },
+    {
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "initiator": "fetch",
+      "start_ms": 15286,
+      "duration_ms": 29.899999856948853,
+      "transfer_bytes": 24875,
+      "decoded_bytes": 136927
+    },
+    {
+      "path": "/api/v1/dashboard/config",
+      "initiator": "fetch",
+      "start_ms": 308.59999990463257,
+      "duration_ms": 24.600000143051147,
+      "transfer_bytes": 12167,
+      "decoded_bytes": 96732
+    },
+    {
+      "path": "/health",
+      "initiator": "fetch",
+      "start_ms": 245.89999985694885,
+      "duration_ms": 19.5,
+      "transfer_bytes": 16744,
+      "decoded_bytes": 117173
+    },
+    {
+      "path": "/mcp",
+      "initiator": "fetch",
+      "start_ms": 255.39999985694885,
+      "duration_ms": 17.300000190734863,
+      "transfer_bytes": 81695,
+      "decoded_bytes": 81395
+    },
+    {
+      "path": "/api/v1/dashboard/shell",
+      "initiator": "fetch",
+      "start_ms": 255.59999990463257,
+      "duration_ms": 17.100000143051147,
+      "transfer_bytes": 4527,
+      "decoded_bytes": 24222
+    },
+    {
+      "path": "/api/v1/dashboard/telemetry",
+      "initiator": "fetch",
+      "start_ms": 60285.700000047684,
+      "duration_ms": 14.199999809265137,
+      "transfer_bytes": 30215,
+      "decoded_bytes": 229666
+    },
+    {
+      "path": "/api/v1/dashboard/runtime-probe",
+      "initiator": "fetch",
+      "start_ms": 255.20000004768372,
+      "duration_ms": 10,
+      "transfer_bytes": 3801,
+      "decoded_bytes": 60631
+    },
+    {
+      "path": "/dashboard/assets/index-Z7C7OotB.css",
+      "initiator": "link",
+      "start_ms": 17.799999952316284,
+      "duration_ms": 7.799999952316284,
+      "transfer_bytes": 0,
+      "decoded_bytes": 1327820
+    },
+    {
+      "path": "/health",
+      "initiator": "fetch",
+      "start_ms": 60247.799999952316,
+      "duration_ms": 6.799999952316284,
+      "transfer_bytes": 16754,
+      "decoded_bytes": 117223
+    },
+    {
+      "path": "/api/v1/dashboard/project-snapshot",
+      "initiator": "fetch",
+      "start_ms": 246,
+      "duration_ms": 6.700000047683716,
+      "transfer_bytes": 3287,
+      "decoded_bytes": 11174
+    },
+    {
+      "path": "/dashboard/assets/index-DglHSJua.js",
+      "initiator": "script",
+      "start_ms": 17.700000047683716,
+      "duration_ms": 6.299999952316284,
+      "transfer_bytes": 0,
+      "decoded_bytes": 871235
+    },
+    {
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-100.woff2",
+      "initiator": "css",
+      "start_ms": 360.89999985694885,
+      "duration_ms": 5.700000047683716,
+      "transfer_bytes": 0,
+      "decoded_bytes": 26208
+    }
+  ],
+  "dom_nodes": 990,
+  "heap": {
+    "used": 11437448,
+    "total": 12760044
+  },
+  "scope": "One live Overview navigation and same-origin resource timing entries. Keeper path names replaced with a route placeholder. No resource bodies or tokens retained. Timings may include browser queueing, server work and network; not server-only or input-to-paint timings."
+}

@@ -1,0 +1,12 @@
+{
+  "recorded_at": "2026-10-22T01:47:35.116Z",
+  "visibility": "visible",
+  "complete": true,
+  "frames": 120,
+  "elapsed_ms": 1000.9000000953674,
+  "p50_interval_ms": 8.299999999988358,
+  "p95_interval_ms": 9.200000000011642,
+  "max_interval_ms": 9.300000000046566,
+  "longTasks": [],
+  "scope": "Idle visible Dashboard requestAnimationFrame cadence, not input-to-paint latency"
+}

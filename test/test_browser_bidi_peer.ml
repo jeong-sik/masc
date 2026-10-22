@@ -38,6 +38,7 @@ let test_a_session_runs_the_expected_profile () =
       let peer =
         Peer.create ~session_end:(fun () -> Ok ()) ~command:(fun method_ _ ->
           match method_ with
+          | "session.subscribe" -> Ok (obj [])
           | "session.new" -> Ok (obj [ "sessionId", `String "s"; "capabilities", caps ])
           | other -> failf "unexpected command %s" other)
       in
@@ -64,6 +65,7 @@ let test_owned_endpoint_identity_and_shutdown () =
     let closing=ref 0 in
     let peer=Peer.create ~session_end:(fun () -> Ok ()) ~command:(fun method_ _ ->
       match method_ with
+      | "session.subscribe" -> Ok (obj [])
       | "session.new" -> Ok (obj ["capabilities",obj
           (["browserName",`String "firefox";"browserVersion",`String "fixture"]
           @ (match reported with None -> [] | Some value -> ["moz:processID",value]))])
@@ -421,6 +423,10 @@ let session_created request =
   reply_to request (obj ["sessionId",`String "scripted";"capabilities",
     obj ["browserName",`String "firefox";"browserVersion",`String "157.0-scripted"]])
 let method_of request = Yojson.Safe.Util.(request |> member "method" |> to_string)
+(* A session the scripted Firefox grants, then the dialog-event subscription the peer asks for next. *)
+let accept_session flow =
+  send_server_message flow (session_created (read_client_message flow));
+  send_server_message flow (reply_to (read_client_message flow) (obj []))
 (* The session a connection created is ended over that connection, also after
    this side stopped trusting it for page commands: a page whose command got
    no reply is not a browser that is gone, and a session left in Firefox
@@ -431,6 +437,9 @@ let test_the_session_is_ended_after_a_command_got_no_reply () =
     let created=read_client_message flow in
     seen:=method_of created :: !seen;
     send_server_message flow (session_created created);
+    let subscribed=read_client_message flow in
+    seen:=method_of subscribed :: !seen;
+    send_server_message flow (reply_to subscribed (obj []));
     let unanswered=read_client_message flow in
     seen:=method_of unanswered :: !seen;
     let ending=read_client_message flow in
@@ -456,13 +465,13 @@ let test_the_session_is_ended_after_a_command_got_no_reply () =
     Ok ()) in
   check (result unit string) "the connection finished" (Ok ()) outcome;
   check (list string) "what Firefox was sent, in order"
-    ["session.new";"browsingContext.getTree";"session.end"] (List.rev !seen)
+    ["session.new";"session.subscribe";"browsingContext.getTree";"session.end"] (List.rev !seen)
 (* A socket that is gone carries no session.end, and one Firefox does not
    answer is not waited on past its window. Each is an error the holder can
    tell the operator. *)
 let test_a_session_that_cannot_be_ended_is_an_error () =
   let closed_under_it=with_scripted_firefox (fun flow ->
-      send_server_message flow (session_created (read_client_message flow)))
+      accept_session flow)
     (fun ~ended peer ->
       (match metadata peer with Ok _ -> () | Error detail -> fail detail);
       (* The script returned after its one answer, which closed the socket.
@@ -472,7 +481,7 @@ let test_a_session_that_cannot_be_ended_is_an_error () =
         | Ok () -> "ended" | Error detail -> detail))) in
   check (result unit string) "a closed socket" (Error "BiDi EOF / BiDi EOF") closed_under_it;
   let unanswered=with_scripted_firefox (fun flow ->
-      send_server_message flow (session_created (read_client_message flow));
+      accept_session flow;
       ignore (read_client_message flow : Yojson.Safe.t);
       (* Held open without an answer until the client is done. *)
       try ignore (Eio.Flow.single_read flow (Cstruct.create 1) : int) with End_of_file -> ())
@@ -487,7 +496,7 @@ let test_a_session_that_cannot_be_ended_is_an_error () =
    window. *)
 let test_a_socket_closing_under_session_end_is_told_at_once () =
   let outcome=with_scripted_firefox (fun flow ->
-      send_server_message flow (session_created (read_client_message flow));
+      accept_session flow;
       ignore (read_client_message flow : Yojson.Safe.t);
       (* Returning after session.end arrived closes the socket under it. *)
       ignore (read_client_message flow : Yojson.Safe.t))
@@ -518,24 +527,24 @@ let test_why_a_session_was_not_ended_says_whether_firefox_could_be_asked () =
   (* What Firefox says of a session it was asked for and does not have
      (measured on 157.0.1): there is none to end. *)
   check string "Firefox has no such session" "ended" (ending (fun flow ->
-    send_server_message flow (session_created (read_client_message flow));
+    accept_session flow;
     let ending=read_client_message flow in
     send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" ending;
       "error",`String "invalid session id"])));
   List.iter (fun code ->
       check string ("Firefox refuses to end it: " ^ code) "not confirmed" (ending (fun flow ->
-        send_server_message flow (session_created (read_client_message flow));
+        accept_session flow;
         let ending=read_client_message flow in
         send_server_message flow (obj ["type",`String "error";"id",Yojson.Safe.Util.member "id" ending;
           "error",`String code]))))
     (* The code that refuses a [session.new] says nothing of ending one. *)
     ["unknown error"; "session not created"];
   check string "Firefox does not answer" "not confirmed" (ending (fun flow ->
-    send_server_message flow (session_created (read_client_message flow));
+    accept_session flow;
     ignore (read_client_message flow : Yojson.Safe.t);
     try ignore (Eio.Flow.single_read flow (Cstruct.create 1) : int) with End_of_file -> ()));
   check string "the socket closes under the request" "connection gone" (ending (fun flow ->
-    send_server_message flow (session_created (read_client_message flow));
+    accept_session flow;
     ignore (read_client_message flow : Yojson.Safe.t)))
 (* Firefox may hold a session from the moment it is asked for one. An answer
    that never came leaves one to end; Firefox's own refusal leaves none. *)
@@ -623,6 +632,7 @@ let test_a_session_is_there_to_end_once_asked_for () =
     let ended=ref 0 in
     let asking answer=Peer.create ~session_end:(fun () -> incr ended; Ok ())
       ~command:(fun method_ _ -> match method_ with
+        | "session.subscribe" -> Ok (obj [])
         | "session.new" -> answer ()
         | other -> failf "unexpected command: %s" other) in
     let abandoned=asking (fun () -> Eio.Fiber.await_cancel ()) in
@@ -668,7 +678,7 @@ let test_refused_upgrade_is_the_connections_error () =
       | exception Failure detail->failf "the refused upgrade escaped as an exception: %s" detail))
 let test_peer_close_frame_ends_a_pending_command () =
   let outcome=with_scripted_firefox (fun flow ->
-      send_server_message flow (session_created (read_client_message flow));
+      accept_session flow;
       ignore (read_client_message flow : Yojson.Safe.t);
       send_server_frame flow 0x8 "";
       try ignore (Eio.Flow.single_read flow (Cstruct.create 1) : int) with End_of_file -> ())
@@ -684,7 +694,7 @@ let test_peer_close_frame_ends_a_pending_command () =
   check (result unit string) "close frame is delivered" (Ok ()) outcome
 let test_malformed_json_ends_a_pending_command () =
   let outcome=with_scripted_firefox (fun flow ->
-      send_server_message flow (session_created (read_client_message flow));
+      accept_session flow;
       ignore (read_client_message flow : Yojson.Safe.t);
       send_server_frame flow 0x1 "not-json";
       try ignore (Eio.Flow.single_read flow (Cstruct.create 1) : int) with End_of_file -> ())
@@ -700,7 +710,7 @@ let test_malformed_json_ends_a_pending_command () =
   check (result unit string) "malformed JSON is reported" (Ok ()) outcome
 let test_invalid_websocket_frame_ends_a_pending_command () =
   let outcome=with_scripted_firefox (fun flow ->
-      send_server_message flow (session_created (read_client_message flow));
+      accept_session flow;
       ignore (read_client_message flow : Yojson.Safe.t);
       (* Reserved opcode 0x3 is not a valid data frame. *)
       send_server_frame flow 0x3 "";
@@ -855,7 +865,8 @@ let test_peer_serves_what_the_lane_table_says () =
       | Tab_closing -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Close_tab})
       | Tab_navigation -> Page_goto {url="https://example.test/next";tab_id=Some 2}
       | Tab_activation -> interact Activate_tab
-  | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")) in
+  | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")
+      | Dialog_answer -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Dismiss_dialog})) in
     (* The names the native host forwards (Browser_host.decode_poll). *)
     let peer_verb = function
       | "tabs.list" -> Peer.Tabs_list | "page.read" -> Peer.Page_read | "page.scene" -> Peer.Page_scene
@@ -876,7 +887,8 @@ let test_peer_serves_what_the_lane_table_says () =
       | "browsingContext.navigate" -> Ok `Null
       | "browsingContext.captureScreenshot" -> Ok (obj ["data",`String "png"])
       | "input.performActions" | "input.releaseActions" | "browsingContext.setViewport"
-      | "browsingContext.traverseHistory" | "browsingContext.reload" | "browsingContext.close" -> Ok `Null
+      | "browsingContext.traverseHistory" | "browsingContext.reload" | "browsingContext.close"
+      | "browsingContext.handleUserPrompt" -> Ok `Null
       | "browsingContext.activate" -> Ok (obj [])
       | other -> failf "unexpected protocol command: %s" other in
     let peer = peer_of command in
@@ -938,6 +950,7 @@ let test_ending_the_session_restores_a_sized_tab () =
   let sent = ref [] in
   let peer = Peer.create ~session_end:(fun () -> Ok ()) ~command:(fun method_ args ->
     match method_ with
+    | "session.subscribe" -> Ok (obj [])
     | "session.new" -> Ok (obj ["capabilities",obj ["browserName",`String "firefox";"browserVersion",`String "158.0"]])
     | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
     | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";"title",`String "fixture";
@@ -960,6 +973,7 @@ let test_a_tab_restored_by_the_caller_is_not_restored_again () =
   let sent = ref [] in
   let peer = Peer.create ~session_end:(fun () -> Ok ()) ~command:(fun method_ args ->
     match method_ with
+    | "session.subscribe" -> Ok (obj [])
     | "session.new" -> Ok (obj ["capabilities",obj ["browserName",`String "firefox";"browserVersion",`String "158.0"]])
     | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
     | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";"title",`String "fixture";
@@ -1167,6 +1181,118 @@ let test_activation_brings_the_observed_tab_forward () =
       (Yojson.Safe.Util.member "active" receipt = `Bool false)
   | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) ->
     fail "a tab still hidden after activation was not reported as read"
+let prompt_event method_ params = obj ["type",`String "event";"method",`String method_;"params",obj params]
+let prompt_opened context kind message more =
+  prompt_event "browsingContext.userPromptOpened"
+    (["context",`String context;"type",`String kind;"message",`String message;"handler",`String "ignore"] @ more)
+(* A page's alert, confirm and prompt are answered by the browser itself unless the session leaves them open
+   (probed 2026-10-22, Firefox 158: confirm() returned false at once for a session made with empty
+   capabilities). The peer asks for them left open and for the two events that say one opened or closed. *)
+let test_the_session_leaves_dialogs_open_and_asks_for_their_events () =
+  let seen = ref [] in
+  let peer = peer_of (fun method_ args ->
+    seen := (method_,args) :: !seen;
+    match method_ with
+    | "session.new" -> Ok (obj ["capabilities",obj ["browserName",`String "firefox";"browserVersion",`String "158.0"]])
+    | "session.subscribe" -> Ok (obj [])
+    | other -> failf "unexpected protocol command: %s" other) in
+  (match metadata peer with Ok _ -> () | Error detail -> fail detail);
+  let member key json = Yojson.Safe.Util.member key json in
+  (match List.rev !seen with
+   | [ ("session.new", created); ("session.subscribe", subscribed) ] ->
+     check bool "the session leaves unhandled prompts open" true
+       (member "default" (member "unhandledPromptBehavior" (member "alwaysMatch" (member "capabilities" created))) = `String "ignore");
+     check (list string) "it asks for the open and the close of a dialog"
+       ["browsingContext.userPromptOpened";"browsingContext.userPromptClosed"]
+       (List.map Yojson.Safe.Util.to_string (Yojson.Safe.Util.to_list (member "events" subscribed)))
+   | _ -> fail "the session must be created, then subscribed");
+  (* A subscription Firefox refuses leaves no session this host can use. *)
+  let refusing = peer_of (fun method_ _ ->
+    match method_ with
+    | "session.new" -> Ok (obj ["capabilities",obj ["browserName",`String "firefox";"browserVersion",`String "158.0"]])
+    | _ -> Error (Peer.Rejected (Peer.error_code_of_wire "invalid argument"))) in
+  match metadata refusing with
+  | Error detail -> check bool "the refusal is named" true (String.length detail > 0)
+  | Ok _ -> fail "a session whose dialog events cannot be had was accepted"
+
+let test_a_tab_row_shows_the_dialog_it_is_blocked_on () =
+  let peer = peer_of (fun method_ _ ->
+    match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+    | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";"title",`String "fixture";"active",`Bool true]))
+    | other -> failf "unexpected protocol command: %s" other) in
+  let dialog () = match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
+    | Ok (`List [row]) -> Yojson.Safe.Util.member "dialog" row
+    | Ok _ | Error _ -> fail "the tab listing failed" in
+  check bool "no dialog before an event" true (dialog () = `Null);
+  Peer.note_event peer (prompt_opened "owned" "prompt" "name?" ["defaultValue",`String "dflt"]);
+  check bool "an opened prompt is on the row with its text and default" true
+    (dialog () = obj ["type",`String "prompt";"message",`String "name?";"defaultValue",`String "dflt"]);
+  Peer.note_event peer (prompt_opened "owned" "confirm" "sure?" []);
+  check bool "a later dialog replaces it" true
+    (dialog () = obj ["type",`String "confirm";"message",`String "sure?"]);
+  (* Events this host cannot read change nothing. *)
+  Peer.note_event peer (prompt_event "browsingContext.userPromptOpened" ["context",`String "owned";"type",`String "confirm"]);
+  Peer.note_event peer (prompt_opened "owned" "unknown-kind" "x" []);
+  Peer.note_event peer (prompt_event "browsingContext.userPromptClosed" ["type",`String "confirm"]);
+  Peer.note_event peer (prompt_event "browsingContext.contextCreated" ["context",`String "owned"]);
+  check bool "unreadable or other events leave the dialog as it was" true
+    (dialog () = obj ["type",`String "confirm";"message",`String "sure?"]);
+  Peer.note_event peer (prompt_event "browsingContext.userPromptClosed" ["context",`String "owned";"accepted",`Bool true;"type",`String "confirm"]);
+  check bool "the close clears the row" true (dialog () = `Null)
+
+let test_dialogs_are_answered_only_on_tabs_this_connection_opened () =
+  let sent = ref [] and created = ref false and refusal = ref None in
+  let peer = peer_of (fun method_ args ->
+    match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List
+        (obj ["context",`String "owned"] :: if !created then [obj ["context",`String "created"]] else [])])
+    | "browsingContext.create" -> created := true; Ok (obj ["context",`String "created"])
+    | "browsingContext.navigate" -> Ok `Null
+    | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";"title",`String "fixture";"active",`Bool true]))
+    | "browsingContext.handleUserPrompt" ->
+      (match !refusal with
+       | Some code -> Error (Peer.Rejected (Peer.error_code_of_wire code))
+       | None -> sent := args :: !sent; Ok `Null)
+    | other -> failf "unexpected protocol command: %s" other) in
+  ignore (Peer.dispatch peer ~verb:Peer.Tabs_list (obj []));
+  let act tab_id interaction = Peer.dispatch peer ~verb:Peer.Page_act
+    (Browser_lane.Action.to_json (Browser_lane.Action.On_tab {tab_id;frame_path=[];interaction})) in
+  let member key json = Yojson.Safe.Util.member key json in
+  (* The person's own tab, ID 1, is refused for both before any command. *)
+  Peer.note_event peer (prompt_opened "owned" "confirm" "Leave this page?" []);
+  List.iter (fun interaction ->
+    (match act 1 interaction with
+     | Error (Peer.Before_effect _) -> ()
+     | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) -> fail "a dialog on the operator's tab was answered");
+    check int "nothing was sent for the operator's tab" 0 (List.length !sent))
+    Browser_lane.Action.[Accept_dialog None; Dismiss_dialog];
+  (match Peer.dispatch peer ~verb:Peer.Page_act
+     (Browser_lane.Action.to_json (Browser_lane.Action.Open_tab "https://example.test/new")) with
+   | Ok _ -> () | Error _ -> fail "opening a tab failed");
+  Peer.note_event peer (prompt_opened "created" "prompt" "name?" ["defaultValue",`String "dflt"]);
+  (match act 2 (Browser_lane.Action.Accept_dialog (Some "masc")) with
+   | Ok receipt ->
+     check string "the receipt names the action" "accept_dialog" Yojson.Safe.Util.(receipt |> member "action" |> to_string);
+     check bool "the receipt says which dialog was answered" true
+       (member "dialog" receipt = obj ["type",`String "prompt";"message",`String "name?";"defaultValue",`String "dflt"])
+   | Error _ -> fail "a dialog on a tab this connection opened was not answered");
+  (match !sent with
+   | [ args ] ->
+     check bool "accept carries the context and the text" true
+       (member "context" args = `String "created" && member "accept" args = `Bool true && member "userText" args = `String "masc")
+   | _ -> fail "one answer must be sent");
+  Peer.note_event peer (prompt_opened "created" "confirm" "sure?" []);
+  sent := [];
+  ignore (act 2 Browser_lane.Action.Dismiss_dialog);
+  (match !sent with
+   | [ args ] ->
+     check bool "dismiss refuses and sends no text" true (member "accept" args = `Bool false && member "userText" args = `Null)
+   | _ -> fail "one dismissal must be sent");
+  refusal := Some "no such alert";
+  (match act 2 Browser_lane.Action.Dismiss_dialog with
+   | Error (Peer.Before_effect detail) -> check string "no dialog is named plainly" "no dialog is open in this tab" detail
+   | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) -> fail "answering nothing was not refused before effect")
 let test_tabs_name_their_window () =
   let peer = peer_of (fun method_ _ ->
     match method_ with
@@ -1194,9 +1320,13 @@ let test_an_error_code_is_read_once_and_written_back () =
     match Peer.error_code_of_wire code with
     | Peer.Session_not_created -> "session not created"
     | Peer.Invalid_session_id -> "invalid session id"
+    | Peer.No_such_alert -> "no such alert"
+    | Peer.Unexpected_alert_open -> "unexpected alert open"
     | Peer.Other_error kept -> "other: " ^ kept in
   check string "session not created" "session not created" (read "session not created");
   check string "invalid session id" "invalid session id" (read "invalid session id");
+  check string "no such alert" "no such alert" (read "no such alert");
+  check string "unexpected alert open" "unexpected alert open" (read "unexpected alert open");
   List.iter (fun code -> check string ("another code is kept: " ^ code) ("other: " ^ code) (read code))
     [ "no such frame"; "unknown command"; "Session not created"; "session not created " ];
   List.iter (fun code ->
@@ -1335,6 +1465,9 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "history and close act only on tabs this connection opened" `Quick test_history_and_close_act_only_on_tabs_this_connection_opened;
     test_case "goto acts only on a tab this connection opened" `Quick test_goto_acts_only_on_a_tab_this_connection_opened;
     test_case "activation brings the observed tab forward" `Quick test_activation_brings_the_observed_tab_forward;
+    test_case "the session leaves dialogs open and asks for their events" `Quick test_the_session_leaves_dialogs_open_and_asks_for_their_events;
+    test_case "a tab row shows the dialog it is blocked on" `Quick test_a_tab_row_shows_the_dialog_it_is_blocked_on;
+    test_case "dialogs are answered only on tabs this connection opened" `Quick test_dialogs_are_answered_only_on_tabs_this_connection_opened;
     test_case "open tab preserves existing context" `Quick test_open_tab_preserves_existing_context;
     test_case "open tab failure does not replay" `Quick test_open_tab_failure_does_not_replay;
     test_case "live act rejects other actions" `Quick test_live_act_rejects_other_actions_before_effect;

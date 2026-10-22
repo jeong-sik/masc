@@ -17,14 +17,18 @@ type failure = Before_effect of string | Partial_failure of partial_failure | Ou
    session. Firefox 157.0.1 answers [session.end] with it before any
    [session.new], after a [session.new] it refused, and it closes the socket
    once it has ended one. *)
-type error_code = Session_not_created | Invalid_session_id | Other_error of string
+type error_code = Session_not_created | Invalid_session_id | No_such_alert | Unexpected_alert_open | Other_error of string
 let error_code_of_wire = function
   | "session not created" -> Session_not_created
   | "invalid session id" -> Invalid_session_id
+  | "no such alert" -> No_such_alert
+  | "unexpected alert open" -> Unexpected_alert_open
   | code -> Other_error code
 let error_code_to_wire = function
   | Session_not_created -> "session not created"
   | Invalid_session_id -> "invalid session id"
+  | No_such_alert -> "no such alert"
+  | Unexpected_alert_open -> "unexpected alert open"
   | Other_error code -> code
 type refusal = Rejected of error_code | Unanswered of string | Unsent of string
 let refusal_message = function
@@ -56,9 +60,29 @@ type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   (* The contexts this connection gave a viewport size. Firefox keeps that size after the session ends
      (probed 2026-10-22, Firefox 158), so ending the session gives each of them its own size back. *)
   mutable sized : string list; mutable version : string option;
-  mutable profile : string option; mutable process_id : int option }
+  mutable profile : string option; mutable process_id : int option;
+  (* The dialog each context is blocked on, from the browser's own events. The session keeps prompts open
+     (unhandledPromptBehavior ignore), so a person or this host answers them. *)
+  prompts : (string, Browser_surface.dialog) Hashtbl.t }
 let create ~session_end ~command =
-  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;windows=[];opened=[];sized=[];version=None;profile=None;process_id=None}
+  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;windows=[];opened=[];sized=[];version=None;profile=None;process_id=None;
+   prompts=Hashtbl.create 4}
+(* A malformed prompt event cannot be tracked and is not counted: the tab row then shows no dialog, and an
+   answer to it gets the browser's own refusal. *)
+let note_event t json =
+  match field "method" json, field "params" json with
+  | Some (`String "browsingContext.userPromptOpened"), Some params ->
+    (match field "context" params, field "type" params, field "message" params with
+     | Some (`String context), Some (`String kind), Some (`String message) when context <> "" ->
+       (match Browser_surface.dialog_kind_of_wire kind with
+        | None -> ()
+        | Some kind ->
+          let default_value = match field "defaultValue" params with Some (`String value) -> Some value | _ -> None in
+          Hashtbl.replace t.prompts context {Browser_surface.kind;message;default_value})
+     | _ -> ())
+  | Some (`String "browsingContext.userPromptClosed"), Some params ->
+    (match field "context" params with Some (`String context) -> Hashtbl.remove t.prompts context | _ -> ())
+  | _ -> ()
 let command t method_ params = Result.map_error (fun refusal -> method_ ^ ": " ^ refusal_message refusal) (t.ask method_ params)
 (* Firefox keeps a session whose socket closed and takes one session at a
    time, so one left behind refuses every later connection until that Firefox
@@ -78,10 +102,14 @@ let metadata t =
      the request was never written. *)
   t.version <- None;t.profile <- None;t.process_id <- None;
   t.session_may_exist <- true;
-  match t.ask "session.new" (obj ["capabilities",obj []]) with
+  (* The browser answers a page's alert, confirm and prompt by itself unless the session says to leave them
+     open (probed 2026-10-22, Firefox 158: confirm() returned false at once for a session made with empty
+     capabilities). A person using this browser must still get the dialog. *)
+  let capabilities = obj ["alwaysMatch",obj ["unhandledPromptBehavior",obj ["default",str "ignore"]]] in
+  match t.ask "session.new" (obj ["capabilities",capabilities]) with
   | Error (Rejected Session_not_created as refused) ->
     t.session_may_exist <- false; Error (Session_refused (refusal_message refused))
-  | Error (Rejected (Invalid_session_id | Other_error _) | Unsent _ as refused) ->
+  | Error (Rejected (Invalid_session_id | No_such_alert | Unexpected_alert_open | Other_error _) | Unsent _ as refused) ->
     t.session_may_exist <- false; Error (Session_failed (refusal_message refused))
   | Error (Unanswered _ as unanswered) -> Error (Session_failed (refusal_message unanswered))
   | Ok result ->
@@ -94,6 +122,9 @@ let metadata t =
          t.process_id <- (match field "moz:processID" caps with
            | Some (`Int pid) when pid>1 -> Some pid
            | None | Some _ -> None);
+         let* _ = Result.map_error (fun refusal -> "session.subscribe: " ^ refusal_message refusal)
+           (t.ask "session.subscribe" (obj ["events",`List [str "browsingContext.userPromptOpened";
+             str "browsingContext.userPromptClosed"]])) in
          Ok version)
 let profile t = t.profile
 let process_id t = t.process_id
@@ -212,7 +243,7 @@ let open_tab t url =
     " Inspect it using this same clientId and tabId.";
     receipt=obj ["action",str "open_tab";"created",`Bool true;"tabId",`Int id]} in
   let rpc_failure = function
-    | Rejected (Other_error _) as refusal -> partial (refusal_message refusal)
+    | Rejected (Other_error _ | No_such_alert | Unexpected_alert_open) as refusal -> partial (refusal_message refusal)
     | Rejected (Session_not_created | Invalid_session_id) | Unanswered _ | Unsent _ as refusal ->
       Outcome_unknown (message (refusal_message refusal) ^
         " This connection cannot be reused. Re-list connections and tabs, then use newly observed IDs to inspect it; the old tabId does not identify a tab on a replacement connection.") in
@@ -338,7 +369,8 @@ let ask_on_tab ?(before=codes_before_acting) t method_ params = match t.ask meth
   | Error (Unsent _ as refusal) -> Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
   | Error (Rejected (Other_error code) as refusal) when List.mem code before ->
     Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
-  | Error (Rejected (Other_error _ | Session_not_created | Invalid_session_id) | Unanswered _ as refusal) ->
+  | Error (Rejected No_such_alert) -> Error (Before_effect "no dialog is open in this tab")
+  | Error (Rejected (Other_error _ | Session_not_created | Invalid_session_id | Unexpected_alert_open) | Unanswered _ as refusal) ->
     Error (Outcome_unknown (method_ ^ ": " ^ refusal_message refusal ^ "; inspect the tab before repeating"))
 let tab_receipt t context id name =
   let* summary = Result.map_error (fun e -> Outcome_unknown e)
@@ -363,11 +395,23 @@ let tab_action t ~tab_id interaction =
     | (Browser_lane.Action.Close_tab | Browser_lane.Action.Back | Browser_lane.Action.Forward
       | Browser_lane.Action.Reload) when not (List.mem tab_id t.opened) ->
       Error (Before_effect "a connected browser's back, forward, reload and close_tab act only on tabs this connection opened")
+    | (Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog) when not (List.mem tab_id t.opened) ->
+      Error (Before_effect "a connected browser's dialogs are answered only on tabs this connection opened; the person using the browser answers a dialog on their own tab")
     | Browser_lane.Action.Close_tab | Browser_lane.Action.Back | Browser_lane.Action.Forward
     | Browser_lane.Action.Reload | Browser_lane.Action.Click _ | Browser_lane.Action.Fill _
     | Browser_lane.Action.Press _ | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _
     | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog -> Ok () in
   let* context,id = Result.map_error (fun e -> Before_effect e) (resolve t (obj ["tabId",`Int tab_id])) in
+  (* The dialog is read before it is answered: the answer closes it, and the receipt says which one was
+     answered. *)
+  let answer_dialog ~accept text =
+    let known = Hashtbl.find_opt t.prompts context in
+    let* _ = ask "browsingContext.handleUserPrompt"
+      (obj (["context",str context;"accept",`Bool accept]
+        @ match text with Some text -> ["userText",str text] | None -> [])) in
+    Hashtbl.remove t.prompts context;
+    Ok (obj (["tabId",`Int id;"action",str (if accept then "accept_dialog" else "dismiss_dialog")]
+      @ match known with Some dialog -> ["dialog",Browser_surface.dialog_json dialog] | None -> [])) in
   match interaction with
   | Browser_lane.Action.Back ->
     settle_navigation t context id "back"
@@ -382,10 +426,11 @@ let tab_action t ~tab_id interaction =
     let* _ = ask "browsingContext.close" (obj ["context",str context;"promptUnload",`Bool false]) in
     t.opened <- List.filter (fun opened -> opened <> id) t.opened;
     Ok (obj ["tabId",`Int id;"action",str "close_tab";"closed",`Bool true])
+  | Browser_lane.Action.Accept_dialog text -> answer_dialog ~accept:true text
+  | Browser_lane.Action.Dismiss_dialog -> answer_dialog ~accept:false None
   | Browser_lane.Action.Click _ | Browser_lane.Action.Fill _ | Browser_lane.Action.Press _
-  | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _ | Browser_lane.Action.Upload _
-  | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog ->
-    Error (Before_effect "live BiDi page.act supports open_tab, back, forward, reload and close_tab only")
+  | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _ | Browser_lane.Action.Upload _ ->
+    Error (Before_effect "live BiDi page.act supports open_tab, back, forward, reload, close_tab, accept_dialog and dismiss_dialog only")
 
 (* A URL navigation follows the rule of the history steps above: only a tab
    this connection opened, so a tab the operator opened is refused before any
@@ -498,7 +543,9 @@ let dispatch ?actor ?request_id t ~verb args =
           | _ :: _ -> obj ["tabs",tabs;"complete",`Bool false;
               "unavailableTabs",`List (List.rev unavailable)])
       | {context;id;url;window}::rest ->
-        let window_field = match window with Some window -> ["windowId",`Int window] | None -> [] in
+        let window_field = (match window with Some window -> ["windowId",`Int window] | None -> [])
+          @ (match Hashtbl.find_opt t.prompts context with
+             | Some dialog -> ["dialog",Browser_surface.dialog_json dialog] | None -> []) in
         (match tab_metadata t context with
          | Error detail ->
            rows (index+1) acc
@@ -609,6 +656,7 @@ let with_connection ~env ~timeout ~url use =
       let* addr=match Eio.Net.getaddrinfo_stream net host ~service:(string_of_int port) with
         | first::_->Ok first|[]->Error "BiDi loopback address unavailable" in
       let flow=Eio.Net.connect ~sw net addr in
+      let on_event = ref (fun (_ : Yojson.Safe.t) -> ()) in
       let settle id result = match Hashtbl.find_opt pending id with
         | None->()
         | Some resolve->Hashtbl.remove pending id;Eio.Promise.resolve resolve result in
@@ -619,7 +667,7 @@ let with_connection ~env ~timeout ~url use =
           (match Yojson.Safe.from_string (Bigstringaf.to_string message.payload) with
           | exception Yojson.Json_error _->disconnect "invalid BiDi JSON"
           | json -> match field "type" json,field "id" json with
-            | Some (`String "event"),_->()
+            | Some (`String "event"),_-> !on_event json
             | Some (`String "success"),Some (`Int id)->
               settle id (Result.map_error (fun detail->Unanswered detail) (required "result" json))
             | Some (`String "error"),Some (`Int id)->
@@ -672,7 +720,7 @@ let with_connection ~env ~timeout ~url use =
            | Ok (Error (Rejected Invalid_session_id))->Ok ()
            (* Firefox's own answer stays its answer when the socket closes
               right behind it. *)
-           | Ok (Error (Rejected (Session_not_created | Other_error _) as declined))->
+           | Ok (Error (Rejected (Session_not_created | No_such_alert | Unexpected_alert_open | Other_error _) as declined))->
              Error (Not_confirmed (refusal_message declined))
            (* No answer: the socket closing under the request is the
               connection going, not Firefox declining. *)
@@ -683,7 +731,9 @@ let with_connection ~env ~timeout ~url use =
            | Error `Deadline_exceeded->Error (Not_confirmed "no answer to session.end in time")) in
       (* The host owns the whole command deadline. A cancelled command ends this
          connection instead of admitting another write behind an unknown one. *)
-      Ok (create ~session_end ~command) in
+      let peer = create ~session_end ~command in
+      on_event := note_event peer;
+      Ok peer in
     try
       (* A connection established as the deadline passed is the connection. *)
       let peer=match

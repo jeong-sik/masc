@@ -2,9 +2,17 @@
 type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
 type request = { route : Browser_selection.preference; tab_id : int option }
 val parse_request : Yojson.Safe.t -> (request, string) result
+type dialog_kind = Alert | Confirm | Prompt | Beforeunload
+val dialog_kind_to_wire : dialog_kind -> string
+val dialog_kind_of_wire : string -> dialog_kind option
+(** A JavaScript dialog a tab is blocked on, as the browser reported it. [message] is page text and
+    can say anything. *)
+type dialog = { kind : dialog_kind; message : string; default_value : string option }
+val dialog_json : dialog -> Yojson.Safe.t
 (** [window_id] names the browser window a tab is in, when the browser says which. Tabs that share a
     [window_id] share a window. It is opaque, and only comparable within one connection. *)
-type tab = { id : int; title : string; url : string; active : bool; window_id : int option }
+type tab = { id : int; title : string; url : string; active : bool; window_id : int option;
+  dialog : dialog option }
 
 (** Which tab a read answers for. [None_active] means no tab was requested
     and none is active, so the answer carries [page = null] and reads nothing. *)

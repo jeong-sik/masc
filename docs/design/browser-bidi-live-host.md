@@ -740,6 +740,27 @@ API's zero-to-reset shorthand is deliberately excluded: callers supply an
 explicit factor. [Isolated native evidence](../evidence/2026-10-19-browser-zoom/README.md)
 records actual 150% and 75% browser zoom and the exact execution boundary.
 
+### JavaScript dialogs on a BiDi connection
+
+A BiDi session answers a page's `alert`, `confirm` and `prompt` itself unless it
+is created with `unhandledPromptBehavior`. Probed 2026-10-22 on Firefox 158: a
+session made with empty capabilities returned `false` from `confirm()` at once,
+with no person involved, and `browsingContext.handleUserPrompt` then answered
+`no such alert`. The host now creates the session with
+`alwaysMatch.unhandledPromptBehavior.default = "ignore"`, so a dialog stays open
+for the person using the browser, and subscribes to
+`browsingContext.userPromptOpened` and `browsingContext.userPromptClosed`.
+
+The two events say which dialog (`alert`, `confirm`, `prompt`, `beforeunload`),
+its message and a prompt's default. The host keeps one per context and shows it
+as `dialog` on that tab's `list_tabs` row. It knows only what happened since it
+subscribed: a dialog already open then is not listed. `accept_dialog` and
+`dismiss_dialog` send `browsingContext.handleUserPrompt` (`accept`, and
+`userText` for a prompt) and answer only for a tab this connection opened; the
+person answers a dialog on their own tab. A tab with no dialog gets the
+browser's `no such alert`, which the host reports before any effect. The
+receipt names the dialog that was answered. A dialog's message is page text.
+
 ### Owned Chrome tab and history actions
 
 On `lane=stagehand`, BrowserAct serves `open_tab` and top-level `back`,

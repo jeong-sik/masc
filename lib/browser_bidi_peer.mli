@@ -26,6 +26,8 @@ type error_code = private
           reason a session cannot start; Firefox 157.0.1 was seen to answer
           it while it held a session for another connection. *)
   | Invalid_session_id  (** A session command on a connection that has no session. *)
+  | No_such_alert  (** A dialog command on a tab that has no dialog open. *)
+  | Unexpected_alert_open  (** A command the browser would not run while a dialog is open. *)
   | Other_error of string
 
 val error_code_of_wire : string -> error_code
@@ -60,6 +62,10 @@ val create
     [Session_failed]: any other way, with nothing said of a session there. *)
 type session_failure = Session_refused of string | Session_failed of string
 val session_failure_message : session_failure -> string
+(** Takes one event the browser sent. Only the two dialog events are read: [browsingContext.userPromptOpened]
+    notes the dialog a tab is blocked on, [browsingContext.userPromptClosed] clears it. Any other event, and
+    a dialog event this host cannot read, changes nothing. *)
+val note_event : t -> Yojson.Safe.t -> unit
 (** Asks the browser for a BiDi session and answers the browser's version. *)
 val metadata : t -> (string, session_failure) result
 

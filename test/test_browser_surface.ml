@@ -142,6 +142,26 @@ let test_tab_window_is_kept_and_checked () =
     | Error _ -> ()
     | Ok _ -> fail "a window that is not a number was accepted")
 
+let test_tab_dialog_is_kept_and_checked () =
+  let with_dialog id dialog = match tab id "https://example.org/page" (id = 41) with
+    | `Assoc fields -> `Assoc (fields @ ["dialog", dialog])
+    | other -> other in
+  let dialogs tabs = with_browser tabs (fun _ ->
+    Yojson.Safe.Util.(read_ok (request None) |> member "tabs" |> to_list |> List.map (member "dialog"))) in
+  let prompt = `Assoc ["type",`String "prompt";"message",`String "name?";"defaultValue",`String "dflt"] in
+  check bool "a tab keeps the dialog it is blocked on, and one with none names none" true
+    (dialogs [with_dialog 41 prompt; tab 73 "https://example.org/page" false] = [prompt; `Null]);
+  List.iter (fun (label, dialog) ->
+    with_browser [with_dialog 41 dialog] (fun _ ->
+      match Surface.read (request None) with
+      | Error _ -> ()
+      | Ok _ -> fail ("a malformed dialog was accepted: " ^ label)))
+    ["a kind the browser does not have", `Assoc ["type",`String "popup";"message",`String "x"];
+     "a message that is not text", `Assoc ["type",`String "alert";"message",`Int 1];
+     "no message", `Assoc ["type",`String "alert"];
+     "a default that is not text", `Assoc ["type",`String "prompt";"message",`String "x";"defaultValue",`Int 1];
+     "not an object", `String "alert"]
+
 let test_transport_unavailability_is_not_a_workflow_refusal () =
   List.iter (fun answer ->
     (match Surface.observe_answer ~lane:Browser_lane.Lane_name.Live answer with
@@ -413,6 +433,7 @@ let () = run "browser surface" ["behavior",[
   test_case "unreadable tabs do not block the requested readable tab" `Quick test_partial_inventory_preserves_requested_work;
   test_case "partial inventories remain incomplete without unavailable tabs" `Quick test_partial_inventory_without_unavailable_tabs;
   test_case "a tab keeps its window and a malformed one is refused" `Quick test_tab_window_is_kept_and_checked;
+      test_case "a tab keeps and checks the dialog it is blocked on" `Quick test_tab_dialog_is_kept_and_checked;
   test_case "transport availability keeps its failure class" `Quick test_transport_unavailability_is_not_a_workflow_refusal;
   test_case "compound read retains its original admission" `Quick test_compound_read_keeps_admission;
   test_case "scoped scene acknowledgement" `Quick test_scoped_scene_acknowledgement;

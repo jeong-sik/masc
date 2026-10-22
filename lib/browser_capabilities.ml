@@ -67,7 +67,12 @@ let support backend operation = match backend with
       | Connected Browser_lane.Web_extension -> conditional ~action:"activate_tab" Interact
           [observed;"Changes the browser's active tab without promising window focus."]
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
-    | List_windows | Create_window | Close_window -> missing
+    | List_windows -> (match backend with
+      | Connected Browser_lane.Webdriver_bidi -> conditional Tabs
+          ["Every list_tabs row carries windowId when Firefox names the tab's window; tabs with the same windowId share a window, and the distinct values are the windows.";
+           "windowId is opaque and only comparable within one connection. There is no window title, size or position."]
+      | Connected Browser_lane.Web_extension | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
+    | Create_window | Close_window -> missing
     | Navigate -> (match backend with
       | Owned_gecko | Owned_chromium -> conditional Goto ["An open owned session and an HTTP(S) URL are required; preserve its concrete browser binding."]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable ->

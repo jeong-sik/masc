@@ -47,6 +47,8 @@ let session_failure_message = function Session_refused why | Session_failed why 
 type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   session_end : unit -> (unit,session_end_failure) result; mutable session_may_exist : bool;
   mutable contexts : (string * int) list; mutable next_tab : int;
+  (* BiDi's window IDs, numbered in the order this connection first sees them, as tab IDs are. *)
+  mutable windows : (string * int) list;
   (* The tab IDs this connection created. It closes these and no others. *)
   mutable opened : int list;
   (* The contexts this connection gave a viewport size. Firefox keeps that size after the session ends
@@ -54,7 +56,7 @@ type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   mutable sized : string list; mutable version : string option;
   mutable profile : string option; mutable process_id : int option }
 let create ~session_end ~command =
-  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;opened=[];sized=[];version=None;profile=None;process_id=None}
+  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;windows=[];opened=[];sized=[];version=None;profile=None;process_id=None}
 let command t method_ params = Result.map_error (fun refusal -> method_ ^ ": " ^ refusal_message refusal) (t.ask method_ params)
 (* Firefox keeps a session whose socket closed and takes one session at a
    time, so one left behind refuses every later connection until that Firefox
@@ -178,6 +180,11 @@ let remember_context t context =
   | None -> t.next_tab <- t.next_tab + 1;
     t.contexts <- (context,t.next_tab)::t.contexts; t.next_tab
 
+let remember_window t window =
+  match List.assoc_opt window t.windows with
+  | Some id -> id
+  | None -> let id = List.length t.windows in t.windows <- t.windows @ [window, id]; id
+
 let open_tab t url =
   let invalid () = Error (Before_effect "open_tab requires an absolute HTTP(S) URL") in
   let* () = match Uri.of_string url with
@@ -217,7 +224,7 @@ let open_tab t url =
   | `Assoc fields -> Ok (obj (("tabId",`Int id)::("action",str "open_tab")::("created",`Bool true)::fields))
   | _ -> Error (partial "invalid new-tab summary")
 
-type tab_context = { context : string; id : int; url : string option }
+type tab_context = { context : string; id : int; url : string option; window : int option }
 
 let tree t =
   let* result = command t "browsingContext.getTree" (obj []) in
@@ -231,7 +238,10 @@ let tree t =
           | None -> Ok None
           | Some (`String url) -> Ok (Some url)
           | Some _ -> Error "invalid BiDi context URL" in
-        collect ({context;id;url}::acc) rest in
+        let window = match field "clientWindow" row with
+          | Some (`String window) -> Some (remember_window t window)
+          | None | Some _ -> None in
+        collect ({context;id;url;window}::acc) rest in
     collect [] rows
   | _ -> Error "invalid BiDi context tree"
 let resolve t args =
@@ -242,7 +252,7 @@ let resolve t args =
   | None ->
     let rec active unavailable = function
       | [] -> Error (String.concat "; " ("no active browser context" :: List.rev unavailable))
-      | {context;id;url=_}::rest ->
+      | {context;id;url=_;window=_}::rest ->
         (match tab_metadata t context with
          | Error detail -> active (Printf.sprintf "tab %d: %s" id detail :: unavailable) rest
          | Ok p -> match field "active" p with
@@ -415,18 +425,21 @@ let dispatch ?actor ?request_id t ~verb args =
           | [] -> tabs
           | _ :: _ -> obj ["tabs",tabs;"complete",`Bool false;
               "unavailableTabs",`List (List.rev unavailable)])
-      | {context;id;url}::rest ->
+      | {context;id;url;window}::rest ->
+        let window_field = match window with Some window -> ["windowId",`Int window] | None -> [] in
         (match tab_metadata t context with
          | Error detail ->
            rows (index+1) acc
              (obj (["id",`Int id;"index",`Int index;"error",str detail]
+               @ window_field
                @ match url with Some url -> ["url",str url] | None -> [])::unavailable) rest
          | Ok p ->
            let* url=pre (string "url" p) in
            let* title=pre (required "title" p) in
            let* active=pre (required "active" p) in
            rows (index+1)
-             (obj ["id",`Int id;"index",`Int index;"url",str url;"title",title;"active",active]::acc)
+             (obj (["id",`Int id;"index",`Int index;"url",str url;"title",title;"active",active]
+               @ window_field)::acc)
              unavailable rest)
     in
     rows 0 [] [] current

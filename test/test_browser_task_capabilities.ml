@@ -154,6 +154,14 @@ let test_touch_table () =
   check bool "the extension has no touch" false (reaches (Cap.Connected Lane.Web_extension));
   check bool "Safari has no touch" false (reaches Cap.Safari_unavailable)
 
+let test_list_windows_table () =
+  let reaches backend = match Cap.support backend Cap.List_windows with
+    | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
+  check bool "live BiDi names each tab's window" true (reaches (Cap.Connected Lane.Webdriver_bidi));
+  List.iter (fun (label,backend) -> check bool (label ^ " does not") false (reaches backend))
+    ["the extension",Cap.Connected Lane.Web_extension;"the owned Firefox",Cap.Owned_gecko;
+     "Stagehand",Cap.Owned_chromium;"Safari",Cap.Safari_unavailable]
+
 let () = run "task-aware browser choice" ["scenarios",[
   test_case "HTML5, frames/downloads and hover/typing discovery" `Quick test_task_choice;
   test_case "zoom, impossible requirements and immutable explicit owners" `Quick test_zoom_and_impossible;
@@ -162,4 +170,5 @@ let () = run "task-aware browser choice" ["scenarios",[
   test_case "right and middle click are claimed only where a button is pressed" `Quick test_button_click_table;
   test_case "viewport resize is claimed only where a size can be set" `Quick test_resize_viewport_table;
   test_case "history and close are claimed on every backend that acts on tabs" `Quick test_tab_history_and_close_table;
-  test_case "touch is claimed only where a touch pointer is sent" `Quick test_touch_table]]
+  test_case "touch is claimed only where a touch pointer is sent" `Quick test_touch_table;
+  test_case "window listing is claimed only where tabs name their window" `Quick test_list_windows_table]]

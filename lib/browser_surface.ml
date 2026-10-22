@@ -1,6 +1,6 @@
 type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
 type request = { route : Browser_selection.preference; tab_id : int option }
-type tab = { id : int; title : string; url : string; active : bool }
+type tab = { id : int; title : string; url : string; active : bool; window_id : int option }
 type selection = Requested of tab | Active of tab | None_active
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
@@ -75,7 +75,11 @@ let observe_answer ~lane answer =
 let decode_tab json =
   match field "id" json, field "title" json, field "url" json, field "active" json with
   | Some (`Int id), Some (`String title), Some (`String url), Some (`Bool active) ->
-    Ok {id;title;url;active}
+    let* window_id = match field "windowId" json with
+      | None -> Ok None
+      | Some (`Int window_id) when window_id >= 0 -> Ok (Some window_id)
+      | Some _ -> Error "malformed browser tab window" in
+    Ok {id;title;url;active;window_id}
   | _ -> Error "malformed browser tab"
 let rec decode_tabs = function
   | [] -> Ok []
@@ -96,8 +100,9 @@ let decode_inventory = function
        else Error "malformed unavailable browser tab"
      | _ -> Error "malformed partial browser inventory")
   | _ -> Error "browser tabs must be a list or inventory"
-let tab_json tab = `Assoc ["id",`Int tab.id;"title",`String tab.title;
+let tab_json tab = `Assoc (["id",`Int tab.id;"title",`String tab.title;
   "url",`String tab.url;"active",`Bool tab.active]
+  @ match tab.window_id with Some window_id -> ["windowId",`Int window_id] | None -> [])
 let source_name route = Browser_lane.Lane_name.to_wire (Browser_lane.route_lane_name route)
 let select ~tab_id tabs = match tab_id with
   | Some id -> (match List.find_opt (fun tab -> tab.id = id) tabs with

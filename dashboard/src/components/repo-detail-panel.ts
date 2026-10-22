@@ -6,7 +6,7 @@ import { signal } from '@preact/signals'
 import { get } from '../api/core'
 import { createAsyncResource } from '../lib/async-state'
 import { LoadingState, ErrorState, EmptyState } from './common/feedback-state'
-import { selectedRepoId, syncRepository, deleteRepository, normalizeRepoStatus, type Repository, type RepoStatus } from './repo-sidebar'
+import { selectedRepoId, syncRepository, repositorySyncResults, repositoryAdvanceSummary, deleteRepository, normalizeRepoStatus, type Repository, type RepoStatus } from './repo-sidebar'
 import { requestConfirm } from './common/confirm-dialog'
 import { StatusBadge as CommonStatusBadge } from './common/status-badge'
 import { formatDateTimeKo as formatDate } from '../lib/format-time'
@@ -25,8 +25,10 @@ export interface BranchInfo {
 
 const repoDetailResource = createAsyncResource<Repository>()
 const repoDetailState = repoDetailResource.state
+const detailRepositoryId = signal<string | null>(null)
 const branchesResource = createAsyncResource<BranchInfo[]>()
 const branchesState = branchesResource.state
+let branchesRepositoryId: string | null = null
 const syncing = signal(false)
 
 // ── API ──────────────────────────────────────────────────
@@ -63,6 +65,10 @@ export function branchRows(raw: unknown): unknown[] {
 }
 
 export async function loadRepoDetail(id: string): Promise<void> {
+  if (detailRepositoryId.peek() !== id) {
+    detailRepositoryId.value = id
+    repoDetailResource.reset()
+  }
   if (repoDetailState.value.status === 'loading') return
   await repoDetailResource.load(async () => {
     const raw = await get<unknown>(`/api/v1/repositories/${encodeURIComponent(id)}`)
@@ -83,6 +89,10 @@ export async function loadRepoDetail(id: string): Promise<void> {
 }
 
 export async function loadRepoBranches(id: string): Promise<void> {
+  if (branchesRepositoryId !== id) {
+    branchesRepositoryId = id
+    branchesResource.reset()
+  }
   await branchesResource.load(async () => {
     const raw = await get<unknown>(`/api/v1/repositories/${encodeURIComponent(id)}/branches`)
     return branchRows(raw).map(normalizeBranch).filter((b): b is BranchInfo => b !== null)
@@ -139,20 +149,25 @@ export function RepoDetailPanel() {
 
   const detailState = repoDetailState.value
   const branchState = branchesState.value
+  const syncOutcome = repositorySyncResults.value.get(selectedId)
+  const syncObservation = syncOutcome
+    ? html`<div role="status">${repositoryAdvanceSummary(syncOutcome).message}</div>` : null
 
   // Load on selection change
-  if (detailState.status === 'idle' || (detailState.status === 'loaded' && detailState.data.id !== selectedId)) {
+  if (detailRepositoryId.value !== selectedId || detailState.status === 'idle') {
     void loadRepoDetail(selectedId)
     void loadRepoBranches(selectedId)
+    return html`<div>${syncObservation}<${LoadingState}>저장소 정보 불러오는 중...<//></div>`
   }
 
   if (detailState.status === 'loading') {
-    return html`<${LoadingState}>저장소 정보 불러오는 중...<//>`
+    return html`<div>${syncObservation}<${LoadingState}>저장소 정보 불러오는 중...<//></div>`
   }
 
   if (detailState.status === 'error') {
     return html`
       <div class="space-y-3">
+        ${syncObservation}
         <${ErrorState} message=${detailState.message} />
         <button
           type="button"
@@ -174,7 +189,13 @@ export function RepoDetailPanel() {
     syncing.value = true
     try {
       await syncRepository(repo.id)
+      if (selectedRepoId.value !== repo.id) return
       await loadRepoDetail(repo.id)
+      if (selectedRepoId.value !== repo.id) return
+      await loadRepoBranches(repo.id)
+    } catch {
+      // syncRepository reports mutation/read failure. Detail refresh errors
+      // belong to the resource and cannot erase the settled sync observation.
     } finally {
       syncing.value = false
     }
@@ -201,6 +222,7 @@ export function RepoDetailPanel() {
 
   return html`
     <div class="v2-workspace-surface flex flex-col gap-4">
+      ${syncObservation}
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
           <h2 class="text-lg font-semibold text-[var(--color-fg-secondary)]">${repo.name}</h2>

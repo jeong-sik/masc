@@ -388,9 +388,7 @@ let live_capability = function
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
   | Session_open _ | Session_close | Session_status
-  | Page_act (Action.On_tab { interaction =
-      ( Action.Click _ | Action.Fill _ | Action.Press _ | Action.Select _ | Action.Scroll _
-      | Action.Upload _ ); _ }) -> None
+  | Page_act (Action.On_tab { interaction = Action.Upload _; _ }) -> None
   | Page_instruct _ | Page_locate _ | Page_extract _ -> None
 ;;
 
@@ -418,8 +416,7 @@ let verb_allowed_on_stagehand = function
   | Page_act (Action.On_tab {frame_path;interaction;_}) ->
     (match interaction with
      | Action.Back | Forward | Reload | Close_tab -> frame_path = []
-     | Action.Click _ | Fill _ | Press _ | Select _ | Scroll _ | Upload _
-     | Accept_dialog _ | Dismiss_dialog -> false)
+     | Action.Upload _ | Accept_dialog _ | Dismiss_dialog -> false)
   | Page_document _ | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ -> false
 ;;
 

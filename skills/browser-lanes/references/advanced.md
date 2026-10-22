@@ -7,8 +7,8 @@
 같은 경로의 `text`와 `elements`를 읽은 뒤 해당 탭·프레임에서 조작한다.
 
 `framePath`는 automation의 `BrowserRead` text/elements/frames 읽기와
-`BrowserAct` 요소·스크롤 조작에 사용한다. `BrowserInteract`는 최상위 문서 전용이며
-`framePath`를 받지 않는다.
+`BrowserAct upload`에 사용한다. `BrowserInteract`는 최상위 문서 전용이며
+`framePath`를 받지 않으므로, 프레임 안 요소의 click/fill은 아직 할 수 없다.
 탭 이동, 히스토리, JS 대화상자와 screenshot에는 넣지 않는다. screenshot은
 최상위 viewport를 캡처하므로 스크롤한 프레임의 입력란이 화면 밖일 수 있다.
 

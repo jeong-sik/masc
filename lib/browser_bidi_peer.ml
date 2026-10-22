@@ -398,8 +398,7 @@ let tab_action t ~tab_id interaction =
     | (Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog) when not (List.mem tab_id t.opened) ->
       Error (Before_effect "a connected browser's dialogs are answered only on tabs this connection opened; the person using the browser answers a dialog on their own tab")
     | Browser_lane.Action.Close_tab | Browser_lane.Action.Back | Browser_lane.Action.Forward
-    | Browser_lane.Action.Reload | Browser_lane.Action.Click _ | Browser_lane.Action.Fill _
-    | Browser_lane.Action.Press _ | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _
+    | Browser_lane.Action.Reload
     | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog -> Ok () in
   let* context,id = Result.map_error (fun e -> Before_effect e) (resolve t (obj ["tabId",`Int tab_id])) in
   (* The dialog is read before it is answered: the answer closes it, and the receipt says which one was
@@ -428,8 +427,7 @@ let tab_action t ~tab_id interaction =
     Ok (obj ["tabId",`Int id;"action",str "close_tab";"closed",`Bool true])
   | Browser_lane.Action.Accept_dialog text -> answer_dialog ~accept:true text
   | Browser_lane.Action.Dismiss_dialog -> answer_dialog ~accept:false None
-  | Browser_lane.Action.Click _ | Browser_lane.Action.Fill _ | Browser_lane.Action.Press _
-  | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _ | Browser_lane.Action.Upload _ ->
+  | Browser_lane.Action.Upload _ ->
     Error (Before_effect "live BiDi page.act supports open_tab, back, forward, reload, close_tab, accept_dialog and dismiss_dialog only")
 
 (* A URL navigation follows the rule of the history steps above: only a tab

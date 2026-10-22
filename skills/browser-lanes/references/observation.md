@@ -68,9 +68,10 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
   긴 `nth-of-type` 경로를 기억으로 재작성하거나 실패한 경로의 숫자를 고치지 않는다.
 - selector 는 문서에서 하나뿐인 id(`#…`)가 있으면 거기서 시작한다. 그 앞부분을
   elements 의 `within` 에 그대로 넘기면 그 영역의 컨트롤만 다시 읽는다.
-- live 조작은 `BrowserInteract`의 click/fill/scroll을 사용하고 직전 URL을
-  `expectedUrl`로 전달한다. automation에서는 요청에 맞게 `BrowserInteract`나
-  `BrowserAct`를 사용한다. 텍스트 입력과 Enter·제출은 별개의 동작이다.
+- 페이지 안의 입력(click, fill, select_option, scroll, 키)은 어느 브라우저에서나
+  `BrowserInteract`를 쓰고 직전 URL을 `expectedUrl`로 전달한다. `BrowserAct`는
+  탭 열기·닫기, 히스토리, 대화상자, 업로드만 맡는다. 텍스트 입력과 Enter·제출은
+  별개의 동작이다.
 - `page_url_changed`로 거절되면 현재 URL과 대상을 다시 관측한다. 목적지 URL을
   expectedUrl로 추측하거나 URL 검사만 통과시키려고 과거 값을 바꾸지 않는다.
 - 조작 후 다시 읽어 실제 결과를 확인한다. 요소를 못 찾으면 같은 프레임에서

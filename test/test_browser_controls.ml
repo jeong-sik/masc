@@ -80,37 +80,27 @@ let test_targeted_goto () = fixture (fun _env driver current calls _ ->
   check int "unknown tab cannot navigate current tab" 0 (List.length !calls))
 let test_selector_contract () = fixture (fun _env driver _ calls matches ->
   List.iter (fun count -> matches := count; calls := [];
-    (match act driver 1 (Action.Click "button") with Lane.Rejected_before_effect _ -> () | _ -> fail "non-unique selector accepted");
-    check bool "no click after absent or ambiguous selector" false
-      (List.exists (fun (_,_,path,_) -> String.ends_with ~suffix:"/click" path) !calls)) [0;2])
-let test_native_fill_and_key () = fixture (fun _env driver _ calls _ ->
-  ignore (ok (act driver 2 (Action.Fill {selector="#name";text="한글'\n🙂"})));
-  let commands = List.rev !calls |> List.filter (fun (_,_,path,_) -> String.starts_with ~prefix:"/session/s/element/" path) in
-  (match commands with
-   | [("b",`POST,"/session/s/element/b_button/clear",_);
-      ("b",`POST,"/session/s/element/b_button/value",Some body)] ->
-      check bool "text travels as JSON, not code" true (field "text" body = Some (`String "한글'\n🙂"))
-   | _ -> fail "fill must clear then send native keys in selected tab");
-  ignore (ok (act driver 2 (Action.Press {selector="#name";key=Action.Enter})));
-  match List.hd !calls with
-  | _,_,"/session/s/element/b_button/value",Some body ->
-    check bool "Enter uses WebDriver key code" true (field "text" body = Some (`String "\xee\x80\x87"))
-  | _ -> fail "native key command missing")
+    (match act driver 1 (Action.Upload {selector="button";paths=["/x/payload.bin"]}) with Lane.Rejected_before_effect _ -> () | _ -> fail "non-unique selector accepted");
+    check bool "no file selection after absent or ambiguous selector" false
+      (List.exists (fun (_,_,path,_) -> String.ends_with ~suffix:"/value" path) !calls)) [0;2])
 let test_parallel_targeting () = fixture (fun _env driver _ calls _ ->
   Eio.Fiber.both
-    (fun () -> ignore (ok (act driver 1 (Action.Click "button"))))
-    (fun () -> ignore (ok (act driver 2 (Action.Click "button"))));
-  let clicks = List.filter_map (fun (tab,_,path,_) ->
-    if String.ends_with ~suffix:"/click" path then Some (tab,path) else None) !calls in
-  check int "both interactions completed" 2 (List.length clicks);
-  List.iter (fun (tab,path) -> check string "tab selection and click are atomic"
-    ("/session/s/element/" ^ tab ^ "_button/click") path) clicks)
+    (fun () -> ignore (ok (act driver 1 (Action.Reload))))
+    (fun () -> ignore (ok (act driver 2 (Action.Reload))));
+  let reloads = List.filter_map (fun (tab,_,path,_) ->
+    if path = "/session/s/refresh" then Some tab else None) !calls in
+  check int "both interactions completed" 2 (List.length reloads);
+  check (list string) "each reload runs in its own tab" ["a";"b"] (List.sort compare reloads))
 let test_parser () =
-  let valid = `Assoc ["action",`String "fill";"tabId",`Int 2;"selector",`String "#name";"text",`String ""] in
+  let valid = `Assoc ["action",`String "upload";"tabId",`Int 2;"selector",`String "#name";"paths",`List [`String "a.txt"]] in
   (match Action.parse valid with Ok action -> check bool "round trip" true (Action.parse (Action.to_json action)=Ok action) | Error e -> fail e);
   List.iter (fun fields -> check bool "invalid action rejected" true (Result.is_error (Action.parse (`Assoc fields))))
-    [["action",`String "click";"selector",`String "button"];
-     ["action",`String "click";"tabId",`Int 1;"selector",`String ""];
+    [["action",`String "click";"tabId",`Int 1;"selector",`String "button"];
+     ["action",`String "fill";"tabId",`Int 1;"selector",`String "#name";"text",`String ""];
+     ["action",`String "press";"tabId",`Int 1;"selector",`String "#name";"key",`String "Enter"];
+     ["action",`String "select";"tabId",`Int 1;"selector",`String "select";"value",`String "x"];
+     ["action",`String "scroll";"tabId",`Int 1;"x",`Int 0;"y",`Int 1];
+     ["action",`String "upload";"tabId",`Int 1;"selector",`String "";"paths",`List [`String "a.txt"]];
      ["action",`String "reload";"tabId",`Int 1;"text",`String "ignored?"];
      ["action",`String "reload";"tabId",`Int 1;"tabId",`Int 2]]
 let test_stale_session_id () = fixture (fun _env driver _ calls _ ->
@@ -118,7 +108,7 @@ let test_stale_session_id () = fixture (fun _env driver _ calls _ ->
   ignore (ok (Driver.execute driver (Lane.Session_open {headless=None})));
   ignore (ok (Driver.execute driver Lane.Tabs_list));
   calls := [];
-  (match act driver 1 (Action.Click "button") with
+  (match act driver 1 Action.Reload with
    | Lane.Rejected_before_effect _ -> () | _ -> fail "stale tab id targeted the new session");
   check int "stale target causes no browser request" 0 (List.length !calls))
 let test_pre_effect_tool_outcome () = with_upload_context (fun config meta -> fixture (fun env driver _ calls matches ->
@@ -128,13 +118,15 @@ let test_pre_effect_tool_outcome () = with_upload_context (fun config meta -> fi
     Browser_addon_fixture.with_worker ~env ~config ~respond:(fun ~route:_ verb -> Driver.execute driver verb) (fun _browser ->
     let invoke fields = Masc.Keeper_tool_in_process_runtime.handle_browser_act_with_outcome
       ~turn_sandbox_factory:None ~config ~meta ~args:(`Assoc (("lane",`String "automation")::fields)) in
-    let missing = invoke ["action",`String "click";"selector",`String "button"] in
+    let missing = invoke ["action",`String "reload"] in
     check bool "missing target permits correction" true
       (missing.failure_effect_disposition = Tool_result.Proven_pre_effect);
-    matches := 0;
-    let absent = invoke ["action",`String "click";"selector",`String "button";"tabId",`Int 1] in
-    check bool "absent element permits correction" true
-      (absent.failure_effect_disposition = Tool_result.Proven_pre_effect);
+    let removed = invoke ["action",`String "click";"selector",`String "button";"tabId",`Int 1] in
+    check bool "page input moved to masc_browser_interact" true
+      (removed.failure_effect_disposition = Tool_result.Proven_pre_effect);
+    let unknown_tab = invoke ["action",`String "reload";"tabId",`Int 99] in
+    check bool "unknown tab permits correction" true
+      (unknown_tab.failure_effect_disposition = Tool_result.Proven_pre_effect);
     calls := [];
     let upload = ["action",`String "upload";"selector",`String "input";"tabId",`Int 1;
       "paths",`List [`String (Filename.concat config.base_path "outside-secret")]] in
@@ -225,14 +217,14 @@ let test_context_arguments () =
   List.iter (fun input -> match Action.parse input with
     | Ok action -> check bool "context round trip" true (Action.parse (Action.to_json action) = Ok action)
     | Error detail -> fail detail)
-    [valid "click" ["selector",`String "#apply";"framePath",`List [`String "iframe";`String "#nested"]];
+    [valid "upload" ["selector",`String "#apply";"paths",`List [`String "a.txt"];"framePath",`List [`String "iframe";`String "#nested"]];
      valid "accept_dialog" ["text",`String "한글"];
      valid "dismiss_dialog" [];
      valid "upload" ["selector",`String "input";"paths",`List [`String "relative.txt"]];
      valid "upload" ["selector",`String "input";"paths",`List [`String "/fixture/file.txt"]]];
   List.iter (fun input -> check bool "invalid context rejected" true (Result.is_error (Action.parse input)))
-    [valid "click" ["selector",`String "button";"framePath",`List [`Int 1]];
-     valid "click" ["selector",`String "button";"framePath",`List [`String ""]];
+    [valid "upload" ["selector",`String "input";"paths",`List [`String "a.txt"];"framePath",`List [`Int 1]];
+     valid "upload" ["selector",`String "input";"paths",`List [`String "a.txt"];"framePath",`List [`String ""]];
      valid "accept_dialog" ["framePath",`List [`String "iframe"]];
      valid "upload" ["selector",`String "input";"paths",`List []];
      valid "upload" ["selector",`String "input";"paths",`List [`String "/file\n/other"]]]

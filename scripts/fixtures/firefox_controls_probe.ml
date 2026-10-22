@@ -58,7 +58,16 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       let confirmation = match interaction with Browser_action.Close_tab -> "closed" | _ -> "performed" in
       check "native action confirms its target tab"
         (member "tabId" response = `Int id && member confirmation response = `Bool true) in
-    let elements id = success (run (Browser_lane.Page_elements {tab_id=Some id})) in
+    (* Page input is BrowserInteract; BrowserAct keeps tabs, history, dialogs and upload. *)
+    let interact_raw id ?expected_url action =
+      run (Browser_lane.Page_interact {tab_id=id;expected_url;action}) in
+    let input id ?expected_url action =
+      let response = success (interact_raw id ?expected_url action) in
+      check "page input confirms its target tab" (member "tabId" response = `Int id) in
+    (* A click that opens a JavaScript dialog can report an error after the page
+       took the click, so the dialog itself is the evidence. *)
+    let click_opening_dialog id selector = ignore (interact_raw id (Browser_lane.Click selector)) in
+    let elements id = success (run (Browser_lane.Page_elements {tab_id=Some id;within=None})) in
     let observation = elements first in
     check "element observation names its tab" (integer (member "tabId" observation)=first);
     let controls = member "elements" observation |> Yojson.Safe.Util.to_list in
@@ -67,22 +76,26 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     check "password values are absent" (member "value" (control "password") = `Null);
     let options = member "options" (control "country") |> Yojson.Safe.Util.to_list in
     check "opaque option values are observable" (List.exists (fun item -> member "value" item = `String "opaque-02") options);
-    act first (Browser_action.Fill {selector=selector "name";text="한글 Firefox 🙂"});
-    act first (Browser_action.Select {selector=selector "country";value="opaque-02"});
-    act first (Browser_action.Click (selector "submit"));
+    input first (Browser_lane.Fill {selector=selector "name";text="한글 Firefox 🙂"});
+    input first (Browser_lane.Select_option {selector=selector "country";value="opaque-02"});
+    input first (Browser_lane.Click (selector "submit"));
     let read id = success (run (Browser_lane.Page_read {tab_id=Some id;max_chars=None})) in
     let text = member "text" (read first) |> string in
     check "native fill select and click changed page" (contains text "1 submissions: 한글 Firefox 🙂 / opaque-02");
     let current = elements first |> member "elements" |> Yojson.Safe.Util.to_list in
     check "live DOM value reflects native fill" (List.exists (fun item -> member "value" item = `String "한글 Firefox 🙂") current);
-    act first (Browser_action.Press {selector=selector "name";key=Browser_action.Enter});
+    let document_id = success (run (Browser_lane.Page_scene {tab_id=first;max_chars=1000;view=Browser_lane.Content;scope=None}))
+      |> member "documentId" |> string in
+    let enter = match Browser_lane.Keyboard.of_wire ~key:"Enter" ~modifiers:[] with Ok key -> key | Error error -> failwith error in
+    input first (Browser_lane.Click (selector "name"));
+    input first ~expected_url:(fixture_url ^ "/first") (Browser_lane.Press_key {document_id;key=enter});
     check "native Enter submits the filled form" (contains (member "text" (read first) |> string) "2 submissions: 한글 Firefox 🙂 / opaque-02");
     let second = open_tab "/second" in
-    act first (Browser_action.Click (selector "submit"));
+    input first (Browser_lane.Click (selector "submit"));
     check "second tab remains independently readable" (member "url" (read second) = `String (fixture_url ^ "/second"));
-    let rejected = run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;frame_path=[];interaction=Browser_action.Click "input"})) in
+    let rejected = interact_raw first (Browser_lane.Click "input") in
     check "ambiguous selector rejected before effect" (match rejected with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
-    act first (Browser_action.Scroll {x=0;y=400});
+    input first (Browser_lane.Scroll {x=0;y=400});
     let navigated = success (run (Browser_lane.Page_goto {url=fixture_url ^ "/next";tab_id=Some second})) in
     check "targeted navigation reaches the requested URL"
       (member "url" navigated = `String (fixture_url ^ "/next"));
@@ -91,7 +104,7 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     act second Browser_action.Forward;
     check "native forward restores URL" (member "url" (read second) = `String (fixture_url ^ "/next"));
     act second Browser_action.Reload;
-    act first (Browser_action.Scroll {x=0;y=(-400)});
+    input first (Browser_lane.Scroll {x=0;y=(-400)});
     check "screenshot target is the first fixture page"
       (member "url" (read first) = `String (fixture_url ^ "/first"));
     check "another tab is selected before screenshot"
@@ -105,25 +118,10 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let oc=open_out (Sys.getenv "MASC_PROBE_SCREENSHOT_BASE64") in
     output_string oc png; close_out oc;
     let context id frame_path mode = success (run (Browser_lane.Page_context {tab_id=id;frame_path;mode})) in
-    let frames = context first [] `Frames |> member "frames" |> Yojson.Safe.Util.to_list in
-    check "iframe discovery returns a selectable frame" (List.length frames = 1);
-    let outer = member "selector" (List.hd frames) |> string in
-    let nested = context first [outer] `Frames |> member "frames" |> Yojson.Safe.Util.to_list in
-    let inner = member "selector" (List.hd nested) |> string in
-    let frame_path = [outer;inner] in
-    let frame_act interaction = success (run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;frame_path;interaction}))) in
-    check "nested cross-origin frame controls are readable"
-      (context first frame_path `Elements |> member "elements" |> Yojson.Safe.Util.to_list |> List.length = 2);
-    check "nested fill executed" (member "performed" (frame_act (Browser_action.Fill {selector="#nested-input";text="프레임 입력"})) = `Bool true);
-    check "nested click executed" (member "performed" (frame_act (Browser_action.Click "#nested-apply")) = `Bool true);
-    check "nested frame contains submitted input" (contains (context first frame_path (`Text 1000) |> member "text" |> string) "프레임 입력");
-    (* A BrowserInteract call must not inherit the previous BrowserAct frame. *)
-    let interact action expected_url = run (Browser_lane.Page_interact
-      {tab_id=first;expected_url;action}) in
+    let interact action expected_url = interact_raw first ?expected_url action in
     let mixed = success (interact (Browser_lane.Fill
       {selector=selector "name";text="Mixed browser controls"}) (Some (fixture_url ^ "/first"))) in
-    check "BrowserInteract resets native frame context and names its tab"
-      (member "tabId" mixed = `Int first);
+    check "BrowserInteract names its tab" (member "tabId" mixed = `Int first);
     let rejected = interact (Browser_lane.Fill
       {selector=selector "name";text="unexpected overwrite"}) (Some (fixture_url ^ "/wrong")) in
     check "BrowserInteract rejects stale URL before overwriting input"
@@ -133,17 +131,14 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     check "native and DOM interactions share the correct page without stale overwrite"
       (contains (member "text" (read first) |> string) "Mixed browser controls");
     check "top-level read resets the frame context" (contains (member "text" (read first) |> string) "Firefox fixture");
-    (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;frame_path=["#missing"];interaction=Browser_action.Click "button"})) with
-     | Browser_lane.Rejected_before_effect _ -> check "missing frame rejected before effect" true
-     | _ -> failwith "missing frame action accepted");
-    act first (Browser_action.Click "button[aria-label=alert]");
+    click_opening_dialog first "button[aria-label=alert]";
     check "alert text remains available" (member "text" (context first [] `Dialog) = `String "Firefox alert");
     act first (Browser_action.Accept_dialog None);
     check "accepted alert closes" (member "open" (context first [] `Dialog) = `Bool false);
-    act first (Browser_action.Click "button[aria-label=confirm]");
+    click_opening_dialog first "button[aria-label=confirm]";
     act first Browser_action.Dismiss_dialog;
     check "dismiss reaches the page as false" (contains (member "text" (read first) |> string) "false");
-    act first (Browser_action.Click "button[aria-label=prompt]");
+    click_opening_dialog first "button[aria-label=prompt]";
     act first (Browser_action.Accept_dialog (Some "대화상자 입력"));
     check "prompt input reaches the page" (contains (member "text" (read first) |> string) "대화상자 입력");
     let load_dialog = success (run (Browser_lane.Page_act (Browser_action.Open_tab (fixture_url ^ "/load-dialog")))) in
@@ -177,7 +172,7 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     (match result with
      | Ok data -> check "later File text read preserves staged bytes" (member "text" data = `String "Firefox upload 한글\n")
      | Error error -> failwith (Driver.error_message error));
-    act upload (Browser_action.Click "#send-upload");
+    input upload (Browser_lane.Click "#send-upload");
     check "real multipart upload preserves file bytes" (contains (member "text" (read upload) |> string) "Upload verified");
     let downloads_tab = open_tab "/downloads" in
     let download_rows () = success (run (Browser_lane.Page_downloads {tab_id=downloads_tab})) |> member "downloads" |> Yojson.Safe.Util.to_list in
@@ -187,20 +182,16 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
           let rows = download_rows () in
           if List.length rows = count && List.for_all (fun row -> member "status" row = `String "completed") rows then rows
           else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.05; wait ()) in wait ()) in
-    act downloads_tab (Browser_action.Click "#download-link");
+    input downloads_tab (Browser_lane.Click "#download-link");
     check "download 1 reached terminal completion" (List.length (await_downloads 1) = 1);
-    act downloads_tab (Browser_action.Click "#download-link");
+    input downloads_tab (Browser_lane.Click "#download-link");
     check "download 2 reached terminal completion" (List.length (await_downloads 2) = 2);
-    act downloads_tab (Browser_action.Click "#download-attribute");
+    input downloads_tab (Browser_lane.Click "#download-attribute");
     check "download 3 reached terminal completion" (List.length (await_downloads 3) = 3);
-    let frame_download_receipt = success (run (Browser_lane.Page_act (Browser_action.On_tab {
-      tab_id=downloads_tab;frame_path=["#download-frame"];interaction=Browser_action.Click "#frame-download"}))) in
-    check "frame download click confirms its tab and effect"
-      (member "tabId" frame_download_receipt = `Int downloads_tab && member "performed" frame_download_receipt = `Bool true);
-    let rows = await_downloads 4 in
+    let rows = await_downloads 3 in
     check "distinct UUIDs correlate identical URLs and null navigation" (List.length (List.sort_uniq String.compare
-      (List.map (fun row -> member "downloadId" row |> string) rows)) = 4);
-    check "iframe downloads belong to their observed top-level tab" (List.length rows = 4);
+      (List.map (fun row -> member "downloadId" row |> string) rows)) = 3);
+    check "downloads belong to their observed top-level tab" (List.length rows = 3);
     check "another tab cannot see these downloads"
       (success (run (Browser_lane.Page_downloads {tab_id=second})) |> member "downloads" = `List []);
     List.iter (fun row ->
@@ -213,11 +204,11 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     Out_channel.with_open_bin (Sys.getenv "MASC_PROBE_DOWNLOAD_RESULT") (fun oc ->
       output_string oc (Yojson.Safe.pretty_to_string evidence));
     act downloads_tab Browser_action.Close_tab;
-    check "completed downloads remain readable after their tab closes" (List.length (download_rows ()) = 4);
+    check "completed downloads remain readable after their tab closes" (List.length (download_rows ()) = 3);
     act upload Browser_action.Close_tab;
     check "closing one tab retains session-owned files" (List.for_all Sys.file_exists !staged_paths);
     act first Browser_action.Close_tab;
-    check "closed tab cannot be clicked" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;frame_path=[];interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
+    check "closed tab cannot be reloaded" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=first;frame_path=[];interaction=Browser_action.Reload})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false);
     let closed = success (run Browser_lane.Session_close) in
     check "session close is confirmed" (member "closed" closed = `Bool true);
     check "confirmed session teardown removes private snapshots" (List.for_all (fun path -> not (Sys.file_exists path)) !staged_paths);
@@ -225,4 +216,4 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     open_session ();
     let fresh = open_tab "/fresh" in
     check "reopened sessions never reuse tab IDs" (fresh > second);
-    check "old session target rejected" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=second;frame_path=[];interaction=Browser_action.Click "button"})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false))))
+    check "old session target rejected" (match run (Browser_lane.Page_act (Browser_action.On_tab {tab_id=second;frame_path=[];interaction=Browser_action.Reload})) with Browser_lane.Rejected_before_effect _ -> true | _ -> false))))

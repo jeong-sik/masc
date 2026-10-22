@@ -541,7 +541,7 @@ let handle_browser_act_with_outcome ~turn_sandbox_factory ~(config : Workspace.c
          ~class_:Tool_result.Runtime_failure
          ~effect_disposition:Tool_result.Proven_pre_effect
          (Keeper_tool_shared_runtime.error_json message))
-  | Ok (Browser_lane.Action.On_tab { interaction = (Browser_lane.Action.Dismiss_dialog | (Browser_lane.Action.Back | (Browser_lane.Action.Forward | (Browser_lane.Action.Reload | (Browser_lane.Action.Close_tab | (Browser_lane.Action.Click _ | (Browser_lane.Action.Fill _ | (Browser_lane.Action.Press _ | (Browser_lane.Action.Select _ | (Browser_lane.Action.Scroll _ | Browser_lane.Action.Accept_dialog _))))))))));_})
+  | Ok (Browser_lane.Action.On_tab { interaction = (Browser_lane.Action.Dismiss_dialog | (Browser_lane.Action.Back | (Browser_lane.Action.Forward | (Browser_lane.Action.Reload | (Browser_lane.Action.Close_tab | Browser_lane.Action.Accept_dialog _)))));_})
   | Ok (Browser_lane.Action.Open_tab _) | Error _ -> invoke ()
 ;;
 

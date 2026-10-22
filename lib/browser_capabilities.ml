@@ -167,17 +167,14 @@ let support backend operation = match backend with
            "Only automatic zoom mode is supported; per-origin scope may also affect and persist for same-origin tabs. Re-read the scene/screenshot afterward."]
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
     | Select_option -> (match backend with
-      | Owned_gecko -> Conditional {invocation=invoke ~action:"select" Act;
-          constraints=[observed;"Requires one observed native select and exact option value."]}
-      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_chromium ->
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium ->
           conditional ~action:"select_option" Interact
             [observed;"Pass the selector of one single-choice select and the exact value of one enabled option; a multiple select, a missing, repeated or disabled option is refused before any effect.";
              "Sets the option and emits input and change; this is not a trusted click on the list."]
       | Safari_unavailable -> missing)
     | Read_frames -> gecko_only backend (invoke ~mode:"frames" Read)
         [observed;"Explicit tabId; framePath consists of observed outer-to-inner frame selectors."]
-    | Frame_interaction -> gecko_only backend (invoke Act)
-        [observed;"framePath supports element/scroll actions only. Inspect the same tab/frame first; action must be click/fill/press/select/scroll/upload."]
+    | Frame_interaction -> missing
     | Read_dialog -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional Tabs
           ["Each list_tabs row of a tab blocked on a dialog carries dialog: type (alert, confirm, prompt or beforeunload), message and, for a prompt, defaultValue. It comes from the browser's own events since this connection began, so a dialog that was already open then is not listed.";

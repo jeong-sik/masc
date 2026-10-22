@@ -66,7 +66,7 @@ let issue ?upload_paths ?(required_actions=[]) t ~preference verb =
     | Browser_lane.Page_act (Browser_lane.Action.On_tab {interaction=Upload {paths;_};_}) -> Some paths
     | Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_interact _
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
-    |Page_act (Open_tab _|On_tab {interaction=Click _|Fill _|Press _|Scroll _|Select _|Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
+    |Page_act (Open_tab _|On_tab {interaction=Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
     |Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> None in
   let preparation=match upload,upload_paths,preference with
     | None,None,_ -> Ok None

@@ -19,23 +19,20 @@ a session another task is using.
 BrowserSession {"action":"open"}
 BrowserAct {"action":"open_tab","url":"https://example.org/"}
 BrowserRead {"lane":"automation","tabId":<returned id>,"mode":"elements"}
-BrowserAct {"action":"click","tabId":<returned id>,"selector":<observed selector>}
+BrowserInteract {"lane":"automation","action":"click","tabId":<returned id>,"selector":<observed selector>}
 BrowserRead {"lane":"automation","tabId":<returned id>}
 ```
 
 | Action | Required fields beyond action/lane |
 |---|---|
 | open_tab | url (absolute HTTP(S)) |
-| click | tabId, selector |
-| fill | tabId, selector, text (empty clears) |
-| press | tabId, selector, key |
-| select | tabId, selector, value (exact option value) |
-| scroll | tabId, x, y (pixel deltas) |
 | back / forward / reload / close_tab | tabId |
+| upload | tabId, selector, paths |
+| accept_dialog (optional text) / dismiss_dialog | tabId |
 
-Click/fill/press/select require exactly one matching element. Native WebDriver
-click, clear and send-keys perform the interaction; strings travel as JSON
-arguments. BrowserGoto now honors optional `tabId`. Each targeted automation
+BrowserAct carries browser-level actions only. Input inside the page (click,
+fill, select, scroll, keys) is BrowserInteract on every browser, including this
+one. `upload` requires exactly one matching file input. BrowserGoto now honors optional `tabId`. Each targeted automation
 operation holds the session lock from tab selection through completion. Tab IDs
 remain unique across session reopenings for the lifetime of the driver, so old
 IDs cannot silently select a new session's tab.

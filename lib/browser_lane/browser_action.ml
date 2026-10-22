@@ -1,10 +1,5 @@
 type key = Enter | Tab | Escape | Backspace | Delete | ArrowUp | ArrowDown | ArrowLeft | ArrowRight | Home | End
 type interaction =
-  | Click of string
-  | Fill of { selector : string; text : string }
-  | Press of { selector : string; key : key }
-  | Select of { selector : string; value : string }
-  | Scroll of { x : int; y : int }
   | Upload of { selector : string; paths : string list }
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab
@@ -22,10 +17,6 @@ let webdriver_key = function
   | ArrowUp -> "\xee\x80\x93" | ArrowDown -> "\xee\x80\x95"
   | ArrowLeft -> "\xee\x80\x92" | ArrowRight -> "\xee\x80\x94"
   | Home -> "\xee\x80\x91" | End -> "\xee\x80\x90"
-let parse_key value =
-  match List.find_opt (fun key -> key_name key = value)
-      [Enter;Tab;Escape;Backspace;Delete;ArrowUp;ArrowDown;ArrowLeft;ArrowRight;Home;End] with
-  | Some key -> Ok key | None -> Error "unsupported key"
 let string_list label = function
   | `List values ->
     let rec collect acc = function
@@ -57,22 +48,13 @@ let parse = function
       let* () = match interaction, frame_path with
         | (Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog), _ :: _ -> Error "this action operates on the top-level tab"
         | ((Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog), [])
-        | ((Click _ | (Fill _ | (Press _ | (Select _ | (Scroll _ | Upload _))))), _) -> Ok () in
+        | Upload _, _ -> Ok () in
       let* tab_id = integer "tabId" in
       if tab_id < 0 then Error "tabId must be nonnegative"
       else Ok (On_tab {tab_id;frame_path;interaction}) in
     let* action = string "action" in
     (match action with
      | "open_tab" -> let* () = exact ["url"] in let* url = string "url" in Ok (Open_tab url)
-     | "click" -> let* selector = selector () in on_tab ["selector"] (Click selector)
-     | "fill" -> let* selector = selector () in let* text = string "text" in
-       on_tab ["selector";"text"] (Fill {selector;text})
-     | "press" -> let* selector = selector () in let* key = string "key" in
-       let* key = parse_key key in on_tab ["selector";"key"] (Press {selector;key})
-     | "select" -> let* selector = selector () in let* value = string "value" in
-       on_tab ["selector";"value"] (Select {selector;value})
-     | "scroll" -> let* x = integer "x" in let* y = integer "y" in
-       on_tab ["x";"y"] (Scroll {x;y})
      | "upload" ->
        let* selector = selector () in
        let* paths = match List.assoc_opt "paths" fields with
@@ -94,11 +76,6 @@ let to_json = function
   | Open_tab url -> `Assoc ["action",`String "open_tab";"url",`String url]
   | On_tab {tab_id;frame_path;interaction} ->
     let action, args = match interaction with
-      | Click selector -> "click", ["selector",`String selector]
-      | Fill {selector;text} -> "fill", ["selector",`String selector;"text",`String text]
-      | Press {selector;key} -> "press", ["selector",`String selector;"key",`String (key_name key)]
-      | Select {selector;value} -> "select", ["selector",`String selector;"value",`String value]
-      | Scroll {x;y} -> "scroll", ["x",`Int x;"y",`Int y]
       | Upload {selector;paths} -> "upload", ["selector",`String selector;"paths",`List (List.map (fun p -> `String p) paths)]
       | Accept_dialog text -> "accept_dialog", Option.to_list (Option.map (fun s -> "text",`String s) text)
       | Dismiss_dialog -> "dismiss_dialog", []

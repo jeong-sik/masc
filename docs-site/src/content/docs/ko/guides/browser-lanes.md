@@ -178,7 +178,7 @@ Keeper에 보이는 이름은 CamelCase이고, MCP 등록 이름은 `masc_browse
 
 `BrowserInstruct`는 `action`(`act`·`observe`·`extract`), 문장 `instruction`(act와 extract에는 필수), `BrowserTabs lane="stagehand"`가 준 `tabId`를 받습니다. extract에는 돌려받을 데이터 모양을 JSON Schema 문자열로 `schema`에 줄 수 있습니다. 결과는 Stagehand의 `data`와 `metadata`입니다. 선택한 Gecko `locate` 소비자는 관측한 탭의 `BrowserInstruct action="observe" lane="automation"`을 제공합니다. act는 페이지를 바꿀 수 있으므로 뒤에 Stagehand `observe`나 `extract`로 확인하며, 실패한 act도 이미 동작했을 수 있습니다. observe와 extract는 읽기만 합니다.
 
-`BrowserInteract`의 click/fill과 `BrowserAct`의 요소 조작에는 관측한 selector를 사용하며, 정확히 하나의 요소와 일치해야 합니다. `BrowserInteract`의 `expectedUrl`에 직전에 읽은 URL을 넣으면 중간에 페이지가 이동한 경우 거부합니다. fill은 페이지 이벤트를 발생시키지만 자체적으로 Enter를 누르거나 submit하지 않습니다. 오류가 발생한 경우도 포함해 조작 후에는 페이지를 읽거나 캡처한 뒤 재시도 여부를 결정합니다.
+`BrowserInteract`의 click/fill 같은 페이지 입력에는 관측한 selector를 사용하며, 정확히 하나의 요소와 일치해야 합니다. `BrowserInteract`의 `expectedUrl`에 직전에 읽은 URL을 넣으면 중간에 페이지가 이동한 경우 거부합니다. fill은 페이지 이벤트를 발생시키지만 자체적으로 Enter를 누르거나 submit하지 않습니다. 오류가 발생한 경우도 포함해 조작 후에는 페이지를 읽거나 캡처한 뒤 재시도 여부를 결정합니다.
 
 BiDi·owned WebDriver의 관측한 요소 click은 native 포인터 입력을 사용하고 Stagehand는 native click 메서드를 사용합니다. WebExtension은 DOM click을 사용합니다. fill과 native typing은 별도 동작입니다. transport capability를 확인하고 입력 후 페이지를 다시 읽어 애플리케이션의 효과를 확인합니다.
 

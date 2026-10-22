@@ -2070,7 +2070,7 @@ let start
                       when Keeper_semantic_execution.equal_input_wait waiting observed
                         && Keeper_checkpoint_ref.equal reference waiting.checkpoint ->
                     Ok {response_child=child;response_operation=operation_id;response_digest=operation.execution_digest;
-                      response_authority=Keeper_input_wait_response.authorize ~session_root:t.session_root ~operation_id ~waiting ~recorded}
+                      response_authority=Keeper_input_wait_response.authorize ~session_root:t.session_root ~operation_id ~waiting ~destination:Keeper_semantic_execution.Canonical_input ~recorded}
                   | (Some _ | None),(Input_observed _ | Input_unobserved | Prior_input_unavailable) ->
                     Error (Chat_operation_store.Invalid_input "response no longer names the exact original wait and input owner"))
               | (Some _ | None),(Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),(Some _ | None) ->

@@ -1039,7 +1039,7 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
          an independent Producer G lineage integration fixture. *)
       Fs_compat.save_file (Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id)
         (Agent_core.Checkpoint.to_string {checkpoint with context;messages});
-      let authority=Response.authorize ~session_root:(Filename.dirname session_dir) ~operation_id ~waiting ~recorded:None in
+      let authority=Response.authorize ~session_root:(Filename.dirname session_dir) ~operation_id ~waiting ~destination:Keeper_semantic_execution.Canonical_input ~recorded:None in
       let plan=Response.prepare_installation ~net:env#net ~authority ~response:Agent_core.Hooks.Declined
         |> Result.map_error Response.installation_error_to_string |> ok in
       let intent=Response.planned_intent plan in

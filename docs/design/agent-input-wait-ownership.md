@@ -305,7 +305,7 @@ Enabling official-client input later requires its own continuation authority.
 The existing unified success receipt precedes durable wait admission; a later
 admission error does not rewrite that earlier run receipt into operation success.
 
-All layers remain Draft. Autonomous
+This feature remains incomplete. Autonomous
 waiting, dedicated input-wait classification,
 canonical/live/retained divergence reconciliation, snapshot/SSE invalidation and
 persistent/reconnected Acting/TUI are still required for #38005 acceptance.
@@ -313,7 +313,7 @@ persistent/reconnected Acting/TUI are still required for #38005 acceptance.
 ## Durable direct response intent and checkpoint lifetime
 
 Before canonical mutation, the response protocol needs a journal fact binding
-one complete original wait W, validated canonical source S, frozen consumed
+one complete original wait W, validated original source S, frozen consumed
 candidate C and typed Answer/Declined/Timeout response. S may extend W's history;
 it need not equal W. All references share W's trace, S does not regress W's
 turn, and C preserves S's turn while changing both source and wait bytes.
@@ -321,10 +321,12 @@ Canonical answer JSON rejects duplicate keys and non-finite values. These
 identity checks do not validate a physical transformation or grant installation
 or response authority.
 
-`prepare_direct_input_response` records that immutable fact transactionally under
+`prepare_direct_input_response` records that exact response payload transactionally under
 the actual original queued operation, execution digest, complete wait, retired
 native state and current input predecessor. The same intent preserves its
-revision; a different response/source/candidate/wait cannot replace it. Recording
+revision; a different response/source/candidate/wait cannot replace it. Its
+destination can only advance from canonical to operation input as described
+below, spending a revision while preserving that complete payload. Recording
 it keeps the wait blocked, including claim, priority, generic resume and successful
 settlement. An actual commit may survive an uncertain acknowledgement; that
 acknowledgement remains an error with no deletion or automatic retry authority.
@@ -354,8 +356,9 @@ queued operation/digest/wait. An existing intent admits only its same typed
 response. Retained W/S/C, original scope, complete nonhistory data, source history
 and exact Core rederivation of C are checked again. Canonical S admits S->C;
 canonical C admits C->C through an actual durable rewrite, after the recorded
-intent proves that candidate. Missing/corrupt retained evidence or another
-canonical is refused without replacement. No hash equality or readback by itself
+intent proves that candidate. Missing/corrupt retained evidence is refused
+without replacement. Canonical mode also refuses a different canonical source;
+operation mode instead uses the retained-only protocol described below. No hash equality or readback by itself
 mints a receipt or turns an uncertain acknowledgement into acceptance.
 
 The first journal commit is now intent confirmation, before canonical mutation.
@@ -369,13 +372,13 @@ files, SQLite and fresh Owner HTTP recovery, not fault injection inside the
 Owner's final resolve invocation. The physical fixture also tests stale canonical
 CAS, corrupt retained C and fresh receipt authority.
 
-Actual independent Producer publication of newer global input G still needs
-typed lineage reconciliation preserving its history, context and other pending
-request; refusing G here is not that recovery. The canonical history-extension
+Full original-invocation resumption after independent Producer publication of
+newer global input G still needs typed lineage reconciliation preserving its
+history, context and other pending request; refusing G is not that recovery. The canonical history-extension
 fixture keeps global input W and must not be cited as that independent integration.
 R1 remains incomplete. Autonomous waiting, dedicated classification,
-snapshot/SSE and persistent/reconnected Acting/TUI also remain mandatory, and all
-layers stay Draft without installation or merge.
+snapshot/SSE and persistent/reconnected Acting/TUI also remain mandatory. This
+unfinished implementation does not authorize installation or merge.
 
 ## Shared Core explicit settlement observations (R2)
 
@@ -435,3 +438,54 @@ actual boundaries before accepting a G-independent response, and must test
 another child publishing G with additional history/context and another pending
 question, original-operation native resume, later checkpoints and crash/reopen.
 Neither this foundation nor an exact G refusal completes R1 or #38005.
+
+
+## Independent branch response storage primitives
+
+Each response intent now persists a closed `Canonical_input` or
+`Operation_input` destination alongside its exact W/S/C and canonicalized
+response. Strict intent equality includes that destination. Reconciliation can
+only keep the same complete fact or promote Canonical_input to Operation_input
+without changing W/S/C/response. An identical preparation is idempotent; a
+promotion spends a revision. Neither a different response nor reattaching an
+operation branch is admitted. Persisted intents missing this destination are
+invalid; no conversion or fallback is provided.
+
+Canonical response installation keeps its existing source CAS and fresh durable
+write. An operation response derives from actual retained original W, or the
+recorded actual retained S during recovery. It does not borrow canonical G's
+history, context, pending request or execution scope. Both S and C are freshly
+retained before recording the intent, and the operation installation receipt
+comes from a fresh confirmed retention of C. Recorded C must still exist and
+validate; rederiving it is not authority to repair missing/corrupt evidence.
+A receipt's complete intent and destination remain tied to its captured
+physical authority. A former canonical receipt cannot match the promoted
+operation intent used by the Owner's final receipt comparison.
+
+The SQLite operation resolution consumes the exact original wait and prepared
+candidate into its persistent branch while leaving the global input head G
+unchanged. Actual before/after commit uncertainty remains an error, preserves
+existing evidence and grants no cleanup or automatic retry authority. Fresh
+reads determine which intent destination and branch actually committed.
+
+The physical regression uses an actual different Owner child invoking Producer
+prepare/publication to retain G, followed by a canonical save of G. G contains
+additional history/context, an independent execution scope and another pending
+question. It then exercises fresh operation response and same-C promotion,
+actual SQLite resolution faults, physical recovery and close/reopen while
+checking canonical G bytes and global G reference. The Store suite separately
+checks promotion commit faults, strict destination parsing and the branch pin
+through actual SQLite phase consumption.
+
+Public Owner response admission still requires global input W and explicitly
+selects Canonical_input. Enabling a branch Accepted response before replacing
+the old shared-canonical loader/Producer/sinks would let generic claim dispatch
+fail the original invocation. This layer therefore adds the actual physical and
+SQLite primitives without activating that unsupported public path. No new
+blocked phase or feature flag substitutes for the intended continuation. The
+next coherent integration must select the branch at Owner admission and carry
+it through retained-only cooperative/runtime/Gate loading, native publication,
+all later checkpoint/error/fallback saves and actual original invocation resume.
+The primitive tests do not prove that continuation, HTTP branch acceptance,
+autonomous input waiting, current-state/SSE reconciliation or the final Acting
+behavior. R1 and #38005 remain incomplete.

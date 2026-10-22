@@ -2416,6 +2416,23 @@ let direct_input_response_intent store ~operation_id =
   let* execution = direct_execution_with_db store.db operation in
   Ok (Option.bind execution (fun (execution : Semantic.t) -> execution.input_response_intent))
 
+let direct_input_branch store ~operation_id =
+  let* () = ensure_open store in
+  let* operation = operation_or_unknown store.db operation_id in
+  let* execution = direct_execution_with_db store.db operation in
+  Ok (Option.bind execution (fun (execution : Semantic.t) -> execution.input_branch))
+
+let validate_response_input_with_db store (execution:Semantic.t) (waiting:Semantic.input_wait) destination =
+  let* input = input_observation_with_db store.db ~trace_id:waiting.checkpoint.trace_id in
+  match destination,input,execution.input_branch with
+  | Semantic.Canonical_input,Input_observed reference,None
+      when Keeper_checkpoint_ref.equal reference waiting.checkpoint -> Ok ()
+  | Operation_input,Input_observed _,None -> Ok ()
+  | Operation_input,Input_observed _,Some branch
+      when Keeper_checkpoint_ref.equal branch.checkpoint waiting.checkpoint -> Ok ()
+  | (Canonical_input | Operation_input),(Input_observed _ | Input_unobserved | Prior_input_unavailable),(Some _ | None) ->
+    Error (Invalid_input "input response destination lost its original input predecessor")
+
 let prepare_direct_input_response store ~now ~operation_id ~execution_digest ~(intent:Semantic.input_response_intent) =
   let* () = ensure_open store in
   with_transaction store (fun () ->
@@ -2433,14 +2450,10 @@ let prepare_direct_input_response store ~now ~operation_id ~execution_digest ~(i
         | Keeper_native_call.No_native_call -> Ok ()
         | Active _ | Terminal_unacknowledged _ -> Error Native_call_unsettled in
       let* () = match expected.input_response_intent with
-        | Some current when not (Semantic.equal_input_response_intent current intent) ->
+        | Some current when not (Semantic.continues_input_response_intent ~previous:current ~next:intent) ->
           Error (Invalid_input "original input response intent cannot be replaced")
         | Some _ | None -> Ok () in
-      let* input = input_observation_with_db store.db ~trace_id:intent.waiting.checkpoint.trace_id in
-      let* () = match input with
-        | Input_observed reference when Keeper_checkpoint_ref.equal reference intent.waiting.checkpoint -> Ok ()
-        | Input_observed _ | Input_unobserved | Prior_input_unavailable ->
-          Error (Invalid_input "input response intent predecessor changed; reconcile original input lineage") in
+      let* () = validate_response_input_with_db store expected intent.waiting intent.destination in
       let* next = semantic_transition ~now (Semantic.Prepare_input_response intent) expected in
       update_semantic store ~expected next)
 ;;
@@ -2461,13 +2474,16 @@ let resolve_direct_input_wait store ~now ~operation_id ~execution_digest ~observ
       let* () = match expected.native_call with
         | Keeper_native_call.No_native_call -> Ok ()
         | Active _ | Terminal_unacknowledged _ -> Error Native_call_unsettled in
-      let* input = input_observation_with_db store.db ~trace_id:observed.checkpoint.trace_id in
-      let* () = match input with
-        | Input_observed reference when Keeper_checkpoint_ref.equal reference observed.checkpoint -> Ok ()
-        | Input_observed _ | Input_unobserved | Prior_input_unavailable ->
-          Error (Invalid_input "input response predecessor changed; reconcile before another response") in
-      let* next = semantic_transition ~now (Semantic.Resolve_input {observed;checkpoint}) expected in
-      let* () = install_input_checkpoint_with_db store ~previous:(Some observed.checkpoint) checkpoint in
+      let destination = match expected.input_response_intent with
+        | None -> Semantic.Canonical_input | Some intent -> intent.destination in
+      let* () = validate_response_input_with_db store expected observed destination in
+      let action = match destination with
+        | Semantic.Canonical_input -> Semantic.Resolve_input {observed;checkpoint}
+        | Operation_input -> Semantic.Resolve_input_branch {observed;checkpoint} in
+      let* next = semantic_transition ~now action expected in
+      let* () = match destination with
+        | Semantic.Canonical_input -> install_input_checkpoint_with_db store ~previous:(Some observed.checkpoint) checkpoint
+        | Operation_input -> Ok () in
       update_semantic store ~expected next)
 ;;
 

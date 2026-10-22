@@ -131,6 +131,11 @@ let persist_failure_placeholder ~media_type ~encoded_bytes = function
         ~size_bytes:(Some encoded_bytes)
 
 let persisted_block ~media_type media_ref =
+  let attachment name =
+    Keeper_chat_blocks.Attach
+      { name; dims = None; src = Some media_ref; svg = None; ph = None;
+        via = None; size = None; data = None; mime_type = Some media_type;
+        size_bytes = None; kind = None } in
   match Keeper_chat_media_store.category_of_media_type media_type with
   | Keeper_chat_media_store.Image ->
       Keeper_chat_blocks.Image { src = media_ref; cap = None }
@@ -143,20 +148,9 @@ let persisted_block ~media_type media_ref =
           transcript = None;
           src = Some media_ref
         }
+  | Keeper_chat_media_store.Midi -> attachment "generated.mid"
   | Keeper_chat_media_store.Document | Keeper_chat_media_store.Other ->
-      Keeper_chat_blocks.Attach
-        { name = generic_media_label;
-          dims = None;
-          src = Some media_ref;
-          svg = None;
-          ph = None;
-          via = None;
-          size = None;
-          data = None;
-          mime_type = Some media_type;
-          size_bytes = None;
-          kind = None
-        }
+      attachment generic_media_label
 
 let completed_to_chat_block ~base_dir = function
   | State.Wire_dropped dropped -> wire_drop_placeholder_block dropped

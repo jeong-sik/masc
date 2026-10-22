@@ -26,6 +26,7 @@ type persist_error =
 type media_category =
   | Image
   | Audio
+  | Midi
   | Document
   | Other
 
@@ -52,6 +53,8 @@ let known_media =
   ; { media_type = "audio/wav"; ext = "wav"; content_type = "audio/wav"; category = Audio }
   ; { media_type = "audio/x-wav"; ext = "wav"; content_type = "audio/wav"; category = Audio }
   ; { media_type = "audio/ogg"; ext = "ogg"; content_type = "audio/ogg"; category = Audio }
+  ; { media_type = "audio/midi"; ext = "mid"; content_type = "audio/midi"; category = Midi }
+  ; { media_type = "audio/x-midi"; ext = "mid"; content_type = "audio/midi"; category = Midi }
   ; { media_type = "application/pdf"; ext = "pdf"; content_type = "application/pdf"; category = Document }
   ]
 
@@ -220,14 +223,13 @@ let persist_result ~base_dir ~media_type ~data =
       let token = token_of_payload ~media_type data in
       let ext = ext_of_media_type media_type in
       let dir = media_dir ~base_dir in
+      let path = Filename.concat dir (token ^ "." ^ ext) in
       let url = media_url token in
       try
         Fs_compat.mkdir_p dir;
         cleanup_old_files_in_dir dir;
-        match file_path_of_token ~base_dir ~token with
-        | Some _ -> Ok (token, url)
-        | None ->
-            let path = Filename.concat dir (token ^ "." ^ ext) in
+        if regular_file_exists path then Ok (token, url)
+        else
             (match Fs_compat.save_file_atomic path data with
              | Ok () -> Ok (token, url)
              | Error msg -> Error msg)

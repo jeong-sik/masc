@@ -125,6 +125,26 @@ let test_media_type_mapping () =
   Alcotest.(check string) "jpg content-type" "image/jpeg" (M.content_type_of_ext "jpg");
   Alcotest.(check string) "mp3 content-type" "audio/mpeg" (M.content_type_of_ext "mp3")
 
+let test_persist_publishes_current_midi_type () =
+  with_temp_base (fun base_dir ->
+    let data = "MThd\000original MIDI bytes" in
+    let media_type = "audio/midi" in
+    let token = expected_token ~media_type data in
+    let media_dir = Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) "media" in
+    Fs_compat.mkdir_p media_dir;
+    let opaque_path = Filename.concat media_dir (token ^ ".bin") in
+    write_file opaque_path data;
+    let regenerated, _ = persist_ok ~base_dir ~media_type ~data in
+    Alcotest.(check string) "regeneration retains its original media token" token regenerated;
+    Alcotest.(check string) "prior opaque bytes remain evidence" data (read_file opaque_path);
+    match M.file_path_of_token ~base_dir ~token with
+    | None -> Alcotest.fail "regenerated MIDI cannot be resolved"
+    | Some path ->
+        Alcotest.(check string) "regeneration publishes the current served MIDI type"
+          "audio/midi" (M.content_type_of_path path);
+        Alcotest.(check string) "canonical publication retains complete original bytes"
+          data (read_file path))
+
 let media_category_testable =
   Alcotest.testable
     (fun ppf c ->
@@ -132,6 +152,7 @@ let media_category_testable =
         (match c with
          | M.Image -> "Image"
          | M.Audio -> "Audio"
+         | M.Midi -> "Midi"
          | M.Document -> "Document"
          | M.Other -> "Other"))
     ( = )
@@ -239,6 +260,8 @@ let () =
             `Quick
             test_token_lookup_probes_known_extensions_without_scan
         ; Alcotest.test_case "media_type mapping" `Quick test_media_type_mapping
+        ; Alcotest.test_case "regeneration publishes current MIDI type" `Quick
+            test_persist_publishes_current_midi_type
         ; Alcotest.test_case "media category" `Quick test_media_category
         ; Alcotest.test_case
             "base64 source decoded"

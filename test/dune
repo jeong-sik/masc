@@ -3615,7 +3615,7 @@
 (test
  (name test_tui_generated_media)
  (modules test_tui_generated_media)
- (libraries alcotest masc masc.agent_core masc.ag_ui masc.server
+ (libraries alcotest base64 masc masc.agent_core masc.ag_ui masc.server
   masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_transcript masc_tui_chat_media yojson))
 

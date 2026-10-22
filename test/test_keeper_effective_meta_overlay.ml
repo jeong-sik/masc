@@ -1543,6 +1543,58 @@ let test_config_snapshot_exposes_retrievable_recent_work () =
   | Absent | Evidence _ | Preview _ -> Alcotest.fail "preview granted a model tool capability"
 ;;
 
+(* #45028: a keeper holding no task still sees every open Goal, with its
+   criterion, in the prompt the dashboard previews. The preview builds the same
+   Active Goals layer as the turn. *)
+let test_config_snapshot_carries_open_goals_without_a_task () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  within_eio @@ fun () ->
+  let name = "goal-preview" in
+  write_file (Filename.concat keepers_dir (name ^ ".toml"))
+    "[keeper]\ninstructions = \"goal fixture\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let goal id title phase metric : Goal_store.goal =
+    { Goal_store.id; criterion_revision = "revision-" ^ id; title; metric = Some metric
+    ; target_value = Some "1"; due_date = None; priority = 3; phase
+    ; last_review_note = None; last_review_at = None
+    ; created_at = "2026-10-22T00:00:00Z"; updated_at = "2026-10-22T00:00:00Z" }
+  in
+  (match
+     Goal_store.write_state_result config
+       { Goal_store.version = 1; updated_at = "2026-10-22T00:00:00Z"
+       ; pending_events = []; pending_notifications = []
+       ; goals =
+           [ goal "goal-open" "Ship the preview release" Goal_phase.Executing
+               "tags named v0.100.0"
+           ; goal "goal-done" "Already achieved" Goal_phase.Completed
+               "a finished measurement" ] }
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  let assembled = match Dashboard_http_keeper_snapshot.keeper_config_json config name with
+    | `Not_found,_ -> Alcotest.fail "snapshot absent"
+    | `OK,json ->
+      let prompt = json_assoc_field "prompt" json |> json_assoc_field "system_prompt" in
+      (match json_string_field "assembled" prompt with
+       | Some text -> text
+       | None -> Alcotest.failf "assembled prompt absent: %s" (Yojson.Safe.to_string prompt)) in
+  let has needle = String_util.contains_substring assembled needle in
+  let fragment key vars =
+    match Prompt_registry.render_prompt_template key vars with
+    | Ok text -> text
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check bool) "the layer counts the open goal" true
+    (has (fragment Prompt_names.keeper_world_active_goals_heading [ "count", "1" ]));
+  Alcotest.(check bool) "the open goal is named" true
+    (has
+       (fragment Prompt_names.keeper_world_active_goals_row
+          [ "goal_id", "goal-open"; "title", "Ship the preview release" ]));
+  Alcotest.(check bool) "its criterion travels with it" true (has "tags named v0.100.0");
+  Alcotest.(check bool) "a completed goal is not offered" false (has "goal-done")
+;;
+
 (* #38354: a turn is refused when the constitution ledger cannot be read, so
    the snapshot states that reason as typed data and sends no prompt text. *)
 let test_config_snapshot_reports_an_unbuildable_system_prompt () =
@@ -1858,6 +1910,8 @@ let () =
             `Quick test_config_snapshot_prompt_is_nested_only;
           Alcotest.test_case "config snapshot exposes retrievable recent work" `Quick
             test_config_snapshot_exposes_retrievable_recent_work;
+          Alcotest.test_case "config snapshot carries open goals without a task" `Quick
+            test_config_snapshot_carries_open_goals_without_a_task;
           Alcotest.test_case "config snapshot reports an unbuildable system prompt" `Quick
             test_config_snapshot_reports_an_unbuildable_system_prompt;
           Alcotest.test_case "invalid primary keeps config editable" `Quick

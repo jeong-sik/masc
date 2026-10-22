@@ -1396,6 +1396,7 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
       ; summary_criterion = None
       ; summary_review_note = None
       ; summary_phase = Some Goal_phase.Verifying
+      ; summary_held_task_link = Keeper_unified_prompt.Not_served_by_held_task
       }
     ]
   in

@@ -1,14 +1,11 @@
-(** A keeper is handed only the Goals its task serves and can still progress.
+(** A keeper is handed every Goal the workspace can still progress.
 
-    The turn's [### Active Goals] block reads the Goal store twice over: the
-    link registry says which Goals this turn's task serves
-    ({!Keeper_unified_prompt.active_goal_summaries_for_task}), and
-    [world_observation.active_goals] carries the ids the frame counts. Both
-    announced terminal goals as this keeper's work, on every turn, under
-    headings that call them available.
-
-    [Goal_phase.admits_self_directed_progress] is the exhaustive predicate for
-    the question and had no callers. These tests pin both surfaces to it. *)
+    The turn's [### Active Goals] block renders the summaries
+    ({!Keeper_unified_prompt.active_goal_summaries}): title, criterion and
+    whether a task the keeper holds serves the goal. The turn observation
+    records the same open goal ids in [world_observation.active_goals].
+    [Goal_phase.admits_self_directed_progress] decides which goals are open on
+    both surfaces. *)
 
 open Alcotest
 open Masc
@@ -82,11 +79,13 @@ let seed_terminal_phases_only config =
     }
 ;;
 
+let keeper_name = "goal-phase-keeper"
+
 let keeper_meta () =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
-         [ "name", `String "goal-phase-keeper"
+         [ "name", `String keeper_name
          ; "trace_id", `String "test-trace-goal-phase"
          ])
   with
@@ -94,8 +93,7 @@ let keeper_meta () =
   | Error e -> failwith ("meta_of_json failed: " ^ e)
 ;;
 
-(* A task whose link registry entry says which Goals it serves. The turn
-   surface reads the link, not the whole store. *)
+(* A held task, so a turn can carry independent work beside the Goal layer. *)
 let task_named id : Masc_domain.task =
   { id
   ; title = "linked work"
@@ -154,18 +152,8 @@ let summary_title_opt goal_id summaries =
 let test_turn_surface_drops_terminal_goals () =
   with_workspace @@ fun config ->
   seed_all_phases config;
-  let _meta = keeper_meta () in
-  Workspace_goal_index.write_goal_task_links
-    config
-    [ "goal-executing", [ "task-linked" ]
-    ; "goal-verifying", [ "task-linked" ]
-    ; "goal-completed", [ "task-linked" ]
-    ; "goal-dropped", [ "task-linked" ]
-    ];
   let summaries =
-    Keeper_unified_prompt.active_goal_summaries_for_task
-      ~config
-      ~current_task:(current_task_of "task-linked")
+    Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name
   in
   check (list string) "only progressable goals are offered"
     [ "goal-executing"; "goal-verifying" ]
@@ -174,33 +162,92 @@ let test_turn_surface_drops_terminal_goals () =
     (summary_title_opt "goal-executing" summaries)
 ;;
 
-(* The task decides which Goals are this turn's context. A Goal the task does
-   not serve is not offered, and a turn holding no task is offered none --
-   [masc_goal_list] is where the rest of the store is read. *)
-let test_turn_surface_carries_only_the_tasks_goals () =
+let contains_in haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  n = 0 || go 0
+;;
+
+let fragment key vars =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text -> text
+  | Error detail -> fail detail
+;;
+
+let goals_heading count =
+  fragment Prompt_names.keeper_world_active_goals_heading
+    [ "count", string_of_int count ]
+;;
+
+(* The rendered Active Goals row of [goal_id], found by its own template. *)
+let goal_row world ~goal_id ~title =
+  let row =
+    fragment Prompt_names.keeper_world_active_goals_row
+      [ "goal_id", goal_id; "title", title ]
+  in
+  match
+    List.find_opt (String.starts_with ~prefix:row) (String.split_on_char '\n' world)
+  with
+  | Some line -> line
+  | None -> fail ("no Active Goals row for " ^ goal_id)
+;;
+
+(* #45028. Every task the keeper holds marks the Goals its link names, whether
+   or not it is the turn's current task, and nothing is removed. When the link
+   registry cannot be read authoritatively the rows are marked unknown, not
+   unlinked. *)
+let test_held_tasks_mark_their_goals_without_hiding_others () =
   with_workspace @@ fun config ->
   seed_all_phases config;
-  Workspace_goal_index.write_goal_task_links
-    config
-    [ "goal-executing", [ "task-linked" ]; "goal-verifying", [ "task-other" ] ];
-  check (list string) "the linked goal only"
-    [ "goal-executing" ]
-    (summary_ids
-       (Keeper_unified_prompt.active_goal_summaries_for_task
-          ~config
-          ~current_task:(current_task_of "task-linked")));
-  check (list string) "a task with no link carries none"
-    []
-    (summary_ids
-       (Keeper_unified_prompt.active_goal_summaries_for_task
-          ~config
-          ~current_task:(current_task_of "task-unlinked")));
-  check (list string) "and no task at all carries none"
-    []
-    (summary_ids
-       (Keeper_unified_prompt.active_goal_summaries_for_task
-          ~config
-          ~current_task:Keeper_world_observation_inputs.No_current_task))
+  let meta = keeper_meta () in
+  let held =
+    match
+      Workspace.add_task_with_result config ~title:"held work" ~priority:2
+        ~description:"linked to the verifying goal"
+    with
+    | Ok created -> created.task_id
+    | Error error -> fail (Workspace.add_task_error_to_string error)
+  in
+  (match Workspace.claim_task_r config ~agent_name:meta.name ~task_id:held () with
+   | Ok _ -> ()
+   | Error _ -> fail "the keeper could not claim its task");
+  Workspace_goal_index.write_goal_task_links config [ "goal-verifying", [ held ] ];
+  let observation =
+    Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
+  in
+  let world ~keeper_name =
+    let { Keeper_unified_prompt.world_state; _ } =
+      Keeper_unified_prompt.build_prompt
+        ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
+        ~current_task:Keeper_world_observation_inputs.No_current_task
+        ~active_goal_summaries:
+          (Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name)
+        ~observation ()
+    in
+    world_state
+  in
+  let yours = fragment Prompt_names.keeper_world_active_goals_yours_annotation [] in
+  let unknown =
+    fragment Prompt_names.keeper_world_active_goals_held_task_link_unreadable_annotation []
+  in
+  let marked = world ~keeper_name:meta.name in
+  check bool "a held task that is not the current task marks its goal" true
+    (contains_in (goal_row marked ~goal_id:"goal-verifying" ~title:"proof pending") yours);
+  check bool "the other open goal stays listed, unmarked" false
+    (contains_in (goal_row marked ~goal_id:"goal-executing" ~title:"still work") yours);
+  check bool "both open goals are counted" true (contains_in marked (goals_heading 2));
+  let other_keeper = world ~keeper_name:"keeper-holding-nothing" in
+  check bool "a keeper holding nothing marks nothing" false (contains_in other_keeper yours);
+  check bool "and sees the same goals" true (contains_in other_keeper (goals_heading 2));
+  Fs_compat.save_file (Workspace_goal_index.goal_task_links_path config) "unreadable";
+  let unreadable = world ~keeper_name:meta.name in
+  check bool "a recovery copy does not stand in for the registry" false
+    (contains_in unreadable yours);
+  check bool "every open goal is marked unknown" true
+    (contains_in (goal_row unreadable ~goal_id:"goal-executing" ~title:"still work") unknown
+     && contains_in (goal_row unreadable ~goal_id:"goal-verifying" ~title:"proof pending") unknown);
+  check bool "a keeper holding nothing needs no links" false
+    (contains_in (world ~keeper_name:"keeper-holding-nothing") unknown)
 ;;
 
 let test_world_observation_drops_terminal_goals () =
@@ -223,14 +270,9 @@ let test_no_goals_surface_when_all_are_terminal () =
   with_workspace @@ fun config ->
   seed_terminal_phases_only config;
   let meta = keeper_meta () in
-  Workspace_goal_index.write_goal_task_links
-    config
-    [ "goal-completed", [ "task-linked" ]; "goal-dropped", [ "task-linked" ] ];
   check (list string) "no goal block rather than an empty-looking one" []
     (summary_ids
-       (Keeper_unified_prompt.active_goal_summaries_for_task
-          ~config
-          ~current_task:(current_task_of "task-linked")));
+       (Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name));
   let observation =
     Keeper_world_observation.observe ~pending_board_events:(Some []) ~config
       ~meta
@@ -250,16 +292,11 @@ let rendered_world_state config =
     Keeper_unified_prompt.build_prompt
       ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
       ~current_task:Keeper_world_observation_inputs.No_current_task
+      ~active_goal_summaries:(Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name)
       ~observation
       ()
   in
   world_state
-;;
-
-let contains_in haystack needle =
-  let n = String.length needle and h = String.length haystack in
-  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
-  n = 0 || go 0
 ;;
 
 let test_no_goal_is_offered_as_work_to_pick_up () =
@@ -273,6 +310,7 @@ let test_no_goal_is_offered_as_work_to_pick_up () =
         ]
     };
   let world = rendered_world_state config in
+  check bool "the open goal is in the frame" true (contains_in world (goals_heading 1));
   check bool "no heading invites the keeper to start work on a goal" false
     (contains_in world "no Task yet");
   check bool "no goal is named as a move to make" false
@@ -303,8 +341,6 @@ max-concurrent = 1
   (match Runtime.init_default ~config_path:runtime_path with
    | Ok () -> () | Error detail -> fail detail);
   seed_all_phases config;
-  Workspace_goal_index.write_goal_task_links config
-    [ "goal-executing", [ "task-linked" ] ];
   let goal = { (goal_in Goal_phase.Executing "goal-executing" "Publish an audio essay") with
     metric = Some "independently reviewed playable audio essays";
     target_value = Some "1";
@@ -315,11 +351,12 @@ max-concurrent = 1
   let check_criterion expected_metric expected_target expected_review absent_text () =
     let observation = Keeper_world_observation.observe
       ~pending_board_events:(Some []) ~config ~meta in
-    let summaries = Keeper_unified_prompt.active_goal_summaries_for_task
-      ~config ~current_task:(current_task_of "task-linked") in
+    let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name in
+    (* No task is held and no task links this Goal: the criterion reaches the
+       turn anyway, because a Goal is shared and not reached through a task. *)
     let { Keeper_unified_prompt.world_state; _ } = Keeper_unified_prompt.build_prompt
       ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
-      ~current_task:(current_task_of "task-linked")
+      ~current_task:Keeper_world_observation_inputs.No_current_task
       ~active_goal_summaries:summaries ~observation () in
     check bool "stored criterion reaches the actual turn context" true
       (contains_in world_state expected_metric);
@@ -354,10 +391,9 @@ max-concurrent = 1
       | Ok _ -> fail "an unreadable Goal source became an available list" in
     check string "read failure names the file it could not read" primary
       unavailable.Goal_store.file;
-    let summaries = Keeper_unified_prompt.active_goal_summaries_for_task
-      ~config ~current_task:(current_task_of "task-linked") in
+    let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name in
     (match summaries with
-     | Error _ -> () | Ok _ -> fail "task context lost the Goal read failure");
+     | Error _ -> () | Ok _ -> fail "the summaries lost the Goal read failure");
     let observation = { observation with pending_messages =
       [ { Keeper_world_observation_message_scope.message_id = "independent-message"
         ; speaker = "operator"; content = "Please inspect the independent file."
@@ -466,8 +502,8 @@ let () =
             test_unreadable_goals_preserve_context_and_independent_turn
         ; test_case "the turn surface drops terminal goals" `Quick
             test_turn_surface_drops_terminal_goals
-        ; test_case "the turn surface carries only the task's goals" `Quick
-            test_turn_surface_carries_only_the_tasks_goals
+        ; test_case "held tasks mark their goals without hiding others" `Quick
+            test_held_tasks_mark_their_goals_without_hiding_others
         ; test_case "world observation drops terminal goals" `Quick
             test_world_observation_drops_terminal_goals
         ; test_case "all-terminal yields no goals at either surface" `Quick

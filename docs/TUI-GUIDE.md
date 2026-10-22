@@ -2903,6 +2903,8 @@ capture of the selected object. Long paths, assignment lists, failure reasons,
 account names and owning TOML sections wrap without the preview's row limit.
 `/` searches this captured document, Enter keeps the query for `n`/`N`, and
 Esc while typing cancels the query. Query text and paste belong to the capture.
+Captured readers also show the query and match count ahead of the document
+title, with `Find` while typing, so a collapsed footer does not hide the search.
 `j/k`, arrows, PageUp/PageDown and Home/End read the complete capture; Esc or `v`
 returns to the same selection. The capture stays fixed while background reads
 or selections change. Close, refresh and reopen for updated data. Leaving the

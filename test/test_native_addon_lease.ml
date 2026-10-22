@@ -4,6 +4,15 @@ let launcher = ref ""
 let ok = function Ok value -> value | Error error -> Alcotest.fail (Lease.error_to_string error)
 let rejected = function Ok _ -> Alcotest.fail "unexpected admission" | Error _ -> ()
 let check = Alcotest.check Alcotest.bool
+let contains text fragment =
+  let size = String.length fragment and limit = String.length text in
+  let rec at index = index + size <= limit
+    && (String.equal (String.sub text index size) fragment || at (index + 1)) in
+  at 0
+let not_private label fragments = function
+  | Error (Lease.Resource_not_private detail) ->
+      List.iter (fun fragment -> check (label ^ " names " ^ fragment) true (contains detail fragment)) fragments
+  | Ok _ | Error _ -> Alcotest.fail (label ^ " was not refused as not private")
 let write path text =
   let channel = open_out path in
   Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel text)
@@ -164,11 +173,13 @@ let test_private_inodes () = with_fixture (fun fixture ->
   let alias = path fixture "symlink" in Unix.symlink directory alias;
   rejected (Lease.prepare ~cleanup_context:None ~directories:[alias] ~instance_id:"a");
   Unix.chmod directory 0o755;
-  rejected (Lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"b");
+  not_private "an open claim directory" [directory;"0755";"0077"]
+    (Lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"b");
   Unix.chmod directory 0o700;
   let sentinel = path fixture "sentinel" in write sentinel "preserve";
   Unix.link sentinel (Filename.concat directory "lease");
-  rejected (Lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"c");
+  not_private "a linked lease file" [Filename.concat directory "lease";"exactly one link";"2 links"]
+    (Lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"c");
   let channel = open_in sentinel in
   let contents = Fun.protect ~finally:(fun () -> close_in channel) (fun () -> really_input_string channel 8) in
   Alcotest.check Alcotest.string "unrelated inode preserved" "preserve" contents)

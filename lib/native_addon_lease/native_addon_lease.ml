@@ -2,31 +2,58 @@ type t = { instance_id : string; directories : string list }
 type preparation = Unpublished | Current of t
 type process = { instance_id : string; pid : int; started : string }
 type status = Awaiting_exec | Live of process | Cleanup_pending of process | Settled
-type error = Invalid_claim of string | Stale_claim | Consumed_claim
+type error = Invalid_claim of string | Stale_claim of string | Consumed_claim
   | Busy of string | State_invalid of string | Io_failure of string
+  | Resource_not_private of string
   | Identity_unavailable | Termination_refused of Owner_process_identity.error
+let owner_error_to_string = function
+  | Owner_process_identity.No_owner -> "the lease has no kernel lock owner"
+  | Owner_changed -> "the lease's kernel lock owner exited or changed after it was captured"
+  | Unsupported -> "this platform cannot bind a signal to the owner's process incarnation"
+  | Unavailable -> "the owner's process incarnation could not be captured or signalled"
+  | Closed -> "the captured owner identity was already closed"
 let error_to_string = function
-  | Invalid_claim detail | Busy detail | State_invalid detail | Io_failure detail -> detail
-  | Stale_claim -> "native admission was replaced or retired"
+  | Invalid_claim detail | Busy detail | State_invalid detail | Io_failure detail
+  | Resource_not_private detail -> detail
+  | Stale_claim detail -> "native admission was replaced or retired: " ^ detail
   | Consumed_claim -> "native instance already consumed its execution admission"
   | Identity_unavailable -> "native process incarnation could not be observed"
-  | Termination_refused _ -> "kernel-bound native termination was not confirmed"
+  | Termination_refused error -> "kernel-bound native termination was not confirmed: " ^ owner_error_to_string error
 let instance_id (t : t) = t.instance_id
 let directories (t : t) = t.directories
 let ( let* ) = Result.bind
-external open_directory : string -> Unix.file_descr = "masc_native_lease_directory"
-external open_private_file : Unix.file_descr -> string -> bool -> Unix.file_descr = "masc_native_lease_file"
+external open_directory_descriptor : string -> Unix.file_descr = "masc_native_lease_directory"
+external open_file_descriptor : Unix.file_descr -> string -> bool -> Unix.file_descr = "masc_native_lease_file"
 external holder : Unix.file_descr -> int = "masc_native_lease_holder"
 external leads_process_group : unit -> bool = "masc_native_lease_group_leader"
 external replace_private_file : Unix.file_descr -> string -> string -> unit = "masc_native_lease_replace"
-type slot = { directory : Unix.file_descr;
+type slot = { path : string; directory : Unix.file_descr;
   lease : Unix.file_descr; intent : Unix.file_descr; owner : Unix.file_descr }
 type intent = Admitted of string | Retired of string
 type history_state = Reserved | Revoked | Consumed
 type history = {state:history_state;cleanup_context:Yojson.Safe.t option}
 let coordinator = Mutex.create ()
+exception Not_private of string
+(* The descriptor is decided after open, so a path replaced between the open
+   and the decision cannot pass. Group and other permission bits must be
+   clear; a lease file must also have exactly one link. A close failure while
+   refusing is dropped because the refusal is the error the caller reports. *)
+let private_directory = {Resource_requirement.kind=Unix.S_DIR;mode=Clear 0o077;links=Any_count}
+let private_file = {Resource_requirement.kind=Unix.S_REG;mode=Clear 0o077;links=Exactly_one}
+let decided ~label requirement ~path fd =
+  let refuse exn = (try Unix.close fd with Unix.Unix_error _ -> ()); raise exn in
+  match Resource_requirement.check ~label requirement ~path (Unix.fstat fd) with
+  | Ok () -> fd
+  | Error detail -> refuse (Not_private detail)
+  | exception (Unix.Unix_error _ as exn) -> refuse exn
+let open_directory path =
+  decided ~label:"native lease directory" private_directory ~path (open_directory_descriptor path)
+let open_private_file ~path directory name create =
+  decided ~label:"native lease file" private_file ~path:(Filename.concat path name)
+    (open_file_descriptor directory name create)
 let protect work = try work () with
   | (Unix.Unix_error _ | Sys_error _) as exn -> Error (Io_failure (Printexc.to_string exn))
+  | Not_private detail -> Error (Resource_not_private detail)
 let close_all descriptors =
   let failure = List.fold_left (fun previous fd ->
     try Unix.close fd; previous with Unix.Unix_error _ as exn ->
@@ -38,10 +65,10 @@ let with_slots ?(create=false) directories work = protect (fun () -> Mutex.prote
   Fun.protect ~finally:(fun () -> close_all !opened) (fun () ->
     let slots = List.map (fun path ->
       let directory = retain (open_directory path) in
-      let file name = retain (open_private_file directory name create) in
+      let file name = retain (open_private_file ~path directory name create) in
       let gate = file "gate" in
       Unix.lockf gate Unix.F_LOCK 0;
-      let slot = {directory;lease=file "lease";intent=file "intent.json";owner=file "owner.json"} in
+      let slot = {path;directory;lease=file "lease";intent=file "intent.json";owner=file "owner.json"} in
       Unix.fsync directory;slot) directories in
     work slots)))
 let read fd =
@@ -86,7 +113,7 @@ let write_intent slot instance state = write_metadata slot "intent.json"
 let history_name instance =
   "instance-" ^ Digestif.SHA256.(to_hex (digest_string instance)) ^ ".json"
 let with_history slot instance work =
-  let fd = open_private_file slot.directory (history_name instance) false in
+  let fd = open_private_file ~path:slot.path slot.directory (history_name instance) false in
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> work fd)
 let history_of_json instance = function
   | `Assoc fields -> (match sorted fields with
@@ -113,14 +140,15 @@ let unused_instance slot instance =
   let* history = read_history fd instance in
   match history.state with
   | Consumed -> Error Consumed_claim
-  | Reserved | Revoked -> Error Stale_claim)
+  | Reserved -> Error (Stale_claim (Printf.sprintf "instance %s is already reserved in native claim %s" instance slot.path))
+  | Revoked -> Error (Stale_claim (Printf.sprintf "instance %s was revoked in native claim %s" instance slot.path)))
   with Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
 let reserved_instance slot instance = with_history slot instance (fun fd ->
   let* history = read_history fd instance in
   match history.state with
   | Reserved -> Ok ()
   | Consumed -> Error Consumed_claim
-  | Revoked -> Error Stale_claim)
+  | Revoked -> Error (Stale_claim (Printf.sprintf "instance %s was revoked in native claim %s" instance slot.path)))
 let original_alive process =
   try Unix.kill process.pid 0;
     match Posix_spawn_detached.process_start process.pid with
@@ -131,21 +159,29 @@ let cleared process =
   let* alive = original_alive process in
   Ok (not alive && not (Posix_spawn_detached.group_id_has_members process.pid))
 let predecessor_clear slot =
-  if holder slot.lease <> 0 then Error (Busy "native claim has a kernel lease holder")
+  let pid = holder slot.lease in
+  if pid <> 0 then Error (Busy (Printf.sprintf "native claim %s has kernel lease holder pid %d" slot.path pid))
   else let* previous = read_owner slot in
     match previous with
     | None -> Ok ()
     | Some previous -> let* gone = cleared previous in
-        if gone then Ok () else Error (Busy "native predecessor or foreground group is not released")
+        if gone then Ok ()
+        else Error (Busy (Printf.sprintf
+          "native claim %s predecessor instance %s (pid %d) or its foreground process group is not released"
+          slot.path previous.instance_id previous.pid))
 let rec sync_ancestry path =
   let fd = Unix.openfile path [Unix.O_RDONLY;Unix.O_CLOEXEC] 0 in
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd);
   let parent = Filename.dirname path in
   if parent<>path then sync_ancestry parent
 let canonical_directories ~sync_ancestry ~create directories =
-  if directories=[] || List.exists (fun path -> Filename.is_relative path || String.contains path '\000') directories then
-    Error (Invalid_claim "native claims require absolute private directories")
-  else protect (fun () ->
+  let invalid = List.filter (fun path -> Filename.is_relative path || String.contains path '\000') directories in
+  match directories, invalid with
+  | [], _ -> Error (Invalid_claim "native claims require at least one absolute private directory; none was given")
+  | _ :: _, _ :: _ -> Error (Invalid_claim (Printf.sprintf
+      "native claims require absolute private directories without NUL; these are not: %s"
+      (String.concat ", " (List.map (Printf.sprintf "%S") invalid))))
+  | _ :: _, [] -> protect (fun () ->
     if create then List.iter (fun path ->
       try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ()) directories;
     let directories = List.map (fun path ->
@@ -177,7 +213,12 @@ let check_current (t : t) slot =
   match intent with
   | Some (Admitted instance) when instance=t.instance_id -> Ok false
   | Some (Retired instance) when instance=t.instance_id -> Ok true
-  | None | Some (Admitted _ | Retired _) -> Error Stale_claim
+  | Some (Admitted current) -> Error (Stale_claim (Printf.sprintf
+      "native claim %s now admits instance %s, not instance %s" slot.path current t.instance_id))
+  | Some (Retired current) -> Error (Stale_claim (Printf.sprintf
+      "native claim %s now records retired instance %s, not instance %s" slot.path current t.instance_id))
+  | None -> Error (Stale_claim (Printf.sprintf
+      "native claim %s has no current intent, not instance %s" slot.path t.instance_id))
 let existing_context t slots =
   let* contexts=List.fold_left (fun result slot -> let* contexts=result in
     let* _retired=check_current t slot in
@@ -221,7 +262,7 @@ let preparation_histories path directory =
     let* histories = result in
     if List.mem name slot_files then Ok histories
     else
-      let fd = open_private_file directory name false in
+      let fd = open_private_file ~path directory name false in
       Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
         (* Staged metadata is never an authority name and cannot admit a
            launcher. Keep it for diagnosis after an interrupted atomic write. *)
@@ -240,7 +281,7 @@ let recover_preparation ~directory:path =
     let* may_complete = Fun.protect ~finally:(fun () -> Unix.close directory) (fun () ->
       let contents name =
         try
-          let fd = open_private_file directory name false in
+          let fd = open_private_file ~path directory name false in
           Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Ok (Some (read fd)))
         with Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None in
       let* intent = contents "intent.json" in
@@ -414,7 +455,11 @@ let request_termination t =
           let* identity = Owner_process_identity.capture ~lease_fd:slot.lease
             |> Result.map_error (fun error -> Termination_refused error) in
           captured := identity :: !captured;
-          if holder slot.lease=process.pid then Ok () else Error Stale_claim) slots in
+          let current = holder slot.lease in
+          if current=process.pid then Ok ()
+          else Error (Stale_claim (Printf.sprintf
+            "native claim %s lease holder is pid %d, not the recorded owner pid %d of instance %s"
+            slot.path current process.pid t.instance_id))) slots in
     match result with
     | Ok () -> transferred := true; Ok !captured
     | Error error -> Error error)) in
@@ -431,7 +476,8 @@ let exec ~instance_id ~directories ~command ~arguments =
     let* () = validate_existing t slots in
     let* () = traverse (fun slot ->
       let* retired = check_current t slot in
-      if retired then Error Stale_claim else
+      if retired then Error (Stale_claim (Printf.sprintf
+        "instance %s was retired in native claim %s" instance_id slot.path)) else
       let* () = predecessor_clear slot in
       reserved_instance slot instance_id) slots in
     let* started = Option.to_result ~none:Identity_unavailable (Posix_spawn_detached.process_start (Unix.getpid ())) in

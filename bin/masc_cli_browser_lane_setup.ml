@@ -20,9 +20,17 @@ let mode_name = function
 let host_modes = [ Extension; Bidi; Host ]
 let installs_host modes = List.exists (fun mode -> List.mem mode modes) host_modes
 
-let refuse message =
+let refuse_with status message =
   prerr_endline message;
-  1
+  status
+
+let refuse message = refuse_with 1 message
+
+(* A workspace whose config root is not there yet: nothing in the request was
+   wrong, and the first server start writes the root, so a run after it
+   declares the Add-on. scripts/install-local-build.sh tells this status apart
+   from a refusal. *)
+let no_config_root_status = 3
 
 let ( let* ) = Result.bind
 
@@ -269,6 +277,28 @@ let addon_refusal choice error =
   | Require_addon -> Error message
   | Offer_addon | Skip_addon -> Ok (Reported message)
 
+let addon_plan_status : Addon_setup.error -> int = function
+  | Addon_setup.Config_root_missing _ -> no_config_root_status
+  | Addon_setup.Base_path_not_absolute _
+  | Addon_setup.Embedded_package_invalid _
+  | Addon_setup.Package_unwritable _
+  | Addon_setup.Package_unloadable _
+  | Addon_setup.Config_root_invalid _
+  | Addon_setup.Inventory_unreadable _
+  | Addon_setup.Declared_more_than_once _
+  | Addon_setup.Declaration_unloadable _
+  | Addon_setup.Declaration_refused _ -> 1
+
+let plan_addon ~base_path choice =
+  match choice with
+  | Skip_addon -> Ok Not_run
+  | Require_addon | Offer_addon ->
+    (match Addon_setup.plan ~base_path with
+     | Ok plan -> Ok (Done plan)
+     | Error error ->
+       addon_refusal choice error
+       |> Result.map_error (fun message -> addon_plan_status error, message))
+
 let print_addon_skipped message =
   prerr_endline ("The browser Add-on was not set up: " ^ message)
 
@@ -301,21 +331,17 @@ let install
      browser Add-on step refuses what it can there too, and the rest after it
      wrote its package ({!Addon_setup.apply}); see [addon_refusal]. *)
   let planned =
-    let* addon =
-      match addon_choice with
-      | Skip_addon -> Ok Not_run
-      | Require_addon | Offer_addon ->
-        (match Addon_setup.plan ~base_path with
-         | Ok plan -> Ok (Done plan)
-         | Error error -> addon_refusal addon_choice error)
+    let refused result = Result.map_error (fun message -> 1, message) result in
+    let* addon = plan_addon ~base_path addon_choice in
+    let* extension = refused (extension_route ~modes ~manifest_dir ~host_name) in
+    let* bidi = refused (bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port) in
+    let* automation =
+      refused (automation_plan ~modes ~runtime_config_path ~geckodriver ~browser)
     in
-    let* extension = extension_route ~modes ~manifest_dir ~host_name in
-    let* bidi = bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port in
-    let* automation = automation_plan ~modes ~runtime_config_path ~geckodriver ~browser in
     Ok (addon, extension, bidi, automation)
   in
   match planned with
-  | Error message -> refuse message
+  | Error (status, message) -> refuse_with status message
   | Ok (addon, extension, bidi, automation) ->
     (* Install the requested host assets, then the browser Add-on package and
        its declaration, before writing configuration tables. A later refusal

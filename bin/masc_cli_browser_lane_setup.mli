@@ -45,4 +45,6 @@ val run
   -> browser:string option
   -> int
 (** The process exit code: [0] when it printed the state or finished the
-    install, [1] when it refused and said why on stderr. *)
+    install, [1] when it refused and said why on stderr, and [3] when
+    [--mode addon] found no config root in the workspace yet, so nothing was
+    written: the first server start writes one. *)

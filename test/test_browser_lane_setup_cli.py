@@ -166,6 +166,17 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         self.assertEqual(sorted(path.name for path in declaration.parent.glob("*.toml")),
                          ["browser.toml"], "one declaration")
 
+    # A workspace no server has started in has no config root yet. That is not
+    # a refusal: the first start writes one, and install-local-build.sh tells
+    # the two apart by this status.
+    def test_addon_without_a_config_root_exits_3_and_writes_nothing(self):
+        root = self.scratch()
+        base = root / "workspace"
+        base.mkdir()
+        result = masc(root, "--mode", "addon", "--base-path", str(base))
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertFalse((base / ".masc").exists(), "nothing is written")
+
     def test_every_route_declares_the_addon(self):
         root = self.scratch()
         base = workspace(root)

@@ -35,7 +35,7 @@ let runner ?(installation_id="original-installation") ~registry ~base_path ~call
     ~scope:"candle-appraisals" ~request_id ~installation_id ~package_id:"candle-appraiser" ~tool:"candle_appraise" ~request
     |> Result.map_error (function
       | Lane_addon_tool_request_owner.Store_unavailable detail -> Lane_addon_runtime.Unavailable detail
-      | (Binding_conflict | Invalid_identity _) as error -> Lane_addon_runtime.Host_refusal
+      | (Binding_conflict | Invalid_identity _ | Invalid_request _) as error -> Lane_addon_runtime.Host_refusal
         (Lane_addon_call_context.Rejected (Lane_addon_tool_request_owner.error_to_string error))) in
   Server_candle_appraiser.For_testing.run ~registry ~base_path ~retain ~call ~identity request
 

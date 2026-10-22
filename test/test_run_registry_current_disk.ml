@@ -186,7 +186,31 @@ let test_concurrent_reads_and_writes () = with_path (fun _ path ->
     (fun () -> ignore (selected registry)));
   assert_completed (`String "terminal") (selected registry))
 
+let test_startup_orphan_cannot_be_compacted_away () = with_path (fun _ path ->
+  write path (complete_row "orphan" `Null);
+  let original=load path in
+  let module B = Run_registry_core.Make (struct include Payload let completed_retention=`Latest 1 end) in
+  let registry=B.replay path in
+  check string "orphan prevents otherwise clean compaction" original (load path);
+  check bool "strict reconciliation cannot borrow false clean startup authority" true
+    (match B.reconcile_current registry ~id:"original" ~decide:(fun _ -> Ok (B.Confirm_current,())) with
+     | Error (B.Current_source_unavailable (B.Incomplete_startup report)) -> report.malformed_lines=1
+     | Ok () | Error (Current_source_unavailable (Volatile_store | Not_initialized | Non_regular_history _
+         | Invalid_history _ | Incomplete_history | Snapshot_changed | Read_failed _ | Read_cleanup_failed _)
+         | Decision_refused _ | Invalid_change _ | Publication_failed _) -> false))
+let test_retained_history_late_terminal_has_original_registration () = with_path (fun _ path ->
+  let module B = Run_registry_core.Make (struct include Payload let completed_retention=`Latest 1 end) in
+  write path (register_row "old" `Null ^ complete_row "old" `Null
+    ^ register_row "new" `Null ^ complete_row "new" `Null ^ complete_row "old" (`String "late"));
+  let registry=B.replay_with_retained_history path in
+  check bool "retention eviction is not an orphaned lifecycle" true
+    (match B.replay_status registry with
+     | Run_registry_core.Replayed report -> report.malformed_lines=0 && report.reached_end
+     | Not_replayed | Log_absent -> false))
+
 let () = run "strict current registry disk observation" ["current history",[
+  test_case "startup orphan cannot disappear before strict publication" `Quick test_startup_orphan_cannot_be_compacted_away;
+  test_case "retention eviction does not orphan a valid late terminal" `Quick test_retained_history_late_terminal_has_original_registration;
   test_case "full registration, terminal, reset and available null" `Quick test_full_lifecycle;
   test_case "volatile/uninitialized and legacy lookup contracts" `Quick test_readiness;
   test_case "absent and empty reads never create or chmod" `Quick test_missing_is_read_only;

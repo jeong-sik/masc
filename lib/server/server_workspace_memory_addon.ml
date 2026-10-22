@@ -561,8 +561,58 @@ let prepare_observation_with ~store ~base_path ~request_id ~now =
 let prepare_observation ~config ~request_id =
   let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   prepare_observation_with ~store ~base_path:config.Workspace.base_path ~request_id ~now:Time_compat.now
+module Runs = Exact_lane_run_registry
+let deliver_observation_with ~store ~base_path ~registry ~request_id ~now =
+  let* prepared=prepare_observation_with ~store ~base_path ~request_id ~now in
+  let pending = function Receipt.Pending _ -> true | Unobserved | Acknowledged _ -> false in
+  let observer=Progress.observer prepared.original.progress in
+  if not (pending observer.registration || pending observer.completion) then Ok prepared else
+  let registration=prepared.registration in
+  let terminal=match prepared.completion with
+    | None -> None
+    | Some completion ->
+      let outcome=match completion.disposition with
+        | Observation.Confirmed_commit _ -> Runs.Succeeded
+        | Domain_conflict _ -> Runs.Failed {code="domain_conflict";detail="Original domain state conflicts with the retained commit"}
+        | Before_dispatch_refusal _ -> Runs.Failed {code="before_dispatch_refused";detail="Original Curator request was refused before dispatch"}
+        | Execution_refusal _ -> Runs.Failed {code="execution_refused";detail="Original Curator execution was refused"} in
+      Some {Runs.outcome;elapsed_s=None;output=Receipt.to_json completion.receipt;
+        selected_slot=completion.selected_slot;usage=None} in
+  let* ()=Runs.reconcile_original registry ~run_id:registration.run_id ~lane:Runs.Workspace_curator
+    ~actor:registration.actor ~started_at:registration.receipt.observed_at
+    ~input:(Runs.Exact_input registration.input) ~completion:terminal
+    |> Result.map_error (fun error -> Unavailable (Runs.reconciliation_error_to_string error)) in
+  (* Reconciliation returned with every registry lock released. Restore the
+     physical original/ancestry and the full immutable receipt again before
+     acknowledging that exact fact; no registry getter can manufacture an ACK. *)
+  let acknowledge stage expected =
+    let* fresh=prepare_observation_with ~store ~base_path ~request_id ~now in
+    let observer=Progress.observer fresh.original.progress in
+    let publication=match stage with Receipt.Registration -> observer.registration
+      | Completion -> observer.completion in
+    match publication with
+    | Receipt.Unobserved -> Error (Rejected "Original observer intention vanished before acknowledgement")
+    | Receipt.Pending actual | Receipt.Acknowledged actual ->
+      if not (Yojson.Safe.equal (Receipt.to_json actual) (Receipt.to_json expected)) then
+        Error (Rejected "Original observer receipt changed after durable registry confirmation")
+      else match publication with
+        | Receipt.Unobserved -> Error (Rejected "Original observer intention vanished")
+        | Receipt.Acknowledged _ -> Ok ()
+        | Receipt.Pending _ ->
+          Eio_unix.run_in_systhread (fun () -> advance ~store fresh.original
+            (Progress.Observer (Receipt.Recorded (stage,expected.Receipt.digest))))
+          |> Result.map (fun _ -> ()) in
+  let* ()=acknowledge Receipt.Registration registration.receipt in
+  let* ()=match prepared.completion with None -> Ok ()
+    | Some completion -> acknowledge Receipt.Completion completion.receipt in
+  prepare_observation_with ~store ~base_path ~request_id ~now
+let deliver_observation ~config ~request_id =
+  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  deliver_observation_with ~store ~base_path:config.Workspace.base_path
+    ~registry:(Runs.global ()) ~request_id ~now:Time_compat.now
 module For_testing = struct
   let resume=resume_with let settle=settle_with let narrow=narrow_local
+  let deliver_observation=deliver_observation_with
   let prepare_observation=prepare_observation_with
   let discover=discover_with
 end

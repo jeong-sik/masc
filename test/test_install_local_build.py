@@ -260,6 +260,7 @@ class LocalBuildInstall(unittest.TestCase):
             prefix = root / "prefix"
             base = root / "addon-refused workspace"
             base.mkdir()
+            install_lane(base)
             result = subprocess.run(
                 ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
                  "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
@@ -268,6 +269,30 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("browser Add-on", result.stderr)
             self.assertTrue((prefix / "masc").is_file(), "the programs stay installed")
+            # The refusal waits for the host refresh, so the lane still gets
+            # the new host.
+            self.assertEqual(lane_calls(prefix), [host_call(prefix, base)])
+            self.assertEqual((base / ".masc/browser-lane/host/masc-browser-host").read_bytes(),
+                             (prefix / "masc-browser-host").read_bytes())
+
+    def test_a_workspace_that_does_not_exist_yet_gets_no_addon_declaration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            fake_masc(build / "main_eio.exe")
+            preflight_helper(build)
+            prefix = root / "prefix"
+            base = root / "not created yet"
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                 "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                 "--base-path", str(base)],
+                env=unnamed_env(root), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(addon_calls(prefix), [])
+            self.assertFalse(base.exists(), "the workspace is not created")
 
     # An install that cannot run the check stops before it replaces a binary or
     # cleans the build tree, so the selected workspace and the build stay.

@@ -85,6 +85,7 @@ browser_addon_programs=(masc_native_addon_launcher masc_browser_addon_worker mas
 custom_build_dir=false
 base_path=""
 workspace_root=""
+workspace_kind=""
 install_args=("$@")
 case "$(uname -s)" in
   Darwin) manifest_dir="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts" ;;
@@ -435,10 +436,16 @@ echo "installed masc, masc-tui, masc-browser-host, masc-native-addon-launcher, m
 # The masc just installed writes the browser Add-on package it carries into
 # the workspace and declares it when the workspace has none, so the server
 # attaches a package of this build. An existing declaration is left as it is
-# and reported.
-if ! "$prefix/masc" browser-lane-setup --mode addon --base-path "$workspace_root"; then
-  echo "install-local-build: the browser Add-on of $workspace_root is not set up; the programs above are installed" >&2
-  exit 1
+# and reported. A workspace that does not exist yet is not created here. A
+# failure is reported after the browser hosts below are refreshed, so one
+# workspace's Lane directory never leaves every host on the old build.
+addon_failed=false
+if [ "$workspace_kind" = directory ]; then
+  if ! "$prefix/masc" browser-lane-setup --mode addon --base-path "$workspace_root"; then
+    addon_failed=true
+  fi
+else
+  echo "install-local-build: the browser Add-on is not declared: workspace $workspace_root does not exist yet; run masc browser-lane-setup --mode addon --base-path $workspace_root once it does"
 fi
 
 python3 - "$prefix/masc" "$prefix/masc-browser-host" "$manifest_dir" "$workspace_root" <<'PY'
@@ -645,6 +652,11 @@ if failures:
         print(f"install-local-build: could not refresh {failure}", file=sys.stderr)
     sys.exit(1)
 PY
+
+if [ "$addon_failed" = true ]; then
+  echo "install-local-build: the browser Add-on of $workspace_root is not set up; the programs above are installed and the browser hosts refreshed" >&2
+  exit 1
+fi
 
 # Installed binaries and browser hosts now hold their own copies. Clean only
 # the default output this invocation built, never externally supplied input.

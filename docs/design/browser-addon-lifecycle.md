@@ -197,13 +197,16 @@ receipts remain distinct from successful contract validation.
    Replacement stays refused until the operator takes the retained allocation
    over with `POST /api/v1/lane-addons/retain` (operator credential only). The
    host first confirms what it can observe: the admission and each Chrome and
-   live BiDi child claim are Settled, and the allocation keeps its recorded
-   identity. It then records the acquisition as `retained` and the instance as
-   detached with `Native_retained`. It infers nothing it cannot observe and
-   removes nothing. The leftover files stay in place, and the declaration may
-   start a new instance. A Gecko build that relaunches itself during startup
-   leaves the group this way: geckodriver reports the original process exit,
-   while the relaunched browser keeps the instance profile (#45187).
+   live BiDi child claim are already Settled, and the allocation keeps its
+   recorded identity. Retain itself retires no claim and signals no process. It
+   then records the acquisition as `retained` and the instance as detached with
+   `Native_retained`. It infers nothing it cannot observe and removes nothing.
+   The leftover files stay in place, and the declaration may start a new
+   instance. Every later cleanup of that claim reports the allocation as
+   retained, never as released, so a binding write that did not land still
+   converges on `Native_retained`. A Gecko build that relaunches itself during
+   startup leaves the group this way: geckodriver reports the original process
+   exit, while the relaunched browser keeps the instance profile (#45187).
 
    The tool proxy must
    preserve the exported tool's installation-selected command/result hooks;

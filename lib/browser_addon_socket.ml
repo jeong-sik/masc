@@ -1,6 +1,7 @@
 let ( let* ) = Result.bind
 type t = {path:string;incarnation:string;automation:bool;models:bool;stagehand:bool;live_bidi:bool;device:int;inode:int}
 type acquisition = Missing | Acquired of int * int | Cleaning of int * int | Retained of int * int | Released
+type settlement = Allocation_released | Allocation_retained
 let socket_path t = t.path
 let arguments t ~max_message_bytes = ["--socket";t.path;"--incarnation";t.incarnation;
   "--max-message-bytes";string_of_int max_message_bytes] @ (if t.automation then ["--automation"] else [])
@@ -254,7 +255,7 @@ let cleanup ~admission ~directory = protect (fun () ->
     | Awaiting_exec|Live _|Cleanup_pending _ -> Error "native browser resource cleanup is not settled" in
   let* root=context_path admission in
   match root with
-  | None -> Ok ()
+  | None -> Ok Allocation_released
   | Some (root,automation,models,stagehand,live_bidi) ->
     let* ()=match stagehand with None -> Ok () | Some c ->
       Browser_addon_stagehand.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root in
@@ -264,7 +265,7 @@ let cleanup ~admission ~directory = protect (fun () ->
     let* identity=acquisition ~instance_id:(Native_addon_lease.instance_id admission) ~root ~file ~directory in
     (* The operator took a retained allocation over. Its contents are not read,
        removed or released here. *)
-    match identity with Retained _ -> Ok () | Missing|Acquired _|Cleaning _|Released ->
+    match identity with Retained _ -> Ok Allocation_retained | Missing|Acquired _|Cleaning _|Released ->
     let* ()=match Unix.lstat root with
       | info when private_root root info ->
         let* ()=match identity with
@@ -292,7 +293,8 @@ let cleanup ~admission ~directory = protect (fun () ->
          | Acquired _,true -> Error "owned browser allocation vanished without confirmed cleanup"
          | (Missing|Cleaning _|Retained _|Released),_ | Acquired _,false -> Ok ()) in
     sync (Filename.dirname root);
-    Fs_compat.save_file_atomic_strict file (Yojson.Safe.to_string (`Assoc ["state",`String "released"])))
+    let* ()=Fs_compat.save_file_atomic_strict file (Yojson.Safe.to_string (`Assoc ["state",`String "released"])) in
+    Ok Allocation_released)
 let retain ~admission ~directory = protect (fun () ->
   let* directory=slot admission directory in
   let* status=Native_addon_lease.status admission |> Result.map_error Native_addon_lease.error_to_string in
@@ -301,20 +303,22 @@ let retain ~admission ~directory = protect (fun () ->
     | Awaiting_exec|Live _|Cleanup_pending _ -> Error "native browser resource cleanup is not settled" in
   let* root=context_path admission in
   match root with
-  | None -> Ok ()
+  | None -> Ok Allocation_released
   | Some (root,_automation,_models,stagehand,live_bidi) ->
     let incarnation=Native_addon_lease.instance_id admission in
     let* ()=match stagehand with None -> Ok () | Some c ->
-      Browser_addon_stagehand.settle c ~incarnation ~directory:root in
+      Browser_addon_stagehand.check_settled c ~incarnation ~directory:root in
     let* ()=match live_bidi with None -> Ok () | Some c ->
-      Browser_addon_live_bidi.settle c ~incarnation ~directory:root in
+      Browser_addon_live_bidi.check_settled c ~incarnation ~directory:root in
     let file=record admission directory in
     let* identity=acquisition ~instance_id:incarnation ~root ~file ~directory in
     let retained ~device ~inode =
-      Fs_compat.save_file_atomic_strict file
+      let* ()=Fs_compat.save_file_atomic_strict file
         (Yojson.Safe.to_string (allocation_json admission root ~device ~inode ~state:"retained")) in
+      Ok Allocation_retained in
     match identity,Unix.lstat root with
-    | (Retained _|Released),_ -> Ok ()
+    | Released,_ -> Ok Allocation_released
+    | Retained _,_ -> Ok Allocation_retained
     | (Acquired (device,inode)|Cleaning (device,inode)),info when private_root root info ->
         if info.st_dev=device && info.st_ino=inode then retained ~device ~inode
         else Error "browser socket directory identity changed"
@@ -323,4 +327,5 @@ let retain ~admission ~directory = protect (fun () ->
     | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
         (match identity with
          | Acquired (device,inode)|Cleaning (device,inode) -> retained ~device ~inode
-         | Missing|Retained _|Released -> Ok ()))
+         | Retained _ -> Ok Allocation_retained
+         | Missing|Released -> Ok Allocation_released))

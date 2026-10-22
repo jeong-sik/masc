@@ -24,15 +24,23 @@ val with_download_snapshot : t -> Browser_addon_downloads.descriptor ->
     The worker supplies a UUID and identity/digest, never a pathname. The callback
     must consume this descriptor without reopening a path. *)
 val arguments : t -> max_message_bytes:int -> string list
-val cleanup : admission:Native_addon_lease.t -> directory:string -> (unit, string) result
+type settlement = Allocation_released | Allocation_retained
+(** What {!cleanup} or {!retain} confirmed about the allocation of a Settled
+    claim. [Allocation_released]: its known resources were removed, or it never
+    had any. [Allocation_retained]: the operator took it over; nothing of it
+    was removed and it stays where it is. *)
+val cleanup : admission:Native_addon_lease.t -> directory:string -> (settlement, string) result
 (** Existing claim must be Settled. The original native reservation decides
     whether cleanup is required, including orphan recovery. Known directories
     are never reused and unknown contents are never recursively deleted. A
-    missing acquisition record with an existing socket is unconfirmed. *)
-val retain : admission:Native_addon_lease.t -> directory:string -> (unit, string) result
+    missing acquisition record with an existing socket is unconfirmed. A
+    retained allocation is reported as [Allocation_retained] and not touched. *)
+val retain : admission:Native_addon_lease.t -> directory:string -> (settlement, string) result
 (** The operator takes over an allocation whose release could not be confirmed.
-    Like {!cleanup}, the claim must be Settled and each Chrome and live BiDi
-    child claim must settle. Unlike it, the allocation's contents are not read
-    or removed: the acquisition record becomes [retained], with the same
-    directory identity, and a later {!cleanup} of this claim returns [Ok ()]
-    without touching that directory. *)
+    The claim must be Settled and each Chrome and live BiDi child claim must
+    already be Settled; unlike {!cleanup}, nothing is retired or signalled.
+    The allocation's contents are not read or removed: the acquisition record
+    becomes [retained] with the recorded directory identity, or, with no
+    record, the identity of the private directory found at this instance's own
+    path. An allocation already released is reported as [Allocation_released]
+    and left as it is. *)

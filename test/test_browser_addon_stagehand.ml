@@ -137,7 +137,9 @@ while True:
       let profile=Filename.concat (Filename.concat directory "chromium-profiles") first in
       Unix.symlink outside (Filename.concat profile "external-link");
       lease (Lease.retire admission);
-      ok (Socket.cleanup ~admission ~directory:(Filename.concat root "worker-slot"));
+      (match ok (Socket.cleanup ~admission ~directory:(Filename.concat root "worker-slot")) with
+       | Socket.Allocation_released -> ()
+       | Allocation_retained -> Alcotest.fail "the allocation was retained, not released");
       check "host cleanup released the original allocation" false (Sys.file_exists directory);
       check "profile cleanup never follows a symlink" true (Sys.file_exists outside);
       check "child admission ledger survives profile cleanup" true (Sys.file_exists (Filename.concat root "chrome-slot/lease"))))))

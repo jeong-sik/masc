@@ -1364,7 +1364,7 @@ let native_directories store installation_id =
   [native_claim_directory store Installation_slot ~id:installation_id]
 let native_result result = Result.map_error (fun error ->
   Lifecycle.Cleanup_unconfirmed (Native_addon_lease.error_to_string error)) result
-let native_settled claim =
+let native_settlement claim =
   let* status = offload (fun () -> Native_addon_lease.status claim) |> native_result in
   match status with
   | Native_addon_lease.Settled ->
@@ -1374,16 +1374,25 @@ let native_settled claim =
        | [] -> Error (Lifecycle.Cleanup_unconfirmed "native claim has no host slot"))
   | Awaiting_exec | Live _ | Cleanup_pending _ ->
       Error (Lifecycle.Cleanup_unconfirmed "native claim has not settled")
+(* For the callers that only need the claim settled: a retained allocation is
+   settled as well, and it is never removed by them. *)
+let native_settled claim =
+  Result.map (fun (_ : Browser_addon_socket.settlement) -> ()) (native_settlement claim)
+(* An allocation the operator retained is never reported as released, even
+   when the binding still says Failed because its own write did not land. *)
+let native_release ~installation_id ~instance_id = function
+  | Browser_addon_socket.Allocation_released -> Lifecycle.Native_released {installation_id;instance_id}
+  | Allocation_retained -> Lifecycle.Native_retained {installation_id;instance_id}
 let native_recover ~store ~installation_id ~instance_id =
   let* claim = offload (fun () -> Native_addon_lease.reopen
     ~directories:(native_directories store installation_id) ~instance_id) |> native_result in
   let* () = offload (fun () -> Native_addon_lease.request_termination claim) |> native_result in
-  let* () = native_settled claim in
-  Ok (Lifecycle.Native_released {installation_id;instance_id})
+  let* settlement = native_settlement claim in
+  Ok (native_release ~installation_id ~instance_id settlement)
 (* What the host still confirms before the operator takes an instance's
    resources over: the admission is Settled (its process and process group are
-   gone) and [Browser_addon_socket.retain] settles each browser child claim and
-   keeps the allocation's recorded identity. Nothing here signals a process. *)
+   gone), each browser child claim is already Settled, and the allocation keeps
+   its recorded identity. Nothing here retires a claim or signals a process. *)
 let native_retain ~store ~installation_id ~instance_id =
   let lease result = Result.map_error Native_addon_lease.error_to_string result in
   let* claim = offload (fun () -> Native_addon_lease.reopen
@@ -1391,8 +1400,8 @@ let native_retain ~store ~installation_id ~instance_id =
   let* status = offload (fun () -> Native_addon_lease.status claim) |> lease in
   match status, Native_addon_lease.directories claim with
   | Native_addon_lease.Settled, directory::_ ->
-      let* () = offload (fun () -> Browser_addon_socket.retain ~admission:claim ~directory) in
-      Ok (Lifecycle.Native_retained {installation_id;instance_id})
+      let* settlement = offload (fun () -> Browser_addon_socket.retain ~admission:claim ~directory) in
+      Ok (native_release ~installation_id ~instance_id settlement)
   | Native_addon_lease.Settled, [] -> Error "native claim has no host slot"
   | (Native_addon_lease.Awaiting_exec | Live _ | Cleanup_pending _), _ ->
       Error "native claim has not settled; its process or process group may still run"
@@ -1524,8 +1533,8 @@ let backend ~store ~artifact_store () = match !override with
                 Option.iter Browser_addon_client.revoke !browser_client;
                 let* _receipt=Lane_addon_native_worker.stop worker
                   |> Result.map_error (fun error -> Lifecycle.Cleanup_unconfirmed (Lane_addon_native_worker.error_to_string error)) in
-                let* ()=native_settled admission in
-                let receipt=Lifecycle.Native_released {installation_id;instance_id} in
+                let* settlement=native_settlement admission in
+                let receipt=native_release ~installation_id ~instance_id settlement in
                 combined_release:=Some receipt;Ok receipt in
             let wrap ~ready worker =
               let* browser=match !browser_client,socket with
@@ -2420,10 +2429,25 @@ let retain_unconfirmed m args =
     | Ok release ->
         let state = Lifecycle.Detached release in
         let terminal = replace_state fields state in
-        Log.Misc.warn "Lane Add-on instance %s was retained by the operator; resources not confirmed released stay in place (%s)"
-          id (Lifecycle.failed_to_string failed);
+        let publication = {fields; terminal = Some terminal; terminal_state = state} in
         let writer = Option.value ~default:default_cleanup_writer (Eio.Fiber.get cleanup_writer_key) in
-        publish_cleanup m ~id ~writer {fields; terminal = Some terminal; terminal_state = state};
+        (* The release already holds. As in [historical_detach], a raising log
+           call is a publication failure: the next maintenance beat retries
+           only the publication. *)
+        (try
+           (match release with
+            | Lifecycle.Native_retained _ ->
+                Log.Misc.warn "Lane Add-on instance %s was retained by the operator; resources not confirmed released stay in place (%s)"
+                  id (Lifecycle.failed_to_string failed)
+            | Lifecycle.Native_released _ | Lifecycle.Never_created | Lifecycle.Released _ ->
+                Log.Misc.info "Lane Add-on instance %s asked to be retained was found released (%s)"
+                  id (Lifecycle.failed_to_string failed));
+           publish_cleanup m ~id ~writer publication
+         with
+         | Eio.Cancel.Cancelled _ as exn ->
+             Hashtbl.replace m.recovering id (Cleanup_commit_failed (publication,"retain publication cancelled"));
+             raise exn
+         | exn -> Hashtbl.replace m.recovering id (Cleanup_commit_failed (publication,Printexc.to_string exn)));
         match Hashtbl.find_opt m.recovering id with
         | None -> Ok terminal
         | Some (Cleanup_commit_failed (_,detail)) ->

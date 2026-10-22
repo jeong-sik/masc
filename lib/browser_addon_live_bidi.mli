@@ -14,6 +14,10 @@ val check_retained_child : configuration -> incarnation:string -> directory:stri
     descriptor compared with the one this allocation recomputes. A missing
     slot is [Ok]. *)
 val settle : configuration -> incarnation:string -> directory:string -> (unit, string) result
+val check_settled : configuration -> incarnation:string -> directory:string -> (unit, string) result
+(** Require what {!settle} requires, without retiring or signalling anything:
+    this allocation's original child claim is already Settled. A missing slot
+    is [Ok]; a reservation that was never published is refused. *)
 val cleanup : configuration -> incarnation:string -> directory:string -> (unit, string) result
 (** Recovery stops only this allocation's original child claim and requires its
     settlement. Persistent profile data and shared claim files are preserved. *)

@@ -17,11 +17,8 @@ let same left right =
   && String.equal left.source right.source
 
 let dashboard_url ~host ~port t =
-  let query = Uri.encoded_of_query
-    [ "section", ["artifacts"]; "artifact", [t.report.id]
-    ; "revision", [string_of_int t.report.revision.revision] ] in
-  Uri.make ~scheme:"http" ~host ~port ~path:"/dashboard/"
-    ~fragment:("/workspace?" ^ query) () |> Uri.to_string
+  Uri.to_string (Uri.make ~scheme:"http" ~host ~port ())
+  ^ Masc.Published_artifact.url ~revision:t.report.revision.revision t.report.id
 
 let path_input path =
   if not (String.is_valid_utf_8 path) then Error "The destination must be valid UTF-8"

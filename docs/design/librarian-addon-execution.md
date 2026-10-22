@@ -68,6 +68,17 @@ retention, strict reread and acknowledgement need original identities. A
 temporary implementation that only parks size-refused work has not preserved
 this behavior and does not complete the unit.
 
+The queue now exposes `batch_to_json` / `batch_of_json` for that immutable input
+boundary. The closed envelope preserves the original generation and full
+ordered candidate rows. Restore must match an independently retained host
+list of `explicit_candidate_id` values, including every full-payload digest;
+it cannot substitute today's pending batch or accept a worker's identity list.
+Sparse sequences and disjoint whole-candidate partitions stay unchanged. This
+pure port does not persist or discover the original execution by itself and
+does not establish workspace/Keeper/installation authority. The eventual host
+capture must bind those owners and Memory inputs separately. Receipt-backed
+locked disposition and queue ACK remain the sole consumption path.
+
 ## Shared execution gaps that must be resolved
 
 **Admission policy:** builtin Librarian resolves to `Background` admission,

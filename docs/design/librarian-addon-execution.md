@@ -1,10 +1,12 @@
 # Librarian execution as an Addon
 
-This is the next implementation boundary for worklist E03. It is a design based
-on source `db31e62fe17f92aea4919de7765f1ace65914772`, not an implemented package,
-passing runtime scenario or replacement for E03's original completion criteria:
-preserve checkpoint, absorption, Memory lineage and pending work, and verify
-Keeper memory continuity.
+This records the original E03 extraction contract and its current implementation.
+The explicit-candidate production caller now uses the configured Librarian Addon
+for the raw proposal and the original host for absorption, Memory and ACK. This
+candidate has source/parser evidence only; its selected compiled behavior checks
+have not yet run. Checkpoint, official-client, continuity and history purposes
+remain on their original host path. E03 is incomplete until its original memory
+lineage, pending-work and actual Keeper-continuity criteria are verified.
 
 ## Execution must leave authority on the host
 
@@ -270,3 +272,65 @@ synthetic, so it proves neither semantic authority nor OCaml host execution,
 provider capture, absorption, Memory or ACK. The complete production owner and
 actual Runtime/Store/failure tests remain required before this unit can be called
 implemented and before E03 can advance to end-to-end qualification.
+
+
+## Actual explicit-candidate owner candidate (2026-10-22)
+
+`Keeper_librarian_queue_refresh.run_explicit_admission` still submits through the
+existing `Keeper_memory_lane`; `Keeper_memory_admission_worker.run` now delegates
+to `Keeper_librarian_admission_owner.run`. There is no second scheduler. The
+owner restores the complete original part/execution/gate inventories before
+local recovery, candidate ACK or fresh work. `Queue.read_generation` preserves
+the address of an original request even when a persisted queue becomes empty.
+Scope identity includes the physical workspace/keepers roots, Keeper and that
+original queue generation. The complete capture additionally binds the required
+Memory epoch, so epoch loss or replacement cannot hide an old request by moving
+its lookup address.
+
+Fresh capture uses the real resolved prompt/fragments, ordered original Memory,
+policy values, stable parsing time, complete sparse candidate payloads,
+retirement evidence and actual semantic Addon destination. The worker retains
+or reads that exact request; the shared host Exact runner invokes the full pure
+admission validator. Its execution-only guard checks current configured
+semantic authority before actual measurement/generation dispatch, including
+waiting for a provider permit, while completed originals remain locally readable
+when Off. Lost or uncertain worker admission never grants a resubmit.
+
+Only actual exclusive host input-capacity proof permits two whole-candidate
+children. The existing Owner/Progress journal retains both original children
+and acknowledges their exact publication before either runs. The right child
+captures Memory at its actual turn after any left-side commit. A terminal
+semantic Deferred remains immutable on an unchanged wake. A new tail or
+material fact/provenance change can qualify a new full pending batch, including
+old gaps, through independently verified original terminal/receipt evidence;
+ordinary failure and unknown execution are not supersession grants.
+
+Before the first absorption evaluation, the execution retains a disposition
+intent with its immutable gate root identity. Gate requests and returned
+transcripts are host-owned. Known-failed retries retain their exact successor
+before child publication and acknowledge it before execution. Pending successor
+publication can recover only that same child locally; missing acknowledged
+history refuses. Restoring completed gate evidence calls no provider.
+
+`Keeper_librarian_admission_commit` validates the original answer and gate chain,
+then passes the original disposition/support/required destinations and recall
+revision to `Current.apply_disposition`. It merges under the existing Memory
+locks instead of replacing a captured full snapshot. Actual matching committed
+candidate receipts alone authorize a Finished observation and sparse queue ACK.
+Unknown local disposition is reconciled against those same receipts before a
+local retry, without another model or gate evaluation.
+
+`Server_librarian_addon_wake` only subscribes to existing Runtime owner events.
+A switch-owned child restores the original owner after yielding, then signals
+the existing per-Keeper queue wake. Configuration/export hints scan actual
+pending queue names. The callback performs no filesystem or Runtime reentry;
+shutdown fences copied callbacks and removes this exact subscription.
+
+The focused production fixture uses actual Runtime, persistent Python worker,
+loopback HTTP/common Exact, serialized Memory lane, original journals, Current
+receipts and queue ACK. Its resource-launch edge is substituted; it does not
+prove Docker, paid-provider execution, installed native binaries, either visible
+UI, other Librarian purposes or the original E03 continuity requirement. The
+server wake case substitutes only the final queue-refresh scheduling callback
+with the same Memory-lane/public-worker consumer. Tests are authored, not yet
+executed; earlier parent execution receipts are not evidence for this candidate.

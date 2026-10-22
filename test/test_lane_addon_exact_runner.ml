@@ -588,7 +588,7 @@ let test_retained_schema_only_curator_answer_is_not_a_domain_judgment () =
     (match get (Exact.run ~store ~declaration_id ~package:curator_package ~runner
       ~authorize_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ ->
                     Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
-                        validate_output=(fun _ -> Ok ())}) request) with
+                        before_dispatch=(fun () -> Ok ()); validate_output=(fun _ -> Ok ())}) request) with
      | Exact.Final (Exact.Call_final (Exact.Answered {output;_})) ->
        check bool "schema-only seed really retained the domain-invalid answer" true
          (Exact.checked_json output=bad)
@@ -620,7 +620,7 @@ let test_curator_briefing_semantics_reject_blank_before_acceptance () =
     | Some (_,slot,_) -> check string "briefing full-domain validation advances" "original-summary" slot
     | None -> fail "nonblank original summary must answer")
 
-let test_http_flow_preserves_host_admission_class admission_class () =
+let test_http_flow_preserves_host_admission_class ?(revoke_while_queued=false) admission_class () =
   with_case (fun ~sw ~net ~clock ~base_path ~store:_ ->
     let module Provider = Agent_core.Llm_provider in
     let module Admission = Provider.Provider_admission in
@@ -643,10 +643,13 @@ let test_http_flow_preserves_host_admission_class admission_class () =
     let remove=Admission.install_wait_observer (fun wait -> observed:=wait::!observed) in
     Eio.Switch.on_release sw remove;
     let original=request "actual-host-admission" in
+    let permitted=ref true and dispatch_checks=ref 0 in
     let authorization : Exact.request_authorization =
-      {admission_class; validate_output=(fun _ -> Ok ())} in
+      {admission_class; before_dispatch=(fun () -> incr dispatch_checks;
+          if !permitted then Ok () else Error "original configuration changed while awaiting admission");
+       validate_output=(fun _ -> Ok ())} in
     let call=match Server_lane_addon_exact.runner ~base_path
-        ~admission_class:authorization.admission_class ~lane_key:lane_id ~schema original with
+        ~before_dispatch:authorization.before_dispatch ~admission_class:authorization.admission_class ~lane_key:lane_id ~schema original with
       | Ok call -> call | Error _ -> fail "actual HTTP runner refused the fixture lane" in
     let validate raw=match Exact.validate_answer ~output:(List.hd package.exact_outputs) original raw with
       | Error detail -> Error detail
@@ -664,16 +667,21 @@ let test_http_flow_preserves_host_admission_class admission_class () =
       | Some state ->
         check int "one permit remains held" 1 state.active;
         check int "the real Exact flow queued before release" 1 state.queue_length;
-        check int "a queued flow has not sent HTTP" 0 (F.post_count server));
+        check int "a queued flow has not sent HTTP" 0 (F.post_count server);
+        if revoke_while_queued then permitted:=false);
     let result=F.await_within_fixture_budget ~clock
       ~failure:"actual host-class HTTP flow did not finish" finished in
-    check (option string) "the actual flow proof names its accepted transport" (Some target.target_ref)
+    check int "actual dispatch rechecks after the permit wait" 1 !dispatch_checks;
+    check (option string) "only a permitted original names an accepted transport"
+      (if revoke_while_queued then None else Some target.target_ref)
       (Keeper_exact_walk_receipt.answered_slot result.receipt);
     (match result.outcome with
      | Exact.Call_ended (Exact.Answered {output;_}) ->
+       check bool "a vetoed generation cannot answer" false revoke_while_queued;
        check bool "the real HTTP response is accepted" true (Exact.checked_json output=question)
+     | Call_refused _ when revoke_while_queued -> ()
      | Call_ended (Invalid_output _ | Input_refused _ | Output_limit_reached _)
-     | Call_refused _ -> fail "actual host-class HTTP flow did not answer");
+     | Call_refused _ -> fail "unexpected actual host-class HTTP outcome");
     (match !observed with
      | [wait] ->
        check bool "provider admission saw the host's actual class" true
@@ -681,7 +689,49 @@ let test_http_flow_preserves_host_admission_class admission_class () =
        check string "the original bound model reached admission" binding.model_id wait.model_id;
        check bool "the queued request was granted" true (wait.outcome=Admission.Wait_granted)
      | [] | _::_ -> fail "expected one original provider admission wait");
-    check int "one actual HTTP request" 1 (F.post_count server))
+    check int "only permitted original sends HTTP" (if revoke_while_queued then 0 else 1) (F.post_count server))
+
+let test_returned_answer_survives_dispatch_authority_change () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let permitted=ref true in
+    let server=F.start_server ~sw ~net ~clock (F.Reply_with (fun _ _ ->
+      permitted:=false;
+      `OK,F.openai_response question)) in
+    publish ~base_path [{F.id="original";base_url=server.base_url}];
+    let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
+      Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Background;
+        before_dispatch=(fun () -> if !permitted then Ok () else Error "configuration changed");
+        validate_output=(fun _ -> Ok ())} in
+    let original=request "returned-before-reconfiguration" in
+    let execute ()=get (Exact.run ~store ~declaration_id ~package ~authorize_request
+      ~runner:(Server_lane_addon_exact.runner ~base_path) original) in
+    check bool "a result from the admitted original survives later config drift" true
+      (Option.is_some (answered_by (execute ())));
+    check bool "retained delivery does not run the execution guard" true
+      (Option.is_some (answered_by (execute ())));
+    check int "neither result validation nor replay resends" 1 (F.post_count server))
+
+let test_cli_dispatch_veto_never_advances () =
+  with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ~store ->
+    publish ~base_path ~cli_slots:[F.cli_primary_runtime;F.cli_secondary_runtime] [];
+    let checks=ref 0 and calls=ref 0 in
+    let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
+      Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Background;
+        before_dispatch=(fun () -> incr checks;
+          if !checks=1 then Ok () else Error "original configuration changed before CLI");
+        validate_output=(fun _ -> Ok ())} in
+    let cli_runner : Keeper_lane_cli_oneshot.runner =
+      fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+        incr calls;Ok (Yojson.Safe.to_string question) in
+    let original=request "cli-authority-veto" in
+    let execute ()=get (Exact.run ~store ~declaration_id ~package ~authorize_request
+      ~runner:(Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner) original) in
+    check bool "a CLI local veto preserves conservative terminal uncertainty" true
+      (execute ()=Exact.Final Exact.Outcome_unknown);
+    check int "neither original nor fallback CLI dispatches" 0 !calls;
+    let before= !checks in
+    check bool "retained uncertainty cannot resend" true (execute ()=Exact.Final Exact.Outcome_unknown);
+    check int "retained uncertainty does not ask execution authority again" before !checks)
 
 let test_worker_names_do_not_grant_background () =
   with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ~store ->
@@ -809,6 +859,10 @@ let () =
         ; test_case "actual mixed failure proof survives Store reopen" `Quick test_original_mixed_failure_proof
         ; test_case "actual semantic predecessor veto survives capacity" `Quick test_semantic_failure_veto_survives_capacity
         ; test_case "actual CLI success retains prior failure" `Quick test_original_cli_prior_failure_proof
+        ; test_case "queued generation rechecks execution authority after permit" `Quick
+            (test_http_flow_preserves_host_admission_class ~revoke_while_queued:true Agent_core.Llm_provider.Admission_class.Background)
+        ; test_case "returned output survives later configuration changes" `Quick test_returned_answer_survives_dispatch_authority_change
+        ; test_case "a CLI authority veto cannot advance or resend" `Quick test_cli_dispatch_veto_never_advances
         ; test_case "an answer that matches the schema is answered" `Quick test_an_answer_that_matches_the_schema_is_answered
         ; test_case "an answer outside the schema advances" `Quick test_an_answer_outside_the_schema_advances
         ; test_case "every answer outside the schema is invalid_output" `Quick

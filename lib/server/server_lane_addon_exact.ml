@@ -68,7 +68,7 @@ type http_outcome =
 let usage_of_api (usage : Agent_core.Types.api_usage) =
   { Addon.input_tokens = usage.input_tokens; output_tokens = usage.output_tokens }
 
-let execute_http ~admission_class ~note ~capture_http ~resolved ~requirement ~messages ~validate =
+let execute_http ~before_dispatch ~admission_class ~note ~capture_http ~resolved ~requirement ~messages ~validate =
   let candidate (slot : Registry.selected_slot) =
     match Exact.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target with
     | Ok candidate -> Some candidate
@@ -114,9 +114,9 @@ let execute_http ~admission_class ~note ~capture_http ~resolved ~requirement ~me
           in
           let flow =
             Exact.execute_flow_once ~net ~clock
-              ~before_measurement_dispatch:(fun _ -> Eio.Fiber.check (); Ok ())
+              ~before_measurement_dispatch:(fun _ -> Eio.Fiber.check (); before_dispatch ())
               ~on_measurement_terminal:(fun _ -> Ok ())
-              ~before_dispatch:(fun _ -> Eio.Fiber.check (); Ok ())
+              ~before_dispatch:(fun _ -> Eio.Fiber.check (); before_dispatch ())
               ~before_advance:(fun ~failed ~next:_ ->
                 Eio.Fiber.check ();
                 (match failed with
@@ -171,7 +171,12 @@ let cli_prompt messages =
   in
   texts [] messages
 
-let call ~admission_class ~cli_runner ~base_path ~(resolved : Registry.resolved_lane) ~schema (request : Addon.request) ~validate =
+(* The shared CLI walker has no local-stop receipt. Do not turn an authority
+   veto into a provider failure/exhaustion or advance to another client. Exact
+   retains Outcome_unknown under its existing exception boundary instead. *)
+exception Dispatch_authority_refused of string
+
+let call ~before_dispatch ~admission_class ~cli_runner ~base_path ~(resolved : Registry.resolved_lane) ~schema (request : Addon.request) ~validate =
   let resolved=Runtime_exact_lane_backpressure.order resolved in
   let http=ref (Receipt.http_not_started ~detail:"no HTTP generation flow started") in
   let visited=ref [] and dispatched=ref [] and cli_failures=ref [] in
@@ -198,7 +203,7 @@ let call ~admission_class ~cli_runner ~base_path ~(resolved : Registry.resolved_
       | Ok receipt -> receipt
       | Error detail -> invalid_arg ("invalid original Addon walk: " ^ detail) in
     {Addon.outcome;receipt} in
-  match execute_http ~admission_class ~note ~capture_http:(fun captured -> http:=captured)
+  match execute_http ~before_dispatch ~admission_class ~note ~capture_http:(fun captured -> http:=captured)
     ~resolved ~requirement ~messages ~validate with
   | Http_answered { output; slot; usage } -> complete Receipt.Not_reached (Addon.Call_ended (Addon.Answered { output; slot; usage }))
   | Http_stopped -> complete Receipt.Not_reached (ended ())
@@ -218,7 +223,10 @@ let call ~admission_class ~cli_runner ~base_path ~(resolved : Registry.resolved_
           ~system_prompt:(Option.value request.system ~default:"") ~requirement
           ~prompt ~validate
           ~observe:(function
-            | Keeper_lane_cli_oneshot.Dispatching {runtime_id} -> dispatched:=runtime_id::!dispatched
+            | Keeper_lane_cli_oneshot.Dispatching {runtime_id} ->
+                (match before_dispatch () with
+                 | Ok () -> dispatched:=runtime_id::!dispatched
+                 | Error detail -> raise (Dispatch_authority_refused detail))
             | Raw_response _ -> ())
           ~on_failure:(fun failure ->
             visited:=cli_failure_slot failure::!visited;
@@ -244,9 +252,9 @@ let resolve ~lane_key =
     | Ok resolved -> Ok resolved
 
 let runner_with ~cli_runner ~base_path : Addon.runner =
-  fun ~admission_class ~lane_key ~schema request ->
+  fun ~before_dispatch ~admission_class ~lane_key ~schema request ->
   Result.map
-    (fun resolved -> fun ~validate -> call ~admission_class ~cli_runner ~base_path ~resolved ~schema request ~validate)
+    (fun resolved -> fun ~validate -> call ~before_dispatch ~admission_class ~cli_runner ~base_path ~resolved ~schema request ~validate)
     (resolve ~lane_key)
 
 let runner ~base_path = runner_with ~cli_runner:None ~base_path
@@ -257,10 +265,11 @@ let authorize_request ~base_path ~store ~declaration_id ~package request =
     ~base_path ~store ~declaration_id ~package request in
   match librarian with
   | None -> Ok {Addon.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
-      validate_output=curator}
+      validate_output=curator; before_dispatch=(fun () -> Ok ())}
   | Some librarian ->
     Ok {Addon.admission_class=Agent_core.Llm_provider.Admission_class.Background;
-      validate_output=(fun answer -> let* ()=curator answer in librarian answer)}
+      validate_output=(fun answer -> let* ()=curator answer in librarian.validate_output answer);
+      before_dispatch=librarian.before_dispatch}
 
 module For_testing = struct
   let runner ~base_path ~cli_runner = runner_with ~cli_runner:(Some cli_runner) ~base_path

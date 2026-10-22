@@ -272,7 +272,8 @@ type call_outcome =
 
 type execution_result = { outcome : call_outcome; receipt : Keeper_exact_walk_receipt.t }
 type call = validate:(Yojson.Safe.t -> (checked, string) result) -> execution_result
-type runner = admission_class:Agent_core.Llm_provider.Admission_class.t ->
+type dispatch_guard = unit -> (unit, string) result
+type runner = before_dispatch:dispatch_guard -> admission_class:Agent_core.Llm_provider.Admission_class.t ->
   lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
 
 (* One record per declaration and request: the request, its digest, every
@@ -605,6 +606,7 @@ type output_validator = Yojson.Safe.t -> (unit, string) result
 type request_authorization = {
   admission_class : Agent_core.Llm_provider.Admission_class.t;
   validate_output : output_validator;
+  before_dispatch : dispatch_guard;
 }
 type authority_refusal =
   | Unowned of { reason : string }
@@ -708,7 +710,8 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
         | None, Some attempt -> Ok attempt
         | None, None ->
           Eio.Fiber.check ();
-          match runner ~admission_class:authorization.admission_class ~lane_key ~schema request with
+          let* ()=authorization.before_dispatch () in
+          match runner ~before_dispatch:authorization.before_dispatch ~admission_class:authorization.admission_class ~lane_key ~schema request with
           | Error unavailable ->
             let reason = Lane_unavailable unavailable in
             let* () = save {previous with attempts = previous.attempts @ [Some (not_final_to_json reason)]} in

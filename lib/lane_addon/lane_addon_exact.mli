@@ -155,7 +155,12 @@ type call = validate:(Yojson.Safe.t -> (checked, string) result) -> execution_re
     declared schema. Raising other than [Eio.Cancel.Cancelled] is recorded as
     [Outcome_unknown]. *)
 
-type runner = admission_class:Agent_core.Llm_provider.Admission_class.t ->
+type dispatch_guard = unit -> (unit, string) result
+(** Fresh execution authority, checked before each actual provider/measurement
+    dispatch. An error stops the walk; it never invalidates an answer already
+    returned by a provider. Not used for local retained terminal observation. *)
+
+type runner = before_dispatch:dispatch_guard -> admission_class:Agent_core.Llm_provider.Admission_class.t ->
   lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
 (** Resolves the add-on lane [lane_key] for the permitted provider [schema]
     (package baseline or request schema). The supplied [validate] still checks
@@ -163,12 +168,17 @@ type runner = admission_class:Agent_core.Llm_provider.Admission_class.t ->
     trusted host authority for this original request and is retained by the
     returned call, never selected by worker data. It governs the HTTP Exact
     flow, not an official client's separate process admission.
-    It sends nothing; the returned [call] does. *)
+    It sends nothing; the returned [call] does. The call must invoke the
+    supplied [before_dispatch] after any provider admission wait, before every
+    measurement, generation or official-client dispatch. An authority error
+    stops candidate progression; it is not a provider/input refusal. A guard
+    is never called to rejudge an already returned provider result. *)
 
 type output_validator = Yojson.Safe.t -> (unit, string) result
 type request_authorization = {
   admission_class : Agent_core.Llm_provider.Admission_class.t;
   validate_output : output_validator;
+  before_dispatch : dispatch_guard;
 }
 (** Why the host consumer grants no authority for a request. *)
 type authority_refusal =
@@ -184,14 +194,17 @@ type execution_authority =
   request -> (request_authorization, authority_refusal) result
 (** Trusted host binding to an original consumer's pure domain validator and
     execution admission policy. Resolution may read host-owned state; the
-    returned validator must perform no effects. Both fields belong to the same
+    returned validator must perform no effects. All fields belong to the same
     verified original request. Worker package/lane names are not policy grants.
     A worker cannot supply this port or disable it through Hooks.
     Either refusal refuses both dispatch and delivery without replacing the
     original result. Authority is resolved again on every [run], including
     replay; delivering a retained result never invokes the runner. The
     authorization is not serialized into the worker request or a durable
-    admission-class audit. *)
+    admission-class audit.
+    [before_dispatch] is execution-only: an initial refusal occurs before the
+    started marker, later guard vetoes stop the actual walk. Retained terminal
+    replay uses only original validation and never invokes this guard. *)
 
 val check_retained_record : Yojson.Safe.t -> (unit, string) result
 (** Decode one retained record of the Exact store with the reads {!run}

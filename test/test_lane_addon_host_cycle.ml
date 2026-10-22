@@ -71,7 +71,7 @@ type worker = {
 type runner_mode = Answer of Yojson.Safe.t | Off
 type runner_state = { mode : runner_mode ref; resolutions : int ref }
 
-let runner state : Exact.runner = fun ~admission_class:_ ~lane_key:_ ~schema:_ _ ->
+let runner state : Exact.runner = fun ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ ->
   incr state.resolutions;
   match !(state.mode) with
   | Off -> Error Exact.Lane_off
@@ -155,7 +155,8 @@ let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 
 let permit : Exact.execution_authority = fun ~store:_ ~declaration_id:_ ~package:_ _ ->
-  Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard; validate_output=(fun _ -> Ok ())}
+  Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
+      before_dispatch=(fun () -> Ok ()); validate_output=(fun _ -> Ok ())}
 
 let with_installation ?await_change ?deliver_reply ?during_delivery ?owner_setup ?before_listing ?before_stop ?exported_tool ?(make_runner = runner) ?(authorize_request = permit) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
   let root = Filename.temp_dir "lane-host-cycle-" "" |> Unix.realpath in
@@ -203,6 +204,35 @@ let publish_lane_change () =
   ignore (F.publish_registry ~lane_id:"quiz/author" ~slot_ids:[ slot ] snapshot : Runtime_exact_output_registry.t)
 
 let delivered_status arguments = text "status" (member "result" arguments)
+
+let test_original_exact_semantic_dispatch_authority () =
+  with_installation (fun clock config _worker _state root ->
+    let directory=Filename.concat root ".masc/config/lane-addons" in
+    let source=Filename.concat directory "quiz.toml" in
+    let snapshot=Lane_addon_config.load ~directory in
+    let original=match snapshot.declarations with [d] -> d | [] | _::_::_ -> fail "one original declaration" in
+    let store=Lane_addon_store.create ~root:(Filename.concat root ".masc/lane-addons") in
+    let guard ()=Runtime.authorize_captured_exact_dispatch ~store ~declaration_id:original.id
+      ~package_id:original.package.id ~configuration_revision:original.revision in
+    await clock (fun () -> Result.is_ok (guard ()));
+    write source ("# formatting retains the original semantic authority\n" ^ declaration);
+    check bool "raw-source formatting does not change original dispatch authority" true (Result.is_ok (guard ()));
+    write source ("enabled=false\n" ^ declaration);
+    check bool "Off forbids new provider effects before reconciliation" true (Result.is_error (guard ()));
+    write source declaration;
+    check bool "On restores the same semantic original" true (Result.is_ok (guard ()));
+    write source ("id=\"quiz\"\nrun_id=\"changed-world\"\nmanifest_path=\"../../package.toml\"\n[binding]\nsources=[]\n");
+    check bool "a pending original cannot dispatch under a new semantic revision" true (Result.is_error (guard ()));
+    ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
+    let changed=match (Lane_addon_config.load ~directory).declarations with
+      | [d] -> d | [] | _::_::_ -> fail "one replacement declaration" in
+    let changed_guard ()=Runtime.authorize_captured_exact_dispatch ~store ~declaration_id:changed.id
+      ~package_id:changed.package.id ~configuration_revision:changed.revision in
+    await clock (fun () -> Result.is_ok (changed_guard ()));
+    check bool "the replacement worker cannot execute the old original" true (Result.is_error (guard ()));
+    write source "invalid TOML = [";
+    check bool "an incomplete fresh read grants no dispatch" true (Result.is_error (guard ()));
+    write source declaration)
 
 let test_scoped_owner_wakes_preserve_mcp_and_metadata_publication () =
   let events=ref [] and ready=ref false and other_scope=ref 0 and other_package=ref 0 and peer=ref 0 in
@@ -332,13 +362,13 @@ let test_model_events_admit_and_withdraw_an_exact_scope () =
     let state=availability () in if after=Some state.revision then None else Some (Ok state)) in
   let cancelled, cancel=Eio.Promise.create () in
   let entered, enter=Eio.Promise.create () in
-  let make_runner state ~admission_class ~lane_key:_ ~schema:_ (request:Exact.request) =
+  let make_runner state ~before_dispatch ~admission_class ~lane_key:_ ~schema:_ (request:Exact.request) =
     incr state.resolutions;
     if request.request_id="withdraw" then Ok (fun ~validate:_ ->
       Fun.protect ~finally:(fun () -> Eio.Promise.resolve cancel ()) (fun () ->
         Eio.Promise.resolve enter ();
         Eio.Fiber.await_cancel ()))
-    else runner {state with resolutions=ref 0} ~admission_class ~lane_key:"fixture" ~schema:(`Assoc []) request in
+    else runner {state with resolutions=ref 0} ~before_dispatch ~admission_class ~lane_key:"fixture" ~schema:(`Assoc []) request in
   with_installation ~await_change ~make_runner (fun clock config worker state _root ->
     await clock (fun () -> cycles config>=1);
     let publish requests =
@@ -360,7 +390,7 @@ let test_model_events_admit_and_withdraw_an_exact_scope () =
 let test_retirement_cancels_exact_before_worker_cleanup_finishes () =
   let entered, enter = Eio.Promise.create () and finished, finish = Eio.Promise.create () in
   let cleaning, clean = Eio.Promise.create () and released, release = Eio.Promise.create () in
-  let make_runner state ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+  let make_runner state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
     incr state.resolutions;
     Ok (fun ~validate:_ ->
       Fun.protect ~finally:(fun () -> Eio.Promise.resolve finish ()) (fun () ->
@@ -1508,7 +1538,8 @@ let () =
   Mirage_crypto_rng_unix.use_default ();
   run "lane add-on host request cycle"
     [ ( "cycle"
-      , [ test_case "a started worker gets its final result once" `Quick test_a_started_worker_gets_its_final_result_once
+      , [ test_case "fresh semantic authority precedes original Exact dispatch" `Quick test_original_exact_semantic_dispatch_authority
+        ; test_case "a started worker gets its final result once" `Quick test_a_started_worker_gets_its_final_result_once
         ; test_case "an unowned request ends and the cycle goes on" `Quick test_an_unowned_request_ends_and_the_cycle_goes_on
         ; test_case "an exported reply starts its pending host work" `Quick
             (test_an_exported_reply_starts_its_pending_host_work ~is_error:false)

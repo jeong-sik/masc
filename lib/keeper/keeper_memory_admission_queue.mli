@@ -62,6 +62,11 @@ val read_pending :
   keepers_dir:string -> keeper_id:string -> (batch option, string) result
 (** [None] means absent or empty. Malformed state is an error, never an empty queue. *)
 
+val read_generation : keepers_dir:string -> keeper_id:string -> (string option, string) result
+(** Strictly read the existing persisted queue generation even when pending is
+    empty. Only an absent queue file yields [None]; malformed/unreadable state
+    is [Error]. Does not create a queue, alter generation or grant execution. *)
+
 val acknowledge_committed :
   keepers_dir:string -> keeper_id:string -> (unit, string) result
 (** Read committed candidate receipts once, then under the queue lock verify

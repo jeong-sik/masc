@@ -4,11 +4,20 @@ type owner
 val observe_owner : base_path:string -> keepers_dir:string -> keeper_id:string ->
   (owner, string) result
 (** Blocking descriptor-bound workspace and actual flat-file keepers_dir observation.
-    Missing/replaced/symlinked roots or missing/changed Memory epoch refuse.
+    Missing/replaced/symlinked roots, missing queue generation or missing Memory
+    epoch refuse. Queue generation is retained even if its pending rows are empty.
     The new-root owner first uses Current.capture_program_anchor to establish
     the original epoch. That initialization grants no provider or consumption
     authority. Caller holds the Memory-lane purge fence and offloads this
     complete observation in Eio contexts. *)
+type scope_identity
+val scope_identity : owner -> scope_identity
+val scope_hash : scope_identity -> string
+(** Address-only identity from physical workspace/keepers roots, canonical Keeper
+    and the existing Queue generation. Epoch is deliberately excluded so its
+    loss/replacement cannot hide original records in a new Store scope. This
+    opaque identity grants no authority; restore always compares the full owner,
+    including the original epoch and generation, before any effect. *)
 val owner_to_json : owner -> Yojson.Safe.t
 val owner_matches_json : owner -> Yojson.Safe.t -> (unit, string) result
 val observe_record_owner : base_path:string -> keepers_dir:string ->
@@ -32,8 +41,9 @@ type t
 val scope : owner -> string
 val fresh_request_id : owner -> string
 val scope_of_request_id : string -> (string, string) result
-(** Host-minted canonical tagged JSON binds the original physical Keeper/epoch
-    scope hash and UUIDv7. Parsing only computes a Store lookup scope; original
+(** Host-minted canonical tagged JSON binds the original physical Keeper and
+    Queue-generation scope hash and UUIDv7. Parsing only computes a Store
+    lookup scope; original
     capture/physical equality must still be checked before any effect. *)
 val package_id : string
 val tool : string

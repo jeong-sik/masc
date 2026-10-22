@@ -6,6 +6,11 @@ module Exact = Lane_addon_exact
 let ( let* ) = Result.bind
 let io work = Eio_unix.run_in_systhread work
 
+type authorization = {
+  validate_output : Exact.output_validator;
+  before_dispatch : Exact.dispatch_guard;
+}
+
 let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.package)
     (request : Exact.request) =
   match Capture.scope_of_request_id request.request_id with
@@ -33,4 +38,9 @@ let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.pac
       let* original=Capture.request capture in
       let* ()=if Exact.digest original=Exact.digest request then Ok ()
         else Error "Librarian exact request differs from its original captured input/schema" in
-      Ok (Some (fun proposal -> Capture.validate_proposal capture proposal |> Result.map (fun _ -> ()))))
+      Ok (Some {
+        validate_output=(fun proposal -> Capture.validate_proposal capture proposal |> Result.map (fun _ -> ()));
+        before_dispatch=(fun () -> Lane_addon_runtime.authorize_captured_exact_dispatch
+          ~store ~declaration_id ~package_id:destination.package_id
+          ~configuration_revision:destination.configuration_revision);
+      }))

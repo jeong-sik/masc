@@ -583,6 +583,34 @@ let live_reading m access =
       | Unready reason -> (ready, unready_of e reason :: unready)
       | Gone -> (ready, unready)) ([], []) (entries m) in
   { ready = List.rev ready; unready = List.rev unready }
+
+let authorize_captured_exact_dispatch ~store ~declaration_id ~package_id ~configuration_revision =
+  Eio_context.run_on_owner_domain (fun () ->
+    let* m=match Hashtbl.find_opt managers (Lane_addon_store.root store) with
+      | Some m -> Ok m | None -> Error "Original Add-on Runtime owner is unavailable" in
+    (* Host cycles already belong to their entry. Re-entering action_mutex can
+       deadlock an RPC that is awaiting that cycle. The configuration serializer
+       is sufficient for this local admission; release it before provider I/O. *)
+    Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+      let* directory=match m.configuration_status with
+        | Some reading -> Ok reading.directory
+        | None -> Error "Original Add-on configuration has not been observed" in
+      let snapshot=offload (fun () -> Lane_addon_config.load ~directory) in
+      let* ()=if snapshot.complete then Ok ()
+        else Error "Original Exact dispatch requires a complete fresh Add-on configuration" in
+      let* declaration=match List.filter (fun (d : Lane_addon_config.declaration) ->
+          d.id=declaration_id) snapshot.declarations with
+        | [d] when d.enabled && d.revision=configuration_revision && d.package.id=package_id -> Ok d
+        | [] | [_] | _::_::_ -> Error "Original Exact semantic configuration no longer permits dispatch" in
+      let live=List.filter (fun (e : entry) ->
+        not e.stopping && Option.is_some e.connection && e.package=declaration.package
+        && match e.configuration with
+          | Some owner -> owner.id=declaration_id && owner.source_path=declaration.source_path
+            && owner.revision=configuration_revision
+          | None -> false) (entries m) in
+      match live with
+      | [_] -> Eio.Fiber.check (); Ok ()
+      | [] | _::_::_ -> Error "Original Exact configured incarnation is unavailable or ambiguous"))
 let status_coverage e = {
   source_id = e.instance_id; incarnation = e.instance_id;
   cursor = Some (string_of_int e.seq);

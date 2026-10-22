@@ -757,3 +757,13 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - [공개 선택 실행 영수증](../docs/evidence/2026-10-22-addon-original-execution/README.md): exact9a7047의 CI39736226345에서 7suite, Alcotest249건과 별도 admission-mode7assertion PASS를 실제 원본 로그로 확인했다. 직전5d2193의 compile FAIL은 유지한다. #45054는 외부에서 Candle branch로 병합됐으며 main 통합·운영 설치는 별도다.
 - 다음 단위는 기존 실제 `Keeper_librarian_queue_refresh.run_explicit_admission → Keeper_memory_admission_worker.run`의 전체 명시 후보 경로를 원래 capture/discovery·worker resume·absorption transcript·locked Memory commit/receipt ACK·두 disjoint partition 복구로 연결한다. 현재 capture/dispatch/captured-gate/parts 포트를 작성 중이며 actual caller 전환과 compiled 검증은 아직 없다. 원래54항목/E03 완료로 세지 않는다.
 - 각 sibling은 자기 차례에 fresh Memory를 읽어 실행 capture를 보존한다. 새로운 후보/Memory가 이전 semantic deferred 입력의 재판단 근거가 되는 경우를 원래 lineage로 표현해야 하며, pending candidate를 영구 owner lock으로 막거나 unchanged wake마다 새 root를 만드는 구현은 허용하지 않는다.
+
+
+## E03 실제 explicit-candidate owner 전환 후보 · 2026-10-22
+
+- 이전 goal turn은 원래 실행 proof의 실제 선택 검사와 미완성 capture 포트 저장까지 진척했다. 직후 승인된 non-stacked PR census는 전체 개발 목표의 구현 진척으로 세지 않는다. 이번에는 실제 `Keeper_memory_admission_worker.run`을 Addon owner로 전환하고, 기존 Memory lane에서 원래 capture/worker/host gate/locked disposition/receipt-backed ACK를 연결했다.
+- complete inventory 이전 ACK, epoch 유실 후 lookup scope 이동, commit에서 원래 gate 유실을 새 판단으로 대체하는 경계를 독립 리뷰에서 찾아 수리했다. 같은 Queue generation의 원본 lookup 주소는 epoch 교체에도 유지하고, full owner 대조에서 거절한다. 첫 gate root와 알려진 실패의 retry successor는 각각 원래 Parent/Progress에 먼저 결속한다. 유실/미확정은 새 모델 호출 허가가 아니다.
+- 같은 원래 결과의 Off 로컬 복구, 실제 typed whole-walk failure veto, sparse whole-input split과 오른쪽의 fresh Memory, Deferred+new tail 전량 재판단, 실제 취소, original 손상/epoch 변경 거절 및 실제 Runtime 결과→server wake→Memory lane 연결을 검증하는 직접 소비자 사례 13개를 작성했다. 기존 common Exact/runner/host-cycle/queue 사례도 변경된 포트에 맞췄다. 현재 parser/source dependency 분석만 수행했으며, 이 후보의 타입/링크/compiled 실행은 아직 미검증이다.
+- 실행 한계: loopback HTTP/실제 Python worker fixture와 실제 외부 provider·Docker·native 두 UI·운영 설치는 다르다. checkpoint/official-client/history/continuity 목적의 후속 추출, 실제 Keeper 기억 연속성, 최종 통합과 원래 A01–H06의 54개 항목명·완료 기준은 그대로 남는다. 앞선 #45054의249+7 PASS를 새 owner 성공으로 이월하지 않는다.
+
+- 공개 전 추가 독립 리뷰에서 두 실행 경계를 더 확인했다. detached common host provider는 기존 Memory lane purge cancel/await에 직접 등록해야 하며, worker의 finished JSON은 원래 host Exact terminal/실행 proof와 일치해야 한다. 두 수리는 현재 진행 중이다. 이번 checkpoint는 이 미해결 사항을 감추지 않는 Draft 개발 후보이며 승인·완료 판정이 아니다.

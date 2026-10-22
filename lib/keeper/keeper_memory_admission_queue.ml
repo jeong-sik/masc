@@ -182,6 +182,10 @@ let read_pending ~keepers_dir ~keeper_id =
   | None | Some {pending = []; _} -> None
   | Some state -> Some {generation = state.generation; rows = List.rev state.pending}
 
+let read_generation ~keepers_dir ~keeper_id =
+  let+ state = read ~keepers_dir ~keeper_id in
+  Option.map (fun (state : state) -> state.generation) state
+
 let acknowledge_with ~read_receipts ~keepers_dir ~keeper_id =
   let* initial = read ~keepers_dir ~keeper_id in
   match initial with

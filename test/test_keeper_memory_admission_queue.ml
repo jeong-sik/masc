@@ -23,6 +23,27 @@ let commit keepers_dir range new_claims =
     ~keepers_dir ~keeper_id:"keeper" ~now:200.
     ~source:{kind = Current.Librarian; trace_id = "admission-judge"} ~new_claims () |> require
 
+let test_generation_survives_empty_queue_without_initialization () = with_store (fun keepers_dir ->
+  let generation ()=Queue.read_generation ~keepers_dir ~keeper_id:"keeper" in
+  check (option string) "absent queue has no invented generation" None (require (generation ()));
+  ignore (append keepers_dir "original" "Original durable candidate");
+  let original=match require (generation ()) with Some generation -> generation
+    | None -> fail "append did not retain its original generation" in
+  let ids=Queue.candidate_ids (batch keepers_dir) in
+  ignore (commit keepers_dir ids [fact "Original durable candidate"]);
+  acknowledge keepers_dir;
+  check bool "actual committed receipt empties pending input" true (pending keepers_dir=None);
+  check (option string) "persisted empty queue keeps its original generation" (Some original) (require (generation ()));
+  let path=Queue.path ~keepers_dir ~keeper_id:"keeper" in
+  let before=Fs_compat.load_file path in
+  ignore (require (generation ()));
+  check string "reading generation preserves every original queue byte" before (Fs_compat.load_file path);
+  Out_channel.with_open_bin path (fun channel -> output_string channel "{controlled-invalid-generation");
+  check bool "malformed queue cannot look like an absent new generation" true (Result.is_error (generation ()));
+  check string "corruption is preserved for diagnosis" "{controlled-invalid-generation" (Fs_compat.load_file path);
+  Unix.unlink path;
+  check (option string) "only file absence returns None" None (require (generation ())))
+
 let test_concurrent_acknowledgement_preserves_deferred_input () = with_store (fun keepers_dir ->
   ignore (append keepers_dir "a" "deferred A");
   ignore (append keepers_dir "b" "settled B");
@@ -925,6 +946,7 @@ let test_batch_restore_rejects_malformed_complete_input () = with_store (fun kee
 
 let () = run "durable explicit admission queue"
   ["storage boundaries", [
+    test_case "empty persisted queue preserves original generation" `Quick test_generation_survives_empty_queue_without_initialization;
     test_case "restored sparse originals commit and ACK without consuming new tail" `Quick test_restored_sparse_batch_commits_originals_and_preserves_tail;
     test_case "restored whole-input partitions keep disjoint receipts" `Quick test_restored_partitions_keep_disjoint_receipts;
     test_case "restore rejects changed original identities and fact provenance" `Quick test_batch_restore_rejects_changed_identity_or_provenance;

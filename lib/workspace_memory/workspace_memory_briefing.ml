@@ -228,6 +228,34 @@ let of_json json =
     Ok { published; building }
   | _ -> Error "unknown workspace briefing schema"
 
+let batch_to_json batch = `Assoc
+  ["schema", `String "workspace.memory.briefing-batch.v1";
+   "state", to_json batch.state;
+   "selected", `List (List.map source_json batch.selected);
+   "remaining", `List (List.map source_json batch.remaining);
+   "input", batch.input; "rendered_prompt", `String batch.rendered_prompt]
+
+let batch_of_json json =
+  let* fields = exact_fields "briefing batch"
+      ["schema"; "state"; "selected"; "remaining"; "input"; "rendered_prompt"] json in
+  let* () = match List.assoc "schema" fields with
+    | `String "workspace.memory.briefing-batch.v1" -> Ok ()
+    | _ -> Error "unknown workspace briefing batch schema" in
+  let* state = of_json (List.assoc "state" fields) in
+  let* selected = array decode_source (List.assoc "selected" fields) in
+  let* remaining = array decode_source (List.assoc "remaining" fields) in
+  let* () = validate_sources (selected @ remaining) in
+  let* rendered_prompt = string (List.assoc "rendered_prompt" fields) in
+  let input = List.assoc "input" fields in
+  match state.building with
+  | None -> Error "briefing batch snapshot has no active pass"
+  | Some building ->
+    if selected = [] || selected @ remaining <> building.remaining
+    then Error "briefing batch snapshot changes its original unconsumed partition"
+    else if not (Yojson.Safe.equal input (model_input building.text selected))
+    then Error "briefing batch snapshot input differs from the original pass"
+    else Ok {state;selected;remaining;input;rendered_prompt}
+
 let path ~directory = Filename.concat directory "briefing.json"
 let io f =
   try f () with

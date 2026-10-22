@@ -40,6 +40,13 @@ val prepared_state : batch -> t
     New additions wait for the next pass; removal or modification of a target
     source resets the pass on the next [prepare]. *)
 
+val batch_to_json : batch -> Yojson.Safe.t
+val batch_of_json : Yojson.Safe.t -> (batch, string) result
+(** Restore the captured original chunk without re-preparing or publishing it.
+    Requires selected plus remaining to be the exact unconsumed pass entries,
+    and input to agree with the prior semantic summary and selected sources.
+    Prompt/contract provenance remains the host request owner's responsibility. *)
+
 type preparation = Unchanged | Cleanup of t | Prepared of batch
 
 val prepare

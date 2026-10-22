@@ -172,18 +172,14 @@ run. If the workspace cannot be resolved or observed, installation stops before
 replacement; pass `--base-path DIR` or set `MASC_BASE_PATH` when
 no workspace is found. A configuration or stored-state rejection also stops installation.
 
-For the optional Browser Addon, use:
-
-```bash
-bash scripts/install-local-build.sh --with-browser-addon
-```
-
-This also builds and installs `masc-native-addon-launcher`,
-`masc-browser-addon-worker` and `masc-browser-process-owner` into the selected
-prefix. Keep that prefix on the server's `PATH` and retain this checkout for the
-package manifest, schemas and skill. Declare and enable the Addon separately;
-see [Browser Addon setup](addons/browser/README.md). This option belongs to the
-source installer; it does not add these programs to release downloads.
+Every browser route runs in the browser Lane Add-on, so the script also builds
+and installs `masc-native-addon-launcher`, `masc-browser-addon-worker` and
+`masc-browser-process-owner` into the same prefix. The masc it installed then
+runs `masc browser-lane-setup --mode addon` for the workspace: it writes the
+Add-on package that build carries to `.masc/packages/browser` and declares it
+in `browser.toml` when the workspace has no declaration of it. The server
+attaches it when it starts. See [Browser Addon setup](addons/browser/README.md).
+Release downloads do not include these programs.
 
 `./quickstart.sh` seeds a workspace under `~/masc-quickstart`, starts the
 server, and writes an MCP bearer to `.masc/config/mcp-client.env`. It starts

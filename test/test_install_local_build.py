@@ -31,8 +31,10 @@ def executable(path, text):
 # path holds "fails" makes it exit 3; one that holds "stale" makes it exit 0
 # without copying the host; one that holds "moves" makes it register the lane
 # somewhere else, as the real command does with a path it trims or strips a
-# trailing .masc from. The real command is run by
-# test_browser_lane_setup_cli.py. Any other call only says which binary it is.
+# trailing .masc from. A --mode addon call is recorded in addon-calls instead,
+# and exits 5 for a workspace whose path holds "addon-refused". The real
+# command is run by test_browser_lane_setup_cli.py. Any other call only says
+# which binary it is.
 FAKE_MASC = '''#!{python}
 import json, shutil, sys
 from pathlib import Path
@@ -41,10 +43,14 @@ if sys.argv[1:2] != ["browser-lane-setup"]:
     print("masc")
     sys.exit(0)
 args = sys.argv[1:]
-with open(here / "lane-calls", "a") as log:
-    log.write(json.dumps(args) + "\\n")
 options = dict(zip(args[1::2], args[2::2]))
 base = Path(options["--base-path"])
+if options["--mode"] == "addon":
+    with open(here / "addon-calls", "a") as log:
+        log.write(json.dumps(args) + "\\n")
+    sys.exit(5 if "addon-refused" in str(base) else 0)
+with open(here / "lane-calls", "a") as log:
+    log.write(json.dumps(args) + "\\n")
 if "fails" in str(base):
     sys.exit(3)
 if "stale" in str(base):
@@ -76,6 +82,11 @@ def fake_masc(path):
 
 def lane_calls(prefix):
     calls = prefix / "lane-calls"
+    return [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
+
+
+def addon_calls(prefix):
+    calls = prefix / "addon-calls"
     return [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
 
 
@@ -166,9 +177,16 @@ def helper_calls(build):
     return calls.read_text().splitlines() if calls.exists() else []
 
 
+# The browser Add-on programs every build installs beside masc.
+def browser_addon_programs(build):
+    for program in BROWSER_ADDON_PROGRAMS:
+        executable(build / f"{program}.exe", program)
+
+
 def binaries(build):
     for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
         executable(build / exe, exe)
+    browser_addon_programs(build)
 
 
 # Neither the operator's MASC_BASE_PATH nor their recorded default may reach
@@ -186,54 +204,70 @@ def workspace(root):
 
 
 class LocalBuildInstall(unittest.TestCase):
-    def test_browser_addon_programs_are_installed_only_when_selected(self):
-        for selected in (False, True):
-            with self.subTest(selected=selected), tempfile.TemporaryDirectory() as temporary:
+    # Every browser route runs in the browser Add-on, so its programs come with
+    # masc from the same build, and the masc just installed declares the Add-on
+    # for the selected workspace.
+    def test_browser_addon_programs_are_installed_and_the_addon_declared(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            fake_masc(build / "main_eio.exe")
+            preflight_helper(build)
+            prefix = root / "prefix"
+            base = workspace(root)
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                 "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                 "--base-path", str(base)],
+                env=unnamed_env(root), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for program in BROWSER_ADDON_PROGRAMS:
+                installed = prefix / program.replace("_", "-")
+                self.assertEqual(installed.read_bytes(), (build / f"{program}.exe").read_bytes())
+                self.assertTrue(os.access(installed, os.X_OK))
+            self.assertEqual(addon_calls(prefix),
+                             [["browser-lane-setup", "--mode", "addon", "--base-path", str(base)]])
+
+    def test_a_missing_browser_addon_program_installs_nothing(self):
+        for program in BROWSER_ADDON_PROGRAMS:
+            with self.subTest(program=program), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
                 build = root / "build"
                 build.mkdir()
                 binaries(build)
                 preflight_helper(build)
-                for program in BROWSER_ADDON_PROGRAMS:
-                    executable(build / f"{program}.exe", program)
+                (build / f"{program}.exe").unlink()
                 prefix = root / "prefix"
-                args = ["--with-browser-addon"] if selected else []
                 result = subprocess.run(
                     ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
                      "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
-                     "--base-path", str(workspace(root)), *args],
+                     "--base-path", str(workspace(root))],
                     env=unnamed_env(root), capture_output=True, text=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                for program in BROWSER_ADDON_PROGRAMS:
-                    installed = prefix / program.replace("_", "-")
-                    self.assertEqual(installed.exists(), selected)
-                    if selected:
-                        self.assertEqual(installed.read_bytes(), (build / f"{program}.exe").read_bytes())
-                        self.assertTrue(os.access(installed, os.X_OK))
-                self.assertTrue((prefix / "masc").is_file())
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"{program}.exe", result.stderr)
+                self.assertFalse(prefix.exists())
 
-    def test_browser_addon_opt_in_selects_its_program_builds(self):
+    def test_a_refused_addon_declaration_fails_the_install(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            checkout = root / "checkout"
-            scripts = checkout / "scripts"
-            scripts.mkdir(parents=True)
-            shutil.copy2(SCRIPT, scripts / SCRIPT.name)
-            record = root / "build-call"
-            guard = scripts / "dune-local.sh"
-            guard.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$RECORD"\nexit 1\n')
-            guard.chmod(0o755)
+            build = root / "build"
+            build.mkdir()
+            binaries(build)
+            fake_masc(build / "main_eio.exe")
+            preflight_helper(build)
             prefix = root / "prefix"
+            base = root / "addon-refused workspace"
+            base.mkdir()
             result = subprocess.run(
-                ["bash", str(scripts / SCRIPT.name), "--with-browser-addon", "--prefix", str(prefix),
-                 "--manifest-dir", str(root / "absent")],
-                env=dict(unnamed_env(root), RECORD=str(record)), capture_output=True, text=True)
+                ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                 "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                 "--base-path", str(base)],
+                env=unnamed_env(root), capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertFalse(prefix.exists())
-            self.assertEqual(record.read_text().splitlines(), [
-                "build", "--root", str(checkout), "./bin/main_eio.exe", "./bin/masc_tui.exe",
-                "./bin/masc_browser_host.exe", "./bin/deployment_preflight_helper.exe",
-                *[f"./bin/{program}.exe" for program in BROWSER_ADDON_PROGRAMS]])
+            self.assertIn("browser Add-on", result.stderr)
+            self.assertTrue((prefix / "masc").is_file(), "the programs stay installed")
 
     # An install that cannot run the check stops before it replaces a binary or
     # cleans the build tree, so the selected workspace and the build stay.
@@ -419,6 +453,7 @@ class LocalBuildInstall(unittest.TestCase):
             fake_masc(build / "main_eio.exe")
             executable(build / "masc_tui.exe", "tui")
             executable(build / "masc_browser_host.exe", "new")
+            browser_addon_programs(build)
             preflight_helper(build)
             prefix = root / "prefix"
 
@@ -449,6 +484,7 @@ class LocalBuildInstall(unittest.TestCase):
         fake_masc(build / "main_eio.exe")
         executable(build / "masc_tui.exe", "tui")
         executable(build / "masc_browser_host.exe", "new")
+        browser_addon_programs(build)
         preflight_helper(build)
         prefix = root / "prefix"
         result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
@@ -545,6 +581,7 @@ class LocalBuildInstall(unittest.TestCase):
                 build.mkdir()
                 for exe in ("masc_tui.exe", "masc_browser_host.exe"):
                     executable(build / exe, exe)
+                browser_addon_programs(build)
                 fake_masc(build / "main_eio.exe")
                 preflight_helper(build)
                 result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
@@ -578,6 +615,7 @@ class LocalBuildInstall(unittest.TestCase):
         fake_masc(build / "main_eio.exe")
         executable(build / "masc_tui.exe", "tui")
         executable(build / "masc_browser_host.exe", "new")
+        browser_addon_programs(build)
         preflight_helper(build)
         prefix = root / "prefix"
         result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
@@ -745,8 +783,7 @@ class LocalBuildInstall(unittest.TestCase):
             root = Path(temporary).resolve()
             build = root / "build"
             build.mkdir()
-            for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
-                executable(build / exe, exe)
+            binaries(build)
             preflight_helper(build)
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
                                      "--prefix", str(root / "prefix"), "--manifest-dir", str(root / "absent"),
@@ -762,8 +799,7 @@ class LocalBuildInstall(unittest.TestCase):
             root = Path(temporary).resolve()
             build = root / "build"
             build.mkdir()
-            for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
-                executable(build / exe, exe)
+            binaries(build)
             preflight_helper(build, verdict_exit=1)
             prefix = root / "prefix"
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
@@ -1177,15 +1213,15 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertEqual(Path(cwd).resolve(), checkout)
             self.assertEqual(arguments, ["build", "--root", str(checkout), "./bin/main_eio.exe",
                                          "./bin/masc_tui.exe", "./bin/masc_browser_host.exe",
-                                         "./bin/deployment_preflight_helper.exe"])
+                                         "./bin/deployment_preflight_helper.exe",
+                                         *[f"./bin/{program}.exe" for program in BROWSER_ADDON_PROGRAMS]])
 
     def test_dune_local_takes_the_install_build_line(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             build = root / "build"
             build.mkdir()
-            for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
-                executable(build / exe, exe)
+            binaries(build)
             preflight_helper(build)
             # A dry run prints the Dune command and runs nothing, so the real
             # script is checked for taking these arguments without a switch.

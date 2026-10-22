@@ -1,28 +1,36 @@
 # Browser worker
 
-This package runs `masc-browser-addon-worker` as a native Add-on. The installed
-worker, `masc-native-addon-launcher` and `masc-browser-process-owner` must be
-available on the server's PATH.
+This package runs `masc-browser-addon-worker` as a native Add-on. The server
+finds the worker on its PATH, and `masc-native-addon-launcher` and
+`masc-browser-process-owner` beside the masc executable or on its PATH.
 The host supplies the private socket, incarnation and message bound; package
 bindings cannot choose them. Native execution uses a foreground process group
 and durable resource claims. It is not a container sandbox.
 
-From a source checkout with its opam environment and dependencies prepared,
-install the matching programs together:
+`scripts/install-local-build.sh` builds and installs the three programs with
+masc, into the same prefix (`~/.local/bin` by default; `--prefix DIR` chooses
+another). Ensure the server process receives that prefix on its actual `PATH`,
+including when started by a service manager. `--skip-build --build-dir DIR`
+requires all three executable inputs alongside the ordinary installer inputs;
+missing or non-executable inputs are refused before installed programs or guest
+shims change. The release download installer does not supply these programs.
 
-```bash
-bash scripts/install-local-build.sh --with-browser-addon
-```
+masc carries this package. After installing, the script runs
+`masc browser-lane-setup --mode addon` for the workspace, and every other
+`browser-lane-setup` mode does the same:
 
-The default prefix is `~/.local/bin`; use `--prefix DIR` to choose another.
-Ensure the server process receives that prefix on its actual `PATH`, including
-when started by a service manager. `--skip-build --build-dir DIR` requires all
-three executable inputs alongside the ordinary installer inputs. Missing or
-non-executable Addon inputs are refused before installed programs or guest
-shims change. Installation does not create an Addon declaration or enable a
-browser backend. The manifest, schemas and skill remain in this checkout;
-retain it and point the declaration at its actual `addons/browser/lane.toml`.
-The release download installer does not supply this optional program set.
+- It writes the package to `<base-path>/.masc/packages/browser/`. An upgraded
+  masc rewrites the files there, so the declaration does not change.
+- When the workspace has no declaration of this package, it creates
+  `browser.toml` in the Lane directory (`<base-path>/.masc/config/lane-addons/`,
+  or the one under `MASC_CONFIG_DIR`). An existing declaration of the package is
+  left as it is; setup reports it, and names the `manifest_path` line to use
+  when it points at another copy. Two declarations of the package are refused,
+  because the server would attach both and refuse every host poll as ambiguous.
+
+Setup attaches nothing. The server attaches the declared Add-on when it starts
+and on its maintenance pass. Set `enabled = false` in the declaration to keep
+it detached.
 
 The worker exports `browser_command` through ordinary Add-on discovery. The host
 supplies verified caller context through the private control port. The package
@@ -93,14 +101,16 @@ unknown outcomes preserve the original receipt and effect metadata without
 repeating the input. These source changes do not establish an installed TUI or
 an actual browser run.
 
-Install a declaration using the active configuration directory described in the
-[TOML guide](../../docs/guides/lane-addon-toml.md), pointing `manifest_path` at
-this package's actual absolute path or a path relative to that declaration:
+`masc browser-lane-setup --mode addon` writes this declaration; the
+[TOML guide](../../docs/guides/lane-addon-toml.md) describes every key. To
+choose hooks or model outputs, add them to the `browser.toml` setup wrote;
+setup never rewrites an existing declaration:
 
 ```toml
 id = "browser"
-run_id = "browser-work"
-manifest_path = "/absolute/path/to/masc/addons/browser/lane.toml"
+enabled = true
+run_id = "browser"
+manifest_path = "/absolute/path/to/workspace/.masc/packages/browser/lane.toml"
 tool_hooks = ["validate_input", "validate_output"]
 exact_outputs = ["locate", "stagehand"]
 

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-21T13:57:10.840792+00:00",
+  "events": [
+    {
+      "pid": 82104,
+      "action": "SIGTERM confirmed owned process"
+    },
+    {
+      "pid": 3632,
+      "action": "SIGTERM confirmed owned process"
+    }
+  ]
+}

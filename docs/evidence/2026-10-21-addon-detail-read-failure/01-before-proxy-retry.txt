@@ -1,0 +1,56 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+                                                                                                        │[Recent] Changes · keepers not loaded · no feed
+  MASC Dashboard  [masc-addon-repaired-ui-20261021-fx3087s5]  HTTP [refresh failed]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────
+  p:Approvals / Questions
+ ┌─ Needs your decision ──────────────────────────┐  ┌─ Status ───────────────────────────────────────┐
+ │ Goal confirmations not read · inspect sources; │  │ Health: not observed — press 'r' to refresh    │
+ │ Operator tasks not read · inspect sources      │  │ Work: not observed                             │
+ │ Approvals and questions: not fully read ·      │  │ Candle unavailable: Workspace identity changed │
+ │ confirm queue, held calls, Gate queue,         │  │ or unavailable during surface collection;      │
+ │ questions                                      │  │ bundle discarded                               │
+ └────────────────────────────────────────────────┘  │                                                │
+                                                     │                                                │
+ ┌─ Continue ─────────────────────────────────────┐  │                                                │
+ │ Choose a Keeper  · start a conversation        │  │                                                │
+ └────────────────────────────────────────────────┘  └────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Left:Keepers  j/k:choose  Enter:open  p:requests  ;:agenda  m:Usage  s:music  r:refresh  q:quit  …?
+ Choose a Keeper before writing · i:choose

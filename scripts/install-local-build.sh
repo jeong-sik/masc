@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build this checkout's masc, masc-tui and masc-browser-host, install them into
-# a prefix, and bring every registered Firefox browser lane host up to the same
+# Build this checkout's masc, masc-tui, masc-browser-host and the browser Add-on
+# programs (launcher, worker, process owner), install them into a prefix, and bring every registered Firefox browser lane host up to the same
 # build. The deployment preflight helper and gate are installed into the prefix
 # too, so the preflight an operator runs there is the one this build produced
 # (#39224).
@@ -55,22 +55,27 @@
 # Usage: scripts/install-local-build.sh [--prefix DIR] [--manifest-dir DIR]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
 #                                       [--keep-build] [--no-guest-shim]
-#                                       [--with-browser-addon]
+#                                       [--without-browser-addon]
 #   --prefix        where masc, masc-tui, masc-browser-host and the deployment
 #                   preflight pair go (default ~/.local/bin)
 #   --manifest-dir  Firefox native messaging manifests (default: the per-user directory)
 #   --skip-build    install what --build-dir already holds
-#   --build-dir     directory holding main_eio.exe, masc_tui.exe, masc_browser_host.exe
-#                   and deployment_preflight_helper.exe (default <repo>/_build/default/bin)
+#   --build-dir     directory holding main_eio.exe, masc_tui.exe, masc_browser_host.exe,
+#                   deployment_preflight_helper.exe and, unless --without-browser-addon,
+#                   the three browser Add-on programs (default <repo>/_build/default/bin)
 #   --base-path     workspace whose runtime.toml the new build must accept, and
 #                   whose browser lane host is brought up to this build when no
 #                   manifest covers it
 #                   (default: the one masc would use -- MASC_BASE_PATH, a current
 #                   directory holding .masc/config, then the recorded default)
 #   --keep-build    retain build artifacts after a successful default build/install
-#   --with-browser-addon also build/install the native Addon launcher, browser
-#                   worker and browser process owner into the same prefix;
-#                   package assets remain in this checkout
+#   --without-browser-addon
+#                   skip the native Addon launcher, browser worker and browser
+#                   process owner. They are built and installed by default: since
+#                   #44295 a native browser host's polls go only to an attached
+#                   browser Add-on, so a server installed without them answers
+#                   every host poll with HTTP 503. Package assets remain in this
+#                   checkout, and the Add-on declaration is the operator's to save
 #   --no-guest-shim leave the workspace's guest exec shim as it is
 set -euo pipefail
 
@@ -80,7 +85,7 @@ build_dir="$repo/_build/default/bin"
 skip_build=false
 keep_build=false
 guest_shim=true
-browser_addon=false
+browser_addon=true
 browser_addon_programs=(masc_native_addon_launcher masc_browser_addon_worker masc_browser_process_owner)
 custom_build_dir=false
 base_path=""
@@ -99,7 +104,7 @@ while [ $# -gt 0 ]; do
     --build-dir) build_dir=${2:?--build-dir needs a directory}; custom_build_dir=true; shift 2 ;;
     --keep-build) keep_build=true; shift ;;
     --no-guest-shim) guest_shim=false; shift ;;
-    --with-browser-addon) browser_addon=true; shift ;;
+    --without-browser-addon) browser_addon=false; shift ;;
     --skip-build) skip_build=true; shift ;;
     --base-path) base_path=${2:?--base-path needs a directory}; shift 2 ;;
     -h|--help) sed -n '/^# Usage:/,/^set -euo pipefail/p' "$0" | sed '$d'; exit 0 ;;
@@ -434,7 +439,7 @@ if [ "$browser_addon" = true ]; then
   for program in "${browser_addon_programs[@]}"; do
     install -m 755 "$build_dir/$program.exe" "$prefix/${program//_/-}"
   done
-  echo "installed browser Addon programs into $prefix; package: $repo/addons/browser/lane.toml"
+  echo "installed browser Addon programs into $prefix; package: $repo/addons/browser/lane.toml (the operator saves the declaration that points at it: docs/guides/lane-addon-toml.md)"
 fi
 install -m 755 "$build_dir/deployment_preflight_helper.exe" "$prefix/masc-deployment-preflight-helper"
 install -m 755 "$repo/scripts/check-runtime-deployment-preflight.sh" "$prefix/masc-check-runtime-deployment-preflight"

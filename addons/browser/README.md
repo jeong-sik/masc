@@ -8,16 +8,20 @@ bindings cannot choose them. Native execution uses a foreground process group
 and durable resource claims. It is not a container sandbox.
 
 From a source checkout with its opam environment and dependencies prepared,
-install the matching programs together:
+the installer installs the matching programs together with the server:
 
 ```bash
-bash scripts/install-local-build.sh --with-browser-addon
+bash scripts/install-local-build.sh
 ```
+
+`--without-browser-addon` leaves them out. A server without them cannot answer
+a native browser host: every poll gets HTTP 503, `no_browser_addon` in the body.
 
 The default prefix is `~/.local/bin`; use `--prefix DIR` to choose another.
 Ensure the server process receives that prefix on its actual `PATH`, including
 when started by a service manager. `--skip-build --build-dir DIR` requires all
-three executable inputs alongside the ordinary installer inputs. Missing or
+three executable inputs alongside the ordinary installer inputs, unless
+`--without-browser-addon` is given. Missing or
 non-executable Addon inputs are refused before installed programs or guest
 shims change. Installation does not create an Addon declaration or enable a
 browser backend. The manifest, schemas and skill remain in this checkout;

@@ -112,8 +112,6 @@ class GuestShim(unittest.TestCase):
                     root = Path(temporary).resolve()
                     base, shim, sidecar = workspace_with_shim(root)
                     build = build_naming(root)
-                    for name in local_build.BROWSER_ADDON_PROGRAMS:
-                        local_build.executable(build / f"{name}.exe", name)
                     bad = build / f"{program}.exe"
                     if invalid == "not_executable":
                         bad.chmod(0o600)
@@ -126,7 +124,7 @@ class GuestShim(unittest.TestCase):
                     old_server = local_build.executable(prefix / "masc", "old-server")
                     old_worker = local_build.executable(prefix / "masc-browser-addon-worker", "old-worker")
                     before = {p: p.read_bytes() for p in (shim, sidecar, old_server, old_worker)}
-                    result = install(root, build, release_base(root), base, "--with-browser-addon")
+                    result = install(root, build, release_base(root), base)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn(str(bad), result.stderr)
                     for path, content in before.items():

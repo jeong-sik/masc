@@ -42,7 +42,8 @@ let capture ~base_path domain =
       |> Result.map_error Request.error_to_string |> get with
       | Some batch -> batch | None -> fail "expected an original classification batch" in
     let capture=get (Capture.classification ~request_id ~workspace ~destination ~prompt ~ledger:Ledger.empty ~batch) in
-    let good=`Assoc ["decisions",`List [`Assoc ["fact_id",`String (Request.fact_id fact.fact);
+    let local=match Request.selected_ids batch with [(id,_)] -> id | [] | _::_::_ -> fail "one original selection" in
+    let good=`Assoc ["decisions",`List [`Assoc ["fact_id",`String local;
       "kind",`String "create_claim";"value",`String "An original host-validated claim"]]] in
     capture,good,`Assoc ["decisions",`List []]
   | Briefing ->

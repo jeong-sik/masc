@@ -467,7 +467,8 @@ let classification_capture ~base_path =
     | Some batch -> batch | None -> fail "one original fact needs classification" in
   let capture=Capture.classification ~request_id:(Capture.Request_id.fresh ()) ~workspace ~destination
     ~prompt ~ledger:Ledger.empty ~batch |> get in
-  let good=`Assoc ["decisions",`List [`Assoc ["fact_id",`String (Request.fact_id fact.fact);
+  let local=match Request.selected_ids batch with [(id,_)] -> id | [] | _::_::_ -> fail "one original selection" in
+  let good=`Assoc ["decisions",`List [`Assoc ["fact_id",`String local;
     "kind",`String "create_claim";"value",`String "A host-validated claim"]]] in
   capture,good,`Assoc ["decisions",`List []]
 let run_curator ?runner ~base_path ~store request =

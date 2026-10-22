@@ -402,20 +402,22 @@ let facts_of_observation observation facts =
   | Workspace_memory_context.Missing -> Some []
   | Workspace_memory_context.Available snapshot -> Some (facts snapshot)
 
+(* Each fact keeps its store's [first_seen], the insertion time the store
+   preserves across re-observation, so new facts can be taken oldest first. *)
 let observe_keeper (keeper : Workspace_memory_context.keeper) =
   let keeper_id = keeper.keeper_id in
   [ ( Ordinary_store keeper_id
     , facts_of_observation keeper.ordinary (fun (snapshot : Keeper_memory_os_current.t) ->
         List.map (fun (fact : Keeper_memory_os_types.fact) ->
           { fact = Ordinary { keeper_id; claim_sha256 = claim_sha256 fact.claim }
-          ; claim = fact.claim })
+          ; claim = fact.claim }, fact.first_seen)
           snapshot.facts) )
   ; ( Source_bound_store keeper_id
     , facts_of_observation keeper.source_bound (fun (snapshot : Keeper_memory_source_current.t) ->
         List.map (fun (fact : Keeper_memory_source_current.fact) ->
           { fact = Source_bound
                 { keeper_id; path = fact.source.path; claim_sha256 = claim_sha256 fact.claim }
-          ; claim = fact.claim })
+          ; claim = fact.claim }, fact.first_seen)
           snapshot.facts) ) ]
 
 let reconcile t keepers =
@@ -428,18 +430,24 @@ let reconcile t keepers =
     List.fold_left
       (fun (current, order) (_, facts) ->
          List.fold_left
-           (fun (current, order) pending ->
+           (fun (current, order) ((pending : pending_fact), first_seen) ->
               if Fact_map.mem pending.fact current then current, order
-              else Fact_map.add pending.fact () current, pending :: order)
+              else Fact_map.add pending.fact () current, (pending, first_seen) :: order)
            (current, order)
            (Option.to_list facts |> List.concat))
       (Fact_map.empty, [])
       stores
   in
-  let current_facts = List.rev observed_order in
+  let observed = List.rev observed_order in
+  let current_facts = List.map fst observed in
   let new_facts =
-    current_facts
-    |> List.filter (fun pending -> not (Fact_map.mem pending.fact t.dispositions))
+    observed
+    |> List.filter (fun ((pending : pending_fact), _) -> not (Fact_map.mem pending.fact t.dispositions))
+    |> List.stable_sort (fun ((a : pending_fact), seen_a) ((b : pending_fact), seen_b) ->
+         match Float.compare seen_a seen_b with
+         | 0 -> compare_fact_ref a.fact b.fact
+         | order -> order)
+    |> List.map fst
   in
   let vanished =
     Fact_map.fold

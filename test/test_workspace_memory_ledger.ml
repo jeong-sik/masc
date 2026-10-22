@@ -271,20 +271,36 @@ let test_store_missing_corrupt_and_round_trip () =
   | Ok () -> Alcotest.fail "save created a missing base"
   | Error _ -> Alcotest.(check bool) "missing base stays missing" false (Sys.file_exists missing_base)
 
-let test_new_facts_follow_store_order () =
+let ordinary_seen facts : Os_current.t =
+  let origin : Os_types.origin = { kind = Os_types.Authored; trace_id = "trace" } in
+  { (ordinary []) with
+    facts = List.map (fun (claim, now) -> Os_types.observed ~claim ~category:Os_types.Fact ~now ~origin) facts }
+
+let source_bound_seen facts : Source_current.t =
+  { (source_bound []) with
+    facts = List.map (fun (path, claim, first_seen) : Source_current.fact ->
+      { claim; first_seen; source = { path; sha256 = sha (path ^ " bytes") } }) facts }
+
+let test_new_facts_are_oldest_first () =
   let result =
     Ledger.reconcile Ledger.empty
       [ keeper "writer"
-          ~ordinary:(Context.Available (ordinary ["B claim"; "A claim"; "B claim"]))
-          ~source_bound:(Context.Available (source_bound ["notes/a.md", "File claim"]))
-      ; keeper "reviewer" ~ordinary:(Context.Available (ordinary ["A claim"])) ]
+          ~ordinary:(Context.Available (ordinary_seen ["Late claim", 30.; "Early claim", 10.; "Late claim", 30.]))
+          ~source_bound:(Context.Available (source_bound_seen ["notes/a.md", "File claim", 20.]))
+      ; keeper "auditor" ~ordinary:(Context.Available (ordinary_seen ["Tied claim", 20.])) ]
   in
-  Alcotest.(check (list fact_ref)) "keeper order, ordinary first, one fact per identity"
-    [ ordinary_ref "writer" "B claim"
-    ; ordinary_ref "writer" "A claim"
+  Alcotest.(check (list fact_ref)) "oldest first_seen first; a tie follows Keeper, store and path"
+    [ ordinary_ref "writer" "Early claim"
+    ; ordinary_ref "auditor" "Tied claim"
     ; source_ref "writer" "notes/a.md" "File claim"
-    ; ordinary_ref "reviewer" "A claim" ]
+    ; ordinary_ref "writer" "Late claim" ]
     (new_refs result);
+  Alcotest.(check (list fact_ref)) "current facts keep store order, one fact per identity"
+    [ ordinary_ref "writer" "Late claim"
+    ; ordinary_ref "writer" "Early claim"
+    ; source_ref "writer" "notes/a.md" "File claim"
+    ; ordinary_ref "auditor" "Tied claim" ]
+    (List.map (fun (pending : Ledger.pending_fact) -> pending.fact) result.current_facts);
   Alcotest.(check (list fact_ref)) "nothing vanished" [] result.vanished
 
 let test_unchanged_facts_are_no_work () =
@@ -458,7 +474,7 @@ let () =
         ; Alcotest.test_case "claim and conflict IDs remain separate" `Quick
             test_briefing_keeps_claim_and_conflict_namespaces_distinct ] )
     ; ( "reconcile"
-      , [ Alcotest.test_case "new facts follow store order" `Quick test_new_facts_follow_store_order
+      , [ Alcotest.test_case "new facts are oldest first" `Quick test_new_facts_are_oldest_first
         ; Alcotest.test_case "unchanged facts are no work" `Quick test_unchanged_facts_are_no_work
         ; Alcotest.test_case "vanished members leave and empty entries go" `Quick
             test_vanished_members_leave_and_empty_entries_go

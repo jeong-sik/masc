@@ -201,7 +201,7 @@ let narrow ~request_id ~final t =
     [variable,Yojson.Safe.to_string input] in
   let* smaller = match t.work with
     | Classification {ledger;batch} ->
-      Request.narrow ~render batch |> Result.map_error Request.error_to_string
+      Request.narrow ~render ~ledger batch |> Result.map_error Request.error_to_string
       |> Result.map (Option.map (fun batch -> Classification {ledger;batch}))
     | Briefing batch -> Brief.narrow ~render batch |> Result.map (Option.map (fun batch -> Briefing batch)) in
   match smaller with
@@ -284,7 +284,7 @@ let recoverable_successors ~workspace originals =
 type expected_commit = Classification_commit of Ledger.t | Briefing_commit of Brief.t
 let validate_output t raw = match t.work with
   | Classification {ledger;batch} ->
-    let* assignments = Decision.decode ~selected:batch.selected raw in
+    let* assignments = Decision.decode ~batch raw in
     Ledger.apply ledger ~selected:batch.selected assignments
     |> Result.map_error Ledger.apply_error_to_string |> Result.map (fun ledger -> Classification_commit ledger)
   | Briefing batch ->

@@ -38,26 +38,36 @@ let rec traverse f = function
     let* remaining = traverse f rest in
     Ok (value :: remaining)
 
-let decode ~selected json =
+module String_map = Map.Make (String)
+
+let local_map pairs =
+  List.fold_left (fun map (local, value) -> String_map.add local value map) String_map.empty pairs
+
+let decode ~batch json =
   let* fields = exact_fields "workspace curator output" ["decisions"] json in
   let* rows = match List.assoc "decisions" fields with
     | `List rows -> Ok rows
     | _ -> Error "workspace curator decisions must be an array" in
-  let ids = List.map (fun (pending : Ledger.pending_fact) ->
-    Request.fact_id pending.fact, pending.fact) selected in
+  let selected = Request.selected_ids batch in
+  let facts = local_map (List.map (fun (id, (pending : Ledger.pending_fact)) -> id, pending.fact) selected) in
+  let claims = local_map (Request.claim_ids batch) in
+  let conflicts = local_map (Request.conflict_ids batch) in
   let parse row =
     let* fields = exact_fields "workspace curator decision"
         ["fact_id"; "kind"; "value"] row in
     let* id = field_text fields "fact_id" in
     let* kind = field_text fields "kind" in
     let* value = field_text fields "value" in
-    let* fact = match List.assoc_opt id ids with
+    let* fact = match String_map.find_opt id facts with
       | Some fact -> Ok fact
       | None -> Error ("workspace curator named a fact outside the selected batch: " ^ id) in
+    let shown what entries = match String_map.find_opt value entries with
+      | Some ledger_id -> Ok ledger_id
+      | None -> Error ("workspace curator named a " ^ what ^ " this request does not show: " ^ value) in
     let* decision = match kind with
-      | "join_claim" -> Ok (Ledger.Join_claim value)
+      | "join_claim" -> let* claim_id = shown "claim" claims in Ok (Ledger.Join_claim claim_id)
       | "create_claim" -> Ok (Ledger.Create_claim value)
-      | "join_conflict" -> Ok (Ledger.Join_conflict value)
+      | "join_conflict" -> let* conflict_id = shown "conflict" conflicts in Ok (Ledger.Join_conflict conflict_id)
       | "create_conflict" -> Ok (Ledger.Create_conflict value)
       | "exclude" -> Ok (Ledger.Exclude value)
       | _ -> Error ("unknown workspace curator decision kind: " ^ kind) in

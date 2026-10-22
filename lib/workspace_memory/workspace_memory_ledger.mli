@@ -102,8 +102,8 @@ type reconciliation =
   ; current_facts : pending_fact list
         (** All readable current facts, in discovery and store order. *)
   ; new_facts : pending_fact list
-        (** In the given Keeper order, ordinary store first, each store in
-            its own row order. *)
+        (** Oldest store [first_seen] first; facts first seen at the same
+            instant follow Keeper, store, path and hash order. *)
   ; vanished : fact_ref list  (** in [dispositions] order *)
   }
 

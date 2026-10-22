@@ -37,7 +37,7 @@ let classification workspace =
   let a = fact "writer" "Complete source evidence A" and b = fact "writer" "Complete source evidence B" in
   let render = render Prompt_names.workspace_memory_curator "workspace_memory_changes" classification_prompt in
   let full = some (requested (R.prepare ~neighbor_limit:0 ~render ~ledger:L.empty ~current:[a;b] ~pending:[a;b])) in
-  let batch = some (requested (R.narrow ~render full)) in
+  let batch = some (requested (R.narrow ~render ~ledger:L.empty full)) in
   a,b,batch,get (C.classification ~request_id:id ~workspace ~destination ~prompt:classification_prompt ~ledger:L.empty ~batch)
 let retain ?(scope=C.scope) ?(installation_id=destination.installation_id) ?(tool=destination.tool)
     ~request store =
@@ -51,21 +51,23 @@ let rejected = function Error _ -> () | Ok _ -> Alcotest.fail "invalid host capt
 
 let test_canonical_storage_preserves_original_prompt_and_selected_judgment () = with_workspace (fun root store ->
   let workspace = get (C.observe_workspace ~base_path:root) in
-  let a,b,batch,capture = classification workspace in
+  let a,_,batch,capture = classification workspace in
   let retained = retain ~request:(C.to_json capture) store in
   let restored = get (restore store ~workspace:(get (C.observe_workspace ~base_path:root)) retained) in
   Alcotest.(check string) "original substitution bytes survive canonical object ordering"
     (Yojson.Safe.to_string batch.input) (C.input_text restored);
   Alcotest.(check string) "actual original prompt is restored" batch.rendered_prompt (C.rendered_prompt restored);
   Alcotest.check json "schema preserved" Workspace_memory_decision.output_schema (C.output_schema restored);
-  let answer = `Assoc ["decisions", `List [`Assoc ["fact_id",`String (R.fact_id a.fact);
+  let local = match R.selected_ids batch with
+    | [(id, _)] -> id | [] | _ :: _ :: _ -> Alcotest.fail "one narrowed selection" in
+  let answer = `Assoc ["decisions", `List [`Assoc ["fact_id",`String local;
     "kind",`String "create_claim";"value",`String "A source-attributed interpretation"]]] in
   (match get (C.validate_output restored answer) with
    | C.Classification_commit ledger ->
      Alcotest.(check bool) "only selected fact has an expected disposition" true
        (List.map fst (L.dispositions ledger) = [a.fact]);
      (match C.work restored with
-      | C.Classification {batch;_} -> Alcotest.(check bool) "original suffix retained" true (batch.remaining=[b])
+      | C.Classification {batch;_} -> Alcotest.(check bool) "the narrowed selection is the oldest fact" true (batch.selected=[a])
       | C.Briefing _ -> Alcotest.fail "request kind changed")
    | C.Briefing_commit _ -> Alcotest.fail "classification changed domain");
   rejected (C.validate_output restored (`Assoc ["decisions",`List []]));

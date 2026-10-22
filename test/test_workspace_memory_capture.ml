@@ -40,7 +40,7 @@ let test_classification_reopens_exact_batches_and_applies_only_selected () = wit
   let neighbor = fact "reviewer" a.claim in
   let full = some (requested (Request.prepare ~neighbor_limit:1 ~render ~ledger:Ledger.empty
       ~current:[a;b;c;neighbor] ~pending:[a;b;c])) in
-  let narrowed = some (requested (Request.narrow ~render full)) in
+  let narrowed = some (requested (Request.narrow ~render ~ledger:Ledger.empty full)) in
   List.iter (fun (request_id, original) ->
     let request = `Assoc ["ledger", Ledger.to_json Ledger.empty; "batch", Request.batch_to_json original] in
     owned (retain ~request_id ~request store);
@@ -52,13 +52,15 @@ let test_classification_reopens_exact_batches_and_applies_only_selected () = wit
     ["classification-full",full; "classification-child",narrowed];
   let retained = some (owned (load (Store.create ~root) "classification-child")) in
   let restored = requested (Request.batch_of_json ~ledger:Ledger.empty (member "batch" retained.request)) in
-  let answer = `Assoc ["decisions", `List [`Assoc ["fact_id", `String (Request.fact_id a.fact);
+  let local = match Request.selected_ids restored with
+    | [(id, _)] -> id | [] | _ :: _ :: _ -> Alcotest.fail "one narrowed selection" in
+  let answer = `Assoc ["decisions", `List [`Assoc ["fact_id", `String local;
     "kind", `String "create_claim"; "value", `String "A captured interpretation"]]] in
-  let decisions = get (Workspace_memory_decision.decode ~selected:restored.selected answer) in
+  let decisions = get (Workspace_memory_decision.decode ~batch:restored answer) in
   let applied = get (Result.map_error Ledger.apply_error_to_string
       (Ledger.apply Ledger.empty ~selected:restored.selected decisions)) in
-  Alcotest.(check bool) "unconsumed source-bound identity and suffix survive" true
-    (restored.selected = [a] && restored.remaining = [b;c]);
+  Alcotest.(check bool) "the oldest source-bound fact is the narrowed selection" true
+    (restored.selected = [a]);
   Alcotest.(check bool) "only the original selected source was disposed" true
     (List.map fst (Ledger.dispositions applied) = [a.fact]))
 
@@ -72,17 +74,17 @@ let test_pending_and_neighbor_boundaries_are_strict () =
     | Error (Request.Invalid_batch _) -> ()
     | Error (Request.Invalid_limit | Request.Render_failed _ | Request.Index_unavailable _)
     | Ok _ -> Alcotest.fail "invalid snapshot restored" in
-  let selected = match member "selected" snapshot with
-    | `List [row] -> row | _ -> Alcotest.fail "one selected source" in
-  refused (replace "selected" (`List [replace "claim" (`String "Changed evidence") selected]) snapshot);
-  refused (replace "remaining" (`List [selected]) snapshot);
+  let input = member "input" snapshot in
+  let rows field = match member field input with `List rows -> rows | _ -> Alcotest.fail "input table" in
+  let with_rows field rows = replace "input" (replace field (`List rows) input) snapshot in
+  refused (with_rows "facts" (List.map (fun fact ->
+    if member "id" fact = `String "f1" then replace "claim" (`String "Changed evidence") fact else fact)
+    (rows "facts")));
   let disposed = get (Result.map_error Ledger.apply_error_to_string
       (Ledger.apply Ledger.empty ~selected:[a] [{Ledger.fact=a.fact;decision=Ledger.Exclude "already handled"}])) in
   refused ~ledger:disposed snapshot;
-  let row = match member "new_facts" full.input with
-    | `List [row] -> row | _ -> Alcotest.fail "one input row" in
-  let same_owner = replace "neighbors" (`List [selected]) row in
-  refused (replace "input" (`Assoc ["new_facts", `List [same_owner]]) snapshot);
+  refused (with_rows "new_facts" (List.map (fun row ->
+    replace "neighbors" (`List [`String "f1"]) row) (rows "new_facts")));
   let unknown = match snapshot with
     | `Assoc fields -> `Assoc (("schema", `String "duplicate") :: fields)
     | _ -> Alcotest.fail "snapshot object" in

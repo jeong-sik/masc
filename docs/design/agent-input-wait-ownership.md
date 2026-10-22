@@ -397,3 +397,41 @@ changes its behavior or that an installed runtime has adopted this layer.
 Independent Producer G reconciliation, autonomous waiting, dedicated outcome and
 status consumers, snapshot/SSE invalidation and persistent/reconnected Acting/TUI
 remain mandatory for #38005. All layers remain Draft without installation or merge.
+
+
+## Independent operation input branch foundation
+
+A different Owner child can publish global input G while the original direct
+operation is blocked at W. G can have another question, context and execution
+scope. Message-prefix similarity does not authorize merging them. The intended
+continuation owns a separate branch C derived by Core from the original full
+request, while the independent global input and canonical G stay unchanged.
+
+The semantic record now has an optional `input_branch`, independent of phase.
+Its immutable `origin` contains the first exact W and complete pending request;
+its current `checkpoint` is the branch's retained input head. Creating a branch
+requires the original blocked wait and prepared response intent's exact C.
+Resolving also removes the intent and enters `Suspended C` in the same semantic
+transition. Consuming that continuation into Running does not remove the branch
+pin. Reconciliation also preserves it, including before the next native Bind.
+The historical root remains retention evidence, not current pending authority.
+
+A branch input advance compares its exact prior head and the same operation's
+active native call at the candidate. Trace identity and nondecreasing turn are
+necessary but cannot substitute for the physical producer proof. A second wait
+must equal the current branch head. Its next response advances that head while
+preserving the first full origin. Attached response resolution cannot consume a
+branched wait. Actual terminal settlement releases branch ownership; an unknown
+native-effect receipt keeps its own checkpoint evidence. Official-client
+continuations cannot carry an Agent Core input branch.
+
+This layer implements semantic transitions, strict persisted JSON and retention
+projection only. Its tests start from the actual direct-wait Store fixture, then
+exercise Semantic transitions and JSON round trips; no independent G Producer,
+physical branch response, SQLite branch commit, Owner recovery, native resume or
+canonical-sink isolation is established. The Store/Owner response endpoints keep
+their current guards. Follow-up integration must bind this branch through those
+actual boundaries before accepting a G-independent response, and must test
+another child publishing G with additional history/context and another pending
+question, original-operation native resume, later checkpoints and crash/reopen.
+Neither this foundation nor an exact G refusal completes R1 or #38005.

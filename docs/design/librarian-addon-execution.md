@@ -76,6 +76,18 @@ inspected source. The host must carry a trusted typed admission policy for the
 new consumer. Do not silently change fairness, let worker input select its own
 priority or add a duplicate operator knob.
 
+The next shared-port implementation returns one host `request_authorization`
+containing its pure output validator and typed admission class. The common
+broker passes that mandatory class through its runner to the actual HTTP
+`Exact.start_flow`. The current issuer first performs the existing Curator
+original-binding checks and then grants Standard; a Librarian-looking worker
+name does not grant Background. Worker wire/digests and original retained
+records remain unchanged, and retained delivery obtains fresh authority without
+running another provider. This conduit alone does not implement the Librarian
+original consumer, persist a per-attempt class audit, or change one-shot CLI
+admission. The eventual Background issuer still needs its strict original host
+capture and purpose/destination validation.
+
 **Failure evidence:** the existing Librarian `inference_failure` distinguishes
 whole-walk capacity evidence, invalid-output veto, CLI participation and
 `exhausted_input_refusals`. The latter authorizes unread-hole behavior only for

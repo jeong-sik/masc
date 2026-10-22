@@ -80,7 +80,7 @@ let publish ?(lane_id = lane_id) ?(cli_slots = []) ~base_path targets =
 
 let run_request ?(package=package) ?runner ?schema ?messages ~base_path ~store id =
   let runner = Option.value runner ~default:(Server_lane_addon_exact.runner ~base_path) in
-  match Exact.run ~validate_request:(Server_lane_addon_exact.validate_request ~base_path) ~store ~declaration_id ~package ~runner (request ?schema ?messages id) with
+  match Exact.run ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path) ~store ~declaration_id ~package ~runner (request ?schema ?messages id) with
   | Ok attempt -> attempt
   | Error detail -> fail detail
 
@@ -443,7 +443,7 @@ let classification_capture ~base_path =
 let run_curator ?runner ~base_path ~store request =
   let runner=Option.value runner ~default:(Server_lane_addon_exact.runner ~base_path) in
   Exact.run ~store ~declaration_id ~package:curator_package ~runner
-    ~validate_request:(Server_lane_addon_exact.validate_request ~base_path) request
+    ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path) request
 
 let test_original_curator_semantics_advance_http_and_survive_reopen () =
   with_case (fun ~sw ~net ~clock ~base_path ~store ->
@@ -524,12 +524,12 @@ let test_curator_authority_is_required_before_dispatch_and_replay () =
     check bool "worker cannot transfer this capture to another installation" true
       (Result.is_error (Exact.run ~store ~declaration_id:"another" ~package:curator_package
         ~runner:(Server_lane_addon_exact.runner ~base_path)
-        ~validate_request:(Server_lane_addon_exact.validate_request ~base_path) request));
+        ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path) request));
     check bool "relabeling the package does not bypass an original Curator capture" true
       (Result.is_error (Exact.run ~store ~declaration_id
         ~package:{curator_package with id="another-package"}
         ~runner:(Server_lane_addon_exact.runner ~base_path)
-        ~validate_request:(Server_lane_addon_exact.validate_request ~base_path) request));
+        ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path) request));
     check int "refusals do not enter the provider" 0 (F.post_count server);
     ignore (get (run_curator ~base_path ~store request) : Exact.attempt);
     let other=Filename.concat base_path "other-workspace" in Unix.mkdir other 0o700;
@@ -550,7 +550,9 @@ let test_retained_schema_only_curator_answer_is_not_a_domain_judgment () =
     (* Seed a real retained schema-only result as produced without the host
        semantic port. It must not gain domain authority when read later. *)
     (match get (Exact.run ~store ~declaration_id ~package:curator_package ~runner
-      ~validate_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ -> Ok (fun _ -> Ok ())) request) with
+      ~authorize_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ ->
+                    Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
+                        validate_output=(fun _ -> Ok ())}) request) with
      | Exact.Final (Exact.Call_final (Exact.Answered {output;_})) ->
        check bool "schema-only seed really retained the domain-invalid answer" true
          (Exact.checked_json output=bad)
@@ -581,6 +583,76 @@ let test_curator_briefing_semantics_reject_blank_before_acceptance () =
     match answered_by (get (run_curator ~base_path ~store (get (Curator.request capture)))) with
     | Some (_,slot,_) -> check string "briefing full-domain validation advances" "original-summary" slot
     | None -> fail "nonblank original summary must answer")
+
+let test_http_flow_preserves_host_admission_class admission_class () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store:_ ->
+    let module Provider = Agent_core.Llm_provider in
+    let module Admission = Provider.Provider_admission in
+    let server=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response question)) in
+    let binding=Provider.Provider_config.make
+      ~kind:Provider.Provider_config.OpenAI_compat ~provider_id:"openai-responses"
+      ~model_id:"gpt-5.6-luna" ~base_url:server.base_url ~request_path:"/v1/chat/completions"
+      ~api_key:"synthetic-no-network"
+      ~max_concurrent_requests:1 ~connect_timeout_s:F.fixture_post_connect_timeout_seconds () in
+    let target : Agent_core.Exact_output.declared_target =
+      {target_ref="openai-responses.admission"; binding;
+       credential=Agent_core.Exact_output.Credential_resolved binding.api_key;
+       body_timeout_s=Some F.fixture_post_body_timeout_seconds} in
+    let snapshot=match Agent_core.Exact_output.load_resolver_snapshot
+        ~io:{getenv=(fun _ -> Ok None)}
+        ~catalog:(Agent_core.Exact_output.Embedded_with_targets [target]) () with
+      | Ok snapshot -> snapshot | Error _ -> fail "actual admission fixture target did not load" in
+    ignore (F.publish_registry ~lane_id ~slot_ids:[target.target_ref] snapshot);
+    let observed=ref [] in
+    let remove=Admission.install_wait_observer (fun wait -> observed:=wait::!observed) in
+    Eio.Switch.on_release sw remove;
+    let original=request "actual-host-admission" in
+    let authorization : Exact.request_authorization =
+      {admission_class; validate_output=(fun _ -> Ok ())} in
+    let call=match Server_lane_addon_exact.runner ~base_path
+        ~admission_class:authorization.admission_class ~lane_key:lane_id ~schema original with
+      | Ok call -> call | Error _ -> fail "actual HTTP runner refused the fixture lane" in
+    let validate raw=match Exact.validate_answer ~output:(List.hd package.exact_outputs) original raw with
+      | Error detail -> Error detail
+      | Ok checked ->
+        Result.map (fun () -> checked) (authorization.validate_output (Exact.checked_json checked)) in
+    let finished,resolve=Eio.Promise.create () in
+    Admission.with_admission ~config:binding (fun () ->
+      (* This fixture target requires no remote measurement. The real runner's
+         first suspension is its full endpoint's permit wait. Eio.fork runs the
+         child immediately; the snapshot confirms it actually queued before the
+         holder releases, without a timer or a scheduling poll. *)
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve (call ~validate));
+      match Admission.snapshot_for ~config:binding with
+      | None -> fail "actual provider scheduler was not created"
+      | Some state ->
+        check int "one permit remains held" 1 state.active;
+        check int "the real Exact flow queued before release" 1 state.queue_length;
+        check int "a queued flow has not sent HTTP" 0 (F.post_count server));
+    let result=F.await_within_fixture_budget ~clock
+      ~failure:"actual host-class HTTP flow did not finish" finished in
+    (match result with
+     | Exact.Call_ended (Exact.Answered {output;_}) ->
+       check bool "the real HTTP response is accepted" true (Exact.checked_json output=question)
+     | Call_ended (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+     | Call_refused _ -> fail "actual host-class HTTP flow did not answer");
+    (match !observed with
+     | [wait] ->
+       check bool "provider admission saw the host's actual class" true
+         (wait.Admission.admission_class=admission_class);
+       check string "the original bound model reached admission" binding.model_id wait.model_id;
+       check bool "the queued request was granted" true (wait.outcome=Admission.Wait_granted)
+     | [] | _::_ -> fail "expected one original provider admission wait");
+    check int "one actual HTTP request" 1 (F.post_count server))
+
+let test_worker_names_do_not_grant_background () =
+  with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ~store ->
+    let original=request "named-like-librarian" in
+    let authorization=match Server_lane_addon_exact.authorize_request ~base_path ~store
+        ~declaration_id:"librarian" ~package:{package with id="librarian"} original with
+      | Ok authorization -> authorization | Error detail -> fail detail in
+    check bool "worker package and installation names are no Background grant" true
+      (authorization.admission_class=Agent_core.Llm_provider.Admission_class.Standard))
 
 let () =
   run "lane add-on exact runner"
@@ -616,4 +688,9 @@ let () =
         ; test_case "original Curator semantics advance CLI tail" `Quick test_original_curator_semantics_advance_the_cli_tail
         ; test_case "Curator authority precedes dispatch and replay" `Quick test_curator_authority_is_required_before_dispatch_and_replay
         ; test_case "schema-only retained Curator answer has no domain authority" `Quick test_retained_schema_only_curator_answer_is_not_a_domain_judgment
-        ; test_case "Curator briefing rejects blank before acceptance" `Quick test_curator_briefing_semantics_reject_blank_before_acceptance ] ) ]
+        ; test_case "Curator briefing rejects blank before acceptance" `Quick test_curator_briefing_semantics_reject_blank_before_acceptance
+        ; test_case "real HTTP admission preserves trusted Background" `Quick
+            (test_http_flow_preserves_host_admission_class Agent_core.Llm_provider.Admission_class.Background)
+        ; test_case "real HTTP admission preserves trusted Standard" `Quick
+            (test_http_flow_preserves_host_admission_class Agent_core.Llm_provider.Admission_class.Standard)
+        ; test_case "worker names cannot select Background" `Quick test_worker_names_do_not_grant_background ] ) ]

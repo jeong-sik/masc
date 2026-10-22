@@ -20,10 +20,14 @@
     slots, or a registry that is not published, is reported before any call. *)
 
 val runner : base_path:string -> Lane_addon_exact.runner
-val validate_request : base_path:string -> Lane_addon_exact.validation_authority
+val authorize_request : base_path:string -> Lane_addon_exact.execution_authority
 (** Host-owned consumer authority. Register together with [runner]; the common
     Exact owner composes it with mandatory package/request schema checks before
-    accepting a candidate and when delivering a retained answer. *)
+    accepting a candidate and when delivering a retained answer. Existing
+    requests receive Standard admission only after the original Curator binding
+    checks succeed. Worker package/lane names never select another class.
+    [runner] preserves the supplied host class through the real HTTP flow;
+    retained delivery rechecks authority without running a provider again. *)
 
 module For_testing : sig
   val runner : base_path:string -> cli_runner:Keeper_lane_cli_oneshot.runner -> Lane_addon_exact.runner

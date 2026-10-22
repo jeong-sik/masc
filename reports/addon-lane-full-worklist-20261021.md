@@ -111,8 +111,8 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
-| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | exact866의8-suite126건·generic observer cf7의52건·typed observer28b5의4-suite65건 실제 PASS. 실제 eligibility conflict wrapper 수리를 af699에 반영하고 독립 소스 재검토 PASS, 새 선택39686436649 4-suite68건 실제 PASS. production 재시작 전 complete forest 검증·기존 child intent local 복구 #44974의4af20 4-suite76건 실제 PASS, 최종641 정식 소스 승인. public owner 전환·fresh Runtime admission·실제 Python/MCP/Exact loopback fixture 소스 후속 중. 같은 commit_plan을 settlement/관측에서 재사용하고 unknown timing/extended usage는 부재로 보존. 새 production compiled 실행·registry reconcile/delivery·실제 provider/두 UI/설치는 남음 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
-| E03 | Librarian 실행의 Addon 경계 검토·추출 | 현재 소스 경계 감사: 첫 실제 단위는 pending 후보 판단의 persistent worker+원래 host resume/settle/ACK. absorption 권한·Background admission·whole-walk 실패 증거의 공통 포트 간극을 명시; 추출 구현·실행은 미완료 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
+| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | db31 선택79·native29 PASS. 같은 실제 workspace에서 Off 원래 Briefing 복구→On 새 입력→final Off0·6요청 ACK·두 UI [실측](../docs/evidence/2026-10-22-curator-Off-recovery/README.md). 전체 실패 경계·통합·운영 설치 별도 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
+| E03 | Librarian 실행의 Addon 경계 검토·추출 | [실행 경계 설계](../docs/design/librarian-addon-execution.md) #45040 승인. 공통 host admission 포트 소스 구현·실행 검증 필요; Librarian worker 추출·실행 미완료 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
 | E05 | Board Attention 실행의 Addon 경계 검토·추출 | 조사·설계, Required | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
 | E06 | Verifier 실행의 Addon 경계 검토·추출 | 조사·설계 | 증거 검증과 Goal/Task 최종 전이를 분리하고 위조·이전 실행 증거 오적용 없이 재개 |
@@ -695,3 +695,10 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - 같은 설치를 정상 Dashboard On으로 켜 새 incarnation `01a16200-c0ae-7000-b20e-0f22a1378663`을 확인했다. 실제 Keeper가 새 pending 후보를1회 기록했고 기존 host Librarian이 revision2에 반영/ACK했다. 일반 이력 pass의 추가 constraint까지 revision3·3fact·3claim·3source Briefing으로 처리되어 전체6원래 요청 모두 commit+observer ACK다. 최초2종단 journal은 frozen 복구 결과와 동일하다.
 - matching Dashboard/TUI에서 Off 복구 결과와 새 worker·최종 이력을 실제 관측했다. 정상 final Off 뒤 owned Docker0, Memory/원래 결과 보존을 확인했다. [공개 실행 근거](../docs/evidence/2026-10-22-curator-Off-recovery/README.md)에 실제 파일·로그·화면·해시를 보존한다.
 - E02의 실제 provider/Off 복구/재연결 경계는 이 후보에서 확인됐으나 모든 실패 경계·main 통합·운영 설치와 전체54개 완료를 뜻하지 않는다. E03의 worker 추출은 아직 구현되지 않았으며 기존54개 항목명·완료 기준은 유지한다.
+
+
+## 2026-10-22 Librarian 공유 실행 권한 포트
+
+- 공통 Exact의 host callback을 `execution_authority` / `authorize_request`로 바꾸고 순수 output validator와 typed provider admission class를 한 결과로 결속했다. 필수 runner 인자를 실제 HTTP `Exact.start_flow`까지 전달한다. 현재 issuer는 기존 Curator 원래 capture 검사를 성공한 뒤 Standard를 발급하며 worker package/lane 이름과 JSON 필드로 Background를 선택하지 못한다.
+- 원래 worker wire/digest·retained record는 유지하고 dispatch/retained delivery에서 authority를 fresh하게 읽는다. 실제 저장 request/digest, Background/Standard 전달, 거절 전 미시작, 원래 종단 불변/복구 delivery, strict priority-field 거절과 실제 HTTP permit wait observer를 확인하는 protocol/resource 검사를 추가했다.
+- 생산8+직접 fixture/probe10 ML/MLI parser18개 PASS 및 diff-check만 로컬에서 수행했다. 새 포트 source의 실제 실행은 아직 없으며 부모 db31의79/29 PASS와 실제 UI를 이 source의 성공으로 이월하지 않는다. 실제 Librarian worker·host original capture·whole-walk failure proof·absorption 복구·CLI admission·durable class audit와 원래54개 완료 기준은 그대로 남는다.

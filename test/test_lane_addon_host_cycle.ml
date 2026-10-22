@@ -56,7 +56,7 @@ type worker = {
 type runner_mode = Answer of Yojson.Safe.t | Off
 type runner_state = { mode : runner_mode ref; resolutions : int ref }
 
-let runner state : Exact.runner = fun ~lane_key:_ ~schema:_ _ ->
+let runner state : Exact.runner = fun ~admission_class:_ ~lane_key:_ ~schema:_ _ ->
   incr state.resolutions;
   match !(state.mode) with
   | Off -> Error Exact.Lane_off
@@ -163,7 +163,9 @@ let with_installation ?await_change ?deliver_reply ?during_delivery ?owner_setup
                 Board_dispatch.init_jsonl ();
                 let state = { mode = ref mode; resolutions = ref 0 } in
                 Runtime.register_exact_runner
-                  ~validate_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ -> Ok (fun _ -> Ok ()))
+                  ~authorize_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ ->
+                    Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
+                        validate_output=(fun _ -> Ok ())})
                   (make_runner state);
                 let config = Workspace.default_config root in
                 Runtime.For_testing.with_backend (backend ?await_change ?deliver_reply ?during_delivery ?before_listing ?before_stop ?exported_tool worker) (fun () ->
@@ -315,13 +317,13 @@ let test_model_events_admit_and_withdraw_an_exact_scope () =
     let state=availability () in if after=Some state.revision then None else Some (Ok state)) in
   let cancelled, cancel=Eio.Promise.create () in
   let entered, enter=Eio.Promise.create () in
-  let make_runner state ~lane_key:_ ~schema:_ (request:Exact.request) =
+  let make_runner state ~admission_class ~lane_key:_ ~schema:_ (request:Exact.request) =
     incr state.resolutions;
     if request.request_id="withdraw" then Ok (fun ~validate:_ ->
       Fun.protect ~finally:(fun () -> Eio.Promise.resolve cancel ()) (fun () ->
         Eio.Promise.resolve enter ();
         Eio.Fiber.await_cancel ()))
-    else runner {state with resolutions=ref 0} ~lane_key:"fixture" ~schema:(`Assoc []) request in
+    else runner {state with resolutions=ref 0} ~admission_class ~lane_key:"fixture" ~schema:(`Assoc []) request in
   with_installation ~await_change ~make_runner (fun clock config worker state _root ->
     await clock (fun () -> cycles config>=1);
     let publish requests =
@@ -343,7 +345,7 @@ let test_model_events_admit_and_withdraw_an_exact_scope () =
 let test_retirement_cancels_exact_before_worker_cleanup_finishes () =
   let entered, enter = Eio.Promise.create () and finished, finish = Eio.Promise.create () in
   let cleaning, clean = Eio.Promise.create () and released, release = Eio.Promise.create () in
-  let make_runner state ~lane_key:_ ~schema:_ _ =
+  let make_runner state ~admission_class:_ ~lane_key:_ ~schema:_ _ =
     incr state.resolutions;
     Ok (fun ~validate:_ ->
       Fun.protect ~finally:(fun () -> Eio.Promise.resolve finish ()) (fun () ->

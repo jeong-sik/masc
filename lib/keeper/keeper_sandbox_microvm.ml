@@ -1422,6 +1422,10 @@ let apple_volume_list_argv () =
   command_argv_for Backend.Apple_container @ [ "volume"; "list"; "--format"; "json" ]
 ;;
 
+let apple_volume_inspect_argv ~volume_name =
+  command_argv_for Backend.Apple_container @ [ "volume"; "inspect"; volume_name ]
+;;
+
 type volume_probe_outcome =
   | Volume_present
   | Volume_absent
@@ -1481,9 +1485,9 @@ let classify_volume_probe ~volume_name ~inspect ~listing =
     establish. Error codes are [microvm_work_volume_*], or
     [microvm_build_volume_*] for Apple's build volume. *)
 let apple_volume_probe ~volume_name ~timeout_sec =
-  let cli = command_argv_for Backend.Apple_container in
-  let inspect_argv = cli @ [ "volume"; "inspect"; volume_name ] in
-  let inspect = Process_eio.run_argv_with_status_split ~timeout_sec inspect_argv in
+  let inspect =
+    Process_eio.run_argv_with_status_split ~timeout_sec (apple_volume_inspect_argv ~volume_name)
+  in
   let listing =
     match inspect with
     | Unix.WEXITED 1, _, _ ->

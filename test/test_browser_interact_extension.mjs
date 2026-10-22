@@ -29,19 +29,34 @@ class Select {
   matches(selector) { assert.equal(selector, ':disabled'); return false; }
   dispatchEvent(event) { events.push(event.type); }
 }
+class Editable {
+  constructor() { this.isContentEditable = true; this.textContent = ''; this.focused = 0; }
+  getClientRects() { return [{}]; }
+  matches(selector) { assert.equal(selector, ':disabled'); return false; }
+  focus() { this.focused++; }
+  dispatchEvent(event) { events.push(event.type); }
+}
+const editable = new Editable(); let editMode = 'accept';
 const choice = new Select(['a', 'b', 'dup', 'dup', 'off', '']), several = new Select(['a', 'b'], true);
-const extra = {'#choice': [choice], '#several': [several]};
+const extra = {'#choice': [choice], '#several': [several], '#editable': [editable]};
 const button = {getClientRects: () => [{}], matches: () => false, click: () => clicked++};
 const page = vm.createContext({HTMLInputElement: Input, HTMLTextAreaElement: Textarea, HTMLSelectElement: Select,
   location: {href: 'https://example.org/form'},
-  document: {title: 'Public fixture', querySelectorAll: selector => {
+  document: {title: 'Public fixture',
+    createRange: () => ({selectNodeContents(node) { assert.equal(node, editable); }}),
+    execCommand: (name, _ui, text) => {
+      if (editMode === 'reject') return false;
+      editable.textContent = name === 'delete' ? '' : editMode === 'mutate' ? text + '!' : text;
+      return true;
+    },
+    querySelectorAll: selector => {
     if (selector === '[') throw new Error('syntax');
     return selector === '#note' ? [note] : selector === '#count' ? [count] : selector === '#button' ? [button]
       : selector === '.ambiguous' ? [button, button] : extra[selector] ?? [];
   }},
   getComputedStyle: () => ({display: 'block', visibility: 'visible'}),
   Event: class {constructor(type, options) {this.type = type; this.bubbles = options.bubbles;}},
-  window: {scrollX: 0, scrollY: 0, scrollBy(options) {
+  window: {scrollX: 0, scrollY: 0, getSelection: () => ({removeAllRanges() {}, addRange() {}}), scrollBy(options) {
     assert.equal(options.behavior, 'instant'); this.scrollX += options.left; this.scrollY += options.top;
   }},
 });
@@ -69,6 +84,20 @@ assert.equal((await command({tabId: 7, action: 'fill', selector: '#count', text:
 assert.equal(count.value, '12'); assert.equal(events.length, 2);
 note.readOnly = true;
 assert.equal((await command({tabId: 7, action: 'fill', selector: '#note', text: 'blocked'})).error, 'element_read_only');
+events.length = 0;
+const typed = await command({tabId: 7, action: 'fill', selector: '#editable', text: 'a  b\u00a0'});
+assert.equal(typed.ok, true); assert.equal(editable.textContent, 'a  b\u00a0'); assert.equal(editable.focused, 1);
+assert.equal(JSON.stringify(typed).includes('a  b'), false, 'editor contents never enter result');
+assert.equal((await command({tabId: 7, action: 'fill', selector: '#editable', text: ''})).ok, true); assert.equal(editable.textContent, '');
+const focusedBefore = editable.focused;
+assert.equal((await command({tabId: 7, action: 'fill', selector: '#editable', text: ''})).ok, true, 'clearing an empty editor is a no-op');
+assert.equal(editable.focused, focusedBefore, 'a no-op clear does not touch the editor');
+editMode = 'reject';
+assert.equal((await command({tabId: 7, action: 'fill', selector: '#editable', text: 'x'})).error, 'editable_rejected_text');
+editMode = 'mutate';
+assert.equal((await command({tabId: 7, action: 'fill', selector: '#editable', text: 'x'})).error, 'editable_changed_text');
+editMode = 'accept'; editable.textContent = '';
+assert.equal((await command({tabId: 7, action: 'fill', selector: '#button', text: 'x'})).error, 'element_is_not_a_text_input');
 events.length = 0;
 const picked = await command({tabId: 7, action: 'select_option', selector: '#choice', value: 'b'});
 assert.equal(picked.ok, true); assert.equal(choice.value, 'b'); assert.deepEqual(events, ['input', 'change']);

@@ -41,7 +41,7 @@ description = "click/double_click/fill/hover/select_option: one visible top-docu
 [[params]]
 name = "text"
 type = "string"
-description = "fill replaces; type_text sends native Unicode text to the currently focused enabled editable control. Empty fill clears. Control characters require explicit press_key, so text cannot navigate focus or submit. Text is never echoed."
+description = "fill replaces the value of a text input or textarea, or the whole content of a contenteditable editor (typed in as insertText, so a rich editor sees input events); type_text sends native Unicode text to the currently focused enabled editable control. Empty fill clears. Control characters require explicit press_key, so text cannot navigate focus or submit. Text is never echoed."
 
 [[params]]
 name = "value"

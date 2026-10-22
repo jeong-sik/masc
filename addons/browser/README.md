@@ -13,7 +13,9 @@ another). Ensure the server process receives that prefix on its actual `PATH`,
 including when started by a service manager. `--skip-build --build-dir DIR`
 requires all three executable inputs alongside the ordinary installer inputs;
 missing or non-executable inputs are refused before installed programs or guest
-shims change. The release download installer does not supply these programs.
+shims change. `--no-browser-addon` leaves the three programs out and the
+workspace's Add-on as it is; without them no browser route works. The release
+download installer does not supply these programs.
 
 masc carries this package. After installing, the script runs
 `masc browser-lane-setup --mode addon` for the workspace, and every other
@@ -30,7 +32,8 @@ masc carries this package. After installing, the script runs
 
 Setup attaches nothing. The server attaches the declared Add-on when it starts
 and on its maintenance pass. Set `enabled = false` in the declaration to keep
-it detached.
+it detached. `browser-lane-setup --no-addon` makes a mode other than `addon`
+leave the package and the declaration as they are.
 
 The worker exports `browser_command` through ordinary Add-on discovery. The host
 supplies verified caller context through the private control port. The package

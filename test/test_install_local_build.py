@@ -230,6 +230,71 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertEqual(addon_calls(prefix),
                              [["browser-lane-setup", "--mode", "addon", "--base-path", str(base)]])
 
+    def test_no_browser_addon_installs_and_declares_nothing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            for exe in ("masc_tui.exe", "masc_browser_host.exe"):
+                executable(build / exe, exe)
+            fake_masc(build / "main_eio.exe")
+            preflight_helper(build)
+            prefix = root / "prefix"
+            base = workspace(root)
+            install_lane(base)
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                 "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                 "--base-path", str(base), "--no-browser-addon"],
+                env=unnamed_env(root), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for program in BROWSER_ADDON_PROGRAMS:
+                self.assertFalse((prefix / program.replace("_", "-")).exists())
+            self.assertEqual(addon_calls(prefix), [])
+            # The host refresh carries the choice, so setup does not declare it.
+            self.assertEqual(lane_calls(prefix), [host_call(prefix, base) + ["--no-addon"]])
+
+    def test_no_browser_addon_names_programs_an_earlier_install_left(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            build = root / "build"
+            build.mkdir()
+            for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe"):
+                executable(build / exe, exe)
+            preflight_helper(build)
+            prefix = root / "prefix"
+            prefix.mkdir()
+            left = executable(prefix / "masc-browser-addon-worker", "an earlier worker")
+            before = left.read_bytes()
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
+                 "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                 "--base-path", str(workspace(root)), "--no-browser-addon"],
+                env=unnamed_env(root), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(str(left), result.stderr)
+            self.assertEqual(left.read_bytes(), before, "the earlier program is not removed")
+
+    def test_no_browser_addon_leaves_its_programs_out_of_the_build(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            checkout = root / "checkout"
+            scripts = checkout / "scripts"
+            scripts.mkdir(parents=True)
+            shutil.copy2(SCRIPT, scripts / SCRIPT.name)
+            record = root / "build-call"
+            guard = scripts / "dune-local.sh"
+            guard.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$RECORD"\nexit 1\n')
+            guard.chmod(0o755)
+            result = subprocess.run(
+                ["bash", str(scripts / SCRIPT.name), "--no-browser-addon", "--prefix",
+                 str(root / "prefix"), "--manifest-dir", str(root / "absent")],
+                env=dict(unnamed_env(root), RECORD=str(record)), capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(record.read_text().splitlines(), [
+                "build", "--root", str(checkout), "./bin/main_eio.exe", "./bin/masc_tui.exe",
+                "./bin/masc_browser_host.exe", "./bin/deployment_preflight_helper.exe"])
+
     def test_a_missing_browser_addon_program_installs_nothing(self):
         for program in BROWSER_ADDON_PROGRAMS:
             with self.subTest(program=program), tempfile.TemporaryDirectory() as temporary:

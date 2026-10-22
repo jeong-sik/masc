@@ -28,7 +28,9 @@ transport는 지원 기능을 설명하며, 서로 다른 설치 체계는 아�
 `masc browser-lane-setup --mode addon`을 실행합니다. `browser-lane-setup`의 다른 모드도 같은
 일을 합니다. 이 명령은 masc에 들어 있는 패키지를 `<base-path>/.masc/packages/browser/`에 씁니다.
 workspace에 이 패키지의 선언이 없으면 활성 설정 루트에 `lane-addons/browser.toml`을 저장합니다.
-이미 있는 선언은 그대로 둡니다. 설치 prefix를 서버 PATH에 포함합니다.
+이미 있는 선언은 그대로 둡니다. 설치 prefix를 서버 PATH에 포함합니다. Add-on이 필요 없으면
+설치 스크립트에는 `--no-browser-addon`, setup에는 `--no-addon`을 줍니다. 그러면 브라우저 경로는
+동작하지 않습니다.
 
 Hook이나 모델 출력을 고르려면 그 `browser.toml`에 더합니다. setup은 이미 있는 선언을 다시
 쓰지 않습니다.

@@ -34,7 +34,8 @@ runs `masc browser-lane-setup --mode addon` for the workspace. Every other
 to `<base-path>/.masc/packages/browser/` and, when the workspace has no
 declaration of it, saves `lane-addons/browser.toml` in the active config root.
 An existing declaration of the package is left as it is. Keep the install
-prefix on the server's PATH.
+prefix on the server's PATH. `--no-browser-addon` (installer) and `--no-addon`
+(setup) leave the Add-on out; without it no browser route works.
 
 To choose hooks or model outputs, add them to that `browser.toml`; setup never
 rewrites an existing declaration:

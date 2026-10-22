@@ -178,7 +178,9 @@ and installs `masc-native-addon-launcher`, `masc-browser-addon-worker` and
 runs `masc browser-lane-setup --mode addon` for the workspace: it writes the
 Add-on package that build carries to `.masc/packages/browser` and declares it
 in `browser.toml` when the workspace has no declaration of it. The server
-attaches it when it starts. See [Browser Addon setup](addons/browser/README.md).
+attaches it when it starts. Pass `--no-browser-addon` to leave the Add-on out:
+the programs are not built or installed, the workspace's declaration is left as
+it is, and no browser route works. See [Browser Addon setup](addons/browser/README.md).
 Release downloads do not include these programs.
 
 `./quickstart.sh` seeds a workspace under `~/masc-quickstart`, starts the

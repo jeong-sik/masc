@@ -627,6 +627,16 @@ let test_current_nonterminal_event_set () =
           ; "toolCallName", `String "read"
           ; "progress", `Assoc ["kind", `String "output_observed"; "byte_count", `Int 1]
           ]
+      else if String.equal name "KEEPER_MEDIA_DELTA" then
+        (* The strict decoder requires a generated media object
+           ([Keeper_chat_events.generated_media_of_json]); a Null is rejected. *)
+        `Assoc
+          [ "index", `Int 0
+          ; "media_type", `String "image/png"
+          ; "media_ref", `String "/api/v1/media/fixture"
+          ; "source_type", `String "base64"
+          ; "response", `Assoc ["content_generation", `Int 0; "stream_scope", `Int 0]
+          ]
       else if String.equal name "KEEPER_CHAT_BATCH_BOUND" then
         `Assoc ["operation_id", `String request.request_id; "execution_id", `String "shared-execution"]
       else if String.equal name "KEEPER_STREAM_PROTOCOL_ERROR" then

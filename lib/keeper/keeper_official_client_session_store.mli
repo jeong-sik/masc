@@ -148,12 +148,18 @@ type context_delivery =
 (** One piece of per-turn context a resume carries in front of its prompt,
     named by what composed it: one typed block of the context carrier, one
     World State section of its [Dynamic_context] block when the renderer's
-    partition of that block is known, the whole carrier when its blocks are
-    not known, the Librarian working state, the independent unread
-    observation, or the historical task reference. *)
+    partition of that block is known, one row of such a section, the whole
+    carrier when its blocks are not known, the Librarian working state, the
+    independent unread observation, or the historical task reference. *)
 type carried_context =
   | Context_block of Prompt_block_id.t
   | Context_section of Keeper_context_layers.source
+      (** A whole section, or for a section with rows
+          ({!Keeper_context_layers.Head_and_rows}) its head and tail. *)
+  | Context_section_row of { section : Keeper_context_layers.source; row_sha256 : string }
+      (** One row of a section with rows. A row has no other name that stays
+          fixed while its section's window moves, so its digest names it and
+          equals the held digest. *)
   | Context_carrier
   | Librarian_working_state
   | Librarian_unread

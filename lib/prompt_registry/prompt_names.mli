@@ -183,6 +183,7 @@ val keeper_context_approval_authority_footer : string
 val keeper_world_frame_frame : string
 
 val keeper_world_frame_unchanged_sections : string
+val keeper_world_frame_held_rows_sections : string
 (** The line a resumed official-client session gets in place of the World State
     sections it already holds unchanged; [sections] names them. *)
 

@@ -36,34 +36,56 @@ let literal text = { text; occurrences = []; omitted = []; acquisitions = [] }
 let text t = t.text
 
 (* The text a selected block renders: all of it, or for the [Dynamic_context]
-   block, its renderer's sections without the ones a resume left out. A left-out
-   section the partition does not name makes the selection invalid. *)
-let selected_block_text assembly ~omitted_sections (id, text) =
+   block, its renderer's sections without the ones a resume left out, and of a
+   section a resume sent in part, its head, the rows it did not leave out and
+   its tail. A left-out section or row the partition does not name makes the
+   selection invalid. *)
+let selected_block_text assembly ~omitted_sections ~omitted_rows (id, text) =
   match id with
-  | Prompt_block_id.Dynamic_context when omitted_sections <> [] ->
+  | Prompt_block_id.Dynamic_context when omitted_sections <> [] || omitted_rows <> [] ->
     Option.bind (Assembly.dynamic_context_sections assembly) (fun sections ->
-      if List.for_all
-           (fun omitted -> List.exists (fun (source, _) -> source = omitted) sections)
-           omitted_sections
+      let names source =
+        List.exists
+          (fun (section : Keeper_context_layers.section) ->
+             section.Keeper_context_layers.section_source = source)
+          sections
+      in
+      let rendered (section : Keeper_context_layers.section) =
+        if List.mem section.Keeper_context_layers.section_source omitted_sections then Some ""
+        else
+          match List.assoc_opt section.section_source omitted_rows, section.section_rows with
+          | None, (Keeper_context_layers.Whole_section | Keeper_context_layers.Head_and_rows _) ->
+            Some section.section_text
+          | Some digests, Keeper_context_layers.Head_and_rows { head; rows; tail } ->
+            let left_out row = List.mem (hash row) digests in
+            if List.for_all
+                 (fun digest -> List.exists (fun row -> String.equal (hash row) digest) rows)
+                 digests
+            then Some (head ^ String.concat "" (List.filter (fun row -> not (left_out row)) rows) ^ tail)
+            else None
+          | Some _, Keeper_context_layers.Whole_section -> None
+      in
+      if List.for_all names omitted_sections
+         && List.for_all (fun (source, _) -> names source) omitted_rows
       then
-        Some
-          (String.concat ""
-             (List.filter_map
-                (fun (source, text) ->
-                   if List.mem source omitted_sections then None else Some text)
-                sections))
+        let texts = List.map rendered sections in
+        if List.exists Option.is_none texts
+        then None
+        else Some (String.concat "" (List.filter_map Fun.id texts))
       else None)
   | Prompt_block_id.(
       Dynamic_context | Keeper_instructions | Temporal_summary | Memory_os_recall
       | Librarian_working_context | Operator_note | Skill_compositions) -> Some text
 
-let source assembly selected_blocks ~omitted_sections (message : Agent_core.Types.message) =
+let source assembly selected_blocks ~omitted_sections ~omitted_rows
+    (message : Agent_core.Types.message) =
+  let omits = omitted_sections <> [] || omitted_rows <> [] in
   let inspect assembly actual =
     match assembly.Assembly.extra_system_context, assembly.receipt with
     | Some original, Some receipt ->
       let selected =
         match selected_blocks with
-        | None when actual = original && omitted_sections = [] ->
+        | None when actual = original && not omits ->
           Some (List.mapi (fun i _ -> i) receipt.spans)
         | None -> None
         | Some ids ->
@@ -72,9 +94,11 @@ let source assembly selected_blocks ~omitted_sections (message : Agent_core.Type
            | Some blocks ->
              let wanted = List.filter
                  (fun (id, _) -> List.exists (Prompt_block_id.equal id) ids) blocks in
-             let texts = List.map (selected_block_text assembly ~omitted_sections) wanted in
+             let texts =
+               List.map (selected_block_text assembly ~omitted_sections ~omitted_rows) wanted
+             in
              if List.map fst wanted <> ids
-                || (omitted_sections <> []
+                || (omits
                     && not (List.exists (Prompt_block_id.equal Prompt_block_id.Dynamic_context) ids))
                 || List.exists Option.is_none texts
                 || String.concat "\n\n" (List.filter_map Fun.id texts) <> actual
@@ -94,10 +118,10 @@ let source assembly selected_blocks ~omitted_sections (message : Agent_core.Type
            ; "source_span_indices", `List (List.map (fun i -> `Int i) indices)
            ; "rendered_text_bytes", `Int (String.length actual)
            ; "rendered_text_sha256", `String (hash actual)
-           ; "rendering", `String (match selected_blocks, omitted_sections with
+           ; "rendering", `String (match selected_blocks, omits with
                | None, _ -> "whole_carrier"
-               | Some _, [] -> "ordered_blocks_joined_by_two_newlines"
-               | Some _, _ :: _ ->
+               | Some _, false -> "ordered_blocks_joined_by_two_newlines"
+               | Some _, true ->
                  "ordered_blocks_joined_by_two_newlines_without_held_world_state_sections")
            ; "codec_schema", `String Keeper_official_client_context_codec.schema
            ; "codec_text_path", `String "/message/content_blocks/0/text"
@@ -107,7 +131,15 @@ let source assembly selected_blocks ~omitted_sections (message : Agent_core.Type
               | _ :: _ ->
                 [ "omitted_world_state_sections",
                   `List (List.map (fun section ->
-                    `String (Keeper_context_layers.source_name section)) omitted_sections) ]))))
+                    `String (Keeper_context_layers.source_name section)) omitted_sections) ])
+           @ (match omitted_rows with
+              | [] -> []
+              | _ :: _ ->
+                [ "omitted_world_state_rows",
+                  `List (List.map (fun (section, digests) ->
+                    `Assoc [ "section", `String (Keeper_context_layers.source_name section)
+                           ; "row_sha256", `List (List.map (fun digest -> `String digest) digests) ])
+                    omitted_rows) ]))))
     | _ -> Unavailable Issuer_has_no_carrier
   in
   match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
@@ -122,9 +154,10 @@ let source assembly selected_blocks ~omitted_sections (message : Agent_core.Type
      | (Agent_core.Types.System, [], _)
      | ((Agent_core.Types.User | (Agent_core.Types.Assistant | Agent_core.Types.Tool)), _, _) -> Unavailable Unsupported_carrier)
 
-let encoded_carrier ~assembly ~selected_blocks ?(omitted_sections = []) message =
+let encoded_carrier ~assembly ~selected_blocks ?(omitted_sections = []) ?(omitted_rows = [])
+    message =
   let text = Keeper_official_client_context_codec.encode message in
-  let evidence = source assembly selected_blocks ~omitted_sections message in
+  let evidence = source assembly selected_blocks ~omitted_sections ~omitted_rows message in
   let occurrences = match evidence with
     | Not_applicable | Unavailable _ -> []
     | Verified proof -> [ { offset = 0; bytes = String.length text; proof } ] in
@@ -155,7 +188,7 @@ let trim piece =
   { piece with text; occurrences; acquisitions }
 
 let omit_held ~assembly ~blocks message piece =
-  let evidence = source assembly blocks ~omitted_sections:[] message in
+  let evidence = source assembly blocks ~omitted_sections:[] ~omitted_rows:[] message in
   let omitted = match evidence with
     | Verified proof -> piece.omitted @ [proof]
     | Not_applicable | Unavailable _ -> piece.omitted in

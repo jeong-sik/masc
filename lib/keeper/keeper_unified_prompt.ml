@@ -1299,8 +1299,12 @@ let format_recent_work = function
             [ "evidence", Yojson.Safe.to_string (`Assoc ["unavailable", `String detail]) ] ^ "\n\n")
 ;;
 
-(* A row is a whole turn, and the heading counts turns. *)
-let format_recent_actions_section ~current_task_id own_recent_actions : string option =
+(* A row is a whole turn, and the heading counts turns. The rows go out as the
+   section's own rows ({!Keeper_context_layers.prepare_rows}): the window moves
+   one turn at a time, so a resumed official-client session already holds all
+   but the newest and is sent only the rows it lacks (#45131). *)
+let format_recent_actions_section ~current_task_id own_recent_actions
+  : Keeper_context_layers.prepared_content option =
   match own_recent_actions with
   | Ok [] -> None
   | Error (Keeper_tool_call_log.Index_unavailable detail) ->
@@ -1308,10 +1312,11 @@ let format_recent_actions_section ~current_task_id own_recent_actions : string o
        silent absence reads as "no calls made", which is exactly the
        repeat-a-finished-task failure this layer exists to prevent. *)
     Some
-      (render_fragment
-         Prompt_names.keeper_world_own_recent_actions_unavailable
-         [ "detail", detail ]
-       ^ "\n\n")
+      (Keeper_context_layers.prepare_content
+         (render_fragment
+            Prompt_names.keeper_world_own_recent_actions_unavailable
+            [ "detail", detail ]
+          ^ "\n\n"))
   | Ok turns ->
     let failures = Keeper_own_recent_actions.digest_failures turns in
     let rows = List.map (format_own_recent_actions_turn ~current_task_id) turns in
@@ -1385,9 +1390,14 @@ let format_recent_actions_section ~current_task_id own_recent_actions : string o
            in
            Buffer.add_string ubuf (row ^ "\n"))
          failures);
-    Buffer.add_string ubuf (String.concat "\n" rows);
-    Buffer.add_string ubuf "\n\n";
-    Some (Buffer.contents ubuf)
+    (* Each row ends its own line, and the tail is the blank line that closes
+       the section: the bytes are the rows joined by newlines and closed by a
+       blank line, and the newest row reads the same once a newer one follows. *)
+    Some
+      (Keeper_context_layers.prepare_rows
+         ~head:(Buffer.contents ubuf)
+         ~rows:(List.map (fun row -> row ^ "\n") rows)
+         ~tail:"\n")
 ;;
 
 let prepare_prompt_internal
@@ -1977,7 +1987,7 @@ let project_prompt prepared ?workspace_memory_access ?own_recent_actions
       |> Option.map Keeper_context_layers.prepare_content
     | Wiki -> format_wiki_observation ?access:workspace_memory_access prepared.wiki_contents
       |> Option.map Keeper_context_layers.prepare_content
-    | Own_recent_actions -> Option.map Keeper_context_layers.prepare_content own_recent_actions_section
+    | Own_recent_actions -> own_recent_actions_section
     | Recent_work -> Option.map Keeper_context_layers.prepare_content (format_recent_work recent_work)
     | Active_goals | Current_task | Approval_authority | Connected_surfaces | Namespace_state
     | Lane_updates | Repository_freshness | Autonomous_trigger | Scheduled_automation

@@ -85,15 +85,26 @@ let order_index = function
 type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
 type source = Layer of layer_id | Unattributed of unattributed
 type resend_on_resume = Sent_when_changed | Sent_every_resume | Sent_with_other_sections
-type span = { source : source; offset : int; bytes : int; sha256 : string }
+type section_rows =
+  | Whole_section
+  | Head_and_rows of { head : string; rows : string list; tail : string }
+type span = { source : source; offset : int; bytes : int; sha256 : string; span_rows : section_rows }
 type rendered = { text : string; spans : span list }
-type prepared_content = { content_text : string; content_sha256 : string }
+type prepared_content = { content_text : string; content_sha256 : string; content_rows : section_rows }
+type section = { section_source : source; section_text : string; section_rows : section_rows }
 
 let hash text = Digestif.SHA256.(digest_string text |> to_hex)
-let prepare_content text = {content_text=text;content_sha256=hash text}
+let prepare_content text = {content_text=text;content_sha256=hash text;content_rows=Whole_section}
+let prepare_rows ~head ~rows ~tail =
+  let content_text = head ^ String.concat "" rows ^ tail in
+  let content_rows = match rows with
+    | [] -> Whole_section
+    | _ :: _ -> Head_and_rows { head; rows; tail } in
+  {content_text;content_sha256=hash content_text;content_rows}
 let text rendered = rendered.text
 let prepared_span source offset content =
-  {source;offset;bytes=String.length content.content_text;sha256=content.content_sha256}
+  {source;offset;bytes=String.length content.content_text;sha256=content.content_sha256;
+   span_rows=content.content_rows}
 let make_span source offset text =
   prepared_span source offset (prepare_content text)
 let unattributed reason text =
@@ -181,7 +192,11 @@ let resend_on_resume = function
 
 let sections rendered =
   List.map
-    (fun span -> span.source, String.sub rendered.text span.offset span.bytes)
+    (fun span ->
+       { section_source = span.source
+       ; section_text = String.sub rendered.text span.offset span.bytes
+       ; section_rows = span.span_rows
+       })
     rendered.spans
 
 let receipt_to_json rendered =

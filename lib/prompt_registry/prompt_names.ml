@@ -166,6 +166,10 @@ let keeper_world_frame_frame = "keeper.world.frame.frame"
    sections it already holds unchanged. *)
 let keeper_world_frame_unchanged_sections = "keeper.world.frame.unchanged_sections"
 
+(* The line a resumed official-client session gets after the World State
+   sections it was sent in part: only their rows new since its latest copy. *)
+let keeper_world_frame_held_rows_sections = "keeper.world.frame.held_rows_sections"
+
 (* Durable direct-conversation transcript block, prepended to the quoted
    recent-conversation rows in the turn context. *)
 let keeper_world_transcript_header = "keeper.world.transcript.header"

@@ -384,6 +384,9 @@ The runtime assembled the sections below for this turn. You did not retrieve the
 ### world.frame.unchanged_sections (vars: sections)
 World State sections not repeated this turn because your latest copy of each in this session is still current: {{sections}}. A section neither sent this turn nor named here is absent this turn.
 
+### world.frame.held_rows_sections (vars: sections)
+World State sections sent with only their rows that are new since your latest copy of each in this session; the rows of that copy still hold: {{sections}}.
+
 ### world.namespace_state.heading
 ### Namespace State
 

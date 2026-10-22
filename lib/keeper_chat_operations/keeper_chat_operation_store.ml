@@ -2369,7 +2369,11 @@ let direct_input_wait store ~operation_id =
 
 let defer_direct_input_wait store ~now ~operation_id ~execution_digest ~(waiting:Semantic.input_wait) =
   let* () = ensure_open store in
-  let exact_owner () =
+  let exact_owner execution =
+    match Option.bind execution (fun (execution:Semantic.t) -> execution.input_branch) with
+    | Some branch when Keeper_checkpoint_ref.equal branch.checkpoint waiting.checkpoint -> Ok ()
+    | Some _ -> Error (Invalid_input "input wait no longer names its original operation branch")
+    | None ->
     let* input = input_observation_with_db store.db ~trace_id:waiting.checkpoint.trace_id in
     match input with
     | Input_observed reference when Keeper_checkpoint_ref.equal reference waiting.checkpoint -> Ok ()
@@ -2385,14 +2389,15 @@ let defer_direct_input_wait store ~now ~operation_id ~execution_digest ~(waiting
       Error (Invalid_input "input wait does not match the original queued continuation") in
   (* A readback cannot turn an uncertain commit into confirmed acceptance. *)
   let* _ = with_transaction store (fun () ->
-    let* () = exact_owner () in
     let* operation = operation_or_unknown store.db operation_id in
     if operation.execution_digest<>execution_digest then Error (Invalid_input "input wait execution digest changed")
-    else match operation.state with
+    else
+    let* current = direct_execution_with_db store.db operation in
+    let* () = exact_owner current in
+    match operation.state with
     | Operation.Queued -> read_existing ()
     | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ -> Error (Not_running operation_id)
     | Operation.Running _ ->
-      let* current = direct_execution_with_db store.db operation in
       let* expected = match current with
         | Some execution -> Ok execution
         | None -> Error (Invalid_input "input wait has no original native execution") in
@@ -2855,6 +2860,15 @@ let apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest 
           | Semantic.Native_call_unsettled -> Native_call_unsettled
           | (Semantic.Invalid_record _ | Semantic.Revision_exhausted) as error ->
             Integrity_error (Semantic.error_to_string error)) in
+      (* The pure native and branch transitions are one persisted record. A
+         reader can never observe a new native checkpoint with an older branch
+         head, including the seed of the first resumed native invocation. *)
+      let* next = match execution.input_branch, replacement with
+        | Some branch, Keeper_native_call.Active call ->
+          semantic_transition ~now
+            (Semantic.Advance_input_branch {observed=branch.checkpoint;checkpoint=call.checkpoint}) next
+        | (Some _ | None),(Keeper_native_call.No_native_call | Terminal_unacknowledged _)
+        | None,Keeper_native_call.Active _ -> Ok next in
       let* () = match current with
         | None -> insert_semantic store.db next
         | Some expected when Semantic.to_json expected = Semantic.to_json next -> Ok ()
@@ -2864,10 +2878,33 @@ let apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest 
 let update_direct_native_call store ~now ~operation_id ~execution_digest change =
   let* () = ensure_open store in
   let expected_commit = ref None in
+  let branch_publication = ref false in
   let result = with_transaction store (fun () ->
     let* next = apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest change in
+    branch_publication := Option.is_some next.input_branch;
     expected_commit := Some (next, ()); Ok ()) in
-  confirm_semantic_transition store expected_commit result
+  if !branch_publication then result
+  else confirm_semantic_transition store expected_commit result
+
+let update_direct_branch_checkpoint store ~now ~operation_id ~execution_digest
+    ~call_id ~observed ~observed_branch ~checkpoint =
+  let* () = ensure_open store in
+  with_transaction store (fun () ->
+    let* operation = operation_or_unknown store.db operation_id in
+    let* execution = direct_execution_with_db store.db operation in
+    let* () = match Option.bind execution (fun (execution:Semantic.t) -> execution.input_branch) with
+      | Some branch when Keeper_checkpoint_ref.equal branch.checkpoint observed_branch -> Ok ()
+      | Some _ | None -> Error (Invalid_input "original operation branch predecessor changed") in
+    let* _ = apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest
+      (Keeper_native_call.Checkpoint {call_id;observed;checkpoint}) in
+    Ok ())
+
+let require_global_direct_input_with_db store operation_id =
+  let* operation = operation_or_unknown store.db operation_id in
+  let* execution = direct_execution_with_db store.db operation in
+  match Option.bind execution (fun (execution:Semantic.t) -> execution.input_branch) with
+  | None -> Ok ()
+  | Some _ -> Error (Invalid_input "operation input branch cannot publish global input")
 
 let update_direct_input_checkpoint store ~now ~operation_id ~execution_digest
     ~call_id ~observed ~observed_input ~checkpoint =
@@ -2878,6 +2915,7 @@ let update_direct_input_checkpoint store ~now ~operation_id ~execution_digest
      cannot replay an installed transition, and no files are released. *)
   let* () = check_input_predecessor ~observed:observed_input ~checkpoint in
   with_transaction store (fun () ->
+    let* () = require_global_direct_input_with_db store operation_id in
     let* previous = input_observation_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
     if not (input_predecessor_matches observed_input previous) then
       Ok (Input_checkpoint_source_changed previous)
@@ -2894,6 +2932,7 @@ let bind_direct_input_checkpoint store ~now ~operation_id ~execution_digest
   let* () = ensure_open store in
   let* () = check_input_predecessor ~observed:observed_input ~checkpoint in
   with_transaction store (fun () ->
+    let* () = require_global_direct_input_with_db store operation_id in
     let* previous = input_observation_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
     if not (input_predecessor_matches observed_input previous) then
       Ok (Input_checkpoint_source_changed previous)

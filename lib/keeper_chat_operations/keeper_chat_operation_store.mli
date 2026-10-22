@@ -314,7 +314,21 @@ val direct_native_call : t -> operation_id:Operation.Operation_id.t ->
 val update_direct_native_call : t -> now:float -> operation_id:Operation.Operation_id.t ->
   execution_digest:string -> Keeper_native_call.change -> (unit, error) result
 (** Owner-serialized native-call identity and checkpoint CAS. Every change
-    verifies the current direct-operation execution digest. *)
+    verifies the current direct-operation execution digest. An operation input
+    branch advances to each admitted Active native checkpoint in the same
+    SQLite transaction and semantic CAS, including initial Bind. Its origin
+    remains pinned, global input is untouched, and uncertain branch commits
+    remain Error without readback-to-success. The Owner must validate the
+    original executing child and retained candidate before publication. *)
+val update_direct_branch_checkpoint : t -> now:float ->
+  operation_id:Operation.Operation_id.t -> execution_digest:string ->
+  call_id:string -> observed:Keeper_checkpoint_ref.t ->
+  observed_branch:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t ->
+  (unit, error) result
+(** Compare the original operation's branch and native predecessors and advance
+    both together. No global input read or write participates. A stale branch,
+    native call or digest leaves both unchanged. Commit uncertainty stays Error.
+    This is a storage primitive; it supplies no child or physical authority. *)
 val update_direct_input_checkpoint : t -> now:float ->
   operation_id:Operation.Operation_id.t -> execution_digest:string ->
   call_id:string -> observed:Keeper_checkpoint_ref.t ->
@@ -334,7 +348,9 @@ val bind_direct_input_checkpoint : t -> now:float ->
   (input_checkpoint_update, error) result
 (** Atomically bind the next native call and publish a verified input history
     cut. Owner validates the transformation before using this storage primitive.
-    Both predecessor comparisons are transactional; uncertain commits stay Error. *)
+    Both predecessor comparisons are transactional; uncertain commits stay Error.
+    This and [update_direct_input_checkpoint] refuse operation input branches;
+    a branch must use its own native/branch publication instead of global input. *)
 
 val direct_input_wait : t -> operation_id:Operation.Operation_id.t ->
   (Keeper_semantic_execution.input_wait option, error) result
@@ -342,7 +358,8 @@ val defer_direct_input_wait : t -> now:float -> operation_id:Operation.Operation
   execution_digest:string -> waiting:Keeper_semantic_execution.input_wait -> (Operation.t, error) result
 (** Atomic original direct-operation input wait. The Owner must first validate
     its original child, trace and exact retained request. The transaction checks
-    current input ownership, the execution digest and matching native Retire;
+    current global or operation branch input ownership, the execution digest
+    and matching native Retire;
     it acknowledges that receipt, records the wait and requeues the same input.
     Active/unknown effects, stale references and conflicting waits are refused.
     Waiting is blocked from claiming and priority indefinitely; no time-based

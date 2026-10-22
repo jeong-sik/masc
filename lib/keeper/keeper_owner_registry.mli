@@ -165,6 +165,11 @@ val has_newer_original_queued
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, command_error) result
+val direct_input_branch : base_path:string -> keeper_name:string ->
+  operation_id:Keeper_chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.input_branch option, command_error) result
+(** Existing-Owner read, including while draining. The returned branch is
+    an observation, not authority to execute or publish. *)
 
 (** [direct_native_call], [checkpoint_direct_native_call] and
     [terminal_direct_native_call] still reach an installed Owner after

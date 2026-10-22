@@ -390,6 +390,10 @@ val restart_interrupted_operations : t -> Chat_operation.t list
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
+val direct_input_branch : t -> operation_id:Chat_operation.Operation_id.t ->
+  (Keeper_semantic_execution.input_branch option, error) result
+(** Read the operation's retained input branch. This observation alone grants
+    neither publication nor continuation authority. *)
 val direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_native_call.state, error) result
 
 type current_input_checkpoint =
@@ -420,6 +424,13 @@ type input_checkpoint_writer
     exact input predecessor it observed before dispatch. Capture/publication
     require the caller's inherited Owner child binding. It grants checkpoint
     publication only, not host input response or continuation admission. *)
+type input_checkpoint_destination =
+  | Global_input
+  | Operation_input of Chat_operation.Operation_id.t
+val input_checkpoint_destination : input_checkpoint_writer -> input_checkpoint_destination
+(** Captured by the original child from the actual journal. Callers cannot
+    select or change this destination, including after an independent global
+    input has been published. *)
 val begin_input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
   (input_checkpoint_writer, error) result
 val input_checkpoint_reference : input_checkpoint_writer -> Keeper_checkpoint_ref.t option
@@ -435,7 +446,9 @@ val advance_direct_input_checkpoint : t -> writer:input_checkpoint_writer ->
   (input_checkpoint_writer, error) result
 (** Revalidate current trace, original child token and lane in the mailbox,
     then compare the predecessor inside the journal transaction. Direct input
-    and native checkpoint advance atomically. A cancelled child can still
+    and native checkpoint advance atomically. An operation destination uses
+    the exact native/branch predecessor and never reads or writes global input.
+    A cancelled child can still
     record its receipt while Owner stops; a new writer cannot be admitted.
     Stale witnesses refuse, uncertain commits remain Error, and callers must
     reconcile both durable relations before any further publication. *)

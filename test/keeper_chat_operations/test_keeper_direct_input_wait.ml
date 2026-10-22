@@ -609,8 +609,105 @@ let test_branch_destination_codec_and_direction () = with_path @@ fun path -> wi
   check bool "operation input can never reattach" false
     (Semantic.continues_input_response_intent ~previous:branched ~next:response_intent)
 
+let actual_running_branch store =
+  let operation,newer=prepare_branch_with_newer_input store in
+  prepare store operation (branch_intent ()) |> ok;
+  respond store operation waiting response_candidate |> ok;
+  ignore (Store.claim_next store ~now:11. |> ok |> Option.get);
+  Store.resume_direct_checkpoint store ~now:12. ~operation_id:original
+    ~observed:(Semantic.Agent_core response_candidate) |> ok;
+  operation,newer
+let branch_native_seed=response_checkpoint 3 "original branch native seed with admitted context"
+let branch_native_next=response_checkpoint 4 "original branch ordinary native checkpoint"
+let branch_native_call operation =
+  let locator=Agent.execution_locator_of_yojson
+    (`Assoc ["version",`Int 1;"run_id",`String "execution-run-branch-native-after-response"]) |> value in
+  Native.create ~call_id:"019a0010-1000-7000-8000-000000000052" ~runtime_id:"native.primary"
+    ~operation_digest:operation.Operation.execution_digest ~api:Native.Continue_from_checkpoint
+    ~seed_checkpoint:branch_native_seed ~locator |> value
+let publish_branch_native store operation change =
+  Store.update_direct_native_call store ~now:13. ~operation_id:original
+    ~execution_digest:operation.Operation.execution_digest change
+let branch_head store = (branch_reference store |> Option.get).Semantic.checkpoint
+let check_native_branch_pair store expected =
+  check bool "persisted branch names exact native publication" true
+    (Keeper_checkpoint_ref.equal (branch_head store) expected);
+  check bool "persisted native names same publication" true
+    (match native store with
+     | Native.Active call | Terminal_unacknowledged (call,_) -> Keeper_checkpoint_ref.equal call.checkpoint expected
+     | No_native_call -> false)
+let test_branch_native_publication_is_atomic_and_repeats_wait () = with_path @@ fun path ->
+  let newer,second_wait=with_store path (fun store ->
+    let operation,newer=actual_running_branch store in
+    let call=branch_native_call operation in
+    publish_branch_native store operation (Native.Bind {observed=Native.No_native_call;call}) |> ok;
+    check_native_branch_pair store branch_native_seed;
+    let before=Semantic.to_json (semantic store) in
+    rejected (Store.update_direct_branch_checkpoint store ~now:14. ~operation_id:original
+      ~execution_digest:operation.execution_digest ~call_id:call.call_id ~observed:branch_native_seed
+      ~observed_branch:response_candidate ~checkpoint:branch_native_next);
+    rejected (Store.update_direct_input_checkpoint store ~now:14. ~operation_id:original
+      ~execution_digest:operation.execution_digest ~call_id:call.call_id ~observed:branch_native_seed
+      ~observed_input:(Some newer) ~checkpoint:branch_native_next);
+    check bool "stale branch and global publication change no native fact" true (before=Semantic.to_json (semantic store));
+    Store.update_direct_branch_checkpoint store ~now:15. ~operation_id:original
+      ~execution_digest:operation.execution_digest ~call_id:call.call_id ~observed:branch_native_seed
+      ~observed_branch:branch_native_seed ~checkpoint:branch_native_next |> ok;
+    check_native_branch_pair store branch_native_next;
+    rejected (publish_branch_native store operation
+      (Native.Checkpoint {call_id=call.call_id;observed=branch_native_seed;checkpoint=branch_native_next}));
+    let next_wait_checkpoint=response_checkpoint 5 "original branch next pending input" in
+    publish_branch_native store operation (Native.Checkpoint {call_id=call.call_id;observed=branch_native_next;checkpoint=next_wait_checkpoint}) |> ok;
+    check_native_branch_pair store next_wait_checkpoint;
+    publish_branch_native store operation (Native.Terminal {call_id=call.call_id;
+      disposition={Agent.outcome=Agent.Terminal_succeeded;recovery=Agent.Retire}}) |> ok;
+    let second_pending={pending with run_id="execution-run-original-branch-next";
+      request={pending.request with request_id="branch-next-question";question="Original branch next question?"}} in
+    let second_wait=Semantic.input_wait ~checkpoint:next_wait_checkpoint ~pending:second_pending |> value in
+    ignore (Store.defer_direct_input_wait store ~now:16. ~operation_id:original
+      ~execution_digest:operation.execution_digest ~waiting:second_wait |> ok);
+    actual_global store newer;newer,second_wait) in
+  with_store path (fun store ->
+    check bool "next branch wait survives actual SQLite reopen" true
+      (Option.equal Semantic.equal_input_wait (Some second_wait) (wait store));
+    check bool "repeated branch wait keeps immutable first origin" true
+      (Semantic.equal_input_wait (branch_reference store |> Option.get).origin waiting);
+    check bool "next branch wait remains blocked" false (Store.has_claimable_queued store ~now:1e12 |> ok);
+    check bool "branch wait acknowledges only its retired native" true (native store=Native.No_native_call);
+    actual_global store newer)
+let test_branch_native_commit_uncertainty ~binding after_commit () = with_path @@ fun path ->
+  let newer,expected=with_store path (fun store ->
+    let operation,newer=actual_running_branch store in
+    let call=branch_native_call operation in
+    if not binding then publish_branch_native store operation (Native.Bind {observed=Native.No_native_call;call}) |> ok;
+    ignore (Store.take_released_checkpoints store);
+    Store.For_testing.fail_next_commit (if after_commit then Fail_after_commit else Fail_before_commit);
+    let change=if binding then Native.Bind {observed=Native.No_native_call;call}
+      else Native.Checkpoint {call_id=call.call_id;observed=branch_native_seed;checkpoint=branch_native_next} in
+    (match publish_branch_native store operation change with
+     | Error (Store.Store_unavailable _) -> () | Error _ | Ok () -> fail "uncertain native/branch commit was acknowledged");
+    Store.For_testing.clear_commit_fault ();
+    let expected=if after_commit then (if binding then branch_native_seed else branch_native_next)
+      else (if binding then response_candidate else branch_native_seed) in
+    check bool "branch reflects actual native commit only" true (Keeper_checkpoint_ref.equal (branch_head store) expected);
+    if binding && not after_commit then
+      check bool "failed Bind creates no native authority" true (native store=Native.No_native_call)
+    else check_native_branch_pair store expected;
+    check int "uncertainty grants no retention cleanup" 0 (List.length (Store.take_released_checkpoints store));
+    actual_global store newer;newer,expected) in
+  with_store path (fun store ->
+    check bool "actual native/branch commit survives reopen together" true
+      (Keeper_checkpoint_ref.equal (branch_head store) expected);
+    if not (binding && not after_commit) then check_native_branch_pair store expected;
+    actual_global store newer)
+
 let () = run "durable original input wait"
   ["store",[
+    test_case "native seed and later branch checkpoints publish atomically and wait again" `Quick test_branch_native_publication_is_atomic_and_repeats_wait;
+    test_case "branch native Bind precommit failure grants no receipt" `Quick (test_branch_native_commit_uncertainty ~binding:true false);
+    test_case "branch native Bind uncertain commit stays an error after reopen" `Quick (test_branch_native_commit_uncertainty ~binding:true true);
+    test_case "branch native checkpoint precommit failure changes neither reference" `Quick (test_branch_native_commit_uncertainty ~binding:false false);
+    test_case "branch native checkpoint uncertain commit persists both references" `Quick (test_branch_native_commit_uncertainty ~binding:false true);
     test_case "branch Store promotion and resume preserve independent input" `Quick test_branch_store_promotes_exact_intent_and_pins_after_resume;
     test_case "branch promotion precommit failure preserves canonical intent" `Quick (test_branch_store_promotion_commit_uncertainty false);
     test_case "uncertain committed branch promotion survives reopen" `Quick (test_branch_store_promotion_commit_uncertainty true);

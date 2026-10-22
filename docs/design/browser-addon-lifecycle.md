@@ -575,10 +575,27 @@ descriptor/digest mismatch and source replacement. The Gecko shutdown fixture
 keeps a real scripted BiDi socket open across Retire. Additional download
 scenarios cover metadata finalization, changed bytes with restored mtime,
 identical-byte replacement, replaced parents, permission changes, duplicate
-snapshots and unconfirmed-backend disposal. These pinned-source scenarios have
-not yet executed. The earlier real Gecko run39514004029 failed at historical
-identity comparison; diagnostic run39515749114 passed 23/23 steps with that
-predicate unchanged. Neither proves this refinement or the old differing field.
+snapshots and unconfirmed-backend disposal.
+[Selected run39518114697](https://github.com/jeong-sik/masc/actions/runs/39518114697)
+passed nine download and one original-owner cleanup cases at composition
+`3b5f93d48aeb0f320a5eddf378f0ef084f2ede1b` (feature `c492faf44d1ee836ae157da2acffb7da7dd424ce`
+plus two reviewed runner files).
+
+[Real Gecko run39518116324](https://github.com/jeong-sik/masc/actions/runs/39518116324)
+failed on that feature source: the remote completed row carried
+`artifactError = "download source changed while copying"`, with no artifact.
+The probe's export-success label checked only remote completion, then raised
+on the absent artifact. That label proves no artifact publication; downloaded
+bytes and confirmed teardown were not established. The probe now retains the
+completed row and requires the shared publication decoder before recording
+export success. Copy refusals record original/opened/final descriptor and path
+properties plus byte count, without source paths or contents. The guard and
+sticky failure remain unchanged; no browser action or publication is replayed.
+These diagnostic/probe changes await actual execution.
+
+The earlier real Gecko run39514004029 failed at historical identity comparison;
+diagnostic run39515749114 passed 23/23 steps with that predicate unchanged.
+Neither identifies the old differing field or makes the newer failure a success.
 Source review and actual selected execution remain separate.
 
 ## Completion evidence

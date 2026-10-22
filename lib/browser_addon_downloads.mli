@@ -24,7 +24,10 @@ val create : directory:string -> (t, string) result
 val publish : t -> string -> (Yojson.Safe.t, string) result
 (** Copy one completed, session-owned source with bounded streaming memory.
     The returned opaque snapshot marker may be cached by the BiDi connection.
-    Original source identity and contents are checked across the copy. The
+    Original source identity and contents are checked across the copy. A
+    post-copy refusal records the original, opened and final descriptor/path
+    properties (or a path-free observation error) and copied byte count,
+    without source paths or contents. The
     broker retains its read-only original descriptor until retirement. *)
 val bind : t -> actor:string -> route:Browser_lane.route -> verb:Browser_lane.verb ->
   Yojson.Safe.t -> (Yojson.Safe.t, string) result

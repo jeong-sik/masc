@@ -18,6 +18,7 @@ type failure =
   | Store_failed of Store.error
   | Io_failed of { path : string; detail : string }
   | Invalid_bundle
+  | Bundle_workspace_mismatch of { recorded_base_path : string; current_base_path : string }
 type error = { bundle_id : string option; failure : failure }
 type publication = Published of receipt | Publication_unconfirmed of receipt
 
@@ -32,7 +33,10 @@ let error_message {bundle_id;failure} =
     | Companion_present path -> "Preserve and recover the SQLite companion before preparing: " ^ path
     | Store_failed cause -> Store.error_to_string cause
     | Io_failed {path;detail} -> "Journal preparation I/O failed at " ^ path ^ ": " ^ detail
-    | Invalid_bundle -> "The published recovery bundle is incomplete, changed or unsupported." in
+    | Invalid_bundle -> "The published recovery bundle is incomplete, changed or unsupported."
+    | Bundle_workspace_mismatch {recorded_base_path;current_base_path} ->
+      Printf.sprintf "This bundle records workspace %S, but was read under %S. Preserve its files and manifest; relocation requires explicit reconciliation."
+        recorded_base_path current_base_path in
   match bundle_id with None -> detail | Some id -> detail ^ " Retain bundle " ^ id ^ " for inspection."
 
 let root base_path = Filename.concat base_path Common.masc_dirname
@@ -198,6 +202,11 @@ let load_recovery ~base_path ~bundle_id:id = blocking (fun () -> boundary base_p
       | Some (`String name) when Keeper_config.validate_name name -> Ok name
       | Some _ | None -> error Invalid_bundle)
     | _ -> error Invalid_bundle in
+  let* recorded_base_path = match json with
+    | `Assoc fields -> (match List.assoc_opt "base_path" fields with
+      | Some (`String path) when not (Filename.is_relative path) -> Ok path
+      | Some _ | None -> error Invalid_bundle)
+    | _ -> error Invalid_bundle in
   let* () = no_companions original_path in
   let* () = no_companions prepared_path in
   let* copied = with_database ~mode:`READONLY original_path (fun source ->
@@ -206,7 +215,10 @@ let load_recovery ~base_path ~bundle_id:id = blocking (fun () -> boundary base_p
       |> Result.map_error (fun failure -> {bundle_id=Some id;failure=Store_failed failure}))) in
   let receipt = {id;base_path;keeper_name;source_hash=digest original.content;
     prepared_hash=digest prepared.content;copied} in
-  let* () = if Yojson.Safe.equal json (receipt_to_json receipt) then Ok () else error Invalid_bundle in
+  (* Validate the complete recorded manifest before distinguishing relocation.
+     Its old paths are compared as data only, never opened or rebound. *)
+  let recorded_receipt = {receipt with base_path=recorded_base_path} in
+  let* () = if Yojson.Safe.equal json (receipt_to_json recorded_receipt) then Ok () else error Invalid_bundle in
   let recheck path (before : Fs_compat.owned_regular_file_contents) =
     let* after = read_private ~base_path path in
     if Fs_compat.equal_owned_regular_file_snapshot before.Fs_compat.snapshot after.snapshot
@@ -216,7 +228,8 @@ let load_recovery ~base_path ~bundle_id:id = blocking (fun () -> boundary base_p
   let* () = recheck manifest_path manifest in
   let* () = no_companions original_path in
   let* () = no_companions prepared_path in
-  Ok receipt)
+  if recorded_base_path=base_path then Ok receipt
+  else error (Bundle_workspace_mismatch {recorded_base_path;current_base_path=base_path}))
   |> Result.map_error (fun failure -> {failure with bundle_id=Some id}))
 
 module For_testing = struct

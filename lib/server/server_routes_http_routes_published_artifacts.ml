@@ -43,6 +43,24 @@ let check_error_response error =
 let refuse_check request reqd error =
   let json, status = check_error_response error in respond ~status request reqd json
 
+let decode_check_request ~config ~body =
+  let ( let* ) = Result.bind in
+  let* json = match Yojson.Safe.from_string body with
+    | json -> Ok json
+    | exception Yojson.Json_error _ ->
+      Error (check_error_response (Published_artifact_check_store.Invalid "invalid JSON body")) in
+  let* json = match Workspace.validate_expected_workspace ~config json with
+    | Ok json -> Ok json
+    | Error Workspace.Invalid_workspace_precondition ->
+      Error (Server_refusal.json ~code:"invalid_workspace_precondition"
+        "invalid expected_workspace precondition", `Bad_request)
+    | Error Workspace.Workspace_precondition_failed ->
+      Error (Server_refusal.json ~code:"workspace_precondition_failed"
+        "workspace precondition failed", `Conflict) in
+  Result.map_error (fun message ->
+    check_error_response (Published_artifact_check_store.Invalid message))
+    (Published_artifact_check.request_of_json json)
+
 let authorized handler request reqd =
   with_token_permission_auth ~permission:Masc_domain.CanAdmin handler request reqd
 
@@ -102,13 +120,11 @@ let add_routes router =
        "diagnostics", `List (List.map (fun (file, message) ->
          `Assoc ["file", `String file; "error", `String message]) listing.diagnostics)])))
   |> Http.Router.post "/api/v1/published-artifact-checks" (authorized (fun state actor request reqd ->
-    let base_path = (Mcp_server.workspace_config state).base_path in
+    let config = Mcp_server.workspace_config state in
+    let base_path = config.base_path in
     Http.Request.read_body_async reqd (fun body ->
-      let parsed = match Yojson.Safe.from_string body with
-        | json -> Published_artifact_check.request_of_json json
-        | exception Yojson.Json_error _ -> Error "invalid JSON body" in
-      match parsed with
-      | Error message -> refuse_check request reqd (Published_artifact_check_store.Invalid message)
+      match decode_check_request ~config ~body with
+      | Error (json, status) -> respond ~status request reqd json
       | Ok change ->
         match Eio_unix.run_in_systhread (fun () ->
           Published_artifact_check_store.set ~base_path ~actor change) with

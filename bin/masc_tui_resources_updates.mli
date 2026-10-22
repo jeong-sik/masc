@@ -22,6 +22,16 @@ val checks_loaded : Masc_tui_types.state -> unit Masc_tui_fetched.request ->
 (** Settle only the current shared-check read, independently of report bodies
     and MCP inventory. Never creates a confirmation or changes selection. *)
 
+val begin_check : Masc_tui_types.state -> report:Masc_tui_resource_catalog.report ->
+  (Masc_tui_artifact_check_action.request, string) result
+(** Only a confirmed workspace, complete settled inventory and no pending write
+    permit a toggle. Retire cached confirmation authority before dispatch. *)
+val check_changed : Masc_tui_types.state -> Masc_tui_artifact_check_action.request ->
+  bool
+(** Consume the matching pending write once and require a fresh inventory read.
+    A retired write cannot update a new owner's view. No receipt is adopted as
+    inventory state. The caller reports the outcome and launches that read. *)
+
 val read_done :
   Masc_tui_types.state -> request:Masc_tui_resource_catalog.read_request ->
   (Masc_tui_resource_catalog.reading, string) result -> unit

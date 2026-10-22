@@ -8540,6 +8540,7 @@ type state = {
   mutable resources_reports_complete: bool;
   mutable resources_list_owner: unit ref option;
   mutable artifact_checks: (unit, Masc_tui_artifact_checks.inventory) Masc_tui_fetched.t;
+  mutable artifact_check_pending: Masc_tui_artifact_check_action.request option;
   mutable resources_cursor: int;
   mutable resource_scope: Masc_tui_resource_catalog.scope;
   mutable resource_day: Masc_tui_resource_catalog.day option;
@@ -10981,11 +10982,13 @@ let visible_resources state =
     ~day:state.resource_day) state.resources_list
 
 let resource_check_status state report =
-  if server_authority_ready state then Masc_tui_artifact_checks.resolve state.artifact_checks report
+  if Option.is_some state.artifact_check_pending then
+    Masc_tui_artifact_checks.Unknown "saving confirmation; a fresh query is required"
+  else if server_authority_ready state then Masc_tui_artifact_checks.resolve state.artifact_checks report
   else Masc_tui_artifact_checks.Unknown "workspace identity is unconfirmed"
 
 let resource_unchecked_today state ~day =
-  if not (server_authority_ready state) then None
+  if not (server_authority_ready state) || Option.is_some state.artifact_check_pending then None
   else Option.bind state.resources_list (fun entries ->
     Masc_tui_artifact_checks.unchecked_on_day
       ~reports_complete:state.resources_reports_complete ~day ~entries state.artifact_checks)
@@ -11827,6 +11830,7 @@ let suspend_workspace_readings state =
   state.keeper_board_quarantines <- Masc_tui_fetched.suspend state.keeper_board_quarantines;
   state.workspace_activity <- Masc_tui_fetched.suspend state.workspace_activity;
   state.artifact_checks <- Masc_tui_fetched.suspend state.artifact_checks;
+  state.artifact_check_pending <- None;
   state.resources_list_owner <- None;
   state.resources_reports_complete <- false;
   state.memory_input <- Masc_tui_fetched.suspend state.memory_input;
@@ -15344,6 +15348,7 @@ let create_state
   resources_reports_complete = false;
   resources_list_owner = None;
   artifact_checks = Masc_tui_fetched.initial;
+  artifact_check_pending = None;
   resources_cursor = 0;
   resource_scope = Masc_tui_resource_catalog.All_resources;
   resource_day = None;

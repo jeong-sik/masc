@@ -683,6 +683,8 @@ type async_msg =
   | Librarian_input_loaded of string * (string list, string) result
   | Artifact_checks_loaded of unit Masc_tui_fetched.request
       * (Masc_tui_artifact_checks.inventory, string) result
+  | Artifact_check_changed of Masc_tui_artifact_check_action.request
+      * (Masc.Published_artifact_check.t, string) result
   | Resources_listed of
       unit ref * (Masc_tui_resource_catalog.listing, string) result
   (* The scope travels with the directory. Without it a reply names a
@@ -1054,7 +1056,7 @@ let rec workspace_message_is_read = function
   | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _
   | Keeper_action_done _
   | Board_new_post_done _
-  | Board_vote_done _
+  | (Board_vote_done _ | Artifact_check_changed _)
   | Goal_transition_done _
   | Goal_confirmation_submitted _
   | Schedule_cancel_done _
@@ -1174,7 +1176,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
     | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _)
     | Keeper_logs_loaded _ | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_new_post_done _
-    | Board_vote_done _ | Goal_transition_done _ | Goal_confirmation_submitted _
+    | (Board_vote_done _ | Artifact_check_changed _) | Goal_transition_done _ | Goal_confirmation_submitted _
     | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
     | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
     | System_logs_loaded _ | Schedule_cancel_done (_, _)
@@ -1310,7 +1312,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Surface_tool_approval_answered (_, _, _, _, _)
   | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
   | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _)
-  | Keeper_logs_loaded _ | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_new_post_done _ | Board_vote_done _
+  | Keeper_logs_loaded _ | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_new_post_done _ | (Board_vote_done _ | Artifact_check_changed _)
   | Goal_transition_done _ | Goal_confirmation_submitted _
   | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
   | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)

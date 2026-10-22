@@ -4,6 +4,10 @@ module Checks = Masc_tui_artifact_checks
 module Check = Masc.Published_artifact_check
 module Published = Masc.Published_artifact
 module Fetched = Masc_tui_fetched
+module Action = Masc_tui_artifact_check_action
+module Updates = Masc_tui_resources_updates
+module Types = Masc_tui_types
+module Routes = Server_routes_http_routes_published_artifacts
 
 let get = function Ok value -> value | Error detail -> fail detail
 let id = "artifact-0123456789abcdef0123456789abcdef"
@@ -116,9 +120,100 @@ let strict_inventory () =
      `Assoc ["checks", `List []; "diagnostics", `List []; "extra", `Null];
      `Assoc ["checks", `List []; "diagnostics", `List [`Assoc ["file", `String "broken"]]]]
 
+let identity base_path : Masc.Tui_decode.server_identity =
+  let canonical = Masc.Tui_decode.Canonical_path.of_path in
+  {sid_version="test";sid_binary_commit="test";sid_binary_commit_age_s=None;
+   sid_base_path=canonical base_path;sid_masc_root=canonical (Filename.concat base_path ".masc");
+   sid_executable_in_worktree=None;sid_state_ready=Some true;sid_uptime=None;
+   sid_sse_clients=None;sid_gc=None;sid_scheduler=None}
+
+let refused = function Error _ -> () | Ok _ -> fail "change admitted without its precondition"
+
+let explicit_target () =
+  let report = report "body" and next = report ~number:2 "body" in
+  refused (Action.prepare Fetched.initial report);
+  let first = get (Action.prepare (ready (inventory [])) report) in
+  let previous = confirmation report in
+  let undo = get (Action.prepare (ready (inventory [previous])) report) in
+  check bool "distinct explicit request owners" false (Action.same_request first undo);
+  let json = Action.body ~expected_workspace:(identity "/workspace") undo in
+  let fields = match json with `Assoc fields -> fields | _ -> fail "request object" in
+  let operation = get (Check.request_of_json
+    (`Assoc (List.remove_assoc "expected_workspace" fields))) in
+  check bool "toggle reverses observed state" true (operation.state=Check.Unchecked);
+  check (option string) "toggle carries actual CAS identity" (Some previous.change_id)
+    operation.expected_change_id;
+  check string "toggle pins report digest" report.revision.body.sha256 operation.target.body_sha256;
+  let response check = `Assoc ["check", Check.to_json check] in
+  ignore (get (Action.decode_response first (response previous)));
+  refused (Action.decode_response first (response (confirmation ~checked:false report)));
+  refused (Action.decode_response first (response (confirmation next)));
+  refused (Action.decode_response undo (response (confirmation ~checked:false report)));
+  let saved = get (Check.create ~actor:"tui-human" ~at:published_at
+    ~change_id:("check-" ^ String.make 32 'b') operation) in
+  ignore (get (Action.decode_response undo (response saved)));
+  refused (Action.decode_response first (`Assoc ["check",Check.to_json previous;"extra",`Null]))
+
+let write_ownership () =
+  let report = report "body" in
+  let state = Types.create_state ~workspace:"confirmations" ~port:0 ~refresh_interval:0. () in
+  state.artifact_checks <- ready (inventory []);
+  refused (Updates.begin_check state ~report);
+  state.server_identity <- Some (identity "/workspace");
+  let first = get (Updates.begin_check state ~report) in
+  check bool "pending change withdraws confirmation authority" true
+    (unknown (Types.resource_check_status state report));
+  refused (Updates.begin_check state ~report);
+  (* A manual read can finish before the pending POST. It cannot restore
+     confirmation authority or survive the write's settlement as fresh. *)
+  let reading, read = begin_read state.artifact_checks in
+  state.artifact_checks <- reading;
+  Updates.checks_loaded state read (Ok (inventory []));
+  check bool "early read cannot certify pending write" true
+    (unknown (Types.resource_check_status state report));
+  check bool "matching write consumes owner" true (Updates.check_changed state first);
+  check bool "receipt does not optimistically confirm" true
+    (unknown (Types.resource_check_status state report));
+  refused (Updates.begin_check state ~report);
+  check bool "duplicate completion has no reread demand" false (Updates.check_changed state first);
+  state.artifact_checks <- ready (inventory []);
+  let second = get (Updates.begin_check state ~report) in
+  check bool "late write cannot settle replacement" false (Updates.check_changed state first);
+  check bool "replacement stays pending" true (Option.is_some state.artifact_check_pending);
+  Types.suspend_workspace_readings state;
+  check bool "withdrawn write cannot settle new view" false (Updates.check_changed state second)
+
+let workspace_write_binding () =
+  let base = Filename.temp_file "artifact-check-한글 # %" "" in
+  Sys.remove base; Unix.mkdir base 0o700;
+  let root = Filename.concat base ".masc" in
+  Unix.mkdir root 0o700;
+  Fun.protect ~finally:(fun () -> Unix.rmdir root; Unix.rmdir base) (fun () ->
+    let config = Masc.Workspace.default_config base in
+    let request = get (Action.prepare (ready (inventory [])) (report "body")) in
+    let json = Action.body ~expected_workspace:(identity base) request in
+    let decode json = Routes.decode_check_request ~config ~body:(Yojson.Safe.to_string json) in
+    let valid = match decode json with Ok request -> request
+      | Error _ -> fail "matching workspace refused" in
+    check bool "matching workspace admits strict operation" true (valid.state=Check.Checked);
+    let fields = match json with `Assoc fields -> fields | _ -> fail "request object" in
+    let refusal expected json = match decode json with
+      | Error (_, status) -> check int "HTTP refusal" expected (Httpun.Status.to_code status)
+      | Ok _ -> fail "wrong workspace or malformed operation admitted" in
+    refusal 409 (Action.body ~expected_workspace:(identity (base ^ "-foreign")) request);
+    refusal 400 (`Assoc (("expected_workspace", `Null) :: List.remove_assoc "expected_workspace" fields));
+    refusal 400 (`Assoc (("expected_workspace", `Null) :: fields));
+    refusal 400 (`Assoc (("changed_by", `String "spoofed") :: fields));
+    (* Dashboard's unbound operation keeps the same strict field contract. *)
+    match decode (`Assoc (List.remove_assoc "expected_workspace" fields)) with
+    | Ok _ -> () | Error _ -> fail "dashboard request contract changed")
+
 let () = run "Shared artifact confirmation reads"
   ["state", [test_case "exact revision and explicit uncheck" `Quick exact_revision;
     test_case "uncertain and partial inventories" `Quick uncertain_inventory;
     test_case "superseded and withdrawn read replies" `Quick late_replies;
     test_case "independent source completeness" `Quick source_completeness;
-    test_case "strict shared inventory" `Quick strict_inventory]]
+    test_case "strict shared inventory" `Quick strict_inventory;
+    test_case "explicit pinned toggle and receipt validation" `Quick explicit_target;
+    test_case "write ownership and required reread" `Quick write_ownership;
+    test_case "request-owned workspace write precondition" `Quick workspace_write_binding]]

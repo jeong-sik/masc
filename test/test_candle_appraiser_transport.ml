@@ -84,7 +84,8 @@ let test_lost_submit_reply_reads_the_retained_original_after_restart () =
   check bool "model evidence remains the original input" true
     (Yojson.Safe.equal (Json.member "input" input) (A.input grade));
   match stored.status with
-  | Runs.Completed {outcome=Runs.Succeeded;selected_slot=Some "original-slot";usage=Some usage;_} ->
+  | Runs.Completed {outcome=Runs.Succeeded;origin=Runs.Producer;elapsed_s=None;
+      selected_slot=Some "original-slot";usage=Some usage;_} ->
     check int "original input usage is retained" 12 usage.input_tokens;
     check int "original output usage is retained" 3 usage.output_tokens
   | _ -> fail "the accepted original result was not durably observed"
@@ -171,7 +172,12 @@ let test_failed_receipt_append_retries_the_first_terminal_time () =
      fail "a failed receipt append was not reported");
   let id = match !original_id with Some id -> id | None -> fail "worker was not read" in
   let first_elapsed = match (stored_run registry id).status with
-    | Runs.Completion_persistence_failed {elapsed_s;_} -> elapsed_s
+    | Runs.Completion_persistence_failed {elapsed_s=Some elapsed_s;_} ->
+      check bool "failed append keeps an actual measured duration" true
+        (Float.is_finite elapsed_s && elapsed_s >= 0.);
+      elapsed_s
+    | Runs.Completion_persistence_failed {elapsed_s=None;_} ->
+      fail "the first producer receipt lost its measured duration"
     | Runs.Running | Runs.Completed _ -> fail "failed receipt was not retained" in
   Unix.rmdir path;
   let registration = match !registration with
@@ -182,11 +188,157 @@ let test_failed_receipt_append_retries_the_first_terminal_time () =
     finished (request_id arguments) (`Assoc ["grade",`String "medium"]) in
   ignore (runner ~registry ~base_path ~call grade |> unwrap);
   match (stored_run (Runs.replay path) id).status with
-  | Runs.Completed {elapsed_s;outcome=Runs.Succeeded;_} ->
-    check (float 0.) "append recovery retains first terminal time" first_elapsed elapsed_s
+  | Runs.Completed {origin=Runs.Producer;elapsed_s=Some elapsed_s;outcome=Runs.Succeeded;_} ->
+    check (float 0.) "append recovery retains first measured terminal time" first_elapsed elapsed_s
   | Runs.Running | Runs.Completion_persistence_failed _
-  | Runs.Completed {outcome=(Runs.Cancelled | Runs.Failed _);_} ->
+  | Runs.Completed _ ->
     fail "the original successful result was not durably recovered"
+
+let test_conflicting_producer_receipt_cannot_be_replaced () =
+  with_workspace @@ fun base_path ->
+  let request = A.Grade {goal;grades=[
+    Option.get (Candle_grade.of_string "medium"),"Connected feature";
+    Option.get (Candle_grade.of_string "large"),"Larger connected feature"]} in
+  let path = Filename.concat base_path "runs.jsonl" in
+  let registry = Runs.create ~path () in
+  let call ~arguments =
+    check string "original completion is only read" "read" (operation arguments);
+    finished (request_id arguments) (`Assoc ["grade",`String "medium"]) in
+  let answer = runner ~registry ~base_path ~call request |> unwrap in
+  let id = answer.trace.run_id in
+  let verify registry ~call =
+    let original = stored_run registry id in
+    let output = match original.status with
+      | Runs.Completed {origin=Runs.Producer;elapsed_s=Some _;output;_} -> output
+      | Runs.Running | Runs.Completion_persistence_failed _ | Runs.Completed _ ->
+        fail "conflict fixture must retain a genuine measured producer receipt" in
+    let digest = Digestif.SHA256.(digest_string (Yojson.Safe.to_string output) |> to_hex) in
+    let payload = Filename.concat
+      (Filename.concat (Filename.concat base_path Runs.payload_dirname) id)
+      ("output-" ^ digest ^ ".json") in
+    let before = Fs_compat.load_file path in
+    let original_bytes = Fs_compat.load_file payload in
+    (match runner ~registry ~base_path ~call request with
+     | Error (A.Transport_unavailable _) -> ()
+     | Ok _ | Error (A.Invalid_response _ | A.Execution_rejected _) ->
+       fail "conflicting valid worker result overwrote or bypassed the original receipt");
+    check string "producer conflict cannot rewrite the retained journal" before (Fs_compat.load_file path);
+    check string "producer conflict cannot rewrite original output bytes"
+      original_bytes (Fs_compat.load_file payload);
+    check bool "producer conflict preserves the whole original receipt" true
+      (Yojson.Safe.equal (Runs.run_to_yojson original)
+        (stored_run registry id |> Runs.run_to_yojson)) in
+  let different_answer ~arguments =
+    check string "conflicting judgment cannot submit another request" "read" (operation arguments);
+    finished (request_id arguments) (`Assoc ["grade",`String "large"]) in
+  verify registry ~call:different_answer;
+  verify (Runs.replay path) ~call:different_answer;
+  (* A genuine producer may report the same failure code used by restart
+     observations. Only its typed origin can authorize placeholder replacement. *)
+  (match Runs.mark_completed registry ~run_id:id
+     ~outcome:(Runs.Failed {code=Runs.server_restarted_code;detail="producer's original failure"})
+     ~elapsed_s:0.25 ~selected_slot:None
+     ~output:(`Assoc ["result",`String "original producer evidence"]) () with
+   | Ok () -> ()
+   | Error error -> fail (Runs.completion_error_to_string error));
+  verify registry ~call;
+  verify (Runs.replay path) ~call
+
+let test_restarted_receipt_append_does_not_invent_a_duration () =
+  with_workspace @@ fun base_path ->
+  let path = Filename.concat base_path "runs.jsonl" in
+  let registry = Runs.create ~path () in
+  let original_id = ref None in
+  let pending ~arguments =
+    let id = request_id arguments in
+    original_id := Some id;
+    check string "initial original is only read" "read" (operation arguments);
+    reply id "pending" [] in
+  (match runner ~registry ~base_path ~call:pending grade with
+   | Error (A.Transport_unavailable _) -> ()
+   | Ok _ | Error (A.Invalid_response _ | A.Execution_rejected _) ->
+     fail "pending original unexpectedly became terminal");
+  let id = match !original_id with Some id -> id | None -> fail "original worker was not read" in
+  let registry = Runs.replay path in
+  (match (stored_run registry id).status with
+   | Runs.Completed {origin=Runs.Restart_replay;elapsed_s=None;_} -> ()
+   | Runs.Running | Runs.Completion_persistence_failed _ | Runs.Completed _ ->
+     fail "restart must not invent an original measured duration");
+  let original_restart = stored_run registry id |> Runs.run_to_yojson in
+  let restart_bytes = Fs_compat.load_file path in
+  let break_append ~arguments =
+    check string "restart completion only reads the original" "read" (operation arguments);
+    Sys.remove path;
+    Unix.mkdir path 0o700;
+    finished (request_id arguments) (`Assoc ["grade",`String "medium"]) in
+  (match runner ~registry ~base_path ~call:break_append grade with
+   | Error (A.Transport_unavailable _) -> ()
+   | Ok _ | Error (A.Invalid_response _ | A.Execution_rejected _) ->
+     fail "failed unmeasured completion append was not reported");
+  (match (stored_run registry id).status with
+   | Runs.Completed {origin=Runs.Restart_replay;elapsed_s=None;_} -> ()
+   | Runs.Running | Runs.Completion_persistence_failed _ | Runs.Completed _ ->
+     fail "a failed correction must preserve the original durable restart receipt");
+  check bool "failed correction cannot mask the original durable receipt" true
+    (Yojson.Safe.equal original_restart (stored_run registry id |> Runs.run_to_yojson));
+  Unix.rmdir path;
+  Fs_compat.save_file path restart_bytes;
+  let call ~arguments =
+    check string "unmeasured append retry cannot resubmit" "read" (operation arguments);
+    finished (request_id arguments) (`Assoc ["grade",`String "medium"]) in
+  ignore (runner ~registry ~base_path ~call grade |> unwrap);
+  for _ = 1 to 2 do
+    let replayed = Runs.replay path in
+    match (stored_run replayed id).status with
+    | Runs.Completed {origin=Runs.Producer;elapsed_s=None;outcome=Runs.Succeeded;_} -> ()
+    | Runs.Running | Runs.Completion_persistence_failed _ | Runs.Completed _ ->
+      fail "recovered producer receipt must preserve its unknown original duration"
+  done
+
+let test_unmeasured_running_receipt_append_retries_without_a_duration () =
+  with_workspace @@ fun base_path ->
+  let path = Filename.concat base_path "runs.jsonl" in
+  let registry = Runs.create ~path () in
+  let original_id = ref None in
+  let pending ~arguments =
+    let id = request_id arguments in
+    original_id := Some id;
+    check string "original unmeasured request is only read" "read" (operation arguments);
+    reply id "pending" [] in
+  (match runner ~registry ~base_path ~call:pending grade with
+   | Error (A.Transport_unavailable _) -> ()
+   | Ok _ | Error (A.Invalid_response _ | A.Execution_rejected _) ->
+     fail "pending original unexpectedly became terminal");
+  let id = match !original_id with Some id -> id | None -> fail "original worker was not read" in
+  let registration = Fs_compat.load_file path in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  let output = `Assoc ["result",`Assoc ["grade",`String "medium"];
+    "semantic_verification",`String "not_performed"] in
+  let usage : Runs.usage = {input_tokens=12;output_tokens=3;
+    cache_creation_input_tokens=0;cache_read_input_tokens=0;cost_usd=None} in
+  (match Runs.mark_completed_unmeasured registry ~run_id:id ~outcome:Runs.Succeeded
+     ~selected_slot:(Some "original-slot") ~usage ~output () with
+   | Error (Runs.Persistence_failed _) -> ()
+   | Ok () | Error (Runs.Unknown_run | Runs.Invalid_selected_slot | Runs.Invalid_elapsed_duration) ->
+     fail "unmeasured producer append did not fail durably");
+  (match (stored_run registry id).status with
+   | Runs.Completion_persistence_failed {elapsed_s=None;intended_outcome=Runs.Succeeded;_} -> ()
+   | Runs.Running | Runs.Completed _ | Runs.Completion_persistence_failed _ ->
+     fail "Running must expose the failed original unmeasured completion");
+  Unix.rmdir path;
+  Fs_compat.save_file path registration;
+  let call ~arguments =
+    check string "unmeasured receipt recovery cannot submit" "read" (operation arguments);
+    finished (request_id arguments) (`Assoc ["grade",`String "medium"]) in
+  ignore (runner ~registry ~base_path ~call grade |> unwrap);
+  for _ = 1 to 2 do
+    let replayed = Runs.replay path in
+    match (stored_run replayed id).status with
+    | Runs.Completed {origin=Runs.Producer;elapsed_s=None;outcome=Runs.Succeeded;_} -> ()
+    | Runs.Running | Runs.Completion_persistence_failed _ | Runs.Completed _ ->
+      fail "retry of the original unmeasured completion invented a duration"
+  done
 
 let test_missing_terminal_payload_is_not_silently_repaired_by_reread () =
   with_workspace @@ fun base_path ->
@@ -303,6 +455,9 @@ let () = run "Candle Add-on consumer"
     test_case "output limit preserves the failed original appraisal evidence" `Quick test_output_limit_retains_failed_original_appraisal_evidence;
     test_case "terminal reread and restart preserve first receipt" `Quick test_terminal_reread_and_restart_preserve_the_first_receipt;
     test_case "failed receipt append retains first terminal time" `Quick test_failed_receipt_append_retries_the_first_terminal_time;
+    test_case "conflicting producer receipt preserves original evidence" `Quick test_conflicting_producer_receipt_cannot_be_replaced;
+    test_case "restart append retry preserves unmeasured duration" `Quick test_restarted_receipt_append_does_not_invent_a_duration;
+    test_case "failed unmeasured Running receipt retries without duration" `Quick test_unmeasured_running_receipt_append_retries_without_a_duration;
     test_case "missing terminal payload stays unavailable" `Quick test_missing_terminal_payload_is_not_silently_repaired_by_reread;
     test_case "replacement cannot replay an unknown original" `Quick test_a_replacement_cannot_replay_an_unknown_original;
     test_case "full Candle decoding checks every recipient" `Quick test_domain_decode_rejects_incomplete_recipient_weights;

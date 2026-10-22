@@ -1802,7 +1802,13 @@ let test_task_history_current_sources () = with_workspace (fun _env _sw base_pat
   let rec earlier cursor prefix acc =
     let next=History.read ~config ~task_id ~max_events:1 ~cursor () |> page in
     let request=Decode.history_earlier ~task_id ~limit:1 prefix |> Option.get in
-    let prefix=Decode.history_page ~request (History.to_json next) |> require "actual original continuation" in
+    let next_json=History.to_json next in
+    let replay=match next_json with
+      | `Assoc fields -> `Assoc (("events",`List first.events)::List.remove_assoc "events" fields)
+      | _ -> fail "actual history page shape" in
+    (match Decode.history_page ~request replay with
+     | Error _ -> () | Ok _ -> fail "continuation replayed an original physical observation");
+    let prefix=Decode.history_page ~request next_json |> require "actual original continuation" in
     let acc=acc @ next.events in match next.next_cursor with
       | None -> acc,prefix | Some cursor -> earlier cursor prefix acc in
   let older,decoded_prefix=earlier cursor prefix [] in
@@ -1811,6 +1817,8 @@ let test_task_history_current_sources () = with_workspace (fun _env _sw base_pat
     ["audit-verification";"canonical-verification"]
     (List.sort String.compare decoded_prefix.history_verifications);
   let rows=Decode.history ~task_id (`List all) |> require "two-source original decode" in
+  check bool "paged original observations preserve source order" true
+    (decoded_prefix.history_events=rows);
   check bool "both original active stores retained" true
     (List.exists (fun row -> Json_util.get_string row "source"=Some "events") all
      && List.exists (fun row -> Json_util.get_string row "source"=Some "activity-events") all);

@@ -19,6 +19,7 @@ import { pickerFooter, selectionLabel, projectSoundLabel } from '../instruments.
 import { openStepInput, sameStepContext, stepControl } from '../step-input.mjs'
 import { phraseBacking } from '../phrase-backing.mjs'
 import * as terminalStyle from '../terminal-style.mjs'
+import * as meterBars from '../meter-bars.mjs'
 
 const frozenSound = selection => ({ kind: 'vst', selection, instrument: { identifier: 'Bass', version: '1' },
   preset: { data: Buffer.from('frozen state').toString('base64'), sha256: createHash('sha256').update('frozen state').digest('hex') } })
@@ -55,7 +56,7 @@ async function controller(options = {}) {
     }
   }
   const slot = `sequencer-${randomUUID()}`
-  globalThis[slot] = { StatusReader, ...terminalStyle,
+  globalThis[slot] = { StatusReader, ...terminalStyle, ...meterBars,
     process, InstrumentPicker, MidiSourcePicker, pickerFooter, selectionLabel, projectSoundLabel, defaultStateDirectory: () => '/synthetic-vst',
     snapshotWriter: () => async value => { observed.snapshots.push(value) },
     openVstSession() {

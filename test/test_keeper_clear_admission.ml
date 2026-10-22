@@ -57,11 +57,30 @@ max-context = 4096
     "[keeper]\ninstructions = \"Clear admission fixture\"\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
   Keeper_meta_store.replace_snapshot config meta |> require_ok;
   ignore (Keeper_registry.register_offline ~base_path meta.name meta);
-  if install_owner then (
-    match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
-      ~on_turn_slot_released:None config with
-    | Ok _ -> ()
-    | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
+  let owner_stop = ref None in
+  let start_owner () =
+    let installed,resolve_installed = Eio.Promise.create () in
+    let stop,resolve_stop = Eio.Promise.create () in
+    let ended,resolve_ended = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      Fun.protect ~finally:(fun () -> Eio.Promise.resolve resolve_ended ()) (fun () ->
+        Eio.Switch.run (fun owner_sw ->
+          let result = Keeper_owner_registry.install_from_store ~sw:owner_sw ~operation_runner:None
+            ~on_turn_slot_released:None config in
+          Eio.Promise.resolve resolve_installed result;
+          ignore (Eio.Promise.await stop))));
+    (match Eio.Promise.await installed with
+     | Ok _ -> owner_stop := Some (resolve_stop,ended)
+     | Error error -> fail (Keeper_owner_registry.install_error_to_string error)) in
+  if install_owner then start_owner ();
+  let restart () =
+    (match Keeper_owner_registry.begin_stopping_all ~base_path with
+     | Ok results -> List.iter (function Ok () -> () | Error error -> fail (Keeper_owner.error_to_string error)) results
+     | Error error -> fail (Keeper_owner_registry.lookup_error_to_string error));
+    (match !owner_stop with
+     | Some (resolve_stop,ended) -> Eio.Promise.resolve resolve_stop (); Eio.Promise.await ended
+     | None -> fail "no original Owner scope");
+    start_owner () in
   let base_dir = Keeper_types_profile.session_base_dir config in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let session = Context.create_session ~session_id:trace_id ~base_dir in
@@ -119,7 +138,10 @@ max-context = 4096
       ~keeper_name:meta.name
     |> require_ok
   in
-  f ~config ~meta ~saved ~save ~load ~clear ~official_session
+  Fun.protect ~finally:(fun () -> match !owner_stop with
+    | Some (resolve_stop,ended) -> Eio.Promise.resolve resolve_stop (); Eio.Promise.await ended
+    | None -> ())
+    (fun () -> f ~config ~meta ~saved ~save ~load ~clear ~official_session ~restart)
 ;;
 
 let check_refused result =
@@ -143,7 +165,7 @@ let check_official_session_cleared official_session =
 
 let test_clear_does_not_race_the_active_turn () =
   with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved ~save ~load ~clear ~official_session ->
+  @@ fun ~config ~meta ~saved ~save ~load ~clear ~official_session ~restart:_ ->
   (match Keeper_owner_registry.run_autonomous_if_idle
     ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
       let before = Context.messages_of_context (load ()) in
@@ -170,7 +192,7 @@ let test_clear_does_not_race_the_active_turn () =
 
 let test_paused_keeper_can_clear_without_resuming () =
   with_keeper ~paused:true ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart:_ ->
   let result = clear () in
   check bool (Tool_result.message result) true (Tool_result.is_success result);
   check_empty load;
@@ -182,7 +204,7 @@ let test_paused_keeper_can_clear_without_resuming () =
 
 let test_missing_owner_does_not_clear () =
   with_keeper ~paused:false ~install_owner:false
-  @@ fun ~config:_ ~meta:_ ~saved ~save:_ ~load ~clear ~official_session ->
+  @@ fun ~config:_ ~meta:_ ~saved ~save:_ ~load ~clear ~official_session ~restart:_ ->
   check_refused (clear ());
   check bool "unavailable owner kept the official-client session" true
     (Option.is_some (official_session ()));
@@ -235,7 +257,7 @@ let as_newer_version path =
    checkpoint. *)
 let test_undecodable_checkpoint_is_removed () =
   with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ~restart:_ ->
   let path = checkpoint_path config meta in
   let session_dir = session_dir_of config meta in
   Unix.unlink path;
@@ -306,7 +328,7 @@ let removal_message = function
 
 let test_removal_leaves_a_loadable_checkpoint () =
   with_keeper ~paused:false ~install_owner:false
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ~restart:_ ->
   let path = checkpoint_path config meta in
   let original = Fs_compat.load_file path in
   (match remove config meta with
@@ -317,7 +339,7 @@ let test_removal_leaves_a_loadable_checkpoint () =
 
 let test_removal_reports_absence () =
   with_keeper ~paused:false ~install_owner:false
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ~restart:_ ->
   Unix.unlink (checkpoint_path config meta);
   match remove config meta with
   | Ok Keeper_checkpoint_store.Canonical_absent -> ()
@@ -326,7 +348,7 @@ let test_removal_reports_absence () =
 
 let test_removal_deletes_undecodable_bytes () =
   with_keeper ~paused:false ~install_owner:false
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ~restart:_ ->
   let path = checkpoint_path config meta in
   let session_dir = session_dir_of config meta in
   Fs_compat.save_file path malformed;
@@ -344,7 +366,7 @@ let test_removal_deletes_undecodable_bytes () =
 
 let test_removal_refuses_an_os_read_failure () =
   with_keeper ~paused:false ~install_owner:false
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ~restart:_ ->
   let path = checkpoint_path config meta in
   let original = Fs_compat.load_file path in
   with_mode path 0o000 (fun () ->
@@ -360,7 +382,7 @@ let test_removal_refuses_an_os_read_failure () =
    about any bytes and is left in place. *)
 let test_removal_refuses_a_path_that_is_not_a_regular_file () =
   with_keeper ~paused:false ~install_owner:false
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ~restart:_ ->
   let path = checkpoint_path config meta in
   Unix.unlink path;
   Unix.symlink (path ^ ".missing") path;
@@ -374,7 +396,7 @@ let test_removal_refuses_a_path_that_is_not_a_regular_file () =
    lands, the directory fsync cannot open it. *)
 let test_removal_reports_an_unconfirmed_delete () =
   with_keeper ~paused:false ~install_owner:false
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ~restart:_ ->
   let path = checkpoint_path config meta in
   Fs_compat.save_file path malformed;
   let result = with_mode (session_dir_of config meta) 0o333 (fun () -> remove config meta) in
@@ -388,7 +410,7 @@ let test_removal_reports_an_unconfirmed_delete () =
    anything changes, the official-client session included. *)
 let test_clear_refuses_a_newer_version_checkpoint () =
   with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ~restart:_ ->
   let path = checkpoint_path config meta in
   let newer = as_newer_version path in
   Fs_compat.save_file path newer;
@@ -403,7 +425,7 @@ let test_clear_refuses_a_newer_version_checkpoint () =
 
 let test_removal_refuses_a_newer_version () =
   with_keeper ~paused:false ~install_owner:false
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ~restart:_ ->
   let path = checkpoint_path config meta in
   let newer = as_newer_version path in
   Fs_compat.save_file path newer;
@@ -419,7 +441,7 @@ let test_removal_refuses_a_newer_version () =
    is known against any bytes. *)
 let test_judgement_of_a_bad_session_id_is_inconclusive () =
   with_keeper ~paused:false ~install_owner:false
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ~restart:_ ->
   match
     Keeper_checkpoint_store.judge_canonical ~session_dir:(session_dir_of config meta)
       ~session_id:"../escape"
@@ -436,7 +458,7 @@ let test_judgement_of_a_bad_session_id_is_inconclusive () =
 
 let test_clear_refuses_an_os_read_failure () =
   with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ~restart:_ ->
   let path = checkpoint_path config meta in
   let original = Fs_compat.load_file path in
   let result = with_mode path 0o000 clear in
@@ -450,7 +472,7 @@ let test_clear_refuses_an_os_read_failure () =
 
 let test_clear_refuses_a_path_that_is_not_a_regular_file () =
   with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ~restart:_ ->
   let path = checkpoint_path config meta in
   Unix.unlink path;
   Unix.symlink (path ^ ".missing") path;
@@ -461,7 +483,7 @@ let test_clear_refuses_a_path_that_is_not_a_regular_file () =
 
 let test_clear_reports_a_delete_that_did_not_happen () =
   with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session:_ ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session:_ ~restart:_ ->
   let path = checkpoint_path config meta in
   Fs_compat.save_file path malformed;
   let result = with_mode (session_dir_of config meta) 0o555 clear in
@@ -473,7 +495,7 @@ let test_clear_reports_a_delete_that_did_not_happen () =
 
 let test_absent_checkpoint_is_a_noop () =
   with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ~restart:_ ->
   let path = checkpoint_path config meta in
   Unix.unlink path;
   let result = clear () in
@@ -489,7 +511,7 @@ let test_absent_checkpoint_is_a_noop () =
 
 let test_superseded_checkpoint_clears_like_an_absent_one () =
   with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ~restart:_ ->
   let path = checkpoint_path config meta in
   let earlier =
     match Yojson.Safe.from_string (Fs_compat.load_file path) with
@@ -517,7 +539,7 @@ let test_paused_keeper_clears_stale_epoch_without_resuming () =
     ~official_owner_epoch:"11111111-1111-4111-8111-111111111111"
     ~paused:true
     ~install_owner:true
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart:_ ->
   let result = clear () in
   check bool (Tool_result.message result) true (Tool_result.is_success result);
   check_empty load;
@@ -526,9 +548,287 @@ let test_paused_keeper_clears_stale_epoch_without_resuming () =
   | Some current -> check bool "stale clear does not resume the keeper" true current.paused
   | None -> fail "keeper metadata disappeared"
 ;;
+let run_owned ~config ~meta work =
+  match Keeper_owner_registry.run_autonomous_if_idle ~base_path:config.Workspace.base_path
+    ~keeper_name:meta.Keeper_meta_contract.name work with
+  | Ok (`Ran value) -> value
+  | Ok (`Busy _ | `Interrupted) -> fail "owned input fixture did not execute"
+  | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+let input_source ~config ~meta load =
+  let checkpoint = Context.checkpoint_of_context (load ()) in
+  let session = Context.create_session ~session_id:(Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id)
+    ~base_dir:(Keeper_types_profile.session_base_dir config) in
+  session,checkpoint
+let publish_input ~config ~meta ~session checkpoint =
+  run_owned ~config ~meta (fun () ->
+    let producer = Keeper_input_checkpoint_producer.prepare ~base_path:config.Workspace.base_path
+      ~keeper_name:meta.Keeper_meta_contract.name ~session_dir:session.Keeper_types.session_dir
+      ~trace_id:meta.runtime.trace_id ~source:(Some checkpoint)
+      |> Result.map_error Keeper_input_checkpoint_producer.error_to_string |> require_ok in
+    ignore (Keeper_input_checkpoint_producer.publish_autonomous producer checkpoint
+      |> Result.map_error Keeper_input_checkpoint_producer.error_to_string |> require_ok))
+let observed_input ~config ~meta =
+  match Keeper_owner_registry.input_checkpoint ~base_path:config.Workspace.base_path ~keeper_name:meta.Keeper_meta_contract.name
+    ~trace_id:meta.runtime.trace_id |> Result.map_error Keeper_owner_registry.command_error_to_string |> require_ok with
+  | Keeper_chat_operation_store.Input_observed reference -> reference
+  | Input_unobserved | Prior_input_unavailable -> fail "input observation was lost"
+let check_next_prepare ~config ~meta ~session load =
+  run_owned ~config ~meta (fun () ->
+    ignore (Keeper_input_checkpoint_producer.prepare ~base_path:config.Workspace.base_path ~keeper_name:meta.Keeper_meta_contract.name
+      ~session_dir:session.Keeper_types.session_dir ~trace_id:meta.runtime.trace_id
+      ~source:(Some (Context.checkpoint_of_context (load ())))
+      |> Result.map_error Keeper_input_checkpoint_producer.error_to_string |> require_ok))
+
+let test_owned_clear_survives_owner_restart () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart ->
+  let session,original = input_source ~config ~meta load in
+  publish_input ~config ~meta ~session original;
+  let before = observed_input ~config ~meta in
+  let result = clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check_empty load; check_official_session_cleared official_session;
+  let after = observed_input ~config ~meta in
+  check bool "clear publishes a different exact owned history" false (Keeper_checkpoint_ref.equal before after);
+  let canonical = Keeper_checkpoint_store.load_agent_core_exact_snapshot
+    ~session_dir:session.session_dir ~session_id:session.session_id
+    |> Result.map_error Keeper_checkpoint_store.checkpoint_ref_load_error_to_string |> require_ok in
+  check bool "canonical and input name the same cleared bytes" true
+    (Keeper_checkpoint_ref.equal after (Keeper_checkpoint_store.exact_snapshot_reference canonical));
+  check_next_prepare ~config ~meta ~session load;
+  restart ();
+  check bool "input ownership survives actual Owner reinstall" true
+    (Keeper_checkpoint_ref.equal after (observed_input ~config ~meta));
+  check_next_prepare ~config ~meta ~session load
+
+let test_owned_clear_recovers_canonical ~corrupt () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart:_ ->
+  let session,original = input_source ~config ~meta load in
+  publish_input ~config ~meta ~session original;
+  let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir:session.session_dir ~session_id:session.session_id in
+  if corrupt then Fs_compat.save_file path "not a checkpoint" else Unix.unlink path;
+  let result = clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check_empty load; check_official_session_cleared official_session;
+  check bool "recovering owned history does not forget its input row" true
+    (Option.is_none (Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir:session.session_dir
+      ~reference:(observed_input ~config ~meta) |> function
+        | Ok snapshot -> (Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot).pending_input
+        | Error _ -> fail "cleared input payload unavailable"));
+  check_next_prepare ~config ~meta ~session load
+
+let test_clear_refuses_owned_pending_input () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart:_ ->
+  let session,original = input_source ~config ~meta load in
+  let pending : Agent_core.Agent_input_request.pending =
+    {run_id="clear-owned-run";request={request_id="clear-owned-request";participant_name=Some "operator";
+      question="Must not be discarded";schema=None;timeout_s=None;created_at=1.}} in
+  let waiting = {original with Agent_core.Checkpoint.pending_input=Some pending} in
+  publish_input ~config ~meta ~session waiting;
+  let owned = observed_input ~config ~meta in
+  let before = Fs_compat.load_file (Keeper_checkpoint_store.agent_core_checkpoint_path
+    ~session_dir:session.session_dir ~session_id:session.session_id) in
+  check_refused (clear ());
+  check bool "pending refusal preserves official session" true (Option.is_some (official_session ()));
+  check bool "pending refusal preserves exact input" true (Keeper_checkpoint_ref.equal owned (observed_input ~config ~meta));
+  check string "pending refusal preserves canonical bytes" before
+    (Fs_compat.load_file (Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir:session.session_dir ~session_id:session.session_id))
+
+let restart_records ~config ~meta =
+  let keepers_dir=Workspace.keepers_runtime_dir config in
+  match Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:meta.Keeper_meta_contract.name with
+  | Ok rows -> List.filter_map (function
+      | _,Ok {Keeper_turn_boundaries.event=History_restarted _;_} -> Some ()
+      | _,(Ok {event=Turn_ended _;_} | Error _) -> None) rows
+  | Error error -> fail error
+
+let test_clear_marker_follows_owned_commit () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session:_ ~restart:_ ->
+  let session,original=input_source ~config ~meta load in
+  publish_input ~config ~meta ~session original;
+  let before=List.length (restart_records ~config ~meta) in
+  let result=clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check bool "confirmed marker names the new input bytes" true
+    (Keeper_checkpoint_ref.equal (observed_input ~config ~meta)
+      (Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir:session.session_dir ~session_id:session.session_id
+       |> Result.map_error Keeper_checkpoint_store.checkpoint_ref_load_error_to_string |> require_ok
+       |> Keeper_checkpoint_store.exact_snapshot_reference));
+  check int "one restart follows the confirmed two-store clear" (before+1)
+    (List.length (restart_records ~config ~meta))
+
+let test_clear_marker_write_failure_keeps_confirmed_input () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session:_ ~restart:_ ->
+  let session,original=input_source ~config ~meta load in
+  publish_input ~config ~meta ~session original;
+  let path=Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir:(Workspace.keepers_runtime_dir config)
+    ~keeper_id:meta.name in
+  Fs_compat.mkdir_p path;
+  let result=clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check bool "marker failure remains explicit" true
+    (Yojson.Safe.Util.member "history_restart_line_error" (Tool_result.data result) <> `Null);
+  check_empty load;
+  check_next_prepare ~config ~meta ~session load
+
+let test_clear_marker_repairs_torn_tail () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session:_ ~restart:_ ->
+  let path=Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir:(Workspace.keepers_runtime_dir config)
+    ~keeper_id:meta.name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file path {|{"kind":"turn_ended"|};
+  let result=clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check int "torn tail retains the confirmed restart" 1 (List.length (restart_records ~config ~meta))
+
+let test_clear_refuses_same_turn_nonhistory_regression () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart:_ ->
+  let session,original=input_source ~config ~meta load in
+  let context=Agent_core.Context.copy original.context in
+  Agent_core.Context.set context "input-side-effect" (`String "new owned value");
+  let owned={original with Agent_core.Checkpoint.context;
+    working_context=Some (`Assoc ["original-response",`String "accepted"])} in
+  publish_input ~config ~meta ~session owned;
+  let before=observed_input ~config ~meta in
+  check_refused (clear ());
+  check bool "ambiguous same-turn state keeps official session" true (Option.is_some (official_session ()));
+  check bool "owned response context was not replaced by stale canonical state" true
+    (Keeper_checkpoint_ref.equal before (observed_input ~config ~meta));
+  let retained=Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir:session.session_dir ~reference:before
+    |> function Ok snapshot -> Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot
+      | Error _ -> fail "owned context disappeared" in
+  check bool "latest input side effect survives" true
+    (Agent_core.Context.get retained.context "input-side-effect"=Some (`String "new owned value"))
+
+let test_partial_clear_requires_fresh_maintenance_authority () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session ~restart:_ ->
+  let session,original=input_source ~config ~meta load in
+  publish_input ~config ~meta ~session original;
+  let previous=observed_input ~config ~meta in
+  let old_writer=ref None and old_receipt=ref None in
+  (match Keeper_owner_registry.run_maintenance_if_idle ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
+     let writer=Keeper_owner_registry.begin_history_clear ~base_path:config.base_path ~keeper_name:meta.name
+       |> Result.map_error Keeper_owner_registry.command_error_to_string |> require_ok in
+     let plan=Keeper_history_clear.prepare ~authority:(Keeper_owner.history_clear_authority writer)
+       ~session_dir:session.session_dir ~preserve_system:true
+       |> Result.map_error Keeper_history_clear.error_to_string |> require_ok in
+     let receipt=Keeper_official_client_session_store.clear_then ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
+       Keeper_history_clear.execute plan |> Result.map_error Keeper_history_clear.error_to_string |> require_ok) |> require_ok in
+     old_writer:=Some writer;old_receipt:=Some receipt) with
+   | Ok (`Ran ()) -> ()
+   | Ok (`Busy _) -> fail "maintenance was busy"
+   | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+  check_empty load;check_official_session_cleared official_session;
+  check bool "canonical-only partial effect keeps previous owned input" true
+    (Keeper_checkpoint_ref.equal previous (observed_input ~config ~meta));
+  (match Keeper_owner_registry.run_maintenance_if_idle ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
+     let fresh=Keeper_owner_registry.begin_history_clear ~base_path:config.base_path ~keeper_name:meta.name
+       |> Result.map_error Keeper_owner_registry.command_error_to_string |> require_ok in
+     (match Keeper_owner_registry.commit_history_clear ~base_path:config.base_path ~keeper_name:meta.name
+       ~writer:fresh ~receipt:(Option.get !old_receipt) with
+      | Error _ -> () | Ok () -> fail "a fresh authority accepted another authority's receipt");
+     match Keeper_owner_registry.commit_history_clear ~base_path:config.base_path ~keeper_name:meta.name
+       ~writer:(Option.get !old_writer) ~receipt:(Option.get !old_receipt) with
+     | Error _ -> () | Ok () -> fail "another maintenance child reused the old clear authority") with
+   | Ok (`Ran ()) -> () | Ok (`Busy _) -> fail "second maintenance was busy"
+   | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+  let result=clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check bool "fresh explicit clear reconciles partial canonical/input state" false
+    (Keeper_checkpoint_ref.equal previous (observed_input ~config ~meta));
+  check_next_prepare ~config ~meta ~session load
+
+let test_clear_cas_refuses_equal_turn_external_change () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear:_ ~official_session ~restart:_ ->
+  let session,original=input_source ~config ~meta load in
+  publish_input ~config ~meta ~session original;
+  let before=observed_input ~config ~meta in
+  let marker_count=List.length (restart_records ~config ~meta) in
+  (match Keeper_owner_registry.run_maintenance_if_idle ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
+     let writer=Keeper_owner_registry.begin_history_clear ~base_path:config.base_path ~keeper_name:meta.name
+       |> Result.map_error Keeper_owner_registry.command_error_to_string |> require_ok in
+     let plan=Keeper_history_clear.prepare ~authority:(Keeper_owner.history_clear_authority writer)
+       ~session_dir:session.session_dir ~preserve_system:true
+       |> Result.map_error Keeper_history_clear.error_to_string |> require_ok in
+     let snapshot=Keeper_checkpoint_store.load_agent_core_exact_snapshot ~session_dir:session.session_dir ~session_id:session.session_id
+       |> Result.map_error Keeper_checkpoint_store.checkpoint_ref_load_error_to_string |> require_ok in
+     let changed={original with Agent_core.Checkpoint.messages=original.messages @ [Agent_core.Types.user_msg "external equal-turn write"]} in
+     (match Keeper_checkpoint_store.save_agent_core_if_source ~session_dir:session.session_dir
+       ~expected_source_ref:(Keeper_checkpoint_store.exact_snapshot_reference snapshot) changed
+       |> Keeper_checkpoint_store.require_confirmed_installation with
+      | Ok _ -> () | Error _ -> fail "external canonical write failed");
+     let outcome=Keeper_official_client_session_store.clear_then ~base_path:config.base_path ~keeper_name:meta.name
+       (fun () -> Keeper_history_clear.execute plan) |> require_ok in
+     (match outcome with
+      | Error (Keeper_history_clear.Installation_unconfirmed (Keeper_checkpoint_store.Not_installed {cause=Source_changed _;_})) -> ()
+      | Error _ -> fail "clear did not report its exact stale source"
+      | Ok _ -> fail "equal-turn external canonical write was overwritten")) with
+   | Ok (`Ran ()) -> () | Ok (`Busy _) -> fail "maintenance was busy"
+   | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+  check_official_session_cleared official_session;
+  check bool "stale plan keeps original input owner" true (Keeper_checkpoint_ref.equal before (observed_input ~config ~meta));
+  check int "stale clear writes no restart marker" marker_count (List.length (restart_records ~config ~meta));
+  check bool "external canonical conversation survives" true
+    (List.exists (fun (message:Agent_core.Types.message) ->
+       Agent_core.Types.text_of_content message.content="external equal-turn write") (Context.messages_of_context (load ())))
+
+let test_clear_journal_failure_recovers_after_owner_restart ~after_commit () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load ~clear ~official_session:_ ~restart ->
+  let session,original=input_source ~config ~meta load in
+  publish_input ~config ~meta ~session original;
+  let before=observed_input ~config ~meta in
+  let marker_count=List.length (restart_records ~config ~meta) in
+  (match Keeper_owner_registry.run_maintenance_if_idle ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
+     let writer=Keeper_owner_registry.begin_history_clear ~base_path:config.base_path ~keeper_name:meta.name
+       |> Result.map_error Keeper_owner_registry.command_error_to_string |> require_ok in
+     let plan=Keeper_history_clear.prepare ~authority:(Keeper_owner.history_clear_authority writer)
+       ~session_dir:session.session_dir ~preserve_system:true
+       |> Result.map_error Keeper_history_clear.error_to_string |> require_ok in
+     let receipt=Keeper_history_clear.execute plan |> Result.map_error Keeper_history_clear.error_to_string |> require_ok in
+     Keeper_chat_operation_store.For_testing.fail_next_commit
+       (if after_commit then Fail_after_commit else Fail_before_commit);
+     Fun.protect ~finally:Keeper_chat_operation_store.For_testing.clear_commit_fault (fun () ->
+       match Keeper_owner_registry.commit_history_clear ~base_path:config.base_path ~keeper_name:meta.name ~writer ~receipt with
+       | Error _ -> () | Ok () -> fail "unconfirmed journal commit became clear success")) with
+   | Ok (`Ran ()) -> () | Ok (`Busy _) -> fail "maintenance was busy"
+   | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+  check_empty load;
+  check int "unconfirmed input commit writes no marker" marker_count (List.length (restart_records ~config ~meta));
+  let actual=observed_input ~config ~meta in
+  check bool "actual commit disposition is preserved" (not after_commit) (Keeper_checkpoint_ref.equal before actual);
+  (* Availability recovery reopens the journal before a fresh admission; it
+     never blindly replays the uncertain old witness. *)
+  let result=clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check_empty load;
+  check_next_prepare ~config ~meta ~session load;
+  restart ();
+  check_next_prepare ~config ~meta ~session load
+
 let () =
   run "keeper clear admission"
-    [ "owner", [ test_case "active turn, clear, next turn" `Quick test_clear_does_not_race_the_active_turn
+    [ "owner", [ test_case "equal-turn external write defeats a stale clear plan" `Quick test_clear_cas_refuses_equal_turn_external_change
+               ; test_case "precommit clear failure permits fresh explicit recovery" `Quick (test_clear_journal_failure_recovers_after_owner_restart ~after_commit:false)
+               ; test_case "uncertain clear commit preserves actual input across restart" `Quick (test_clear_journal_failure_recovers_after_owner_restart ~after_commit:true)
+               ; test_case "restart marker follows owned input commit" `Quick test_clear_marker_follows_owned_commit
+               ; test_case "marker failure preserves confirmed input clear" `Quick test_clear_marker_write_failure_keeps_confirmed_input
+               ; test_case "restart marker repairs a torn tail" `Quick test_clear_marker_repairs_torn_tail
+               ; test_case "same-turn nonhistory ambiguity refuses before effects" `Quick test_clear_refuses_same_turn_nonhistory_regression
+               ; test_case "partial clear requires fresh original maintenance authority" `Quick test_partial_clear_requires_fresh_maintenance_authority
+               ; test_case "owned clear resumes before and after Owner restart" `Quick test_owned_clear_survives_owner_restart
+               ; test_case "owned clear recovers missing canonical" `Quick (test_owned_clear_recovers_canonical ~corrupt:false)
+               ; test_case "owned clear recovers corrupt canonical" `Quick (test_owned_clear_recovers_canonical ~corrupt:true)
+               ; test_case "owned pending input refuses before official-session effects" `Quick test_clear_refuses_owned_pending_input
+               ; test_case "active turn, clear, next turn" `Quick test_clear_does_not_race_the_active_turn
                ; test_case "paused keeper remains paused" `Quick test_paused_keeper_can_clear_without_resuming
                ; test_case "missing owner leaves history" `Quick test_missing_owner_does_not_clear
                ; test_case "malformed checkpoint is deleted" `Quick

@@ -392,6 +392,19 @@ val restart_interrupted_operations : t -> Chat_operation.t list
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
 val direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_native_call.state, error) result
 
+type history_clear_writer
+val begin_history_clear : t -> (history_clear_writer, error) result
+(** Capture a fresh clear authority in the current inherited Maintenance child,
+    under the journal's sticky operation fence and full unsettled-state guard.
+    Admission refuses stopping/shutdown. This alone performs no clear effect. *)
+val history_clear_authority : history_clear_writer -> Keeper_history_clear.authority
+val commit_history_clear : t -> writer:history_clear_writer ->
+  receipt:Keeper_history_clear.receipt -> (unit, error) result
+(** Record an already confirmed filesystem clear through that same original
+    maintenance child, including while the Owner drains. Recheck trace, opaque
+    authority identity, unsettled state and exact input CAS. An uncertain result
+    remains Error; never blindly retry its witness or append a restart marker. *)
+
 type input_checkpoint_writer
 (** Opaque witness for this Owner's current non-maintenance child and the
     exact input predecessor it observed before dispatch. Capture/publication

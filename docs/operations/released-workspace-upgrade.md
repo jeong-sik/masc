@@ -381,9 +381,9 @@ native effect leaves both authorities unchanged. An uncertain commit remains an
 error even if it installed both; blind replay is refused. Retained files are
 preserved as evidence, and cancellation embedded in retention outcomes propagates.
 
-This connects the native retry path only. Operator history clear, authoritative
-host response admission, reconnect/TUI behavior and whole-issue acceptance remain
-unfinished. All #38005 stack layers remain Draft; these changes do not authorize
+This connects the native retry path only. The operator history-clear boundary
+is described below. Authoritative host response admission, reconnect/TUI behavior
+and whole-issue acceptance remain unfinished. All #38005 stack layers remain Draft; these changes do not authorize
 live installation or merge.
 
 ### Confirming retained checkpoint writes
@@ -399,5 +399,44 @@ performs no I/O and does not reconfirm uncertain durability.
 The new focused cancellation cases use actual durable filesystem writes and the
 existing observer/unwind test boundary. They establish the staged-result boundary,
 not a full Native seed cancellation integration run. The native adapter calls the
-same interpreter directly. Operator history clear and the remaining #38005
-product acceptance remain separate unfinished work.
+same interpreter directly. This writer-boundary evidence does not establish the
+remaining #38005 product acceptance.
+
+
+### Operator history clear and input ownership
+
+`masc_keeper_clear` captures a fresh authority inside its original Owner
+Maintenance child before removing the official-client session. The Owner binds
+that authority to its trace, original workspace session root and exact input
+predecessor. Admission and publication both check every semantic record, including
+terminal records with active or unacknowledged native evidence. Running operations,
+unavailable prior input and either canonical or retained pending input refuse the
+clear before official-session effects. Normal native terminal acceptance first
+acknowledges `Retire`; a terminal unknown effect is not equivalent to that receipt.
+
+The plan freezes its candidate bytes. It keeps only System messages when requested
+and resets the existing repetition history generation while preserving the ledger
+frontier. An equal-turn canonical with different nonhistory state is ambiguous and
+is refused; two `pending=None` fields and equal turn counters cannot prove which
+context is current. A verified earlier partial history clear can be reconciled by
+a fresh explicit operator action. A missing or undecodable canonical can be rebuilt
+from the observed nonwaiting retained input. Genuinely fresh absent/superseded state
+keeps the no-payload behavior; genuinely fresh undecodable state is removed under
+the existing session lock. Newer versions and unreadable paths are refused.
+
+Execution durably retains the cleared payload before installing it by exact source
+CAS or absent-file admission. The original maintenance child then publishes its
+input reference with a journal transaction that rechecks quiescence and predecessor.
+The restart marker follows both confirmed commits. Neither a different child nor
+a fresh authority can reuse the earlier receipt. Filesystem and SQLite commits are
+separate: failures preserve partial evidence, publish no successful clear and write
+no restart marker. Availability recovery may reopen the actual journal before a
+fresh operator action; it does not blindly replay the old witness. Existing
+integrity/reconciliation fences remain in force.
+
+The focused fixtures exercise actual Tool/Owner/Store clearing, original authority,
+next input-producer preparation, Owner reinstall, retained recovery, same-turn state
+ambiguity, canonical CAS and journal commit uncertainty. Source typing is separate
+from actually executing those fixtures. This boundary does not prove a provider
+turn, host response admission, reconnect/TUI behavior, live installation or whole
+issue completion. The entire #38005 stack remains Draft.

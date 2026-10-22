@@ -1052,6 +1052,49 @@ let update_input_checkpoint store ~observed ~checkpoint =
       let* () = install_input_checkpoint_with_db store ~previous checkpoint in
       Ok Input_checkpoint_updated)
 
+(* A terminal semantic phase alone cannot settle a native effect. Read every
+   original record so unknown-effect calls on terminal rows are not hidden. *)
+let require_history_clear_quiescence store =
+  let* inventory = inventory store in
+  let* rows = semantic_rows store.db ~active_only:false in
+  let unsettled execution =
+    not (Semantic.is_terminal execution) ||
+    match execution.Semantic.native_call with
+    | Keeper_native_call.No_native_call -> false
+    | Active _ | Terminal_unacknowledged _ -> true in
+  if Option.is_some inventory.running_operation_id || List.exists unsettled rows then
+    Error (Invalid_input "history clear requires settled semantic and native execution; reconcile outstanding effects first")
+  else Ok ()
+
+let history_clear_input_checkpoint store ~trace_id =
+  with_transaction store (fun () ->
+    let* () = require_history_clear_quiescence store in
+    let* observed = input_observation_with_db store.db ~trace_id in
+    match observed with
+    | Input_observed reference -> Ok (Some reference)
+    | Input_unobserved -> Ok None
+    | Prior_input_unavailable -> Error (Invalid_input
+        "prior input history is unavailable; reconcile before clearing history"))
+
+let commit_history_clear_input_checkpoint store ~trace_id ~observed ~checkpoint =
+  let* () = match checkpoint,observed with
+    | None,Some _ -> Error (Invalid_input "history clear cannot forget an observed input")
+    | None,None -> Ok ()
+    | Some checkpoint,(Some _ | None) ->
+      if not (Keeper_id.Trace_id.equal trace_id checkpoint.Keeper_checkpoint_ref.trace_id)
+      then Error (Invalid_input "history clear checkpoint belongs to another trace")
+      else check_input_predecessor ~observed ~checkpoint in
+  with_transaction store (fun () ->
+    let* () = require_history_clear_quiescence store in
+    let* previous = input_observation_with_db store.db ~trace_id in
+    if not (input_predecessor_matches observed previous) then
+      Ok (Input_checkpoint_source_changed previous)
+    else match checkpoint with
+    | None -> Ok Input_checkpoint_updated
+    | Some checkpoint ->
+      let* () = install_input_checkpoint_with_db store ~previous:observed checkpoint in
+      Ok Input_checkpoint_updated)
+
 let register_created_input_checkpoint store ~checkpoint =
   let* () = ensure_open store in
   with_transaction store (fun () ->

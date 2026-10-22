@@ -51,5 +51,5 @@ val record : Agent_core.Context.t -> t -> unit
     [judged] at or past the length keeps nothing. *)
 val seed_beyond
   :  judged:int
-  -> Keeper_agent_result.tool_call_detail list
-  -> Keeper_agent_result.tool_call_detail list
+  -> 'a list
+  -> 'a list

@@ -56,7 +56,7 @@ function AddonModelRoutes({ installation, outputs }: { installation: string; out
   return html`<section aria-label="Exact-output model routes" class="space-y-2">
     <h4 class="font-semibold">Exact-output model routes</h4>
     <p>Installation: <code>${installation}</code></p>
-    <p>Models are configured per installation and output in
+    <p>Models are configured per installation and output in${' '}
       <code>runtime.addon_exact_lanes</code>. Package activity and worker presence are separate observations.</p>
     ${outputs.map(output => {
       const config = output.configuration

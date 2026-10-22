@@ -182,6 +182,37 @@ module Make (Payload : Payload) : sig
       hydrate them and report whether that read succeeded. [None] means the
       id is not retained. Unrelated mutations preserve this entry's identity. *)
   val get : t -> id:string -> entry option
+  type current_read_error =
+    | Volatile_store
+    | Not_initialized
+    | Incomplete_startup of replay_report
+    | Non_regular_history of Unix.file_kind
+    | Invalid_history of string
+    | Incomplete_history
+    | Snapshot_changed
+    | Read_failed of string
+    | Read_cleanup_failed of { primary : current_read_error option; detail : string }
+
+  val read_current_from_log
+    : t -> id:string -> (entry option, current_read_error) result
+  (** Fresh strict read of the complete current log under the mutation lock.
+      [Ok None] means this id has no registration in the observed history,
+      including a genuinely absent log. [Some] retains the full latest
+      registration and its [Running] or [Completed] status, without shedding
+      payloads or synthesizing a restart completion. A later registration
+      resets the previous lifecycle. Malformed unrelated rows, orphan
+      completions, incomplete tails and source changes refuse the whole read.
+
+      A pathless store, a [create] instance without startup replay, and an
+      incomplete startup replay are explicit errors. A clean startup permits
+      this fresh read; it does not prove its success or durability. Cancellation
+      propagates. [Read_cleanup_failed] retains a simultaneous source failure
+      in [primary]; [None] means the source read succeeded but descriptor
+      settlement did not. This read does not compact, repair, append, alter the live
+      projection or confirm fsync. Its result is not an ACK or a capability
+      for a later conditional write: that write must reacquire the serializer,
+      revalidate its source and confirm publication durability. The caller must
+      retain exclusive ownership of the log, as for [replay]. *)
   val completed_from_log : t -> id:string -> (entry option, string) result
   (** Strict streamed lookup of the latest registration lifecycle for one id.
       A later register resets an earlier completion. Running/missing ids return

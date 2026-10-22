@@ -676,6 +676,71 @@ module Make (Payload : Payload) = struct
     get_metadata t ~id |> Option.map (full_entry_from_disk t)
   ;;
 
+  type current_read_error =
+    | Volatile_store
+    | Not_initialized
+    | Incomplete_startup of replay_report
+    | Non_regular_history of Unix.file_kind
+    | Invalid_history of string
+    | Incomplete_history
+    | Snapshot_changed
+    | Read_failed of string
+    | Read_cleanup_failed of { primary : current_read_error option; detail : string }
+
+  let read_current_from_log t ~id =
+    Cross_context_mutex.with_lock t.mutation_mutex (fun () ->
+      match t.path, t.replay_status with
+      | None, (Not_replayed | Log_absent | Replayed _) -> Error Volatile_store
+      | Some _, Not_replayed -> Error Not_initialized
+      | Some _, Replayed report
+          when report.malformed_lines <> 0 || not report.reached_end ->
+        Error (Incomplete_startup report)
+      | Some path, (Log_absent | Replayed _) ->
+        (* Track every registration identity to reject unrelated orphan
+           completions, but retain full payloads only for the requested id.
+           Never reuse the append-only index as current-source authority. *)
+        let folded = Fs_compat.fold_private_jsonl_locked_result path
+          ~init:(Ok (Id_map.empty, None), 1)
+          ~f:(fun (reading, line_no) line ->
+            let reading = Result.bind reading (fun (registered, selected) ->
+              match parse_event_line ~path ~line_no line with
+              | Error detail -> Error (Invalid_history detail)
+              | Ok None -> Ok (registered, selected)
+              | Ok (Some (Register r)) ->
+                let selected = if String.equal r.id id then
+                    Some {id=r.id;started_at=r.started_at;registration=r.registration;status=Running}
+                  else selected in
+                Ok (Id_map.add r.id () registered, selected)
+              | Ok (Some (Complete c)) ->
+                if not (Id_map.mem c.id registered) then
+                  Error (Invalid_history (Printf.sprintf "%s:%d: completion has no matching registration" path line_no))
+                else if String.equal c.id id then
+                  (match selected with
+                   | Some entry -> Ok (registered, Some {entry with status=Completed c.completion})
+                   | None -> Error (Invalid_history "requested completion has no selected registration"))
+                else Ok (registered, selected)) in
+            reading, line_no + 1) in
+        let read_error = function
+          | Fs_compat.Private_jsonl_fold.Snapshot_changed -> Snapshot_changed
+          | Read_error (Fs_compat.Private_jsonl_rows.Non_regular_file kind) -> Non_regular_history kind
+          | Read_error (Io_failed exn) -> Read_failed (Printexc.to_string exn) in
+        let observed = function
+          | Fs_compat.Private_jsonl_fold.Missing -> Ok None
+          | Present {value=(reading,_);rows_end;end_offset} ->
+            if rows_end <> end_offset then Error Incomplete_history
+            else Result.map snd reading in
+        match folded with
+        | Fs_compat.Private_file_failed error -> Error (read_error error)
+        | Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
+          Error (Read_cleanup_failed {primary=Some (read_error error);
+            detail=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure})
+        | Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
+          let primary = match observed value with Ok (Some _ | None) -> None | Error error -> Some error in
+          Error (Read_cleanup_failed {primary;
+            detail=Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure})
+        | Private_file_succeeded value -> observed value)
+  ;;
+
   let completed_from_log t ~id =
     Cross_context_mutex.with_lock t.mutation_mutex (fun () ->
       match t.path with

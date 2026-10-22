@@ -18,11 +18,16 @@
 
 (** Starts one session whose browser lives on [sw]: releasing [sw] stops it.
     Answers the session and the [stagehand.init] result. *)
+type open_error = Not_opened of string | Cleanup_unconfirmed of string
+(** A normal refusal with confirmed partial cleanup, or an opening whose
+    original resources could not be confirmed settled. Unexpected exceptions
+    also leave settlement unconfirmed. Cancellation must join partial resources;
+    report failed cleanup to the supplied switch before re-raising it. *)
 type 'session opener =
   sw:Eio.Switch.t
   -> headless:bool
   -> log:(Browser_stagehand_session.event -> unit)
-  -> ('session * Yojson.Safe.t, string) result
+  -> ('session * Yojson.Safe.t, open_error) result
 
 type 'session t
 val session_observation : 'session t -> Browser_lane.session_observation
@@ -32,15 +37,25 @@ val session_observation : 'session t -> Browser_lane.session_observation
     fibers are daemons: when the rest of [sw] is done, an open session is
     released and its browser stopped rather than holding [sw] open. [call]
     sends one Stagehand call on a session. [log] receives every session
-    event. *)
+    event. [shutdown] stops the original owned browser exactly once, before
+    its transport switch is released. Transport resources survive parent
+    cancellation during shutdown; startup work remains cancellable. The
+    callback must join its original process and return unconfirmed cleanup
+    as an error. It must not replay browser input. *)
 val create :
   sw:Eio.Switch.t
   -> clock:_ Eio.Time.clock
   -> open_session:'session opener
   -> call:('session -> Browser_stagehand_executor.call)
+  -> shutdown:('session -> (unit, string) result)
   -> pid:('session -> int)
   -> log:(Browser_stagehand_session.event -> unit)
   -> 'session t
+
+val settlement : 'session t -> (unit, string) result
+(** Read the retained terminal shutdown result after the backend lifetime has
+    joined. An active lifetime is unconfirmed. A failed shutdown cannot be
+    replaced by a later successful idempotent close or an automatic reopen. *)
 
 (** What {!Browser_lane.install_stagehand_executor} takes.
 

@@ -292,8 +292,9 @@ receipts remain distinct from successful contract validation.
    This defines behavior to execute; it is not real Chrome evidence or
    persistent-profile support. Startup and model work retain their original owner rather than
    the quick browser response clock. Startup failure stops and joins the original process group before
-   returning. Close and detach fence late launchers, close the keepalive and join
-   the session switch; retirement additionally requires child-claim settlement.
+   returning. Close and detach fence late launchers and join the session switch;
+   retirement additionally requires child-claim settlement. Normal browser
+   shutdown now precedes keepalive release, as described below.
    Host recovery uses the original descriptor and child lease even after worker
    loss. It never signals a PID taken from a page or command-line match.
 
@@ -547,3 +548,36 @@ Exercise model delay/cancellation, malformed output, created-tab partial failure
 and lost worker replies. A lost reply must not cause another click, input or tab
 creation. Source review, focused protocol evidence, full build and installed
 runtime verification are separate claims.
+
+### Orderly Chrome shutdown and persistent-profile evidence
+
+The real cookie proof in [run39490982860](https://github.com/jeong-sik/masc/actions/runs/39490982860)
+passed private42/42, but persistent31/40 failed first at close/reopen: the profile
+still contained SingletonLock. Stagehand runtime disposal had not requested
+browser shutdown before the guardian termination path. The existing profile
+identity and Singleton refusal remain; metadata is never deleted to make reuse
+appear successful.
+
+The backend now requires one shutdown callback per successfully opened original
+session. Explicit close, automatic session retirement and parent stop all join
+that same callback before releasing transport resources. A control cancellation
+watcher ends the original lifetime; transport ownership remains protected while
+startup work races that stop signal in a cancellable context. A successful opener
+result wins a simultaneous stop, so an acquired session is never discarded.
+Startup failure still joins its partial resources without inventing a session.
+
+Chrome's callback verifies its original native owner and browser incarnation,
+requests [Browser.close](https://github.com/ChromeDevTools/devtools-protocol/blob/master/pdl/domains/Browser.pdl)
+once on the retained CDP connection, then awaits the pinned guardian process.
+EOF causes no replay. Logical child retirement, native settlement and persistent
+profile identity/Singleton release are checked separately. The existing
+five-second resource grace bounds this teardown; it never bounds page/model
+work. Unconfirmed orderly shutdown falls back to the original owned process
+cleanup and remains an error even when abort cleanup succeeds.
+
+The retained result reaches explicit close and Addon owner cleanup. Repeating
+close or opening a successor cannot replace that failure with a clean receipt.
+New focused backend scenarios cover parent-stop reader lifetime, cancellation of
+unfinished startup and failed shutdown without replay. These source changes and
+limited typing are not a linked scenario result or a repaired real-cookie proof;
+that execution must use a new explicit candidate.

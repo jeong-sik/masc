@@ -14,7 +14,7 @@ module Lane = Browser_lane
 let settle_s = 0.001
 
 type fake_session = { mutable stopped : bool; log : Session.event -> unit }
-type opening = Opens | Fails | Raises
+type opening = Opens | Fails | Raises | Unconfirmed
 
 exception Opener_bug
 exception Close_bug
@@ -44,7 +44,8 @@ let summary =
   `Assoc [ "value", `String {|{"url":"http://127.0.0.1:1/","title":"Shop","viewport":null}|} ]
 ;;
 
-let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None) f =
+let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None)
+    ?(shutdown = fun _ -> Ok ()) f =
   Eio_mock.Backend.run_full
   @@ fun env ->
   let clock = env#clock in
@@ -60,8 +61,9 @@ let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None) f =
   let open_session ~sw ~headless:_ ~log =
     Option.iter Eio.Promise.await behaviour.open_gate;
     match behaviour.opening with
-    | Fails -> Error "no Chromium"
+    | Fails -> Error (Backend.Not_opened "no Chromium")
     | Raises -> raise Opener_bug
+    | Unconfirmed -> Error (Backend.Cleanup_unconfirmed "partial cleanup unconfirmed")
     | Opens ->
       let session = { stopped = false; log } in
       Eio.Switch.on_release sw (fun () -> session.stopped <- true);
@@ -96,7 +98,7 @@ let with_backend ?(configure = ignore) ?(call_hook = fun _ -> None) f =
          failf "the backend sent %s" (Wire.method_name request))
 
   in
-  let backend = Backend.create ~sw ~clock ~open_session ~call ~pid:(fun _ -> 42) ~log:ignore in
+  let backend = Backend.create ~sw ~clock ~open_session ~call ~shutdown ~pid:(fun _ -> 42) ~log:ignore in
   f
     { backend
     ; sessions
@@ -200,8 +202,6 @@ let test_open_failures () =
   check bool "and leaves the backend closed" false (is_open h);
   check bool "closed, not opening" false
     (Yojson.Safe.Util.member "opening" (data (Backend.execute h.backend Lane.Session_status)) = `Bool true);
-  h.behaviour.opening <- Raises;
-  check bool "an opener that raises is refused" true (refused (Backend.execute h.backend open_));
   h.behaviour.opening <- Opens;
   check bool "the backend still opens afterwards" false (flag "reused" (data (Backend.execute h.backend open_)))
 ;;
@@ -574,15 +574,94 @@ let test_status_reports_an_undelivered_answer () =
     (text "ended" status)
 ;;
 
+let test_uncertain_opening_is_retained () =
+  List.iter (fun opening ->
+    with_backend ~configure:(fun behaviour -> behaviour.opening<-opening) (fun h ->
+      check bool "uncertain original opening is refused" true (refused (Backend.execute h.backend open_));
+      h.settle ();
+      h.behaviour.opening<-Opens;
+      check bool "uncertain cleanup cannot be replaced by reopening" true (refused (Backend.execute h.backend open_));
+      check bool "owner sees failed partial cleanup" true (Result.is_error (Backend.settlement h.backend));
+      check int "no replacement session was launched" 0 (List.length !(h.sessions))))
+    [Raises;Unconfirmed]
+
+let test_shutdown_failure_is_retained () =
+  let shutdowns=ref 0 in
+  with_backend ~shutdown:(fun session ->
+    incr shutdowns;
+    check bool "shutdown precedes transport release" false session.stopped;
+    Error "profile flush unconfirmed") (fun h ->
+    ignore (data (Backend.execute h.backend open_));
+    List.iter (fun verb ->
+      check bool "failed shutdown never becomes successful close or reuse" true
+        (refused (Backend.execute h.backend verb)))
+      [Lane.Session_close;Lane.Session_close;open_];
+    check int "original shutdown is not replayed" 1 !shutdowns;
+    check bool "fallback resource scope joins" true (the_session h).stopped;
+    check bool "uncertain cleanup stays visible" true
+      (Backend.session_observation h.backend=Lane.Browser_unknown);
+    check bool "owner reads the retained failure" true
+      (Backend.settlement h.backend=Error "profile flush unconfirmed"))
+
+let test_parent_stop_keeps_shutdown_transport () =
+  Eio_mock.Backend.run_full (fun env ->
+    let shutdowns=ref 0 and released=ref false and retained=ref None in
+    Eio.Switch.run (fun sw ->
+      let request,send=Eio.Promise.create () and response,reply=Eio.Promise.create () in
+      let open_session ~sw ~headless:_ ~log:_ =
+        Eio.Switch.on_release sw (fun () -> released:=true);
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+          Eio.Promise.await request;
+          Eio.Promise.resolve reply ();
+          Eio.Fiber.await_cancel ());
+        Ok ((),`Null) in
+      let backend=Backend.create ~sw ~clock:env#clock ~open_session
+        ~call:(fun () _ -> fail "no runtime request expected") ~pid:(fun () -> 42) ~log:ignore
+        ~shutdown:(fun () ->
+          incr shutdowns;
+          check bool "parent stop leaves transport open for shutdown" false !released;
+          Eio.Promise.resolve send ();Eio.Promise.await response;Ok ()) in
+      retained:=Some backend;
+      ignore (data (Backend.execute backend open_)));
+    check int "parent stop shuts down exactly once" 1 !shutdowns;
+    check bool "transport is released after the shutdown reply" true !released;
+    match !retained with
+    | Some backend -> check bool "owner settlement is terminal" true (Backend.settlement backend=Ok ())
+    | None -> fail "backend was not created")
+
+let test_parent_stop_cancels_opening () =
+  Eio_mock.Backend.run_full (fun env ->
+    let entered,enter=Eio.Promise.create () and never,_=Eio.Promise.create () in
+    let cancelled=ref false and released=ref false and shutdowns=ref 0 in
+    Eio.Switch.run (fun sw ->
+      let open_session ~sw ~headless:_ ~log:_ =
+        Eio.Switch.on_release sw (fun () -> released:=true);
+        Eio.Promise.resolve enter ();
+        match Eio.Promise.await never with
+        | () -> fail "startup must not survive its parent"
+        | exception (Eio.Cancel.Cancelled _ as exn) -> cancelled:=true;raise exn in
+      let backend=Backend.create ~sw ~clock:env#clock ~open_session
+        ~call:(fun () _ -> fail "startup sent a runtime command") ~pid:(fun () -> 42) ~log:ignore
+        ~shutdown:(fun () -> incr shutdowns;Ok ()) in
+      Eio.Fiber.fork_daemon ~sw (fun () -> ignore (Backend.execute backend open_);`Stop_daemon);
+      Eio.Promise.await entered);
+    check bool "parent stop cancels bootstrap work" true !cancelled;
+    check bool "partial resource scope is joined" true !released;
+    check int "no completed session is invented" 0 !shutdowns)
+
 let () =
   run "browser_stagehand_backend" [
     "lifecycle", [
+      test_case "uncertain partial opening retains original failure" `Quick test_uncertain_opening_is_retained;
+      test_case "shutdown failure remains uncertain without replay" `Quick test_shutdown_failure_is_retained;
+      test_case "parent stop keeps transport alive through shutdown" `Quick test_parent_stop_keeps_shutdown_transport;
+      test_case "parent stop cancels unfinished startup" `Quick test_parent_stop_cancels_opening;
       test_case "uncertain keyboard release quarantines without closing" `Quick test_native_keyboard_quarantine;
       test_case "cancelled keyboard dispatch quarantines" `Quick test_cancelled_native_keyboard_quarantines;
       test_case "open, reuse, list, close" `Quick test_lifecycle;
       test_case "lifecycle observations never wait on browser I/O" `Quick test_nonblocking_lifecycle_observation;
       test_case "a page verb needs a session" `Quick test_page_verb_without_a_session;
-      test_case "a failed or raising open leaves the backend usable" `Quick test_open_failures;
+      test_case "a cleanly refused open leaves the backend usable" `Quick test_open_failures;
       test_case "an open finishes after its caller leaves" `Quick test_open_outlives_its_caller;
       test_case "close waits for the runtime only so long" `Quick test_close_does_not_wait_forever;
       test_case "tab ids do not cross sessions" `Quick test_tab_ids_do_not_cross_sessions;

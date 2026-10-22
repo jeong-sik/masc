@@ -111,6 +111,30 @@ let attempts store id =
   | Some json -> Yojson.Safe.Util.(json |> member "attempts" |> to_list)
   | None -> []
 
+(* The run republishes its record while an observer reads it (#45134). The
+   seam republishes a larger record once, after the reader opened the old one
+   and before it confirms the path still names that file. *)
+let test_republished_record_is_read_again () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let request_id = "republished" in
+    let first = `Assoc [ "attempts", `List [] ] in
+    let newer = `Assoc [ "attempts", `List [ `Null ]; "final", `Assoc [ "kind", `String "answered" ] ] in
+    require (Store.save_exact_request store ~declaration_id ~request_id first);
+    let republished = ref 0 in
+    let sync_file fd =
+      Unix.fsync fd;
+      if !republished = 0 then begin
+        incr republished;
+        require (Store.save_exact_request store ~declaration_id ~request_id newer)
+      end
+    in
+    let read =
+      Store.For_testing.load_exact_request ~sync_file ~sync_parent:Unix.fsync store ~declaration_id ~request_id
+    in
+    check int "the record was republished during the first read" 1 !republished;
+    check bool "the read returns the newer record instead of an error" true (read = Ok (Some newer)))
+
 let test_retained_before_the_call_and_replayed () =
   with_root (fun root ->
     let store = Store.create ~root in
@@ -783,7 +807,8 @@ let test_worker_cannot_select_admission_policy () =
 let () =
   run "lane add-on exact requests"
     [ ( "retention"
-      , [ test_case "retained before the call and replayed after a restart" `Quick test_retained_before_the_call_and_replayed
+      , [ test_case "a record republished during a read is read again" `Quick test_republished_record_is_read_again
+        ; test_case "retained before the call and replayed after a restart" `Quick test_retained_before_the_call_and_replayed
         ; test_case "an unavailable lane sends nothing and survives a restart" `Quick
             test_an_unavailable_lane_sends_nothing_and_survives_a_restart
         ; test_case "a provider refusal that may pass is tried again" `Quick

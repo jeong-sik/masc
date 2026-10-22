@@ -94,7 +94,10 @@ val load_exact_request : t -> declaration_id:string -> request_id:string ->
   (Yojson.Safe.t option, string) result
 (** A package's exact-output request and its attempts, keyed by the
     declaration id so a restarted worker finds what the host retained. Same
-    durability and read verification as action receipts. *)
+    durability and read verification as action receipts, except one case.
+    The owning run republishes the record at each transition, and an observer
+    reads it without the run's claim. A read that ends on a file the path no
+    longer names reads the newer record, instead of failing. *)
 val save_tool_request_owner : t -> scope:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
 (** Cooperative publication is serialized with known-ID reads and complete
     inventories of the same original scope, across Store objects and aliases
@@ -228,6 +231,8 @@ module For_testing : sig
     request_id:string -> Yojson.Safe.t -> (unit, string) result
   val load_action : sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
     t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
+  val load_exact_request : sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->
+    t -> declaration_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
   val append_observation :
     replace_file:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
     t -> instance_id:string -> seq:int -> sources:Yojson.Safe.t ->

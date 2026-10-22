@@ -151,8 +151,13 @@ $(printf '%s\n' "$bound" | sed 's/^/    - /')
   [ -z "$replace_cr" ] || [ "$replaced" = "$replace_cr" ] || refuse "--replace-own-cr does not name this account's open request"
 }
 check_verdict() {
-  local value state cited by
-  value=$(verdict_for "$pr" "$head") || { echo "approve-guard: verdict read failed before parsing: PR $pr head $head" >&2; return 1; }
+  local value state cited by exclude_review=""
+  # Only check_reviews can supply the authenticated caller's current open CR.
+  # Merge admission and source receipts never consume a replacement exception.
+  if [ "$merge_check" -eq 0 ] && [ "$source_receipt" -eq 0 ]; then
+    exclude_review="$replaced"
+  fi
+  value=$(verdict_for "$pr" "$head" "$exclude_review") || { echo "approve-guard: verdict read failed before parsing: PR $pr head $head" >&2; return 1; }
   read -r state cited by <<<"$value"
   if [ -n "$state" ] && [ "$state" != PASS ]; then
     [ -n "$approvals" ] || emit_refusal_detail

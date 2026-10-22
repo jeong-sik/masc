@@ -201,14 +201,14 @@ let support backend operation = match backend with
       | Connected Browser_lane.Web_extension -> Unsupported
           "WebExtension clicks through the DOM and cannot send touch input; the selected tab must not be silently moved to another browser."
       | Safari_unavailable -> missing)
-    | Pointer_down | Pointer_up
+    | Pointer_down | Pointer_up -> missing
     | Read_console -> gecko_only backend (invoke ~mode:"console" Read)
         [observed;"Messages and uncaught errors since the session opened, for one tab, oldest first. At most 200 are kept and the reply says how many older ones were dropped; each text is cut at 4000 bytes and says so. Entries Firefox gave no tab for, and events that were not what BiDi documents, are counted in the reply and do not end the session.";
          "The text is whatever the page printed, and a page can print anything."]
     | Read_network -> gecko_only backend (invoke ~mode:"network" Read)
         [observed;"Requests since the session opened, for one tab, oldest first; at most 200 are kept and the reply says how many older ones were dropped.";
          "Each row has method, address, state, and status, mimeType and bytesReceived once it completed. Header values, cookies and bodies are never returned, only header names; the address keeps its path and replaces every query value with REDACTED. A path can still carry a token."]
-    | Read_clipboard | Write_clipboard | Intercept_network
+    | Read_clipboard | Write_clipboard | Intercept_network -> missing
     | Read_storage -> gecko_only backend (invoke ~mode:"cookies" Read)
         [observed;"The cookies the tab's page can see, at most 200, with the total. Name, domain, path, secure, httpOnly, sameSite and expiry; the value is never returned.";
          "Only cookies are covered. Web storage (localStorage, sessionStorage) is not read."]

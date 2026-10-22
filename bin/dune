@@ -1419,7 +1419,8 @@
  (name masc_tui_attachment_action)
  (wrapped false)
  (modules masc_tui_attachment_action)
- (libraries masc_tui_types masc_tui_browser masc_tui_midi masc_string_util unix))
+ (libraries masc_tui_types masc_tui_browser masc_tui_midi
+  masc_string_util masc.masc_tool_blob_store unix))
 
 (library
  (name masc_tui_memo)

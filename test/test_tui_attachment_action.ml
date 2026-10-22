@@ -1,6 +1,5 @@
-(* The pure decisions of opening an attachment: the kind's action, the cache
-   path, the player and synth argv picks, and the one-line outcome text.
-   Effects (fetch, processes, open) stay unexercised here. *)
+(* Attachment decisions and the actual save boundary. Fetch is injected;
+   the save case owns its temporary cache and starts no external process. *)
 
 module Action = Masc_tui_attachment_action
 
@@ -176,6 +175,59 @@ let test_describe_outcome () =
     (describe_outcome
        { name = "take1.mid"; result = Played; midi_summary = Some "2 tracks · 96 BPM" })
 
+let test_save_served_artifact_boundary () =
+  let root = mkdtemp "masc_attachment_save_" in
+  let previous = Filename.get_temp_dir_name () in
+  Fun.protect
+    ~finally:(fun () ->
+      Filename.set_temp_dir_name previous;
+      Array.iter
+        (fun entry ->
+          let cache = Filename.concat root entry in
+          Array.iter (fun name -> Sys.remove (Filename.concat cache name))
+            (Sys.readdir cache);
+          Unix.rmdir cache)
+        (Sys.readdir root);
+      Unix.rmdir root)
+    (fun () ->
+      Filename.set_temp_dir_name root;
+      let limit = Tool_blob_store.max_served_bytes in
+      let bytes = String.init limit (fun index -> Char.chr (index land 0xff)) in
+      let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
+      let attachment name ~sha256 size : Masc_tui_types.board_attachment =
+        { ba_kind = Ak_file
+        ; ba_name = Some name
+        ; ba_source = As_artifact { sha256; bytes = size }
+        }
+      in
+      let requested = ref [] in
+      let fetch ~sha256 = requested := sha256 :: !requested; Ok bytes in
+      let outcome = Action.run ~fetch (attachment "boundary.bin" ~sha256 limit)
+          ~midi_soundfont:None in
+      (match outcome.result with
+       | Saved path ->
+           Alcotest.(check int) "the complete served artifact was written"
+             limit (Unix.stat path).st_size;
+           let saved = In_channel.with_open_bin path In_channel.input_all in
+           Alcotest.(check string) "saved binary bytes retain their exact digest"
+             sha256 Digestif.SHA256.(digest_string saved |> to_hex)
+       | Failed reason -> Alcotest.fail reason
+       | Played | Opened -> Alcotest.fail "a file attachment started a process");
+      Alcotest.(check (list string)) "fetch uses the original reference once"
+        [sha256] !requested;
+      let oversized = bytes ^ "\000" in
+      let oversized_sha256 = Digestif.SHA256.(digest_string oversized |> to_hex) in
+      let refused = attachment "oversized.bin" ~sha256:oversized_sha256
+          (String.length oversized) in
+      let target = Action.target_path ~name:refused.ba_name ~sha256:oversized_sha256 in
+      let outcome = Action.run ~fetch:(fun ~sha256:_ -> Ok oversized) refused
+          ~midi_soundfont:None in
+      (match outcome.result with
+       | Failed _ -> ()
+       | Saved _ | Played | Opened -> Alcotest.fail "an oversized artifact was accepted");
+      Alcotest.(check bool) "an oversized body never creates a saved file"
+        false (Sys.file_exists target))
+
 let () =
   Alcotest.run "tui-attachment-action"
     [ ( "decisions"
@@ -194,4 +246,7 @@ let () =
         ; Alcotest.test_case "the outcome is one line" `Quick
             test_describe_outcome
         ] )
+    ; ( "save"
+      , [ Alcotest.test_case "saving uses the authoritative served-byte boundary"
+            `Quick test_save_served_artifact_boundary ] )
     ]

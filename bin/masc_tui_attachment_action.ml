@@ -156,8 +156,6 @@ let describe_outcome { name; result; midi_summary } =
 
 (* {1 Effects} *)
 
-let max_attachment_bytes = 16 * 1024 * 1024
-
 let write_file path bytes =
   try
     let channel = open_out_bin path in
@@ -194,9 +192,12 @@ let run ~fetch (attachment : Masc_tui_types.board_attachment) ~midi_soundfont =
       let name = display_name ~sha256 attachment.ba_name in
       match fetch ~sha256 with
       | Error reason -> { name; result = Failed reason; midi_summary = None }
-      | Ok bytes when String.length bytes > max_attachment_bytes ->
+      | Ok bytes when String.length bytes > Tool_blob_store.max_served_bytes ->
           { name
-          ; result = Failed "attachment exceeds 16 MiB limit"
+          ; result =
+              Failed
+                (Printf.sprintf "attachment exceeds %d-byte artifact limit"
+                   Tool_blob_store.max_served_bytes)
           ; midi_summary = None
           }
       | Ok bytes -> (

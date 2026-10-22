@@ -2,12 +2,14 @@ module Launcher = Masc.Browser_lane_launcher
 module Setup = Masc.Browser_lane_setup
 module Bidi_setup = Masc.Browser_lane_bidi_setup
 module Automation_setup = Masc.Browser_lane_automation_setup
+module Addon_setup = Masc.Browser_addon_setup
 
-type mode = Extension | Bidi | Host | Automation
+type mode = Addon | Extension | Bidi | Host | Automation
 
-let all_modes = [ Extension; Bidi; Host; Automation ]
+let all_modes = [ Addon; Extension; Bidi; Host; Automation ]
 
 let mode_name = function
+  | Addon -> "addon"
   | Extension -> "extension"
   | Bidi -> "bidi"
   | Host -> "host"
@@ -153,9 +155,10 @@ let print_bidi_steps plan =
       "  [browser.live] enabled = false in runtime.toml keeps the live lane off, so the \
        browser Add-on starts no Firefox. Turn it on first.";
   print_endline
-    "  1. Restart the MASC server to load runtime.toml, then attach the browser Lane Add-on \
-     or detach and reattach its existing installation. The Add-on owns this Firefox and its \
-     BiDi connection; its observation reports readiness or the startup refusal.";
+    "  1. Restart the MASC server to load runtime.toml. A browser Add-on that was attached \
+     before keeps its old settings until it is detached and attached again. The Add-on owns \
+     this Firefox and its BiDi connection; its observation reports readiness or the startup \
+     refusal.";
   print_endline
     "  2. In that Firefox, log in once to the sites the Keepers work on. The profile keeps \
      the logins.";
@@ -210,12 +213,41 @@ let print_automation ~runtime_config_path plan =
       "  [browser.automation] enabled = false in runtime.toml keeps the lane off, so the \
        browser Add-on starts no geckodriver. Turn it on first.";
   print_endline
-    "  Restart the MASC server to load the updated runtime.toml. Attach the browser Lane Add-on, \
-     or detach and reattach its existing installation, to use this configuration. The attached \
-     Add-on owns this geckodriver and stops it during detach. Each new automation session uses \
-     a fresh profile; logins do not carry over to a new session.";
+    "  Restart the MASC server to load the updated runtime.toml. A browser Add-on that was \
+     attached before keeps its old settings until it is detached and attached again. The \
+     attached Add-on owns this geckodriver and stops it during detach. Each new automation \
+     session uses a fresh profile; logins do not carry over to a new session.";
   print_endline
     "  A browser that needs a login is another route: --mode bidi or --mode extension."
+
+(* Every route runs in the browser Add-on, so every mode declares it. *)
+let print_addon (installed : Addon_setup.installed) =
+  let manifest = Filename.concat installed.package_directory "lane.toml" in
+  Printf.printf "Browser Add-on package  %s (%s)\n" installed.package_directory
+    (match installed.files_written with
+     | 0 -> "already this build's"
+     | written -> Printf.sprintf "%d files written" written);
+  (match installed.declaration with
+   | Addon_setup.Created { path } ->
+     Printf.printf "Declared the browser Add-on in %s\n" path;
+     print_endline
+       "The MASC server attaches it when it starts and on its maintenance pass; set \
+        enabled = false there to keep it detached."
+   | Addon_setup.Present { path; this_build = true; _ } ->
+     Printf.printf "The browser Add-on is declared in %s\n" path
+   | Addon_setup.Present { path; manifest_path; this_build = false } ->
+     Printf.printf
+       "The browser Add-on is declared in %s with the package %s, not the one this masc \
+        carries, and is left as it is. To use this build's package, write %s there.\n"
+       path manifest_path
+       (Toml_line_editor.scalar_line ~key:"manifest_path" ~value:manifest));
+  match installed.missing_programs with
+  | [] -> ()
+  | missing ->
+    Printf.printf
+      "Not found beside masc or on PATH: %s. scripts/install-local-build.sh installs them \
+       beside masc; the server looks for them the same way.\n"
+      (String.concat ", " missing)
 
 let print_host_only =
   "--mode host connects no browser: it installs the native host and launcher for a browser \
@@ -243,17 +275,19 @@ let install
   =
   (* Everything that can be refused is refused before the first write. *)
   let planned =
+    let* addon = Addon_setup.plan ~base_path |> Result.map_error Addon_setup.error_message in
     let* extension = extension_route ~modes ~manifest_dir ~host_name in
     let* bidi = bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port in
     let* automation = automation_plan ~modes ~runtime_config_path ~geckodriver ~browser in
-    Ok (extension, bidi, automation)
+    Ok (addon, extension, bidi, automation)
   in
   match planned with
   | Error message -> refuse message
-  | Ok (extension, bidi, automation) ->
-    (* Install the requested host assets before writing configuration tables.
-       A later refusal retains those completed assets. Setup does not attach
-       the browser Add-on or start its browsers. *)
+  | Ok (addon, extension, bidi, automation) ->
+    (* Install the requested host assets, then the browser Add-on package and
+       its declaration, before writing configuration tables. A later refusal
+       retains those completed assets. Setup does not attach the browser
+       Add-on or start its browsers. *)
     let installed =
       if installs_host modes
       then
@@ -262,10 +296,18 @@ let install
         |> Result.map_error Setup.error_message
       else Ok None
     in
+    let installed =
+      Result.bind installed (fun installed ->
+        Addon_setup.apply addon
+        |> Result.map (fun addon -> installed, addon)
+        |> Result.map_error Addon_setup.error_message)
+    in
     (match installed with
      | Error message -> refuse message
-     | Ok installed ->
+     | Ok (installed, addon) ->
        Option.iter (print_installed ~base_path) installed;
+       if Option.is_some installed then print_endline "";
+       print_addon addon;
        let tabled =
          match bidi with
          | None -> Ok None

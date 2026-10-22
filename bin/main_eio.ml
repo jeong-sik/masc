@@ -2266,8 +2266,11 @@ let browser_lane_setup_cmd =
           [ "mode" ]
           ~docv:"MODE"
           ~doc:
-            "How to connect Firefox: extension installs the native host and writes the \
-             MASC extension for Firefox to load; bidi installs the host and writes the \
+            "How to connect Firefox: addon writes the browser Add-on package this masc \
+             carries to .masc/packages/browser and declares it when no declaration of it \
+             exists, which every other mode also does; extension installs the native host \
+             and writes the MASC extension for Firefox to load; bidi installs the host and \
+             writes the \
              [browser.live.bidi] table so the MASC server starts a Firefox of its own; \
              host installs the host and its launcher only, for a browser you attach \
              yourself or to bring an installed lane's host up to date; automation writes \
@@ -2395,6 +2398,12 @@ let browser_lane_setup_cmd =
          ; `P
              "Installing again replaces the host, launcher, manifest and extension files \
               and keeps the workspace's lane token."
+         ; `P
+             "Every route runs in the browser Lane Add-on, so every mode also writes the \
+              Add-on package this masc carries to .masc/packages/browser and, when the \
+              workspace has no declaration of it, creates browser.toml in its Lane \
+              directory. An existing declaration is left as it is. The server attaches the \
+              Add-on when it starts and on its maintenance pass."
          ; `P
              "--mode automation writes the geckodriver of the lane that opens a fresh \
               profile per session ([browser.automation], or the keys where they already \

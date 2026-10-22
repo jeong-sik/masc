@@ -6,6 +6,10 @@ type installation = Configuration of string | Manual of string
 val installation_id : installation -> string
 (** Canonical identity used by original request retention and worker state.
     A configured declaration and a manual instance with equal names are distinct. *)
+val installation_of_id : string -> (installation, string) result
+(** Decode only the complete canonical identity produced by [installation_id].
+    Missing/unknown kinds, blank names and noncanonical JSON are errors. This
+    identifies an original owner; it does not establish live export authority. *)
 type retained = private {
   scope : string;
   request_id : string;

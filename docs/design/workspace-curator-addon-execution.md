@@ -453,3 +453,40 @@ snapshot while retaining the parent's original substitution bytes separately.
 This repairs deterministic fresh/restored narrowing rather than relaxing the
 exact child comparison. The failed run and earlier pre-MCP-dependency compile
 failure39679243670 remain historical; a new-head run is separate evidence.
+
+
+## Read an original host terminal while its worker is unavailable
+
+Off retires a worker and removes its live exports. Calling the active export's
+read operation therefore cannot recover every already completed host result.
+`Lane_addon_exact.observe_retained` provides a host-only read of the original
+Exact record. It checks canonical envelope/declaration/request identity, exact
+captured request and digest, all actual attempt envelopes and the terminal
+against the original schema. Missing, open and terminal are distinct; malformed
+or conflicting storage is an error. Started without a final stays open because
+a read cannot establish that its provider stopped. No result, claim or request
+is written and no route/provider/worker is invoked.
+
+The read accepts the real writer's exception evidence on Outcome_unknown and
+later Not_allowed audit attempts that preserve an earlier terminal. A null
+started attempt need not be last after interrupted-run recovery and a later
+selection denial. This host observation grants no current package delivery or
+new execution. It does not call Exact.run with a disabled route.
+
+Curator Dispatch_pending now restores the physical capture and full acknowledged
+ancestry, strictly decodes its original configured installation, reconstructs the
+same Exact request/schema and checks that original host record first. A retained
+terminal goes through the existing complete domain validator and original
+judgment/refusal journal. Missing/open still use the normal worker read, and an
+invalid record refuses before that fallback. Captured/Admission_wait keep their
+existing live export checks and original dispatch rules. Domain settlement keeps
+its separate current-state/source/contract guards.
+
+Five new common-reader scenarios exercise real producer records, active started
+reads, exception and selection-denial history, interrupted started evidence and
+strict identity/schema corruption. Four additional original-consumer scenarios
+exercise the public resume/settle path without an initialized live Runtime,
+corrupt-host fallback refusal, full domain rejection and canonical installation
+kind separation. Controlled provider callbacks are not live provider/actual Off
+lifecycle evidence. Production owner scheduling, original observer receipts,
+initial prepared-state/capture reconciliation and installed UI remain pending.

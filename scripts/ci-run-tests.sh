@@ -77,6 +77,33 @@ tmpdir_disk_usage() {
     | awk 'NR == 2 { print "size=" $2 " used=" $3 " avail=" $4 " capacity=" $5; found=1 } END { if (!found) print "unknown" }'
 }
 
+# Where the space went, printed only when the observer reports disk pressure.
+# df says the disk is full; it does not say which tree filled it. Each du is
+# bounded so a slow walk over a huge tree cannot outlast the diagnostics.
+disk_pressure_usage() {
+  local build_dir="${ACTIVE_TEST_BUILD_DIR%/}"
+  local path=""
+  echo "[ci-diag] disk usage by path (MB):"
+  for path in \
+    "${build_dir}/default" \
+    "${build_dir}/.sandbox" \
+    "${TMPDIR:-/tmp}" \
+    "${RUNNER_TEMP:-}" \
+    "${HOME:-}/.cache"; do
+    [[ -n "${path}" && -e "${path}" ]] || continue
+    timeout 60 du -sm "${path}" 2>/dev/null || echo "unknown ${path}"
+  done
+  if [[ -d /var/lib/docker ]]; then
+    timeout 60 sudo -n du -sm /var/lib/docker 2>/dev/null \
+      || echo "unknown /var/lib/docker"
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    echo "[ci-diag] docker system df:"
+    timeout 60 docker system df 2>/dev/null || echo "unknown"
+    echo "[ci-diag] docker containers: $(timeout 30 docker ps -aq 2>/dev/null | wc -l)"
+  fi
+}
+
 active_cmd_tree_pids() {
   local root_pid="${ACTIVE_CMD_PID:-}"
   local all_pairs=""
@@ -124,6 +151,9 @@ diag_dump() {
   echo "[ci-diag] active_cmd_pid=${ACTIVE_CMD_PID:-<none>}"
   echo "[ci-diag] active_cmd_pgid=${ACTIVE_CMD_PGID:-<none>}"
   echo "[ci-diag] tmpdir usage: $(tmpdir_disk_usage)"
+  if [[ "${reason}" = "disk_pressure_observed" ]]; then
+    disk_pressure_usage
+  fi
   # Runner processes may carry credentials in argv. Emit executable names only.
   echo "[ci-diag] process snapshot (dune/ocaml/test):"
   ps -eo pid,ppid,pgid,etime,%cpu,%mem,comm \

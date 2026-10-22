@@ -1,0 +1,85 @@
+
+ RUN  v5.0.2 /private/tmp/masc-candle-terminal-observation-20261022/dashboard
+
+ ❯ src/api/lane-inventory.test.ts (8 tests | 1 failed | 7 skipped) 7ms
+   ❯ common Lane inventory wire (8)
+     × preserves each installation output model reading independently of worker presence 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/api/lane-inventory.test.ts > common Lane inventory wire > preserves each installation output model reading independently of worker presence
+AssertionError: expected { kind: 'package', …(2) } to match object { Object (instances, declaration) }
+(9 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "declaration": {
+-     "exact_outputs": [
+-       {
+-         "configuration": {
+-           "admission_error": "one runtime refused",
+-           "admitted_slots": [
+-             "local.first",
+-           ],
+-           "cli_slots": [
+-             "cloud.cli",
+-           ],
+-           "declared_cli_slots": [
+-             "cloud.cli",
+-           ],
+-           "declared_slots": [
+-             "local.first",
+-             "unavailable",
+-           ],
+-           "dropped_slots": [
+-             "unavailable",
+-           ],
+-           "kind": "configured",
+-         },
+-         "output": "classification",
+-         "source": "declared",
+-       },
+-       {
+-         "configuration": {
+-           "detail": "registry unreadable",
+-           "kind": "unavailable",
+-         },
+-         "output": "briefing",
+-         "source": "declared",
+-       },
+-       {
+-         "configuration": {
+-           "declared_cli_slots": [],
+-           "declared_slots": [
+-             "retained.model",
+-           ],
+-           "kind": "off",
+-         },
+-         "output": "removed-output",
+-         "source": "table_only",
+-       },
+-     ],
+      "installation_id": "custom-curator",
+      "run_id": "scope-not-observation",
+    },
+    "instances": [],
+  }
+
+ ❯ src/api/lane-inventory.test.ts:24:39
+     22|     }
+     23|     const parsed = parseLaneInventory({ ...fixture, rows: [...fixture.…
+     24|     expect(parsed.rows.at(-1)?.state).toMatchObject({ instances: [], d…
+       |                                       ^
+     25|       installation_id: 'custom-curator', run_id: 'scope-not-observatio…
+     26|     } })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 skipped (8)
+   Start at  11:56:12
+   Duration  846ms (import 33%, environment 27%, setup 23%, transform 16%, tests 1%, worker 1%)
+

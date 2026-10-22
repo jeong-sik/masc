@@ -75,9 +75,34 @@ receipts and configuration drafts keep their original owners. The state
 transition fixture covers idle, posting and receipt/read-back phases and checks
 that a hidden slot deletion can no longer be planned. The palette fixture checks
 typed Curator/Verifier destinations with no configuration or inventory reading.
-These fixtures require execution on this source; earlier identity builds do not
-validate this navigation delta. Actual native/UI use and Curator builtin
-retirement remain separate work.
+The TUI history parent `a0d3f3197fb88005bd9f920ded9d915d2c8dccea` subsequently
+completed its 65-case selected execution and a separate matching native
+TUI/server build with 29 related cases. Earlier identity builds are not reused
+as evidence for this navigation delta. Interactive TUI use, installation and
+Curator builtin retirement remain separate work.
+
+## Installation model observations
+
+The common server inventory already emits each valid declaration's required
+`exact_outputs`, including declared versus table-only provenance and the current
+configuration result. The Dashboard decoder now preserves this contract and
+rejects missing outputs, duplicate output names and unknown provenance. All
+Lanes shows these readings under the actual installation ID, independently of
+worker presence or package activity. A table-only output is not offered as an
+executable package capability.
+
+Curator prompt guidance names the real per-installation `classification` and
+`briefing` Addon routes instead of the builtin history ID's model table. The
+generic Runtime configuration link opens the existing editor; it does not
+resolve a current Curator installation or fabricate an original observation ID.
+
+[The source-bound execution receipt](../evidence/2026-10-22-addon-model-observation/README.md)
+records the reproduced decoder loss, selected 37-case Dashboard execution,
+TypeScript/lint and an actual Chromium component rendering with a synthetic API.
+It also records the separate TUI parent's selected 65-case CI and native build.
+These observations
+do not prove actual provider execution, the full Dashboard lifecycle, installation
+or removal of the builtin Curator route, which remain subsequent work.
 
 ## Executed identity source
 

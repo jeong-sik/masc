@@ -1,0 +1,121 @@
+{
+  "schema": "masc.addon-model-observation-evidence/v1",
+  "observed_at": "2026-10-22T03:04:55.487544+00:00",
+  "dashboard_source": "79e8a66286fd677c41e92b126d02060b51b3c6b9",
+  "parent_source": "a0d3f3197fb88005bd9f920ded9d915d2c8dccea",
+  "dashboard_source_sha256": {
+    "dashboard/src/api/lane-inventory.test.ts": "2e8dcd0a1379aaa45933a9a443ddf879548d9eed3a5d81078b3a44e80d345f1f",
+    "dashboard/src/api/lane-inventory.ts": "9b895bc6c9fcda8287511d8506f2a7445e305a81242a9bc3ccef34496e128d87",
+    "dashboard/src/components/lane-inventory-panel.test.ts": "10be2bcde4503666c5e8a1ed621cbc41a5100dd2681411c008141741ea273dc9",
+    "dashboard/src/components/lane-inventory-panel.ts": "77cb62ae3e1974dcc1d9127b1179cbc0cb17d26188107dceffc2d304b13bf8fa",
+    "dashboard/src/components/tools/prompt-registry-panel.test.ts": "0fe3af66d900fc0e2e41bfc919f7a305feb755af89d213d996f5b7252f3623f1",
+    "dashboard/src/components/tools/prompt-registry-panel.ts": "6e2707bc9c2093c5fff71acf0da49d470686e6b16d72ea41d552603835625391"
+  },
+  "dashboard_checks": {
+    "vitest": {
+      "command": [
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "vitest.config.ts",
+        "--no-file-parallelism",
+        "--maxWorkers=1",
+        "src/api/lane-inventory.test.ts",
+        "src/components/lane-inventory-panel.test.ts",
+        "src/components/tools/prompt-registry-panel.test.ts"
+      ],
+      "exit_code": 0,
+      "sha256": "d31a40c2b7fccba0334de8aaa5590d54876f1f4a686e8a409942b8ef6f3f3112"
+    },
+    "typescript": {
+      "command": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--noEmit",
+        "--pretty",
+        "false"
+      ],
+      "exit_code": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "eslint": {
+      "command": [
+        "pnpm",
+        "exec",
+        "eslint",
+        "src/api/lane-inventory.ts",
+        "src/api/lane-inventory.test.ts",
+        "src/components/lane-inventory-panel.ts",
+        "src/components/lane-inventory-panel.test.ts",
+        "src/components/tools/prompt-registry-panel.ts",
+        "src/components/tools/prompt-registry-panel.test.ts"
+      ],
+      "exit_code": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "selected_dashboard_case_count": 37,
+  "baseline": {
+    "production_source": "a0d3f3197fb88005bd9f920ded9d915d2c8dccea",
+    "method": "New regression fixture executed before modifying the production decoder",
+    "log": "baseline-decoder-failure.txt",
+    "result": "failed: parser dropped exact_outputs"
+  },
+  "browser": {
+    "scope": "Production LaneInventoryPanel and decoder rendered in Chromium with synthetic API fixture, not the live Dashboard application",
+    "mocked_endpoint": "GET /api/v1/lanes",
+    "live_worker": false,
+    "live_provider": false,
+    "installed_runtime_verified": false,
+    "screenshot": "model-routes-fixture.png",
+    "fixture": "browser-fixture.html",
+    "observation": "browser-observation.json"
+  },
+  "tui_parent_execution": {
+    "source": "a0d3f3197fb88005bd9f920ded9d915d2c8dccea",
+    "run": 39713823343,
+    "url": "https://github.com/jeong-sik/masc/actions/runs/39713823343",
+    "status": "completed",
+    "conclusion": "success",
+    "target_suites": {
+      "test_tui_palette_matching": 19,
+      "test_tui_runtime_listing": 46
+    },
+    "raw_log_sha256": "53cd4edbff577f8c5db54debc5e479a961d747a0bb0c056e597a05fdcb0c6669",
+    "limits": [
+      "Does not build the main TUI executable",
+      "Does not execute the later Dashboard delta"
+    ]
+  },
+  "artifact_sha256": {
+    "baseline-decoder-failure.txt": "0c1a32d7deb54c22d3cf2fe558323243ed3434c3775de205071e5ce89385b545",
+    "browser-fixture.html": "81a5e79f2bd14d1ff4c272b4c1de0d43ce6e8c86ba95cc47825154f7a806eae6",
+    "browser-observation.json": "6c39fce998f66730f7e63dbed28e88ed329884318f5dc0ca0293140f53e6505f",
+    "model-routes-fixture.png": "95dfd4711c075d94604d24fb5826d5199c7ab943c3ba8fddfb44e1e0a795d6ac",
+    "selected-dashboard-tests.txt": "d31a40c2b7fccba0334de8aaa5590d54876f1f4a686e8a409942b8ef6f3f3112",
+    "native-tui-parent-receipt.json": "af5a7876113cb4979ca06b5e6d76f9ab349544c944a1a7f4b535edee2c79b9c2",
+    "original54-contract-audit.json": "335c513b6ac2641a40b2d894ea7de713f2ea7a48e4fe05b5893204de7dbdd3e2"
+  },
+  "goal_status": "Original54 A01-H06 criteria remain incomplete; this evidence does not establish provider/UI lifecycle/integration/installation completion",
+  "tui_parent_native": {
+    "run": 39713826631,
+    "url": "https://github.com/jeong-sik/masc/actions/runs/39713826631",
+    "status": "completed",
+    "conclusion": "success",
+    "source_sha": "a0d3f3197fb88005bd9f920ded9d915d2c8dccea",
+    "workflow_sha": "38b63de32b575ceb4eef6d26fdd9de4c7eccee81",
+    "artifact_id": 12398028976,
+    "artifact_zip_sha256": "0d78d9d54b4e4ddd1ae05d415d66638bc7f90a3b615ede752bfcd342bed44af7",
+    "receipt": "native-tui-parent-receipt.json",
+    "raw_log_sha256": "4ccc7ad2a73ef0f38e3c04d5bb0f1ae3a4d8af9e6dda0dd2d70887c7dfe341e7",
+    "artifact_bytes_checked_by_author": true,
+    "test_case_count": 29,
+    "limits": [
+      "Does not execute Dashboard delta",
+      "No installed runtime or visible TUI verification"
+    ]
+  }
+}

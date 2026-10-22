@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /private/tmp/masc-candle-terminal-observation-20261022/dashboard
+
+
+ Test Files  3 passed (3)
+      Tests  37 passed (37)
+   Start at  12:03:11
+   Duration  3.23s (import 31%, transform 21%, tests 20%, environment 15%, setup 12%)
+
+    Isolate  3 workers spawned · ~250ms startup each (spawn + environment, per file)
+             at least ~499ms faster with isolate: false — reuses workers across files instead of one per file
+

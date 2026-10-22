@@ -1037,7 +1037,8 @@ let test_automatic_selection_keeps_observed_browser () =
         | Browser_lane.Page_scene _ | Browser_lane.Session_open _ | Browser_lane.Session_close
         | Browser_lane.Session_status | Browser_lane.Page_goto _ | Browser_lane.Page_elements _
         | Browser_lane.Page_act _ | Browser_lane.Page_context _ | Browser_lane.Page_instruct _
-        | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
+        | Browser_lane.Page_locate _ | Browser_lane.Page_extract _
+        | Browser_lane.Page_console _ | Browser_lane.Page_network _ | Browser_lane.Page_cookies _ ->
           fail "unexpected command during automatic browser scenario" in
       Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
       Browser_lane.install_stagehand_executor (Some (fun ~actor:_ verb -> execute verb));

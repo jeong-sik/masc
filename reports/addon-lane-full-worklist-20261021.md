@@ -616,3 +616,10 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - [실제 선택 실행39705408417](../docs/evidence/2026-10-22-curator-original-delivery/selected-execution.json)은 exact042에서 컴파일 후 7개 suite155건 중154건 성공·1건 실패로 전체 FAIL이다. 원본 reconcile12·Core current13·Owner commit61·기존 Exact37·Fusion14·concurrent6은 각각 통과했다. public owner는11/12이며 Off 전 host terminal 대기 중 원래 Owner의 descriptor 검증 거절·retained Exact 부재·HTTP0건을 실제 로그로 확인했다. 같은 진단 문자열은 nlink0도 포함하므로 공격성 hardlink라고 단정하지 않는다. 파일 교체와 authority 읽기의 직렬화 후속은 남는다.
 - 독립 response 리뷰가 원래 ACK 실패→다음 발견 실패→retry 표시 해제로 Off owner가 다시 park하는 P2를 확인했다. 모든 refused pass에서 기존 retry 요구를 보존하도록 수리하고, 실제 scope를 regular file로 일시 차단해 strict discovery Error를 확인한 뒤 복원·기존 maintenance만으로 두 ACK를 회복하는13번째 시나리오를 추가했다. parser와 소스 검토는 새 실행 성공이 아니다.
 - 전체 run FAIL·원래042의 response FAIL·후속 수리를 구분하며 A01–H06의 원래54개 이름·완료 기준을 유지한다. 실제 provider·두 UI·설치와 전체 E02/G03 완료는 여전히 증명되지 않았다.
+
+
+## B02/E02 원래 Store 읽기·publication 직렬화 후속 · 2026-10-22
+
+실제39705408417의 host admission 거절 경계에 대응해 [원래 Store 직렬화](../docs/design/addon-original-store-serialization.md)를 추가했다. 기존 공용 cross-context mutex를 물리 parent·store·scope로 공유하며 별도 Store/parent alias의 알려진 ID 읽기·완전 inventory·publication을 같은 짧은 구간으로 묶는다. no-follow·owner·single-link·descriptor 및 실제 fsync 검사는 유지한다. 원래 domain CAS·workspace lease·execution 권한으로 확대하지 않고 새 registry/잠금 파일/주기 재시도를 만들지 않는다.
+
+실제 descriptor를 열린 채 유지해 alias writer의 대기를 확인하고, 다른 scope publication 뒤 이전 read bytes와 새 원래 progress를 확인하는 회귀를 추가했다. 기존 외부 교체/소유권 거절과 public owner의 Off 시나리오도 유지한다. 새 소스의 parser 검사는 실행 성공이 아니며 정확한 후보의 독립 리뷰와 선택 CI는 별도다. 원래 A01–H06의54개 이름·완료 기준과 실제 provider·두 UI·운영 설치 미완료 경계를 유지한다.

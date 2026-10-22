@@ -142,6 +142,55 @@ let test_fresh_ancestor_and_file_permissions_are_checked_after_io () =
         (path root "original") (fun ~file:_ ~parent:_ ~stat:_ -> ())) in
     fail_inventory result)
 
+let test_original_publication_waits_for_actual_read_across_store_aliases () =
+  with_store (fun root store ->
+    retain store "original";
+    let original=some (owned (load store "original")) in
+    let original_json=some (get (Store.load_tool_request_owner store ~scope ~request_id:"original")) in
+    let alias=Filename.concat (Filename.dirname root) "parent-alias" in
+    Unix.symlink (Filename.dirname root) alias;
+    let writer=Store.create ~root:(Filename.concat alias (Filename.basename root)) in
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let gate=Stdlib.Mutex.create () and changed=Condition.create () and released=ref false in
+      let release ()=Stdlib.Mutex.protect gate (fun () -> released:=true;Condition.broadcast changed) in
+      let entered,entered_resolver=Eio.Promise.create () in
+      let reading,reading_resolver=Eio.Promise.create () in
+      let writing,writing_resolver=Eio.Promise.create () in
+      (* The real descriptor stays open across sync and final verification.
+         The timeout is a hang guard; the lock's actual waiter state orders the
+         actors, rather than a sleep or an expected elapsed-time threshold. *)
+      Fun.protect ~finally:release (fun () ->
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10. (fun () ->
+          Eio.Fiber.fork ~sw (fun () ->
+            let result=Eio_unix.run_in_systhread (fun () ->
+              inventory store ~sync_file:(fun fd ->
+                Unix.fsync fd;
+                Eio.Promise.resolve entered_resolver ();
+                Stdlib.Mutex.protect gate (fun () ->
+                  while not !released do Condition.wait changed gate done))) in
+            Eio.Promise.resolve reading_resolver result);
+          Eio.Promise.await entered;
+          Eio.Fiber.fork ~sw (fun () ->
+            let result=Eio_unix.run_in_systhread (fun () ->
+              Owner.advance ~store:writer ~expected:original ~event:Progress.Dispatch_intended) in
+            Eio.Promise.resolve writing_resolver result);
+          let key=directory (Unix.realpath root) in
+          let rec await_writer ()=
+            if File_lock_eio.For_testing.holders_and_waiters ~lock_path:key=2 then ()
+            else (Eio.Fiber.yield ();await_writer ()) in
+          await_writer ();
+          Eio_unix.run_in_systhread (fun () -> retain ~scope:"unrelated-scope" writer "independent");
+          release ();
+          let read=get (Eio.Promise.await reading) in
+          Alcotest.check json "held original inventory confirms the pre-publication bytes" original_json
+            (match read with [(_,record)] -> record | [] | _::_::_ -> Alcotest.fail "one original required");
+          (match Eio.Promise.await writing |> Result.map_error Owner.update_error_to_string |> get with
+           | Owner.Stored _ -> ()
+           | Already_stored _ | Unconfirmed _ -> Alcotest.fail "original progress must be durably published");
+          let fresh=some (owned (load store "original")) in
+          Alcotest.(check bool) "fresh known-ID read sees the exact new original progress" true
+            (Progress.phase fresh.progress=Progress.Dispatch_pending None))))))
+
 let () = Alcotest.run "Original Add-on request discovery" ["inventory",[
   Alcotest.test_case "restart discovers original input and progress" `Quick test_restart_discovers_original_input_progress_and_scope;
   Alcotest.test_case "absence requires owned settled authority and creates nothing" `Quick test_initial_absence_requires_existing_safe_anchor_without_creation;
@@ -149,4 +198,6 @@ let () = Alcotest.run "Original Add-on request discovery" ["inventory",[
   Alcotest.test_case "listed disappearance and directory replacement" `Quick test_listed_disappearance_and_same_name_directory_replacement_are_errors;
   Alcotest.test_case "symlink hardlink and nonregular records" `Quick test_symlink_hardlink_and_nonregular_records_are_refused;
   Alcotest.test_case "sync failure and replacement through actual descriptors" `Quick test_sync_failure_and_actual_replacement_preserve_original_read_boundary;
-  Alcotest.test_case "fresh ownership and permissions after I/O" `Quick test_fresh_ancestor_and_file_permissions_are_checked_after_io]]
+  Alcotest.test_case "fresh ownership and permissions after I/O" `Quick test_fresh_ancestor_and_file_permissions_are_checked_after_io;
+  Alcotest.test_case "actual held read serializes aliased publication without blocking other scopes" `Quick
+    test_original_publication_waits_for_actual_read_across_store_aliases]]

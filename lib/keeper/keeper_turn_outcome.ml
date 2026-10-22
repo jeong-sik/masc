@@ -5,6 +5,7 @@
 type t =
   | Visible_reply
   | Continuation_checkpoint
+  | Waiting_for_input
   | Terminal_effect_settled
   | Awaiting_gate_approval
   | No_visible_reply
@@ -14,11 +15,13 @@ let equal a b =
   | Visible_reply, Visible_reply
   | No_visible_reply, No_visible_reply
   | Terminal_effect_settled, Terminal_effect_settled
+  | Waiting_for_input, Waiting_for_input
   | Awaiting_gate_approval, Awaiting_gate_approval
   | Continuation_checkpoint, Continuation_checkpoint ->
       true
   | ( Visible_reply
     | Continuation_checkpoint
+    | Waiting_for_input
     | Terminal_effect_settled
     | Awaiting_gate_approval
     | No_visible_reply ), _ ->
@@ -27,6 +30,7 @@ let equal a b =
 let to_label = function
   | Visible_reply -> "visible_reply"
   | Continuation_checkpoint -> "continuation_checkpoint"
+  | Waiting_for_input -> "waiting_for_input"
   | Terminal_effect_settled -> "external_effect_completed"
   | Awaiting_gate_approval -> "external_effect_pending"
   | No_visible_reply -> "no_visible_reply"
@@ -34,6 +38,7 @@ let to_label = function
 let of_label = function
   | "visible_reply" -> Some Visible_reply
   | "continuation_checkpoint" -> Some Continuation_checkpoint
+  | "waiting_for_input" -> Some Waiting_for_input
   | "external_effect_completed" -> Some Terminal_effect_settled
   | "external_effect_pending" -> Some Awaiting_gate_approval
   | "no_visible_reply" -> Some No_visible_reply
@@ -50,7 +55,7 @@ let of_stop_reason = function
   | Runtime_agent.Yielded_after_repeated_tool_call _
   | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     Continuation_checkpoint
-  | Runtime_agent.InputRequired _ -> Visible_reply
+  | Runtime_agent.InputRequired _ -> Waiting_for_input
 
 let of_result_surface ~response_text = function
   | Runtime_agent.Completed ->
@@ -60,7 +65,7 @@ let of_result_surface ~response_text = function
   | Runtime_agent.Yielded_after_repeated_tool_call _
   | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     Continuation_checkpoint
-  | Runtime_agent.InputRequired _ -> Visible_reply
+  | Runtime_agent.InputRequired _ -> Waiting_for_input
 
 type decode_error =
   | Payload_missing

@@ -756,13 +756,15 @@ export interface KeeperToolApprovalPending {
 
 // RFC-0232 P2: producer-typed turn outcome carried in the reply payload
 // (`turn_outcome`). `continuation_checkpoint` marks a resume-next-cycle
-// boundary, `external_effect_pending` marks a durable control wait,
+// boundary, `waiting_for_input` marks an explicit input pause,
+// `external_effect_pending` marks a durable Gate control wait,
 // `external_effect_completed` marks a reply delivered by an external
 // connector (e.g. Slack/Discord), and `no_visible_reply` marks a completed
 // runtime turn with no assistant text.
 export type KeeperTurnOutcome =
   | 'visible_reply'
   | 'continuation_checkpoint'
+  | 'waiting_for_input'
   | 'external_effect_completed'
   | 'external_effect_pending'
   | 'no_visible_reply'
@@ -958,7 +960,7 @@ export type ChatBroadcastBlock = { t: 'broadcast'; scope: string; via?: string; 
 export type ChatFusionBlock = { t: 'fusion'; board_post_id: string; run_id?: string }
 export type ChatStatusBlock = {
   t: 'status'
-  kind: 'continuation_checkpoint' | 'external_effect_pending'
+  kind: 'continuation_checkpoint' | 'waiting_for_input' | 'external_effect_pending'
 }
 
 export type ChatBlock =

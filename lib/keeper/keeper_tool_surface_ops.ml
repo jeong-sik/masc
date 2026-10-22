@@ -486,6 +486,7 @@ let direct_reply_projection json =
   | Ok
       (( Keeper_turn_outcome.Continuation_checkpoint
        | Keeper_turn_outcome.Terminal_effect_settled
+       | Keeper_turn_outcome.Waiting_for_input
        | Keeper_turn_outcome.Awaiting_gate_approval
        | Keeper_turn_outcome.No_visible_reply ) as turn_outcome) ->
     Ok
@@ -498,6 +499,8 @@ let direct_reply_projection json =
 let direct_reply_visible_text json =
   match direct_reply_projection json with
   | Ok (Keeper_chat_blocks.Connector_text text) -> Ok (Some text)
+  | Ok (Connector_input_wait {question}) ->
+    Ok (Some (Keeper_chat_blocks.status_kind_connector_text ?question Waiting_for_input))
   | Ok (Connector_status _ | Connector_no_visible_reply) -> Ok None
   | Error error -> Error error
 ;;

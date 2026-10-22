@@ -1542,7 +1542,9 @@ let test_an_unstageable_image_is_refused_not_pathed () =
 let test_checkpoint_segments_replay_until_actual_answer () =
   let checkpoint = [run_started; text_start;
     reply_details ~reply:"" ~turn_outcome:"continuation_checkpoint" (); text_end; run_finished] in
-  let body = List.map sse_event ([acceptance ()] @ checkpoint @ checkpoint
+  let input_wait = [run_started; text_start;
+    reply_details ~reply:"" ~turn_outcome:"waiting_for_input" (); text_end; run_finished] in
+  let body = List.map sse_event ([acceptance ()] @ checkpoint @ input_wait @ checkpoint
     @ [run_started; text_start; delta "actual answer";
        reply_details ~reply:"actual answer" ~turn_ref:"trace-chat#3" (); text_end; run_finished])
     |> String.concat "" in

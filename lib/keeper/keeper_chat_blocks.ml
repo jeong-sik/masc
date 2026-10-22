@@ -95,13 +95,16 @@ type fusion_block = {
 
 type status_kind =
   | Continuation_checkpoint
+  | Waiting_for_input
   | Awaiting_gate_approval
 
 type status_block = { kind : status_kind }
 
-let status_kind_connector_text = function
+let status_kind_connector_text ?question = function
   | Continuation_checkpoint ->
     "작업이 체크포인트에 저장되었습니다. 다음 주기에 이어서 처리합니다."
+  | Waiting_for_input -> "입력 요청이 관측되었습니다." ^
+      (match question with Some question -> "\n" ^ question | None -> "")
   | Awaiting_gate_approval ->
     "승인 대기: 외부 작업을 실행하기 전에 확인이 필요합니다."
 ;;
@@ -109,12 +112,15 @@ let status_kind_connector_text = function
 type connector_projection =
   | Connector_text of string
   | Connector_status of status_block
+  | Connector_input_wait of { question : string option }
   | Connector_no_visible_reply
 
 let connector_projection ~turn_outcome ~reply =
   match turn_outcome, reply with
   | Keeper_turn_outcome.Continuation_checkpoint, _ ->
     Connector_status { kind = Continuation_checkpoint }
+  | Keeper_turn_outcome.Waiting_for_input, _ ->
+    Connector_input_wait {question=reply}
   | Keeper_turn_outcome.Awaiting_gate_approval, _ ->
     Connector_status { kind = Awaiting_gate_approval }
   | Keeper_turn_outcome.Terminal_effect_settled, _ ->
@@ -304,11 +310,13 @@ let trace_tool_status_to_label = function
 
 let status_kind_to_label = function
   | Continuation_checkpoint -> "continuation_checkpoint"
+  | Waiting_for_input -> "waiting_for_input"
   | Awaiting_gate_approval -> "external_effect_pending"
 ;;
 
 let status_kind_of_label = function
   | "continuation_checkpoint" -> Some Continuation_checkpoint
+  | "waiting_for_input" -> Some Waiting_for_input
   | "external_effect_pending" -> Some Awaiting_gate_approval
   | _ -> None
 ;;

@@ -737,6 +737,58 @@ describe('sendKeeperThreadMessage operation stream', () => {
     }
   }
 
+  it.each(['waiting_for_input', 'continuation_checkpoint'] as const)(
+    'hands off %s to the same tracked operation and accepts its actual later answer', async (turnOutcome) => {
+      let operationId = ''
+      let resolveLookup!: (operation: {operationId: string; state: {
+        kind: 'succeeded'; completedAt: number; outcomeRef: string;
+      }}) => void
+      const lookup = new Promise<{operationId: string; state: {
+        kind: 'succeeded'; completedAt: number; outcomeRef: string;
+      }}>(resolve => { resolveLookup = resolve })
+      fetchKeeperChatOperation.mockReturnValue(lookup)
+      fetchKeeperChatHistory.mockResolvedValue([])
+      streamKeeperMessage.mockImplementation(async (_name: string, _message: string, opts: {
+        operationId: string; onEvent: (event: KeeperChatStreamEvent) => void;
+      }) => {
+        operationId = opts.operationId
+        opts.onEvent({type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+          value: {operation_id: operationId, state: 'Running', queued_count: 0}})
+        opts.onEvent({type: 'RUN_STARTED'})
+        opts.onEvent({type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS', value: {
+          reply: 'Which original branch?', turn_outcome: turnOutcome, turn_ref: 'original#1',
+        }})
+        if (turnOutcome === 'continuation_checkpoint') opts.onEvent({type: 'CUSTOM',
+          name: 'KEEPER_CONTINUATION_CHECKPOINT', value: {message: '', request_id: operationId}})
+        opts.onEvent({type: 'RUN_FINISHED'})
+        return {terminal: true}
+      })
+      await sendKeeperThreadMessage('echo', 'original request')
+      expect(trackedKeeperChatOperationsForKeeper('echo').map(request => request.operationId)).toEqual([operationId])
+      expect(keeperThreads.value.echo?.find(entry => entry.role === 'assistant')).toMatchObject({
+        delivery: 'queued', details: {turnOutcome}, responseState: {phase: 'awaiting-continuation'},
+      })
+      expect(fetchKeeperChatOperation).toHaveBeenCalled()
+      applyKeeperOperationTurnEvent('echo', {operationId, event: {type: 'RUN_STARTED'}})
+      applyKeeperOperationTurnEvent('echo', {operationId, event: {type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS',
+        value: {reply: 'actual later answer', turn_outcome: 'visible_reply', turn_ref: 'original#2'}}})
+      applyKeeperOperationTurnEvent('echo', {operationId, event: {type: 'RUN_FINISHED'}})
+      expect(keeperThreads.value.echo?.find(entry => entry.role === 'assistant')).toMatchObject({
+        text: 'actual later answer', delivery: 'delivered', responseState: {phase: 'terminal'},
+      })
+      fetchKeeperChatHistory.mockResolvedValue([
+        {id: 'canonical-user', role: 'user', content: 'original request', ts: 1,
+          delivery_provenance: operationDeliveryProvenance(operationId, 'accepted_user'),
+          delivery_provenance_status: 'valid'},
+        {id: 'canonical-answer', role: 'assistant', content: 'actual later answer', ts: 2,
+          delivery_provenance: operationDeliveryProvenance(operationId, 'terminal_result'),
+          delivery_provenance_status: 'valid'},
+      ])
+      resolveLookup({operationId, state: {kind: 'succeeded', completedAt: 2, outcomeRef: 'actual-result'}})
+      await vi.waitFor(() => expect(trackedKeeperChatOperationsForKeeper('echo')).toEqual([]))
+    },
+  )
+
   it('preserves authored request blocks and the completed reply', async () => {
     const text = '    첫 줄\nSKILL.md 설명\n\n\n끝  \n\n'
     streamKeeperMessage.mockImplementation(completeStream(text))
@@ -1743,8 +1795,23 @@ describe('restored chat operation outcome', () => {
     })
     expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).operationId).toBe('restored-op')
   })
-  it('releases the stored observation only after the canonical operation turn replaces it', async () => {
+  it.each(['none', 'user', 'both'] as const)('releases tracking while retaining canonical rows already observed (%s)', async preloaded => {
     storeDraft()
+    if (preloaded !== 'none') {
+      appendThreadEntry('echo', {
+        id: 'canonical-user', role: 'user', source: 'direct_user', label: 'You', text: 'input',
+        delivery: 'history', deliveryProvenance: operationDeliveryProvenance('restored-op', 'accepted_user'),
+      })
+    }
+    if (preloaded === 'both') {
+      appendThreadEntry('echo', {
+        id: 'canonical-assistant', role: 'assistant', source: 'direct_assistant', label: 'echo', text: '',
+        rawText: 'partial authored answer', timestamp: '2026-10-11T00:00:00Z', delivery: 'queued',
+        traceSteps: [{ kind: 'think', text: 'exposed reasoning' }],
+        details: { turnOutcome: 'waiting_for_input', replyText: 'Which branch?' },
+        deliveryProvenance: operationDeliveryProvenance('restored-op', 'terminal_result'),
+      })
+    }
     fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state: { kind: 'succeeded', completedAt: 2, outcomeRef: 'result' } })
     fetchKeeperChatHistory.mockResolvedValue([
       { id: 'canonical-user', role: 'user', content: 'input', ts: 1,
@@ -1756,6 +1823,9 @@ describe('restored chat operation outcome', () => {
     ])
     await hydrateTrackedKeeperChatOperations('echo')
     expect(trackedKeeperChatOperationsForKeeper('echo')).toEqual([])
+    expect(requiredFixture(keeperThreads.value.echo).filter(entry => entry.role === 'user')).toMatchObject([
+      { id: 'canonical-user', text: 'input' },
+    ])
     expect(requiredFixture(keeperThreads.value.echo).filter(entry => entry.role === 'assistant')).toMatchObject([
       { id: 'canonical-assistant', text: 'complete answer', traceSteps: [{ kind: 'think', text: 'exposed reasoning' }] },
     ])

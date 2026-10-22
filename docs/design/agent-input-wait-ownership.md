@@ -867,7 +867,7 @@ resolution and keeps the same exact-C/history assertions without requiring
 released S to remain readable. This repair remains unexecuted on the new head.
 
 
-## Actual unsettled Tool effect on an original branch (source, not executed)
+## Actual unsettled Tool effect on an original branch
 
 A new native-context scenario starts with the public original W response on a
 private branch after independent G publication. Its actual Tool handler appends
@@ -888,8 +888,8 @@ must refuse the unknown receipt.
 This is source for one actual Owner/native/Core crash boundary. The external
 effect is a fixture file append, not a production person-note handler. It does
 not establish every production AgentRun error/fallback path, autonomous waiting
-or SSE/Acting/TUI acceptance. Execution is pending on the new exact head;
-previous successful native-context suites do not establish this seventh case.
+or SSE/Acting/TUI acceptance. The exact-head execution at `48e07309` is recorded
+below; earlier successful native-context suites did not establish this seventh case.
 
 
 The preceding detachment head `b7bca53a7d2070598f2862862b03ce86e2773239`
@@ -899,5 +899,54 @@ The actual log shows Owner-open-native-call 17/17 passing, then a fatal warning
 23 at `test_keeper_direct_input_wait.ml` in the batched build of the other five
 executables. Those 131 cases did not run. This layer replaces the redundant
 outer record update with a typed pending-record construction; the inner request
-update still preserves all other actual request fields. That repair and the
-new unknown-effect scenario remain unexecuted on this new layer.
+update still preserves all other actual request fields. Their subsequent
+exact-head execution at `48e07309` is recorded below.
+
+
+## Explicit input-wait outcome and transport continuation (source)
+
+`Runtime_agent.InputRequired` now projects to `Waiting_for_input`, encoded as
+`waiting_for_input`, rather than an ordinary visible answer. Its question comes
+from the typed request at finalization, before ordinary response-text parsing.
+The existing `Reply_details.reply` and persisted reply body carry those exact
+question bytes with the waiting outcome. The typed status block, connector
+input-wait projection and TUI/Dashboard status content preserve that question.
+These are input-request observations, not proof that an old request is still
+current. Historical cards say that an input request was observed; response
+admission continues to require the current exact Owner wait and retained proof.
+
+A prior completed surface post remains delivery evidence beside the input wait.
+It cannot replace the waiting outcome with external-effect completion in the
+producer, HTTP payload, Dashboard stream or connector adapter. Empty waiting
+controls are not empty-answer failures; persisted blocks and strict stream/history
+decoders understand their explicit label. No content-prefix inference is added.
+
+A direct input pause closes one transport segment while retaining the original
+queued operation. TUI replay/watch and transcript folding admit its later segment
+under the same request without settling the request at the pause. Dashboard
+keeps the original queued tracking and hands observation to its existing operation
+hydration after releasing live-send ownership. That handoff reuses the original
+user/assistant entries by exact operation provenance, preserving their content
+rather than creating another placeholder. Canonical rows present in the fresh
+history response are kept when retiring replaced local placeholders, including
+rows already read before restoration. Only the later canonical terminal
+operation/history observation releases tracking. A posted-effect event preserves
+control outcomes while adding its actual delivery target. iMessage sends the
+typed input-request observation and canonical question once when its segment
+ends; the separate Keeper continuation channel retains its existing pending
+continuation behavior.
+
+This layer does not implement durable autonomous input waiting or the
+snapshot/SSE revision/incarnation and persistent/reconnected Acting acceptance.
+It adds no live installation and does not establish a currently pending request
+from historical chat content. Source review, focused Dashboard checks and
+exact-head OCaml checks are recorded separately from whole-issue acceptance.
+
+The preceding head `48e073094611a049271c6cc8aadec1eafa195960` completed
+[39729989129](https://github.com/jeong-sik/masc/actions/runs/39729989129):
+direct input wait47, native store27, retained sweep9, HTTP41, admitted ingress7
+and native-context7, all 138/138 passing. The raw log confirms checkout and the
+actual Tool effect/unknown-terminal assertions. That evidence covers the prior
+head and its six suites, including C-before-G detachment and the repaired HTTP
+resolution fixture; it does not execute this new waiting-outcome layer or every
+production error/fallback path.

@@ -266,6 +266,7 @@ const KEEPER_STREAM_PROTOCOL_ERROR_KIND_SET: ReadonlySet<string> = new Set<strin
 const KEEPER_TURN_OUTCOMES = new Set([
   'visible_reply',
   'continuation_checkpoint',
+  'waiting_for_input',
   'external_effect_completed',
   'external_effect_pending',
   'no_visible_reply',

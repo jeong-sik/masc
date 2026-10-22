@@ -1437,6 +1437,19 @@ let test_thinking_only_final_follows_the_quiet_policy () =
     ; "redacted thinking", [ Agent_core.Types.RedactedThinking "opaque" ]
     ]
 
+let test_input_pause_finalization_preserves_canonical_question () =
+  let request : Agent_core.Error.input_required = {request_id="finalize-input";
+    participant_name=None;question="Which original branch?\nKeep these exact bytes.";
+    schema=None;timeout_s=None;created_at=1.} in
+  let result={ (run_result ~content:[] ()) with
+    Runtime_agent.stop_reason=InputRequired {turns_used=0;request} } in
+  match Masc.Keeper_agent_run.For_testing.normalize_final_response_text
+      ~response_policy:Keeper_tooling.Response.Require_progress
+      ~keeper_name:"keeper-input" ~runtime_id:"runtime.input"
+      ~run_result:result ~text:"unrelated assistant preface" ~tool_names:[] () with
+  | Ok observed -> Alcotest.(check string) "typed pause preserves its canonical question" request.question observed
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
+
 let test_finalization_settles_no_content_quiet_final () =
   let finalize ~policy content =
     Masc.Keeper_agent_run.For_testing.normalize_final_response_text
@@ -2426,6 +2439,8 @@ let () =
             "thinking-only final follows the quiet policy"
             `Quick
             test_thinking_only_final_follows_the_quiet_policy;
+          Alcotest.test_case "typed input pause keeps canonical question" `Quick
+            test_input_pause_finalization_preserves_canonical_question;
           Alcotest.test_case
             "finalization settles an accepted no-content or reasoning-only final"
             `Quick

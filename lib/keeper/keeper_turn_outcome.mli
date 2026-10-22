@@ -3,13 +3,14 @@
     The keeper reply payload declares at the write boundary whether its
     [reply] text is model output ([Visible_reply]), absent from the
     visible surface ([No_visible_reply]), a continuation boundary
-    ([Continuation_checkpoint]), or a completed terminal external
+    ([Continuation_checkpoint]), an explicit input wait ([Waiting_for_input]),
+    or a completed terminal external
     delivery ([Terminal_effect_settled]). Consumers (lane persistence,
     stream terminal, direct-reply surface, dashboard) match on the
     decoded variant; control state is never synthesized into assistant
     prose.
 
-    [Awaiting_gate_approval] is the fifth variant and no turn produces
+    [Awaiting_gate_approval] is a retained Gate variant and no turn produces
     it. A Gate deferral used to end the turn and that ending was this
     outcome; the deferral now parks the call and lets the turn keep
     running, so a parked call is said on an approval lifecycle row
@@ -23,6 +24,9 @@
 type t =
   | Visible_reply
   | Continuation_checkpoint
+  | Waiting_for_input
+  (** The Agent paused for explicit input. This observation does not grant
+      response authority or prove that its original wait is still current. *)
   | Terminal_effect_settled
   | Awaiting_gate_approval
   | No_visible_reply
@@ -30,7 +34,7 @@ type t =
 val equal : t -> t -> bool
 
 val to_label : t -> string
-(** Closed wire labels: ["visible_reply"] / ["continuation_checkpoint"] /
+(** Closed wire labels: ["visible_reply"] / ["continuation_checkpoint"] / ["waiting_for_input"] /
     ["external_effect_completed"] / ["external_effect_pending"] /
     ["no_visible_reply"].
 
@@ -68,6 +72,7 @@ val of_result_surface : response_text:string -> Runtime_agent.stop_reason -> t
     [Visible_reply].  This keeps hidden read-only/tool-only runtime turns
     from being reported as user-visible replies while preserving the
     explicit continuation checkpoint outcome for control-yield stops.
+    [InputRequired] always produces [Waiting_for_input], even with blank text.
     No stop reason maps to [Awaiting_gate_approval]; see the header for
     why that variant is still decodable. A runtime execution-limit
     observation does not create a MASC lifecycle gate. *)

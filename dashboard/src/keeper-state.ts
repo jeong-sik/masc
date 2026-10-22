@@ -523,7 +523,7 @@ function normalizeBlocks(raw: unknown, role: KeeperConversationRole): ChatBlock[
       }
       if (t === 'status') {
         const kind = asString(item.kind)
-        return kind === 'continuation_checkpoint' || kind === 'external_effect_pending'
+        return kind === 'continuation_checkpoint' || kind === 'waiting_for_input' || kind === 'external_effect_pending'
           ? { t: 'status', kind }
           : null
       }

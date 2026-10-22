@@ -605,7 +605,7 @@ val reply : t -> reply option
 (** The recorded reply, once the turn has one. Not a trail item. For
     [Visible_reply] the text is already in the trail: the server streams it as
     deltas and, when nothing streamed, chunks the reply at the end. For the
-    four control outcomes ([Continuation_checkpoint],
+    control outcomes ([Continuation_checkpoint], [Waiting_for_input],
     [Terminal_effect_settled], [Awaiting_gate_approval], [No_visible_reply])
     nothing is chunked, so the reply text lives only here. {!drawn} is the one
     place both are reconciled into rows. *)

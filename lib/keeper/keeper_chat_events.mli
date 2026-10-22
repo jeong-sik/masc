@@ -89,7 +89,10 @@ type stream_protocol_error = {
 
 type reply_details =
   { reply : string
-        (** Canonical terminal body after finalization. This flat string does
+        (** Canonical body after finalization. With [Waiting_for_input] this
+            is the question from the typed [InputRequired] request, observed
+            for display only; it is not current-wait or response authority.
+            This flat string does
             not identify provider content blocks or authorize distributing
             its bytes over separate observed text stretches. *)
   ; turn_outcome : Keeper_turn_outcome.t

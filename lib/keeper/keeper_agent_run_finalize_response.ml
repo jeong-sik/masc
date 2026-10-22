@@ -183,6 +183,7 @@ let finalize
     | Keeper_turn_outcome.Terminal_effect_settled -> true
     | Keeper_turn_outcome.Visible_reply
     | Keeper_turn_outcome.Continuation_checkpoint
+    | Keeper_turn_outcome.Waiting_for_input
     | Keeper_turn_outcome.Awaiting_gate_approval
     | Keeper_turn_outcome.No_visible_reply -> false
   in

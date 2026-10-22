@@ -286,6 +286,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     ?(now = Unix.gettimeofday)
     ?(on_send_result = fun _ -> ()) () =
   let external_effect_completed = ref false in
+  let continuation_pending = ref false in
   let tool_trail = ref (Keeper_chat_tool_trail.create ()) in
   let activity_error_logged = ref false in
   let refresh_activity () =
@@ -432,7 +433,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         send_text_rich_embeds ?clock ~token ~channel_id acc_text;
         Keeper_chat_events.reader_gone events
     | External_effect_completed _ ->
-        external_effect_completed := true;
+        if not !continuation_pending then external_effect_completed := true;
         continue ()
     | Event_error { message } ->
         on_send_result (send_message ~content:("Keeper error: " ^ message));
@@ -450,7 +451,16 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         continue ~acc_text:"" ()
     | Provider_retry_observed _ -> continue ()
     | Text_message_start _ -> continue ()
-    | Reply_details _
+    | Reply_details {turn_outcome;reply;_} ->
+      continuation_pending := (match turn_outcome with
+        | Keeper_turn_outcome.Waiting_for_input | Continuation_checkpoint -> true
+        | Visible_reply | Terminal_effect_settled | Awaiting_gate_approval | No_visible_reply -> false);
+      (match turn_outcome with
+       | Keeper_turn_outcome.Waiting_for_input ->
+         continue ~acc_text:(Keeper_chat_blocks.status_kind_connector_text
+           ~question:reply Waiting_for_input) ()
+       | Visible_reply | Continuation_checkpoint | Terminal_effect_settled
+       | Awaiting_gate_approval | No_visible_reply -> continue ())
     | Batch_bound _
     | Continuation_checkpoint _
     | Agent_core_stream_connected
@@ -499,6 +509,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         continue ()
     | Status_block { kind } ->
         (match kind with
+         | Keeper_chat_blocks.Waiting_for_input -> continue ()
          | Keeper_chat_blocks.Awaiting_gate_approval ->
              (* The turn's partial text is deliberately replaced by the
                 pending-approval status; the external-effect flow then owns

@@ -51,6 +51,7 @@ type acceptance = {
 type turn_outcome = Masc.Keeper_turn_outcome.t =
   | Visible_reply
   | Continuation_checkpoint
+  | Waiting_for_input
   | Terminal_effect_settled
   | Awaiting_gate_approval
   | No_visible_reply
@@ -1285,16 +1286,16 @@ let decode_data_event ~request state json =
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
   let state = match state.terminal, state.reply_details, event_type with
-    | Some Run_finished, Some { turn_outcome = Continuation_checkpoint; _ }, ("RUN_STARTED" | "RUN_ERROR")
+    | Some Run_finished, Some { turn_outcome = (Continuation_checkpoint | Waiting_for_input); _ }, ("RUN_STARTED" | "RUN_ERROR")
       when state.text_ended ->
       (* A reconnect can replay several complete checkpoint segments. Only a
-         validated checkpoint boundary admits another run for this request. *)
+         validated checkpoint/input-wait boundary admits another run for this request. *)
       { initial_decode_state with acceptance = state.acceptance }
     | ( (None | Some (Run_finished | Run_error _))
       , ( None
         | Some
             { turn_outcome =
-                ( Visible_reply | Continuation_checkpoint
+                ( Visible_reply | Continuation_checkpoint | Waiting_for_input
                 | Terminal_effect_settled | Awaiting_gate_approval
                 | No_visible_reply )
             ; _

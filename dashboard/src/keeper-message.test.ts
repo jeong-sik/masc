@@ -92,6 +92,15 @@ describe('normalizeKeeperConversationDetails', () => {
     expect(result!.traceId).toBe('outer')
   })
 
+  it('decodes explicit input waiting without promoting the question to an answer', () => {
+    const result = normalizeKeeperConversationDetails({
+      turn_outcome: 'waiting_for_input', reply: 'Which original branch?', turn_ref: 'original#1',
+    })
+    expect(result?.turnOutcome).toBe('waiting_for_input')
+    expect(result?.replyText).toBe('Which original branch?')
+    expect(keeperTurnOutcomeSuppressesReply(result?.turnOutcome)).toBe(true)
+  })
+
   it('defaults null for missing string fields', () => {
     const result = normalizeKeeperConversationDetails({})
     expect(result).not.toBeNull()
@@ -172,6 +181,7 @@ describe('normalizeKeeperConversationDetails', () => {
 describe('keeperTurnOutcomeSuppressesReply', () => {
   it('suppresses terminal control outcomes, including connector delivery', () => {
     expect(keeperTurnOutcomeSuppressesReply('continuation_checkpoint')).toBe(true)
+    expect(keeperTurnOutcomeSuppressesReply('waiting_for_input')).toBe(true)
     expect(keeperTurnOutcomeSuppressesReply('external_effect_pending')).toBe(true)
     expect(keeperTurnOutcomeSuppressesReply('external_effect_completed')).toBe(true)
     expect(keeperTurnOutcomeSuppressesReply('no_visible_reply')).toBe(true)

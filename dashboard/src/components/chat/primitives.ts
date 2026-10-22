@@ -2539,7 +2539,7 @@ const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
   'status',
 ])
 
-type ChatControlStatus = 'continuation_checkpoint' | 'external_effect_pending' | 'external_effect_completed'
+type ChatControlStatus = 'continuation_checkpoint' | 'waiting_for_input' | 'external_effect_pending' | 'external_effect_completed'
 
 function chatControlStatus(entry: KeeperConversationEntry): ChatControlStatus | null {
   const persistedStatus = (entry.blocks ?? []).find(
@@ -2548,6 +2548,7 @@ function chatControlStatus(entry: KeeperConversationEntry): ChatControlStatus | 
   if (persistedStatus) return persistedStatus.kind
   const turnOutcome = entry.details?.turnOutcome
   return turnOutcome === 'continuation_checkpoint'
+    || turnOutcome === 'waiting_for_input'
     || turnOutcome === 'external_effect_pending'
     || turnOutcome === 'external_effect_completed'
     ? turnOutcome
@@ -2566,13 +2567,15 @@ function ChatControlStatusCard({
   const timestamp = timeLabel(entry.timestamp)
   const supportingBlocks = (entry.blocks ?? []).filter(block => block.t !== 'status')
 
-  if (status === 'continuation_checkpoint') {
+  if (status === 'continuation_checkpoint' || status === 'waiting_for_input') {
+    const waitingForInput = status === 'waiting_for_input'
+    const observedQuestion = entry.details?.replyText ?? entry.rawText ?? entry.text
     return html`
       <article
         class="w-full rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-subtle)] px-4 py-3.5"
         role="status"
         aria-live="polite"
-        data-chat-control-status="continuation_checkpoint"
+        data-chat-control-status=${status}
         data-chat-entry-id=${entry.id}
         data-chat-turn-ref=${entry.turnRef ?? undefined}
       >
@@ -2585,17 +2588,17 @@ function ChatControlStatusCard({
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <strong class="text-sm font-semibold text-[var(--color-fg-primary)]">이어가기 예약됨</strong>
+              <strong class="text-sm font-semibold text-[var(--color-fg-primary)]">${waitingForInput ? '입력 요청 관측' : '이어가기 예약됨'}</strong>
               ${timestamp
                 ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
                 : null}
             </div>
             <p class="mt-1 text-sm leading-paragraph text-[var(--color-fg-secondary)]">
-              작업이 체크포인트에 저장되었습니다.
+              ${waitingForInput ? observedQuestion : '작업이 체크포인트에 저장되었습니다.'}
             </p>
-            <p class="mt-0.5 text-xs leading-paragraph text-[var(--color-fg-muted)]">
+            ${waitingForInput ? null : html`<p class="mt-0.5 text-xs leading-paragraph text-[var(--color-fg-muted)]">
               Keeper가 다음 주기에 이어서 처리합니다.
-            </p>
+            </p>`}
           </div>
         </div>
         ${supportingBlocks.length > 0

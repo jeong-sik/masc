@@ -2424,6 +2424,17 @@ let test_a_failed_trigger_is_named_on_the_compact_row () =
   check bool "the block draws in the failure's state" true
     (Transcript.skill_block_state [ ok; failed ] = Transcript.Skill_failed)
 
+let test_input_wait_keeps_the_request_unsettled () =
+  let t=fresh () in
+  feed t [Live.Run_started;Live.Reply_details {terminal_stream_scope=None;reply="";
+    turn_outcome=Masc.Keeper_turn_outcome.Waiting_for_input;turn_ref="input-wait#1"};Live.Run_finished];
+  check phase "input wait leaves original operation waiting" Transcript.Waiting (Transcript.phase t);
+  check (option (float 0.)) "input pause does not settle original request" None (Transcript.settled_at t);
+  check bool "input pause retains the original continuation" true (Transcript.awaiting_continuation t);
+  feed t [Live.Run_started;reply_details ~reply:"after explicit response" ();Live.Run_finished];
+  check phase "later actual answer settles request" Transcript.Stream_ended (Transcript.phase t)
+;;
+
 let test_checkpoint_wait_keeps_the_request_live () =
   let t = fresh () in
   feed t [Live.Run_started; tool_started ~block_index:0 "before" "read_file"; tool_ended ~block_index:0 "before";
@@ -3091,6 +3102,7 @@ let () =
             test_the_legend_names_every_mark_and_phrase_the_rows_draw
         ; test_case "an observed action draws the shared display label" `Quick
             test_an_observed_action_draws_the_shared_display_label
+        ; test_case "input wait keeps original request unsettled" `Quick test_input_wait_keeps_the_request_unsettled
         ; test_case "checkpoint keeps original request live" `Quick test_checkpoint_wait_keeps_the_request_live
         ; test_case "started_at keeps the dispatch instant" `Quick
             test_started_at_keeps_the_dispatch_instant

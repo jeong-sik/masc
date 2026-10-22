@@ -103,11 +103,12 @@ type fusion_block = {
 
 type status_kind =
   | Continuation_checkpoint
+  | Waiting_for_input
   | Awaiting_gate_approval
 
 type status_block = { kind : status_kind }
 
-val status_kind_connector_text : status_kind -> string
+val status_kind_connector_text : ?question:string -> status_kind -> string
 (** Channel-facing presentation for a typed status. This is delivery UI text,
     not assistant output, and must not be persisted as assistant content. *)
 
@@ -121,6 +122,9 @@ val status_kind_of_label : string -> status_kind option
 type connector_projection =
   | Connector_text of string
   | Connector_status of status_block
+  | Connector_input_wait of { question : string option }
+    (** The observed input question, not a current-wait or response capability.
+        [None] means this display payload supplied no question. *)
   | Connector_no_visible_reply
 
 val connector_projection :

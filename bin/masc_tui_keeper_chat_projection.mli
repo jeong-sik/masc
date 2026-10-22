@@ -49,6 +49,7 @@ type acceptance = {
 type turn_outcome = Masc.Keeper_turn_outcome.t =
   | Visible_reply
   | Continuation_checkpoint
+  | Waiting_for_input
   | Terminal_effect_settled
   | Awaiting_gate_approval
   | No_visible_reply

@@ -634,7 +634,7 @@ let phase t = t.phase
 let ending_source t = t.ending_source
 let awaiting_continuation t =
   match t.phase, t.reply with
-  | Waiting, Some { reply_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint; _ } -> true
+  | Waiting, Some { reply_outcome = (Masc.Keeper_turn_outcome.Continuation_checkpoint | Waiting_for_input); _ } -> true
   | ( (Waiting | Working | Stream_ended | Stream_failed _)
     , ( None
       | Some
@@ -642,6 +642,7 @@ let awaiting_continuation t =
               ( Masc.Keeper_turn_outcome.Visible_reply
               | Masc.Keeper_turn_outcome.Continuation_checkpoint
               | Masc.Keeper_turn_outcome.Terminal_effect_settled
+              | Masc.Keeper_turn_outcome.Waiting_for_input
               | Masc.Keeper_turn_outcome.Awaiting_gate_approval
               | Masc.Keeper_turn_outcome.No_visible_reply )
           ; _
@@ -2045,7 +2046,7 @@ let apply_delta ~now t (delta : Live.delta) =
       settle t ~now
   | Live.Run_finished ->
       (match t.phase, t.reply with
-       | (Waiting | Working), Some { reply_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint; _ }
+       | (Waiting | Working), Some { reply_outcome = (Masc.Keeper_turn_outcome.Continuation_checkpoint | Waiting_for_input); _ }
          when (match t.source with Masc_tui_keeper_chat_log.Operation _ -> true | Autonomous_turn _ -> false) ->
          t.phase <- Waiting;
          t.ended_at <- None;
@@ -2057,6 +2058,7 @@ let apply_delta ~now t (delta : Live.delta) =
                    ( Masc.Keeper_turn_outcome.Visible_reply
                    | Masc.Keeper_turn_outcome.Continuation_checkpoint
                    | Masc.Keeper_turn_outcome.Terminal_effect_settled
+                   | Masc.Keeper_turn_outcome.Waiting_for_input
                    | Masc.Keeper_turn_outcome.Awaiting_gate_approval
                    | Masc.Keeper_turn_outcome.No_visible_reply )
                ; _
@@ -2072,7 +2074,7 @@ let apply_delta ~now t (delta : Live.delta) =
         Some { reply_text = reply; reply_at = now; reply_outcome = turn_outcome; reply_turn_ref = turn_ref;
           reply_stream_scope = terminal_stream_scope };
       (match turn_outcome with
-       | Masc.Keeper_turn_outcome.Continuation_checkpoint -> ()
+       | Masc.Keeper_turn_outcome.Continuation_checkpoint | Waiting_for_input -> ()
        | Visible_reply | Terminal_effect_settled | Awaiting_gate_approval | No_visible_reply -> settle t ~now)
   | Live.Undecodable detail ->
       note_unreadable t detail
@@ -2291,6 +2293,7 @@ let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
       Printf.sprintf "Turn completed with non-text visible content (turn %s)" turn_ref
   | Masc.Keeper_turn_outcome.Continuation_checkpoint ->
       Printf.sprintf "Continuation checkpoint recorded (turn %s)" turn_ref
+  | Masc.Keeper_turn_outcome.Waiting_for_input -> "입력 요청 관측\n" ^ reply
   | Masc.Keeper_turn_outcome.Terminal_effect_settled ->
       Printf.sprintf "Reply delivered by a terminal tool (turn %s)" turn_ref
   | Masc.Keeper_turn_outcome.Awaiting_gate_approval ->
@@ -2490,6 +2493,7 @@ let compute_drawn t =
                 ( Masc.Keeper_turn_outcome.Visible_reply
                 | Masc.Keeper_turn_outcome.Continuation_checkpoint
                 | Masc.Keeper_turn_outcome.Terminal_effect_settled
+                | Masc.Keeper_turn_outcome.Waiting_for_input
                 | Masc.Keeper_turn_outcome.Awaiting_gate_approval
                 | Masc.Keeper_turn_outcome.No_visible_reply )
             ; _
@@ -2571,6 +2575,7 @@ let compute_drawn t =
           ( ( Masc.Keeper_turn_outcome.Visible_reply
             | Masc.Keeper_turn_outcome.Continuation_checkpoint
             | Masc.Keeper_turn_outcome.Terminal_effect_settled
+            | Masc.Keeper_turn_outcome.Waiting_for_input
             | Masc.Keeper_turn_outcome.Awaiting_gate_approval
             | Masc.Keeper_turn_outcome.No_visible_reply ) as reply_outcome )
       ; reply_turn_ref

@@ -539,6 +539,7 @@ let adapter_loop_with_transport
     ?base_url
     ?(on_send_result = fun _ -> ()) () =
   let external_effect_completed = ref false in
+  let continuation_pending = ref false in
   let tool_trail = ref (Keeper_chat_tool_trail.create ()) in
   let external_effect_cleanup_result = ref (Ok ()) in
   let activity_error_logged = ref false in
@@ -702,11 +703,13 @@ let adapter_loop_with_transport
         clear_activity ();
         Keeper_chat_events.reader_gone events
     | External_effect_completed _ ->
+        if not !continuation_pending then begin
         external_effect_completed := true;
         (match streaming_transport, message_id with
          | Some (_, _, _, delete), Some message_id ->
            external_effect_cleanup_result := delete ~message_id
          | _ -> ());
+        end;
         continue ()
     | Event_error { message } ->
         let content = "Keeper error: " ^ message in
@@ -735,7 +738,16 @@ let adapter_loop_with_transport
     | Provider_retry_observed _ -> continue ()
     | Text_message_start { message_id = _; role = _ } ->
         continue ()
-    | Reply_details _
+    | Reply_details {turn_outcome;reply;_} ->
+      continuation_pending := (match turn_outcome with
+        | Keeper_turn_outcome.Waiting_for_input | Continuation_checkpoint -> true
+        | Visible_reply | Terminal_effect_settled | Awaiting_gate_approval | No_visible_reply -> false);
+      (match turn_outcome with
+       | Keeper_turn_outcome.Waiting_for_input ->
+         continue ~acc_text:(Keeper_chat_blocks.status_kind_connector_text
+           ~question:reply Waiting_for_input) ()
+       | Visible_reply | Continuation_checkpoint | Terminal_effect_settled
+       | Awaiting_gate_approval | No_visible_reply -> continue ())
     | Batch_bound _
     | Continuation_checkpoint _
     | Agent_core_stream_connected
@@ -796,6 +808,7 @@ let adapter_loop_with_transport
     | Status_block status ->
         let block = status_block_json status in
         (match status.Keeper_chat_blocks.kind with
+         | Keeper_chat_blocks.Waiting_for_input -> continue ()
          | Keeper_chat_blocks.Awaiting_gate_approval ->
            (* The turn's partial text is deliberately replaced by the
               pending-approval status; External_effect_completed later deletes

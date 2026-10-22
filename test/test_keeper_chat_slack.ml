@@ -639,6 +639,22 @@ let test_terminal_edit_waits_for_slack_interval () =
    | _ -> fail "terminal delivery must add one rich edit");
   check bool "paced delivery settles successfully" true (outcomes = [ Ok () ])
 
+let test_input_wait_keeps_question_after_prior_delivery () =
+  let question="Which original branch?" in
+  let sends=ref [] in
+  let events=[Masc.Keeper_chat_events.Run_started {run_id="input-wait";thread_id="input-wait"};
+    Masc.Keeper_chat_events.Reply_details {reply=question;turn_outcome=Waiting_for_input;
+      turn_ref=Ids.Turn_ref.make ~trace_id:"input-wait" ~absolute_turn:1;terminal_stream_scope=None};
+    Masc.Keeper_chat_events.External_effect_completed {target=Masc.Keeper_surface_post.Delivered_to_dashboard};
+    Masc.Keeper_chat_events.Status_block {kind=Masc.Keeper_chat_blocks.Waiting_for_input};
+    Masc.Keeper_chat_events.Run_finished {run_id="input-wait"}] in
+  let outcomes=run_adapter events
+    ~send_plain:(fun ~content -> sends:=content :: !sends;Ok ())
+    ~send_blocks:(fun ~content ~blocks:_ -> sends:=content :: !sends;Ok ()) in
+  check bool "waiting control delivery succeeds" true (outcomes=[Ok ()]);
+  check bool "canonical question reaches the connector after prior delivery evidence" true
+    (List.exists (fun content -> contains content question) !sends)
+
 let test_adapter_external_effect_status_is_terminal_success () =
   let sends = ref [] in
   let outcomes =
@@ -962,6 +978,7 @@ let () =
             test_private_errors_never_reach_channel
         ; test_case "empty terminal is explicit failure" `Quick
             test_adapter_empty_terminal_is_error
+        ; test_case "input question survives prior delivery evidence" `Quick test_input_wait_keeps_question_after_prior_delivery
         ; test_case "completed effect sends no duplicate reply" `Quick
             test_completed_external_effect_settles_without_duplicate_send
         ; test_case "completed effect deletes streamed draft" `Quick

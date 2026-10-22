@@ -216,6 +216,7 @@ export const KeeperChatBlockSchema = union([
     t: literal('status'),
     kind: union([
       literal('continuation_checkpoint'),
+      literal('waiting_for_input'),
       literal('external_effect_pending'),
     ]),
   }),

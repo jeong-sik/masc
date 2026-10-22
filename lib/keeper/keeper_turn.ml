@@ -1014,8 +1014,9 @@ let run_keeper_invocation_turn_admitted_inner
                 with
                 | Keeper_unified_turn_success.Completed updated_meta -> updated_meta
               in
-              let checkpoint_yield = Keeper_turn_outcome.equal result.turn_outcome
-                  Keeper_turn_outcome.Continuation_checkpoint in
+              let continuation_pending = match result.turn_outcome with
+                | Keeper_turn_outcome.Continuation_checkpoint | Waiting_for_input -> true
+                | Visible_reply | Terminal_effect_settled | Awaiting_gate_approval | No_visible_reply -> false in
               let retained = match result.stop_reason with
                 | Runtime_agent.InputRequired {request;_} ->
                   let ( let* ) = Result.bind in
@@ -1025,7 +1026,7 @@ let run_keeper_invocation_turn_admitted_inner
                   Ok ()
                 | Runtime_agent.Completed | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
                 | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _ ->
-                if checkpoint_yield then
+                if continuation_pending then
                   match result.checkpoint with
                   | Some checkpoint -> Keeper_direct_checkpoint_continuation.defer
                       ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
@@ -1095,7 +1096,7 @@ let run_keeper_invocation_turn_admitted_inner
                 ] @ terminal_effect_fields)
               in
               dispatch_ok
-                (if checkpoint_yield then
+                (if continuation_pending then
                    Tool_result.make_deferred ~tool_name:"masc_keeper_msg"
                      ~start_time:(Tool_timing.start ()) ~data:reply_json ()
                  else tool_result_ok_data reply_json))

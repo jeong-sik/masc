@@ -2359,8 +2359,8 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
             ~since_seq request
         in
         match result with
-        | Ok (Keeper_chat.Turn_completed { turn_outcome = Keeper_chat.Continuation_checkpoint; _ }) ->
-            (* A checkpoint closes this transport segment, not the durable
+        | Ok (Keeper_chat.Turn_completed { turn_outcome = (Keeper_chat.Continuation_checkpoint | Keeper_chat.Waiting_for_input); _ }) ->
+            (* A checkpoint or input wait closes this transport segment, not the durable
                request. Subscribe after its last journal sequence to receive
                the eventual answer under the same operation identity. *)
             watch ~first_post:false ~since_seq:(resume_position ()) false

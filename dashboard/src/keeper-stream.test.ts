@@ -1042,6 +1042,41 @@ describe('Keeper operation stream projection', () => {
     expect(keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')?.rawText).toBe('before after')
   })
 
+  it.each([false, true])('keeps an input-wait stream nonterminal after prior delivery %s and admits the later actual answer', (posted) => {
+    const operationId = 'original-input-operation'
+    assistantEntry(operationId)
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_STARTED' })
+    const wire = { type: 'CUSTOM', threadId: 'keeper:original-input-operation',
+      runId: 'original-input-run', timestamp: 1, name: 'KEEPER_REPLY_DETAILS', value: {
+      reply: 'Which original branch?', turn_outcome: 'waiting_for_input',
+      turn_ref: 'original#1',
+    } }
+    const parsed = parseSSEMessage({ type: 'keeper_chat_operation_event', name: 'sangsu',
+      operation_id: operationId, ag_ui_event: wire })
+    expect(parsed?.ag_ui_event).toEqual(wire)
+    if (!parsed) throw new Error('typed input wait failed SSE decoding')
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', parsed.ag_ui_event as KeeperChatStreamEvent,
+      {kind: 'operation', operationId})).toBeNull()
+    if (posted) applyKeeperStreamEvent('sangsu', 'reply-1', {type: 'CUSTOM', name: 'KEEPER_EXTERNAL_EFFECT_COMPLETED',
+      value: {target: {kind: 'dashboard'}}}, {kind: 'operation', operationId})
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'RUN_FINISHED' },
+      {kind: 'operation', operationId})).toBeNull()
+    const waiting = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(waiting).toMatchObject({ text: '', rawText: 'Which original branch?', delivery: 'queued',
+      details: {turnOutcome: 'waiting_for_input'}, responseState: {phase: 'awaiting-continuation'} })
+    expect(waiting?.blocks).toContainEqual({t: 'status', kind: 'waiting_for_input'})
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {type: 'RUN_STARTED'},
+      {kind: 'operation', operationId})).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {type: 'CUSTOM', name: 'KEEPER_REPLY_DETAILS',
+      value: {reply: 'Actual answer', turn_outcome: 'visible_reply', turn_ref: 'original#2'}},
+      {kind: 'operation', operationId})).toBeNull()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {type: 'RUN_FINISHED'}, {kind: 'operation', operationId})
+    const completed = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(completed).toMatchObject({text: 'Actual answer', delivery: 'delivered',
+      responseState: {phase: 'terminal'}})
+    expect(completed?.blocks?.some(block => block.t === 'status')).toBe(false)
+  })
+
   it('streams text into the selected assistant entry', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

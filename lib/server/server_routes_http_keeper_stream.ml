@@ -1514,7 +1514,7 @@ let assoc_replace key value fields =
 let public_reply_of_outcome ~turn_outcome ~reply =
   match (turn_outcome : Keeper_turn_outcome.t) with
   | Terminal_effect_settled -> None
-  | Visible_reply | Continuation_checkpoint | Awaiting_gate_approval
+  | Visible_reply | Continuation_checkpoint | Waiting_for_input | Awaiting_gate_approval
   | No_visible_reply -> Some reply
 
 let canonical_reply_payload_of_body ~redact_text body =
@@ -1550,7 +1550,8 @@ let canonical_reply_payload_of_body ~redact_text body =
     let receipt_required, receipt_allowed =
       match turn_outcome with
       | Keeper_turn_outcome.Terminal_effect_settled -> true, true
-      | Keeper_turn_outcome.Continuation_checkpoint -> false, true
+      | Keeper_turn_outcome.Continuation_checkpoint
+      | Keeper_turn_outcome.Waiting_for_input -> false, true
       | Keeper_turn_outcome.Visible_reply
       | Keeper_turn_outcome.Awaiting_gate_approval
       | Keeper_turn_outcome.No_visible_reply -> false, false
@@ -1651,6 +1652,7 @@ let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt v
      with
      | Keeper_turn_outcome.Continuation_checkpoint, _, _ -> None
      | Keeper_turn_outcome.Terminal_effect_settled, _, _ -> None
+     | Keeper_turn_outcome.Waiting_for_input, _, _ -> None
      | Keeper_turn_outcome.Awaiting_gate_approval, _, _ -> None
      | Keeper_turn_outcome.No_visible_reply, _, true -> None
      | Keeper_turn_outcome.Visible_reply, None, true -> None
@@ -1670,6 +1672,9 @@ let persisted_reply_blocks ~reply ~turn_outcome media_blocks =
       [ Keeper_chat_blocks.Status
           { kind = Keeper_chat_blocks.Continuation_checkpoint }
       ]
+  | Keeper_turn_outcome.Waiting_for_input, media_blocks ->
+    Some (Keeper_chat_blocks.Status {kind=Keeper_chat_blocks.Waiting_for_input}
+      :: (match media_blocks with Some blocks -> blocks | None -> []))
   | Keeper_turn_outcome.Awaiting_gate_approval, Some media_blocks ->
     Some
       (Keeper_chat_blocks.Status
@@ -1808,7 +1813,7 @@ let empty_reply_delivery_plan ~has_visible_blocks ~has_tool_calls =
    diagnostic prose. Pending control boundaries still preserve their words. *)
 let control_turn_delivery ~turn_outcome ~spoken =
   match (turn_outcome : Keeper_turn_outcome.t), spoken with
-  | (Continuation_checkpoint | Awaiting_gate_approval), spoken ->
+  | (Continuation_checkpoint | Waiting_for_input | Awaiting_gate_approval), spoken ->
     `Assistant_row (Option.value spoken ~default:"")
   | Terminal_effect_settled, _ -> `Tool_calls_only
   | (Visible_reply | No_visible_reply), spoken ->
@@ -2493,6 +2498,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                    in
                    match turn_outcome, spoken with
                    | ( ( Keeper_turn_outcome.Continuation_checkpoint
+                       | Keeper_turn_outcome.Waiting_for_input
                        | Keeper_turn_outcome.Awaiting_gate_approval
                        | Keeper_turn_outcome.Terminal_effect_settled ) as
                        control_outcome )
@@ -2995,6 +3001,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
             match turn_outcome with
             | Keeper_turn_outcome.Continuation_checkpoint
             | Keeper_turn_outcome.Terminal_effect_settled
+            | Keeper_turn_outcome.Waiting_for_input
             | Keeper_turn_outcome.Awaiting_gate_approval
             | Keeper_turn_outcome.No_visible_reply ->
                 true
@@ -3021,6 +3028,9 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
              Keeper_chat_events.publish events
                (External_effect_completed { target })
            | None -> ());
+          if Keeper_turn_outcome.equal turn_outcome Keeper_turn_outcome.Waiting_for_input then
+            Keeper_chat_events.publish events
+              (Status_block {kind=Keeper_chat_blocks.Waiting_for_input});
           if
             Keeper_turn_outcome.equal turn_outcome
               Keeper_turn_outcome.Awaiting_gate_approval
@@ -3323,6 +3333,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                            | Keeper_turn_outcome.Visible_reply
                              when String.trim details.reply <> "" ->
                              Some details.reply
+                           | Keeper_turn_outcome.Waiting_for_input ->
+                             Some (Keeper_chat_blocks.status_kind_connector_text
+                               ~question:details.reply Keeper_chat_blocks.Waiting_for_input)
                            (* The turn spoke somewhere else or said nothing;
                               either way there is no text to send. *)
                            | Keeper_turn_outcome.Visible_reply
@@ -3411,6 +3424,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                         | Keeper_turn_outcome.Visible_reply
                         | Keeper_turn_outcome.Continuation_checkpoint
                         | Keeper_turn_outcome.Terminal_effect_settled
+                        | Keeper_turn_outcome.Waiting_for_input
                         | Keeper_turn_outcome.Awaiting_gate_approval
                         | Keeper_turn_outcome.No_visible_reply -> None)
                    | Keeper_chat_events.Next (Keeper_chat_events.Run_finished _) ->

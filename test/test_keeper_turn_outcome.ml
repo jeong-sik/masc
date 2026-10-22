@@ -31,6 +31,7 @@ let outcome : TO.t testable =
 let all =
   [ TO.Visible_reply
   ; TO.Continuation_checkpoint
+  ; TO.Waiting_for_input
   ; TO.Terminal_effect_settled
   ; TO.Awaiting_gate_approval
   ; TO.No_visible_reply
@@ -77,6 +78,44 @@ let test_parked_call_label_still_decodes () =
   | Some _ | None ->
     fail "a status block from a pre-change lane no longer decodes"
 
+let test_input_wait_survives_delivery_and_payload_projection () =
+  let request : Agent_core.Error.input_required =
+    {request_id="owned-input-surface";participant_name=Some "operator";
+     question="Which original branch?";schema=None;timeout_s=None;created_at=1.} in
+  let stop_reason=Runtime_agent.InputRequired {turns_used=0;request} in
+  List.iter (fun response_text ->
+    check outcome "input pause remains waiting with or without text" TO.Waiting_for_input
+      (TO.of_result_surface ~response_text stop_reason)) ["";request.question];
+  let receipt=Masc.Keeper_tool_execution.Surface_post_completed Masc.Keeper_surface_post.To_dashboard in
+  (match Masc.Keeper_agent_run.For_testing.finalize_turn_surface ~response_text:request.question
+      ~stop_reason (Masc.Keeper_tools_agent_core.Terminal_effect_completed receipt) with
+   | Ok (observed,retained) ->
+     check outcome "an earlier delivered effect cannot complete the input wait" TO.Waiting_for_input observed;
+     check bool "actual delivery receipt is preserved" true (retained=Some receipt)
+   | Error error -> fail (Agent_core.Error.to_string error));
+  let turn_ref=Ids.Turn_ref.make ~trace_id:"input-wait-surface" ~absolute_turn:1 in
+  let payload=`Assoc ["reply",`String request.question;
+    TO.wire_key,`String (TO.to_label TO.Waiting_for_input);
+    TO.turn_ref_wire_key,Ids.Turn_ref.to_yojson turn_ref;
+    Masc.Keeper_surface_post.delivery_target_wire_key,`Assoc ["kind",`String "dashboard"]] in
+  let canonical=match Stream.canonical_reply_payload_of_body ~redact_text:Fun.id (Yojson.Safe.to_string payload) with
+    | Ok canonical -> canonical
+    | Error error -> fail (Stream.canonical_reply_payload_error_to_string error) in
+  check outcome "HTTP keeps explicit input-wait outcome" TO.Waiting_for_input canonical.turn_outcome;
+  check bool "HTTP keeps earlier delivery evidence without making the wait terminal" true
+    (Option.is_some canonical.external_effect_target);
+  check bool "wordless waiting control is not an empty-reply failure" true
+    (Stream.direct_reply_terminal_error (Some payload) ""=None);
+  let expected=[Masc.Keeper_chat_blocks.Status {kind=Masc.Keeper_chat_blocks.Waiting_for_input}] in
+  let blocks=Stream.persisted_reply_blocks ~reply:request.question ~turn_outcome:TO.Waiting_for_input None in
+  check bool "persisted wait has a typed status block" true (blocks=Some expected);
+  (match Ops.direct_reply_projection (Yojson.Safe.to_string payload) with
+   | Ok (Connector_input_wait {question=Some observed}) ->
+     check string "connector preserves the canonical question" request.question observed
+   | Ok (Connector_status ( {kind=(Continuation_checkpoint | Waiting_for_input | Awaiting_gate_approval)} )
+       | Connector_input_wait {question=None} | Connector_text _ | Connector_no_visible_reply) -> fail "connector must retain input waiting"
+   | Error error -> fail (Ops.direct_reply_decode_error_to_string error))
+
 let test_unknown_label_is_none () =
   List.iter
     (fun label ->
@@ -113,7 +152,7 @@ let test_of_stop_reason () =
     (TO.of_stop_reason
        (Runtime_agent.Yielded_after_repeated_assistant_text
           { turns_used = 2; repeated_count = 3 }));
-  check outcome "typed input required -> visible" TO.Visible_reply
+  check outcome "typed input required -> waiting" TO.Waiting_for_input
     (TO.of_stop_reason
        (Runtime_agent.InputRequired { turns_used = 2; request }))
 
@@ -1871,8 +1910,8 @@ let test_connector_projection_keeps_external_wait_typed () =
       ~reply:(Some "assistant preface that must not survive")
   with
   | Connector_status { kind = Awaiting_gate_approval } -> ()
-  | Connector_status { kind = Continuation_checkpoint }
-  | Connector_text _ | Connector_no_visible_reply ->
+  | Connector_status { kind = (Continuation_checkpoint | Waiting_for_input) }
+  | Connector_input_wait _ | Connector_text _ | Connector_no_visible_reply ->
     fail "external-effect wait must remain a typed connector status"
 
 let test_connector_projection_keeps_continuation_typed () =
@@ -1882,8 +1921,8 @@ let test_connector_projection_keeps_continuation_typed () =
       ~reply:(Some "assistant preface that must not survive")
   with
   | Connector_status { kind = Continuation_checkpoint } -> ()
-  | Connector_status { kind = Awaiting_gate_approval }
-  | Connector_text _ | Connector_no_visible_reply ->
+  | Connector_status { kind = (Awaiting_gate_approval | Waiting_for_input) }
+  | Connector_input_wait _ | Connector_text _ | Connector_no_visible_reply ->
     fail "continuation checkpoint must remain a typed connector status"
 
 let test_connector_projection_suppresses_completed_external_effect () =
@@ -1893,7 +1932,7 @@ let test_connector_projection_suppresses_completed_external_effect () =
       ~reply:None
   with
   | Connector_no_visible_reply -> ()
-  | Connector_status _ | Connector_text _ ->
+  | Connector_input_wait _ | Connector_status _ | Connector_text _ ->
     fail "completed external effect must not emit a duplicate connector reply"
 
 let test_direct_reply_projection_keeps_external_wait_typed () =
@@ -1905,8 +1944,8 @@ let test_direct_reply_projection_keeps_external_wait_typed () =
          ])
   with
   | Ok (Connector_status { kind = Awaiting_gate_approval }) -> ()
-  | Ok (Connector_status { kind = Continuation_checkpoint })
-  | Ok (Connector_text _ | Connector_no_visible_reply) ->
+  | Ok (Connector_status { kind = (Continuation_checkpoint | Waiting_for_input) })
+  | Ok (Connector_input_wait _ | Connector_text _ | Connector_no_visible_reply) ->
     fail "direct reply collapsed external-effect wait into silence"
   | Error error ->
     fail (Ops.direct_reply_decode_error_to_string error)
@@ -1953,6 +1992,8 @@ let () =
         [
           test_case "of_stop_reason" `Quick test_of_stop_reason;
           test_case "of_result_surface" `Quick test_of_result_surface;
+          test_case "input wait survives delivery and payload projection" `Quick
+            test_input_wait_survives_delivery_and_payload_projection;
           test_case "posted progress retains cooperative continuation" `Quick
             test_progress_post_keeps_typed_continuation;
           test_case "completed external effect has no direct reply error" `Quick

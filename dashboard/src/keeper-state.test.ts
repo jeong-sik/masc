@@ -1809,6 +1809,14 @@ describe('thread history merge & persistence', () => {
     ])
   })
 
+  it('keeps a typed input-wait status in restored history without inventing text', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [{role: 'assistant', content: '', ts: 1780000000,
+      blocks: [{t: 'status', kind: 'waiting_for_input'}]}])
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.text).toBe('')
+    expect(entries[0]?.blocks).toEqual([{t: 'status', kind: 'waiting_for_input'}])
+  })
+
   it('keeps a typed continuation status block when assistant content is empty', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       {

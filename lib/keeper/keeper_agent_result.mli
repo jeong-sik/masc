@@ -36,6 +36,8 @@ type wire_prompt_tokens =
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
+    (** For [Waiting_for_input], the typed [InputRequired] request's exact
+        question, observed for display. This grants no response authority. *)
   ; turn_outcome : Keeper_turn_outcome.t
   ; terminal_effect_receipt : Keeper_tool_execution.terminal_effect_receipt option
   ; model_used : string

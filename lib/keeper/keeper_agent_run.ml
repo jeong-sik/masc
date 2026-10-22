@@ -105,6 +105,10 @@ let with_completion_clause ~input_speaker ~response_policy user_message =
    reasoning-only turn apart. *)
 let normalize_final_response_text ~response_policy ~keeper_name ~runtime_id
     ~(run_result : Runtime_agent.run_result) ~text ~tool_names () =
+  match run_result.stop_reason with
+  | Runtime_agent.InputRequired {request;_} -> Ok request.question
+  | Completed | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
+  | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _ ->
   match
     Keeper_turn_response_contract.normalize_response_text_for_finalization
       ~runtime_id ~run_result ~text ~tool_names ()
@@ -815,10 +819,10 @@ let finalize_turn_surface ~response_text ~stop_reason terminal_effect_state =
   | Keeper_tools_agent_core.Terminal_effect_completed receipt ->
     let outcome =
       match Keeper_turn_outcome.of_result_surface ~response_text stop_reason with
-      | Keeper_turn_outcome.Continuation_checkpoint ->
+      | (Keeper_turn_outcome.Continuation_checkpoint | Keeper_turn_outcome.Waiting_for_input) as outcome ->
         (* Posting progress proves delivery, not completion of the operation
            whose settled conversation must still be retained for resumption. *)
-        Keeper_turn_outcome.Continuation_checkpoint
+        outcome
       | Keeper_turn_outcome.Visible_reply | Keeper_turn_outcome.No_visible_reply
       | Keeper_turn_outcome.Terminal_effect_settled
       | Keeper_turn_outcome.Awaiting_gate_approval ->

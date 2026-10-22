@@ -1510,11 +1510,14 @@ export function applyKeeperStreamEvent(
           ...entry,
           details: {
             ...(entry.details ?? {}),
-            turnOutcome: 'external_effect_completed',
+            turnOutcome: entry.details?.turnOutcome === 'continuation_checkpoint'
+              || entry.details?.turnOutcome === 'waiting_for_input'
+              ? entry.details.turnOutcome : 'external_effect_completed',
             externalEffectTarget,
           },
           text: '',
-          delivery: 'delivered',
+          delivery: entry.details?.turnOutcome === 'continuation_checkpoint'
+            || entry.details?.turnOutcome === 'waiting_for_input' ? 'queued' : 'delivered',
           streamState: null,
           streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', {
             eventName: 'KEEPER_EXTERNAL_EFFECT_COMPLETED',
@@ -1554,6 +1557,12 @@ export function applyKeeperStreamEvent(
                 turnRef: mergedDetails.turnRef ?? entry.turnRef,
                 rawText,
                 text: '',
+                ...(mergedDetails.turnOutcome === 'waiting_for_input' ? {
+                  blocks: [
+                    ...producerReplyBlocks(entry).filter(block => block.t !== 'status'),
+                    { t: 'status' as const, kind: 'waiting_for_input' as const },
+                  ],
+                } : {}),
                 delivery: mergedDetails.turnOutcome === 'no_visible_reply' ? 'no_reply' : 'queued',
                 streamState: null,
               }
@@ -1585,8 +1594,11 @@ export function applyKeeperStreamEvent(
     }
     case 'RUN_FINISHED': {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
+      const turnOutcome = (keeperThreads.value[keeperName] ?? []).find(
+        entry => entry.id === assistantEntryId,
+      )?.details?.turnOutcome
       const finished = admitResponseEvent(keeperName, assistantEntryId, {
-        kind: (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)?.details?.turnOutcome === 'continuation_checkpoint'
+        kind: turnOutcome === 'continuation_checkpoint' || turnOutcome === 'waiting_for_input'
           ? 'checkpoint' : 'terminal',
       })
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)

@@ -70,6 +70,13 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     ])
   })
 
+  it('retains an explicit input-wait block in empty persisted assistant content', () => {
+    const out = safeParseKeeperChatHistoryMessage(validMessage({
+      role: 'assistant', content: '', blocks: [{ t: 'status', kind: 'waiting_for_input' }],
+    }))
+    expect(out?.blocks).toEqual([{ t: 'status', kind: 'waiting_for_input' }])
+  })
+
   it('rejects an unknown transcript row classification', () => {
     const out = safeParseKeeperChatHistoryMessage(
       validMessage({ role: 'tool-result-v2' }),

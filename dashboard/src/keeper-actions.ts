@@ -8,6 +8,7 @@ import {
   sameDeliveryKey,
   toolDeliveryBelongsToProducer,
   operationDeliveryProvenance,
+  isOperationDeliveryProvenance,
   sameDeliveryProvenance,
 } from './keeper-delivery-provenance'
 import { callMcpTool } from './api/mcp'
@@ -603,7 +604,11 @@ async function reconcileOperationFromServerHistory(
       setRecordValue(keeperChatHistoryErrors, keeperName, null)
     }
     if (!canonical) return false
-    removeThreadEntries(keeperName, [localUserId, localAssistantId])
+    // Restoration can reuse canonical row IDs already observed before the
+    // operation settled. Only retire placeholders that this history replaced.
+    removeThreadEntries(keeperName, [localUserId, localAssistantId].filter(
+      id => !historyEntries.some(entry => entry.id === id),
+    ))
     return true
   } catch (err) {
     if (chatHistoryHydrationRequests.get(keeperName) !== request) return false
@@ -635,10 +640,14 @@ function isUnknownKeeperChatOperationError(err: unknown): boolean {
   return message.includes('/chat/operations/') && message.includes('unknown_operation')
 }
 
-function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation): string {
+function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation): {userId: string; assistantId: string} {
   const existing = keeperThreads.value[request.keeperName] ?? []
-  const userId = operationUserEntryId(request.operationId)
-  const assistantId = operationAssistantEntryId(request.operationId)
+  const userId = existing.find(entry => entry.role === 'user'
+    && isOperationDeliveryProvenance(entry.deliveryProvenance, request.operationId, 'accepted_user'))?.id
+    ?? operationUserEntryId(request.operationId)
+  const assistantId = [...existing].reverse().find(entry => entry.role === 'assistant'
+    && isOperationDeliveryProvenance(entry.deliveryProvenance, request.operationId, 'terminal_result'))?.id
+    ?? operationAssistantEntryId(request.operationId)
   const assistantDraft = request.assistantDraft
   if (!existing.some(entry => entry.id === userId)) {
     appendThreadEntry(request.keeperName, {
@@ -739,7 +748,7 @@ function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation
       appendThreadEntry(request.keeperName, { ...tool, role: 'tool', source: 'tool_result', streamState: null })
     }
   }
-  return assistantId
+  return {userId, assistantId}
 }
 
 function persistTrackedOperationAssistantDraft(
@@ -813,7 +822,7 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
   const key = `${request.keeperName}:${request.operationId}`
   if (hydratingKeeperChatOperations.has(key)) return
   hydratingKeeperChatOperations.add(key)
-  const assistantId = ensureTrackedOperationThreadEntries(request)
+  const {userId, assistantId} = ensureTrackedOperationThreadEntries(request)
   setRecordValue(keeperSending, request.keeperName, true)
   setRecordValue(keeperActionErrors, request.keeperName, null)
   setRecordValue(keeperStreamStartedAt, request.keeperName, request.submittedAt)
@@ -853,7 +862,7 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
           && (assistantStillLocal?.delivery ?? request.assistantDraft?.delivery) === 'no_reply'
           ? 'no_reply'
           : userDelivery
-      finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
+      finalizeAssistantEntry(request.keeperName, userId, {
         delivery: userDelivery,
         error: errorMessage,
         streamContract: keeperStreamContract('client_operation_lookup', 'client_operation_terminal', {
@@ -895,7 +904,7 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
       try {
         const canonical = await reconcileOperationFromServerHistory(
-          request.keeperName, request.operationId, operationUserEntryId(request.operationId), assistantId,
+          request.keeperName, request.operationId, userId, assistantId,
         )
         if (canonical) {
           removeTrackedKeeperChatOperation(request.operationId)
@@ -921,7 +930,7 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
       try {
         const canonical = await reconcileOperationFromServerHistory(
-          request.keeperName, request.operationId, operationUserEntryId(request.operationId), assistantId,
+          request.keeperName, request.operationId, userId, assistantId,
         )
         if (canonical) {
           removeTrackedKeeperChatOperation(request.operationId)
@@ -936,7 +945,7 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       return
     }
     if (isUnknownKeeperChatOperationError(err)) {
-      finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
+      finalizeAssistantEntry(request.keeperName, userId, {
         delivery: 'error',
         error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
@@ -961,7 +970,7 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
     const detail = err instanceof Error ? err.message : `Failed to resume ${request.keeperName} chat request`
     const message = `${PENDING_KEEPER_CHAT_RESUME_FAILED_MESSAGE} (${detail})`
     // A lookup failure is not a terminal operation receipt. Keep tracking.
-    finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
+    finalizeAssistantEntry(request.keeperName, userId, {
       delivery: 'error',
       error: message,
       streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
@@ -1285,6 +1294,7 @@ export async function sendKeeperThreadMessage(
   let operationAccepted = false
   let toolCallEnded = false
   let droppedFrame: string | null = null
+  let continuationToHydrate: TrackedKeeperChatOperation | null = null
   // #20849/#25898 Gap B: after ACCEPTED, the live-send SSE feed is silent
   // while the operation sits queued behind a running turn. [lastEventAt]
   // would otherwise cross STREAM_STALL_THRESHOLD_S and the composer would
@@ -1443,10 +1453,11 @@ export async function sendKeeperThreadMessage(
     }
 
     const finalDelivery = 'delivered' as KeeperConversationDelivery
+    const controlOutcome = finalEntry?.details?.turnOutcome
     const hasContinuationStatus = (
-      finalEntry?.details?.turnOutcome === 'continuation_checkpoint'
-      && finalEntry.blocks?.some(block => (
-        block.t === 'status' && block.kind === 'continuation_checkpoint'
+      (controlOutcome === 'continuation_checkpoint' || controlOutcome === 'waiting_for_input')
+      && finalEntry?.blocks?.some(block => (
+        block.t === 'status' && block.kind === controlOutcome
       )) === true
     )
     if (
@@ -1468,6 +1479,20 @@ export async function sendKeeperThreadMessage(
       setRecordValue(keeperActionErrors, keeperName, EMPTY_VISIBLE_REPLY_TEXT)
       if (operationAccepted) {
         removeTrackedKeeperChatOperation(operationId)
+      }
+      return
+    }
+    if (hasContinuationStatus) {
+      finalizeAssistantEntry(keeperName, assistantId, {
+        text: '', delivery: 'queued', streamState: null, error: null,
+      })
+      if (operationAccepted) {
+        const tracked = trackedKeeperChatOperationsForKeeper(keeperName)
+          .find(candidate => candidate.operationId === operationId)
+        if (tracked) {
+          continuationToHydrate = withCurrentTrackedOperationAssistantDraft(tracked, assistantId)
+          upsertTrackedKeeperChatOperation(continuationToHydrate)
+        }
       }
       return
     }
@@ -1612,6 +1637,7 @@ export async function sendKeeperThreadMessage(
       setRecordValue(keeperStreamStartedAt, keeperName, null)
       clearKeeperStreamSignal(keeperName)
     }
+    if (continuationToHydrate) void hydrateTrackedKeeperChatOperation(continuationToHydrate)
     // No refreshDashboardState() here: forcing a full dashboard
     // refetch after every chat message re-rendered every panel and was
     // the main "the screen keeps refreshing" complaint. Keeper status

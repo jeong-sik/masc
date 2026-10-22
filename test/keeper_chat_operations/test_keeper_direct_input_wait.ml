@@ -252,7 +252,7 @@ let test_canonical_response_refuses_invalid_detach_and_native_identity () = with
 
 let test_repeated_canonical_wait_detaches_exact_prepared_response () = with_path @@ fun path ->
   let second=checkpoint "second original pending input" in
-  let pending={pending with run_id="second-original-run";
+  let pending : Agent_core.Agent_input_request.pending = {run_id="second-original-run";
     request={pending.request with request_id="second-original-question";question="Which second original option?"}} in
   let second_wait=Semantic.input_wait ~checkpoint:second ~pending |> value in
   let candidate=checkpoint "second exact consumed response" in

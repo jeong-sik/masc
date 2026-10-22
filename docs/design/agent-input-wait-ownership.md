@@ -865,3 +865,39 @@ S is no longer pinned by the consumed intent at that point. The fixture now
 captures immutable expected source messages while S is still retained before
 resolution and keeps the same exact-C/history assertions without requiring
 released S to remain readable. This repair remains unexecuted on the new head.
+
+
+## Actual unsettled Tool effect on an original branch (source, not executed)
+
+A new native-context scenario starts with the public original W response on a
+private branch after independent G publication. Its actual Tool handler appends
+one external file record, flushes and fsyncs it, then exits the process before
+returning any ToolResult. The next process installs a fresh Owner and invokes
+the same native adapter/Core continuation against the retained locator.
+
+The scenario requires a failed native terminal with
+`Operator_repair_required Effect_outcome_unknown`, matching the actual Core
+journal's admitted Tool attempt and absence of a settled result. It checks that
+no Tool handler, provider request, result observer or context injector runs in
+the restarted process, the one external effect remains, and exact G bytes and
+global ownership are unchanged. Owner failure settlement must preserve the
+unknown native receipt and its pinned exact checkpoint. A further load must
+remain terminal pending, and preparation with no preconfigured execution store
+must refuse the unknown receipt.
+
+This is source for one actual Owner/native/Core crash boundary. The external
+effect is a fixture file append, not a production person-note handler. It does
+not establish every production AgentRun error/fallback path, autonomous waiting
+or SSE/Acting/TUI acceptance. Execution is pending on the new exact head;
+previous successful native-context suites do not establish this seventh case.
+
+
+The preceding detachment head `b7bca53a7d2070598f2862862b03ce86e2773239`
+ran the six requested suites in
+[39728696303](https://github.com/jeong-sik/masc/actions/runs/39728696303).
+The actual log shows Owner-open-native-call 17/17 passing, then a fatal warning
+23 at `test_keeper_direct_input_wait.ml` in the batched build of the other five
+executables. Those 131 cases did not run. This layer replaces the redundant
+outer record update with a typed pending-record construction; the inner request
+update still preserves all other actual request fields. That repair and the
+new unknown-effect scenario remain unexecuted on this new layer.

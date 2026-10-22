@@ -13,6 +13,7 @@ let model_id = "native-context-model"
 let runtime_id = "native-context.runtime"
 let goal = "Update the shared context."
 let crash_exit = 87
+let unknown_effect_exit = 88
 let require label = function Ok value -> value | Error _ -> fail (label ^ " failed")
 let operation_id = Keeper_chat_operation.Operation_id.of_string "native-context-operation"
   |> require "operation ID"
@@ -22,7 +23,7 @@ let tool_reply =
 let final_reply =
   {|{"id":"context-final","model":"native-context-model","choices":[{"index":0,"message":{"role":"assistant","content":"context saved"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
 
-let run_phase ?(operation_branch=false) ~child root =
+let run_phase ?(operation_branch=false) ?(unknown_effect=false) ~child root =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -77,6 +78,12 @@ let run_phase ?(operation_branch=false) ~child root =
       check bool "actual original crash/replay preserves global input G reference" true
         (Registry.input_checkpoint ~base_path:root ~keeper_name ~trace_id |> require "global G observation"
           =Keeper_chat_operation_store.Input_observed expected) in
+  let effect_path = Filename.concat root "external-effect.log" in
+  let effect_fact = "external effect committed\n" in
+  let unknown_receipt = ref None in
+  let check_effect () =
+    check string "one actual external effect survives process restart" effect_fact
+      (Fs_compat.load_file effect_path) in
   let settled, resolve_settled = Eio.Promise.create () in
   let execute ~sw:turn_sw ~keeper_name:_ ~claim =
     let operation : Keeper_chat_operation.t =
@@ -124,6 +131,15 @@ let run_phase ?(operation_branch=false) ~child root =
       (`String (if child then "child-setup" else "restored-before-hooks"));
     let tool = Agent_core.Tool.create ~name:"update_context"
         ~description:"Update captured shared state" ~parameters:[] (fun _ ->
+          if child && unknown_effect then (
+            (* An actual effect is durable, but the Tool handler never returns a
+               result. Only Core's admitted, unsettled attempt survives. *)
+            let channel = open_out_gen [Open_wronly; Open_creat; Open_append; Open_binary] 0o600 effect_path in
+            output_string channel effect_fact;
+            flush channel;
+            Unix.fsync (Unix.descr_of_out_channel channel);
+            close_out channel;
+            Unix._exit unknown_effect_exit);
           if child then fail "child reached the tool before its crash boundary";
           incr tool_calls;
           Agent_core.Context.set context "tool-receipt" (`String "resumed-tool");
@@ -140,7 +156,7 @@ let run_phase ?(operation_branch=false) ~child root =
             extra_messages=[]} in
     let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
       check_g ();
-      if child && snapshot.stage = Agent_core.Agent.After_assistant_collected then (
+      if child && not unknown_effect && snapshot.stage = Agent_core.Agent.After_assistant_collected then (
         check int "original branch tool has not executed at process crash" 0 !tool_calls;
         Unix._exit crash_exit)
       else if operation_branch then
@@ -156,6 +172,12 @@ let run_phase ?(operation_branch=false) ~child root =
         ~agent_core_checkpoint:checkpoint ~input ~agent_ref () |> require "prepare native call" in
     let config = Native.config prepared in
     let checkpoint = Native.prepared_checkpoint prepared in
+    let original_call = if unknown_effect && not child then
+      match Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id
+          |> require "read original unsettled native receipt" with
+      | Keeper_native_call.Active call -> Some call
+      | No_native_call | Terminal_unacknowledged _ -> fail "expected actual unsettled native call"
+      else None in
     let result = match Native.prepared_input prepared with
       | Native.New_input {blocks; metadata} ->
         Runtime_agent.run_blocks ~sw:turn_sw ~net:env#net ~config ~agent_ref
@@ -163,6 +185,45 @@ let run_phase ?(operation_branch=false) ~child root =
       | Native.Continue_from_checkpoint ->
         Runtime_agent.continue_from_checkpoint ~sw:turn_sw ~net:env#net ~config ~agent_ref
           ~checkpoint:(Option.get checkpoint) () in
+    if unknown_effect then (
+      check bool "unsettled effect prevents automatic continuation" true (Result.is_error result);
+      check_effect ();
+      let original = Option.get original_call in
+      let call, disposition = match Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id
+          |> require "read unknown-effect native terminal" with
+        | Keeper_native_call.Terminal_unacknowledged (call, disposition) -> call, disposition
+        | No_native_call | Active _ -> fail "Core must durably finish the actual unsettled effect" in
+      check bool "actual unsettled effect requires operator repair" true
+        (disposition={Agent_core.Agent.outcome=Terminal_failed;
+          recovery=Operator_repair_required Effect_outcome_unknown});
+      check string "unknown terminal preserves original call identity" original.call_id call.call_id;
+      check bool "unknown terminal preserves original seed and locator" true
+        (original.seed_checkpoint=call.seed_checkpoint && original.locator=call.locator
+         && original.operation_digest=call.operation_digest);
+      let runtime = Runtime_agent_execution_runtime.get () |> Option.get in
+      let projection = Agent_core.Agent.open_execution_projection ~runtime
+          ~dir:Eio.Path.(env#fs / session_dir / "native-executions" / call.call_id) call.locator
+        |> require "open actual crashed Core journal" in
+      let terminal = Agent_core.Agent.read_execution_terminal projection
+        |> require "actual Core unknown-effect terminal" |> Option.get in
+      check bool "Owner disposition matches actual Core journal" true (terminal.disposition=disposition);
+      check bool "actual journal contains an admitted tool attempt" true terminal.has_tool_attempts;
+      check int "actual external effect has no settled ToolResult" 0 (List.length terminal.settled_tool_results);
+      let branch = Registry.direct_input_branch ~base_path:root ~keeper_name ~operation_id
+        |> require "unknown-effect original branch" |> Option.get in
+      check bool "unknown terminal remains on its original branch" true
+        (Keeper_checkpoint_ref.equal branch.checkpoint call.checkpoint);
+      (* Remove the prepared scope, so refusal tests the unknown receipt
+         rather than the unrelated already-configured-store guard. *)
+      let retry_config = {config with Runtime_agent.execution_store=None} in
+      check bool "unknown-effect receipt refuses another prepared call" true
+        (Native.prepare ~binding ~runtime_id ~config:retry_config
+           ~agent_core_checkpoint:checkpoint ~input ~agent_ref () |> Result.is_error);
+      unknown_receipt := Some (binding, call, disposition);
+      check_g ();
+      Owner.Operation_failed {kind=Keeper_chat_operation.Turn_invariant;
+        detail="Actual admitted Tool effect is unsettled; operator repair is required.";outcome_ref=None})
+    else (
     let result = match result with
       | Ok result -> result
       | Error error -> fail (Agent_core.Error.to_string error) in
@@ -206,7 +267,7 @@ let run_phase ?(operation_branch=false) ~child root =
           (List.exists (fun row -> Yojson.Safe.Util.member "content" row=`String "Independent G history") messages))
         (Exact_output_fixture.request_bodies server);
       check_g ());
-    Owner.Operation_succeeded {outcome_ref="shared-context-checkpointed"}
+    Owner.Operation_succeeded {outcome_ref="shared-context-checkpointed"})
   in
   let runner : Owner.operation_runner =
     {ready=(fun ~keeper_name:_ -> true); execute;
@@ -222,10 +283,40 @@ let run_phase ?(operation_branch=false) ~child root =
       ~source:(`Assoc ["kind", `String "fixture"]) ~input |> require "submit operation" |> ignore);
   (match Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
       (fun () -> Eio.Promise.await settled) with
-   | Owner.Operation_succeeded _ when not child -> ()
-   | Owner.Operation_failed {detail; _} -> fail detail
+   | Owner.Operation_succeeded _ when not child && not unknown_effect -> ()
+   | Owner.Operation_failed {kind; detail; _} ->
+     if not child && unknown_effect then
+       check bool "Owner runner reports the typed invariant failure" true
+         (kind=Keeper_chat_operation.Turn_invariant)
+     else fail detail
    | Owner.Operation_succeeded _ | Owner.Operation_deferred ->
      fail "native context continuation did not complete");
+  if unknown_effect then (
+    let binding, expected_call, expected_disposition = Option.get !unknown_receipt in
+    check_effect ();
+    check int "unknown effect is never re-executed" 0 !tool_calls;
+    check int "unsettled result never invokes completion observer" 0 !hook_calls;
+    check int "unsettled result never invokes context injector" 0 !injector_calls;
+    check int "unknown effect never issues another provider request" 0 !provider_calls;
+    check bool "Owner retains exact unknown-effect receipt after failed operation settlement" true
+      (Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id
+       |> require "read settled unknown receipt"
+       |> Keeper_native_call.equal_state
+           (Keeper_native_call.Terminal_unacknowledged (expected_call, expected_disposition)));
+    (match Native.load ~binding |> require "load settled unknown native receipt" with
+     | Native.Terminal_pending (call, disposition) ->
+       check bool "settled unknown receipt grants no fresh or resume admission" true
+         (Keeper_native_call.equal call expected_call && disposition=expected_disposition)
+     | Native.No_pending | Native.Resume _ -> fail "unknown effect must remain terminal pending");
+    Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:expected_call.checkpoint
+      |> require "unknown effect exact recovery checkpoint remains pinned" |> ignore;
+    let operation = Registry.exact_operation ~base_path:root ~keeper_name operation_id
+      |> require "settled original operation" |> Option.get in
+    check bool "Owner records failure rather than claimed completion" true
+      (match operation.state with
+       | Keeper_chat_operation.Failed {failure;_} -> failure.kind=Keeper_chat_operation.Turn_invariant
+       | Queued | Running _ | Succeeded _ | Cancelled _ -> false))
+  else (
   check int "the resumed tool executes once" 1 !tool_calls;
   check int "the resumed observer executes once" 1 !hook_calls;
   check int "the resumed context injector executes once" 1 !injector_calls;
@@ -233,13 +324,13 @@ let run_phase ?(operation_branch=false) ~child root =
   check bool "Owner acknowledges the completed native call" true
     (Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id
      |> require "read Owner acceptance"
-     |> Keeper_native_call.equal_state Keeper_native_call.No_native_call);
+     |> Keeper_native_call.equal_state Keeper_native_call.No_native_call));
   check_g ();
-  if operation_branch then check bool "original branch retires only after Owner accepts completion" true
+  if operation_branch then check bool "original branch retires only after Owner settles the original operation" true
     (Registry.direct_input_branch ~base_path:root ~keeper_name ~operation_id
       |> require "settled original branch"=None)
 
-let test_active_context_restart ?(operation_branch=false) () =
+let test_active_context_restart ?(operation_branch=false) ?(unknown_effect=false) () =
   let root = Filename.temp_dir "keeper-native-context-" "" in
   Fun.protect ~finally:(fun () ->
     Eio_main.run (fun env -> Eio.Path.rmtree ~missing_ok:true Eio.Path.(env#fs / root)))
@@ -247,12 +338,14 @@ let test_active_context_restart ?(operation_branch=false) () =
       Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
         let process = Eio.Process.spawn ~sw env#process_mgr
             [Sys.executable_name;
-             (if operation_branch then "--native-branch-context-child" else "--native-context-child");root] in
+             (if unknown_effect then "--native-branch-unknown-effect-child"
+              else if operation_branch then "--native-branch-context-child" else "--native-context-child");root] in
         match Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
             (fun () -> Eio.Process.await process) with
-        | `Exited code -> check int "interrupted with Active receipt before tool execution" crash_exit code
+        | `Exited code -> check int "interrupted at actual native crash boundary"
+            (if unknown_effect then unknown_effect_exit else crash_exit) code
         | `Signaled signal -> failf "child died from signal %d" signal));
-      run_phase ~operation_branch ~child:false root)
+      run_phase ~operation_branch ~unknown_effect ~child:false root)
 
 let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain_consume () =
   let root = Filename.temp_dir "keeper-native-input-" "" in
@@ -510,12 +603,16 @@ let test_retired_input_history_cut () =
 let () = match Array.to_list Sys.argv with
   | [_; "--native-context-child"; root] -> run_phase ~child:true root
   | [_; "--native-branch-context-child"; root] -> run_phase ~operation_branch:true ~child:true root
+  | [_; "--native-branch-unknown-effect-child"; root] ->
+    run_phase ~operation_branch:true ~unknown_effect:true ~child:true root
   | _ -> run "native shared context restart"
       ["context ownership", [test_case "exact retired response cut advances input authority" `Quick test_retired_input_history_cut;
        test_case "resumed tool and hook changes reach durable checkpoint"
         `Quick (test_active_context_restart ~operation_branch:false);
        test_case "original branch survives actual native process crash while preserving independent G"
          `Quick (test_active_context_restart ~operation_branch:true);
+       test_case "actual branch tool effect without result survives restart without replay or G overwrite"
+         `Quick (test_active_context_restart ~operation_branch:true ~unknown_effect:true);
        test_case "first input checkpoint precedes native terminal settlement"
          `Quick (test_native_input_checkpoint_order ~uncertain_consume:false);
        test_case "uncertain input consumption never rolls retained state back"

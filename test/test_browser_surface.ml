@@ -428,7 +428,31 @@ let test_automatic_selection_keeps_observed_browser () =
         (Result.is_error (Masc.Browser_interaction.perform request));
       check int "lost-owner mutation is never dispatched elsewhere" before (List.length !calls)))
 
+(* BrowserRead keeps a screenshot under its Keeper's workspace, so a caller
+   with no owning Keeper is refused as input before the tool looks for a
+   browser Add-on. With an owner the same read goes on to that lookup, which
+   finds none in a workspace nothing created. *)
+let test_screenshot_requires_an_owning_keeper () =
+  let config = Masc.Workspace.default_config no_workspace in
+  let read keeper_name = Masc.Browser_addon_tools.handle ~config
+      ~access:Masc.Lane_addon_sources.Operator_configuration
+      ~principal:(Lane_addon_call_context.Host_actor "browser-screenshot-tester") ~reserved:[]
+      ~keeper_name ~tool:Masc.Browser_capabilities.Read ~tool_name:"BrowserRead"
+      ~start_time:(Tool_timing.start ())
+      (`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
+  let unowned = read None in
+  check bool "a screenshot without an owner is refused as input" true
+    (Tool_result.failure_class unowned = Some Tool_result.Policy_rejection);
+  check bool "before any browser command" true
+    (match unowned with
+     | Tool_result.Failed failure -> failure.effect_disposition = Tool_result.Proven_pre_effect
+     | Tool_result.Completed _ | Tool_result.Deferred _ -> false);
+  check bool "an owned screenshot goes on to find the browser Add-on" true
+    (Tool_result.failure_class (read (Some "browser-screenshot-keeper"))
+     = Some Tool_result.Dependency_unavailable)
+
 let () = run "browser surface" ["behavior",[
+  test_case "a screenshot needs an owning Keeper" `Quick test_screenshot_requires_an_owning_keeper;
   test_case "automatic discovery binds subsequent observations and input" `Quick test_automatic_selection_keeps_observed_browser;
   test_case "unreadable tabs do not block the requested readable tab" `Quick test_partial_inventory_preserves_requested_work;
   test_case "partial inventories remain incomplete without unavailable tabs" `Quick test_partial_inventory_without_unavailable_tabs;

@@ -199,6 +199,19 @@ returns `no_live_client`. An explicit missing/retired ID returns
 `selected_client_disconnected`; it never selects a replacement. Automation
 requests omit `clientId` and return it as null.
 
+`masc doctor` and the dashboard's setup check (`GET /api/v1/setup/status`)
+report the lane as one `browser_lane` line. Hosts register with the browser
+Add-on's worker, so a server reads which hosts poll it from the Add-on's last
+published observation, the same reading the Lanes screen's browser rows show.
+`masc doctor` runs outside a server and does not read it. The line is
+`satisfied` while a host polls, or while none does and the installed launcher
+follows the port the server bound. Before the launcher and the port it names a
+browser Add-on that cannot take a host: none declared or one switched off is
+`needs_setup` (the first is fixed by
+`masc browser-lane-setup --mode addon --base-path <path>`), one declared on
+that the server does not run is `invalid`, and one the server cannot read is
+`needs_verification`. A workspace with no launcher installed has no such line.
+
 `transport` is `web_extension` or `webdriver_bidi`. The TUI browser picker
 displays WebExtension or BiDi beside the browser name. When both hosts attach
 to the same Firefox, select the BiDi client for trusted `hover_at` or `drag`,

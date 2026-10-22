@@ -40,6 +40,7 @@ let context_of_agent_core_checkpoint (cp : Agent_core.Checkpoint.t) : working_co
   sync_agent_core_context { checkpoint }
 
 let checkpoint_for_persistence
+    ~base_path
     ~(runtime_id : string)
     ~(keeper_name : string)
     ~(session : session_context)
@@ -63,6 +64,7 @@ let checkpoint_for_persistence
   let checkpoint_messages =
     List.map
       (Keeper_vision_ingest.evict_message
+         ~base_path
          ~mode:Keeper_vision_ingest.Store_only
          ~delegate:(Keeper_vision_ingest.delegates_media ~runtime_id)
          ~keeper_name)
@@ -85,6 +87,7 @@ let checkpoint_for_persistence
       }
 
 let save_agent_core_checkpoint_classified
+    ~base_path
     ~runtime_id
     ~keeper_name
     ~session
@@ -93,6 +96,7 @@ let save_agent_core_checkpoint_classified
   =
   match
     checkpoint_for_persistence
+      ~base_path
       ~runtime_id
       ~keeper_name
       ~session
@@ -115,6 +119,7 @@ let save_agent_core_checkpoint_classified
      | Error error -> Error (Persistence_error error))
 
 let save_agent_core_checkpoint
+    ~base_path
     ~runtime_id
     ~keeper_name
     ~session
@@ -123,6 +128,7 @@ let save_agent_core_checkpoint
   =
   match
     save_agent_core_checkpoint_classified
+      ~base_path
       ~runtime_id
       ~keeper_name
       ~session

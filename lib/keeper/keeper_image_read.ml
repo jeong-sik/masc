@@ -36,7 +36,7 @@ let handle ?turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.keeper_me
                    Tool_result.Runtime_failure, "sandbox_image_read_failed", detail)
         | Artifact handle ->
             Keeper_vision_tool.load_artifact
-              ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name:meta.name) handle
+              ~dir:(Keeper_vision_tool.vision_store_dir ~base_path:config.Workspace.base_path ~keeper_name:meta.name ()) handle
             |> Result.map_error (fun error ->
                  let class_, code = match error with
                    | Store.Malformed_handle _ -> Tool_result.Policy_rejection, "invalid_artifact"
@@ -59,7 +59,7 @@ let handle ?turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.keeper_me
         in
         (* Keep a frame's verified bytes before reporting a successful read:
            rotating browser frames must not invalidate this conversation. *)
-        let* artifact = Keeper_vision_tool.store_kept ~keeper_name:meta.name bytes
+        let* artifact = Keeper_vision_tool.store_kept ~base_path:config.Workspace.base_path ~keeper_name:meta.name bytes
           |> Result.map_error (fun detail -> Tool_result.Runtime_failure, "artifact_store_failed", detail) in
         Ok (bytes, media_type, dimensions, Store.to_string artifact)
       in

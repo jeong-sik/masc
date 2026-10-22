@@ -283,6 +283,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
                  let session = Keeper_context_runtime.create_session
                    ~session_id:trace_id ~base_dir:(Keeper_input_birth.session_root initial_session) in
                  let* checkpoint,outcome = Keeper_context_core.save_agent_core_checkpoint_classified
+                   ~base_path:ctx.config.base_path
                    ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
                    ~keeper_name:meta.name ~session ~agent_name:meta.name
                    ~ctx:(Keeper_context_runtime.create ~eio:true ~system_prompt)

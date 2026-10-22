@@ -41,6 +41,7 @@ let initial config intake_token =
   let session = Keeper_context_core.create_session ~base_dir:(Birth.session_root reserved)
     ~session_id:(Keeper_id.Trace_id.to_string (Birth.trace_id creation)) in
   let checkpoint,outcome = Keeper_context_core.save_agent_core_checkpoint_classified
+    ~base_path:config.Workspace.base_path
     ~runtime_id:"test-runtime" ~keeper_name:"imp" ~agent_name:"imp" ~session
     ~ctx:(Keeper_context_core.create ~eio:true ~system_prompt:"Original initial prompt")
     |> ok (Keeper_context_core.checkpoint_write_error_to_string ~persistence_error_to_string:Fun.id) in

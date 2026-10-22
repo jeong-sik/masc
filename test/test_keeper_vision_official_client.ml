@@ -284,7 +284,7 @@ let test_frame_store_in_pool () =
     | Error detail -> fail detail
   in
   let path =
-    Filename.concat (V.frames_dir ~keeper_name:"vision-fixture")
+    Filename.concat (V.frames_dir ~keeper_name:"vision-fixture" ())
       (Multimodal.Vision_artifact_store.to_string handle)
   in
   check bool "frame stored from Eio fiber through installed pool" true
@@ -293,7 +293,7 @@ let test_frame_store_in_pool () =
 let test_cancelled_frame_store_does_not_start () =
   with_fixture "valid" @@
   fun ~root:_ ~load:_ ~run:_ ~execute:_ ~capture:_ ~fallback_capture:_ ->
-  let dir = V.frames_dir ~keeper_name:"vision-fixture" in
+  let dir = V.frames_dir ~keeper_name:"vision-fixture" () in
   let cancelled =
     try
       Eio.Cancel.sub (fun context ->
@@ -341,7 +341,7 @@ let test_cancelled_queued_frame_store_does_not_start () =
       Eio.Promise.resolve release_worker ();
       Domain_pool.submit_cpu pool (fun () -> ());
       check bool "cancelled queued store creates no frame directory" false
-        (Sys.file_exists (V.frames_dir ~keeper_name:"vision-fixture")))
+        (Sys.file_exists (V.frames_dir ~keeper_name:"vision-fixture" ())))
 
 let () = run "Keeper standalone official-client vision"
   [ "artifact pool", [test_case "frame store" `Quick test_frame_store_in_pool;

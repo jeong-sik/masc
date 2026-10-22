@@ -170,6 +170,22 @@ receipts remain distinct from successful contract validation.
    exercise the public producer path when run; their source alone does not prove
    execution or support for actual browsers and transfers. Built-in startup and
    the remaining executor helpers still need to be removed in a following unit.
+
+   Screenshot publication now takes the served Workspace base path explicitly.
+   PNG validation, frame storage, image reads, Vision analysis and promotion use
+   that same config-root resolution and Keeper identity. An operator's explicit
+   config-root override still follows the existing resolver policy. The browser
+   reply cannot supply a host pathname or change this storage scope. Image
+   ingestion and other producers with a Workspace also forward it; callers
+   without a Workspace retain process-config resolution. Checkpoint image
+   eviction requires the save caller's base path, including initialization
+   saves, so a reloaded handle stays readable in that Workspace.
+   The screenshot-to-Vision
+   fixture uses separate ambient and served Workspaces, checks refusal from the
+   other Workspace, and preserves native-image, pixel, rotation and connection
+   assertions. It also saves and reloads an image-evicting checkpoint and checks
+   that its bytes belong to the served Workspace. Source changes do not establish scenario execution. File-transfer
+   broker and real browser evidence remain separate requirements.
 5. Scoped model-generation middleware using the existing exact-output authority,
    with retained request/terminal evidence and installation-selected routes. The
    new package `exact_outputs` declarations are reused; observation-only sampling

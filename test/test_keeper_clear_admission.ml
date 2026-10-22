@@ -108,6 +108,7 @@ max-context = 4096
   in
   let save ctx =
     match Context.save_agent_core_checkpoint_classified
+      ~base_path:config.base_path
       ~runtime_id:"fixture-runtime" ~keeper_name:meta.name ~session
       ~agent_name:meta.name ~ctx with
     | Ok (_, Keeper_checkpoint_store.Saved _) -> ()

@@ -195,8 +195,12 @@ let handle ?upload_paths ~config ~access ~principal ~reserved ~keeper_name ~tool
                      let effect_disposition=match request.projection with
                        | Session -> Tool_result.Effect_outcome_unknown
                        | Raw|Inventory|Scene _|Screenshot _|Scoped_elements _ -> Tool_result.Proven_pre_effect in
+                     (* A refused scoped read does not pass on the unscoped answer. *)
+                     let data=match request.projection with
+                       | Scoped_elements _ -> `Assoc ["error",`String detail]
+                       | Session|Raw|Inventory|Scene _|Screenshot _ ->
+                           Mcp_protocol.Mcp_types.tool_result_to_yojson receipt.raw_result in
                      Tool_result.make_err ~tool_name ~start_time
                      ~class_:Tool_result.Runtime_failure ~effect_disposition
-                     ?metadata:receipt.raw_result._meta
-                     ~data:(Mcp_protocol.Mcp_types.tool_result_to_yojson receipt.raw_result) detail) in
+                     ?metadata:receipt.raw_result._meta ~data detail) in
   restamp ~tool_name ~start_time result

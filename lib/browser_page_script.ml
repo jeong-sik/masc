@@ -28,13 +28,19 @@ const actionRoles = new Set('button link checkbox radio switch menuitem menuitem
 // match it, or sit inside an element that matches it, are observed. An invalid
 // selector is refused rather than read as the whole page.
 const within = (arguments[0] || {}).within;
-let withinMatches = null;
+let scope = null;
 if (within !== undefined) {
-  try { withinMatches = document.querySelectorAll(within).length; }
+  try { scope = new Set(document.querySelectorAll(within)); }
   catch { throw new Error('invalid_css_selector'); }
 }
+// Membership in the matched set, not closest(): closest() reads :scope as
+// the control itself, while the count above reads it as the root element.
+const inScope = el => {
+  for (let node = el; node; node = node.parentElement) if (scope.has(node)) return true;
+  return false;
+};
 const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'))
-  .filter(el => within === undefined || el.closest(within) !== null);
+  .filter(el => scope === null || inScope(el));
 // A single synchronous observation shares styles and ancestor visibility.
 // Large feeds have many controls under the same ancestors; walking and
 // restyling that chain for every control repeats the same work.
@@ -143,7 +149,7 @@ function observe(el) {
   return result;
 }
 return {url:location.href,title:document.title,
-  ...(within === undefined ? {} : {within,withinMatches}),
+  ...(scope === null ? {} : {within,withinMatches:scope.size}),
   total:visible.length,truncated:visible.length>200,
   elements:visible.slice(0,200).map(observe)};
 |}

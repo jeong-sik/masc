@@ -373,9 +373,15 @@ let test_public_scoped_elements () = with_upload_context (fun config _meta ->
         ~keeper_name:None ~tool:Masc.Browser_capabilities.Read ~tool_name:"masc_browser_read"
         ~start_time:(Tool_timing.start ()) (`Assoc fields) in
       let read=["lane",`String "automation";"tabId",`Int 3;"mode",`String "elements";"within",`String "nav"] in
-      answer:=`Assoc ["tabId",`Int 3;"total",`Int 8;"truncated",`Bool false;"elements",`List []];
+      answer:=`Assoc ["tabId",`Int 3;"total",`Int 8;"truncated",`Bool false;
+        "elements",`List [`Assoc ["selector",`String "#outside"]]];
+      let refused=invoke read in
       check bool "an answer without withinMatches is not a scoped answer" true
-        (Tool_result.is_failed (invoke read));
+        (Tool_result.is_failed refused);
+      let carried=Yojson.Safe.to_string (Tool_result.data refused) in
+      let rec mentions index=index+8<=String.length carried
+        && (String.sub carried index 8="#outside" || mentions (index+1)) in
+      check bool "the refusal does not pass on the unscoped controls" false (mentions 0);
       check bool "the scope reaches the browser" true
         (List.hd !sent=(Lane.Automation_route,Lane.Page_elements {tab_id=Some 3;within=Some "nav"}));
       answer:=`Assoc ["tabId",`Int 3;"within",`String "nav";"withinMatches",`Int 1;

@@ -193,11 +193,6 @@ function scope(context, containers) {
     if (selector === 'nav((') throw new SyntaxError('not a selector');
     return containers[selector] ?? [];
   };
-  for (const control of controls) control.closest = selector => {
-    for (let node = control; node; node = node.parentElement)
-      if ((containers[selector] ?? []).includes(node)) return node;
-    return null;
-  };
 }
 
 test('within keeps the controls inside the matched elements, in both readers', async () => {

@@ -96,6 +96,17 @@ let reply_timeout_sec = function
   | Page_scene _ | Page_interact _ | Page_elements _ | Page_context _
   | Page_instruct _ | Page_locate _ | Page_extract _ -> default_timeout_sec
 
+(* The CSS scope an elements read carries, top-level or in a frame. Every
+   caller that relays such a read checks the answer against it. *)
+let elements_within = function
+  | Page_elements { within; _ } -> within
+  | Page_context { mode = `Elements within; _ } -> within
+  | Page_context { mode = (`Text _ | `Frames | `Dialog); _ }
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _
+  | Page_cookies _ | Page_capture _ | Page_scene _ | Page_interact _ | Session_open _ | Session_close
+  | Session_status | Page_goto _ | Page_act _ | Page_instruct _ | Page_locate _ | Page_extract _ -> None
+;;
+
 let verb_to_string = function
   | Tabs_list -> "tabs.list"
   | Page_read _ -> "page.read"

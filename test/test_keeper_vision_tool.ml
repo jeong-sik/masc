@@ -2277,7 +2277,12 @@ let test_browser_screenshot_reaches_vision_reader () =
           let wrong = Masc.Keeper_image_read.handle ~config:wrong_config ~meta
             ~args:(`Assoc ["artifact",`String handle]) () in
           assert (wrong.disposition <> Tool_result.Completed ());
-          assert (assoc_string "error" (json_of_output wrong.raw_output) = "artifact_not_found");
+          (* A native image read failure keeps its code in the typed data;
+             the raw output is the store's sentence. *)
+          let wrong_data = match wrong.data with
+            | Some data -> data
+            | None -> failwith "native read failure did not retain its typed data" in
+          assert (assoc_string "error" wrong_data = "artifact_not_found");
           let wrong_reader = Vt.handle ~base_path:ambient_base ~complete ~sw
             ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
             ~meta ~args:(artifact_args handle) () |> json_of_output in

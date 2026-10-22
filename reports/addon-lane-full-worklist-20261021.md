@@ -111,7 +111,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 | ID | 대상과 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
-| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | 기존 original admission/commit/wake 근거 유지. successor exact062의39679636091은 컴파일 뒤 복구3건 FAIL; fresh/restored 키 순서에 따른 후속 prompt 차이를 owning layer709에서 수리. Off 복구용 strict host Exact read 및 원래 consumer 연결·9개 새 시나리오 소스 구현. production owner·observer receipt·실제 provider/두 UI/설치는 남음 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
+| E02 | Workspace Curator의 모델 실행·작업 수명 추출 | exact866의39682010920에서 host Exact25·consumer commit34·계약6·runner31·capture5·progress7·discovery7·Candle11 총126건 PASS. 원래062 복구3건·805 fixture3건의 수리 확인. 관측 start/terminal immutable intent·ACK의 독립 원장 축과 실제 Store4개 시나리오 소스 추가 중. production owner·typed domain receipt/registry reconcile·실제 provider/두 UI/설치는 남음 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
 | E03 | Librarian 실행의 Addon 경계 검토·추출 | 조사·설계 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
 | E05 | Board Attention 실행의 Addon 경계 검토·추출 | 조사·설계, Required | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
@@ -446,3 +446,11 @@ PR head, 스택 크기, 리뷰·빌더 상태는 2026-10-21 이번 조회의 값
 - Curator의 Dispatch_pending에서 원래 capture·ancestry를 복원한 뒤 이 포트를 먼저 읽는다. 저장된 terminal은 기존 완전 domain validator를 통과해야 하며, 손상 기록은 worker fallback 없이 거절한다. 새 admission은 여전히 live export를 요구한다.
 - 기존 successor062의 실행39679636091은 실제 복구3건 FAIL이었다. 새 capture와 복원 capture의 내부 JSON 키 순서가 달라진 문제를 owning layer709에서 수리했다. 원래 parent substitution bytes는 보존하며 내부 work만 canonical snapshot으로 고정한다. 앞선4ac 실행39679243670은 직접 MCP 의존성 결손으로 컴파일 FAIL이었고062에서 수리됐다. 현재 소스 승인과 새 실행 성공을 각각 재확인해야 한다.
 - 이 변경은 기존 production owner를 아직 교체하지 않는다. observer의 최초 start/terminal receipt를 원래 원장에 독립 보존하고, Off accepted-work/initial prepared save/capture를 처리한 뒤 기존 direct provider 경로를 교체하는 작업이 남는다. 원래54개 완료 기준은 유지한다.
+
+
+## E02 원래 관측 receipt 보존 후속 · 2026-10-22
+
+- [정확한866 선택 실행](../docs/evidence/2026-10-22-curator-retained-host-read/selected-execution.json)은 run39682010920 completed/success이며 8개 suite126건의 실제 원문 성공행과 source/hash를 보존했다. consumer34에는 이전062의 successor 복구3건이 포함되며, runner31·Candle11은 이전805 fixture 수리도 확인한다. 새 observer 소스나 실제 provider/Off/UI/production 전환의 성공으로 이월하지 않는다.
+- #44961 head709와 #44965 head866의 새 정식 source Approved 본문 첫 줄과 approve-guard footer를 직독했다. 이는 각각의 현재 source 판정이며 전체 Native Stack 병합이나 설치 승인이 아니다.
+- [독립 관측 축](../docs/design/addon-original-observer-receipts.md)은 원래 owner record에 registration/completion의 최초 시각·전체 canonical payload/digest를 intent→ACK로 보존한다. registration ACK 전에 completion intent를 보존할 수 있고, terminal ACK에는 원래 registration ACK가 필요하다. primary phase를 바꾸거나 RPC·도메인 save·successor 권한을 만들지 않는다.
+- 실제 Store의 재열기·domain terminal과 pending 관측 공존·ACK 유실 시 원래 파일 bytes/identity 유지·refusal/link·손상 history를 다루는4개 새 시나리오 소스를 추가했다. 파싱과 소스 검토를 새 compiled 성공으로 세지 않는다. Curator typed receipt/domain 검증·registry 잠금 안 compare/reconcile·synthetic restart terminal/retention 정책·production owner 교체·실제 provider/두 UI/설치와 A01–H06 전체 완료는 계속 남는다. 원래54개의 이름·완료 기준은 바꾸지 않는다.

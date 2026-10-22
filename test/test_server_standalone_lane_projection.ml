@@ -565,24 +565,36 @@ let test_unmeasured_terminal_uses_observation_anchor_without_inventing_finish ()
 
 let test_registry_rows_reach_tui_without_synthetic_duration () =
   let module Decode = Masc.Tui_decode in
-  let registry=Exact.create () in
+  let root=Filename.temp_dir "curator-retained-identity-" "" in
+  let path=Filename.concat root Exact.storage_filename in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+  let registry=Exact.create ~path () in
   Exact.register_running registry ~run_id:"tui-original" ~lane:Exact.Workspace_curator
     ~actor:"curator" ~started_at:10. ~input:(Exact.Exact_input `Null);
   (match Exact.mark_completed registry ~run_id:"tui-original" ~outcome:Exact.Succeeded
     ~elapsed_s:2. ~selected_slot:None ~output:`Null () with
    | Ok () -> () | Error e -> fail (Exact.completion_error_to_string e));
-  let measured=Exact.get registry ~run_id:"tui-original" |> Option.get in
   Exact.register_running registry ~run_id:"tui-unmeasured-original" ~lane:Exact.Workspace_curator
     ~actor:"curator" ~started_at:20. ~input:(Exact.Exact_input `Null);
   (match Exact.mark_completed_unmeasured registry ~run_id:"tui-unmeasured-original"
     ~outcome:Exact.Succeeded ~selected_slot:None ~output:`Null () with
    | Ok () -> () | Error e -> fail (Exact.completion_error_to_string e));
+  (* Reopen the real persisted source. A history read neither resolves a
+     builtin route nor borrows an Addon's current installation scope ID. *)
+  let registry=Exact.replay path in
+  let measured=Exact.get registry ~run_id:"tui-original" |> Option.get in
   let unknown=Exact.get registry ~run_id:"tui-unmeasured-original" |> Option.get in
   List.iter (fun (run,expected) ->
-    let summary=Exact.run_summary_to_yojson run in
-    let listing=`Assoc ["has_more",`Bool false;"runs",`List [summary]] in
-    (match Decode.decode_lane_run_page ~lane:Standalone_lane.Workspace_curator listing with
-     | Ok {lrpg_runs=[row];_} -> check (option (float 0.)) "original summary duration" expected row.lrs_elapsed_s
+    let listing=match Projection.For_testing.recent_run_page_json_with
+      ~limit:1 ~before:None ~lane:(Some "workspace_curator_exact") ~run_kind:None
+      ~exact_runs:[run] ~verification_runs:[] ~goal_verification_runs:[] with
+      | Ok page -> page | Error e -> fail e in
+    (match Decode.decode_lane_run_page ~lane:Lane_run_identity.Workspace_curator listing with
+     | Ok {lrpg_runs=[row];_} ->
+       check bool "retained identity is independent of current configuration" true
+         (Lane_run_identity.equal row.lrs_lane Lane_run_identity.Workspace_curator);
+       check string "original observation ID reaches the TUI" run.run_id row.lrs_run_id;
+       check (option (float 0.)) "original summary duration" expected row.lrs_elapsed_s
      | Ok _ -> fail "expected one original summary" | Error e -> fail e);
     (match Projection.For_testing.run_detail_json_with ~run_id:run.run_id ~exact_runs:[run]
         ~verification_runs:[] ~goal_verification_runs:[] with
@@ -590,7 +602,7 @@ let test_registry_rows_reach_tui_without_synthetic_duration () =
        | Ok row -> check (option (float 0.)) "original detail duration" expected row.lrd_elapsed_s
        | Error e -> fail e)
      | Projection.Detail_not_found | Projection.Detail_ambiguous -> fail "expected original detail"))
-    [measured,Some 2.;unknown,None]
+    [measured,Some 2.;unknown,None])
 ;;
 
 let verifier_tool : Verification.tool_observation =
@@ -865,7 +877,7 @@ let test_every_retained_run_kind_projects_skill_evidence () =
       ~verification_runs:[]
       ~goal_verification_runs:[]
     |> check_no_keeper_skill_evidence
-         ~label:(Standalone_lane.to_id (Exact.standalone_lane lane)));
+         ~label:(Exact.lane_id lane));
   let task = task_verification_run ~verification_id:"task-skill" ~started_at:90. in
   Projection.For_testing.run_detail_json_with
     ~run_id:"task-skill"

@@ -96,7 +96,7 @@ let test_immediate_retention_is_historical_confirmation ()=with_registry (fun _ 
       let id=string_of_int index in
       output_string channel (row (`Assoc ["event",`String "register";"id",`String id;
         "started_at",`Float (1000.+.float_of_int index);"registration",`Assoc [
-          "lane",`String (Standalone_lane.to_id Standalone_lane.Workspace_curator);"actor",`String "original-workspace";
+          "lane",`String (Lane_run_identity.to_id Lane_run_identity.Workspace_curator);"actor",`String "original-workspace";
           "input",`Assoc ["kind",`String "row";"value",`Null]]]));
       output_string channel (row (`Assoc ["event",`String "complete";"id",`String id;"completion",completion]))
     done);

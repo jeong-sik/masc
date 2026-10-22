@@ -10132,7 +10132,7 @@ let test_decode_lane_run_page_filters_to_one_lane () =
             ] )
       ]
   in
-  match Tui_decode.decode_lane_run_page ~lane:Standalone_lane.Librarian listing with
+  match Tui_decode.decode_lane_run_page ~lane:Lane_run_identity.Librarian listing with
   | Error detail -> Alcotest.fail detail
   | Ok page ->
       Alcotest.(check (option int)) "retained total comes from server"
@@ -10145,7 +10145,7 @@ let test_decode_lane_run_page_filters_to_one_lane () =
       Alcotest.(check (option (pair (float 0.0) string))) "next cursor"
         (Some (100., "lib-2")) page.Tui_decode.lrpg_next
 
-(* A run's lane is read into [Standalone_lane.t] as it is decoded. The server
+(* A run's lane is read into [Lane_run_identity.t] as it is decoded. The server
    writes it from the same type, so a run whose lane no lane has refuses the
    page instead of being dropped by the lane filter. *)
 let test_decode_lane_run_page_refuses_an_unknown_lane () =
@@ -10160,7 +10160,7 @@ let test_decode_lane_run_page_refuses_an_unknown_lane () =
             ] )
       ]
   in
-  match Tui_decode.decode_lane_run_page ~lane:Standalone_lane.Librarian listing with
+  match Tui_decode.decode_lane_run_page ~lane:Lane_run_identity.Librarian listing with
   | Ok _ -> Alcotest.fail "a run whose lane no lane has decoded"
   | Error detail ->
     Alcotest.(check bool) "the error names the lane" true
@@ -10174,7 +10174,7 @@ let test_decode_lane_run_page_running_run_has_no_completion_fields () =
                             ~completion:false "lib-live" ]
       ]
   in
-  match Tui_decode.decode_lane_run_page ~lane:Standalone_lane.Librarian listing with
+  match Tui_decode.decode_lane_run_page ~lane:Lane_run_identity.Librarian listing with
   | Error detail -> Alcotest.fail detail
   | Ok page ->
       (match page.Tui_decode.lrpg_runs with
@@ -10200,7 +10200,7 @@ let test_decode_exact_lane_failure_keeps_reason () =
             ] )
       ]
   in
-  match Tui_decode.decode_lane_run_page ~lane:Standalone_lane.Librarian listing with
+  match Tui_decode.decode_lane_run_page ~lane:Lane_run_identity.Librarian listing with
   | Error detail -> Alcotest.fail detail
   | Ok { Tui_decode.lrpg_runs = [ run ]; _ } ->
     (match run.Tui_decode.lrs_failure with
@@ -10224,7 +10224,7 @@ let test_decode_lane_run_status_is_typed () =
             ] )
       ]
   in
-  match Tui_decode.decode_lane_run_page ~lane:Standalone_lane.Librarian listing with
+  match Tui_decode.decode_lane_run_page ~lane:Lane_run_identity.Librarian listing with
   | Error detail -> Alcotest.fail detail
   | Ok page ->
       (match page.Tui_decode.lrpg_runs with
@@ -10259,7 +10259,7 @@ let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
                 ] ] )
       ]
   in
-  match Tui_decode.decode_lane_run_page ~lane:Standalone_lane.Verifier listing with
+  match Tui_decode.decode_lane_run_page ~lane:Lane_run_identity.Verifier listing with
   | Error detail -> Alcotest.fail detail
   | Ok page ->
     (match page.Tui_decode.lrpg_runs with
@@ -10655,7 +10655,7 @@ let test_decode_lane_run_detail_carries_prompt_and_output () =
     Alcotest.(check (option string)) "exact detail has no subject" None
       detail.Tui_decode.lrd_subject_id;
     Alcotest.(check string) "lane" "board_attention_exact"
-      (Standalone_lane.to_id detail.Tui_decode.lrd_lane);
+      (Lane_run_identity.to_id detail.Tui_decode.lrd_lane);
       Alcotest.(check (option (float 0.0))) "elapsed" (Some 0.5)
         detail.Tui_decode.lrd_elapsed_s;
       (match detail.Tui_decode.lrd_input_payload with

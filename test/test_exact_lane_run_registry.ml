@@ -890,10 +890,10 @@ let test_exact_history_is_not_pruned_across_lanes () =
     (list string)
     "every registered lane survives replay"
     (recorded_lanes
-     |> List.map (fun lane -> Standalone_lane.to_id (R.standalone_lane lane))
+     |> List.map (fun lane -> R.lane_id lane)
      |> List.sort String.compare)
     (R.list_runs replayed
-     |> List.map (fun (run : R.run) -> Standalone_lane.to_id (R.standalone_lane run.lane))
+     |> List.map (fun (run : R.run) -> R.lane_id run.lane)
      |> List.sort_uniq String.compare);
   let permissions = (Unix.stat path).Unix.st_perm land 0o777 in
   check int "durable registry is private" 0o600 permissions;
@@ -944,7 +944,7 @@ let test_the_registry_refuses_unrecorded_lanes () =
     (fun lane ->
        check bool (Standalone_lane.to_id lane ^ " converts back to itself") true
          (match R.lane_of_standalone lane with
-          | Some recorded -> R.standalone_lane recorded = lane
+          | Some recorded -> Lane_run_identity.equal (R.run_lane recorded) (Standalone_lane.run_identity lane)
           | None -> lane = Standalone_lane.Verifier || lane = Standalone_lane.Browser_stagehand))
     Standalone_lane.all;
   let read_and_refused lane =

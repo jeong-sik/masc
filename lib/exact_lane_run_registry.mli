@@ -1,5 +1,6 @@
-(** Admin-only durable execution records for model-driven standalone exact-output
-    lanes. Input/output values are exact. *)
+(** Admin-only durable observations of exact-output work, including original
+    domain work executed through an Addon. Input/output values are exact.
+    A logical lane identity does not select or enable a current executor. *)
 
 (** A run's lane. Verifier reviews have separate Task and Goal registries;
     Browser Stagehand requests do not yet create retained run records. Both
@@ -11,14 +12,21 @@ type lane =
   | Workspace_curator
   | Candle_appraiser
 
-val standalone_lane : lane -> Standalone_lane.t
-(** The lane in the shared vocabulary. A run record writes its
-    {!Standalone_lane.to_id}. *)
+val run_lane : lane -> Lane_run_identity.t
+(** Logical identity of the original observation, independent of its current
+    executor or model configuration. *)
+
+val lane_id : lane -> string
+(** Wire/storage key of {!run_lane}. *)
 
 val lane_of_standalone : Standalone_lane.t -> lane option
 (** [None] for [Standalone_lane.Verifier] and
     [Standalone_lane.Browser_stagehand], whose runs this registry does not
     record. *)
+
+val lane_of_run_lane : Lane_run_identity.t -> lane option
+(** [None] for Verifier and Browser Stagehand. This registry's replay uses
+    the observation vocabulary, not the set of currently configurable routes. *)
 
 type outcome =
   | Succeeded

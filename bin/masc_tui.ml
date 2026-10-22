@@ -22221,6 +22221,33 @@ let copy_reference_to_terminal render_schedule reference =
   write_to_terminal (Link.osc52_copy reference);
   request_console_write_repair render_schedule
 
+let session_quit_notice (state : state) ~key =
+  let waiting = Masc_tui_keeper_chat_queue.length state.msg_queued in
+  let drafts, saving =
+    List.fold_left
+      (fun (count, saving) draft ->
+        let submitted =
+          match Masc_tui_code_draft.phase draft with
+          | Masc_tui_code_draft.Saving _ -> true
+          | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _
+          | Masc_tui_code_draft.Needs_review _ -> false
+        in
+        count + 1, saving || submitted)
+      (0, false) state.code_drafts
+  in
+  match drafts with
+  | 0 -> Masc_tui_exit_signals.quit_notice ~key ~waiting
+  | count ->
+      (* Put consequences before instructions: the footer can truncate the
+         notice. A submitted save may still commit after this process exits. *)
+      let queued =
+        if waiting = 0 then "" else Printf.sprintf " + %d queued" waiting
+      in
+      let pending = if saving then "; save unconfirmed" else "" in
+      Printf.sprintf
+        "%s: lose %d Code draft(s)%s%s · press again to quit; any other key stays"
+        key count queued pending
+
 (* One enable/disable pair for SGR mouse reports. Without tracking the
    terminal keeps the wheel for its own scrollback -- which scrolls past the
    TUI's frame on a non-alternate screen -- or turns it into arrow keys only
@@ -24503,8 +24530,7 @@ and is loaded on demand through keeper_skill.
                 None
             | No_paste, false ->
                 report_action state "system"
-                  (Masc_tui_exit_signals.quit_notice ~key:"Ctrl-C"
-                     ~waiting:(Masc_tui_keeper_chat_queue.length state.msg_queued));
+                  (session_quit_notice state ~key:"Ctrl-C");
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None)
        | Masc_tui_exit_signals.Continue -> None
@@ -26608,11 +26634,7 @@ and is loaded on demand through keeper_skill.
            else begin
              state.quit_armed <- true;
              report_action state "system"
-               (Masc_tui_exit_signals.quit_notice ~key:"q"
-                  ~waiting:(Masc_tui_keeper_chat_queue.length state.msg_queued)
-                ^ (if state.code_drafts = [] then "" else Printf.sprintf
-                    " · %d Code draft(s) belong to this session and will be lost on exit; pending save outcomes may be unknown"
-                    (List.length state.code_drafts)))
+               (session_quit_notice state ~key:"q")
            end
        (* Above the modals on purpose: the reason to reach for this is to copy
           something already on the screen, and the help overlay is one of the

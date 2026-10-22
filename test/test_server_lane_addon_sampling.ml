@@ -429,7 +429,7 @@ max_reply_bytes=4194304
         stop=(fun () -> Ok (Masc.Lane_addon_lifecycle.Released {engine=Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine";container_id=Some (Store.digest instance_id)}))} in
       ignore (on_authority (Masc.Lane_addon_lifecycle.Container_authority {runtime=Masc.Lane_addon_types.Docker;engine=Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine"}));
       on_created connection; Ok connection);
-    acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+    acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~read_browser_document:_ ~binding:_ -> Ok (`List []));
     package_ready=(fun ~package:_ -> Ok ());
     recover_stop=(fun ~state_owner:_ ~instance_id:_ ~authority ~resource ->
       match authority,resource with

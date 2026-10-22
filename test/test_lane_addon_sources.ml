@@ -1,7 +1,4 @@
 (** Source acquisition reuses owners and preserves measured bytes. *)
-(* This standalone fixture explicitly enables new Browser work, so the
-   automation document source is observable instead of refused as inactive. *)
-let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
 open Alcotest
 module Sources = Masc.Lane_addon_sources
 module Store = Masc.Lane_addon_store
@@ -31,6 +28,7 @@ let package dir max_bytes : Types.package = {
   model_access=Types.Model_disabled;exact_outputs=[];tool_hooks=[];operator_asks=false; worker_service=Types.Mcp_tools;
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;
   execution=Types.Host_process {max_reply_bytes=max_bytes}}
+let no_browser ~route:_ ~tab_id:_ = Error "no browser owner in this fixture"
 let file_source id path = `Assoc ["kind", `String "snapshot_file";
   "source_id", `String id; "path", `String path]
 let binding sources = `Assoc ["sources", `List sources]
@@ -48,7 +46,7 @@ let test_file_rotation_keeps_exact_original_bytes () = with_store (fun dir store
     "evidence", `List [`Assoc ["uri", `String external_uri; "sha256", `Null]]]] in
   let bytes = "  \n" ^ Yojson.Safe.pretty_to_string input ^ "\n\n" in
   write path bytes;
-  let result = require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir 16384)
+  let result = require (Sources.acquire ~read_browser_document:no_browser ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir 16384)
     ~binding:(binding [file_source "deployment" path])) |> list |> List.hd in
   let reference = own_reference (member "snapshot_evidence" result) in
   check string "raw whitespace bytes retained" bytes (require (Store.read_blob store reference));
@@ -73,7 +71,7 @@ let test_duplicate_snapshot_keys_cannot_replace_host_evidence () = with_store (f
     | _ -> assert false in
   List.iter (fun input ->
     write path (Yojson.Safe.to_string input);
-    let source = require (Sources.acquire
+    let source = require (Sources.acquire ~read_browser_document:no_browser
       ~access:Sources.Operator_configuration
       ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream")
       ~store ~package:(package dir 16384)
@@ -93,7 +91,7 @@ let test_combined_ingress_marks_omitted_sources () = with_store (fun dir store -
     write path (Yojson.Safe.to_string value);
     file_source id path) in
   let cap = 2048 in
-  let result = require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir cap) ~binding:(binding sources)) in
+  let result = require (Sources.acquire ~read_browser_document:no_browser ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir cap) ~binding:(binding sources)) in
   check bool "whole source array fits ingress envelope" true (String.length (Yojson.Safe.to_string result) <= cap);
   let rows = list result in
   check int "both source coverage entries survive" 2 (List.length rows);
@@ -103,44 +101,102 @@ let test_combined_ingress_marks_omitted_sources () = with_store (fun dir store -
     (List.for_all (fun source -> member "observations" source <> `List []
       || member "complete" source = `Bool false) rows))
 
-let browser_source = `Assoc ["kind", `String "browser_document"; "source_id", `String "browser";
-  "lane", `String "automation"; "tab_id", `Int 4; "target_id", `String "service";
+let live_client = "0c000000-0000-4000-8000-000000000001"
+let browser_source ?client lane = `Assoc (["kind", `String "browser_document"; "source_id", `String "browser";
+  "lane", `String lane; "tab_id", `Int 4; "target_id", `String "service";
   "environment", `String "production"; "request_id", `String "verify-1"]
-let browser_payload ~tab ~complete ~html = `Assoc ["ok", `Bool true; "data", `Assoc [
-  "clientId", `String "automation:actual-session"; "tabId", `Int tab;
+  @ match client with None -> [] | Some id -> ["client_id", `String id])
+let browser_payload ?(client="automation:actual-session") ~tab ~complete ~html () =
+  Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", `Assoc [
+  "clientId", `String client; "tabId", `Int tab;
   "documentId", `String "actual-document"; "url", `String "https://actual.example:8123/app?q=1";
   "observedAt", `Float 1000.; "html", html; "htmlComplete", `Bool complete;
-  "htmlUnavailableReason", if complete then `Null else `String "document_html_exceeds_1_mib"]]
+  "htmlUnavailableReason", if complete then `Null else `String "document_html_exceeds_1_mib"]])
+let route_name = function
+  | Browser_lane.Live_route (Some id) -> "live:" ^ Browser_lane.client_id_to_string id
+  | Browser_lane.Live_route None -> "live:unselected"
+  | Browser_lane.Automation_route -> "automation"
+  | Browser_lane.Stagehand_route -> "stagehand"
+(* The host's reader stands in for the browser Add-on worker. It records each
+   request so a test can see which route and tab the source asked for. *)
+let browser_reader answer =
+  let requests = ref [] in
+  let read ~route ~tab_id = requests := (route_name route, tab_id) :: !requests; !answer in
+  read, requests
+let read_browser ~dir ~store ~read source =
+  require (Sources.acquire ~read_browser_document:read ~access:Sources.Operator_configuration
+    ~resolve_machine_output:(fun _ -> Error "no attached machine fixture")
+    ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream")
+    ~store ~package:(package dir 16384) ~binding:(binding [source])) |> list |> List.hd
+let observation_count source = member "observations" source |> list |> List.length
 
 let test_browser_identity_and_unknown_coverage () = with_store (fun dir store ->
-  let response = ref (browser_payload ~tab:4 ~complete:true ~html:(`String "<html>actual document</html>")) in
-  Eio.Switch.run (fun sw ->
-    let previous = Atomic.get Browser_lane.automation_document_observer in
-    Browser_lane.install_automation_document_observer (Some (fun ~tab_id ->
-      check int "explicit existing tab requested" 4 tab_id; Browser_lane.Answered !response));
-    Eio.Switch.on_release sw (fun () -> Browser_lane.install_automation_document_observer previous);
-    let read () = require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "no configured upstream") ~store ~package:(package dir 16384)
-      ~binding:(binding [browser_source])) |> list |> List.hd in
+  let response = ref (Ok (browser_payload ~tab:4 ~complete:true ~html:(`String "<html>actual document</html>") ())) in
+  let read, requests = browser_reader response in
+  let read () = read_browser ~dir ~store ~read (browser_source "automation") in
+  let source = read () in
+  check (Alcotest.list (pair string int)) "the bound route and tab are asked once" ["automation", 4] !requests;
+  let observation = member "observations" source |> list |> List.hd in
+  check string "returned client is preserved" "automation:actual-session" (text (member "client_id" observation));
+  check string "tab uses package string representation" "4" (text (member "tab_id" observation));
+  check string "actual URL preserved exactly" "https://actual.example:8123/app?q=1"
+    (text (member "url" (member "target" observation)));
+  check string "document identity preserved" "actual-document" (text (member "document_id" observation));
+  let reference = member "evidence" observation |> list |> List.hd |> own_reference in
+  check string "raw browser HTML preserved" "<html>actual document</html>"
+    (require (Store.read_blob store reference) |> Yojson.Safe.from_string |> member "html" |> text);
+  response := Ok (browser_payload ~tab:5 ~complete:true ~html:(`String "<html>other tab</html>") ());
+  let wrong = read () in
+  check bool "different actual tab produces incomplete source" true (member "complete" wrong = `Bool false);
+  check int "different actual tab produces no fabricated observation" 0 (observation_count wrong);
+  response := Ok (browser_payload ~tab:4 ~complete:false ~html:`Null ());
+  let missing = read () in
+  check bool "unknown document remains incomplete" true (member "complete" missing = `Bool false);
+  check string "source's reason remains visible" "document_html_exceeds_1_mib" (text (member "detail" missing));
+  let missing_observation = member "observations" missing |> list |> List.hd in
+  check bool "missing document does not become content" true (member "html" missing_observation = `Null))
+
+(* Every way the browser owner can decline leaves the source unavailable with
+   no observation. A reason the owner gave is the detail the package reads. *)
+let test_browser_refusals_leave_the_source_unavailable () = with_store (fun dir store ->
+  let response = ref (Error "no browser Add-on is attached") in
+  let read, _requests = browser_reader response in
+  let read () = read_browser ~dir ~store ~read (browser_source "automation") in
+  let absent = "no browser Add-on is attached" and busy = "optional_document_observation_busy"
+  and unknown = "owned session authority is unknown" in
+  let cases = [
+    "the host found no browser Add-on", Error absent, Some absent;
+    "the worker refused a busy browser", Ok (Browser_lane.Refused busy), Some busy;
+    "the worker refused before any effect", Ok (Browser_lane.Rejected_before_effect unknown), Some unknown;
+    "the browser lane is absent", Ok Browser_lane.Lane_absent, None;
+    "the transport deadline elapsed", Ok Browser_lane.Timed_out, None;
+    "the browser reported a failed read", Ok (Browser_lane.Answered (`Assoc ["ok", `Bool false])), None;
+    "the browser answered something other than an envelope", Ok (Browser_lane.Answered (`List [])), None ] in
+  List.iter (fun (name, answer, owner_reason) ->
+    response := answer;
     let source = read () in
-    let observation = member "observations" source |> list |> List.hd in
-    check string "returned client is preserved" "automation:actual-session" (text (member "client_id" observation));
-    check string "tab uses package string representation" "4" (text (member "tab_id" observation));
-    check string "actual URL preserved exactly" "https://actual.example:8123/app?q=1"
-      (text (member "url" (member "target" observation)));
-    check string "document identity preserved" "actual-document" (text (member "document_id" observation));
-    let reference = member "evidence" observation |> list |> List.hd |> own_reference in
-    check string "raw browser HTML preserved" "<html>actual document</html>"
-      (require (Store.read_blob store reference) |> Yojson.Safe.from_string |> member "html" |> text);
-    response := browser_payload ~tab:5 ~complete:true ~html:(`String "<html>other tab</html>");
-    let wrong = read () in
-    check bool "different actual tab produces incomplete source" true (member "complete" wrong = `Bool false);
-    check int "different actual tab produces no fabricated observation" 0 (member "observations" wrong |> list |> List.length);
-    response := browser_payload ~tab:4 ~complete:false ~html:`Null;
-    let missing = read () in
-    check bool "unknown document remains incomplete" true (member "complete" missing = `Bool false);
-    check string "source's reason remains visible" "document_html_exceeds_1_mib" (text (member "detail" missing));
-    let missing_observation = member "observations" missing |> list |> List.hd in
-    check bool "missing document does not become content" true (member "html" missing_observation = `Null)))
+    check string (name ^ ": the source keeps its identity") "browser" (text (member "source_id" source));
+    check bool (name ^ ": the source is unavailable") false (Yojson.Safe.Util.to_bool (member "complete" source));
+    check int (name ^ ": no document is fabricated") 0 (observation_count source);
+    Option.iter (fun reason ->
+      check string (name ^ ": the owner's reason is the detail") reason (text (member "detail" source)))
+      owner_reason) cases)
+
+let test_live_document_from_another_client_is_refused () = with_store (fun dir store ->
+  let other = "0c000000-0000-4000-8000-000000000002" in
+  let response = ref (Ok (browser_payload ~client:other ~tab:4 ~complete:true ~html:(`String "<html>other client</html>") ())) in
+  let read, requests = browser_reader response in
+  let read () = read_browser ~dir ~store ~read (browser_source ~client:live_client "live") in
+  let foreign = read () in
+  check (Alcotest.list (pair string int)) "the bound live client and tab are asked" ["live:" ^ live_client, 4] !requests;
+  check bool "another client's document leaves the source unavailable" false
+    (Yojson.Safe.Util.to_bool (member "complete" foreign));
+  check int "another client's document is not observed" 0 (observation_count foreign);
+  response := Ok (browser_payload ~client:live_client ~tab:4 ~complete:true ~html:(`String "<html>bound client</html>") ());
+  let own = read () in
+  check int "the bound client's document is observed" 1 (observation_count own);
+  check string "the observation names the bound client" live_client
+    (text (member "client_id" (member "observations" own |> list |> List.hd))))
 
 let test_completed_port_refresh_identity_preserves_status_and_output () = with_store (fun dir store ->
   let binding = binding [`Assoc ["source_id",`String "upstream";"kind",`String "lane_output";
@@ -153,7 +209,7 @@ let test_completed_port_refresh_identity_preserves_status_and_output () = with_s
     configuration_revision="config-1";package_revision="package-1";outputs=[];
     observation_seq=1;output={rows=[row];coverage=[status]};status} : Sources.lane_output) in
   let interest = require (Sources.refresh_interest binding) in
-  let acquire () = require (Sources.acquire ~access:Sources.Operator_configuration ~store ~package:(package dir 16384)
+  let acquire () = require (Sources.acquire ~read_browser_document:no_browser ~access:Sources.Operator_configuration ~store ~package:(package dir 16384)
     ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Ok !producer) ~binding) in
   let fingerprint value = require (Sources.refresh_fingerprint interest value) in
   let first = acquire () in
@@ -197,7 +253,7 @@ let test_named_port_uses_exact_instance_and_keeps_coverage () = with_store (fun 
     run_id="run";configuration_revision="configuration";package_revision="package";
     outputs=["frames",Types.Selected_lanes ["msx/frame"];"empty",Types.Selected_lanes ["absent"];
       "all",Types.All_lanes];observation_seq=7;output;status={coverage with complete=true;detail=None}} in
-  let read ?(complete=false) selector = require (Sources.acquire ~access:Sources.Operator_configuration ~store ~package:(package dir 16384)
+  let read ?(complete=false) selector = require (Sources.acquire ~read_browser_document:no_browser ~access:Sources.Operator_configuration ~store ~package:(package dir 16384)
     ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id ->
       check string "stable declaration requested" "producer" installation_id;
       Ok {captured with output={output with coverage=[{coverage with complete}]}})
@@ -257,7 +313,7 @@ let test_machine_source_requires_current_worker () = with_store (fun dir store -
   let snapshot = retained_machine_output ~store ~machine:Masc.Machine_lane.Msx
     ~incarnation:"load-1" ~count:0 ~entries:[] ~fields:["frame",`Int 7]
     ~width:1 ~height:1 ~rgb:"\000\001\002" in
-  let acquire resolve_machine_output = require (Sources.acquire ~access:Sources.Operator_configuration
+  let acquire resolve_machine_output = require (Sources.acquire ~read_browser_document:no_browser ~access:Sources.Operator_configuration
     ~resolve_machine_output ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
     ~store ~package:(package dir 16384)
     ~binding:(binding [`Assoc ["kind",`String "msx_capture";"source_id",`String "screen"]]))
@@ -289,7 +345,7 @@ let test_native_input_history_is_frozen_with_capture () = with_store (fun dir st
       let snapshot = retained_machine_output ~store ~machine:Masc.Machine_lane.Msx
         ~incarnation:c.incarnation ~count:c.input_count ~entries:(List.map Msx_lane.entry_json c.input_ledger)
         ~fields:["frame",`Int c.frame.number] ~width:c.frame.width ~height:c.frame.height ~rgb:c.frame.rgb in
-      require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Ok snapshot) ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
+      require (Sources.acquire ~read_browser_document:no_browser ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Ok snapshot) ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
         ~store ~package:(package dir 16384)
         ~binding:(binding [`Assoc ["kind",`String "msx_capture";"source_id",`String "native"]]))
       |> list |> List.hd |> member "observations" |> list |> List.hd in
@@ -356,7 +412,7 @@ let test_dos_capture_retains_the_machines_history () = with_store (fun dir store
           "controller",Option.fold ~none:`Null ~some:(fun name -> `String name) c.observation.controller;
           "program",Option.fold ~none:`Null ~some:(fun name -> `String name) c.observation.program]
         ~width:c.frame.width ~height:c.frame.height ~rgb:c.frame.rgb in
-      require (Sources.acquire ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Ok snapshot) ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
+      require (Sources.acquire ~read_browser_document:no_browser ~access:Sources.Operator_configuration ~resolve_machine_output:(fun _ -> Ok snapshot) ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
         ~store ~package:(package dir 2_000_000)
         ~binding:(binding [`Assoc ["kind",`String "dos_capture";"source_id",`String "dos"]]))
       |> list |> List.hd |> member "observations" |> list |> List.hd in
@@ -495,13 +551,13 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
         Fusion_run_registry.register_running registry ~run_id
           ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
           ~topology:Fusion_types.Simple ~started_at:1.;
-        let read () = require (Sources.acquire ~access:(Sources.Keeper "fixture") ~store ~package:(package dir 16384)
+        let read () = require (Sources.acquire ~read_browser_document:no_browser ~access:(Sources.Keeper "fixture") ~store ~package:(package dir 16384)
           ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
           ~binding:(binding [`Assoc ["source_id",`String "fusion";
             "kind",`String "fusion_run";"run_id",`String run_id]]))
           |> list |> List.hd |> member "observations" |> list |> List.hd in
         List.iter (fun access ->
-        let denied = require (Sources.acquire ~access
+        let denied = require (Sources.acquire ~read_browser_document:no_browser ~access
           ~store ~package:(package dir 16384)
           ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
           ~binding:(binding [`Assoc ["source_id",`String "fusion";
@@ -523,7 +579,7 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
         check int "array serialization reserves exactly the detail plus brackets"
           (detail_bytes + String.length "[]")
           (String.length (Yojson.Safe.to_string (`List [member "detail" first])));
-        let rejected = require (Sources.acquire ~access:(Sources.Keeper "fixture")
+        let rejected = require (Sources.acquire ~read_browser_document:no_browser ~access:(Sources.Keeper "fixture")
           ~store:rejected_store ~package:(package dir
             (String.length (Yojson.Safe.to_string (`List [member "detail" first]))))
           ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
@@ -585,7 +641,7 @@ let test_fusion_capture_retains_exact_state_across_terminal_change () =
           Fusion_run_registry.register_running registry ~run_id:reused_run
             ~keeper:"fixture" ~preset:"default" ~roster:Fusion_types.preset_roster
             ~topology:Fusion_types.Simple ~started_at:2.;
-          let captured = require (Sources.acquire ~access:(Sources.Keeper "fixture")
+          let captured = require (Sources.acquire ~read_browser_document:no_browser ~access:(Sources.Keeper "fixture")
             ~store ~package:(package dir 16384)
             ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
             ~binding:(binding [`Assoc ["source_id",`String "fusion";
@@ -619,7 +675,7 @@ let test_fusion_binding_targets_only_exact_run () =
     (Result.is_error (Sources.parse (binding [bad])));
   check bool "unknown run is unavailable, not fabricated" true
     (with_store (fun dir store ->
-       let sources = require (Sources.acquire ~access:Sources.Operator_configuration ~store ~package:(package dir 16384)
+       let sources = require (Sources.acquire ~read_browser_document:no_browser ~access:Sources.Operator_configuration ~store ~package:(package dir 16384)
          ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
          ~binding:(binding [source "definitely-unregistered-fusion-run"])) in
        match list sources with
@@ -648,7 +704,7 @@ let test_fusion_envelope_overflow_does_not_retain_or_remove_blobs () =
         let change_reason marker = Fusion_run_registry.mark_completed registry ~run_id
           ~outcome:(Fusion_run_registry.Failed {reason=String.make 4096 marker;code="fixture"}) in
         change_reason 'a';
-        let read cap = require (Sources.acquire ~access:(Sources.Keeper "fixture")
+        let read cap = require (Sources.acquire ~read_browser_document:no_browser ~access:(Sources.Keeper "fixture")
           ~store ~package:(package dir cap)
 
           ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id:_ -> Error "unused")
@@ -702,5 +758,7 @@ let () = run "Lane source provenance" ["acquisition", [
   test_case "duplicate snapshot keys cannot replace retained evidence" `Quick test_duplicate_snapshot_keys_cannot_replace_host_evidence;
   test_case "combined ingress preserves incomplete coverage" `Quick test_combined_ingress_marks_omitted_sources;
   test_case "browser actual identity and unknown coverage" `Quick test_browser_identity_and_unknown_coverage;
+  test_case "browser refusals leave the source unavailable" `Quick test_browser_refusals_leave_the_source_unavailable;
+  test_case "a live document from another client is refused" `Quick test_live_document_from_another_client_is_refused;
   test_case "misc tools name the source they move" `Quick test_misc_tools_name_the_source_they_move;
   test_case "built-in lanes offer what parse accepts" `Quick test_built_in_lanes_offer_what_parse_accepts]]

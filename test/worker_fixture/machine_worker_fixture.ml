@@ -40,7 +40,7 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
           Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "container fixture cannot release native resources"));
         condition_met = (fun ~runtime:_ _ -> true);
         sweep = (fun ~runtime:_ ~is_live_instance:_ -> Ok []);
-        acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+        acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~read_browser_document:_ ~binding:_ -> Ok (`List []));
         start=(fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~(package : Masc.Lane_addon_types.package) ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
           let store = Masc.Lane_addon_store.create
             ~root:(Filename.concat (Masc.Workspace.masc_dir config) "lane-addons") in

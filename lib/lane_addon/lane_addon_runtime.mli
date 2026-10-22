@@ -374,6 +374,18 @@ val host_issue_to_json : host_issue -> Yojson.Safe.t
 (** The [issue] of an instance's [host_requests] in the inspect payload. *)
 
 module For_testing : sig
+  type visibility = Shared | Operator_only | Keeper_only of string
+  type 'service document_service =
+    | Document_service of 'service
+    | No_browser_service  (** No browser Add-on this installation may read. *)
+    | Browser_narrower_than_consumer
+        (** Every such browser is visible to fewer readers than the consumer's output. *)
+    | Several_browser_services
+  val choose_document_service :
+    visibility:visibility -> ('service * visibility) list -> 'service document_service
+  (** Which browser Add-on a [browser_document] source reads: only one whose
+      readers include every reader of the consumer's output, the rule
+      [lane_output] already follows. *)
   val with_tool_change_handler : (unit -> unit) -> (unit -> 'a) -> 'a
   (** Temporarily observe the original MCP bridge without replacing owner
       subscriptions; restores the preceding handler on exit. *)
@@ -417,6 +429,7 @@ module For_testing : sig
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
       resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
+    read_browser_document:(route:Browser_lane.route -> tab_id:int -> (Browser_lane.answer, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
     recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string ->
       authority:Lane_addon_lifecycle.authority -> resource:Lane_addon_lifecycle.resource option ->

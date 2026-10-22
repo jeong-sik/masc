@@ -124,7 +124,7 @@ let backend ?await_change ?deliver_reply ?during_delivery ?before_listing ?expor
       { runtime = Lane_addon_types.Docker; engine = Lane_addon_lifecycle.Docker_engine "fixture-engine" }));
     on_created connection; Ok connection);
   package_ready = (fun ~package:_ -> Ok ());
-  acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+  acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~read_browser_document:_ ~binding:_ -> Ok (`List []));
   recover_stop = (fun ~state_owner:_ ~instance_id:_ ~authority ~resource ->
     match authority, resource with
     | Lane_addon_lifecycle.Container_authority { engine; _ }, None ->

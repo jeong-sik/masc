@@ -82,6 +82,7 @@ val authorize : access:access -> Yojson.Safe.t -> (unit, string) result
 val acquire : access:access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
   resolve_machine_output:(Machine_lane.t -> (machine_output, string) result) ->
   resolve_lane_output:(installation_id:string -> (lane_output, string) result) ->
+  read_browser_document:(route:Browser_lane.route -> tab_id:int -> (Browser_lane.answer, string) result) ->
   binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** The complete returned source array fits the package's ingress envelope.
     Unavailable sources retain explicit coverage entries. Bound file snapshots
@@ -91,4 +92,11 @@ val acquire : access:access -> store:Lane_addon_store.t -> package:Lane_addon_ty
     A [lane_output] binding can select an [output_id] declared in the applied
     producer package. Absence selects the whole completed output. Unknown names
     remain unavailable. Selection retains whole-producer coverage; it does not
-    claim completeness for one port independently of other producer inputs. *)
+    claim completeness for one port independently of other producer inputs.
+
+    A [browser_document] source asks [read_browser_document] for the document
+    of one existing tab on the bound route. The host answers from the browser
+    owner without queueing behind another browser command; [Error] says why no
+    document was read and becomes the source's unavailable detail. The
+    returned document must name the bound tab and, on the live lane, the bound
+    client. *)

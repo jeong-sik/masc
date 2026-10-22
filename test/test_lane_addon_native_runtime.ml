@@ -258,7 +258,7 @@ let operator_retain () = with_fixture (fun clock root config ->
     ignore (dispatch config R.Detach ["instance_id",`String second]);
     check string "recovery of a retained allocation is not a release" "native_retained" (release_kind second);
     check bool "the left profile stays in place" true (Sys.file_exists left)))
-let browser_server = {|import argparse,hashlib,json,os,socket,subprocess,sys,threading
+let browser_server = {|import argparse,hashlib,json,os,socket,subprocess,sys,threading,time
 p=argparse.ArgumentParser()
 p.add_argument("root");p.add_argument("mode")
 p.add_argument("--socket");p.add_argument("--incarnation");p.add_argument("--max-message-bytes")
@@ -290,6 +290,12 @@ def handle(conn):
             result={"reply":"poll","command":None,"state_id":hashlib.sha256(json.dumps({"command_running":running}).encode()).hexdigest()}
         elif op=="disconnect":
             clients.pop(req["clientId"],None);result={"reply":"receipt"}
+        elif op=="issue" and req["only_if_idle"]:
+            request=os.path.join(a.root,"idle-request-"+a.incarnation)
+            with open(request+".tmp","w") as out: json.dump(req,out)
+            os.replace(request+".tmp",request)
+            while os.path.exists(os.path.join(a.root,"hold-idle")): time.sleep(0.005)
+            with open(os.path.join(a.root,"idle-reply.json")) as source: result=json.load(source)
         elif op=="issue":
             event.clear()
             with open(os.path.join(a.root,"issued-"+a.incarnation),"w") as out: out.write("issued")
@@ -574,6 +580,149 @@ hooks = ["validate_input", "validate_output"]
   wait clock (fun () -> not (Sys.file_exists (Filename.dirname (socket_path refused))));
   check bool "readiness refusal never advertises service" false
     (List.exists (fun (service:R.browser_service) -> service.instance_id=refused) (services ()))))
+(* An observe-only package that keeps the sources of each observation. *)
+let consumer_server = {|import json,os,sys
+root=sys.argv[1]
+count=0
+for line in sys.stdin:
+    req=json.loads(line)
+    if "id" not in req: continue
+    method=req["method"]
+    if method=="initialize": result={"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"document-consumer","version":"1"}}
+    elif method=="tools/list": result={"tools":[{"name":"lane_observe","inputSchema":{"type":"object"}}]}
+    elif method=="tools/call":
+        count+=1
+        path=os.path.join(root,"consumer-sources-"+str(count)+".json")
+        with open(path+".tmp","w") as out: json.dump(req["params"]["arguments"]["sources"],out)
+        os.replace(path+".tmp",path)
+        result={"content":[],"structuredContent":{"rows":[],"coverage":[]}}
+    else: raise RuntimeError(method)
+    print(json.dumps({"jsonrpc":"2.0","id":req["id"],"result":result}),flush=True)
+|}
+(* A consuming installation reads a browser document through the browser
+   Add-on worker, the only process that holds browser connections. It reads
+   only when exactly one browser Add-on serves it. The whole case runs under
+   the fixture's deadline, so a read that re-entered a lock its observation
+   loop holds would fail here instead of hanging. *)
+let browser_document_source () = with_browser_environment (fun () -> with_fixture (fun clock root config ->
+  let script=Filename.concat root "browser.py" in write script browser_server;
+  let tool=Browser_addon_tool.definition in
+  write (Filename.concat root "browser-tool.json") (Yojson.Safe.to_string (`Assoc [
+    "name",`String tool.name;"inputSchema",tool.input_schema;
+    "outputSchema",Option.get tool.output_schema]));
+  let manifest=Filename.concat root "browser.toml" in
+  write manifest (Printf.sprintf {|id = "browser-host-fixture"
+revision = "fixture-1"
+title = "Browser service fixture"
+runtime = "host_process"
+service = "browser"
+command = ["python3", %S, %S, "normal"]
+contributions = ["observe"]
+[resources]
+max_reply_bytes = 65536
+[world.tools]
+export = ["browser_command"]
+invocation = "host_context"
+hooks = ["validate_input", "validate_output"]
+|} script root);
+  let consumer_script=Filename.concat root "consumer.py" in write consumer_script consumer_server;
+  let consumer_manifest=Filename.concat root "consumer.toml" in
+  write consumer_manifest (Printf.sprintf {|id = "document-consumer"
+revision = "fixture-1"
+title = "Browser document consumer"
+runtime = "host_process"
+command = ["python3", %S, %S]
+contributions = ["observe"]
+[resources]
+max_reply_bytes = 65536
+|} consumer_script root);
+  let access=Lane_addon_sources.Operator_configuration in
+  let attach manifest sources=dispatch config R.Attach ["manifest_path",`String manifest;
+    "run_id",`String "browser-document";"binding",`Assoc ["sources",`List sources]] |> text "instance_id" in
+  let inspect id=dispatch config R.Inspect ["instance_id",`String id]
+    |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
+  let phase id=inspect id |> member "phase" |> text "kind" in
+  let seq id=inspect id |> member "observation_seq" |> Yojson.Safe.Util.to_int in
+  let service id=List.find_opt (fun (service:R.browser_service) -> service.instance_id=id)
+    (R.browser_services ~config ~access) in
+  let ready id=Option.is_some (service id) && phase id="attached" && seq id>0 in
+  let client="0c000000-0000-4000-8000-000000000001" in
+  let client_id=require (Browser_lane.client_id_of_string client) in
+  let document=`Assoc ["ok",`Bool true;"data",`Assoc ["clientId",`String client;"tabId",`Int 4;
+    "documentId",`String "fixture-document";"url",`String "https://fixture.example/";
+    "observedAt",`Float 1000.;"html",`String "<html>fixture</html>";"htmlComplete",`Bool true]] in
+  let reply answer=write (Filename.concat root "idle-reply.json")
+    (Yojson.Safe.to_string (Browser_addon_wire.reply_to_json answer)) in
+  let page=`Assoc ["kind",`String "browser_document";"source_id",`String "page";"lane",`String "live";
+    "client_id",`String client;"tab_id",`Int 4;"target_id",`String "fixture-target";
+    "environment",`String "fixture";"request_id",`String "fixture-read"] in
+  let consumer=attach consumer_manifest [page] in
+  (* Each observation of the consumer keeps the sources it received. *)
+  let observed=ref 0 in
+  let next_source ()=incr observed;
+    let path=Filename.concat root (Printf.sprintf "consumer-sources-%d.json" !observed) in
+    wait clock (fun () -> Sys.file_exists path && phase consumer="attached" && seq consumer >= !observed);
+    Yojson.Safe.from_file path |> Yojson.Safe.Util.to_list |> List.hd in
+  let observe id=ignore (dispatch config R.Observe ["instance_id",`String id]) in
+  let unavailable source=member "complete" source=`Bool false
+    && (member "observations" source |> Yojson.Safe.Util.to_list)=[] in
+  check bool "with no browser Add-on the source is unavailable" true (unavailable (next_source ()));
+  let browser=attach manifest [] in
+  wait clock (fun () -> ready browser);
+  let browser_seq=seq browser in
+  let idle_request=Filename.concat root ("idle-request-"^browser) in
+  reply (Browser_addon_wire.Issue_result (Ok (Browser_lane.Answered document)));
+  observe consumer;
+  let source=next_source () in
+  check bool "the consumer receives the document as a complete source" true (member "complete" source=`Bool true);
+  let observation=member "observations" source |> Yojson.Safe.Util.to_list |> List.hd in
+  check string "the observed document is the one the browser Add-on answered" "fixture-document"
+    (text "document_id" observation);
+  check string "the observation names the bound client" client (text "client_id" observation);
+  let request=require (Browser_addon_wire.of_json (Yojson.Safe.from_file idle_request)) in
+  check bool "the worker receives an idle document read of the bound tab on the bound client" true
+    (request.Browser_addon_wire.command=Browser_addon_wire.Issue {route=Browser_lane.Live_route (Some client_id);
+      verb=Browser_lane.Page_document {tab_id=4};actor=None;
+      timeout_sec=Browser_lane.default_timeout_sec;only_if_idle=true});
+  check string "the read does not send the browser Add-on into another observation" "attached" (phase browser);
+  check int "the browser Add-on keeps its observation" browser_seq (seq browser);
+  (* A reply of the wrong kind is a lost answer to the transport. *)
+  reply Browser_addon_wire.Receipt;
+  observe consumer;
+  check bool "a lost answer leaves the source unavailable" true (unavailable (next_source ()));
+  check string "a lost answer does not fail the browser Add-on" "attached" (phase browser);
+  check int "nor send it into another observation" browser_seq (seq browser);
+  let second=attach manifest [] in
+  wait clock (fun () -> ready second);
+  let second_request=Filename.concat root ("idle-request-"^second) in
+  Unix.unlink idle_request;
+  observe consumer;
+  check bool "with two browser Add-ons the source is unavailable" true (unavailable (next_source ()));
+  check bool "and neither browser Add-on is asked for the document" false
+    (Sys.file_exists idle_request || Sys.file_exists second_request);
+  ignore (dispatch config R.Detach ["instance_id",`String second]);
+  wait clock (fun () -> phase second="detached");
+  (* Detach the consumer while the worker still holds its read. *)
+  reply (Browser_addon_wire.Issue_result (Ok (Browser_lane.Answered document)));
+  write (Filename.concat root "hold-idle") "hold";
+  observe consumer;
+  wait clock (fun () -> Sys.file_exists idle_request);
+  ignore (dispatch config R.Detach ["instance_id",`String consumer]);
+  (* Retained means the consumer's observation fiber has ended, so whatever its
+     cancelled read did to the browser Add-on has already happened. *)
+  wait clock (fun () -> let item=inspect consumer in
+    text "kind" (member "phase" item)="detached" && text "runtime_presence" item="retained");
+  check bool "a consumer detached during its read leaves the browser Add-on serving" true
+    (Option.is_some (service browser));
+  check bool "the browser Add-on still answers" true
+    (match Option.map (fun service -> R.call_browser_service ~config ~access ~service
+        ~command:Browser_addon_wire.Snapshot) (service browser) with
+     | Some (Ok (Browser_addon_wire.Snapshot_result _)) -> true
+     | Some (Ok (Browser_addon_wire.(Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _)))
+     | Some (Error (Browser_addon_client.(Unavailable _|Outcome_unknown _))) | None -> false);
+  Unix.unlink (Filename.concat root "hold-idle");
+  ignore (dispatch config R.Detach ["instance_id",`String browser]);
+  wait clock (fun () -> phase browser="detached")))
 let () =
   if Array.length Sys.argv<>2 then fail "expected native admission launcher path";
   launcher := Unix.realpath Sys.argv.(1);
@@ -583,4 +732,5 @@ let () =
     test_case "configuration resumes after interrupted slot metadata" `Quick interrupted_metadata;
     test_case "configuration retires unpublished reservation before fresh attach" `Quick interrupted_reservation;
     test_case "the operator retains an unconfirmed native instance" `Quick operator_retain;
-    test_case "browser service concurrent channels exact owner cancellation and failed readiness" `Quick browser_installation]]
+    test_case "browser service concurrent channels exact owner cancellation and failed readiness" `Quick browser_installation;
+    test_case "a browser document source reads through the browser Add-on worker" `Quick browser_document_source]]

@@ -1993,6 +1993,7 @@ let test_large_sampling_sources_fit_without_duplicate_response_bodies () = with_
     "source_id",`String id;"kind",`String "lane_output";"installation_id",`String id;
     "selection",`String "latest_completed"]) producers)] in
   let acquired = require (Sources.acquire ~access:Sources.Operator_configuration ~store ~package
+    ~read_browser_document:(fun ~route:_ ~tab_id:_ -> Error "no browser owner in this fixture")
     ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id -> match List.assoc_opt installation_id producers with
       | Some producer -> Ok producer | None -> Error "unknown producer") ~binding) in
   check bool "combined source array stays within the configured ingress envelope" true

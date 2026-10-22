@@ -102,7 +102,7 @@ let with_fixture f =
                       action_schema=(fun () -> None);act=(fun ~arguments:_ -> Error "read-only");
                       host = None; stop=(fun () -> Ok (Masc.Lane_addon_lifecycle.Released {engine=Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine";container_id=Some (instance_id)}));resource=Masc.Lane_addon_lifecycle.Container_resource instance_id} in ignore (on_authority (Masc.Lane_addon_lifecycle.Container_authority {runtime=Masc.Lane_addon_types.Docker;engine=Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine"})); on_created connection;Ok connection);
                   package_ready=(fun ~package:_ -> Ok ());
-                  acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+                  acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~read_browser_document:_ ~binding:_ -> Ok (`List []));
                   recover_stop=(fun ~state_owner:_ ~instance_id:_ ~authority ~resource ->
       match authority,resource with
       | Masc.Lane_addon_lifecycle.Container_authority {engine;_},None ->

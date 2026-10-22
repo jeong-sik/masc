@@ -80,7 +80,7 @@ let backend worker : Runtime.For_testing.backend = {
      enabled, with no live instance. *)
   package_ready = (fun ~(package : Lane_addon_types.package) ->
     if String.equal package.id "broken-package" then Error "image is not loaded" else Ok ());
-  acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+  acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~read_browser_document:_ ~binding:_ -> Ok (`List []));
   recover_stop = (fun ~state_owner:_ ~instance_id:_ ~authority ~resource ->
     match authority, resource with
     | Lane_addon_lifecycle.Container_authority { engine; _ }, None ->

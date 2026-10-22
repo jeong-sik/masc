@@ -148,7 +148,7 @@ let make_backend ?observe_step () =
       end);
     package_ready = (fun ~package ->
       if package.id = "image-missing" then Error "image fixture/image is not on this host" else Ok ());
-    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ ->
+    acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~read_browser_document:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
     recover_stop = (fun ~state_owner:_ ~instance_id ~authority ~resource ->
       match authority,resource with
@@ -355,6 +355,28 @@ let test_a_failure_is_explained_only_to_the_operator () =
   check bool "the operator's refusal tells the failures apart" false
     (String.equal (Runtime.export_refusal_operator_message (refusal exited))
        (Runtime.export_refusal_operator_message (refusal unconfirmed)))
+
+(* A browser document source reads only a browser whose readers include every
+   reader of the consumer's output, the rule lane_output follows, so an
+   operator-only browser's page never lands in output a Keeper can read. *)
+let test_a_document_source_reads_only_a_browser_that_covers_its_output () =
+  let module T = Runtime.For_testing in
+  let choose visibility candidates = T.choose_document_service ~visibility candidates in
+  check bool "a shared browser serves a shared consumer" true
+    (choose T.Shared ["browser", T.Shared] = T.Document_service "browser");
+  check bool "an operator-only browser does not serve a shared consumer" true
+    (choose T.Shared ["browser", T.Operator_only] = T.Browser_narrower_than_consumer);
+  check bool "a Keeper's browser does not serve a shared consumer" true
+    (choose T.Shared ["browser", T.Keeper_only "a"] = T.Browser_narrower_than_consumer);
+  check bool "an operator-only browser serves an operator-only consumer" true
+    (choose T.Operator_only ["browser", T.Operator_only] = T.Document_service "browser");
+  check bool "another Keeper's browser does not serve a Keeper's consumer" true
+    (choose (T.Keeper_only "a") ["browser", T.Keeper_only "b"] = T.Browser_narrower_than_consumer);
+  check bool "the one browser that covers the consumer is chosen" true
+    (choose T.Shared ["private", T.Operator_only; "public", T.Shared] = T.Document_service "public");
+  check bool "two browsers that cover the consumer cannot be chosen between" true
+    (choose T.Shared ["first", T.Shared; "second", T.Shared] = T.Several_browser_services);
+  check bool "no browser is no browser" true (choose T.Shared [] = T.No_browser_service)
 
 (* A failed DOS installation may still hold the controller in its state, so a
    release is not reported as done, and a shared call names the installation. *)
@@ -804,10 +826,10 @@ let test_capture_cannot_rewrite_detach_failure () =
   let released, release = Eio.Promise.create () in
   let returned, return = Eio.Promise.create () in
   let captures = ref 0 in
-  let acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~binding =
+  let acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~read_browser_document ~binding =
     incr captures;
     if !captures=2 then (Eio.Promise.resolve enter (); Eio.Promise.await released);
-    let result = Lane_addon_sources.acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~binding in
+    let result = Lane_addon_sources.acquire ~access ~store ~package ~resolve_machine_output ~resolve_lane_output ~read_browser_document ~binding in
     if !captures=2 then Eio.Promise.resolve return ();
     result in
   with_fixture ~acquire (fun env _sw config dir state ->
@@ -2186,6 +2208,8 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "a failed installation is read as unready with its failure" `Quick
     test_a_failed_installation_is_read_as_unready;
   test_case "a failure is explained only to the operator" `Quick test_a_failure_is_explained_only_to_the_operator;
+  test_case "a document source reads only a browser that covers its output" `Quick
+    test_a_document_source_reads_only_a_browser_that_covers_its_output;
   test_case "a failed DOS installation is named and not released" `Quick
     test_a_failed_dos_installation_is_named_and_not_released;
   test_case "a cleanup that is cut short can run again" `Quick test_a_cleanup_that_is_cut_short_can_run_again;

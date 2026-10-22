@@ -12,7 +12,7 @@
   },
   "data": {
    "tabId": 1,
-   "url": "http://127.0.0.1:62258/fixture#followed",
+   "url": "http://127.0.0.1:50825/fixture#followed",
    "title": "BiDi native fixture",
    "within": "#message",
    "withinMatches": 1,
@@ -34,7 +34,7 @@
   },
   "data": {
    "tabId": 1,
-   "url": "http://127.0.0.1:62258/fixture#followed",
+   "url": "http://127.0.0.1:50825/fixture#followed",
    "title": "BiDi native fixture",
    "within": "#long",
    "withinMatches": 1,
@@ -62,7 +62,7 @@
   },
   "data": {
    "tabId": 1,
-   "url": "http://127.0.0.1:62258/fixture#followed",
+   "url": "http://127.0.0.1:50825/fixture#followed",
    "title": "BiDi native fixture",
    "within": "#nothing-here",
    "withinMatches": 0,
@@ -88,7 +88,7 @@
   "verb": "page.goto",
   "args": {
    "tabId": 1,
-   "url": "http://127.0.0.1:62258/fixture?moved=1"
+   "url": "http://127.0.0.1:50825/fixture?moved=1"
   },
   "result": {
    "ok": false,
@@ -101,7 +101,7 @@
   "verb": "page.goto",
   "args": {
    "tabId": 5,
-   "url": "http://127.0.0.1:62258/fixture?went=1"
+   "url": "http://127.0.0.1:50825/fixture?went=1"
   },
   "result": {
    "ok": true,
@@ -111,8 +111,26 @@
   "data": {
    "tabId": 5,
    "action": "goto",
-   "url": "http://127.0.0.1:62258/fixture?went=1",
+   "url": "http://127.0.0.1:50825/fixture?went=1",
    "title": "BiDi native fixture"
+  }
+ },
+ {
+  "verb": "page.goto",
+  "args": {
+   "tabId": 5,
+   "url": "http://127.0.0.1:51026/"
+  },
+  "result": {
+   "ok": false,
+   "error": "browsingContext.navigate: BiDi command rejected: unknown error; inspect the tab before repeating",
+   "effectPhase": "partial"
+  },
+  "data": {
+   "tabId": 5,
+   "action": "goto",
+   "url": "http://127.0.0.1:51026/",
+   "title": ""
   }
  },
  {
@@ -120,7 +138,7 @@
   "args": {
    "tabId": 2,
    "action": "activate_tab",
-   "expectedUrl": "http://127.0.0.1:62258/fixture"
+   "expectedUrl": "http://127.0.0.1:50825/fixture"
   },
   "result": {
    "ok": true,
@@ -130,10 +148,39 @@
   "data": {
    "tabId": 2,
    "action": "activate_tab",
-   "urlBefore": "http://127.0.0.1:62258/fixture",
-   "url": "http://127.0.0.1:62258/fixture",
+   "urlBefore": "http://127.0.0.1:50825/fixture",
+   "url": "http://127.0.0.1:50825/fixture",
    "active": true,
    "title": "BiDi native fixture"
+  }
+ },
+ {
+  "verb": "page.capture",
+  "args": {
+   "tabId": 2
+  },
+  "result": {
+   "ok": true,
+   "error": null,
+   "effectPhase": null
+  },
+  "data": {
+   "tabId": 2,
+   "url": "http://127.0.0.1:50825/fixture",
+   "title": "BiDi native fixture",
+   "mimeType": "image/png",
+   "data": {
+    "sha256": "cb0a0729779b2815bf2d2af543c9e52da1c72758c2cfed4fa0eccfc633378a1c",
+    "bytes": 26742,
+    "path": "cb0a0729779b2815bf2d2af543c9e52da1c72758c2cfed4fa0eccfc633378a1c.png"
+   },
+   "viewport": {
+    "documentId": "0ec002f23d305fcde11b7b8dadf4ea99",
+    "width": 1366,
+    "height": 683,
+    "scrollX": 0,
+    "scrollY": 0
+   }
   }
  }
 ]

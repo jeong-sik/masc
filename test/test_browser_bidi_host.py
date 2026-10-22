@@ -449,6 +449,17 @@ dragSource.onpointerup=e=>{const box=dropTarget.getBoundingClientRect();
             assert call("page.read", {"tabId": first})["data"]["url"] == here
             went = call("page.goto", {"tabId": new_tab, "url": fixture_url + "?went=1"})
             assert went["ok"] and went["data"]["url"] == fixture_url + "?went=1", went
+            # A navigation Firefox cannot finish (nothing listens on the port)
+            # is answered either way, and the connection keeps its tabs.
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                closed_port = probe.getsockname()[1]
+            refused_url = f"http://127.0.0.1:{closed_port}/"
+            failed_goto = call("page.goto", {"tabId": new_tab, "url": refused_url})
+            assert failed_goto["ok"] or failed_goto.get("effectPhase") == "partial", failed_goto
+            still = call("tabs.list", {})
+            assert still["ok"] and new_tab in [tab["id"] for tab in still["data"]], still
+            print(json.dumps({"refusedGoto": {key: failed_goto.get(key) for key in ("ok", "error", "effectPhase", "data")}}))
             # Activation brings a tab in the background to the front.
             rows = call("tabs.list", {})["data"]
             background = [row for row in rows if row["id"] in (first, second) and not row["active"]]

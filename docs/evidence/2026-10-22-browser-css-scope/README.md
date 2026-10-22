@@ -35,6 +35,7 @@ node measure.mjs <firefox> <main 의 browser_page_script.ml> <스택의 browser_
 - `within=#message((`: `invalid_css_selector` 로 거절됐어요.
 - 요소 목록의 `#react` 선택자로 click 했고, 페이지가 클릭을 받았어요.
 - `page.goto` 를 운영자가 연 탭 1에 보내면 `effectPhase: not_started` 로 거절돼요. 이 연결이 연 탭 5는 `?went=1` 로 옮겨졌어요.
+- 아무도 듣지 않는 포트로 `page.goto` 를 보내면 Firefox 가 `unknown error` 로 답해요. 탭을 다시 읽어 `effectPhase: partial` 과 지금 주소를 돌려주고, 같은 연결로 탭 목록을 계속 읽어요.
 - 뒤에 있던 탭 2에 `activate_tab` 을 보낸 뒤, 활성 탭은 2 하나였어요. 그 직후 캡처가 `activated-tab.png` 예요.
 
 이 실행은 Claude 샌드박스 밖에서만 Firefox 가 떠요. 운영 중인 Firefox 와 live 서버에는 닿지 않았어요.

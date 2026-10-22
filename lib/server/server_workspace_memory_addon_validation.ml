@@ -3,8 +3,8 @@ module Exact = Lane_addon_exact
 module Owner = Lane_addon_tool_request_owner
 let ( let* ) = Result.bind
 
-let package_id = "workspace-curator"
-let tool = "curate"
+let package_id = Capture.package_id
+let tool = Capture.tool
 
 let request capture =
   let output = match Capture.work capture with

@@ -957,11 +957,11 @@ let test_lanes_search_texts_lead_with_the_standalone_labels () =
       "Librarian exact/librarian_exact Fixture exact lane";
       "Verifier exact/verifier_exact Fixture exact lane";
       "DOS machine/dos Shared machine"])
-    (Masc_tui_surface_search.surface_row_texts state Lanes)
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Lanes)
 
 (* Resources draws a list beside a reading, and j/k means one thing in each.
-   The search follows the same split: a match lands the list cursor, and with
-   the reading focused there is no cursor for it to land on.
+   List search lands the catalog cursor. The loaded document has its own
+   logical search position, independent of its clamped scroll.
 
    The row text is the name the list actually draws -- the server's title
    when it sent one -- because a search that matches a name nothing on screen
@@ -990,33 +990,33 @@ let test_resources_searches_the_names_the_list_draws () =
     "the title when there is one, the name otherwise, and a blank title is \
      not one"
     (Some [ "Board posts"; "keepers"; "lanes" ])
-    (Masc_tui_surface_search.surface_row_texts state Resources)
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Resources)
 
-let test_the_resource_reading_offers_no_row_search () =
+let test_unread_resource_offers_no_body_search () =
   let state = resources_state () in
   state.resource_focus <- Right_pane;
   Alcotest.(check (option (list string)))
-    "with the text focused there is no cursor to land a match on" None
-    (Masc_tui_surface_search.surface_row_texts state Resources);
+    "an unread resource has no body to search" None
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Resources);
   state.resource_focus <- Left_pane;
   Alcotest.(check Alcotest.bool) "and the list has one again" true
-    (Option.is_some (Masc_tui_surface_search.surface_row_texts state Resources))
+    (Option.is_some (Masc_tui_surface_search.surface_row_texts ~cols:120 state Resources))
 
 let test_resources_without_a_list_answers_nothing () =
   let state = resources_state () in
   state.resources_list <- None;
   Alcotest.(check (option (list string)))
     "before the catalog arrives there are no rows" None
-    (Masc_tui_surface_search.surface_row_texts state Resources)
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Resources)
 
 let test_lanes_sub_modes_stay_unsearchable () =
   let state = lanes_state () in
   state.lanes_mode <- Lanes_run_list Standalone_lane.Librarian;
   Alcotest.(check (option (list string))) "run list keeps / closed" None
-    (Masc_tui_surface_search.surface_row_texts state Lanes);
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Lanes);
   state.lanes_mode <- Lanes_run_detail (Standalone_lane.Verifier, "vrf-1");
   Alcotest.(check (option (list string))) "run detail keeps / closed" None
-    (Masc_tui_surface_search.surface_row_texts state Lanes)
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Lanes)
 
 (* Board and Planning answer "/" over the list they draw. Both panes window
    themselves around the cursor, so a landing is on screen without a scroll
@@ -1054,23 +1054,23 @@ let test_board_searches_the_post_list () =
     "id, author and title -- what the list draws"
     (Some
        [ "p-1 alpha release evidence sweep"; "p-2 beta frame budget" ])
-    (Masc_tui_surface_search.surface_row_texts state Board)
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Board)
 
 let test_board_reading_and_writing_keep_the_key_closed () =
   let state = board_state () in
   state.board_mode <- Board_read "p-1";
   Alcotest.(check (option (list string))) "reading a post" None
-    (Masc_tui_surface_search.surface_row_texts state Board);
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Board);
   state.board_mode <- Board_compose;
   (* Writing is the stronger case: "/" there is draft text. *)
   Alcotest.(check (option (list string))) "writing a post" None
-    (Masc_tui_surface_search.surface_row_texts state Board)
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Board)
 
 let test_board_without_posts_offers_nothing_to_search () =
   let state = board_state () in
   ignore (apply_board_posts_load state {bpr_query=board_query state;bpr_result=Ok []});
   Alcotest.(check (option (list string))) "no rows" None
-    (Masc_tui_surface_search.surface_row_texts state Board)
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Board)
 
 let planning_goal_row id title =
   { pg_id = id
@@ -1120,7 +1120,7 @@ let test_planning_searches_the_goals_the_list_shows () =
   Alcotest.(check (option (list string)))
     "id and title"
     (Some [ "g-1 cut the frame budget"; "g-2 paste follows the field" ])
-    (Masc_tui_surface_search.surface_row_texts state Planning)
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Planning)
 
 let test_planning_searches_what_the_filter_left () =
   (* The cursor counts positions in the filtered, sorted list, so the search
@@ -1130,13 +1130,13 @@ let test_planning_searches_what_the_filter_left () =
   state.planning_filter <- Planning_filter_completed;
   Alcotest.(check (option (list string)))
     "nothing active survives the completed filter" None
-    (Masc_tui_surface_search.surface_row_texts state Planning)
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Planning)
 
 let test_planning_detail_keeps_the_key_closed () =
   let state = planning_state () in
   state.planning_mode <- Planning_detail "g-1";
   Alcotest.(check (option (list string))) "a goal is open" None
-    (Masc_tui_surface_search.surface_row_texts state Planning)
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Planning)
 
 let test_detail_tab_keys_are_not_quit_keys () =
   List.iter
@@ -1196,7 +1196,7 @@ let test_code_search_count_tracks_fetched_source () =
         state.code_file <- Masc_tui_fetched.complete ~equal:String.equal next request
           (Ok { cfd_source = source; cfd_revision = String.make 64 'a'; cfd_rows = rows })
   in
-  let count query = Masc_tui_surface_search.surface_search_count state Code ~query in
+  let count query = Masc_tui_surface_search.surface_search_count ~cols:120 state Code ~query in
   load "large.ml" (Array.init 20_000 (fun index ->
     [((if index mod 2 = 0 then "needle" else "other"), "")]));
   Alcotest.(check (option int)) "large file count" (Some 10_000) (count "needle");
@@ -1238,14 +1238,14 @@ let test_detail_search_counts_follow_the_active_pane () =
       sys_total = 1; sys_latest_seq = Some 1 }) state.system_logs;
   let check_pane label surface set_detail =
     state.view <- surface;
-    let count () = Masc_tui_surface_search.surface_search_count state surface ~query:state.search_last in
+    let count () = Masc_tui_surface_search.surface_search_count ~cols:120 state surface ~query:state.search_last in
     Alcotest.(check (option int)) (label ^ " list count") (Some 1) (count ());
     Alcotest.(check bool) (label ^ " list has a cursor") true
       (Option.is_some (scrolled_surface_rows state ~cols:80 surface));
     set_detail true;
     Alcotest.(check (option int)) (label ^ " detail has no count or n/N") None (count ());
     Alcotest.(check (option (list string))) (label ^ " detail has no search rows")
-      None (Masc_tui_surface_search.surface_row_texts state surface);
+      None (Masc_tui_surface_search.surface_row_texts ~cols:120 state surface);
     Alcotest.(check bool) (label ^ " detail has no cursor") false
       (Option.is_some (scrolled_surface_rows state ~cols:80 surface));
     set_detail false;
@@ -1275,15 +1275,15 @@ let test_changes_diff_uses_visible_search_rows () =
   state.search_last <- "needle";
   let check_list label =
     Alcotest.(check (option int)) (label ^ " visible count") (Some 1)
-      (Masc_tui_surface_search.surface_search_count state Changes ~query:state.search_last);
+      (Masc_tui_surface_search.surface_search_count ~cols:120 state Changes ~query:state.search_last);
     Alcotest.(check bool) (label ^ " cursor available") true
       (Option.is_some (scrolled_surface_rows state ~cols:80 Changes)) in
   check_list "list";
   state.changes_diff_row <- Some 0;
   Alcotest.(check (option (list string))) "diff has no hidden search rows" None
-    (Masc_tui_surface_search.surface_row_texts state Changes);
+    (Masc_tui_surface_search.surface_row_texts ~cols:120 state Changes);
   Alcotest.(check (option int)) "diff has no hidden list count" None
-    (Masc_tui_surface_search.surface_search_count state Changes ~query:state.search_last);
+    (Masc_tui_surface_search.surface_search_count ~cols:120 state Changes ~query:state.search_last);
   Alcotest.(check bool) "diff cannot move a hidden list cursor" false
     (Option.is_some (scrolled_surface_rows state ~cols:80 Changes));
   state.changes_diff_row <- None;
@@ -1313,10 +1313,10 @@ let test_workspace_activity_offers_no_row_search () =
   state.repositories <-
     Some { Tui_decode.rs_repositories = [ repository ]; rs_total = 1 };
   Alcotest.(check (option int)) "the repository list answers the search"
-    (Some 1) (Masc_tui_surface_search.surface_search_count state Repositories ~query:"masc");
+    (Some 1) (Masc_tui_surface_search.surface_search_count ~cols:120 state Repositories ~query:"masc");
   state.workspace_activity_repo <- Some "masc";
   Alcotest.(check (option int)) "Workspace Activity answers no search"
-    None (Masc_tui_surface_search.surface_search_count state Repositories ~query:"masc")
+    None (Masc_tui_surface_search.surface_search_count ~cols:120 state Repositories ~query:"masc")
 
 let test_memory_facts_footer_hints_respect_split_threshold () =
   let has_sub needle text =
@@ -1580,7 +1580,7 @@ let () =
         ; Alcotest.test_case "Resources searches the names it draws" `Quick
             test_resources_searches_the_names_the_list_draws
         ; Alcotest.test_case "the resource reading offers no row search"
-            `Quick test_the_resource_reading_offers_no_row_search
+            `Quick test_unread_resource_offers_no_body_search
         ; Alcotest.test_case "Resources without a list answers nothing" `Quick
             test_resources_without_a_list_answers_nothing
         ] )

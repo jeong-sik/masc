@@ -7073,7 +7073,11 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
    the other way. A miss moves nothing. The searched list is the one
    [Masc_tui_surface_search.surface_row_texts] answers -- the same list the row cursor names -- and
    the window follows the landing so the match is visible. *)
-let search_row_cursor state = Option.map (fun r -> r.rl_cursor) (row_list state)
+let search_row_cursor state =
+  if state.view = Resources && state.resource_focus = Right_pane
+     && not state.context_inspector_open && not state.repository_changes_open
+  then Some state.resource_search_cursor
+  else Option.map (fun r -> r.rl_cursor) (row_list state)
 
 let place_row_cursor state index =
   Option.iter (fun r -> r.rl_place index) (row_list state)
@@ -7104,7 +7108,7 @@ let show_lanes_action_error state detail =
 
 let search_jump ?(backwards = false) state ~query ~after =
   let query = surface_search_query state.view query in
-  match Masc_tui_surface_search.surface_row_texts state state.view with
+  match Masc_tui_surface_search.surface_row_texts ~cols:(snd (get_terminal_size ())) state state.view with
   | None -> ()
   | Some texts ->
       (* Into an array before the scan, not walked per index. The scan visits
@@ -7130,7 +7134,10 @@ let search_jump ?(backwards = false) state ~query ~after =
                 state.lanes_action_error <- None;
                 Masc_tui_types.dismiss_runtime_lane_notice state
               end;
-              place_row_cursor state index
+              if state.view = Resources && state.resource_focus = Right_pane
+                 && not state.context_inspector_open && not state.repository_changes_open
+              then Masc_tui_resources_updates.place_search_match state ~count:total ~index
+              else place_row_cursor state index
             end
             else scan (step + 1)
           end
@@ -28715,7 +28722,7 @@ and is loaded on demand through keeper_skill.
                 state.runtime_config_status_scroll <-
                   max 0 (min limit (min limit state.runtime_config_status_scroll + delta)))
        | Some "/"
-         when Option.is_some (Masc_tui_surface_search.surface_row_texts state state.view) ->
+         when Option.is_some (Masc_tui_surface_search.surface_row_texts ~cols:(snd (get_terminal_size ())) state state.view) ->
            state.search <- Some ""
        | Some (("[" | "]") as bracket)
          when state.view = Keepers Keeper_detail ->
@@ -30201,7 +30208,7 @@ and is loaded on demand through keeper_skill.
             | Connectors | Runtime | Config | Resources | Tools | System_logs ->
                 if
                   state.search_last <> ""
-                  && Option.is_some (Masc_tui_surface_search.surface_row_texts state state.view)
+                  && Option.is_some (Masc_tui_surface_search.surface_row_texts ~cols:(snd (get_terminal_size ())) state state.view)
                 then
                   let after =
                     Option.value (search_row_cursor state) ~default:0

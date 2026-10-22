@@ -991,8 +991,7 @@ let for_surface = function
       ; b Act "Esc" "back"
           ~help:"the text hands back to the list; the list leaves for System"
       ; b Search "/" "find"
-          ~help:"jump the cursor to a matching resource name; the list has to \
-                 be focused for there to be a cursor to land"
+          ~help:"find a resource name in the list, or text in the loaded detail"
       ; b Search "n / N" "next / previous match"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"
@@ -1513,12 +1512,6 @@ let footer_hints_resources ~detail_focus =
      adjacent resource and the dispatcher answers it only with the text
      focused. *)
   |> List.filter (answers_in_state ~detail_open:detail_focus)
-  (* The row search needs a cursor to land on, and with the text focused
-     there is none -- [Masc_tui_surface_search.surface_row_texts] says so too. Dropped here rather
-     than listed and silent. *)
-  |> List.filter (fun binding ->
-         (not detail_focus)
-         || not (String.equal binding.key "/" || String.equal binding.key "n / N"))
   |> List.map (fun binding ->
          if String.equal binding.key "j/k" then
            { binding with label = (if detail_focus then "scroll text" else "move") }

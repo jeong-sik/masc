@@ -27,3 +27,7 @@ val step_revision :
   read:(key:Masc_tui_resource_catalog.key -> unit) -> unit
 (** Request the adjacent validated revision of the open report. Does not admit
     a body, synthesize revisions or wrap at an end. MCP reads have no history. *)
+
+val place_search_match : Masc_tui_types.state -> count:int -> index:int -> unit
+(** Retain the logical match separately from the rendered scroll, whose last
+    page may clamp before that row. Invalid landings or list focus do nothing. *)

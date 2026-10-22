@@ -6367,3 +6367,9 @@
  (modules test_tui_published_reports)
  (libraries alcotest masc masc.tool_types digestif yojson masc_tui_resource_catalog
   masc_tui_types masc_tui_resources_updates masc_tui_mcp))
+
+(test
+ (name test_tui_resource_document_search)
+ (modules test_tui_resource_document_search)
+ (libraries alcotest masc_tui_types masc_tui_resource_document
+  masc_tui_resource_catalog masc_tui_resources_updates masc_tui_mcp))

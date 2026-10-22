@@ -28,7 +28,8 @@ let listed state result =
          state.resource_revision_history <- [];
          state.resource_content <- None;
          state.resource_content_error <- None;
-         state.resource_scroll <- 0
+         state.resource_scroll <- 0;
+         state.resource_search_cursor <- 0
        end)
   | Error detail -> state.resources_error <- Some detail
 
@@ -44,6 +45,7 @@ let read_done state ~(request : Catalog.read_request) result =
        state.resource_content <- Some (key, reading.parts);
        state.resource_revision_history <- reading.revisions;
        state.resource_image_cursor <- 0;
+       state.resource_search_cursor <- 0;
        state.resource_content_error <- None
      | Error detail -> state.resource_content_error <- Some (key, detail))
   | (Some _ | None), (Some _ | None) -> ()
@@ -65,3 +67,9 @@ let step_revision state ~direction ~read =
     Option.iter (fun revision -> read ~key:(Catalog.Report_revision revision))
       (Catalog.adjacent_revision direction ~current:report state.resource_revision_history)
   | Some (Catalog.Mcp_uri _) | None -> ()
+
+let place_search_match state ~count ~index =
+  if state.resource_focus = Right_pane && index >= 0 && index < count then begin
+    state.resource_search_cursor <- index;
+    state.resource_scroll <- index
+  end

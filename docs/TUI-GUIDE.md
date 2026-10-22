@@ -421,7 +421,7 @@ image source; late results cannot take over the new reading.
 With detail focused, `[`/`]` read the previous
 or next resource without returning to the list. Responses carry their MCP URI or exact report revision, so
 a slow older read cannot replace a newer selection. `Ctrl-W` switches between
-list and detail, and `j`/`k` move whichever pane has focus. The selected
+list and detail, and `j`/`k` move whichever pane has focus. `/` searches the focused pane: resource names in the list, or the loaded document in detail. `n`/`N` moves between matching rows, wrapping at the ends. Detail search follows the same width and Markdown projection as drawing; an unread, failed or withdrawn resource offers no body search. Searching does not change the original resource bytes. The selected
 Keeper's Channels tab shows transport status; `b` opens a binding form with
 that Keeper already named, and `U` `U` removes all of its bindings (see
 [Keeper detail](#keeper-detail)).

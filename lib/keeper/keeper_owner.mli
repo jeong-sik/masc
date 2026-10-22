@@ -395,7 +395,7 @@ val input_checkpoint_reference : input_checkpoint_writer -> Keeper_checkpoint_re
 (** None means this trace has no recorded input observation. Some may name a
     payload with pending_input=None; consumed evidence is never unobserved. *)
 val input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
-  (Keeper_checkpoint_ref.t option, error) result
+  (Keeper_chat_operation_store.input_checkpoint_observation, error) result
 val advance_autonomous_input_checkpoint : t -> writer:input_checkpoint_writer ->
   checkpoint:Keeper_checkpoint_ref.t -> (input_checkpoint_writer, error) result
 val advance_direct_input_checkpoint : t -> writer:input_checkpoint_writer ->

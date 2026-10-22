@@ -7,7 +7,7 @@
  (name test_keeper_native_call_store)
  (modules test_keeper_native_call_store)
  (libraries alcotest masc.agent_core masc.keeper_chat_operations masc.keeper_execution_scope
-  masc.keeper_checkpoint_ref masc.keeper_registry digestif unix yojson))
+  masc.keeper_checkpoint_ref masc.keeper_registry digestif sqlite3 unix yojson))
 
 (test
  (name test_keeper_chat_operation_store)
@@ -36,7 +36,7 @@
  (name test_keeper_retained_checkpoint_sweep)
  (modules test_keeper_retained_checkpoint_sweep)
  (libraries alcotest masc masc.masc_core masc.keeper_chat_operations masc.keeper_execution_scope
-  masc.keeper_checkpoint_ref masc.keeper_registry digestif unix yojson))
+  masc.keeper_checkpoint_ref masc.keeper_registry digestif sqlite3 unix yojson))
 
 (test
  (name test_keeper_chat_operation_public)

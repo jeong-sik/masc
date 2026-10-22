@@ -391,8 +391,11 @@ let test_the_release_selection_matches_the_sweep () =
 let input_updated = function
   | Store.Input_checkpoint_updated -> ()
   | Store.Input_checkpoint_source_changed _ -> fail "input checkpoint source unexpectedly changed"
-let current_input store = Store.input_checkpoint store
-  ~trace_id:(Keeper_id.Trace_id.of_string "native-trace" |> value) |> ok
+let current_input store = match Store.input_checkpoint store
+  ~trace_id:(Keeper_id.Trace_id.of_string "native-trace" |> value) |> ok with
+  | Store.Input_observed reference -> Some reference
+  | Input_unobserved -> None
+  | Prior_input_unavailable -> fail "unexpected unavailable input history"
 let check_input label expected store =
   check bool label true (Option.equal Keeper_checkpoint_ref.equal expected (current_input store))
 let advance_input store operation ~observed ~observed_input checkpoint =
@@ -409,7 +412,7 @@ let test_input_owner_survives_retirement_and_reopen () = with_store @@ fun path 
   check_input "input owner remains after native retirement" (Some (checkpoint 2)) store;
   check bool "native call is retired" true (Native.equal_state Native.No_native_call (read store));
   (match Store.inspect_outstanding ~path |> ok with
-   | Store.Stored_operations {input_checkpoints=[reference]; semantic_executions=[]; chat_operations=[]} ->
+   | Store.Stored_operations {input_checkpoints=[reference]; input_history=Fresh_input_history; semantic_executions=[]; chat_operations=[]} ->
      check bool "settled input still keeps its exact checkpoint live" true
        (Keeper_checkpoint_ref.equal reference (checkpoint 2))
    | Store.Stored_operations _ | Missing_store -> fail "input lifetime was coupled to operation settlement");
@@ -421,10 +424,10 @@ let test_input_owner_survives_retirement_and_reopen () = with_store @@ fun path 
   check bool "input update never changes immutable terminal result" true
     (terminal_row = (Store.get reopened operation_id |> ok));
   match Store.update_input_checkpoint reopened ~observed:(Some (checkpoint 2)) ~checkpoint:(checkpoint 4) |> ok with
-  | Store.Input_checkpoint_source_changed (Some current) ->
+  | Store.Input_checkpoint_source_changed (Store.Input_observed current) ->
     check bool "stale input cannot resurrect after a new observation" true
       (Keeper_checkpoint_ref.equal current (checkpoint 3))
-  | Input_checkpoint_updated | Input_checkpoint_source_changed None -> fail "stale input was admitted"
+  | Input_checkpoint_updated | Input_checkpoint_source_changed (Input_unobserved | Prior_input_unavailable) -> fail "stale input was admitted"
 
 let test_input_and_native_checkpoint_commit_atomically () = with_store @@ fun _path store operation ->
   bind store operation (make_call operation);
@@ -447,9 +450,9 @@ let test_input_and_native_checkpoint_commit_atomically () = with_store @@ fun _p
    | No_native_call | Terminal_unacknowledged _ -> fail "native authority was lost");
   check int "uncertain transaction releases no files" 0 (List.length (Store.take_released_checkpoints store));
   (match advance_input store operation ~observed:(checkpoint 2) ~observed_input:None (checkpoint 3) |> ok with
-   | Store.Input_checkpoint_source_changed (Some actual) ->
+   | Store.Input_checkpoint_source_changed (Store.Input_observed actual) ->
      check bool "stale producer gets actual input owner" true (Keeper_checkpoint_ref.equal actual (checkpoint 2))
-   | Input_checkpoint_updated | Input_checkpoint_source_changed None -> fail "stale input source was accepted");
+   | Input_checkpoint_updated | Input_checkpoint_source_changed (Input_unobserved | Prior_input_unavailable) -> fail "stale input source was accepted");
   check_input "stale producer leaves input ref unchanged" (Some (checkpoint 2)) store;
   (match read store with Native.Active call ->
     check bool "stale input predecessor leaves native ref unchanged" true
@@ -495,10 +498,10 @@ let test_input_identity_is_not_an_ordinal () = with_store @@ fun _path store _op
   Store.update_input_checkpoint store ~observed:None ~checkpoint:first |> ok |> input_updated;
   Store.update_input_checkpoint store ~observed:(Some first) ~checkpoint:same_turn |> ok |> input_updated;
   (match Store.update_input_checkpoint store ~observed:(Some first) ~checkpoint:(checkpoint 5) |> ok with
-   | Store.Input_checkpoint_source_changed (Some actual) ->
+   | Store.Input_checkpoint_source_changed (Store.Input_observed actual) ->
      check bool "same turn replacement is detected by exact bytes" true
        (Keeper_checkpoint_ref.equal actual same_turn)
-   | Input_checkpoint_updated | Input_checkpoint_source_changed None -> fail "ordinal was substituted for identity");
+   | Input_checkpoint_updated | Input_checkpoint_source_changed (Input_unobserved | Prior_input_unavailable) -> fail "ordinal was substituted for identity");
   let foreign = Keeper_checkpoint_ref.create
     ~trace_id:(Keeper_id.Trace_id.of_string "other-input-trace" |> value)
     ~turn_count:4 ~canonical_checkpoint_bytes:"foreign input"
@@ -506,12 +509,41 @@ let test_input_identity_is_not_an_ordinal () = with_store @@ fun _path store _op
   rejected "a previous trace authorized a new trace"
     (Store.update_input_checkpoint store ~observed:(Some same_turn) ~checkpoint:foreign);
   check bool "cross-trace refusal creates no foreign input owner" true
-    ((Store.input_checkpoint store ~trace_id:foreign.trace_id |> ok) = None);
+    ((Store.input_checkpoint store ~trace_id:foreign.trace_id |> ok) = Store.Input_unobserved);
   rejected "input owner moved behind its source turn"
     (Store.update_input_checkpoint store ~observed:(Some same_turn) ~checkpoint:(checkpoint 3));
   check_input "identity refusals preserve actual current owner" (Some same_turn) store
 
+let test_prior_history_never_becomes_unobserved_or_releasable () = with_store @@ fun path store operation ->
+  bind store operation (make_call operation);
+  Store.close store |> ok;
+  let db = Sqlite3.db_open ~mode:`NO_CREATE path in
+  check bool "mark unresolved prior history" true
+    (Sqlite3.exec db "UPDATE input_history SET basis='prior_unavailable' WHERE singleton=1" = Sqlite3.Rc.OK);
+  check bool "close fixture database" true (Sqlite3.db_close db);
+  let reopened = Store.open_existing ~path |> ok in
+  Fun.protect ~finally:(fun () -> Store.close reopened |> ok) @@ fun () ->
+  let trace_id = Keeper_id.Trace_id.of_string "omitted-historical-trace" |> value in
+  check bool "an omitted prior trace is unknown, never fresh" true
+    ((Store.input_checkpoint reopened ~trace_id |> ok) = Store.Prior_input_unavailable);
+  (match Store.update_input_checkpoint reopened ~observed:None ~checkpoint:(checkpoint 2) |> ok with
+   | Store.Input_checkpoint_source_changed Store.Prior_input_unavailable -> ()
+   | Input_checkpoint_updated | Input_checkpoint_source_changed (Input_unobserved | Input_observed _) ->
+     fail "ordinary input writer fabricated prior authority");
+  (match advance_input reopened operation ~observed:(checkpoint 1) ~observed_input:None (checkpoint 2) |> ok with
+   | Store.Input_checkpoint_source_changed Store.Prior_input_unavailable -> ()
+   | Input_checkpoint_updated | Input_checkpoint_source_changed (Input_unobserved | Input_observed _) ->
+     fail "native input writer fabricated prior authority");
+  commit reopened operation (Native.Checkpoint {call_id;observed=checkpoint 1;checkpoint=checkpoint 2});
+  check int "unknown prior history prevents confirmed-commit file release" 0
+    (List.length (Store.take_released_checkpoints reopened));
+  match Store.inspect_outstanding ~path |> ok with
+  | Store.Stored_operations {input_history=Store.Prior_input_history_unavailable;input_checkpoints=[];_} -> ()
+  | Stored_operations _ | Missing_store -> fail "inspection hid the unknown history floor"
+
 let () = run "native-call-owner-store" ["input ownership", [
+  test_case "unknown prior input never becomes fresh or releases evidence" `Quick
+    test_prior_history_never_becomes_unobserved_or_releasable;
   test_case "closed stores refuse each input writer with a typed error" `Quick test_input_writes_on_closed_store_are_typed;
   test_case "same turn bytes, trace and source turn are exact" `Quick test_input_identity_is_not_an_ordinal;
   test_case "input owner survives retirement and reopen" `Quick test_input_owner_survives_retirement_and_reopen;

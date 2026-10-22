@@ -225,7 +225,7 @@ let test_readonly_inventory_includes_every_unsettled_phase () =
     let before = raw_file path in
     (match Store.inspect_outstanding ~path |> store_ok with
      | Missing_store -> fail "durable journal looked absent"
-     | Stored_operations {chat_operations; semantic_executions; input_checkpoints = _} ->
+     | Stored_operations {chat_operations; semantic_executions; input_checkpoints = _; input_history = _} ->
        check int "every unfinished direct chat remains visible" 5 (List.length chat_operations);
        check (list string) "all semantic nonterminal phases are visible"
          (List.sort String.compare (List.map (fun id -> Yojson.Safe.to_string (Scope.to_json id))
@@ -242,6 +242,125 @@ let test_corrupt_semantic_frame_refuses_unsafe_inspection () =
     (match Store.inspect_outstanding ~path with
      | Error _ -> () | Ok _ -> fail "corrupt owned execution was treated as absent");
     check string "corrupt execution evidence is retained" before (raw_file path))
+
+let convert_fixture_to_exact_v2 path = with_db path (fun db ->
+  let sequence = scalar db "SELECT next_sequence FROM metadata WHERE singleton=1" in
+  sql db "BEGIN IMMEDIATE";
+  sql db "DROP TABLE input_checkpoints";
+  sql db "DROP TABLE input_history";
+  sql db "DROP TABLE metadata";
+  sql db "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema TEXT NOT NULL CHECK (schema = 'masc.keeper_chat_operations.v2'), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0)) STRICT";
+  sql db ("INSERT INTO metadata VALUES (1, 'masc.keeper_chat_operations.v2', " ^ sequence ^ ")");
+  sql db "PRAGMA user_version=2";
+  sql db "COMMIT")
+
+let test_offline_copy_preserves_evidence_and_prior_uncertainty () = with_path (fun source_path ->
+  with_open source_path (fun store ->
+    let input = `Assoc ["message",`String "original input"] in
+    submit store ~now:1. "success" input;
+    let success = claim store ~now:2. in
+    ignore (Store.succeed_running store ~now:3. ~operation_id:success.operation_id ~outcome_ref:"original-receipt" |> store_ok);
+    submit store ~now:4. "failure" input;
+    let failure = claim store ~now:5. in
+    ignore (Store.fail_running store ~now:6. ~operation_id:failure.operation_id
+      ~kind:Chat.Interrupted_by_restart ~detail:"original failure" ~outcome_ref:None |> store_ok);
+    submit store ~now:7. "cancelled" input;
+    ignore (Store.cancel_queued store ~now:8. ~operation_id:(operation_id "cancelled") |> store_ok);
+    submit store ~now:9. "batch-a" input;
+    submit store ~now:9. "batch-b" input;
+    let batch _ _ = Ok (Some {Store.members=[operation_id "batch-a";operation_id "batch-b"];
+      input=(`Assoc ["message",`String "frozen combined input"])}) in
+    ignore (Store.claim_next ~batch store ~now:10. |> store_ok);
+    submit store ~now:11. "queued" input;
+    ignore (prepare store 900 [source 900]));
+  convert_fixture_to_exact_v2 source_path;
+  let before = raw_file source_path in
+  let destination_path = Filename.concat (Filename.dirname source_path) "prepared-copy.sqlite3" in
+  let source_db = Sqlite3.db_open ~mode:`READONLY source_path in
+  Fun.protect ~finally:(fun () -> check bool "source closed" true (Sqlite3.db_close source_db)) @@ fun () ->
+  with_db destination_path (fun destination ->
+    let copied = Store.Offline.prepare_v2_copy ~source:source_db ~destination |> store_ok in
+    check int "every operation copied without restart settlement" 6 copied.operation_count;
+    check int "semantic original copied" 1 copied.semantic_count;
+    check int "frozen batch membership copied" 2 copied.batch_member_count;
+    List.iter (fun query -> check bool "original cells unchanged" true
+      (rows source_db query = rows destination query))
+      ["SELECT * FROM operations ORDER BY sequence";
+       "SELECT * FROM semantic_executions ORDER BY scope_key";
+       "SELECT * FROM operation_batch_members ORDER BY operation_id";
+       "SELECT next_sequence FROM metadata"];
+    check string "destination preserves unknown prior input" "prior_unavailable"
+      (scalar destination "SELECT basis FROM input_history");
+    check string "source stays v2" "masc.keeper_chat_operations.v2"
+      (scalar source_db "SELECT schema FROM metadata"));
+  check string "read-only source retains exact bytes" before (raw_file source_path);
+  let destination = Store.open_existing ~path:destination_path |> store_ok in
+  Fun.protect ~finally:(fun () -> Store.close destination |> store_ok) @@ fun () ->
+  let omitted = Keeper_id.Trace_id.of_string "trace-missing-from-old-rows" |> string_ok in
+  check bool "omitted trace did not become unobserved" true
+    ((Store.input_checkpoint destination ~trace_id:omitted |> store_ok) = Store.Prior_input_unavailable))
+
+let test_offline_copy_refuses_nonempty_destination_and_corrupt_source () = with_path (fun source_path ->
+  with_open source_path (fun store -> submit store ~now:1. "original" (`Assoc []));
+  convert_fixture_to_exact_v2 source_path;
+  let before = raw_file source_path in
+  with_db source_path (fun source_db ->
+    let destination = Sqlite3.db_open ":memory:" in
+    Fun.protect ~finally:(fun () -> check bool "destination closed" true (Sqlite3.db_close destination)) @@ fun () ->
+    sql destination "CREATE TABLE original_evidence(value TEXT)";
+    sql destination "INSERT INTO original_evidence VALUES ('keep')";
+    assert_execution_error (Store.Offline.prepare_v2_copy ~source:source_db ~destination);
+    check string "occupied destination not overwritten" "keep" (scalar destination "SELECT value FROM original_evidence"));
+  check string "nonempty destination refusal preserves source" before (raw_file source_path);
+  with_db source_path (fun db -> sql db "UPDATE operations SET input_json='{' WHERE state='queued'");
+  let corrupt_before = raw_file source_path in
+  with_db source_path (fun source_db ->
+    let destination = Sqlite3.db_open ":memory:" in
+    Fun.protect ~finally:(fun () -> check bool "destination closed" true (Sqlite3.db_close destination)) @@ fun () ->
+    assert_execution_error (Store.Offline.prepare_v2_copy ~source:source_db ~destination);
+    check string "no destination schema created for corrupt input" "0"
+      (scalar destination "SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"));
+  check string "corrupt source is preserved" corrupt_before (raw_file source_path))
+
+let test_offline_copy_refuses_reused_sequence () =
+  List.iter (fun next_sequence -> with_path (fun source_path ->
+    with_open source_path (fun store ->
+      submit store ~now:1. "first" (`Assoc []);
+      submit store ~now:2. "second" (`Assoc []));
+    convert_fixture_to_exact_v2 source_path;
+    with_db source_path (fun db -> sql db
+      (Printf.sprintf "UPDATE metadata SET next_sequence=%d" next_sequence));
+    let before = raw_file source_path in
+    with_db source_path (fun source_db ->
+      let destination = Sqlite3.db_open ":memory:" in
+      Fun.protect ~finally:(fun () -> check bool "destination closed" true (Sqlite3.db_close destination)) @@ fun () ->
+      (match Store.Offline.prepare_v2_copy ~source:source_db ~destination with
+       | Error (Store.Integrity_error _) -> ()
+       | Error error -> fail (Store.error_to_string error)
+       | Ok _ -> fail "a reused operation sequence was prepared for admission");
+      check string "invalid sequence is refused before copying" "0"
+        (scalar destination "SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"));
+    check string "sequence corruption remains original evidence" before (raw_file source_path))) [0;1]
+
+let test_offline_copy_commit_uncertainty_does_not_confirm_preparation () =
+  List.iter (fun fault -> with_path (fun source_path ->
+    with_open source_path (fun store -> submit store ~now:1. "original" (`Assoc []));
+    convert_fixture_to_exact_v2 source_path;
+    let before = raw_file source_path in
+    with_db source_path (fun source_db ->
+      (* The production copy requires DELETE journaling; an in-memory database
+         refuses that mode before reaching either injected commit fault. *)
+      let destination = Sqlite3.db_open (Filename.concat (Filename.dirname source_path) "uncertain-copy.sqlite3") in
+      Fun.protect ~finally:(fun () -> check bool "destination closed" true (Sqlite3.db_close destination)) @@ fun () ->
+      Store.For_testing.fail_next_commit fault;
+      assert_execution_error (Store.Offline.prepare_v2_copy ~source:source_db ~destination);
+      check string "failed preparation preserves original operation" "1"
+        (scalar destination "SELECT COUNT(*) FROM operations");
+      check string "private destination state is not a success receipt"
+        (match fault with Store.For_testing.Fail_before_commit -> "2" | Fail_after_commit -> "3")
+        (scalar destination "PRAGMA user_version"));
+    check string "failed preparation never alters source" before (raw_file source_path)))
+    Store.For_testing.[Fail_before_commit;Fail_after_commit]
 
 let test_prior_generation_is_preserved () =
   with_path (fun path ->
@@ -431,7 +550,12 @@ let test_corrupt_input_cannot_become_fresh_or_repaired () =
 
 let () =
   run "keeper semantic execution store"
-    [ "admitted input", [
+    [ "offline preparation", [
+        test_case "copy preserves original rows and unknown input" `Quick test_offline_copy_preserves_evidence_and_prior_uncertainty;
+        test_case "occupied destinations and corrupt source are refused" `Quick test_offline_copy_refuses_nonempty_destination_and_corrupt_source;
+        test_case "reused sequence refuses preparation before copying" `Quick test_offline_copy_refuses_reused_sequence;
+        test_case "uncertain commit never confirms preparation" `Quick test_offline_copy_commit_uncertainty_does_not_confirm_preparation ];
+      "admitted input", [
         test_case "Direct input survives checkpoint deferral and independent work" `Quick test_input_survives_checkpoint_deferral_and_independent_work;
         test_case "canonical input identity rejects changed requests" `Quick test_input_canonical_idempotency_and_conflict;
         test_case "invalid input creates no partial admission" `Quick test_invalid_admitted_input_is_not_committed;

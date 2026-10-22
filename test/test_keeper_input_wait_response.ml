@@ -151,7 +151,9 @@ let test_autonomous_input_owner_rejects_lost_response_lineage () =
      ignore (prepare (Some progressed) |> prepared)) with
    | Ok (`Ran ()) -> ()
    | Ok (`Busy _ | `Interrupted) | Error _ -> fail "autonomous publication did not run");
-  let reference = Keeper_owner.input_checkpoint owner ~trace_id:meta.runtime.trace_id |> prepared |> Option.get in
+  let reference = Keeper_owner.input_checkpoint owner ~trace_id:meta.runtime.trace_id |> prepared
+    |> (function Keeper_chat_operation_store.Input_observed reference -> reference
+      | Input_unobserved | Prior_input_unavailable -> fail "input owner was not observed") in
   let observed = Store.load_retained_exact_snapshot ~session_dir ~reference |> prepared
     |> Store.exact_snapshot_checkpoint in
   check bool "consumed payload remains authoritative after child settlement" true

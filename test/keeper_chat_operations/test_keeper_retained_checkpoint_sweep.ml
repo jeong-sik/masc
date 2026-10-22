@@ -174,7 +174,7 @@ let test_unreadable_store_removes_nothing () = with_root (fun root ->
   write orphan "{}";
   (match Sweep.run ~runtime_root:root with
    | Error (Sweep.Store_unreadable _) -> ()
-   | Error (Sweep.Keeper_shares_store_directory _ as error) -> fail (Sweep.error_to_string error)
+   | Error ((Sweep.Keeper_shares_store_directory _ | Sweep.Prior_input_history_unavailable _) as error) -> fail (Sweep.error_to_string error)
    | Ok _ -> fail "an unreadable store must stop the sweep");
   check bool "orphan kept while the live set is unknown" true (Sys.file_exists orphan))
 
@@ -201,10 +201,27 @@ let test_input_owner_retains_only_current_checkpoint_after_restart () = with_roo
   check bool "current consumed evidence survives restart sweep" true (Sys.file_exists current_file);
   check bool "superseded input checkpoint is removed" false (Sys.file_exists old_file))
 
+let test_prior_input_history_keeps_unnamed_retained_evidence () = with_root (fun root ->
+  let path = keeper_store root "prior-input" in
+  with_open path (fun _ -> ());
+  let db = Sqlite3.db_open ~mode:`NO_CREATE path in
+  check bool "mark unresolved history" true
+    (Sqlite3.exec db "UPDATE input_history SET basis='prior_unavailable' WHERE singleton=1" = Sqlite3.Rc.OK);
+  check bool "close fixture" true (Sqlite3.db_close db);
+  let unnamed = retained root ~session:["omitted-trace"] (checkpoint "unresolved-answer") in
+  write unnamed "accepted answer whose old owner may have retired";
+  (match Sweep.run ~runtime_root:root with
+   | Error (Sweep.Prior_input_history_unavailable _) -> ()
+   | Error (Store_unreadable _ | Keeper_shares_store_directory _) | Ok _ ->
+     fail "sweep did not preserve the unknown prior input boundary");
+  check bool "unreferenced bytes survive while prior ownership is unknown" true (Sys.file_exists unnamed))
+
 let () =
   run "keeper_retained_checkpoint_sweep"
     [ ( "sweep"
-      , [ test_case "input checkpoint owner survives restart sweep" `Quick
+      , [ test_case "prior input uncertainty preserves every retained artifact" `Quick
+            test_prior_input_history_keeps_unnamed_retained_evidence;
+          test_case "input checkpoint owner survives restart sweep" `Quick
         test_input_owner_retains_only_current_checkpoint_after_restart;
       test_case "removes only what no unsettled execution names" `Quick
             test_removes_only_what_no_unsettled_execution_names

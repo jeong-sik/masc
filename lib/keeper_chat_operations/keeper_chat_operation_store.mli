@@ -34,9 +34,17 @@ type inventory =
 val database_file : string
 val path_for_keeper : keepers_runtime_dir:string -> keeper_name:string -> string
 
+type input_history = Fresh_input_history | Prior_input_history_unavailable
+(** A prior journal cannot prove that a missing trace row never had input.
+    This durable global floor also covers omitted historical traces. *)
+type input_checkpoint_observation =
+  | Input_unobserved
+  | Input_observed of Keeper_checkpoint_ref.t
+  | Prior_input_unavailable
+
 type outstanding_snapshot =
   | Missing_store
-  | Stored_operations of { chat_operations : Operation.t list; semantic_executions : Semantic.t list; input_checkpoints : Keeper_checkpoint_ref.t list }
+  | Stored_operations of { chat_operations : Operation.t list; semantic_executions : Semantic.t list; input_checkpoints : Keeper_checkpoint_ref.t list; input_history : input_history }
 
 type durable_snapshot =
   | Missing_durable_store
@@ -45,6 +53,7 @@ type durable_snapshot =
       ; batch_member_inputs : Yojson.Safe.t list
       ; semantic_executions : Semantic.t list
       ; input_checkpoints : Keeper_checkpoint_ref.t list
+      ; input_history : input_history
       }
 
 val inspect_outstanding : path:string -> (outstanding_snapshot, error) result
@@ -69,13 +78,14 @@ val inspect_pending_inputs : path:string -> (Operation.t list option, error) res
 
 type input_checkpoint_update =
   | Input_checkpoint_updated
-  | Input_checkpoint_source_changed of Keeper_checkpoint_ref.t option
+  | Input_checkpoint_source_changed of input_checkpoint_observation
 
 val input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
-  (Keeper_checkpoint_ref.t option, error) result
-(** None means no input observation was installed for this trace. Some points
-    to the exact retained payload, including a consumed pending_input=None.
-    Neither state alone grants current Owner or dispatch authority. *)
+  (input_checkpoint_observation, error) result
+(** Input_unobserved is only available in a fresh journal. A missing trace in
+    a journal with unresolved prior input history is Prior_input_unavailable,
+    never Unobserved. Input_observed points to exact retained bytes, including
+    consumed pending_input=None. None of these grants dispatch authority. *)
 
 val update_input_checkpoint : t -> observed:Keeper_checkpoint_ref.t option ->
   checkpoint:Keeper_checkpoint_ref.t -> (input_checkpoint_update, error) result
@@ -84,6 +94,27 @@ val update_input_checkpoint : t -> observed:Keeper_checkpoint_ref.t option ->
     the actual reference without writing. Uncertain commit remains an error;
     reread the actual relation to reconcile it, never blindly retry.
     This relation survives immutable operation/semantic terminal settlement. *)
+
+module Offline : sig
+  type prepared_copy =
+    { operation_count : int; semantic_count : int; batch_member_count : int
+    ; next_sequence : int64 }
+  val prepare_v2_copy : source:Sqlite3.db -> destination:Sqlite3.db ->
+    (prepared_copy, error) result
+  (** Copy an exactly validated v2 source into a caller-reserved empty SQLite
+      destination using SQLite Backup. Source is read only by this function;
+      no startup settlement or ordinary open migration occurs. Transform only
+      the private destination and preserve every original operation/semantic/
+      batch cell and next_sequence. Prior input is marked globally unavailable,
+      including omitted traces, and no checkpoint is imported as authority.
+
+      Success verifies a transaction in the private destination, not publication,
+      installation, source freshness after return, or a file/parent fsync receipt.
+      A failed or uncertain result may leave a partial destination: discard it,
+      never install or blindly retry it. Caller owns both handles and must hold
+      the original BasePath lease before promoting any offline artifact; this
+      copy primitive neither acquires authority nor replaces a live journal. *)
+end
 
 val open_or_create : path:string -> (t, error) result
 val open_existing : path:string -> (t, error) result

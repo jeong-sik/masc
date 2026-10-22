@@ -176,7 +176,7 @@ val direct_native_call : base_path:string -> keeper_name:string -> operation_id:
 val begin_input_checkpoint : base_path:string -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
   (Keeper_owner.input_checkpoint_writer, command_error) result
 val input_checkpoint : base_path:string -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
-  (Keeper_checkpoint_ref.t option, command_error) result
+  (Keeper_chat_operation_store.input_checkpoint_observation, command_error) result
 val advance_autonomous_input_checkpoint : base_path:string -> keeper_name:string ->
   writer:Keeper_owner.input_checkpoint_writer -> checkpoint:Keeper_checkpoint_ref.t ->
   (Keeper_owner.input_checkpoint_writer, command_error) result

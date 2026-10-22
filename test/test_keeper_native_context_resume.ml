@@ -280,7 +280,9 @@ let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain
       check bool "terminal cannot resurrect the old pending request" true
         ((retained_pending ()).pending_input = None));
     let input_owner = Registry.input_checkpoint ~base_path:root ~keeper_name ~trace_id:meta.runtime.trace_id
-        |> require "read durable input owner" |> Option.get in
+        |> require "read durable input owner" |> (function
+          | Keeper_chat_operation_store.Input_observed reference -> reference
+          | Input_unobserved | Prior_input_unavailable -> fail "input owner was not observed") in
     let input_snapshot = Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:input_owner
         |> (function Ok snapshot -> snapshot | Error _ -> fail "input owner artifact unavailable") in
     let owned_input = Keeper_checkpoint_store.exact_snapshot_checkpoint input_snapshot in

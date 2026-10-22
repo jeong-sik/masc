@@ -22,6 +22,7 @@ type report =
   }
 
 type error =
+  | Prior_input_history_unavailable of { path : string }
   | Store_unreadable of { path : string; detail : string }
       (** A keeper's operation store could not be read, so the live set is
           unknown and nothing was removed. One unreadable store stops the

@@ -72,9 +72,10 @@ repair cases in setup preflight; this module neither resets nor rewrites them.
 ## Input ownership journal generation
 
 The input-wait Owner journal uses `masc.keeper_chat_operations.v3` and SQLite
-`user_version=3`. Its `input_checkpoints` table is mandatory even before a trace
-has an input observation. A missing table is damaged authority, not an empty
-input history; ordinary open and read-only inspection do not create it again.
+`user_version=3`. Both `input_checkpoints` and the singleton `input_history`
+basis are mandatory even before a trace has an input observation. Missing
+tables or a missing basis are damaged authority; ordinary open and read-only
+inspection do not create them again. A fresh journal records `fresh` explicitly.
 The same rule preserves consumed-input evidence after native call retirement.
 
 Earlier journal generations are refused without rewriting rows, sequence, or
@@ -86,6 +87,34 @@ remain unavailable. Retaining pending operations and terminal outcomes is part
 of that preparation. No live data preparation or restart is implied by a source
 change or passing fixture. The response endpoint and producer wiring are separate
 implementation layers; the journal table alone does not make a wait actionable.
+
+### Private journal copy preparation
+
+`Keeper_chat_operation_store.Offline.prepare_v2_copy` copies an exactly
+validated v2 journal into a caller-reserved empty SQLite destination. SQLite
+Backup reads one source transaction; the original journal is not configured,
+recovered, or rewritten. The copy preserves every original operation, semantic
+execution and frozen batch-member cell, including terminal outcomes and the
+next admission sequence. A sequence that could reuse an existing operation's
+number, corrupt payloads, or an occupied destination is refused.
+
+The old journal cannot prove which input waits were consumed. The prepared copy
+therefore records `prior_unavailable` globally. A trace absent from its rows
+returns `Prior_input_unavailable`, including historical traces omitted by the
+old schema; it never becomes a fresh unobserved trace. Owner input preparation
+and both ordinary and atomic native/input publication refuse that uncertainty.
+Checkpoint release and startup sweeping preserve all potentially related
+retained evidence until explicit reconciliation exists.
+
+This API prepares a private database only. Its result is not an operator
+upgrade receipt, an installation, a freshness check after the function returns,
+or confirmation that the destination file and parent directory were synced.
+The caller owns both SQLite handles and must reserve the destination and hold
+the original configured BasePath lease before promoting any artifact. A failed
+or uncertain copy must be discarded; it is never installed or retried as if the
+result proved no write. The operator lease, durable publication/rollback, and
+prior-input reconciliation workflow remain to be implemented. This tool does
+not import a canonical checkpoint as response authority.
 
 ### Input checkpoint producer boundary
 

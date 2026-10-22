@@ -2,6 +2,10 @@
     the workspace process lease and serializes retains and progress updates. *)
 type error = Binding_conflict | Store_unavailable of string | Invalid_identity of string
   | Invalid_request of string
+type installation = Configuration of string | Manual of string
+val installation_id : installation -> string
+(** Canonical identity used by original request retention and worker state.
+    A configured declaration and a manual instance with equal names are distinct. *)
 type retained = private {
   scope : string;
   request_id : string;

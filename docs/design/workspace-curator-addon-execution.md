@@ -41,8 +41,10 @@ schema success is not a ledger or briefing commit.
 There is another concrete gap before that commit: the current HTTP flow invokes
 these pure host checks **before candidate acceptance**, using
 `Reject_and_advance` for a schema-valid but domain-invalid answer. CLI candidates
-receive the same validation. The common Addon Exact runner currently validates
-package/request schemas; it does not supply Curator's captured domain validator.
+receive the same validation. The common Addon Exact runner originally validated
+only package/request schemas. The [trusted semantic port](workspace-curator-semantic-validation.md)
+now binds original Curator captures before candidate acceptance and retained delivery;
+production owner capture and worker integration are still required.
 Checking only after the worker retains a terminal answer would silently lose
 this semantic fallback. The extraction must provide a shared host-owned
 validation port inside the original admitted flow, before terminal delivery,
@@ -54,8 +56,8 @@ not commit authority. A worker cannot select a privileged validator by naming
 one in its arguments, and optional input/output Hooks cannot disable it. Restore
 the same binding from strict host state after restart. Missing or conflicting
 semantic validation authority must refuse dispatch, rather than accept a
-schema-only result as a Curator judgment. This shared integration is required
-before production wiring; it is not implemented by this document.
+schema-only result as a Curator judgment. The shared validation integration is now implemented as described in the semantic
+port document; this document alone does not prove execution or production wiring.
 
 ## Two request kinds, one retained execution contract
 

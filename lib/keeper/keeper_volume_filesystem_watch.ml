@@ -96,18 +96,20 @@ let failure_to_string = function
   | Image_unreadable failure -> Fs.read_failure_to_string failure
 ;;
 
-let observation_to_yojson observation =
-  `Assoc
-    [ "volume", `String observation.volume
-    ; "observed_at", `Float observation.observed_at
-    ; "image", Json_util.string_opt_to_json observation.source
-    ; ( "filesystem"
-      , match observation.result with
-        | Ok state -> Fs.state_to_yojson state
-        | Error (Inspect_refused _ | Inspect_unparsed _ | Image_unreadable _) -> `Null )
-    ; ( "observation_failed"
-      , match observation.result with
-        | Ok (Fs.Clean | Fs.Errors_recorded _) -> `Null
-        | Error failure -> `String (failure_to_string failure) )
-    ]
+let observation_fields observation =
+  [ "volume", `String observation.volume
+  ; "observed_at", `Float observation.observed_at
+  ; "image", Json_util.string_opt_to_json observation.source
+  ; ( "filesystem"
+    , match observation.result with
+      | Ok state -> Fs.state_to_yojson state
+      | Error (Inspect_refused _ | Inspect_unparsed _ | Image_unreadable _) -> `Null )
+  ; ( "observation_failed"
+    , match observation.result with
+      | Ok (Fs.Clean | Fs.Errors_recorded _) -> `Null
+      | Error failure -> `String (failure_to_string failure) )
+  ]
+;;
+
+let observation_to_yojson observation = `Assoc (observation_fields observation)
 ;;

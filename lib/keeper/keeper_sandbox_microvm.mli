@@ -377,6 +377,51 @@ val reclaim_apple_work_volume :
     The returned status describes discard configuration and trim; failure is harmless
     only after cleanup has been confirmed. *)
 
+val volume_repair_guest_root : string
+(** [/masc-repair]: where {!apple_volume_repair_argv} mounts the volume. *)
+
+val volume_repair_name : keeper_name:string -> string
+(** Stable bounded helper name, [masc-keeper-work-<keeper>-repair]. *)
+
+val volume_repair_script : string
+(** Unmount {!volume_repair_guest_root}, stop if it is still mounted, then
+    [e2fsck -f -y] and [e2fsck -f -n] on its device, printing both exit
+    codes. The script exits 0 once e2fsck has run, whatever it found: the
+    caller reads the host superblock to decide the outcome
+    (RFC keeper-volume-filesystem-repair §3.3). *)
+
+val apple_volume_repair_argv :
+  keeper_name:string -> volume_name:string -> image:string -> string list
+(** [container run --rm] of [image] as root with every capability dropped and
+    [CAP_SYS_ADMIN] added back (to unmount), no network, a read-only root
+    with a [/tmp] tmpfs, and {!volume_repair_script} as entrypoint. Run only
+    while no guest has the volume attached. *)
+
+val remove_apple_volume_repair :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> remove_timeout_sec:float
+  -> keeper_name:string
+  -> (unit, string) result
+(** {!remove_apple_work_volume_trim} for the repair helper. *)
+
+val repair_apple_volume :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> run_helper:(string list -> Unix.process_status * string * string)
+  -> on_cleanup_error:(string -> unit)
+  -> timeout_sec:float
+  -> remove_timeout_sec:float
+  -> keeper_name:string
+  -> volume_name:string
+  -> image:string
+  -> (Unix.process_status * string * string, string) result
+(** Remove a repair helper a previous server left, then run
+    {!apple_volume_repair_argv} through [run_helper], which has no timeout.
+    The switch release removes the helper and proves its absence after
+    success, failure or cancellation. [Error] means a stale helper could not
+    be removed, so e2fsck did not run. The status, stdout and stderr are the
+    helper's own, uncut. *)
+
 val keeper_work_root : keeper_name:string -> string
 (** [<work root>/<sanitized keeper>]: what the shim jails requests under. *)
 

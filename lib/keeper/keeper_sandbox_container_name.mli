@@ -21,6 +21,10 @@ type spec =
   | Micro_vm_work_volume_trim of { keeper_name : string }
       (** The keeper name has passed work-volume segment validation. Preserve
           its case and original helper spelling while bounding long names. *)
+  | Micro_vm_volume_repair of { keeper_name : string }
+      (** The one-shot helper that runs [e2fsck] on a Keeper's image-backed
+          volume (RFC keeper-volume-filesystem-repair §3.3). Stable, so a
+          repair finds and removes one a dead server left behind. *)
   | Docker_persistent of
       { keeper_name : string
       ; network_mode : Keeper_types_profile_sandbox.network_mode

@@ -7,6 +7,7 @@ type spec =
       ; base_path : string
       }
   | Micro_vm_work_volume_trim of { keeper_name : string }
+  | Micro_vm_volume_repair of { keeper_name : string }
       (** The keeper name has passed work-volume segment validation. Preserve
           its case and original helper spelling while bounding long names. *)
   | Docker_persistent of
@@ -119,6 +120,12 @@ let make spec =
       ~prefix:"masc-keeper-work"
       ~keeper_segment:keeper_name
       ~qualifiers:[ "trim" ]
+  | Micro_vm_volume_repair { keeper_name } ->
+    fit
+      ~limit:micro_vm_guest_max_length
+      ~prefix:"masc-keeper-work"
+      ~keeper_segment:keeper_name
+      ~qualifiers:[ "repair" ]
   | Docker_persistent { keeper_name; network_mode; base_path; image } ->
     spell
       ~prefix:"masc-keeper-docker"

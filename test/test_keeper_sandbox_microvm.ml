@@ -2217,6 +2217,118 @@ let test_work_volume_trim_confirms_cleanup () =
   Alcotest.(check int) "no trim starts; protected cleanup still runs" 0 (List.length !remaining)
 ;;
 
+(* RFC keeper-volume-filesystem-repair §3.3. *)
+let test_volume_repair_argv_grants_only_sys_admin () =
+  let argv =
+    M.apple_volume_repair_argv ~keeper_name:"x" ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
+  in
+  let drop_all =
+    match Backend.run_constraint_argv Backend.Apple_container Backend.Drop_all_capabilities with
+    | Backend.Expressed tokens -> tokens
+    | Backend.Not_expressible reason -> Alcotest.failf "Apple cannot spell it: %s" reason
+  in
+  let rec contains_run run = function
+    | [] -> false
+    | _ :: rest as whole ->
+      (List.length whole >= List.length run
+       && List.equal String.equal run (List.filteri (fun i _ -> i < List.length run) whole))
+      || contains_run run rest
+  in
+  Alcotest.(check bool) "a one-shot container" true (contains "--rm" argv);
+  Alcotest.(check bool) "cleanup can address this exact helper" true
+    (adjacent ~flag:"--name" ~value:"masc-keeper-work-x-repair" argv);
+  Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0" argv);
+  Alcotest.(check bool) "drops every capability first" true (contains_run drop_all argv);
+  (* SYS_ADMIN to unmount. e2fsck writes the block device, not files, so the
+     trim helper's DAC_OVERRIDE is not needed. *)
+  Alcotest.(check bool) "only CAP_SYS_ADMIN is added" true
+    (adjacent ~flag:"--cap-add" ~value:"CAP_SYS_ADMIN" argv
+     && List.length (List.filter (String.equal "--cap-add") argv) = 1);
+  Alcotest.(check bool) "no network" true (adjacent ~flag:"--network" ~value:"none" argv);
+  Alcotest.(check bool) "read-only root" true (contains "--read-only" argv);
+  Alcotest.(check bool) "a writable /tmp for e2fsck" true (adjacent ~flag:"--tmpfs" ~value:"/tmp" argv);
+  Alcotest.(check bool) "fixed script entrypoint" true (adjacent ~flag:"--entrypoint" ~value:"/bin/sh" argv);
+  Alcotest.(check bool) "mounts the volume at the repair root" true
+    (adjacent ~flag:"--volume" ~value:("masc-keeper-work-x:" ^ M.volume_repair_guest_root) argv);
+  Alcotest.(check (list string)) "the image runs the fixed script"
+    [ "masc-sandbox:general"; "-eu"; "-c"; M.volume_repair_script ]
+    (let n = List.length argv in
+     List.filteri (fun i _ -> i >= n - 4) argv)
+;;
+
+let substring_at needle haystack =
+  let rec go i =
+    if i + String.length needle > String.length haystack then None
+    else if String.sub haystack i (String.length needle) = needle then Some i
+    else go (i + 1)
+  in
+  go 0
+;;
+
+(* e2fsck must never run on a mounted filesystem: the script unmounts,
+   checks by mount point (--target finds the root filesystem once the volume
+   is gone, measured 2026-10-22), and only then repairs. *)
+let test_volume_repair_script_unmounts_before_e2fsck () =
+  let script = M.volume_repair_script in
+  let at needle =
+    match substring_at needle script with
+    | Some i -> i
+    | None -> Alcotest.failf "the script has no %S" needle
+  in
+  let unmount = at "/usr/bin/umount /masc-repair" in
+  let still_mounted = at "if /usr/bin/findmnt --mountpoint /masc-repair" in
+  let repair = at "/usr/sbin/e2fsck -f -y" in
+  let verify = at "/usr/sbin/e2fsck -f -n" in
+  Alcotest.(check bool) "unmount, check, repair, verify" true
+    (unmount < still_mounted && still_mounted < repair && repair < verify);
+  Alcotest.(check bool) "never --target" true (substring_at "--target" script = None)
+;;
+
+let test_volume_repair_cleanup_brackets_the_helper () =
+  Eio_main.run @@ fun _ ->
+  let cli = [ Backend.cli_name Backend.Apple_container ] in
+  let name = M.volume_repair_name ~keeper_name:"x" in
+  let rm = M.delete_force_argv_for Backend.Apple_container ~container_name:name in
+  let list = cli @ [ "list"; "--all"; "--format"; "json" ] in
+  let absent = Unix.WEXITED 0, "[]", "" in
+  let expected_helper =
+    M.apple_volume_repair_argv ~keeper_name:"x" ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
+  in
+  let execute ~before =
+    let remaining = ref [ rm, (Unix.WEXITED 1, "", "already absent"); list, before
+                        ; rm, (Unix.WEXITED 1, "", "already absent"); list, absent ] in
+    let helper_ran = ref false in
+    let run ~timeout_sec:_ argv =
+      match !remaining with
+      | (expected, result) :: rest ->
+        Alcotest.(check (list string)) "cleanup brackets the helper" expected argv;
+        remaining := rest;
+        result
+      | [] -> Alcotest.fail "unexpected container command"
+    in
+    let run_helper argv =
+      Alcotest.(check (list string)) "the repair helper" expected_helper argv;
+      helper_ran := true;
+      Unix.WEXITED 0, "e2fsck repair exit 1", ""
+    in
+    let result =
+      M.repair_apple_volume ~run ~run_helper ~on_cleanup_error:(fun _ -> ())
+        ~timeout_sec:30. ~remove_timeout_sec:180. ~keeper_name:"x"
+        ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
+    in
+    result, !helper_ran, remaining
+  in
+  let result, helper_ran, remaining = execute ~before:absent in
+  (match result with
+   | Ok (Unix.WEXITED 0, "e2fsck repair exit 1", "") -> ()
+   | Ok _ | Error _ -> Alcotest.fail "the helper's own status and output come back uncut");
+  Alcotest.(check bool) "the helper ran" true helper_ran;
+  Alcotest.(check int) "both cleanup inventories were read" 0 (List.length !remaining);
+  let result, helper_ran, _ = execute ~before:(Unix.WEXITED 0, "[{}]", "") in
+  (match result with Error _ -> () | Ok _ -> Alcotest.fail "an unproven stale helper still starts a repair");
+  Alcotest.(check bool) "no helper starts beside an unknown container" false helper_ran
+;;
+
 let trim_test_plan keeper_name =
   M.work_volume_trim_name ~keeper_name,
   M.apple_work_volume_trim_argv ~keeper_name ~volume_name:("masc-keeper-work-" ^ keeper_name) ~image:"trim-fixture"
@@ -3525,6 +3637,12 @@ let () =
             test_work_volume_trim_argv_grants_only_its_capabilities
         ; Alcotest.test_case "work volume trim proves cleanup before boot" `Quick
             test_work_volume_trim_confirms_cleanup
+        ; Alcotest.test_case "volume repair argv grants only CAP_SYS_ADMIN" `Quick
+            test_volume_repair_argv_grants_only_sys_admin
+        ; Alcotest.test_case "volume repair script unmounts before e2fsck" `Quick
+            test_volume_repair_script_unmounts_before_e2fsck
+        ; Alcotest.test_case "volume repair cleanup brackets the helper" `Quick
+            test_volume_repair_cleanup_brackets_the_helper
         ; Alcotest.test_case "trim names preserve existing helpers and bound long names" `Quick
             test_trim_names_fit_apple_and_distinguish_long_keepers
         ; Alcotest.test_case "trim cancellation runs protected cleanup" `Quick

@@ -214,6 +214,47 @@ receipts remain distinct from successful contract validation.
    assertions. It also saves and reloads an image-evicting checkpoint and checks
    that its bytes belong to the served Workspace. Source changes do not establish scenario execution. File-transfer
    broker and real browser evidence remain separate requirements.
+
+   The Chrome ownership component now has a dedicated
+   `masc-browser-process-owner` executable. It runs behind the native launcher
+   and keeps the launcher's inherited lease descriptors in its own process;
+   the browser child receives only its standard streams. Browser subprocess
+   descriptor handling is explicit in Chromium's
+   [LaunchOptions contract](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/base/process/launch.h),
+   so a browser is not required to preserve MASC's lease descriptors itself.
+   This owner refuses to run outside its own foreground group. Its bootstrap
+   receipt names the original instance, owner and child, but grants no authority:
+   the caller must independently observe that instance's native kernel lease.
+
+   A stdin keepalive pipe carries no commands. EOF, any byte or TERM/INT stops
+   admission to the owner lifetime and requests group TERM. The owner remains
+   alive through the existing five-second resource grace and then kills its
+   own group, including itself. Normal browser-child exit ends that group
+   promptly. The running owner occupies the group ID until the final signal;
+   no recorded PID or command-line lookup authorizes orphan signalling. An
+   actual child that closes extra descriptors therefore cannot drop the owner's
+   lease, and losing the sole keepalive writer requests cleanup without another
+   browser command. The native claim still needs durable retirement and observed
+   settlement before resource reuse. A child that deliberately leaves the group
+   needs its own ownership; this component is not a sandbox or proof about such
+   children. Abrupt loss of the owner with a surviving group remains unconfirmed.
+
+   Bootstrap output runs concurrently with child/keepalive/termination
+   observation. Stopping cancels a backpressured bootstrap write before group
+   teardown; no arbitrary timeout is added. A partial bootstrap reply does not
+   establish browser readiness or a completed operation.
+
+   The `runtest-browser-process-owner` alias defines actual launcher/owner/lease
+   scenarios for TERM, keepalive-writer crash, normal child exit, non-owner
+   refusal, descriptor closure, descendant cleanup and fresh admission. They
+   also fill the actual stdout pipe to EAGAIN and separately exercise TERM,
+   EOF and child exit without reading the bootstrap reply. They
+   use Python process trees, not an actual Chrome/CDP session. The browser Add-on
+   worker's Chrome session/profile controller and host-selected child claim
+   descriptor are not connected to this component yet; those remain the next
+   ownership integration, together with scoped file transfers and real browser
+   evidence. Source typing of this component does not establish scenario
+   execution or an installed browser.
 5. Scoped model-generation middleware using the existing exact-output authority,
    with retained request/terminal evidence and installation-selected routes. The
    new package `exact_outputs` declarations are reused; observation-only sampling

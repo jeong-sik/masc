@@ -418,11 +418,15 @@ once, before any record names it, beside the scope's records at
 `tool-request-bodies/<scope digest>/<request digest>.json`. Progress rewrites
 only the record, and retain and progress compare the request by its digest, so
 a progress event reads and writes a record whose size does not depend on the
-request. A record whose body is
-missing, changed or not canonical JSON is an error, not absence. A retain
-interrupted between the two writes leaves a body no record names, and the next
-retain writes it again. The deploy store check reads each record with the body
-it names. Candle Appraiser keeps its originals in the same store.
+request; it still holds the commit's before and after domain states. Discovery
+reads the scope's records under one hold and then every body they name under
+one hold of the bodies directory. A record whose body is missing, changed or
+not canonical JSON is an error, not absence. A retain interrupted between the
+two writes leaves a body no record names: retaining the same request again
+writes it again, and nothing else reads or removes it. A record and the body it
+names move together; moving only one of them breaks discovery of the scope. The
+deploy store check reads each record with the body it names, by path, as it
+reads records. Candle Appraiser keeps its originals in the same store.
 
 The capture format requires an explicit nullable predecessor. Root constructors
 emit null; a child records its immediate original parent. The decoder is strict: missing predecessor and old-format

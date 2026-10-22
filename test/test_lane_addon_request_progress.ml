@@ -403,6 +403,11 @@ let test_a_record_without_its_body_is_an_error_not_absence () = with_store (fun 
        Alcotest.fail (label ^ " was discovered")) in
   Sys.remove body;
   refused "a missing body";
+  (match retain store with
+   | Error (Owner.Store_unavailable _) -> ()
+   | Error (Owner.Binding_conflict | Owner.Invalid_identity _ | Owner.Invalid_request _) | Ok () ->
+     Alcotest.fail "a retain over a record without its body succeeded");
+  Alcotest.(check bool) "that retain does not write the missing body again" false (Sys.file_exists body);
   save body (original ^ " ");
   refused "a changed body";
   save body original;

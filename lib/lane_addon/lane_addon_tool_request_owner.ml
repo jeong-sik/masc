@@ -91,25 +91,37 @@ let load ~store ~scope ~request_id =
   | None -> Ok None
   | Some json -> restore ~store ~scope ~request_id json
       |> Result.map Option.some |> Result.map_error (fun detail -> Store_unavailable detail)
+module Bodies = Map.Make (String)
 let discover ~store ~scope =
   let* () = validate_identity ["scope",scope] in
-  let* rows = Lane_addon_store.tool_request_owner_inventory store ~scope
-    |> Result.map_error (fun detail -> Store_unavailable detail) in
-  let rec collect records = function
+  let unavailable value = Result.map_error (fun detail -> Store_unavailable detail) value in
+  let* rows = Lane_addon_store.tool_request_owner_inventory store ~scope |> unavailable in
+  let rec decode_all records = function
     | [] -> Ok (List.rev records)
     | (name,json) :: rest ->
       let* request_id = (match json with
         | `Assoc fields -> (match List.assoc_opt "request_id" fields with
             | Some (`String value) when String.trim value <> "" -> Ok value
             | _ -> Error "missing original request ID")
-        | _ -> Error "invalid original request record")
-        |> Result.map_error (fun detail -> Store_unavailable detail) in
+        | _ -> Error "invalid original request record") |> unavailable in
       let* () = if String.equal name (Lane_addon_store.digest request_id ^ ".json") then Ok ()
         else Error (Store_unavailable "original request filename does not match its ID") in
-      let* record = restore ~store ~scope ~request_id json
-        |> Result.map_error (fun detail -> Store_unavailable detail) in
-      collect (record :: records) rest in
-  collect [] rows
+      let* record = decode ~scope ~request_id json |> unavailable in
+      decode_all (record :: records) rest in
+  let* records = decode_all [] rows in
+  (* The records' hold is released; the bodies they name are read under one
+     hold of the bodies directory, not one per record. *)
+  let* bodies = Lane_addon_store.load_tool_request_bodies store ~scope
+      ~request_digests:(List.sort_uniq String.compare (List.map fst records)) |> unavailable in
+  let bodies = List.fold_left (fun map (request_digest, body) -> Bodies.add request_digest body map)
+      Bodies.empty bodies in
+  let rec restore_all retained = function
+    | [] -> Ok (List.rev retained)
+    | (request_digest, make) :: rest ->
+      let* request = request_of_body ~request_digest (Option.join (Bodies.find_opt request_digest bodies))
+        |> unavailable in
+      restore_all (make request :: retained) rest in
+  restore_all [] records
 let check_published ~read_body ~directory_name ~file_name json =
   let field key = match json with
     | `Assoc fields -> (match List.assoc_opt key fields with
@@ -142,8 +154,8 @@ let retain ~store ~scope ~request_id ~installation_id ~package_id ~tool ~request
     then Ok () else Error Binding_conflict
   | None ->
     (* The body is durable before any record names it. A retain interrupted
-       between the two writes leaves a body no record names; this retain
-       writes it again. *)
+       between the two writes leaves a body no record names: retaining the same
+       request again writes it again, and nothing reads it otherwise. *)
     let* () = Lane_addon_store.save_tool_request_body store ~scope ~request_digest:expected.request_digest bytes
       |> Result.map_error (fun detail -> Store_unavailable detail) in
     Lane_addon_store.save_tool_request_owner store ~scope ~request_id (to_json expected)
@@ -162,7 +174,9 @@ let advance ~store ~(expected : retained) ~event =
   | Some json ->
     (* Progress reads and rewrites only the record. A record naming another
        body differs from [expected] in its digest. *)
-    let* _, make = decode ~scope:expected.scope ~request_id:expected.request_id json |> Result.map_error unavailable in
+    let* stored_digest, make = decode ~scope:expected.scope ~request_id:expected.request_id json
+      |> Result.map_error unavailable in
+    if not (String.equal stored_digest expected.request_digest) then Error State_conflict else
     let previous = make expected.request in
     if same_record previous next then Ok (Already_stored previous)
     else if not (same_record previous expected) then Error State_conflict

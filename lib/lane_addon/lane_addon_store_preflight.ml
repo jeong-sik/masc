@@ -265,7 +265,9 @@ let scan store ~base_path =
         (fun ~group:_ ~name:_ ~path:_ json ->
            Lane_addon_exact.check_retained_record json |> decoded Exact_record)
     | Tool_request_owners ->
-      (* A record is read with the body it names, as discovery reads it. *)
+      (* A record is checked with the body it names: present, named by its
+         digest, canonical JSON. Like records, the body is read by path; the
+         owner, mode and link checks stay with the runtime reader. *)
       let read_body ~scope ~request_digest =
         match Fs_compat.load_file_opt
                 (Filename.concat root (Lane_addon_store.tool_request_body_path ~scope ~request_digest)) with

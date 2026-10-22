@@ -53,8 +53,9 @@ val retain : store:Lane_addon_store.t -> scope:string -> request_id:string ->
     then the record that names it. Same input and original destination is
     idempotent and preserves advanced progress; the comparison uses the
     request digest. Invalid JSON is refused before writing. A retain
-    interrupted between the two writes leaves a body no record names, and the
-    next retain writes it again; a record whose body is missing is an error.
+    interrupted between the two writes leaves a body no record names.
+    Retaining the same request again writes that body again; otherwise nothing
+    reads it or removes it. A record whose body is missing is an error.
     Publication failure is not proof of absence: a retry strictly reads the
     original record again. *)
 type update_error = Ownership_error of error | State_conflict | Invalid_transition of string

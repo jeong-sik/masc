@@ -66,11 +66,11 @@ jobs:
             echo "#43719 music stack; this step runs them as soon as they are on the ref."
             exit 0
           fi
-          wave_export_root=
-          trap 'if [[ -n "$wave_export_root" ]]; then rm -rf "$wave_export_root"; fi' EXIT
-          run_harness() {
-            if [[ "$1" == tools/alphatex/native/test-wave-export.mjs ]]; then
+          run_harness() (
+            if [[ "$1" == tools/alphatex/native/test-wave-export.mjs \
+               || "$1" == tools/alphatex/native/test-soundfont-wave-export.mjs ]]; then
               wave_export_root="$(mktemp -d)" || return
+              trap 'rm -rf -- "$wave_export_root"' EXIT
               native=tools/alphatex/native
               xcrun swiftc -parse-as-library -D MIDI_LIBRARY -O \
                 "$native/WaveArrangement.swift" "$native/WaveLoopClock.swift" \
@@ -85,7 +85,7 @@ jobs:
             else
               node "$1"
             fi
-          }
+          )
           status=0
           for harness in "${harnesses[@]}"; do
             name="$(basename "$harness")"

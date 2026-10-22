@@ -497,24 +497,33 @@ let entry_json e =
     "visibility", visibility_to_json e.visibility;
     "configuration", Option.fold ~none:`Null ~some:configuration_owner_json e.configuration;
     "resource", (match e.connection with None -> `Null | Some c -> Lifecycle.resource_to_json c.worker.resource)]
-(* A detached worker that acquired no execution authority or resource and
-   never committed an observation leaves nothing for Inspect, Slice or Evidence.  When
+(* A released worker that never held a resource and never committed an
+   observation leaves nothing for Inspect, Slice or Evidence.  When
    its start returned [Error], the masc:lane:resource:acquire_failed event in
    the agent-core event journal records why it did not start; a start that
    raised keeps its reason only in the [Failed] phase until it is retired.
    Its binding would only add a record that every reconciliation reads
    again, and a startup that keeps failing adds one per maintenance beat, so
    its durable form is no file. [persist] and the restart recovery in
-   [historical_detach] both decide with this one rule. *)
-let never_started ~seq ~authority ~resource = seq=0 && Option.is_none authority && Option.is_none resource
-let retains_history e =
-  not (never_started ~seq:e.seq ~authority:e.authority ~resource:(Option.map (fun c -> c.worker.resource) e.connection))
+   [historical_detach] both decide with this one rule.
+   Execution authority is not part of the rule. It is recorded before every
+   create, so a create the engine refuses, or a slot another container holds,
+   leaves authority and no resource. Until the release is confirmed against
+   that authority the worker is not [Detached] and its record stays; once it
+   is confirmed, the authority holds nothing more. [Native_retained] is not a
+   release of anything: the host left in place what it could not confirm
+   released, and the record is what says the operator took it over. *)
+let leaves_no_record ~seq ~resource = function
+  | Lifecycle.Detached (Lifecycle.Never_created | Lifecycle.Released _ | Lifecycle.Native_released _) ->
+      seq=0 && Option.is_none resource
+  | Lifecycle.Detached (Lifecycle.Native_retained _)
+  | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Failed _ | Lifecycle.Detaching _ -> false
 let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
   (* Capture mutable state on the owning domain after serializing writes.
      The I/O thread sees only the immutable snapshot. Every write, including
      a late one after detach, derives the file from the same state under this
      mutex, so the last write leaves the record that state calls for. *)
-  if is_detached e.state && not (retains_history e)
+  if leaves_no_record ~seq:e.seq ~resource:(Option.map (fun c -> c.worker.resource) e.connection) e.state
   then offload (fun () -> Lane_addon_store.remove_binding m.store ~instance_id:e.instance_id)
   else
     let json = entry_json e in
@@ -2424,7 +2433,7 @@ let historical_detach ~sw ?(wait = false) m fields =
         | Ok release -> Lifecycle.Detached release | Error failure -> failed_after fields failure in
       finished := Some state;
       let terminal =
-        if is_detached state && never_started ~seq ~authority ~resource
+        if leaves_no_record ~seq ~resource state
         then None else Some (replace_state fields state) in
       let publication = {fields;terminal;terminal_state=state} in
       (* Event publication can yield. The cleanup result already exists, so

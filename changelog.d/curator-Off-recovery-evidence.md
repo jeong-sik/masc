@@ -1,0 +1,3 @@
+### Documentation
+
+- Record source-matched Curator original Briefing recovery while Off, actual provider work after reattachment, six retained commit/observer receipts and normal final worker cleanup.

@@ -1,0 +1,143 @@
+{
+  "at": "2026-10-22T05:07:34.406329+00:00",
+  "identity": "local-admin",
+  "method": "POST",
+  "path": "/mcp",
+  "request": {
+    "jsonrpc": "2.0",
+    "id": "dd2ef1a6a37e440f9f94ad25bd580d50",
+    "method": "tools/call",
+    "params": {
+      "name": "masc_keeper_delegate_status",
+      "arguments": {
+        "target": {
+          "kind": "keeper",
+          "name": "curator-source-1196"
+        },
+        "operation_id": "kmsg-db3bf1b04fab7e90bd1a682a1228eb2c"
+      }
+    }
+  },
+  "http_status": 200,
+  "response": {
+    "jsonrpc": "2.0",
+    "id": "dd2ef1a6a37e440f9f94ad25bd580d50",
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.61.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"schema\":\"masc.keeper_chat_operation.v1\",\"operation_id\":\"kmsg-db3bf1b04fab7e90bd1a682a1228eb2c\",\"sequence\":\"2\",\"created_at\":1792645564.311207,\"admission_digest\":\"c548c8ad25e0e23a97a727c8003d785cd4177c4c6dad22da531af831a6198132\",\"execution_digest\":\"6acdd8916366aca0e6c0277fcb0c0200961107a93f7ba2ad165a556f58a23aa5\",\"source\":{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:curator-source-1196\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"local-admin\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:curator-source-1196\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null},\"input\":null,\"state\":\"Succeeded\",\"completed_at\":1792645603.080413,\"outcome_ref\":\"trace-1792641821776-00000#4\",\"completed_reply\":{\"status\":\"available\",\"turn_ref\":\"trace-1792641821776-00000#4\",\"replies\":[{\"message_id\":\"msg-1792645603054024-1\",\"text\":\"\uae30\ub85d\uc744 \uc644\ub8cc\ud588\uc2b5\ub2c8\ub2e4. \uacb0\uacfc\ub97c \ubcf4\uace0\ub4dc\ub9bd\ub2c8\ub2e4.\\n\\n**\uae30\ub85d \uacb0\uacfc (keeper_memory_write, \uc815\ud655\ud788 1\ud68c \ud638\ucd9c)**\\n- outcome: `persisted_pending_admission`, rows_written: 1\\n- request_id: `memory-admission-eacd6102425f3dc4d519fe817002d278`\\n- sequence: **2**\\n- recorded_at: 2026-10-22T05:06:29Z\\n- title: `Curator original-result recovery`\\n- basis: observed, store: pending_memory_admission\\n\\n\uc601\uc218\uc99d\uc5d0 \uba85\uc2dc\ub41c \ub300\ub85c \uc774 request_id\ub294 memory_id\uac00 \uc544\ub2c8\uba70 premise\ub098 supersedes \ub300\uc0c1\uc73c\ub85c \uc4f8 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. \ud6c4\ubcf4\ub294 Librarian \uc2ec\uc0ac \ub300\uae30 \uc0c1\ud0dc\ub85c \uc811\uc218\ub41c \uac83\uc774\uba70, \ud604\uc7ac Memory \ubc18\uc601 \uc5ec\ubd80\ub294 \uc2ec\uc0ac \ud6c4 \ud655\uc815\ub429\ub2c8\ub2e4.\\n\\nsource_path, supersedes, Board, derivation\uc740 \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc558\uace0, pending \ud6c4\ubcf4 \uc7ac\uac80\uc0c9\u00b7\uc7ac\uc4f0\uae30\ub098 \uc678\ubd80 \uc791\uc5c5\uc740 \ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4. \uc694\uccad\ub41c \uae30\ub85d\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4.\",\"blocks\":[{\"t\":\"p\",\"html\":\"\uae30\ub85d\uc744 \uc644\ub8cc\ud588\uc2b5\ub2c8\ub2e4. \uacb0\uacfc\ub97c \ubcf4\uace0\ub4dc\ub9bd\ub2c8\ub2e4.\"},{\"t\":\"p\",\"html\":\"**\uae30\ub85d \uacb0\uacfc (keeper_memory_write, \uc815\ud655\ud788 1\ud68c \ud638\ucd9c)**\"},{\"t\":\"p\",\"html\":\"- outcome: `persisted_pending_admission`, rows_written: 1\"},{\"t\":\"p\",\"html\":\"- request_id: `memory-admission-eacd6102425f3dc4d519fe817002d278`\"},{\"t\":\"p\",\"html\":\"- sequence: **2**\"},{\"t\":\"p\",\"html\":\"- recorded_at: 2026-10-22T05:06:29Z\"},{\"t\":\"p\",\"html\":\"- title: `Curator original-result recovery`\"},{\"t\":\"p\",\"html\":\"- basis: observed, store: pending_memory_admission\"},{\"t\":\"p\",\"html\":\"\uc601\uc218\uc99d\uc5d0 \uba85\uc2dc\ub41c \ub300\ub85c \uc774 request_id\ub294 memory_id\uac00 \uc544\ub2c8\uba70 premise\ub098 supersedes \ub300\uc0c1\uc73c\ub85c \uc4f8 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. \ud6c4\ubcf4\ub294 Librarian \uc2ec\uc0ac \ub300\uae30 \uc0c1\ud0dc\ub85c \uc811\uc218\ub41c \uac83\uc774\uba70, \ud604\uc7ac Memory \ubc18\uc601 \uc5ec\ubd80\ub294 \uc2ec\uc0ac \ud6c4 \ud655\uc815\ub429\ub2c8\ub2e4.\"},{\"t\":\"p\",\"html\":\"source_path, supersedes, Board, derivation\uc740 \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc558\uace0, pending \ud6c4\ubcf4 \uc7ac\uac80\uc0c9\u00b7\uc7ac\uc4f0\uae30\ub098 \uc678\ubd80 \uc791\uc5c5\uc740 \ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4. \uc694\uccad\ub41c \uae30\ub85d\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4.\"}]}]}}",
+            "status": "ok",
+            "tool": "masc_keeper_delegate_status"
+          },
+          "trace_id": "\"dd2ef1a6a37e440f9f94ad25bd580d50\"",
+          "agent_id": "local-admin",
+          "tool": "masc_keeper_delegate_status",
+          "duration_ms": 1,
+          "attempts": 1,
+          "timestamp": "2026-10-22T05:07:34Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"schema\":\"masc.keeper_chat_operation.v1\",\"operation_id\":\"kmsg-db3bf1b04fab7e90bd1a682a1228eb2c\",\"sequence\":\"2\",\"created_at\":1792645564.311207,\"admission_digest\":\"c548c8ad25e0e23a97a727c8003d785cd4177c4c6dad22da531af831a6198132\",\"execution_digest\":\"6acdd8916366aca0e6c0277fcb0c0200961107a93f7ba2ad165a556f58a23aa5\",\"source\":{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:curator-source-1196\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"local-admin\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:curator-source-1196\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null},\"input\":null,\"state\":\"Succeeded\",\"completed_at\":1792645603.080413,\"outcome_ref\":\"trace-1792641821776-00000#4\",\"completed_reply\":{\"status\":\"available\",\"turn_ref\":\"trace-1792641821776-00000#4\",\"replies\":[{\"message_id\":\"msg-1792645603054024-1\",\"text\":\"\uae30\ub85d\uc744 \uc644\ub8cc\ud588\uc2b5\ub2c8\ub2e4. \uacb0\uacfc\ub97c \ubcf4\uace0\ub4dc\ub9bd\ub2c8\ub2e4.\\n\\n**\uae30\ub85d \uacb0\uacfc (keeper_memory_write, \uc815\ud655\ud788 1\ud68c \ud638\ucd9c)**\\n- outcome: `persisted_pending_admission`, rows_written: 1\\n- request_id: `memory-admission-eacd6102425f3dc4d519fe817002d278`\\n- sequence: **2**\\n- recorded_at: 2026-10-22T05:06:29Z\\n- title: `Curator original-result recovery`\\n- basis: observed, store: pending_memory_admission\\n\\n\uc601\uc218\uc99d\uc5d0 \uba85\uc2dc\ub41c \ub300\ub85c \uc774 request_id\ub294 memory_id\uac00 \uc544\ub2c8\uba70 premise\ub098 supersedes \ub300\uc0c1\uc73c\ub85c \uc4f8 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. \ud6c4\ubcf4\ub294 Librarian \uc2ec\uc0ac \ub300\uae30 \uc0c1\ud0dc\ub85c \uc811\uc218\ub41c \uac83\uc774\uba70, \ud604\uc7ac Memory \ubc18\uc601 \uc5ec\ubd80\ub294 \uc2ec\uc0ac \ud6c4 \ud655\uc815\ub429\ub2c8\ub2e4.\\n\\nsource_path, supersedes, Board, derivation\uc740 \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc558\uace0, pending \ud6c4\ubcf4 \uc7ac\uac80\uc0c9\u00b7\uc7ac\uc4f0\uae30\ub098 \uc678\ubd80 \uc791\uc5c5\uc740 \ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4. \uc694\uccad\ub41c \uae30\ub85d\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4.\",\"blocks\":[{\"t\":\"p\",\"html\":\"\uae30\ub85d\uc744 \uc644\ub8cc\ud588\uc2b5\ub2c8\ub2e4. \uacb0\uacfc\ub97c \ubcf4\uace0\ub4dc\ub9bd\ub2c8\ub2e4.\"},{\"t\":\"p\",\"html\":\"**\uae30\ub85d \uacb0\uacfc (keeper_memory_write, \uc815\ud655\ud788 1\ud68c \ud638\ucd9c)**\"},{\"t\":\"p\",\"html\":\"- outcome: `persisted_pending_admission`, rows_written: 1\"},{\"t\":\"p\",\"html\":\"- request_id: `memory-admission-eacd6102425f3dc4d519fe817002d278`\"},{\"t\":\"p\",\"html\":\"- sequence: **2**\"},{\"t\":\"p\",\"html\":\"- recorded_at: 2026-10-22T05:06:29Z\"},{\"t\":\"p\",\"html\":\"- title: `Curator original-result recovery`\"},{\"t\":\"p\",\"html\":\"- basis: observed, store: pending_memory_admission\"},{\"t\":\"p\",\"html\":\"\uc601\uc218\uc99d\uc5d0 \uba85\uc2dc\ub41c \ub300\ub85c \uc774 request_id\ub294 memory_id\uac00 \uc544\ub2c8\uba70 premise\ub098 supersedes \ub300\uc0c1\uc73c\ub85c \uc4f8 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. \ud6c4\ubcf4\ub294 Librarian \uc2ec\uc0ac \ub300\uae30 \uc0c1\ud0dc\ub85c \uc811\uc218\ub41c \uac83\uc774\uba70, \ud604\uc7ac Memory \ubc18\uc601 \uc5ec\ubd80\ub294 \uc2ec\uc0ac \ud6c4 \ud655\uc815\ub429\ub2c8\ub2e4.\"},{\"t\":\"p\",\"html\":\"source_path, supersedes, Board, derivation\uc740 \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc558\uace0, pending \ud6c4\ubcf4 \uc7ac\uac80\uc0c9\u00b7\uc7ac\uc4f0\uae30\ub098 \uc678\ubd80 \uc791\uc5c5\uc740 \ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4. \uc694\uccad\ub41c \uae30\ub85d\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4.\"}]}]}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "schema": "masc.keeper_chat_operation.v1",
+        "operation_id": "kmsg-db3bf1b04fab7e90bd1a682a1228eb2c",
+        "sequence": "2",
+        "created_at": 1792645564.311207,
+        "admission_digest": "c548c8ad25e0e23a97a727c8003d785cd4177c4c6dad22da531af831a6198132",
+        "execution_digest": "6acdd8916366aca0e6c0277fcb0c0200961107a93f7ba2ad165a556f58a23aa5",
+        "source": {
+          "channel": "agent",
+          "channel_user_id": "",
+          "channel_user_name": "",
+          "channel_workspace_id": "",
+          "continuation_channel": {
+            "kind": "dashboard",
+            "thread_id": "keeper:curator-source-1196"
+          },
+          "conversation_id": null,
+          "external_message_id": null,
+          "extra_mentions": [],
+          "schema": "masc.keeper_chat_operation.source.v2",
+          "sender_keeper": null,
+          "submitted_by": "local-admin",
+          "surface": {
+            "kind": "agent"
+          },
+          "thread_id": "keeper:curator-source-1196",
+          "user_row_origin": "needs_append",
+          "workspace_id": null
+        },
+        "input": null,
+        "state": "Succeeded",
+        "completed_at": 1792645603.080413,
+        "outcome_ref": "trace-1792641821776-00000#4",
+        "completed_reply": {
+          "status": "available",
+          "turn_ref": "trace-1792641821776-00000#4",
+          "replies": [
+            {
+              "message_id": "msg-1792645603054024-1",
+              "text": "\uae30\ub85d\uc744 \uc644\ub8cc\ud588\uc2b5\ub2c8\ub2e4. \uacb0\uacfc\ub97c \ubcf4\uace0\ub4dc\ub9bd\ub2c8\ub2e4.\n\n**\uae30\ub85d \uacb0\uacfc (keeper_memory_write, \uc815\ud655\ud788 1\ud68c \ud638\ucd9c)**\n- outcome: `persisted_pending_admission`, rows_written: 1\n- request_id: `memory-admission-eacd6102425f3dc4d519fe817002d278`\n- sequence: **2**\n- recorded_at: 2026-10-22T05:06:29Z\n- title: `Curator original-result recovery`\n- basis: observed, store: pending_memory_admission\n\n\uc601\uc218\uc99d\uc5d0 \uba85\uc2dc\ub41c \ub300\ub85c \uc774 request_id\ub294 memory_id\uac00 \uc544\ub2c8\uba70 premise\ub098 supersedes \ub300\uc0c1\uc73c\ub85c \uc4f8 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. \ud6c4\ubcf4\ub294 Librarian \uc2ec\uc0ac \ub300\uae30 \uc0c1\ud0dc\ub85c \uc811\uc218\ub41c \uac83\uc774\uba70, \ud604\uc7ac Memory \ubc18\uc601 \uc5ec\ubd80\ub294 \uc2ec\uc0ac \ud6c4 \ud655\uc815\ub429\ub2c8\ub2e4.\n\nsource_path, supersedes, Board, derivation\uc740 \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc558\uace0, pending \ud6c4\ubcf4 \uc7ac\uac80\uc0c9\u00b7\uc7ac\uc4f0\uae30\ub098 \uc678\ubd80 \uc791\uc5c5\uc740 \ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4. \uc694\uccad\ub41c \uae30\ub85d\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4.",
+              "blocks": [
+                {
+                  "t": "p",
+                  "html": "\uae30\ub85d\uc744 \uc644\ub8cc\ud588\uc2b5\ub2c8\ub2e4. \uacb0\uacfc\ub97c \ubcf4\uace0\ub4dc\ub9bd\ub2c8\ub2e4."
+                },
+                {
+                  "t": "p",
+                  "html": "**\uae30\ub85d \uacb0\uacfc (keeper_memory_write, \uc815\ud655\ud788 1\ud68c \ud638\ucd9c)**"
+                },
+                {
+                  "t": "p",
+                  "html": "- outcome: `persisted_pending_admission`, rows_written: 1"
+                },
+                {
+                  "t": "p",
+                  "html": "- request_id: `memory-admission-eacd6102425f3dc4d519fe817002d278`"
+                },
+                {
+                  "t": "p",
+                  "html": "- sequence: **2**"
+                },
+                {
+                  "t": "p",
+                  "html": "- recorded_at: 2026-10-22T05:06:29Z"
+                },
+                {
+                  "t": "p",
+                  "html": "- title: `Curator original-result recovery`"
+                },
+                {
+                  "t": "p",
+                  "html": "- basis: observed, store: pending_memory_admission"
+                },
+                {
+                  "t": "p",
+                  "html": "\uc601\uc218\uc99d\uc5d0 \uba85\uc2dc\ub41c \ub300\ub85c \uc774 request_id\ub294 memory_id\uac00 \uc544\ub2c8\uba70 premise\ub098 supersedes \ub300\uc0c1\uc73c\ub85c \uc4f8 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. \ud6c4\ubcf4\ub294 Librarian \uc2ec\uc0ac \ub300\uae30 \uc0c1\ud0dc\ub85c \uc811\uc218\ub41c \uac83\uc774\uba70, \ud604\uc7ac Memory \ubc18\uc601 \uc5ec\ubd80\ub294 \uc2ec\uc0ac \ud6c4 \ud655\uc815\ub429\ub2c8\ub2e4."
+                },
+                {
+                  "t": "p",
+                  "html": "source_path, supersedes, Board, derivation\uc740 \uc0ac\uc6a9\ud558\uc9c0 \uc54a\uc558\uace0, pending \ud6c4\ubcf4 \uc7ac\uac80\uc0c9\u00b7\uc7ac\uc4f0\uae30\ub098 \uc678\ubd80 \uc791\uc5c5\uc740 \ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4. \uc694\uccad\ub41c \uae30\ub85d\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}

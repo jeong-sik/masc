@@ -1,0 +1,14 @@
+{
+  "schema": "workspace.memory.briefing.v1",
+  "published": {
+    "sources": [
+      {
+        "id": "claim:claim-c884a063ed8a35ffc12ffd466e1eba82a491b15407d0450d09dc398cf437b426",
+        "sha256": "888fcd0ebb370c6e83679274ce08e8b6a14c15f1d1339afbb59fb53b9a82daa2"
+      }
+    ],
+    "text": "Authority boundary (recorded as a claim, not independently verified): the Workspace Curator Addon computes only classification and briefing, while the MASC host retains durable fact intake, original request identity, memory ledger commits, observer acknowledgements, and effect authority. Constraint from this claim: disabling the Curator installation must preserve pending original work so it can be reattached. No conflicts or corrections exist yet; later batches may extend this briefing.",
+    "contract": "c4a46f8670b805f0945f8dd397f20fcfa38b015902ba9d7f4e6904f8d84f16ac"
+  },
+  "building": null
+}

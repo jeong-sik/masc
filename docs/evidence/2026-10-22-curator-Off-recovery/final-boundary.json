@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-22T05:10:20.226605+00:00",
+  "source": "db31e62fe17f92aea4919de7765f1ace65914772",
+  "original_owner_count": 6,
+  "all_originals_committed_and_observer_ACKed": true,
+  "old_two_terminal_journals_unchanged": true,
+  "final_owned_running_containers": 0,
+  "new_incarnation": "01a16200-c0ae-7000-b20e-0f22a1378663",
+  "final_memory_revision": 3,
+  "final_fact_count": 3,
+  "final_ledger_fact_count": 3,
+  "final_briefing_source_count": 3,
+  "final_briefing_building": null,
+  "note": "Normal host Librarian also admitted a third constraint from the actual completed Keeper turn; Curator processed this separate input with another original classification/briefing pair."
+}

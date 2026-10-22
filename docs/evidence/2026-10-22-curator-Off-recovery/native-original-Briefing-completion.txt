@@ -1,0 +1,56 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+                                                                                                        │[Recent] Changes · 0 keepers (1 offline)
+  MASC Lane Run  workspace-curator-01a161e4-2a50-7000-965e-934e89c4a2cb  HTTP [connected]               │───────────────────────────────────────────────────────
+ ────────────────────────────────────────────────────────────────────────────────────────────────────── │curator-source-1196 · no events on this feed yet
+   LANE  workspace_curator_exact  ·  exact output
+   ACTOR  /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ks…
+   DECISION  NOT A VERDICT  ·  RUN  succeeded
+   TOOLS  none · exact-output runs do not use the MASC tool loop
+   SKILLS  none · these runs do not load Keeper Skill instructions
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────
+   │         "state": {
+   │           "building": {
+   │             "contract": "c4a46f8670b805f0945f8dd397f20fcfa38b015902ba9d7f4e6904f8d84f16ac",
+   │             "remaining": [
+   │               {
+   │                 "id": "claim:claim-c884a063ed8a35ffc12ffd466e1eba82a491b15407d0450d09dc398cf437b
+   │ 426",
+   │                 "kind": "claim",
+   │                 "text": "Curator authority boundary. The Workspace Curator Addon computes classi
+   │ fication and briefing, while the MASC host retains durable fact intake, original request identit
+   │ y, memory ledger commits, observer acknowledgements, and effect authority. Disabling the install
+   │ ation must preserve pending original work for reattachment."
+   │               }
+   │             ],
+   │             "target": [
+   │               {
+   │                 "id": "claim:claim-c884a063ed8a35ffc12ffd466e1eba82a491b15407d0450d09dc398cf437b
+   │ 426",
+   │                 "sha256": "888fcd0ebb370c6e83679274ce08e8b6a14c15f1d1339afbb59fb53b9a82daa2"
+   │               }
+   │             ],
+   │             "text": null
+   │           },
+   │           "published": null,
+   │           "schema": "workspace.memory.briefing.v1"
+   │         }
+   │       },
+   │       "judgment": {
+   │         "output": {
+   │           "briefing": "Authority boundary (recorded as a claim, not independently verified): the
+   │  Workspace Curator Addon computes only classification and briefing, while the MASC host retains
+   │ durable fact intake, original request identity, memory ledger commits, observer acknowledgements
+   │ , and effect authority. Constraint from this claim: disabling the Curator installation must pres
+   │ erve pending original work so it can be reattached. No conflicts or corrections exist yet; later
+   │  batches may extend this briefing."
+   │         },
+   │         "slot": "glm-coding.glm-5.3-flash",
+   │         "status": "answered",
+   │         "usage": { "input_tokens": 428, "output_tokens": 430 }
+   │       }
+   │     },
+   │     "kind": "committed"
+   │   },
+
+  j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit  ?:help  211-253/269
+ › to curator-source-1196   (i to write)

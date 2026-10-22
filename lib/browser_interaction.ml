@@ -2,9 +2,11 @@
 type request = { route : Browser_selection.preference; tab_id : int;
   expected_url : string option; action : Browser_lane.interaction }
 let ( let* ) = Result.bind
+let route_names = ["lane"; "clientId"]
+let wire_fields = ["tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"; "width"; "height"; "value"]
 let parse = function
   | `Assoc fields ->
-    let allowed = ["lane"; "clientId"; "tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"; "width"; "height"; "value"] in
+    let allowed = route_names @ wire_fields in
     let* () = if List.for_all (fun (key, _) -> List.mem key allowed) fields
       && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       then Ok () else Error "unknown or duplicate browser interaction argument" in

@@ -186,5 +186,14 @@ do not modify publication manifests, history or source bytes. Data and lock
 leaves are owned regular files; the stable protocol creates a new lock
 exclusively and validates an existing descriptor binding before writing it.
 
-This layer supplies the shared storage/API. Dashboard and TUI confirmation
-controls and their live cross-client verification remain separate work.
+The Dashboard list and the selected reader expose an explicit confirmation
+button, including the actor and time for that exact revision. "Today unchecked"
+counts current revisions only when both inventories are complete; unavailable,
+partial or digest-mismatched evidence stays unknown. The unchecked filter follows
+the same rule. Opening a report never checks it automatically.
+
+Successful, conflicting and failed writes all require an authoritative reread;
+the controls never optimistically confirm or automatically retry. Retiring the
+credential epoch or selected revision retires the local write owner, even when
+the server may already have committed its request. TUI controls and live
+cross-client verification remain separate work.

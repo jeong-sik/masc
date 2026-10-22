@@ -18,8 +18,10 @@ let revision ?(format=Published.Markdown) ?(number=1) content =
 let summary revision = Published.summary_to_json ~id revision
 let listing revisions diagnostics = `Assoc [
   "artifacts", `List (List.map summary revisions); "diagnostics", `List diagnostics]
-let entry revision =
-  match get (Catalog.reports_of_json (listing [revision] [])) with
+let entry ?(artifact_id=id) revision =
+  let json = `Assoc ["artifacts", `List [Published.summary_to_json ~id:artifact_id revision];
+    "diagnostics", `List []] in
+  match get (Catalog.reports_of_json json) with
   | [entry], [] -> entry
   | _ -> fail "expected report"
 let report entry = match Catalog.key entry with
@@ -210,7 +212,8 @@ let failed_revision_navigation () =
 
 let filtered_selection () =
   let doc = entry (revision markdown) in
-  let page = entry (revision ~format:Published.Html html) in
+  let page = entry ~artifact_id:"artifact-fedcba9876543210fedcba9876543210"
+    (revision ~format:Published.Html html) in
   let mcp = Catalog.Mcp { (Catalog.metadata doc) with name="status" } in
   let state = state () in
   Updates.listed state (Ok {Catalog.entries=[mcp;page;doc];notes=[]});

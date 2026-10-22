@@ -17,8 +17,10 @@ let format_badge = function
 
 let check_badge status =
   let colour = match status with
-    | Masc_tui_artifact_checks.Known (Some _) -> Theme.ok ()
-    | Known None -> Theme.warn ()
+    | Masc_tui_artifact_checks.Known
+        (Some {state = Masc.Published_artifact_check.Checked; _}) -> Theme.ok ()
+    | Known None
+    | Known (Some {state = Masc.Published_artifact_check.Unchecked; _}) -> Theme.warn ()
     | Unknown _ -> Theme.muted () in
   colour ^ Masc_tui_artifact_checks.label status ^ Ansi.reset
 

@@ -347,7 +347,8 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
       ~clock:env#clock ()) in
   Eio.Switch.on_release sw bundle.cleanup;
   let create index large =
-    write (Filename.concat base "control.json") "{}";
+    json (Filename.concat base "control.json")
+      (`Assoc ["shared",`Assoc [];"jobs",`Assoc [];"armed",`List []]);
     let started = stage (Start_job index) (fun () ->
       invoke bundle ~id:("fixture-launch-" ^ string_of_int index) ~turn:0
         "keeper_job_start" (`Assoc ["argv",`List [`String "fixture-program";`String (string_of_int index)]])) in
@@ -356,7 +357,8 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
     let id = string "job_id" start in
     let control = ["state",`String "exited";"exit_code",`Int 0] @
       if large then ["large_logs",`Assoc ["head",`Int (String.length "alpha");"tail",`Int (String.length "omega")]] else [] in
-    json (Filename.concat base "control.json") (`Assoc control);
+    json (Filename.concat base "control.json") (`Assoc
+      ["shared",`Assoc [];"jobs",`Assoc [id,`Assoc control];"armed",`List []]);
     ignore (stage (Collect_job index) (fun () ->
       invoke bundle ~id:("fixture-collect-" ^ string_of_int index) ~turn:0
         "keeper_job_status" (`Assoc ["job_id",`String id])));
@@ -369,6 +371,8 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
       | None -> failwith "setup original outputs are not complete" in
     let body = blob_bytes base stdout in
     require (record.source.task_id=Some task.task_id) "setup job lost original Task identity";
+    (* Independent preparation trials explicitly reset their synthetic peer.
+       This is fixture setup, not evidence of real Docker resource cleanup. *)
     if Sys.file_exists (Filename.concat base "daemon.json") then Unix.unlink (Filename.concat base "daemon.json");
     `Assoc ["job_id",`String id;"source",Jobs.source_to_json record.source;
       "stdout",Tool_output.normalized_artifact_ref_to_json stdout;

@@ -200,8 +200,43 @@ let set_source ?(answer_source_ids = []) fixture ~task_id ~turn =
     ~answer_source_ids
     ~turn ~keeper_turn_id:turn
     ~trace_id:(Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) ()
-let control fixture json = write fixture.control_path (Yojson.Safe.to_string json)
+let write_control fixture ~shared ~jobs ~armed =
+  write fixture.control_path (Yojson.Safe.to_string (`Assoc
+    ["shared", shared; "jobs", `Assoc jobs; "armed", `List armed]))
+
+let control_jobs fixture ids json =
+  let shared,resource = json |> to_assoc |> List.partition (fun (name,_) ->
+    List.mem name ["daemon_id";"presence_blocked";"presence_unavailable";
+      "presence_wrong_scope";"presence_padding_bytes"]) in
+  check bool "resource faults require an explicit original job target" true
+    (resource=[] || ids<>[]);
+  write_control fixture ~shared:(`Assoc shared)
+    ~jobs:(List.map (fun id -> id,`Assoc resource) ids) ~armed:[]
+let control_job fixture id json = control_jobs fixture [id] json
+let control_shared fixture json = control_jobs fixture [] json
+let control_reset fixture () = control_shared fixture (`Assoc [])
+
+let control_launch fixture ~tool_use_id ~keeper_turn_id json =
+  let trace_id = Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id in
+  let source : Store.source =
+    { task_id=Some "task-A"; keeper_turn_id; trace_id=Some trace_id;
+      turn_ref=Some (Ids.Turn_ref.make ~trace_id ~absolute_turn:41);
+      tool_use_id=Some tool_use_id } in
+  let request = `Assoc ["argv",`List [`String "fixture-program"];"inputs",`List []] in
+  let digest = Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string request))) in
+  write_control fixture ~shared:(`Assoc []) ~jobs:[] ~armed:[`Assoc
+    ["base_path",`String fixture.base_path;"keeper_name",`String keeper;
+     "source",Store.source_to_json source;"request_sha256",`String digest;"fault",json]]
+
 let daemon fixture = Yojson.Safe.from_string (read fixture.daemon_path)
+let fixture_container fixture id = daemon fixture |> member "containers" |> member id
+let set_fixture_container fixture id value =
+  let state = daemon fixture |> to_assoc in
+  let containers = List.assoc "containers" state |> to_assoc |> List.remove_assoc id in
+  let containers = if value=`Null then containers else (id,value)::containers in
+  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
+    (("containers",`Assoc containers)::List.remove_assoc "containers" state)))
+let remove_fixture_container fixture id = set_fixture_container fixture id `Null
 let calls fixture = daemon fixture |> member "calls" |> to_list
 let effect_count fixture operation =
   List.filter (fun json ->
@@ -370,9 +405,10 @@ let test_running_restart_exit_and_artifacts () = with_fixture @@ fun _env initia
   check_original_source fixture started;
   let id = job_id started in
   let record = load fixture id in
+  let original_container_id = fixture_container fixture id |> member "Id" |> to_string in
   let paths = Store.paths ~base_path:fixture.base_path record.job_id in
   check string "real preparation copied immutable input" input_bytes (read (Filename.concat paths.workspace "input.txt"));
-  let container = daemon fixture |> member "container" in
+  let container = fixture_container fixture id in
   check_json "argv is structured and never shell-expanded" (`List (List.map (fun x -> `String x) (List.tl argv)))
     (container |> member "Config" |> member "Cmd");
   check string "workspace is private job mount" paths.workspace
@@ -388,21 +424,21 @@ let test_running_restart_exit_and_artifacts () = with_fixture @@ fun _env initia
       invoke fixture bundle ~tool_use_id:"status-later" ~turn:52 "keeper_job_status" (argument id)) in
   check string "original container survives process-local reset" "running" (running |> member "phase" |> to_string);
   check_original_source fixture running;
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "mode", `String "logs_unknown"]);
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "mode", `String "logs_unknown"]);
   let awaiting_outputs = with_bundle fixture (fun bundle ->
       invoke fixture bundle ~tool_use_id:"status-output-unavailable" ~turn:52 "keeper_job_status" (argument id)) in
   check string "original exit persists before output receipt" "exited" (awaiting_outputs |> member "phase" |> to_string);
   check_json "unavailable outputs are not invented" (`List []) (awaiting_outputs |> member "artifacts");
   check int "original output fetch attempted once" 1 (effect_count fixture "logs");
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "replacement", `Bool true]);
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "replacement", `Bool true]);
   let cloned = with_bundle fixture (fun bundle ->
       invoke fixture bundle ~tool_use_id:"status-exited-clone" ~turn:52 "keeper_job_status" (argument id)) in
   check_json "same-label exited clone cannot supply original artifacts" (`List []) (cloned |> member "artifacts");
   check int "saved identity refuses clone logs before command" 1 (effect_count fixture "logs");
   (match (load fixture id).phase with
-   | Store.Exited {container_id;_} -> check string "saved exited identity is immutable" (String.make 64 'a') container_id
+   | Store.Exited {container_id;_} -> check string "saved exited identity is immutable" original_container_id container_id
    | _ -> fail "original exited phase replaced by clone");
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "restore_identity", `Bool true]);
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "restore_identity", `Bool true]);
   let exited = with_bundle fixture (fun bundle ->
       invoke fixture bundle ~tool_use_id:"status-terminal" ~turn:52 "keeper_job_status" (argument id)) in
   check string "original terminal state reconciles" "exited" (exited |> member "phase" |> to_string);
@@ -452,7 +488,7 @@ let test_running_restart_exit_and_artifacts () = with_fixture @@ fun _env initia
 
 let test_unknown_create_absence_never_replays () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
-  control fixture (`Assoc ["mode", `String "create_unknown_absent"]);
+  control_launch fixture ~tool_use_id:"start-original" ~keeper_turn_id:(Some 41) (`Assoc ["mode", `String "create_unknown_absent"]);
   let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   let id = job_id started in
   check string "create uncertainty preserves durable intent" "create_requested" (started |> member "phase" |> to_string);
@@ -471,7 +507,7 @@ let test_unknown_create_absence_never_replays () = with_fixture @@ fun _env _ini
 
 let test_unknown_start_absence_never_replays () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
-  control fixture (`Assoc ["mode", `String "start_unknown_absent"]);
+  control_launch fixture ~tool_use_id:"start-original" ~keeper_turn_id:(Some 41) (`Assoc ["mode", `String "start_unknown_absent"]);
   let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   let id = job_id started in
   check string "start uncertainty preserves durable intent" "start_requested" (started |> member "phase" |> to_string);
@@ -488,17 +524,16 @@ let test_unknown_start_absence_never_replays () = with_fixture @@ fun _env _init
 
 let test_created_absence_reports_hold_instead_of_ready () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
-  control fixture (`Assoc ["mode", `String "create_unknown_created"]);
+  control_launch fixture ~tool_use_id:"start-original" ~keeper_turn_id:(Some 41) (`Assoc ["mode", `String "create_unknown_created"]);
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
   let original = load fixture id in
-  let container_id = daemon fixture |> member "container" |> member "Id" |> to_string in
+  let container_id = fixture_container fixture id |> member "Id" |> to_string in
   (* Preserve the real create's exact handle at the acknowledged-created
      journal boundary, then lose that backend before any start intent. *)
   let created = Store.transition original ~phase:(Store.Created container_id)
       ~cancel_requested:false ~outputs:None ~detail:None |> store_value "created journal boundary" in
-  let recorded_calls = daemon fixture |> member "calls" in
-  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc ["calls", recorded_calls; "container", `Null]));
-  control fixture (`Assoc []);
+  remove_fixture_container fixture id;
+  control_reset fixture ();
   let status = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"status-created-absent" ~turn:42
       "keeper_job_status" (argument id)) in
   check string "original durable phase is retained" "created" (status |> member "phase" |> to_string);
@@ -523,7 +558,7 @@ let test_created_absence_reports_hold_instead_of_ready () = with_fixture @@ fun 
 
 let test_cancelled_unconfirmed_launch_closes_absent_create () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
-  control fixture (`Assoc ["mode", `String "create_unknown_absent"]);
+  control_launch fixture ~tool_use_id:"start-original" ~keeper_turn_id:(Some 41) (`Assoc ["mode", `String "create_unknown_absent"]);
   let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   let id = job_id started in
   check string "unknown create preserves intent" "create_requested" (started |> member "phase" |> to_string);
@@ -548,7 +583,7 @@ let test_cancelled_unconfirmed_launch_closes_absent_create () = with_fixture @@ 
 
 let test_cancelled_unconfirmed_launch_treats_late_container_as_orphan () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
-  control fixture (`Assoc ["mode", `String "start_unknown_absent"]);
+  control_launch fixture ~tool_use_id:"start-original" ~keeper_turn_id:(Some 41) (`Assoc ["mode", `String "start_unknown_absent"]);
   let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   let id = job_id started in
   check string "unknown start preserves intent" "start_requested" (started |> member "phase" |> to_string);
@@ -560,17 +595,16 @@ let test_cancelled_unconfirmed_launch_treats_late_container_as_orphan () = with_
   (match (load fixture id).phase with
    | Store.Cancelled_unconfirmed_launch -> ()
    | _ -> fail "cancelled start launch is not durable");
-  control fixture (`Assoc []);
+  control_reset fixture ();
   set_source fixture ~task_id:"task-B" ~turn:52;
-  ignore (with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]));
-  let container = daemon fixture |> member "container" in
+  let donor_id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  let container = fixture_container fixture donor_id in
   let create_argv = first_create_argv fixture in
   let name = argv_option "--name" create_argv in
   let a_job_id = Store.Job_id.of_string id |> require "typed cancelled job id" in
   let workspace = (Store.paths ~base_path:fixture.base_path a_job_id).workspace in
   let orphan = orphan_container ~job_id:id ~name ~workspace container in
-  let calls_json = daemon fixture |> member "calls" in
-  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc ["calls", calls_json; "container", orphan]));
+  set_fixture_container fixture id orphan;
   let orphan_seen = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"status-orphan" ~turn:53
       "keeper_job_status" (argument id)) in
   check string "late same-label container stays orphan" "cancelled_unconfirmed_launch"
@@ -596,7 +630,7 @@ let test_cancel_in_flight_retains_exact_intent () = with_fixture @@ fun env _ini
         let id = job_id started in
         let before = load fixture id in
         set_source fixture ~task_id:"task-B" ~turn:52;
-        control fixture (`Assoc ["mode", `String "kill_blocked"]);
+        control_job fixture id (`Assoc ["mode", `String "kill_blocked"]);
         let interrupted = with_bundle fixture (fun bundle ->
             Eio.Fiber.first
               (fun () -> ignore (invoke fixture bundle ~tool_use_id:"cancel-later" ~turn:52
@@ -613,7 +647,7 @@ let test_cancel_in_flight_retains_exact_intent () = with_fixture @@ fun env _ini
         let pending = load fixture id in
         check bool "interruption retains cancellation intent" true pending.cancel_requested;
         check_json "interruption cannot change source ownership" (Store.source_to_json before.source) (Store.source_to_json pending.source);
-        control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 137]);
+        control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 137]);
         let completed = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"status-cancelled" ~turn:52
             "keeper_job_status" (argument id)) in
         check bool "terminal receipt retains requested cancellation" true (completed |> member "cancel_requested" |> to_bool);
@@ -626,22 +660,23 @@ let test_changed_mount_cannot_authorize_cancel () = with_fixture @@ fun _env _in
   set_source fixture ~task_id:"task-A" ~turn:41;
   let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   let id = job_id started in
-  control fixture (`Assoc ["corrupt", `String "mount"]);
+  let original_container_id = fixture_container fixture id |> member "Id" |> to_string in
+  control_job fixture id (`Assoc ["corrupt", `String "mount"]);
   let refused = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"cancel-unowned-mount" ~turn:42
       "keeper_job_cancel" (argument id)) in
   check string "unverified backend preserves original phase" "running" (refused |> member "phase" |> to_string);
   check bool "cancel obligation remains durable" true (refused |> member "cancel_requested" |> to_bool);
   check bool "unverified backend explains uncertainty" true (refused |> member "detail" <> `Null);
   check int "no kill crosses a changed mount authority" 0 (effect_count fixture "kill");
-  control fixture (`Assoc ["replacement", `Bool true]);
+  control_job fixture id (`Assoc ["replacement", `Bool true]);
   let cloned = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"cancel-same-label-clone" ~turn:42
       "keeper_job_cancel" (argument id)) in
   check bool "same-label running clone retains cancel obligation" true (cloned |> member "cancel_requested" |> to_bool);
   check int "saved identity refuses clone kill before command" 0 (effect_count fixture "kill");
   (match (load fixture id).phase with
-   | Store.Running container_id -> check string "saved running identity is immutable" (String.make 64 'a') container_id
+   | Store.Running container_id -> check string "saved running identity is immutable" original_container_id container_id
    | _ -> fail "original running phase replaced by clone");
-  control fixture (`Assoc ["restore_identity", `Bool true]);
+  control_job fixture id (`Assoc ["restore_identity", `Bool true]);
   let recovered = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"cancel-restored-owner" ~turn:42
       "keeper_job_status" (argument id)) in
   check string "restored exact authority retires original container" "exited" (recovered |> member "phase" |> to_string);
@@ -670,7 +705,7 @@ let test_large_streams_publish_complete_original_artifacts () = with_fixture @@ 
      public status/capture/publication path; hashes use only these source bytes. *)
   let expected = [body "stdout" 'O' 'o'; body "stderr" 'E' 'e'] in
   set_source fixture ~task_id:"task-B" ~turn:52;
-  control fixture (`Assoc
+  control_job fixture id (`Assoc
       ["state", `String "exited"; "exit_code", `Int 0;
        "large_logs", `Assoc ["head", `Int head; "tail", `Int tail]]);
   let exited = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"status-large-streams" ~turn:52
@@ -721,7 +756,7 @@ let lookup_original fixture =
 
 let test_lost_start_reply_recovers_original_job () = with_fixture @@ fun env initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
-  control fixture (`Assoc ["mode", `String "start_blocked"]);
+  control_launch fixture ~tool_use_id:"start-original" ~keeper_turn_id:(Some 41) (`Assoc ["mode", `String "start_blocked"]);
   let marker = Filename.concat fixture.base_path "start-entered" in
   (* Fixture deadlock guard only; no timeout is added to the producer. *)
   let interrupted = with_bundle fixture (fun bundle ->
@@ -744,7 +779,7 @@ let test_lost_start_reply_recovers_original_job () = with_fixture @@ fun env ini
   check string "original source lookup survives current Task change" id (Store.Job_id.to_string found_again.job_id);
   check (option string) "source lookup keeps original Task" (Some "task-A") found_again.source.task_id;
   Process_eio.reset_for_testing (); initialize ();
-  control fixture (`Assoc []);
+  control_reset fixture ();
   set_source fixture ~task_id:"task-A" ~turn:41;
   let recovered = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   check string "same logical invocation recovers the original handle" id (job_id recovered);
@@ -858,7 +893,7 @@ let test_named_async_result_parent ?(child_waits=false) ?(child_cancelled=false)
   Call_log.init ~base_path:fixture.base_path ();
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
   if not child_waits then (
-    control fixture (`Assoc ["state",`String "exited"]);
+    control_job fixture id (`Assoc ["state",`String "exited"]);
     ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-child-input"
       ~turn:41 "keeper_job_status" (argument id))));
   let owned_id = Store.Job_id.of_string id |> require "original child job" in
@@ -1054,7 +1089,7 @@ value = { sha256 = %S }
     check bool "released child still leaves parent waiting" true
       (Journal.continuation_readiness ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness continuation
        = Ok Journal.Waiting_for_results);
-    control fixture (`Assoc ["state",`String "exited"]);
+    control_job fixture id (`Assoc ["state",`String "exited"]);
     ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-original-child-job"
       ~turn:52 "keeper_job_status" (argument id)));
     Process_eio.reset_for_testing (); initialize ();
@@ -1407,7 +1442,7 @@ let test_held_continuation_is_not_retried_until_restart () =
   with_environment ["MASC_CONFIG_DIR", None] @@ fun () ->
   with_parked_named_producer env fixture @@ fun parked ->
   let module Wake = Masc.Keeper_composition_continuation_wake in
-  control fixture (`Assoc ["state", `String "exited"]);
+  control_job fixture parked.job_id (`Assoc ["state", `String "exited"]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-before-hold-proof"
       ~turn:52 "keeper_job_status" (argument parked.job_id)));
   let discover () =
@@ -1470,7 +1505,7 @@ let test_original_evidence_repair_reactivates_continuation ~skill_publication ()
   with_parked_named_producer env fixture @@ fun parked ->
   let module Wake = Masc.Keeper_composition_continuation_wake in
   let module O = Masc.Keeper_skill_preparation_observation in
-  control fixture (`Assoc ["state", `String "exited"]);
+  control_job fixture parked.job_id (`Assoc ["state", `String "exited"]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-before-authority-repair" ~turn:52 "keeper_job_status" (argument parked.job_id)));
   let declaration = Config_dir_resolver.keeper_toml_path_for_base_path
@@ -1622,7 +1657,7 @@ let test_continuation_pulse_shares_declarations ~invalid_initial () =
            (List.map dependency_job_id dependencies)
        | _ -> fail "profile round requires canonical original waits");
       entry.request_id) ["first"; "second"] in
-  control fixture (`Assoc ["state", `String "exited"]);
+  control_job fixture id (`Assoc ["state", `String "exited"]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-before-profile-round" ~turn:52 "keeper_job_status" (argument id)));
   let discover () = Journal.pending_continuations
@@ -1687,7 +1722,7 @@ let test_named_producer_skill_loss_settles_run_and_ends_parent () =
   with_parked_named_producer env fixture @@ fun parked ->
   let module Async = Masc.Keeper_msg_async in
   (* Readiness and original authority precede even a proven producer absence. *)
-  control fixture (`Assoc ["state",`String "exited"]);
+  control_job fixture parked.job_id (`Assoc ["state",`String "exited"]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-before-producer-removal"
       ~turn:52 "keeper_job_status" (argument parked.job_id)));
   let skill_dir = Filename.concat fixture.base_path ".agents/skills/named-result-child" in
@@ -1765,7 +1800,7 @@ let test_named_producer_switched_to_inline_settles_run_and_ends_parent () =
   with_parked_named_producer env fixture @@ fun parked ->
   let module Async = Masc.Keeper_msg_async in
   let module Wake = Masc.Keeper_composition_continuation_wake in
-  control fixture (`Assoc ["state",`String "exited"]);
+  control_job fixture parked.job_id (`Assoc ["state",`String "exited"]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-before-producer-switch"
       ~turn:52 "keeper_job_status" (argument parked.job_id)));
   let skill_md = Filename.concat fixture.base_path ".agents/skills/named-result-child/SKILL.md" in
@@ -1852,7 +1887,7 @@ let test_temporary_keeper_refusal_keeps_named_run_open () =
   check int "temporary refusal adds no discovery failure" 0 (List.length discovery.failures);
   check int "both parked runs stay waiting" 2 discovery.waiting;
   (* The right Keeper can still resume the run to its canonical result. *)
-  control fixture (`Assoc ["state",`String "exited"]);
+  control_job fixture parked.job_id (`Assoc ["state",`String "exited"]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-producer-job"
       ~turn:52 "keeper_job_status" (argument parked.job_id)));
   check bool "collected job readies the original producer wait" true
@@ -2155,7 +2190,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let refused_node = composition_nodes fixture refused_data |> composition_node "await" in
   List.iter (fun field -> check_json ("refusal preserves original occurrence " ^ field)
       (awaiting |> member field) (refused_node |> member field)) ["execution_id";"tool_use_id"];
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "mode", `String "logs_unknown"]);
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "mode", `String "logs_unknown"]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-unavailable" ~turn:52 "keeper_job_status" (argument id)));
   let before_resume = List.length (calls fixture) in
@@ -2167,7 +2202,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let ready_continuation = continuation () in
   List.iter (fun field -> check_json ("same waiting occurrence " ^ field)
       (awaiting |> member field) (composition_node "await" second_nodes |> member field)) ["execution_id";"tool_use_id"];
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7]);
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 7]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-complete" ~turn:52 "keeper_job_status" (argument id)));
   let before_completed_resume = List.length (calls fixture) in
@@ -2483,13 +2518,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   (* A current explicit denial ends a second logical run through an ordinary
      failure successor and one durable notification, without rewriting its
      original Waiting attempt or retrying the refused run on later pulses. *)
-  let second_daemon_state = daemon fixture |> to_assoc in
-  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
-    (List.map (fun (name,value) -> name,(if name="container" then `Null else value))
-       second_daemon_state)));
-  (* Clear the first job's exit injection; only the real start command may
-     move the next container out of Created. *)
-  control fixture (`Assoc []);
+  (* The retained first resource and its targeted exit fault remain intact. *)
   set_source fixture ~task_id:"task-C" ~turn:61;
   let second_id = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"start-second" ~turn:61 "keeper_job_start"
@@ -2515,7 +2544,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
       (`Assoc ["sha256", `String second_draft.sha256])) in
   let second_ok, _, second_entry = await_composition env fixture second_accepted in
   check bool "second run suspends on its original job wait" false second_ok;
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
+  control_job fixture second_id (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-second" ~turn:61 "keeper_job_status" (argument second_id)));
   let second_ready = pending () in
@@ -2705,6 +2734,11 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
     | Error (Async.Acceptance_persistence_failed {request_id;_}) -> request_id
     | Error _ | Ok _ -> fail "competing stale intake was not rejected by the actual Journal CAS" in
   check int "CAS loser never starts a worker" 0 !losing_worker_calls;
+  let loser_marker = Filename.concat
+      (Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path:fixture.base_path)
+         "keeper_msg_requests") "prepared_continuations")
+      (Digestif.SHA256.(to_hex (digest_string losing_request)) ^ ".json") in
+  check bool "rejected CAS never publishes a continuation marker" false (Sys.file_exists loser_marker);
   let losing_entry = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
       ~caller:keeper losing_request |> require "CAS loser canonical acceptance failure"
       |> Async.durable_terminal_entry in
@@ -2769,11 +2803,11 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   (* Discovery retires the marker, so the next pulse has 0 ready candidates. *)
   let after_refusal,final_retirements = retirements () in
   check int "next discovery has no ready continuation" 0 (List.length after_refusal.ready);
-  check int "final discovery inspects Lost, winner and CAS loser markers" 3 after_refusal.inspected;
-  check int "Lost, winner and CAS loser markers all retire" 3 after_refusal.retired;
-  check (list string) "final marker retirement preserves the three exact physical identities"
-    (List.sort String.compare [fault_entry.request_id;refusal_entry.request_id;losing_request]) final_retirements;
-  check int "both discoveries retire all four original physical request markers" 4
+  check int "final discovery inspects Lost and winner markers" 2 after_refusal.inspected;
+  check int "Lost and winner markers both retire" 2 after_refusal.retired;
+  check (list string) "final marker retirement preserves both admitted physical identities"
+    (List.sort String.compare [fault_entry.request_id;refusal_entry.request_id]) final_retirements;
+  check int "both discoveries retire all three admitted physical request markers" 3
     (restored_discovery.retired + after_refusal.retired);
   let quiet_wake = Wake.create ~context () in
   Wake.pulse ~sw:context.sw quiet_wake;
@@ -3096,7 +3130,7 @@ let test_completion_delivery_failure_and_restart () =
   let running = recover_completions fixture in
   check int "running job remains pending" 1 running.waiting;
   check_no_completion fixture;
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "mode", `String "logs_unknown"]);
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "mode", `String "logs_unknown"]);
   let unavailable = recover_completions fixture in
   check int "exit without complete output keeps its obligation" 1 unavailable.waiting;
   check bool "exit alone is not a result" false (Store.result_ready (load fixture id));
@@ -3110,7 +3144,7 @@ let test_completion_delivery_failure_and_restart () =
   let prior = if Sys.file_exists queue_path then Some (read queue_path) else None in
   (match prior with Some _ -> Unix.unlink queue_path | None -> ());
   Unix.mkdir queue_path 0o700;
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7]);
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 7]);
   let failed = recover_completions fixture in
   check int "failed enqueue is visible" 1 (List.length failed.failures);
   check bool "complete result committed before enqueue" true (Store.result_ready (load fixture id));
@@ -3205,7 +3239,7 @@ let test_completion_consumed_before_producer_ack () = with_fixture @@ fun _env i
   set_source fixture ~task_id:"task-A" ~turn:41;
   let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   let id = job_id started in
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-original" ~turn:42
       "keeper_job_status" (argument id)));
   let record = load fixture id in
@@ -3248,7 +3282,7 @@ let test_completion_consumed_before_producer_ack () = with_fixture @@ fun _env i
 
 let test_completion_retains_unknown_launch_and_owner () = with_fixture @@ fun _env initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
-  control fixture (`Assoc ["mode", `String "create_unknown_absent"]);
+  control_launch fixture ~tool_use_id:"start-original" ~keeper_turn_id:(Some 41) (`Assoc ["mode", `String "create_unknown_absent"]);
   let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   let id = job_id started in
   Process_eio.reset_for_testing (); initialize ();
@@ -3282,7 +3316,7 @@ let test_completion_retains_unknown_launch_and_owner () = with_fixture @@ fun _e
 
 let test_cancelled_unknown_launch_delivery_and_cleanup () = with_fixture @@ fun _env initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
-  control fixture (`Assoc ["mode", `String "create_unknown_absent"]);
+  control_launch fixture ~tool_use_id:"start-original" ~keeper_turn_id:(Some 41) (`Assoc ["mode", `String "create_unknown_absent"]);
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"cancel-unknown-completion" ~turn:42
       "keeper_job_cancel" (argument id)));
@@ -3310,16 +3344,14 @@ let test_finished_without_outputs_absent_inventory_notified_once () = with_fixtu
   let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   let id = job_id started in
   (* Confirmed exit first; output capture fails while the container exists. *)
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "mode", `String "logs_unknown"]);
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "mode", `String "logs_unknown"]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"status-exited" ~turn:42
       "keeper_job_status" (argument id)));
   check bool "exit without outputs is not yet a result" false (Store.result_ready (load fixture id));
   check int "output capture attempted once" 1 (effect_count fixture "logs");
   (* The exact owned container is then removed externally. *)
-  let state = daemon fixture |> to_assoc in
-  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
-      (List.map (fun (name, value) -> name, (if name = "container" then `Null else value)) state)));
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7]);
+  remove_fixture_container fixture id;
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 7]);
   let delivered = recover_completions fixture in
   check int "absent inventory closes the finished job exactly once" 1 delivered.delivered;
   check int "closed job leaves the waiting set" 0 delivered.waiting;
@@ -3362,9 +3394,7 @@ let test_running_absent_inventory_notified_once () = with_fixture @@ fun _env in
     | Store.Running cid -> cid
     | _ -> fail "expected confirmed Running phase after start" in
   (* The exact owned container is removed externally while in Running phase (e.g. daemon reset). *)
-  let state = daemon fixture |> to_assoc in
-  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
-      (List.map (fun (name, value) -> name, (if name = "container" then `Null else value)) state)));
+  remove_fixture_container fixture id;
   let delivered = recover_completions fixture in
   check int "absent inventory closes the running job exactly once" 1 delivered.delivered;
   check int "closed running job leaves the waiting set" 0 delivered.waiting;
@@ -3452,7 +3482,7 @@ let test_completion_hint_resumes_original_dag () = with_fixture @@ fun env _init
   (* Change the current turn before the original job completes. No direct
      composition resume or independent continuation pulse follows this point. *)
   set_source fixture ~task_id:"task-B" ~turn:52;
-  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+  control_job fixture id (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
   let backend_before = List.length (calls fixture) in
   let completion_started = Mtime_clock.counter () in
   Completion_wake.pulse ~sw:context.sw jobs;
@@ -3569,6 +3599,15 @@ let test_prepared_job_launch_and_continuation ~launch_after_result () = with_fix
   check string "prepared launch result is the exact awaited job" id
     (original_launch |> member "result" |> member "data" |> member "job_id" |> to_string);
   let original_job = load fixture id in
+  let original_backend_id = fixture_container fixture id |> member "Id" |> to_string in
+  (match original_job.phase with
+   | Store.Running container_id ->
+       check string "first launch confirms its actual Running identity" original_backend_id container_id
+   | Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
+   | Store.Exited _ | Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch ->
+       fail "the first prepared launch did not confirm Running");
+  check bool "first backend actually started before its completion fault" true
+    (fixture_container fixture id |> member "State" |> member "Running" |> to_bool);
   check (option string) "prepared launch belongs to the original Task" (Some "task-A") original_job.source.task_id;
   check (option string) "durable launch belongs to its exact node occurrence"
     (Some (original_launch |> member "tool_use_id" |> to_string)) original_job.source.tool_use_id;
@@ -3617,7 +3656,7 @@ let test_prepared_job_launch_and_continuation ~launch_after_result () = with_fix
   let later_trace = Keeper_id.Trace_id.of_string "prepared-later-runtime-trace" |> require "later trace" in
   let later_meta = {fixture.meta with runtime={fixture.meta.runtime with trace_id=later_trace}} in
   ignore (Masc.Keeper_meta_store.replace_snapshot config later_meta |> require "persist later metadata trace");
-  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+  control_job fixture id (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
   let backend_before = List.length (calls fixture) in
   let completion_started = Mtime_clock.counter () in
   Completion_wake.pulse ~sw:context.sw jobs;
@@ -3698,6 +3737,28 @@ let test_prepared_job_launch_and_continuation ~launch_after_result () = with_fix
     let next_id = next |> member "result" |> member "data" |> member "job_id" |> to_string in
     check bool "the post-wait node starts its own distinct job" true (next_id<>id);
     let next_job = load fixture next_id in
+    let next_backend_id = match next_job.phase with
+      | Store.Running container_id -> container_id
+      | Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
+      | Store.Exited _ | Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch ->
+          fail "post-wait launch did not confirm its own Running backend" in
+    check bool "the second successful start owns a distinct physical container" true
+      (next_backend_id <> original_backend_id);
+    let next_container = fixture_container fixture next_id in
+    check string "canonical Running identity matches the second actual backend"
+      next_backend_id (next_container |> member "Id" |> to_string);
+    check bool "second backend actually started, not merely attempted create" true
+      (next_container |> member "State" |> member "Running" |> to_bool);
+    check string "second backend is running despite the first job's targeted exit"
+      "running" (next_container |> member "State" |> member "Status" |> to_string);
+    check string "the first physical resource remains retained"
+      original_backend_id (fixture_container fixture id |> member "Id" |> to_string);
+    check int "the retained original resource keeps its own terminal exit" 7
+      (fixture_container fixture id |> member "State" |> member "ExitCode" |> to_int);
+    check bool "second launch never rewrites the original terminal phase" true
+      ((load fixture id).phase = record.phase);
+    check bool "second launch never rewrites the original complete outputs" true
+      ((load fixture id).outputs = record.outputs);
     check (option string) "new post-wait launch keeps the original Task" (Some "task-A") next_job.source.task_id;
     check (option string) "new post-wait launch keeps the original trace" (Some original_trace) next_job.source.trace_id;
     check (option int) "new post-wait launch keeps the original physical Keeper turn" (Some 41)
@@ -3734,7 +3795,6 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
     ~turn:41 ?keeper_turn_id
     ~trace_id:(Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) ();
   Call_log.init ~base_path:fixture.base_path ();
-  control fixture (`Assoc ["mode", `String "start_blocked"]);
   let recipe = `Assoc
     [ "execution", `String "async"
     ; "nodes", `List
@@ -3768,6 +3828,10 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
   let observation : Journal.source_observation =
     { trace_id = Some fixture.meta.runtime.trace_id; session_id = None; keeper_turn_id; answer_source_ids = [] } in
   let journal = Journal.prepare ~observation ~base_path:fixture.base_path source |> require "interrupted launch journal" in
+  let run = Plan.Composition_run_id.to_string composition_run_id in
+  let launch_node = match Plan.nodes (Draft.plan draft) with
+    | [node] -> Plan.Node_id.to_string node.Plan.id
+    | [] | _ :: _ :: _ -> fail "interrupted fixture must retain its one validated launch node" in
   let request_context = Some
       [ "composition_tool", `String Draft.run_tool_name
       ; "parent_tool_use_id", `String source.parent_tool_use_id
@@ -3802,6 +3866,15 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
         Eio.Promise.resolve notify_settled1 settlement)
       ~f:(fun ~request_id request_sw ->
         let worker = match !worker1 with Some worker -> worker | None -> fail "unbound interrupted worker" in
+        (* The actual async surface replaces the original SDK parent with
+           this accepted request identity before deriving leaf call IDs.
+           Arm only once that exact request is known, before execution. *)
+        let parent = "composition-async:" ^ request_id in
+        let launch_tool_use_id = Printf.sprintf "composition:%d:%s:%d:%s:%d:%s"
+            (String.length run) run (String.length parent) parent
+            (String.length launch_node) launch_node in
+        control_launch fixture ~tool_use_id:launch_tool_use_id ~keeper_turn_id
+          (`Assoc ["mode",`String "start_blocked"]);
         let rec await_start () =
           if Sys.file_exists (Filename.concat fixture.base_path "start-entered") then ()
           else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.005; await_start ()) in
@@ -3821,6 +3894,8 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
             Async.worker_interrupted ~reason:"fixture interrupted the actual start reply")) () in
   let first = first |> require "interrupted original request accepted" in
   ignore (Eio.Promise.await settled1);
+  check_json "the exact first async launch consumed its pre-handle fault" (`List [])
+    (Yojson.Safe.from_file fixture.control_path |> member "armed");
   let terminal request_id =
     let rec read () = match Async.load_canonical_durable_terminal ~base_path:fixture.base_path
         ~caller:keeper request_id with
@@ -4339,7 +4414,7 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
       parent_continuation = Ok Journal.Waiting_for_results);
   set_source fixture ~task_id:"task-B" ~turn:52;
   runtime := "later.runtime";
-  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+  control_job fixture id (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-fixed-child-job"
     ~turn:52 "keeper_job_status" (argument id)));
   let backend_after_result = List.length (calls fixture) in
@@ -4529,7 +4604,7 @@ let test_public_upstream_inline_arguments ~reject () =
       ~publication_recovery:_ ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ~snapshot:_ ->
   let module Ledger = Masc.Keeper_skill_activation_ledger in
   let id = read (Filename.concat fixture.base_path "physical-original-job") in
-  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+  control_job fixture id (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
   with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-original-inline-result"
     ~turn:41 "keeper_job_status" (`Assoc ["job_id",`String id])) |> ignore;
   let backend_at_ready = List.length (calls fixture) in
@@ -4883,7 +4958,7 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
       | Journal.Named {origin=Nested _;skill_reference;_} -> Skill_reference.to_yojson skill_reference
       | _ -> fail "physical recovery invented standalone child");
   let id = read (Filename.concat fixture.base_path "physical-original-job") in
-  control fixture (`Assoc ["state",`String "exited"]);
+  control_job fixture id (`Assoc ["state",`String "exited"]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-physical-original-job"
       ~turn:52 "keeper_job_status" (argument id)));
   let backend = List.length (calls fixture) in
@@ -5009,7 +5084,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
   let accepted_worker_calls = ref 0 in
   let retained_wait_request = Fun.protect ~finally:(fun () -> write events original_events) (fun () ->
     if not fault_after_acceptance then write events "invalid-original-child-activation\n";
-    control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+    control_job fixture id (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
     Completion_wake.pulse ~sw:context.sw jobs;
     Eio.Promise.await ready;
     let expected_request = if not fault_after_acceptance then (
@@ -5633,7 +5708,7 @@ let test_prepared_discovery_demand_survives_observer_failure () =
   with_parked_named_producer env fixture @@ fun parked ->
   let module Wake = Masc.Keeper_composition_continuation_wake in
   let module Async = Masc.Keeper_msg_async in
-  control fixture (`Assoc ["state",`String "exited"]);
+  control_job fixture parked.job_id (`Assoc ["state",`String "exited"]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-before-prepared-discovery" ~turn:52 "keeper_job_status" (argument parked.job_id)));
   let original_job = load fixture parked.job_id in
@@ -5784,7 +5859,7 @@ let test_prepared_result_scope_preserves_original_resources ?(parent_alias=false
     (List.map Journal.continuation_request_id not_ready.ready);
   check bool "original job wait remains canonically waiting" true (not_ready.waiting > 0);
   check bool "parent's distinct result dependency stays explicitly unselected" true (not_ready.unselected > 0);
-  control fixture (`Assoc ["state",`String "exited"]);
+  control_jobs fixture [parked.job_id;peer_id] (`Assoc ["state",`String "exited"]);
   List.iter (fun id -> ignore (with_bundle fixture (fun bundle ->
     invoke fixture bundle ~tool_use_id:("collect-scoped-" ^ id) ~turn:81
       "keeper_job_status" (argument id)))) [parked.job_id;peer_id];
@@ -5913,7 +5988,7 @@ let test_completion_discovery_failure_preserves_original_result () =
   with_fixture ~continuation_channel:channel @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
   ignore (with_bundle fixture (fun bundle ->
     invoke fixture bundle ~tool_use_id:"collect-before-discovery-failure" ~turn:42
       "keeper_job_status" (argument id)));
@@ -6020,7 +6095,7 @@ let test_completion_cancelled_round_preserves_original_result () =
   with_fixture ~continuation_channel:channel @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
   ignore (with_bundle fixture (fun bundle ->
     invoke fixture bundle ~tool_use_id:"collect-before-recovery-cancellation" ~turn:42
       "keeper_job_status" (argument id)));
@@ -6131,7 +6206,7 @@ let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun
     authority_before (read (owner_path fixture blocked_id));
   let entered = Filename.concat fixture.base_path "inspect-entered" in
   let release = Filename.concat fixture.base_path "inspect-release" in
-  control fixture (`Assoc ["mode", `String "inspect_blocked"; "blocked_job_id", `String blocked_id]);
+  control_job fixture blocked_id (`Assoc ["mode", `String "inspect_blocked"]);
   (* Fixture deadlock guard only. The production pulse has no deadline. *)
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15. @@ fun () ->
   Eio.Switch.run @@ fun job_sw ->
@@ -6146,17 +6221,16 @@ let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun
   (* The peer retains the blocked inspection's old container snapshot. Open a
      separate original job while that process waits; durable completed output
      recovery of this new job must not join the older inspection. *)
-  let state = daemon fixture |> to_assoc in
-  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
-    (List.map (fun (name,value) -> name,(if name="container" then `Null else value)) state)));
+  (* Keep the earlier exact resource while the independent job is created. *)
   set_source fixture ~task_id:"task-B" ~turn:52;
   let later = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"start-independent" ~turn:52 "keeper_job_start"
       (`Assoc ["argv", `List [`String "fixture-program"]])) in
   let later_id = job_id later in
   check bool "independent work owns a distinct original job" true (later_id <> blocked_id);
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 0;
-      "mode", `String "inspect_blocked"; "blocked_job_id", `String blocked_id]);
+  write_control fixture ~shared:(`Assoc []) ~armed:[] ~jobs:
+    [blocked_id,`Assoc ["mode",`String "inspect_blocked"];
+     later_id,`Assoc ["state",`String "exited";"exit_code",`Int 0]];
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-independent" ~turn:53 "keeper_job_status" (argument later_id)));
   let calls_before = List.length (calls fixture) in
@@ -6181,13 +6255,13 @@ let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun
 
 let test_held_absent_presence_reactivates_only_original_authority () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
-  control fixture (`Assoc ["mode", `String "create_unknown_created"]);
+  control_launch fixture ~tool_use_id:"start-original" ~keeper_turn_id:(Some 41) (`Assoc ["mode", `String "create_unknown_created"]);
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
   let config = Workspace.default_config fixture.base_path in
   let supervisor = Completion_wake.create ~config () in
   let pulse supervisor = Eio.Switch.run @@ fun sw ->
     Completion_wake.pulse ~sw supervisor in
-  control fixture (`Assoc ["mode", `String "hide_owner_inventory"]);
+  control_job fixture id (`Assoc ["mode", `String "hide_owner_inventory"]);
   let before = List.length (calls fixture) in
   pulse supervisor;
   let full_absence_calls = List.length (calls fixture) - before in
@@ -6214,16 +6288,16 @@ let test_held_absent_presence_reactivates_only_original_authority () = with_fixt
   let before = List.length (calls fixture) in
   pulse supervisor;
   check int "failed presence evidence is cleared before recovery" 2 (List.length (calls fixture) - before);
-  control fixture (`Assoc ["daemon_id", `String "replacement-daemon"]);
+  control_shared fixture (`Assoc ["daemon_id", `String "replacement-daemon"]);
   pulse supervisor;
   check int "positive hint cannot bypass original daemon identity" 0 (effect_count fixture "start");
   check bool "foreign daemon never advances original create intent" true ((load fixture id).phase=Store.Create_requested);
-  control fixture (`Assoc []);
+  control_reset fixture ();
   pulse supervisor;
   check int "late original container is started once" 1 (effect_count fixture "start");
   check int "reactivation never prepares another container" 1 (effect_count fixture "create");
   (match (load fixture id).phase with Store.Running _ -> () | _ -> fail "late original did not resume");
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7]);
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 7]);
   pulse supervisor;
   let completion = only_selection fixture |> completion_payload in
   check string "eventual result names the exact original job" id (Store.Job_id.to_string completion.oj_job_id);
@@ -6242,9 +6316,9 @@ let test_shared_held_presence_round ~different_endpoint () = with_fixture @@ fun
   let launch tool_use_id = with_bundle fixture (fun bundle ->
     invoke fixture bundle ~tool_use_id ~turn:41 "keeper_job_start"
       (`Assoc ["argv",`List [`String "fixture-program"]])) |> job_id in
-  control fixture (`Assoc ["mode",`String "create_unknown_created"]);
+  control_launch fixture ~tool_use_id:"shared-presence-first" ~keeper_turn_id:(Some 41) (`Assoc ["mode",`String "create_unknown_created"]);
   let first = launch "shared-presence-first" in
-  control fixture (`Assoc ["mode",`String "create_unknown_absent"]);
+  control_launch fixture ~tool_use_id:"shared-presence-second" ~keeper_turn_id:(Some 41) (`Assoc ["mode",`String "create_unknown_absent"]);
   let second = if different_endpoint then
       with_environment ["DOCKER_HOST",Some "unix:///fixture/other-docker.sock"] (fun () -> launch "shared-presence-second")
     else launch "shared-presence-second" in
@@ -6277,14 +6351,14 @@ let test_shared_held_presence_round ~different_endpoint () = with_fixture @@ fun
     check string "shared backend scan retains original workspace" fixture.base_path base_path;
     result |> store_value "actual shared maintenance discovery" in
   let pulse () = Eio.Switch.run (fun sw -> discover ~sw) in
-  control fixture (`Assoc ["mode",`String "hide_owner_inventory"]);
+  control_jobs fixture [first;second] (`Assoc ["mode",`String "hide_owner_inventory"]);
   let before = call_count () in
   pulse ();
   check int "fresh owners each retain full daemon and inventory verification" 4 (call_count ()-before);
   let owners = List.map (fun id -> id,read (owner_path fixture id)) [first;second] in
   let before = call_count () in
   if different_endpoint then pulse () else (
-    control fixture (`Assoc ["mode",`String "hide_owner_inventory";"presence_blocked",`Bool true]);
+    control_jobs fixture [first;second] (`Assoc ["mode",`String "hide_owner_inventory";"presence_blocked",`Bool true]);
     Eio.Switch.run (fun sw ->
       discover ~sw;
       let entered = Filename.concat fixture.base_path "presence-entered" in
@@ -6296,7 +6370,7 @@ let test_shared_held_presence_round ~different_endpoint () = with_fixture @@ fun
       discover ~sw;
       check int "another pulse cannot duplicate the blocked original read" active_calls (call_count ());
       write (Filename.concat fixture.base_path "presence-release") "release original shared inventory\n");
-    control fixture (`Assoc ["mode",`String "hide_owner_inventory"]));
+    control_jobs fixture [first;second] (`Assoc ["mode",`String "hide_owner_inventory"]));
   let batch_calls = List.drop before (transport_calls ()) in
   let routes = if different_endpoint then 2 else 1 in
   check int "one shared inventory per exact frozen backend route" routes (List.length batch_calls);
@@ -6313,12 +6387,12 @@ let test_shared_held_presence_round ~different_endpoint () = with_fixture @@ fun
     bytes (read (owner_path fixture id))) owners;
   check int "presence observation does not start a program" 0 (effect_count fixture "start");
   if not different_endpoint then (
-    control fixture (`Assoc ["presence_wrong_scope",`Bool true]);
+    control_shared fixture (`Assoc ["presence_wrong_scope",`Bool true]);
     let before = call_count () in
     pulse ();
     check int "a malformed shared ownership projection is fetched once" 1 (call_count ()-before);
     check int "foreign projected ownership cannot start either job" 0 (effect_count fixture "start");
-    control fixture (`Assoc ["mode",`String "hide_owner_inventory"]);
+    control_jobs fixture [first;second] (`Assoc ["mode",`String "hide_owner_inventory"]);
     let before = call_count () in
     pulse ();
     check int "failed shared evidence clears each owner's held hint" 4 (call_count ()-before);
@@ -6330,23 +6404,23 @@ let test_shared_held_presence_round ~different_endpoint () = with_fixture @@ fun
     Unix.unlink injected;
     pulse ();
     pulse ();
-    control fixture (`Assoc ["mode",`String "hide_owner_inventory";"presence_unavailable",`Bool true]);
+    control_jobs fixture [first;second] (`Assoc ["mode",`String "hide_owner_inventory";"presence_unavailable",`Bool true]);
     let before = call_count () in
     pulse ();
     check int "one failed transport is shared without per-job retry" 1 (call_count ()-before);
-    control fixture (`Assoc ["mode",`String "hide_owner_inventory"]);
+    control_jobs fixture [first;second] (`Assoc ["mode",`String "hide_owner_inventory"]);
     let before = call_count () in
     pulse ();
     check int "transport failure sends both original owners through full recovery" 4 (call_count ()-before);
     let second_owner = read (owner_path fixture second) in
-    control fixture (`Assoc ["presence_padding_bytes",`Int
+    control_shared fixture (`Assoc ["presence_padding_bytes",`Int
       (Common.max_process_capture_head_bytes+Common.max_process_capture_tail_bytes+1)]);
     pulse ();
     check int "late original in the middle of a complete inventory starts only its original program" 1 (effect_count fixture "start");
     check int "shared hints never prepare replacement programs" 2 (effect_count fixture "create");
     check string "another original job stays held without a phase rewrite" second_owner (read (owner_path fixture second));
     (match (load fixture first).phase with Store.Running _ -> () | _ -> fail "the original visible job did not resume");
-    control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+    control_job fixture first (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
     pulse ();
     let completion = only_selection fixture |> completion_payload in
     check string "durable result delivery keeps the exact original job" first (Store.Job_id.to_string completion.oj_job_id));
@@ -6358,12 +6432,12 @@ let test_shared_held_presence_round ~different_endpoint () = with_fixture @@ fun
 
 let test_changed_cancel_intent_bypasses_held_presence () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
-  control fixture (`Assoc ["mode", `String "create_unknown_created"]);
+  control_launch fixture ~tool_use_id:"start-original" ~keeper_turn_id:(Some 41) (`Assoc ["mode", `String "create_unknown_created"]);
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
   let supervisor = Completion_wake.create ~config:(Workspace.default_config fixture.base_path) () in
   let pulse () = Eio.Switch.run @@ fun sw ->
     Completion_wake.pulse ~sw supervisor in
-  control fixture (`Assoc ["mode", `String "hide_owner_inventory"]);
+  control_job fixture id (`Assoc ["mode", `String "hide_owner_inventory"]);
   pulse ();
   let current = load fixture id in
   ignore (Store.transition current ~phase:current.phase ~cancel_requested:true
@@ -6382,14 +6456,12 @@ let test_completion_recovery_preserves_refused_owner_bytes () = with_fixture @@ 
   let first_id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
   let first_path = owner_path fixture first_id in
   let original_first = read first_path in
-  let state = daemon fixture |> to_assoc in
-  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
-    (List.map (fun (name,value) -> name,(if name="container" then `Null else value)) state)));
+  (* Keep the earlier exact resource while the independent job is created. *)
   set_source fixture ~task_id:"task-B" ~turn:52;
   let foreign_id = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"start-foreign" ~turn:52 "keeper_job_start"
       (`Assoc ["argv", `List [`String "fixture-program"]])) |> job_id in
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
+  control_job fixture foreign_id (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-foreign" ~turn:53 "keeper_job_status" (argument foreign_id)));
   let foreign_prefix = read (owner_path fixture foreign_id) in
@@ -6419,7 +6491,7 @@ let terminal_cleanup_fixture fixture =
   let inputs = [`Assoc ["path",`String "input.txt";
     "artifact",Tool_output.normalized_artifact_ref_to_json input]] in
   let id = with_bundle fixture (fun bundle -> start fixture bundle ~inputs ["fixture-program"]) |> job_id in
-  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+  control_job fixture id (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
   let completed = with_bundle fixture (fun bundle -> invoke fixture bundle
     ~tool_use_id:"collect-before-cleanup" ~turn:42 "keeper_job_status" (argument id)) in
   let delivered = recover_completions fixture in
@@ -6498,7 +6570,7 @@ let test_terminal_cleanup_preserves_result_and_gc () = with_fixture @@ fun _env 
 
 let test_cleanup_refuses_backend_change fault = with_fixture @@ fun _env _initialize fixture ->
   let id,paths,_,original = terminal_cleanup_fixture fixture in
-  control fixture (`Assoc fault);
+  control_job fixture id (`Assoc fault);
   let refused = recover_completions fixture in
   check int "changed backend retains cleanup failure" 1 (List.length refused.failures);
   check int "changed authority never removes a container" 0 (effect_count fixture "rm");
@@ -6507,21 +6579,21 @@ let test_cleanup_refuses_backend_change fault = with_fixture @@ fun _env _initia
     ((load fixture id).cleanup=Store.Container_removal_requested);
   let pending = Store.pending_deliveries ~base_path:fixture.base_path |> store_value "refused cleanup discovery" in
   check int "refused cleanup stays discoverable" 1 (List.length pending.entries);
-  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7;"restore_identity",`Bool true]);
+  control_job fixture id (`Assoc ["state",`String "exited";"exit_code",`Int 7;"restore_identity",`Bool true]);
   check int "restored original resource can be cleaned" 1 (recover_completions fixture).retired;
   ignore (check_cleaned_original fixture id original)
 
 let test_cleanup_recovers_lost_remove_receipt () = with_fixture @@ fun _env initialize fixture ->
   let id,paths,_,original = terminal_cleanup_fixture fixture in
-  control fixture (`Assoc ["mode",`String "remove_unknown_removed"]);
+  control_job fixture id (`Assoc ["mode",`String "remove_unknown_removed"]);
   let uncertain = recover_completions fixture in
   check int "lost removal receipt remains unconfirmed" 1 (List.length uncertain.failures);
   check int "the original remove actually ran once" 1 (effect_count fixture "rm");
-  check bool "actual container is gone before confirmation" true (daemon fixture |> member "container" = `Null);
+  check bool "actual container is gone before confirmation" true (fixture_container fixture id = `Null);
   check bool "data waits for canonical container absence" true (Sys.file_exists paths.workspace);
   check bool "removal intent survives missing receipt" true ((load fixture id).cleanup=Store.Container_removal_requested);
   Process_eio.reset_for_testing (); initialize ();
-  control fixture (`Assoc []);
+  control_reset fixture ();
   check int "fresh maintenance confirms the original absence" 1 (recover_completions fixture).retired;
   check int "absence recovery never repeats removal" 1 (effect_count fixture "rm");
   ignore (check_cleaned_original fixture id original)
@@ -6588,9 +6660,9 @@ let test_cleanup_recovers_data_absence_under_original_parent () = with_fixture @
 
 let test_cleanup_cancelled_before_start () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
-  control fixture (`Assoc ["mode",`String "create_unknown_created"]);
+  control_launch fixture ~tool_use_id:"start-original" ~keeper_turn_id:(Some 41) (`Assoc ["mode",`String "create_unknown_created"]);
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
-  control fixture (`Assoc []);
+  control_reset fixture ();
   let cancelled = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"cancel-created"
     ~turn:42 "keeper_job_cancel" (argument id)) in
   check string "actual created job cancels before start" "cancelled_before_start" (cancelled |> member "phase" |> to_string);
@@ -6623,12 +6695,12 @@ let test_parent_alias_keeps_original_job_and_outputs () =
   check string "original input reaches the actual private workspace" input_bytes
     (read (Filename.concat paths.workspace "input.txt"));
   check string "actual bind mount agrees with the canonical owner" paths.workspace
-    (daemon fixture |> member "container" |> member "Mounts" |> to_list |> List.hd |> member "Source" |> to_string);
+    (fixture_container fixture id |> member "Mounts" |> to_list |> List.hd |> member "Source" |> to_string);
   Process_eio.reset_for_testing (); initialize ();
   let replayed = with_bundle fixture (fun bundle -> start fixture bundle ~inputs argv) in
   check string "original invocation through the alias reuses its durable job" id (job_id replayed);
   set_source fixture ~task_id:"task-B" ~turn:52;
-  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+  control_job fixture id (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"alias-original-status" ~turn:52 "keeper_job_status" (argument id)));
   let result = with_bundle fixture (fun bundle -> invoke fixture bundle

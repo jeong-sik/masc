@@ -7,6 +7,7 @@ shared Exact Output runner with a scripted loopback provider. Browser input,
 process ownership, in-flight detach and fresh reattachment use production paths.
 """
 import argparse
+import http.cookies
 import http.server
 import json
 import pathlib
@@ -14,6 +15,7 @@ import re
 import subprocess
 import sys
 import threading
+import uuid
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--chrome", type=pathlib.Path, required=True, help="Chromium-family executable")
@@ -23,25 +25,10 @@ parser.add_argument("--guardian", type=pathlib.Path, required=True, help="built 
 parser.add_argument("--worker", type=pathlib.Path, required=True, help="built masc_browser_addon_worker.exe")
 parser.add_argument("--base-path", type=pathlib.Path, required=True, help="workspace to install the extension into")
 parser.add_argument("--out", type=pathlib.Path, required=True)
-args = parser.parse_args()
+parser.add_argument("--profile-mode", choices=("private", "persistent", "both"), default="both",
+                    help="exercise fresh allocations, a dedicated persistent profile, or both (default)")
 
 repo = pathlib.Path(__file__).resolve().parents[1]
-out = args.out.resolve()
-out.mkdir(parents=True, exist_ok=True)
-# A failed rerun must not leave a previous screenshot or proof looking like new evidence.
-for name in ("stagehand.png", "stagehand-proof.json", "pointer-feedback.json", "scroll-observed.json"):
-    (out / name).unlink(missing_ok=True)
-
-args.base_path.mkdir(parents=True, exist_ok=True)
-installed = subprocess.run(
-    ["bash", str(repo / "connectors/browser/install-stagehand-extension.sh"), "--base-path", str(args.base_path)],
-    check=True, capture_output=True, text=True,
-).stdout
-(out / "install.txt").write_text(installed)
-match = re.search(r'^extension = "(.+)"$', installed, re.MULTILINE)
-if match is None:
-    sys.exit("the installer printed no extension path")
-extension = match.group(1)
 
 # Each native action changes the title only after the page observes its input.
 FIXTURE = b"""<!doctype html><html><head><meta charset="utf-8"><title>Stagehand fixture</title></head><body>
@@ -150,6 +137,8 @@ requestAnimationFrame(observeFeedback);
 
 
 class Fixture(http.server.BaseHTTPRequestHandler):
+    server: "FixtureServer"
+
     def do_POST(self) -> None:
         name = {"/observations/pointer-feedback": "pointer-feedback.json",
                 "/observations/scroll-observed": "scroll-observed.json"}.get(self.path)
@@ -163,7 +152,7 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError):
             self.send_error(400)
             return
-        target = out / name
+        target = self.server.output / name
         temporary = target.with_suffix(".tmp")
         temporary.write_text(json.dumps(value))
         temporary.replace(target)
@@ -171,36 +160,103 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
+        if self.path == "/session/login":
+            self.send_response(303)
+            self.send_header("Location", "/session")
+            # An expiring persistent cookie models a login without credentials
+            # or personal sites. It must survive the probe's browser restarts.
+            self.send_header("Set-Cookie", f"masc_probe={self.server.session_cookie}; Max-Age=3600; Path=/; HttpOnly; SameSite=Lax")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if self.path == "/session":
+            cookies = http.cookies.SimpleCookie()
+            try:
+                cookies.load(self.headers.get("Cookie", ""))
+            except http.cookies.CookieError:
+                cookies = http.cookies.SimpleCookie()
+            cookie = cookies.get("masc_probe")
+            signed_in = cookie is not None and cookie.value == self.server.session_cookie
+            state = "signed in" if signed_in else "signed out"
+            body = f"<!doctype html><title>MASC fixture {state}</title><h1>Fixture {state}</h1>".encode()
+        else:
+            body = FIXTURE
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(FIXTURE)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(FIXTURE)
+        self.wfile.write(body)
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - the base class names it
         del format, args
 
 
-server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
-threading.Thread(target=server.serve_forever, daemon=True).start()
-fixture_url = f"http://127.0.0.1:{server.server_port}/"
+class FixtureServer(http.server.ThreadingHTTPServer):
+    def __init__(self, output: pathlib.Path):
+        self.output = output
+        self.session_cookie = uuid.uuid4().hex
+        super().__init__(("127.0.0.1", 0), Fixture)
 
 # Fixture hang guard for attach, browser actions, in-flight detach and reattach.
 PROBE_TIMEOUT_S = 600
-with open(out / "probe.log", "w") as log:
-    try:
-        returncode = subprocess.run(
-            [str(args.probe), "--chrome", str(args.chrome), "--extension", extension,
-             "--fixture-url", fixture_url, "--out", str(out),
-             "--launcher", str(args.launcher.resolve()), "--guardian", str(args.guardian.resolve()),
-             "--worker", str(args.worker.resolve()), "--manifest", str(repo / "addons/browser/lane.toml")],
-            stdout=log, stderr=subprocess.STDOUT, timeout=PROBE_TIMEOUT_S,
-        ).returncode
-    except subprocess.TimeoutExpired:
-        # The log so far says which step never finished.
-        returncode = None
-server.shutdown()
-sys.stdout.write((out / "probe.log").read_text())
-if returncode is None:
-    sys.exit(f"the probe did not finish within {PROBE_TIMEOUT_S} s; the log above ends at the step that hung")
-sys.exit(returncode)
+
+
+def exercise(args, *, extension: str, profile_mode: str, output: pathlib.Path) -> int | None:
+    with FixtureServer(output) as server:
+        serving = threading.Thread(target=server.serve_forever, daemon=True)
+        serving.start()
+        fixture_url = f"http://127.0.0.1:{server.server_port}/"
+        try:
+            with open(output / "probe.log", "w") as log:
+                try:
+                    returncode = subprocess.run(
+                        [str(args.probe), "--chrome", str(args.chrome), "--extension", extension,
+                         "--fixture-url", fixture_url, "--out", str(output), "--profile-mode", profile_mode,
+                         "--launcher", str(args.launcher.resolve()), "--guardian", str(args.guardian.resolve()),
+                         "--worker", str(args.worker.resolve()), "--manifest", str(repo / "addons/browser/lane.toml")],
+                        stdout=log, stderr=subprocess.STDOUT, timeout=PROBE_TIMEOUT_S,
+                    ).returncode
+                except subprocess.TimeoutExpired:
+                    returncode = None
+        finally:
+            server.shutdown()
+            serving.join()
+    sys.stdout.write((output / "probe.log").read_text())
+    if returncode is None:
+        print(f"{profile_mode}: probe did not finish within {PROBE_TIMEOUT_S} s", file=sys.stderr)
+    return returncode
+
+
+def main() -> int:
+    args = parser.parse_args()
+    out = args.out.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    # Every managed report location is cleared, including an unselected mode,
+    # so a failed or narrower run cannot publish a previous success as current.
+    for output in (out, out / "private", out / "persistent"):
+        output.mkdir(parents=True, exist_ok=True)
+        for name in ("stagehand.png", "stagehand-proof.json", "pointer-feedback.json", "scroll-observed.json", "probe.log"):
+            (output / name).unlink(missing_ok=True)
+    (out / "profile-results.json").unlink(missing_ok=True)
+    args.base_path.mkdir(parents=True, exist_ok=True)
+    installed = subprocess.run(
+        ["bash", str(repo / "connectors/browser/install-stagehand-extension.sh"), "--base-path", str(args.base_path)],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    (out / "install.txt").write_text(installed)
+    match = re.search(r'^extension = "(.+)"$', installed, re.MULTILINE)
+    if match is None:
+        sys.exit("the installer printed no extension path")
+    modes = ("private", "persistent") if args.profile_mode == "both" else (args.profile_mode,)
+    results = {}
+    for mode in modes:
+        print(f"Profile mode: {mode}", flush=True)
+        results[mode] = exercise(args, extension=match.group(1), profile_mode=mode, output=out / mode)
+        (out / "profile-results.json").write_text(json.dumps(results, indent=2) + "\n")
+    return 0 if all(code == 0 for code in results.values()) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

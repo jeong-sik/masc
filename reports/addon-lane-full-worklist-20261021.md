@@ -678,3 +678,10 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - 그 뒤 Curator owner가 `Eio_guard.Non_eio_mutex_context(0)`로 실패했다. `Request.prepare`와 strict capture restore가 system thread에서 이미 캡처된 prompt를 렌더링할 때, renderer가 mutable metadata의 Eio mutex를 다시 읽는 경로다. 후속 소스는 이미 resolved된 renderer를 순수하게 만들고 metadata 관측은 live resolution으로 옮겼다. production fixture도 서버와 같은 guard를 켠다.
 - 별도 선택 run39717776023은 1009개 중1005 PASS·4 FAIL(owner2/3/11/12)이다. native run39717901525의 29 PASS와 섞지 않는다. 원래30초 관측 budget·13개 시나리오·assertion은 유지하고 idle checkpoint Promise 대기, 취소 정리와 실패 상태 출력 및2개 경계 시나리오를 추가했다. 두 사건의 동일 원인은 입증하지 않았다.
 - [실제 입력·실패·두 UI 증거](../docs/evidence/2026-10-22-curator-owner-runtime/README.md)를 보존한다. 새 수리의 compiled 실행, 수리된 native host에서 classification→briefing→원래 receipt, Off/On·재연결과 운영 설치는 남는다. A01–H06의 원래54개 완료 기준은 그대로다.
+
+
+### E02 두 UI의 실제 worker On/Off/재연결 관측
+
+- 같은 native1196 private host에서 Dashboard가 On→Off→On을 저장했다. 첫 incarnation `01a161d1-adf6-7000-a5bb-d068f198269c` → Off inventory inactive·실행 Docker0개 → 새 incarnation `01a161d4-4188-7000-b79c-17a3edec7769`의 새 Docker1개를 직접 확인했다. 같은 owned state volume과 current Memory 바이트가 보존됐다.
+- 실제 Dashboard PNG와 native TUI 셀에는 두 incarnation·실제 모델 연결이 보인다. provider credential의 env/file이 worker에 없고 package/state 외 mount가 없는 것도 직접 검사했다. 이 관측은 worker 수명과 이미 admitted된 입력 보존의 증거이며 아직 분류·브리핑 원래 domain receipt의 증거가 아니다.
+- 수리 [#45030](https://github.com/jeong-sik/masc/pull/45030)의 source `cb2eeb1d271a0a436e34133e58ceda0c9a7b6efd`에 선택5suite run39721673539와 native run39721677397을 요청했다. 실행 성공은 아직 미확인이다. 원래54개 완료 기준은 유지한다.

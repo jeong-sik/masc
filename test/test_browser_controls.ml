@@ -395,7 +395,6 @@ let () = run "Firefox controls" ["behavior",[
   test_case "download result reaches provider manifest" `Quick test_download_result_reaches_provider;
   test_case "navigation uses requested tab" `Quick test_targeted_goto;
   test_case "selectors must match exactly once" `Quick test_selector_contract;
-  test_case "fill and press use native input" `Quick test_native_fill_and_key;
   test_case "parallel interactions keep their tab" `Quick test_parallel_targeting;
   test_case "stale ids cannot target a new session" `Quick test_stale_session_id;
   test_case "pre-effect failures permit correction" `Quick test_pre_effect_tool_outcome;

@@ -347,8 +347,10 @@ let test_partial_input_retires_midi_editor () =
         if offset < String.length text then
           loop (offset + Unix.write_substring outgoing text offset (String.length text - offset)) in
       loop 0 in
-    List.iter (fun (prefix, suffix, recover) ->
+    List.iter (fun (prefix, suffix, recover, probe) ->
       let reader = Reader.create_input_reader () and state = listen_state () in
+      if probe then Reader.install_terminal_probe reader
+        (Masc_tui_terminal_probe.create ~palette_requested:true);
       let midi = {audio with Masc_tui_chat_media.kind=`Midi; name="phrase.mid"} in
       let request = begin_chat_listen ~destination:Listen_music_editor state ~keeper:"music" midi in
       write prefix;
@@ -365,10 +367,11 @@ let test_partial_input_retires_midi_editor () =
       ignore (Reader.read_input ~timeout:0. reader ());
       Alcotest.(check bool) "finishing input cannot revive the old open" false
         (take_chat_listen state request))
-      ["\027[200~draft", " tail\027[201~", false;
-       "\027[200~draft", " tail\027[201~", true;
-       "\027[", "A", false;
-       "\226", "\130\172", false])
+      ["\027[200~draft", " tail\027[201~", false, false;
+       "\027[200~draft", " tail\027[201~", true, false;
+       "\027[", "A", false, false;
+       "\226", "\130\172", false, false;
+       "\027[200", "~draft\027[201~", false, true])
 
 let test_listen_surface_withdrawal () =
   let open Masc_tui_types in

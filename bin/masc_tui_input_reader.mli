@@ -40,7 +40,8 @@ val paste_phase : input_reader -> paste_phase
 val input_reader_has_ready_input : input_reader -> bool
 val input_reader_has_started_input : input_reader -> bool
 (** Input is queued or already retained in the decoder, including partial
-    pastes, recovered tails and incomplete terminal/UTF-8 sequences. Does not
+    pastes, recovered tails and incomplete terminal/UTF-8 sequences held by
+    either the normal decoder or the original startup probe. Does not
     consume input. A terminal handoff must preserve this input's owner. *)
 val input_holds_incomplete_sequence : input_reader -> bool
 val cancel_incomplete_sequence : input_reader -> unit

@@ -196,10 +196,6 @@ let input_reader_has_ready_input reader =
     || try terminal_has_bytes ~remaining:0.0 with
        | Unix.Unix_error (Unix.EINTR, _, _) -> true
 
-let input_reader_has_started_input reader =
-  Option.is_some (Masc_tui_input_decoder.pending reader.decoder)
-  || input_reader_has_ready_input reader
-
 let refill_input_reader reader ~timeout =
   let timeout_ns =
     Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
@@ -340,6 +336,11 @@ let input_holds_incomplete_sequence reader =
   || (match reader.terminal_probe with
       | Some decoder -> Masc_tui_terminal_probe.holds_incomplete_sequence decoder
       | None -> false)
+
+let input_reader_has_started_input reader =
+  Option.is_some (Masc_tui_input_decoder.pending reader.decoder)
+  || input_holds_incomplete_sequence reader
+  || input_reader_has_ready_input reader
 
 let cancel_incomplete_sequence reader =
   Masc_tui_input_decoder.cancel_pending reader.decoder;

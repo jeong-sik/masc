@@ -69,9 +69,9 @@ let embedded_files () =
 let copy_package ~into =
   List.iter (fun (name, contents) -> write (Filename.concat into name) contents) (embedded_files ())
 
-let declaration_text ~id ~manifest_path =
-  Printf.sprintf "id = %S\nrun_id = %S\nmanifest_path = %S\n\n[binding]\nsources = []\n" id id
-    manifest_path
+let declaration_text ?(enabled = true) ~id ~manifest_path () =
+  Printf.sprintf "id = %S\nenabled = %b\nrun_id = %S\nmanifest_path = %S\n\n[binding]\nsources = []\n"
+    id enabled id manifest_path
 
 let test_first_install_writes_the_package_and_declares_it () =
   with_workspace (fun base ->
@@ -136,7 +136,7 @@ let test_an_existing_declaration_of_the_package_is_left_as_it_is () =
     copy_package ~into:elsewhere;
     let manifest_path = Filename.concat elsewhere "lane.toml" in
     let own = Filename.concat (lane_directory base) "browser-work.toml" in
-    let text = declaration_text ~id:"browser-work" ~manifest_path in
+    let text = declaration_text ~id:"browser-work" ~manifest_path () in
     write own text;
     let result = installed base in
     (match result.declaration with
@@ -156,7 +156,8 @@ let test_two_declarations_of_the_package_are_refused () =
     let manifest_path = Filename.concat elsewhere "lane.toml" in
     List.iter
       (fun id ->
-         write (Filename.concat (lane_directory base) (id ^ ".toml")) (declaration_text ~id ~manifest_path))
+         write (Filename.concat (lane_directory base) (id ^ ".toml"))
+           (declaration_text ~id ~manifest_path ()))
       [ "browser-one"; "browser-two" ];
     match Result.bind (S.plan ~base_path:base) S.apply with
     | Ok _ -> fail "two declarations of the package were accepted"
@@ -165,6 +166,40 @@ let test_two_declarations_of_the_package_are_refused () =
       check bool "nothing was written" false
         (Sys.file_exists (S.package_directory ~base_path:base))
     | Error error -> failf "refused for another reason: %s" (S.error_message error))
+
+(* The server attaches only enabled declarations, so a disabled one beside
+   the enabled one cannot make host polls ambiguous. *)
+let test_a_disabled_declaration_beside_the_enabled_one_is_not_counted () =
+  with_workspace (fun base ->
+    let elsewhere = Filename.concat base "operator-package" in
+    copy_package ~into:elsewhere;
+    let manifest_path = Filename.concat elsewhere "lane.toml" in
+    let enabled = Filename.concat (lane_directory base) "browser-one.toml" in
+    let disabled = Filename.concat (lane_directory base) "browser-two.toml" in
+    write enabled (declaration_text ~id:"browser-one" ~manifest_path ());
+    let disabled_text = declaration_text ~enabled:false ~id:"browser-two" ~manifest_path () in
+    write disabled disabled_text;
+    (match (installed base).declaration with
+     | S.Present { path; enabled = on; _ } ->
+       check string "the enabled declaration" enabled path;
+       check bool "enabled" true on
+     | S.Created _ -> fail "a third declaration of the package was created");
+    check string "the disabled file is unchanged" disabled_text (read disabled))
+
+let test_a_disabled_declaration_alone_keeps_the_addon_detached () =
+  with_workspace (fun base ->
+    let elsewhere = Filename.concat base "operator-package" in
+    copy_package ~into:elsewhere;
+    let manifest_path = Filename.concat elsewhere "lane.toml" in
+    let disabled = Filename.concat (lane_directory base) "browser-work.toml" in
+    write disabled (declaration_text ~enabled:false ~id:"browser-work" ~manifest_path ());
+    (match (installed base).declaration with
+     | S.Present { path; enabled; _ } ->
+       check string "the disabled declaration" disabled path;
+       check bool "still disabled" false enabled
+     | S.Created _ -> fail "an enabled declaration was created beside the disabled one");
+    check bool "no browser.toml" false
+      (Sys.file_exists (Filename.concat (lane_directory base) "browser.toml")))
 
 let rec remove_tree path =
   match Unix.lstat path with
@@ -195,7 +230,7 @@ let test_an_unloadable_declaration_of_the_id_is_left_and_reported () =
   with_workspace (fun base ->
     let broken = Filename.concat (lane_directory base) "browser-checkout.toml" in
     let text =
-      declaration_text ~id:"browser" ~manifest_path:(Filename.concat base "gone/lane.toml")
+      declaration_text ~id:"browser" ~manifest_path:(Filename.concat base "gone/lane.toml") ()
     in
     write broken text;
     (match Result.bind (S.plan ~base_path:base) S.apply with
@@ -221,7 +256,7 @@ let test_a_file_this_build_does_not_carry_is_removed () =
     let leftover = Filename.concat package "skills/retired/SKILL.md" in
     write leftover "a skill an older build carried\n";
     let again = installed base in
-    check int "one file removed" 1 again.files_removed;
+    check (list string) "the one file removed" [ leftover ] again.files_removed;
     check bool "the file is gone" false (Sys.file_exists leftover);
     check bool "its emptied directory is gone" false
       (Sys.file_exists (Filename.dirname leftover));
@@ -248,6 +283,10 @@ let () =
             test_an_existing_declaration_of_the_package_is_left_as_it_is
         ; test_case "two declarations of the package are refused" `Quick
             test_two_declarations_of_the_package_are_refused
+        ; test_case "a disabled declaration beside the enabled one is not counted" `Quick
+            test_a_disabled_declaration_beside_the_enabled_one_is_not_counted
+        ; test_case "a disabled declaration alone keeps the Add-on detached" `Quick
+            test_a_disabled_declaration_alone_keeps_the_addon_detached
         ; test_case "a declaration whose package was removed is kept" `Quick
             test_a_declaration_whose_package_was_removed_is_kept
         ; test_case "an unloadable declaration of the id is left and reported" `Quick

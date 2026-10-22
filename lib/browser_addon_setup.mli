@@ -28,8 +28,10 @@ type declaration =
 
 type installed =
   { package_directory : string
+  ; manifest_path : string  (** The package's [lane.toml] in [package_directory]. *)
   ; files_written : int  (** 0 when every file already held these bytes. *)
-  ; files_removed : int  (** Files an earlier build wrote that this one does not carry. *)
+  ; files_removed : string list
+        (** Paths of files an earlier build wrote that this one does not carry. *)
   ; declaration : declaration
   ; missing_programs : string list
         (** Programs the browser Add-on runs that this process cannot find:
@@ -50,8 +52,10 @@ type error =
       (** The workspace has no config root yet; setup does not create one. *)
   | Inventory_unreadable of { directory : string }
   | Declared_more_than_once of string list
-      (** Several declarations name the browser package; the server would
-          attach both and refuse every host poll as ambiguous. *)
+      (** Several enabled declarations name the browser package; the server
+          would attach them all and refuse every host poll as ambiguous.
+          Disabled declarations are not counted, as the server does not
+          attach them. *)
   | Declaration_unloadable of { path : string; reason : string }
       (** [browser.toml], or a declaration with the id [browser], does not
           load even with the package in place. It is left as it is. *)
@@ -67,7 +71,7 @@ type plan
 val plan : base_path:string -> (plan, error) result
 (** Read what [apply] needs and refuse, before any write, a relative
     [base_path], an invalid or missing config root, an unreadable Lane
-    directory, more than one declaration of the browser package and an
+    directory, more than one enabled declaration of the browser package and an
     embedded package that lists a file without bytes. Nothing is written. *)
 
 val apply : plan -> (installed, error) result

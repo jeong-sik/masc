@@ -6,8 +6,9 @@ type declaration =
 
 type installed =
   { package_directory : string
+  ; manifest_path : string
   ; files_written : int
-  ; files_removed : int
+  ; files_removed : string list
   ; declaration : declaration
   ; missing_programs : string list
   }
@@ -45,9 +46,9 @@ let error_message = function
       directory
   | Declared_more_than_once paths ->
     Printf.sprintf
-      "The browser Add-on is declared more than once (%s). The server would attach every \
-       one and refuse browser hosts as ambiguous. Keep one and set enabled = false in, or \
-       remove, the others."
+      "The browser Add-on is declared and enabled more than once (%s). The server would \
+       attach every one and refuse browser hosts as ambiguous. Keep one enabled and set \
+       enabled = false in, or remove, the others."
       (String.concat ", " paths)
   | Declaration_unloadable { path; reason } ->
     Printf.sprintf
@@ -132,28 +133,30 @@ let remove_leftovers ~directory files =
            | Unix.S_DIR ->
              let* inside = walk relative in
              (match Unix.rmdir path with
-              | () -> Ok (removed + inside)
+              | () -> Ok (removed @ inside)
               | exception Unix.Unix_error ((Unix.ENOTEMPTY | Unix.EEXIST), _, _) ->
-                Ok (removed + inside)
+                Ok (removed @ inside)
               | exception Unix.Unix_error (error, _, _) -> unwritable path (Unix.error_message error))
            | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
              if List.mem relative carried
              then Ok removed
              else (
                match Sys.remove path with
-               | () -> Ok (removed + 1)
+               | () -> Ok (removed @ [ path ])
                | exception Sys_error reason -> unwritable path reason))
-        (Ok 0) entries
+        (Ok []) entries
   in
   walk ""
 
-(* Each file is replaced atomically and the manifest goes last, so a reader
-   that sees the new manifest also sees the schemas and the skill it names. *)
+(* Each file is replaced atomically and the manifest comes after the files it
+   names, so a reader that sees the new manifest also sees its schemas and
+   skill. Leftovers go last: until the new manifest is in place, the old one
+   still finds every file it names. *)
 let write_package ~directory files =
   let manifest, others = List.partition (fun (name, _) -> String.equal name manifest_name) files in
   let* written = write_files ~directory others in
-  let* removed = remove_leftovers ~directory files in
   let* manifest_written = write_files ~directory manifest in
+  let* removed = remove_leftovers ~directory files in
   Ok (written + manifest_written, removed)
 
 let missing_programs ~package_directory (package : Lane_addon_types.package) =
@@ -221,20 +224,27 @@ let read_inventory ~lane_directory =
   then Ok snapshot
   else Error (Inventory_unreadable { directory = lane_directory })
 
-(* The one declaration of the browser package, if there is one. *)
+(* The declaration of the browser package that counts, if there is one. The
+   server attaches only enabled declarations, so only those can make host
+   polls ambiguous. With none enabled, the first disabled one stands for the
+   operator's choice to keep the Add-on detached, and nothing is declared. *)
 let browser_declaration (snapshot : Lane_addon_config.snapshot) =
-  match
+  let declared =
     List.filter
       (fun (declared : Lane_addon_config.declaration) ->
          String.equal declared.package.id package_name)
       snapshot.declarations
-  with
-  | [] -> Ok None
-  | [ declared ] -> Ok (Some declared)
-  | _ :: _ :: _ as declared ->
+  in
+  match List.filter (fun (d : Lane_addon_config.declaration) -> d.enabled) declared with
+  | [ enabled ] -> Ok (Some enabled)
+  | _ :: _ :: _ as enabled ->
     Error
       (Declared_more_than_once
-         (List.map (fun (d : Lane_addon_config.declaration) -> d.source_path) declared))
+         (List.map (fun (d : Lane_addon_config.declaration) -> d.source_path) enabled))
+  | [] ->
+    (match declared with
+     | [] -> Ok None
+     | disabled :: _ -> Ok (Some disabled))
 
 type plan =
   { base_path : string
@@ -299,6 +309,7 @@ let apply plan =
   in
   Ok
     { package_directory = directory
+    ; manifest_path
     ; files_written
     ; files_removed
     ; declaration

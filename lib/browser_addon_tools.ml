@@ -150,6 +150,10 @@ let prepare ~keeper_name ~upload_paths tool json =
       let* fields=fields ["lane";"clientId";"tabId";"url"] json in
       let* request=surface fields in
       let* url=absolute_url (List.assoc_opt "url" fields) in
+      let* ()=match request.route,request.tab_id with
+        | Browser_selection.Exact (B.Live_route _),None ->
+            Error "live navigation needs the tabId of a tab this connection opened with open_tab"
+        | (Automatic|Exact (B.Live_route _|Automation_route|Stagehand_route)),(None|Some _) -> Ok () in
       prepared request Raw (B.Page_goto {url;tab_id=request.tab_id})
 let restamp ~tool_name ~start_time : Tool_result.result -> Tool_result.result = function
   | Tool_result.Completed data -> Tool_result.Completed {data with tool_name;duration_ms=Tool_timing.elapsed_ms start_time}

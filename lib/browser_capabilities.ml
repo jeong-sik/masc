@@ -75,8 +75,12 @@ let support backend operation = match backend with
     | Create_window | Close_window -> missing
     | Navigate -> (match backend with
       | Owned_gecko | Owned_chromium -> conditional Goto ["An open owned session and an HTTP(S) URL are required; preserve its concrete browser binding."]
-      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable ->
-          Unsupported "Direct navigation of a connected operator browser is not exposed; use an inspected follow_link or supported open_tab.")
+      | Connected Browser_lane.Webdriver_bidi -> conditional Goto
+          [observed;"Requires the exact observed clientId and the tabId of a tab this connection opened with open_tab; a tab the operator opened is refused before any effect.";
+           "Waits for the new document. An error after the navigation started leaves the result unknown: inspect the same tab."]
+      | Connected Browser_lane.Web_extension -> Unsupported
+          "A connected WebExtension does not navigate a tab; use an inspected follow_link, or a live BiDi connection's open_tab and goto."
+      | Safari_unavailable -> missing)
     | Follow_link -> conditional ~action:"follow_link" Interact
         [observed;target;"Requires expectedUrl and an observed same-tab HTTP(S) anchor; rejects downloads, new-window targets and unsupported referrer semantics."]
     | Back -> (match backend with

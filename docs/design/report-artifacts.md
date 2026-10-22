@@ -157,5 +157,34 @@ when selected for preview. External URLs, file paths, non-image and non-base64
 data remain explicitly unavailable; selecting them does not authorize a fetch.
 Scripts, metadata, templates, embedded frames and explicit hidden subtrees do
 not contribute reading/image candidates. This reading does not execute CSS or
-JavaScript, and does not reproduce a browser's page layout. Shared human
-confirmation is not implemented yet.
+JavaScript, and does not reproduce a browser's page layout.
+
+## Shared revision confirmation
+
+An explicit check belongs to the workspace and the exact artifact ID, revision
+and body SHA-256. Dashboard and TUI can read the same record even when their
+authenticated actor names differ. Opening a body, previewing an image and
+refreshing today's inventory never write a check. A new revision starts without
+a check even when its body is byte-identical to an older revision.
+
+`GET /api/v1/published-artifact-checks` returns checks and storage diagnostics.
+Only a successful complete listing can establish that a revision has no check;
+unavailable or corrupt storage must remain unknown. `POST` accepts `id`,
+`revision`, `body_sha256`, `checked` and `expected_change_id` (null for an
+authoritatively absent record). Both routes use the existing Admin authority and
+private, no-store HTTP response. The actor comes from authentication, not JSON.
+
+Each mutation verifies the published revision and body digest, then compares the
+opaque change ID from a stable-lock snapshot. The whole-record atomic replacement
+must match that exact file identity and cursor under the same retained stable
+lock. A successful check or uncheck
+persists a fresh change ID and its actor/time. Unchecking does not delete the
+record, so an old checked state cannot overwrite a later uncheck. Conflict
+responses return the current record; an uncertain durable commit requires a
+refresh before retry. Checks live under the resolved workspace runtime root and
+do not modify publication manifests, history or source bytes. Data and lock
+leaves are owned regular files; the stable protocol creates a new lock
+exclusively and validates an existing descriptor binding before writing it.
+
+This layer supplies the shared storage/API. Dashboard and TUI confirmation
+controls and their live cross-client verification remain separate work.

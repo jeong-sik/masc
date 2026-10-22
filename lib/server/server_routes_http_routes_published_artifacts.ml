@@ -25,6 +25,24 @@ let respond ?(status = `OK) request reqd json =
 let refuse request reqd error =
   let json, status = error_response error in respond ~status request reqd json
 
+let check_error_response error =
+  let module Checks = Published_artifact_check_store in
+  let response status code extra =
+    `Assoc (("error", `String (Checks.error_message error)) :: ("code", `String code) :: extra), status in
+  match error with
+  | Checks.Artifact_error error -> error_response error
+  | Checks.Invalid _ -> response `Bad_request "invalid_artifact_check" []
+  | Conflict current -> response `Conflict "artifact_check_conflict"
+        ["current_check", Option.fold ~none:`Null
+          ~some:Published_artifact_check.to_json current]
+  | Unavailable _ -> response `Service_unavailable "artifact_check_unavailable" []
+  | Commit_uncertain check -> response `Service_unavailable "artifact_check_commit_uncertain"
+        ["attempted_check", Published_artifact_check.to_json check;
+         "recovery", `String "Refresh artifact checks before retrying."]
+
+let refuse_check request reqd error =
+  let json, status = check_error_response error in respond ~status request reqd json
+
 let authorized handler request reqd =
   with_token_permission_auth ~permission:Masc_domain.CanAdmin handler request reqd
 
@@ -75,3 +93,25 @@ let add_routes router =
         | Ok (artifact, revision) ->
           respond ~status:`Created request reqd
             (Published_artifact.publication_to_json ~id:artifact.id revision))))
+  |> Http.Router.get "/api/v1/published-artifact-checks" (authorized (fun state _actor request reqd ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    match Eio_unix.run_in_systhread (fun () -> Published_artifact_check_store.list ~base_path) with
+    | Error error -> refuse_check request reqd error
+    | Ok listing -> respond request reqd (`Assoc
+      ["checks", `List (List.map Published_artifact_check.to_json listing.checks);
+       "diagnostics", `List (List.map (fun (file, message) ->
+         `Assoc ["file", `String file; "error", `String message]) listing.diagnostics)])))
+  |> Http.Router.post "/api/v1/published-artifact-checks" (authorized (fun state actor request reqd ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    Http.Request.read_body_async reqd (fun body ->
+      let parsed = match Yojson.Safe.from_string body with
+        | json -> Published_artifact_check.request_of_json json
+        | exception Yojson.Json_error _ -> Error "invalid JSON body" in
+      match parsed with
+      | Error message -> refuse_check request reqd (Published_artifact_check_store.Invalid message)
+      | Ok change ->
+        match Eio_unix.run_in_systhread (fun () ->
+          Published_artifact_check_store.set ~base_path ~actor change) with
+        | Error error -> refuse_check request reqd error
+        | Ok check -> respond request reqd
+          (`Assoc ["check", Published_artifact_check.to_json check]))))

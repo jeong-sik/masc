@@ -80,13 +80,15 @@ and cache_token =
 type preparation =
   { completion : completion Eio.Promise.t
   ; resolver : completion Eio.Promise.u
+  ; wait_mutex : Stdlib.Mutex.t
+  ; wait_condition : Stdlib.Condition.t
   ; cache_marker : unit ref
   ; valid : bool Atomic.t
   }
 
 type claim =
   | Already_durable
-  | Await_preparation of completion Eio.Promise.t
+  | Await_preparation of preparation
   | Observe_completion of completion
   | Own_preparations of (directory_key * preparation) list
 
@@ -187,7 +189,25 @@ let rec invalidate_cache_subtree path =
 
 let finish preparation completion =
   (* See [release]: durable-prefix publication makes this wake idempotent. *)
-  ignore (Eio.Promise.try_resolve preparation.resolver completion)
+  Stdlib.Mutex.protect preparation.wait_mutex (fun () ->
+    ignore (Eio.Promise.try_resolve preparation.resolver completion);
+    Stdlib.Condition.broadcast preparation.wait_condition)
+;;
+
+let await_preparation ~before_wait preparation =
+  if Eio_guard.is_eio_fiber ()
+  then (before_wait (); Eio.Promise.await preparation.completion)
+  else
+    Stdlib.Mutex.protect preparation.wait_mutex (fun () ->
+      let rec wait () =
+        match Eio.Promise.peek preparation.completion with
+        | Some completion -> completion
+        | None ->
+          before_wait ();
+          Stdlib.Condition.wait preparation.wait_condition preparation.wait_mutex;
+          wait ()
+      in
+      wait ())
 ;;
 
 let invalidate path =
@@ -232,7 +252,9 @@ let clear () =
 
 let make_preparation () =
   let completion, resolver = Eio.Promise.create () in
-  { completion; resolver; cache_marker = ref (); valid = Atomic.make true }
+  { completion; resolver
+  ; wait_mutex = Stdlib.Mutex.create (); wait_condition = Stdlib.Condition.create ()
+  ; cache_marker = ref (); valid = Atomic.make true }
 ;;
 
 let directory_chain_from_root path =
@@ -300,7 +322,7 @@ let claim components =
           | None -> first_outstanding rest
           | Some preparation ->
             (match Eio.Promise.peek preparation.completion with
-             | None -> Some (`Await preparation.completion)
+             | None -> Some (`Await preparation)
              | Some completion ->
                Directory_key_table.remove preparations key;
                Some (`Observe completion)))
@@ -515,6 +537,7 @@ let validate_current_lease keys target =
 let rec ensure_with
           ~after_validation
           ~before_claim
+          ~before_wait
           ~before_prepare
           ~before_directory_fsync
           ?ownership_root
@@ -547,16 +570,18 @@ let rec ensure_with
          ensure_with
            ~after_validation
            ~before_claim
+           ~before_wait
            ~before_prepare
            ~before_directory_fsync
            ?ownership_root
            dir
-       | Await_preparation completion ->
-         (match Eio.Promise.await completion with
+       | Await_preparation preparation ->
+         (match await_preparation ~before_wait preparation with
           | Prepared | Retry ->
             ensure_with
               ~after_validation
               ~before_claim
+              ~before_wait
               ~before_prepare
               ~before_directory_fsync
               ?ownership_root
@@ -568,6 +593,7 @@ let rec ensure_with
             ensure_with
               ~after_validation
               ~before_claim
+              ~before_wait
               ~before_prepare
               ~before_directory_fsync
               ?ownership_root
@@ -591,6 +617,7 @@ let rec ensure_with
             ensure_with
               ~after_validation
               ~before_claim
+              ~before_wait
               ~before_prepare
               ~before_directory_fsync
               ?ownership_root
@@ -606,7 +633,11 @@ let rec ensure_with
 ;;
 
 let ensure = ensure_with ~after_validation:(fun () -> ()) ~before_claim:(fun () -> ())
+  ~before_wait:(fun () -> ())
 
 module For_testing = struct
-  let ensure = ensure_with
+  let ensure ~after_validation ~before_claim ?(before_wait = fun () -> ())
+      ~before_prepare ~before_directory_fsync ?ownership_root dir =
+    ensure_with ~after_validation ~before_claim ~before_wait
+      ~before_prepare ~before_directory_fsync ?ownership_root dir
 end

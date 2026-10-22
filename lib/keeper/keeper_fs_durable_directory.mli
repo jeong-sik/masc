@@ -6,7 +6,9 @@
     boundary before entering this durability cache.
 
     A caller parked on someone else's preparation receives that preparation's
-    outcome: an ordinary failure is returned as its own error and the parked
+    outcome in either an Eio fiber or a system thread. Fiber waiters suspend;
+    system-thread waiters use a condition on the same completion promise.
+    An ordinary failure is returned as its own error and the parked
     caller does not prepare the chain again, while a cancelled preparation
     releases its waiters to prepare it themselves. A caller that claims after
     the owner released the chain finds no preparation outstanding and becomes
@@ -61,9 +63,14 @@ module For_testing : sig
   val ensure
     :  after_validation:(unit -> unit)
     -> before_claim:(unit -> unit)
+    -> ?before_wait:(unit -> unit)
     -> before_prepare:(unit -> unit)
     -> before_directory_fsync:(string -> unit)
     -> ?ownership_root:string
     -> string
     -> (lease, failure) result
+  (** [before_wait] runs after claiming an outstanding preparation. In a
+      system thread it runs with the completion mutex held immediately before
+      [Condition.wait] releases that mutex. It must only signal the test;
+      it must not block, perform I/O or reenter directory preparation. *)
 end

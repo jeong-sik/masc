@@ -579,3 +579,10 @@ absent/open/terminal/error, host Inspect, strict retained Exact의 attempts, 실
 provider callback의 원래 예외/backtrace를 실패 때 보존한다. timeout·수락 조건·resume 호출·
 Off 순서와 production 실행은 바꾸지 않는다. 새 진단 소스·파싱과 compiled 실행/원인 수리는
 구분한다. 조건부 publication·원래 관측 delivery/ACK와 A01–H06 전체 완료는 계속 남는다.
+
+Core 읽기077c의 [실제 선택 실행39698460839](../docs/evidence/2026-10-22-registry-current-disk/selected-execution.json)는
+current-disk11·Fusion persist14·concurrent mutation6 합31건 completed/success다.
+이후 상위 Browser target이1f776으로 바뀌어 두 층을 함께 재배치했다. #44989는1d914,
+진단 #44993은 그 위 별도 층이며 Native Stack44994다. 새 Core 소스·인터페이스·관련 테스트/실행기
+blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조합 전체 성공으로 부르지 않는다.
+현재 base/head 독립 재리뷰와 새 진단 fixture 실행은 별도다. 실행31건은 ACK·UI·설치를 증명하지 않는다.

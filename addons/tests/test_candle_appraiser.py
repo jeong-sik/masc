@@ -130,6 +130,16 @@ class CandleWorker(unittest.TestCase):
             for item in requests:
                 self.assertEqual(set(item), {"kind", "request_id", "output", "messages", "schema"})
 
+    def test_output_limit_is_retained_without_another_appraisal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            terminal = {"status": "output_limit_reached", "detail": "provider output limit"}
+            self.run_worker(state, [submit(request()), deliver("grade-1", terminal)])
+            result = self.run_worker(state, [submit(request()), listing(), read("grade-1")])
+            self.assertEqual(self.output(result[0])["result"], terminal)
+            self.assertEqual(self.output(result[1]), {"requests": []})
+            self.assertEqual(self.output(result[2])["result"], terminal)
+
     def test_unknown_outcome_is_terminal_and_never_relisted_after_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)

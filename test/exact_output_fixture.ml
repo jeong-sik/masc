@@ -62,6 +62,13 @@ type target_fixture =
   ; base_url : string
   }
 
+type serving_constraint = {
+  checked_at_unix_s : int;
+  expires_at_unix_s : int;
+  accepted_through_tokens : int;
+  rejected_from_tokens : int;
+}
+
 (* A body source for [Stream_then_stall]: the first read hands over the
    bytes, every later read blocks until the fiber is cancelled. Blocking here
    (instead of returning 0 or [End_of_file]) is what keeps the response open
@@ -197,6 +204,8 @@ let target_fixture_toml
       ~connect_timeout_s
       ~body_timeout_s
       ?enable_thinking
+      ?(serving_constraint={checked_at_unix_s=0;expires_at_unix_s=2000000000;
+          accepted_through_tokens=524298;rejected_from_tokens=524299})
       ~requires_token_measurement
       ~supports_response_format_json
       ~supports_structured_output
@@ -219,13 +228,15 @@ let target_fixture_toml
     then
       ( "anthropic"
       , "/v1/messages"
-      , "serving_constraint_source_kind = \"probe\"\n\
+      , Printf.sprintf "serving_constraint_source_kind = \"probe\"\n\
          serving_constraint_source = \"probe://exact-output-fixture\"\n\
-         serving_constraint_checked_at_unix_s = 0\n\
+         serving_constraint_checked_at_unix_s = %d\n\
          serving_constraint_confidence = \"high\"\n\
-         serving_constraint_expires_at_unix_s = 2000000000\n\
-         serving_constraint_accepted_through_tokens = 524298\n\
-         serving_constraint_rejected_from_tokens = 524299\n" )
+         serving_constraint_expires_at_unix_s = %d\n\
+         serving_constraint_accepted_through_tokens = %d\n\
+         serving_constraint_rejected_from_tokens = %d\n"
+          serving_constraint.checked_at_unix_s serving_constraint.expires_at_unix_s
+          serving_constraint.accepted_through_tokens serving_constraint.rejected_from_tokens )
     else "openai_compat", "/v1/chat/completions", ""
   in
   Printf.sprintf
@@ -278,6 +289,7 @@ let catalog_document
       ?(requires_api_key = false)
       ?(requires_api_keys = [])
       ?(requires_token_measurement = false)
+      ?serving_constraint
       ?(supports_response_format_json = true)
       ?(supports_structured_output = true)
       ~source
@@ -305,6 +317,7 @@ let catalog_document
             ~body_timeout_s:(body_timeout_for fixture.id)
             ?enable_thinking:(enable_thinking_for fixture.id)
             ~requires_token_measurement
+            ?serving_constraint
             ~supports_response_format_json
             ~supports_structured_output
             ~requires_api_key:(requires_api_key_for fixture.id)
@@ -326,6 +339,7 @@ let resolver_snapshot
       ?requires_api_key
       ?requires_api_keys
       ?requires_token_measurement
+      ?serving_constraint
       ?supports_response_format_json
       ?supports_structured_output
       ~source
@@ -339,6 +353,7 @@ let resolver_snapshot
       ?requires_api_key
       ?requires_api_keys
       ?requires_token_measurement
+      ?serving_constraint
       ?supports_response_format_json
       ?supports_structured_output
       ~source

@@ -203,7 +203,10 @@ let support backend operation = match backend with
         [observed;"Requests since the session opened, for one tab, oldest first; at most 200 are kept and the reply says how many older ones were dropped.";
          "Each row has method, address, state, and status, mimeType and bytesReceived once it completed. Header values, cookies and bodies are never returned, only header names; the address keeps its path and replaces every query value with REDACTED. A path can still carry a token."]
     | Read_clipboard | Write_clipboard | Intercept_network
-    | Read_storage | Write_storage -> missing
+    | Read_storage -> gecko_only backend (invoke ~mode:"cookies" Read)
+        [observed;"The cookies the tab's page can see, at most 200, with the total. Name, domain, path, secure, httpOnly, sameSite and expiry; the value is never returned.";
+         "Only cookies are covered. Web storage (localStorage, sessionStorage) is not read."]
+    | Write_storage -> missing
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations
 let operation_name = function
   | List_tabs -> "list_tabs" | Open_tab -> "open_tab" | Close_tab -> "close_tab"

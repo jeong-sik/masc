@@ -186,7 +186,7 @@ let allowed route verb = match route,verb with
   | B.Automation_route,B.Page_downloads _ -> Ok ()
   | (B.Live_route _|Stagehand_route),(B.Page_downloads _)
   | (B.Live_route _|Automation_route|Stagehand_route),
-    (B.Tabs_list|Page_read _|Page_document _|Page_console _ | Page_network _|Page_capture _|Page_scene _|Page_interact _
+    (B.Tabs_list|Page_read _|Page_document _|Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_interact _
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _
     |Page_context _|Page_instruct _|Page_locate _|Page_extract _) -> Error "download grants require owned automation downloads"
 let bind t ~actor ~route ~verb payload =

@@ -40,12 +40,12 @@ let prepare_read ~keeper_name json =
   let* cap=optional_int "maxChars" fields in
   let* max_chars=Browser_page_script.text_cap cap in
   let top_scene=frame_path=[] && (match mode with `Scene|`Regions -> true
-    | `Text|`Elements|`Screenshot|`Downloads|`Console|`Network|`Frames|`Dialog -> false) in
+    | `Text|`Elements|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog -> false) in
   let* ()=if not top_scene && List.exists (fun key -> List.mem_assoc key fields)
       ["scope";"expectedUrl";"navigationSource"] then
       Error "scope, expectedUrl and navigationSource support top-document scene or regions only" else Ok () in
   let contextual=frame_path<>[] || (match mode with `Frames|`Dialog -> true
-    | `Text|`Elements|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network -> false) in
+    | `Text|`Elements|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies -> false) in
   if contextual then
     let* ()=match request.route with Browser_selection.Exact B.Automation_route -> Ok ()
       | Automatic|Exact (Live_route _|Stagehand_route) -> Error "frame and dialog reads require automation" in
@@ -53,7 +53,7 @@ let prepare_read ~keeper_name json =
     let* mode=match mode with
       | `Text -> Ok (`Text max_chars) | `Elements -> Ok `Elements | `Frames -> Ok `Frames
       | `Dialog when frame_path=[] -> Ok `Dialog
-      | `Dialog|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network -> Error "framePath supports text, elements and frames" in
+      | `Dialog|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies -> Error "framePath supports text, elements and frames" in
     prepared request Raw (B.Page_context {tab_id;frame_path;mode})
   else match mode with
   | (`Scene|`Regions as scene_mode) ->
@@ -77,6 +77,10 @@ let prepare_read ~keeper_name json =
       let* ()=match request.route with Browser_selection.Exact B.Automation_route -> Ok ()
         | Automatic|Exact (Live_route _|Stagehand_route) -> Error "network reads require automation" in
       let* tab_id=tab request in prepared request Raw (B.Page_network {tab_id})
+  | `Cookies ->
+      let* ()=match request.route with Browser_selection.Exact B.Automation_route -> Ok ()
+        | Automatic|Exact (Live_route _|Stagehand_route) -> Error "cookie reads require automation" in
+      let* tab_id=tab request in prepared request Raw (B.Page_cookies {tab_id})
   | `Text -> prepared request Raw (B.Page_read {tab_id=request.tab_id;max_chars=Some max_chars})
   | `Elements -> prepared request Raw (B.Page_elements {tab_id=request.tab_id})
   | `Frames|`Dialog -> Error "contextual read requires a frame or dialog mode"

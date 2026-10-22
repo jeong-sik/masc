@@ -99,6 +99,11 @@ let browser_addon_reading_wire () =
   let read addon = (find "browser/live" (ok (Decode.decode (with_live addon)))).state in
   Alcotest.(check bool) "no browser Add-on decodes as absent" true
     (read (object_ ["kind",str "absent"]) = Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_addon_absent));
+  Alcotest.(check bool) "a switched-off Add-on decodes as off" true
+    (read (object_ ["kind",str "off"]) = Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_addon_off));
+  Alcotest.(check bool) "an Add-on declared on and not running decodes as not running" true
+    (read (object_ ["kind",str "not_running"])
+     = Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_addon_not_running));
   Alcotest.(check bool) "an unreadable Add-on keeps its reason" true
     (read (object_ ["kind",str "unavailable";"detail",str "worker failed"])
      = Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_addon_unavailable "worker failed"));
@@ -298,6 +303,10 @@ let standing_reads_what_the_row_says () =
     (Decode.Browser_clients (Decode.Browser_disabled, Decode.Browser_observed 2));
   check "a browser lane with no browser Add-on is not set up" S.Not_set_up
     (Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_addon_absent));
+  check "a browser lane whose Add-on is switched off is off" S.Off
+    (Decode.Browser_clients (Decode.Browser_enabled, Decode.Browser_addon_off));
+  check "a browser lane whose Add-on is declared on and not running waits" S.Waiting
+    (Decode.Browser_executor (Decode.Browser_enabled, Decode.Browser_addon_not_running));
   check "a browser lane whose Add-on cannot be read is failing" S.Failing
     (Decode.Browser_executor (Decode.Browser_enabled, Decode.Browser_addon_unavailable "cleanup incomplete"));
   check "a browser lane the server did not read is unknown" S.Unobserved

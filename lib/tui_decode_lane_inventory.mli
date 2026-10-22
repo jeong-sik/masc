@@ -46,11 +46,14 @@ type browser_activity = Browser_enabled | Browser_disabled | Browser_unobserved
 type machine_activity = Machine_enabled | Machine_disabled | Machine_unobserved
 type machine_publication = No_screen | Stable | Running | Publication_unavailable
 (** What the browser Add-on's last published observation says for a
-    built-in browser row: the observed value, no browser Add-on, or why its
-    observation cannot be read. *)
+    built-in browser row: the observed value; with no observation, whether
+    no browser Add-on is declared, one is switched off or one is declared on
+    and not running; or why its observation cannot be read. *)
 type 'a browser_reading =
   | Browser_observed of 'a
   | Browser_addon_absent
+  | Browser_addon_off
+  | Browser_addon_not_running
   | Browser_addon_unavailable of string
 type state =
   | Exact_state of configuration

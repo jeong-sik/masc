@@ -31,15 +31,17 @@ Clients use `selection` for navigation, not heuristics over labels or IDs.
 | State kind | Fields and meaning |
 | --- | --- |
 | `exact` | `configuration`: `configured` with `admitted_slots`, `cli_slots`, `declared_slots`, `declared_cli_slots`, `dropped_slots`, nullable `admission_error`; `off` with `declared_slots` and `declared_cli_slots`; or `unconfigured`/`unavailable` with `detail` |
-| `browser_clients` | `connected_clients`, counted using the existing connection deadline without pruning clients or settling requests |
-| `browser_executor` | `registered`; registration does not prove a child process or browser session is alive |
+| `browser_clients` | `activity` plus `addon`: `observed` with `connected_clients`, the clients the browser Add-on's last published observation holds; `absent` (no browser Add-on declared), `off` (declared and switched off) or `not_running` (declared on, no installation running); or `unavailable` with `detail` |
+| `browser_executor` | `activity` plus `addon`: `observed` with `registered`, from the same observation; or the same `absent`, `off`, `not_running` and `unavailable` readings. Registration does not prove a child process or browser session is alive |
 | `machine` | `publication`: `no_screen`, `stable` or `running`, from the owner's Atomic publication only |
 | `package` | Nullable `declaration` plus `instances`; null is a manual attachment, not a failed declaration read |
 
 An exact registry that cannot be read, including a publication reservation, is
 `unavailable`; it is not interpreted as disabled. Machine reads do not acquire
 the machine lock, capture pixels or infer a controller/program. Browser reads
-never invoke an executor or open a session.
+never invoke an executor or open a session; they read the browser Add-on's
+cached observation, not the server process's browser tables, which only the
+Add-on worker fills.
 
 Exact `off` refuses new acquisitions while retaining its declared candidates.
 The embedded standalone snapshot has `configuration_state: "off"`, `status:

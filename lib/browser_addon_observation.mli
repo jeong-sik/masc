@@ -19,4 +19,5 @@ val decode_snapshot : Yojson.Safe.t -> (published, string) result
 
 val read : Lane_addon_types.output -> (published, string) result
 (** Read back the observation {!of_snapshot} published, from the cached
-    output of the browser installation. *)
+    output of the browser installation, whose row the runtime has renamed
+    under its instance and sequence. *)

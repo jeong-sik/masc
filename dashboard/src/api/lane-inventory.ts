@@ -38,13 +38,15 @@ const instance = Schema.Struct({ instance_id: text, incarnation: text, run_id: t
   title: text, package_revision: text, presence: Schema.Literal('live', 'retained'), phase,
   applied_revision: Schema.NullOr(text) })
 // The server reads the three built-in browser rows from the browser Add-on's
-// published observation: the observed value, no Add-on, or why it is unreadable.
-const browserAddonAbsent = Schema.Struct({ kind: Schema.Literal('absent') })
+// published observation: the observed value; with none, whether no Add-on is
+// declared, it is switched off or it is declared on and not running; or why
+// it is unreadable.
+const browserAddonUnobserved = Schema.Struct({ kind: Schema.Literal('absent', 'off', 'not_running') })
 const browserAddonUnavailable = Schema.Struct({ kind: Schema.Literal('unavailable'), detail: Schema.String })
 const browserClientsAddon = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal('observed'), connected_clients: count }), browserAddonAbsent, browserAddonUnavailable)
+  Schema.Struct({ kind: Schema.Literal('observed'), connected_clients: count }), browserAddonUnobserved, browserAddonUnavailable)
 const browserExecutorAddon = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal('observed'), registered: Schema.Boolean }), browserAddonAbsent, browserAddonUnavailable)
+  Schema.Struct({ kind: Schema.Literal('observed'), registered: Schema.Boolean }), browserAddonUnobserved, browserAddonUnavailable)
 const common = { id: text, label: text, purpose: text }
 const row = Schema.Union(
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('exact'), lane_id: Schema.Literal(...LANE_IDS) }),

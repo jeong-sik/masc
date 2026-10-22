@@ -42,6 +42,8 @@ type machine_publication = No_screen | Stable | Running | Publication_unavailabl
 type 'a browser_reading =
   | Browser_observed of 'a
   | Browser_addon_absent
+  | Browser_addon_off
+  | Browser_addon_not_running
   | Browser_addon_unavailable of string
 type state =
   | Exact_state of configuration
@@ -223,6 +225,8 @@ let browser_reading field decode json =
   | "observed" -> let* f = fields ["kind";field] json in
       Result.map (fun value -> Browser_observed value) (get decode field f)
   | "absent" -> let* _ = fields ["kind"] json in Ok Browser_addon_absent
+  | "off" -> let* _ = fields ["kind"] json in Ok Browser_addon_off
+  | "not_running" -> let* _ = fields ["kind"] json in Ok Browser_addon_not_running
   | "unavailable" -> let* f = fields ["kind";"detail"] json in
       Result.map (fun detail -> Browser_addon_unavailable detail) (get string "detail" f)
   | _ -> error "unknown browser Add-on reading"

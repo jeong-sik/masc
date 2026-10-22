@@ -50,6 +50,9 @@ type t =
            from that answer, and absence with no reason beside it reads as a
            skill that was never written. *)
   ; lane_addon_conflicts : Lane_addon_tool_export.conflict list
+  ; lane_addon_unready : Lane_addon_unready.t list
+        (* Visible installations whose tools are missing from [tools] because
+           they cannot serve now, with why. *)
   ; skills_left_out : string list
   ; tools : tool list
   ; tool_surface_sha256 : string option
@@ -116,6 +119,7 @@ let composition_rows skill_catalog =
 
 let project
       ~lane_addon_conflicts
+      ~lane_addon_unready
       ~lane_addon_exports
       ~keeper_name
       ~runtime_id
@@ -312,6 +316,7 @@ let project
            branch made [skills_left_out] also name what the turn could not
            reach. Keeping one would drop the other's answer. *)
       ; lane_addon_conflicts
+      ; lane_addon_unready
       ; skills_left_out =
           skills_left_out
           @ List.map
@@ -490,6 +495,7 @@ let resolve ~config ~keeper_name =
                 (match
                    project
                      ~lane_addon_conflicts:snapshot.conflicts
+                     ~lane_addon_unready:snapshot.unready
                      ~lane_addon_exports:snapshot.exports
                      ~keeper_name
                      ~runtime_id
@@ -633,6 +639,13 @@ let to_yojson = function
             "reason",`String (match conflict.reason with
               | Reserved_host_name -> "reserved_host_name"
               | Multiple_installations -> "multiple_installations")]) surface.lane_addon_conflicts)
+      ; "lane_addon_unavailable", `List (List.map (fun (unready : Lane_addon_unready.t) ->
+          `Assoc ["installation",`String unready.installation; "package",`String unready.package_id;
+            "tools",string_list unready.declared_tools;
+            "state",`String (match unready.reason with
+              | Starting -> "starting" | Stopping -> "stopping"
+              | Detaching -> "detaching" | Failed _ -> "failed");
+            "message",`String (Lane_addon_unready.message unready)]) surface.lane_addon_unready)
       ; "skills_left_out", string_list surface.skills_left_out
       ; "count", `Int (List.length surface.tools)
       ; ( "tools"
@@ -652,5 +665,5 @@ let to_yojson = function
 ;;
 
 module For_testing = struct
-  let project = project ~lane_addon_conflicts:[] ~lane_addon_exports:[]
+  let project = project ~lane_addon_conflicts:[] ~lane_addon_unready:[] ~lane_addon_exports:[]
 end

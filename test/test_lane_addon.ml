@@ -1659,7 +1659,8 @@ let test_broadcast_pending_commit_recovers_same_identity () =
 let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw config dir state ->
   let clock = Eio.Stdenv.clock env in
   let access = Lane_addon_sources.Operator_configuration in
-  let exports () = Runtime.tool_exports ~config ~access ~reserved:[] in
+  let exports () = Runtime.tool_export_reading ~config ~access ~reserved:[]
+    |> Result.map (fun (reading : Runtime.export_reading) -> reading.exports) in
   List.iter (fun name ->
     check bool (name ^ " is absent from the static MCP inventory") false (Config.is_raw_tool_name name);
     check bool (name ^ " has no static Keeper descriptor") true
@@ -1801,7 +1802,7 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   detach config invited;
   await_phase clock config invited "detached";
   check bool "reserved host name rejects publication" true
-    (Result.is_error (Runtime.tool_exports ~config ~access ~reserved:["masc_msx_step"]));
+    (Result.is_error (Runtime.tool_export_reading ~config ~access ~reserved:["masc_msx_step"]));
   let second = attach_export "second" in
   await clock (fun () -> int "observation_seq" (instance config second) > 0);
   check bool "ambiguous name rejects publication" true (Result.is_error (exports ()));
@@ -1959,7 +1960,7 @@ let test_machine_activity_applies_to_worker_calls () = with_fixture (fun env _sw
     "run_id",`String "activity";"binding",`Assoc ["sources",`List []]]) in
   let id = text "instance_id" attached in
   let access = Lane_addon_sources.Unauthenticated in
-  let exports () = unwrap (Runtime.tool_exports ~config ~access ~reserved:[]) in
+  let exports () = (unwrap (Runtime.tool_export_reading ~config ~access ~reserved:[])).exports in
   await (Eio.Stdenv.clock env) (fun () -> List.length (exports ()) = List.length names);
   let call name arguments =
     let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name=name) (exports ()) in
@@ -2013,7 +2014,7 @@ let test_machine_export_host_admission () = with_fixture (fun env _sw config dir
     let id = unwrap (dispatch config Runtime.Attach ["manifest_path", `String path;
       "run_id", `String "world"; "binding", `Assoc ["sources", `List []]]) |> text "instance_id" in
     let access = Lane_addon_sources.Operator_configuration in
-    let exports () = unwrap (Runtime.tool_exports ~config ~access ~reserved:[]) in
+    let exports () = (unwrap (Runtime.tool_export_reading ~config ~access ~reserved:[])).exports in
     await clock (fun () -> List.length (exports ()) = 2);
     let call ~principal name arguments =
       let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name = name) (exports ()) in

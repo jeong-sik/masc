@@ -320,25 +320,34 @@ let addon_exports_for_request ~profile ~auth_token state =
   let reserved = List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
       Config.raw_all_tool_schemas in
   let permitted ~agent_name ~principal access =
-    Lane_addon_runtime.tool_exports ~config ~access ~reserved
-    |> Result.map (fun exports ->
-      let exports = List.filter (fun (export : Lane_addon_runtime.tool_export) ->
-        (* Retained tool metadata owns known permissions even when execution is
-           supplied by an Add-on. Unknown package tools use the generic Lane
-           action permission; package-provided annotations grant no role. *)
-        let permission_tool = match Tool_catalog.registered_metadata export.tool.name with
-          | Some _ -> export.tool.name
+    Lane_addon_runtime.tool_export_reading ~config ~access ~reserved
+    |> Result.map (fun (reading : Lane_addon_runtime.export_reading) ->
+      (* Retained tool metadata owns known permissions even when execution is
+         supplied by an Add-on. Unknown package tools use the generic Lane
+         action permission; package-provided annotations grant no role. *)
+      let permits name =
+        let permission_tool = match Tool_catalog.registered_metadata name with
+          | Some _ -> name
           | None -> "masc_lane_act" in
         let profile_permits = match profile with
           | Full -> true
-          | Seat -> TP.is_seat_tool export.tool.name
+          | Seat -> TP.is_seat_tool name
           | Managed_agent | Operator_remote -> false in
         profile_permits && Result.is_ok (Auth.authorize_tool_v2 config.base_path ~agent_name
-          ~token:auth_token ~tool_name:permission_tool)) exports in
-      access, principal, reserved, exports) in
+          ~token:auth_token ~tool_name:permission_tool) in
+      let exports = List.filter (fun (export : Lane_addon_runtime.tool_export) ->
+        permits export.tool.name) reading.exports in
+      (* An installation that cannot serve keeps only the tools this caller
+         could have called, so its reason never names a tool it may not see. *)
+      let unready = List.filter_map (fun (unready : Lane_addon_unready.t) ->
+        match List.filter permits unready.declared_tools with
+        | [] -> None
+        | declared_tools -> Some { unready with declared_tools }) reading.unready in
+      access, principal, reserved, ({ exports; unready } : Lane_addon_runtime.export_reading)) in
   match profile with
   | Managed_agent | Operator_remote ->
-      Ok (Lane_addon_sources.Unauthenticated, Lane_addon_call_context.Anonymous, reserved, [])
+      Ok (Lane_addon_sources.Unauthenticated, Lane_addon_call_context.Anonymous, reserved,
+        ({ exports = []; unready = [] } : Lane_addon_runtime.export_reading))
   | Full | Seat ->
       match auth_token with
       | None -> permitted ~agent_name:"anonymous" ~principal:Lane_addon_call_context.Anonymous
@@ -399,13 +408,13 @@ let handle_list_tools_eio
   in
   match addon_exports_for_request ~profile ~auth_token state with
   | Error detail -> make_error_typed ~id Mcp_error_code.Invalid_request detail
-  | Ok (_, _, _, exports) ->
+  | Ok (_, _, _, (reading : Lane_addon_runtime.export_reading)) ->
   let tools =
     (TP.tool_schemas_for_profile ~include_hidden state profile
       |> List.map (fun (schema : Masc_domain.tool_schema) ->
           schema.name, TP.tool_json_for_profile ?usage_summary profile schema))
     @ List.map (fun (export : Lane_addon_runtime.tool_export) ->
-        export.tool.name, addon_tool_json export.tool) exports
+        export.tool.name, addon_tool_json export.tool) reading.exports
     |> (match names with
       | None -> Fun.id
       | Some wanted -> List.filter (fun (name, _) -> List.mem name wanted))
@@ -1143,15 +1152,21 @@ let handle_request
                         | Full -> Full
                       in
                       let addon =
-                        if Config.is_raw_tool_name name then Ok None
+                        if Config.is_raw_tool_name name then Ok (None, None)
                         else addon_exports_for_request ~profile:call_profile ~auth_token state
-                          |> Result.map (fun (access, principal, reserved, exports) ->
+                          |> Result.map (fun (access, principal, reserved, (reading : Lane_addon_runtime.export_reading)) ->
                               Option.map (fun export -> access, principal, reserved, export)
                                 (List.find_opt (fun (export : Lane_addon_runtime.tool_export) ->
-                                  String.equal export.tool.name name) exports)) in
+                                  String.equal export.tool.name name) reading.exports),
+                              Lane_addon_unready.summary (Lane_addon_unready.declaring ~name reading.unready)) in
                       match addon with
                       | Error detail -> failed_tool_call_error ~tool_name:name Mcp_error_code.Invalid_request detail
-                      | Ok (Some (access, principal, reserved, export)) ->
+                      | Ok (None, Some reason) ->
+                          (* Like tools/list, the endpoint has no callable tool
+                             of this name; an installation that declares it
+                             and cannot serve now is named with why. *)
+                          failed_tool_call_error ~tool_name:name Mcp_error_code.Method_not_found reason
+                      | Ok (Some (access, principal, reserved, export), _) ->
                           let wire_result = ref None in
                           let execute ~sw:_ ~clock:_ ~workspace_scope ?profile:_ ?mcp_session_id
                               ?invocation_ref:_ ?auth_token ?(internal_keeper_runtime=false)
@@ -1198,7 +1213,7 @@ let handle_request
                             ~broadcast_tools_list_changed ~wire_result:(fun () -> !wire_result)
                             ~sw ~clock ~profile:call_profile ?mcp_session_id ?auth_token
                             ~internal_keeper_runtime state id call
-                      | Ok None ->
+                      | Ok (None, None) ->
                       if
                         not
                           (TP.tool_allowed_in_profile state

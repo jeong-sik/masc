@@ -1680,9 +1680,6 @@ let tool_export_reading ~config ~access ~reserved = Eio_context.run_on_owner_dom
   unique_exports ~reserved (reading_exports reading)
   |> Result.map (fun exports -> ({ exports; unready = reading.unready } : export_reading)))
 
-let tool_exports ~config ~access ~reserved =
-  tool_export_reading ~config ~access ~reserved |> Result.map (fun (reading : export_reading) -> reading.exports)
-
 type export_observation = {
   instance_id : string;
   observation_seq : int;

@@ -104,8 +104,8 @@ max_reply_bytes = %d
           |> Result.map_error R.error_to_string |> unwrap in
         let id = Yojson.Safe.Util.(attached |> member "instance_id" |> to_string) in
         let rec ready () =
-          match R.tool_exports ~config ~access:Masc.Lane_addon_sources.Unauthenticated ~reserved:[] with
-          | Ok exports when List.length exports = List.length names -> () | _ -> Eio.Time.sleep clock 0.001; ready () in
+          match R.tool_export_reading ~config ~access:Masc.Lane_addon_sources.Unauthenticated ~reserved:[] with
+          | Ok reading when List.length reading.exports = List.length names -> () | _ -> Eio.Time.sleep clock 0.001; ready () in
         ready ();
         let invoke ~principal ~controller ~name ~arguments =
           call Lane_addon_call_context.tool_name

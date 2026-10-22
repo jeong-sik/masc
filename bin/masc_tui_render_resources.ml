@@ -7,6 +7,21 @@ open Masc_tui_render_prim
 module Rows = Masc_tui_rows
 module Catalog = Masc_tui_resource_catalog
 
+let format_badge = function
+  | Catalog.Mcp _ -> Theme.recede () ^ "[MCP]" ^ Ansi.reset
+  | Report report ->
+      let colour, name = match report.revision.format with
+        | Masc.Published_artifact.Markdown -> Theme.category Theme.Slot_1, "MD"
+        | Html -> Theme.category Theme.Slot_2, "HTML" in
+      colour ^ Printf.sprintf "[%s v%d]" name report.revision.revision ^ Ansi.reset
+
+let check_badge status =
+  let colour = match status with
+    | Masc_tui_artifact_checks.Known (Some _) -> Theme.ok ()
+    | Known None -> Theme.warn ()
+    | Unknown _ -> Theme.muted () in
+  colour ^ Masc_tui_artifact_checks.label status ^ Ansi.reset
+
 let entry_rows = 3
 let save_prompt_height state = if Option.is_some state.resource_save_prompt then 3 else 0
 
@@ -57,6 +72,7 @@ let render_resources (state : state) =
     let framed_top = if framed then framed_top else fun _ _ -> () in
     let framed_divider = if framed then framed_divider else box_divider in
     let framed_line = if framed then framed_line else box_line in
+    let styled_line = if framed then framed_line_styled else box_line_styled in
     let framed_empty = if framed then framed_empty else box_empty in
     let framed_bottom = if framed then framed_bottom else box_bottom in
     framed_top pane_buf pane_cols;
@@ -88,15 +104,17 @@ let render_resources (state : state) =
       | Some day -> Printf.sprintf "%04d-%02d-%02d local" day.year day.month day.day in
     let today = Catalog.local_day (Unix.gettimeofday ()) in
     let unchecked = match resource_unchecked_today state ~day:today with
-      | None -> "unknown"
-      | Some count -> string_of_int count in
+      | None -> Theme.muted () ^ "unknown"
+      | Some 0 -> Theme.ok () ^ "0"
+      | Some count -> Theme.warn () ^ string_of_int count in
     let query = match Masc_tui_fetched.current state.artifact_checks with
       | Some (_, (Ready inventory | Stale (inventory, _))) ->
         let at = Unix.localtime inventory.received_at in
         Printf.sprintf " · last check query %02d:%02d:%02d" at.tm_hour at.tm_min at.tm_sec
       | Some (_, (Absent | Loading | Failed _)) | None -> " · checks not read" in
-    framed_line pane_buf pane_cols (Ansi.dim ^ " " ^ period
-      ^ " · today unchecked: " ^ unchecked ^ query ^ Ansi.reset);
+    framed_line pane_buf pane_cols (Theme.recede () ^ " " ^ period
+      ^ " · today unchecked: " ^ unchecked ^ Ansi.reset
+      ^ Theme.recede () ^ query ^ Ansi.reset);
     let list_rows_budget, visible = list_viewport state ~rows in
     let first = max 0 (cursor - visible + 1) in
     for i = 0 to list_rows_budget - 1 do
@@ -106,21 +124,29 @@ let render_resources (state : state) =
           let selected = index = cursor in
           let metadata = Catalog.metadata resource in
           let line = match i mod entry_rows with
-            | 0 -> (if selected then " ▸ " else "   ") ^ Catalog.display_name resource
+            | 0 -> (if selected then " ▸ " else "   ") ^ format_badge resource ^ " "
+              ^ Ansi.bold ^ Terminal_text.single_line (Catalog.display_name resource) ^ Ansi.reset
               ^ (match resource with Catalog.Mcp _ -> ""
-                | Report report -> " · " ^ Masc_tui_artifact_checks.label (resource_check_status state report))
-              ^ (if Catalog.on_day today resource then " · today" else "")
-            | 1 -> "   " ^ (match resource with
+                | Report report -> " · " ^ check_badge (resource_check_status state report))
+              ^ (if Catalog.on_day today resource then Theme.recede () ^ " · today" ^ Ansi.reset else "")
+            | 1 -> "   " ^ Theme.recede () ^ Terminal_text.single_line (match resource with
                 | Catalog.Report report -> report.revision.summary
-                | Mcp _ -> Option.value metadata.description ~default:metadata.uri)
+                | Mcp _ -> Option.value metadata.description ~default:metadata.uri) ^ Ansi.reset
             | _ -> "   " ^ (match resource with
-                | Catalog.Report report -> Printf.sprintf "%s · %s · %d bytes"
-                    report.revision.author report.revision.created_at report.revision.body.bytes
-                | Mcp _ -> "MCP · " ^ Option.value metadata.mime_type ~default:"type unknown") in
-          let line = Terminal_text.single_line line in
-          let color = if selected then Theme.selection
-            else if i mod entry_rows = 0 then Ansi.bold else Ansi.dim in
-          framed_line pane_buf pane_cols (color ^ line ^ Ansi.reset)
+                | Catalog.Report report -> Terminal_text.single_line report.revision.author
+                  ^ Theme.recede () ^ Terminal_text.single_line
+                    (Printf.sprintf " · %s · %d bytes" report.revision.created_at report.revision.body.bytes)
+                  ^ Ansi.reset
+                | Mcp _ -> Theme.recede () ^ "MCP · "
+                  ^ Terminal_text.single_line (Option.value metadata.mime_type ~default:"type unknown")
+                  ^ Ansi.reset) in
+          (* Keep the selected card's foreground paired with its adaptive
+             ground. Content colours are for the neighbouring cards; inner
+             resets must not punch holes in the selected band. *)
+          if selected then
+            styled_line pane_buf pane_cols ~style:(Theme.sidebar_selection ())
+              (Masc_tui_theme.strip_sgr line)
+          else framed_line pane_buf pane_cols line
       | None -> framed_empty pane_buf pane_cols
     done;
     framed_bottom pane_buf pane_cols

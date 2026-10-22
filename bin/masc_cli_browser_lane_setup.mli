@@ -13,9 +13,16 @@
     no host: that lane needs none. It starts no browser and loads no
     extension.
 
+    [--mode addon] writes the browser Add-on package this masc carries to
+    [.masc/packages/browser] and declares it when the workspace has no
+    declaration of it ({!Masc.Browser_addon_setup}). Every other mode does the
+    same after its host step, but there a refusal of that step is reported and
+    the mode's own steps go on; only [--mode addon] fails on it. [--no-addon]
+    skips the step for the other modes and contradicts [--mode addon].
+
     An option that the chosen modes do not use is refused, not ignored. *)
 
-type mode = Extension | Bidi | Host | Automation
+type mode = Addon | Extension | Bidi | Host | Automation
 
 val all_modes : mode list
 
@@ -26,6 +33,7 @@ val run
   :  base_path:string
   -> runtime_config_path:string
   -> modes:mode list
+  -> no_addon:bool
   -> binary:string option
   -> token_file:string option
   -> manifest_dir:string option
@@ -37,4 +45,6 @@ val run
   -> browser:string option
   -> int
 (** The process exit code: [0] when it printed the state or finished the
-    install, [1] when it refused and said why on stderr. *)
+    install, [1] when it refused and said why on stderr, and [3] when
+    [--mode addon] found no config root in the workspace yet, so nothing was
+    written: the first server start writes one. *)

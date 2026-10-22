@@ -148,6 +148,62 @@ class BrowserLaneSetupCommand(unittest.TestCase):
                 self.assertFalse(base.exists(), "nothing was written to the workspace")
                 self.assertFalse(manifests.exists(), "nothing was registered")
 
+    # --mode addon: the browser Add-on package this masc carries and one
+    # declaration of it. Every other mode does the same after its host step.
+    def test_addon_writes_the_package_and_declares_it_once(self):
+        root = self.scratch()
+        base = workspace(root)
+        first = masc(root, "--mode", "addon", "--base-path", str(base))
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        declaration = base / ".masc/config/lane-addons/browser.toml"
+        self.assertTrue(declaration.is_file(), "the Add-on is declared")
+        self.assertTrue((base / ".masc/packages/browser/lane.toml").is_file(), "the package is written")
+        self.assertFalse(lane(base).exists(), "no host, no token, no extension")
+        written = declaration.read_text()
+        again = masc(root, "--mode", "addon", "--base-path", str(base))
+        self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+        self.assertEqual(declaration.read_text(), written, "the declaration is not rewritten")
+        self.assertEqual(sorted(path.name for path in declaration.parent.glob("*.toml")),
+                         ["browser.toml"], "one declaration")
+
+    # A workspace no server has started in has no config root yet. That is not
+    # a refusal: the first start writes one, and install-local-build.sh tells
+    # the two apart by this status.
+    def test_addon_without_a_config_root_exits_3_and_writes_nothing(self):
+        root = self.scratch()
+        base = root / "workspace"
+        base.mkdir()
+        result = masc(root, "--mode", "addon", "--base-path", str(base))
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertFalse((base / ".masc").exists(), "nothing is written")
+
+    def test_every_route_declares_the_addon(self):
+        root = self.scratch()
+        base = workspace(root)
+        result = masc(root, "--mode", "host", "--binary", str(HOST), "--base-path", str(base))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((base / ".masc/config/lane-addons/browser.toml").is_file())
+
+    def test_no_addon_leaves_the_addon_alone(self):
+        root = self.scratch()
+        base = workspace(root)
+        result = masc(root, "--mode", "host", "--binary", str(HOST), "--base-path", str(base),
+                      "--no-addon")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((lane(base) / "host/masc-browser-host").is_file(), "the host is installed")
+        self.assertFalse((base / ".masc/config/lane-addons").exists(), "nothing is declared")
+        self.assertFalse((base / ".masc/packages").exists(), "no package is written")
+
+    def test_no_addon_with_the_addon_mode_or_alone_is_refused(self):
+        root = self.scratch()
+        base = workspace(root)
+        for arguments in (("--mode", "addon", "--no-addon"), ("--no-addon",)):
+            with self.subTest(arguments=arguments):
+                result = masc(root, *arguments, "--base-path", str(base))
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertFalse((base / ".masc/config/lane-addons").exists())
+                self.assertFalse((base / ".masc/packages").exists())
+
     # --mode host: the host and the launcher, for a browser attached by hand and
     # for bringing an installed lane's host up to date.
     def test_host_installs_the_host_and_the_launcher_and_nothing_else(self):

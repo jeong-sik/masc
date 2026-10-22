@@ -2,12 +2,14 @@ module Launcher = Masc.Browser_lane_launcher
 module Setup = Masc.Browser_lane_setup
 module Bidi_setup = Masc.Browser_lane_bidi_setup
 module Automation_setup = Masc.Browser_lane_automation_setup
+module Addon_setup = Masc.Browser_addon_setup
 
-type mode = Extension | Bidi | Host | Automation
+type mode = Addon | Extension | Bidi | Host | Automation
 
-let all_modes = [ Extension; Bidi; Host; Automation ]
+let all_modes = [ Addon; Extension; Bidi; Host; Automation ]
 
 let mode_name = function
+  | Addon -> "addon"
   | Extension -> "extension"
   | Bidi -> "bidi"
   | Host -> "host"
@@ -18,9 +20,17 @@ let mode_name = function
 let host_modes = [ Extension; Bidi; Host ]
 let installs_host modes = List.exists (fun mode -> List.mem mode modes) host_modes
 
-let refuse message =
+let refuse_with status message =
   prerr_endline message;
-  1
+  status
+
+let refuse message = refuse_with 1 message
+
+(* A workspace whose config root is not there yet: nothing in the request was
+   wrong, and the first server start writes the root, so a run after it
+   declares the Add-on. scripts/install-local-build.sh tells this status apart
+   from a refusal. *)
+let no_config_root_status = 3
 
 let ( let* ) = Result.bind
 
@@ -153,9 +163,10 @@ let print_bidi_steps plan =
       "  [browser.live] enabled = false in runtime.toml keeps the live lane off, so the \
        browser Add-on starts no Firefox. Turn it on first.";
   print_endline
-    "  1. Restart the MASC server to load runtime.toml, then attach the browser Lane Add-on \
-     or detach and reattach its existing installation. The Add-on owns this Firefox and its \
-     BiDi connection; its observation reports readiness or the startup refusal.";
+    "  1. Restart the MASC server to load runtime.toml. A browser Add-on that was attached \
+     before keeps its old settings until it is detached; the server attaches its declaration \
+     again on the next maintenance pass. The Add-on owns this Firefox and its BiDi \
+     connection; its observation reports readiness or the startup refusal.";
   print_endline
     "  2. In that Firefox, log in once to the sites the Keepers work on. The profile keeps \
      the logins.";
@@ -210,12 +221,86 @@ let print_automation ~runtime_config_path plan =
       "  [browser.automation] enabled = false in runtime.toml keeps the lane off, so the \
        browser Add-on starts no geckodriver. Turn it on first.";
   print_endline
-    "  Restart the MASC server to load the updated runtime.toml. Attach the browser Lane Add-on, \
-     or detach and reattach its existing installation, to use this configuration. The attached \
-     Add-on owns this geckodriver and stops it during detach. Each new automation session uses \
-     a fresh profile; logins do not carry over to a new session.";
+    "  Restart the MASC server to load the updated runtime.toml. A browser Add-on that was \
+     attached before keeps its old settings until it is detached; the server attaches its \
+     declaration again on the next maintenance pass. The attached Add-on owns this \
+     geckodriver and stops it during detach. Each new automation session uses a fresh \
+     profile; logins do not carry over to a new session.";
   print_endline
     "  A browser that needs a login is another route: --mode bidi or --mode extension."
+
+(* Every route runs in the browser Add-on, so every mode declares it. *)
+let print_addon (installed : Addon_setup.installed) =
+  Printf.printf "Browser Add-on package  %s (%s)\n" installed.package_directory
+    (match installed.files_written, installed.files_removed with
+     | 0, [] -> "already this build's"
+     | written, [] -> Printf.sprintf "%d files written" written
+     | written, removed ->
+       Printf.sprintf "%d files written, %d removed" written (List.length removed));
+  List.iter (Printf.printf "  removed %s\n") installed.files_removed;
+  (match installed.declaration with
+   | Addon_setup.Created { path } ->
+     Printf.printf "Declared the browser Add-on in %s\n" path;
+     print_endline
+       "The MASC server attaches it when it starts and on its maintenance pass; set \
+        enabled = false there to keep it detached."
+   | Addon_setup.Present { path; manifest_path = named; this_build; enabled } ->
+     Printf.printf "The browser Add-on is declared in %s\n" path;
+     if not this_build
+     then
+       Printf.printf
+         "It names the package %s, not the one this masc carries, and is left as it is. To \
+          use this build's package, write %s there.\n"
+         named
+         (Toml_line_editor.scalar_line ~key:"manifest_path" ~value:installed.manifest_path);
+     if not enabled then print_endline "Its enabled = false keeps it detached.");
+  match installed.missing_programs with
+  | [] -> ()
+  | missing ->
+    Printf.printf
+      "Not found beside masc or on PATH: %s. scripts/install-local-build.sh installs them \
+       beside masc; the server looks for them the same way.\n"
+      (String.concat ", " missing)
+
+(* Whether this command runs the browser Add-on step, and what its refusal
+   means. --mode addon requires it: a refusal is the command's. Every other
+   mode offers it: a refusal is reported and that mode's own steps go on, so
+   a Lane directory problem never stops a host refresh or a table write.
+   --no-addon skips it. *)
+type addon_choice = Require_addon | Offer_addon | Skip_addon
+
+type 'a addon_step = Not_run | Reported of string | Done of 'a
+
+let addon_refusal choice error =
+  let message = Addon_setup.error_message error in
+  match choice with
+  | Require_addon -> Error message
+  | Offer_addon | Skip_addon -> Ok (Reported message)
+
+let addon_plan_status : Addon_setup.error -> int = function
+  | Addon_setup.Config_root_missing _ -> no_config_root_status
+  | Addon_setup.Base_path_not_absolute _
+  | Addon_setup.Embedded_package_invalid _
+  | Addon_setup.Package_unwritable _
+  | Addon_setup.Package_unloadable _
+  | Addon_setup.Config_root_invalid _
+  | Addon_setup.Inventory_unreadable _
+  | Addon_setup.Declared_more_than_once _
+  | Addon_setup.Declaration_unloadable _
+  | Addon_setup.Declaration_refused _ -> 1
+
+let plan_addon ~base_path choice =
+  match choice with
+  | Skip_addon -> Ok Not_run
+  | Require_addon | Offer_addon ->
+    (match Addon_setup.plan ~base_path with
+     | Ok plan -> Ok (Done plan)
+     | Error error ->
+       addon_refusal choice error
+       |> Result.map_error (fun message -> addon_plan_status error, message))
+
+let print_addon_skipped message =
+  prerr_endline ("The browser Add-on was not set up: " ^ message)
 
 let print_host_only =
   "--mode host connects no browser: it installs the native host and launcher for a browser \
@@ -231,6 +316,7 @@ let install
       ~base_path
       ~runtime_config_path
       ~modes
+      ~addon_choice
       ~binary
       ~token_file
       ~manifest_dir
@@ -241,19 +327,26 @@ let install
       ~geckodriver
       ~browser
   =
-  (* Everything that can be refused is refused before the first write. *)
+  (* Every refusal of the modes' own steps comes before the first write. The
+     browser Add-on step refuses what it can there too, and the rest after it
+     wrote its package ({!Addon_setup.apply}); see [addon_refusal]. *)
   let planned =
-    let* extension = extension_route ~modes ~manifest_dir ~host_name in
-    let* bidi = bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port in
-    let* automation = automation_plan ~modes ~runtime_config_path ~geckodriver ~browser in
-    Ok (extension, bidi, automation)
+    let refused result = Result.map_error (fun message -> 1, message) result in
+    let* addon = plan_addon ~base_path addon_choice in
+    let* extension = refused (extension_route ~modes ~manifest_dir ~host_name) in
+    let* bidi = refused (bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port) in
+    let* automation =
+      refused (automation_plan ~modes ~runtime_config_path ~geckodriver ~browser)
+    in
+    Ok (addon, extension, bidi, automation)
   in
   match planned with
-  | Error message -> refuse message
-  | Ok (extension, bidi, automation) ->
-    (* Install the requested host assets before writing configuration tables.
-       A later refusal retains those completed assets. Setup does not attach
-       the browser Add-on or start its browsers. *)
+  | Error (status, message) -> refuse_with status message
+  | Ok (addon, extension, bidi, automation) ->
+    (* Install the requested host assets, then the browser Add-on package and
+       its declaration, before writing configuration tables. A later refusal
+       retains those completed assets. Setup does not attach the browser
+       Add-on or start its browsers. *)
     let installed =
       if installs_host modes
       then
@@ -262,10 +355,29 @@ let install
         |> Result.map_error Setup.error_message
       else Ok None
     in
+    let installed =
+      Result.bind installed (fun installed ->
+        let* addon =
+          match addon with
+          | Not_run -> Ok Not_run
+          | Reported message -> Ok (Reported message)
+          | Done plan ->
+            (match Addon_setup.apply plan with
+             | Ok applied -> Ok (Done applied)
+             | Error error -> addon_refusal addon_choice error)
+        in
+        Ok (installed, addon))
+    in
     (match installed with
      | Error message -> refuse message
-     | Ok installed ->
+     | Ok (installed, addon) ->
        Option.iter (print_installed ~base_path) installed;
+       (match addon with
+        | Not_run -> ()
+        | Reported message -> print_addon_skipped message
+        | Done applied ->
+          if Option.is_some installed then print_endline "";
+          print_addon applied);
        let tabled =
          match bidi with
          | None -> Ok None
@@ -329,6 +441,7 @@ let run
       ~base_path
       ~runtime_config_path
       ~modes:requested
+      ~no_addon
       ~binary
       ~token_file
       ~manifest_dir
@@ -352,17 +465,24 @@ let run
       ; "--port", Option.is_some port, [ Bidi ]
       ; "--geckodriver", Option.is_some geckodriver, [ Automation ]
       ; "--browser", Option.is_some browser, [ Automation ]
+      ; "--no-addon", no_addon, [ Extension; Bidi; Host; Automation ]
       ]
   with
   | Some message -> refuse message
   | None ->
     (match modes with
      | [] -> show ~base_path
+     | _ :: _ when List.mem Addon modes && no_addon ->
+       refuse "--no-addon contradicts --mode addon."
      | _ :: _ ->
        install
          ~base_path
          ~runtime_config_path
          ~modes
+         ~addon_choice:
+           (if List.mem Addon modes then Require_addon
+            else if no_addon then Skip_addon
+            else Offer_addon)
          ~binary
          ~token_file
          ~manifest_dir

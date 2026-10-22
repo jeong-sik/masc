@@ -191,6 +191,7 @@ let test_snapshot_is_bound_to_the_captured_ledger () =
   let input = member "input" snapshot in
   Alcotest.check json "a frame-filled batch has no count bound" `Null (member "up_to" snapshot);
   refused "a zero fact count" (replace "up_to" (`Int 0) snapshot);
+  refused "a fact count below the facts it selected" (replace "up_to" (`Int 1) snapshot);
   refused "a fact count written as text" (replace "up_to" (`String "3") snapshot);
   refused "a changed membership" (replace "input" (map_list "facts" (fun fact ->
     if member "member_of" fact = `String "c1" then replace "member_of" `Null fact else fact) input) snapshot);

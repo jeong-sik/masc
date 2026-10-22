@@ -246,6 +246,9 @@ let batch_of_json ~ledger json =
             (List.assoc "neighbors" fields) in
         Ok { fact; neighbors }) (List.assoc "new_facts" input_fields) in
     let* () = if rows = [] then Error "classification batch has no selected facts" else check_rows rows in
+    let* () = match size with
+      | Up_to count when List.length rows > count -> Error "snapshot selects more facts than its up_to"
+      | Up_to _ | Fill_frame -> Ok () in
     let disposed =
       List.fold_left (fun map (fact, _) -> Fact_map.add fact () map) Fact_map.empty (Ledger.dispositions ledger) in
     let* () = if List.exists (fun (row : row) -> Fact_map.mem row.fact.fact disposed) rows

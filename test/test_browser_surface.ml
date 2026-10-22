@@ -227,6 +227,23 @@ let test_partial_inventory_without_unavailable_tabs () =
        && Yojson.Safe.Util.member "page" data = `Null);
     check (list int) "no page is guessed for an empty partial inventory" [] !reads)
 
+let test_tab_window_is_kept_and_checked () =
+  let in_window id window = match tab id "https://example.org/page" (id = 41) with
+    | `Assoc fields -> `Assoc (fields @ ["windowId", window])
+    | other -> other in
+  with_browser [in_window 41 (`Int 0); in_window 73 (`Int 1)] (fun _ ->
+    let rows = Yojson.Safe.Util.(read_ok (request None) |> member "tabs" |> to_list) in
+    check bool "each tab keeps the window it is in" true
+      (List.map (Yojson.Safe.Util.member "windowId") rows = [`Int 0; `Int 1]));
+  with_browser [tab 41 "https://example.org/page" true] (fun _ ->
+    let rows = Yojson.Safe.Util.(read_ok (request None) |> member "tabs" |> to_list) in
+    check bool "a tab with no window names none" true
+      (List.map (Yojson.Safe.Util.member "windowId") rows = [`Null]));
+  with_browser [in_window 41 (`String "w1")] (fun _ ->
+    match Surface.read (request None) with
+    | Error _ -> ()
+    | Ok _ -> fail "a window that is not a number was accepted")
+
 let test_transport_unavailability_is_not_a_workflow_refusal () =
   List.iter (fun answer ->
     (match Surface.observe_answer ~lane:Browser_lane.Lane_name.Live answer with
@@ -1099,6 +1116,7 @@ let () = run "browser surface" ["behavior",[
   test_case "automatic discovery binds subsequent observations and input" `Quick test_automatic_selection_keeps_observed_browser;
   test_case "unreadable tabs do not block the requested readable tab" `Quick test_partial_inventory_preserves_requested_work;
   test_case "partial inventories remain incomplete without unavailable tabs" `Quick test_partial_inventory_without_unavailable_tabs;
+  test_case "a tab keeps its window and a malformed one is refused" `Quick test_tab_window_is_kept_and_checked;
   test_case "transport availability keeps its failure class" `Quick test_transport_unavailability_is_not_a_workflow_refusal;
   test_case "compound read retains its original admission" `Quick test_compound_read_keeps_admission;
   test_case "input correction resumes on the same connected browser" `Quick test_tool_input_recovery;

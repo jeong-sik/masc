@@ -650,6 +650,13 @@ input is sent. A
 `secondary` click opens whatever the page binds to the context menu; observe the
 page afterwards, the receipt does not say what it did.
 
+Each `tabs.list` row carries `windowId` when Firefox's `browsingContext.getTree`
+names the tab's `clientWindow` (Firefox 158 does, probed 2026-10-22). Tabs with the
+same `windowId` share a window, and the distinct values are the windows. The number
+is assigned by this connection in the order it first sees a window, so it is not
+comparable across connections. There is no window title, size or position, and no
+way to create or close a window yet.
+
 `tap_at` and `swipe` send the same WebDriver pointer sequences as `click_at`
 and `drag`, from a pointer whose `pointerType` is `touch`. Firefox 158 reported
 `pointerdown`, `touchstart`, `pointerup` and `touchend` to the page for a tap,

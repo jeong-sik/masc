@@ -1031,6 +1031,25 @@ let test_history_and_close_act_only_on_tabs_this_connection_opened () =
   match act 2 Browser_lane.Action.Close_tab with
   | Error (Peer.Before_effect _) -> ()
   | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) -> fail "a closed tab was closed again"
+let test_tabs_name_their_window () =
+  let peer = peer_of (fun method_ _ ->
+    match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [
+        obj ["context",`String "a";"clientWindow",`String "w1"];
+        obj ["context",`String "b";"clientWindow",`String "w2"];
+        obj ["context",`String "c";"clientWindow",`String "w2"];
+        obj ["context",`String "d"]]])
+    | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";"title",`String "t";"active",`Bool true]))
+    | other -> failf "unexpected protocol command: %s" other) in
+  match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
+  | Ok (`List rows) ->
+    let window row = Yojson.Safe.Util.member "windowId" row in
+    (match List.map window rows with
+     | [`Int a; `Int b; `Int c; `Null] ->
+       check bool "tabs in different windows get different IDs" true (a <> b);
+       check bool "tabs in one window share an ID" true (b = c)
+     | _ -> fail "expected three window IDs and one tab with none")
+  | Ok _ | Error _ -> fail "the tab listing failed"
 (* Firefox's error codes are read once where the answer arrives. The two
    this host acts on are their own cases; any other is kept as Firefox wrote
    it, and every code is written back as it was read. *)
@@ -1174,6 +1193,7 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "malformed JSON ends a pending command" `Quick test_malformed_json_ends_a_pending_command;
     test_case "invalid websocket frame reaches the error path" `Quick test_invalid_websocket_frame_ends_a_pending_command];
   "effect",[test_case "set_viewport sends the size, or null to restore it" `Quick test_set_viewport_sends_the_size_or_clears_it;
+    test_case "tabs name their window" `Quick test_tabs_name_their_window;
     test_case "ending the session restores a sized tab" `Quick test_ending_the_session_restores_a_sized_tab;
     test_case "a tab the caller restored is not restored again" `Quick test_a_tab_restored_by_the_caller_is_not_restored_again;
     test_case "history and close act only on tabs this connection opened" `Quick test_history_and_close_act_only_on_tabs_this_connection_opened;

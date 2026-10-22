@@ -2,7 +2,9 @@
 type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
 type request = { route : Browser_selection.preference; tab_id : int option }
 val parse_request : Yojson.Safe.t -> (request, string) result
-type tab = { id : int; title : string; url : string; active : bool }
+(** [window_id] names the browser window a tab is in, when the browser says which. Tabs that share a
+    [window_id] share a window. It is opaque, and only comparable within one connection. *)
+type tab = { id : int; title : string; url : string; active : bool; window_id : int option }
 
 (** Which tab a read answers for. [None_active] means no tab was requested
     and none is active, so the answer carries [page = null] and reads nothing. *)

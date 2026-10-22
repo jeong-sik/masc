@@ -43,6 +43,10 @@ type installation_error =
   | Canonical_unavailable of Store.checkpoint_ref_load_error
   | Response_refused of refusal
   | Installation_unconfirmed of Store.checkpoint_installation
+  | Installation_mismatch of
+      { retained : Keeper_checkpoint_ref.t
+      ; canonical : Keeper_checkpoint_ref.t
+      }
 let authorize ~session_root ~operation_id ~waiting =
   {session_dir=Filename.concat session_root (Keeper_id.Trace_id.to_string waiting.Semantic.checkpoint.trace_id);
    operation_id;waiting}
@@ -57,6 +61,7 @@ let installation_error_to_string = function
   | Response_refused (Input_not_current _) -> "response request is no longer current"
   | Response_refused (Input_checkpoint_failed error) -> Agent_core.Error.to_string error
   | Installation_unconfirmed _ -> "response file installation is unconfirmed; preserve evidence and reconcile before retry"
+  | Installation_mismatch _ -> "response canonical installation differs from its retained bytes; preserve both references and reconcile"
 let rec prefix expected actual = match expected,actual with
   | [],_ -> true | x::xs,y::ys when x=y -> prefix xs ys
   | _::_,([] | _::_) -> false
@@ -121,4 +126,4 @@ let install ~net ~(authority:authority) ~response =
   let* installed=confirmed (Store.save_agent_core_if_source ~session_dir:authority.session_dir
       ~expected_source_ref:(Store.exact_snapshot_reference source) candidate) in
   if Keeper_checkpoint_ref.equal retained_reference installed then Ok {authority;checkpoint=installed}
-  else Error (Invalid_response "response canonical installation differs from its frozen retained bytes")
+  else Error (Installation_mismatch {retained=retained_reference;canonical=installed})

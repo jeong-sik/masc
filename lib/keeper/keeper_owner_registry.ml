@@ -17,6 +17,10 @@ type command_error =
   | Command_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Command_rejected of Keeper_owner.error
 
+type input_response_error =
+  | Response_owner_lookup_failed of lookup_error
+  | Response_owner_failed of Keeper_owner.input_response_error
+
 exception Install_failed of install_error
 
 type pool =
@@ -68,6 +72,11 @@ let command_error_to_string = function
     "Keeper owner command rejected by lifecycle reservation: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
   | Command_rejected error -> Keeper_owner.error_to_string error
+;;
+
+let input_response_error_to_string = function
+  | Response_owner_lookup_failed error -> lookup_error_to_string error
+  | Response_owner_failed error -> Keeper_owner.input_response_error_to_string error
 ;;
 
 let () =
@@ -807,8 +816,11 @@ let defer_direct_checkpoint ~base_path ~keeper_name ~operation_id ~execution_dig
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.defer_direct_checkpoint owner ~operation_id ~execution_digest ~checkpoint)
 let respond_direct_input_wait ~base_path ~keeper_name ~net ~operation_id ~observed ~response =
-  with_owner_command ~base_path ~keeper_name (fun owner ->
-    Keeper_owner.respond_direct_input_wait owner ~net ~operation_id ~observed ~response)
+  match get ~base_path ~keeper_name with
+  | Error error -> Error (Response_owner_lookup_failed error)
+  | Ok owner ->
+    Keeper_owner.respond_direct_input_wait owner ~net ~operation_id ~observed ~response
+    |> Result.map_error (fun error -> Response_owner_failed error)
 let direct_input_wait ~base_path ~keeper_name ~operation_id =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.direct_input_wait owner ~operation_id)

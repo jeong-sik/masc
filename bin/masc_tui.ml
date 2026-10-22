@@ -10772,23 +10772,6 @@ let launch_image_render _state ~mailbox ~notice ~title ~caption ~page_url image_
                result = Error "Eio switch unavailable" })
   end
 
-(* The staged door. Ctrl-V leaves the image in the attachment as base64 for
-   the wire to the endpoint; the terminal wants the PNG's own bytes, so they
-   are decoded back and drawn by the same tail a named file gets. The
-   attachment's name titles the screen: a staged image has no path, and the
-   name is the label the draft marker already knows it by. *)
-let open_staged_image state ~notice attachment =
-  let title = attachment.Masc_tui_keeper_chat_projection.name in
-  let refuse reason =
-    notice ~kind:Notice_failure (Printf.sprintf "Ctrl-O %s: %s" title reason)
-  in
-  match !terminal_draws_images with
-  | Some false -> refuse terminal_draws_no_images
-  | Some true | None -> (
-      match Base64.decode attachment.Masc_tui_keeper_chat_projection.data with
-      | Error (`Msg detail) -> refuse detail
-      | Ok data -> draw_image state ~refuse ~title data)
-
 let image_request_is_active state entry =
   let matches request =
     String.equal request.Keeper_chat.keeper_name entry.me_keeper_name
@@ -10867,17 +10850,10 @@ let image_notice (state : state) ~view ~keeper_name ~kind text =
     report_action state (match kind with Notice_failure -> "error" | Notice_reply -> "system") text
   else chat_notice state ~keeper_name ~kind text
 
-let resource_image_reading_is_current (state : state) (pending : sent_image_read) =
-  pending.sir_view <> Resources
-  || (Masc_tui_resource_images.same_reading ~equal:Masc_tui_resource_catalog.equal_key pending.sir_resource state.resource_content
-      && Option.is_none state.resource_pending_key
-      && Option.is_none state.resource_content_error)
-
 (* Settle the exact interrupted preview without replacing a newer selection. *)
 let settle_retired_sent_image state =
   match state.sent_image_read with
-  | Some pending when pending.sir_authority != state.workspace_read_authority
-      || not (resource_image_reading_is_current state pending) ->
+  | Some pending when not (image_reading_is_current state pending) ->
       state.sent_image_read <- None;
       if not state.msx_open && pending.sir_generation = state.image_request_generation
          && pending.sir_view = state.view
@@ -10887,11 +10863,20 @@ let settle_retired_sent_image state =
              pending.sir_name)
   | Some _ | None -> ()
 
-(* Image acquisition has no terminal effects. Capture the endpoint and UI
-   generation before forking; the mailbox consumer owns stale-result rejection. *)
-let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
-  if server_authority_ready state then begin
-  let enqueue_async = workspace_enqueue state in
+(* Draft payloads are local even while disconnected. Peer readings retain
+   their original authority envelope; both paths capture the UI generation
+   and workspace/draft owner before forking and share completion admission. *)
+let open_preview_image ?skill_reference state ~mailbox ~notice ~name source =
+  let dispatch = match source with
+    | Masc_tui_image_requests.Draft attachment ->
+      Some (enqueue_async, Draft_image_read (state.workspace_authority, attachment))
+    | Retained _ | Generated _ ->
+      if server_authority_ready state then
+        Some (workspace_enqueue state, Peer_image_read state.workspace_read_authority)
+      else None in
+  match dispatch with
+  | None -> ()
+  | Some (enqueue_async, owner) ->
   let rows, columns = Masc_tui_ansi.get_terminal_size () in
   let display = match !active_graphics_protocol with
     | Masc_tui_graphics.Kitty_protocol | ITerm2_protocol -> Some Masc_tui_image_cache.Pixel_graphics
@@ -10907,7 +10892,7 @@ let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
     let generation = state.image_request_generation in
     let view = state.view in
     state.sent_image_read <- Some {sir_generation=generation; sir_view=view;
-      sir_keeper=keeper_name; sir_name=name; sir_authority=state.workspace_read_authority;
+      sir_keeper=keeper_name; sir_name=name; sir_owner=owner;
       sir_resource=(if view = Resources then state.resource_content else None)};
     (* When the terminal supplies no pixel geometry, use the half-em advance
        of Pele's 16px default font as a logical layout width. The existing
@@ -10935,8 +10920,7 @@ let open_message_image ?skill_reference state ~mailbox ~notice ~name source =
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
     | None ->
         state.sent_image_read <- None;
-        notice ~kind:Notice_failure "image preview requires an active connection"
-  end
+        notice ~kind:Notice_failure "image preview requires an active background session"
 
 let current_resource_images (state : state) =
   match state.resource_content, state.resource_pending_key, state.resource_content_error with
@@ -10956,7 +10940,7 @@ let open_resource_image (state : state) ~mailbox =
   let images = current_resource_images state in
   match List.nth_opt images state.resource_image_cursor with
   | Some (_, Masc_tui_image_preview.Output_image {name;source}) ->
-    open_message_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
+    open_preview_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
   | Some (_, Unavailable_image {name;reason}) ->
     notice ~kind:Notice_failure (name ^ ": " ^ reason)
   | Some (_, (Named_path _ | Staged _ | Stored_attachment _ | No_image))
@@ -10966,12 +10950,15 @@ let open_selected_image state ~mailbox preview =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
   match preview with
   | Masc_tui_image_preview.Named_path path -> open_image state ~notice path
-  | Masc_tui_image_preview.Staged attachment -> open_staged_image state ~notice attachment
+  | Masc_tui_image_preview.Staged attachment ->
+      open_preview_image state ~mailbox ~notice
+        ~name:attachment.Masc_tui_keeper_chat_projection.name
+        (Masc_tui_image_requests.Draft attachment)
   | Masc_tui_image_preview.Stored_attachment { name; reference; format } ->
-      open_message_image state ~mailbox ~notice ~name
+      open_preview_image state ~mailbox ~notice ~name
         (Masc_tui_image_requests.Retained {reference;format})
   | Masc_tui_image_preview.Output_image { name; source } ->
-      open_message_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
+      open_preview_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
   | Masc_tui_image_preview.Unavailable_image { name; reason } ->
       notice ~kind:Notice_failure
         (Printf.sprintf "Ctrl-O %s: %s" name reason)
@@ -20383,8 +20370,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
            && pending.sir_view = view && pending.sir_keeper = keeper_name
            && pending.sir_name = name ->
          state.sent_image_read <- None;
-         pending.sir_authority == state.workspace_read_authority
-         && resource_image_reading_is_current state pending
+         image_reading_is_current state pending
        | Some _ | None -> false in
       let same_skill = match skill_reference with
         | None -> true
@@ -20396,7 +20382,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
          && view = state.view && (view = Resources || keeper_name = state.msg_target_keeper_name) && same_skill then begin
         let notice = image_notice state ~view ~keeper_name in
         let refuse reason =
-          notice ~kind:Notice_failure (Printf.sprintf "sent image %s: %s" name reason)
+          notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" name reason)
         in
         match result with
         | Error reason -> refuse reason
@@ -23947,7 +23933,7 @@ and is loaded on demand through keeper_skill.
              | Ok source ->
                  let notice ~kind text = report_action state
                    (match kind with Notice_failure -> "error" | Notice_reply -> "system") text in
-                 open_message_image ~skill_reference:profile.esp_reference state ~mailbox:async_messages
+                 open_preview_image ~skill_reference:profile.esp_reference state ~mailbox:async_messages
                    ~notice ~name:("Declared composition: " ^ profile.esp_name)
                    (Masc_tui_image_requests.Generated (Masc_tui_image_preview.mermaid_source source)))
   in

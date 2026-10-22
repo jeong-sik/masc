@@ -1,6 +1,7 @@
 (** Chat image acquisition outside the render loop. The caller captures the
     endpoint and later checks its request generation before displaying bytes. *)
 type source =
+  | Draft of Masc_tui_keeper_chat_projection.attachment
   | Retained of { reference : Tool_output.artifact_ref;
       format : Masc_tui_image_payload.format }
   | Generated of Masc_tui_image_preview.output_source
@@ -10,7 +11,9 @@ val load :
   diagram_width:int -> diagram_colors:(string * string) option ->
   display:Masc_tui_image_cache.display -> source ->
   (Masc_tui_image_cache.presentation, string) result
-(** Fetch the authenticated peer in an Eio fiber. Run retained-payload
+(** [Draft] decodes only its captured local payload and requires no peer
+    identity or HTTP request. Other sources keep authenticated-peer ownership.
+    Fetch the authenticated peer in an Eio fiber. Run retained-payload
     verification, base64 decoding, remote downloads and image conversion on a
     system thread. Prepare the captured pixel or character-cell presentation
     there as well; the caller owns all terminal writes and stale-result checks. *)

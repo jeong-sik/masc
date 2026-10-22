@@ -6370,7 +6370,7 @@
 (test
  (name test_tui_resource_image_admission)
  (modules test_tui_resource_image_admission)
- (libraries masc_tui_resource_catalog alcotest masc_tui_types masc_tui_mcp masc_tui_resource_images
+ (libraries masc_tui_keeper_chat_projection masc_tui_resource_catalog alcotest masc_tui_types masc_tui_mcp masc_tui_resource_images
   masc_tui_image_preview masc_tui_resources_updates))
 
 (test

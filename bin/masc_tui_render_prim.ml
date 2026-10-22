@@ -551,14 +551,8 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
            && pending.sir_view = state.view
            && (pending.sir_view = Resources
                || pending.sir_keeper = state.msg_target_keeper_name)
-           && pending.sir_authority == state.workspace_read_authority
-           && not state.msx_open
-           && (pending.sir_view <> Resources
-               || (Masc_tui_resource_images.same_reading
-                     ~equal:Masc_tui_resource_catalog.equal_key
-                     pending.sir_resource state.resource_content
-                   && Option.is_none state.resource_pending_key
-                   && Option.is_none state.resource_content_error)) ->
+           && Masc_tui_types.image_reading_is_current state pending
+           && not state.msx_open ->
         Some (Terminal_text.single_line
           (Printf.sprintf "Loading image (any key cancels): %s" pending.sir_name))
     | Some _ | None -> None

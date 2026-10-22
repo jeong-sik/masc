@@ -78,8 +78,57 @@ let test_new_observation () =
   check bool "equal new bytes retire old preview" false (Images.same_reading ~equal:Catalog.equal_key old state.resource_content);
   check (option (pair key string)) "success clears previous error" None state.resource_content_error
 
+let attachment () =
+  { Masc_tui_keeper_chat_projection.attachment_id = "draft-1";
+    name = "local.png"; mime_type = "image/png"; size = 3;
+    data = String.init 4 (fun _ -> 'A') }
+
+let pending state owner =
+  { Types.sir_generation = state.Types.image_request_generation;
+    sir_view = state.view; sir_keeper = state.msg_target_keeper_name;
+    sir_name = "local.png"; sir_owner = owner; sir_resource = None }
+
+let test_local_peer_loss () =
+  let state = state () and original = attachment () in
+  state.msg_attachments <- [original];
+  let local = pending state (Types.Draft_image_read (state.workspace_authority, original)) in
+  let peer = pending state (Types.Peer_image_read state.workspace_read_authority) in
+  Types.suspend_workspace_readings state;
+  check bool "local draft survives peer withdrawal" true (Types.image_reading_is_current state local);
+  check bool "peer reply loses its read epoch" false (Types.image_reading_is_current state peer);
+  check bool "original attachment retained" true (List.hd state.msg_attachments == original);
+  check string "encoded attachment preserved" "AAAA" original.data
+
+let test_local_draft_replacement () =
+  let state = state () and original = attachment () in
+  state.msg_attachments <- [original];
+  let local = pending state (Types.Draft_image_read (state.workspace_authority, original)) in
+  state.msg_attachments <- [attachment ()];
+  check bool "equal replacement is another draft" false (Types.image_reading_is_current state local);
+  state.msg_attachments <- [];
+  check bool "removed draft cannot paint" false (Types.image_reading_is_current state local);
+  state.msg_attachments <- [original];
+  state.workspace_authority <- Types.Workspace_authority 1;
+  check bool "same object in another workspace cannot paint" false (Types.image_reading_is_current state local)
+
+let test_peer_resource_owner () =
+  let state = state () and original = parts () in
+  state.view <- Types.Resources;
+  state.resource_content <- Some (uri, original);
+  let peer = { (pending state (Types.Peer_image_read state.workspace_read_authority)) with
+    sir_resource = state.resource_content } in
+  check bool "original peer resource owned" true (Types.image_reading_is_current state peer);
+  state.resource_content <- Some (uri, parts ());
+  check bool "equal new response retires preview" false (Types.image_reading_is_current state peer);
+  state.resource_content <- Some (uri, original);
+  state.resource_pending_key <- Some uri;
+  check bool "pending replacement cannot paint" false (Types.image_reading_is_current state peer)
+
 let () = run "resource image admission" ["stored source",[
   test_case "original SVG and multipart admission" `Quick test_original_admission;
   test_case "wrong pending URI" `Quick test_wrong_pending;
   test_case "failed and detached completion" `Quick test_failed_read;
-  test_case "new immutable observation" `Quick test_new_observation]]
+  test_case "new immutable observation" `Quick test_new_observation;
+  test_case "local draft and peer withdrawal" `Quick test_local_peer_loss;
+  test_case "local draft replacement and workspace" `Quick test_local_draft_replacement;
+  test_case "peer resource owner" `Quick test_peer_resource_owner]]

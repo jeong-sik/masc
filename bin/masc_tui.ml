@@ -10777,8 +10777,7 @@ let current_resource_images (state : state) =
   match state.resource_content, state.resource_pending_key, state.resource_content_error with
   | Some (uri, contents), None, None ->
     let mime_type = Option.bind state.resources_list (fun resources ->
-      Option.bind (List.find_opt (fun resource ->
-        Masc_tui_resource_catalog.equal_key (Masc_tui_resource_catalog.key resource) uri) resources)
+      Option.bind (Masc_tui_resource_catalog.entry_for_key resources uri)
         (fun resource -> (Masc_tui_resource_catalog.metadata resource).mime_type)) in
     Masc_tui_resource_images.images ~mime_type contents
   | (Some _ | None), (Some _ | None), (Some _ | None) -> []
@@ -13405,6 +13404,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resource_content <- None;
   state.resource_content_error <- None;
   state.resource_pending_key <- None;
+  state.resource_read_owner <- None;
+  state.resource_revision_history <- [];
   state.resource_scroll <- 0;
   state.resource_image_cursor <- 0;
   state.observer_cursor <- None;
@@ -19598,8 +19599,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
       Code_results.apply_history state request result
   | Resources_listed result ->
       Masc_tui_resources_updates.listed state result
-  | Resource_read (key, result) ->
-      Masc_tui_resources_updates.read_done state ~key result
+  | Resource_read (request, result) ->
+      Masc_tui_resources_updates.read_done state ~request result
   | Github_identity_view_loaded (request, result) ->
       Masc_tui_identity_updates.github_view_loaded state request result
   | Identity_switch_set (keeper_name, provider_id, enabled, result) ->
@@ -28845,6 +28846,14 @@ and is loaded on demand through keeper_skill.
        | Some (("," | ".") as direction)
          when state.view = Resources && state.resource_focus = Right_pane ->
            step_resource_image state ~delta:(if direction = "." then 1 else -1)
+       | Some (("{" | "}") as bracket)
+         when state.view = Resources && state.resource_focus = Right_pane ->
+           Masc_tui_resources_updates.step_revision state
+             ~direction:(if bracket = "{" then Masc_tui_resource_catalog.Older else Newer)
+             ~read:(fun ~key -> Masc_tui_resources_requests.launch_read state
+               ~host:server_peer_host
+               ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
+               ~check:(capture_workspace_check state ~mailbox:async_messages) ~key)
        | Some (("[" | "]") as bracket)
          when state.view = Resources && state.resource_focus = Right_pane ->
            step_detail_cursor

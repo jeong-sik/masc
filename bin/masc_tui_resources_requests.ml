@@ -36,17 +36,21 @@ let launch_list state ~host ~launch ~check =
 let launch_read state ~host ~launch ~check ~key =
   retain_resource_read state ~key;
   if server_authority_ready state then begin
+    let owner = ref () in
+    state.resource_read_owner <- Some owner;
+    let request = { Catalog.key; owner } in
     let port = state.port in
     let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
     let captured_session = state.mcp_session in
     launch
       ~deliver:(fun result -> Resource_read
-        (key, Masc_tui_async_read.attribute Masc_tui_async_read.Resource_read result))
+        (request, Masc_tui_async_read.attribute Masc_tui_async_read.Resource_read result))
       (fun () -> match key with
         | Catalog.Mcp_uri uri ->
           let* session_id = session ~host ~port captured_session in
           let* () = check () in
           Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id ~request_id ~uri
+          |> Result.map Catalog.mcp_reading
         | Catalog.Report_revision report ->
           let* () = check () in
           let* json = report_json ~host ~port ~path:(Catalog.report_path report) in

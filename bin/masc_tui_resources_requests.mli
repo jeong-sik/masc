@@ -22,15 +22,16 @@ val launch_list
     Selection is retained while authority is unconfirmed, without invoking
     [launch] or [check]. Same-workspace recovery resumes the pending key;
     foreign-workspace reconciliation clears it. Resource_read failure
-    attribution is applied exactly once. *)
+    attribution is applied exactly once. Every launched read has a fresh owner;
+    a superseded response cannot settle a later request for the same key. *)
 val launch_read
   :  Masc_tui_types.state
   -> host:string
   -> launch:
        (deliver:
-          ((Masc_tui_mcp.resource_content list, string) result
+          ((Masc_tui_resource_catalog.reading, string) result
            -> Masc_tui_async_protocol.async_msg)
-        -> (unit -> (Masc_tui_mcp.resource_content list, string) result)
+        -> (unit -> (Masc_tui_resource_catalog.reading, string) result)
         -> unit)
   -> check:(unit -> (unit, string) result)
   -> key:Masc_tui_resource_catalog.key

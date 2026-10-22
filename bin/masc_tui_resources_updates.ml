@@ -16,7 +16,7 @@ let listed state result =
     let rec index_of_uri index uri = function
       | [] -> None
       | resource :: rest ->
-        if Catalog.equal_key (Catalog.key resource) uri then Some index
+        if Catalog.owns_key resource uri then Some index
         else index_of_uri (index + 1) uri rest in
     (match Option.bind open_uri (fun uri -> index_of_uri 0 uri rows) with
      | Some cursor -> state.resources_cursor <- cursor
@@ -24,24 +24,29 @@ let listed state result =
        state.resources_cursor <- max 0 (min state.resources_cursor (List.length rows - 1));
        if Option.is_some open_uri then begin
          state.resource_pending_key <- None;
+         state.resource_read_owner <- None;
+         state.resource_revision_history <- [];
          state.resource_content <- None;
          state.resource_content_error <- None;
          state.resource_scroll <- 0
        end)
   | Error detail -> state.resources_error <- Some detail
 
-let read_done state ~key result =
-  match state.resource_pending_key with
-  | Some pending_uri when Catalog.equal_key pending_uri key ->
+let read_done state ~(request : Catalog.read_request) result =
+  match state.resource_pending_key, state.resource_read_owner with
+  | Some pending_key, Some owner when owner == request.owner && Catalog.equal_key pending_key request.key ->
+    let key = request.key in
     state.resource_pending_key <- None;
+    state.resource_read_owner <- None;
     (match result with
-     | Ok contents ->
+     | Ok (reading : Catalog.reading) ->
        (* Acquisition retains original bytes; only display copies are sanitized. *)
-       state.resource_content <- Some (key, contents);
+       state.resource_content <- Some (key, reading.parts);
+       state.resource_revision_history <- reading.revisions;
        state.resource_image_cursor <- 0;
        state.resource_content_error <- None
      | Error detail -> state.resource_content_error <- Some (key, detail))
-  | Some _ | None -> ()
+  | (Some _ | None), (Some _ | None) -> ()
 
 let open_selected state ~read =
   match Option.bind state.resources_list (fun resources ->
@@ -50,3 +55,13 @@ let open_selected state ~read =
   | Some resource ->
     state.resource_focus <- Right_pane;
     read ~key:(Catalog.key resource)
+
+let step_revision state ~direction ~read =
+  let current = match state.resource_pending_key, state.resource_content_error, state.resource_content with
+    | Some key, _, _ | None, Some (key, _), _ | None, None, Some (key, _) -> Some key
+    | None, None, None -> None in
+  match current with
+  | Some (Catalog.Report_revision report) ->
+    Option.iter (fun revision -> read ~key:(Catalog.Report_revision revision))
+      (Catalog.adjacent_revision direction ~current:report state.resource_revision_history)
+  | Some (Catalog.Mcp_uri _) | None -> ()

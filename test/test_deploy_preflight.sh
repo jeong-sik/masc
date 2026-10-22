@@ -126,6 +126,7 @@ case "\$1" in
     durable-filenames) printf 'snapshot=fixture-snapshot.json\\nwal=fixture-wal.jsonl\\n' ;;
     validate-runtime-config) echo "runtime.toml ok" ;;
     validate-browser-addon)
+        if [ "\$2" = --help ]; then exit 0; fi
         if [ "$1" = refuse ]; then
             echo "a browser lane host is installed and no browser Add-on declaration is saved" >&2
             exit 1
@@ -167,3 +168,29 @@ then
 fi
 
 echo "deploy preflight accepts a declared browser Add-on"
+
+# A helper built before the check has no such command. The gate says so rather
+# than reading cmdliner's usage error as a refusal of the workspace.
+cat > "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe" <<'HELPER'
+#!/usr/bin/env bash
+case "$1" in
+    build-commit) echo fixture-commit ;;
+    durable-filenames) printf 'snapshot=fixture-snapshot.json\nwal=fixture-wal.jsonl\n' ;;
+    validate-runtime-config) echo "runtime.toml ok" ;;
+    *) echo "unknown command: $1" >&2; exit 124 ;;
+esac
+HELPER
+chmod +x "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe"
+if MASC_DEPLOYMENT_PREFLIGHT_HELPER="$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe" \
+    bash "$GATE" --base-path "$FIXTURE_DIR/runtime" --runtime-config-only \
+    >/dev/null 2>"$BROWSER_ERR"
+then
+    echo "expected a helper without the browser Add-on check to be refused" >&2
+    exit 1
+fi
+if ! grep -q "predates the browser Add-on check" "$BROWSER_ERR"; then
+    echo "an old helper is not named as the reason" >&2
+    cat "$BROWSER_ERR" >&2
+    exit 1
+fi
+echo "deploy preflight names a helper that predates the browser Add-on check"

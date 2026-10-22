@@ -138,6 +138,10 @@ check_runtime_config() {
 # declaration is the operator's to save, so the gate refuses and writes
 # nothing. This runs before the stop step, where a refusal stops nothing.
 check_browser_addon() {
+  # A helper built before this check answers an unknown command with a usage
+  # error, which must not read as a refusal of this workspace.
+  "$PREFLIGHT_HELPER" validate-browser-addon --help >/dev/null 2>&1 \
+    || fail "the preflight helper predates the browser Add-on check (it has no validate-browser-addon command): build the helper from this tree, then run this again"
   "$PREFLIGHT_HELPER" validate-browser-addon --base-path "$BASE_PATH" \
     || fail "this workspace has a browser lane host and no browser Add-on declaration (the helper verdict above says what is missing); nothing was stopped or installed: save the declaration through the running server's lane Add-on editor, then run this again"
 }

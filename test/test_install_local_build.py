@@ -164,7 +164,7 @@ def preflight_helper(build, verdict_exit=0, unnamed_workspace=None, old=False,
     validate = ("" if old else
                 f"  validate-runtime-config) echo 'runtime.toml fixture verdict'; exit {verdict_exit} ;;\n"
                 f"  validate-stores) echo 'stored state fixture verdict'; exit {stores_exit} ;;\n"
-                "  validate-browser-addon) "
+                "  validate-browser-addon) if [ \"$2\" = --help ]; then exit 0; fi; "
                 + ("echo 'browser Add-on fixture verdict' >&2; " if browser_addon_exit else "")
                 + f"exit {browser_addon_exit} ;;\n")
     path.write_text("#!/bin/sh\n"

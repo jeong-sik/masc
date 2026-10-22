@@ -3175,7 +3175,7 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
     Tui_types.hold_settled_log state running;
     let preview : Tui_decode.keeper_turn_preview =
       { ktp_status_text = "glm · receiving response"; ktp_updated_at_unix = 130.
-      ; ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail = "said"; ktp_last_tool = None; ktp_preparation=None; ktp_preparation_timeline=None; ktp_execution_scope=None }
+      ; ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail = "said"; ktp_last_tool = None; ktp_preparation=None; ktp_preparation_timeline=None; ktp_execution_scope=None; ktp_activity=None }
     in
     state.keeper_turns <-
       [ { Tui_decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"
@@ -5703,7 +5703,7 @@ let test_speech_keeps_original_words_across_metadata_and_retry () =
           ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance; started_at_unix=120.;
             interrupt_token="preview-stop"; turn_ref=None;
             preview=Some {ktp_status_text="working"; ktp_updated_at_unix=121.;
-              ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail="관측 답변 원문"; ktp_last_tool=None; ktp_preparation=None; ktp_preparation_timeline=None; ktp_execution_scope=None}}}];
+              ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail="관측 답변 원문"; ktp_last_tool=None; ktp_preparation=None; ktp_preparation_timeline=None; ktp_execution_scope=None; ktp_activity=None}}}];
         let preview = Masc_tui_render_chat.polled_turn_output_entries state ~keeper_name:"alpha"
             ~role_label_column:(Layout.chat_role_label_width ~pane_cells:columns) in
         check (list string) "polled speech separates its observation status"
@@ -5845,7 +5845,7 @@ let test_scroll_pins_follow_live_and_hold_transient_rows () =
        ktr_state=Keeper_turn_running {lane=Turn_lane_maintenance; started_at_unix=120.;
          interrupt_token="one-observed-turn"; turn_ref=None;
          preview=Some {ktp_status_text="working"; ktp_updated_at_unix=121.;
-           ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail=text; ktp_last_tool=None; ktp_preparation=None; ktp_preparation_timeline=None; ktp_execution_scope=None}}} in
+           ktp_text_position={kpp_generation=0; kpp_start_byte=0}; ktp_text_tail=text; ktp_last_tool=None; ktp_preparation=None; ktp_preparation_timeline=None; ktp_execution_scope=None; ktp_activity=None}}} in
     polled.keeper_turns <- [preview long_body];
     ignore (draw polled);
     Tui_types.set_msg_scroll polled 5;

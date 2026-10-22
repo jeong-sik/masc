@@ -59,6 +59,13 @@ type t = {
 
 val caller_agent_name_from_arguments : Yojson.Safe.t -> string option
 
+val without_caller_marker : Yojson.Safe.t -> Yojson.Safe.t
+(** The arguments without the caller marker that
+    {!caller_agent_name_from_arguments} reads. The marker names the caller,
+    not a tool input, so a Lane Add-on export is validated and invoked
+    without it; its caller travels in the host-context envelope. Other
+    underscore names stay, because an export schema may declare them. *)
+
 val resolve :
   config:Workspace_utils_backend_setup.config ->
   tool_name:string ->

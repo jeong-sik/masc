@@ -95,11 +95,15 @@ let snapshot_matches ~label ~path descriptor (info:Unix.stats) =
       ~expected:{Requirement.device=descriptor.device;inode=descriptor.inode} ~observed) in
   if info.st_size=descriptor.bytes then Ok ()
   else Error (Printf.sprintf "%s %s must have %d bytes; it has %d" label path descriptor.bytes info.st_size)
+let pinned ~label ~path ~expected observed =
+  if same_identity observed expected then Ok ()
+  else Error (Requirement.replaced ~label ~path ~expected:(Requirement.identity expected)
+    ~observed:(Requirement.identity observed))
 let check t =
   let* allocation=private_directory ~label:allocation_label t.directory in
   let* root=private_directory ~label:snapshots_label t.root in
-  if same_identity allocation t.allocation && same_identity root t.root_stat then Ok ()
-  else Error "download allocation identity changed"
+  let* ()=pinned ~label:allocation_label ~path:t.directory ~expected:t.allocation allocation in
+  pinned ~label:snapshots_label ~path:t.root ~expected:t.root_stat root
 let create ~directory = io (fun () ->
   let* allocation=private_directory ~label:allocation_label directory in
   let root=Filename.concat directory "download-snapshots" in Unix.mkdir root 0o700;
@@ -133,7 +137,9 @@ let source_parents t path =
 let check_parents parents = List.fold_left (fun result (path,expected) ->
   let* ()=result in let current=Unix.lstat path in
   if same_identity current expected && current.st_uid=expected.Unix.st_uid
-    && current.st_perm=expected.st_perm then Ok () else Error "download source parent identity changed") (Ok ()) parents
+    && current.st_perm=expected.st_perm then Ok ()
+  else Error ("download source parent " ^ path ^ " changed: " ^ Yojson.Safe.to_string (`Assoc [
+    "expected",file_observation expected;"observed",file_observation current]))) (Ok ()) parents
 let write_all fd buffer count =
   let rec loop offset = if offset<count then
     let written=Unix.write fd buffer offset (count-offset) in

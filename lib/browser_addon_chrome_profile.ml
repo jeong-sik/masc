@@ -1,5 +1,5 @@
 module Requirement = Resource_requirement
-type identity = { device:int; inode:int }
+type identity = Requirement.identity = { device:int; inode:int }
 type persistent = { path:string; root:identity; slot:identity; gate:identity;
   lease:identity; anchor:identity }
 type t = Private | Persistent of persistent
@@ -27,24 +27,35 @@ let to_json = function
   | Persistent p -> `Assoc ["kind",`String "persistent";"path",`String p.path;
       "root",id_json p.root;"slot",id_json p.slot;"gate",id_json p.gate;
       "lease",id_json p.lease;"anchor",id_json p.anchor]
+let descriptor_label = "Chrome profile descriptor"
+let persistent_keys = ["anchor";"gate";"kind";"lease";"path";"root";"slot"]
+let field_refusal name requirement value = Printf.sprintf "%s field %s must be %s; it is %s"
+  descriptor_label name requirement (Yojson.Safe.to_string value)
+let identity_requirement = "an object with exactly the integer keys device and inode"
+let integer = function
+  | `Int value -> Some value
+  | `Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> None
 let of_json = function
   | `Assoc ["kind",`String "private"] -> Ok Private
-  | `Assoc fields when List.sort String.compare (List.map fst fields)=
-      ["anchor";"gate";"kind";"lease";"path";"root";"slot"] ->
-    let* ()=if List.assoc "kind" fields=`String "persistent" then Ok ()
-      else Error "unknown Chrome profile lifetime" in
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=persistent_keys ->
+    let* ()=match List.assoc "kind" fields with
+      | `String "persistent" -> Ok ()
+      | value -> Error (field_refusal "kind" "\"persistent\"" value) in
     let* path=match List.assoc "path" fields with
-      | `String path when absolute path -> Ok path | _ -> Error "invalid persistent Chrome profile path" in
+      | `String path when absolute path -> Ok path
+      | value -> Error (field_refusal "path" "an absolute path without NUL" value) in
     let read name=match List.assoc name fields with
-      | `Assoc pair when List.sort String.compare (List.map fst pair)=["device";"inode"] ->
-        (match List.assoc "device" pair,List.assoc "inode" pair with
-         | `Int device,`Int inode -> Ok {device;inode}
-         | _ -> Error "invalid Chrome profile resource identity")
-      | _ -> Error "invalid Chrome profile resource identity" in
+      | `Assoc pair as value when List.sort String.compare (List.map fst pair)=["device";"inode"] ->
+        (match integer (List.assoc "device" pair),integer (List.assoc "inode" pair) with
+         | Some device,Some inode -> Ok {device;inode}
+         | None,(Some _ | None) | Some _,None -> Error (field_refusal name identity_requirement value))
+      | value -> Error (field_refusal name identity_requirement value) in
     let* root=read "root" in let* slot=read "slot" in let* gate=read "gate" in
     let* lease=read "lease" in let* anchor=read "anchor" in
     Ok (Persistent {path;root;slot;gate;lease;anchor})
-  | _ -> Error "invalid Chrome profile descriptor"
+  | (`Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as value ->
+    Error (Printf.sprintf "%s must be {\"kind\":\"private\"} or an object with exactly the keys %s; it is %s"
+      descriptor_label (String.concat ", " persistent_keys) (Yojson.Safe.to_string value))
 let load_anchor path =
   let* text=Fs_compat.load_owned_regular_file ~ownership_root:path (anchor_path path)
     |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
@@ -54,16 +65,22 @@ let load_anchor path =
     (match selected with Persistent p -> Ok (Some p)
      | Private -> Error "persistent Chrome anchor cannot select a private allocation")
 let verify p = protect (fun () ->
-  let* ()=if Unix.realpath p.path=p.path then Ok () else Error "Chrome profile path identity changed" in
+  let* ()=Requirement.canonical ~label:profile_label p.path in
   let resources=[profile_label,p.path,true,p.root;slot_label,claim_directory p,true,p.slot;
     gate_label,Filename.concat (claim_directory p) "gate",false,p.gate;
     lease_label,Filename.concat (claim_directory p) "lease",false,p.lease;
     anchor_label,anchor_path p.path,false,p.anchor] in
   let* ()=List.fold_left (fun result (label,path,directory,expected) ->
     let* ()=result in let* observed=owned ~label ~directory path in
-    if observed=expected then Ok () else Error "Chrome profile or stable claim inode was replaced") (Ok ()) resources in
+    if observed=expected then Ok ()
+    else Error (Requirement.replaced ~label ~path ~expected ~observed)) (Ok ()) resources in
   let* anchor=load_anchor p.path in
-  if anchor=Some p then Ok () else Error "Chrome profile anchor changed")
+  let required=Yojson.Safe.to_string (to_json (Persistent p)) in
+  match anchor with
+  | Some recorded when recorded=p -> Ok ()
+  | Some recorded -> Error (Printf.sprintf "%s %s must record %s; it records %s" anchor_label
+      (anchor_path p.path) required (Yojson.Safe.to_string (to_json (Persistent recorded))))
+  | None -> Error (Printf.sprintf "%s %s must record %s; it is missing" anchor_label (anchor_path p.path) required))
 let sync path =
   let fd=Unix.openfile path [Unix.O_RDONLY;Unix.O_CLOEXEC] 0 in
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)

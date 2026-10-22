@@ -19,7 +19,8 @@ let private_directory ~label path =
 let check t =
   let* info=private_directory ~label:uploads_label t.directory in
   if info.Unix.st_dev=t.device && info.st_ino=t.inode then Ok ()
-  else Error "upload allocation identity changed"
+  else Error (Requirement.replaced ~label:uploads_label ~path:t.directory
+    ~expected:{Requirement.device=t.device;inode=t.inode} ~observed:(Requirement.identity info))
 let create ~directory = protect (fun () ->
   let* _=private_directory ~label:"browser allocation directory" directory in
   let directory=Filename.concat directory "uploads" in

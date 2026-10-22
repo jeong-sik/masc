@@ -1,16 +1,24 @@
 let ( let* ) = Result.bind
+let configuration_label = "automation configuration"
+let configuration_keys = ["binary";"driver"]
 let configuration_to_json (configuration:Browser_configuration.automation) = `Assoc [
   "driver",`String configuration.driver;
   "binary",(match configuration.binary with None -> `Null | Some binary -> `String binary)]
 let configuration_of_json = function
-  | `Assoc fields when List.sort String.compare (List.map fst fields)=["binary";"driver"] ->
-    let path = function `String path when not (Filename.is_relative path) && not (String.contains path '\000') -> Ok path
-      | _ -> Error "automation executable must be an absolute path" in
-    let* driver=match List.assoc_opt "driver" fields with Some value -> path value | None -> Error "missing driver" in
-    let* binary=match List.assoc_opt "binary" fields with
-      | Some `Null -> Ok None | Some value -> Result.map Option.some (path value) | None -> Error "missing binary" in
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=configuration_keys ->
+    let path name requirement = function
+      | `String path when not (Filename.is_relative path) && not (String.contains path '\000') -> Ok path
+      | value -> Error (Printf.sprintf "%s field %s must be %s; it is %s"
+          configuration_label name requirement (Yojson.Safe.to_string value)) in
+    let* driver=path "driver" "an absolute path without NUL" (List.assoc "driver" fields) in
+    let* binary=match List.assoc "binary" fields with
+      | `Null -> Ok None
+      | value -> Result.map Option.some (path "binary" "null or an absolute path without NUL" value) in
     Ok {Browser_configuration.driver;binary}
-  | _ -> Error "invalid automation configuration"
+  | `Assoc fields ->
+    Error (Resource_requirement.keys ~label:configuration_label ~found:(List.map fst fields) ~required:configuration_keys)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as value ->
+    Error (Printf.sprintf "%s must be a JSON object; it is %s" configuration_label (Yojson.Safe.to_string value))
 let request ~pool ~clock ~endpoint ~method_ ~path ~body =
   match Masc_http_client.Pool.request pool ~clock ~timeout_seconds:60.
     ~method_ ~url:(endpoint ^ path) ~headers:["Content-Type","application/json"]

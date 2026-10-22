@@ -10,8 +10,11 @@ type configuration = { chrome : string; extension : string; launcher : string;
 
 let absolute path = path<>"" && not (Filename.is_relative path) && not (String.contains path '\000')
 let configuration ~(browser:Browser_configuration.stagehand) ~launcher ~guardian ~claim_directory =
-  let* ()=if List.for_all absolute [browser.chrome;browser.extension;launcher;guardian;claim_directory]
-    then Ok () else Error "Chrome Add-on resources must have absolute paths without NUL" in
+  let* ()=List.fold_left (fun result (name,path) -> let* ()=result in
+      if absolute path then Ok ()
+      else Error (Printf.sprintf "%s must be an absolute path without NUL; it is %S" name path)) (Ok ())
+    ["[browser.stagehand] chrome",browser.chrome;"[browser.stagehand] extension",browser.extension;
+     "Chrome launcher",launcher;"Chrome guardian",guardian;"Chrome claim directory",claim_directory] in
   let* profile=Profile.select ~path:browser.profile in
   Ok {chrome=browser.chrome;extension=browser.extension;launcher;guardian;claim_directory;profile}
 
@@ -21,21 +24,25 @@ let claim_directories c = c.claim_directory :: (match c.profile with
 let configuration_to_json c = `Assoc ["chrome",`String c.chrome;"extension",`String c.extension;
   "launcher",`String c.launcher;"guardian",`String c.guardian;"claim_directory",`String c.claim_directory;
   "profile",Profile.to_json c.profile]
+let configuration_label = "Chrome Add-on configuration"
+let configuration_keys = ["chrome";"claim_directory";"extension";"guardian";"launcher";"profile"]
 let configuration_of_json = function
-  | `Assoc fields when List.sort String.compare (List.map fst fields)=
-      ["chrome";"claim_directory";"extension";"guardian";"launcher";"profile"] ->
-    let field name=match List.assoc_opt name fields with
-      | Some (`String path) when absolute path -> Ok path
-      | None | Some _ -> Error ("invalid Chrome resource: " ^ name) in
+  | `Assoc fields when List.sort String.compare (List.map fst fields)=configuration_keys ->
+    let field name=match List.assoc name fields with
+      | `String path when absolute path -> Ok path
+      | value -> Error (Printf.sprintf "%s field %s must be an absolute path without NUL; it is %s"
+          configuration_label name (Yojson.Safe.to_string value)) in
     let* chrome=field "chrome" in
     let* extension=field "extension" in
     let* launcher=field "launcher" in
     let* guardian=field "guardian" in
     let* claim_directory=field "claim_directory" in
-    let* profile=match List.assoc_opt "profile" fields with
-      | Some value -> Profile.of_json value | None -> Error "missing Chrome profile lifetime" in
+    let* profile=Profile.of_json (List.assoc "profile" fields) in
     Ok {chrome;extension;launcher;guardian;claim_directory;profile}
-  | _ -> Error "invalid Chrome Add-on configuration"
+  | `Assoc fields ->
+    Error (Requirement.keys ~label:configuration_label ~found:(List.map fst fields) ~required:configuration_keys)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as value ->
+    Error (Printf.sprintf "%s must be a JSON object; it is %s" configuration_label (Yojson.Safe.to_string value))
 
 let protect work = try work () with
   | (Unix.Unix_error _ | Sys_error _ | Yojson.Json_error _) as exn -> Error (Printexc.to_string exn)

@@ -265,6 +265,24 @@ let test_a_file_this_build_does_not_carry_is_removed () =
          check string ("package file " ^ name) contents (read (Filename.concat package name)))
       (embedded_files ()))
 
+(* The crunch rule carries only .toml, .json and .md files, so a file of
+   another kind added to addons/browser would be left out of the binary
+   without a sound. Hidden files (a Finder's .DS_Store) are not part of the
+   package. *)
+let test_the_binary_carries_every_file_of_the_source_package () =
+  let source = "../addons/browser" in
+  let rec files relative =
+    Sys.readdir (if relative = "" then source else Filename.concat source relative)
+    |> Array.to_list
+    |> List.filter (fun name -> not (String.starts_with ~prefix:"." name))
+    |> List.concat_map (fun name ->
+      let path = if relative = "" then name else Filename.concat relative name in
+      if Sys.is_directory (Filename.concat source path) then files path else [ path ])
+  in
+  check (list string) "every source file is carried"
+    (List.sort String.compare (files ""))
+    (List.sort String.compare Embedded_browser_addon.file_list)
+
 let test_a_relative_base_path_is_refused () =
   match S.plan ~base_path:"relative/workspace" with
   | Error (S.Base_path_not_absolute _) -> ()
@@ -295,6 +313,8 @@ let () =
             test_a_workspace_without_a_config_root_is_refused
         ; test_case "a file this build does not carry is removed" `Quick
             test_a_file_this_build_does_not_carry_is_removed
+        ; test_case "the binary carries every file of the source package" `Quick
+            test_the_binary_carries_every_file_of_the_source_package
         ; test_case "a relative base path is refused" `Quick test_a_relative_base_path_is_refused
         ] )
     ]

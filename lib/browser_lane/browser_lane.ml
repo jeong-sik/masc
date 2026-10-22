@@ -468,23 +468,25 @@ let activity_refusal lane verb =
   Option.map (fun rejection -> Rejected_before_effect (activity_rejection_message rejection))
     (activity_rejection lane verb)
 
-type browser = Firefox | Zen
-let browser_name = function Firefox -> "firefox" | Zen -> "zen"
+type browser = Firefox | Zen | Ego_lite
+let browser_name = function Firefox -> "firefox" | Zen -> "zen" | Ego_lite -> "ego_lite"
 let browser_of_string = function
-  | "firefox" -> Ok Firefox | "zen" -> Ok Zen | _ -> Error "unsupported_browser"
+  | "firefox" -> Ok Firefox | "zen" -> Ok Zen | "ego_lite" -> Ok Ego_lite | _ -> Error "unsupported_browser"
 type client_id = Uuidm.t
 let client_id_to_string = Uuidm.to_string
 let client_id_of_string value =
   match Uuidm.of_string value with
   | Some id when String.equal (Uuidm.to_string id) value -> Ok id
   | _ -> Error "invalid_client_id"
-type live_transport = Web_extension | Webdriver_bidi [@@deriving enumerate]
+type live_transport = Web_extension | Webdriver_bidi | Ego_task_space [@@deriving enumerate]
 let live_transport_to_string = function
   | Web_extension -> "web_extension"
   | Webdriver_bidi -> "webdriver_bidi"
+  | Ego_task_space -> "ego_task_space"
 let live_transport_of_string = function
   | "web_extension" -> Ok Web_extension
   | "webdriver_bidi" -> Ok Webdriver_bidi
+  | "ego_task_space" -> Ok Ego_task_space
   | _ -> Error "unsupported_browser_transport"
 
 (* Which live work each transport serves. Every pair is spelled out, so a new
@@ -497,7 +499,12 @@ let live_transport_of_string = function
    activation also gives the browser window system focus. The BiDi peer's
    history, close and navigation act only on tabs it opened; the extension
    opens none. test_browser_bidi_peer holds this table to what that peer
-   does. *)
+   does.
+
+   The ego connection runs fixed scripts in one ego lite task space
+   (RFC-browser-live-ego). It reads that space's pages with the same page
+   scripts as the other connections; test_browser_ego_peer holds its column
+   to what Browser_ego_peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
   | ( (Web_extension | Webdriver_bidi)
@@ -512,6 +519,11 @@ let live_transport_serves transport capability =
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer) -> true
   | Webdriver_bidi, Browser_zoom -> false
+  | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read) -> true
+  | Ego_task_space, (Document_source | Dom_interaction | Point_click | Point_scroll | Trusted_hover
+                    | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
+                    | Trusted_keyboard | Browser_zoom | Viewport_resize | Tab_activation | Tab_history
+                    | Tab_navigation | Tab_closing | Tab_creation) -> false
 ;;
 
 let live_transports_serving capability =
@@ -522,6 +534,7 @@ let live_transports_serving capability =
 let live_transport_setup_doc = function
   | Web_extension -> "connectors/browser/host/README.md"
   | Webdriver_bidi -> "docs/design/browser-bidi-live-host.md"
+  | Ego_task_space -> "docs/rfc/RFC-browser-live-ego.md"
 ;;
 
 type client_info = { client_id : client_id; browser : browser; version : string; engine_version : string;

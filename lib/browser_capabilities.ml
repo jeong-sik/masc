@@ -40,15 +40,25 @@ let observed = "Keep the observed browser identity and tabId; re-read after an e
 let target = "Use one freshly observed selector or documentId/nodeId; the target must be visible and unobstructed."
 let geometry = "Use the current documentId and viewport geometry; stale URL/document/viewport is refused."
 let native = function Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium -> true
-  | Connected Browser_lane.Web_extension | Safari_unavailable -> false
+  | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable -> false
+let ego_pages = "Only a page the ego task space manages; a tab the operator opened in that space is listed and refused before any read."
+(* A read every connection serves, which an ego connection serves only on its own pages. *)
+let read backend invocation constraints = match backend with
+  | Connected Browser_lane.Ego_task_space -> Conditional {invocation;constraints=constraints @ [ego_pages]}
+  | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
+    (match constraints with [] -> Available invocation | _ :: _ -> Conditional {invocation;constraints})
+(* A DOM input every connection serves but ego's. *)
+let dom_input backend support = match backend with
+  | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium -> support
+  | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing
 let gecko_only backend invocation constraints = match backend with
   | Owned_gecko -> Conditional {invocation;constraints}
-  | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_chromium ->
+  | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_chromium ->
     Unsupported "This public operation is implemented only by the owned Gecko adapter."
   | Safari_unavailable -> Unsupported "No Safari adapter is installed in MASC."
 let support backend operation = match backend with
   | Safari_unavailable -> Unsupported "No Safari adapter is installed in MASC; installed Safari alone is not a connection."
-  | (Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium) ->
+  | (Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Owned_chromium) ->
     match operation with
     | List_tabs -> available Tabs
     | Open_tab -> (match backend with
@@ -56,25 +66,25 @@ let support backend operation = match backend with
           ["Requires the exact observed clientId; creation can succeed even if navigation fails. Inspect the returned tabId before another create."]
       | Owned_gecko | Owned_chromium -> conditional ~action:"open_tab" Act
           ["Requires an open work session; creation and navigation can partially succeed. Preserve any created tabId in the partial receipt and inspect that exact browser/tab before another create."]
-      | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
+      | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable -> missing)
     | Close_tab -> (match backend with
       | Owned_gecko | Owned_chromium -> conditional ~action:"close_tab" Act
           [observed;"Top-level tab only; the ID is retired after confirmed closure, not a lost or unconfirmed receipt."]
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"close_tab" Act
           [observed;"Only a tab this connection opened with open_tab; a tab the operator opened is refused before any effect. Closes without running the page's unload prompt."]
-      | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
+      | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable -> missing)
     | Activate_tab -> (match backend with
       | Connected Browser_lane.Web_extension -> conditional ~action:"activate_tab" Interact
           [observed;"Changes the browser's active tab without promising window focus."]
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"activate_tab" Interact
           [observed;"Requires expectedUrl; a tab whose page moved on is refused before any effect.";
            "Brings the tab to the front and gives its browser window system focus, which can take focus from what the operator is doing."]
-      | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
+      | Connected Browser_lane.Ego_task_space | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
     | List_windows -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional Tabs
           ["Every list_tabs row carries windowId when Firefox names the tab's window; tabs with the same windowId share a window, and the distinct values are the windows.";
            "windowId is opaque and only comparable within one connection. There is no window title, size or position."]
-      | Connected Browser_lane.Web_extension | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
+      | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
     | Create_window | Close_window -> missing
     | Navigate -> (match backend with
       | Owned_gecko | Owned_chromium -> conditional Goto ["An open owned session and an HTTP(S) URL are required; preserve its concrete browser binding."]
@@ -83,57 +93,63 @@ let support backend operation = match backend with
            "Waits for the new document. An error after the navigation started leaves the result unknown: inspect the same tab."]
       | Connected Browser_lane.Web_extension -> Unsupported
           "A connected WebExtension does not navigate a tab; use an inspected follow_link, or a live BiDi connection's open_tab and goto."
-      | Safari_unavailable -> missing)
-    | Follow_link -> conditional ~action:"follow_link" Interact
-        [observed;target;"Requires expectedUrl and an observed same-tab HTTP(S) anchor; rejects downloads, new-window targets and unsupported referrer semantics."]
+      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
+    | Follow_link -> dom_input backend (conditional ~action:"follow_link" Interact
+        [observed;target;"Requires expectedUrl and an observed same-tab HTTP(S) anchor; rejects downloads, new-window targets and unsupported referrer semantics."])
     | Back -> (match backend with
         | Owned_gecko | Owned_chromium -> conditional ~action:"back" Act
           [observed;"Top-level tab only; inspect the same tab after navigation or an unknown result."]
         | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"back" Act
           [observed;"Top-level tab only, and only a tab this connection opened with open_tab; an operator tab is refused before any effect. An error after the step started leaves the result unknown: inspect the same tab."]
-        | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
+        | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable -> missing)
     | Forward -> (match backend with
         | Owned_gecko | Owned_chromium -> conditional ~action:"forward" Act
           [observed;"Top-level tab only; inspect the same tab after navigation or an unknown result."]
         | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"forward" Act
           [observed;"Top-level tab only, and only a tab this connection opened with open_tab; an operator tab is refused before any effect. An error after the step started leaves the result unknown: inspect the same tab."]
-        | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
+        | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable -> missing)
     | Reload -> (match backend with
         | Owned_gecko | Owned_chromium -> conditional ~action:"reload" Act
           [observed;"Top-level tab only; inspect the same tab after navigation or an unknown result."]
         | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"reload" Act
           [observed;"Top-level tab only, and only a tab this connection opened with open_tab; an operator tab is refused before any effect. An error after the step started leaves the result unknown: inspect the same tab."]
-        | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
+        | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable -> missing)
     | Session_lifecycle -> (match backend with
       | Owned_gecko | Owned_chromium -> conditional Session
           ["Actions open/status/close apply to the selected owned browser; status and close remain available while disabled."]
-      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable ->
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Safari_unavailable ->
           Unsupported "Connected operator browsers do not expose an owned session lifecycle.")
-    | Read_text -> available ~mode:"text" Read
+    | Read_text -> read backend (invoke ~mode:"text" Read) []
     | Read_html -> Unsupported "Document-source adapters exist, but BrowserRead exposes no HTML/source mode."
-    | Read_elements -> available ~mode:"elements" Read
-    | Read_scene -> conditional ~mode:"scene" Read [observed;"Explicit tabId; viewport scene may be truncated. Geometry is not an occlusion guarantee."]
-    | Read_regions -> conditional ~mode:"regions" Read [observed;"Explicit tabId; copy observed region references for scoped reads."]
-    | Screenshot -> conditional ~mode:"screenshot" Read
+    | Read_elements -> read backend (invoke ~mode:"elements" Read) []
+    | Read_scene -> read backend (invoke ~mode:"scene" Read) [observed;"Explicit tabId; viewport scene may be truncated. Geometry is not an occlusion guarantee."]
+    | Read_regions -> read backend (invoke ~mode:"regions" Read) [observed;"Explicit tabId; copy observed region references for scoped reads."]
+    | Screenshot -> read backend (invoke ~mode:"screenshot" Read)
         [observed;"Requires an owning Keeper and explicit tabId; captures the viewport, not the whole document."]
-    | Click -> conditional ~action:"click" Interact
-        (observed::target::(match backend with
-          | Connected Browser_lane.Web_extension -> ["Uses DOM click; trusted pointerdown/mousedown is not provided."]
-          | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium -> ["Uses native pointer input; captures/checks the current URL when expectedUrl is omitted."]
-          | Safari_unavailable -> []))
-    | Hover -> if native backend then conditional ~action:"hover" Interact [observed;target]
-        else Unsupported "WebExtension does not serve trusted hover; the selected tab must not be silently moved to another browser."
-    | Pointer_drag -> if native backend then conditional ~action:"drag_to" Interact
+    | Click -> (match backend with
+      | Connected Browser_lane.Web_extension -> conditional ~action:"click" Interact
+          [observed;target;"Uses DOM click; trusted pointerdown/mousedown is not provided."]
+      | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium -> conditional ~action:"click" Interact
+          [observed;target;"Uses native pointer input; captures/checks the current URL when expectedUrl is omitted."]
+      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
+    | Hover -> (match backend with
+      | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium -> conditional ~action:"hover" Interact [observed;target]
+      | Connected Browser_lane.Web_extension ->
+        Unsupported "WebExtension does not serve trusted hover; the selected tab must not be silently moved to another browser."
+      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
+    | Pointer_drag -> (match backend with
+      | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium -> conditional ~action:"drag_to" Interact
         ([observed;target;geometry;"via contains observed viewport fractions. Input receipt does not establish application drop acceptance."]
          @ match backend with Owned_chromium -> ["durationMs must be zero."]
-           | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Safari_unavailable -> [])
-        else Unsupported "WebExtension does not serve native pointer drag."
+           | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Safari_unavailable -> [])
+      | Connected Browser_lane.Web_extension -> Unsupported "WebExtension does not serve native pointer drag."
+      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
     | Html5_drop -> (match backend with
       | Owned_chromium -> conditional ~action:"drag_to" Interact
           [observed;target;"Native HTML5 DataTransfer/drop passed a fixture; target behavior must be observed afterward. Not a universal drop guarantee."]
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko -> Unsupported
           "Native pointer drag exists, but the tested Firefox HTML5 DataTransfer/drop scenario fails; no synthetic fallback."
-      | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
+      | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable -> missing)
     | Right_click | Middle_click -> (match backend with
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko -> conditional ~action:"click_at" Interact
           [observed;geometry;
@@ -146,11 +162,11 @@ let support backend operation = match backend with
            "A context menu or application behavior must be observed afterward."]
       | Connected Browser_lane.Web_extension -> Unsupported
           "WebExtension clicks through the DOM and cannot press the middle or secondary button; the selected tab must not be silently moved to another browser."
-      | Safari_unavailable -> missing)
-    | Scroll_page -> conditional ~action:"scroll" Interact [observed;"Scrolls the page; use scroll_at for a nested pane."]
-    | Scroll_at -> conditional ~action:"scroll_at" Interact [observed;geometry;"Scrolls the pane at the observed viewport point."]
-    | Fill -> conditional ~action:"fill" Interact
-        [observed;target;"Replaces the value of a text input or textarea and emits input/change, or replaces the content of a contenteditable editor with insertText (the editor gets input events); this is not trusted keyboard typing or submission."]
+      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
+    | Scroll_page -> dom_input backend (conditional ~action:"scroll" Interact [observed;"Scrolls the page; use scroll_at for a nested pane."])
+    | Scroll_at -> dom_input backend (conditional ~action:"scroll_at" Interact [observed;geometry;"Scrolls the pane at the observed viewport point."])
+    | Fill -> dom_input backend (conditional ~action:"fill" Interact
+        [observed;target;"Replaces the value of a text input or textarea and emits input/change, or replaces the content of a contenteditable editor with insertText (the editor gets input events); this is not trusted keyboard typing or submission."])
     | Double_click -> if native backend then conditional ~action:"double_click" Interact
         [observed;target;"Native double click; application behavior must be observed afterward."] else missing
     | Type_text -> if native backend then conditional ~action:"type_text" Interact
@@ -165,13 +181,13 @@ let support backend operation = match backend with
       | Connected Browser_lane.Web_extension -> conditional ~action:"set_zoom" Interact
           [observed;"Requires extension 0.8.0+, exact clientId/tabId, expectedUrl and factor 0.3–5. Uses measured browser zoom, never CSS scaling.";
            "Only automatic zoom mode is supported; per-origin scope may also affect and persist for same-origin tabs. Re-read the scene/screenshot afterward."]
-      | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
+      | Connected (Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
     | Select_option -> (match backend with
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium ->
           conditional ~action:"select_option" Interact
             [observed;"Pass the selector of one single-choice select and the exact value of one enabled option; a multiple select, a missing, repeated or disabled option is refused before any effect.";
              "Sets the option and emits input and change; this is not a trusted click on the list."]
-      | Safari_unavailable -> missing)
+      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
     | Read_frames -> gecko_only backend (invoke ~mode:"frames" Read)
         [observed;"Explicit tabId; framePath consists of observed outer-to-inner frame selectors."]
     | Frame_interaction -> (match backend with
@@ -204,7 +220,7 @@ let support backend operation = match backend with
     | Sentence_action -> (match backend with
       | Owned_chromium -> conditional ~action:"act" Instruct
           [observed;"Model-mediated sentence action; not a substitute for guaranteed native keyboard, double-click or zoom support. observe/extract are separate read actions."]
-      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Safari_unavailable -> missing)
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Owned_gecko | Safari_unavailable -> missing)
     | Resize_viewport -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"set_viewport" Interact
           [observed;"Requires exact clientId/tabId and expectedUrl; " ^ viewport_bounds ^ ". With neither, the browser's own size returns.";
@@ -214,7 +230,7 @@ let support backend operation = match backend with
            "Read the screenshot or scene again afterward. This is the page viewport, not the browser window."]
       | Owned_gecko -> Unsupported "The owned Firefox driver sets no viewport; use a live BiDi connection or Stagehand."
       | Connected Browser_lane.Web_extension -> Unsupported "WebExtension cannot set the page viewport; the selected tab must not be silently moved to another browser."
-      | Safari_unavailable -> missing)
+      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
     | Touch -> (match backend with
       | Connected Browser_lane.Webdriver_bidi | Owned_gecko -> conditional ~action:"tap_at" Interact
           [observed;geometry;
@@ -223,7 +239,7 @@ let support backend operation = match backend with
       | Owned_chromium -> Unsupported "Stagehand has no touch call."
       | Connected Browser_lane.Web_extension -> Unsupported
           "WebExtension clicks through the DOM and cannot send touch input; the selected tab must not be silently moved to another browser."
-      | Safari_unavailable -> missing)
+      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
     | Pointer_down | Pointer_up -> missing
     | Read_console -> gecko_only backend (invoke ~mode:"console" Read)
         [observed;"Messages and uncaught errors since the session opened, for one tab, oldest first. At most 200 are kept and the reply says how many older ones were dropped; each text is cut at 4000 bytes and says so. Entries Firefox gave no tab for, and events that were not what BiDi documents, are counted in the reply and do not end the session.";

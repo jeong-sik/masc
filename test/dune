@@ -6032,6 +6032,7 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_browser_bidi_peer.inc)
+(include stanzas/test_browser_ego_peer.inc)
 (include stanzas/test_browser_bidi_host_record.inc)
 
 ; An attempt that published its answer must not publish a failure over it:

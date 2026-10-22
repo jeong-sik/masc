@@ -128,13 +128,14 @@ build their rejection from it.
 | `point_scroll` | `scroll_at` | yes | yes, a trusted wheel |
 | `trusted_hover` | `hover`, `hover_at` | no | yes |
 | `trusted_drag` | `drag_to`, `drag` | no | yes |
-| `tab_activation` | `activate_tab` | yes | no |
+| `tab_activation` | `activate_tab` | yes | yes, and it also focuses the window |
 
 The extension acts through DOM calls inside the page and has no pointer the
 browser treats as the operator's. The BiDi peer sends pointer and wheel input
-through the browser; it does not implement tab activation. BiDi's own
-[`browsingContext.activate`](https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi/Modules/browsingContext/activate)
-also gives the tab's window focus, which `activate_tab` promises not to do.
+through the browser. Its `activate_tab` uses
+[`browsingContext.activate`](https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi/Modules/browsingContext/activate),
+which also gives the tab's window system focus; the extension's activation
+does not take window focus.
 
 A request its connection does not serve is a selection failure: the server
 queues no command and answers `live_transport_unsupported`. A Keeper tool's

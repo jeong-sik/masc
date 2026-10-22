@@ -333,10 +333,10 @@ let keyboard t context args ~sources ~name =
    other error, like a command that got no answer, may have had an effect: a navigation step reads the tab
    again ([settle_navigation]) and a close stays [Outcome_unknown]. *)
 let codes_before_acting = ["no such history entry"; "invalid argument"; "no such frame"]
-let ask_on_tab t method_ params = match t.ask method_ params with
+let ask_on_tab ?(before=codes_before_acting) t method_ params = match t.ask method_ params with
   | Ok result -> Ok result
   | Error (Unsent _ as refusal) -> Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
-  | Error (Rejected (Other_error code) as refusal) when List.mem code codes_before_acting ->
+  | Error (Rejected (Other_error code) as refusal) when List.mem code before ->
     Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
   | Error (Rejected (Other_error _ | Session_not_created | Invalid_session_id) | Unanswered _ as refusal) ->
     Error (Outcome_unknown (method_ ^ ": " ^ refusal_message refusal ^ "; inspect the tab before repeating"))
@@ -407,6 +407,25 @@ let goto t args =
   let* context,id = Result.map_error (fun e -> Before_effect e) (resolve t (obj ["tabId",`Int tab_id])) in
   settle_navigation t context id "goto"
     (ask_on_tab t "browsingContext.navigate" (obj ["context",str context;"url",str url;"wait",str "complete"]))
+
+(* Firefox brings the tab to the front and gives it focus; the W3C
+   specification extends that to the system focus of its window, which the
+   extension's activation does not take. The observed URL is checked first, so
+   a tab that moved on is refused before any effect. Each error Firefox
+   documents for this command is one it answers before acting. *)
+let activation_refusals = ["invalid argument"; "no such frame"; "unsupported operation"]
+let activate t context args =
+  let* observed = Result.map_error (fun e -> Before_effect e)
+    (script t context Browser_interaction.url_guard_script args) in
+  let* old_url = Result.map_error (fun e -> Before_effect e) (string "url" observed) in
+  let* _ = ask_on_tab ~before:activation_refusals t "browsingContext.activate" (obj ["context",str context]) in
+  let* after = Result.map_error (fun e -> Outcome_unknown e) (tab_metadata t context) in
+  match field "url" after, field "active" after with
+  | Some (`String url), Some (`Bool true) when String.equal url old_url ->
+    Ok (obj ["urlBefore",str old_url;"url",str url;"active",`Bool true;
+      "title",Option.value (field "title" after) ~default:`Null])
+  | (Some _ | None), (Some _ | None) ->
+    Error (Outcome_unknown "the activated tab is not the observed page in the foreground; inspect it before repeating")
 
 (* The override stays on the tab until a later [Browser_default] clears it, so a refusal before the
    command leaves the viewport as it was. *)
@@ -542,7 +561,7 @@ let dispatch ?actor ?request_id t ~verb args =
             | None -> Ok result))
       | Browser_lane.Set_viewport size -> set_viewport t context args size
       | Browser_lane.Set_zoom _ -> Error (Before_effect "set_zoom requires a connected WebExtension browser")
-      | Browser_lane.Activate_tab -> Error (Before_effect "unsupported BiDi interaction") in
+      | Browser_lane.Activate_tab -> activate t context args in
       let receipt = match receipt with
         | `Assoc fields -> obj (("action",str (Browser_lane.interaction_verb request.action))
             :: List.remove_assoc "action" fields)

@@ -492,24 +492,25 @@ let live_transport_of_string = function
    The extension acts through DOM calls inside the page, so it has no pointer
    the browser treats as the operator's: it cannot hover or drag, and its
    point click is the element's own [click()]. The BiDi peer sends pointer
-   and wheel input through the browser. It does not implement tab activation
-   (Browser_bidi_peer.dispatch): BiDi's own activation also takes window
-   focus. Its history, close and navigation act only on tabs it opened; the
-   extension opens none. test_browser_bidi_peer holds this table to what that
-   peer does. *)
+   and wheel input through the browser. Both switch the active tab; BiDi's
+   activation also gives the browser window system focus. The BiDi peer's
+   history, close and navigation act only on tabs it opened; the extension
+   opens none. test_browser_bidi_peer holds this table to what that peer
+   does. *)
 let live_transport_serves transport capability =
   match transport, capability with
   | ( (Web_extension | Webdriver_bidi)
     , ( Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture
       | Scene_read | Dom_interaction | Point_click | Point_scroll ) ) -> true
-  | Web_extension, (Tab_activation | Browser_zoom) -> true
+  | (Web_extension | Webdriver_bidi), Tab_activation -> true
+  | Web_extension, Browser_zoom -> true
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing) -> true
-  | Webdriver_bidi, (Tab_activation | Browser_zoom) -> false
+  | Webdriver_bidi, Browser_zoom -> false
 ;;
 
 let live_transports_serving capability =

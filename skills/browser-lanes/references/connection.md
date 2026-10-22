@@ -21,8 +21,9 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
     운영자뿐이라 같은 호출을 되풀이해도 답은 같다. 운영자에게 알린다.
   - `live_transport_unsupported`: 고른 연결(`clientId`, `transport`)이 그 일
     (`capability`)을 못 한다. live 연결은 방식(`transport`)에 따라 할 수 있는 일이
-    다르다. `hover_at`과 `drag`는 `webdriver_bidi` 연결만 하고, `activate_tab`은
-    `web_extension` 연결만 한다. 읽기(`mode=text`·`elements`·`scene`·`screenshot`)는
+    다르다. `hover_at`과 `drag`는 `webdriver_bidi` 연결만 하고, `set_zoom`은
+    `web_extension` 연결만 한다. `activate_tab`은 둘 다 하지만 `webdriver_bidi`는
+    브라우저 창에 포커스도 준다. 읽기(`mode=text`·`elements`·`scene`·`screenshot`)는
     둘 다 한다. 그 일을 하는 다른 연결이 있으면 그 clientId로 탭 목록과 페이지를 다시
     읽은 뒤 거기서 다시 한다. 탭 ID와 관측은 연결마다 따로다. 그런 연결이 없으면
     운영자에게 알린다.

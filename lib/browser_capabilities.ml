@@ -66,7 +66,10 @@ let support backend operation = match backend with
     | Activate_tab -> (match backend with
       | Connected Browser_lane.Web_extension -> conditional ~action:"activate_tab" Interact
           [observed;"Changes the browser's active tab without promising window focus."]
-      | Connected Browser_lane.Webdriver_bidi | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
+      | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"activate_tab" Interact
+          [observed;"Requires expectedUrl; a tab whose page moved on is refused before any effect.";
+           "Brings the tab to the front and gives its browser window system focus, which can take focus from what the operator is doing."]
+      | Owned_gecko | Owned_chromium | Safari_unavailable -> missing)
     | List_windows -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional Tabs
           ["Every list_tabs row carries windowId when Firefox names the tab's window; tabs with the same windowId share a window, and the distinct values are the windows.";

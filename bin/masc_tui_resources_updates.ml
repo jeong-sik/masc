@@ -137,6 +137,27 @@ let step_revision state ~direction ~read =
       (Catalog.adjacent_revision direction ~current:report state.resource_revision_history)
   | Some (Catalog.Mcp_uri _) | None -> ()
 
+let select_next_unchecked state =
+  let ( let* ) = Result.bind in
+  let* () =
+    if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+    else if Option.is_some state.artifact_check_pending then
+      Error "A confirmation change is still pending"
+    else Ok () in
+  let* entries = match visible_resources state with
+    | None -> Error "Report inventory has not been read"
+    | Some entries -> Ok entries in
+  let* selected = Masc_tui_artifact_checks.next_unchecked
+    ~reports_complete:state.resources_reports_complete ~entries
+    ~cursor:state.resources_cursor state.artifact_checks in
+  match Option.bind selected (List.nth_opt entries) with
+  | None -> Ok None
+  | Some entry ->
+    (* The candidate comes from this exact projection; only the caller may
+       launch its workspace-owned read or replace the current read owner. *)
+    Option.iter (fun cursor -> state.resources_cursor <- cursor) selected;
+    Ok (Some (Catalog.key entry))
+
 let place_search_match state ~cols ~query ~count ~index =
   if state.resource_focus = Right_pane && query <> "" && index >= 0 && index < count then
     match Masc_tui_resource_document.current state with

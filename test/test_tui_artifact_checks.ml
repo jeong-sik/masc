@@ -15,7 +15,7 @@ let published_at = "2026-10-21T00:00:00Z"
 let day = Catalog.local_day (match Time_codec.parse_rfc3339 published_at with
   | Ok seconds -> seconds | Error Time_codec.Invalid_rfc3339 -> fail "fixture date")
 
-let report ?(number=1) content =
+let report ?(number=1) ?(report_id=id) content =
   let body = get (Result.map_error Tool_output.make_error_to_string
     (Tool_output.make_artifact_ref
       ~sha256:Digestif.SHA256.(to_hex (digest_string content))
@@ -24,7 +24,7 @@ let report ?(number=1) content =
     format=Published.Markdown; author="keeper"; created_at=published_at; body;
     task_id=None; goal_id=None } in
   match get (Catalog.reports_of_json (`Assoc ["artifacts", `List
-    [Published.summary_to_json ~id revision]; "diagnostics", `List []])) with
+    [Published.summary_to_json ~id:report_id revision]; "diagnostics", `List []])) with
   | [Catalog.Report report], [] -> report
   | ([Catalog.Mcp _] | [] | _ :: _ :: _), _ | [_], _ :: _ -> fail "fixture report"
 
@@ -208,6 +208,81 @@ let workspace_write_binding () =
     match decode (`Assoc (List.remove_assoc "expected_workspace" fields)) with
     | Ok _ -> () | Error _ -> fail "dashboard request contract changed")
 
+let next_unchecked_revision () =
+  let old = report "same bytes" and latest = report ~number:2 "same bytes" in
+  let other = report ~report_id:("artifact-" ^ String.make 32 'b') "other" in
+  let mcp = Catalog.Mcp {uri="masc://unconfirmed"; name="unconfirmed";
+    title=None;description=None;mime_type=None;size=None} in
+  let entries = [mcp; Catalog.Report latest; Catalog.Report other] in
+  let reading = ready (inventory [confirmation old; confirmation ~checked:false other]) in
+  let next cursor = get (Checks.next_unchecked ~reports_complete:true ~entries ~cursor reading) in
+  check (option int) "later unchecked report" (Some 2) (next 1);
+  check (option int) "wrap skips MCP and old-version confirmation" (Some 1) (next 2);
+  let reading = ready (inventory [confirmation latest;confirmation other]) in
+  check (option int) "all exact revisions checked" None
+    (get (Checks.next_unchecked ~reports_complete:true ~entries ~cursor:0 reading))
+
+let uncertain_navigation () =
+  let report = report "body" in
+  let entries = [Catalog.Report report] in
+  let reading = ready (inventory []) in
+  let pending, request = begin_read reading in
+  let failed = settle pending request (Error "403") in
+  let partial = ready (inventory ~diagnostics:[`Assoc
+    ["file",`String "damaged.json";"error",`String "unreadable"]] []) in
+  let mismatch = ready (inventory [confirmation ~sha:(String.make 64 '0') report]) in
+  List.iter (fun inventory ->
+    refused (Checks.next_unchecked ~reports_complete:true ~entries ~cursor:0 inventory);
+    refused (Checks.next_unchecked ~reports_complete:true ~entries:[] ~cursor:0 inventory))
+    [Fetched.initial;pending;failed;partial];
+  refused (Checks.next_unchecked ~reports_complete:true ~entries ~cursor:0 mismatch);
+  refused (Checks.next_unchecked ~reports_complete:false ~entries ~cursor:0 reading);
+  check (option int) "complete empty view has no candidate" None
+    (get (Checks.next_unchecked ~reports_complete:true ~entries:[] ~cursor:0 reading))
+
+let navigation_retains_read_owner () =
+  let first = report "first" and second = report ~report_id:("artifact-" ^ String.make 32 'b') "second" in
+  let state = Types.create_state ~workspace:"confirmations" ~port:0 ~refresh_interval:0. () in
+  state.view <- Types.Resources;
+  state.server_identity <- Some (identity "/workspace");
+  state.resources_list <- Some [Catalog.Report first;Catalog.Report second];
+  state.resources_reports_complete <- true;
+  state.artifact_checks <- ready (inventory [confirmation first]);
+  let owner = ref () in
+  state.resource_read_owner <- Some owner;
+  state.resource_pending_key <- Some (Catalog.Report_revision first);
+  state.resource_focus <- Types.Right_pane;
+  let selected = get (Updates.select_next_unchecked state) in
+  check bool "selected current unchecked immutable key" true
+    (Option.equal Catalog.equal_key selected (Some (Catalog.Report_revision second)));
+  check int "cursor follows selected candidate" 1 state.resources_cursor;
+  check bool "detail focus preserved" true (state.resource_focus=Types.Right_pane);
+  let read_preserved () =
+    check bool "caller still owns read replacement" true
+      (match state.resource_read_owner with Some current -> current==owner | None -> false);
+    check bool "navigation does not claim a new pending body" true
+      (Option.equal Catalog.equal_key state.resource_pending_key (Some (Catalog.Report_revision first))) in
+  read_preserved ();
+  state.resource_scope <- Catalog.Html_reports;
+  check bool "current format scope respected" true (get (Updates.select_next_unchecked state)=None);
+  state.resource_scope <- Catalog.Markdown_reports;
+  state.resource_day <- Some {day with year=day.year+1};
+  check bool "current captured day respected" true (get (Updates.select_next_unchecked state)=None);
+  state.resource_day <- None;
+  let pending = get (Updates.begin_check state ~report:second) in
+  (* A shared read may finish before the explicit check write. It cannot
+     classify a target for navigation until that write settles. *)
+  state.artifact_checks <- ready (inventory []);
+  refused (Updates.select_next_unchecked state);
+  check int "refusal preserves cursor" 1 state.resources_cursor;
+  read_preserved ();
+  ignore (Updates.check_changed state pending);
+  refused (Updates.select_next_unchecked state);
+  state.artifact_checks <- ready (inventory []);
+  state.server_identity <- None;
+  refused (Updates.select_next_unchecked state);
+  read_preserved ()
+
 let () = run "Shared artifact confirmation reads"
   ["state", [test_case "exact revision and explicit uncheck" `Quick exact_revision;
     test_case "uncertain and partial inventories" `Quick uncertain_inventory;
@@ -216,4 +291,7 @@ let () = run "Shared artifact confirmation reads"
     test_case "strict shared inventory" `Quick strict_inventory;
     test_case "explicit pinned toggle and receipt validation" `Quick explicit_target;
     test_case "write ownership and required reread" `Quick write_ownership;
-    test_case "request-owned workspace write precondition" `Quick workspace_write_binding]]
+    test_case "request-owned workspace write precondition" `Quick workspace_write_binding;
+    test_case "next unchecked exact revision and wrap" `Quick next_unchecked_revision;
+    test_case "unknown inventories cannot navigate" `Quick uncertain_navigation;
+    test_case "scoped navigation preserves caller read ownership" `Quick navigation_retains_read_owner]]

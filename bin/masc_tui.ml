@@ -29248,6 +29248,15 @@ and is loaded on demand through keeper_skill.
              (Masc_tui_resource_catalog.next_scope state.resource_scope)
        | Some "c" when state.view = Resources ->
            launch_artifact_check_change state ~mailbox:async_messages
+       | Some "u" when state.view = Resources ->
+           (match Masc_tui_resources_updates.select_next_unchecked state with
+            | Error detail -> report_action state "error" detail
+            | Ok None -> report_action state "system" "No unchecked reports in the current format and date selection"
+            | Ok (Some key) ->
+              if state.resource_focus = Right_pane then
+                Masc_tui_resources_requests.launch_read state ~host:server_peer_host
+                  ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
+                  ~check:(capture_workspace_check state ~mailbox:async_messages) ~key)
        | Some "t" when state.view = Resources ->
            Masc_tui_resources_updates.toggle_today state ~now:(Unix.gettimeofday ())
        | Some "w" when state.view = Resources ->

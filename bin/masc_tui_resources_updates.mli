@@ -43,6 +43,14 @@ val open_selected :
 (** With a selected resource, move focus to its content pane before [read].
     An empty or invalid selection leaves state unchanged and invokes no callback. *)
 
+val select_next_unchecked : Masc_tui_types.state ->
+  (Masc_tui_resource_catalog.key option, string) result
+(** Select the next unchecked report in the current format/day projection.
+    Preserve focus. Return its immutable key for the caller's existing read
+    boundary when the detail is focused; this function does not fetch or confirm.
+    Unknown authority, a pending check write or incomplete inventories leave
+    selection and reading ownership unchanged. [Ok None] also leaves them unchanged. *)
+
 val step_revision :
   Masc_tui_types.state -> direction:Masc_tui_resource_catalog.direction ->
   read:(key:Masc_tui_resource_catalog.key -> unit) -> unit

@@ -534,7 +534,8 @@ let test_host_result_continuations_cross_the_real_worker_port () = with_fixture 
     | Ok value -> value
     | Error (Delivery.Refused detail | Storage_failed detail) -> fail detail in
   let host_package mode = {(package dir mode) with
-    exact_outputs=[{Types.name="author"; schema=`Assoc ["type", `String "object"]}]} in
+    exact_outputs=[{Types.name="author"; schema=`Assoc ["type", `String "object"];
+      request_schema=Types.Package_schema_only}]} in
   let start_host mode instance_id = Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
     ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id ~package:(host_package mode) ~docker_command:docker () in
   check bool "missing result control port refuses initialization" true

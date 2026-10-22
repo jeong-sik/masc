@@ -31,8 +31,12 @@ async function controller(options = {}) {
   }
   // Only the names this controller test fakes; every other relative import is real.
   const { viewSequencer } = await loadSubstituted(new URL('../sequencer-tui.mjs', import.meta.url), {
-    process, Worker, InstrumentPicker,
+    Worker, InstrumentPicker,
+    openPlayback() { throw new Error('Unexpected playback') },
+    renderVstPhrase() { throw new Error('Unexpected VST render') },
+    captureVstSound() { throw new Error('Unexpected VST capture') },
     openVstSession: () => ({ run() { throw new Error('Unexpected VST host job') }, async close() {} }),
+    loadProject: async () => { throw new Error('Unexpected load') },
     captureFluidSound() { throw new Error('Unexpected FluidSynth selection') },
     renderFluidSound() { throw new Error('Unexpected FluidSynth render') },
     openStepInput(request) {
@@ -60,7 +64,7 @@ async function controller(options = {}) {
     Note: { fromMidi: String }, safeText: String,
     saveProject: async (_path, project) => { observed.saved.push(structuredClone(project)); return 'revision' },
     writeFile: async (path, text, flags) => { observed.diagnostics.push({ path, value: JSON.parse(text), flags }) },
-  }, { rewrite: source => source
+  }, { globals: { process }, rewrite: source => source
     .replace("new URL('./sequencer-worker.mjs', import.meta.url)", "new URL('file:///synthetic-worker')") })
   const signal = new AbortController()
   const done = viewSequencer({ root: '/synthetic', output: options.output, midiOutput: options.midiOutput,

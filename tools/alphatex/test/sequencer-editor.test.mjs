@@ -143,19 +143,24 @@ test('loading a saved arrangement dispatches before phrase terminal or backgroun
   const dispatched = []
   const process = { stdin: { isTTY: true, setRawMode(value) { ownership.raw.push(value) } }, stdout: { isTTY: true } }
   const unexpected = name => () => { throw new Error(`Unexpected ${name} before arrangement dispatch`) }
-  // The real path helpers; every resource a phrase editor would open is refused.
-  const substitutes = { process, join, resolve, dirname, tmpdir, randomUUID, constants, Note,
-    async openArrangement(options) { dispatched.push(options) },
+  const refused = name => class { constructor() { throw new Error(`Unexpected ${name} before arrangement dispatch`) } }
+  // The real path helpers and loader; every resource a phrase editor would open is refused.
+  const substitutes = { join, resolve, dirname, tmpdir, randomUUID, constants, Note,
     async mkdtemp() { ownership.temporary++; throw new Error('Unexpected terminal temporary directory') },
     rm: unexpected('rm'), writeFile: unexpected('writeFile'), copyFile: unexpected('copyFile'),
-    emitKeypressEvents: unexpected('keypress setup'),
+    emitKeypressEvents: unexpected('keypress setup'), snapshotWriter: unexpected('VST observation'),
+    captureVstSound: unexpected('VST capture'), renderVstPhrase: unexpected('VST render'),
+    captureFluidSound: unexpected('FluidSynth capture'), renderFluidSound: unexpected('FluidSynth render'),
+    openStepInput: unexpected('MIDI input'), openPlayback: unexpected('playback'), saveProject: unexpected('save'),
+    InstrumentPicker: refused('instrument picker'), MidiSourcePicker: refused('MIDI source picker'),
     Worker: class { constructor() { ownership.workers++; throw new Error('Unexpected terminal worker') } } }
+  const globals = { process, async openArrangement(options) { dispatched.push(options) } }
   try {
     const path = join(directory, 'arrangement.json')
     await saveProject(path, newArrangement())
     assert.equal((await loadProject(path)).project.kind, 'arrangement')
     const { viewSequencer } = await loadSubstituted(new URL('../sequencer-tui.mjs', import.meta.url), substitutes,
-      { rewrite: source => source.replace("await import('./arrangement-tui.mjs')", 'await Promise.resolve({ viewArrangement: openArrangement })') })
+      { globals, rewrite: source => source.replace("await import('./arrangement-tui.mjs')", 'await Promise.resolve({ viewArrangement: openArrangement })') })
     await viewSequencer({ path, root: directory })
     assert.equal(dispatched.length, 1)
     assert.equal(dispatched[0].loaded.path, path)

@@ -48,7 +48,8 @@ async function controller(options = {}) {
   }
   // Only the names this controller test fakes; every other relative import is real.
   const { viewSequencer } = await loadSubstituted(new URL('../sequencer-tui.mjs', import.meta.url), {
-    process, InstrumentPicker, MidiSourcePicker, defaultStateDirectory: () => '/synthetic-vst',
+    InstrumentPicker, MidiSourcePicker, defaultStateDirectory: () => '/synthetic-vst',
+    openStepInput() { throw new Error('Unexpected MIDI input') },
     snapshotWriter: () => async value => { observed.snapshots.push(value) },
     openVstSession() {
       const session = { closed: 0, run() { throw new Error('Unexpected VST host job') }, async close() { session.closed++ } }
@@ -67,9 +68,10 @@ async function controller(options = {}) {
     loadProject: async () => { throw new Error('Unexpected load') },
     saveProject: async (path, project) => { observed.saved.push(structuredClone(project)); return 'revision' },
     projectMidi() { throw new Error('Unexpected MIDI export') }, safeText: String,
+  }, { globals: { process,
     async openArrangement(value) { observed.arrangements.push(value); await options.arrangement?.(value) },
-    async openSession(value) { observed.sessions++; await options.session?.(value) },
-  }, { rewrite: source => source
+    async openSession(value) { observed.sessions++; await options.session?.(value) } },
+  rewrite: source => source
     .replace("new URL('./sequencer-worker.mjs', import.meta.url)", "new URL('file:///synthetic-worker')")
     .replace("await import('./music-session.mjs')", 'await Promise.resolve({ viewSession: openSession })')
     .replaceAll("await import('./arrangement-tui.mjs')", 'await Promise.resolve({ viewArrangement: openArrangement })') })

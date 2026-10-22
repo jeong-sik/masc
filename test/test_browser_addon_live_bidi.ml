@@ -52,6 +52,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     result={'sessionId':'original-session','capabilities':{'browserName':'firefox','browserVersion':'fixture',
                         'moz:profile':str(root) if mode=='wrong-profile' else str(profile),
                         'moz:processID':os.getppid() if mode=='wrong-pid' else os.getpid()}}
+                elif method=='session.subscribe':
+                    result={'subscription':'dialog-events'}
                 elif method=='browsingContext.getTree':
                     if mode=='lost':os._exit(3)
                     result={'contexts':[]}

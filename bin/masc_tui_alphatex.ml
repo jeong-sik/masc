@@ -1,8 +1,8 @@
 (* alphaTex → ASCII tablature.
 
    [Masc_tui_alphatex_score] reads the text into measures of beats. Here the
-   measures are laid across the pane and drawn: [systems] decides which
-   measures share a row, and drawing writes them out. *)
+   measures are laid across the pane and drawn: [layout] decides which
+   original beat spans share a system, and drawing writes them out. *)
 
 module Score = Masc_tui_alphatex_score
 
@@ -10,28 +10,34 @@ type tab_failure =
   | Unreadable of Score.failure
   | Too_wide of { needed : int; available : int }
 
+type boundary = Barline | Continuation
+
+type fragment = {
+  bar : int;
+  source : Score.measure;
+  beats : Score.beat list;
+  left : boundary;
+  right : boundary;
+}
+
 let failure_text = function
   | Unreadable failure -> Score.failure_text failure
   | Too_wide { needed; available } ->
-      Printf.sprintf "one measure needs %d cells and this pane has %d" needed available
+      Printf.sprintf "one beat with its bar marks needs %d cells and this pane has %d" needed available
 
 (* {1 Systems}
 
-   A sixteenth note is [cells_per_unit] character cells in its measure. That
-   is one until a fret would touch the slot after it: two-digit frets on
-   eighth notes drew [1210], which reads as four notes. A measure takes the
-   smallest count that leaves each of its frets a dash before the next slot.
-   It is the measure's own count: one crowded measure widens and the rest of
-   the score stays as it was.
+   A beat takes the wider of its duration in cells and its fret text plus
+   one separating dash, so neighboring frets never run together. Each beat
+   reserves its own width. Simultaneous notes share one column: only the
+   widest fret on any string contributes to that column's width.
 
-   A system is the run of measures drawn side by side. Measures fill a system
-   until the next one would pass the pane, and the tab is its systems top to
-   bottom -- the way printed tablature breaks at bar lines. A measure is never
-   split, so one wider than the pane on its own is the failure. The widths
-   are known before anything is drawn, so a measure the pane cannot hold
-   fails before a cell of it is allocated: no measure costs more than a pane's
-   width for each string. The whole tab still grows with the score -- about
-   three lines of pane for every measure of whole rests on twelve strings. *)
+   Systems normally end at bar lines. An oversized bar continues between
+   whole beats, retaining the original bar and beat objects. A continuation
+   is a display edge, not a musical barline. Only an indivisible beat with
+   its original edge marks can refuse the reading. The whole plan is checked
+   before drawing allocates any rows; each fragment then costs at most the
+   pane width per string. The full result still grows with the score. *)
 
 (* What a note writes on its line: its fret, in parentheses when it is tied
    and held on rather than picked, and a [*] after it when it carried
@@ -78,7 +84,7 @@ let ticks_per_cell = 24
    so the grace does not erase it. *)
 let beat_width (beat : Score.beat) =
   let text_len =
-    List.fold_left (fun len note -> len + String.length (note_text note) + 1) 0 beat.notes
+    List.fold_left (fun len note -> max len (String.length (note_text note) + 1)) 0 beat.notes
   in
   if beat.span = 0 then
     (* A grace note takes no time, but its text still draws: as wide as the
@@ -90,9 +96,6 @@ let beat_width (beat : Score.beat) =
     max span_cells text_len
 
 let beat_cells = beat_width
-
-let measure_cells (measure : Score.measure) =
-  List.fold_left (fun cells beat -> cells + beat_cells beat) 1 measure.beats
 
 (* The line names share one column, so a two-letter name (Eb) does not push
    its line a cell to the right of the others. Every cell is one ASCII
@@ -118,13 +121,62 @@ let right_marks (measure : Score.measure) =
   | None -> "|"
   | Some count -> ":|x" ^ string_of_int count ^ "|"
 
-let measure_width (measure : Score.measure) =
-  String.length (left_marks measure)
-  + measure_cells measure
-  + String.length (right_marks measure)
+let number_text ~bar ~left =
+  string_of_int bar ^ (match left with Barline -> "" | Continuation -> "+")
 
-let systems ~max_width (score : Score.t) =
+let fragment_left_marks ~source ~left =
+  match left with Barline -> left_marks source | Continuation -> ""
+
+let fragment_right_marks ~source ~right =
+  match right with Barline -> right_marks source | Continuation -> ">"
+
+let cells_for ~bar ~left beat_cells =
+  max (1 + beat_cells) (String.length (number_text ~bar ~left))
+
+let width_for ~bar ~source ~left ~right beat_cells =
+  String.length (fragment_left_marks ~source ~left)
+  + cells_for ~bar ~left beat_cells
+  + String.length (fragment_right_marks ~source ~right)
+
+let fragment_cells fragment =
+  cells_for ~bar:fragment.bar ~left:fragment.left
+    (List.fold_left (fun sum beat -> sum + beat_cells beat) 0 fragment.beats)
+
+let fragment_width fragment =
+  width_for ~bar:fragment.bar ~source:fragment.source
+    ~left:fragment.left ~right:fragment.right
+    (List.fold_left (fun sum beat -> sum + beat_cells beat) 0 fragment.beats)
+
+let layout ~max_width (score : Score.t) =
   let lead = name_width score + 1 in
+  let split ~bar source =
+    let finish ~left ~right taken =
+      {bar; source; beats=List.rev taken; left; right} in
+    let rec take fragments left taken used = function
+      | [] -> Ok (List.rev fragments)
+      | beat :: rest as remaining ->
+          let right = match rest with [] -> Barline | _ :: _ -> Continuation in
+          let cells = used + beat_cells beat in
+          let needed = lead + width_for ~bar ~source ~left ~right cells in
+          if needed <= max_width then
+            (match rest with
+             | [] -> Ok (List.rev (finish ~left ~right (beat :: taken) :: fragments))
+             | _ :: _ -> take fragments left (beat :: taken) cells rest)
+          else
+            match taken with
+            | [] -> Error (Too_wide {needed; available=max_width})
+            | _ :: _ ->
+                take (finish ~left ~right:Continuation taken :: fragments)
+                  Continuation [] 0 remaining
+    in
+    take [] Barline [] 0 source.Score.beats
+  in
+  let rec fragments bar acc = function
+    | [] -> Ok (List.rev acc)
+    | source :: rest ->
+        Result.bind (split ~bar source) (fun spans ->
+          fragments (bar + 1) (List.rev_append spans acc) rest)
+  in
   let rec fill systems current used = function
     | [] ->
         Ok
@@ -132,22 +184,23 @@ let systems ~max_width (score : Score.t) =
              (match current with
               | [] -> systems
               | _ :: _ -> List.rev current :: systems))
-    | (measure : Score.measure) :: rest ->
-        let width = measure_width measure in
-        if lead + width > max_width then
-          Error (Too_wide { needed = lead + width; available = max_width })
-        else (
-          match current with
-          | _ :: _ when used + width > max_width ->
-              fill (List.rev current :: systems) [ measure ] (lead + width) rest
-          | _ -> fill systems (measure :: current) (used + width) rest)
+    | fragment :: rest ->
+        let width = fragment_width fragment in
+        let systems, current, used = match current with
+          | _ :: _ when fragment.left = Continuation || used + width > max_width ->
+              List.rev current :: systems, [], lead
+          | [] | _ :: _ -> systems, current, used in
+        let current = fragment :: current in
+        (match fragment.right with
+         | Continuation -> fill (List.rev current :: systems) [] lead rest
+         | Barline -> fill systems current (used + width) rest)
   in
-  fill [] [] lead score.measures
+  Result.bind (fragments 1 [] score.measures) (fill [] [] lead)
 
 (* {1 Drawing} *)
 
-let draw_measure ~strings (measure : Score.measure) =
-  let cells = measure_cells measure in
+let draw_measure ~strings fragment =
+  let cells = fragment_cells fragment in
   let rows = Array.init (strings + 1) (fun _ -> Bytes.make cells '-') in
   (* Each beat takes the column after the one before it, so the beats never
      overlap and no note is dropped to keep inside the row. *)
@@ -168,7 +221,7 @@ let draw_measure ~strings (measure : Score.measure) =
               Bytes.blit_string text 0 rows.(note.on_string - 1) column (String.length text))
           beat.notes;
         column + beat_width beat)
-      0 measure.beats
+      0 fragment.beats
   in
   rows
 
@@ -208,25 +261,24 @@ let header_line (score : Score.t) =
 let draw ?(rhythm = false) (score : Score.t) systems =
   let strings = List.length score.tuning in
   let name_width = name_width score in
-  (* The numbers are physical measures, counted across the systems, so the
-     second system opens where the first one left off. *)
-  let next_number = ref 1 in
+  (* A display continuation keeps the original physical number. Its [+]
+     identifies the same bar, rather than inventing another musical bar. *)
   let number_row system =
     let lead = name_width + 1 in
-    let width = lead + List.fold_left (fun sum m -> sum + measure_width m) 0 system in
+    let width = lead + List.fold_left (fun sum m -> sum + fragment_width m) 0 system in
     let row = Bytes.make width ' ' in
     let written_end = ref lead in
-    let place at (measure : Score.measure) =
-      let text = string_of_int !next_number in
-      next_number := !next_number + 1;
+    let place at fragment =
+      let text = number_text ~bar:fragment.bar ~left:fragment.left in
       (* The number rides at the measure's first cell, past its left marks,
          the way fret cells do below. *)
-      let start = at + String.length (left_marks measure) in
+      let start = at + String.length (fragment_left_marks
+        ~source:fragment.source ~left:fragment.left) in
       Bytes.blit_string text 0 row start (String.length text);
       written_end := max !written_end (start + String.length text)
     in
     let (_ : int) =
-      List.fold_left (fun at m -> place at m; at + measure_width m) lead system
+      List.fold_left (fun at m -> place at m; at + fragment_width m) lead system
     in
     Bytes.sub_string row 0 !written_end
   in
@@ -243,12 +295,16 @@ let draw ?(rhythm = false) (score : Score.t) systems =
         let text = Buffer.create 32 in
         Buffer.add_string text name;
         Buffer.add_string text (String.make (name_width - String.length name) ' ');
-        Buffer.add_char text '|';
+        Buffer.add_char text (match system with
+          | {left=Continuation;_} :: _ -> '>'
+          | [] | {left=Barline;_} :: _ -> '|');
         List.iter2
-          (fun (measure : Score.measure) rows ->
-            Buffer.add_string text (left_marks measure);
+          (fun fragment rows ->
+            Buffer.add_string text (fragment_left_marks
+              ~source:fragment.source ~left:fragment.left);
             Buffer.add_bytes text rows.(line);
-            Buffer.add_string text (right_marks measure))
+            Buffer.add_string text (fragment_right_marks
+              ~source:fragment.source ~right:fragment.right))
           system drawn;
         Buffer.contents text)
       (if rhythm then score.tuning @ [ "" ] else score.tuning)
@@ -270,4 +326,4 @@ let render_tab ?(rhythm = false) ~max_width source =
             | Some line -> [ line ]
             | None -> [])
            @ draw ~rhythm score systems)
-        (systems ~max_width score)
+        (layout ~max_width score)

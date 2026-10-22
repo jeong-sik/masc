@@ -1368,8 +1368,8 @@ let render_streaming_internal ?on_semantic ?on_unmapped ~palette ~width text =
          let source = body_text () in
          let body_width = max 1 (width - Layout.display_width palette.code_gutter) in
          (* A score outside the drawn subset shows its source with the reason,
-            the way a mermaid fence falls back; so does one whose single
-            measure is wider than the pane. The tablature rows are generated
+            the way a mermaid fence falls back; so does an indivisible beat
+            whose original bar marks cannot fit the pane. The tablature rows are generated
             text with no source-byte mapping, so a drawn tab has no semantic
             run: the block is reported unmapped rather than passed off as a
             document whose every visible row has a source. The rhythm word in

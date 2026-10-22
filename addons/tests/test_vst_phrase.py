@@ -87,6 +87,40 @@ class VstPhrase(unittest.TestCase):
         self.assertTrue(reply["isError"])
         self.assertIn("observation.id", reply["content"][0]["text"])
 
+    def test_export_destination_and_hashes_survive_the_lane_boundary(self):
+        exported = snapshot("exported")
+        fields = exported["observations"][0]["fields"]
+        fields["export_path"] = "/audio.wav"
+        fields["render"]["output_path"] = "/audio.wav"
+        reply = self.exchange([exported])
+        self.assertFalse(reply["isError"])
+        reading = reply["structuredContent"]["rows"][0]
+        self.assertEqual(reading["fields"]["state"], "exported")
+        self.assertEqual(reading["fields"]["export_path"], "/audio.wav")
+        self.assertEqual(reading["evidence"], exported["observations"][0]["evidence"])
+        self.assertFalse(reading["fields"]["action_receipt"])
+        fields["render"]["output_path"] = "/different.wav"
+        self.assertTrue(self.exchange([exported])["isError"])
+        fields["render"] = None
+        self.assertTrue(self.exchange([exported])["isError"])
+
+    def test_export_failure_keeps_error_without_published_audio(self):
+        failed = snapshot("export_failed")
+        observation = failed["observations"][0]
+        observation["evidence"] = []
+        observation["fields"].update({"render": None, "export_path": "/existing.wav", "error": "EEXIST"})
+        reply = self.exchange([failed])
+        self.assertFalse(reply["isError"])
+        reading = reply["structuredContent"]["rows"][0]
+        self.assertEqual(reading["fields"]["error"], "EEXIST")
+        self.assertEqual(reading["evidence"], [])
+        self.assertTrue(reply["structuredContent"]["coverage"][0]["complete"])
+        observation["evidence"] = snapshot()["observations"][0]["evidence"]
+        self.assertTrue(self.exchange([failed])["isError"])
+        observation["evidence"] = []
+        del observation["fields"]["error"]
+        self.assertTrue(self.exchange([failed])["isError"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -436,6 +436,11 @@ Lane action receipt. Loop rendering omits the release tail so repetition does
 not insert an extra tail interval. Nonloop playback includes the instrument tail;
 the musical playhead stays at the phrase end during that tail. `:wave PATH`
 exports the currently selected audio instrument.
+For VST phrase/source exports, the Lane snapshot records `exported` after the
+destination copy succeeds, with the exported WAV and retained MIDI hashes.
+Rendering or destination-copy failure records `export_failed` and the requested
+path, clearing earlier render evidence. These are file export observations, not
+player or device acknowledgements.
 
 Imported single-port MIDI can use the same VST route, including the chosen SMF2
 pattern and SMPTE timing. The original source document is retained; a synchronous

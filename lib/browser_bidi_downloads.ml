@@ -103,7 +103,7 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
                  | Some (`String "event") ->
                    let* method_ = string "method" json in
                    (match field "params" json with
-                    | Some params when method_ = Browser_console.subscribed_method -> Browser_console.event console params
+                    | Some params when method_ = Browser_console.subscribed_method -> Ok (Browser_console.event console params)
                     | Some params -> Browser_downloads.event model ~method_ params
                     | None -> Error "BiDi event lacks params")
                  | Some (`String ("success" | "error" as kind)) ->

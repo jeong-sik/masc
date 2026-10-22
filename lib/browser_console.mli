@@ -15,10 +15,15 @@ val text_bytes_limit : int
 type t
 val create : unit -> t
 
-(** Records one [log.entryAdded] event. A payload that is not what BiDi
-    documents is an error, not a dropped entry. *)
-val event : t -> Yojson.Safe.t -> (unit, string) result
+(** Records one [log.entryAdded] event. It never fails, because the connection
+    that feeds it also carries download evidence, and a log entry must not end
+    that. What BiDi documents as optional is accepted: a [null] text is kept as
+    [null], and an entry whose source names no browsing context is counted as
+    unattributed instead of being given to a tab. An event that is not what BiDi
+    documents is counted as malformed, with the reason of the last one. *)
+val event : t -> Yojson.Safe.t -> unit
 
 (** The entries kept for one tab, oldest first, and how many older ones were
-    dropped to stay within {!entries_per_context}. *)
+    dropped to stay within {!entries_per_context}. [unattributedEntries] and
+    [malformedEvents] are about the whole session, not the tab. *)
 val to_json : t -> context:string -> Yojson.Safe.t

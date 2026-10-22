@@ -5,10 +5,10 @@ let entry ?(context = "tab-a") ?(kind = "console") ?(level = "info") ?(timestamp
   obj [ "type", `String kind; "level", `String level; "text", `String text; "method", `String "log"
       ; "timestamp", `Int timestamp; "source", obj [ "context", `String context; "realm", `String "r" ]
       ; "args", `List [] ]
-let record log params = match Console.event log params with Ok () -> () | Error detail -> fail detail
+let record log params = Console.event log params
 let member key json = Yojson.Safe.Util.member key json
 let entries log ~context = Yojson.Safe.Util.to_list (member "entries" (Console.to_json log ~context))
-let texts log ~context = List.map (fun row -> Yojson.Safe.Util.to_string (member "text" row)) (entries log ~context)
+let texts log ~context = List.filter_map (fun row -> match member "text" row with `String text -> Some text | _ -> None) (entries log ~context)
 
 let test_entries_are_kept_in_order_per_tab () =
   let log = Console.create () in
@@ -47,20 +47,37 @@ let test_a_long_text_is_cut_on_a_character_boundary_and_says_so () =
   check bool "the cut text is valid UTF-8" true (String.is_valid_utf_8 kept);
   check bool "the entry says it was cut" true (member "textCut" row = `Bool true)
 
-let test_a_malformed_event_is_an_error_not_a_dropped_entry () =
+let test_what_bidi_allows_to_be_absent_is_accepted () =
+  let log = Console.create () in
+  record log (match entry "x" with `Assoc fields -> `Assoc (("text", `Null) :: List.remove_assoc "text" fields) | other -> other);
+  record log (match entry "y" with
+    | `Assoc fields -> `Assoc (("source", obj [ "realm", `String "r" ]) :: List.remove_assoc "source" fields) | other -> other);
+  record log (match entry "z" with
+    | `Assoc fields -> `Assoc (("source", obj [ "realm", `String "r"; "context", `Null ]) :: List.remove_assoc "source" fields) | other -> other);
+  let json = Console.to_json log ~context:"tab-a" in
+  (match entries log ~context:"tab-a" with
+   | [ row ] -> check bool "a null text is kept as null" true (member "text" row = `Null)
+   | other -> failf "expected the null-text entry only, saw %d" (List.length other));
+  check int "entries without a browsing context are counted, not given to a tab" 2
+    (Yojson.Safe.Util.to_int (member "unattributedEntries" json));
+  check int "none of these is malformed" 0 (Yojson.Safe.Util.to_int (member "count" (member "malformedEvents" json)))
+
+let test_a_malformed_event_is_counted_and_never_fails_the_stream () =
   let log = Console.create () in
   let without key = match entry "x" with
     | `Assoc fields -> `Assoc (List.remove_assoc key fields) | other -> other in
-  List.iter (fun key ->
-    check bool ("missing " ^ key ^ " is refused") true (Result.is_error (Console.event log (without key))))
-    [ "type"; "level"; "text"; "timestamp"; "source" ];
-  check bool "a source without a context is refused" true
-    (Result.is_error (Console.event log (match entry "x" with
-       | `Assoc fields -> `Assoc (("source", obj []) :: List.remove_assoc "source" fields) | other -> other)));
-  check bool "a non-integer timestamp is refused" true
-    (Result.is_error (Console.event log (match entry "x" with
-       | `Assoc fields -> `Assoc (("timestamp", `String "1") :: List.remove_assoc "timestamp" fields) | other -> other)));
-  check (list string) "nothing was recorded by the refused events" [] (texts log ~context:"tab-a")
+  List.iter (fun key -> record log (without key)) [ "type"; "level"; "timestamp"; "source" ];
+  record log (match entry "x" with
+    | `Assoc fields -> `Assoc (("timestamp", `String "1") :: List.remove_assoc "timestamp" fields) | other -> other);
+  record log (match entry "x" with
+    | `Assoc fields -> `Assoc (("text", `Int 3) :: List.remove_assoc "text" fields) | other -> other);
+  record log (match entry "x" with
+    | `Assoc fields -> `Assoc (("source", obj [ "context", `Int 1 ]) :: List.remove_assoc "source" fields) | other -> other);
+  let json = Console.to_json log ~context:"tab-a" in
+  let malformed = member "malformedEvents" json in
+  check int "each of the seven is counted" 7 (Yojson.Safe.Util.to_int (member "count" malformed));
+  check bool "the reason of the last one is kept" true (match member "last" malformed with `String _ -> true | _ -> false);
+  check (list string) "none was recorded as an entry" [] (texts log ~context:"tab-a")
 
 let test_the_verb_round_trips_and_is_automation_only () =
   let verb = Browser_lane.Page_console { tab_id = 3 } in
@@ -88,6 +105,7 @@ let () = run "browser console" [ "console", [
   test_case "entries are kept in order per tab" `Quick test_entries_are_kept_in_order_per_tab;
   test_case "the oldest drop and are counted" `Quick test_the_oldest_entries_drop_and_are_counted;
   test_case "a long text is cut on a character boundary" `Quick test_a_long_text_is_cut_on_a_character_boundary_and_says_so;
-  test_case "a malformed event is an error" `Quick test_a_malformed_event_is_an_error_not_a_dropped_entry;
+  test_case "what BiDi allows to be absent is accepted" `Quick test_what_bidi_allows_to_be_absent_is_accepted;
+  test_case "a malformed event is counted" `Quick test_a_malformed_event_is_counted_and_never_fails_the_stream;
   test_case "the verb is automation only" `Quick test_the_verb_round_trips_and_is_automation_only;
   test_case "the capability table" `Quick test_the_capability_table ] ]

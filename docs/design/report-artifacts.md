@@ -144,6 +144,18 @@ readable while its artifact remains in the selected inventory.
 The reader starts with compact report metadata. `i` expands its URI, type and
 size; `v` changes document/source presentation and `y` copies the selected
 original text part through the existing OSC 52 path. These display changes do
-not mutate source bytes or request another revision. HTML remains highlighted
-source in this unit; terminal HTML interpretation and embedded image extraction
-are separate work. Shared human confirmation is also not implemented here.
+not mutate source bytes or request another revision. HTML document mode uses a
+standards-parsed, inert terminal reading: headings, paragraphs, lists, tables
+and preformatted text. Original mode keeps the HTML syntax. Body search reads
+exactly the same terminal projection as drawing. HTML whitespace is interpreted
+only in document mode; copied bytes remain the original response.
+
+HTML image declarations retain their original content-part number, including
+multiple images inside one part and nested/table images. Base64 image data URIs
+are passed unchanged to the existing off-thread image decoder/converter only
+when selected for preview. External URLs, file paths, non-image and non-base64
+data remain explicitly unavailable; selecting them does not authorize a fetch.
+Scripts, metadata, templates, embedded frames and explicit hidden subtrees do
+not contribute reading/image candidates. This reading does not execute CSS or
+JavaScript, and does not reproduce a browser's page layout. Shared human
+confirmation is not implemented yet.

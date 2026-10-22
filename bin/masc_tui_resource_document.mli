@@ -15,9 +15,11 @@ val copy_source : Masc_tui_types.state -> ((string * string), string) result
 val rows : cols:int -> t -> string list
 (** [cols] is the actual document pane width, after Activity and optional
     Resources split. Both drawing and search use this projection.
-    Each source part's CRLF is parsed before fencing, joining, Markdown and
-    terminal sanitization;
-    original parts and copy bytes are unchanged. Standalone CR stays escaped. *)
+    HTML document mode uses an inert structured terminal reading; source mode
+    preserves syntax. Each source part's CRLF is parsed before generated
+    fencing/joining and terminal sanitization. HTML document whitespace follows
+    HTML parsing; original parts and copy bytes are unchanged. Source mode
+    keeps standalone CR escaped. *)
 val search_rows : cols:int -> Masc_tui_types.state -> string list option
 (** Search only the currently displayed admitted content. Metadata-only,
     loading another key, failures and withdrawn inventory return [None].

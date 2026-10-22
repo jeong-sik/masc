@@ -77,9 +77,50 @@ let test_malformed_parts_refused () =
      `Assoc ["text",`String "caption"; "blob",`String "QUJD"];
      `Assoc ["blob",`String "QUJD"; "blob",`String "REVG"]]
 
+let test_html_embedded_sources () =
+  let first = "data:image/png;base64,QUJDRA==" in
+  let second = "data:image/svg+xml;base64,PHN2Zy8+" in
+  let source = "<html><head><script>fetch('/secret')</script></head><body>"
+    ^ "<p><span><img alt='first' src='" ^ first ^ "'></span></p>"
+    ^ "<table><tr><td><img src='" ^ second ^ "'></td>"
+    ^ "<td><img src='file:///private/not-opened.png'></td></tr></table>"
+    ^ "<div hidden><img src='data:image/png;base64,SElEREVO'></div>"
+    ^ "<template><img src='data:image/png;base64,VEVNUExBVEU='></template>"
+    ^ "</body></html>" in
+  let parts = [text (Some "text/html; charset=utf-8") source;
+    blob (Some "image/jpeg") "QUJD"] in
+  let images = Images.images ~mime_type:None parts in
+  check (list int) "embedded candidates keep owning source part" [1;1;1;2]
+    (List.map fst images);
+  check string "nested image URI remains exact" first (payload (snd (List.nth images 0)));
+  check string "table image URI remains exact" second (payload (snd (List.nth images 1)));
+  (match snd (List.nth images 2) with
+   | Preview.Unavailable_image _ -> ()
+   | Named_path _ | Staged _ | Stored_attachment _ | Output_image _ | No_image ->
+     fail "HTML file image must not become a local or remote read");
+  check string "next original part is retained" "QUJD" (payload (snd (List.nth images 3)));
+  match List.hd parts with
+  | {Mcp.rc_kind=Resource_text original;_} -> check string "HTML source is unchanged" source original
+  | {Mcp.rc_kind=Resource_blob _;_} -> fail "original HTML part changed"
+
+let test_html_unavailable_sources () =
+  let source = "<img src='https://example.invalid/picture.png'>"
+    ^ "<img src='/api/v1/artifacts/not-followed'>"
+    ^ "<img src='javascript:alert(1)'>"
+    ^ "<img src='data:text/html;base64,QUJD'>"
+    ^ "<img src='data:image/png,not-base64'>" in
+  let candidates = Images.images ~mime_type:None [text (Some "text/html") source] in
+  check int "unavailable declarations stay selectable" 5 (List.length candidates);
+  List.iter (fun (_,preview) -> match preview with
+    | Preview.Unavailable_image _ -> ()
+    | Named_path _ | Staged _ | Stored_attachment _ | Output_image _ | No_image ->
+      fail "HTML image declaration must not grant an external read") candidates
+
 let () = run "resource image sources" ["source decisions", [
   test_case "wire conservation" `Quick test_wire_conservation;
   test_case "malformed parts refused" `Quick test_malformed_parts_refused;
   test_case "multipart declared media" `Quick test_multipart_types;
   test_case "immutable source ownership" `Quick test_source_ownership;
-  test_case "payload decode refusal" `Quick test_decode_refusal]]
+  test_case "payload decode refusal" `Quick test_decode_refusal;
+  test_case "inert embedded HTML sources" `Quick test_html_embedded_sources;
+  test_case "external HTML declarations remain unavailable" `Quick test_html_unavailable_sources]]

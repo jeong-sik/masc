@@ -10805,7 +10805,9 @@ let open_resource_image (state : state) ~mailbox =
   match List.nth_opt images state.resource_image_cursor with
   | Some (_, Masc_tui_image_preview.Output_image {name;source}) ->
     open_message_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
-  | Some (_, (Named_path _ | Staged _ | Stored_attachment _ | Unavailable_image _ | No_image))
+  | Some (_, Unavailable_image {name;reason}) ->
+    notice ~kind:Notice_failure (name ^ ": " ^ reason)
+  | Some (_, (Named_path _ | Staged _ | Stored_attachment _ | No_image))
   | None -> notice ~kind:Notice_failure "No image in the current resource reading"
 
 let open_selected_image state ~mailbox preview =

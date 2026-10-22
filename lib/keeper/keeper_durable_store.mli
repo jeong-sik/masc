@@ -56,6 +56,7 @@ module Id : sig
     | Memory_os_events
     | Keeper_event_queue
     | Keeper_chat_transcripts
+    | Keeper_chat_operations
   val all : t list
   (** Every constructor in declaration order, derived by
       [\[@@deriving enumerate\]]. *)

@@ -599,6 +599,55 @@ let test_transcript_inventory_failure_is_not_empty () =
          | Ok _ -> fail "unreadable transcript directory passed as an empty store")
 ;;
 
+(* 2026-10-22 (#45075): #44905 moved the chat operation journal to
+   user_version 3 while all 36 live journals were version 2. No deploy check
+   read them, and after the restart every keeper owner refused its journal. *)
+let test_preflight_refuses_an_older_chat_operation_journal () =
+  with_workspace
+  @@ fun config ->
+  let module Store = Keeper_chat_operation_store in
+  let base_path = config.Workspace.base_path in
+  let keepers_runtime_dir = Common.keepers_runtime_dir_of_base ~base_path in
+  let journal keeper_name = Store.path_for_keeper ~keepers_runtime_dir ~keeper_name in
+  let create keeper_name =
+    let path = journal keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    match Store.open_or_create ~path with
+    | Error error -> fail (Store.error_to_string error)
+    | Ok store ->
+      (match Store.close store with
+       | Ok () -> ()
+       | Error error -> fail (Store.error_to_string error))
+  in
+  create "current";
+  create "older";
+  (* The generation before this build's, as the live journals were. *)
+  let db = Sqlite3.db_open (journal "older") in
+  let rc = Sqlite3.exec db "PRAGMA user_version=2" in
+  ignore (Sqlite3.db_close db : bool);
+  check bool "the older generation is written" true (Sqlite3.Rc.is_success rc);
+  (* A store directory beside the keepers is not a keeper's journal. *)
+  write_bytes
+    (Filename.concat
+       (Filename.concat keepers_runtime_dir
+          (Common.keeper_runtime_store_dirname Common.Keeper_tool_usage))
+       Store.database_file)
+    "";
+  let scan =
+    match D.reader D.Id.Keeper_chat_operations with
+    | D.Preflight_only scan -> scan
+    | D.Refuse_boot _ | D.Degrade_typed _ -> fail "chat operation journals are read by the preflight only"
+  in
+  match D.run scan ~base_path with
+  | Ok { D.rows = 2; refused = 1; first_refusal = Some detail } ->
+    check bool "the refusal names the older journal" true
+      (String.starts_with ~prefix:(journal "older" ^ ": ") detail);
+    check bool "and says its generation is not this build's" true
+      (String_util.contains_substring detail "user_version")
+  | Ok report -> failf "rows %d refused %d" report.D.rows report.D.refused
+  | Error detail -> failf "scan failed: %s" detail
+;;
+
 (* [Id.all] is derived. Each store boot refuses on or reports must be
    reached from exactly one id, or boot would read it twice or never. *)
 let test_every_boot_store_has_exactly_one_id () =
@@ -1585,6 +1634,8 @@ let () =
             test_preflight_names_the_transcript_line_appends_refuse
         ; test_case "transcript inventory failures cannot pass as empty" `Quick
             test_transcript_inventory_failure_is_not_empty
+        ; test_case "the preflight refuses an older chat operation journal" `Quick
+            test_preflight_refuses_an_older_chat_operation_journal
         ; test_case "every boot store has exactly one id" `Quick
             test_every_boot_store_has_exactly_one_id
         ] )

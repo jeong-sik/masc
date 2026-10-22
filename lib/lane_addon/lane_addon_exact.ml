@@ -267,7 +267,8 @@ type call_outcome =
   | Call_refused of provider_refusal
 
 type call = validate:(Yojson.Safe.t -> (checked, string) result) -> call_outcome
-type runner = lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
+type runner = admission_class:Agent_core.Llm_provider.Admission_class.t ->
+  lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
 
 (* One record per declaration and request: the request, its digest, every
    attempt in order (an attempt with no outcome was started and never
@@ -369,11 +370,16 @@ let claim key =
 
 let release key = Mutex.protect in_flight_lock (fun () -> Hashtbl.remove in_flight key)
 
-type validation_authority =
+type output_validator = Yojson.Safe.t -> (unit, string) result
+type request_authorization = {
+  admission_class : Agent_core.Llm_provider.Admission_class.t;
+  validate_output : output_validator;
+}
+type execution_authority =
   store:Lane_addon_store.t -> declaration_id:string -> package:Lane_addon_types.package ->
-  request -> (Yojson.Safe.t -> (unit, string) result, string) result
+  request -> (request_authorization, string) result
 
-let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~validate_request request =
+let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~authorize_request request =
   let request_id = request.request_id in
   let key = Lane_addon_store.root store, declaration_id, request_id in
   (* Identity precedes permission: even a refused request owns its id. *)
@@ -418,12 +424,12 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~va
         match schema_for_request ~output:declared request with
         | Error reason -> deny reason
         | Ok schema ->
-        let* validate_domain = validate_request ~store ~declaration_id ~package request in
+        let* authorization = authorize_request ~store ~declaration_id ~package request in
         let* lane = Runtime_schema.addon_lane ~declaration_id ~output:request.output in
         let lane_key = Runtime_schema.exact_lane_key (Runtime_schema.Addon lane) in
         let validate answer =
           let* checked = validate_answer ~output:declared request answer in
-          let* () = validate_domain (checked_json checked) in
+          let* () = authorization.validate_output (checked_json checked) in
           Ok checked in
         let deliver = function
           | Call_final (Answered {output; slot; usage}) ->
@@ -437,7 +443,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~va
         | Some final -> Ok (Final (deliver final))
         | None ->
           Eio.Fiber.check ();
-          match runner ~lane_key ~schema request with
+          match runner ~admission_class:authorization.admission_class ~lane_key ~schema request with
           | Error unavailable ->
             let reason = Lane_unavailable unavailable in
             let* () = save {previous with attempts = previous.attempts @ [Some (not_final_to_json reason)]} in

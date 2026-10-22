@@ -254,7 +254,7 @@ let with_fixture ?(on_response_error=(fun _ _ -> ()))
         |> Result.map_error Runtime_exact_output_registry.publication_error_to_string |> get);
       if routes then publish_routes base_path urls;
       commit_facts base_path claims;
-      Runtime.register_exact_runner ~validate_request:(Server_lane_addon_exact.validate_request ~base_path)
+      Runtime.register_exact_runner ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path)
         (Server_lane_addon_exact.runner ~base_path);
       Runtime.For_testing.with_backend (backend env base_path delivery) (fun () ->
         ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);

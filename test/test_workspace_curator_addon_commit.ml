@@ -462,12 +462,12 @@ let test_nested_successor_has_no_root_sibling ()=with_workspace (fun base_path s
   check int "one root, one child, one grandchild only" 3 (List.length (owned (Owner.discover ~store ~scope:Capture.scope))))
 let host_result base_path store capture output =
   let request=get (Server_workspace_memory_addon_validation.request capture) in
-  let runner ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
+  let runner ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
     match validate output with
     | Ok output -> Exact.Call_ended (Exact.Answered {output;slot="original-host";usage=None})
     | Error detail -> Exact.Call_ended (Exact.Invalid_output {detail})) in
   get (Exact.run ~store ~declaration_id:"curator" ~package:(package ()) ~runner
-    ~validate_request:(Server_workspace_memory_addon_validation.authorize ~base_path) request)
+    ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path) request)
 let test_original_host_terminal_recovers_without_a_live_runtime ()=with_workspace (fun base_path _ ->
   let config=Workspace.default_config base_path in
   let store=Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in

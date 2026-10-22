@@ -5,7 +5,9 @@ val tool : string
 val request : Workspace_memory_execution_capture.t -> (Lane_addon_exact.request, string) result
 (** The original host request ID, complete rendered prompt and output schema.
     Classification and briefing have distinct declared output names. *)
-val authorize : base_path:string -> Lane_addon_exact.validation_authority
+val authorize : base_path:string -> store:Lane_addon_store.t -> declaration_id:string ->
+  package:Lane_addon_types.package -> Lane_addon_exact.request ->
+  (Lane_addon_exact.output_validator, string) result
 (** Requests without a Curator capture keep other packages' baseline validation.
     All requests strictly read the original Curator namespace so relabeling a
     package cannot bypass a retained binding. An unreadable namespace refuses

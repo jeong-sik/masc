@@ -655,6 +655,40 @@ let test_idle_barrier_cancel_and_stop ()=
     check int "stop retires the surviving subscription" 0 (idle_waiter_count base_path);
     check int "cancel and stop create no original" 0 (List.length (records store));
     check int "cancel and stop call no provider" 0 (F.post_count server))
+let test_briefing_successor_observes_live_contract ()=
+  with_fixture ~start_owner:false ~claims:["Briefing frontier source a";"Briefing frontier source b"]
+    (fun ~sw:_ ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode:_ ~delivery:_ ->
+    reconcile_until_export clock ~config;
+    let classification=capture_classification config in
+    let selected=match Capture.work classification with
+      | Capture.Classification {batch;_} -> batch.selected | Briefing _ -> fail "expected original classification" in
+    let answer=`Assoc ["decisions",`List (List.map (fun (fact:Ledger.pending_fact) ->
+      `Assoc ["fact_id",`String (Request.fact_id fact.fact);"kind",`String "create_claim";
+        "value",`String fact.claim]) selected)] in
+    let ledger=match get (Capture.validate_output classification answer) with
+      | Capture.Classification_commit ledger -> ledger | Briefing_commit _ -> fail "expected original ledger" in
+    get (Ledger.save ~base_path ledger);
+    let prompt=Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing in
+    let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_briefing
+      prompt ["workspace_memory_briefing",Yojson.Safe.to_string input] in
+    let batch=match get (Briefing.prepare ~sources:(Ledger.briefing_sources ledger)
+        ~contract:(Briefing.contract ~template:prompt.effective) ~render Briefing.empty) with
+      | Prepared batch -> batch | Unchanged | Cleanup _ -> fail "expected original prepared Briefing" in
+    let prepared=Briefing.prepared_state batch in
+    get (Briefing.save ~directory:(Ledger.directory ~base_path) prepared);
+    let capture=Consumer.capture_briefing ~config ~prompt ~batch |> consumed in
+    let originals ()=records store |> List.map (fun record -> record.Owner.request_id,Progress.to_json record.progress) in
+    let before=originals () in
+    check bool "matching live Briefing contract supplies the current frontier" true
+      (Consumer.successor_is_current ~config ~capture |> consumed);
+    get (Prompt_registry.set_override Prompt_names.workspace_memory_briefing
+      "Changed current contract {{workspace_memory_briefing}}");
+    check bool "changed live Briefing contract refuses the old frontier" false
+      (Consumer.successor_is_current ~config ~capture |> consumed);
+    check (list (pair string json)) "frontier observation does not advance original requests" before (originals ());
+    check json "frontier observation preserves original prepared state" (Briefing.to_json prepared)
+      (Briefing.to_json (get (Briefing.load ~directory:(Ledger.directory ~base_path))));
+    check int "frontier observation dispatches no provider" 0 (F.post_count server))
 let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "public owner uses real worker, semantic candidates and original terminal" `Quick test_actual_production_pipeline;
   test_case "actual Addon On wakes sources parked while Off" `Quick test_off_then_actual_metadata_on;
@@ -672,4 +706,6 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "existing successor intent recovers locally Off and completes after On" `Quick test_existing_intent_recovers_locally_off_then_runs_on;
   test_case "accepted retained host terminal commits Off without another provider" `Quick test_accepted_host_terminal_commits_off_without_worker;
   test_case "idle subscription observes queued and already completed wakes" `Quick test_idle_barrier_has_no_lost_wake;
-  test_case "idle subscription cancellation and owner stop preserve other waiters" `Quick test_idle_barrier_cancel_and_stop]]
+  test_case "idle subscription cancellation and owner stop preserve other waiters" `Quick test_idle_barrier_cancel_and_stop;
+  test_case "Briefing successor observes the guarded live contract without publication" `Quick
+    test_briefing_successor_observes_live_contract]]

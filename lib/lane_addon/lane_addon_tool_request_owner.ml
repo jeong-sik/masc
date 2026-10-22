@@ -5,6 +5,15 @@ type installation = Configuration of string | Manual of string
 let installation_id = function
   | Configuration id -> Yojson.Safe.to_string (`List [`String "configuration"; `String id])
   | Manual id -> Yojson.Safe.to_string (`List [`String "manual"; `String id])
+let installation_of_id encoded =
+  let* json = try Ok (Yojson.Safe.from_string encoded)
+    with Yojson.Json_error detail -> Error detail in
+  let* installation = match json with
+    | `List [`String "configuration";`String id] when String.trim id<>"" -> Ok (Configuration id)
+    | `List [`String "manual";`String id] when String.trim id<>"" -> Ok (Manual id)
+    | _ -> Error "invalid original installation identity" in
+  if String.equal encoded (installation_id installation) then Ok installation
+  else Error "original installation identity is not canonical"
 type retained = {
   scope : string; request_id : string; installation_id : string;
   package_id : string; tool : string; request_digest : string; request : Yojson.Safe.t;

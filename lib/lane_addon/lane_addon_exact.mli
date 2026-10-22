@@ -162,6 +162,24 @@ type validation_authority =
     [Error] refuses both dispatch and delivery without replacing the original
     result. Authority is resolved again on every [run], including replay. *)
 
+type retained_observation = Retained_absent | Retained_open | Retained_terminal of final
+val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> request -> (retained_observation, string) result
+(** Read only the original host Exact record under the caller's workspace
+    authority. Strictly check the complete canonical envelope, declaration and
+    request ID, original request/digest, attempt outcomes and terminal against
+    the caller's original schema. Missing/malformed/conflicting records remain
+    distinct. A started attempt without a final is [Retained_open], since this
+    read cannot determine whether its provider is still running. It does not
+    claim, write, resolve a route, call a provider or synthesize Outcome_unknown.
+
+    This is an observation for the trusted original consumer, including while
+    the worker is Off. It grants no package/worker delivery, new execution or
+    domain write authority. That consumer first restores its immutable capture
+    and acknowledged ancestry, supplies the original request/schema, validates
+    the full domain answer and rechecks authority before its separate effects.
+    Run the complete blocking read/validation scope on a system thread in Eio. *)
+
 val run :
   store:Lane_addon_store.t ->
   declaration_id:string ->

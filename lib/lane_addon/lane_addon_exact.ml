@@ -309,6 +309,54 @@ let record_of_json = function
     Ok { digest; request; attempts; final }
   | _ -> Error "record must be an object"
 
+type retained_observation = Retained_absent | Retained_open | Retained_terminal of final
+let observe_retained ~store ~declaration_id ~schema request =
+  let* _ = Runtime_schema.addon_lane ~declaration_id ~output:request.output in
+  let* schema = Lane_addon_action.canonical schema in
+  let* () = match schema with `Assoc _ -> Ok () | _ -> Error "original Exact schema must be an object" in
+  let* () = match request.schema with
+    | Some original when not (Yojson.Safe.equal original schema) ->
+      Error "retained observation schema differs from its original request grant"
+    | Some _ | None -> Ok () in
+  let* wire = Lane_addon_store.load_exact_request store ~declaration_id ~request_id:request.request_id in
+  match wire with
+  | None -> Ok Retained_absent
+  | Some wire ->
+    let* wire = Lane_addon_action.canonical wire in
+    let* record = record_of_json wire in
+    let* encoded = Lane_addon_action.canonical
+      (record_to_json ~declaration_id ~request_id:request.request_id record) in
+    let* () = if Yojson.Safe.equal wire encoded then Ok ()
+      else Error "retained Exact record has different identity or unknown fields" in
+    let* original = request_of_json record.request in
+    let* expected = Lane_addon_action.canonical (request_to_json request) in
+    let* captured = Lane_addon_action.canonical (request_to_json original) in
+    let* () = if String.equal record.digest (digest original)
+        && String.equal record.digest (digest request)
+        && Yojson.Safe.equal captured record.request && Yojson.Safe.equal captured expected then Ok ()
+      else Error "retained Exact record differs from the original request or digest" in
+    let attempt = function
+      | None -> Ok ()
+      | Some (`Assoc fields as json) ->
+        let* outcome = match List.assoc_opt "exception" fields with
+          | None -> Ok json
+          | Some (`String detail) when String.trim detail<>"" ->
+            let remaining=List.remove_assoc "exception" fields in
+            if Yojson.Safe.equal (`Assoc remaining) (final_to_json Outcome_unknown) then Ok (`Assoc remaining)
+            else Error "only an unknown Exact outcome can retain exception evidence"
+          | Some _ -> Error "invalid retained Exact exception evidence" in
+        (match List.assoc_opt "status" fields,List.assoc_opt "reason" fields with
+         | Some _,(None | Some _) -> let* _ = final_of_json ~schema outcome in Ok ()
+         | None,Some _ -> let* _ = not_final_of_json outcome in Ok ()
+         | None,None -> Error "invalid retained Exact attempt outcome")
+      | Some _ -> Error "retained Exact attempt must be an outcome object or started marker" in
+    let* () = List.fold_left (fun state value -> let* () = state in attempt value) (Ok ()) record.attempts in
+    match record.final with
+    | None -> Ok Retained_open
+    | Some final ->
+      let* final = final_of_json ~schema (final_to_json final) in
+      Ok (Retained_terminal final)
+
 (* Requests this process is running, by store root, declaration and request.
    Only the base-path lease holder runs requests (see the interface), so a
    started attempt that is not here was cut off by a crash or a cancellation. *)

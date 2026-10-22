@@ -425,6 +425,88 @@ let test_unknown_is_preserved_before_schema_grant_refusal () =
       (consumer_run store runner pending=Exact.Final Exact.Outcome_unknown);
     check int "provider never re-entered" 0 !sends)
 
+let observe store request = Eio_unix.run_in_systhread (fun () ->
+  Exact.observe_retained ~store ~declaration_id ~schema request)
+let test_observe_missing_and_original_terminal_without_another_call ()=with_root (fun root ->
+  let store=Store.create ~root in
+  let original=request "readonly-original" in
+  check bool "strict missing record stays absent" true (require (observe store original)=Exact.Retained_absent);
+  check bool "absence does not create a store" false (Sys.file_exists root);
+  let runner,sends,_=counting_runner store (ref [Answer question]) in
+  ignore (run_request store runner original);
+  let before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) in
+  let read store=match require (observe store original) with
+    | Exact.Retained_terminal (Exact.Call_final (Exact.Answered {output;_})) ->
+      check bool "original answer is observed" true (Exact.checked_json output=question)
+    | _ -> fail "terminal observation did not preserve the original result" in
+  read store;read (Store.create ~root);
+  check int "read never invokes the provider" 1 !sends;
+  check bool "terminal record is unchanged" true (before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id));
+  check bool "same ID with another original input refuses" true
+    (Result.is_error (observe store (request ~message:"Different input" original.request_id))))
+let test_observe_started_is_open_while_provider_is_running ()=with_root (fun root ->
+  let store=Store.create ~root in
+  let original=request "readonly-running" in
+  let runner ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
+    let before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) in
+    check bool "actual provider's started record remains open" true
+      (require (observe (Store.create ~root) original)=Exact.Retained_open);
+    check bool "read cannot infer terminal uncertainty or rewrite started history" true
+      (before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id));
+    let output=require (validate question) in Exact.Call_ended (Exact.Answered {output;slot="original";usage=None})) in
+  check bool "the actual in-flight call can still answer" true (answered_with question (run_request store runner original)))
+let test_observe_exception_and_later_denial_preserves_original ()=with_root (fun root ->
+  let store=Store.create ~root in
+  let original=request "readonly-exception" in
+  let runner ~lane_key:_ ~schema:_ _=Ok (fun ~validate:_ -> raise Exit) in
+  ignore (run_request store runner original);
+  let hidden={package with exact_outputs=[]} in
+  ignore (require (Exact.run ~validate_request ~store ~declaration_id ~package:hidden ~runner original));
+  check bool "exception evidence and denial audit do not replace the original unknown" true
+    (require (observe (Store.create ~root) original)=Exact.Retained_terminal Exact.Outcome_unknown);
+  let valid=request "readonly-denied-answer" in
+  let answer,_,_=counting_runner store (ref [Answer question]) in
+  ignore (run_request store answer valid);
+  ignore (require (Exact.run ~validate_request ~store ~declaration_id ~package:hidden ~runner:answer valid));
+  check bool "host observation is the original answer, not package redelivery" true
+    (match require (observe store valid) with
+     | Exact.Retained_terminal (Exact.Call_final (Exact.Answered {output;_})) -> Exact.checked_json output=question
+     | _ -> false))
+let test_observe_interrupted_attempt_with_later_denial ()=with_root (fun root ->
+  let store=Store.create ~root in
+  let original=request "readonly-interrupted" in
+  require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id (`Assoc [
+    "declaration_id",`String declaration_id;"request_id",`String original.request_id;
+    "digest",`String (Exact.digest original);"request",Exact.request_to_json original;
+    "attempts",`List [`Null];"final",`Null]));
+  check bool "read alone leaves the interrupted attempt open" true (require (observe store original)=Exact.Retained_open);
+  let runner,sends,_=counting_runner store (ref []) in
+  ignore (require (Exact.run ~validate_request ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner original));
+  check bool "existing producer can retain unknown with a later denial after the null attempt" true
+    (require (observe store original)=Exact.Retained_terminal Exact.Outcome_unknown);
+  check int "observing recovery never sends again" 0 !sends)
+let test_observe_rejects_malformed_identity_attempts_and_schema ()=with_root (fun root ->
+  let store=Store.create ~root in
+  let original=request "readonly-tampered" in
+  let runner,_,_=counting_runner store (ref [Answer question]) in ignore (run_request store runner original);
+  let wire=match require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) with
+    | Some wire -> wire | None -> fail "original fixture record" in
+  let replace key value=match wire with `Assoc fields -> `Assoc (List.map (fun (name,old) -> name,if name=key then value else old) fields)
+    | _ -> fail "original fixture object" in
+  let variants=[replace "declaration_id" (`String "another-installation");replace "request_id" (`String "another-request");
+    replace "digest" (`String "different");replace "request" (Exact.request_to_json (request ~message:"other" original.request_id));
+    replace "attempts" (`List [`Assoc ["reason",`String "provider_unavailable";"detail",`String "original";"extra",`Bool true]]);
+    replace "attempts" (`List [`Assoc ["status",`String "answered";"slot",`String "slot";"output",question;"exception",`String "not unknown"]]);
+    replace "final" (`Assoc ["status",`String "answered";"slot",`String "slot";"output",`String "wrong shape"]);
+    (match wire with `Assoc fields -> `Assoc (("extra",`Bool true)::fields) | _ -> fail "object")] in
+  List.iter (fun invalid ->
+    require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id invalid);
+    check bool "malformed stored evidence is neither absent nor terminal authority" true (Result.is_error (observe store original))) variants;
+  require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id wire);
+  let granted=request ~schema "readonly-granted" in
+  check bool "a supplied schema cannot weaken the original request grant" true
+    (Result.is_error (Exact.observe_retained ~store ~declaration_id ~schema:(`Assoc ["type",`String "string"]) granted)))
+
 let () =
   run "lane add-on exact requests"
     [ ( "retention"
@@ -452,4 +534,9 @@ let () =
         ; test_case "request schema authority preserves retained identity" `Quick test_request_schema_authority_and_retention
         ; test_case "provider schema cannot weaken the package baseline" `Quick test_request_schema_is_provider_requirement_not_baseline_replacement
         ; test_case "request schema wire is canonical" `Quick test_request_schema_canonical_wire
-        ; test_case "unknown outcome survives schema grant changes" `Quick test_unknown_is_preserved_before_schema_grant_refusal ] ) ]
+        ; test_case "unknown outcome survives schema grant changes" `Quick test_unknown_is_preserved_before_schema_grant_refusal
+        ; test_case "host observes original terminal without replay or package delivery" `Quick test_observe_missing_and_original_terminal_without_another_call
+        ; test_case "started provider remains open during a read" `Quick test_observe_started_is_open_while_provider_is_running
+        ; test_case "exception and denial audit preserve the original terminal" `Quick test_observe_exception_and_later_denial_preserves_original
+        ; test_case "interrupted started marker and denial audit remain valid" `Quick test_observe_interrupted_attempt_with_later_denial
+        ; test_case "strict original identity attempt and schema validation" `Quick test_observe_rejects_malformed_identity_attempts_and_schema ] ) ]

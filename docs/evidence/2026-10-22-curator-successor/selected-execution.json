@@ -1,0 +1,19 @@
+{
+  "run": 39679636091,
+  "head": "062bea30dd9a0a7c030ceb9944076c535ba38457",
+  "status": "completed",
+  "conclusion": "failure",
+  "actual": "selected binaries compiled; three interrupted-link commit-suite cases failed because fresh and restored row object key order rendered different child input_text/prompt bytes",
+  "repair_head": "7093af4a5c50aa8c5593de5debc1043f55a1c7ed",
+  "repair": "canonicalize internal captured work while separately preserving original parent substitution bytes; exact child identity comparison remains strict",
+  "repair_execution": "not yet observed",
+  "preceding_run": {
+    "id": 39679243670,
+    "head": "4ac521f27a34d4999e89c6fc1dce292fa95946ec",
+    "status": "completed",
+    "conclusion": "failure",
+    "actual": "Unbound module Mcp_protocol before selected tests",
+    "repair_head": "062bea30dd9a0a7c030ceb9944076c535ba38457"
+  },
+  "limits": "No success for repair or current source, no production scheduler, live provider/Off lifecycle or installed UI claim"
+}

@@ -137,7 +137,8 @@ let observe_analysis t proc ~method_ params =
      | Some (`String uri),Some (`Int version),Some (`List _) ->
        with_table t (fun () ->
          let ready,remaining=List.partition (fun waiter ->
-           waiter.process == proc && String.equal waiter.uri uri && waiter.version=version)
+           waiter.process == proc && Lsp_uri.same_local_document waiter.uri uri
+           && waiter.version=version)
            t.analysis_waiters in
          t.analysis_waiters <- remaining;
          List.iter (fun waiter -> Eio.Promise.resolve waiter.resolver (Ok ())) ready)
@@ -165,7 +166,7 @@ let transmit t ~timeout ~what f =
 
 let initialize_params ~workspace_root =
   `Assoc
-    [ "rootUri", `String ("file://" ^ workspace_root)
+    [ "rootUri", `String (Lsp_uri.file_uri_of_path workspace_root)
     ; "rootPath", `String workspace_root
       (* NDT-OK: the pid is what it is for — LSP has the server watch this
          process and exit when it goes, which is the only teardown left if

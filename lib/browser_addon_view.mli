@@ -7,4 +7,8 @@ val capture : Browser_addon_host.t -> Yojson.Safe.t -> Tool_result.result
 val interact : Browser_addon_host.t -> Yojson.Safe.t -> Tool_result.result
 val session : Browser_addon_host.t -> Yojson.Safe.t -> Tool_result.result
 val goto : Browser_addon_host.t -> Yojson.Safe.t -> Tool_result.result
-val clients : Browser_addon_host.t -> Tool_result.result
+(** The Add-on's clients and automatic choices, with [bidi_host] beside them as
+    [bidiHost]. The caller observes it: the manual BiDi host record is read
+    from this server's disk, not from the Add-on worker. *)
+val clients :
+  bidi_host:Browser_bidi_host_status.observation -> Browser_addon_host.t -> Tool_result.result

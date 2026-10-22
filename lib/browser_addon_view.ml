@@ -80,7 +80,7 @@ let goto host json=run (fun () ->
     | None|Some _ -> Error "url is required") in
   let* receipt=Host.issue host ~preference:request.route (B.Page_goto {url;tab_id=request.tab_id}) in
   Ok (Browser_binding.annotate receipt.binding receipt.data))
-let clients host=run (fun () ->
+let clients ~bidi_host host=run (fun () ->
   let* value=Host.snapshot host |> Result.map_error (function
     | Browser_addon_client.Unavailable detail|Outcome_unknown detail ->
         failure ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect detail) in
@@ -108,4 +108,5 @@ let clients host=run (fun () ->
     | Ok selected -> `Assoc ["ok",`Bool true;"data",Browser_selection.to_json selected]
     | Error error -> `Assoc ["ok",`Bool false;"error",Browser_selection.error_to_json error] in
   Ok (`Assoc ["clients",`List rows;"automatic",`Assoc ["browse",decision B.Tabs_list;
-    "work",decision (B.Session_open {headless=Some false})]]))
+    "work",decision (B.Session_open {headless=Some false})];
+    "bidiHost",Browser_bidi_host_status.to_json bidi_host]))

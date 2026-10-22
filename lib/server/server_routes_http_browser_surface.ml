@@ -33,8 +33,14 @@ let view ~config ~principal operation json =
   match shared_host ~config ~principal with
   | Ok host -> operation host json
   | Error error -> Browser_addon_host.error_result ~start_time error
-let clients_listing ~config = view ~config ~principal:Lane_addon_call_context.Operator
-  (fun host _ -> Browser_addon_view.clients host) `Null
+(* The manual BiDi host record is on this server's disk, not in the Add-on
+   worker: it is read here and answered beside the Add-on's clients, where the
+   TUI connection list reads it. *)
+let clients_listing ~config =
+  let bidi_host=Browser_bidi_host_status.observe ~base_path:config.Workspace.base_path
+    ~configuration:(Runtime.browser_configuration ()) in
+  view ~config ~principal:Lane_addon_call_context.Operator
+    (fun host _ -> Browser_addon_view.clients ~bidi_host host) `Null
 let reply_view request reqd result = match result with
   | Tool_result.Completed _ -> respond_json_value_with_cors request reqd
       (`Assoc ["ok",`Bool true;"data",Tool_result.data result])

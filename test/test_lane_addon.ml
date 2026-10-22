@@ -38,6 +38,7 @@ type fake = {
   modes : (string, string) Hashtbl.t;
   recovery : (string * string) list ref;
   principals : Lane_addon_call_context.principal list ref;
+  export_arguments : Yojson.Safe.t list ref;
   controller : string option ref;
   admissions : Machine_controller_contract.admission option list ref;
   start_gate : unit Eio.Promise.t * unit Eio.Promise.u;
@@ -57,7 +58,7 @@ let fake_output : Types.output = {
 let make_backend ?observe_step () =
   let home = Fake.docker "engine-a" in
   let state = { bindings=Hashtbl.create 4; calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
-                recovery=ref []; principals=ref []; controller=ref None; admissions=ref [];
+                recovery=ref []; principals=ref []; export_arguments=ref []; controller=ref None; admissions=ref [];
                 start_gate = Eio.Promise.create (); teardown_gate = Eio.Promise.create ();
                 world = Fake.create home; home } in
   let proven ~engine work =
@@ -75,17 +76,22 @@ let make_backend ?observe_step () =
       Hashtbl.add state.modes instance_id package.id;
       Hashtbl.add state.bindings instance_id binding;
       (* Real workers retain the Tool objects from protocol initialization. *)
+      let input_schema = match package.id with
+        | "closed-export" -> `Assoc ["type",`String "object";"properties",`Assoc [];
+            "additionalProperties",`Bool false]
+        | _ -> `Assoc ["type",`String "object"] in
       let exported_tools = List.map (fun name ->
         match Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String name;
-          "inputSchema",`Assoc ["type",`String "object"]]) with
+          "inputSchema",input_schema]) with
         | Ok tool -> tool | Error message -> fail message) package.exported_tools in
       let connection : Runtime.For_testing.connection = {browser=None;
         resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
           | Ok image -> Some image | Error detail -> Alcotest.fail detail);
                 host = None; resource = Lifecycle.Container_resource (Store.digest instance_id);
         exported_tools = (fun () -> exported_tools);
-        call_exported_tool = (fun ~on_result:_ ~authorize ~principal ~name:_ ~arguments:_ ->
+        call_exported_tool = (fun ~on_result:_ ~authorize ~principal ~name:_ ~arguments ->
           state.principals := principal :: !(state.principals);
+          state.export_arguments := arguments :: !(state.export_arguments);
           let invoke admission =
             state.admissions := admission :: !(state.admissions);
             if package.id = "export-hang" then begin
@@ -1854,6 +1860,41 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   await clock (fun () -> Atomic.get owner_complete);
   check bool "remote caller cancellation cleans owner worker" true (Hashtbl.mem state.stops remote))
 
+let test_http_caller_marker_stays_out_of_export_arguments () = with_fixture (fun env sw config dir state ->
+  let clock = Eio.Stdenv.clock env in
+  let access = Lane_addon_sources.Operator_configuration in
+  ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
+  Auth.disable_auth config.base_path;
+  let path = manifest dir "closed-export" in
+  let original = In_channel.with_open_bin path In_channel.input_all in
+  write path (original ^ "\n[world.tools]\nexport = [\"masc_msx_step\"]\n");
+  let id = unwrap (dispatch config Runtime.Attach ["manifest_path",`String path;
+    "run_id",`String "world";"binding",`Assoc ["sources",`List []]]) |> text "instance_id" in
+  await clock (fun () ->
+    match Runtime.tool_exports ~config ~access ~reserved:[] with Ok [_] -> true | _ -> false);
+  let server = Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
+  let metadata = `Assoc [
+    "io.modelcontextprotocol/protocolVersion", `String "2026-07-28";
+    "io.modelcontextprotocol/clientCapabilities", `Assoc [];
+    "io.modelcontextprotocol/clientInfo", `Assoc [
+      "name", `String "lane-addon-fixture"; "version", `String "1"]] in
+  (* The body the HTTP transport forwards: it writes the caller into the
+     arguments of every tools/call, also when the client sent none. *)
+  let body = Server_mcp_actor_injection.inject_agent_name_into_body ~agent_name:"fixture-operator"
+    (Yojson.Safe.to_string (`Assoc ["jsonrpc",`String "2.0"; "id",`Int 1;
+      "method",`String "tools/call"; "params",`Assoc ["_meta",metadata;
+        "name",`String "masc_msx_step"; "arguments",`Assoc []]])) in
+  check bool "the forwarded arguments carry the caller marker" true
+    (Yojson.Safe.from_string body |> member "params" |> member "arguments"
+     = `Assoc ["_agent_name", `String "fixture-operator"]);
+  let result = Mcp_server_eio.handle_request ~profile:Mcp_server_eio.Full ~clock ~sw server body
+    |> member "result" in
+  check bool "a closed export schema accepts the call" true
+    (result <> `Null && member "isError" result <> `Bool true);
+  check bool "the worker receives the arguments without the caller marker" true
+    (!(state.export_arguments) = [`Assoc []]);
+  detach config id; await_phase clock config id "detached")
+
 let test_machine_dependencies_reject_cycles () = with_fixture (fun env _sw config dir state ->
   let attach_machine ~id ~export ~source =
     let path = manifest dir id in
@@ -1994,6 +2035,8 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "a retained record is released only by its recorded engine" `Quick
     test_retained_record_is_released_only_by_its_recorded_engine;
   test_case "tool exports bind live incarnations" `Quick test_tool_exports_bind_live_incarnations;
+  test_case "HTTP caller marker stays out of export arguments" `Quick
+    test_http_caller_marker_stays_out_of_export_arguments;
   test_case "unreadable retained bindings are isolated" `Quick test_unreadable_retained_bindings_are_isolated;
   test_case "MCP attribution never authorizes private Lane reads" `Quick
     test_mcp_attribution_does_not_authorize_private_lane;

@@ -24,6 +24,10 @@ type t = {
 let silent_auth_token_error_kind err =
   Auth_error_kind.to_string (Auth_error_kind.classify err)
 
+(* The HTTP transport writes the caller under this key into every
+   [tools/call] argument object (Server_mcp_actor_injection). *)
+let caller_marker_key = "_agent_name"
+
 let caller_agent_name_from_arguments arguments =
   let nonempty_nonunknown key =
     match Safe_ops.json_string_opt key arguments with
@@ -35,9 +39,14 @@ let caller_agent_name_from_arguments arguments =
           None
     | None -> None
   in
-  match nonempty_nonunknown "_agent_name" with
+  match nonempty_nonunknown caller_marker_key with
   | Some _ as value -> value
   | None -> None
+
+let without_caller_marker = function
+  | `Assoc fields ->
+      `Assoc (List.filter (fun (key, _) -> not (String.equal key caller_marker_key)) fields)
+  | arguments -> arguments
 
 let direct_call_block_message name =
   Printf.sprintf

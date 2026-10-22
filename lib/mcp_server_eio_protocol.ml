@@ -1167,7 +1167,8 @@ let handle_request
                             Option.iter (fun observe -> observe caller) on_caller_resolved;
                             let _ = state in
                             Tool_dispatch.guarded_external_dispatch
-                              ~name ~schema:export.tool.input_schema ~args:arguments
+                              ~name ~schema:export.tool.input_schema
+                              ~args:(Mcp_server_eio_caller_identity.without_caller_marker arguments)
                               ~handler:(fun ~name ~args:arguments ->
                             let start_time = Tool_timing.start () in
                             match Machine_addon_host.call ~principal ~config ~access ~reserved ~export ~arguments with

@@ -100,6 +100,8 @@ let fact_ref_fields = function
     ; "path", `String path
     ; "claim_sha256", `String claim_sha256 ]
 
+let fact_ref_to_json fact = `Assoc (fact_ref_fields fact)
+
 let disposition_json = function
   | Claim_member claim_id -> `Assoc ["kind", `String "claim"; "claim_id", `String claim_id]
   | Conflict_member conflict_id ->
@@ -173,7 +175,7 @@ let decode_disposition json =
     Ok (Excluded reason)
   | _ -> Error "disposition kind must be claim, conflict or excluded"
 
-let decode_fact json =
+let decode_fact_ref_fields ~extra json =
   let store = match json with
     | `Assoc fields -> List.assoc_opt "store" fields
     | _ -> None
@@ -182,13 +184,13 @@ let decode_fact json =
     match store with
     | Some (`String name) when String.equal name ordinary_store_name ->
       let* fields =
-        exact_fields ~what:"ordinary fact" ["keeper_id"; "store"; "claim_sha256"; "disposition"] json
+        exact_fields ~what:"ordinary fact" (["keeper_id"; "store"; "claim_sha256"] @ extra) json
       in
       Ok (fields, fun ~keeper_id ~claim_sha256 -> Ok (Ordinary { keeper_id; claim_sha256 }))
     | Some (`String name) when String.equal name source_bound_store_name ->
       let* fields =
         exact_fields ~what:"source-bound fact"
-          ["keeper_id"; "store"; "path"; "claim_sha256"; "disposition"] json
+          (["keeper_id"; "store"; "path"; "claim_sha256"] @ extra) json
       in
       Ok (fields, fun ~keeper_id ~claim_sha256 ->
         let* path = nonblank ~what:"path" (List.assoc "path" fields) in
@@ -198,6 +200,14 @@ let decode_fact json =
   let* keeper_id = nonblank ~what:"keeper_id" (List.assoc "keeper_id" fields) in
   let* claim_sha256 = sha256_hex ~what:"claim_sha256" (List.assoc "claim_sha256" fields) in
   let* fact = fact_of_fields ~keeper_id ~claim_sha256 in
+  Ok (fact, fields)
+
+let fact_ref_of_json json =
+  let* fact, _ = decode_fact_ref_fields ~extra:[] json in
+  Ok fact
+
+let decode_fact json =
+  let* fact, fields = decode_fact_ref_fields ~extra:["disposition"] json in
   let* disposition = decode_disposition (List.assoc "disposition" fields) in
   Ok (fact, disposition)
 

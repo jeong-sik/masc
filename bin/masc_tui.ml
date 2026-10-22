@@ -13563,7 +13563,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.verification_evidence_request <- None;
   state.verification_verdict_armed <- None;
   state.verification_verdict_error <- None;
-  state.runtime_params <- [];
+  state.runtime_params <- None;
   state.runtime_params_error <- None;
   state.runtime_params_loading <- false;
   state.runtime_params_cursor <- 0;
@@ -19607,7 +19607,8 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
       match result with
       | Ok rows ->
           let selected_key =
-            List.nth_opt state.runtime_params state.runtime_params_cursor
+            Option.bind state.runtime_params (fun rows ->
+              List.nth_opt rows state.runtime_params_cursor)
             |> Option.map (fun (row : Tui_decode.runtime_param_row) -> row.rpr_key)
           in
           let cursor =
@@ -19623,7 +19624,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
           in
           if not (Option.equal String.equal selected_key next_key)
           then state.config_scroll <- 0;
-          state.runtime_params <- rows;
+          state.runtime_params <- Some rows;
           state.runtime_params_cursor <- cursor;
           state.runtime_params_error <- None
       | Error detail ->
@@ -23729,7 +23730,8 @@ let main
       open_runtime_model_settings sr_slot
   in
   let selected_runtime_param () =
-    List.nth_opt state.runtime_params state.runtime_params_cursor
+    Option.bind state.runtime_params (fun rows ->
+      List.nth_opt rows state.runtime_params_cursor)
   in
   let write_runtime_param ~edit ~failure ~notice write =
     if not state.runtime_params_loading then begin
@@ -31650,7 +31652,7 @@ and is loaded on demand through keeper_skill.
             | Config when state.config_pane = Config_params ->
                 let next_cursor =
                   min
-                    (max 0 (List.length state.runtime_params - 1))
+                    (max 0 (Option.fold ~none:0 ~some:List.length state.runtime_params - 1))
                     (state.runtime_params_cursor + 1) in
                 if next_cursor <> state.runtime_params_cursor then begin
                   state.runtime_params_cursor <- next_cursor;

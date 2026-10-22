@@ -9032,7 +9032,8 @@ type state = {
      default, and whether somebody moved it. Loaded like the other config
      views rather than kept live -- these change when an operator changes
      them, not on their own. *)
-  mutable runtime_params: Tui_decode.runtime_param_row list;
+  mutable runtime_params: Tui_decode.runtime_param_row list option;
+  (* None means no registry observation; Some [] is a successful empty read. *)
   mutable runtime_params_error: string option;
   mutable runtime_params_loading: bool;
   (* The Runtime params pane is an operator surface, not a passive dump.
@@ -15707,7 +15708,7 @@ let create_state
   keeper_yolo_names = [];
   keeper_tool_modes_observed = false;
   keeper_tool_modes_error = None;
-  runtime_params = [];
+  runtime_params = None;
   runtime_params_error = None;
   runtime_params_loading = false;
   runtime_params_cursor = 0;

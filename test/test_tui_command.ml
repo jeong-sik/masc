@@ -678,15 +678,33 @@ let test_a_lone_slash_lists_everything () =
      | Command.Candidates { entries; _ } -> List.length entries
      | Command.No_command | Command.Chosen _ | Command.Unknown_command _ -> 0)
 
+let candidate_commands ~typed text =
+  match Command.hint text with
+  | Command.Candidates { typed = actual; entries } ->
+      check string "the candidate query is preserved" typed actual;
+      List.map (fun entry -> Command.parse ("/" ^ entry.Command.word)) entries
+  | Command.No_command | Command.Chosen _ | Command.Unknown_command _ ->
+      fail "expected an incomplete command to offer candidates"
+
 let test_a_prefix_narrows_the_list () =
-  check string "t narrows to four" "candidates:task,thinking,tools,telemetry" (hint "/t");
-  check string "th narrows to one" "candidates:thinking" (hint "/th")
+  let candidates = candidate_commands ~typed:"t" "/t" in
+  List.iter
+    (fun command -> check bool "the matching command is available" true (List.mem command candidates))
+    [ Command.Task_missing_title; Command.Task_inspect; Command.Task_recover
+    ; Command.Set_thinking `Cycle; Command.Set_tools `Toggle; Command.Open_metrics ];
+  check bool "an unrelated command is excluded" false (List.mem Command.Help candidates);
+  check bool "a narrower prefix resolves to one command" true
+    (candidate_commands ~typed:"th" "/th" = [ Command.Set_thinking `Cycle ])
 
 (* [parse] does no prefix matching, so a half-typed word is not a command yet.
    A hint that described it would say the line was ready when sending it would
    be refused. *)
 let test_a_half_typed_word_is_not_chosen () =
-  check string "not chosen" "candidates:task" (hint "/ta");
+  let candidates = candidate_commands ~typed:"ta" "/ta" in
+  List.iter
+    (fun command -> check bool "a Task command is offered without choosing it" true
+        (List.mem command candidates))
+    [ Command.Task_missing_title; Command.Task_inspect; Command.Task_recover ];
   check bool "and the parser agrees" true
     (match Command.parse "/ta" with
      | Command.Unknown "ta" -> true
@@ -763,13 +781,13 @@ let test_autocomplete_plain_text_is_ignored () =
 
 let test_autocomplete_unique_prefix () =
   check (option string) "/th -> /thinking " (Some "/thinking ") (Command.autocomplete "/th");
-  check (option string) "/ta -> /task " (Some "/task ") (Command.autocomplete "/ta");
+  check (option string) "/task-r -> /task-recover" (Some "/task-recover")
+    (Command.autocomplete "/task-r");
   check (option string) "/se -> /settings" (Some "/settings") (Command.autocomplete "/se");
   (* Several matches: the [play] argument [i] stops at the "invite" that
      invite and invites share, and [c] has nothing shared past the letter
-     itself, so it offers the catalog's first c-word (cost, today). No
-     command-word prefix in today's catalog reaches the shared-prefix case for
-     the command word itself. *)
+     itself, so it offers the catalog's first c-word (cost, today). The
+     command words in the Task family also share a prefix, covered below. *)
   check (option string) "/play i -> /play invite" (Some "/play invite")
     (Command.autocomplete "/play i");
   check (option string) "/c -> /cost" (Some "/cost") (Command.autocomplete "/c");
@@ -777,7 +795,19 @@ let test_autocomplete_unique_prefix () =
   check (option string) "/zork -> None" None (Command.autocomplete "/zork")
 
 let test_autocomplete_cycles_ambiguous_prefix () =
-  check (option string) "/t first candidate" (Some "/task ") (Command.autocomplete "/t");
+  check (option string) "the Task family completes only its common word"
+    (Some "/task") (Command.autocomplete "/ta");
+  (match Command.autocomplete "/t", Command.autocomplete ~direction:Command.Prev "/t" with
+   | Some next, Some prev ->
+       check bool "opposite directions offer different choices" false (String.equal next prev);
+       List.iter
+         (fun completion ->
+           check bool "the choice still belongs to the requested prefix" true
+             (String.starts_with ~prefix:"/t" completion);
+           check bool "the offered command is accepted by the parser" true
+             (match Command.parse completion with Command.Unknown _ -> false | _ -> true))
+         [ next; prev ]
+   | _ -> fail "an ambiguous command prefix must offer a choice");
   check (option string) "/to -> /tools " (Some "/tools ") (Command.autocomplete "/to");
   check (option string) "/st -> /steer " (Some "/steer ") (Command.autocomplete "/st")
 
@@ -794,12 +824,22 @@ let test_autocomplete_finished_word_does_not_mutate () =
   check (option string) "/task adds trailing space for args" (Some "/task ")
     (Command.autocomplete "/task");
   check (option string) "/task with trailing space does not cycle" None
-    (Command.autocomplete "/task ")
+    (Command.autocomplete "/task ");
+  check (option string) "reverse completion also preserves the exact Task command"
+    (Some "/task ") (Command.autocomplete ~direction:Command.Prev "/task");
+  List.iter
+    (fun command ->
+      check (option string) "an exact argument-free Task command does not change" None
+        (Command.autocomplete command))
+    [ "/task-inspect"; "/task-recover" ]
 
 let test_autocomplete_preserves_multiline_body () =
-  check (option string) "multiline body preserved on command"
-    (Some "/task \nfirst line of body\nsecond line of body")
+  check (option string) "multiline body preserved while the Task family is ambiguous"
+    (Some "/task\nfirst line of body\nsecond line of body")
     (Command.autocomplete "/ta\nfirst line of body\nsecond line of body");
+  check (option string) "multiline body preserved when the exact Task command takes arguments"
+    (Some "/task \nfirst line of body\nsecond line of body")
+    (Command.autocomplete "/task\nfirst line of body\nsecond line of body");
   check (option string) "multiline body preserved on subargument"
     (Some "/thinking hidden\nnotes here")
     (Command.autocomplete "/thinking h\nnotes here")
@@ -923,8 +963,16 @@ let test_command_menu_keeps_selection_separate_from_draft () =
   let draft = "/t\nkeep the original body" in
   let initial = menu Command.Menu_idle draft in
   let next = menu (Command.menu_step ~direction:Command.Next ~draft initial) draft in
-  check string "arrow selects another command without replacing query" "/thinking \nkeep the original body"
-    (Command.menu_accept next);
+  let accepted = Command.menu_accept next in
+  check bool "arrow selects another command" false
+    (String.equal (Command.menu_accept initial) accepted);
+  (match String.split_on_char '\n' accepted with
+   | first_line :: body ->
+       check (list string) "accepting a choice preserves the original body"
+         [ "keep the original body" ] body;
+       check bool "the accepted command is known" true
+         (match Command.parse first_line with Command.Unknown _ -> false | _ -> true)
+   | [] -> fail "accepting a command must preserve its first line");
   check int "window contains one selection" 1
     (Command.menu_window ~max_rows:2 next |> List.filter fst |> List.length);
   check bool "dismissed exact draft closes" true

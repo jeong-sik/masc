@@ -162,20 +162,44 @@ let test_native_ingress_has_no_builtin_fallback () =
   let listing=Server_routes_http_browser_surface.clients_listing ~config in
   check bool "Dashboard inventory does not borrow builtin clients" true
     (Tool_result.failure_class listing=Some Tool_result.Dependency_unavailable);
-  let status,_=post router ~path:"/browser-lane/poll" ~headers in
+  let refusal_code body = Yojson.Safe.Util.(member "error" body |> to_string) in
+  let status,body=post router ~path:"/browser-lane/poll" ~headers in
   check int "builtin connection does not substitute for an absent Add-on" 503 status;
+  check string "an absent Add-on is named by a code the host logs" "no_browser_addon" (refusal_code body);
   let root=Filename.concat lane "registrations" in
   let recorded=Masc.Browser_addon_registration.claim ~root ~client
     ~instance_id:"0b000000-0000-4000-8000-000000000001" in
   (match recorded with Ok _ -> () | Error Identity_changed -> fail "identity changed"
    | Error (Unconfirmed detail) -> fail detail);
-  let status,_=post router ~path:"/browser-lane/poll" ~headers in
+  let status,body=post router ~path:"/browser-lane/poll" ~headers in
   check int "missing inventory is unavailable rather than proof of retirement" 503 status;
+  check string "an Add-on that is not running is a different cause" "browser_addon_unavailable" (refusal_code body);
   let changed=("x-browser-transport","webdriver_bidi")::List.remove_assoc "x-browser-transport" headers in
   let status,body=post router ~path:"/browser-lane/poll" ~headers:changed in
   check int "retained client identity cannot be changed" 400 status;
   check bool "identity conflict remains distinct from retirement" true
     (body=`Assoc ["ok",`Bool false;"error",`String "client_identity_changed"])
+
+(* The host keeps a refusal reason only when it is lower-case letters, digits
+   and underscores of at most this length (Browser_host.refusal_code_limit);
+   anything else is logged as a bare status. *)
+let host_refusal_code_limit = 64
+
+let test_unavailable_causes_have_host_readable_distinct_codes () =
+  let module I = Masc.Browser_addon_ingress in
+  let causes = [ I.No_addon; I.Ambiguous_addons; I.Observation_unavailable; I.Addon_unavailable;
+                 I.Registration_unconfirmed "detail"; I.Worker_unavailable "detail";
+                 I.Worker_refused "detail" ] in
+  let codes = List.map I.unavailable_to_wire causes in
+  check int "each cause has its own code" (List.length causes)
+    (List.length (List.sort_uniq String.compare codes));
+  List.iter (fun code ->
+    check bool ("the host keeps " ^ code) true
+      (code <> "" && String.length code <= host_refusal_code_limit
+       && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' -> true | _ -> false) code))
+    codes;
+  check bool "a payload is a diagnostic, not part of the code" true
+    (I.unavailable_to_wire (I.Worker_refused "one") = I.unavailable_to_wire (I.Worker_refused "two"))
 
 let test_owned_pointer_poll_retains_command_and_settles_waiter () =
   Eio_main.run @@ fun env ->
@@ -276,6 +300,8 @@ let () =
             test_ping_answers_only_the_lane_token_and_registers_no_client ] )
     ; ( "poll"
       , [ test_case "native ingress has no builtin fallback" `Quick test_native_ingress_has_no_builtin_fallback
+        ; test_case "unavailable causes have host-readable distinct codes" `Quick
+            test_unavailable_causes_have_host_readable_distinct_codes
         ; test_case "owned pointer commands reach the host and settle their waiters" `Quick
             test_owned_pointer_poll_retains_command_and_settles_waiter
         ; test_case "malformed command envelopes remain errors" `Quick test_malformed_poll_envelope_is_an_error ] )

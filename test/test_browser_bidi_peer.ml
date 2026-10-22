@@ -762,18 +762,42 @@ let test_semantic_click_uses_native_input () =
       [["selector",`String "#menu"];
        ["documentId",`String "observed";"nodeId",`String "menu"]])
 
-let test_framed_interaction_is_refused () =
+let test_framed_interaction_runs_in_the_child_context () =
   Eio_main.run (fun _ ->
-    let sent = ref 0 in
-    let command method_ _ = match method_ with
+    let targets = ref [] and frame_calls = ref 0 and frame_found = ref true in
+    let command method_ args = match method_ with
       | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
-      | _ -> incr sent; fail ("a framed request must not reach the browser: " ^ method_) in
+      | "script.callFunction" ->
+        let open Yojson.Safe.Util in
+        let context = args |> member "target" |> member "context" |> to_string in
+        let declaration = args |> member "functionDeclaration" |> to_string in
+        if String.length declaration > 20 && String.sub declaration 0 20 = "function(selector) {" then begin
+          incr frame_calls;
+          check string "the frame is looked up in its parent" "owned" context;
+          check string "the selector travels as an argument" "iframe[name=inner]"
+            (args |> member "arguments" |> index 0 |> member "value" |> to_string);
+          if !frame_found
+          then Ok (obj ["type",`String "success";"result",obj ["type",`String "window";
+                 "value",obj ["context",`String "child"]]])
+          else Ok (obj ["type",`String "exception";"exceptionDetails",obj ["text",`String "Error: frame_not_found"]])
+        end else begin
+          targets := context :: !targets;
+          Ok (script_value (obj ["action",`String "fill";"url",`String "https://example.test/frame"]))
+        end
+      | _ -> fail ("unexpected command: " ^ method_) in
     let peer = peer_of command in
-    (match Peer.dispatch peer ~verb:Peer.Page_interact (obj ["tabId",`Int 1;
-      "action",`String "click";"selector",`String "#go";"framePath",`List [`String "iframe"]]) with
+    let fill = obj ["tabId",`Int 1;"action",`String "fill";"selector",`String "#q";"text",`String "x";
+      "framePath",`List [`String "iframe[name=inner]"]] in
+    (match Peer.dispatch peer ~verb:Peer.Page_interact fill with
+     | Ok _ -> ()
+     | Error _ -> fail "a framed fill must succeed");
+    check int "the frame is resolved once" 1 !frame_calls;
+    check (list string) "the page script runs in the child context only" ["child"] !targets;
+    targets := []; frame_found := false;
+    (match Peer.dispatch peer ~verb:Peer.Page_interact fill with
      | Error (Peer.Before_effect _) -> ()
-     | Ok _ | Error _ -> fail "a framed request must be refused before any effect");
-    check int "the refusal sends nothing to the browser" 0 !sent)
+     | Ok _ | Error _ -> fail "an unknown frame must be refused before any effect");
+    check (list string) "no page script runs after a missing frame" [] !targets)
 
 let test_hover_without_click () =
   Eio_main.run (fun _ ->
@@ -1485,7 +1509,7 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "open tab failure does not replay" `Quick test_open_tab_failure_does_not_replay;
     test_case "live act rejects other actions" `Quick test_live_act_rejects_other_actions_before_effect;
     test_case "semantic clicks use trusted native input" `Quick test_semantic_click_uses_native_input;
-    test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "a framed request is refused" `Quick test_framed_interaction_is_refused; test_case "element inventory is the shared page script" `Quick test_element_inventory;
+    test_case "hover moves without clicking" `Quick test_hover_without_click; test_case "a framed request runs in the child context" `Quick test_framed_interaction_runs_in_the_child_context; test_case "element inventory is the shared page script" `Quick test_element_inventory;
     test_case "capture retains URL and document/viewport guards" `Quick test_capture_guards;
     test_case "document source is the shared document helper" `Quick test_document_source;
     test_case "a document still loading is not answered for" `Quick test_document_still_loading;

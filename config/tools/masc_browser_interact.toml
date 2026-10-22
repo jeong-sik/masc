@@ -26,7 +26,7 @@ minimum = 0
 name = "framePath"
 type = "array"
 items = { type = "string" }
-description = "Observed outer-to-inner iframe selectors (preserve CSS escapes). Only for click, fill, select_option and scroll with a selector, on an automation Firefox; the selector and expectedUrl then refer to the innermost frame document. Omit for the top document."
+description = "Observed outer-to-inner iframe selectors (preserve CSS escapes). Only for click, fill, select_option and scroll with a selector, on an automation Firefox or a live BiDi connection; the selector and expectedUrl then refer to the innermost frame document. Omit for the top document."
 
 [[params]]
 name = "expectedUrl"

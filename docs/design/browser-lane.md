@@ -152,8 +152,8 @@ Fill supports text inputs and textareas through the native value setter plus
 input/change events; it never sends Enter or calls submit. The website's own
 event handlers may react. Missing, ambiguous, disabled and unsupported targets
 return errors. This interface accepts no arbitrary script. `framePath` (selector-based click,
-fill, select_option and scroll) is served by the owned Gecko browser only; a live
-connection, the extension and Stagehand refuse it before any effect.
+fill, select_option and scroll) is served by the owned Gecko browser and a live BiDi connection; the extension
+and Stagehand refuse it before any effect.
 Automation frame reads, JS dialogs and file selection use
 the separate `BrowserRead`/`BrowserAct` contracts described in the
 [advanced browser instruction](../../skills/browser-lanes/references/advanced.md).

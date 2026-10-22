@@ -2998,6 +2998,9 @@ let test_a_partial_world_state_keeps_its_issuer_attribution () =
     (binding |> member "issuer_attribution" |> member "status" |> to_string);
   match binding |> member "occurrences" |> to_list with
   | [ occurrence ] ->
+    check string "the rendering names only left-out sections"
+      "ordered_blocks_joined_by_two_newlines_without_held_world_state_sections"
+      (occurrence |> member "source" |> member "rendering" |> to_string);
     check (list string) "the attribution names the sections left out"
       [ "workspace_memory"; "wiki" ]
       (occurrence |> member "source" |> member "omitted_world_state_sections"
@@ -3059,8 +3062,8 @@ let test_every_world_state_section_goes_out_when_the_session_may_not_hold_it () 
    [Keeper_unified_prompt] renders it. The window moves one turn at a time. *)
 let action_row turn = Printf.sprintf "- [turn %d] Execute -> ok\n" turn
 
-let world_state_with_actions ?(head_note = "") turns =
-  let rows = List.map action_row turns in
+let world_state_with_actions ?(head_note = "") ?(row = action_row) turns =
+  let rows = List.map row turns in
   Layers.assemble_prepared ~content_of:(function
     | Layers.Workspace_memory ->
       Some (Layers.prepare_content "## Shared workspace memory ledger\nMEMORY-LEDGER\n\n")
@@ -3175,6 +3178,9 @@ let test_recent_action_rows_sent_in_part_keep_their_issuer_attribution () =
     (binding |> member "issuer_attribution" |> member "status" |> to_string);
   match binding |> member "occurrences" |> to_list with
   | [ occurrence ] ->
+    check string "the rendering names both kinds of omission"
+      "ordered_blocks_joined_by_two_newlines_without_held_world_state_sections_and_rows"
+      (occurrence |> member "source" |> member "rendering" |> to_string);
     (match occurrence |> member "source" |> member "omitted_world_state_rows" |> to_list with
      | [ entry ] ->
        check string "the rows left out are recent actions" "own_recent_actions"
@@ -3186,6 +3192,107 @@ let test_recent_action_rows_sent_in_part_keep_their_issuer_attribution () =
          (entry |> member "row_sha256" |> to_list |> List.map to_string)
      | _ -> fail "one section was sent in part")
   | _ -> fail "the World State carrier must be one attributed occurrence"
+;;
+
+(* A session that holds only the recent-action rows and head sends every other
+   section whole, so its evidence names omitted rows and no omitted section. *)
+let test_a_rows_only_omission_is_named_as_rows () =
+  use_markdown_prompts ();
+  let open Yojson.Safe.Util in
+  let first = world_state_turn (world_state_with_actions [ 1; 2; 3 ]) in
+  let only_recent_actions =
+    List.filter
+      (fun (held : Keeper_official_client_session_store.held_context) ->
+         match held.context with
+         | Keeper_official_client_session_store.Context_section_row _ -> true
+         | Keeper_official_client_session_store.Context_section section ->
+           section = Layers.Layer Layers.Own_recent_actions
+         | Keeper_official_client_session_store.(
+             Context_block _ | Context_carrier | Librarian_working_state | Librarian_unread
+             | Historical_task_reference) -> false)
+      (start_holding first)
+  in
+  let delivery =
+    resume ~held:only_recent_actions (world_state_turn (world_state_with_actions [ 2; 3; 4 ]))
+  in
+  check (list string) "no section is left out whole" [] (section_names delivery.unchanged_sections);
+  let binding =
+    Keeper_context_submission_link.binding_to_json
+      ~slot:Runtime_official_client_write.Whole_write
+      delivery.context_projection
+      (Runtime_official_client_write.raw delivery.prompt)
+  in
+  match binding |> member "occurrences" |> to_list with
+  | [ occurrence ] ->
+    check string "the rendering names only left-out rows"
+      "ordered_blocks_joined_by_two_newlines_without_held_world_state_rows"
+      (occurrence |> member "source" |> member "rendering" |> to_string)
+  | _ -> fail "the World State carrier must be one attributed occurrence"
+;;
+
+(* A turn's row is written again when the keeper selects another task: the
+   row's task relation is relative to this turn's task. A session that holds
+   the old version of that row must not be told its copy still holds, so the
+   section goes out whole even though an unchanged row is still held. *)
+let test_a_row_written_again_in_place_sends_the_section_whole () =
+  use_markdown_prompts ();
+  let other_task turn =
+    if turn = 1 then action_row turn
+    else Printf.sprintf "- [turn %d] Execute -> ok OTHER-TASK\n" turn
+  in
+  let first = world_state_turn (world_state_with_actions [ 1; 2; 3 ]) in
+  let reselected = world_state_turn (world_state_with_actions ~row:other_task [ 1; 2; 3; 4 ]) in
+  let delivery = resume ~held:(start_holding first) reselected in
+  check (list string) "nothing is named as sent in part" []
+    (section_names delivery.partly_held_sections);
+  check bool "every row goes out, the unchanged one included" true
+    (List.for_all (sends delivery) [ 1; 2; 3; 4 ]);
+  check bool "the rewritten rows go out in their new form" true
+    (contains delivery.prompt "[turn 2] Execute -> ok OTHER-TASK")
+;;
+
+(* Rows that repeat one text cannot be named apart, so the section is compared
+   as one text and goes out whole, still attributed to its issuer. *)
+let test_repeated_rows_are_compared_as_one_text () =
+  use_markdown_prompts ();
+  let open Yojson.Safe.Util in
+  let first = world_state_turn (world_state_with_actions [ 1; 1; 2 ]) in
+  let second = world_state_turn (world_state_with_actions [ 1; 1; 2; 3 ]) in
+  let delivery = resume ~held:(start_holding first) second in
+  check (list string) "nothing is named as sent in part" []
+    (section_names delivery.partly_held_sections);
+  check bool "every row goes out" true (List.for_all (sends delivery) [ 1; 2; 3 ]);
+  check int "no row is held by name" 0 (held_row_count delivery);
+  let binding =
+    Keeper_context_submission_link.binding_to_json
+      ~slot:Runtime_official_client_write.Whole_write
+      delivery.context_projection
+      (Runtime_official_client_write.raw delivery.prompt)
+  in
+  check string "the carrier attributes to its issuer" "verified"
+    (binding |> member "issuer_attribution" |> member "status" |> to_string)
+;;
+
+(* The window moves one turn per resume for several resumes in a row; each
+   resume sends that turn's row alone. *)
+let test_partial_resumes_in_a_row_send_one_row_each () =
+  use_markdown_prompts ();
+  let windows = [ [ 2; 3; 4 ]; [ 3; 4; 5 ]; [ 4; 5; 6 ] ] in
+  let _ =
+    List.fold_left
+      (fun held window ->
+         let newest = List.nth window 2 in
+         let delivery = resume ~held (world_state_turn (world_state_with_actions window)) in
+         check bool (Printf.sprintf "row %d is sent" newest) true (sends delivery newest);
+         check bool (Printf.sprintf "the rows before %d are not sent again" newest) false
+           (List.exists (sends delivery) (List.filter (fun turn -> turn <> newest) window));
+         check int "the session names the rows of the current window" 3
+           (held_row_count delivery);
+         delivery.held_context)
+      (start_holding (world_state_turn (world_state_with_actions [ 1; 2; 3 ])))
+      windows
+  in
+  ()
 ;;
 
 let test_unsupported_choice_refuses_before_projection () =
@@ -3256,6 +3363,22 @@ let () =
             "recent action rows sent in part keep their issuer attribution"
             `Quick
             test_recent_action_rows_sent_in_part_keep_their_issuer_attribution
+        ; test_case
+            "a rows-only omission is named as rows"
+            `Quick
+            test_a_rows_only_omission_is_named_as_rows
+        ; test_case
+            "a row written again in place sends the section whole"
+            `Quick
+            test_a_row_written_again_in_place_sends_the_section_whole
+        ; test_case
+            "repeated rows are compared as one text"
+            `Quick
+            test_repeated_rows_are_compared_as_one_text
+        ; test_case
+            "partial resumes in a row send one row each"
+            `Quick
+            test_partial_resumes_in_a_row_send_one_row_each
         ] )
     ; ( "native posture admission (RFC-0390)"
       , [ test_case

@@ -159,7 +159,8 @@ type carried_context =
   | Context_section_row of { section : Keeper_context_layers.source; row_sha256 : string }
       (** One row of a section with rows. A row has no other name that stays
           fixed while its section's window moves, so its digest names it and
-          equals the held digest. *)
+          equals the held digest. A frontier lists a section's rows in the
+          order they were sent, and a resume reads that order. *)
   | Context_carrier
   | Librarian_working_state
   | Librarian_unread

@@ -538,8 +538,9 @@ let readiness (e : entry) = match phase_of e, e.connection with
   | (Attached | Observing), (Some _ | None) when e.stopping -> Unready Lane_addon_unready.Stopping
   | (Attached | Observing), Some connection when e.started -> Ready connection
   | (Attached | Observing), (Some _ | None) -> Unready Lane_addon_unready.Starting
+let installation_name (e : entry) = match e.configuration with Some owner -> owner.id | None -> e.instance_id
 let unready_of (e : entry) reason = {
-  Lane_addon_unready.installation = (match e.configuration with Some owner -> owner.id | None -> e.instance_id);
+  Lane_addon_unready.installation = installation_name e;
   instance_id = e.instance_id; package_id = e.package.id; declared_tools = e.package.exported_tools;
   service = e.package.worker_service; reason }
 let unready_message e reason = Lane_addon_unready.message (unready_of e reason)
@@ -1687,6 +1688,16 @@ type export_observation = {
   refreshing : bool;
   output : output;
 }
+type export_refusal =
+  | Unready_installations of Lane_addon_unready.t * Lane_addon_unready.t list
+  | Not_yet_observed of { installation : string; package_id : string }
+  | Ambiguous_installations of string list
+let export_refusal_message = function
+  | Unready_installations (first, rest) -> String.concat "; " (List.map Lane_addon_unready.message (first :: rest))
+  | Not_yet_observed {installation; package_id} ->
+      Printf.sprintf "Add-on installation %s (package %s) has no completed observation yet" installation package_id
+  | Ambiguous_installations installations ->
+      "multiple visible installations provide this export: " ^ String.concat ", " installations
 
 let observation_for_export ~config ~access ~name = Eio_context.run_on_owner_domain (fun () ->
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -1702,19 +1713,18 @@ let observation_for_export ~config ~access ~name = Eio_context.run_on_owner_doma
           | Unready Lane_addon_unready.Detaching -> Some (Either.Right e)
           | Ready _ | Unready (Lane_addon_unready.Starting | Stopping | Failed _) -> Some (Either.Left e))
         |> List.partition_map Fun.id in
-      match serving, Lane_addon_unready.summary
-          (List.map (fun e -> unready_of e Lane_addon_unready.Detaching) detaching) with
-      | [], None -> Ok None
-      | [], Some reason -> Error reason
-      | [e], (Some _ | None) ->
+      match serving, List.map (fun e -> unready_of e Lane_addon_unready.Detaching) detaching with
+      | [], [] -> Ok None
+      | [], first :: rest -> Error (Unready_installations (first, rest))
+      | [e], ([] | _ :: _) ->
           (match readiness e with
-           | Unready reason -> Error (unready_message e reason)
+           | Unready reason -> Error (Unready_installations (unready_of e reason, []))
            | Gone -> Ok None
            | Ready _ ->
-               if e.seq = 0 then Error "machine worker observation is not available yet"
+               if e.seq = 0 then Error (Not_yet_observed {installation=installation_name e;package_id=e.package.id})
                else Ok (Some {instance_id=e.instance_id;observation_seq=e.seq;max_bytes=(Lane_addon_types.max_reply_bytes e.package);
                  refreshing=e.state = Lifecycle.Observing || e.pending <> Idle || e.active_tool_calls > 0 || Option.is_some e.current_action;output=e.output}))
-      | _ :: _ :: _, (Some _ | None) -> Error "multiple visible installations provide this machine")
+      | _ :: _ :: _, ([] | _ :: _) -> Error (Ambiguous_installations (List.map installation_name serving)))
 
 let with_tool_call_owner work =
   let cancelled, signal_cancelled = Eio.Promise.create () in

@@ -274,8 +274,10 @@ let machine_publication_reads_worker_observation () =
   check bool "worker frame is visible without a host machine" true (project (Ok (Some snapshot)) = Inventory.Stable);
   check bool "worker refresh is visible" true
     (project (Ok (Some {snapshot with refreshing=true})) = Inventory.Running);
+  let failed : Lane_addon_unready.t = {installation="worker";instance_id="worker";package_id="dos";
+    declared_tools=["masc_dos_screen"];service=Lane_addon_types.Mcp_tools;reason=Failed "worker failed"} in
   check bool "worker failure is not an empty machine" true
-    (project (Error "worker failed") = Inventory.Publication_unavailable);
+    (project (Error (Addon.Unready_installations (failed, []))) = Inventory.Publication_unavailable);
   check bool "missing installation has no current screen" true (project (Ok None) = Inventory.No_screen);
   let unloaded = {snapshot with output={rows=[{row with fields=["machine_loaded",`Bool false]}];coverage=[]}} in
   check bool "unloaded worker reports no screen" true (project (Ok (Some unloaded)) = Inventory.No_screen);
@@ -421,9 +423,13 @@ let browser_rows_read_the_addon_observation () =
   check bool "no browser Add-on is not zero connected clients" true
     (state (Inventory.For_testing.browser_reading ~declarations:[] (Ok None)) Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_addon_absent));
+  let failed : Lane_addon_unready.t = {installation="browser-work";instance_id="browser-worker";package_id="browser";
+    declared_tools=[];service=Lane_addon_types.Browser_service;reason=Failed "cleanup incomplete"} in
+  let refusal = Addon.Unready_installations (failed, []) in
   check bool "a failed browser Add-on carries its reason" true
-    (state (Inventory.For_testing.browser_reading ~declarations:[] (Error "cleanup incomplete")) Browser_lane.Lane_name.Live
-     = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_addon_unavailable "cleanup incomplete"))
+    (state (Inventory.For_testing.browser_reading ~declarations:[] (Error refusal)) Browser_lane.Lane_name.Live
+     = Inventory.Browser_clients (Browser_lane.Enabled,
+         Inventory.Browser_addon_unavailable (Addon.export_refusal_message refusal)))
 
 (* With no observation, the declarations tell an Add-on nobody declared from
    one switched off and one declared on that is not running. A declaration

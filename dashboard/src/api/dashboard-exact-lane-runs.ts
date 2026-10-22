@@ -37,6 +37,15 @@ export type ExactLaneAnswerSource =
 // A listing row. The exact input and output payloads are deliberately absent:
 // a lane run embeds the whole rendered prompt, so carrying them here made one
 // listing 246 MB. They arrive from fetchExactLaneRun when a row is opened.
+export type ExactLaneCompletionOrigin = 'producer' | 'restart_replay'
+export interface ExactLaneUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  costUsd?: number
+}
+
 export interface ExactLaneRunSummary {
   runId: string
   runKind: 'exact_output'
@@ -46,6 +55,8 @@ export interface ExactLaneRunSummary {
   startedAt: number
   status: ExactLaneRunStatus
   elapsedSeconds?: number
+  completionOrigin?: ExactLaneCompletionOrigin
+  usage?: ExactLaneUsage | null
   code?: string
   detail?: string
   intendedStatus?: ExactLaneIntendedStatus
@@ -125,6 +136,22 @@ function exactFields(
   const unknown = Object.keys(value).filter(key => !expected.has(key))
   if (missing.length > 0 || unknown.length > 0) {
     fail(`${context} fields mismatch (missing=[${missing.join(',')}], unknown=[${unknown.join(',')}])`)
+  }
+}
+
+function parseUsage(raw: unknown, context: string): ExactLaneUsage | null {
+  if (raw === null) return null
+  if (!isRecord(raw)) fail(`${context} must be an object or null`)
+  exactFields(raw, ['input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens'], ['cost_usd'], context)
+  const count = (key: string): number => {
+    const value = number(raw[key], `${context}.${key}`)
+    if (!Number.isSafeInteger(value)) fail(`${context}.${key} must be a safe integer`)
+    return value
+  }
+  return {
+    inputTokens: count('input_tokens'), outputTokens: count('output_tokens'),
+    cacheCreationInputTokens: count('cache_creation_input_tokens'), cacheReadInputTokens: count('cache_read_input_tokens'),
+    ...(raw.cost_usd === undefined ? {} : { costUsd: number(raw.cost_usd, `${context}.cost_usd`) }),
   }
 }
 
@@ -248,8 +275,8 @@ function parseRun(
     .concat(withPayloads ? ['input', 'payload_availability', 'skill_evidence'] : [])
   // `output` rides with the payloads; a summary never carries it.
   const completion = withPayloads
-    ? ['elapsed_s', 'output', 'selected_slot']
-    : ['elapsed_s', 'selected_slot']
+    ? ['elapsed_s', 'completion_origin', 'usage', 'output', 'selected_slot']
+    : ['elapsed_s', 'completion_origin', 'usage', 'selected_slot']
   const persistenceFailure = status === 'completion_persistence_failed'
     || status === 'completion_durability_unknown'
   const intendedStatus = persistenceFailure
@@ -290,6 +317,14 @@ function parseRun(
     : raw.selected_slot === null
       ? null
       : string(raw.selected_slot, `${context}.selected_slot`)
+  const completionOrigin = status === 'running' ? undefined : raw.completion_origin
+  if (completionOrigin !== undefined && completionOrigin !== 'producer' && completionOrigin !== 'restart_replay') {
+    fail(`${context}.completion_origin has an unknown value`)
+  }
+  if (completionOrigin === 'restart_replay' && (status !== 'failed' || raw.elapsed_s !== null || raw.selected_slot !== null || raw.usage !== null)) {
+    fail(`${context} restart observation must be a failed row without measured duration, slot or usage`)
+  }
+  if (persistenceFailure && completionOrigin !== 'producer') fail(`${context} pending completion must have producer origin`)
   const payloads = withPayloads ? parsePayloads(raw, status, context) : undefined
   const answerSource = withPayloads
     && lane === 'board_attention_exact'
@@ -308,7 +343,9 @@ function parseRun(
     startedAt: number(raw.started_at, `${context}.started_at`),
     ...(payloads ?? {}),
     status: status as ExactLaneRunStatus,
-    elapsedSeconds: status === 'running' ? undefined : number(raw.elapsed_s, `${context}.elapsed_s`),
+    elapsedSeconds: status === 'running' || raw.elapsed_s === null ? undefined : number(raw.elapsed_s, `${context}.elapsed_s`),
+    completionOrigin,
+    usage: status === 'running' ? undefined : parseUsage(raw.usage, `${context}.usage`),
     code: status === 'failed' ? string(raw.code, `${context}.code`) : undefined,
     detail: status === 'failed' ? string(raw.detail, `${context}.detail`) : undefined,
     intendedStatus: intendedStatus as ExactLaneIntendedStatus | undefined,

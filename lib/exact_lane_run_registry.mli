@@ -58,18 +58,25 @@ type usage =
 
 val usage_of_api_usage : Agent_core.Types.api_usage -> usage
 
+type completion_origin = Producer | Restart_replay
+(** [Restart_replay] describes only the observation fiber lost at restart,
+    never the original durable domain request or a producer terminal. *)
+
 type run_status =
   | Running
   | Completed of
       { outcome : outcome
-      ; elapsed_s : float
+      ; origin : completion_origin
+      ; elapsed_s : float option
+          (** [None] means the original duration was not measured. *)
       ; output : Yojson.Safe.t
       ; selected_slot : string option
       ; usage : usage option
       }
   | Completion_persistence_failed of
       { intended_outcome : outcome
-      ; elapsed_s : float
+      ; elapsed_s : float option
+          (** [None] means the original duration was not measured. *)
       ; output : Yojson.Safe.t
       ; selected_slot : string option
       ; usage : usage option
@@ -116,6 +123,7 @@ type t
 type completion_error =
   | Unknown_run
   | Invalid_selected_slot
+  | Invalid_elapsed_duration
   | Persistence_failed of persistence_failure
 
 val completion_error_to_string : completion_error -> string
@@ -123,10 +131,12 @@ val completion_error_to_string : completion_error -> string
 (** Current-only durable registry with the closed [run_input] contract. The log
     row records a run's identity and outcome and the size and SHA-256 of its
     input and output; the values are in [<log dir>/<payload_dirname>/<run_id>/]
-    [input.json] and [output.json]. *)
+    [input-<sha256>.json] and [output-<sha256>.json]. *)
 val storage_filename : string
 
 val payload_dirname : string
+(** Payload ownership is scoped to the same storage generation as the log.
+    Replay cleanup never traverses a different generation's payload root. *)
 
 val max_completed_retained : int
 (** How many completed runs survive a replay, PER LANE. Running entries are
@@ -171,7 +181,10 @@ val mark_completed
     raised. The durable core entry remains [Running], while [get]/[list_runs]
     expose [Completion_persistence_failed] with an explicit durability state;
     callers never silently present a terminal run as still executing. The
-    labelled [selected_slot] argument forces every producer to state its lane
+    completion has [origin=Producer] and [elapsed_s=Some elapsed_s]. A replay
+    interruption has [origin=Restart_replay] and no measured duration. Unknown
+    duration is never zero and must not enter latency or finish-time statistics.
+    The labelled [selected_slot] argument forces every producer to state its lane
     attribution. It names the last bound HTTP attempt, or the successful CLI
     slot after HTTP exhaustion. Vendor System One runs before either and leaves
     it [None]; its provenance remains in [output]. Blank slot identities are
@@ -179,8 +192,22 @@ val mark_completed
 
     [usage] is the answering attempt's provider-reported token counts; omit it
     when the run's transport produced none (CLI slot, vendor judging, missing
-    wire report). Completions written before this field existed replay with
-    [usage = None]. *)
+    wire report). Non-finite or negative measured duration is rejected. *)
+
+val mark_completed_unmeasured
+  :  t
+  -> run_id:string
+  -> outcome:outcome
+  -> selected_slot:string option
+  -> ?usage:usage
+  -> output:Yojson.Safe.t
+  -> unit
+  -> (unit, completion_error) result
+(** Record the actual producer terminal when its original duration was not
+    measured, including a retained terminal recovered after restart. Records
+    [Producer] and [elapsed_s=None]; observer/retry wall clocks cannot supply
+    the missing duration. Persistence and slot validation match [mark_completed].
+    This is an unconditional observation write, not durable reconciliation. *)
 
 val list_runs : t -> run list
 

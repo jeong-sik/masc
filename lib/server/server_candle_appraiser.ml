@@ -112,7 +112,9 @@ let run_with ~registry ~base_path ~retain ~call ~identity request =
       recorded_outcome = outcome && Yojson.Safe.equal recorded_output output
       && recorded_slot = slot && recorded_usage = usage in
     let write elapsed_s =
-      Runs.mark_completed registry ~run_id ~outcome ~elapsed_s ~selected_slot:slot ?usage ~output ()
+      (match elapsed_s with
+       | Some elapsed_s -> Runs.mark_completed registry ~run_id ~outcome ~elapsed_s ~selected_slot:slot ?usage ~output ()
+       | None -> Runs.mark_completed_unmeasured registry ~run_id ~outcome ~selected_slot:slot ?usage ~output ())
       |> Result.map_error (fun error -> A.Transport_unavailable (Runs.completion_error_to_string error)) in
     let readable = function
       | Some Runs.Available -> Ok ()
@@ -122,7 +124,7 @@ let run_with ~registry ~base_path ~retain ~call ~identity request =
         Error (A.Transport_unavailable "Candle terminal receipt output was not observed") in
     let elapsed_now () = max 0. (Time_compat.now () -. started_at) in
     match Runs.get registry ~run_id with
-    | None | Some {status=Runs.Running;_} -> write (elapsed_now ())
+    | None | Some {status=Runs.Running;_} -> write (Some (elapsed_now ()))
     | Some {status=Runs.Completed recorded;output_availability;_} ->
       let* () = readable output_availability in
       (* A retained judgment is read again while later payout stages progress.
@@ -130,14 +132,15 @@ let run_with ~registry ~base_path ~retain ~call ~identity request =
          restart marker can still yield to the actual worker's terminal. *)
       if same_receipt ~recorded_outcome:recorded.outcome ~recorded_output:recorded.output
           ~recorded_slot:recorded.selected_slot ~recorded_usage:recorded.usage then Ok ()
-      else write (elapsed_now ())
+      else (match recorded.origin with
+        | Runs.Restart_replay -> write None
+        | Runs.Producer -> Error (A.Transport_unavailable "Original Candle producer receipt conflicts with the retained terminal"))
     | Some {status=Runs.Completion_persistence_failed recorded;output_availability;_} ->
       let* () = readable output_availability in
-      let elapsed_s =
-        if same_receipt ~recorded_outcome:recorded.intended_outcome ~recorded_output:recorded.output
-            ~recorded_slot:recorded.selected_slot ~recorded_usage:recorded.usage
-        then recorded.elapsed_s else elapsed_now () in
-      write elapsed_s in
+      if same_receipt ~recorded_outcome:recorded.intended_outcome ~recorded_output:recorded.output
+          ~recorded_slot:recorded.selected_slot ~recorded_usage:recorded.usage then
+        write recorded.elapsed_s
+      else Error (A.Transport_unavailable "Original Candle pending producer receipt conflicts with the retained terminal") in
   let reject ~slot ~code error result =
     (* A failed observer write cannot change a terminal judgment into a
        retryable dispatch. The retained worker result remains authoritative. *)

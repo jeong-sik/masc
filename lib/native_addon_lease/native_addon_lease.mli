@@ -6,9 +6,14 @@ type t
 type preparation = Unpublished | Current of t
 type process = { instance_id : string; pid : int; started : string }
 type status = Awaiting_exec | Live of process | Cleanup_pending of process | Settled
-type error = Invalid_claim of string | Stale_claim | Consumed_claim
+type error = Invalid_claim of string | Stale_claim of string | Consumed_claim
   | Busy of string | State_invalid of string | Io_failure of string
+  | Resource_not_private of string
   | Identity_unavailable | Termination_refused of Owner_process_identity.error
+(** [Stale_claim] and [Busy] name the claim slot, instance or pid that was
+    found in place of the expected one. [Resource_not_private] names a claim
+    directory or file whose kind, owner, mode or link count is not private,
+    with what was found and what is required. *)
 val error_to_string : error -> string
 val prepare : directories:string list -> instance_id:string -> cleanup_context:Yojson.Safe.t option -> (t, error) result
 (** Fence previous unstarted launchers under all claim gates. Refuse a holder,

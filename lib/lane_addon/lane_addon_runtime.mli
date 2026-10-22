@@ -9,7 +9,9 @@ val register_delivery_handler :
 val register_exact_runner : Lane_addon_exact.runner -> unit
 (** Server-owned runner for packages' exact-output requests, registered before
     configuration maintenance. Without it a declared installation's exact
-    request ends its host request cycle with [no_exact_runner]. *)
+    request ends its host request cycle with [no_exact_runner]. Retirement
+    cancels its current exact call independently of worker cleanup; a pending
+    provider outcome is not replayed and no later request is dispatched. *)
 val register_github_reader : Lane_addon_records.github -> unit
 (** Server-owned GitHub access for [github_pulls] record grants, registered
     before configuration maintenance. Until then such a read waits as

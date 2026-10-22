@@ -77,7 +77,7 @@ let port worker : Runtime.For_testing.host_port = {
     Ok (`Assoc [ "accepted", `Bool !(worker.consume) ]));
 }
 
-let backend worker : Runtime.For_testing.backend = {
+let backend ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend = {
   start = (fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~package:_ ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {browser=None;
         resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
@@ -87,7 +87,7 @@ let backend worker : Runtime.For_testing.backend = {
       call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ ->
         Error (Lane_addon_call_context.Transport_error "no exported tools"));
       action_schema = (fun () -> None); act = (fun ~arguments:_ -> Error "read-only");
-      stop = (fun () -> Ok (Lane_addon_lifecycle.Released
+      stop = (fun () -> before_stop (); Ok (Lane_addon_lifecycle.Released
         { engine = Lane_addon_lifecycle.Docker_engine "fixture-engine"; container_id = Some instance_id }));
       resource = Lane_addon_lifecycle.Container_resource instance_id; host = Some (port worker) } in
     ignore (on_authority (Lane_addon_lifecycle.Container_authority
@@ -123,7 +123,7 @@ let cycles config = match member "cycles" (host_requests config) with `Int n -> 
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 
-let with_installation ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
+let with_installation ?before_stop ?(make_runner = runner) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
   let root = Filename.temp_dir "lane-host-cycle-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let config_root = Filename.concat root ".masc/config" in
@@ -147,12 +147,13 @@ let with_installation ?(manifest = manifest) ?(declaration = declaration) ?(list
                 Board_dispatch.reset_for_test ();
                 Board_dispatch.init_jsonl ();
                 let state = { mode = ref mode; resolutions = ref 0 } in
-                Runtime.register_exact_runner (runner state);
+                Runtime.register_exact_runner (make_runner state);
                 let config = Workspace.default_config root in
-                Runtime.For_testing.with_backend (backend worker) (fun () ->
+                Runtime.For_testing.with_backend (backend ?before_stop worker) (fun () ->
                   ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
                   f clock config worker state root;
-                  Sys.remove (Filename.concat directory "quiz.toml");
+                  let source = Filename.concat directory "quiz.toml" in
+                  if Sys.file_exists source then Sys.remove source;
                   ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
                   await clock (fun () -> host_requests config = `Null))))))))))
 
@@ -166,6 +167,40 @@ let publish_lane_change () =
   ignore (F.publish_registry ~lane_id:"quiz/author" ~slot_ids:[ slot ] snapshot : Runtime_exact_output_registry.t)
 
 let delivered_status arguments = text "status" (member "result" arguments)
+
+let test_retirement_cancels_exact_before_worker_cleanup_finishes () =
+  let entered, enter = Eio.Promise.create () and finished, finish = Eio.Promise.create () in
+  let cleaning, clean = Eio.Promise.create () and released, release = Eio.Promise.create () in
+  let make_runner state ~lane_key:_ ~schema:_ _ =
+    incr state.resolutions;
+    Ok (fun ~validate:_ ->
+      Fun.protect ~finally:(fun () -> Eio.Promise.resolve finish ()) (fun () ->
+        Eio.Promise.resolve enter ();
+        (* Only retirement can end this provider call. *)
+        Eio.Promise.await (fst (Eio.Promise.create ()));
+        Exact.Call_refused (Exact.Provider_unavailable {detail="not reached"}))) in
+  let before_stop () =
+    Eio.Promise.await finished;
+    Eio.Promise.resolve clean ();
+    Eio.Promise.await released in
+  with_installation ~make_runner ~before_stop ~listing:[exact "retiring-1";exact "retiring-2"]
+    (fun _clock config worker state _root ->
+      Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve release ())) (fun () ->
+      Eio.Promise.await entered;
+      let detached, detach = Eio.Promise.create () in
+      let sw = match Eio_context.get_switch_opt () with
+        | Some sw -> sw | None -> fail "fixture switch is unavailable" in
+      Eio.Switch.check sw;
+      Eio.Fiber.fork ~sw (fun () ->
+        let source = Filename.concat (Runtime.configuration_directory config) "quiz.toml" in
+        Sys.remove source;
+        Eio.Promise.resolve detach (Runtime.reconcile_configuration ~config
+          ~directory:(Filename.dirname source)));
+      Eio.Promise.await cleaning;
+      check int "no second request starts while worker cleanup is pending" 1 !(state.resolutions);
+      check int "no result is delivered to a retiring worker" 0 (List.length !(worker.delivered));
+      Eio.Promise.resolve release ();
+      ignore (Eio.Promise.await detached |> unwrap)))
 
 let test_a_started_worker_gets_its_final_result_once () =
   with_installation ~listing:[ exact "r1" ] (fun clock config worker state  _root->
@@ -1028,6 +1063,7 @@ let () =
   run "lane add-on host request cycle"
     [ ( "cycle"
       , [ test_case "a started worker gets its final result once" `Quick test_a_started_worker_gets_its_final_result_once
+        ; test_case "retirement cancels exact before worker cleanup finishes" `Quick test_retirement_cancels_exact_before_worker_cleanup_finishes
         ; test_case "a request that is not final waits for the next event" `Quick
             test_a_request_that_is_not_final_waits_for_the_next_event
         ; test_case "a request listed again after delivery ends the cycle" `Quick

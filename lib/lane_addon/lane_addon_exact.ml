@@ -259,97 +259,85 @@ let claim key =
 let release key = Mutex.protect in_flight_lock (fun () -> Hashtbl.remove in_flight key)
 
 let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner request =
-  match
-    List.find_opt
-      (fun (declared : Lane_addon_types.exact_output) -> String.equal declared.name request.output)
-      package.exact_outputs
-  with
-  | None ->
-    Ok (Final (Not_allowed { reason = "the package manifest declares no exact output " ^ request.output }))
-  | Some declared ->
-    let* lane = Runtime_schema.addon_lane ~declaration_id ~output:request.output in
-    let lane_key = Runtime_schema.exact_lane_key (Runtime_schema.Addon lane) in
-    let request_id = request.request_id in
-    let validate answer = Lane_addon_action.validate_input ~schema:declared.schema ~name:request.output answer in
-    (* The package may have changed its schema since the answer was retained.
-       The record keeps the answer as it came. *)
-    let deliver = function
-      | Call_final (Answered { output; slot; usage }) ->
-        (match validate (checked_json output) with
-         | Ok output -> Call_final (Answered { output; slot; usage })
-         | Error detail ->
-           Call_final (Invalid_output
-             { detail = "the retained answer does not match the schema the package declares now: " ^ detail }))
-      | (Call_final (Invalid_output _ | Input_refused _) | Outcome_unknown | Not_allowed _ | Request_id_reused)
-        as final -> final
-    in
-    let key = Lane_addon_store.root store, declaration_id, request_id in
-    (* Claimed before the record is read, so no other run of this request can
-       finish between the read and the claim. *)
-    if not (claim key)
-    then Ok (Not_final Attempt_in_progress)
-    else
-      Fun.protect ~finally:(fun () -> release key) (fun () ->
-        let digest = digest request in
-        let save record =
-          Eio_unix.run_in_systhread (fun () ->
-            Lane_addon_store.save_exact_request store ~declaration_id ~request_id
-              (record_to_json ~declaration_id ~request_id record))
-        in
-        let* retained =
-          Eio_unix.run_in_systhread (fun () ->
-            Lane_addon_store.load_exact_request store ~declaration_id ~request_id)
-        in
-        let* retained =
-          match retained with
-          | None -> Ok None
-          | Some json -> record_of_json json |> Result.map Option.some
-        in
-        match retained with
-        | Some record when not (String.equal record.digest digest) -> Ok (Final Request_id_reused)
-        | Some { final = Some final; _ } -> Ok (Final (deliver final))
-        | Some ({ final = None; _ } as record) when List.exists Option.is_none record.attempts ->
-          let* () = save { record with final = Some Outcome_unknown } in
-          Ok (Final Outcome_unknown)
-        | None | Some { final = None; _ } ->
-          let previous =
-            match retained with
-            | Some record -> record
-            | None -> { digest; request = request_to_json request; attempts = []; final = None }
-          in
+  let request_id = request.request_id in
+  let key = Lane_addon_store.root store, declaration_id, request_id in
+  (* Identity precedes permission: even a refused request owns its id. *)
+  if not (claim key) then Ok (Not_final Attempt_in_progress)
+  else Fun.protect ~finally:(fun () -> release key) (fun () ->
+    let digest = digest request in
+    let save record =
+      Eio_unix.run_in_systhread (fun () ->
+        Lane_addon_store.save_exact_request store ~declaration_id ~request_id
+          (record_to_json ~declaration_id ~request_id record)) in
+    let* retained = Eio_unix.run_in_systhread (fun () ->
+      Lane_addon_store.load_exact_request store ~declaration_id ~request_id) in
+    let* retained = match retained with
+      | None -> Ok None
+      | Some json -> record_of_json json |> Result.map Option.some in
+    match retained with
+    | Some record when not (String.equal record.digest digest) -> Ok (Final Request_id_reused)
+    | None | Some _ ->
+      let previous = match retained with
+        | Some record -> record
+        | None -> {digest; request = request_to_json request; attempts = []; final = None} in
+      let* previous = match previous.final with
+        | None when List.exists Option.is_none previous.attempts ->
+            let unknown = {previous with final = Some Outcome_unknown} in
+            let* () = save unknown in Ok unknown
+        | None | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused) -> Ok previous in
+      match List.find_opt
+        (fun (declared : Lane_addon_types.exact_output) -> String.equal declared.name request.output)
+        package.exact_outputs with
+      | None ->
+        let refusal = Not_allowed {reason = "the effective package declares no exact output " ^ request.output} in
+        let record = match previous.final with
+          | None -> {previous with final = Some refusal}
+          | Some (Not_allowed _) -> previous
+          | Some (Call_final _ | Outcome_unknown | Request_id_reused) ->
+              (* A selection change cannot erase the original provider result. *)
+              {previous with attempts = previous.attempts @ [Some (final_to_json refusal)]} in
+        let* () = save record in
+        Ok (Final refusal)
+      | Some declared ->
+        let* lane = Runtime_schema.addon_lane ~declaration_id ~output:request.output in
+        let lane_key = Runtime_schema.exact_lane_key (Runtime_schema.Addon lane) in
+        let validate answer = Lane_addon_action.validate_input ~schema:declared.schema ~name:request.output answer in
+        let deliver = function
+          | Call_final (Answered {output; slot; usage}) ->
+              (match validate (checked_json output) with
+               | Ok output -> Call_final (Answered {output; slot; usage})
+               | Error detail -> Call_final (Invalid_output
+                   {detail = "the retained answer does not match the schema the package declares now: " ^ detail}))
+          | (Call_final (Invalid_output _ | Input_refused _) | Outcome_unknown | Not_allowed _ | Request_id_reused)
+            as final -> final in
+        match previous.final with
+        | Some final -> Ok (Final (deliver final))
+        | None ->
+          Eio.Fiber.check ();
           match runner ~lane_key ~schema:declared.schema request with
           | Error unavailable ->
-            (* Nothing was sent, so no attempt is marked as started. *)
             let reason = Lane_unavailable unavailable in
-            let* () = save { previous with attempts = previous.attempts @ [ Some (not_final_to_json reason) ] } in
+            let* () = save {previous with attempts = previous.attempts @ [Some (not_final_to_json reason)]} in
             Ok (Not_final reason)
           | Ok call ->
-            let* () = save { previous with attempts = previous.attempts @ [ None ] } in
-            (* An exception may come after the request left, so it ends the
-               request as Outcome_unknown; its text stays in the attempt. *)
+            let* () = save {previous with attempts = previous.attempts @ [None]} in
+            (* The save yields. A retiring incarnation must not start a call
+               after it returns. A cancelled started attempt remains unknown. *)
+            Eio.Fiber.check ();
             let attempt, raised =
               match call ~validate with
               | Call_ended final -> Final (Call_final final), None
               | Call_refused refusal -> Not_final (Provider_refused refusal), None
               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-              | exception exn -> Final Outcome_unknown, Some (Printexc.to_string exn)
-            in
+              | exception exn -> Final Outcome_unknown, Some (Printexc.to_string exn) in
             let with_raised = function
-              | `Assoc fields ->
-                `Assoc (fields @ match raised with None -> [] | Some text -> [ "exception", `String text ])
-              | json -> json
-            in
-            (* No yielding operation may separate the attempt from its record. *)
+              | `Assoc fields -> `Assoc (fields @ match raised with None -> [] | Some text -> ["exception", `String text])
+              | json -> json in
             Eio.Cancel.protect (fun () ->
-              let finished =
-                match attempt with
+              let finished = match attempt with
                 | Final final ->
-                  { previous with
-                    attempts = previous.attempts @ [ Some (with_raised (final_to_json final)) ]
-                  ; final = Some final
-                  }
+                    {previous with attempts = previous.attempts @ [Some (with_raised (final_to_json final))]; final = Some final}
                 | Not_final reason ->
-                  { previous with attempts = previous.attempts @ [ Some (not_final_to_json reason) ] }
-              in
+                    {previous with attempts = previous.attempts @ [Some (not_final_to_json reason)]} in
               let* () = save finished in
               Ok attempt))

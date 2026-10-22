@@ -2987,7 +2987,7 @@
  (name masc_tui_code_results)
  (wrapped false)
  (modules masc_tui_code_results)
- (libraries masc_tui_code_draft
+ (libraries masc_tui_scroll masc_tui_code_draft
   masc
   masc_tui_types
   masc_tui_fetched

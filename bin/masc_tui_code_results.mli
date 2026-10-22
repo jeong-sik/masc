@@ -59,6 +59,10 @@ val apply_lsp_answer : Masc_tui_types.state ->
   (Masc.Tui_decode.lsp_answer, string) result -> unit
 (** Admit only the latest question for the still-current source reading and
     scope. Location answers are staged until input has had priority. *)
+val scroll_hover : Masc_tui_types.state -> count:int -> height:int ->
+  [ `Up | `Down | `Page_up | `Page_down | `First | `Last ] -> unit
+(** Scroll only the retained hover belonging to the current source reading.
+    Code cursor, position, jump history and source requests are unchanged. *)
 val retire_lsp_input : Masc_tui_types.state -> unit
 (** Retire an in-flight answer, its recovery key and an unopened location offer
     before handling operator input. An already open owned location picker

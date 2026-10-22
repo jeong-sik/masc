@@ -1030,7 +1030,7 @@ let for_surface = function
       ; b Act "K" "hover"
           ~help:"ask the language server what a name on the cursor line is \
                  (one name asks at once; several open the palette as \
-                 choices)"
+                 choices); read the complete answer with j/k or paging, Esc returns to code"
       ; b Act "R" "references"
           ~help:"ask the language server where a name on the cursor line is \
                  used; needs the project's reference index, and says which \
@@ -1428,6 +1428,14 @@ type code_pane =
   | Code_diff
   | Code_notes  (** wrapped memo document is drawn over the file *)
   | Code_history  (** complete history document is drawn over the file *)
+
+let footer_hints_code_hover = hints_of_bindings
+  [ b Navigate "j/k" "scroll"
+  ; b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "edges"
+  ; b Navigate "Esc / Left" "return to code"
+  ; b Meta "?" "help"
+  ]
 
 let code_notes_bindings =
   [ b Navigate "j/k" "scroll"

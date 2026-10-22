@@ -315,6 +315,48 @@ let test_file_recovery_preserves_nested_readers () =
     [false, false; false, true; true, false; true, true]
 ;;
 
+let test_full_hover_keeps_original_answer_and_source_ownership () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  confirm_code_workspace state;
+  let next, file = start_read ~equal:String.equal state.code_file "source.ml" in
+  state.code_file <- next;
+  apply_file state file (Ok "let target = 1");
+  state.code_focus_file <- Right_pane;
+  let ask () = match Code_results.start_lsp_question state ~question:"hover" ~symbol:"target" with
+    | Some request -> request | None -> Alcotest.fail "hover did not start" in
+  let old = ask () in
+  Code_results.retire_lsp_input state;
+  let request = ask () in
+  let text = "signature\n\n한글 설명🙂\nlast paragraph\r" in
+  let before = state.code_file, state.code_file_cursor, state.code_file_scroll,
+    state.code_file_hscroll, state.code_jump_back, state.code_drafts in
+  Code_results.apply_lsp_answer state request (Ok (Decode.Lsp_hover (Some text)));
+  Code_results.apply_lsp_answer state old (Ok (Decode.Lsp_hover (Some "obsolete")));
+  let reading = match current_code_hover state with
+    | Some reading -> reading | None -> Alcotest.fail "current answer was not retained" in
+  check_string "retained original multiline response" text reading.chr_text;
+  Alcotest.(check bool) "offscreen source is not a copy target" true
+    (Result.is_error (Code_results.copy_file_source state));
+  Code_results.retire_lsp_input state;
+  Code_results.scroll_hover state ~count:80 ~height:12 `Page_down;
+  Alcotest.(check bool) "scroll owns the retained answer after request retirement" true
+    (match current_code_hover state with Some reading -> reading.chr_scroll > 0 | None -> false);
+  Alcotest.(check bool) "reading changes no file cursor history or draft" true
+    (before = (state.code_file, state.code_file_cursor, state.code_file_scroll,
+      state.code_file_hscroll, state.code_jump_back, state.code_drafts));
+  let replacement, _ = start_read ~equal:String.equal (Fetched.clear state.code_file) "source.ml" in
+  state.code_file <- replacement;
+  Alcotest.(check bool) "same path with another physical source cannot borrow answer" true
+    (Option.is_none (current_code_hover state));
+  state.code_file <- (let file, _, _, _, _, _ = before in file);
+  let identity = state.server_identity in
+  suspend_workspace_readings state;
+  state.server_identity <- identity;
+  state.workspace_identity <- Workspace_identity_match;
+  Alcotest.(check bool) "reconfirmed workspace cannot borrow old reading" true
+    (Option.is_none (current_code_hover state))
+;;
+
 let test_lsp_replies_belong_to_their_source_reading () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   confirm_code_workspace state;
@@ -1547,7 +1589,9 @@ let () =
             test_source_copy_respects_read_ownership
         ] )
     ; ( "location choices"
-      , [ Alcotest.test_case "pending status follows accepted request lifetime" `Quick
+      , [ Alcotest.test_case "full hover retains original answer and source ownership" `Quick
+            test_full_hover_keeps_original_answer_and_source_ownership
+        ; Alcotest.test_case "pending status follows accepted request lifetime" `Quick
             test_lsp_pending_status_follows_request_lifetime
         ; Alcotest.test_case "pending status includes same-question refresh and retry" `Quick
             test_lsp_pending_status_includes_refresh_and_retry

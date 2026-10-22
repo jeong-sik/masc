@@ -5085,6 +5085,12 @@ type code_lsp_query = {
   clq_line : int;
 }
 
+type code_hover_reading = {
+  chr_query : code_lsp_query;
+  chr_text : string;
+  chr_scroll : int;
+}
+
 let code_lsp_query_equal left right =
   left.clq_workspace = right.clq_workspace
   && left.clq_reading == right.clq_reading
@@ -9433,6 +9439,8 @@ type state = {
   (* The last language-server answer (or refusal), shown beside the title
      until the next question or file replaces it. *)
   mutable code_lsp_note: string option;
+  (* Original admitted hover with its physical source owner and local viewport. *)
+  mutable code_hover: code_hover_reading option;
   mutable code_lsp_query: (code_lsp_query, unit) Masc_tui_fetched.t;
   mutable code_location_offer: code_location_offer option;
   (* Where a jump left from, newest first. A pending return reads separately
@@ -10535,8 +10543,25 @@ let put_code_draft state draft =
   state.code_drafts <- draft :: List.filter (fun previous ->
     not (Masc_tui_code_draft.equal_address address (Masc_tui_code_draft.address previous))) state.code_drafts
 
+let code_lsp_query_current (state : state) query =
+  server_authority_ready state && state.view = Code
+  && query.clq_workspace = state.workspace_authority
+  && query.clq_reading == state.workspace_read_authority
+  && query.clq_scope = state.code_scope
+  && String.equal query.clq_dir state.code_dir
+  && (match Masc_tui_fetched.current_request state.code_file with
+      | None -> false
+      | Some current ->
+          Masc_tui_fetched.same_request ~equal:String.equal current query.clq_file)
+
+let current_code_hover state =
+  match state.code_hover with
+  | Some reading when code_lsp_query_current state reading.chr_query -> Some reading
+  | Some _ | None -> None
+
 let code_edit_focus state =
   state.view = Code && state.code_focus_file = Right_pane
+  && Option.is_none (current_code_hover state)
   && not state.repository_changes_open && not state.code_history_open && not state.code_diff_open && not state.code_notes_open
 
 
@@ -14031,6 +14056,7 @@ let set_code_scope state scope =
     state.code_file <- Masc_tui_fetched.clear state.code_file;
     state.code_file_resume_intent <- Refresh_code_file;
     state.code_lsp_note <- None;
+    state.code_hover <- None;
     state.code_target_line <- None
   end;
   state.code_scope <- scope
@@ -14050,6 +14076,7 @@ let enter_keeper_code_file state ~keeper ~path =
   state.code_file_max_width <- 0;
   state.code_target_line <- None;
   state.code_lsp_note <- None;
+  state.code_hover <- None;
   state.code_history <- Masc_tui_fetched.clear state.code_history;
   state.code_history_open <- false;
   state.code_history_scroll <- 0;
@@ -15776,6 +15803,7 @@ let create_state
   code_file_scroll = 0;
   code_file_cursor = 0;
   code_lsp_note = None;
+  code_hover = None;
   code_lsp_query = Masc_tui_fetched.initial;
   code_location_offer = None;
   code_jump_back = [];
@@ -16083,17 +16111,6 @@ let code_pending_navigation (state : state) =
       Option.map (fun path -> reading.cnr_owner, path)
         (Masc_tui_fetched.current_key reading.cnr_file)
   | Some _ | None -> None
-
-let code_lsp_query_current (state : state) query =
-  server_authority_ready state && state.view = Code
-  && query.clq_workspace = state.workspace_authority
-  && query.clq_reading == state.workspace_read_authority
-  && query.clq_scope = state.code_scope
-  && String.equal query.clq_dir state.code_dir
-  && (match Masc_tui_fetched.current_request state.code_file with
-      | None -> false
-      | Some current ->
-          Masc_tui_fetched.same_request ~equal:String.equal current query.clq_file)
 
 (* Pending presentation and answer admission share the original source owner.
    Settled queries keep a key for recovery, but are not pending work. *)

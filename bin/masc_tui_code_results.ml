@@ -273,7 +273,7 @@ let copy_file_source (state : state) =
     Error "Confirm the workspace before copying file source"
   else if state.view <> Code || state.code_focus_file <> Right_pane
           || state.code_history_open || state.code_diff_open || state.code_notes_open
-          || state.code_draft_open then
+          || state.code_draft_open || Option.is_some (current_code_hover state) then
     Error "Focus file content to copy its source"
   else match Masc_tui_fetched.current state.code_file with
     | Some (path, Masc_tui_fetched.Ready document) -> Ok (path, document.cfd_source)
@@ -386,6 +386,7 @@ let start_lsp_question ?line (state : state) ~question ~symbol =
        | Masc_tui_fetched.Already_loading -> None
        | Masc_tui_fetched.Started (next, request) ->
            state.code_lsp_query <- next;
+           state.code_hover <- None;
            state.code_lsp_note <- None;
            Some request)
 ;;
@@ -461,6 +462,8 @@ let apply_lsp_answer (state : state) request result =
        state.code_lsp_note <- Some (symbol ^ ": " ^ detail);
        ()
    | Ok (Masc.Tui_decode.Lsp_hover text) ->
+       state.code_hover <- Option.map (fun text ->
+         { chr_query = query; chr_text = text; chr_scroll = 0 }) text;
        state.code_lsp_note <-
          Some
            (match text with
@@ -486,6 +489,18 @@ let apply_lsp_answer (state : state) request result =
        ())
   end
 ;;
+
+let scroll_hover state ~count ~height move =
+  Option.iter (fun reading ->
+    let maximum = max 0 (count - height) in
+    let current = max 0 (min maximum reading.chr_scroll) in
+    let page = Masc_tui_scroll.page_step ~height in
+    let next = match move with
+      | `Up -> current - 1 | `Down -> current + 1
+      | `Page_up -> current - page | `Page_down -> current + page
+      | `First -> 0 | `Last -> maximum in
+    state.code_hover <- Some { reading with chr_scroll = max 0 (min maximum next) })
+    (current_code_hover state)
 
 let retire_lsp_input state =
   match state.palette_mode with

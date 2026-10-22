@@ -1,0 +1,25 @@
+{
+  "container_id": "5a9824730cc61c28fee118ee664712bfa20d320160b77b50c508fe8437db5c88",
+  "image_id": "sha256:8df21ee67174a57544597abf3ba16174f107508e9f523e2e1709b091da39d258",
+  "running": true,
+  "network_mode": "none",
+  "read_only_rootfs": true,
+  "cap_drop": [
+    "ALL"
+  ],
+  "credential_variable_names_found": [],
+  "mounts": [
+    {
+      "Type": "bind",
+      "Source": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-curator-host-1196-20261022-3ksh84lf/package/addons/workspace-curator",
+      "Destination": "/addon",
+      "RW": false
+    },
+    {
+      "Type": "volume",
+      "Source": "/var/lib/docker/volumes/masc-lane-state-b81272c2e5d63b1826d78d0f0fdc28f6cd27725a9feccf4838eed2707e29dd19/_data",
+      "Destination": "/state",
+      "RW": true
+    }
+  ]
+}

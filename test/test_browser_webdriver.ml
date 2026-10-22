@@ -445,6 +445,46 @@ let test_pointer_release_recovery () =
     check int "wheel recovers only older remote release" 3 !releases;
     check int "recovery never replays previous input" 1 !gestures)
 
+(* A click that opens a JavaScript dialog makes geckodriver refuse the pointer
+   release (probed on Firefox 158). Answering that dialog goes through the same
+   session, so the refused release must not block it. *)
+let test_dialog_opened_by_a_click_can_be_answered () =
+  Eio_main.run (fun _ ->
+    let dialog_open = ref false and releases = ref 0 and answered = ref 0 in
+    let request ~method_ ~path ~body:_ = match method_, path with
+      | `POST, "/session" -> Ok (`Assoc ["sessionId",`String "owned";
+          "capabilities",`Assoc ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `GET, "/session/owned/window/handles" -> Ok (`List [`String "tab"])
+      | `GET, "/session/owned/window" -> Ok (`String "tab")
+      | `POST, "/session/owned/window" | `POST, "/session/owned/frame" -> Ok `Null
+      | `POST, "/session/owned/execute/sync" -> Ok (`Assoc ["url",`String "https://example.org";"title",`String "Fixture"])
+      | `POST, "/session/owned/actions" -> dialog_open := true; Ok `Null
+      | `DELETE, "/session/owned/actions" -> incr releases;
+          if !dialog_open then Error (Driver.Remote {code=Driver.Unexpected_alert_open;message="dialog open"})
+          else Ok `Null
+      | `GET, "/session/owned/alert/text" -> Ok (`String "sure?")
+      | `POST, "/session/owned/alert/accept" -> incr answered; dialog_open := false; Ok `Null
+      | _ -> fail ("unexpected request: " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    let point : Lane.Pointer.point = {x=0.5;y=0.5} in
+    let viewport : Lane.Pointer.viewport = {document_id="fixture";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
+    let click = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
+      action=Lane.Click_at {point;viewport;button=Lane.Pointer.Primary}} in
+    (match Driver.execute driver click with
+     | Lane.Refused _ | Lane.Answered _ -> ()
+     | Lane.Rejected_before_effect _ | Lane.Lane_absent | Lane.Timed_out -> fail "the click must reach the page");
+    check bool "the click opened a dialog" true !dialog_open;
+    (match Driver.execute driver (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None})) with
+     | Lane.Answered _ -> ()
+     | Lane.Refused _ | Lane.Rejected_before_effect _ | Lane.Lane_absent | Lane.Timed_out ->
+       fail "a pending release must not block answering the dialog");
+    check int "the dialog was answered once" 1 !answered;
+    let before = !releases in
+    ignore (Driver.execute driver Lane.Tabs_list);
+    check bool "the pending release runs once the dialog is gone" true (!releases > before))
+
 let test_touch_sends_a_touch_pointer_and_releases_it () =
   Eio_main.run (fun _ ->
     let pointer_types = ref [] and releases = ref 0 in
@@ -725,6 +765,7 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
   test_case "semantic clicks use native input" `Quick test_semantic_click_uses_native_pointer_input;
   test_case "pointer release failure recovery" `Quick test_pointer_release_recovery;
+  test_case "a dialog opened by a click can be answered" `Quick test_dialog_opened_by_a_click_can_be_answered;
   test_case "pointer guard failure rejects before effect" `Quick test_pointer_guard_failure_rejects_before_effect;
   test_case "download setup cancellation rolls back session" `Quick test_download_setup_cancellation;
   test_case "session ownership and crash recovery" `Quick test_session_lifecycle;

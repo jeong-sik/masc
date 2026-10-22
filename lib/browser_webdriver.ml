@@ -95,9 +95,16 @@ let session t = match t.session with
     let* () = match session.pointer_state with
       | Released -> Ok ()
       | Release_required ->
-        let* _ = call t session `DELETE "/actions" None in
-        session.pointer_state <- Released;
-        Ok () in
+        (* A click that opens a JavaScript dialog leaves the release refused
+           while the dialog is open. The dialog is answered through this same
+           session, so the refusal must not block it; the release stays
+           pending and runs once the dialog is gone. *)
+        (match call t session `DELETE "/actions" None with
+         | Ok _ -> session.pointer_state <- Released; Ok ()
+         | Error (Remote {code=Unexpected_alert_open;_}) -> Ok ()
+         | Error (Transport _ | Protocol _
+                 | Remote {code=Invalid_session_id | No_such_window | No_such_alert | Other _;_}) as error ->
+           Result.map ignore error) in
     let* downloads = Result.map_error (fun detail -> Protocol detail) session.downloads in
     let* () = Result.map_error (fun detail -> Protocol detail) (downloads.check ()) in
     Ok session

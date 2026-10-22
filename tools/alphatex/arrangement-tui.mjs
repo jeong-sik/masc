@@ -1057,7 +1057,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       const items = picker.items(), capacity = Math.max(1, rows - 4)
       const start = Math.max(0, (picker.view.cursor ?? 0) - capacity + 1)
       const lines = [picker.view.title, `${pickerAsset} · ${status}`,
-        ...(picker.view.query === undefined ? [] : [`${picker.view.searching ? 'Search' : 'Filter'}: ${picker.view.query}`]),
+        ...(picker.view.query === undefined ? [] : [`${picker.view.kind === 'preset_name' ? 'Name' : picker.view.kind === 'preset_path' ? 'Path' : picker.view.searching ? 'Search' : 'Filter'}: ${picker.view.query}`]),
         ...items.slice(start, start + capacity).map((item, index) => `${start + index === picker.view.cursor ? '›' : ' '} ${picker.isActive(item) ? '●' : ' '} ${item.name}`)]
       let output = '\x1b[H'
       for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`

@@ -1,7 +1,6 @@
 import { mkdir, readdir } from 'node:fs/promises'
-import { basename, join, resolve } from 'node:path'
+import { basename, join, resolve, win32 } from 'node:path'
 import { homedir } from 'node:os'
-import { randomUUID } from 'node:crypto'
 import { nativeJob, loadSelection, saveSelection, presetDirectory } from './vst.mjs'
 
 // A selection is a plug-in plus an optional saved sound. The state line and the
@@ -19,13 +18,16 @@ export function selectionLabel(selection) {
 export function pickerActions(view) {
   if (!view) return []
   if (view.kind === 'loading') return [{ key: 'Esc', label: 'cancel' }]
+  if (view.kind === 'preset_name') {
+    return [{ key: 'Enter', label: 'open sound browser' }, { key: 'Esc', label: 'cancel' }]
+  }
   if (view.kind === 'preset_path') {
     return [{ key: 'Enter', label: 'load preset file' }, { key: 'Esc', label: 'cancel' }]
   }
   const actions = [{ key: '↑↓/j k', label: 'choose' }, { key: '/', label: 'search' },
     { key: 'Enter', label: view.kind === 'presets' ? 'play' : 'select' }]
   if (view.kind === 'presets') {
-    actions.push({ key: 'e', label: 'native sound browser' }, { key: 'p', label: 'preset file' })
+    actions.push({ key: 'e', label: 'new sound' }, { key: 'p', label: 'preset file' })
   }
   actions.push({ key: 'Esc', label: 'cancel' }, { key: 's', label: 'stop' })
   return actions
@@ -205,15 +207,32 @@ export class InstrumentPicker {
     const view = this.view
     if (view?.kind !== 'presets') return
     const preset = this.items()[view.cursor]?.preset_path ?? null
+    this.view = { kind: 'preset_name', title: 'Name the sound to save',
+      instrument: view.instrument, preset_path: preset, query: '', searching: false }
+    this.notify()
+  }
+
+  async saveNamedPreset() {
+    const view = this.view
+    if (view?.kind !== 'preset_name') return
     await this.attempt(async epoch => {
+      // The name denotes one file in this instrument's own preset directory.
+      // Do not turn a sound name into a path or silently sanitize its spelling.
+      const extension = '.vstpreset'
+      const name = view.query.toLowerCase().endsWith(extension)
+        ? view.query.slice(0, -extension.length) : view.query
+      if (!name.trim() || name === '.' || name === '..' || view.query.includes('\0')
+          || basename(view.query) !== view.query || win32.basename(view.query) !== view.query) {
+        throw new Error('Choose a sound name without directories')
+      }
+      const folder = presetDirectory(this.directory, view.instrument.plugin_path, view.instrument.plugin_name)
+      const path = join(folder, `${name}.vstpreset`)
       this.view = { kind: 'loading', title: 'Choose a sound in the native editor; close its window to save' }
       this.notify()
-      const folder = presetDirectory(this.directory, view.instrument.plugin_path, view.instrument.plugin_name)
       await mkdir(folder, { recursive: true, mode: 0o700 })
       if (epoch !== this.epoch) return
-      const path = join(folder, `${new Date().toISOString().replaceAll(':', '-')}-${randomUUID()}.vstpreset`)
       const result = await this.work({ operation: 'edit', ...view.instrument,
-        preset_path: preset, output_path: path }, epoch)
+        preset_path: view.preset_path, output_path: path }, epoch)
       if (result === null) return
       await this.presets(view.instrument, epoch, result.preset_path)
     })
@@ -228,6 +247,10 @@ export class InstrumentPicker {
       if (key.name === 'return') view.searching = false
       else if (key.name === 'backspace') { view.query = view.query.slice(0, -1); view.cursor = 0 }
       else if (text && !key.ctrl && !key.meta) { view.query += text; view.cursor = 0 }
+    } else if (view.kind === 'preset_name') {
+      if (key.name === 'return') { await this.saveNamedPreset(); return }
+      if (key.name === 'backspace') view.query = [...view.query].slice(0, -1).join('')
+      else if (text && !key.ctrl && !key.meta) view.query += text
     } else if (view.kind === 'preset_path') {
       if (key.name === 'return') {
         const path = view.query.startsWith('~/') ? join(homedir(), view.query.slice(2)) : resolve(view.query)

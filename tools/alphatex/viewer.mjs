@@ -218,7 +218,7 @@ async function viewScores(sources, initialIndex) {
       output += retire(tmux)
       const menu = picker.view
       output += `\x1b[4;2H${fit(menu.title)}`
-      if (menu.kind === 'preset_path') output += `\x1b[6;2H${fit(menu.query)}▌`
+      if (menu.kind === 'preset_path' || menu.kind === 'preset_name') output += `\x1b[6;2H${fit(menu.query)}▌`
       else if (menu.items) {
         const items = picker.items()
         const available = Math.max(1, rows - 9)
@@ -428,7 +428,7 @@ async function viewScores(sources, initialIndex) {
   })
   function keypress(text, key = {}) {
     if (picker.view && !(key.ctrl && key.name === 'c')) {
-      if (key.name === 's' && !picker.view.searching && picker.view.kind !== 'preset_path') {
+      if (key.name === 's' && !picker.view.searching && ['plugins', 'presets'].includes(picker.view.kind)) {
         stop(); status = 'Stopped'; redraw(); return
       }
       const hadMenu = picker.view

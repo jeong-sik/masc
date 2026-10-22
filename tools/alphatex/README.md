@@ -37,8 +37,11 @@ remains available on other terminals. In the score view:
   cursor (`›`) and the sounding instrument never read alike. The footer lists
   only the keys the open menu answers: `Enter:play` and `e`/`p` appear in the
   preset menu, `Enter:select` in the plug-in list.
-  In the preset menu, `e` opens the instrument's native editor and sound browser;
-  close that window to save the complete sound. `p` accepts a preset file path.
+  In the preset menu, `e` asks for a sound name, then opens the instrument's
+  native editor and sound browser. Close that window to save the complete sound
+  under that name. Existing sounds are never overwritten; choose another name
+  to save a variation. Escape cancels before opening the editor. `p` accepts a
+  preset file path.
 - `l` toggles repeat, using the same rendered audio for each repetition.
 - `r` opens audio/MIDI input selection and the recording timeline on macOS.
 - `v` shows the source and complete official diagnostics; `s` stops playback;
@@ -380,7 +383,7 @@ cycles the musical grid. Tab changes track, `n` adds one, `m` mutes it and `o`
 solos it. `u`/`y` undo/redo. On macOS, the first audio Space opens the existing
 instrument/preset picker. Choose a verified VST instrument or the explicit
 SoundFont entry; **i** stops playback and reopens the picker. In the preset view,
-**e** opens the native editor and **p** selects a preset file. The selected VST
+**e** names a new sound before opening the native editor, and **p** selects a preset file. The selected VST
 preset owns the sound; MIDI program/bank messages do not replace it. Instrument,
 sample-library or license failures remain visible without a SoundFont fallback.
 Phrase and original MIDI documents save their selected sound. Choosing a VST

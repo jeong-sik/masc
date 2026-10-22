@@ -95,6 +95,16 @@ val update_input_checkpoint : t -> observed:Keeper_checkpoint_ref.t option ->
     reread the actual relation to reconcile it, never blindly retry.
     This relation survives immutable operation/semantic terminal settlement. *)
 
+val register_created_input_checkpoint : t -> checkpoint:Keeper_checkpoint_ref.t ->
+  (input_checkpoint_update, error) result
+(** Explicit new-trace registration, called only after the Owner validates the
+    producer-owned creation seed for an empty actor. Registers this one exact
+    retained reference even when prior history is unavailable; never changes
+    the global floor. A different existing reference is refused. An exact
+    existing reference is an idempotent observation, not permission to replay
+    metadata or dispatch. This low-level storage function cannot validate the
+    creation capability or filesystem evidence; the Owner must do so first. *)
+
 module Offline : sig
   type prepared_copy =
     { operation_count : int; semantic_count : int; batch_member_count : int

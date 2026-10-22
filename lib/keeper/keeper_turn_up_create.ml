@@ -37,10 +37,11 @@ let create_response_json ~name ~trace_id ~instructions ~activation_mode ~input_p
     ]
 ;;
 
-let write_initial_meta ~intake_token config meta =
+let write_initial_meta ~intake_token ~initial_input config meta =
   match
     Keeper_owner_registry.create_meta
       ~intake_token
+      ~initial_input
       ~base_path:config.Workspace.base_path
       meta
   with
@@ -122,8 +123,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
             in
               let instructions = Option.value ~default:"" p.instructions_opt in
               Progress.Tracker.step tracker ~message:"Initializing session directory" ();
-              let trace_id = generate_trace_id () in
-              match Keeper_id.Trace_id.of_string trace_id with
+              match Keeper_input_birth.generate ~keeper_name:p.name () with
               | Error err ->
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string LifecycleDispatchRejections)
@@ -134,7 +134,9 @@ let create_keeper ~expected_config_revision (ctx : _ context)
                     p.name err;
                   Progress.stop_tracking task_id;
                   tool_result_error ~class_:Tool_result.Runtime_failure "internal keeper trace_id generation failed"
-              | Ok trace_id_t ->
+              | Ok creation ->
+                  let trace_id_t = Keeper_input_birth.trace_id creation in
+                  let trace_id = Keeper_id.Trace_id.to_string trace_id_t in
                   (match
                      Keeper_shutdown_intake_fence.run_durable_intake_observing
                        ~base_path:ctx.config.base_path
@@ -193,7 +195,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
           message_scope_ack_id = None;
 	          last_runtime_attempt = None;
 	        };
-      keeper_id = Some (Keeper_id.Uid.generate ());
+      keeper_id = Some (Keeper_input_birth.keeper_uid creation);
       agent_core_env = p.profile_defaults.agent_core_env;
       } in
       match
@@ -227,9 +229,6 @@ let create_keeper ~expected_config_revision (ctx : _ context)
         Progress.stop_tracking task_id;
         tool_result_error ~class_:Tool_result.Runtime_failure detail
       | Ok system_prompt ->
-      let ctx0 =
-        Keeper_context_runtime.create ~eio:true ~system_prompt
-      in
       Progress.Tracker.step tracker ~message:"Writing declarative keeper configuration" ();
       (match
          Keeper_turn_up_config_persistence.commit_configuration
@@ -239,8 +238,6 @@ let create_keeper ~expected_config_revision (ctx : _ context)
            ~meta
            ~publish:(fun _outcome revision ->
            let publish () =
-             let base_dir = session_base_dir ctx.config in
-             ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
              let bundle_paths =
                Cancel_safe.protect
                  ~on_exn:(fun exn ->
@@ -276,22 +273,23 @@ let create_keeper ~expected_config_revision (ctx : _ context)
                        ]
                      ()))
                bundle_paths;
-             let session =
-               Keeper_context_runtime.create_session ~session_id:trace_id ~base_dir
-             in
              Progress.Tracker.step tracker ~message:"Saving initial checkpoint" ();
              let checkpoint_result =
                try
-                 Keeper_context_runtime.save_agent_core_checkpoint
+                 let ( let* ) = Result.bind in
+                 let* initial_session = Keeper_input_birth.reserve_session
+                   ~base_path:ctx.config.base_path ~intake_token creation
+                   |> Result.map_error Keeper_input_birth.error_to_string in
+                 let session = Keeper_context_runtime.create_session
+                   ~session_id:trace_id ~base_dir:(Keeper_input_birth.session_root initial_session) in
+                 let* checkpoint,outcome = Keeper_context_core.save_agent_core_checkpoint_classified
                    ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
-                   ~keeper_name:meta.name
-                   ~session
-                   ~agent_name:meta.name
-                   ~ctx:ctx0
-                 |> Result.map_error (fun error ->
-                   Keeper_context_core.checkpoint_write_error_to_string
-                     ~persistence_error_to_string:Fun.id
-                     error)
+                   ~keeper_name:meta.name ~session ~agent_name:meta.name
+                   ~ctx:(Keeper_context_runtime.create ~eio:true ~system_prompt)
+                   |> Result.map_error (Keeper_context_core.checkpoint_write_error_to_string
+                     ~persistence_error_to_string:Fun.id) in
+                 Keeper_input_birth.retain_initial initial_session ~checkpoint ~outcome
+                   |> Result.map_error Keeper_input_birth.error_to_string
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
                | exn ->
@@ -303,10 +301,10 @@ let create_keeper ~expected_config_revision (ctx : _ context)
              match checkpoint_result with
              | Error detail ->
                Error (`Checkpoint detail)
-             | Ok _ ->
+             | Ok initial_input ->
                Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
                Result.map_error (fun detail -> `Metadata detail)
-                 (write_initial_meta ~intake_token ctx.config meta)
+                 (write_initial_meta ~intake_token ~initial_input ctx.config meta)
            in
            let published =
              try publish () with

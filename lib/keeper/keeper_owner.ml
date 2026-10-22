@@ -195,7 +195,7 @@ type _ command =
   | Exact_projection :
       (Keeper_owner_reducer.projection, error) result command
   | Apply_meta :
-      Keeper_owner_reducer.meta_command
+      Keeper_owner_reducer.meta_command * Keeper_input_birth.seed option
       -> (Keeper_meta_contract.keeper_meta option, error) result command
   | Exact_operation :
       Operation_id.t -> (Chat_operation.t option, error) result command
@@ -1688,7 +1688,7 @@ let start
         | Command (Exact_projection, resolve) ->
           Eio.Promise.resolve resolve (Ok (Keeper_owner_reducer.projection state));
           loop state shutdown_operation_id
-        | Command (Apply_meta command, resolve) ->
+        | Command (Apply_meta (command,initial_input), resolve) ->
           (match !(t.metadata_error) with
            | Some fault ->
              (* The metadata snapshot store is fenced until a restart. An
@@ -1699,7 +1699,31 @@ let start
              loop state shutdown_operation_id
            | None ->
           let operation_store_ready =
-            match command, (Keeper_owner_reducer.projection state).meta with
+            match initial_input with
+            | Some seed ->
+              reject_if_stopping state (fun () ->
+                reject_if_shutdown shutdown_operation_id (fun () ->
+                  let ( let* ) = Result.bind in
+                  let* meta = match command, (Keeper_owner_reducer.projection state).meta,
+                      Atomic.get t.turn_in_flight with
+                    | Keeper_owner_reducer.Create meta,None,None -> Ok meta
+                    | (Create _ | Pause _ | Resume _ | Reset_latch _ | Retain_shutdown_latch _
+                      | Update_profile _ | Delete_if_snapshot _ | Commit_turn_runtime _ | Set_current_task _),
+                        (Some _ | None),(Some _ | None) ->
+                      Error (Operation_rejected (Chat_operation_store.Invalid_input
+                        "initial input creation requires an empty idle Owner")) in
+                  let* () = reopen_operation_store_if_missing t in
+                  let* reference = Keeper_input_birth.validate ~session_root:t.session_root
+                    ~keeper_name:t.keeper_name ~meta seed
+                    |> Result.map_error (fun cause -> Operation_rejected (Chat_operation_store.Invalid_input
+                      (Keeper_input_birth.error_to_string cause))) in
+                  let* installed,_ = run_operation_command t ~label:"register created trace input" (fun () ->
+                    Chat_operation_store.register_created_input_checkpoint t.operation_store ~checkpoint:reference) in
+                  match installed with
+                  | Chat_operation_store.Input_checkpoint_updated -> Ok ()
+                  | Input_checkpoint_source_changed _ -> Error (Operation_rejected
+                      (Chat_operation_store.Invalid_input "created trace input already names another checkpoint"))))
+            | None -> match command, (Keeper_owner_reducer.projection state).meta with
             | Keeper_owner_reducer.Create _, None ->
               reopen_operation_store_if_missing t
             | (Keeper_owner_reducer.Create _, Some _)
@@ -2461,7 +2485,9 @@ let start
 ;;
 
 let exact_projection t = request t Exact_projection
-let apply_meta t command = request t (Apply_meta command)
+let apply_meta t command = request t (Apply_meta (command,None))
+let create_from_input_birth t meta seed =
+  request t (Apply_meta (Keeper_owner_reducer.Create meta,Some seed))
 let direct_checkpoint t ~operation_id = request t (Direct_checkpoint operation_id)
 let defer_direct_checkpoint t ~operation_id ~execution_digest ~checkpoint =
   request t (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint})

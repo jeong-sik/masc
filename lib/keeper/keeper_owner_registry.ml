@@ -916,7 +916,7 @@ let cancel_queued_operation ~base_path ~keeper_name operation_id =
     Keeper_owner.cancel_queued_operation owner operation_id)
 ;;
 
-let create_meta_unfenced ~base_path meta =
+let create_meta_unfenced ?initial_input ~base_path meta =
   match find_pool ~purpose:Admission base_path with
   | Error error -> Error (Command_lookup_failed error)
   | Ok pool ->
@@ -936,13 +936,15 @@ let create_meta_unfenced ~base_path meta =
             | Error error -> Error (Command_lookup_failed error)
             | Ok owner ->
               (match
-                 Keeper_owner.apply_meta owner (Keeper_owner_reducer.Create meta)
+                 (match initial_input with
+                  | None -> Keeper_owner.apply_meta owner (Keeper_owner_reducer.Create meta)
+                  | Some seed -> Keeper_owner.create_from_input_birth owner meta seed)
                with
                | Error error -> Error (Command_rejected error)
                | Ok committed -> Ok committed)))
 ;;
 
-let create_meta ?intake_token ~base_path meta =
+let create_meta ?intake_token ?initial_input ~base_path meta =
   match intake_token with
   | Some token ->
     if
@@ -950,7 +952,7 @@ let create_meta ?intake_token ~base_path meta =
         token
         ~base_path
         ~keeper_name:meta.Keeper_meta_contract.name
-    then create_meta_unfenced ~base_path meta
+    then create_meta_unfenced ?initial_input ~base_path meta
     else
       Error
         (shutdown_fence_error
@@ -960,7 +962,7 @@ let create_meta ?intake_token ~base_path meta =
        Keeper_shutdown_intake_fence.run_durable_intake_if_open
          ~base_path
          ~keeper_name:meta.Keeper_meta_contract.name
-         (fun _intake_token -> create_meta_unfenced ~base_path meta)
+         (fun _intake_token -> create_meta_unfenced ?initial_input ~base_path meta)
      with
      | Keeper_shutdown_intake_fence.Intake_committed result -> result
      | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->

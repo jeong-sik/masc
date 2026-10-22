@@ -1052,6 +1052,18 @@ let update_input_checkpoint store ~observed ~checkpoint =
       let* () = install_input_checkpoint_with_db store ~previous checkpoint in
       Ok Input_checkpoint_updated)
 
+let register_created_input_checkpoint store ~checkpoint =
+  let* () = ensure_open store in
+  with_transaction store (fun () ->
+    let* previous = input_observation_with_db store.db ~trace_id:checkpoint.Keeper_checkpoint_ref.trace_id in
+    match previous with
+    | Input_observed reference when not (Keeper_checkpoint_ref.equal reference checkpoint) ->
+      Ok (Input_checkpoint_source_changed previous)
+    | Input_observed _ -> Ok Input_checkpoint_updated
+    | Input_unobserved | Prior_input_unavailable ->
+      let* () = install_input_checkpoint_with_db store ~previous:None checkpoint in
+      Ok Input_checkpoint_updated)
+
 type released_checkpoint = Keeper_checkpoint_ref.t
 let take_released_checkpoints store = Atomic.exchange store.released []
 let released_reference (released : released_checkpoint) = released

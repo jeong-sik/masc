@@ -339,7 +339,26 @@ that evidence is refused pending explicit continuation reconciliation. This is
 an incomplete recovery boundary, not proof that compaction, host responses,
 reconnection, or the operator waiting-state surface are integrated.
 
-Do not merge or install the v3 stack alone. Complete continuation and new-trace
+### New Keeper trace creation
+
+Actual Keeper creation mints a trace and Keeper UID together, reserves that
+session directory exclusively inside the original live intake, and saves a
+fresh initial context. It requires a confirmed `Saved` outcome and exact
+canonical readback before retaining the initial input checkpoint. The empty
+Owner rechecks the live creation capability, incarnation, canonical and retained
+bytes, then registers this single trace before publishing metadata or starting
+a child. The existing global unavailable-history floor remains unchanged;
+unrelated old traces do not become fresh. An ordinary metadata create without
+this capability does not grant input authority.
+
+Expired capability, an existing session, changed evidence, an existing different
+input reference, or the Owner's integrity/reconciliation fence refuses creation.
+A failed or uncertain input registration does not publish metadata or start a
+child; an already committed input row and retained checkpoint remain evidence.
+Metadata and input registration are separate durable writes, not a single
+cross-store transaction. Recovery must inspect their actual outcomes.
+
+Do not merge or install the v3 stack alone. History-cut/continuation
 reconciliation, operator-input response/reconnect/TUI integration, and actual
 whole-rollout acceptance cases are still required. Offline preparation and a
 conditional journal replacement do not substitute for those contracts.

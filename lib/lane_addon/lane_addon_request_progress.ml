@@ -6,8 +6,11 @@ type refusal = { stage : refusal_stage; evidence : Yojson.Safe.t }
 type change = { before : Yojson.Safe.t; after : Yojson.Safe.t }
 type commit = { judgment : Yojson.Safe.t; change : change }
 type successor = { request_id : string; request_digest : string }
+type preparation_intent = { request_id : string; request : Yojson.Safe.t }
+type preparation = Preparation_pending of preparation_intent | Preparation_confirmed of preparation_intent
 type event = Dispatch_intended | Admission_declined of Yojson.Safe.t | Execution_observed of observation
-  | Judgment_retained of Yojson.Safe.t | Commit_intended of change
+  | Judgment_retained of Yojson.Safe.t | Preparation_intended of preparation_intent
+  | Preparation_observed of string | Commit_intended of change
   | Commit_uncertain of Yojson.Safe.t | Commit_retry_observed of Yojson.Safe.t
   | Commit_observed of Yojson.Safe.t | Commit_conflicted of Yojson.Safe.t
   | Refused of refusal | Successor_intended of successor | Successor_observed of string
@@ -17,10 +20,12 @@ type phase = Captured | Admission_wait of Yojson.Safe.t | Dispatch_pending of ob
   | Commit_unknown of commit * Yojson.Safe.t | Finished of commit
   | Conflicted of commit * Yojson.Safe.t | Rejected of refusal
   | Subdividing of refusal * successor | Subdivided of refusal * successor
-type t = { events_rev : event list; phase : phase; observer:Lane_addon_request_receipt.t }
-let captured = {events_rev=[];phase=Captured;observer=Lane_addon_request_receipt.empty}
+type t = { events_rev : event list; phase : phase; preparation:preparation option;
+  observer:Lane_addon_request_receipt.t }
+let captured = {events_rev=[];phase=Captured;preparation=None;observer=Lane_addon_request_receipt.empty}
 let phase t = t.phase
 let events t = List.rev t.events_rev
+let preparation t = t.preparation
 let observer t = t.observer
 let object_fields names = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) =
@@ -36,6 +41,9 @@ let event_to_json = function
   | Execution_observed (Outcome_unknown evidence) -> evidence_event "execution_unknown" evidence
   | Execution_observed (Absent evidence) -> evidence_event "worker_absent" evidence
   | Judgment_retained judgment -> envelope "judgment_retained" ["judgment",judgment]
+  | Preparation_intended successor -> envelope "preparation_intended"
+      ["request_id",`String successor.request_id;"request",successor.request]
+  | Preparation_observed request_id -> envelope "preparation_observed" ["request_id",`String request_id]
   | Commit_intended change -> envelope "commit_intended" ["before",change.before;"after",change.after]
   | Commit_uncertain evidence -> evidence_event "commit_unknown" evidence
   | Commit_retry_observed before -> envelope "commit_retry_observed" ["before",before]
@@ -66,6 +74,17 @@ let event_of_json json =
   | "execution_unknown" -> evidence (fun value -> Execution_observed (Outcome_unknown value))
   | "worker_absent" -> evidence (fun value -> Execution_observed (Absent value))
   | "judgment_retained" -> value "judgment" (fun value -> Judgment_retained value)
+  | "preparation_intended" ->
+    let* fields = fields ["request_id";"request"] in
+    (match List.assoc "request_id" fields with
+     | `String request_id when String.trim request_id <> "" ->
+       Ok (Preparation_intended {request_id;request=List.assoc "request" fields})
+     | _ -> Error "preparation intent requires a nonblank child ID")
+  | "preparation_observed" ->
+    let* fields = fields ["request_id"] in
+    (match List.assoc "request_id" fields with
+     | `String request_id when String.trim request_id <> "" -> Ok (Preparation_observed request_id)
+     | _ -> Error "preparation acknowledgement requires a nonblank child ID")
   | "commit_intended" -> let* fields = fields ["before";"after"] in
     Ok (Commit_intended {before=List.assoc "before" fields;after=List.assoc "after" fields})
   | "commit_unknown" -> evidence (fun value -> Commit_uncertain value)
@@ -93,6 +112,10 @@ let event_of_json json =
   | _ -> Error "unknown request progress event"
 let invalid () = Error "event does not follow the original request progress"
 let step phase = function
+  | Preparation_intended _ | Preparation_observed _ -> (match phase with
+      | Judged _ -> Ok phase
+      | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _
+      | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> invalid ())
   | Observer (Lane_addon_request_receipt.Intended (Completion,_)) -> (match phase with
       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok phase
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
@@ -158,19 +181,34 @@ let step phase = function
 (* Private fold boundary. Callers below have either decoded the wire event or
    validated a public event; repeating its wire codec here rehashes receipts. *)
 let append_validated t event =
+  let* preparation = match event,t.preparation with
+    | Preparation_intended successor,None -> Ok (Some (Preparation_pending successor))
+    | Preparation_observed request_id,Some (Preparation_pending successor)
+        when request_id=successor.request_id -> Ok (Some (Preparation_confirmed successor))
+    | Preparation_intended _,Some (Preparation_pending _ | Preparation_confirmed _)
+    | Preparation_observed _,(None | Some (Preparation_pending _ | Preparation_confirmed _)) ->
+      Error "preparation acknowledgement does not follow its exact immutable intent"
+    | Commit_intended _,Some (Preparation_pending _) ->
+      Error "domain commit cannot precede original prerequisite publication acknowledgement"
+    | (Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+      | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
+      | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _ | Observer _),
+      (None | Some (Preparation_pending _ | Preparation_confirmed _)) -> Ok t.preparation in
   let* phase = step t.phase event in
   let* observer = match event with
     | Observer event -> Lane_addon_request_receipt.append t.observer event
     | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+    | Preparation_intended _ | Preparation_observed _
     | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
     | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _ -> Ok t.observer in
-  Ok {events_rev=event :: t.events_rev;phase;observer}
+  Ok {events_rev=event :: t.events_rev;phase;preparation;observer}
 let append t event =
   let* event = match event with
     (* Receipt construction is opaque. Its append checks ACK text and ordering;
        the complete public payload codecs remain necessary for other events. *)
     | Observer _ -> Ok event
     | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+    | Preparation_intended _ | Preparation_observed _
     | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
     | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _ ->
       event_of_json (event_to_json event) in

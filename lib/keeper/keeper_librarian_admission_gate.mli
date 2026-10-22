@@ -3,6 +3,24 @@
 val scope : Keeper_librarian_admission_capture.owner -> string
 val parent_execution_id : Lane_addon_tool_request_owner.retained -> (string, string) result
 (** Strict header read for discovery joining only; follow with full validation. *)
+val prepare_root : store:Lane_addon_store.t -> owner:Keeper_librarian_admission_capture.owner ->
+  capture:Keeper_librarian_admission_capture.t -> parent:Lane_addon_tool_request_owner.retained ->
+  proposal:Yojson.Safe.t -> request_id:string -> authority:Keeper_librarian_absorb_gate.live_authority ->
+  (Lane_addon_request_progress.preparation_intent, string) result
+(** Build and validate the full immutable first gate request before retaining
+    its parent preparation intent. Does not publish or evaluate anything. *)
+val recover_root : store:Lane_addon_store.t -> owner:Keeper_librarian_admission_capture.owner ->
+  capture:Keeper_librarian_admission_capture.t ->
+  (Lane_addon_tool_request_owner.retained, string) result
+(** Restore the exact full pending parent preparation and publish only its
+    original child ID/request. Confirm Captured before acknowledging the parent.
+    An acknowledged missing child refuses. No current live configuration or
+    provider is required; callers hold the Memory lane and purge fence. *)
+val validate_root_preparation : store:Lane_addon_store.t -> owner:Keeper_librarian_admission_capture.owner ->
+  capture:Keeper_librarian_admission_capture.t -> (unit, string) result
+(** Strict read-only full parent intent and child join. An absent pending child
+    is valid incomplete publication; an acknowledged missing or progressed
+    unacknowledged child is invalid. Performs no repair. *)
 val retain : store:Lane_addon_store.t -> owner:Keeper_librarian_admission_capture.owner ->
   capture:Keeper_librarian_admission_capture.t -> parent:Lane_addon_tool_request_owner.retained ->
   proposal:Yojson.Safe.t -> request_id:string ->

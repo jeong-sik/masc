@@ -186,12 +186,13 @@ let gate_result ~store ~config ~reserved ~owner ~inventory part original proposa
     | None ->
       let authority=Gate.resolve ~keeper_id:(Capture.keeper_id owner) in
       let request_id=Capture.fresh_request_id owner in
-      let* prepared=Commit.begin_gate ~store ~owner ~capture ~record:original.record ~gate_root_id:request_id in
+      let* prepared=Commit.begin_gate ~store ~owner ~capture ~record:original.record ~gate_root_id:request_id ~authority in
       (match prepared with
        | Commit.Reload_original -> Error "Reload the original gate disposition intent before proceeding"
-       | Prepared parent ->
-         let* record=io (fun () -> Gate_journal.retain ~store ~owner ~capture ~parent ~proposal
-           ~request_id ~authority ~predecessor:None) in
+       | Prepared _ ->
+         let* parent=io (fun () -> Gate_journal.recover_root ~store ~owner ~capture) in
+         let* record=io (fun () -> Gate_journal.latest ~store ~owner ~capture) in
+         let* record=Option.to_result ~none:"Original gate root publication disappeared" record in
          Ok ({original with record=parent},record))
     | Some record -> Ok (original,record) in
   let live=match fresh_authority ~config ~reserved owner capture with
@@ -253,7 +254,7 @@ let evaluate ~store ~config ~reserved ~owner ~inventory part =
   let* ()=check_owner owner in
   let* exact=Capture.request original.capture in
   let* schema=Option.to_result ~none:"Original admission schema is absent" exact.schema in
-  let* state=Dispatch.resume ~store ~config ~reserved ~destination:(Capture.destination original.capture)
+  let* state=Dispatch.resume ~store ~config ~reserved ~capture:original.capture ~destination:(Capture.destination original.capture)
     ~original:original.record ~exact ~schema
     ~validate_answer:(fun proposal -> Capture.validate_proposal original.capture proposal |> Result.map (fun _ -> ()))
     ~call:(call ~config ~reserved) |> Result.map_error Dispatch.error_to_string in
@@ -321,6 +322,12 @@ let run_queue ~base_path ~keeper_name =
   let* ()=io (fun () -> Queue.acknowledge_committed ~keepers_dir ~keeper_id:keeper_name) in
   let* pending=read () in
   let* _recovered=io (fun () -> Parts.recover_partitions ~store ~owner ~restore_gate:(restore_gate ~store ~owner)) in
+  let* ()=io (fun () -> List.fold_left (fun result original ->
+    let* ()=result in
+    match Progress.preparation original.record.progress with
+    | Some (Preparation_pending _) ->
+      Gate_journal.recover_root ~store ~owner ~capture:original.capture |> Result.map (fun _ -> ())
+    | None | Some (Preparation_confirmed _) -> Ok ()) (Ok ()) initial.executions) in
   let* ()=io (fun () -> List.fold_left (fun result original ->
     let* ()=result in Gate_journal.recover_retries ~store ~owner ~capture:original.capture)
     (Ok ()) initial.executions) in

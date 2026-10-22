@@ -265,11 +265,11 @@ let authorize_request ~base_path ~store ~declaration_id ~package request =
     ~base_path ~store ~declaration_id ~package request in
   match librarian with
   | None -> Ok {Addon.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
-      validate_output=curator; before_dispatch=(fun () -> Ok ())}
+      validate_output=curator; before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ())}
   | Some librarian ->
     Ok {Addon.admission_class=Agent_core.Llm_provider.Admission_class.Background;
       validate_output=(fun answer -> let* ()=curator answer in librarian.validate_output answer);
-      before_dispatch=librarian.before_dispatch}
+      before_dispatch=librarian.before_dispatch;with_execution=librarian.with_execution}
 
 module For_testing = struct
   let runner ~base_path ~cli_runner = runner_with ~cli_runner:(Some cli_runner) ~base_path

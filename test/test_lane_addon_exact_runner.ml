@@ -588,7 +588,7 @@ let test_retained_schema_only_curator_answer_is_not_a_domain_judgment () =
     (match get (Exact.run ~store ~declaration_id ~package:curator_package ~runner
       ~authorize_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ ->
                     Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
-                        before_dispatch=(fun () -> Ok ()); validate_output=(fun _ -> Ok ())}) request) with
+                        before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())}) request) with
      | Exact.Final (Exact.Call_final (Exact.Answered {output;_})) ->
        check bool "schema-only seed really retained the domain-invalid answer" true
          (Exact.checked_json output=bad)
@@ -647,7 +647,7 @@ let test_http_flow_preserves_host_admission_class ?(revoke_while_queued=false) a
     let authorization : Exact.request_authorization =
       {admission_class; before_dispatch=(fun () -> incr dispatch_checks;
           if !permitted then Ok () else Error "original configuration changed while awaiting admission");
-       validate_output=(fun _ -> Ok ())} in
+       with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
     let call=match Server_lane_addon_exact.runner ~base_path
         ~before_dispatch:authorization.before_dispatch ~admission_class:authorization.admission_class ~lane_key:lane_id ~schema original with
       | Ok call -> call | Error _ -> fail "actual HTTP runner refused the fixture lane" in
@@ -701,7 +701,7 @@ let test_returned_answer_survives_dispatch_authority_change () =
     let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
       Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Background;
         before_dispatch=(fun () -> if !permitted then Ok () else Error "configuration changed");
-        validate_output=(fun _ -> Ok ())} in
+        with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
     let original=request "returned-before-reconfiguration" in
     let execute ()=get (Exact.run ~store ~declaration_id ~package ~authorize_request
       ~runner:(Server_lane_addon_exact.runner ~base_path) original) in
@@ -719,7 +719,7 @@ let test_cli_dispatch_veto_never_advances () =
       Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Background;
         before_dispatch=(fun () -> incr checks;
           if !checks=1 then Ok () else Error "original configuration changed before CLI");
-        validate_output=(fun _ -> Ok ())} in
+        with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
     let cli_runner : Keeper_lane_cli_oneshot.runner =
       fun ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
         incr calls;Ok (Yojson.Safe.to_string question) in

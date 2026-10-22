@@ -396,3 +396,35 @@ let request capture = Lane_addon_exact.request_of_json (`Assoc [
 let validate_proposal capture output =
   Runtime.validate_admission_proposal ~now:capture.parsing_now ~batch:capture.original_batch
     ~input:capture.original_input output |> Result.map_error L.parse_error_to_string
+
+let confirm_final ~store (capture:t) (final:Lane_addon_exact.final) =
+  let module Exact = Lane_addon_exact in
+  let* actual_owner = observe_owner ~base_path:(base_path capture.owner)
+    ~keepers_dir:(keepers_dir capture.owner) ~keeper_id:(keeper_id capture.owner) in
+  let* () = owner_matches_json actual_owner (owner_to_json capture.owner) in
+  let* original = request capture in
+  let* schema = Option.to_result ~none:"Original admission host proof has no schema" original.Exact.schema in
+  let* installation = Owner.installation_of_id capture.destination.installation_id in
+  let* declaration_id = match installation with
+    | Owner.Configuration id -> Ok id
+    | Manual _ -> Error "Original admission host proof requires its configured installation" in
+  let* observed = Exact.observe_retained ~store ~declaration_id ~schema original in
+  let* () = match observed with
+    | Exact.Retained_absent -> Error "Original admission host terminal is absent"
+    | Retained_open -> Error "Original admission host terminal remains unresolved"
+    | Retained_terminal retained ->
+      let* same = same_json (Exact.final_to_json retained) (Exact.final_to_json final) in
+      if same then Ok () else Error "Admission final differs from its original host terminal" in
+  match final with
+  | Exact.Call_final call_final ->
+    let* latest = Exact.read_latest_original_execution ~store ~declaration_id ~schema original in
+    (match latest with
+     | Exact.No_completed_latest -> Error "Original admission has no completed latest host execution proof"
+     | Completed_latest {attempt_ordinal;execution={outcome=Exact.Call_ended actual;_}} ->
+       let* same = same_json (Exact.final_to_json (Exact.Call_final actual))
+         (Exact.final_to_json (Exact.Call_final call_final)) in
+       if attempt_ordinal>0 && same then Ok ()
+       else Error "Admission final differs from its latest original host execution proof"
+     | Completed_latest {execution={outcome=Exact.Call_refused _;_};_} ->
+       Error "Original refused execution cannot confirm a completed admission answer")
+  | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok ()

@@ -175,10 +175,15 @@ type runner = before_dispatch:dispatch_guard -> admission_class:Agent_core.Llm_p
     is never called to rejudge an already returned provider result. *)
 
 type output_validator = Yojson.Safe.t -> (unit, string) result
+type execution_scope = (unit -> (attempt, string) result) -> (attempt, string) result
+(** Inline host lifecycle scope covering fresh initial authority, admission,
+    started intent, actual provider walk and proof/final publication. New
+    execution only; retained terminals never register another effect scope. *)
 type request_authorization = {
   admission_class : Agent_core.Llm_provider.Admission_class.t;
   validate_output : output_validator;
   before_dispatch : dispatch_guard;
+  with_execution : execution_scope;
 }
 (** Why the host consumer grants no authority for a request. *)
 type authority_refusal =

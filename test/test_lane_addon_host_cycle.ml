@@ -156,7 +156,7 @@ let await clock predicate =
 
 let permit : Exact.execution_authority = fun ~store:_ ~declaration_id:_ ~package:_ _ ->
   Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
-      before_dispatch=(fun () -> Ok ()); validate_output=(fun _ -> Ok ())}
+      before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())}
 
 let with_installation ?await_change ?deliver_reply ?during_delivery ?owner_setup ?before_listing ?before_stop ?exported_tool ?(make_runner = runner) ?(authorize_request = permit) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
   let root = Filename.temp_dir "lane-host-cycle-" "" |> Unix.realpath in

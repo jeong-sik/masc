@@ -423,9 +423,48 @@ let test_a_record_without_its_body_is_an_error_not_absence () = with_store (fun 
   Alcotest.(check string) "the refused progress leaves that record as it was" renamed
     (Fs_compat.load_file (record_path root)))
 
+let test_original_preparation_survives_partial_publication () = with_store (fun root store ->
+  let judged=judge store in
+  let intended:Progress.preparation_intent={request_id="original-required-child";
+    request=`Assoc ["input",request;"original_authority",`List [`String "first";`String "second"]]} in
+  let pending=stored store judged (Progress.Preparation_intended intended) in
+  let reopened=load (Store.create ~root) in
+  Alcotest.(check bool) "preparation is separate from a Memory commit attempt" true
+    (Progress.phase reopened.progress=Progress.Judged judgment);
+  Alcotest.(check bool) "full immutable child survives interruption before publication" true
+    (Progress.preparation reopened.progress=Some (Progress.Preparation_pending intended));
+  invalid store reopened (Progress.Commit_intended {before;after});
+  invalid store reopened (Progress.Preparation_observed "replacement-child");
+  invalid store reopened (Progress.Preparation_intended {intended with request_id="replacement-child"});
+  let child_scope="original-prerequisite" in
+  owned (Owner.retain ~store ~scope:child_scope ~request_id:intended.request_id
+    ~installation_id:pending.installation_id ~package_id:pending.package_id ~tool:pending.tool
+    ~summary:`Null ~request:intended.request);
+  let child=some (owned (Owner.load ~store:(Store.create ~root) ~scope:child_scope ~request_id:intended.request_id)) in
+  Alcotest.check json "actual prerequisite publication preserves the whole original" intended.request child.request;
+  let acknowledged=stored store reopened (Progress.Preparation_observed child.request_id) in
+  Alcotest.(check bool) "publication ACK does not fabricate Memory commit" true
+    (Progress.phase acknowledged.progress=Progress.Judged judgment);
+  Alcotest.(check bool) "restart restores exact acknowledged prerequisite" true
+    (Progress.preparation (load (Store.create ~root)).progress=Some (Progress.Preparation_confirmed intended));
+  invalid store acknowledged (Progress.Preparation_observed intended.request_id);
+  let committing=stored store acknowledged (Progress.Commit_intended {before;after}) in
+  let finished=stored store committing (Progress.Commit_observed after) in
+  Alcotest.(check bool) "actual later disposition retains original prerequisite" true
+    (Progress.preparation finished.progress=Some (Progress.Preparation_confirmed intended));
+  let history=Progress.to_json pending.progress in
+  let malformed=`Assoc ["event",`String "preparation_observed";"request_id",`String intended.request_id;
+    "request_id",`String "replacement"] in
+  let history=match history with `List events -> `List (events@[malformed])
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> Alcotest.fail "expected event history" in
+  Alcotest.(check bool) "duplicate prerequisite identity never parses as an acknowledgement" true
+    (Result.is_error (Progress.of_json history)))
+
 let () = Alcotest.run "Original Add-on request progress" ["owner",[
   Alcotest.test_case "opaque receipt reuse and strict replay" `Quick
     test_typed_receipt_sharing_and_strict_replay;
+  Alcotest.test_case "original prerequisite publication survives restart without attempting Memory" `Quick
+    test_original_preparation_survives_partial_publication;
   Alcotest.test_case "restart keeps unknown and late original result" `Quick test_restart_preserves_unknown_and_late_original_result;
   Alcotest.test_case "whole expected history and exact acknowledgement" `Quick test_expected_history_and_exact_uncertain_ack_are_distinct;
   Alcotest.test_case "commit resumes original before after and judgment" `Quick test_commit_recovery_uses_original_before_after_and_judgment;

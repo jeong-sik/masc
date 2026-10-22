@@ -61,9 +61,22 @@ let confirm_destination ~config ~reserved ~(destination : Capture.destination) =
   |> Result.map_error Submit.error_of_runtime
 
 let resume ~store ~config ~reserved ~destination ~(original : Owner.retained)
-    ~exact ~schema ~validate_answer ~(call : call) =
+    ~capture ~exact ~schema ~validate_answer ~(call : call) =
   let* () = check_identity ~destination original exact in
-  let terminal original final = match final with
+  let* captured = rejected (Capture.request capture) in
+  let* actual = rejected (Lane_addon_action.canonical original.request) in
+  let* expected = rejected (Lane_addon_action.canonical (Capture.to_json capture)) in
+  let* original_schema = match captured.schema with
+    | Some original_schema -> rejected (Lane_addon_action.canonical original_schema)
+    | None -> Error (Rejected "Original admission capture has no schema") in
+  let* supplied_schema = rejected (Lane_addon_action.canonical schema) in
+  let* () = if Yojson.Safe.equal actual expected && Exact.digest captured=Exact.digest exact
+    && Yojson.Safe.equal original_schema supplied_schema then Ok ()
+    else Error (Rejected "Admission dispatch differs from its original capture") in
+  let terminal original final =
+    let* () = Eio_unix.run_in_systhread (fun () -> Capture.confirm_final ~store capture final)
+      |> Result.map_error (fun detail -> Rejected detail) in
+    match final with
     | Exact.Call_final (Exact.Answered {output; _}) ->
       let* () = rejected (validate_answer (Exact.checked_json output)) in
       Ok (Answered (final, original))

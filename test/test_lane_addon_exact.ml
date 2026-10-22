@@ -21,7 +21,7 @@ module Types = Masc.Lane_addon_types
 
 let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
   Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
-      before_dispatch=(fun () -> Ok ()); validate_output=(fun _ -> Ok ())}
+      before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())}
 
 let require = function Ok value -> value | Error error -> fail error
 
@@ -768,7 +768,7 @@ let test_host_admission_class_is_forwarded admission_class () =
     let expected_wire=Exact.request_to_json original and expected_digest=Exact.digest original in
     let observed=ref [] in
     let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
-      Ok {Exact.admission_class; before_dispatch=(fun () -> Ok ()); validate_output=(fun _ -> Ok ())} in
+      Ok {Exact.admission_class; before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
     let runner ~before_dispatch:_ ~admission_class ~lane_key:_ ~schema:_ _ =
       observed:=admission_class :: !observed;
       Ok (fun ~validate ->
@@ -795,7 +795,7 @@ let test_retained_delivery_rechecks_host_authority () =
       incr checks;
       if !permitted then
         Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Background;
-            before_dispatch=(fun () -> Ok ()); validate_output=(fun _ -> Ok ())}
+            before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())}
       else Error (Exact.Undecided {detail="original host authority is unavailable"}) in
     let runner,sends,_=counting_runner store (ref [Answer question]) in
     let execute store = Exact.run ~store ~declaration_id ~package ~authorize_request ~runner original in
@@ -829,6 +829,7 @@ let test_authority_refusal_does_not_start_a_request () =
 let owned_authority owned ~store:_ ~declaration_id:_ ~package:_ _ =
   if !owned then Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
                      before_dispatch=(fun () -> Ok ());
+                     with_execution=(fun run -> run ());
                      validate_output=(fun _ -> Ok ())}
   else Error (Exact.Unowned {reason="no original host request owns it"})
 
@@ -868,11 +869,22 @@ let test_execution_guard_is_not_retained_delivery_authority () =
   with_root (fun root ->
     let store=Store.create ~root in
     let original=request "execution-only-guard" in
-    let permit=ref false and checks=ref 0 in
+    let permit=ref false and checks=ref 0 and scopes=ref 0 and active=ref false in
     let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
       Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Background;
+        with_execution=(fun run ->
+          incr scopes;active:=true;
+          Fun.protect ~finally:(fun () -> active:=false) (fun () ->
+            let result=run () in
+            if !permit then
+              check bool "scope owns final publication before it exits" true
+                (match require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) with
+                 | Some wire -> Yojson.Safe.Util.member "final" wire<>`Null
+                 | None -> false);
+            result));
         validate_output=(fun _ -> Ok ());
-        before_dispatch=(fun () -> incr checks;
+        before_dispatch=(fun () ->
+          check bool "lifecycle registration precedes initial authority" true !active;incr checks;
           if !permit then Ok () else Error "original semantic configuration changed")} in
     let runner,sends,_=counting_runner store (ref [Answer question]) in
     let execute ()=Exact.run ~store ~declaration_id ~package ~authorize_request ~runner original in
@@ -883,11 +895,13 @@ let test_execution_guard_is_not_retained_delivery_authority () =
     permit:=true;
     check bool "permitted original answers" true (answered_with question (require (execute ())));
     let retained=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) in
-    let before= !checks in
+    let before= !checks and scopes_before= !scopes in
     permit:=false;
     check bool "a returned original answer survives execution authority changing" true
       (answered_with question (require (execute ())));
     check int "retained delivery never asks the execution-only guard" before !checks;
+    check int "retained delivery never opens an external lifecycle scope" scopes_before !scopes;
+    check bool "every inline execution scope has already exited" false !active;
     check int "the original provider was called once" 1 !sends;
     check bool "local observation still sees the original terminal while dispatch is forbidden" true
       (match require (Exact.observe_retained ~store ~declaration_id ~schema original) with

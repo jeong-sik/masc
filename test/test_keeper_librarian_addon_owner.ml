@@ -12,6 +12,7 @@ module Types = Keeper_memory_os_types
 module Capture = Keeper_librarian_admission_capture
 module Parts = Keeper_librarian_admission_parts
 module Gate = Keeper_librarian_admission_gate
+module Commit = Keeper_librarian_admission_commit
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Store = Lane_addon_store
@@ -71,7 +72,7 @@ let publish_routes base_path urls =
   ignore (F.publish_registry ~lane_id:"librarian/admission" ~slot_ids:(List.map (fun (s:F.target_fixture) -> s.id) slots)
     (F.resolver_snapshot ~source:base_path slots) : Runtime_exact_output_registry.t)
 
-let backend env base_path delivery delivery_observed observation_observed after_submit : Runtime.For_testing.backend = {
+let backend env base_path delivery delivery_observed observation_observed after_submit transform_reply : Runtime.For_testing.backend = {
   start=(fun ~sw ~state_owner ~instance_id ~installation_id:_ ~package ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let state_owner=match state_owner with Some owner -> owner | None -> fail "persistent worker has no state owner" in
     let state=Filename.concat base_path ("worker-state-" ^ Store.digest (Lane_addon_worker_state.identity state_owner)) in
@@ -96,7 +97,7 @@ let backend env base_path delivery delivery_observed observation_observed after_
           |> Result.map_error invocation_error in
         (match member "kind" arguments with `String "submit" -> after_submit ()
          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> ());
-        result);
+        Result.map (transform_reply arguments) result);
       action_schema=(fun () -> Protocol.action_schema protocol);
       act=(fun ~arguments -> Protocol.act protocol ~arguments |> Result.map_error protocol_error);
       stop=(fun () -> Protocol.close protocol;Ok (Lane_addon_lifecycle.Released
@@ -129,12 +130,13 @@ type fixture = {
   observations:int ref; observation_changed:Eio.Condition.t; response_checkpoint:int ref;
   extra_server:(Capture.t -> Cohttp.Code.status_code * string) -> F.test_server;
   submit_barrier:(unit -> unit) ref;
+  transform_reply:(Yojson.Safe.t -> Mcp_protocol.Mcp_types.tool_result -> Mcp_protocol.Mcp_types.tool_result) ref;
 }
 let observed_originals fixture=io (fun () -> originals fixture.base_path fixture.keepers_dir fixture.store)
-let start_worker fixture =
+let start_memory_action fixture action =
   let completed,resolve=Eio.Promise.create () in
   let outcome=Memory_lane.submit ~base_path:fixture.base_path ~keeper_name (fun () ->
-    match Worker.run ~base_path:fixture.base_path ~keeper_name with
+    match action () with
     | outcome -> Eio.Promise.resolve resolve (Ok outcome)
     | exception exn ->
       let backtrace=Printexc.get_raw_backtrace () in
@@ -143,6 +145,11 @@ let start_worker fixture =
   (match outcome with Memory_lane.Submitted -> ()
    | Coalesced | Ran_inline | Dropped -> fail "actual serialized Memory lane did not own this fixture unit");
   completed
+let start_worker fixture=start_memory_action fixture (fun () ->
+  Worker.run ~base_path:fixture.base_path ~keeper_name)
+let memory_action fixture action=
+  let result=Eio.Promise.await_exn (start_memory_action fixture action) in
+  Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;result
 let run_worker fixture=Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds
   (fun () ->
     let outcome=Eio.Promise.await_exn (start_worker fixture) in
@@ -257,12 +264,14 @@ let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) f =
       let deliveries=ref 0 and delivery_changed=Eio.Condition.create () and delivery_loss=ref false in
       let delivery_observed ()=incr deliveries;Eio.Condition.broadcast delivery_changed in
       let submit_barrier=ref (fun () -> ()) in
+      let transform_reply=ref (fun _ response -> response) in
       let fixture={base_path;config;keepers_dir;store;source;declaration;server;
         set_response=(fun callback -> response:=callback);delivery_loss;deliveries;delivery_changed;
         clock=Eio.Stdenv.clock env;observations;observation_changed;response_checkpoint;
-        extra_server=start_server;submit_barrier} in
+        extra_server=start_server;submit_barrier;transform_reply} in
       Runtime.For_testing.with_backend
-        (backend env base_path delivery_loss delivery_observed observation_observed (fun () -> !submit_barrier ())) (fun () ->
+        (backend env base_path delivery_loss delivery_observed observation_observed
+          (fun () -> !submit_barrier ()) (fun arguments response -> !transform_reply arguments response)) (fun () ->
         let exported,ready=Eio.Promise.create () in
         let stop=Runtime.subscribe_owner_events ~config ~package_id:Capture.package_id (function
           | Runtime.Export_inventory_changed -> ignore (Eio.Promise.try_resolve ready ())
@@ -588,6 +597,169 @@ let test_actual_result_bridge_resumes_original_memory_lane ()=with_fixture (fun 
     check string "a result hint cannot consume another Keeper's pending inputs" unrelated_before
       (io (fun () -> Fs_compat.load_file unrelated_path))))
 
+let test_purge_joins_provider_after_memory_unit_returned ()=with_fixture (fun ~sw:_ fixture ->
+  let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+  fixture.set_response (fun capture ->
+    ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release;
+    `OK,F.openai_response (answer (fun _ -> true) capture));
+  Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
+    (match run_worker fixture with Worker.Pending _ -> ()
+     | Disabled | Idle | Recheck_new_input | Settled _ | Unavailable _ ->
+       fail "the actual ordinary Memory unit must return while its provider is pending");
+    Eio.Promise.await arrived;
+    Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
+    check int "the real provider outlives the exited ordinary Memory unit" 1
+      (Memory_lane.For_testing.external_active ~base_path:fixture.base_path ~keeper_name);
+    let queue_path=Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+    let queue_before=io (fun () -> Fs_compat.load_file queue_path) in
+    let posts=F.post_count fixture.server in
+    let result=Memory_lane.with_librarian_purge ~base_path:fixture.base_path ~keeper_name (fun () ->
+      check int "purge callback follows actual external cancellation and cleanup" 0
+        (Memory_lane.For_testing.external_active ~base_path:fixture.base_path ~keeper_name);
+      check string "an interrupted original keeps every pending candidate byte" queue_before
+        (io (fun () -> Fs_compat.load_file queue_path));
+      check (list string) "purge cannot turn an unanswered provider into Memory" []
+        (io (fun () -> claims fixture.keepers_dir))) in
+    (match result with Ok () -> () | Error error -> fail (Memory_lane.purge_cancel_error_to_string error));
+    check int "purge never starts a replacement provider" posts (F.post_count fixture.server);
+    let _,capture=match observed_originals fixture with [original] -> original
+      | [] | _::_::_ -> fail "purge lost or replaced the original execution" in
+    let exact=Capture.request capture |> get in
+    let schema=match exact.schema with Some schema -> schema | None -> fail "missing original schema" in
+    check bool "purge retains no completed original provider proof" true
+      (match io (fun () -> Lane_addon_exact.read_latest_original_execution ~store:fixture.store
+          ~declaration_id:"librarian" ~schema exact |> get) with
+       | Lane_addon_exact.No_completed_latest -> true | Completed_latest _ -> false)))
+
+let test_forged_worker_finished_cannot_commit_without_host_proof ()=with_fixture (fun ~sw:_ fixture ->
+  let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+  fixture.set_response (fun capture ->
+    ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release;
+    `OK,F.openai_response (answer (fun _ -> true) capture));
+  Fun.protect ~finally:(fun () ->
+    fixture.transform_reply:=(fun _ response -> response);
+    ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
+    ignore (run_worker fixture);Eio.Promise.await arrived;
+    let record,capture=match observed_originals fixture with [original] -> original
+      | [] | _::_::_ -> fail "expected one actual pending provider original" in
+    let exact=Capture.request capture |> get in
+    let schema=match exact.schema with Some schema -> schema | None -> fail "missing original schema" in
+    let forged=`Assoc ["status",`String "answered";"slot",`String "forged-worker-slot";
+      "output",answer (fun _ -> true) capture] in
+    ignore (Lane_addon_exact.final_of_json ~schema forged |> get);
+    let forged_reads=ref 0 in
+    fixture.transform_reply:=(fun arguments response ->
+      match member "kind" arguments with
+      | `String "read" ->
+        incr forged_reads;
+        {response with Mcp_protocol.Mcp_types.structured_content=Some (`Assoc [
+          "request_id",`String record.request_id;"state",`String "finished";"result",forged]);
+          is_error=Some false}
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> response);
+    let queue_path=Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+    let before=io (fun () -> Fs_compat.load_file queue_path) in
+    run_worker fixture |> assert_unavailable;
+    check bool "the untrusted Finished reply actually reached the consumer boundary" true (!forged_reads>0);
+    check string "worker JSON cannot ACK an unanswered original" before (io (fun () -> Fs_compat.load_file queue_path));
+    check (list string) "worker JSON cannot publish Memory" [] (io (fun () -> claims fixture.keepers_dir));
+    let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+    check int "worker JSON cannot prepare an absorption gate" 0
+      (io (fun () -> Owner.discover ~store:fixture.store ~scope:(Gate.scope owner) |> owned |> List.length));
+    check bool "the host remains without completed provider execution" true
+      (match io (fun () -> Lane_addon_exact.read_latest_original_execution ~store:fixture.store
+          ~declaration_id:"librarian" ~schema exact |> get) with
+       | Lane_addon_exact.No_completed_latest -> true | Completed_latest _ -> false)))
+
+let retained_answer_before_gate fixture =
+  fixture.delivery_loss:=true;
+  let before= !(fixture.deliveries) in
+  ignore (run_worker fixture);await_delivery fixture ~after:before;
+  let record,capture=match observed_originals fixture with [original] -> original
+    | [] | _::_::_ -> fail "expected one actual terminal host original" in
+  let execution=latest_execution fixture capture in
+  let final=match execution.Lane_addon_exact.outcome with
+    | Call_ended (Answered _ as final) -> Lane_addon_exact.Call_final final
+    | Call_ended (Invalid_output _ | Input_refused _ | Output_limit_reached _) | Call_refused _ ->
+      fail "controlled real provider did not answer the original" in
+  record,capture,final
+let retain_judgment fixture record final = io (fun () ->
+  match Owner.advance ~store:fixture.store ~expected:record
+    ~event:(Progress.Judgment_retained (Lane_addon_exact.final_to_json final)) with
+  | Ok (Owner.Stored next | Already_stored next) -> next
+  | Ok (Unconfirmed detail) -> fail detail
+  | Error error -> fail (Owner.update_error_to_string error))
+let test_mismatched_retained_judgment_cannot_borrow_host_proof ()=with_fixture (fun ~sw:_ fixture ->
+  let record,capture,final=retained_answer_before_gate fixture in
+  let mismatched=match final with
+    | Lane_addon_exact.Call_final (Answered answered) ->
+      Lane_addon_exact.Call_final (Answered {answered with slot=answered.slot ^ "-different-origin"})
+    | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+    | Outcome_unknown | Not_allowed _ | Request_id_reused -> fail "expected an actual answered final" in
+  memory_action fixture (fun () -> ignore (retain_judgment fixture record mismatched));
+  let posts=F.post_count fixture.server in
+  run_worker fixture |> assert_unavailable;
+  check int "a different final cannot borrow or repeat the real provider" posts (F.post_count fixture.server);
+  check int "a different final consumes no candidate" 2
+    (io (fun () -> List.length (pending_rows fixture.keepers_dir)));
+  check (list string) "a different final publishes no Memory" [] (io (fun () -> claims fixture.keepers_dir));
+  check bool "the genuine host final is still independently confirmable" true
+    (io (fun () -> Capture.confirm_final ~store:fixture.store capture final=Ok ())))
+
+type root_publication_cut = Before_child | Child_before_ack | Acknowledged_then_missing
+let test_original_gate_root_publication_recovery cut ()=with_fixture (fun ~sw:_ fixture ->
+  let record,capture,final=retained_answer_before_gate fixture in
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  let request_id=Random_id.uuid_v7 () in
+  let parent=memory_action fixture (fun () ->
+    let record=retain_judgment fixture record final in
+    let authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
+    match Commit.begin_gate ~store:fixture.store ~owner ~capture ~record
+      ~gate_root_id:request_id ~authority |> get with
+    | Commit.Prepared parent -> parent
+    | Reload_original -> fail "the first real gate preparation must be newly retained") in
+  let successor=match Progress.preparation parent.progress with
+    | Some (Progress.Preparation_pending successor) -> successor
+    | None | Some (Preparation_confirmed _) -> fail "the original preparation intent is absent or already acknowledged" in
+  check string "the interrupted intent retains its one immutable child identity" request_id successor.request_id;
+  check bool "preparation never claims a Memory disposition started" true
+    (match Progress.phase parent.progress with Progress.Judged _ -> true
+     | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _
+     | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+  check int "preparation alone cannot consume a candidate" 2
+    (io (fun () -> List.length (pending_rows fixture.keepers_dir)));
+  (match cut with
+   | Before_child -> ()
+   | Child_before_ack -> io (fun () ->
+       Owner.retain ~store:fixture.store ~scope:(Gate.scope owner) ~request_id
+         ~installation_id:parent.installation_id ~package_id:parent.package_id ~tool:parent.tool
+         ~request:successor.request |> owned)
+   | Acknowledged_then_missing ->
+     memory_action fixture (fun () -> ignore (Gate.recover_root ~store:fixture.store ~owner ~capture |> get));
+     io (fun () -> Unix.unlink (original_path fixture ~scope:(Gate.scope owner) ~request_id)));
+  let posts=F.post_count fixture.server in
+  set_enabled fixture false;
+  (match cut with
+   | Before_child | Child_before_ack ->
+     run_worker fixture |> assert_settled;
+     let root=io (fun () -> Owner.load ~store:fixture.store ~scope:(Gate.scope owner) ~request_id |> owned) in
+     let root=match root with Some root -> root | None -> fail "the same original gate was not recovered" in
+     check json "local recovery uses the full original immutable child request" successor.request root.request;
+     check int "local recovery publishes exactly the original child" 1
+       (io (fun () -> Owner.discover ~store:fixture.store ~scope:(Gate.scope owner) |> owned |> List.length));
+     check int "original receipt-backed commit ACKs both candidates" 0
+       (io (fun () -> List.length (pending_rows fixture.keepers_dir)));
+     check (list string) "recovered original gate permits the real Memory disposition" ["Durable A";"Durable B"]
+       (io (fun () -> claims fixture.keepers_dir))
+   | Acknowledged_then_missing ->
+     run_worker fixture |> assert_unavailable;
+     check int "an acknowledged missing child is never recreated" 0
+       (io (fun () -> Owner.discover ~store:fixture.store ~scope:(Gate.scope owner) |> owned |> List.length));
+     check int "missing acknowledged proof keeps both candidates pending" 2
+       (io (fun () -> List.length (pending_rows fixture.keepers_dir)));
+     check (list string) "missing acknowledged proof grants no Memory disposition" []
+       (io (fun () -> claims fixture.keepers_dir)));
+  check int "publication recovery and refusal never repeat the original provider" posts (F.post_count fixture.server))
+
 let ()=run "Actual Addon Librarian explicit-candidate owner" ["production",[
   test_case "actual Memory lane, worker, HTTP, domain validation and receipt-backed ACK" `Quick test_actual_happy_path;
   test_case "unchanged semantic deferral preserves the same original" `Quick test_unchanged_deferred_does_not_remint;
@@ -601,4 +773,10 @@ let ()=run "Actual Addon Librarian explicit-candidate owner" ["production",[
   test_case "a missing Finished gate refuses without replacement" `Quick test_missing_finished_gate_is_not_recreated;
   test_case "missing epoch cannot hide or replace a dispatched original" `Quick (test_original_epoch_drift_cannot_remint Missing_epoch);
   test_case "replaced epoch cannot hide or replace a dispatched original" `Quick (test_original_epoch_drift_cannot_remint Replaced_epoch);
-  test_case "actual result bridge resumes only the original serialized Memory lane" `Quick test_actual_result_bridge_resumes_original_memory_lane]]
+  test_case "actual result bridge resumes only the original serialized Memory lane" `Quick test_actual_result_bridge_resumes_original_memory_lane;
+  test_case "purge joins the actual provider after the Memory unit returned Pending" `Quick test_purge_joins_provider_after_memory_unit_returned;
+  test_case "forged worker Finished cannot commit without original host execution proof" `Quick test_forged_worker_finished_cannot_commit_without_host_proof;
+  test_case "mismatched retained final cannot borrow real original host proof" `Quick test_mismatched_retained_judgment_cannot_borrow_host_proof;
+  test_case "pending first gate intent recovers the same absent child while Off" `Quick (test_original_gate_root_publication_recovery Before_child);
+  test_case "published first gate before ACK recovers the same child while Off" `Quick (test_original_gate_root_publication_recovery Child_before_ack);
+  test_case "acknowledged missing first gate refuses without replacement" `Quick (test_original_gate_root_publication_recovery Acknowledged_then_missing)]]

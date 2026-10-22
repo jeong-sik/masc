@@ -60,6 +60,7 @@ let validate ~store ~owner ~capture ~(record : Owner.retained) =
   let* schema=Option.to_result ~none:"Original admission has no output schema" exact.schema in
   let accepted judgment =
     let* final=Exact.final_of_json ~schema judgment in
+    let* ()=Capture.confirm_final ~store capture final in
     match final with
     | Exact.Call_final (Answered {output;_}) -> Capture.validate_proposal capture (Exact.checked_json output)
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
@@ -68,9 +69,16 @@ let validate ~store ~owner ~capture ~(record : Owner.retained) =
   | Progress.Captured | Admission_wait _ | Dispatch_pending _ -> Ok ()
   | Judged judgment ->
     let* _=accepted judgment in
-    let* root=Gate_journal.root ~store ~owner ~capture in
-    require (Option.is_none root) "Original gate exists without its parent disposition intent"
+    (match Progress.preparation record.progress with
+     | Some (Preparation_pending _ | Preparation_confirmed _) ->
+       Gate_journal.validate_root_preparation ~store ~owner ~capture
+     | None ->
+       let* root=Gate_journal.root ~store ~owner ~capture in
+       require (Option.is_none root) "Original gate exists without its full parent preparation intent")
   | Committing commit | Commit_unknown (commit,_) | Finished commit ->
+    let* ()=match Progress.preparation record.progress with
+      | Some (Preparation_confirmed _) -> Gate_journal.validate_root_preparation ~store ~owner ~capture
+      | None | Some (Preparation_pending _) -> Error "Memory disposition precedes original gate publication acknowledgement" in
     let* proposal=accepted commit.judgment in
     let* proposal=match proposal with
       | Keeper_librarian_runtime.Accepted accepted -> Ok accepted
@@ -103,6 +111,7 @@ let validate ~store ~owner ~capture ~(record : Owner.retained) =
      | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok ())
   | Rejected {stage=Progress.Execution;evidence} ->
     let* final=Exact.final_of_json ~schema evidence in
+    let* ()=Capture.confirm_final ~store capture final in
     (match final with
      | Exact.Call_final (Answered _) -> Error "Original refusal contains an answered proposal"
      | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
@@ -110,7 +119,7 @@ let validate ~store ~owner ~capture ~(record : Owner.retained) =
   | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
     Error "Original Librarian execution has an unsupported domain phase"
 type preparation = Prepared of Owner.retained | Reload_original
-let begin_gate ~store ~owner ~capture ~(record : Owner.retained) ~gate_root_id =
+let begin_gate ~store ~owner ~capture ~(record : Owner.retained) ~gate_root_id ~authority =
   io (fun () ->
     let* ()=live_owner owner in
     let* ()=same record.request (Capture.to_json capture) in
@@ -119,17 +128,18 @@ let begin_gate ~store ~owner ~capture ~(record : Owner.retained) ~gate_root_id =
     let* exact=Capture.request capture in
     let* schema=Option.to_result ~none:"Original admission has no schema" exact.schema in
     let* final=Exact.final_of_json ~schema original_judgment in
-    let* accepted=match final with
+    let* ()=Capture.confirm_final ~store capture final in
+    let* proposal=match final with
       | Exact.Call_final (Answered {output;_}) ->
         (match Capture.validate_proposal capture (Exact.checked_json output) with
-         | Ok (Keeper_librarian_runtime.Accepted accepted) -> Ok accepted
+         | Ok (Keeper_librarian_runtime.Accepted _) -> Ok (Exact.checked_json output)
          | Ok Deferred -> Error "Deferred admission cannot prepare an absorption disposition"
          | Error detail -> Error detail)
       | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
       | Outcome_unknown | Not_allowed _ | Request_id_reused -> Error "Gate intent requires the original answered proposal" in
-    let* before=receipt_marker record ~gate_request_id:gate_root_id accepted false in
-    let* after=receipt_marker record ~gate_request_id:gate_root_id accepted true in
-    let* fresh,record=advance ~store record (Progress.Commit_intended {before;after}) in
+    let* intended=Gate_journal.prepare_root ~store ~owner ~capture ~parent:record ~proposal
+      ~request_id:gate_root_id ~authority in
+    let* fresh,record=advance ~store record (Progress.Preparation_intended intended) in
     Ok (if fresh then Prepared record else Reload_original))
 let settle ~store ~owner ~capture ~(record : Owner.retained) ~gate_request_id =
   let keepers_dir=Capture.keepers_dir owner and keeper_id=Capture.keeper_id owner in
@@ -143,8 +153,8 @@ let settle ~store ~owner ~capture ~(record : Owner.retained) ~gate_request_id =
     Ok current) in
   let* original_judgment=judgment current in
   let* ()=match Progress.phase current.progress with
-    | Progress.Committing _ | Commit_unknown _ | Finished _ -> Ok ()
-    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Conflicted _ | Rejected _
+    | Progress.Judged _ | Committing _ | Commit_unknown _ | Finished _ -> Ok ()
+    | Captured | Admission_wait _ | Dispatch_pending _ | Conflicted _ | Rejected _
     | Subdividing _ | Subdivided _ -> Error "Original gate has no retained disposition intent" in
   let* exact=Capture.request capture in
   let* schema=Option.to_result ~none:"Original admission has no output schema" exact.schema in
@@ -234,7 +244,9 @@ let settle ~store ~owner ~capture ~(record : Owner.retained) ~gate_request_id =
   if proved then confirm current else
   match Progress.phase current.progress with
   | Progress.Finished _ -> Error "Finished admission no longer has authoritative candidate receipts"
-  | Judged _ -> Error "Original absorption preceded its retained disposition intent"
+  | Judged _ ->
+    let* fresh,record=publish current (Progress.Commit_intended {before;after}) in
+    if fresh then apply record else Ok (Pending "Reload original local disposition intent")
   | Committing _ ->
     (* A previous process may have stopped anywhere after its intent. Record
        uncertainty, then independently observe the complete absent receipt set. *)

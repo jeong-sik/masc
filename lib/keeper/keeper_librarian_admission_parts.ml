@@ -240,6 +240,9 @@ let original_execution ~store ~owner ~inventory ~parent execution_id =
   let* ordinal,execution=match latest with
     | Exact.No_completed_latest -> Error "Original latest execution proof is incomplete"
     | Exact.Completed_latest {attempt_ordinal;execution} -> Ok (attempt_ordinal,execution) in
+  let* ()=match execution.Exact.outcome with
+    | Exact.Call_ended final -> Capture.confirm_final ~store capture (Exact.Call_final final)
+    | Call_refused _ -> Error "Original refused execution cannot prove an admission terminal" in
   Ok (capture,request,schema,ordinal,execution)
 let check_size ~store ~owner ~inventory ~(parent:part) ~restore_gate source =
   let execution_id=match source with Exact_source id -> id | Gate_source {execution_id;_} -> execution_id in
@@ -345,35 +348,18 @@ let original_judgment (record:Owner.retained) = match Progress.phase record.prog
 let answered_original ~store ~owner ~inventory ~parent execution_id =
   let* record,capture,request,schema,declaration_id=original_capture ~store ~owner ~inventory ~parent execution_id in
   let* latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema request in
-  let* final,authority=match original_judgment record with
-    | Some raw ->
-      let* final=Exact.final_of_json ~schema raw in
-      let* ()=match latest with
-        | Exact.Completed_latest {execution={outcome=Exact.Call_ended call_final;_};_} ->
-          equal raw (Exact.final_to_json (Exact.Call_final call_final)) "Original host judgment differs from latest execution"
-        | Completed_latest {execution={outcome=Exact.Call_refused _;_};_} ->
-          Error "A refused latest execution is not an original completed judgment"
-        | No_completed_latest ->
-          let* observed=Exact.observe_retained ~store ~declaration_id ~schema request in
-          (match observed with
-           | Exact.Retained_open -> Error "Unresolved latest execution cannot borrow a historical judgment"
-           | Retained_terminal observed -> equal raw (Exact.final_to_json observed) "Original retained terminal differs from host judgment"
-           | Retained_absent -> Ok ()) in
-      let authority=match latest with
-        | Exact.Completed_latest {attempt_ordinal;execution={outcome=Call_ended _;receipt}} ->
-          `Assoc ["kind",`String "host_execution";"attempt_ordinal",`Int attempt_ordinal;
-            "receipt",Keeper_exact_walk_receipt.to_json receipt;"final",Exact.final_to_json final]
-        | Completed_latest {execution={outcome=Call_refused _;_};_} | No_completed_latest ->
-          `Assoc ["kind",`String "host_judgment";"final",Exact.final_to_json final] in
-      Ok (final,authority)
-    | None ->
-      (match latest with
-       | Exact.No_completed_latest -> Error "Original terminal judgment is incomplete"
-       | Completed_latest {attempt_ordinal;execution={outcome=Exact.Call_ended call_final;receipt}} ->
-         let final=Exact.Call_final call_final in
-         Ok (final,`Assoc ["kind",`String "host_execution";"attempt_ordinal",`Int attempt_ordinal;
-           "receipt",Keeper_exact_walk_receipt.to_json receipt;"final",Exact.final_to_json final])
-       | Completed_latest {execution={outcome=Exact.Call_refused _;_};_} -> Error "Ordinary provider failure is not a terminal frontier") in
+  let* final,authority=match latest with
+    | Exact.No_completed_latest -> Error "Original terminal judgment has no completed latest host proof"
+    | Completed_latest {attempt_ordinal;execution={outcome=Exact.Call_ended call_final;receipt}} ->
+      let final=Exact.Call_final call_final in
+      let* ()=Capture.confirm_final ~store capture final in
+      let* ()=match original_judgment record with
+        | None -> Ok ()
+        | Some raw -> equal raw (Exact.final_to_json final) "Original judgment differs from confirmed host execution" in
+      Ok (final,`Assoc ["kind",`String "host_execution";"attempt_ordinal",`Int attempt_ordinal;
+        "receipt",Keeper_exact_walk_receipt.to_json receipt;"final",Exact.final_to_json final])
+    | Completed_latest {execution={outcome=Exact.Call_refused _;_};_} ->
+      Error "Ordinary provider failure is not a terminal frontier" in
   match final with
   | Exact.Call_final (Answered {output;_}) ->
     let+ proposal=Capture.validate_proposal capture (Exact.checked_json output) in

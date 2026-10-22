@@ -421,6 +421,82 @@ let test_releases_on_cancel () =
    librarian-lifecycle section 8). It cancels the running unit, waits until
    the lane has exited, and leaves no fence behind: the next submission is
    accepted and runs. *)
+let test_external_effect_without_executor_is_cancelled_and_joined () =
+  Lane.For_testing.reset ();
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let started,signal=Eio.Promise.create () and finished,finish=Eio.Promise.create () in
+    let never,_=Eio.Promise.create () in
+    let cleaned=ref false in
+    Eio.Fiber.fork ~sw (fun () ->
+      let result=Lane.with_external_effect ~base_path ~keeper_name:"external-only" (fun () ->
+        Fun.protect ~finally:(fun () -> cleaned:=true) (fun () ->
+          Eio.Promise.resolve signal ();Eio.Promise.await never)) in
+      Eio.Promise.resolve finish result);
+    Eio.Promise.await started;
+    Alcotest.(check int) "executor initialization is unnecessary" 1
+      (Lane.For_testing.external_active ~base_path ~keeper_name:"external-only");
+    (match Lane.with_librarian_purge ~base_path ~keeper_name:"external-only" (fun () ->
+      Alcotest.(check bool) "actual inline scope cleaned before deletion" true !cleaned;
+      Alcotest.(check int) "no external scope survives the join" 0
+        (Lane.For_testing.external_active ~base_path ~keeper_name:"external-only");
+      match Lane.with_external_effect ~base_path ~keeper_name:"external-only" (fun () -> Alcotest.fail "purge admitted new work") with
+      | Error Lane.External_purge_in_progress -> ()
+      | Ok _ | Error External_cancelled_by_purge -> Alcotest.fail "purge did not exclude registration") with
+     | Ok () -> () | Error error -> Alcotest.fail (Lane.purge_cancel_error_to_string error));
+    (match Eio.Promise.await finished with
+     | Error Lane.External_cancelled_by_purge -> ()
+     | Ok _ | Error External_purge_in_progress -> Alcotest.fail "exact purge cancellation was not retained");
+    Alcotest.(check bool) "successful purge releases the fence" true
+      (Lane.with_external_effect ~base_path ~keeper_name:"external-only" (fun () -> 42)=Ok 42)))
+;;
+
+let test_purge_signals_external_before_joining_drain () =
+  Lane.For_testing.reset ();
+  Eio_main.run (fun env -> Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () ->
+    Eio.Switch.run (fun sw ->
+      Lane.init ~sw;
+      let external_started,external_signal=Eio.Promise.create () in
+      let external_exited,external_exit=Eio.Promise.create () in
+      let unit_started,unit_signal=Eio.Promise.create () in
+      let never,_=Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        ignore (Lane.with_external_effect ~base_path ~keeper_name:"joined" (fun () ->
+          Fun.protect ~finally:(fun () -> Eio.Promise.resolve external_exit ()) (fun () ->
+            Eio.Promise.resolve external_signal ();Eio.Promise.await never))));
+      Eio.Promise.await external_started;
+      ignore (Lane.submit ~base_path ~keeper_name:"joined" (fun () ->
+        Eio.Promise.resolve unit_signal ();
+        Eio.Cancel.protect (fun () -> Eio.Promise.await external_exited)));
+      Eio.Promise.await unit_started;
+      (match Lane.with_librarian_purge ~base_path ~keeper_name:"joined" (fun () ->
+        Alcotest.(check int) "drain and external scope are both settled" 0
+          (Lane.For_testing.external_active ~base_path ~keeper_name:"joined")) with
+       | Ok () -> () | Error error -> Alcotest.fail (Lane.purge_cancel_error_to_string error)))))
+;;
+
+let test_external_purge_wrong_domain_is_fail_closed () =
+  Lane.For_testing.reset ();
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let started,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+    let done_,finish=Eio.Promise.create () and deleted=ref false in
+    Eio.Fiber.fork ~sw (fun () ->
+      let result=Lane.with_external_effect ~base_path ~keeper_name:"domain-owned" (fun () ->
+        Eio.Promise.resolve signal ();Eio.Promise.await release) in
+      Eio.Promise.resolve finish result);
+    Eio.Promise.await started;
+    let foreign=Domain.spawn (fun () -> Eio_main.run (fun _ ->
+      Lane.with_librarian_purge ~base_path ~keeper_name:"domain-owned" (fun () -> deleted:=true))) in
+    (match Domain.join foreign with
+     | Error Lane.Purge_cancel_wrong_domain -> ()
+     | Ok () | Error (Purge_already_in_progress | Purge_cancel_not_committed _) -> Alcotest.fail "foreign cancellation did not fail closed");
+    Alcotest.(check bool) "wrong domain cannot enter deletion" false !deleted;
+    Alcotest.(check int) "the original domain still owns its effect" 1
+      (Lane.For_testing.external_active ~base_path ~keeper_name:"domain-owned");
+    Eio.Promise.resolve unblock ();
+    match Eio.Promise.await done_ with
+    | Ok () -> () | Error error -> Alcotest.fail (Lane.external_effect_error_to_string error)))
+;;
+
 let test_purge_cancels_running_unit_and_leaves_no_fence () =
   Lane.For_testing.reset ();
   let cancelled = ref false in
@@ -865,6 +941,12 @@ let () =
             test_has_waiting_reads_the_latest_slot
         ; Alcotest.test_case "releases on raise" `Quick test_releases_on_raise
         ; Alcotest.test_case "releases on cancel" `Quick test_releases_on_cancel
+        ; Alcotest.test_case "external inline scope is cancelled without executor initialization" `Quick
+            test_external_effect_without_executor_is_cancelled_and_joined
+        ; Alcotest.test_case "purge signals external work before joining a waiting drain" `Quick
+            test_purge_signals_external_before_joining_drain
+        ; Alcotest.test_case "external cancellation from the wrong domain fails closed" `Quick
+            test_external_purge_wrong_domain_is_fail_closed
         ; Alcotest.test_case
             "purge cancels the running unit and leaves no fence"
             `Quick

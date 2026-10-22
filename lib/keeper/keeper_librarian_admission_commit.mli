@@ -8,17 +8,20 @@ val begin_gate : store:Lane_addon_store.t ->
   owner:Keeper_librarian_admission_capture.owner ->
   capture:Keeper_librarian_admission_capture.t ->
   record:Lane_addon_tool_request_owner.retained -> gate_root_id:string ->
+  authority:Keeper_librarian_absorb_gate.live_authority ->
   (preparation, string) Stdlib.result
-(** Retain the original candidate-receipt disposition intent and immutable gate
-    root identity before the first gate journal or evaluation. Only a newly
-    Stored intent permits first publication. A missing gate after restart is
-    retained uncertainty, never permission to choose another ID or replay. *)
+(** Retain the full immutable gate request/authority as a prerequisite-publication
+    intent while the proposal remains Judged. Only its original ID/request can
+    recover locally, and provider execution requires the parent's publication
+    acknowledgement. This is not an attempted Memory disposition. *)
 val validate : store:Lane_addon_store.t ->
   owner:Keeper_librarian_admission_capture.owner ->
   capture:Keeper_librarian_admission_capture.t ->
   record:Lane_addon_tool_request_owner.retained -> (unit, string) Stdlib.result
-(** Read-only complete original execution/proposal/commit-marker validation.
-    Commit phases require their exact original gate root and complete chain;
+(** Read-only complete original execution/proposal/preparation/commit validation.
+    Pending root publication is retained Judged work and may lack its child;
+    acknowledged publication and commit phases require their exact gate root.
+    Commit phases require the complete original chain;
     a pending evaluation remains pending. Missing proof
     cannot mint a replacement gate or execute another judgment. Finished also
     requires matching actual committed candidate receipts. *)

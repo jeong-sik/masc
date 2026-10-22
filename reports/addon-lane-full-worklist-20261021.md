@@ -767,3 +767,5 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - 실행 한계: loopback HTTP/실제 Python worker fixture와 실제 외부 provider·Docker·native 두 UI·운영 설치는 다르다. checkpoint/official-client/history/continuity 목적의 후속 추출, 실제 Keeper 기억 연속성, 최종 통합과 원래 A01–H06의 54개 항목명·완료 기준은 그대로 남는다. 앞선 #45054의249+7 PASS를 새 owner 성공으로 이월하지 않는다.
 
 - 공개 전 추가 독립 리뷰에서 두 실행 경계를 더 확인했다. detached common host provider는 기존 Memory lane purge cancel/await에 직접 등록해야 하며, worker의 finished JSON은 원래 host Exact terminal/실행 proof와 일치해야 한다. 두 수리는 현재 진행 중이다. 이번 checkpoint는 이 미해결 사항을 감추지 않는 Draft 개발 후보이며 승인·완료 판정이 아니다.
+
+- 후속 소스 수리에서는 새 host 실행의 initial guard부터 proof/result 저장·정리까지 기존 Memory lane의 inline cancel scope에 등록했다. purge는 새 등록을 막고 모든 취소를 먼저 보낸 뒤 실제 종료를 기다린다. worker terminal과 복원된 판단은 실제 원래 host terminal 및 최신 completed execution proof를 대조한다. 첫 Gate는 Memory commit intent와 분리한 full preparation intent → 같은 child 저장·확인 → parent ACK 순서로 연결했으며, ACK 뒤 누락은 새 실행으로 덮지 않는다. 실제 Memory intent는 Gate 완료 뒤에만 기록한다. 소스 수리와 작성된 실패 사례는 아직 compiled 실행 성공이 아니다.

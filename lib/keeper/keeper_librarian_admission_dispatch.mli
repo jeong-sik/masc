@@ -29,14 +29,17 @@ type call =
 
 val resume : store:Lane_addon_store.t -> config:Workspace.config ->
   reserved:string list -> destination:Keeper_librarian_admission_capture.destination ->
-  original:Lane_addon_tool_request_owner.retained -> exact:Lane_addon_exact.request ->
+  original:Lane_addon_tool_request_owner.retained -> capture:Keeper_librarian_admission_capture.t ->
+  exact:Lane_addon_exact.request ->
   schema:Yojson.Safe.t -> validate_answer:(Yojson.Safe.t -> (unit, string) Stdlib.result) ->
   call:call -> (result, error) Stdlib.result
 (** Read original host terminal state before consulting a live worker, allowing
     retained completion while Off. Otherwise validate the fresh Runtime export
     and its exact original destination before read/admission. Strict worker
     replies are bound to this request and its original schema. A full pure
-    answer validation precedes Judgment_retained, including restored judgments.
+    answer validation and mandatory original host terminal/latest execution
+    confirmation precede Judgment_retained, including restored judgments.
+    A worker-supplied Finished reply alone is never host execution evidence.
 
     The shared {!Lane_addon_submit_once.resume} owns the journal: the fresh
     destination check runs before Dispatch_intended, only a newly Stored intent

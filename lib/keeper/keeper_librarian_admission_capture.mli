@@ -75,6 +75,17 @@ val input : t -> Keeper_librarian.input
 val expected_revision : t -> int option
 val now : t -> float
 val request : t -> (Lane_addon_exact.request, string) result
+val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final ->
+  (unit, string) result
+(** Blocking read-only original host proof confirmation. Reobserve the physical
+    owner, derive the original request/schema/declaration, and require an exact
+    actual retained host terminal. Every Call_final additionally requires the
+    actual latest completed original execution proof and matching full outcome;
+    missing/open history and a different final refuse. Host Outcome_unknown,
+    Not_allowed and Request_id_reused remain their original uncertainty/refusal
+    and never borrow a call proof or authorize replay. No worker JSON, domain
+    answer or host progress record alone supplies this evidence. Offload the
+    complete operation in an Eio caller; no provider, write or ACK occurs. *)
 val validate_proposal : t -> Yojson.Safe.t ->
   (Keeper_librarian_runtime.admission_proposal, string) result
 (** Full original admission validation, including every candidate, exact

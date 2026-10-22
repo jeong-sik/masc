@@ -267,11 +267,16 @@ let classification_current ~base_path ~ledger ~selected =
   Ok (Yojson.Safe.equal (Ledger.to_json current.ledger) (Ledger.to_json ledger)
       && List.for_all (fun pending -> List.mem pending current.current_facts) selected)
 let eligible ~base_path ~briefing_contract capture = match Capture.work capture with
-  | Capture.Classification {ledger;batch} -> classification_current ~base_path ~ledger ~selected:batch.selected
+  | Capture.Classification {ledger;batch} ->
+    Eio_unix.run_in_systhread (fun () -> classification_current ~base_path ~ledger ~selected:batch.selected)
   | Capture.Briefing batch ->
-    let* ledger=Ledger.load ~base_path |> Result.map_error (fun detail -> Unavailable detail) in
-    Briefing.batch_is_current ~sources:(Ledger.briefing_sources ledger) ~contract:(briefing_contract ()) batch
-    |> rejected
+    (* Resolve live authority on the original caller, at this eligibility check.
+       The worker receives only a captured contract and performs disk reads. *)
+    let contract=briefing_contract () in
+    Eio_unix.run_in_systhread (fun () ->
+      let* ledger=Ledger.load ~base_path |> Result.map_error (fun detail -> Unavailable detail) in
+      Briefing.batch_is_current ~sources:(Ledger.briefing_sources ledger) ~contract batch
+      |> rejected)
 let successor_is_current ~config ~capture =
   let reserved=reserved () in
   let* export=resolve ~config ~reserved in
@@ -282,16 +287,16 @@ let successor_is_current ~config ~capture =
   let base_path=config.Workspace.base_path in
   let briefing_contract ()=Briefing.contract
     ~template:(Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective in
-  Eio_unix.run_in_systhread (fun () ->
-    let* same_before=match Capture.work capture with
+  let* same_before=Eio_unix.run_in_systhread (fun () ->
+    match Capture.work capture with
       | Capture.Classification {ledger;_} ->
         let* current=Ledger.load ~base_path |> Result.map_error (fun detail -> Unavailable detail) in
         Ok (Yojson.Safe.equal (Ledger.to_json current) (Ledger.to_json ledger))
       | Capture.Briefing batch ->
         let* current=Briefing.load ~directory:(Ledger.directory ~base_path)
           |> Result.map_error (fun detail -> Unavailable detail) in
-        Ok (Yojson.Safe.equal (Briefing.to_json current) (Briefing.to_json (Briefing.prepared_state batch))) in
-    if not same_before then Ok false else eligible ~base_path ~briefing_contract capture)
+        Ok (Yojson.Safe.equal (Briefing.to_json current) (Briefing.to_json (Briefing.prepared_state batch)))) in
+  if not same_before then Ok false else eligible ~base_path ~briefing_contract capture
 let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
   let* original=Eio_unix.run_in_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
   let* original=match original with Some record -> Ok record
@@ -349,7 +354,7 @@ let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
       else if not (Yojson.Safe.equal current change.before) then
         observe original (Progress.Commit_conflicted current) (fun r -> Commit_conflict r)
       else
-        let* current_sources=Eio_unix.run_in_systhread (fun () -> eligible ~base_path ~briefing_contract capture) in
+        let* current_sources=eligible ~base_path ~briefing_contract capture in
         if not current_sources then
           observe original (Progress.Commit_conflicted (`Assoc ["state",current;"reason",`String "Original sources or contract changed"]))
             (fun r -> Commit_conflict r)

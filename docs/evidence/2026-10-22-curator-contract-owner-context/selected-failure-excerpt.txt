@@ -1,0 +1,54 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] dune build test/test_workspace_memory_curator_lane.exe test/test_prompt_registry_dune_fallback.exe test/test_workspace_memory_execution_capture.exe test/test_workspace_memory_request.exe test/test_prompt_templates_render.exe config/prompts/workspace_memory_curator.md config/prompts/workspace_memory_briefing.md config/prompts/keeper.md addons/workspace-curator/Dockerfile addons/workspace-curator/README.md addons/workspace-curator/lane.toml addons/workspace-curator/schemas/briefing.json addons/workspace-curator/schemas/classification.json addons/workspace-curator/server.py addons/protocol.py addons/exact_worker.py config/prompts/agent_core.md config/prompts/candle_appraiser_grade.md config/prompts/candle_appraiser_relation.md config/prompts/candle_appraiser_weights.md config/prompts/eval.calibration.few_shot.md config/prompts/exec_policy.md config/prompts/fusion.judge.md config/prompts/goal_verification.md config/prompts/judge.md config/prompts/keeper.autonomous.wake.txt config/prompts/keeper.md config/prompts/lane_cli_probe.md config/prompts/librarian.md config/prompts/mcp.md config/prompts/mcp.tool_help.md config/prompts/play.agent_guide.md config/prompts/subset_rewrite.md config/prompts/tool_failure.md config/prompts/tool_guidance.md config/prompts/tool_help.md config/prompts/verification.md config/prompts/workspace_memory_briefing.md config/prompts/workspace_memory_curator.md
+[targeted] test/test_workspace_memory_curator_lane: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_workspace_memory_curator_lane: start 2026-10-22T04:23:20Z
+[2026-10-22 04:23:20] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-c61caf: Eio_guard.Non_eio_mutex_context(0)
+[2026-10-22 04:23:20] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-c61caf: Eio_guard.Non_eio_mutex_context(0)
+  [FAIL]        owner          0   public owner uses real worker, semantic ca...
+[2026-10-22 04:23:50] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-25cca7: Eio_guard.Non_eio_mutex_context(0)
+[2026-10-22 04:23:50] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-25cca7: Eio_guard.Non_eio_mutex_context(0)
+  [FAIL]        owner          1   actual Addon On wakes sources parked while...
+[2026-10-22 04:24:20] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-0537a4: Eio_guard.Non_eio_mutex_context(0)
+[2026-10-22 04:24:21] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-0537a4: Eio_guard.Non_eio_mutex_context(0)
+  [FAIL]        owner          2   actual output publication resumes the same...
+[2026-10-22 04:24:51] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-40a237: Eio_guard.Non_eio_mutex_context(0)
+[2026-10-22 04:24:51] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-40a237: Eio_guard.Non_eio_mutex_context(0)
+  [FAIL]        owner          3   unrelated source never remints a refused o...
+[2026-10-22 04:25:21] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-8405ba: Eio_guard.Non_eio_mutex_context(0)
+[2026-10-22 04:25:21] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-8405ba: Eio_guard.Non_eio_mutex_context(0)
+  [FAIL]        owner          6   finished source can return as new pending ...
+[2026-10-22 04:25:52] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-7c2967: Eio_guard.Non_eio_mutex_context(0)
+[2026-10-22 04:25:52] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-7c2967: Eio_guard.Non_eio_mutex_context(0)
+  [FAIL]        owner          7   only the current semantic destination supp...
+[2026-10-22 04:26:26] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-cb2156: Eio_guard.Non_eio_mutex_context(0)
+[2026-10-22 04:26:26] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-cb2156: Eio_guard.Non_eio_mutex_context(0)
+  [FAIL]        owner         11   existing successor intent recovers locally...
+[2026-10-22 04:26:57] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-8fbf51: Eio_guard.Non_eio_mutex_context(0)
+[2026-10-22 04:26:57] [ERROR] [Server] workspace curator owner /tmp/curator-production-owner-8fbf51: Eio_guard.Non_eio_mutex_context(0)
+  [FAIL]        owner         12   accepted retained host terminal commits Of...
+│ [FAIL]        owner          0   public owner uses real worker, semantic...  │
+│ [FAIL]        owner          1   actual Addon On wakes sources parked wh...  │
+│ [FAIL]        owner          2   actual output publication resumes the s...  │
+│ [FAIL]        owner          3   unrelated source never remints a refuse...  │
+│ [FAIL]        owner          6   finished source can return as new pendi...  │
+│ [FAIL]        owner          7   only the current semantic destination s...  │
+│ [FAIL]        owner         11   existing successor intent recovers loca...  │
+│ [FAIL]        owner         12   accepted retained host terminal commits...  │
+8 failures! in 246.725s. 15 tests run.
+[targeted] test/test_workspace_memory_curator_lane: FAIL exit 1 in 247s
+[targeted] test/test_prompt_registry_dune_fallback: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_prompt_registry_dune_fallback: start 2026-10-22T04:27:27Z
+Test Successful in 0.021s. 9 tests run.
+[targeted] test/test_prompt_registry_dune_fallback: OK in 0s
+[targeted] test/test_workspace_memory_execution_capture: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_workspace_memory_execution_capture: start 2026-10-22T04:27:27Z
+Test Successful in 0.030s. 5 tests run.
+[targeted] test/test_workspace_memory_execution_capture: OK in 0s
+[targeted] test/test_workspace_memory_request: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_workspace_memory_request: start 2026-10-22T04:27:27Z
+Test Successful in 0.053s. 5 tests run.
+[targeted] test/test_workspace_memory_request: OK in 0s
+[targeted] test/test_prompt_templates_render: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_prompt_templates_render: start 2026-10-22T04:27:27Z
+Test Successful in 0.041s. 4 tests run.
+[targeted] test/test_prompt_templates_render: OK in 0s

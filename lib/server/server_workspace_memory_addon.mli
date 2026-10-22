@@ -30,8 +30,14 @@ val resume : config:Workspace.config -> request_id:string -> (result, error) Std
     Already_stored and absence after dispatch never permit another submission.
     Consecutive equal observations reuse the current record without another
     journal write; changed kind/evidence remains a new original fact.
-    Full terminal/domain validation precedes Judgment_retained. This performs no
-    domain save, observer completion or automatic successor/narrowing. Caller
+    Full terminal/domain validation precedes Judgment_retained.
+    Dispatch_pending first observes the original host Exact record by its
+    configured installation and captured request/schema. A strict retained
+    terminal needs no live worker/export and can finish while Off. Absent/open
+    records still require the normal worker read; a malformed/conflicting host
+    record refuses without that fallback. Started/open is never inferred final.
+    Captured/Admission_wait still require live export authority before admission.
+    This performs no domain save, observer completion or automatic successor/narrowing. Caller
     holds the original workspace lease and serializes this owner. *)
 type commit_result = Commit_waiting of Lane_addon_tool_request_owner.retained
   | Committed of Lane_addon_tool_request_owner.retained

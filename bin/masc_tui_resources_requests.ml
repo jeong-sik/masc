@@ -1,13 +1,11 @@
-(** Both transports retain the caller-owned workspace request boundary. *)
+(** Both transports retain the caller-owned workspace JSON read boundary. *)
 open Masc_tui_types
 open Masc_tui_async_protocol
 module Catalog = Masc_tui_resource_catalog
 
 let ( let* ) = Result.bind
 
-let report_json ~host ~port ~path =
-  let* status_code, body = Masc_tui_http.http_get ~host ~port ~path in
-  Masc_tui_http.decode_json ~allow_empty:false ~status_code ~body
+let report_json = Masc_tui_http.get_json
 
 let session ~host ~port = function
   | Some session_id -> Ok session_id

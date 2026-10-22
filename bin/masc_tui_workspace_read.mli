@@ -10,6 +10,13 @@ val with_binding
   -> (unit -> 'a)
   -> 'a
 
+val without_binding : (unit -> 'a) -> 'a
+(** Observe endpoint identity without inheriting a payload read's workspace
+    proof. The caller must compare that identity with its captured authority;
+    a foreign observation remains available for diagnostics. Restores the
+    enclosing binding on return, exception or cancellation. Never use this
+    boundary for workspace payload reads or to authorize an effect. *)
+
 val read_json
   : kept_reads:Yojson.Safe.t Masc_tui_kept_reads.t
   -> address_of:(path:string -> string)

@@ -1761,7 +1761,11 @@ let check_workspace_request ?schedule_form_action ?refresh_ticket
   else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
   else
     let reading_authority = state.workspace_read_authority in
-    let reading = Masc_tui_loader.load_server_identity ~host ~port in
+    (* Health observes the endpoint identity; the comparison below decides
+       whether this request still owns it. A payload's admission proof must
+       neither require a health receipt nor erase a foreign observation. *)
+    let reading = Masc_tui_workspace_read.without_binding (fun () ->
+      Masc_tui_loader.load_server_identity ~host ~port) in
     if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
     else if reading_authority != state.workspace_read_authority || not (server_authority_ready state)
     then Error "Workspace identity is unconfirmed"
@@ -1964,7 +1968,7 @@ let launch_artifact_checks_load state ~mailbox =
 
 let launch_resources_load state ~mailbox =
   Masc_tui_resources_requests.launch_list state ~host:server_peer_host
-    ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
+    ~launch:(launch_workspace_json_read state ~mailbox)
     ~check:(capture_workspace_check state ~mailbox);
   launch_artifact_checks_load state ~mailbox
 
@@ -2034,6 +2038,11 @@ let open_resource_in_dashboard state ~mailbox =
           Eio_guard.run_in_systhread ~label:"tui-report-browser" (fun () ->
             Masc_tui_browser.open_url url)
           |> Result.map (fun opener -> "Opened " ^ url ^ " via " ^ opener ^ "; browser authentication may be required"))
+
+let launch_resources_read state ~mailbox ~key =
+  Masc_tui_resources_requests.launch_read state ~host:server_peer_host
+    ~launch:(launch_workspace_json_read state ~mailbox)
+    ~check:(capture_workspace_check state ~mailbox) ~key
 
 let launch_artifact_check_change state ~mailbox =
   let entry = match state.resource_focus with
@@ -13657,6 +13666,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.mcp_session <- None;
   state.resources_list <- None;
   state.resources_error <- None;
+  state.resource_inventory_notice <- None;
   state.resources_reports_complete <- false;
   state.resources_list_owner <- None;
   state.artifact_checks <- Masc_tui_fetched.clear state.artifact_checks;
@@ -15501,9 +15511,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
      | Approvals | Harness | Repositories | Connectors | Runtime | Config | Resources | System_logs -> ());
     (match state.view with
      | Resources -> Option.iter (fun uri ->
-         Masc_tui_resources_requests.launch_read state ~host:server_peer_host
-           ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
-           ~check:(capture_workspace_check state ~mailbox) ~key:uri) state.resource_pending_key
+         launch_resources_read state ~mailbox ~key:uri) state.resource_pending_key
      | Config when state.config_pane = Config_prompts ->
          (match state.prompts_librarian_input_requested, selected_prompt_for_state state with
           | Some prompt_key, Some row when String.equal row.Tui_decode.pr_key prompt_key ->
@@ -29349,9 +29357,7 @@ and is loaded on demand through keeper_skill.
             | Ok None -> report_action state "system" "No unchecked reports in the current format and date selection"
             | Ok (Some key) ->
               if state.resource_focus = Right_pane then
-                Masc_tui_resources_requests.launch_read state ~host:server_peer_host
-                  ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
-                  ~check:(capture_workspace_check state ~mailbox:async_messages) ~key)
+                launch_resources_read state ~mailbox:async_messages ~key)
        | Some "t" when state.view = Resources ->
            Masc_tui_resources_updates.toggle_today state ~now:(Unix.gettimeofday ())
        | Some "w" when state.view = Resources ->
@@ -29375,10 +29381,7 @@ and is loaded on demand through keeper_skill.
          when state.view = Resources && state.resource_focus = Right_pane ->
            Masc_tui_resources_updates.step_revision state
              ~direction:(if bracket = "{" then Masc_tui_resource_catalog.Older else Newer)
-             ~read:(fun ~key -> Masc_tui_resources_requests.launch_read state
-               ~host:server_peer_host
-               ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id)
-               ~check:(capture_workspace_check state ~mailbox:async_messages) ~key)
+             ~read:(launch_resources_read state ~mailbox:async_messages)
        | Some (("[" | "]") as bracket)
          when state.view = Resources && state.resource_focus = Right_pane ->
            step_detail_cursor
@@ -29390,7 +29393,8 @@ and is loaded on demand through keeper_skill.
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun cursor -> state.resources_cursor <- cursor)
              ~reopen:(fun () ->
-               Masc_tui_resources_updates.open_selected state ~read:(fun ~key -> Masc_tui_resources_requests.launch_read state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox:async_messages) ~key))
+               Masc_tui_resources_updates.open_selected state
+                 ~read:(launch_resources_read state ~mailbox:async_messages))
        | Some (("[" | "]") as bracket)
          when state.view = Lanes && state.lanes_mode = Lanes_overview ->
            (* A package row's exact outputs, chosen by name (RFC operator-quiz
@@ -29534,7 +29538,8 @@ and is loaded on demand through keeper_skill.
                 report_action state "system"
                   "Approval list changed; review the updated row before retrying")
        | Some "\r" when state.view = Resources ->
-           Masc_tui_resources_updates.open_selected state ~read:(fun ~key -> Masc_tui_resources_requests.launch_read state ~host:server_peer_host ~launch:(launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id) ~check:(capture_workspace_check state ~mailbox:async_messages) ~key)
+           Masc_tui_resources_updates.open_selected state
+             ~read:(launch_resources_read state ~mailbox:async_messages)
        | Some "J" when state.view = Resources ->
            move_resource_document state (Masc_tui_scroll.Position.By 1)
        | Some "K" when state.view = Resources ->

@@ -138,7 +138,12 @@ let add_routes ?config router =
     | Browser_addon_ingress.Registration_refused refusal ->
         respond_json_value_with_cors ~status:`Bad_request request reqd
           (error_json (Browser_lane.registration_refusal_to_wire refusal))
-    | Unavailable detail -> respond_json_value_with_cors ~status:`Service_unavailable request reqd (error_json detail)
+    | Unavailable reason ->
+        (* A native host logs the code; it drops prose as "not a code". *)
+        respond_json_value_with_cors ~status:`Service_unavailable request reqd
+          (`Assoc [ "ok", `Bool false
+                  ; "error", `String (Browser_addon_ingress.unavailable_to_wire reason)
+                  ; "detail", `String (Browser_addon_ingress.unavailable_message reason) ])
     | Outcome_unknown detail -> respond_json_value_with_cors ~status:`Bad_gateway request reqd (error_json detail) in
   router
   |> Server_routes_http_browser_surface.add_routes

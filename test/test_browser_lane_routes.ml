@@ -26,7 +26,7 @@ let with_workspace f =
       (match previous with Some value -> Unix.putenv Env_config_core.base_path_env_key value
        | None -> Unix.unsetenv Env_config_core.base_path_env_key);
       remove base)
-    (fun () -> f ~config:(Workspace.default_config base) ~lane ~token_file)
+    (fun () -> f ~config:(Masc.Workspace.default_config base) ~lane ~token_file)
 
 let post router ~path ~headers =
   let output = Buffer.create 512 in

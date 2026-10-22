@@ -427,8 +427,8 @@ type carried_delivery =
 
 (* How much of one World State section the session holds. A section sent on
    every resume is never held. Of a section with rows, the session holds part
-   when it holds at least one row and lacks a row or the head; a session that
-   holds no row is sent the section whole. *)
+   when the rows it holds run on into this window ({!held_run}) and it lacks a
+   later row or the head; otherwise it is sent the section whole. *)
 type section_holding =
   | Holds_none
   | Holds_all
@@ -439,19 +439,67 @@ type section_holding =
       ; held_rows : world_state_row list
       }
 
-let section_holding ~holds section =
+(* The digests of the rows of [section] the session holds, in the order it was
+   sent them: [held_of_item] names rows in render order and the store keeps the
+   list as written. *)
+let held_row_digests ~held section =
+  List.filter_map
+    (fun (entry : Session_store.held_context) ->
+       match entry.context with
+       | Session_store.Context_section_row { section = held_in; row_sha256 }
+         when held_in = section -> Some row_sha256
+       | Session_store.(
+           Context_section_row _ | Context_block _ | Context_section _ | Context_carrier
+           | Librarian_working_state | Librarian_unread | Historical_task_reference) -> None)
+    held
+;;
+
+(* How many rows at the start of [rows] continue the rows the session holds:
+   the length of the longest run that ends what it holds and starts [rows].
+   That is how the window moves, one turn at a time at its end. A row the
+   renderer wrote again in place -- its task relation changes when the keeper
+   selects another task -- breaks the run, and the session's copy of that
+   turn would contradict the new one, so the run is then 0 and the section
+   goes out whole. *)
+let held_run ~held_digests rows =
+  let digests = List.map (fun row -> row.row_held.Session_store.sha256) rows in
+  let rec starts prefix list =
+    match prefix, list with
+    | [], _ -> true
+    | digest :: prefix, next :: list -> String.equal digest next && starts prefix list
+    | _ :: _, [] -> false
+  in
+  let rec longest = function
+    | [] -> 0
+    | _ :: shorter as suffix ->
+      if starts suffix digests then List.length suffix else longest shorter
+  in
+  longest held_digests
+;;
+
+let section_holding ~held section =
+  let holds entry = List.mem entry held in
+  let holds_every_row =
+    match section.division with
+    | One_text -> true
+    | Rows { rows; _ } -> List.for_all (fun row -> holds row.row_held) rows
+  in
   match Keeper_context_layers.resend_on_resume section.section with
   | Keeper_context_layers.Sent_every_resume -> Holds_none
   | Keeper_context_layers.Sent_with_other_sections ->
-    if holds section.section_held then Holds_all else Holds_none
+    if holds section.section_held && holds_every_row then Holds_all else Holds_none
   | Keeper_context_layers.Sent_when_changed ->
     (match section.division with
      | One_text -> if holds section.section_held then Holds_all else Holds_none
      | Rows { head; rows; tail } ->
-       (match List.partition (fun row -> holds row.row_held) rows with
-        | [], _ -> Holds_none
-        | _ :: _, [] when holds section.section_held -> Holds_all
-        | (_ :: _ as held_rows), sent_rows -> Holds_rows { head; tail; sent_rows; held_rows }))
+       (match held_run ~held_digests:(held_row_digests ~held section.section) rows with
+        | 0 -> Holds_none
+        | run ->
+          let held_rows = List.filteri (fun index _ -> index < run) rows in
+          let sent_rows = List.filteri (fun index _ -> index >= run) rows in
+          (match sent_rows with
+           | [] when holds section.section_held -> Holds_all
+           | [] | _ :: _ -> Holds_rows { head; tail; sent_rows; held_rows })))
 ;;
 
 let carried_delivery ~held item =
@@ -461,7 +509,7 @@ let carried_delivery ~held item =
     if (not item.resent_when_held) && holds item.held then Already_held
     else Sent (Sent_whole item)
   | World_state_sections sections ->
-    let holdings = List.map (fun section -> section, section_holding ~holds section) sections in
+    let holdings = List.map (fun section -> section, section_holding ~held section) sections in
     let holds_all = function
       | Holds_all -> true
       | Holds_none | Holds_rows _ -> false

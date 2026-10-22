@@ -57,11 +57,16 @@ let selected_block_text assembly ~omitted_sections ~omitted_rows (id, text) =
           | None, (Keeper_context_layers.Whole_section | Keeper_context_layers.Head_and_rows _) ->
             Some section.section_text
           | Some digests, Keeper_context_layers.Head_and_rows { head; rows; tail } ->
-            let left_out row = List.mem (hash row) digests in
-            if List.for_all
-                 (fun digest -> List.exists (fun row -> String.equal (hash row) digest) rows)
-                 digests
-            then Some (head ^ String.concat "" (List.filter (fun row -> not (left_out row)) rows) ^ tail)
+            let named = List.map (fun row -> hash row, row) rows in
+            if List.for_all (fun digest -> List.mem_assoc digest named) digests
+            then
+              Some
+                (head
+                 ^ String.concat ""
+                     (List.filter_map
+                        (fun (digest, row) -> if List.mem digest digests then None else Some row)
+                        named)
+                 ^ tail)
             else None
           | Some _, Keeper_context_layers.Whole_section -> None
       in
@@ -118,11 +123,15 @@ let source assembly selected_blocks ~omitted_sections ~omitted_rows
            ; "source_span_indices", `List (List.map (fun i -> `Int i) indices)
            ; "rendered_text_bytes", `Int (String.length actual)
            ; "rendered_text_sha256", `String (hash actual)
-           ; "rendering", `String (match selected_blocks, omits with
-               | None, _ -> "whole_carrier"
-               | Some _, false -> "ordered_blocks_joined_by_two_newlines"
-               | Some _, true ->
-                 "ordered_blocks_joined_by_two_newlines_without_held_world_state_sections")
+           ; "rendering", `String (match selected_blocks, omitted_sections, omitted_rows with
+               | None, _, _ -> "whole_carrier"
+               | Some _, [], [] -> "ordered_blocks_joined_by_two_newlines"
+               | Some _, _ :: _, [] ->
+                 "ordered_blocks_joined_by_two_newlines_without_held_world_state_sections"
+               | Some _, [], _ :: _ ->
+                 "ordered_blocks_joined_by_two_newlines_without_held_world_state_rows"
+               | Some _, _ :: _, _ :: _ ->
+                 "ordered_blocks_joined_by_two_newlines_without_held_world_state_sections_and_rows")
            ; "codec_schema", `String Keeper_official_client_context_codec.schema
            ; "codec_text_path", `String "/message/content_blocks/0/text"
            ]

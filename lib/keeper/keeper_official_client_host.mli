@@ -346,10 +346,12 @@ val resume_prompt :
     System message after the carrier names those ({!unchanged_sections_notice},
     [unchanged_sections]). A section with rows
     ({!Keeper_context_layers.Head_and_rows}) is compared row by row: when the
-    session holds some of its rows it goes out as its head, the rows the
-    session lacks and its tail, and one more System message names it
-    ({!held_rows_notice}, [partly_held_sections]). A session that holds none
-    of its rows gets it whole. A line that does not render sends every
+    rows the session holds, in the order it was sent them, end with the rows
+    this window starts with -- the window moved on and no row it holds was
+    written again -- it goes out as its head, the rows after that run and its
+    tail, and one more System message names it ({!held_rows_notice},
+    [partly_held_sections]). Otherwise it goes out whole, so the session
+    never holds two versions of one row. A line that does not render sends every
     section whole.
 
     [held_context] is [held] updated with every carried context this turn

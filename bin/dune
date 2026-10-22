@@ -1826,7 +1826,7 @@
  (name masc_tui_resource_document)
  (wrapped false)
  (modules masc_tui_resource_document)
- (libraries masc_tui_types masc_tui_ansi masc_tui_message_layout
+ (libraries masc_tui_types masc_tui_ansi masc_tui_message_layout masc_tui_text_block
   masc_tui_resource_catalog masc_tui_mcp masc_tui_resource_images
   masc_tui_markdown_theme masc_tui_roster_pane masc_tui_theme masc yojson))
 

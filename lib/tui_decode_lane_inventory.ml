@@ -39,10 +39,14 @@ type instance = {
 type browser_activity = Browser_enabled | Browser_disabled | Browser_unobserved
 type machine_activity = Machine_enabled | Machine_disabled | Machine_unobserved
 type machine_publication = No_screen | Stable | Running | Publication_unavailable
+type 'a browser_reading =
+  | Browser_observed of 'a
+  | Browser_addon_absent
+  | Browser_addon_unavailable of string
 type state =
   | Exact_state of configuration
-  | Browser_clients of browser_activity * int
-  | Browser_executor of browser_activity * bool
+  | Browser_clients of browser_activity * int browser_reading
+  | Browser_executor of browser_activity * bool browser_reading
   | Machine_state of machine_activity * machine_publication
   | Package_state of { declaration : declaration option; instances : instance list }
 type row = { id : string; label : string; purpose : string; selection : selection; state : state }
@@ -213,16 +217,28 @@ let machine_activity = function
   | `String "unobserved" -> Ok Machine_unobserved
   | _ -> error "unknown Machine activity"
 
+let browser_reading field decode json =
+  let* tag = kind json in
+  match tag with
+  | "observed" -> let* f = fields ["kind";field] json in
+      Result.map (fun value -> Browser_observed value) (get decode field f)
+  | "absent" -> let* _ = fields ["kind"] json in Ok Browser_addon_absent
+  | "unavailable" -> let* f = fields ["kind";"detail"] json in
+      Result.map (fun detail -> Browser_addon_unavailable detail) (get string "detail" f)
+  | _ -> error "unknown browser Add-on reading"
+
 let state json =
   let* tag = kind json in
   match tag with
   | "exact" -> let* f = fields ["kind";"configuration"] json in Result.map (fun c -> Exact_state c) (get configuration "configuration" f)
-  | "browser_clients" -> let* f = fields ["kind";"activity";"connected_clients"] json in
+  | "browser_clients" -> let* f = fields ["kind";"activity";"addon"] json in
       let* activity = get browser_activity "activity" f in
-      Result.map (fun n -> Browser_clients (activity,n)) (get count "connected_clients" f)
-  | "browser_executor" -> let* f = fields ["kind";"activity";"registered"] json in
+      Result.map (fun reading -> Browser_clients (activity,reading))
+        (get (browser_reading "connected_clients" count) "addon" f)
+  | "browser_executor" -> let* f = fields ["kind";"activity";"addon"] json in
       let* activity = get browser_activity "activity" f in
-      Result.map (fun value -> Browser_executor (activity,value)) (get bool "registered" f)
+      Result.map (fun reading -> Browser_executor (activity,reading))
+        (get (browser_reading "registered" bool) "addon" f)
   | "machine" -> let* f = fields ["kind";"activity";"publication"] json in
       let* activity = get machine_activity "activity" f in
       let* value = get (function `String "no_screen" -> Ok No_screen | `String "stable" -> Ok Stable | `String "running" -> Ok Running | `String "unavailable" -> Ok Publication_unavailable | _ -> error "unknown machine publication") "publication" f in

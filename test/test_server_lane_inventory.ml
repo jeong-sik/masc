@@ -395,6 +395,36 @@ let suffix_only_declaration_is_editable () = with_fixture (fun _ _ config root d
   | Ok document -> check string "same enumerated source can be opened" ".toml" document.file_name
   | Error e -> fail e.message)
 
+(* The server process holds no browser clients since #44295; the built-in
+   browser rows read the browser Add-on's cached observation, and say why
+   when there is none. *)
+let browser_rows_read_the_addon_observation () =
+  let work registered = `Assoc ["activity",`String "enabled";"registered",`Bool registered;
+    "session",`String "closed";"locate",`Bool false] in
+  let client id = `Assoc ["clientId",`String id;"browser",`String "firefox";"version",`String "158.0.1";
+    "engineVersion",`String "158.0.1";"transport",`String "web_extension";"interactions",`List []] in
+  let output = match Browser_addon_observation.of_snapshot ~observed_at:1.
+      (`Assoc ["state",`String "serving";
+        "clients",`List [client "01a16363-ef67-7000-ad62-05bcd0320d99"; client "01a16363-ef68-7000-aee1-37e1be230202"];
+        "owned_backends",`Assoc ["automation",work true;"stagehand",work false]]) with
+    | Ok output -> output | Error detail -> fail detail in
+  let snapshot : Addon.export_observation = {instance_id="browser-worker";observation_seq=2;
+    max_bytes=4096;refreshing=false;output} in
+  let state reading lane = Inventory.For_testing.browser_state ~activity:Browser_lane.Enabled reading lane in
+  let observed = Inventory.For_testing.browser_reading (Ok (Some snapshot)) in
+  check bool "the live row counts the clients the Add-on published" true
+    (state observed Browser_lane.Lane_name.Live = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_observed 2));
+  check bool "the automation row reads its registration from the Add-on" true
+    (state observed Browser_lane.Lane_name.Automation = Inventory.Browser_executor (Browser_lane.Enabled, Inventory.Browser_observed true));
+  check bool "the Stagehand row reads its registration from the Add-on" true
+    (state observed Browser_lane.Lane_name.Stagehand = Inventory.Browser_executor (Browser_lane.Enabled, Inventory.Browser_observed false));
+  check bool "no browser Add-on is not zero connected clients" true
+    (state (Inventory.For_testing.browser_reading (Ok None)) Browser_lane.Lane_name.Live
+     = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_addon_absent));
+  check bool "a failed browser Add-on carries its reason" true
+    (state (Inventory.For_testing.browser_reading (Error "cleanup incomplete")) Browser_lane.Lane_name.Live
+     = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_addon_unavailable "cleanup incomplete"))
+
 let browser_activity_snapshot () = with_fixture (fun _env sw config root _directory ->
   let previous = Runtime.For_testing.snapshot () in
   let startup = Runtime_startup_state.get () in
@@ -421,16 +451,10 @@ enabled=%b
 |} enabled enabled enabled);
     match Runtime.init_default ~config_path:path with Ok () -> () | Error detail -> fail detail in
   load true;
-  let locked, signal_locked = Eio.Promise.create () in
-  let release, signal_release = Eio.Promise.create () in
-  Eio.Fiber.fork ~sw (fun () -> Eio.Mutex.use_rw ~protect:true Browser_lane.clients_mutex (fun () ->
-    Eio.Promise.resolve signal_locked (); Eio.Promise.await release));
-  Eio.Promise.await locked;
   let result = Eio.Fiber.fork_promise ~sw (fun () -> Inventory.snapshot ~config |> Inventory.to_json) in
-  (* The snapshot reaches the held Live backend mutex before the new publication. *)
+  (* The snapshot captured its configuration before this publication. *)
   Eio.Fiber.yield ();
   load false;
-  Eio.Promise.resolve signal_release ();
   let json = match Eio.Promise.await result with Ok value -> value | Error exn -> raise exn in
   let activities snapshot = values "rows" snapshot |> List.filter_map (fun row ->
     if text "kind" (member "selection" row) = "browser" then
@@ -444,6 +468,7 @@ let () = run "operator lane inventory" ["read boundaries",[
   test_case "machine publication reads worker observations" `Quick machine_publication_reads_worker_observation;
   test_case "machine activity and publication serialize independently" `Quick machine_wire_preserves_both_readings;
   test_case "Browser activity captures one configuration" `Quick browser_activity_snapshot;
+  test_case "browser rows read the Add-on observation" `Quick browser_rows_read_the_addon_observation;
   test_case "invalid explicit root remains unobserved" `Quick invalid_config_root;
   test_case "retained mismatched incarnation is a per-record issue" `Quick mismatched_retained_incarnation;
   test_case "suffix-only declaration stays editable" `Quick suffix_only_declaration_is_editable;

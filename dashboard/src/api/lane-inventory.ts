@@ -37,14 +37,22 @@ const phase = Schema.Union(
 const instance = Schema.Struct({ instance_id: text, incarnation: text, run_id: text, package_id: text,
   title: text, package_revision: text, presence: Schema.Literal('live', 'retained'), phase,
   applied_revision: Schema.NullOr(text) })
+// The server reads the three built-in browser rows from the browser Add-on's
+// published observation: the observed value, no Add-on, or why it is unreadable.
+const browserAddonAbsent = Schema.Struct({ kind: Schema.Literal('absent') })
+const browserAddonUnavailable = Schema.Struct({ kind: Schema.Literal('unavailable'), detail: Schema.String })
+const browserClientsAddon = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal('observed'), connected_clients: count }), browserAddonAbsent, browserAddonUnavailable)
+const browserExecutorAddon = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal('observed'), registered: Schema.Boolean }), browserAddonAbsent, browserAddonUnavailable)
 const common = { id: text, label: text, purpose: text }
 const row = Schema.Union(
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('exact'), lane_id: Schema.Literal(...LANE_IDS) }),
     state: Schema.Struct({ kind: Schema.Literal('exact'), configuration }) }),
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('browser'), lane: Schema.Literal('live') }),
-    state: Schema.Struct({ kind: Schema.Literal('browser_clients'), activity: Schema.Literal('on', 'off', 'unobserved'), connected_clients: count }) }),
+    state: Schema.Struct({ kind: Schema.Literal('browser_clients'), activity: Schema.Literal('on', 'off', 'unobserved'), addon: browserClientsAddon }) }),
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('browser'), lane: Schema.Literal('automation', 'stagehand') }),
-    state: Schema.Struct({ kind: Schema.Literal('browser_executor'), activity: Schema.Literal('on', 'off', 'unobserved'), registered: Schema.Boolean }) }),
+    state: Schema.Struct({ kind: Schema.Literal('browser_executor'), activity: Schema.Literal('on', 'off', 'unobserved'), addon: browserExecutorAddon }) }),
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('machine'), machine: Schema.Literal('msx', 'dos') }),
     state: Schema.Struct({ kind: Schema.Literal('machine'), activity: Schema.Literal('on', 'off', 'unobserved'),
       publication: Schema.Literal('no_screen', 'stable', 'running', 'unavailable') }) }),

@@ -105,9 +105,9 @@ describe('operator Lane inventory', () => {
     const automation = raw.rows.find(item => item.id === 'browser/automation')!
     const stagehand = raw.rows.find(item => item.id === 'browser/stagehand')!
     const live = raw.rows.find(item => item.id === 'browser/live')!
-    Object.assign(automation.state, { activity: 'off', registered: true })
-    Object.assign(stagehand.state, { activity: 'unobserved', registered: true })
-    Object.assign(live.state, { activity: 'off', connected_clients: 2 })
+    Object.assign(automation.state, { activity: 'off', addon: { kind: 'observed', registered: true } })
+    Object.assign(stagehand.state, { activity: 'unobserved', addon: { kind: 'observed', registered: true } })
+    Object.assign(live.state, { activity: 'off', addon: { kind: 'observed', connected_clients: 2 } })
     api.fetchLaneInventory.mockResolvedValue(parseLaneInventory(raw))
     const screen = render(html`<${LaneInventoryPanel} />`)
     fireEvent.click(await screen.findByRole('button', { name: `Inspect ${automation.label}` }))

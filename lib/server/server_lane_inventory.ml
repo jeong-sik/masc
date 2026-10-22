@@ -14,10 +14,17 @@ type declaration =
   | Valid of { declaration : Config.declaration; exact_outputs : exact_output list; application : Lane_addon_application.t }
   | Invalid of string list | Absent | Unobserved
 type machine_publication = No_screen | Stable | Running | Publication_unavailable
+(* The server process holds no browser clients or executors of its own:
+   since #44295 they live in the browser Add-on worker, so the built-in
+   browser rows read its cached observation. *)
+type 'a browser_reading =
+  | Browser_observed of 'a
+  | Browser_addon_absent
+  | Browser_addon_unavailable of string
 type state =
   | Exact_state of Exact_projection.lane_configuration
-  | Browser_clients of Browser_lane.activity * int
-  | Browser_executor of Browser_lane.activity * bool
+  | Browser_clients of Browser_lane.activity * int browser_reading
+  | Browser_executor of Browser_lane.activity * bool browser_reading
   | Machine_state of Machine_configuration.activity * machine_publication
   | Package_state of { declaration : declaration option; instances : Addon.inventory_instance list }
 type row = { id : string; label : string; purpose : string; selection : selection; state : state }
@@ -110,17 +117,44 @@ let machine_state ~config ~configuration machine =
     |> machine_publication in
   Machine_state (activity,publication)
 
+let browser_reading = function
+  | Error detail -> Browser_addon_unavailable detail
+  | Ok None -> Browser_addon_absent
+  | Ok (Some (snapshot : Addon.export_observation)) ->
+      (match Browser_addon_observation.read snapshot.output with
+       | Ok published -> Browser_observed published
+       | Error detail -> Browser_addon_unavailable ("its observation is unreadable: " ^ detail))
+(* Read once per snapshot, so the three browser rows describe one
+   observation. *)
+let browser_publication ~config =
+  Addon.observation_for_export ~config ~access:Lane_addon_sources.Operator_configuration
+    ~name:Browser_addon_tool.definition.name
+  |> browser_reading
+let browser_map f = function
+  | Browser_observed value -> Browser_observed (f value)
+  | Browser_addon_absent -> Browser_addon_absent
+  | Browser_addon_unavailable detail -> Browser_addon_unavailable detail
+let browser_state ~activity publication = function
+  | Browser_lane.Lane_name.Live ->
+      Browser_clients (activity, browser_map (fun (p : Browser_addon_observation.published) ->
+        List.length p.clients) publication)
+  | Browser_lane.Lane_name.Automation ->
+      Browser_executor (activity, browser_map (fun (p : Browser_addon_observation.published) ->
+        p.automation.registered) publication)
+  | Browser_lane.Lane_name.Stagehand ->
+      Browser_executor (activity, browser_map (fun (p : Browser_addon_observation.published) ->
+        p.stagehand.registered) publication)
+
 let snapshot ~config =
   let exact = Exact_projection.observe () in
   let browser_activity = Server_browser_configuration.activity_snapshot () in
+  let browser_publication = browser_publication ~config in
   let machine_configuration = Runtime.machine_configuration () in
   let builtin = Lane_id.all_of_builtin |> List.map (fun lane ->
     let selection,state = match lane with
       | Lane_id.Exact id -> Exact id,Exact_state (Exact_projection.configuration exact id)
       | Lane_id.Browser id ->
-          Browser id,(match Browser_lane.inventory_observation ~observed_activity:(browser_activity id) id with
-            | {Browser_lane.activity; backend=Live_clients count} -> Browser_clients (activity,count)
-            | {Browser_lane.activity; backend=Executor_registered registered} -> Browser_executor (activity,registered))
+          Browser id,browser_state ~activity:(browser_activity id) browser_publication id
       | Lane_id.Machine id -> Machine id,machine_state ~config ~configuration:machine_configuration id in
     {id=Lane_id.to_wire (Lane_id.Builtin lane); label=Lane_manifest.label lane;
      purpose=Lane_manifest.purpose lane; selection; state}) in
@@ -182,10 +216,16 @@ let browser_activity_json = function
   | Browser_lane.Enabled -> str "on"
   | Disabled -> str "off"
   | Unobserved -> str "unobserved"
+let browser_reading_json fields = function
+  | Browser_observed value -> `Assoc (("kind",str "observed") :: fields value)
+  | Browser_addon_absent -> `Assoc ["kind",str "absent"]
+  | Browser_addon_unavailable detail -> `Assoc ["kind",str "unavailable";"detail",str detail]
 let state_json = function
   | Exact_state configuration -> `Assoc ["kind",str "exact";"configuration",configuration_json configuration]
-  | Browser_clients (activity,count) -> `Assoc ["kind",str "browser_clients";"activity",browser_activity_json activity;"connected_clients",`Int count]
-  | Browser_executor (activity,registered) -> `Assoc ["kind",str "browser_executor";"activity",browser_activity_json activity;"registered",`Bool registered]
+  | Browser_clients (activity,reading) -> `Assoc ["kind",str "browser_clients";"activity",browser_activity_json activity;
+      "addon",browser_reading_json (fun count -> ["connected_clients",`Int count]) reading]
+  | Browser_executor (activity,reading) -> `Assoc ["kind",str "browser_executor";"activity",browser_activity_json activity;
+      "addon",browser_reading_json (fun registered -> ["registered",`Bool registered]) reading]
   | Machine_state (activity,publication) -> `Assoc ["kind",str "machine";
       "activity",str (Machine_configuration.activity_to_wire activity);
       "publication",str (match publication with No_screen -> "no_screen" | Stable -> "stable" | Running -> "running" | Publication_unavailable -> "unavailable")]
@@ -200,6 +240,8 @@ let to_json t = `Assoc ["schema",str "masc.lane-inventory/v1";"observed_at",`Flo
       `Assoc ["source_path",str path;"message",str detail]) t.issues)]]
 module For_testing = struct
   let machine_publication = machine_publication
+  let browser_reading = browser_reading
+  let browser_state = browser_state
   let package_rows = package_rows
   let exact_outputs = exact_outputs
   let row_to_json = row_to_json

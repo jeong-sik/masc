@@ -173,7 +173,7 @@ let scenario domain () =
               ~template:"Summarize the original pass: {{workspace_memory_briefing}}") partial with
              | Briefing.Missing -> ()
              | Briefing.Current _ | Briefing.Stale _ -> fail "a partial original pass must not publish"))
-       | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _)
+       | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
        | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused -> fail "original answered terminal changed");
       check bool "duplicate delivery is acknowledged without replacing terminal" true (deliver ()=`Assoc ["accepted",`Bool true]);
       (match consume call_worker with
@@ -268,6 +268,27 @@ let test_terminal_unknown_survives_host_restart_without_worker_or_replacement ()
     assert_unknown (accepted (resume call));
     assert_unknown (accepted (resume (fun ~arguments:_ -> fail "terminal unknown was dispatched again"))))
 
+let test_original_output_limit_is_retained_without_worker_replay_or_a_judgment () =
+  with_original_consumer (fun ~resume ~reply ~request_id:_ ~good:_ ~bad:_ ~journal_snapshot ->
+    let terminal=`Assoc ["status",`String "output_limit_reached";"detail",`String "original provider limit"] in
+    let call ~arguments=match member "kind" arguments with
+      | `String "read" -> reply "absent" []
+      | `String "submit" -> reply "finished" ["result",terminal]
+      | _ -> fail "unexpected original worker command" in
+    let verify result=match result |> Result.map_error Consumer.error_to_string |> get with
+      | Consumer.Terminal (Exact.Call_final (Exact.Output_limit_reached _),record) ->
+        (match Lane_addon_request_progress.phase record.progress with
+         | Lane_addon_request_progress.Rejected {stage=Execution;evidence} ->
+           check bool "typed original terminal is retained as execution refusal" true (Yojson.Safe.equal evidence terminal)
+         | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+         | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} -> fail "a limit cannot become a domain judgment")
+      | Consumer.Terminal _ | Consumer.Awaiting _ | Consumer.Judgment _ | Consumer.Commit_pending _ | Consumer.Settled _ ->
+        fail "the original provider output limit changed meaning" in
+    verify (resume call);
+    let original_files=journal_snapshot () in
+    verify (resume (fun ~arguments:_ -> fail "a terminal original must not reach the worker again"));
+    check bool "restoring the terminal does not add a new journal fact" true (original_files=journal_snapshot ()))
+
 let test_repeated_observation_retains_original_history_without_another_fact () =
   with_original_consumer (fun ~resume ~reply ~request_id:_ ~good:_ ~bad:_ ~journal_snapshot ->
     let first ~arguments=match member "kind" arguments with
@@ -312,5 +333,7 @@ let () = run "Workspace Curator actual worker and common Exact contract" ["origi
     test_capacity_retries_original_but_lost_admission_never_submits_again;
   test_case "terminal unknown survives host restart without worker or replacement" `Quick
     test_terminal_unknown_survives_host_restart_without_worker_or_replacement;
+  test_case "original output limit survives without worker replay or a domain judgment" `Quick
+    test_original_output_limit_is_retained_without_worker_replay_or_a_judgment;
   test_case "equal pending unknown and absent observations do not grow original history" `Quick
     test_repeated_observation_retains_original_history_without_another_fact]]

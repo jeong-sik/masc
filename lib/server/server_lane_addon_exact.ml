@@ -12,7 +12,7 @@ type slot_failure =
 
 let may_pass = function
   | Failure.Transient | Failure.Auth_refused | Failure.Configuration_refused -> true
-  | Failure.Input_refused _ | Failure.Output_unusable -> false
+  | Failure.Input_refused _ | Failure.Output_unusable | Failure.Output_limit -> false
 
 let input_refusal = function
   | Failure.Request_body -> Addon.Request_body_refused
@@ -47,11 +47,13 @@ let ending = function
              match f.failure with
              | Failure.Input_refused kind -> Some kind
              | Failure.Transient | Failure.Auth_refused | Failure.Configuration_refused
-             | Failure.Output_unusable -> None)
+             | Failure.Output_unusable | Failure.Output_limit -> None)
           failures
       with
       | Some kind -> Addon.Call_ended (Addon.Input_refused (input_refusal kind))
-      | None -> Addon.Call_ended (Addon.Invalid_output { detail })
+      | None ->
+        if has Failure.Output_limit then Addon.Call_ended (Addon.Output_limit_reached {detail})
+        else Addon.Call_ended (Addon.Invalid_output { detail })
 
 let raw_excerpt = Keeper_exact_flow_detail.raw_response_excerpt
 

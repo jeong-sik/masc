@@ -47,7 +47,7 @@ let generate owner ~scene:(scene:Browser_scene.t) ~instruction =
   let* outcome=Browser_addon_owner.generate owner request |> Result.map_error Browser_addon_models.error_to_string in
   match outcome with
   | Browser_addon_models.Final (Exact.Call_final (Answered {output;_})) -> decode (Exact.checked_json output)
-  | Final ((Call_final (Invalid_output _|Input_refused _)|Outcome_unknown|Not_allowed _|Request_id_reused) as final) ->
+  | Final ((Call_final (Invalid_output _|Input_refused _|Output_limit_reached _)|Outcome_unknown|Not_allowed _|Request_id_reused) as final) ->
       Error ("browser locate model did not answer: " ^ Yojson.Safe.to_string (Exact.final_to_json final))
   | Exceeds_frame {sha256;bytes} -> Error (Printf.sprintf "browser locate model result exceeds its frame (%d bytes, retained %s)" bytes sha256)
 let for_owner owner = match Browser_addon_owner.model_output owner ~name:output_name with

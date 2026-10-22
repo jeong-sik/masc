@@ -2480,6 +2480,11 @@ to the same list row.
 Config is five views over the runtime's settings. Press `p` to move through
 `runtime.toml`, `models`, typed `params`, prompt overrides, and themes.
 
+Open typed parameters with `:settings`. Until the server registry has been read,
+this pane reports that parameters are not read; a missing connection does not
+mean the registry is empty. Only a successful empty response reports no
+registered settings. Read failures remain separate from both states.
+
 The `runtime.toml` view shows the source revision, validation result, and routing
 and Keeper application status returned with that source. `v` opens the complete
 read status: individual validation issues, restart requirements, pending keys,

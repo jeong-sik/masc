@@ -57,7 +57,8 @@ let render_runtime_params (state : state) =
    | Some (ok, detail) ->
      box_line_styled buf cols ~style:(if ok then Theme.ok () else Theme.bad ())
        ("  " ^ Terminal_text.single_line detail));
-  let selected = List.nth_opt state.runtime_params state.runtime_params_cursor in
+  let rows = Option.value state.runtime_params ~default:[] in
+  let selected = List.nth_opt rows state.runtime_params_cursor in
   let field label value =
     ("  " ^ Ansi.bold ^ label ^ Ansi.reset)
     :: (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 4)) value
@@ -106,7 +107,7 @@ let render_runtime_params (state : state) =
      the always-present composer. *)
   let list_height, detail_height =
     Masc_tui_types.runtime_params_viewport state ~terminal_rows in
-  let count = List.length state.runtime_params in
+  let count = List.length rows in
   let cursor = max 0 (min state.runtime_params_cursor (count - 1)) in
   (match state.runtime_params_error with
    | Some detail ->
@@ -114,12 +115,17 @@ let render_runtime_params (state : state) =
                         ^ Terminal_text.single_line detail);
      for _ = 2 to list_height do box_empty buf cols done
    | None ->
-     if state.runtime_params_loading && state.runtime_params = []
+     if state.runtime_params_loading && rows = []
      then begin
        box_line buf cols (Ansi.dim ^ "  (loading runtime parameters…)" ^ Ansi.reset);
        for _ = 2 to list_height do box_empty buf cols done
      end
-     else if state.runtime_params = []
+     else if Option.is_none state.runtime_params
+     then begin
+       box_line buf cols (Ansi.dim ^ "  Runtime parameters not read · confirm workspace access and refresh" ^ Ansi.reset);
+       for _ = 2 to list_height do box_empty buf cols done
+     end
+     else if rows = []
      then begin
        box_line buf cols (Ansi.dim ^ "  등록된 설정 없음" ^ Ansi.reset);
        for _ = 2 to list_height do box_empty buf cols done
@@ -153,7 +159,7 @@ let render_runtime_params (state : state) =
              in
              build (Some id) (index + 1) (`Row (index, row) :: acc) rest
          in
-         build None 0 [] state.runtime_params
+         build None 0 [] rows
        in
        let cursor_display =
          let rec find index = function

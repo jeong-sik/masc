@@ -94,7 +94,7 @@ A의 이번 Addon 변경 닫기는 대상 범위가 다르며, 같은 수정이�
 | ID | 남은 작업 | 현재 상태 | 완료 기준 |
 | --- | --- | --- | --- |
 | D01 | Addon별 모델 route와 기능 활성화의 독립 선택 검증 확장 | Browser broker 있음 | LLM 없는 동작은 독립 실행되고, 설치/출력별 선택 모델이 실제 호출에 반영 |
-| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | [#44768](https://github.com/jeong-sik/masc/pull/44768)·[#44769](https://github.com/jeong-sik/masc/pull/44769)에 원래 요청 identity·grant·완전 domain decode·terminal unknown 처리 source 구현. 독립 source/response 검토 PASS; OCaml 실행 검사는 아직 미완료 | `Consumer_request_schema` 권한·package baseline·요청 digest 재사용; Grade enum·keeper 집합·weight 상한은 Candle 완전 domain decode로 검증 |
+| D02 | 기존 요청별 schema grant를 Candle에 재사용하는 계약 확정 | [#44768](https://github.com/jeong-sik/masc/pull/44768)·[#44769](https://github.com/jeong-sik/masc/pull/44769)에 원래 요청 identity·grant·완전 domain decode·terminal unknown 처리 source 구현. 독립 source/response 검토 PASS; OCaml 실행 검사는 아직 미완료 | `Consumer_request_schema`의 권한·package baseline·요청 digest를 재사용; Grade enum·keeper 집합·weight 상한은 Candle의 완전한 domain decode로 검증 |
 | D03 | 모델 호출 전 요청 보존 및 원래 identity 결속 | 기반 있음 | request·stage·input·schema·route·trace를 보존한 뒤 한 번 dispatch |
 | D04 | 오류·거절·불확실 결과의 typed 처리 일관화 | 도메인별 차이 있음 | transport 불가/잘못된 출력/실행 거절/효과 불확실의 재시도 의미를 유지 |
 | D05 | credential·provider admission·동시 실행 권한을 host에 유지 | Browser 검증 있음 | worker/child에 비밀 유출 없음; 실제 provider별 queue·취소·동시성 동작 확인 |

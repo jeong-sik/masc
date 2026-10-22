@@ -45,6 +45,10 @@ missing current configuration row is not an error in a valid history selection.
 The original record's run ID and detail endpoint are unchanged; the history
 filter does not derive a run ID from an Addon installation scope.
 
+Refresh still uses the existing combined `Promise.allSettled` barrier. This
+separates history availability from configuration availability; it does not
+make a slow or pending unrelated read stop delaying the refresh.
+
 Focused Dashboard verification executes the real router and components with
 mocked API responses, plus the strict API decoder suite. It is not an actual
 server/browser session. The initial eight internal-agents fixture failures

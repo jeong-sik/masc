@@ -3,6 +3,28 @@ let maximum ~count ~height = Int.max 0 (count - height)
 let normalize ~count ~height scroll =
   Int.max 0 (Int.min scroll (maximum ~count ~height))
 
+module Position = struct
+  type t = Offset of int | End
+  type movement = First | Last | By of int
+  let first = Offset 0
+  let at value = Offset (max 0 value)
+  let offset ~count ~height = function
+    | Offset value -> normalize ~count ~height value
+    | End -> maximum ~count ~height
+  let clamp ~count ~height = function
+    | Offset value -> Offset (normalize ~count ~height value)
+    | End -> End
+  let move ~count ~height movement position = match movement with
+    | First -> first
+    | Last -> End
+    | By delta ->
+        let current = offset ~count ~height position in
+        Offset (if delta > 0 then
+          min (maximum ~count ~height)
+            (current + min delta (max_int - current))
+        else max 0 (current + delta))
+end
+
 let down ~count ~height scroll =
   Int.min (maximum ~count ~height) (normalize ~count ~height scroll + 1)
 

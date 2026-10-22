@@ -22,7 +22,7 @@ let reconcile state =
       state.resource_revision_history <- [];
       state.resource_content <- None;
       state.resource_content_error <- None;
-      state.resource_scroll <- 0;
+      state.resource_scroll <- Masc_tui_scroll.Position.first;
       state.resource_search_cursor <- 0;
       state.resource_text_cursor <- 0;
       state.resource_image_cursor <- 0;
@@ -87,7 +87,7 @@ let toggle_today state ~now =
   select_scope state state.resource_scope
 
 let reset_document_position state =
-  state.resource_scroll <- 0;
+  state.resource_scroll <- Masc_tui_scroll.Position.first;
   state.resource_search_cursor <- 0
 
 let toggle_layout state =
@@ -140,7 +140,7 @@ let step_revision state ~direction ~read =
 let place_search_match state ~count ~index =
   if state.resource_focus = Right_pane && index >= 0 && index < count then begin
     state.resource_search_cursor <- index;
-    state.resource_scroll <- index
+    state.resource_scroll <- Masc_tui_scroll.Position.at index
   end
 
 let step_text_part state ~delta =

@@ -4469,10 +4469,10 @@ let test_resource_scroll_accepts_the_rendered_clamp () =
   let state =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
-  state.resource_scroll <- 42;
-  Tui_types.apply_clamped_scroll state (Tui_types.Resource_scroll 5);
+  state.resource_scroll <- Masc_tui_scroll.Position.at 42;
+  Tui_types.apply_clamped_scroll state (Tui_types.Resource_scroll (Masc_tui_scroll.Position.at 5));
   check int "requested scroll is normalized to the drawn row" 5
-    state.resource_scroll
+    (Masc_tui_scroll.Position.offset ~count:50 ~height:1 state.resource_scroll)
 ;;
 
 let test_approval_detail_scroll_accepts_the_rendered_clamp () =

@@ -836,13 +836,13 @@ let test_unsent_resource_and_log_intents_survive_reconfirmation () =
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match_unconfirmed "health failed";
   state.resource_content <- Some (Masc_tui_resource_catalog.Mcp_uri "masc://old", []);
-  state.resource_scroll <- 12;
+  state.resource_scroll <- Masc_tui_scroll.Position.at 12;
   retain_resource_read state ~key:(Masc_tui_resource_catalog.Mcp_uri "masc://new");
   retain_sandbox_log_read state ~keeper_name:"selected-keeper";
   Alcotest.(check bool) "intent does not authorize network reads" false
     (server_authority_ready state);
   Alcotest.(check bool) "new selection cannot display old resource" true
-    (state.resource_content = None && state.resource_scroll = 0);
+    (state.resource_content = None && Masc_tui_scroll.Position.offset ~count:40 ~height:1 state.resource_scroll = 0);
   suspend_workspace_readings state;
   state.workspace_identity <- Workspace_identity_match;
   Alcotest.(check (option (of_pp (fun fmt _ -> Format.pp_print_string fmt "resource key")))) "resource recovery selects the unsent URI"

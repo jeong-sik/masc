@@ -239,7 +239,7 @@ let test_response_intent_keeps_source_and_candidate_after_restart () = with_root
         recovery=Agent_core.Agent.Retire}}) |> store_ok;
     let waiting=Execution.input_wait ~checkpoint:original ~pending |> string_ok in
     ignore (Store.defer_direct_input_wait store ~now:15. ~operation_id:operation.operation_id ~execution_digest:operation.execution_digest ~waiting |> store_ok);
-    let intent=Execution.input_response_intent ~waiting ~source ~candidate ~response:Agent_core.Hooks.Declined |> string_ok in
+    let intent=Execution.input_response_intent ~destination:Execution.Canonical_input ~waiting ~source ~candidate ~response:Agent_core.Hooks.Declined |> string_ok in
     Store.prepare_direct_input_response store ~now:16. ~operation_id:operation.operation_id ~execution_digest:operation.execution_digest ~intent |> store_ok;
     operation.operation_id) in
   (* Sweep observes actual reopened SQLite facts; these files test retention,

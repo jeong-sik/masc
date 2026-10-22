@@ -217,7 +217,7 @@ let response_checkpoint turn bytes = Keeper_checkpoint_ref.create ~trace_id:owne
   |> function Ok reference -> reference | Error _ -> fail "invalid response reference"
 let response_source=response_checkpoint 3 "canonical extended original history"
 let response_candidate=response_checkpoint 3 "frozen consumed response"
-let response_intent = Semantic.input_response_intent ~waiting ~source:response_source
+let response_intent = Semantic.input_response_intent ~destination:Semantic.Canonical_input ~waiting ~source:response_source
   ~candidate:response_candidate ~response:(Agent_core.Hooks.Answer (`Assoc ["z",`Int 2;"choice",`String "original"])) |> value
 let prepare store operation intent = Store.prepare_direct_input_response store ~now:7. ~operation_id:original
   ~execution_digest:operation.Operation.execution_digest ~intent
@@ -259,7 +259,7 @@ let test_intent_survives_restart_without_resuming () = with_path @@ fun path ->
     check bool "original wait remains the pending authority" true (names owned (Semantic.continuation_checkpoints execution)))
 let test_intent_conflicts_and_newer_input_preserve_facts () = with_path @@ fun path -> with_store path @@ fun store ->
   let operation=stage_wait store in prepare store operation response_intent |> ok;
-  let changed ~waiting ~source ~candidate ~response = Semantic.input_response_intent ~waiting ~source ~candidate ~response |> value in
+  let changed ~waiting ~source ~candidate ~response = Semantic.input_response_intent ~destination:Semantic.Canonical_input ~waiting ~source ~candidate ~response |> value in
   let forged_wait=Semantic.input_wait ~checkpoint:owned ~pending:{pending with request={pending.request with question="another original question"}} |> value in
   List.iter (fun different -> rejected (prepare store operation different)) [
     changed ~waiting ~source:response_source ~candidate:response_candidate ~response:Agent_core.Hooks.Timeout;
@@ -324,7 +324,7 @@ let test_intent_strict_codec_and_reference_domain () = with_path @@ fun path -> 
   let fact=List.assoc "input_response_intent" (fields encoded) in
   let malformed_response response=replace "input_response_intent" (replace "response" response fact) encoded in
   let other_wait=Semantic.input_wait ~checkpoint:owned ~pending:{pending with run_id="other-run"} |> value in
-  let other_fact=Semantic.input_response_intent ~waiting:other_wait ~source:response_source ~candidate:response_candidate
+  let other_fact=Semantic.input_response_intent ~destination:Semantic.Canonical_input ~waiting:other_wait ~source:response_source ~candidate:response_candidate
       ~response:Agent_core.Hooks.Declined |> value in
   (* Strict persisted facts cannot be attached to a different wait or phase. *)
   let mutated_wait=replace "pending" (Agent_core.Agent_input_request.pending_to_json other_fact.waiting.pending)
@@ -341,7 +341,7 @@ let test_intent_strict_codec_and_reference_domain () = with_path @@ fun path -> 
     replace "input_response_intent" (replace "waiting" mutated_wait fact) encoded;
     replace "phase" (`Assoc ["kind",`String "ready"]) encoded];
   List.iter (fun response ->
-    let intent=Semantic.input_response_intent ~waiting ~source:response_source ~candidate:response_candidate ~response |> value in
+    let intent=Semantic.input_response_intent ~destination:Semantic.Canonical_input ~waiting ~source:response_source ~candidate:response_candidate ~response |> value in
     let unprepared=Semantic.of_json (`Assoc (List.remove_assoc "input_response_intent" (fields encoded)))
       |> Result.map_error Semantic.error_to_string |> value in
     let prepared=Semantic.apply ~now:7. (Semantic.Prepare_input_response intent) unprepared
@@ -352,7 +352,7 @@ let test_intent_strict_codec_and_reference_domain () = with_path @@ fun path -> 
     [Agent_core.Hooks.Answer (`Assoc ["choice",`String "yes"]);Agent_core.Hooks.Declined;Agent_core.Hooks.Timeout];
   let foreign=Keeper_checkpoint_ref.create ~trace_id:(Keeper_id.Trace_id.of_string "foreign-trace" |> value)
       ~turn_count:3 ~canonical_checkpoint_bytes:"foreign candidate" |> Result.get_ok in
-  List.iter (fun (source,candidate) -> rejected (Semantic.input_response_intent ~waiting ~source ~candidate ~response:Agent_core.Hooks.Declined))
+  List.iter (fun (source,candidate) -> rejected (Semantic.input_response_intent ~destination:Semantic.Canonical_input ~waiting ~source ~candidate ~response:Agent_core.Hooks.Declined))
     [response_source,foreign;response_source,response_source;response_source,owned;
      response_checkpoint 1 "regressed source",response_checkpoint 1 "regressed candidate";
      response_source,response_checkpoint 4 "response changed model turn"]
@@ -367,7 +367,10 @@ let roundtrip execution = Semantic.of_json (Semantic.to_json execution)
 let branch_of execution = match execution.Semantic.input_branch with
   | Some branch -> branch | None -> fail "operation lost its independent input branch"
 let staged_branch store =
-  let operation=stage_wait store in prepare store operation response_intent |> ok;
+  let operation=stage_wait store in
+  let intent=Semantic.input_response_intent ~waiting ~source:response_intent.source ~candidate:response_intent.candidate
+    ~response:response_intent.response ~destination:Semantic.Operation_input |> value in
+  prepare store operation intent |> ok;
   operation,transition (Semantic.Resolve_input_branch {observed=waiting;checkpoint=response_candidate}) (semantic store)
 let check_branch_root execution =
   check bool "first full wait remains the immutable branch origin" true
@@ -429,7 +432,7 @@ let test_branch_native_cas_and_second_response () = with_path @@ fun path -> wit
   let second_wait=Semantic.input_wait ~checkpoint:second_checkpoint ~pending:second_pending |> value in
   let waiting_again=transition (Semantic.Suspend_input second_wait) terminal |> roundtrip in
   let second_candidate=response_checkpoint 4 "second consumed response" in
-  let intent=Semantic.input_response_intent ~waiting:second_wait ~source:second_checkpoint
+  let intent=Semantic.input_response_intent ~destination:Semantic.Operation_input ~waiting:second_wait ~source:second_checkpoint
     ~candidate:second_candidate ~response:Agent_core.Hooks.Timeout |> value in
   let prepared=transition (Semantic.Prepare_input_response intent) waiting_again |> roundtrip in
   rejected (Semantic.apply ~now:24. (Semantic.Resolve_input {observed=second_wait;checkpoint=second_candidate}) prepared);
@@ -515,8 +518,105 @@ let test_branch_settlement_releases_only_branch_evidence () = with_path @@ fun p
   check bool "unknown native effect still retains exact checkpoint" true
     (names response_candidate (Semantic.checkpoint_references failed))
 
+let branch_intent () = Semantic.input_response_intent ~waiting ~source:response_source ~candidate:response_candidate
+  ~response:response_intent.response ~destination:Semantic.Operation_input |> value
+let actual_global store reference = check bool "independent global input remains unchanged" true
+  (Store.input_checkpoint store ~trace_id:owned.trace_id |> ok=Store.Input_observed reference)
+let branch_reference store = Store.direct_input_branch store ~operation_id:original |> ok
+let prepare_branch_with_newer_input store =
+  let operation=stage_wait store in prepare store operation response_intent |> ok;
+  let newer=response_checkpoint 4 "independent newer global input" in
+  ignore (Store.update_input_checkpoint store ~observed:(Some owned) ~checkpoint:newer |> ok);
+  operation,newer
+let test_branch_store_promotes_exact_intent_and_pins_after_resume () = with_path @@ fun path ->
+  let newer=with_store path (fun store ->
+    let operation,newer=prepare_branch_with_newer_input store in
+    let before=(semantic store).revision in
+    let branched=branch_intent () in prepare store operation branched |> ok;
+    check bool "stored intent has operation destination" true
+      (Option.equal Semantic.equal_input_response_intent (Some branched) (intent store));
+    check int64 "promotion commits a new revision" (Int64.succ before) (semantic store).revision;
+    prepare store operation branched |> ok;
+    check int64 "same intent preparation is idempotent" (Int64.succ before) (semantic store).revision;
+    rejected (prepare store operation response_intent);
+    let changed=Semantic.input_response_intent ~waiting ~source:response_source ~candidate:response_candidate
+      ~response:Agent_core.Hooks.Timeout ~destination:Semantic.Operation_input |> value in
+    rejected (prepare store operation changed);
+    actual_global store newer;
+    respond store operation waiting response_candidate |> ok;
+    check bool "response creates actual stored branch" true
+      (Option.fold ~none:false ~some:(fun (branch:Semantic.input_branch) -> Semantic.equal_input_wait branch.origin waiting
+        && Keeper_checkpoint_ref.equal branch.checkpoint response_candidate) (branch_reference store));
+    check bool "branch response consumes prepared intent" true (intent store=None);
+    let claimed=Store.claim_next store ~now:9. |> ok |> Option.get in
+    check bool "primitive preserves original operation identity" true (Operation.Operation_id.equal claimed.operation_id original);
+    Store.resume_direct_checkpoint store ~now:10. ~operation_id:original ~observed:(Semantic.Agent_core response_candidate) |> ok;
+    List.iter (fun reference -> check bool "branch pins survive actual SQLite resume transaction" true
+      (names reference (Semantic.checkpoint_references (semantic store)))) [owned;response_candidate];
+    actual_global store newer;newer) in
+  with_store path (fun store ->
+    actual_global store newer;
+    check bool "branch survives actual SQLite close/reopen" true (Option.is_some (branch_reference store));
+    List.iter (fun reference -> check bool "restored running branch pins original evidence" true
+      (names reference (Semantic.checkpoint_references (semantic store)))) [owned;response_candidate])
+let test_branch_store_promotion_commit_uncertainty after_commit () = with_path @@ fun path ->
+  let newer=with_store path (fun store ->
+    let operation,newer=prepare_branch_with_newer_input store in
+    ignore (Store.take_released_checkpoints store);
+    Store.For_testing.fail_next_commit (if after_commit then Fail_after_commit else Fail_before_commit);
+    (match prepare store operation (branch_intent ()) with
+     | Error (Store.Store_unavailable _) -> () | Error _ | Ok () -> fail "uncertain promotion was acknowledged");
+    Store.For_testing.clear_commit_fault ();
+    let recorded=intent store |> Option.get in
+    check bool "destination reflects actual promotion commit" after_commit (recorded.destination=Semantic.Operation_input);
+    check int "uncertain promotion emits no cleanup authority" 0 (List.length (Store.take_released_checkpoints store));
+    actual_global store newer;newer) in
+  with_store path (fun store ->
+    actual_global store newer;check_wait store;
+    let recorded=intent store |> Option.get in
+    check bool "promotion commit survives actual reopen" after_commit (recorded.destination=Semantic.Operation_input);
+    check bool "promotion alone never makes wait claimable" false (Store.has_claimable_queued store ~now:20. |> ok))
+let test_branch_store_resolution_commit_uncertainty after_commit () = with_path @@ fun path ->
+  let newer=with_store path (fun store ->
+    let operation,newer=prepare_branch_with_newer_input store in prepare store operation (branch_intent ()) |> ok;
+    ignore (Store.take_released_checkpoints store);
+    Store.For_testing.fail_next_commit (if after_commit then Fail_after_commit else Fail_before_commit);
+    (match respond store operation waiting response_candidate with
+     | Error (Store.Store_unavailable _) -> () | Error _ | Ok () -> fail "uncertain branch resolution was acknowledged");
+    Store.For_testing.clear_commit_fault ();
+    check bool "branch reflects actual resolution commit" after_commit (Option.is_some (branch_reference store));
+    check int "uncertain branch resolution emits no cleanup authority" 0 (List.length (Store.take_released_checkpoints store));
+    actual_global store newer;newer) in
+  with_store path (fun store ->
+    actual_global store newer;
+    check bool "branch actual commit survives reopen" after_commit (Option.is_some (branch_reference store));
+    check bool "wait consumption follows actual branch commit" after_commit (wait store=None);
+    check bool "primitive claimability follows actual branch commit" after_commit (Store.has_claimable_queued store ~now:20. |> ok))
+let test_branch_destination_codec_and_direction () = with_path @@ fun path -> with_store path @@ fun store ->
+  let operation=stage_wait store in prepare store operation response_intent |> ok;
+  let json=Semantic.to_json (semantic store) in
+  let fields=function `Assoc fields -> fields | _ -> fail "expected object" in
+  let fact=List.assoc "input_response_intent" (fields json) in
+  let replace name value fields = (name,value)::List.remove_assoc name fields in
+  List.iter (fun destination ->
+    let malformed=`Assoc (replace "input_response_intent" (`Assoc (replace "destination" destination (fields fact))) (fields json)) in
+    rejected (Semantic.of_json malformed)) [`Null;`String "unknown";`Bool true];
+  rejected (Semantic.of_json (`Assoc (replace "input_response_intent" (`Assoc (List.remove_assoc "destination" (fields fact))) (fields json))));
+  let branched=branch_intent () in
+  check bool "strict intent equality includes destination" false (Semantic.equal_input_response_intent response_intent branched);
+  check bool "same payload can advance only towards operation branch" true
+    (Semantic.continues_input_response_intent ~previous:response_intent ~next:branched);
+  check bool "operation input can never reattach" false
+    (Semantic.continues_input_response_intent ~previous:branched ~next:response_intent)
+
 let () = run "durable original input wait"
   ["store",[
+    test_case "branch Store promotion and resume preserve independent input" `Quick test_branch_store_promotes_exact_intent_and_pins_after_resume;
+    test_case "branch promotion precommit failure preserves canonical intent" `Quick (test_branch_store_promotion_commit_uncertainty false);
+    test_case "uncertain committed branch promotion survives reopen" `Quick (test_branch_store_promotion_commit_uncertainty true);
+    test_case "branch resolution precommit failure preserves blocked wait" `Quick (test_branch_store_resolution_commit_uncertainty false);
+    test_case "uncertain committed branch resolution survives reopen" `Quick (test_branch_store_resolution_commit_uncertainty true);
+    test_case "branch destination codec and promotion are strict" `Quick test_branch_destination_codec_and_direction;
     test_case "branch pins survive consumed continuation and reconciliation" `Quick test_branch_pins_after_consuming_continuation;
     test_case "branch native CAS and repeated input preserve original lineage" `Quick test_branch_native_cas_and_second_response;
     test_case "resumed runtime and Gate keep admission while branch input advances" `Quick test_branch_resumed_retry_and_gate_allow_new_input;

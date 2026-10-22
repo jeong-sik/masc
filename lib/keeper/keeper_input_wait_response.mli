@@ -45,6 +45,7 @@ type installation_error =
       }
 val authorize : session_root:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   waiting:Keeper_semantic_execution.input_wait ->
+  destination:Keeper_semantic_execution.input_response_destination ->
   recorded:Keeper_semantic_execution.input_response_intent option -> authority
 (** A caller-created authority cannot match the one captured by its Owner. *)
 val waiting : authority -> Keeper_semantic_execution.input_wait
@@ -54,13 +55,19 @@ val prepare_installation : net:Eio_context.eio_net -> authority:authority ->
     using Core, and freshly confirm durable retention of BOTH S and C before any
     canonical change. A recorded intent requires the same response and exact
     retained W/S/C, including rederivation of C. Only canonical S or recorded C
-    can be the predecessor. Reads alone grant no installation receipt. *)
+    can be the predecessor for Canonical_input. Operation_input derives from
+    exact retained W (or recorded S), preserves canonical G without borrowing
+    its history, and freshly confirms retained S/C. A recorded canonical intent
+    can only be promoted with identical W/S/C/response. Reads alone grant no
+    installation receipt. *)
 val planned_intent : plan -> Keeper_semantic_execution.input_response_intent
 val plan_belongs_to : plan -> authority -> bool
 val install : plan -> (receipt, installation_error) result
 (** The original Owner must first durably record this plan's exact intent under
     its same exclusive child. Install exact S->C, or recorded-intent-proven C->C
     through a fresh durable write, under the captured canonical predecessor CAS.
+    Operation_input instead freshly confirms retained C, without reading or
+    writing the canonical checkpoint; its receipt retains that destination.
     Filesystem and SQLite commits are separate; no failure mints a receipt or
     automatic retry authority. A caller-made authority cannot match its Owner. *)
 val installed_intent : receipt -> Keeper_semantic_execution.input_response_intent

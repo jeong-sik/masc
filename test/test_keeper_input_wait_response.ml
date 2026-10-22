@@ -178,7 +178,7 @@ let test_install_refuses_stale_nonhistory () =
   let retained=exact checkpoint in
   let reference=Store.exact_snapshot_reference retained in
   let waiting=Keeper_semantic_execution.input_wait ~checkpoint:reference ~pending:owned |> Result.get_ok in
-  let authority=Response.authorize ~session_root:root ~operation_id ~waiting ~recorded:None in
+  let authority=Response.authorize ~session_root:root ~operation_id ~waiting ~destination:Keeper_semantic_execution.Canonical_input ~recorded:None in
   let session_dir=Filename.concat root checkpoint.session_id in
   Fs_compat.mkdir_p session_dir;
   ignore (Store.retain_exact_snapshot ~session_dir retained |> Store.require_confirmed_installation |> Result.get_ok);
@@ -234,7 +234,7 @@ let test_install_refuses_stale_nonhistory () =
   check bool "physical Answer keeps original working context tools and MCP" true
     (consumed.working_context=checkpoint.working_context && consumed.tools=checkpoint.tools
       && consumed.mcp_sessions=checkpoint.mcp_sessions);
-  let fresh=Response.authorize ~session_root:root ~operation_id ~waiting ~recorded:(Some intent) in
+  let fresh=Response.authorize ~session_root:root ~operation_id ~waiting ~destination:Keeper_semantic_execution.Canonical_input ~recorded:(Some intent) in
   check bool "old receipt cannot become fresh authority" false (Response.belongs_to receipt fresh);
   (match Response.prepare_installation ~net:env#net ~authority:fresh ~response:Core.Hooks.Timeout with
    | Error (Response.Invalid_response _) -> () | Error _ | Ok _ -> fail "recovery changed recorded response");
@@ -258,9 +258,171 @@ let test_install_refuses_stale_nonhistory () =
   check bool "fresh confirmed rewrite belongs only to fresh authority" true (Response.belongs_to receipt fresh);
   check bool "recovery installs the exact recorded candidate" true (Keeper_checkpoint_ref.equal intent.candidate (Response.installed_checkpoint receipt))
 
+(* Actual physical files, SQLite and an independently executing Owner child
+   publishing G through the real Producer. This does not dispatch the original
+   native continuation; the public Owner response remains guarded until that
+   whole branch path is connected. *)
+let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+  let root=Filename.temp_dir "branch-response-producer-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) @@ fun () ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;Fs_compat.set_fs env#fs;
+  ignore (Server_startup_state.mark_state_ready ());
+  let module Journal=Keeper_chat_operation_store in
+  let module Semantic=Keeper_semantic_execution in
+  let module Native=Keeper_native_call in
+  let value=function Ok value -> value | Error detail -> fail detail in
+  let journal_ok result=Result.map_error Journal.error_to_string result |> value in
+  let physical result=Result.map_error Response.installation_error_to_string result |> value in
+  let workspace=Workspace.default_config root in
+  ignore (Workspace.init workspace ~agent_name:(Some "branch-response-test"));
+  let owned=pending ~run_id:"original-branch-run" ~request_id:"original-branch-question" in
+  let original=source_checkpoint owned in
+  let keeper_name=original.agent_name in
+  let meta=Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String keeper_name;
+    "trace_id",`String original.session_id;"activation_mode",`String "manual"]) |> value in
+  Keeper_meta_store.replace_snapshot workspace meta |> value;
+  let operation_id=Keeper_chat_operation.Operation_id.of_string "original-branch-response" |> value in
+  let frame=Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+    (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation operation_id)) |> Result.get_ok in
+  Keeper_repetition_context.save original.context frame;
+  let session_dir=Keeper_types_support.keeper_session_dir workspace original.session_id in
+  Fs_compat.mkdir_p session_dir;
+  let canonical=Store.agent_core_checkpoint_path ~session_dir ~session_id:original.session_id in
+  let save checkpoint = match Store.save_agent_core_classified ~session_dir ~history_retained:0 checkpoint with
+    | Ok (Store.Saved _) -> () | Ok (Stale_noop _) | Error _ -> fail "physical canonical fixture was not installed" in
+  let reference=Store.retain_exact_snapshot ~session_dir (exact original)
+    |> Store.require_confirmed_installation |> Result.get_ok in
+  save original;
+  let waiting=Semantic.input_wait ~checkpoint:reference ~pending:owned |> value in
+  let path=Journal.path_for_keeper ~keepers_runtime_dir:(Workspace.keepers_runtime_dir workspace) ~keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let with_journal f =
+    let journal=Journal.open_or_create ~path |> journal_ok in
+    Fun.protect ~finally:(fun () -> Journal.For_testing.clear_commit_fault ();Journal.close journal |> journal_ok)
+      (fun () -> f journal) in
+  let operation,recorded,old_receipt=with_journal (fun journal ->
+    Journal.submit journal ~now:1. ~operation_id ~source:(`Assoc []) ~input:(`String "original invocation") |> journal_ok |> ignore;
+    let operation=Journal.claim_next journal ~now:2. |> journal_ok |> Option.get in
+    let call_id="019a0010-1000-7000-8000-000000000051" in
+    let locator=Core.Agent.execution_locator_of_yojson (`Assoc ["version",`Int 1;"run_id",`String "execution-run-original-branch-response"]) |> value in
+    let call=Native.create ~call_id ~runtime_id:"native.primary" ~operation_digest:operation.execution_digest
+      ~api:Native.Continue_from_checkpoint ~seed_checkpoint:reference ~locator |> value in
+    Journal.update_direct_native_call journal ~now:3. ~operation_id ~execution_digest:operation.execution_digest
+      (Native.Bind {observed=Native.No_native_call;call}) |> journal_ok;
+    Journal.update_direct_input_checkpoint journal ~now:4. ~operation_id ~execution_digest:operation.execution_digest
+      ~call_id ~observed:reference ~observed_input:None ~checkpoint:reference |> journal_ok |> ignore;
+    Journal.update_direct_native_call journal ~now:5. ~operation_id ~execution_digest:operation.execution_digest
+      (Native.Terminal {call_id;disposition={Core.Agent.outcome=Core.Agent.Terminal_succeeded;recovery=Core.Agent.Retire}}) |> journal_ok;
+    Journal.defer_direct_input_wait journal ~now:6. ~operation_id ~execution_digest:operation.execution_digest ~waiting |> journal_ok |> ignore;
+    if not canonical_intent then operation,None,None else
+    let source={original with Core.Checkpoint.messages=original.messages @ [Core.Types.assistant_msg "original operation later source"]} in
+    save source;
+    let authority=Response.authorize ~session_root:(Filename.dirname session_dir) ~operation_id ~waiting
+      ~destination:Semantic.Canonical_input ~recorded:None in
+    let plan=Response.prepare_installation ~net:env#net ~authority ~response:Core.Hooks.Declined |> physical in
+    let intent=Response.planned_intent plan in
+    Journal.prepare_direct_input_response journal ~now:7. ~operation_id ~execution_digest:operation.execution_digest ~intent |> journal_ok;
+    let receipt=Response.install plan |> physical in
+    operation,Some intent,Some receipt) in
+  let newer_pending=pending ~run_id:"independent-global-run" ~request_id:"independent-global-question" in
+  let newer_pending={newer_pending with request={newer_pending.request with question="Independent global question?"}} in
+  let context=Core.Context.copy original.context in
+  Core.Context.set context "independent-global-context" (`String "preserve this context");
+  let independent=Keeper_execution_scope_id.autonomous_admission
+    (Uuidm.of_string "00000000-0000-4000-8000-000000000009" |> Option.get) in
+  let frame=Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+    (Keeper_repetition_snapshot.Fresh independent) |> Result.get_ok in
+  Keeper_repetition_context.save context frame;
+  let newer={original with Core.Checkpoint.context;turn_count=original.turn_count+1;
+    messages=original.messages @ [Core.Types.assistant_msg "independent later history"];
+    pending_input=Some newer_pending;working_context=Some (`Assoc ["independent",`Bool true])} in
+  let newer_snapshot=exact newer in
+  let g=Store.exact_snapshot_reference newer_snapshot in
+  let g_payload_bytes=Store.exact_snapshot_canonical_bytes newer_snapshot in
+  Eio.Switch.run (fun owner_sw ->
+    Keeper_owner_registry.install_from_store ~sw:owner_sw ~operation_runner:None ~on_turn_slot_released:None workspace |> prepared |> ignore;
+    let owner=Keeper_owner_registry.get ~base_path:root ~keeper_name |> prepared in
+    (match Keeper_owner.run_autonomous_if_idle owner (fun () ->
+       let producer=Keeper_input_checkpoint_producer.prepare ~base_path:root ~keeper_name ~session_dir
+         ~trace_id:meta.runtime.trace_id ~source:(Some original) |> prepared in
+       ignore (Keeper_input_checkpoint_producer.publish_autonomous producer newer |> prepared);
+       save newer) with
+     | Ok (`Ran ()) -> () | Ok (`Busy _ | `Interrupted) | Error _ -> fail "independent Producer did not publish G");
+    (* Do not expose a successful response before the native branch path exists. *)
+    (match Keeper_owner.respond_direct_input_wait owner ~net:env#net ~operation_id ~observed:waiting ~response:Core.Hooks.Declined with
+     | Error (Keeper_owner.Response_owner_error (Keeper_owner.Operation_rejected (Journal.Invalid_input _))) -> ()
+     | Error _ | Ok _ -> fail "public Owner accepted an unsupported branch continuation");
+    check bool "guard preserves the original exact waiting operation" true
+      (Option.equal Semantic.equal_input_wait (Some waiting) (Keeper_owner.direct_input_wait owner ~operation_id |> prepared));
+    ignore (Keeper_owner.begin_stopping owner |> prepared));
+  let g_bytes=Fs_compat.load_file canonical in
+  let authority=Response.authorize ~session_root:(Filename.dirname session_dir) ~operation_id ~waiting
+    ~destination:Semantic.Operation_input ~recorded in
+  let plan=Response.prepare_installation ~net:env#net ~authority ~response:Core.Hooks.Declined |> physical in
+  let branched=Response.planned_intent plan in
+  (match recorded with
+   | None -> check bool "fresh branch derives from exact retained W" true (Keeper_checkpoint_ref.equal reference branched.source)
+   | Some prior ->
+     check bool "promotion preserves original source and consumed candidate" true
+       (Semantic.continues_input_response_intent ~previous:prior ~next:branched
+         && Keeper_checkpoint_ref.equal prior.candidate branched.candidate));
+  let check_g journal =
+    check string "operation branch never rewrites canonical G" g_bytes (Fs_compat.load_file canonical);
+    check bool "operation branch never replaces global input G" true
+      (Journal.input_checkpoint journal ~trace_id:meta.runtime.trace_id |> journal_ok=Journal.Input_observed g);
+    let retained=Store.load_retained_exact_snapshot ~session_dir ~reference:g |> Result.get_ok in
+    check bool "G keeps other pending context and complete bytes" true
+      (Store.exact_snapshot_canonical_bytes retained=g_payload_bytes) in
+  with_journal (fun journal ->
+    Journal.prepare_direct_input_response journal ~now:8. ~operation_id ~execution_digest:operation.execution_digest ~intent:branched |> journal_ok;
+    let actual=Journal.direct_input_response_intent journal ~operation_id |> journal_ok |> Option.get in
+    Option.iter (fun receipt -> check bool "old canonical receipt cannot match promoted destination" false
+      (Semantic.equal_input_response_intent actual (Response.installed_intent receipt))) old_receipt;
+    let receipt=Response.install plan |> physical in
+    check bool "fresh branch receipt stays bound to its captured authority" true (Response.belongs_to receipt authority);
+    (match fault with None -> () | Some fault -> Journal.For_testing.fail_next_commit fault);
+    let result=Journal.resolve_direct_input_wait journal ~now:9. ~operation_id ~execution_digest:operation.execution_digest
+      ~observed:waiting ~checkpoint:(Response.installed_checkpoint receipt) in
+    (match fault,result with
+     | None,Ok () -> () | Some _,Error (Journal.Store_unavailable _) -> ()
+     | (Some _ | None),(Ok () | Error _) -> fail "branch resolution did not preserve actual commit uncertainty");
+    Journal.For_testing.clear_commit_fault ();check_g journal);
+  with_journal (fun journal ->
+    check_g journal;
+    let remaining=Journal.direct_input_wait journal ~operation_id |> journal_ok in
+    (match remaining with
+     | None -> ()
+     | Some waiting ->
+       let recorded=Journal.direct_input_response_intent journal ~operation_id |> journal_ok in
+       let fresh=Response.authorize ~session_root:(Filename.dirname session_dir) ~operation_id ~waiting
+         ~destination:Semantic.Operation_input ~recorded in
+       let plan=Response.prepare_installation ~net:env#net ~authority:fresh ~response:Core.Hooks.Declined |> physical in
+       let receipt=Response.install plan |> physical in
+       Journal.resolve_direct_input_wait journal ~now:10. ~operation_id ~execution_digest:operation.execution_digest
+         ~observed:waiting ~checkpoint:(Response.installed_checkpoint receipt) |> journal_ok);
+    let branch=Journal.direct_input_branch journal ~operation_id |> journal_ok |> Option.get in
+    check bool "reopened branch preserves exact original wait and consumed C" true
+      (Semantic.equal_input_wait branch.origin waiting && Keeper_checkpoint_ref.equal branch.checkpoint branched.candidate);
+    (match Journal.resolve_direct_input_wait journal ~now:11. ~operation_id ~execution_digest:operation.execution_digest
+        ~observed:waiting ~checkpoint:branched.candidate with
+     | Error _ -> () | Ok () -> fail "duplicate branch response was accepted");
+    check_g journal)
+
 let () =
   run "Keeper stored input response"
-    [ "physical response ownership",
+    [ "independent branch response primitives",
+      [test_case "fresh response preserves actual Producer G and other pending" `Quick
+         (test_operation_response_preserves_producer_g ~canonical_intent:false ~fault:None);
+       test_case "canonical intent promotes with same consumed C after actual Producer G" `Quick
+         (test_operation_response_preserves_producer_g ~canonical_intent:true ~fault:None);
+       test_case "branch precommit failure reopens exact physical intent" `Quick
+         (test_operation_response_preserves_producer_g ~canonical_intent:true ~fault:(Some Keeper_chat_operation_store.For_testing.Fail_before_commit));
+       test_case "uncertain committed branch response preserves actual G after reopen" `Quick
+         (test_operation_response_preserves_producer_g ~canonical_intent:true ~fault:(Some Keeper_chat_operation_store.For_testing.Fail_after_commit))];
+      "physical response ownership",
       [test_case "same pending cannot discard retained context working-context tools MCP or turn" `Quick test_install_refuses_stale_nonhistory];
       "autonomous input ownership",
       [test_case "consumed answer lineage survives settlement and rejects stale sources" `Quick

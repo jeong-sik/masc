@@ -74,11 +74,13 @@ val equal_input_wait : input_wait -> input_wait -> bool
 (** Exact owned input and complete canonical request. The serialized request is
     validated; this value alone is not filesystem or response authority. The
     Owner must read and compare its exact retained payload before admission. *)
+type input_response_destination = Canonical_input | Operation_input
 type input_response_intent = private
   { waiting : input_wait
   ; source : Keeper_checkpoint_ref.t
   ; candidate : Keeper_checkpoint_ref.t
-  ; response : Agent_core.Hooks.elicitation_response }
+  ; response : Agent_core.Hooks.elicitation_response
+  ; destination : input_response_destination }
 val canonical_input_response : Agent_core.Hooks.elicitation_response ->
   (Agent_core.Hooks.elicitation_response, string) result
 (** Canonicalize Answer JSON recursively before deriving a physical candidate
@@ -86,6 +88,7 @@ val canonical_input_response : Agent_core.Hooks.elicitation_response ->
     Declined and Timeout remain distinct responses. *)
 val input_response_intent : waiting:input_wait -> source:Keeper_checkpoint_ref.t ->
   candidate:Keeper_checkpoint_ref.t -> response:Agent_core.Hooks.elicitation_response ->
+  destination:input_response_destination ->
   (input_response_intent, string) result
 val equal_input_response_intent : input_response_intent -> input_response_intent -> bool
 (** The original complete wait, canonical source and frozen consumed candidate.
@@ -93,6 +96,13 @@ val equal_input_response_intent : input_response_intent -> input_response_intent
     and the candidate preserves the source's turn. Answers are canonical JSON.
     This value validates identity structure, not physical payloads, installation,
     response acceptance or continuation authority. *)
+val continues_input_response_intent : previous:input_response_intent ->
+  next:input_response_intent -> bool
+(** Preserve the exact W/S/C and complete response. The destination can stay
+    unchanged or advance from Canonical_input to Operation_input when a newer
+    independent input must be preserved. It can never reattach a branch or
+    change any other fact. The caller must independently validate the current
+    Owner and storage destination; this comparison grants no physical authority. *)
 type input_branch = private
   { origin : input_wait
   ; checkpoint : Keeper_checkpoint_ref.t }
@@ -225,9 +235,11 @@ val apply : now:float -> action -> t -> (t, error) result
     Suspend_input acknowledges only settled Retire native evidence together
     with the wait; generic resume and successful settlement cannot consume it.
     Prepare_input_response requires the exact original direct wait and no native
-    call. It keeps that wait blocked and pins one immutable intent until exact
-    candidate resolution or cancellation/failure. Reconciliation preserves it;
-    preparing the same intent does not spend another revision.
+    call. It keeps that wait blocked and pins exact W/S/C/response until
+    candidate resolution or cancellation/failure. Only the destination may
+    advance from Canonical_input to Operation_input without changing that
+    payload. Reconciliation preserves it; preparing the same complete intent
+    does not spend another revision.
 
     [Resolve_input_branch] additionally requires that exact prepared intent's
     candidate and no native call. It atomically removes the intent, suspends on

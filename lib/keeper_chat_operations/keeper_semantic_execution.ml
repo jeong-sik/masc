@@ -168,11 +168,13 @@ let equal_input_wait left right = Keeper_checkpoint_ref.equal left.checkpoint ri
   && Yojson.Safe.equal (Agent_core.Agent_input_request.pending_to_json left.pending)
        (Agent_core.Agent_input_request.pending_to_json right.pending)
 
+type input_response_destination = Canonical_input | Operation_input
 type input_response_intent =
   { waiting : input_wait
   ; source : Keeper_checkpoint_ref.t
   ; candidate : Keeper_checkpoint_ref.t
-  ; response : Agent_core.Hooks.elicitation_response }
+  ; response : Agent_core.Hooks.elicitation_response
+  ; destination : input_response_destination }
 let canonical_input_response = function
   | Agent_core.Hooks.Answer answer ->
     Keeper_chat_operation.canonical_json answer
@@ -182,7 +184,7 @@ let canonical_input_response = function
       | Keeper_chat_operation.Non_finite_float -> "response contains a non-finite number")
   | Agent_core.Hooks.Declined -> Ok Agent_core.Hooks.Declined
   | Agent_core.Hooks.Timeout -> Ok Agent_core.Hooks.Timeout
-let input_response_intent ~(waiting : input_wait) ~source ~candidate ~response =
+let input_response_intent ~(waiting : input_wait) ~source ~candidate ~response ~destination =
   if not (Keeper_id.Trace_id.equal waiting.checkpoint.trace_id source.Keeper_checkpoint_ref.trace_id
       && Keeper_id.Trace_id.equal source.trace_id candidate.Keeper_checkpoint_ref.trace_id)
      || source.turn_count < waiting.checkpoint.turn_count
@@ -192,8 +194,8 @@ let input_response_intent ~(waiting : input_wait) ~source ~candidate ~response =
   then Error "input response intent changed trace, turn or consumed checkpoint identity"
   else
     let* response = canonical_input_response response in
-    Ok {waiting;source;candidate;response}
-let equal_input_response_intent left right =
+    Ok {waiting;source;candidate;response;destination}
+let same_input_response_payload left right =
   equal_input_wait left.waiting right.waiting
   && Keeper_checkpoint_ref.equal left.source right.source
   && Keeper_checkpoint_ref.equal left.candidate right.candidate
@@ -201,6 +203,14 @@ let equal_input_response_intent left right =
       | Agent_core.Hooks.Answer left,Agent_core.Hooks.Answer right -> Yojson.Safe.equal left right
       | Declined,Declined | Timeout,Timeout -> true
       | (Answer _ | Declined | Timeout),(Answer _ | Declined | Timeout) -> false)
+
+let equal_input_response_intent left right =
+  same_input_response_payload left right && left.destination = right.destination
+let continues_input_response_intent ~previous ~next =
+  same_input_response_payload previous next &&
+  match previous.destination,next.destination with
+  | Canonical_input,(Canonical_input | Operation_input) | Operation_input,Operation_input -> true
+  | Operation_input,Canonical_input -> false
 
 type input_branch =
   { origin : input_wait
@@ -453,7 +463,8 @@ let validate_input_branch ~id ~revision ~phase ~native_call ~intent = function
     match intent with
     | None -> Ok ()
     | Some intent ->
-      if Keeper_checkpoint_ref.equal intent.waiting.checkpoint branch.checkpoint then Ok ()
+      if intent.destination = Operation_input
+          && Keeper_checkpoint_ref.equal intent.waiting.checkpoint branch.checkpoint then Ok ()
       else Error "input branch response intent names another input head"
 
 let update_native_call ~now ~expected ~replacement current =
@@ -595,7 +606,8 @@ let apply ~now action current =
                  && Option.is_some (Scope_id.direct_operation_id current.id)
                  && Option.fold ~none:true ~some:(fun branch ->
                    Keeper_checkpoint_ref.equal branch.checkpoint waiting.checkpoint) current.input_branch
-                 && Option.fold ~none:true ~some:(equal_input_response_intent intent) current.input_response_intent ->
+                 && (Option.is_none current.input_branch || intent.destination = Operation_input)
+                 && Option.fold ~none:true ~some:(fun previous -> continues_input_response_intent ~previous ~next:intent) current.input_response_intent ->
              unchanged current.phase
            | Recovering {origin=(Input_wait _ | Unconfirmed_sources | Confirmed_undispatched
                | Checkpointed _ | Official_checkpointed _ | Interrupted_execution
@@ -611,7 +623,8 @@ let apply ~now action current =
                  && checkpoint.turn_count >= observed.checkpoint.turn_count
                  && not (Keeper_checkpoint_ref.equal checkpoint observed.checkpoint)
                  && Option.fold ~none:true
-                      ~some:(fun intent -> Keeper_checkpoint_ref.equal intent.candidate checkpoint) current.input_response_intent ->
+                      ~some:(fun intent -> intent.destination = Canonical_input
+                        && Keeper_checkpoint_ref.equal intent.candidate checkpoint) current.input_response_intent ->
              unchanged (Suspended checkpoint)
            | Recovering {origin=(Input_wait _ | Unconfirmed_sources | Confirmed_undispatched
                | Checkpointed _ | Official_checkpointed _ | Interrupted_execution
@@ -622,6 +635,7 @@ let apply ~now action current =
           (match current.phase,current.native_call,current.input_response_intent with
            | Recovering {origin=Input_wait expected;_},Keeper_native_call.No_native_call,Some intent
                when equal_input_wait observed expected && equal_input_wait observed intent.waiting
+                 && intent.destination = Operation_input
                  && Keeper_checkpoint_ref.equal checkpoint intent.candidate
                  && Option.is_some (Scope_id.direct_operation_id current.id)
                  && Option.fold ~none:true ~some:(fun branch ->
@@ -875,6 +889,7 @@ let phase_json = function
 let input_response_intent_json (intent : input_response_intent) =
   `Assoc ["waiting",recovery_origin_json (Input_wait intent.waiting);
     "source",checkpoint_json intent.source;"candidate",checkpoint_json intent.candidate;
+    "destination",`String (match intent.destination with Canonical_input -> "canonical_input" | Operation_input -> "operation_input");
     "response",(match intent.response with
       | Agent_core.Hooks.Answer value -> `Assoc ["kind",`String "answer";"value",value]
       | Agent_core.Hooks.Declined -> `Assoc ["kind",`String "declined"]
@@ -1140,7 +1155,7 @@ let phase_of_json json =
   | _ -> Error "unknown execution phase"
 
 let input_response_intent_of_json json =
-  let* fields = exact ["waiting";"source";"candidate";"response"] json in
+  let* fields = exact ["waiting";"source";"candidate";"response";"destination"] json in
   let* origin = recovery_origin_of_json (field "waiting" fields) in
   let* waiting = match origin with
     | Input_wait waiting -> Ok waiting
@@ -1157,7 +1172,11 @@ let input_response_intent_of_json json =
     | "declined" -> let* _ = exact ["kind"] response_json in Ok Agent_core.Hooks.Declined
     | "timeout" -> let* _ = exact ["kind"] response_json in Ok Agent_core.Hooks.Timeout
     | _ -> Error "unknown input response kind" in
-  input_response_intent ~waiting ~source ~candidate ~response
+  let* destination = match field "destination" fields with
+    | `String "canonical_input" -> Ok Canonical_input
+    | `String "operation_input" -> Ok Operation_input
+    | _ -> Error "unknown input response destination" in
+  input_response_intent ~waiting ~source ~candidate ~response ~destination
 
 let input_branch_of_json json =
   let* fields = exact ["origin";"checkpoint"] json in

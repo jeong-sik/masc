@@ -36,9 +36,11 @@ module Store = Keeper_checkpoint_store
 module Semantic = Keeper_semantic_execution
 let ( let* ) = Result.bind
 type authority = { session_dir:string; operation_id:Keeper_chat_operation.Operation_id.t;
-  waiting:Semantic.input_wait; recorded:Semantic.input_response_intent option }
+  waiting:Semantic.input_wait; destination:Semantic.input_response_destination;
+  recorded:Semantic.input_response_intent option }
+type installation_target = Canonical_predecessor of Keeper_checkpoint_ref.t | Branch_retention
 type plan = { authority:authority; intent:Semantic.input_response_intent;
-  predecessor:Keeper_checkpoint_ref.t; candidate:Agent_core.Checkpoint.t }
+  target:installation_target; candidate:Agent_core.Checkpoint.t }
 type receipt = { authority:authority; intent:Semantic.input_response_intent; checkpoint:Keeper_checkpoint_ref.t }
 type installation_error =
   | Invalid_response of string
@@ -50,9 +52,9 @@ type installation_error =
       { retained : Keeper_checkpoint_ref.t
       ; canonical : Keeper_checkpoint_ref.t
       }
-let authorize ~session_root ~operation_id ~(waiting:Semantic.input_wait) ~recorded =
+let authorize ~session_root ~operation_id ~(waiting:Semantic.input_wait) ~destination ~recorded =
   {session_dir=Filename.concat session_root (Keeper_id.Trace_id.to_string waiting.Semantic.checkpoint.trace_id);
-   operation_id;waiting;recorded}
+   operation_id;waiting;destination;recorded}
 let waiting (authority:authority) = authority.waiting
 let belongs_to (receipt:receipt) authority = receipt.authority == authority
 let installed_checkpoint (receipt:receipt) = receipt.checkpoint
@@ -131,45 +133,58 @@ let prepare_installation ~net ~(authority:authority) ~response =
   let* () = match authority.recorded with
     | None -> Ok ()
     | Some intent ->
-      let* supplied = Semantic.input_response_intent ~waiting ~source:intent.source ~candidate:intent.candidate ~response
+      let* supplied = Semantic.input_response_intent ~waiting ~source:intent.source ~candidate:intent.candidate ~response ~destination:authority.destination
         |> Result.map_error (fun detail -> Invalid_response detail) in
-      if Semantic.equal_input_response_intent supplied intent then Ok ()
+      if Semantic.continues_input_response_intent ~previous:intent ~next:supplied then Ok ()
       else Error (Invalid_response "another response cannot replace the original recorded intent") in
-  let* canonical = Store.load_agent_core_exact_snapshot ~session_dir:authority.session_dir
-      ~session_id:(Keeper_id.Trace_id.to_string waiting.checkpoint.trace_id)
-    |> Result.map_error (fun error -> Canonical_unavailable error) in
-  let* source = match authority.recorded with
-    | None -> Ok canonical
-    | Some intent ->
+  let* canonical = match authority.destination with
+    | Semantic.Canonical_input -> Store.load_agent_core_exact_snapshot ~session_dir:authority.session_dir
+        ~session_id:(Keeper_id.Trace_id.to_string waiting.checkpoint.trace_id)
+      |> Result.map Option.some |> Result.map_error (fun error -> Canonical_unavailable error)
+    | Operation_input -> Ok None in
+  let* source = match authority.recorded,canonical with
+    | None,Some canonical -> Ok canonical
+    | None,None -> Ok original_snapshot
+    | Some intent,(Some _ | None) ->
       if Keeper_checkpoint_ref.equal waiting.checkpoint intent.source then Ok original_snapshot
       else retained authority intent.source in
   let* () = validate_source authority original (Store.exact_snapshot_checkpoint source) in
   let response=match authority.recorded with None -> response | Some intent -> intent.response in
   let* frozen = frozen_response ~net authority source response in
   let* intent = Semantic.input_response_intent ~waiting ~source:(Store.exact_snapshot_reference source)
-      ~candidate:(Store.exact_snapshot_reference frozen) ~response
+      ~candidate:(Store.exact_snapshot_reference frozen) ~response ~destination:authority.destination
     |> Result.map_error (fun detail -> Invalid_response detail) in
   let* () = match authority.recorded with
     | None -> Ok ()
     | Some recorded ->
-      if not (Semantic.equal_input_response_intent recorded intent) then
+      if not (Semantic.continues_input_response_intent ~previous:recorded ~next:intent) then
         Error (Invalid_response "recorded response no longer derives its exact consumed candidate")
       else let* _ = retained authority recorded.candidate in Ok () in
-  let predecessor=Store.exact_snapshot_reference canonical in
-  let* () = if Keeper_checkpoint_ref.equal predecessor intent.source
-      || (Option.is_some authority.recorded && Keeper_checkpoint_ref.equal predecessor intent.candidate)
-    then Ok () else Error (Invalid_response "canonical changed outside the recorded response; reconcile its lineage") in
+  let* target = match canonical with
+    | None -> Ok Branch_retention
+    | Some canonical ->
+      let predecessor=Store.exact_snapshot_reference canonical in
+      if Keeper_checkpoint_ref.equal predecessor intent.source
+          || (Option.is_some authority.recorded && Keeper_checkpoint_ref.equal predecessor intent.candidate)
+      then Ok (Canonical_predecessor predecessor)
+      else Error (Invalid_response "canonical changed outside the recorded response; reconcile its lineage") in
   (* Source can differ from W. Keep its actual bytes before canonical mutation,
      so restart never has to infer S from C or from an original history prefix. *)
   let* _ = confirmed (Store.retain_exact_snapshot ~session_dir:authority.session_dir source) in
   let* retained_candidate = confirmed (Store.retain_exact_snapshot ~session_dir:authority.session_dir frozen) in
   let* candidate=Agent_core.Checkpoint.of_string (Store.exact_snapshot_canonical_bytes frozen)
     |> Result.map_error (fun error -> Invalid_response (Agent_core.Error.to_string error)) in
-  if Keeper_checkpoint_ref.equal retained_candidate intent.candidate then Ok {authority;intent;predecessor;candidate}
+  if Keeper_checkpoint_ref.equal retained_candidate intent.candidate then Ok {authority;intent;target;candidate}
   else Error (Installation_mismatch {retained=retained_candidate;canonical=intent.candidate})
 let install (plan:plan) =
-  let* installed = confirmed (Store.save_agent_core_if_source ~session_dir:plan.authority.session_dir
-      ~expected_source_ref:plan.predecessor plan.candidate) in
+  let* installed = match plan.target with
+    | Canonical_predecessor predecessor ->
+      confirmed (Store.save_agent_core_if_source ~session_dir:plan.authority.session_dir
+        ~expected_source_ref:predecessor plan.candidate)
+    | Branch_retention ->
+      let* snapshot=Store.exact_snapshot_of_value ~expected_session_id:plan.authority.waiting.checkpoint.trace_id
+          plan.candidate |> Result.map_error (fun error -> Canonical_unavailable error) in
+      confirmed (Store.retain_exact_snapshot ~session_dir:plan.authority.session_dir snapshot) in
   if Keeper_checkpoint_ref.equal plan.intent.candidate installed then
     Ok {authority=plan.authority;intent=plan.intent;checkpoint=installed}
   else Error (Installation_mismatch {retained=plan.intent.candidate;canonical=installed})

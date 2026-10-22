@@ -353,6 +353,9 @@ val direct_input_response_intent : t -> operation_id:Operation.Operation_id.t ->
   (Keeper_semantic_execution.input_response_intent option, error) result
 (** The actual persisted intent, or None when no intent is recorded. Files or
     matching checkpoint hashes never supply a missing intent. *)
+val direct_input_branch : t -> operation_id:Operation.Operation_id.t ->
+  (Keeper_semantic_execution.input_branch option, error) result
+(** Read this exact operation's stored branch, never the trace's global head. *)
 val prepare_direct_input_response : t -> now:float -> operation_id:Operation.Operation_id.t ->
   execution_digest:string -> intent:Keeper_semantic_execution.input_response_intent ->
   (unit, error) result
@@ -361,7 +364,10 @@ val prepare_direct_input_response : t -> now:float -> operation_id:Operation.Ope
     The Owner must first validate its original child, canonical source and frozen
     candidate and confirm candidate retention. This primitive does no checkpoint filesystem I/O
     and grants no response acceptance or resume. Source/candidate join semantic
-    retention; duplicates preserve the fact, conflicting intents refuse. Commit
+    retention; duplicates preserve the fact, conflicting intents refuse. A
+    same-payload canonical intent can advance only to Operation_input. That
+    destination preserves the global input and the exact current branch wait;
+    Canonical_input still requires the original global predecessor. Commit
     uncertainty stays Error without readback-to-success or cleanup authority. *)
 
 val resolve_direct_input_wait : t -> now:float -> operation_id:Operation.Operation_id.t ->
@@ -372,7 +378,9 @@ val resolve_direct_input_wait : t -> now:float -> operation_id:Operation.Operati
     current input predecessor, publishes its consumed checkpoint and enables the
     same operation's checkpoint continuation. This is never a new prompt.
     A prepared intent, when present, pins the exact consumed candidate.
-    Duplicate/stale responses refuse; uncertain commit acknowledgement stays
+    Operation_input instead consumes its exact prepared candidate into the
+    operation's branch without updating the trace's global input. Duplicate/stale
+    responses refuse; uncertain commit acknowledgement stays
     Error and grants no retry or retained-file deletion authority. *)
 
 val defer_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->

@@ -253,10 +253,10 @@ let standing_reads_what_the_row_says () =
   let standing = Alcotest.testable (fun f value -> Format.pp_print_string f (S.word value)) ( = ) in
   let row_of state = { Decode.id = "row"; label = "row"; purpose = "fixture purpose";
     selection = Decode.Declaration "/config/lane-addons/browser-work.toml"; state } in
-  let worker phase = { Decode.instance_id = "worker"; incarnation = "worker"; run_id = "browser-work";
+  let worker ?(presence = Decode.Live) phase = { Decode.instance_id = "worker"; incarnation = "worker"; run_id = "browser-work";
     package_id = "browser"; title = "Browser connections"; package_revision = "0.1.0";
-    presence = Decode.Live; phase; applied_revision = None } in
-  let declared application = Decode.Valid { installation_id = "browser-work"; enabled = true;
+    presence; phase; applied_revision = None } in
+  let declared ?(enabled = true) application = Decode.Valid { installation_id = "browser-work"; enabled;
     run_id = "browser-work"; package_id = "browser"; title = "Browser connections";
     desired_revision = "1"; source_revision = "1"; application; exact_outputs = [] } in
   let package declaration instances = Decode.Package_state { declaration; instances } in
@@ -270,20 +270,59 @@ let standing_reads_what_the_row_says () =
   check "a worker that is starting is changing" S.Changing
     (package (Some (declared Lane_addon_application.Starting_worker)) []);
   check "a declaration switched off and cleaned up is off" S.Off
-    (package (Some (declared Lane_addon_application.Inactive)) []);
+    (package (Some (declared ~enabled:false Lane_addon_application.Inactive)) []);
+  check "a worker whose declaration was removed is changing while it detaches" S.Changing
+    (package (Some Decode.Absent) [ worker Decode.Attached ]);
+  check "a manual attachment that runs is ready" S.Ready (package None [ worker Decode.Attached ]);
+  check "a retained worker still cleaning up is changing" S.Changing
+    (package None [ worker ~presence:Decode.Retained Decode.Detaching ]);
+  check "a removed declaration with no worker left is not set up" S.Not_set_up (package (Some Decode.Absent) []);
   check "a declaration the server did not read is unknown" S.Unobserved (package (Some Decode.Unobserved) []);
   check "a browser lane with no browser connected waits" S.Waiting (Decode.Browser_clients (Decode.Browser_enabled, 0));
   check "a browser lane with a browser connected is ready" S.Ready (Decode.Browser_clients (Decode.Browser_enabled, 1));
   check "a browser lane switched off is off" S.Off (Decode.Browser_executor (Decode.Browser_disabled, true));
+  check "a browser lane switched off that still has browsers is changing" S.Changing
+    (Decode.Browser_clients (Decode.Browser_disabled, 2));
+  check "a browser lane the server did not read is unknown" S.Unobserved
+    (Decode.Browser_clients (Decode.Browser_unobserved, 0));
+  check "an exact lane switched off is off" S.Off
+    (Decode.Exact_state (Decode.Disabled { declared_slots = []; declared_cli_slots = [] }));
+  check "an exact lane without its registry is unknown" S.Unobserved
+    (Decode.Exact_state (Decode.Registry_unavailable "registry unreadable"));
+  check "a machine with no screen yet waits" S.Waiting (Decode.Machine_state (Decode.Machine_enabled, Decode.No_screen));
+  check "a machine switched off that still runs is changing" S.Changing
+    (Decode.Machine_state (Decode.Machine_disabled, Decode.Running));
   check "an exact lane with no configuration is not set up" S.Not_set_up
     (Decode.Exact_state (Decode.Unconfigured "no candidates"));
   check "a machine switched off is off" S.Off (Decode.Machine_state (Decode.Machine_disabled, Decode.Stable));
   check "a machine whose worker cannot be read is failing" S.Failing
     (Decode.Machine_state (Decode.Machine_enabled, Decode.Publication_unavailable))
 
+(* An exact row's mark reads the run observation of the same capture, as its
+   STATE text does. *)
+let exact_standing_reads_the_run_observation () =
+  let module S = Masc_tui_lane_standing in
+  let standing = Alcotest.testable (fun f value -> Format.pp_print_string f (S.word value)) ( = ) in
+  let decoded = ok (Decode.decode (snapshot [])) in
+  let lane = List.hd decoded.exact_snapshot.sls_lanes in
+  let row = List.find (fun (row : Decode.row) -> match row.selection with
+    | Decode.Exact target -> Standalone_lane.equal target lane.sl_lane
+    | _ -> false) decoded.rows in
+  let with_status sl_status sl_running_count =
+    { decoded with exact_snapshot = { decoded.exact_snapshot with sls_lanes =
+        List.map (fun (other : Tui_decode.standalone_lane) ->
+          if Standalone_lane.equal other.sl_lane lane.sl_lane then { other with sl_status; sl_running_count }
+          else other) decoded.exact_snapshot.sls_lanes } } in
+  Alcotest.check standing "a configured lane with no runs yet is ready" S.Ready (Display.row_standing_in decoded row);
+  Alcotest.check standing "a lane whose latest runs fail is failing" S.Failing
+    (Display.row_standing_in (with_status Tui_decode.Standalone_degraded 0) row);
+  Alcotest.check standing "a lane switched off that still finishes runs is changing" S.Changing
+    (Display.row_standing_in (with_status Tui_decode.Standalone_off 1) row)
+
 let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
   Alcotest.test_case "machine activity and publication remain independent" `Quick machine_activity_and_publication_are_independent;
   Alcotest.test_case "standing reads what the row says" `Quick standing_reads_what_the_row_says;
+  Alcotest.test_case "exact standing reads the run observation" `Quick exact_standing_reads_the_run_observation;
   Alcotest.test_case "browser activity and registration remain independent" `Quick browser_activity_and_backend_are_independent;
   Alcotest.test_case "exact off retains candidates and finishing work" `Quick disabled_exact_keeps_candidates_and_finishing_work;
   Alcotest.test_case "disabled intent keeps unfinished cleanup visible" `Quick disabled_is_desired_not_cleanup_proof;

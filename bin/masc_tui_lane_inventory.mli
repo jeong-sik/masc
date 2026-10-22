@@ -5,7 +5,12 @@ val row_summary : Masc.Tui_decode_lane_inventory.row -> string
 val row_standing : Masc.Tui_decode_lane_inventory.row -> Masc_tui_lane_standing.t
 (** How the row stands. A package row with a failed worker is [Failing]
     whatever its declaration says; otherwise the declaration's application
-    decides, and without a usable declaration its live workers do. *)
+    decides, and without a usable declaration its workers do. Something
+    switched off that still has work in flight is [Changing]. *)
+val row_standing_in : Masc.Tui_decode_lane_inventory.snapshot -> Masc.Tui_decode_lane_inventory.row -> Masc_tui_lane_standing.t
+(** [row_standing], with an exact row's run observation from the same
+    capture: a degraded lane is [Failing], one switched off that is still
+    finishing runs is [Changing]. *)
 val detail_lines : Masc.Tui_decode_lane_inventory.row -> string list
 val refused_cli_slot_lines :
   Masc.Keeper_lane_cli_oneshot.refused_slot list -> string list

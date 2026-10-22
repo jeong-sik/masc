@@ -64,13 +64,15 @@ module Standing = Masc_tui_lane_standing
 let instance_failed (item : instance) = match item.phase with
   | Failed _ -> true
   | Attached | Observing | Detaching | Detached -> false
-(* Without a usable declaration, the workers alone say how the row stands. A
-   retained worker is no longer running here. *)
-let instances_standing ~none (instances : instance list) =
-  let live phases = List.exists (fun (item : instance) ->
-    item.presence = Live && List.mem item.phase phases) instances in
-  if live [ Attached; Observing ] then Standing.Ready
-  else if live [ Detaching ] then Standing.Changing
+(* Without a usable declaration, the workers alone say how the row stands.
+   [attached] is what a live attached worker means: ready for a manual
+   attachment, changing for one whose declaration was removed and so is
+   being detached. A cleanup in progress is changing wherever its record
+   lives; a retained worker is no longer running here. *)
+let instances_standing ~attached ~none (instances : instance list) =
+  if List.exists (fun (item : instance) ->
+      item.presence = Live && List.mem item.phase [ Attached; Observing ]) instances then attached
+  else if List.exists (fun (item : instance) -> item.phase = Detaching) instances then Standing.Changing
   else match instances with [] -> none | _ :: _ -> Standing.Off
 let application_standing : Masc.Lane_addon_application.t -> Standing.t = function
   | Applied _ -> Standing.Ready
@@ -78,6 +80,8 @@ let application_standing : Masc.Lane_addon_application.t -> Standing.t = functio
   | Inactive -> Standing.Off
   | Failed _ -> Standing.Failing
   | Unknown _ -> Standing.Unobserved
+(* Something switched off that still has work in flight is changing, not
+   off: the operator would otherwise read it as already stopped. *)
 let row_standing (row : row) = match row.state with
   | Exact_state (Unconfigured _) -> Standing.Not_set_up
   | Exact_state (Disabled _) -> Standing.Off
@@ -86,11 +90,13 @@ let row_standing (row : row) = match row.state with
       if c.admitted_slots=[] && c.cli_slots=[] then Standing.Failing
       else if Option.is_some c.admission_error then Standing.Failing
       else Standing.Ready
-  | Browser_clients (Browser_disabled, _) | Browser_executor (Browser_disabled, _) -> Standing.Off
+  | Browser_clients (Browser_disabled, connected) -> if connected > 0 then Standing.Changing else Standing.Off
+  | Browser_executor (Browser_disabled, _) -> Standing.Off
   | Browser_clients (Browser_unobserved, _) | Browser_executor (Browser_unobserved, _) -> Standing.Unobserved
   | Browser_clients (Browser_enabled, connected) -> if connected > 0 then Standing.Ready else Standing.Waiting
   | Browser_executor (Browser_enabled, registered) -> if registered then Standing.Ready else Standing.Waiting
-  | Machine_state (Machine_disabled, _) -> Standing.Off
+  | Machine_state (Machine_disabled, Running) -> Standing.Changing
+  | Machine_state (Machine_disabled, (No_screen | Stable | Publication_unavailable)) -> Standing.Off
   | Machine_state (Machine_unobserved, _) -> Standing.Unobserved
   | Machine_state (Machine_enabled, (Stable | Running)) -> Standing.Ready
   | Machine_state (Machine_enabled, No_screen) -> Standing.Waiting
@@ -103,8 +109,31 @@ let row_standing (row : row) = match row.state with
         | Some (Valid value) -> application_standing value.application
         | Some (Invalid _) -> Standing.Failing
         | Some Unobserved -> Standing.Unobserved
-        | Some Absent -> instances_standing ~none:Standing.Not_set_up instances
-        | None -> instances_standing ~none:Standing.Off instances
+        | Some Absent -> instances_standing ~attached:Standing.Changing ~none:Standing.Not_set_up instances
+        | None -> instances_standing ~attached:Standing.Ready ~none:Standing.Off instances
+(* An exact row's run observation can say more than its admission: a lane
+   whose latest runs fail needs attention, and one switched off may still be
+   finishing runs. Kept beside [row_summary_in], which writes the same
+   observation, so the mark and the text read one capture. *)
+let exact_standing (admission : Standing.t) (lane : Masc.Tui_decode.standalone_lane) =
+  match lane.sl_status with
+  | Masc.Tui_decode.Standalone_degraded -> Standing.Failing
+  | Masc.Tui_decode.Standalone_off ->
+      if lane.sl_running_count > 0 then Standing.Changing else admission
+  | Masc.Tui_decode.Standalone_unavailable ->
+      (match admission with
+       | Standing.(Failing | Not_set_up | Off) -> admission
+       | Standing.(Ready | Waiting | Changing | Unobserved) -> Standing.Unobserved)
+  | Masc.Tui_decode.(Standalone_running | Standalone_idle | Standalone_no_retained_observation) -> admission
+let row_standing_in (snapshot : snapshot) (row : row) =
+  let admission = row_standing row in
+  match row.selection with
+  | Exact target ->
+      (match List.find_opt (fun (lane : Masc.Tui_decode.standalone_lane) ->
+           Standalone_lane.equal lane.sl_lane target) snapshot.exact_snapshot.sls_lanes with
+       | None -> admission
+       | Some lane -> exact_standing admission lane)
+  | Browser _ | Machine _ | Declaration _ | Manual_instance _ -> admission
 
 let instance_lines (item : instance) =
   ["Instance: " ^ item.instance_id; "Incarnation: " ^ item.incarnation;

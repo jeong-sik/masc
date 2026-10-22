@@ -28,6 +28,11 @@ val word : t -> string
 val status : t -> Masc_tui_theme.status
 (** The status colour of the mark. *)
 
+val colour : t -> string
+(** The SGR of {!status}, made readable against the terminal's own palette
+    when it answered. Both screens draw the mark with this, so one standing
+    is one colour everywhere. *)
+
 val recedes : t -> bool
 (** Whether the whole row is drawn behind the others: switched off, never
     set up, or not observed. *)

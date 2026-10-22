@@ -28,6 +28,11 @@ let status : t -> Masc_tui_theme.status = function
   | Failing -> Bad
   | Off | Not_set_up | Unobserved -> Muted
 
+let colour standing =
+  Masc_tui_theme.status_readable
+    (Masc_tui_terminal_palette.snapshot_palette (Masc_tui_terminal_palette.snapshot ()))
+    (status standing)
+
 let recedes = function
   | Off | Not_set_up | Unobserved -> true
   | Ready | Waiting | Changing | Failing -> false

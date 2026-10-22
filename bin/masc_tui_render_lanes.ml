@@ -11,13 +11,6 @@ module Rows = Masc_tui_rows
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
 
-let standing_colour standing = match Masc_tui_lane_standing.status standing with
-  | Masc_tui_theme.Ok -> Theme.ok ()
-  | Masc_tui_theme.Warn -> Theme.warn ()
-  | Masc_tui_theme.Bad -> Theme.bad ()
-  | Masc_tui_theme.Info -> Theme.info ()
-  | Masc_tui_theme.Muted -> Theme.muted ()
-
 let format_context_tokens = Masc_tui_types.format_context_tokens
 
 (* A refusal is bad news about the key pressed; a pending write is a warning
@@ -513,7 +506,8 @@ let render_lanes_overview (state : state) =
     | Some snapshot ->
         let observed = Unix.localtime snapshot.Masc.Tui_decode_lane_inventory.observed_at in
         let standings = Masc_tui_lane_standing.counts
-            (List.map Masc_tui_lane_inventory.row_standing snapshot.Masc.Tui_decode_lane_inventory.rows) in
+            (List.map (Masc_tui_lane_inventory.row_standing_in snapshot)
+               snapshot.Masc.Tui_decode_lane_inventory.rows) in
         Printf.sprintf "  All lanes · observed %02d:%02d:%02d%s"
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
           (if standings = "" then "" else " · " ^ standings) in
@@ -529,7 +523,10 @@ let render_lanes_overview (state : state) =
     |> Masc_tui_scroll.ensure_visible ~cursor:state.lanes_cursor ~height in
   (* The standing leads the state, so a narrow STATE column still shows
      whether the lane is ready, failing or never set up. *)
-  let summary row = Masc_tui_lane_standing.word (Masc_tui_lane_inventory.row_standing row) ^ " · "
+  let standing row = match state.lane_inventory with
+    | Some snapshot -> Masc_tui_lane_inventory.row_standing_in snapshot row
+    | None -> Masc_tui_lane_inventory.row_standing row in
+  let summary row = Masc_tui_lane_standing.word (standing row) ^ " · "
     ^ Terminal_text.single_line (match state.lane_inventory with
       | Some snapshot -> Masc_tui_lane_inventory.row_summary_in snapshot row
       | None -> Masc_tui_lane_inventory.row_summary row) in
@@ -550,7 +547,7 @@ let render_lanes_overview (state : state) =
            else "  reading all lanes…")
     | None -> box_empty buf cols
     | Some row ->
-        let standing = Masc_tui_lane_inventory.row_standing row in
+        let standing = standing row in
         let label = fit_width (Terminal_text.single_line
             (Masc_tui_lane_inventory.family_label row.selection ^ " · " ^ row.label)) label_width in
         let mark = fit_width (Masc_tui_lane_standing.mark standing) mark_width in
@@ -565,9 +562,9 @@ let render_lanes_overview (state : state) =
         else
           let row_style = if Masc_tui_lane_standing.recedes standing then Theme.recede () else "" in
           let state_style = match standing with
-            | Masc_tui_lane_standing.Failing -> Theme.bad ()
+            | Masc_tui_lane_standing.Failing -> Masc_tui_lane_standing.colour standing
             | Masc_tui_lane_standing.(Ready | Waiting | Changing | Off | Not_set_up | Unobserved) -> row_style in
-          box_line buf cols (marked (standing_colour standing ^ mark ^ Ansi.reset
+          box_line buf cols (marked (Masc_tui_lane_standing.colour standing ^ mark ^ Ansi.reset
             ^ row_style ^ label ^ "  " ^ Ansi.reset ^ state_style ^ state_text ^ Ansi.reset))
   done;
   (match Masc_tui_scroll.position_row ~scroll ~height (List.length inventory) with

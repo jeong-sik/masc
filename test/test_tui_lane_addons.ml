@@ -510,12 +510,31 @@ let guided_actions () =
   let declaration = {UI.source_path="/config/lane-addons/custom.toml";installation_id=Some "custom";
     enabled=Some true;desired=Some "1";applied=None;instance_id=None;issues=[];
     origin=UI.Parsed_declaration;application=None} in
+  (* The mark follows the application line drawn under the entry. *)
+  let observed ~enabled state =
+    let target = {UI.Application.source_path=declaration.source_path;installation_id="custom";
+      source_revision="1";desired_revision="1";enabled} in
+    let declaration = {declaration with enabled=Some enabled;
+      application=Some {UI.Application.target;state}} in
+    let configuration : UI.configuration =
+      {directory="/config/lane-addons";complete=true;declarations=[declaration]} in
+    UI.declaration_entry_standing
+      {UI.initial with application_reading=UI.Application.accept (Ok configuration)} declaration in
   check standing "a declaration with a TOML issue is failing" S.Failing
-    (UI.declaration_entry_standing {declaration with issues=["invalid TOML"]});
-  check standing "a declaration switched off is off" S.Off
-    (UI.declaration_entry_standing {declaration with enabled=Some false});
-  check standing "an applied declaration with no worker now waits" S.Waiting
-    (UI.declaration_entry_standing {declaration with applied=Some "1"});
+    (UI.declaration_entry_standing UI.initial {declaration with issues=["invalid TOML"]});
+  check standing "a declaration whose application was not read is unknown" S.Unobserved
+    (UI.declaration_entry_standing UI.initial declaration);
+  check standing "a declaration whose application failed is failing" S.Failing
+    (observed ~enabled:true (UI.Application.Failed ["refused"]));
+  check standing "a declaration whose worker is starting is changing" S.Changing
+    (observed ~enabled:true UI.Application.Starting);
+  check standing "a declaration switched off and cleaned up is off" S.Off
+    (observed ~enabled:false UI.Application.Inactive);
+  check standing "a worker that is detaching is changing" S.Changing
+    (UI.instance_standing ~off_requested:false {instance with phase=UI.Row.Detaching});
+  check standing "an attached worker whose presence is unknown is unknown" S.Unobserved
+    (UI.instance_standing ~off_requested:false
+       {instance with phase=UI.Row.Attached;runtime_presence=UI.Presence_unknown});
   check bool "technical action schema is folded by default" false
     (List.exists (fun line -> String.contains line '{') compact);
   let form_schema = match schema with

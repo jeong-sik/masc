@@ -1321,12 +1321,23 @@ let declaration_reading_word = function
   | Configured_off -> "configured off"
   | No_current_worker -> "no current worker"
   | Pending -> "pending"
-let declaration_standing = function
+(* The mark follows the application line drawn under the entry
+   ([declaration_application]), so the two cannot disagree. A declaration with
+   an issue needs attention before any application reading. *)
+let application_standing : Application.tracking -> Standing.t = function
+  | Application.Observed (Application.Failed _) -> Standing.Failing
+  | Application.Observed (Application.Unknown _) | Application.Unavailable _ -> Standing.Unobserved
+  | Application.Observed (Application.Starting | Application.Cleaning) -> Standing.Changing
+  | Application.Observed (Application.Applied _) -> Standing.Ready
+  | Application.Observed Application.Inactive -> Standing.Off
+  | Application.(Awaiting_declaration | Different_source | Different_inputs) -> Standing.Waiting
+let declaration_entry_standing view (declaration : declaration) =
+  match declaration_reading declaration with
   | Configuration_issue | Needs_attention -> Standing.Failing
-  | Configured_off -> Standing.Off
-  | No_current_worker -> Standing.Waiting
-  | Pending -> Standing.Changing
-let declaration_entry_standing declaration = declaration_standing (declaration_reading declaration)
+  | Configured_off | No_current_worker | Pending ->
+      (match declaration.application with
+       | None -> Standing.Unobserved
+       | Some observation -> application_standing (track_application view observation.target))
 let off_requested (snapshot : snapshot) (item : instance) = match snapshot.configuration with
   | Some config -> List.exists (fun (d : declaration) ->
       d.enabled = Some false && d.instance_id = Some item.id
@@ -1340,9 +1351,17 @@ let instance_standing ~off_requested (item : instance) = match item.phase, item.
   | Row.Detached, _ -> Standing.Off
   | (Row.Attached | Row.Observing), Live_entry -> if off_requested then Standing.Changing else Standing.Ready
   | (Row.Attached | Row.Observing), (Retained_binding | Presence_unknown) -> Standing.Unobserved
-let standing_mark standing =
-  Span.render (Span.text (Span.fg (Masc_tui_theme.status (Standing.status standing)))
-    (Standing.mark standing)) ^ " "
+(* Overview rows are wrapped and sanitized at the end, and the sanitizer
+   prints an SGR byte as text. An entry's first row is drawn here instead:
+   the mark gets its colour, and [led_rows] wraps and sanitizes the entry text
+   after it. *)
+type overview_row = Overview_text of string | Overview_drawn of string list
+let entry_lead ~width ~marker standing text =
+  Overview_drawn (led_rows ~width
+    ~lead:(Span.concat [ Span.text Span.plain marker;
+      Span.text (Span.fg (Standing.colour standing)) (Standing.mark standing);
+      Span.text Span.plain " " ])
+    ~text_style:Span.plain text |> List.map Span.render)
 
 let instance_heading _snapshot (item : instance) =
   match installation_identity item with
@@ -1369,8 +1388,9 @@ let snapshot_coverage_lines coverage =
 
 let overview_lines ~width view =
   let wrap = document_rows ~width in
+  let texts = List.map (fun line -> Overview_text line) in
   let content = match view.snapshot with
-    | None -> [unread_body_text ~failed_note:"Read failed · r:retry" view]
+    | None -> [Overview_text (unread_body_text ~failed_note:"Read failed · r:retry" view)]
     | Some snapshot ->
         let active, failed = List.fold_left (fun (active, failed) (item : instance) ->
           match item.phase with
@@ -1408,11 +1428,11 @@ let overview_lines ~width view =
           | Current_installations, Some {complete=false;_} when entries=[] -> ["Installation inventory incomplete · r:refresh"]
           | Current_installations, None when entries=[] -> ["TOML installation status unknown · r:refresh"]
           | Current_installations, (Some _ | None) -> [] in
-        [heading;
+        texts ([heading;
          (match view.overview_mode with
           | Current_installations -> Printf.sprintf "Retained history · %d instances · h:open" retained_count
           | Retained_runs -> Printf.sprintf "Retained history · %d instances · h:current installations" retained_count);
-         ""] @ empty
+         ""] @ empty)
         @ List.concat_map (fun (index,item) ->
             let marker = if index=view.instance_cursor then "> " else "  " in
             match item with
@@ -1422,10 +1442,10 @@ let overview_lines ~width view =
                 let edit = Option.bind snapshot.configuration (fun config ->
                   if Document.editable_source_path ~directory:config.directory declaration.source_path
                   then Some "  E:edit" else None) |> Option.value ~default:"" in
-                [marker ^ standing_mark (declaration_standing reading) ^ name ^ " · "
-                 ^ declaration_reading_word reading ^ " · " ^ Filename.basename declaration.source_path;
-                 "    " ^ declaration_application view declaration;
-                 "    Enter:installation" ^ edit]
+                entry_lead ~width ~marker (declaration_entry_standing view declaration)
+                  (name ^ " · " ^ declaration_reading_word reading ^ " · " ^ Filename.basename declaration.source_path)
+                :: texts ["    " ^ declaration_application view declaration;
+                          "    Enter:installation" ^ edit]
             | `Instance item ->
                 let group_header = match view.overview_mode with
                   | Current_installations -> []
@@ -1442,13 +1462,13 @@ let overview_lines ~width view =
                   else Printf.sprintf "%d records" item.rows_count in
                 let off_requested = off_requested snapshot item in
                 let activity = if off_requested then "off requested · " else "" in
-                let lead = marker ^ standing_mark (instance_standing ~off_requested item)
-                  ^ instance_heading snapshot item ^ " · " ^
-                  activity ^
-                  (match item.phase with
-                    | Row.Failed _ -> "failed"
-                    | Row.Attached | Observing | Detaching | Detached -> phase_label item.phase) ^
-                  " · " ^ count_text in
+                let lead = entry_lead ~width ~marker (instance_standing ~off_requested item)
+                  (instance_heading snapshot item ^ " · " ^
+                   activity ^
+                   (match item.phase with
+                     | Row.Failed _ -> "failed"
+                     | Row.Attached | Observing | Detaching | Detached -> phase_label item.phase) ^
+                   " · " ^ count_text) in
                 let controls = "    Enter:open  " ^ instance_controls view item in
                 let detail = match item.phase with
                   | Row.Failed detail ->
@@ -1456,8 +1476,8 @@ let overview_lines ~width view =
                         ("D:full · " ^ detail)
                       |> List.map (fun line -> "    " ^ line)
                   | Row.Attached | Row.Observing | Row.Detaching | Row.Detached -> [] in
-                group_header @ [lead]
-                @ (match view.overview_mode, snapshot.configuration with
+                texts group_header @ [lead]
+                @ texts ((match view.overview_mode, snapshot.configuration with
                    | Current_installations, Some config ->
                        List.filter_map (fun (d : declaration) ->
                          if Some d.source_path=item.source_path && d.installation_id=item.installation_id
@@ -1468,10 +1488,11 @@ let overview_lines ~width view =
                 @ (if index=view.instance_cursor then
                      Option.to_list (Option.map (fun text -> "    " ^ text) item.display.description)
                    else [])
-                @ [controls] @ detail) items
+                @ [controls] @ detail)) items
   in
-  List.concat_map wrap (diagnostic_lines view @ content
-    @ [""; overview_hints view] @ action_lines view)
+  List.concat_map (function Overview_text line -> wrap line | Overview_drawn rows -> rows)
+    (texts (diagnostic_lines view) @ content
+     @ texts ([""; overview_hints view] @ action_lines view))
 
 let help_lines = [
   "Lane Add-ons keys · Esc:close";

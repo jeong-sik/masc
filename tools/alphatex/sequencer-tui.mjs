@@ -165,7 +165,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       return sound.kind === 'vst' ? sound.selection : sound.kind === 'soundfont' ? null : undefined
     },
     selected: selection => chooseInstrument({ kind: 'vst', selection }),
-    soundfont: () => chooseInstrument({ kind: 'soundfont' }),
+    soundfont: () => chooseInstrument(editor.project.kind === 'midi-source'
+      ? { kind: 'fluid-selection' } : { kind: 'soundfont' }),
     failed: error => { status = `VST: ${error.message}`; draw() } })
   const sourcePicker = new MidiSourcePicker({ notify: draw, selected(source) {
     const monitor = openedSourceMenuOwner?.monitor === true

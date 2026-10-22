@@ -1793,7 +1793,10 @@ or an incomplete terminal/UTF-8 sequence also keeps the terminal
 in chat; run `/music midi` again when ready to enter the editor. The
 original attachment stays unchanged, and saved projects use the workspace's
 music project directory. The phrase editor's first audio Space opens instrument/preset selection;
-`i` changes it. Install or update the helper with `scripts/install-alphatex.sh`.
+`i` changes it. For imported MIDI, the SoundFont choice captures the configured
+font (or the bundled default) with FluidSynth, preserving the original performance
+for audition and project reload. Ordinary note phrases keep their AlphaSynth
+SoundFont choice. Install or update the helper with `scripts/install-alphatex.sh`.
 
 In the music library, phrase and arrangement editors, and recording/take screen,
 `Ctrl-L` opens the full status and source path observed at that moment. Scroll

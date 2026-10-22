@@ -1012,6 +1012,58 @@ let input_checkpoint store ~trace_id =
   let* () = ensure_open store in
   input_observation_with_db store.db ~trace_id
 
+let semantic_canonical execution = canonical_json "semantic execution" (Semantic.to_json execution)
+
+let insert_semantic db execution =
+  let* bytes = semantic_canonical execution in
+  with_statement db ~operation:"persist semantic admission"
+    "INSERT INTO semantic_executions(scope_key, revision, phase, record_json) VALUES (?, ?, ?, ?)"
+    (fun stmt ->
+      let* () = bind_text db stmt ~operation:"bind execution identity" 1 (scope_key execution.id) in
+      let* () = bind_int64 db stmt ~operation:"bind execution revision" 2 execution.revision in
+      let* () = bind_text db stmt ~operation:"bind execution phase" 3 (Semantic.phase_name execution.phase) in
+      let* () = bind_text db stmt ~operation:"bind initialized frame and membership" 4 bytes in
+      expect_done db stmt ~operation:"persist semantic admission")
+;;
+(* Every semantic write that can stop naming a reference is this CAS: an
+   insert names only new references, and no row is deleted. *)
+let update_semantic store ~expected next =
+  let db = store.db in
+  let* expected_bytes = semantic_canonical expected in
+  let* bytes = semantic_canonical next in
+  with_statement db ~operation:"CAS semantic execution"
+    "UPDATE semantic_executions SET revision = ?, phase = ?, record_json = ? WHERE scope_key = ? AND revision = ? AND record_json = ?"
+    (fun stmt ->
+      let* () = bind_int64 db stmt ~operation:"bind next revision" 1 next.revision in
+      let* () = bind_text db stmt ~operation:"bind next phase" 2 (Semantic.phase_name next.phase) in
+      let* () = bind_text db stmt ~operation:"bind next execution record" 3 bytes in
+      let* () = bind_text db stmt ~operation:"bind expected identity" 4 (scope_key expected.id) in
+      let* () = bind_int64 db stmt ~operation:"bind expected revision" 5 expected.revision in
+      let* () = bind_text db stmt ~operation:"bind expected exact record" 6 expected_bytes in
+      let* () = expect_done db stmt ~operation:"CAS semantic execution" in
+      if Sqlite3.changes db = 1 then (record_dropped store ~before:expected ~after:next; Ok ())
+      else Error (Integrity_error "semantic CAS did not update its exact record"))
+;;
+let detach_other_canonical_inputs store ~now ~publisher ~previous checkpoint =
+  match previous with
+  | None -> Ok ()
+  | Some previous when Keeper_checkpoint_ref.equal previous checkpoint -> Ok ()
+  | Some previous ->
+    let* executions=semantic_rows store.db ~active_only:true in
+    let publisher=Option.map Keeper_execution_scope_id.direct_operation publisher in
+    List.fold_left (fun result (execution:Semantic.t) ->
+      let* ()=result in
+      match execution.canonical_input_origin with
+      | None -> Ok ()
+      | Some origin ->
+        if Keeper_id.Trace_id.equal origin.checkpoint.trace_id previous.Keeper_checkpoint_ref.trace_id
+            && not (Option.fold ~none:false ~some:(Keeper_execution_scope_id.equal execution.id) publisher)
+        then
+          let* next=Semantic.detach_canonical_input ~now ~input_checkpoint:previous execution
+            |> Result.map_error (fun error -> Invalid_input (Semantic.error_to_string error)) in
+          update_semantic store ~expected:execution next
+        else Ok ()) (Ok ()) executions
+
 let install_input_checkpoint_with_db store ~previous checkpoint =
   let* () = with_statement store.db ~operation:"install input checkpoint"
     "INSERT INTO input_checkpoints(trace_id, turn_count, sha256) VALUES (?, ?, ?) ON CONFLICT(trace_id) DO UPDATE SET turn_count=excluded.turn_count, sha256=excluded.sha256" (fun stmt ->
@@ -1039,7 +1091,7 @@ let check_input_predecessor ~observed ~checkpoint =
     Error (Invalid_input "input checkpoint turn regressed")
   | Some _ | None -> Ok ()
 
-let update_input_checkpoint store ~observed ~checkpoint =
+let update_input_checkpoint store ~now ~observed ~checkpoint =
   let* () = ensure_open store in
   let* () = check_input_predecessor ~observed ~checkpoint in
   with_transaction store (fun () ->
@@ -1049,6 +1101,7 @@ let update_input_checkpoint store ~observed ~checkpoint =
     else
       let previous = match previous with Input_observed ref -> Some ref
         | Input_unobserved | Prior_input_unavailable -> None in
+      let* () = detach_other_canonical_inputs store ~now ~publisher:None ~previous checkpoint in
       let* () = install_input_checkpoint_with_db store ~previous checkpoint in
       Ok Input_checkpoint_updated)
 
@@ -2234,38 +2287,6 @@ let with_semantic_transaction store f =
   in_transaction store ~begin_operation:"begin semantic operation transaction"
     ~store_error:(fun error -> Semantic_store_error error) f
 ;;
-let semantic_canonical execution = canonical_json "semantic execution" (Semantic.to_json execution)
-
-let insert_semantic db execution =
-  let* bytes = semantic_canonical execution in
-  with_statement db ~operation:"persist semantic admission"
-    "INSERT INTO semantic_executions(scope_key, revision, phase, record_json) VALUES (?, ?, ?, ?)"
-    (fun stmt ->
-      let* () = bind_text db stmt ~operation:"bind execution identity" 1 (scope_key execution.id) in
-      let* () = bind_int64 db stmt ~operation:"bind execution revision" 2 execution.revision in
-      let* () = bind_text db stmt ~operation:"bind execution phase" 3 (Semantic.phase_name execution.phase) in
-      let* () = bind_text db stmt ~operation:"bind initialized frame and membership" 4 bytes in
-      expect_done db stmt ~operation:"persist semantic admission")
-;;
-(* Every semantic write that can stop naming a reference is this CAS: an
-   insert names only new references, and no row is deleted. *)
-let update_semantic store ~expected next =
-  let db = store.db in
-  let* expected_bytes = semantic_canonical expected in
-  let* bytes = semantic_canonical next in
-  with_statement db ~operation:"CAS semantic execution"
-    "UPDATE semantic_executions SET revision = ?, phase = ?, record_json = ? WHERE scope_key = ? AND revision = ? AND record_json = ?"
-    (fun stmt ->
-      let* () = bind_int64 db stmt ~operation:"bind next revision" 1 next.revision in
-      let* () = bind_text db stmt ~operation:"bind next phase" 2 (Semantic.phase_name next.phase) in
-      let* () = bind_text db stmt ~operation:"bind next execution record" 3 bytes in
-      let* () = bind_text db stmt ~operation:"bind expected identity" 4 (scope_key expected.id) in
-      let* () = bind_int64 db stmt ~operation:"bind expected revision" 5 expected.revision in
-      let* () = bind_text db stmt ~operation:"bind expected exact record" 6 expected_bytes in
-      let* () = expect_done db stmt ~operation:"CAS semantic execution" in
-      if Sqlite3.changes db = 1 then (record_dropped store ~before:expected ~after:next; Ok ())
-      else Error (Integrity_error "semantic CAS did not update its exact record"))
-;;
 let same_source (left : Semantic.source_member) (right : Semantic.source_member) =
   left.post_id = right.post_id && left.admitted_revision = right.admitted_revision
   && left.source_sha256 = right.source_sha256
@@ -2508,7 +2529,10 @@ let resolve_direct_input_wait store ~now ~operation_id ~execution_digest ~observ
         | Operation_input -> Semantic.Resolve_input_branch {observed;checkpoint} in
       let* next = semantic_transition ~now action expected in
       let* () = match destination with
-        | Semantic.Canonical_input -> install_input_checkpoint_with_db store ~previous:(Some observed.checkpoint) checkpoint
+        | Semantic.Canonical_input ->
+          let previous=Some observed.checkpoint in
+          let* ()=detach_other_canonical_inputs store ~now ~publisher:(Some operation_id) ~previous checkpoint in
+          install_input_checkpoint_with_db store ~previous checkpoint
         | Operation_input -> Ok () in
       update_semantic store ~expected next)
 ;;
@@ -2941,6 +2965,10 @@ let update_direct_input_checkpoint store ~now ~operation_id ~execution_digest
     if not (input_predecessor_matches observed_input previous) then
       Ok (Input_checkpoint_source_changed previous)
     else
+      let previous_reference=match previous with Input_observed reference -> Some reference
+        | Input_unobserved | Prior_input_unavailable -> None in
+      let* ()=detach_other_canonical_inputs store ~now ~publisher:(Some operation_id)
+        ~previous:previous_reference checkpoint in
       let* _next = apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest
         (Keeper_native_call.Checkpoint {call_id; observed; checkpoint}) in
       let previous = match previous with Input_observed ref -> Some ref
@@ -2958,6 +2986,10 @@ let bind_direct_input_checkpoint store ~now ~operation_id ~execution_digest
     if not (input_predecessor_matches observed_input previous) then
       Ok (Input_checkpoint_source_changed previous)
     else
+      let previous_reference=match previous with Input_observed reference -> Some reference
+        | Input_unobserved | Prior_input_unavailable -> None in
+      let* ()=detach_other_canonical_inputs store ~now ~publisher:(Some operation_id)
+        ~previous:previous_reference checkpoint in
       let* _next = apply_direct_native_call_with_db store ~now ~operation_id ~execution_digest
         (Keeper_native_call.Bind {observed;call}) in
       let previous = match previous with Input_observed reference -> Some reference

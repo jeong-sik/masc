@@ -185,7 +185,7 @@ let check_resume_authority ~env ~root binding =
   check_effect_counts root;
   {original_call=call; canonical_result=List.hd results}
 
-let run_phase ?(operation_branch=false) ?(empty_terminal = false) ~child ~cut root =
+let run_phase ?(operation_branch=false) ?(response_before_global=false) ?(empty_terminal = false) ~child ~cut root =
   let fresh = child || empty_terminal in
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -309,7 +309,7 @@ is-default = true
     Fs_compat.mkdir_p session_dir;
     let provider_cfg=Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.OpenAI_compat
       ~provider_id:"fixture" ~model_id ~base_url:server.base_url ~request_path:"/v1/chat/completions" () in
-    Keeper_original_input_branch_fixture.prepare ~net:env#net ~clock:env#clock ~workspace:config ~session_dir
+    Keeper_original_input_branch_fixture.prepare ~response_before_global ~net:env#net ~clock:env#clock ~workspace:config ~session_dir
       {keeper_name;session_id;runtime_id;operation_id;provider_cfg;source;input=original_input ();
        message=goal;input_metadata=Keeper_input_speaker.metadata speaker;
        system_prompt="Preserve the original invocation."};
@@ -473,7 +473,7 @@ is-default = true
     (Registry.direct_input_branch ~base_path:root ~keeper_name ~operation_id |> require "terminal branch"=None);
   effect_counts root
 
-let test_restart ?(operation_branch=false) cut () =
+let test_restart ?(operation_branch=false) ?(response_before_global=false) cut () =
   let root = Filename.temp_dir "keeper-ingress-restart-" "" in
   let executable_before = executable_sha256 () in
   Fun.protect ~finally:(fun () ->
@@ -481,12 +481,13 @@ let test_restart ?(operation_branch=false) cut () =
     Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       let process = Eio.Process.spawn ~sw env#process_mgr
           [Sys.executable_name;
-           (if operation_branch then "--ingress-branch-child" else "--ingress-native-child");cut_name cut;root] in
+           (if response_before_global then "--ingress-answered-before-global-child"
+            else if operation_branch then "--ingress-branch-child" else "--ingress-native-child");cut_name cut;root] in
       match Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
           (fun () -> Eio.Process.await process) with
       | `Exited code -> check int "hard process cut at the requested boundary" (exit_code cut) code
       | `Signaled signal -> failf "child died from signal %d" signal));
-    let note_rows, target_tool_log_rows = run_phase ~operation_branch ~child:false ~cut root in
+    let note_rows, target_tool_log_rows = run_phase ~operation_branch ~response_before_global ~child:false ~cut root in
     check int "only two original requests and one final response" 3 (count root "provider");
     let executable_after = executable_sha256 () in
     check string "the child and parent used an unchanged executable" executable_before executable_after;
@@ -522,6 +523,8 @@ let () = match Array.to_list Sys.argv with
   | [_; "--ingress-native-child"; "terminal"; root] -> ignore (run_phase ~child:true ~cut:Returned_turn root)
   | [_; "--ingress-branch-child"; "settled"; root] -> ignore (run_phase ~operation_branch:true ~child:true ~cut:Settled_result root)
   | [_; "--ingress-branch-child"; "terminal"; root] -> ignore (run_phase ~operation_branch:true ~child:true ~cut:Returned_turn root)
+  | [_; "--ingress-answered-before-global-child"; "settled"; root] ->
+    ignore (run_phase ~operation_branch:true ~response_before_global:true ~child:true ~cut:Settled_result root)
   | _ -> run "Keeper direct ingress native restart" ["real ingress", [
       test_case "settled result resumes through the original Keeper turn" `Quick (test_restart Settled_result);
       test_case "unacknowledged terminal does not reexecute ingress" `Quick (test_restart Returned_turn);
@@ -529,6 +532,8 @@ let () = match Array.to_list Sys.argv with
         (test_empty_terminal_completes_message_without_replay ~operation_branch:false);
       test_case "original input branch resumes through AgentRun finalization preserving G" `Quick
         (test_restart ~operation_branch:true Settled_result);
+      test_case "public canonical response detaches before G and resumes the original AgentRun after crash" `Quick
+        (test_restart ~operation_branch:true ~response_before_global:true Settled_result);
       test_case "original input branch terminal cut preserves G without redispatch" `Quick
         (test_restart ~operation_branch:true Returned_turn);
       test_case "original input branch empty terminal finalizes without replay or replacing G" `Quick

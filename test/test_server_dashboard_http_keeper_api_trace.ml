@@ -1026,6 +1026,7 @@ let test_input_response_http_accepts_only_original_wait ?(independent_global=fal
     (Native.Terminal {call_id;disposition={Agent_core.Agent.outcome=Agent_core.Agent.Terminal_succeeded;recovery=Agent_core.Agent.Retire}}) |> journal_ok;
   let waiting=Keeper_semantic_execution.input_wait ~checkpoint:reference ~pending |> ok in
   Journal.defer_direct_input_wait journal ~now:6. ~operation_id ~execution_digest:operation.execution_digest ~waiting |> journal_ok |> ignore;
+  let response_source_messages=ref checkpoint.messages in
   let partial=match commit_fault with
     | No_response_fault | Before_response_intent | After_response_intent -> None
     | Before_response_resolution | After_response_resolution ->
@@ -1044,6 +1045,11 @@ let test_input_response_http_accepts_only_original_wait ?(independent_global=fal
       let plan=Response.prepare_installation ~net:env#net ~authority ~response:Agent_core.Hooks.Declined
         |> Result.map_error Response.installation_error_to_string |> ok in
       let intent=Response.planned_intent plan in
+      (* Capture immutable expected history while retained S is available.
+         Successful resolution may legitimately release retained S. *)
+      let source=Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:intent.source
+        |> function Ok source -> source | Error _ -> fail "prepared response source is unavailable before resolution" in
+      response_source_messages:=(Keeper_checkpoint_store.exact_snapshot_checkpoint source).messages;
       Journal.prepare_direct_input_response journal ~now:7. ~operation_id ~execution_digest:operation.execution_digest ~intent |> journal_ok;
       let receipt=Response.install plan |> Result.map_error Response.installation_error_to_string |> ok in
       Fun.protect ~finally:Journal.For_testing.clear_commit_fault (fun () ->
@@ -1235,7 +1241,7 @@ let test_input_response_http_accepts_only_original_wait ?(independent_global=fal
        Yojson.Safe.Util.(json |> member "input_wait_observation" |> member "status" |> to_string);
      let status,_=post () in check int "same HTTP response is not admitted twice" 409 status);
   check_global ();
-  if independent_global && commit_fault<>After_response_resolution then begin
+  if independent_global then begin
     let branch=Keeper_owner_registry.direct_input_branch ~base_path:dir ~keeper_name ~operation_id
       |> Result.map_error Keeper_owner_registry.command_error_to_string |> ok |> Option.get in
     check bool "HTTP response retains exact original branch origin" true
@@ -1247,12 +1253,8 @@ let test_input_response_http_accepts_only_original_wait ?(independent_global=fal
       | Agent_core.Hooks.Answer value -> "[User input] " ^ pending.request.question ^ ": " ^ Yojson.Safe.to_string value
       | Declined -> "[Input declined] " ^ pending.request.question
       | Timeout -> "[Input timed out] " ^ pending.request.question in
-    let response_source=match partial with
-      | None -> checkpoint
-      | Some intent -> Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:intent.source
-        |> Result.get_ok |> Keeper_checkpoint_store.exact_snapshot_checkpoint in
     check bool "HTTP branch retains original history and the typed response exactly once" true
-      (candidate.messages=response_source.messages @ [Agent_core.Types.user_msg response_message]);
+      (candidate.messages= !response_source_messages @ [Agent_core.Types.user_msg response_message]);
     restart ();check_global ();
     let status,_=post () in check int "fresh Owner refuses duplicate original branch response" 409 status;
     check_global ()

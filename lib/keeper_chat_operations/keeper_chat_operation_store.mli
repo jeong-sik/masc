@@ -87,13 +87,15 @@ val input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
     never Unobserved. Input_observed points to exact retained bytes, including
     consumed pending_input=None. None of these grants dispatch authority. *)
 
-val update_input_checkpoint : t -> observed:Keeper_checkpoint_ref.t option ->
+val update_input_checkpoint : t -> now:float -> observed:Keeper_checkpoint_ref.t option ->
   checkpoint:Keeper_checkpoint_ref.t -> (input_checkpoint_update, error) result
 (** Owner-serialized predecessor CAS for the trace in checkpoint. The caller
     retains and validates the exact payload first. A stale predecessor returns
     the actual reference without writing. Uncertain commit remains an error;
     reread the actual relation to reconcile it, never blindly retry.
-    This relation survives immutable operation/semantic terminal settlement. *)
+    This relation survives immutable operation/semantic terminal settlement.
+    Before an independent update, the same transaction detaches canonical
+    response lineages to their retained original execution branches. *)
 
 val register_created_input_checkpoint : t -> checkpoint:Keeper_checkpoint_ref.t ->
   (input_checkpoint_update, error) result

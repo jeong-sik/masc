@@ -17,13 +17,16 @@ type invocation = {
 }
 
 val prepare :
+  ?response_before_global:bool ->
   net:Eio_context.eio_net -> clock:_ Eio.Time.clock ->
   workspace:Workspace.config -> session_dir:string -> invocation -> unit
 (** Caller initializes the native execution runtime, workspace and keeper meta.
     Run actual Core InputRequired W, defer through its original Owner, publish
     independent G from a separate autonomous child, respond through the public
     Owner API, then close that Owner. C is queued until the next actual runner
-    is ready. Does not dispatch C. Failures raise an Alcotest assertion. *)
+    is ready. [response_before_global] accepts canonical C before G is published,
+    exercising atomic detachment of its original response lineage. Does not
+    dispatch C. Failures raise an Alcotest assertion. *)
 
 val expected_global_checkpoint_bytes : workspace:Workspace.config -> string
 (** Read fixture bytes captured immediately after actual G publication. This is

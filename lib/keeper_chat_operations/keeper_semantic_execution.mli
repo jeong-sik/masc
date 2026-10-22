@@ -146,6 +146,10 @@ type t = private
   ; native_call : Keeper_native_call.state
   ; input_response_intent : input_response_intent option
   ; input_branch : input_branch option
+  ; canonical_input_origin : input_wait option
+      (** Original response lineage while this execution still follows the
+          global input. A different publisher atomically detaches it before
+          replacing global input; this is not a prepared response intent. *)
   ; created_at : float
   ; updated_at : float
   }
@@ -229,6 +233,12 @@ val create : id:Keeper_execution_scope_id.t -> input:Yojson.Safe.t -> sources:so
 (** The producer owns the input codec. Its canonical payload remains available
     during waiting/recovery and is released only at semantic settlement. The
     immutable digest remains part of admission identity after release. *)
+val detach_canonical_input : now:float -> input_checkpoint:Keeper_checkpoint_ref.t ->
+  t -> (t, error) result
+(** Detach a response-derived canonical execution onto its exact current
+    continuation before an independent publisher advances global input. Keeps
+    its complete original wait and all existing native/Gate/retry authority.
+    Caller owns the same SQLite transaction as that global input replacement. *)
 val apply : now:float -> action -> t -> (t, error) result
 (** Resume_checkpoint requires that the caller re-read and validate the exact
     canonical checkpoint named by Suspended/Checkpointed. The journal owns

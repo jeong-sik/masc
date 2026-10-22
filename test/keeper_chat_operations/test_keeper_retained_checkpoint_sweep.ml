@@ -187,7 +187,7 @@ let test_input_owner_retains_only_current_checkpoint_after_restart () = with_roo
   let previous = checkpoint "input-before-consumption" in
   let consumed = checkpoint "input-consumed" in
   with_open (keeper_store root "input-owner") (fun store ->
-    let update observed checkpoint = match Store.update_input_checkpoint store ~observed ~checkpoint |> store_ok with
+    let update observed checkpoint = match Store.update_input_checkpoint store ~now:40. ~observed ~checkpoint |> store_ok with
       | Store.Input_checkpoint_updated -> ()
       | Input_checkpoint_source_changed _ -> fail "fixture input owner changed" in
     update None previous;

@@ -251,6 +251,7 @@ type t =
   ; native_call : Keeper_native_call.state
   ; input_response_intent : input_response_intent option
   ; input_branch : input_branch option
+  ; canonical_input_origin : input_wait option
   ; created_at : float
   ; updated_at : float
   }
@@ -328,6 +329,7 @@ let branch_checkpoints execution = match execution.input_branch with
 let checkpoint_references execution =
   Keeper_native_call.checkpoint_references execution.native_call @ phase_checkpoints execution
   @ branch_checkpoints execution
+  @ (match execution.canonical_input_origin with None -> [] | Some origin -> [origin.checkpoint])
   @ (match execution.input_response_intent with
      | None -> [] | Some intent -> [intent.source;intent.candidate])
 let continuation_checkpoints execution =
@@ -381,7 +383,7 @@ let create ~id ~input ~sources ~now =
     let* input, input_sha256 = canonical_input input |> Result.map_error (fun detail -> Invalid_record detail) in
     let* frame = Snapshot.admit Snapshot.empty (Snapshot.Fresh id)
       |> Result.map_error (fun error -> Invalid_record (Snapshot.error_to_string error)) in
-    Ok { id; revision = 0L; input = Some input; input_sha256; gate_obligations=[]; sources; current_sources = sources; frame; phase = Preparing; native_call = Keeper_native_call.No_native_call; input_response_intent=None; input_branch=None; created_at = now; updated_at = now }
+    Ok { id; revision = 0L; input = Some input; input_sha256; gate_obligations=[]; sources; current_sources = sources; frame; phase = Preparing; native_call = Keeper_native_call.No_native_call; input_response_intent=None; input_branch=None; canonical_input_origin=None; created_at = now; updated_at = now }
 
 let same_admission left right =
   Scope_id.equal left.id right.id && left.sources = right.sources
@@ -467,6 +469,57 @@ let validate_input_branch ~id ~revision ~phase ~native_call ~intent = function
           && Keeper_checkpoint_ref.equal intent.waiting.checkpoint branch.checkpoint then Ok ()
       else Error "input branch response intent names another input head"
 
+let validate_canonical_input_origin current = match current.canonical_input_origin with
+  | None -> Ok ()
+  | Some origin ->
+    let active=match current.phase with
+      | Settled _ | Preparing | Ready -> false
+      | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Recovering _ -> true in
+    if active && current.revision>=4L && Option.is_some (Scope_id.direct_operation_id current.id)
+        && Option.is_none current.input_branch
+        && List.for_all (fun reference ->
+          Keeper_id.Trace_id.equal origin.checkpoint.trace_id reference.Keeper_checkpoint_ref.trace_id
+          && reference.turn_count>=origin.checkpoint.turn_count) (continuation_checkpoints current)
+    then Ok () else Error "canonical input response lost its original direct lineage"
+
+let detach_canonical_input ~now ~input_checkpoint current =
+  let invalid detail=Error (Invalid_transition detail) in
+  let* origin=match current.canonical_input_origin,current.input_branch with
+    | Some origin,None when Keeper_id.Trace_id.equal origin.checkpoint.trace_id input_checkpoint.Keeper_checkpoint_ref.trace_id -> Ok origin
+    | (Some _ | None),(Some _ | None) -> invalid "execution has no canonical response lineage for this input" in
+  let* checkpoint=match current.phase with
+    | Suspended checkpoint
+    | Recovering {origin=(Checkpointed checkpoint | Input_wait {checkpoint;_} | Runtime_retry {checkpoint;_});_}
+    | Resuming_runtime_retry {checkpoint;_} -> Ok checkpoint
+    | Recovering {origin=Gate_wait {waiting;_};_} | Resuming_gate (waiting,_) ->
+      (match waiting.checkpoint with Agent_core checkpoint -> Ok checkpoint
+       | Official_client _ -> invalid "canonical response has no Agent Core Gate checkpoint")
+    | Recovering {origin=Gate_binding binding;_} ->
+      (match binding.preparation with Prepared_agent_core {reference;_} -> Ok reference
+       | Prepared_official_client _ -> invalid "canonical response has no Agent Core Gate preparation")
+    | Running | Recovering {origin=Interrupted_execution;_} ->
+      (match current.native_call with
+       | Keeper_native_call.No_native_call -> Ok input_checkpoint
+       | Active call | Terminal_unacknowledged (call,_) -> Ok call.checkpoint)
+    | Preparing | Ready | Settled _
+    | Recovering {origin=(Unconfirmed_sources | Confirmed_undispatched | Official_checkpointed _);_} ->
+      invalid "canonical response has no detachable original continuation" in
+  let* ()=if current.revision=Int64.max_int then Error Revision_exhausted
+    else if valid_time now then Ok () else invalid "invalid canonical response detach time" in
+  let branch={origin;checkpoint} in
+  let* input_response_intent=match current.input_response_intent with
+    | None -> Ok None
+    | Some previous ->
+      let intent={previous with destination=Operation_input} in
+      if continues_input_response_intent ~previous ~next:intent then Ok (Some intent)
+      else invalid "detachment changed the original prepared response" in
+  let next={current with revision=Int64.succ current.revision;canonical_input_origin=None;
+    input_branch=Some branch;input_response_intent;updated_at=now} in
+  let* ()=validate_input_branch ~id:next.id ~revision:next.revision ~phase:next.phase
+      ~native_call:next.native_call ~intent:next.input_response_intent next.input_branch
+    |> Result.map_error (fun detail -> Invalid_transition detail) in
+  Ok next
+
 let checkpoint_input_branch ~now ~(observed:Keeper_checkpoint_ref.t)
     ~(checkpoint:Keeper_checkpoint_ref.t) (current:t) =
   let invalid detail = Error (Invalid_transition detail) in
@@ -529,7 +582,10 @@ let update_native_call ~now ~expected ~replacement current =
       |> Result.map_error (fun detail -> Invalid_transition detail) in
     if equal_state expected replacement then Ok current
     else if current.revision = Int64.max_int then Error Revision_exhausted
-    else Ok {current with native_call=replacement; revision=Int64.succ current.revision; updated_at=now}
+    else
+      let next={current with native_call=replacement; revision=Int64.succ current.revision; updated_at=now} in
+      let* ()=validate_canonical_input_origin next |> Result.map_error (fun detail -> Invalid_transition detail) in
+      Ok next
 
 let apply ~now action current =
   if not (valid_time now) then Error (Invalid_transition "invalid transition time")
@@ -823,6 +879,14 @@ let apply ~now action current =
       | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
       | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _ | Prepare_input_response _
       | Resolve_input _ | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _ -> current.input_branch in
+    let canonical_input_origin=match action with
+      | Resolve_input {observed;_} -> Some (match current.canonical_input_origin with Some origin -> origin | None -> observed)
+      | Resolve_input_branch _ | Settle _ -> None
+      | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
+      | Require_reconciliation _ | Suspend _ | Suspend_official_checkpoint _
+      | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
+      | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _ | Prepare_input_response _
+      | Advance_input_branch _ | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _ -> current.canonical_input_origin in
     let* () = validate_input_branch ~id:current.id ~revision:(if current.revision = Int64.max_int then current.revision else Int64.succ current.revision)
         ~phase ~native_call ~intent:input_response_intent input_branch
       |> Result.map_error (fun detail -> Invalid_transition detail) in
@@ -830,13 +894,16 @@ let apply ~now action current =
        && Keeper_native_call.equal_state native_call current.native_call
        && Option.equal equal_input_response_intent input_response_intent current.input_response_intent
        && input_branch = current.input_branch
+       && Option.equal equal_input_wait canonical_input_origin current.canonical_input_origin
     then Ok current
     else if current.revision = Int64.max_int then Error Revision_exhausted
     else
       let input = match phase with
         | Settled _ -> None
         | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Recovering _ -> current.input in
-      Ok { current with revision = Int64.succ current.revision; phase; input; gate_obligations; native_call; input_response_intent; input_branch; updated_at = now }
+      let next={ current with revision = Int64.succ current.revision; phase; input; gate_obligations; native_call; input_response_intent; input_branch; canonical_input_origin; updated_at = now } in
+      let* ()=validate_canonical_input_origin next |> Result.map_error (fun detail -> Invalid_transition detail) in
+      Ok next
 
 let source_to_json source =
   `Assoc [ "post_id", `String source.post_id
@@ -944,6 +1011,8 @@ let to_json execution =
                ["native_call", Keeper_native_call.state_to_json execution.native_call])
           @ (match execution.input_response_intent with None -> []
              | Some intent -> ["input_response_intent",input_response_intent_json intent])
+          @ (match execution.canonical_input_origin with None -> []
+             | Some origin -> ["canonical_input_origin",recovery_origin_json (Input_wait origin)])
           @ (match execution.input_branch with None -> []
              | Some branch -> ["input_branch",`Assoc ["origin",recovery_origin_json (Input_wait branch.origin);
                  "checkpoint",checkpoint_json branch.checkpoint]])
@@ -1222,6 +1291,17 @@ let input_branch_of_json json =
 
 let of_json json =
   let decode () =
+    let* canonical_input_origin,json=match json with
+      | `Assoc fields ->
+        (match List.assoc_opt "canonical_input_origin" fields with
+         | None -> Ok (None,json)
+         | Some value ->
+           let* origin=recovery_origin_of_json value in
+           let* waiting=match origin with Input_wait waiting -> Ok waiting
+             | Unconfirmed_sources | Confirmed_undispatched | Checkpointed _ | Official_checkpointed _
+             | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> Error "canonical input origin has no full wait" in
+           Ok (Some waiting,`Assoc (List.remove_assoc "canonical_input_origin" fields)))
+      | _ -> Ok (None,json) in
     let* input_branch, json = match json with
       | `Assoc fields ->
         (match List.assoc_opt "input_branch" fields with
@@ -1341,5 +1421,7 @@ let of_json json =
       else Error "execution phase, revision and initial frame are incoherent" in
     let* created_at = time "created_at" fields in
     let* updated_at = time "updated_at" fields in
-    Ok { id; revision; input; input_sha256; gate_obligations; sources; current_sources; frame; phase; native_call; input_response_intent; input_branch; created_at; updated_at }
+    let execution={ id; revision; input; input_sha256; gate_obligations; sources; current_sources; frame; phase; native_call; input_response_intent; input_branch; canonical_input_origin; created_at; updated_at } in
+    let* ()=validate_canonical_input_origin execution in
+    Ok execution
   in decode () |> Result.map_error (fun detail -> Invalid_record detail)

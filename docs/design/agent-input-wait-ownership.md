@@ -814,3 +814,54 @@ admission/execution evidence; retaining C alone is insufficient.
 
 These scenarios are source only until their exact-head minimum check completes.
 They do not extend an older head's passing evidence.
+
+
+## Canonical response provenance before later independent G (source, not executed)
+
+Canonical response acceptance now records the immutable complete original wait
+as `canonical_input_origin`, separately from a prepared response intent. This
+record persists through native, retry, Gate and cooperative phases until
+settlement or detachment, and pins its historical W for evidence. Ordinary
+continuation queries do not borrow that historical W as current input.
+
+Before a different publisher advances global input on the same trace, the same
+SQLite transaction detaches each affected response-derived execution to its
+exact existing phase/native checkpoint and original wait. The publisher's own
+execution keeps following canonical input. Autonomous publication, direct native
+checkpoint publication/binding and canonical response resolution all use this
+transactional boundary. No branch is inferred from message text or a new
+request; the existing typed original continuation owns it. History clear still
+requires quiescence. A failed or uncertain transaction grants no receipt or
+cleanup authority; fresh reads establish whether both G and detachment committed.
+
+Store scenarios cover success and actual before/after-commit faults with close
+and reopen. A real shared-fixture variant accepts C through the public Owner
+before the independent Owner/Producer G publication, then the admitted ingress
+scenario executes the original Keeper/AgentRun, cuts the process after durable
+ToolResult settlement, restarts and verifies exact original replay/finalizer and
+G preservation. The HTTP postcommit scenario also observes the detached C
+branch after G. These are unexecuted source changes until their new exact-head
+checks complete; earlier successful scopes do not establish them.
+
+Official-client continuation changes, all fallback/error/unknown-effect paths,
+autonomous durable input waiting, waiting outcomes and snapshot/SSE/Acting/TUI
+reconciliation remain separate acceptance work.
+
+
+The earlier public response head `9c608e2fc92c88e41cd8c1bc46a8a8a58df9a62c`
+passed its five explicit suites in [39726585008](https://github.com/jeong-sik/masc/actions/runs/39726585008):
+Owner17, physical response12, HTTP39, native-context6 and ingress6 (80/80).
+Its raw log confirms exact checkout and the five requested suites. That head
+exercises G-before-C public admission; it does not execute the new canonical
+origin/detachment or additional HTTP resolution scenarios described above.
+
+
+The intermediate HTTP-only run [39727519077](https://github.com/jeong-sik/masc/actions/runs/39727519077)
+checked out `b8fddf9d6f97706b1052cef4503dd9815ba23b4e`, compiled and ran
+41 cases: 40 passed and one precommit-promotion scenario failed while rereading
+retained S after successful resolution and a fresh Owner reopen. Its earlier
+assertions confirmed the exact recovered C, branch origin and G preservation.
+S is no longer pinned by the consumed intent at that point. The fixture now
+captures immutable expected source messages while S is still retained before
+resolution and keeps the same exact-C/history assertions without requiring
+released S to remain readable. This repair remains unexecuted on the new head.

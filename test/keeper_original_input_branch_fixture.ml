@@ -18,7 +18,7 @@ type invocation = {
 }
 let expected_global_path workspace=Filename.concat workspace.Workspace.base_path "expected-G.json"
 let expected_global_checkpoint_bytes ~workspace=Fs_compat.load_file (expected_global_path workspace)
-let prepare ~net ~clock ~workspace ~session_dir
+let prepare ?(response_before_global=false) ~net ~clock ~workspace ~session_dir
     {keeper_name;session_id;runtime_id;operation_id;source;input;message;input_metadata;system_prompt;provider_cfg} =
   let module Store=Keeper_checkpoint_store in
   let root=workspace.Workspace.base_path in
@@ -80,6 +80,16 @@ let prepare ~net ~clock ~workspace ~session_dir
     let waiting=Owner.direct_input_wait owner ~operation_id |> require "original complete wait" |> Option.get in
     let original=Store.load_retained_exact_snapshot ~session_dir ~reference:waiting.checkpoint
       |> require "actual retained W" |> Store.exact_snapshot_checkpoint in
+    let respond ()=match Owner.respond_direct_input_wait owner ~net ~operation_id ~observed:waiting
+        ~response:Agent_core.Hooks.Declined with
+      | Ok `Accepted -> ()
+      | Ok (`Busy _) -> fail "idle original branch response was busy"
+      | Error error -> fail (Owner.input_response_error_to_string error) in
+    if response_before_global then respond ();
+    let original=if response_before_global then
+      Store.load_agent_core_exact_snapshot ~session_dir ~session_id
+      |> require "publicly accepted canonical C" |> Store.exact_snapshot_checkpoint
+      else original in
     (match Owner.run_autonomous_if_idle owner (fun () ->
       let context=Agent_core.Context.copy original.context ~eio:false in
       let scope=Keeper_execution_scope_id.autonomous_admission
@@ -111,11 +121,7 @@ let prepare ~net ~clock ~workspace ~session_dir
      | Error (Owner.Response_owner_error (Owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input _))) -> ()
      | Error error -> fail (Owner.input_response_error_to_string error)
      | Ok _ -> fail "foreign original question acquired public branch authority");
-    (match Owner.respond_direct_input_wait owner ~net ~operation_id ~observed:waiting
-        ~response:Agent_core.Hooks.Declined with
-     | Ok `Accepted -> ()
-     | Ok (`Busy _) -> fail "idle original branch response was busy"
-     | Error error -> fail (Owner.input_response_error_to_string error));
+    if not response_before_global then respond ();
     Alcotest.check Alcotest.string "public response preserves independent G bytes" expected
       (Fs_compat.load_file (Store.agent_core_checkpoint_path ~session_dir ~session_id));
     let branch=Owner.direct_input_branch owner ~operation_id |> require "public original branch" |> Option.get in

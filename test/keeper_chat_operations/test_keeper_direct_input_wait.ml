@@ -104,7 +104,7 @@ let test_stale_digest_and_checkpoint_refuse () = with_path @@ fun path -> with_s
   (match Store.defer_direct_input_wait store ~now:6. ~operation_id:original ~execution_digest:"another digest" ~waiting with
    | Error (Store.Invalid_input _) -> () | _ -> fail "foreign digest permitted wait");
   let changed=checkpoint "same-turn different input" in
-  (match Store.update_input_checkpoint store ~observed:(Some owned) ~checkpoint:changed |> ok with
+  (match Store.update_input_checkpoint store ~now:40. ~observed:(Some owned) ~checkpoint:changed |> ok with
    | Store.Input_checkpoint_updated -> () | _ -> fail "fixture current input did not advance");
   (match defer store operation waiting with Error (Store.Invalid_input _) -> () | _ -> fail "stale input authorized wait");
   let changed_wait=Semantic.input_wait ~checkpoint:changed ~pending |> value in
@@ -184,6 +184,117 @@ let test_response_advances_original_and_input_together () = with_path @@ fun pat
     check bool "only original operation becomes claimable" true (Operation.Operation_id.equal original operation.operation_id);
     Store.resume_direct_checkpoint store ~now:9. ~operation_id:original ~observed:(Semantic.Agent_core consumed) |> ok;
     Store.succeed_running store ~now:10. ~operation_id:original ~outcome_ref:"actual original continuation" |> ok |> ignore)
+let test_canonical_response_detaches_with_global_transaction fault () = with_path @@ fun path ->
+  let newer=checkpoint "independent G after original canonical C" in
+  let committed=match fault with None | Some true -> true | Some false -> false in
+  with_store path (fun store ->
+    let operation=admit store in retire store operation Agent.Retire;
+    ignore (defer store operation waiting |> ok);
+    respond store operation waiting consumed |> ok;
+    check bool "canonical C persists complete original response origin" true
+      (Option.equal Semantic.equal_input_wait (Some waiting) (semantic store).canonical_input_origin);
+    ignore (Store.take_released_checkpoints store);
+    Option.iter (fun after -> Store.For_testing.fail_next_commit
+      (if after then Fail_after_commit else Fail_before_commit)) fault;
+    let result=Store.update_input_checkpoint store ~now:8. ~observed:(Some consumed) ~checkpoint:newer in
+    Store.For_testing.clear_commit_fault ();
+    (match fault,result with
+     | None,Ok Store.Input_checkpoint_updated -> ()
+     | Some _,Error (Store.Store_unavailable _) ->
+       check int "uncertain detachment grants no cleanup authority" 0 (List.length (Store.take_released_checkpoints store))
+     | (None | Some _),(Ok _ | Error _) -> fail "canonical detachment misreported actual commit");
+    check bool "global publication follows the actual same transaction" true
+      (Store.input_checkpoint store ~trace_id:owned.trace_id |> ok=
+        Store.Input_observed (if committed then newer else consumed)));
+  with_store path (fun store ->
+    let execution=semantic store in
+    check bool "original canonical marker retires only with actual G commit" committed
+      (Option.is_none execution.canonical_input_origin);
+    let branch=Store.direct_input_branch store ~operation_id:original |> ok in
+    check bool "branch detachment commits atomically with G across reopen" committed (Option.is_some branch);
+    Option.iter (fun (branch:Semantic.input_branch) ->
+      check bool "branch preserves full original wait" true (Semantic.equal_input_wait branch.origin waiting);
+      check bool "branch preserves exact original C" true (Keeper_checkpoint_ref.equal branch.checkpoint consumed)) branch;
+    check bool "G cannot replace original C continuation" true
+      (Store.direct_checkpoint store ~operation_id:original |> ok=Some (Semantic.Agent_core consumed));
+    check bool "fresh read observes actual committed global input" true
+      (Store.input_checkpoint store ~trace_id:owned.trace_id |> ok=
+        Store.Input_observed (if committed then newer else consumed)))
+
+let test_canonical_response_refuses_invalid_detach_and_native_identity () = with_path @@ fun path -> with_store path @@ fun store ->
+  let operation=admit store in retire store operation Agent.Retire;
+  ignore (defer store operation waiting |> ok);respond store operation waiting consumed |> ok;
+  let before=Semantic.to_json (semantic store) in
+  rejected (Store.update_input_checkpoint store ~now:(-1.) ~observed:(Some consumed)
+    ~checkpoint:(checkpoint "G with invalid detachment time"));
+  check bool "invalid detach time preserves exact original semantic record" true (Semantic.to_json (semantic store)=before);
+  check bool "invalid detach time preserves global C" true
+    (Store.input_checkpoint store ~trace_id:owned.trace_id |> ok=Store.Input_observed consumed);
+  ignore (Store.claim_next store ~now:8. |> ok |> Option.get);
+  Store.resume_direct_checkpoint store ~now:9. ~operation_id:original ~observed:(Semantic.Agent_core consumed) |> ok;
+  let before=Semantic.to_json (semantic store) in
+  let reference ~trace_id ~turn_count=Keeper_checkpoint_ref.create ~trace_id ~turn_count
+    ~canonical_checkpoint_bytes:"foreign canonical response native seed"
+    |> function Ok reference -> reference | Error _ -> fail "invalid native identity fixture reference" in
+  let foreign_trace=Keeper_id.Trace_id.of_string "foreign-response-native-trace" |> value in
+  List.iter (fun seed_checkpoint ->
+    let call=Native.create ~call_id:"019a0010-1000-7000-8000-000000000051" ~runtime_id:"native.primary"
+      ~operation_digest:operation.execution_digest ~api:(Native.New_input {seed_message_count=1})
+      ~seed_checkpoint ~locator |> value in
+    rejected (Store.update_direct_native_call store ~now:10. ~operation_id:original
+      ~execution_digest:operation.execution_digest (Native.Bind {observed=Native.No_native_call;call}));
+    check bool "foreign native receipt preserves exact canonical response record" true
+      (Semantic.to_json (semantic store)=before);
+    ignore (Semantic.of_json (Semantic.to_json (semantic store))
+      |> Result.map_error Semantic.error_to_string |> value))
+    [reference ~trace_id:foreign_trace ~turn_count:owned.turn_count;
+     reference ~trace_id:owned.trace_id ~turn_count:(owned.turn_count-1)]
+
+let test_repeated_canonical_wait_detaches_exact_prepared_response () = with_path @@ fun path ->
+  let second=checkpoint "second original pending input" in
+  let pending={pending with run_id="second-original-run";
+    request={pending.request with request_id="second-original-question";question="Which second original option?"}} in
+  let second_wait=Semantic.input_wait ~checkpoint:second ~pending |> value in
+  let candidate=checkpoint "second exact consumed response" in
+  let prepared=Semantic.input_response_intent ~waiting:second_wait ~source:second ~candidate
+    ~response:Agent_core.Hooks.Declined ~destination:Semantic.Canonical_input |> value in
+  let newer=checkpoint "G after second installed response and resolution precommit failure" in
+  with_store path (fun store ->
+    let operation=admit store in retire store operation Agent.Retire;
+    ignore (defer store operation waiting |> ok);respond store operation waiting consumed |> ok;
+    ignore (Store.claim_next store ~now:8. |> ok |> Option.get);
+    Store.resume_direct_checkpoint store ~now:9. ~operation_id:original ~observed:(Semantic.Agent_core consumed) |> ok;
+    let call=Native.create ~call_id:"019a0010-1000-7000-8000-000000000052" ~runtime_id:"native.primary"
+      ~operation_digest:operation.execution_digest ~api:(Native.New_input {seed_message_count=1})
+      ~seed_checkpoint:consumed ~locator |> value in
+    Store.update_direct_native_call store ~now:10. ~operation_id:original ~execution_digest:operation.execution_digest
+      (Native.Bind {observed=Native.No_native_call;call}) |> ok;
+    Store.update_direct_input_checkpoint store ~now:11. ~operation_id:original ~execution_digest:operation.execution_digest
+      ~call_id:call.call_id ~observed:consumed ~observed_input:(Some consumed) ~checkpoint:second |> ok |> ignore;
+    Store.update_direct_native_call store ~now:12. ~operation_id:original ~execution_digest:operation.execution_digest
+      (Native.Terminal {call_id=call.call_id;disposition={Agent.outcome=Agent.Terminal_succeeded;recovery=Agent.Retire}}) |> ok;
+    Store.defer_direct_input_wait store ~now:13. ~operation_id:original ~execution_digest:operation.execution_digest
+      ~waiting:second_wait |> ok |> ignore;
+    Store.prepare_direct_input_response store ~now:14. ~operation_id:original ~execution_digest:operation.execution_digest
+      ~intent:prepared |> ok;
+    Store.For_testing.fail_next_commit Fail_before_commit;
+    rejected (Store.resolve_direct_input_wait store ~now:15. ~operation_id:original ~execution_digest:operation.execution_digest
+      ~observed:second_wait ~checkpoint:candidate);
+    Store.For_testing.clear_commit_fault ();
+    Store.update_input_checkpoint store ~now:16. ~observed:(Some second) ~checkpoint:newer |> ok |> ignore);
+  with_store path (fun store ->
+    let branch=Store.direct_input_branch store ~operation_id:original |> ok |> Option.get in
+    check bool "repeated wait detachment keeps first original origin" true (Semantic.equal_input_wait branch.origin waiting);
+    check bool "repeated wait detachment retains second actual input head" true (Keeper_checkpoint_ref.equal branch.checkpoint second);
+    let intent=Store.direct_input_response_intent store ~operation_id:original |> ok |> Option.get in
+    check bool "only recorded response destination changes" true
+      (intent.destination=Semantic.Operation_input && Semantic.continues_input_response_intent ~previous:prepared ~next:intent);
+    let operation=current store in
+    Store.resolve_direct_input_wait store ~now:17. ~operation_id:original ~execution_digest:operation.execution_digest
+      ~observed:second_wait ~checkpoint:candidate |> ok;
+    check bool "second response cannot replace independent G" true
+      (Store.input_checkpoint store ~trace_id:owned.trace_id |> ok=Store.Input_observed newer))
+
 let test_response_stale_wait_digest_and_input_refuse () = with_path @@ fun path -> with_store path @@ fun store ->
   let operation=admit store in retire store operation Agent.Retire;ignore (defer store operation waiting |> ok);
   rejected (Store.resolve_direct_input_wait store ~now:7. ~operation_id:original ~execution_digest:"foreign" ~observed:waiting ~checkpoint:consumed);
@@ -191,7 +302,7 @@ let test_response_stale_wait_digest_and_input_refuse () = with_path @@ fun path 
   rejected (respond store operation wrong consumed);
   rejected (respond store operation waiting owned);
   let advanced=checkpoint "later independent owned input" in
-  Store.update_input_checkpoint store ~observed:(Some owned) ~checkpoint:advanced |> ok |> ignore;
+  Store.update_input_checkpoint store ~now:40. ~observed:(Some owned) ~checkpoint:advanced |> ok |> ignore;
   rejected (respond store operation waiting consumed);
   check_wait store;check bool "rejected response preserves actual newer input" true
     (Store.input_checkpoint store ~trace_id:owned.trace_id |> ok=Store.Input_observed advanced)
@@ -268,7 +379,7 @@ let test_intent_conflicts_and_newer_input_preserve_facts () = with_path @@ fun p
     changed ~waiting:forged_wait ~source:response_source ~candidate:response_candidate ~response:response_intent.response];
   rejected (Store.prepare_direct_input_response store ~now:8. ~operation_id:original ~execution_digest:"foreign" ~intent:response_intent);
   let newer=response_checkpoint 4 "actual newer published global input" in
-  (match Store.update_input_checkpoint store ~observed:(Some owned) ~checkpoint:newer |> ok with
+  (match Store.update_input_checkpoint store ~now:40. ~observed:(Some owned) ~checkpoint:newer |> ok with
    | Store.Input_checkpoint_updated -> () | Input_checkpoint_source_changed _ -> fail "new input fixture did not publish");
   rejected (prepare store operation response_intent);
   check_intent store;check_wait store;
@@ -526,7 +637,7 @@ let branch_reference store = Store.direct_input_branch store ~operation_id:origi
 let prepare_branch_with_newer_input store =
   let operation=stage_wait store in prepare store operation response_intent |> ok;
   let newer=response_checkpoint 4 "independent newer global input" in
-  ignore (Store.update_input_checkpoint store ~observed:(Some owned) ~checkpoint:newer |> ok);
+  ignore (Store.update_input_checkpoint store ~now:40. ~observed:(Some owned) ~checkpoint:newer |> ok);
   operation,newer
 let test_branch_store_promotes_exact_intent_and_pins_after_resume () = with_path @@ fun path ->
   let newer=with_store path (fun store ->
@@ -829,6 +940,16 @@ let test_branch_cut_commit_uncertainty after_commit () = with_path @@ fun path -
 
 let () = run "durable original input wait"
   ["store",[
+    test_case "repeated canonical wait detaches only the recorded response destination and preserves its first origin" `Quick
+      test_repeated_canonical_wait_detaches_exact_prepared_response;
+    test_case "canonical response refuses invalid detach time and foreign or regressed native Bind without corrupting its row" `Quick
+      test_canonical_response_refuses_invalid_detach_and_native_identity;
+    test_case "canonical response detaches atomically before independent global publication" `Quick
+      (test_canonical_response_detaches_with_global_transaction None);
+    test_case "canonical response detachment rolls back with global precommit failure" `Quick
+      (test_canonical_response_detaches_with_global_transaction (Some false));
+    test_case "uncertain canonical detachment persists exact branch and G together" `Quick
+      (test_canonical_response_detaches_with_global_transaction (Some true));
     test_case "branch history cut compares native N and host H before binding next seed" `Quick test_branch_cut_compares_native_and_host_predecessors;
     test_case "branch history cut Bind precommit failure grants no receipt" `Quick (test_branch_cut_commit_uncertainty false);
     test_case "branch history cut uncertain Bind survives reopen without acknowledgement" `Quick (test_branch_cut_commit_uncertainty true);

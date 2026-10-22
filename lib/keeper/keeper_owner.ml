@@ -2119,7 +2119,7 @@ let start
                   && flight.lane = writer.input_lane && flight.lane = lane ->
               let persist () = match writer.input_target,change with
                 | Global_target,Autonomous_input checkpoint ->
-                  Chat_operation_store.update_input_checkpoint t.operation_store
+                  Chat_operation_store.update_input_checkpoint t.operation_store ~now:(t.now ())
                     ~observed:writer.input_reference ~checkpoint
                 | Global_target,Direct_input {operation_id;execution_digest;call_id;observed;checkpoint} ->
                   Chat_operation_store.update_direct_input_checkpoint t.operation_store ~now:(t.now ())

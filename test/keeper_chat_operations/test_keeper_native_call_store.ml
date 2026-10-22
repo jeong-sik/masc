@@ -418,12 +418,12 @@ let test_input_owner_survives_retirement_and_reopen () = with_store @@ fun path 
    | Store.Stored_operations _ | Missing_store -> fail "input lifetime was coupled to operation settlement");
   with_reopened path store @@ fun reopened ->
   check_input "input ownership survives restart" (Some (checkpoint 2)) reopened;
-  Store.update_input_checkpoint reopened ~observed:(Some (checkpoint 2)) ~checkpoint:(checkpoint 3)
+  Store.update_input_checkpoint reopened ~now:40. ~observed:(Some (checkpoint 2)) ~checkpoint:(checkpoint 3)
     |> ok |> input_updated;
   check_input "consumption can advance after terminal operation" (Some (checkpoint 3)) reopened;
   check bool "input update never changes immutable terminal result" true
     (terminal_row = (Store.get reopened operation_id |> ok));
-  match Store.update_input_checkpoint reopened ~observed:(Some (checkpoint 2)) ~checkpoint:(checkpoint 4) |> ok with
+  match Store.update_input_checkpoint reopened ~now:40. ~observed:(Some (checkpoint 2)) ~checkpoint:(checkpoint 4) |> ok with
   | Store.Input_checkpoint_source_changed (Store.Input_observed current) ->
     check bool "stale input cannot resurrect after a new observation" true
       (Keeper_checkpoint_ref.equal current (checkpoint 3))
@@ -461,7 +461,7 @@ let test_input_and_native_checkpoint_commit_atomically () = with_store @@ fun _p
 
 let test_input_retention_shares_native_liveness () = with_store @@ fun _path store operation ->
   bind store operation (make_call operation);
-  Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
+  Store.update_input_checkpoint store ~now:40. ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
   commit store operation (Native.Checkpoint {call_id;observed=checkpoint 1;checkpoint=checkpoint 2});
   terminal store operation Agent.Retire;
   ignore (Store.succeed_running store ~now:5. ~operation_id ~outcome_ref:"settled" |> ok);
@@ -471,7 +471,7 @@ let test_input_retention_shares_native_liveness () = with_store @@ fun _path sto
     (List.exists (Keeper_checkpoint_ref.equal (checkpoint 2)) released);
   check bool "input owner protects a retired native seed" false
     (List.exists (Keeper_checkpoint_ref.equal (checkpoint 1)) released);
-  Store.update_input_checkpoint store ~observed:(Some (checkpoint 1)) ~checkpoint:(checkpoint 3)
+  Store.update_input_checkpoint store ~now:40. ~observed:(Some (checkpoint 1)) ~checkpoint:(checkpoint 3)
     |> ok |> input_updated;
   let released = Store.take_released_checkpoints store |> List.map Store.released_reference in
   check bool "superseded input ref releases after confirmed commit" true
@@ -488,16 +488,16 @@ let test_input_writes_on_closed_store_are_typed () = with_store @@ fun _path sto
     ~execution_digest:operation.Operation.execution_digest
     (Native.Checkpoint {call_id;observed=checkpoint 1;checkpoint=checkpoint 2}));
   closed "autonomous input update"
-    (Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 2));
+    (Store.update_input_checkpoint store ~now:40. ~observed:None ~checkpoint:(checkpoint 2));
   closed "atomic direct input update"
     (advance_input store operation ~observed:(checkpoint 1) ~observed_input:None (checkpoint 2))
 
 let test_input_identity_is_not_an_ordinal () = with_store @@ fun _path store _operation ->
   let first = checkpoint_of_bytes ~turn_count:4 40 in
   let same_turn = checkpoint_of_bytes ~turn_count:4 41 in
-  Store.update_input_checkpoint store ~observed:None ~checkpoint:first |> ok |> input_updated;
-  Store.update_input_checkpoint store ~observed:(Some first) ~checkpoint:same_turn |> ok |> input_updated;
-  (match Store.update_input_checkpoint store ~observed:(Some first) ~checkpoint:(checkpoint 5) |> ok with
+  Store.update_input_checkpoint store ~now:40. ~observed:None ~checkpoint:first |> ok |> input_updated;
+  Store.update_input_checkpoint store ~now:40. ~observed:(Some first) ~checkpoint:same_turn |> ok |> input_updated;
+  (match Store.update_input_checkpoint store ~now:40. ~observed:(Some first) ~checkpoint:(checkpoint 5) |> ok with
    | Store.Input_checkpoint_source_changed (Store.Input_observed actual) ->
      check bool "same turn replacement is detected by exact bytes" true
        (Keeper_checkpoint_ref.equal actual same_turn)
@@ -507,11 +507,11 @@ let test_input_identity_is_not_an_ordinal () = with_store @@ fun _path store _op
     ~turn_count:4 ~canonical_checkpoint_bytes:"foreign input"
     |> function Ok reference -> reference | Error _ -> fail "foreign trace fixture" in
   rejected "a previous trace authorized a new trace"
-    (Store.update_input_checkpoint store ~observed:(Some same_turn) ~checkpoint:foreign);
+    (Store.update_input_checkpoint store ~now:40. ~observed:(Some same_turn) ~checkpoint:foreign);
   check bool "cross-trace refusal creates no foreign input owner" true
     ((Store.input_checkpoint store ~trace_id:foreign.trace_id |> ok) = Store.Input_unobserved);
   rejected "input owner moved behind its source turn"
-    (Store.update_input_checkpoint store ~observed:(Some same_turn) ~checkpoint:(checkpoint 3));
+    (Store.update_input_checkpoint store ~now:40. ~observed:(Some same_turn) ~checkpoint:(checkpoint 3));
   check_input "identity refusals preserve actual current owner" (Some same_turn) store
 
 let test_prior_history_never_becomes_unobserved_or_releasable () = with_store @@ fun path store operation ->
@@ -526,7 +526,7 @@ let test_prior_history_never_becomes_unobserved_or_releasable () = with_store @@
   let trace_id = Keeper_id.Trace_id.of_string "omitted-historical-trace" |> value in
   check bool "an omitted prior trace is unknown, never fresh" true
     ((Store.input_checkpoint reopened ~trace_id |> ok) = Store.Prior_input_unavailable);
-  (match Store.update_input_checkpoint reopened ~observed:None ~checkpoint:(checkpoint 2) |> ok with
+  (match Store.update_input_checkpoint reopened ~now:40. ~observed:None ~checkpoint:(checkpoint 2) |> ok with
    | Store.Input_checkpoint_source_changed Store.Prior_input_unavailable -> ()
    | Input_checkpoint_updated | Input_checkpoint_source_changed (Input_unobserved | Input_observed _) ->
      fail "ordinary input writer fabricated prior authority");
@@ -543,7 +543,7 @@ let test_prior_history_never_becomes_unobserved_or_releasable () = with_store @@
 
 let test_retired_cut_bind_and_input_owner_are_atomic () = with_store @@ fun path store operation ->
   bind store operation (make_call operation);
-  Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
+  Store.update_input_checkpoint store ~now:40. ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
   terminal store operation Agent.Retire;
   let observed=read store in
   let cut=checkpoint_of_bytes ~turn_count:1 101 in
@@ -574,7 +574,7 @@ let test_retired_cut_bind_and_input_owner_are_atomic () = with_store @@ fun path
 let test_retired_cut_native_refusals_keep_input () =
   List.iter (fun recovery -> with_store @@ fun _path store operation ->
     bind store operation (make_call operation);
-    Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
+    Store.update_input_checkpoint store ~now:40. ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
     terminal store operation recovery;
     let observed=read store in
     let call=make_call ~id:next_call_id ~seed:2 operation in
@@ -595,7 +595,7 @@ let test_retired_cut_native_refusals_keep_input () =
 
 let test_history_clear_guards_and_exact_commit () = with_store @@ fun path store operation ->
   let trace_id = (checkpoint 1).Keeper_checkpoint_ref.trace_id in
-  Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
+  Store.update_input_checkpoint store ~now:40. ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
   rejected "running operation admitted history clear" (Store.history_clear_input_checkpoint store ~trace_id);
   bind store operation (make_call operation);
   rejected "active native call admitted history clear" (Store.history_clear_input_checkpoint store ~trace_id);
@@ -632,7 +632,7 @@ let test_history_clear_guards_and_exact_commit () = with_store @@ fun path store
 
 let test_history_clear_never_hides_terminal_unknown_native () = with_store @@ fun _path store operation ->
   let trace_id=(checkpoint 1).Keeper_checkpoint_ref.trace_id in
-  Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
+  Store.update_input_checkpoint store ~now:40. ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
   bind store operation (make_call operation);
   terminal store operation (Agent.Operator_repair_required Agent.Effect_outcome_unknown);
   ignore (Store.fail_running store ~now:4. ~operation_id ~kind:Operation.Turn_exception

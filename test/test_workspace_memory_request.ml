@@ -175,7 +175,7 @@ let test_model_answer_uses_request_local_ids () =
 let test_snapshot_is_bound_to_the_captured_ledger () =
   let batch = prepare [changed; second] in
   let snapshot = Request.batch_to_json batch in
-  (match Request.batch_of_json ~ledger snapshot with
+  (match Request.batch_of_json ~ledger ~render snapshot with
    | Ok restored -> Alcotest.check json "snapshot round trip" snapshot (Request.batch_to_json restored)
    | Error error -> Alcotest.fail (Request.error_to_string error));
   let replace key value = function
@@ -183,7 +183,7 @@ let test_snapshot_is_bound_to_the_captured_ledger () =
     | _ -> Alcotest.fail "expected an object" in
   let map_list key f node = replace key (`List (List.map f (member key node |> to_list))) node in
   let refused label ?(against = ledger) tampered =
-    match Request.batch_of_json ~ledger:against tampered with
+    match Request.batch_of_json ~ledger:against ~render tampered with
     | Error (Request.Invalid_batch _) -> ()
     | Ok _ | Error (Request.Invalid_limit | Render_failed _ | Index_unavailable _ | Measure_failed _
                    | Exceeds_frame _ | Invalid_size _) ->
@@ -283,7 +283,7 @@ let test_next_batch_takes_at_most_the_answered_size () =
    | Ok (Some child) -> Alcotest.(check bool) "a narrowed child keeps its parent's size" true
                           (child.size = Request.Up_to 6)
    | Ok None | Error _ -> Alcotest.fail "a five-row batch did not narrow");
-  (match Request.batch_of_json ~ledger:Ledger.empty (Request.batch_to_json batch) with
+  (match Request.batch_of_json ~ledger:Ledger.empty ~render (Request.batch_to_json batch) with
    | Ok restored -> Alcotest.(check bool) "the snapshot keeps the size" true (restored.size = Request.Up_to 6)
    | Error error -> Alcotest.fail (Request.error_to_string error));
   Alcotest.(check int) "an answered size above the backlog takes the backlog" 40

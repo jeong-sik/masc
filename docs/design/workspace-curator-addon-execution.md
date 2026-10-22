@@ -400,9 +400,15 @@ original execution refusal. This is recoverable publication across two records,
 under the existing serialized workspace lease; it is not a cross-file transaction.
 The link operation makes no worker call, model call, domain save or observer ACK.
 
-Capture format `workspace.memory.execution-capture.v2` requires an explicit
-nullable predecessor. Root constructors emit null; a child records its immediate
-original parent. The decoder is strict: missing predecessor and old-format
+Capture format `workspace.memory.execution-capture.v3` stores the model input
+once, inside the batch snapshot. A batch renders its prompt over its canonical
+input (sorted keys), so restore renders the same prompt again with the captured
+template; the capture keeps only the prompt's SHA-256 and refuses a restore
+whose rendering no longer matches it. The observer registration receipt names
+the capture by its request digest instead of holding a copy.
+
+The capture format requires an explicit nullable predecessor. Root constructors
+emit null; a child records its immediate original parent. The decoder is strict: missing predecessor and old-format
 records are errors, not inferred roots. This branch has no production scheduler
 cutover or installed-data migration. Before any child resume, commit or direct
 Exact authorization, strict restoration reads every ancestor and requires the
@@ -451,12 +457,12 @@ execution. A new selected compiled run remains separate evidence.
 Selected successor run39679636091 at062bea30 compiled and ran the selected
 suites, then failed three interrupted-link fixtures. A newly constructed capture
 kept noncanonical internal row key order, while a strict persisted restore read
-canonical rows. Narrowing re-rendered a different child's input_text/prompt from
-those equivalent rows. Capture.make now canonicalizes its internal whole-work
-snapshot while retaining the parent's original substitution bytes separately.
-This repairs deterministic fresh/restored narrowing rather than relaxing the
-exact child comparison. The failed run and earlier pre-MCP-dependency compile
-failure39679243670 remain historical; a new-head run is separate evidence.
+canonical rows, so narrowing rendered a different child prompt from those
+equivalent rows. Capture.make canonicalizes its internal whole-work snapshot,
+and every batch renders over its canonical input, so fresh and restored captures
+narrow to the same child. This keeps the exact child comparison. The failed run
+and earlier pre-MCP-dependency compile failure39679243670 remain historical; a
+new-head run is separate evidence.
 
 
 ## Read an original host terminal while its worker is unavailable

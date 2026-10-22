@@ -55,8 +55,15 @@ let test_canonical_storage_preserves_original_prompt_and_selected_judgment () = 
   let a,_,batch,capture = classification workspace in
   let retained = retain ~request:(C.to_json capture) store in
   let restored = get (restore store ~workspace:(get (C.observe_workspace ~base_path:root)) retained) in
-  Alcotest.(check string) "original substitution bytes survive canonical object ordering"
-    (Yojson.Safe.to_string batch.input) (C.input_text restored);
+  let occurrences sub text =
+    let n = String.length sub in
+    let rec count from total = match String.index_from_opt text from sub.[0] with
+      | Some i when i + n <= String.length text ->
+        if String.equal (String.sub text i n) sub then count (i + n) (total + 1) else count (i + 1) total
+      | Some _ | None -> total in
+    count 0 0 in
+  Alcotest.(check int) "the stored capture holds the model input once" 1
+    (occurrences a.claim (Yojson.Safe.to_string retained.request));
   Alcotest.(check string) "actual original prompt is restored" batch.rendered_prompt (C.rendered_prompt restored);
   Alcotest.check json "schema preserved" Workspace_memory_decision.output_schema (C.output_schema restored);
   let local = match R.selected_ids batch with
@@ -93,14 +100,11 @@ let test_changed_capture_provenance_and_owner_are_refused () = with_workspace (f
   rejected (C.classification ~request_id:id ~workspace ~destination ~ledger:L.empty ~batch
     ~prompt:{classification_prompt with file_path=Some ""});
   let original = C.to_json capture in
-  let canonical_input = get (Lane_addon_action.canonical batch.input) |> Yojson.Safe.to_string in
-  Alcotest.(check bool) "fixture exercises canonical key reordering" true
-    (canonical_input <> Yojson.Safe.to_string batch.input);
+  (* A consistent template that renders another prompt than the one sent. *)
   let changed_prompt = member "prompt" original
     |> replace "effective" (`String "Other template: {{workspace_memory_changes}}")
     |> replace "override_value" (`String "Other template: {{workspace_memory_changes}}") in
-  let invalid = [replace "input_text" (`String canonical_input) original;
-    replace "input_text" (`String "{\"new_facts\":[]}") original;
+  let invalid = [replace "rendered_prompt_sha256" (`String (String.make 64 '0')) original;
     replace "prompt" changed_prompt original;
     replace "prompt" (replace "has_override" (`Bool false) (member "prompt" original)) original;
     replace "output_schema" (`Assoc ["type",`String "string"]) original;

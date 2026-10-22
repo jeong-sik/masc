@@ -106,7 +106,9 @@ let render_batch ~render ~state ~selected ~remaining =
   match state.building with
   | None -> Error "briefing batch has no active pass"
   | Some building ->
-    let input = model_input building.text selected in
+    (* The model reads the canonical input. A snapshot keeps neither it nor the
+       prompt; a restore renders both again from the pass and its selection. *)
+    let* input = Lane_addon_action.canonical (model_input building.text selected) in
     let* rendered_prompt = render input in
     Ok { state; selected; remaining; input; rendered_prompt }
 
@@ -240,33 +242,29 @@ let of_json json =
     Ok { published; building }
   | _ -> Error "unknown workspace briefing schema"
 
+let batch_schema = "workspace.memory.briefing-batch.v2"
+
 let batch_to_json batch = `Assoc
-  ["schema", `String "workspace.memory.briefing-batch.v1";
+  ["schema", `String batch_schema;
    "state", to_json batch.state;
    "selected", `List (List.map source_json batch.selected);
-   "remaining", `List (List.map source_json batch.remaining);
-   "input", batch.input; "rendered_prompt", `String batch.rendered_prompt]
+   "remaining", `List (List.map source_json batch.remaining)]
 
-let batch_of_json json =
-  let* fields = exact_fields "briefing batch"
-      ["schema"; "state"; "selected"; "remaining"; "input"; "rendered_prompt"] json in
+let batch_of_json ~render json =
+  let* fields = exact_fields "briefing batch" ["schema"; "state"; "selected"; "remaining"] json in
   let* () = match List.assoc "schema" fields with
-    | `String "workspace.memory.briefing-batch.v1" -> Ok ()
+    | `String schema when String.equal schema batch_schema -> Ok ()
     | _ -> Error "unknown workspace briefing batch schema" in
   let* state = of_json (List.assoc "state" fields) in
   let* selected = array decode_source (List.assoc "selected" fields) in
   let* remaining = array decode_source (List.assoc "remaining" fields) in
   let* () = validate_sources (selected @ remaining) in
-  let* rendered_prompt = string (List.assoc "rendered_prompt" fields) in
-  let input = List.assoc "input" fields in
   match state.building with
   | None -> Error "briefing batch snapshot has no active pass"
   | Some building ->
     if selected = [] || selected @ remaining <> building.remaining
     then Error "briefing batch snapshot changes its original unconsumed partition"
-    else if not (Yojson.Safe.equal input (model_input building.text selected))
-    then Error "briefing batch snapshot input differs from the original pass"
-    else Ok {state;selected;remaining;input;rendered_prompt}
+    else render_batch ~render ~state ~selected ~remaining
 
 let path ~directory = Filename.concat directory "briefing.json"
 let io f =

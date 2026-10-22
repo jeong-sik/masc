@@ -167,16 +167,22 @@ let check_rows rows =
   let* _ = traverse neighbors rows in
   Ok ()
 
-let render_batch ~render ~ledger ~size ~index_stats rows =
-  let* input, ids = build ~ledger rows |> Result.map_error (fun detail -> Invalid_batch detail) in
+(* The model reads the canonical input. A snapshot keeps only that input, and a
+   restore renders the same prompt from it. *)
+let rendered ~render ~size ~index_stats rows input ids =
+  let* input = Lane_addon_action.canonical input |> Result.map_error (fun detail -> Invalid_batch detail) in
   let* rendered_prompt = render input |> Result.map_error (fun detail -> Render_failed detail) in
   Ok { rows; selected = List.map (fun (row : row) -> row.fact) rows; size; input; rendered_prompt; ids; index_stats }
+
+let render_batch ~render ~ledger ~size ~index_stats rows =
+  let* input, ids = build ~ledger rows |> Result.map_error (fun detail -> Invalid_batch detail) in
+  rendered ~render ~size ~index_stats rows input ids
 
 let selected_ids batch = batch.ids.selected_ids
 let claim_ids batch = batch.ids.claim_ids
 let conflict_ids batch = batch.ids.conflict_ids
 
-let batch_schema = "workspace.memory.classification-batch.v3"
+let batch_schema = "workspace.memory.classification-batch.v4"
 
 (* [null] is [Fill_frame]: no count bound, the frame decides. *)
 let size_to_json = function
@@ -188,7 +194,6 @@ let batch_to_json (batch : batch) =
   let pairs field values =
     `List (List.map (fun (local, value) -> `Assoc ["id", `String local; field, value]) values) in
   `Assoc ["schema", `String batch_schema; "up_to", size_to_json batch.size; "input", batch.input;
-    "rendered_prompt", `String batch.rendered_prompt;
     "facts", pairs "fact" (List.map (fun (id, fact) -> id, Ledger.fact_ref_to_json fact) batch.ids.fact_ids);
     "claims", pairs "claim_id" (List.map (fun (id, claim) -> id, `String claim) batch.ids.claim_ids);
     "conflicts", pairs "conflict_id"
@@ -212,10 +217,10 @@ let snapshot_pairs field decode json =
     let* value = decode (List.assoc field fields) in
     Ok (id, value)) json
 
-let batch_of_json ~ledger json =
+let batch_of_json ~ledger ~render json =
   let decode () =
     let* fields = snapshot_fields
-        ["schema"; "up_to"; "input"; "rendered_prompt"; "facts"; "claims"; "conflicts"; "index_stats"] json in
+        ["schema"; "up_to"; "input"; "facts"; "claims"; "conflicts"; "index_stats"] json in
     let* schema = snapshot_text (List.assoc "schema" fields) in
     let* () = if String.equal schema batch_schema then Ok () else Error "unknown classification batch schema" in
     let* size = match List.assoc "up_to" fields with
@@ -260,7 +265,6 @@ let batch_of_json ~ledger json =
     let* () = if Yojson.Safe.equal expected input && ids.fact_ids = fact_ids
                  && ids.claim_ids = claim_ids && ids.conflict_ids = conflict_ids then Ok ()
       else Error "snapshot differs from its selected facts or captured ledger context" in
-    let* rendered_prompt = snapshot_text (List.assoc "rendered_prompt" fields) in
     let* stats = snapshot_fields ["index_builds"; "indexed_rows"; "queries_executed"] (List.assoc "index_stats" fields) in
     let count key = match List.assoc key stats with
       | `Int count when count >= 0 -> Ok count
@@ -268,9 +272,9 @@ let batch_of_json ~ledger json =
     let* index_builds = count "index_builds" in
     let* indexed_rows = count "indexed_rows" in
     let* queries_executed = count "queries_executed" in
-    Ok { rows; selected = List.map (fun (row : row) -> row.fact) rows; size; input; rendered_prompt; ids;
-         index_stats = { Index.index_builds; indexed_rows; queries_executed } } in
-  decode () |> Result.map_error (fun detail -> Invalid_batch detail)
+    Ok (rows, size, expected, ids, { Index.index_builds; indexed_rows; queries_executed }) in
+  let* rows, size, input, ids, index_stats = decode () |> Result.map_error (fun detail -> Invalid_batch detail) in
+  rendered ~render ~size ~index_stats rows input ids
 
 (* Rows ranked so far, newest first, for the first [count] pending facts. *)
 type ranked = { rows_rev : row list; count : int }

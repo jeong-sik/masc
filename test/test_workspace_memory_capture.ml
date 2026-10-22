@@ -46,12 +46,12 @@ let test_classification_reopens_exact_batches_and_applies_only_selected () = wit
     owned (retain ~request_id ~request store);
     let retained = some (owned (load (Store.create ~root) request_id)) in
     let ledger = get (Ledger.of_json (member "ledger" retained.request)) in
-    let restored = requested (Request.batch_of_json ~ledger (member "batch" retained.request)) in
+    let restored = requested (Request.batch_of_json ~ledger ~render (member "batch" retained.request)) in
     Alcotest.check json "original rows, neighbors, suffix, prompt and index observations"
       (Request.batch_to_json original) (Request.batch_to_json restored))
     ["classification-full",full; "classification-child",narrowed];
   let retained = some (owned (load (Store.create ~root) "classification-child")) in
-  let restored = requested (Request.batch_of_json ~ledger:Ledger.empty (member "batch" retained.request)) in
+  let restored = requested (Request.batch_of_json ~ledger:Ledger.empty ~render (member "batch" retained.request)) in
   let local = match Request.selected_ids restored with
     | [(id, _)] -> id | [] | _ :: _ :: _ -> Alcotest.fail "one narrowed selection" in
   let answer = `Assoc ["decisions", `List [`Assoc ["fact_id", `String local;
@@ -70,7 +70,7 @@ let test_pending_and_neighbor_boundaries_are_strict () =
       ~current:[a;b] ~pending:[a] ~size:Request.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0))) in
   let snapshot = Request.batch_to_json full in
   let refused ?(ledger = Ledger.empty) raw =
-    match Request.batch_of_json ~ledger raw with
+    match Request.batch_of_json ~ledger ~render raw with
     | Error (Request.Invalid_batch _) -> ()
     | Error (Request.Invalid_limit | Request.Render_failed _ | Request.Index_unavailable _
            | Request.Measure_failed _ | Request.Exceeds_frame _ | Request.Invalid_size _)
@@ -104,12 +104,11 @@ let test_briefing_reopens_original_chunk_without_early_publication () = with_sto
   let request = Briefing.batch_to_json original in
   owned (retain ~tool:"briefing" ~request_id:"briefing-chunk" ~request store);
   let retained = some (owned (load (Store.create ~root) "briefing-chunk")) in
-  let restored = get (Briefing.batch_of_json retained.request) in
+  let restored = get (Briefing.batch_of_json ~render retained.request) in
   Alcotest.check json "whole original pass and exact chunk survive reopening" request (Briefing.batch_to_json restored);
-  let refused raw = match Briefing.batch_of_json raw with
+  let refused raw = match Briefing.batch_of_json ~render raw with
     | Error _ -> () | Ok _ -> Alcotest.fail "changed original pass restored" in
   refused (replace "remaining" (`List []) request);
-  refused (replace "input" (replace "previous_summary" (`String "Forged prior summary") (Briefing.input restored)) request);
   (match member "remaining" request with
    | `List rows -> refused (replace "remaining" (`List (List.rev rows)) request)
    | _ -> Alcotest.fail "remaining sources");

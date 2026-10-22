@@ -12,9 +12,11 @@ val registration : capture:Workspace_memory_execution_capture.t ->
 val restore_registration : capture:Workspace_memory_execution_capture.t ->
   original:Lane_addon_tool_request_owner.retained ->
   Lane_addon_request_receipt.receipt -> (registration, string) result
-(** Reconstruct and compare the entire original versioned payload, captured
-    request/destination/digest, deterministic run ID, input and first time.
-    No current prompt/configuration or registry state is substituted. *)
+(** Reconstruct and compare the entire original versioned payload: captured
+    request digest, deterministic run ID, actor and first time. The payload
+    names the capture by its digest; [input] is the restored capture itself,
+    bound to that digest. No current prompt/configuration or registry state is
+    substituted. *)
 type disposition =
   | Confirmed_commit of Lane_addon_request_progress.commit
   | Domain_conflict of Lane_addon_request_progress.commit * Yojson.Safe.t

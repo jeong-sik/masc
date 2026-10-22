@@ -52,11 +52,14 @@ val batch_is_current : sources:source list -> contract:string -> batch -> (bool,
     Does not render, prepare, accept or publish another request. *)
 
 val batch_to_json : batch -> Yojson.Safe.t
-val batch_of_json : Yojson.Safe.t -> (batch, string) result
+val batch_of_json :
+  render:(Yojson.Safe.t -> (string, string) result) -> Yojson.Safe.t -> (batch, string) result
 (** Restore the captured original chunk without re-preparing or publishing it.
-    Requires selected plus remaining to be the exact unconsumed pass entries,
-    and input to agree with the prior semantic summary and selected sources.
-    Prompt/contract provenance remains the host request owner's responsibility. *)
+    Requires selected plus remaining to be the exact unconsumed pass entries.
+    The snapshot holds neither the input nor the prompt: the canonical input is
+    built again from the prior semantic summary and the selected sources, and
+    [render] renders the prompt from it. Prompt/contract provenance, and
+    evidence of the prompt that was sent, remain the host request owner's. *)
 
 type preparation = Unchanged | Cleanup of t | Prepared of batch
 

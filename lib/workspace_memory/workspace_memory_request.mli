@@ -33,8 +33,8 @@ type batch = private
         (** The size the batch was prepared for; a narrowed child keeps its
             parent's. [selected] can be shorter: the frame or the backlog
             stopped it first. *)
-  ; input : Yojson.Safe.t
-  ; rendered_prompt : string
+  ; input : Yojson.Safe.t  (** canonical: sorted keys ({!Lane_addon_action.canonical}) *)
+  ; rendered_prompt : string  (** [render input]; never stored *)
   ; ids : ids
   ; index_stats : Keeper_memory_search_index.batch_stats
   }
@@ -56,14 +56,18 @@ val conflict_ids : batch -> (string * string) list
 
 val batch_to_json : batch -> Yojson.Safe.t
 val batch_of_json
-  : ledger:Workspace_memory_ledger.t -> Yojson.Safe.t -> (batch, error) result
-(** Strict snapshot of the complete original batch, not a new retrieval or
-    prompt render. Rebuilds the input and id map from the snapshot rows and
-    the captured [ledger] and refuses any difference, so every membership and
-    entry text the model saw is the captured ledger's. Also refuses a
-    neighbor owned by its selected fact's Keeper, a repeated fact and a
-    selected fact already disposed in that ledger. The caller must retain the
-    original ledger and rendered-template identity with this snapshot. *)
+  :  ledger:Workspace_memory_ledger.t
+  -> render:(Yojson.Safe.t -> (string, string) result)
+  -> Yojson.Safe.t
+  -> (batch, error) result
+(** Strict snapshot of the complete original batch, not a new retrieval.
+    Rebuilds the input and id map from the snapshot rows and the captured
+    [ledger] and refuses any difference, so every membership and entry text
+    the model saw is the captured ledger's. Also refuses a neighbor owned by
+    its selected fact's Keeper, a repeated fact and a selected fact already
+    disposed in that ledger. The snapshot holds no rendered prompt: [render]
+    renders it again from the canonical input, so the caller passes the
+    captured template and keeps evidence of the prompt it sent. *)
 
 val prepare
   :  neighbor_limit:int

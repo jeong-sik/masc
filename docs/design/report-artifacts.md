@@ -237,6 +237,47 @@ do not modify publication manifests, history or source bytes. Data and lock
 leaves are owned regular files; the stable protocol creates a new lock
 exclusively and validates an existing descriptor binding before writing it.
 
+### Check retention and storage recovery
+
+The check store retains the latest state for each artifact ID and revision,
+including its body digest, change ID, actor and time. Checking and then
+unchecking the same revision replaces that record; it does not preserve the
+earlier check or its actor/time as an audit trail. Different revisions retain
+separate records. An explicit uncheck also creates a record when none exists.
+
+Records are stored as `published_artifact_checks/<id>-r<revision>.json` under
+the resolved workspace runtime root. Listing enumerates that directory and
+takes a stable-lock snapshot of each `.json` record. Its work therefore grows
+with explicitly checked or unchecked revisions, plus malformed `.json` entries,
+not with automatically published revisions. Unchecking keeps the record and
+does not reduce that inventory. Listing decodes check records without reading
+or joining their published revision bodies; clients must still compare the
+target digest with the publication inventory.
+
+Malformed record content and a stored record whose digest disagrees with the
+published target cannot be overwritten through the normal check/uncheck API.
+Refresh or repeated `POST` requests do not repair that evidence. There is no
+check-repair endpoint. For operator maintenance, first quiesce check writers for
+the workspace, preserve the failing response and original record, and verify the
+published revision and its body integrity. An operator can then move the corrupt
+or mismatched data leaf outside the check directory, retaining it as evidence.
+Keep the transaction's stable lock leaf in place; do not unlink or replace locks
+to bypass a refusal. Unsafe ownership, lock or publication failures require their
+own diagnosis rather than this data-record reset. After maintenance, refresh both
+inventories and require a complete, diagnostic-free read with the expected
+publication digest before making a new explicit check. An absent record uses
+`expected_change_id: null`; the old confirmation and its change ID are not
+restored. This is manual recovery guidance, not an automatic repair performed
+by the service.
+
+The publication API currently has no delete operation, and neither publication
+nor unchecking removes check records. Any future deletion or retention cleanup
+must coordinate retirement of the matching revision checks with publication
+removal. A check listing alone does not detect a deleted publication; leaving a
+syntactically valid check record behind would otherwise produce no storage
+diagnostic. Such a deletion path must preserve transaction lock ownership and
+keep the affected confirmation unknown until the coordinated change is complete.
+
 The Dashboard list and the selected reader expose an explicit confirmation
 button, including the actor and time for that exact revision. "Today unchecked"
 counts current revisions only when both inventories are complete; unavailable,

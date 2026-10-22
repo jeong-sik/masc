@@ -110,7 +110,7 @@ let queue_help =
 let catalog =
   [ { word = "login"; aliases = []; args = "[client]"; summary = "sign in to an official client and verify a model connection" }
   ; { word = "task-inspect"; aliases = []; args = "";
-      summary = "inspect the original retained Task creation without repeating it" }
+      summary = "inspect this session's Task creations without repeating them" }
   ; { word = "task-recover"
     ; aliases = []
     ; args = ""

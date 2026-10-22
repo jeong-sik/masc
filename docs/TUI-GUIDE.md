@@ -701,8 +701,11 @@ names. A line that starts with `/` is a command for the TUI instead:
   New text, attachment and reference edits survive late replies, including
   changing the draft and returning to empty.
   Retained commands live in this TUI session; they are not restart recovery.
-- `/task-inspect` — opens retained Task creations for this Keeper and the
-  confirmed original workspace. `[` selects an older request, `]` a newer one,
+- `/task-inspect` — opens this session's completed Task creation requests,
+  including successful creations, for this Keeper and the confirmed original
+  workspace. Successful requests remain available for reading, while
+  `/task-recover` continues to select only failed or unconfirmed commands.
+  `[` selects an older request, `]` a newer one,
   and `r` reads the displayed source again. The original title, body and
   transport outcome remain visible beside the lookup. A failed refresh keeps
   the last fact and its failure. “Not observed” does not prove that creation

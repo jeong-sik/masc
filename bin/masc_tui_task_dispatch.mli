@@ -1,5 +1,7 @@
 (** Original Task creation intent and its session-owned protocol outcome.
-    A created Task outlives workspace observations; no operation is replayed. *)
+    A created Task outlives workspace observations; no operation is replayed.
+    UI consumers may retain completed intents for read-only inspection.
+    [Created] does not authorize input recovery or another dispatch. *)
 type intent = {
   request_id : string;
   keeper : string;

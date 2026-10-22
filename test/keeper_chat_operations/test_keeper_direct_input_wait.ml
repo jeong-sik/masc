@@ -357,8 +357,171 @@ let test_intent_strict_codec_and_reference_domain () = with_path @@ fun path -> 
      response_checkpoint 1 "regressed source",response_checkpoint 1 "regressed candidate";
      response_source,response_checkpoint 4 "response changed model turn"]
 
+(* Branch foundation exercises the actual semantic transition and strict
+   persisted JSON. Store/Owner/physical response/native integration remains a
+   separate contract; these opaque refs do not simulate an independent Producer. *)
+let transition action execution = Semantic.apply ~now:20. action execution
+  |> Result.map_error Semantic.error_to_string |> value
+let roundtrip execution = Semantic.of_json (Semantic.to_json execution)
+  |> Result.map_error Semantic.error_to_string |> value
+let branch_of execution = match execution.Semantic.input_branch with
+  | Some branch -> branch | None -> fail "operation lost its independent input branch"
+let staged_branch store =
+  let operation=stage_wait store in prepare store operation response_intent |> ok;
+  operation,transition (Semantic.Resolve_input_branch {observed=waiting;checkpoint=response_candidate}) (semantic store)
+let check_branch_root execution =
+  check bool "first full wait remains the immutable branch origin" true
+    (Semantic.equal_input_wait (branch_of execution).origin waiting)
+let test_branch_pins_after_consuming_continuation () = with_path @@ fun path -> with_store path @@ fun store ->
+  let _,branched=staged_branch store in
+  let suspended=roundtrip branched in
+  check_branch_root suspended;
+  check bool "branch resolution consumes exact prepared intent" true (suspended.input_response_intent=None);
+  let running=transition (Semantic.Resume_checkpoint response_candidate) suspended |> roundtrip in
+  check bool "resume consumed only the phase continuation" true (running.phase=Semantic.Running);
+  List.iter (fun checkpoint -> check bool "branch evidence survives resume before next Bind" true
+    (names checkpoint (Semantic.checkpoint_references running))) [owned;response_candidate];
+  check bool "historical W is not current continuation authority" false
+    (names owned (Semantic.continuation_checkpoints running));
+  check bool "C remains current input authority between resume and native Bind" true
+    (names response_candidate (Semantic.continuation_checkpoints running));
+  let recovering=transition (Semantic.Require_reconciliation "process ended before native Bind") running |> roundtrip in
+  check_branch_root recovering;
+  check bool "reconciliation preserves the exact branch head" true
+    (Keeper_checkpoint_ref.equal (branch_of recovering).checkpoint response_candidate);
+  rejected (Semantic.apply ~now:21. (Semantic.Resume_checkpoint response_candidate) recovering);
+  rejected (Semantic.apply ~now:21. (Semantic.Resolve_input_branch {observed=waiting;checkpoint=response_candidate}) running);
+  let unprepared=semantic store |> fun prepared ->
+    let json=Semantic.to_json prepared in
+    match json with
+    | `Assoc fields -> Semantic.of_json (`Assoc (List.remove_assoc "input_response_intent" fields))
+      |> Result.map_error Semantic.error_to_string |> value
+    | _ -> fail "expected semantic object" in
+  rejected (Semantic.apply ~now:21. (Semantic.Resolve_input_branch {observed=waiting;checkpoint=response_candidate}) unprepared)
+let bind_branch execution =
+  let call=Native.create ~call_id ~runtime_id:"native.primary" ~operation_digest:execution.Semantic.input_sha256
+    ~api:Native.Continue_from_checkpoint ~seed_checkpoint:response_candidate ~locator |> value in
+  let execution=Semantic.update_native_call ~now:21. ~expected:Native.No_native_call ~replacement:(Native.Active call) execution
+    |> Result.map_error Semantic.error_to_string |> value in
+  call,execution
+let test_branch_native_cas_and_second_response () = with_path @@ fun path -> with_store path @@ fun store ->
+  let _,branched=staged_branch store in
+  let running=transition (Semantic.Resume_checkpoint response_candidate) branched in
+  let call,bound=bind_branch running in
+  let second_checkpoint=response_checkpoint 4 "second owned input wait" in
+  rejected (Semantic.apply ~now:22. (Semantic.Advance_input_branch {observed=response_candidate;checkpoint=second_checkpoint}) bound);
+  let advanced_call=Native.advance call ~observed:response_candidate ~checkpoint:second_checkpoint |> value in
+  let advanced=Semantic.update_native_call ~now:22. ~expected:(Native.Active call) ~replacement:(Native.Active advanced_call) bound
+    |> Result.map_error Semantic.error_to_string |> value in
+  rejected (Semantic.apply ~now:22. (Semantic.Advance_input_branch {observed=owned;checkpoint=second_checkpoint}) advanced);
+  let next=transition (Semantic.Advance_input_branch {observed=response_candidate;checkpoint=second_checkpoint}) advanced |> roundtrip in
+  check_branch_root next;
+  check bool "branch input publication names the actual native checkpoint" true
+    (Keeper_checkpoint_ref.equal (branch_of next).checkpoint second_checkpoint);
+  let unchanged=transition (Semantic.Advance_input_branch {observed=second_checkpoint;checkpoint=second_checkpoint}) next in
+  check int64 "same branch publication does not spend revision" next.revision unchanged.revision;
+  let disposition={Agent.outcome=Agent.Terminal_succeeded;recovery=Agent.Retire} in
+  let terminal=Semantic.update_native_call ~now:23. ~expected:(Native.Active advanced_call)
+      ~replacement:(Native.Terminal_unacknowledged (advanced_call,disposition)) next
+    |> Result.map_error Semantic.error_to_string |> value in
+  rejected (Semantic.apply ~now:24. (Semantic.Advance_input_branch {observed=second_checkpoint;checkpoint=second_checkpoint}) terminal);
+  let second_pending={pending with run_id="second-invocation";request={pending.request with request_id="second-question";question="Second choice?"}} in
+  let second_wait=Semantic.input_wait ~checkpoint:second_checkpoint ~pending:second_pending |> value in
+  let waiting_again=transition (Semantic.Suspend_input second_wait) terminal |> roundtrip in
+  let second_candidate=response_checkpoint 4 "second consumed response" in
+  let intent=Semantic.input_response_intent ~waiting:second_wait ~source:second_checkpoint
+    ~candidate:second_candidate ~response:Agent_core.Hooks.Timeout |> value in
+  let prepared=transition (Semantic.Prepare_input_response intent) waiting_again |> roundtrip in
+  rejected (Semantic.apply ~now:24. (Semantic.Resolve_input {observed=second_wait;checkpoint=second_candidate}) prepared);
+  rejected (Semantic.apply ~now:24. (Semantic.Resolve_input_branch {observed=waiting;checkpoint=response_candidate}) prepared);
+  let resolved=transition (Semantic.Resolve_input_branch {observed=second_wait;checkpoint=second_candidate}) prepared |> roundtrip in
+  check_branch_root resolved;
+  check bool "second response advances the branch without replacing first origin" true
+    (Keeper_checkpoint_ref.equal (branch_of resolved).checkpoint second_candidate);
+  check bool "second response retires only its prepared intent" true (resolved.input_response_intent=None);
+  check bool "old branch input is no longer retained" false
+    (names response_candidate (Semantic.checkpoint_references resolved))
+let test_branch_resumed_retry_and_gate_allow_new_input () = with_path @@ fun path -> with_store path @@ fun store ->
+  let _,branched=staged_branch store in
+  let running=transition (Semantic.Resume_checkpoint response_candidate) branched in
+  let retry=Semantic.runtime_retry ~not_before:None ~checkpoint:response_candidate
+    ~assignment_id:"branch-runtime" ~failed_runtime_id:"old-runtime" ~next_runtime_id:"native.primary" ~later_runtime_ids:[] |> value in
+  let obligation=Semantic.gate_obligation ~approval_id:"branch-gate" ~tool_name:"tool_execute"
+    ~input_hash:response_candidate.sha256 |> value in
+  let gate=Semantic.gate_wait ~checkpoint:response_candidate ~obligations:[obligation] |> value in
+  let resolution={Semantic.obligation;decision=Semantic.Gate_approved} in
+  let resumed_retry=transition (Semantic.Suspend_runtime_retry retry) running
+    |> transition (Semantic.Resume_runtime_retry retry) in
+  let resumed_gate=transition (Semantic.Suspend_gate gate) running
+    |> transition (Semantic.Resolve_gate resolution) |> transition (Semantic.Resume_gate (gate,resolution)) in
+  List.iter (fun resumed ->
+    let call,bound=bind_branch resumed in
+    let next_checkpoint=response_checkpoint 4 "new input after resumed runtime or Gate" in
+    let next_call=Native.advance call ~observed:response_candidate ~checkpoint:next_checkpoint |> value in
+    let progressed=Semantic.update_native_call ~now:22. ~expected:(Native.Active call) ~replacement:(Native.Active next_call) bound
+      |> Result.map_error Semantic.error_to_string |> value in
+    let advanced=transition (Semantic.Advance_input_branch {observed=response_candidate;checkpoint=next_checkpoint}) progressed |> roundtrip in
+    check_branch_root advanced;
+    check bool "frozen admission does not block new input on resumed execution" true
+      (Keeper_checkpoint_ref.equal (branch_of advanced).checkpoint next_checkpoint);
+    check bool "original resume evidence remains retained" true
+      (names response_candidate (Semantic.checkpoint_references advanced))) [resumed_retry;resumed_gate]
+let test_branch_strict_codec () = with_path @@ fun path -> with_store path @@ fun store ->
+  let _,branched=staged_branch store in
+  let fields = function `Assoc fields -> fields | _ -> fail "expected encoded object" in
+  let replace name value json = `Assoc ((name,value)::List.remove_assoc name (fields json)) in
+  let encoded=Semantic.to_json branched in
+  let branch=List.assoc "input_branch" (fields encoded) in
+  let foreign=Keeper_checkpoint_ref.create ~trace_id:(Keeper_id.Trace_id.of_string "foreign-branch-trace" |> value)
+    ~turn_count:4 ~canonical_checkpoint_bytes:"foreign" |> Result.get_ok in
+  let checkpoint_json reference = `Assoc ["trace_id",`String (Keeper_id.Trace_id.to_string reference.Keeper_checkpoint_ref.trace_id);
+    "turn_count",`Int reference.turn_count;"sha256",`String reference.sha256] in
+  let with_branch branch=replace "input_branch" branch encoded in
+  List.iter (fun json -> rejected (Semantic.of_json json)) [
+    with_branch `Null;
+    `Assoc (("input_branch",branch)::fields encoded);
+    with_branch (`Assoc (("unknown",`Null)::fields branch));
+    with_branch (replace "origin" (`Assoc ["kind",`String "interrupted_execution"]) branch);
+    with_branch (replace "checkpoint" (checkpoint_json foreign) branch);
+    with_branch (replace "checkpoint" (checkpoint_json owned) branch);
+    with_branch (replace "checkpoint" (checkpoint_json (response_checkpoint 1 "regressed")) branch);
+    replace "revision" (`Int 4) encoded;
+    replace "phase" (`Assoc ["kind",`String "preparing"]) encoded;
+    replace "phase" (`Assoc ["kind",`String "ready"]) encoded;
+    replace "phase" (`Assoc ["kind",`String "suspended";"checkpoint",checkpoint_json foreign]) encoded;
+    replace "phase" (`Assoc ["kind",`String "recovering";"origin",`Assoc ["kind",`String "official_checkpointed";"official_client",`Null];"detail",`String "foreign"]) encoded];
+  let exhausted=replace "revision" (`Intlit (Int64.to_string Int64.max_int)) encoded
+    |> Semantic.of_json |> Result.map_error Semantic.error_to_string |> value in
+  (match Semantic.apply ~now:22. (Semantic.Resume_checkpoint response_candidate) exhausted with
+   | Error Semantic.Revision_exhausted -> ()
+   | Error error -> fail (Semantic.error_to_string error) | Ok _ -> fail "branch resume wrapped exhausted revision")
+let test_branch_settlement_releases_only_branch_evidence () = with_path @@ fun path -> with_store path @@ fun store ->
+  let _,branched=staged_branch store in
+  let running=transition (Semantic.Resume_checkpoint response_candidate) branched in
+  List.iter (fun terminal ->
+    let settled=transition (Semantic.Settle terminal) running |> roundtrip in
+    check bool "actual terminal settlement removes branch" true (settled.input_branch=None);
+    check bool "branch root is no longer pinned" false (names owned (Semantic.checkpoint_references settled));
+    check bool "branch candidate is no longer pinned" false (names response_candidate (Semantic.checkpoint_references settled)))
+    [Semantic.Completed;Semantic.Cancelled;Semantic.Failed "explicit failure"];
+  let call,bound=bind_branch running in
+  let disposition={Agent.outcome=Agent.Terminal_failed;recovery=Agent.Operator_repair_required Agent.Effect_outcome_unknown} in
+  let unknown=Semantic.update_native_call ~now:23. ~expected:(Native.Active call)
+      ~replacement:(Native.Terminal_unacknowledged (call,disposition)) bound
+    |> Result.map_error Semantic.error_to_string |> value in
+  rejected (Semantic.apply ~now:24. (Semantic.Settle Semantic.Completed) unknown);
+  let failed=transition (Semantic.Settle (Semantic.Failed "effect needs operator reconciliation")) unknown |> roundtrip in
+  check bool "failed branch removes only its own pin" true (failed.input_branch=None);
+  check bool "unknown native effect still retains exact checkpoint" true
+    (names response_candidate (Semantic.checkpoint_references failed))
+
 let () = run "durable original input wait"
   ["store",[
+    test_case "branch pins survive consumed continuation and reconciliation" `Quick test_branch_pins_after_consuming_continuation;
+    test_case "branch native CAS and repeated input preserve original lineage" `Quick test_branch_native_cas_and_second_response;
+    test_case "resumed runtime and Gate keep admission while branch input advances" `Quick test_branch_resumed_retry_and_gate_allow_new_input;
+    test_case "branch persisted codec rejects inconsistent authority" `Quick test_branch_strict_codec;
+    test_case "branch settlement preserves unknown native evidence" `Quick test_branch_settlement_releases_only_branch_evidence;
     test_case "prepared response survives restart and stays blocked" `Quick test_intent_survives_restart_without_resuming;
     test_case "conflicting intents and newer input preserve original facts" `Quick test_intent_conflicts_and_newer_input_preserve_facts;
     test_case "intent precommit failure does not invent retained intent" `Quick (test_intent_commit_uncertainty false);

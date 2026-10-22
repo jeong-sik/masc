@@ -93,6 +93,14 @@ val equal_input_response_intent : input_response_intent -> input_response_intent
     and the candidate preserves the source's turn. Answers are canonical JSON.
     This value validates identity structure, not physical payloads, installation,
     response acceptance or continuation authority. *)
+type input_branch = private
+  { origin : input_wait
+  ; checkpoint : Keeper_checkpoint_ref.t }
+(** A direct operation's independent input lineage. [origin] is its first
+    complete wait and never changes; [checkpoint] is its current retained input
+    head, including a later pending request. This is independent of the trace's
+    global input head and survives consuming a phase-specific continuation.
+    Reference identity is not physical payload or dispatch authority. *)
 type terminal = Completed | Cancelled | Failed of string
 type recovery_origin =
   | Unconfirmed_sources
@@ -127,6 +135,7 @@ type t = private
   ; phase : phase
   ; native_call : Keeper_native_call.state
   ; input_response_intent : input_response_intent option
+  ; input_branch : input_branch option
   ; created_at : float
   ; updated_at : float
   }
@@ -158,6 +167,9 @@ type action =
   | Suspend_input of input_wait
   | Prepare_input_response of input_response_intent
   | Resolve_input of { observed : input_wait; checkpoint : Keeper_checkpoint_ref.t }
+  | Resolve_input_branch of { observed : input_wait; checkpoint : Keeper_checkpoint_ref.t }
+  | Advance_input_branch of
+      { observed : Keeper_checkpoint_ref.t; checkpoint : Keeper_checkpoint_ref.t }
   | Reconcile_gate_binding of gate_binding * gate_wait
   | Resolve_gate of gate_resolution
   | Resume_gate of gate_wait * gate_resolution
@@ -172,7 +184,8 @@ val checkpoint_references : t -> Keeper_checkpoint_ref.t list
     one it resumes, a retry's, a Gate wait's and a Gate preparation's. A
     retained continuation named by no record's list is never read again. A
     direct operation's references all live directly under the session root,
-    in the directory named by the reference's trace id. *)
+    in the directory named by the reference's trace id. A branch pins both its
+    historical root and current input head until semantic settlement. *)
 
 val continuation_checkpoints : t -> Keeper_checkpoint_ref.t list
 (** Current native checkpoint and phase-specific continuations, all under
@@ -181,7 +194,10 @@ val continuation_checkpoints : t -> Keeper_checkpoint_ref.t list
     phase independently references that same seed, its continuation remains.
     Prepared input-response source/candidate references are also excluded: they
     are recovery evidence, never ordinary pending-input or resume authority.
-    {!checkpoint_references} includes both kinds of evidence for cleanup. *)
+    A branch contributes its current input head, including between consuming
+    its suspended continuation and publishing the next native call; its
+    historical root is excluded. {!checkpoint_references} includes all evidence
+    for cleanup. *)
 
 val gate_approval_ids : t -> string list
 (** Approval ids this execution may still read from the Gate store: the
@@ -211,7 +227,17 @@ val apply : now:float -> action -> t -> (t, error) result
     Prepare_input_response requires the exact original direct wait and no native
     call. It keeps that wait blocked and pins one immutable intent until exact
     candidate resolution or cancellation/failure. Reconciliation preserves it;
-    preparing the same intent does not spend another revision. *)
+    preparing the same intent does not spend another revision.
+
+    [Resolve_input_branch] additionally requires that exact prepared intent's
+    candidate and no native call. It atomically removes the intent, suspends on
+    C and creates/advances the branch; a second response must name the branch's
+    current wait and preserves its first origin. Attached [Resolve_input] cannot
+    resolve a branched operation. [Advance_input_branch] requires an exact prior
+    branch reference and an active native call already at the candidate, in the
+    same direct operation/digest. It never changes the global input head.
+    Ordinary resume/reconciliation keeps the branch; settlement removes it.
+    Official-client continuations cannot carry an Agent Core input branch. *)
 val update_native_call : now:float -> expected:Keeper_native_call.state ->
   replacement:Keeper_native_call.state -> t -> (t, error) result
 (** Direct-operation-only CAS. A terminal call remains evidence until the

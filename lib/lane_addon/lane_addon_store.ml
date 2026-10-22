@@ -454,6 +454,9 @@ let save_sampling_outcome t ~instance_id ~request_id json =
     (Yojson.Safe.to_string json)
 let observation_dir instance_id = Filename.concat "observations" (digest instance_id)
 type record_verification = Visible | Durable
+(* [Republished]: the path names another file by the end of the read, so
+   the bytes read belong to a file the path no longer names. *)
+type confirmed_read = Confirmed of string | Republished
 let same_file a b = a.Unix.st_dev=b.Unix.st_dev && a.Unix.st_ino=b.Unix.st_ino
 let record_bytes fd size =
   let buffer=Bytes.create size in
@@ -482,16 +485,16 @@ let verify_record_bytes path fd stat bytes =
   let _offset=Unix.lseek fd 0 Unix.SEEK_SET in
   let* verified=record_bytes fd stat.Unix.st_size in
   if verified<>bytes then Error "retained file changed during sync"
-  else if same_file stat (Unix.stat path) then Ok bytes
-  else Error "retained file changed during verification"
+  else if same_file stat (Unix.stat path) then Ok (Confirmed bytes)
+  else Ok Republished
 let settle_verified_record ~sync_file ~sync_parent path fd stat bytes parent_fd =
   let parent=Filename.dirname path in
   let parent_stat=Unix.fstat parent_fd in
   if parent_stat.Unix.st_kind<>Unix.S_DIR then Error "retained file parent is not a directory"
   else (
     sync_file fd;sync_parent parent_fd;
-    let* bytes=verify_record_bytes path fd stat bytes in
-    if same_file parent_stat (Unix.stat parent) then Ok bytes
+    let* read=verify_record_bytes path fd stat bytes in
+    if same_file parent_stat (Unix.stat parent) then Ok read
     else Error "retained file parent changed during sync")
 let read_verified_record ~sync_file ~sync_parent ~verification path fd stat =
   let* bytes=record_bytes fd stat.Unix.st_size in
@@ -500,32 +503,58 @@ let read_verified_record ~sync_file ~sync_parent ~verification path fd stat =
   | Durable ->
     let parent=Filename.dirname path in
     with_record_fd parent (settle_verified_record ~sync_file ~sync_parent path fd stat bytes)
+let changed_during_verification = function
+  | Confirmed bytes -> Ok bytes
+  | Republished -> Error "retained file changed during verification"
 let bounded_file_with ~sync_file ~sync_parent ~verification ~max_bytes path = protect (fun () ->
   with_record_fd path (fun fd ->
     let stat = Unix.fstat fd in
     if stat.Unix.st_kind <> Unix.S_REG then Error "retained file is not a regular file"
     else if stat.Unix.st_size > max_bytes then Error "retained file exceeds its read envelope"
-    else read_verified_record ~sync_file ~sync_parent ~verification path fd stat))
+    else Result.bind (read_verified_record ~sync_file ~sync_parent ~verification path fd stat)
+        changed_during_verification))
 let bounded_file = bounded_file_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~verification:Durable
-let load_record_with ~what ~sync_file ~sync_parent t relative = protect (fun () ->
+type record_observation =
+  | Record_missing
+  | Record_current of Yojson.Safe.t
+  | Record_republished
+(* A keyed record is replaced whole by a rename (save_record_with). The size
+   comes from the opened file, so a rename between a path stat and the open
+   cannot pass for growth; growth of the opened file fails [record_bytes]. *)
+let observe_record_with ~what ~sync_file ~sync_parent t relative = protect (fun () ->
   let path = Filename.concat t.root relative in
   match Fs_compat.exact_path_kind path with
-  | Fs_compat.Exact_missing -> Ok None
+  | Fs_compat.Exact_missing -> Ok Record_missing
   | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
-      let stat = Unix.stat path in
-      if stat.Unix.st_kind <> Unix.S_REG then Error (what ^ " is not a regular file")
-      else
-        (* No new receipt-size policy: use the observed file size to reject
-           growth between the path read and the exact descriptor verification. *)
-        let* bytes = bounded_file_with ~sync_file ~sync_parent ~verification:Durable
-          ~max_bytes:stat.Unix.st_size path in
-        Ok (Some (Yojson.Safe.from_string bytes)))
+      with_record_fd path (fun fd ->
+        let stat = Unix.fstat fd in
+        if stat.Unix.st_kind <> Unix.S_REG then Error (what ^ " is not a regular file")
+        else
+          let* read = read_verified_record ~sync_file ~sync_parent ~verification:Durable path fd stat in
+          match read with
+          | Confirmed bytes -> Ok (Record_current (Yojson.Safe.from_string bytes))
+          | Republished -> Ok Record_republished))
+let load_record_with ~what ~sync_file ~sync_parent t relative =
+  let* observed = observe_record_with ~what ~sync_file ~sync_parent t relative in
+  match observed with
+  | Record_missing -> Ok None
+  | Record_current json -> Ok (Some json)
+  | Record_republished -> Error "retained file changed during verification"
 let load_action_with ~sync_file ~sync_parent t ~instance_id ~request_id =
   load_record_with ~what:"action receipt" ~sync_file ~sync_parent t (action_path ~instance_id ~request_id)
 let load_action = load_action_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
-let load_exact_request t ~declaration_id ~request_id =
-  load_record_with ~what:"exact request record" ~sync_file:Unix.fsync ~sync_parent:Unix.fsync t
-    (exact_request_path ~declaration_id ~request_id)
+(* The run that owns an exact request republishes it at each of its
+   transitions while observers read it without the run's claim. A read that
+   ends on a republished file reads the newer record. Every repeat needs
+   another publication, and a run publishes a bounded number of transitions. *)
+let rec load_exact_request_with ~sync_file ~sync_parent t ~declaration_id ~request_id =
+  let* observed = observe_record_with ~what:"exact request record" ~sync_file ~sync_parent t
+      (exact_request_path ~declaration_id ~request_id) in
+  match observed with
+  | Record_missing -> Ok None
+  | Record_current json -> Ok (Some json)
+  | Record_republished -> load_exact_request_with ~sync_file ~sync_parent t ~declaration_id ~request_id
+let load_exact_request = load_exact_request_with ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 
 let owned_result value = Result.map_error Fs_compat.owned_regular_file_read_error_to_string value
 let with_tool_request_owner_scope ~sync_parent t ~scope fn =
@@ -559,7 +588,8 @@ let read_owned_tool_request ~sync_file ~sync_parent ~owner_uid held name =
   let* result = Fs_compat.with_owned_inventory_regular_file ~owner_uid held relative
     (fun ~file ~parent ~stat -> protect (fun () ->
       let* bytes = record_bytes file stat.Unix.st_size in
-      let* bytes = settle_verified_record ~sync_file ~sync_parent path file stat bytes parent in
+      let* read = settle_verified_record ~sync_file ~sync_parent path file stat bytes parent in
+      let* bytes = changed_during_verification read in
       Ok (Yojson.Safe.from_string bytes))) |> owned_result in
   result
 let load_tool_request_owner t ~scope ~request_id =
@@ -674,7 +704,8 @@ let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instan
         else if stat.Unix.st_size > budget.remaining then Error Read_limit_exceeded
         else begin
           budget.remaining <- budget.remaining - stat.Unix.st_size;
-          read_verified_record ~sync_file ~sync_parent ~verification:Durable path fd stat
+          Result.bind (read_verified_record ~sync_file ~sync_parent ~verification:Durable path fd stat)
+            changed_during_verification
           |> Result.map_error (fun detail -> Read_failed detail)
         end) in
       try Ok (Some (Yojson.Safe.from_string bytes))
@@ -1031,6 +1062,7 @@ module For_testing = struct
   let load_sampling_request_bounded = load_sampling_request_bounded_with
   let save_action = save_action_with
   let load_action = load_action_with
+  let load_exact_request = load_exact_request_with
   let append_observation = append_observation_with
   let read_observation = read_observation_with
 end

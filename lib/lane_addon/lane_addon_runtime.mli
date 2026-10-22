@@ -103,12 +103,26 @@ type tool_request_destination = private {
   source_revision : string;
   configuration_revision : string;
 }
+val with_tool_request_destination : config:Workspace.config -> access:Lane_addon_sources.access ->
+  reserved:string list -> export:tool_export ->
+  publish:(tool_request_destination -> ('a, tool_call_error) result) ->
+  ('a, tool_call_error) result
+(** Trusted host publication of new configured work. Hold configuration then
+    action serialization; strictly reread the actual complete declaration set
+    and revalidate its enabled state, semantic revision, package and live export
+    before invoking [publish]. A committed Off/save cannot borrow a stale cached
+    reconciliation. The callback may yield only for local original journal
+    publication/recovery, never call Runtime or execute a worker/model/domain
+    effect. It runs cancellation-protected after lock acquisition; exceptions
+    release the locks without poisoning the shared action serializer. An error
+    may follow publication, requiring strict original recovery. The destination
+    is not authority for an effect after the callback returns. *)
 val capture_tool_request_owner : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> export:tool_export -> scope:string -> request_id:string ->
   capture:(tool_request_destination -> ('a * Yojson.Safe.t, string) result) ->
   ('a, tool_call_error) result
-(** New configured work only. Under the original action serializer, revalidate
-    the live export and matching enabled declaration, invoke the pure host
+(** New configured work only. Under the shared configuration/action serializers,
+    revalidate the live export and freshly read enabled declaration, invoke the pure host
     capture factory with its original destination/revisions, and durably retain
     that exact JSON before returning the host value. The callback must not yield,
     perform effects or call Runtime. A failed publication may already be visible;

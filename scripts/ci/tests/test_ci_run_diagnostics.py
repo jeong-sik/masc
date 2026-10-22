@@ -81,6 +81,7 @@ class CiRunDiagnostics(unittest.TestCase):
     def test_nonzero_snapshot_omits_arguments_and_keeps_grep_processes(self):
         result, calls, _ = self.observe_failure()
         self.assert_safe_snapshots(result, calls)
+        self.assertNotIn("disk usage by path", result.stdout)
         filtered, global_snapshot = result.stdout.split("[ci-diag] global process snapshot:", 1)
         self.assertIn("test_grep_worker", filtered)
         for comm in ("test_grep_worker", "grep", "curl", "runner"):
@@ -91,6 +92,8 @@ class CiRunDiagnostics(unittest.TestCase):
         self.assert_safe_snapshots(result, calls)
         self.assertTrue(captured)
         self.assertIn("reason=disk_pressure_observed", result.stdout)
+        # Disk pressure names where the space went; a plain nonzero exit does not walk the disk.
+        self.assertIn("[ci-diag] disk usage by path (MB):", result.stdout)
         tree = result.stdout.split("[ci-diag] active command process tree snapshot:", 1)[1]
         self.assertIn("00:42 1.2 0.3 test_grep_worker", tree)
 

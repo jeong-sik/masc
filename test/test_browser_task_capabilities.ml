@@ -133,10 +133,23 @@ let test_resize_viewport_table () =
   check bool "the extension does not" false (reaches (Cap.Connected Lane.Web_extension));
   check bool "Safari does not" false (reaches Cap.Safari_unavailable)
 
+let test_tab_history_and_close_table () =
+  let reaches backend operation = match Cap.support backend operation with
+    | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
+  List.iter (fun operation ->
+    check bool (Cap.operation_name operation ^ " on live BiDi") true (reaches (Cap.Connected Lane.Webdriver_bidi) operation);
+    check bool (Cap.operation_name operation ^ " on owned Gecko") true (reaches Cap.Owned_gecko operation);
+    check bool (Cap.operation_name operation ^ " on Stagehand") true (reaches Cap.Owned_chromium operation);
+    check bool (Cap.operation_name operation ^ " is not claimed for the extension") false
+      (reaches (Cap.Connected Lane.Web_extension) operation);
+    check bool (Cap.operation_name operation ^ " is not claimed for Safari") false (reaches Cap.Safari_unavailable operation))
+    [Cap.Back; Cap.Forward; Cap.Reload; Cap.Close_tab]
+
 let () = run "task-aware browser choice" ["scenarios",[
   test_case "HTML5, frames/downloads and hover/typing discovery" `Quick test_task_choice;
   test_case "zoom, impossible requirements and immutable explicit owners" `Quick test_zoom_and_impossible;
   test_case "session opening and parse/binding pre-effect refusal" `Quick test_open_and_boundary;
   test_case "selected model consumer is required before discovery and open" `Quick test_model_selection;
   test_case "right and middle click are claimed only where a button is pressed" `Quick test_button_click_table;
-  test_case "viewport resize is claimed only where a size can be set" `Quick test_resize_viewport_table]]
+  test_case "viewport resize is claimed only where a size can be set" `Quick test_resize_viewport_table;
+  test_case "history and close are claimed on every backend that acts on tabs" `Quick test_tab_history_and_close_table]]

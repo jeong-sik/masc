@@ -47,12 +47,14 @@ let session_failure_message = function Session_refused why | Session_failed why 
 type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   session_end : unit -> (unit,session_end_failure) result; mutable session_may_exist : bool;
   mutable contexts : (string * int) list; mutable next_tab : int;
+  (* The tab IDs this connection created. It closes these and no others. *)
+  mutable opened : int list;
   (* The contexts this connection gave a viewport size. Firefox keeps that size after the session ends
      (probed 2026-10-22, Firefox 158), so ending the session gives each of them its own size back. *)
   mutable sized : string list; mutable version : string option;
   mutable profile : string option; mutable process_id : int option }
 let create ~session_end ~command =
-  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;sized=[];version=None;profile=None;process_id=None}
+  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;opened=[];sized=[];version=None;profile=None;process_id=None}
 let command t method_ params = Result.map_error (fun refusal -> method_ ^ ": " ^ refusal_message refusal) (t.ask method_ params)
 (* Firefox keeps a session whose socket closed and takes one session at a
    time, so one left behind refuses every later connection until that Firefox
@@ -194,6 +196,7 @@ let open_tab t url =
   let* context = string "context" created |> Result.map_error (fun reason ->
     Outcome_unknown (reason ^ "; tab creation was dispatched; inspect the connection before opening another tab")) in
   let id = remember_context t context in
+  t.opened <- id :: t.opened;
   let message reason =
     Printf.sprintf "New tab was created as tabId %d on this connection. %s. Do not open another tab to retry." id reason in
   let partial reason = Partial_failure {tab_id=id;message=message reason ^
@@ -306,6 +309,51 @@ let keyboard t context args ~sources ~name =
   match after with
   | `Assoc fields -> Ok (obj (("action",str name)::("urlBefore",str old_url)::fields))
   | _ -> Error (Outcome_unknown "invalid post-keyboard observation")
+(* All four act only on tabs this connection opened: a tab the operator opened holds pages and unsaved state
+   this host never saw, and these actions carry no expectedUrl to say which page the caller observed. Of
+   Firefox's refusals, only [codes_before_acting] mean nothing happened. A reload or a history step waits for
+   the document, and one that lands on an error page is answered with an error after the tab moved, so any
+   other error, like a command that got no answer, is [Outcome_unknown]. *)
+let codes_before_acting = ["no such history entry"; "invalid argument"; "no such frame"]
+let tab_action t ~tab_id interaction =
+  let ask method_ params = match t.ask method_ params with
+    | Ok result -> Ok result
+    | Error (Unsent _ as refusal) -> Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
+    | Error (Rejected (Other_error code) as refusal) when List.mem code codes_before_acting ->
+      Error (Before_effect (method_ ^ ": " ^ refusal_message refusal))
+    | Error (Rejected (Other_error _ | Session_not_created | Invalid_session_id) | Unanswered _ as refusal) ->
+      Error (Outcome_unknown (method_ ^ ": " ^ refusal_message refusal ^ "; inspect the tab before repeating")) in
+  let* () = match interaction with
+    | (Browser_lane.Action.Close_tab | Browser_lane.Action.Back | Browser_lane.Action.Forward
+      | Browser_lane.Action.Reload) when not (List.mem tab_id t.opened) ->
+      Error (Before_effect "a connected browser's back, forward, reload and close_tab act only on tabs this connection opened")
+    | Browser_lane.Action.Close_tab | Browser_lane.Action.Back | Browser_lane.Action.Forward
+    | Browser_lane.Action.Reload | Browser_lane.Action.Click _ | Browser_lane.Action.Fill _
+    | Browser_lane.Action.Press _ | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _
+    | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog -> Ok () in
+  let* context,id = Result.map_error (fun e -> Before_effect e) (resolve t (obj ["tabId",`Int tab_id])) in
+  let after name =
+    let* summary = Result.map_error (fun e -> Outcome_unknown e)
+      (script t context "return {url:location.href,title:document.title};" (obj [])) in
+    match summary with
+    | `Assoc fields -> Ok (obj (("tabId",`Int id)::("action",str name)::fields))
+    | _ -> Error (Outcome_unknown ("invalid post-" ^ name ^ " observation")) in
+  match interaction with
+  | Browser_lane.Action.Back ->
+    let* _ = ask "browsingContext.traverseHistory" (obj ["context",str context;"delta",`Int (-1)]) in after "back"
+  | Browser_lane.Action.Forward ->
+    let* _ = ask "browsingContext.traverseHistory" (obj ["context",str context;"delta",`Int 1]) in after "forward"
+  | Browser_lane.Action.Reload ->
+    let* _ = ask "browsingContext.reload" (obj ["context",str context;"wait",str "complete"]) in after "reload"
+  | Browser_lane.Action.Close_tab ->
+    let* _ = ask "browsingContext.close" (obj ["context",str context;"promptUnload",`Bool false]) in
+    t.opened <- List.filter (fun opened -> opened <> id) t.opened;
+    Ok (obj ["tabId",`Int id;"action",str "close_tab";"closed",`Bool true])
+  | Browser_lane.Action.Click _ | Browser_lane.Action.Fill _ | Browser_lane.Action.Press _
+  | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _ | Browser_lane.Action.Upload _
+  | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog ->
+    Error (Before_effect "live BiDi page.act supports open_tab, back, forward, reload and close_tab only")
+
 (* The override stays on the tab until a later [Browser_default] clears it, so a refusal before the
    command leaves the viewport as it was. *)
 let set_viewport t context args size =
@@ -350,7 +398,7 @@ let dispatch ?actor ?request_id t ~verb args =
     let* action = pre (Browser_lane.Action.parse args) in
     (match action with
      | Browser_lane.Action.Open_tab url -> open_tab t url
-     | Browser_lane.Action.On_tab _ -> Error (Before_effect "live BiDi page.act supports open_tab only"))
+     | Browser_lane.Action.On_tab {tab_id; interaction; _} -> tab_action t ~tab_id interaction)
   | Browser_info ->
     (match t.version with Some version->Ok (obj ["name",str "Firefox";"version",str version])
      | None->Error (Before_effect "BiDi session metadata is unavailable"))

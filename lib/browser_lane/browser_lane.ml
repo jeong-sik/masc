@@ -279,6 +279,8 @@ type live_capability =
   | Browser_zoom
   | Viewport_resize
   | Tab_activation
+  | Tab_history
+  | Tab_closing
   | Tab_creation
 [@@deriving enumerate]
 
@@ -300,6 +302,8 @@ let live_capability_to_wire = function
   | Browser_zoom -> "browser_zoom"
   | Viewport_resize -> "viewport_resize"
   | Tab_activation -> "tab_activation"
+  | Tab_history -> "tab_history"
+  | Tab_closing -> "tab_closing"
   | Tab_creation -> "tab_creation"
 ;;
 
@@ -332,11 +336,15 @@ let live_capability = function
   | Page_scene _ -> Some Scene_read
   | Page_interact { action; _ } -> Some (live_capability_of_interaction action)
   | Page_act (Action.Open_tab _) -> Some Tab_creation
+  | Page_act (Action.On_tab {interaction = (Action.Back | Action.Forward | Action.Reload); _}) -> Some Tab_history
+  | Page_act (Action.On_tab {interaction = Action.Close_tab; _}) -> Some Tab_closing
   | Page_context _ | Page_downloads _ -> None
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
   | Session_open _ | Session_close | Session_status | Page_goto _
-  | Page_act (Action.On_tab _) -> None
+  | Page_act (Action.On_tab { interaction =
+      ( Action.Click _ | Action.Fill _ | Action.Press _ | Action.Select _ | Action.Scroll _
+      | Action.Upload _ | Action.Accept_dialog _ | Action.Dismiss_dialog ); _ }) -> None
   | Page_instruct _ | Page_locate _ | Page_extract _ -> None
 ;;
 
@@ -451,9 +459,9 @@ let live_transport_serves transport capability =
       | Scene_read | Dom_interaction | Point_click | Point_scroll ) ) -> true
   | Web_extension, (Tab_activation | Browser_zoom) -> true
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click
-                    | Trusted_keyboard | Tab_creation | Viewport_resize) -> false
+                    | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_closing) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click
-                    | Trusted_keyboard | Tab_creation | Viewport_resize) -> true
+                    | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_closing) -> true
   | Webdriver_bidi, (Tab_activation | Browser_zoom) -> false
 ;;
 

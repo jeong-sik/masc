@@ -188,6 +188,9 @@ let run ~config ~on_inventory ~on_observation_failure =
   let classified=changed classify and synthesized=changed synthesize in
   classified || synthesized
 
+type idle_checkpoint = unit ref
+type idle_result = Owner_idle of idle_checkpoint | Owner_stopped | Owner_missing
+
 type owner =
   { mutex : Stdlib.Mutex.t
   ; mutable pending : bool
@@ -195,9 +198,23 @@ type owner =
   ; mutable stopped : bool
   ; mutable observation_retry : bool
   ; mutable wake : unit Eio.Promise.u option
+  ; mutable idle_checkpoint : idle_checkpoint
+  ; mutable idle_waiters : idle_result Eio.Promise.u list
   ; in_flight_revisions :
       (string * Keeper_memory_commit_notifications.store, int) Hashtbl.t
   }
+
+(* The caller holds [owner.mutex]. Resolving promises happens after releasing
+   it: an idle observation is not a lease against a subsequent wake. *)
+let take_idle_waiters owner =
+  if owner.stopped || (not owner.pending && not owner.in_flight) then (
+    let result=if owner.stopped then Owner_stopped else Owner_idle owner.idle_checkpoint in
+    let waiters=owner.idle_waiters in
+    owner.idle_waiters <- [];
+    List.map (fun waiter -> waiter,result) waiters)
+  else []
+let resolve_idle_waiters waiters =
+  List.iter (fun (waiter,result) -> ignore (Eio.Promise.try_resolve waiter result)) waiters
 
 let owners_mutex = Stdlib.Mutex.create ()
 let owners : (string, owner) Hashtbl.t = Hashtbl.create 4
@@ -270,6 +287,8 @@ let start ~sw ~config =
     ; stopped = false
     ; observation_retry = false
     ; wake = None
+    ; idle_checkpoint = ref ()
+    ; idle_waiters = []
     ; in_flight_revisions = Hashtbl.create 8
     }
   in
@@ -303,7 +322,9 @@ let start ~sw ~config =
         | Lane_addon_runtime.Export_inventory_changed | Configuration_observed | Exact_result_delivered _ ->
           ignore (wake owner)) in
     Eio.Switch.on_release sw (fun () ->
-      Stdlib.Mutex.protect owner.mutex (fun () -> owner.stopped <- true; owner.wake <- None);
+      let waiters=Stdlib.Mutex.protect owner.mutex (fun () ->
+        owner.stopped <- true; owner.wake <- None; take_idle_waiters owner) in
+      resolve_idle_waiters waiters;
       List.iter (fun (_,stop) -> stop ()) !routes;
       routes:=[];
       unsubscribe ();
@@ -340,15 +361,27 @@ let start ~sw ~config =
            | exn ->
              Stdlib.Mutex.protect owner.mutex (fun () -> owner.observation_retry <- true);
              Log.Server.error "workspace curator owner %s: %s" base_path (Printexc.to_string exn));
-          Stdlib.Mutex.protect owner.mutex (fun () ->
+          let waiters=Stdlib.Mutex.protect owner.mutex (fun () ->
             owner.in_flight <- false;
-            Hashtbl.clear owner.in_flight_revisions);
+            Hashtbl.clear owner.in_flight_revisions;
+            if not owner.pending then owner.idle_checkpoint <- ref ();
+            take_idle_waiters owner) in
+          resolve_idle_waiters waiters;
           drain () in
       drain ();
       `Stop_daemon))
 
 
 module For_testing = struct
+  type nonrec idle_checkpoint = idle_checkpoint
+  type nonrec idle_result = idle_result = Owner_idle of idle_checkpoint | Owner_stopped | Owner_missing
+  type snapshot =
+    { pending : bool
+    ; in_flight : bool
+    ; observation_retry : bool
+    ; stopped : bool
+    ; idle_waiters : int
+    }
   let find ~base_path =
     let base_path = Unix.realpath base_path in
     Stdlib.Mutex.protect owners_mutex (fun () -> Hashtbl.find_opt owners base_path)
@@ -357,9 +390,35 @@ module For_testing = struct
     | None -> true
     | Some owner -> Stdlib.Mutex.protect owner.mutex (fun () -> not owner.pending && not owner.in_flight)
 
+  let snapshot ~base_path = Option.map (fun (owner:owner) ->
+    Stdlib.Mutex.protect owner.mutex (fun () ->
+      {pending=owner.pending;in_flight=owner.in_flight;observation_retry=owner.observation_retry;
+       stopped=owner.stopped;idle_waiters=List.length owner.idle_waiters})) (find ~base_path)
+
+  let await_idle ?after ~base_path () =
+    Eio.Fiber.check ();
+    match find ~base_path with
+    | None -> Owner_missing
+    | Some owner ->
+      let promise,resolver=Eio.Promise.create () in
+      let ready=Stdlib.Mutex.protect owner.mutex (fun () ->
+        if owner.stopped then Some Owner_stopped
+        else if not owner.pending && not owner.in_flight
+          && (match after with None -> true | Some previous -> previous != owner.idle_checkpoint)
+        then Some (Owner_idle owner.idle_checkpoint)
+        else (owner.idle_waiters <- resolver::owner.idle_waiters;None)) in
+      match ready with
+      | Some result -> result
+      | None ->
+        Fun.protect ~finally:(fun () ->
+          Stdlib.Mutex.protect owner.mutex (fun () ->
+            owner.idle_waiters <- List.filter (fun waiter -> waiter != resolver) owner.idle_waiters))
+          (fun () -> Eio.Promise.await promise)
+
   let stop ~base_path = Option.iter (fun owner ->
-    let resolver = Stdlib.Mutex.protect owner.mutex (fun () ->
+    let resolver,waiters = Stdlib.Mutex.protect owner.mutex (fun () ->
       owner.stopped <- true;
-      let resolver = owner.wake in owner.wake <- None; resolver) in
+      let resolver = owner.wake in owner.wake <- None; resolver,take_idle_waiters owner) in
+    resolve_idle_waiters waiters;
     Option.iter (fun resolver -> Eio.Promise.resolve resolver ()) resolver) (find ~base_path)
 end

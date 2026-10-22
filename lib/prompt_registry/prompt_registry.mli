@@ -161,7 +161,10 @@ val resolve_and_render_prompt_template :
 val render_resolved_prompt_template
   :  string -> prompt_resolution -> (string * string) list -> (string, string) result
 (** Render a previously resolved snapshot, for callers that must measure
-    several candidate prompts against the very same template bytes. *)
+    several candidate prompts against the very same template bytes. This is
+    pure: it reads no registry or file and may run in a system thread while
+    runtime mutex guards are enabled. Metadata drift is observed when resolving
+    the prompt, never while replaying a captured template. *)
 
 (** {1 Override lifecycle} *)
 

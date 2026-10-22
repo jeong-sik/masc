@@ -5,6 +5,10 @@ module Request_id : sig
   val fresh : unit -> t
   val of_string : string -> (t, string) result
   val to_string : t -> string
+  val compare : t -> t -> int
+  (** Mint order. The canonical UUIDv7 text starts with its millisecond
+      timestamp, and one process mints monotonically within a millisecond
+      ({!Random_id.uuid_v7}). *)
 end
 type workspace
 val observe_workspace : base_path:string -> (workspace, string) result
@@ -48,6 +52,15 @@ val input_text : t -> string
 val rendered_prompt : t -> string
 val output_schema : t -> Yojson.Safe.t
 val to_json : t -> Yojson.Safe.t
+val classification_size : (t * Lane_addon_request_progress.phase) list -> Workspace_memory_request.size
+(** The size of the next classification batch
+    (RFC-workspace-curator-curates-changed-facts 2.4, "다음 묶음"), from the
+    latest-minted classification a provider answered ([Finished] or
+    [Conflicted]). A child exists only after a size refusal, so a child's size
+    fit: [Up_to] that size. A root was answered without one: [Up_to] twice its
+    size. With no answered classification, [Fill_frame]. Briefing and every
+    other phase are not evidence. Nothing is stored for this; each pass reads
+    the originals it keeps. *)
 val narrow : request_id:Request_id.t -> final:Lane_addon_exact.final -> t -> (t option, string) result
 (** Pure whole-row/whole-entry bisection using the original captured template,
     ledger, physical workspace and destination. Input_capacity, Context_overflow

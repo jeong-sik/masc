@@ -11,6 +11,7 @@ module Request_id = struct
   let fresh = Random_id.uuid_v7
   let of_string = Random_id.parse_uuid_v7
   let to_string value = value
+  let compare = String.compare
 end
 type workspace = { path : string; device : int; inode : int }
 let observe_workspace ~base_path =
@@ -182,6 +183,20 @@ let restore_record ~workspace (retained : Owner.retained) =
   let* input_text = text (List.assoc "input_text" f) in
   let* () = check ~prompt ~input_text work in
   Ok {id;predecessor;workspace;destination;prompt;work;input_text}
+let classification_size originals =
+  let answered = List.filter_map (fun (t, (phase : Progress.phase)) ->
+      match t.work, phase with
+      | Classification {batch;_}, (Finished _ | Conflicted _) -> Some (t, List.length batch.selected)
+      | Classification _, (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+                          | Commit_unknown _ | Rejected _ | Subdividing _ | Subdivided _)
+      | Briefing _, _ -> None) originals in
+  let latest = List.fold_left (fun latest (t, count) -> match latest with
+      | Some (newer, _) when Request_id.compare newer.id t.id > 0 -> latest
+      | Some _ | None -> Some (t, count)) None answered in
+  match latest with
+  | None -> Request.Fill_frame
+  | Some ({predecessor = Some _; _}, count) -> Request.Up_to count
+  | Some ({predecessor = None; _}, count) -> Request.Up_to (2 * count)
 let narrow ~request_id ~final t =
   let* () = if Request_id.to_string request_id <> Request_id.to_string t.id then Ok ()
     else Error "a successor must have its own original request ID" in

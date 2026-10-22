@@ -112,8 +112,12 @@ let classify_new ~config ~originals ~new_work =
   let resolution=Prompt_registry.resolve_prompt Prompt_names.workspace_memory_curator in
   let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
     resolution ["workspace_memory_changes",Yojson.Safe.to_string input] in
+  (* The last answered classification this pass still keeps decides how many
+     facts the next one may hold. *)
+  let size=Capture.classification_size
+      (List.map (fun (original : Consumer.original) -> original.capture,phase original) originals) in
   let* batch=io (fun () -> Request.prepare ~neighbor_limit:(max 0 (List.length (Context.keepers context)-1))
-    ~render ~ledger:change.ledger ~current:change.current_facts ~pending
+    ~render ~ledger:change.ledger ~current:change.current_facts ~pending ~size
     ~frame:destination.max_reply_bytes ~measure:(Binding.classification_submit_bytes ~request_id)
     |> Result.map_error Request.error_to_string) in
   match batch with

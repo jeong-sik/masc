@@ -179,7 +179,7 @@ let capture_classification config =
   let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
     prompt ["workspace_memory_changes",Yojson.Safe.to_string input] in
   let batch=match Request.prepare ~neighbor_limit:0 ~render ~ledger:change.ledger
-    ~current:change.current_facts ~pending:change.new_facts ~frame:max_int ~measure:(fun _ -> Ok 0)
+    ~current:change.current_facts ~pending:change.new_facts ~size:Request.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0)
     |> Result.map_error Request.error_to_string |> get with
     | Some batch -> batch | None -> fail "fixture requires pending classification" in
   Consumer.capture_classification ~config ~request_id:(Capture.Request_id.fresh ()) ~prompt
@@ -405,7 +405,8 @@ let test_capture_refuses_a_batch_over_the_destination_frame ()=
     let batch_of claim=
       let fact : Ledger.pending_fact={fact=Ledger.Ordinary {keeper_id="writer";claim_sha256=Store.digest claim};claim} in
       match Request.prepare ~neighbor_limit:0 ~render ~ledger:Ledger.empty ~current:[fact] ~pending:[fact]
-          ~frame:max_int ~measure:(fun _ -> Ok 0) |> Result.map_error Request.error_to_string |> get with
+          ~size:Request.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0)
+        |> Result.map_error Request.error_to_string |> get with
       | Some batch -> batch | None -> fail "expected one pending classification" in
     (* The same capture path admits a batch inside the frame, so the refusal
        below is the frame's, not the package or tool check's. *)
@@ -719,7 +720,7 @@ let test_successor_frontier_ignores_an_old_semantic_destination ()=
     let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
       prompt ["workspace_memory_changes",Yojson.Safe.to_string input] in
     let batch=match Request.prepare ~neighbor_limit:0 ~render ~ledger:change.ledger ~current:change.current_facts ~pending
-        ~frame:max_int ~measure:(fun _ -> Ok 0) |> Result.map_error Request.error_to_string |> get with
+        ~size:Request.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0) |> Result.map_error Request.error_to_string |> get with
       | Some batch -> batch | None -> fail "expected disjoint current pending work" in
     let current_capture=Consumer.capture_classification ~config ~request_id:(Capture.Request_id.fresh ()) ~prompt
         ~ledger:change.ledger ~batch |> consumed in

@@ -11,6 +11,13 @@ type error =
   | Exceeds_frame of { fact : Workspace_memory_ledger.fact_ref; bytes : int; frame : int }
       (** The oldest pending fact with its neighbors alone measures [bytes],
           over the receiving Add-on's declared [frame]. *)
+  | Invalid_size of int
+
+(** How many facts a new batch may hold. [Fill_frame] takes as many as the
+    frame holds. [Up_to n] takes at most [n], the size an earlier provider
+    answer supports (RFC-workspace-curator-curates-changed-facts 2.4,
+    "다음 묶음"). *)
+type size = Fill_frame | Up_to of int
 
 val error_to_string : error -> string
 
@@ -61,25 +68,30 @@ val prepare
   -> ledger:Workspace_memory_ledger.t
   -> current:Workspace_memory_ledger.pending_fact list
   -> pending:Workspace_memory_ledger.pending_fact list
+  -> size:size
   -> frame:int
   -> measure:(batch -> (int, string) result)
   -> (batch option, error) result
-(** Prepare a prefix of [pending] whose request fits [frame], the receiving
-    Add-on's declared worker frame, as [measure] counts the bytes the host
-    would send for a batch. The prefix keeps the given order
+(** Prepare a prefix of [pending], at most [size], whose request fits [frame],
+    the receiving Add-on's declared worker frame, as [measure] counts the
+    bytes the host would send for a batch. The prefix keeps the given order
     ({!Workspace_memory_ledger.reconcile} gives its new facts oldest first).
     Each fact gets BM25-ranked facts from other Keepers in [current], bounded
     by [neighbor_limit] (which may be zero), from one transient index table
-    built once for the whole preparation.
-    The size doubles from one fact until it does not fit, then bisects. Only a
-    measured size is returned. Bytes nearly always grow with the prefix but
-    can shrink a little when renumbering shortens local ids, so a slightly
-    longer prefix may also fit. Ranking stops at the first size that does not
-    fit, so at most twice the chosen facts are ranked, each once: the work
-    follows the batch, not the backlog. [index_stats] counts the build and
-    every query. This is the declared protocol frame, not an estimate of
-    provider input capacity. No pending facts return [Ok None] without
-    building an index or rendering a prompt. *)
+    built once for the whole preparation; each fact is ranked once.
+    - [Fill_frame]: the size doubles from one fact until it does not fit, then
+      bisects. Ranking stops at the first size that does not fit, so at most
+      twice the chosen facts are ranked.
+    - [Up_to n]: the first [n] facts are ranked and measured; only when the
+      frame does not hold them is a smaller prefix searched, without ranking
+      more.
+    Only a measured size is returned. Bytes nearly always grow with the
+    prefix but can shrink a little when renumbering shortens local ids, so a
+    slightly longer prefix may also fit. Either way the work follows the
+    batch, not the backlog. [index_stats] counts the build and every query.
+    This is the declared protocol frame, not an estimate of provider input
+    capacity. No pending facts return [Ok None] without building an index or
+    rendering a prompt. *)
 
 val narrow
   :  render:(Yojson.Safe.t -> (string, string) result)

@@ -1193,12 +1193,8 @@ let run_blocks_internal
   with
   | Error _ as err -> err
   | Ok () ->
-  (* A progress observer cannot enable SSE when the resolved model declares it unsupported. *)
-  let on_event =
-    if (provider_caps_of_config config.provider_cfg).supports_native_streaming
-    then on_event
-    else None
-  in
+  (* Agent Core preserves the observer across JSON-only provider calls and
+     emits completed response events before tool-name admission. *)
   let boundary_response = ref None in
   let config =
     match cooperative_yield_probe with

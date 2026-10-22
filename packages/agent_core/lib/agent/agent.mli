@@ -510,8 +510,10 @@ val run_blocks_detailed
   -> Types.content_block list
   -> (Types.api_response, detailed_error) result
 
-(** Stream a full agent run. Non-fatal exceptions raised by [on_event] are
-    logged and do not abort the run. *)
+(** Stream a full agent run. A model explicitly declaring no native streaming
+    uses sync dispatch and publishes completed-response events before tool-name
+    admission; those events do not represent incremental provider delivery.
+    Non-fatal exceptions raised by [on_event] are logged and do not abort the run. *)
 val run_stream
   :  sw:Eio.Switch.t
   -> ?clock:_ Eio.Time.clock

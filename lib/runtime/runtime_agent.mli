@@ -470,8 +470,11 @@ val run :
     Returns the wrapped {!run_result}; errors propagate
     as [Agent_core.Error.t].
     [on_event] observes actual SSE events when the resolved model supports
-    native streaming. Otherwise the run uses sync JSON without invoking
-    [on_event]. *)
+    native streaming. Otherwise the run keeps sync JSON dispatch and emits
+    synthetic events for each successful provider response, before existing
+    after-turn hooks inspect it. These events describe completed content;
+    they do not claim incremental provider delivery. Failed requests emit
+    no synthetic response. *)
 
 val run_blocks :
   sw:Eio.Switch.t ->

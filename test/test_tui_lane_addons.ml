@@ -990,7 +990,7 @@ let evidence_export_chooses_a_keeper_by_name () =
   check bool "navigation retains an explicitly past receipt without assigning it to another worker" true
     (List.mem "Last evidence receipt" (UI.lines ~width:100 another_worker)
      && Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance another_worker)=Some "other");
-  let overview_with_receipt = UI.lines ~width:40 another_worker in
+  let overview_with_receipt = UI.lines ~width:40 another_worker |> entry_lines in
   let selected_position = List.find_index (String.starts_with ~prefix:"> Observed value changes")
       overview_with_receipt |> Option.get in
   let receipt_position = List.find_index (String.equal "Last evidence receipt")

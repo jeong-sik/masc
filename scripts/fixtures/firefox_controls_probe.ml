@@ -67,7 +67,7 @@ let () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     (* A click that opens a JavaScript dialog can report an error after the page
        took the click, so the dialog itself is the evidence. *)
     let click_opening_dialog id selector = ignore (interact_raw id (Browser_lane.Click selector)) in
-    let elements id = success (run (Browser_lane.Page_elements {tab_id=Some id})) in
+    let elements id = success (run (Browser_lane.Page_elements {tab_id=Some id;within=None})) in
     let observation = elements first in
     check "element observation names its tab" (integer (member "tabId" observation)=first);
     let controls = member "elements" observation |> Yojson.Safe.Util.to_list in

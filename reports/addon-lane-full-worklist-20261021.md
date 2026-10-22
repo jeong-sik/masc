@@ -611,7 +611,7 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 실제 descriptor를 열린 채 유지해 alias writer의 대기를 확인하고, 다른 scope publication 뒤 이전 read bytes와 새 원래 progress를 확인하는 회귀를 추가했다. 기존 외부 교체/소유권 거절과 public owner의 Off 시나리오도 유지한다. 새 소스의 parser 검사는 실행 성공이 아니며 정확한 후보의 독립 리뷰와 선택 CI는 별도다. 원래 A01–H06의54개 이름·완료 기준과 실제 provider·두 UI·운영 설치 미완료 경계를 유지한다.
 
 
-## E02 原本 전달·scope 직렬화 선택 실행 확인 · 2026-10-22
+## E02 원본 전달·scope 직렬화 선택 실행 확인 · 2026-10-22
 
 - [실제10-suite 실행39707346202](../docs/evidence/2026-10-22-curator-original-delivery/selected-execution-serialization.json)은 exact47b9e716607b74d4948e38608f09460b1ccb45b5에서226건 모두 PASS다. reconcile12·Core current13·Owner commit61·production13·기존 Exact37·Fusion14·concurrent6·strict discovery8·request progress11·host cycle51을 실제 원문과 대조했다. 원래 실패했던 host terminal→Off 정산, namespace 불가 후 maintenance ACK 회복, held descriptor/alias writer와 독립 scope 진행을 포함한다. 이전042의155건 중1건 실패는 별도 원문으로 보존한다.
 - 외부 세션이 Stack44994의 네 층 #44989/#44993/#45002/#45005를 01:44:44–48Z에 실제 Candle 브랜치로 병합했다. top merge65727f4998ee9a0152d38b977d53ca2cfa95f2ca의 전체 tree가 실행47b9와 동일함을 직접 확인했다. 이 세션은 병합 요청을 하지 않았으며 #45005의 당시 reviews API는 빈 배열이다. 독립 source/response PASS를 정식 승인으로 바꾸어 말하지 않는다. main 포함·운영 설치는 증명되지 않았다.

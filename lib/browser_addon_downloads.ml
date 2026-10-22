@@ -4,7 +4,8 @@ type descriptor = {snapshot_id:string;root_device:int;root_inode:int;
   device:int;inode:int;bytes:int;sha256:string}
 type claim = Snapshot of descriptor | Published of Yojson.Safe.t
 type snapshot = {descriptor:descriptor;source:string;source_stat:Unix.stats;
-  parents:(string * Unix.stats) list;mutable published:Yojson.Safe.t option}
+  parents:(string * Unix.stats) list;mutable source_fd:Unix.file_descr option;
+  mutable published:Yojson.Safe.t option}
 type grant_state = Pending | Claimed | Committed of Yojson.Safe.t
   | Settled of Yojson.Safe.t | Released
 type grant = {snapshot:snapshot;actor:string;route:B.route;verb:B.verb;
@@ -98,6 +99,13 @@ let create ~directory = io (fun () ->
     snapshots=Hashtbl.create 8;grants=Hashtbl.create 8})
 let remember_failure t detail = locked t (fun () ->
   match t.failure with None -> t.failure<-Some detail | Some _ -> ())
+let close_pin snapshot = match snapshot.source_fd with
+  | None -> Ok ()
+  | Some fd -> snapshot.source_fd<-None;io (fun () -> Unix.close fd;Ok ())
+let close_pins snapshots = List.fold_left (fun result snapshot ->
+  let closed=close_pin snapshot in
+  match result,closed with Error detail,_ | Ok (),Error detail -> Error detail
+    | Ok (),Ok () -> Ok ()) (Ok ()) snapshots
 let source_parents t path =
   let downloads=Filename.concat t.directory "downloads" in
   let rec collect current acc =
@@ -127,12 +135,13 @@ let copy t path id = io (fun () ->
   let* ()=if before.Unix.st_kind=Unix.S_REG && before.st_uid=Unix.geteuid () && before.st_nlink=1
     then Ok () else Error "download source is not an owned regular file" in
   let source=Unix.openfile path [Unix.O_RDONLY;Unix.O_CLOEXEC;Unix.O_NONBLOCK] 0 in
-  Fun.protect ~finally:(fun () -> Unix.close source) (fun () ->
+  let transferred=ref false in
+  Fun.protect ~finally:(fun () -> if not !transferred then Unix.close source) (fun () ->
     let observed=Unix.fstat source in
     let* ()=if same_file before observed then Ok () else Error "download source identity changed" in
     let* target=snapshot_path ~directory:t.directory ~snapshot_id:id in
     let output=Unix.openfile target [Unix.O_WRONLY;Unix.O_CREAT;Unix.O_EXCL;Unix.O_CLOEXEC] 0o600 in
-    Fun.protect ~finally:(fun () -> Unix.close output) (fun () ->
+    let result=Fun.protect ~finally:(fun () -> Unix.close output) (fun () ->
       let buffer=Bytes.create Sys.io_buffer_size in
       let rec stream digest bytes = match Unix.read source buffer 0 (Bytes.length buffer) with
         | 0 -> Digestif.SHA256.(to_hex (get digest)),bytes
@@ -146,7 +155,8 @@ let copy t path id = io (fun () ->
       let copied=Unix.fstat output in
       let descriptor={snapshot_id=id;root_device=t.root_stat.st_dev;root_inode=t.root_stat.st_ino;
         device=copied.st_dev;inode=copied.st_ino;bytes;sha256} in
-      Ok {descriptor;source=path;source_stat=before;parents;published=None})))
+      Ok {descriptor;source=path;source_stat=before;parents;source_fd=Some source;published=None}) in
+    (match result with Ok _ -> transferred:=true | Error _ -> ());result))
 let publish t path =
   let* ()=locked t (fun () -> if not t.serving then Error "download broker is retired"
     else (t.preparing<-t.preparing+1;Ok ())) in
@@ -154,10 +164,15 @@ let publish t path =
     let id=fresh_id () in
     match copy t path id with
     | Error detail -> remember_failure t detail;Error detail
-    | Ok snapshot -> locked t (fun () ->
-        Hashtbl.add t.snapshots id snapshot;
-        if not t.serving then Error "download broker retired during preparation"
-        else Ok (`Assoc ["downloadSnapshot",`String id])))
+    | Ok snapshot ->
+        let registered=ref false in
+        Fun.protect ~finally:(fun () ->
+          if not !registered then match close_pin snapshot with
+            | Ok () -> () | Error detail -> remember_failure t detail) (fun () ->
+          locked t (fun () ->
+            Hashtbl.add t.snapshots id snapshot;registered:=true;
+            if not t.serving then Error "download broker retired during preparation"
+            else Ok (`Assoc ["downloadSnapshot",`String id]))))
 let allowed route verb = match route,verb with
   | B.Automation_route,B.Page_downloads _ -> Ok ()
   | (B.Live_route _|Stagehand_route),(B.Page_downloads _)
@@ -229,7 +244,37 @@ let rec empty_downloads path =
         empty_downloads (Filename.concat path name)) (Ok ()) (Sys.readdir path)
   | _ -> Error "session downloads contain an unpublished or unknown resource"
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
-let cleanup t =
+let original_digest fd bytes =
+  ignore (Unix.lseek fd 0 Unix.SEEK_SET);
+  let buffer=Bytes.create Sys.io_buffer_size in
+  let rec stream remaining digest =
+    if remaining=0 then
+      if Unix.read fd buffer 0 1=0 then Ok Digestif.SHA256.(to_hex (get digest))
+      else Error "original completed download has extra bytes"
+    else match Unix.read fd buffer 0 (min remaining (Bytes.length buffer)) with
+      | 0 -> Error "original completed download was truncated"
+      | count -> stream (remaining-count) (Digestif.SHA256.feed_bytes digest ~off:0 ~len:count buffer) in
+  stream bytes Digestif.SHA256.empty
+let remove_original t snapshot =
+  match Unix.lstat snapshot.source with
+  | current ->
+      let* fd=Option.to_result ~none:"original completed download descriptor is closed" snapshot.source_fd in
+      let before=Unix.fstat fd in
+      let* ()=if same_identity before snapshot.source_stat && before.st_kind=Unix.S_REG
+          && before.st_uid=snapshot.source_stat.st_uid && before.st_perm=snapshot.source_stat.st_perm
+          && before.st_nlink=1 && before.st_size=snapshot.descriptor.bytes && same_file before current
+        then Ok () else Error (changed_source_message snapshot current) in
+      let* digest=original_digest fd snapshot.descriptor.bytes in
+      let* ()=if digest=snapshot.descriptor.sha256 then Ok ()
+        else Error "original completed download contents changed" in
+      let* ()=check t in let* ()=check_parents snapshot.parents in
+      let after=Unix.fstat fd and current=Unix.lstat snapshot.source in
+      if same_file before after && same_file before current
+      then (Unix.unlink snapshot.source;Ok ())
+      else Error (changed_source_message snapshot current)
+  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
+type retirement = Remove_published | Preserve_files
+let retire t retirement =
   let result=io (fun () ->
   Mutex.lock t.cleanup_mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock t.cleanup_mutex) (fun () ->
@@ -238,21 +283,39 @@ let cleanup t =
       | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()) else (
     let snapshots,failure=locked t (fun () ->
       t.serving<-false;
-      let active ()=t.preparing>0 || Hashtbl.fold (fun _ grant active ->
-        match grant.state with Claimed|Committed _ -> true
-          | Pending|Settled _|Released -> active) t.grants false in
-      while active () do Condition.wait t.changed t.mutex done;
+      while t.preparing>0 do Condition.wait t.changed t.mutex done;
+      (* A remote holder may never settle. Observe deletion authority under the
+         grant lock rather than waiting for it; no files may be deleted unless
+         every existing claim has settled. Preserve grant states on refusal. *)
+      (match t.failure,retirement with
+      | Some _,(Remove_published|Preserve_files) | None,Preserve_files -> ()
+      | None,Remove_published ->
+          let held=Hashtbl.fold (fun _ grant held ->
+            match grant.state with Claimed|Committed _ -> true
+              | Pending|Settled _|Released -> held) t.grants false in
+          if held then t.failure<-Some "download cleanup has unsettled consumer claims");
       Hashtbl.fold (fun _ snapshot acc -> snapshot::acc) t.snapshots [],t.failure) in
+    let result=ref (Error "download cleanup did not settle") in
+    let ()=Fun.protect ~finally:(fun () ->
+      let closed=close_pins snapshots in
+      result:=(match !result,closed with
+        | Error detail,_ | Ok (),Error detail -> Error detail
+        | Ok (),Ok () -> Ok ());
+      (* Publish the result before releasing cleanup ownership or reusing any
+         consumed descriptor number. Every pin is closed even on failure. *)
+      match !result with
+      | Error detail -> remember_failure t detail
+      | Ok () -> t.settled<-true) (fun () ->
+    result:=io (fun () ->
     let* ()=match failure with None -> Ok ()|Some detail -> Error detail in
+    let* ()=match retirement with Remove_published -> Ok ()
+      | Preserve_files -> Error "download cleanup requires confirmed backend teardown" in
     let* ()=check t in
     let cleanup_snapshot snapshot =
       let* ()=match snapshot.published with None -> Error "download snapshot was not durably published"
         | Some _ -> Ok () in
       let* ()=check_parents snapshot.parents in
-      let* ()=match Unix.lstat snapshot.source with
-        | stat when same_file stat snapshot.source_stat -> Unix.unlink snapshot.source;Ok ()
-        | stat -> Error (changed_source_message snapshot stat)
-        | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok () in
+      let* ()=remove_original t snapshot in
       let* path=snapshot_path ~directory:t.directory ~snapshot_id:snapshot.descriptor.snapshot_id in
       match Unix.lstat path with
       | stat when stat.Unix.st_dev=snapshot.descriptor.device && stat.st_ino=snapshot.descriptor.inode
@@ -260,12 +323,19 @@ let cleanup t =
           && stat.st_uid=Unix.geteuid () && stat.st_perm=0o600 && stat.st_nlink=1 -> Unix.unlink path;Ok ()
       | _ -> Error "download snapshot identity changed"
       | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok () in
-    let result=List.fold_left (fun result snapshot -> let* ()=result in cleanup_snapshot snapshot) (Ok ()) snapshots in
-    match result with
-    | Error detail -> Error detail
-    | Ok () ->
+    (* One snapshot's failure must not skip the rest: attempt each snapshot and
+       report the failures once, leaving only failed items behind. *)
+    let failures=List.fold_left (fun failures snapshot ->
+      match io (fun () -> cleanup_snapshot snapshot) with
+      | Ok () -> failures | Error detail -> detail::failures) [] snapshots in
+    match failures with
+    | _::_ -> Error (String.concat "; " (List.rev failures))
+    | [] ->
         let* ()=empty_downloads (Filename.concat t.directory "downloads") in
         if Sys.readdir t.root<>[||] then Error "download root contains unknown or partial files"
-        else (Unix.rmdir t.root;t.settled<-true;Ok ())))) in
+        else (Unix.rmdir t.root;Ok ()))) in
+    !result))) in
   (match result with Ok () -> ()|Error detail -> remember_failure t detail);
   result
+let cleanup t = retire t Remove_published
+let abandon t = retire t Preserve_files

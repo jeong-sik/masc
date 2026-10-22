@@ -24,7 +24,8 @@ val create : directory:string -> (t, string) result
 val publish : t -> string -> (Yojson.Safe.t, string) result
 (** Copy one completed, session-owned source with bounded streaming memory.
     The returned opaque snapshot marker may be cached by the BiDi connection.
-    Original source identity and contents are checked across the copy. *)
+    Original source identity and contents are checked across the copy. The
+    broker retains its read-only original descriptor until retirement. *)
 val bind : t -> actor:string -> route:Browser_lane.route -> verb:Browser_lane.verb ->
   Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** Bind [Page_downloads] rows to this call, replacing private snapshot markers
@@ -36,22 +37,39 @@ val claim : t -> id:string -> actor:string -> route:Browser_lane.route ->
 (** Fresh claims are refused after revocation. A matching publication already
     committed through this broker is returned without another file import.
     Re-reading an already settled grant is idempotent metadata lookup and does
-    not acquire a new lifetime; ordinary calls always bind a fresh grant. *)
+    not acquire a new lifetime; ordinary calls always bind a fresh grant.
+    Claims carry immutable snapshot metadata or a publication receipt, never
+    a borrowed original-file descriptor. *)
 val commit : t -> id:string -> actor:string -> route:Browser_lane.route ->
   verb:Browser_lane.verb -> receipt:Yojson.Safe.t -> (unit, string) result
 (** Acknowledge the durable artifact for an exact existing claim. The receipt
     must name the snapshot's digest and byte count. Matching repeated commits
     are idempotent; conflicting receipts are refused, including after revoke.
     The original claim remains held until [release], including when [claim]
-    returned an existing publication rather than a file descriptor. *)
+    returned an existing publication rather than a snapshot descriptor. *)
 val release : t -> id:string -> actor:string -> route:Browser_lane.route ->
   verb:Browser_lane.verb -> (unit, string) result
 (** Settle this exact claim without publication, including after revocation.
     This never authorizes another caller or deletes the original download. *)
 val revoke : t -> unit
+val abandon : t -> (unit, string) result
+(** Revoke and join local snapshot preparations, then close private original-file
+    descriptors without deleting files. Do not wait for outstanding claims:
+    their holders may no longer run. Preserve their exact grant states so an
+    existing holder can still commit and release after this call returns.
+    Record unconfirmed backend teardown as a sticky cleanup failure. This
+    cannot confer deletion authority later. *)
 val cleanup : t -> (unit, string) result
-(** Revoke new work and join preparations and claims. Call only after confirmed
-    original backend teardown. Remove only broker snapshots and committed
-    original sources whose exact identities remain unchanged. Unpublished,
+(** Revoke new work and join local snapshot preparations. Call only after
+    confirmed original backend teardown. Outstanding claimed or committed
+    grants prevent deletion: return a sticky error without waiting for their
+    holders or changing their states. Existing holders may still commit and
+    release after this call returns; later settlement does not clear the error.
+    Remove only broker snapshots and committed
+    original sources whose pinned inode, owner, permissions and published bytes
+    remain unchanged. Historical mtime/ctime may differ; the current properties
+    must remain stable across content verification. Close all original-file
+    descriptors on success or sticky failure. Unpublished,
     partial, replaced or unknown resources remain and cleanup reports error.
-    A failed cleanup stays unconfirmed on later calls. *)
+    A failed cleanup stays unconfirmed on later calls. Neither retirement path
+    waits for remote claim settlement. *)

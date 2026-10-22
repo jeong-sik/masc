@@ -62,6 +62,12 @@ let test_a_run_answers_both_streams_or_why_not () =
     failed "a signal" "signaled SIGTERM" (run "kill -TERM $$");
     failed "output past the limit" "output exceeded"
       (run (Printf.sprintf "head -c %d /dev/zero" (Peer.output_limit_bytes + 1)));
+    (* Its script still unwritten, because it reads none of it. *)
+    let started = Eio.Time.now clock in
+    failed "output past the limit from a run that does not read" "output exceeded"
+      (run ~stdin:(String.make 1_000_000 'x')
+         (Printf.sprintf "head -c %d /dev/zero; sleep 30" (Peer.output_limit_bytes + 1)));
+    check bool "stopped at the limit, not at the window" true (Eio.Time.now clock -. started < 4.);
     let started = Eio.Time.now clock in
     failed "a run past its window" "timed out" (run ~timeout_s:0.3 "sleep 30");
     (* The window and the stop grace (2 s), not the run's own 30 s. *)

@@ -506,6 +506,49 @@ let test_pending_observation_recovers_on_existing_maintenance ?(unavailable_name
     check int "Off observer recovery never asks the provider" 0 (F.post_count server);
     check int "observer retry never applies a domain judgment" 0
       (List.length (Ledger.dispositions (get (Ledger.load ~base_path)))))
+let test_registry_failure_does_not_block_new_work ()=
+  let blocked="An original refused before dispatch"
+  and fresh="A new source while registry observation is pending" in
+  with_fixture ~start_owner:false ~claims:[blocked]
+    (fun ~sw ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode:_ ~delivery:_ ->
+    reconcile_until_export clock ~config;
+    let capture=capture_classification config in
+    ignore (advance store (original_record store capture)
+      (Progress.Refused {stage=Progress.Before_dispatch;evidence=`Assoc ["reason",`String "original host refusal"]}));
+    commit_facts base_path [blocked;fresh];
+    let path=Filename.concat registry_directory Runs.storage_filename in
+    let before=match Fs_compat.load_file_opt path with Some bytes -> bytes | None -> "" in
+    Fun.protect ~finally:(fun () -> write path before) (fun () ->
+      write path (before ^ "{controlled-incomplete-history");
+      Curator.start ~sw ~config;
+      await_owner clock base_path (fun () ->
+        List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=1
+        && ready_summary base_path && Curator.For_testing.is_idle ~base_path);
+      let fresh_classification=captures base_path store |> List.filter_map (fun (record,capture) ->
+        match Capture.work capture with
+        | Capture.Classification {batch;_} when List.exists (fun (fact:Ledger.pending_fact) -> fact.claim=fresh) batch.selected ->
+          Some record
+        | Capture.Classification _ | Capture.Briefing _ -> None) in
+      check bool "fresh source reaches a confirmed classification despite registry failure" true
+        (match fresh_classification with [record] -> is_finished record | [] | _::_::_ -> false);
+      check int "fresh classification and Briefing each use the actual provider" 2 (F.post_count server);
+      let observer=Progress.observer (original_record store capture).progress in
+      check bool "unconfirmed registry keeps both original receipts pending" true
+        (match observer.registration,observer.completion with
+         | Lane_addon_request_receipt.Pending _,Pending _ -> true
+         | (Unobserved | Acknowledged _),_ | Pending _,(Unobserved | Acknowledged _) -> false);
+      check bool "registry failure keeps maintenance retry demand" true
+        (match Curator.For_testing.snapshot ~base_path with Some state -> state.observation_retry | None -> false);
+      Curator.retry_pending_observations ~base_path;
+      await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
+      check int "failed observation retry never repeats primary work" 2 (F.post_count server));
+    Curator.retry_pending_observations ~base_path;
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path
+      && List.for_all observer_acknowledged (records store));
+    check bool "recovered registry clears maintenance retry demand" false
+      (match Curator.For_testing.snapshot ~base_path with Some state -> state.observation_retry
+       | None -> fail "original owner disappeared after registry recovery");
+    check int "successful ACK retry never repeats primary work" 2 (F.post_count server))
 let test_finished_identity_readded_after_observed_removal ()=
   let claim="A completed source that is removed and later restored" in
   with_fixture ~claims:[claim]
@@ -698,6 +741,8 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
     (fun () -> test_pending_observation_recovers_on_existing_maintenance ());
   test_case "pending Off observation survives a failed discovery pass" `Quick
     (test_pending_observation_recovers_on_existing_maintenance ~unavailable_namespace:true);
+  test_case "registry delivery failure preserves new work and original ACK retries" `Quick
+    test_registry_failure_does_not_block_new_work;
   test_case "finished source can return as new pending work after actual removal" `Quick test_finished_identity_readded_after_observed_removal;
   test_case "only the current semantic destination supplies a size successor" `Quick test_successor_frontier_ignores_an_old_semantic_destination;
   test_case "complete malformed original inventory blocks replacement" `Quick test_complete_discovery_blocks_malformed_original;

@@ -61,9 +61,15 @@ let observe ~config ~on_observation_failure originals =
   List.fold_left (fun complete original ->
     match Consumer.deliver_observation ~config ~request_id:(id original) with
     | Ok _ -> complete
-    | Error error ->
+    | Error (Consumer.Registry_delivery_failed _ as error) ->
       on_observation_failure ();
-      Log.Server.error "workspace curator original observation %s: %s" (id original) (Consumer.error_to_string error);
+      Log.Server.warn "workspace curator registry observation %s: %s" (id original)
+        (Consumer.observation_error_to_string error);
+      complete
+    | Error (Consumer.Original_observation_failed _ as error) ->
+      on_observation_failure ();
+      Log.Server.error "workspace curator original observation %s: %s" (id original)
+        (Consumer.observation_error_to_string error);
       false) true originals
 let one_active originals=match List.filter (fun original -> active (phase original)) originals with
   | [] -> Ok None | [original] -> Ok (Some original)

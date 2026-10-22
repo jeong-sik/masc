@@ -599,6 +599,7 @@ let registry_at base_path =
   path,Runs.replay path
 let delivery base_path store registry (record:Owner.retained) ~now =
   Consumer.For_testing.deliver_observation ~store ~base_path ~registry ~request_id:record.request_id ~now
+let observation_accepted value=get (Result.map_error Consumer.observation_error_to_string value)
 let acknowledged = function Receipt.Acknowledged _ -> true | Pending _ | Unobserved -> false
 let test_actual_observer_delivery_and_ack_retry ()=with_workspace (fun base_path store ->
   let capture,output=classification base_path ["Original fact delivered to the real registry"] in
@@ -617,7 +618,7 @@ let test_actual_observer_delivery_and_ack_retry ()=with_workspace (fun base_path
     |> Result.map_error Runs.reconciliation_error_to_string |> get;
   let restarted=Runs.replay path in
   let bytes=Fs_compat.load_file path and stat=Unix.stat path in
-  let delivered=delivery base_path store restarted prepared.original ~now:never_clock |> accepted in
+  let delivered=delivery base_path store restarted prepared.original ~now:never_clock |> observation_accepted in
   let observer=Progress.observer delivered.original.progress in
   check bool "registration ACK is durable" true (acknowledged observer.registration);
   check bool "completion ACK is durable after registration" true (acknowledged observer.completion);
@@ -628,7 +629,7 @@ let test_actual_observer_delivery_and_ack_retry ()=with_workspace (fun base_path
   let journal=Fs_compat.load_file (owner_file store delivered.original) in
   Unix.unlink path;
   let no_authority=Runs.create () in
-  ignore (delivery base_path store no_authority delivered.original ~now:never_clock |> accepted);
+  ignore (delivery base_path store no_authority delivered.original ~now:never_clock |> observation_accepted);
   check bool "already ACKed work never recreates evicted history" false (Sys.file_exists path);
   check string "already ACKed work keeps original journal bytes" journal
     (Fs_compat.load_file (owner_file store delivered.original)))
@@ -636,13 +637,13 @@ let test_registration_delivery_does_not_invent_completion ()=with_workspace (fun
   let capture,_output=classification base_path ["Active original without a terminal"] in
   let original=retain_capture store capture in
   let path,registry=registry_at base_path in
-  let delivered=delivery base_path store registry original ~now:(fun () -> 31.) |> accepted in
+  let delivered=delivery base_path store registry original ~now:(fun () -> 31.) |> observation_accepted in
   let observer=Progress.observer delivered.original.progress in
   check bool "start is ACKed without primary execution" true (acknowledged observer.registration);
   check bool "no terminal is fabricated" true (observer.completion=Receipt.Unobserved);
   check bool "primary stays Captured" true (Progress.phase delivered.original.progress=Progress.Captured);
   let bytes=Fs_compat.load_file path in
-  ignore (delivery base_path store registry delivered.original ~now:never_clock |> accepted);
+  ignore (delivery base_path store registry delivered.original ~now:never_clock |> observation_accepted);
   check string "ACKed active original is not re-registered" bytes (Fs_compat.load_file path))
 let test_failed_registry_keeps_original_pending ()=with_workspace (fun base_path store ->
   let capture,_output=classification base_path ["Unavailable registry preserves original intention"] in
@@ -651,11 +652,14 @@ let test_failed_registry_keeps_original_pending ()=with_workspace (fun base_path
   let path=owner_file store prepared.original in
   let bytes=Fs_compat.load_file path in
   (match delivery base_path store (Runs.create ()) prepared.original ~now:never_clock with
-   | Error (Consumer.Unavailable _) -> ()
-   | Error (Rejected _ | Uncertain _) | Ok _ -> fail "volatile registry must refuse durable acknowledgement");
+   | Error (Consumer.Registry_delivery_failed (Runs.Reconciliation_unavailable _)) -> ()
+   | Error (Original_observation_failed _ | Registry_delivery_failed
+       (Invalid_original _ | Original_registration_conflict | Original_completion_conflict
+        | Failed_completion_conflict | Reconciliation_persistence_failed _))
+   | Ok _ -> fail "volatile registry must refuse durable acknowledgement");
   check string "registry failure preserves immutable pending original" bytes (Fs_compat.load_file path);
   let log_path,registry=registry_at base_path in
-  let delivered=delivery base_path store registry prepared.original ~now:never_clock |> accepted in
+  let delivered=delivery base_path store registry prepared.original ~now:never_clock |> observation_accepted in
   check bool "later exact retry acknowledges original" true
     (acknowledged (Progress.observer delivered.original.progress).registration);
   check bool "later retry uses the actual file-backed registry" true (Sys.file_exists log_path))

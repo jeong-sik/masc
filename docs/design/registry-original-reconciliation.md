@@ -40,7 +40,13 @@ its registration was evicted. Success confirms historical publication even if
 ordinary per-lane retention immediately removes the run from the current page.
 
 Observer and authoritative discovery failures leave the owner eligible for a
-wake from the existing server maintenance tick. A later failed pass preserves
+wake from the existing server maintenance tick. Registry delivery failures keep
+their typed reconciliation cause and pending receipts, but do not gate new
+classification or Briefing work: an unrelated lane's incomplete log must not
+stop Curator's primary work. Original preparation, fresh ACK validation and final
+restore failures still gate new captures because Curator's own journal integrity
+is unconfirmed. A registry failure also preserves any earlier integrity failure
+in the same pass. A later failed pass preserves
 this demand, including a temporarily unavailable original namespace; only a
 completed pass without observation errors clears it. The wake resolves its physical workspace and signals only that
 existing owner; it performs no journal/provider/domain work. Fresh owner authority

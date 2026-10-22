@@ -567,8 +567,15 @@ let prepare_observation ~config ~request_id =
   let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   prepare_observation_with ~store ~base_path:config.Workspace.base_path ~request_id ~now:Time_compat.now
 module Runs = Exact_lane_run_registry
+type observation_error =
+  | Original_observation_failed of error
+  | Registry_delivery_failed of Runs.reconciliation_error
+let observation_error_to_string = function
+  | Original_observation_failed error -> error_to_string error
+  | Registry_delivery_failed error -> Runs.reconciliation_error_to_string error
 let deliver_observation_with ~store ~base_path ~registry ~request_id ~now =
-  let* prepared=prepare_observation_with ~store ~base_path ~request_id ~now in
+  let integrity value=Result.map_error (fun error -> Original_observation_failed error) value in
+  let* prepared=prepare_observation_with ~store ~base_path ~request_id ~now |> integrity in
   let pending = function Receipt.Pending _ -> true | Unobserved | Acknowledged _ -> false in
   let observer=Progress.observer prepared.original.progress in
   if not (pending observer.registration || pending observer.completion) then Ok prepared else
@@ -586,7 +593,7 @@ let deliver_observation_with ~store ~base_path ~registry ~request_id ~now =
   let* ()=Runs.reconcile_original registry ~run_id:registration.run_id ~lane:Runs.Workspace_curator
     ~actor:registration.actor ~started_at:registration.receipt.observed_at
     ~input:(Runs.Exact_input registration.input) ~completion:terminal
-    |> Result.map_error (fun error -> Unavailable (Runs.reconciliation_error_to_string error)) in
+    |> Result.map_error (fun error -> Registry_delivery_failed error) in
   (* Reconciliation returned with every registry lock released. Restore the
      physical original/ancestry and the full immutable receipt again before
      acknowledging that exact fact; no registry getter can manufacture an ACK. *)
@@ -607,10 +614,10 @@ let deliver_observation_with ~store ~base_path ~registry ~request_id ~now =
           Eio_unix.run_in_systhread (fun () -> advance ~store fresh.original
             (Progress.Observer (Receipt.Recorded (stage,expected.Receipt.digest))))
           |> Result.map (fun _ -> ()) in
-  let* ()=acknowledge Receipt.Registration registration.receipt in
+  let* ()=acknowledge Receipt.Registration registration.receipt |> integrity in
   let* ()=match prepared.completion with None -> Ok ()
-    | Some completion -> acknowledge Receipt.Completion completion.receipt in
-  prepare_observation_with ~store ~base_path ~request_id ~now
+    | Some completion -> acknowledge Receipt.Completion completion.receipt |> integrity in
+  prepare_observation_with ~store ~base_path ~request_id ~now |> integrity
 let deliver_observation ~config ~request_id =
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   deliver_observation_with ~store ~base_path:config.Workspace.base_path

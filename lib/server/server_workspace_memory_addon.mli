@@ -115,19 +115,27 @@ val prepare_observation : config:Workspace.config -> request_id:string ->
     Available while Off for an existing owner; it cannot create a new request.
     Uncertain publication requires fresh reload. Caller holds the original
     workspace process lease and serializes the complete operation. *)
+type observation_error =
+  | Original_observation_failed of error
+  | Registry_delivery_failed of Exact_lane_run_registry.reconciliation_error
+val observation_error_to_string : observation_error -> string
 val deliver_observation : config:Workspace.config -> request_id:string ->
-  (observation, error) Stdlib.result
+  (observation, observation_error) Stdlib.result
 (** Prepare/revalidate the original immutable receipts, conditionally publish
     pending facts into the real exact registry, then release registry locks and
     freshly restore the same physical original and receipt digests before ACK.
     Registration ACK precedes completion ACK. Already acknowledged facts do not
     repopulate evicted registry history. A failed/lost ACK retries this observer
-    path, never primary work. Caller holds the original workspace lease and
+    path, never primary work. [Registry_delivery_failed] preserves retry demand
+    without blocking new primary work. [Original_observation_failed] includes
+    prepare, fresh ACK validation and final restore failures; these still block
+    new primary work because original journal integrity is unconfirmed.
+    Caller holds the original workspace lease and
     serializes the entire pass. Available while Off; no model/worker/domain save. *)
 module For_testing : sig
   val deliver_observation : store:Lane_addon_store.t -> base_path:string ->
     registry:Exact_lane_run_registry.t -> request_id:string -> now:(unit -> float) ->
-    (observation, error) Stdlib.result
+    (observation, observation_error) Stdlib.result
   val resume : store:Lane_addon_store.t -> base_path:string -> request_id:string ->
     call:(arguments:Yojson.Safe.t -> (Mcp_protocol.Mcp_types.tool_result, error) Stdlib.result) ->
     (result, error) Stdlib.result

@@ -5,6 +5,8 @@ module Exact = Masc.Lane_addon_exact
 module Store = Masc.Lane_addon_store
 module Types = Masc.Lane_addon_types
 
+let validate_request ~store:_ ~declaration_id:_ ~package:_ _ = Ok (fun _ -> Ok ())
+
 let require = function Ok value -> value | Error error -> fail error
 
 let rec remove_tree path =
@@ -86,7 +88,7 @@ let counting_runner store steps =
   in
   runner, sends, seen
 
-let run_request store runner request = require (Exact.run ~store ~declaration_id ~package ~runner request)
+let run_request store runner request = require (Exact.run ~validate_request ~store ~declaration_id ~package ~runner request)
 
 let attempts store id =
   match require (Store.load_exact_request store ~declaration_id ~request_id:id) with
@@ -193,7 +195,7 @@ let test_an_undeclared_output_is_not_allowed () =
       (run_request restarted runner (request "r6") = Exact.Final Exact.Request_id_reused);
     let allowed = {package with exact_outputs = [{Types.name="grade";schema;request_schema=Types.Package_schema_only}]} in
     check bool "the same denied request retains its final after permission changes" true
-      (match require (Exact.run ~store:restarted ~declaration_id ~package:allowed ~runner (request ~output:"grade" "r6")) with
+      (match require (Exact.run ~validate_request ~store:restarted ~declaration_id ~package:allowed ~runner (request ~output:"grade" "r6")) with
        | Exact.Final (Exact.Not_allowed _) -> true | _ -> false);
     check int "without a send" 0 !sends)
 
@@ -202,7 +204,7 @@ let test_selection_hides_but_preserves_a_retained_answer () =
     let store = Store.create ~root in
     let runner, sends, _ = counting_runner store (ref [Answer question]) in
     ignore (run_request store runner (request "selected"));
-    let off request = require (Exact.run ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner request) in
+    let off request = require (Exact.run ~validate_request ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner request) in
     check bool "permission does not mask a changed identity" true
       (off (request ~output:"grade" "selected") = Exact.Final Exact.Request_id_reused);
     check bool "disabled output does not disclose the original answer" true
@@ -250,13 +252,13 @@ let test_a_cancelled_call_leaves_its_attempt_started () =
   with_root (fun root ->
     let store = Store.create ~root in
     let cancelled ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ -> raise (Eio.Cancel.Cancelled Exit)) in
-    (match Exact.run ~store ~declaration_id ~package ~runner:cancelled (request "r10") with
+    (match Exact.run ~validate_request ~store ~declaration_id ~package ~runner:cancelled (request "r10") with
      | _ -> fail "a cancellation must reach the caller"
      | exception Eio.Cancel.Cancelled _ -> ());
     check bool "the started attempt stays" true (attempts store "r10" = [ `Null ]);
     let runner, sends, _ = counting_runner store (ref []) in
     check bool "disabled output refuses delivery of an unresolved attempt" true
-      (match require (Exact.run ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner (request "r10")) with
+      (match require (Exact.run ~validate_request ~store ~declaration_id ~package:{package with exact_outputs=[]} ~runner (request "r10")) with
        | Exact.Final (Exact.Not_allowed _) -> true | _ -> false);
     check bool "the next run reads it as unknown, so the claim was released" true
       (run_request store runner (request "r10") = Exact.Final Exact.Outcome_unknown);
@@ -278,7 +280,7 @@ let test_a_retained_answer_is_checked_against_the_schema_declared_now () =
                   ; "properties", `Assoc [ "question", `Assoc [ "type", `String "integer" ] ]
                   ; "additionalProperties", `Bool false ] } ] }
     in
-    (match require (Exact.run ~store ~declaration_id ~package:changed ~runner (request "r11")) with
+    (match require (Exact.run ~validate_request ~store ~declaration_id ~package:changed ~runner (request "r11")) with
      | Exact.Final (Exact.Call_final (Exact.Invalid_output _)) -> ()
      | _ -> fail "an answer retained under the old schema must not be delivered as answered");
     check int "and the provider is not called again" 1 !sends;
@@ -296,7 +298,7 @@ let test_an_outcome_that_cannot_be_written_stays_unknown () =
            | Ok output -> Exact.Call_ended (Exact.Answered { output; slot = "s"; usage = None })
            | Error detail -> fail detail)
     in
-    let result = Exact.run ~store ~declaration_id ~package ~runner:locking (request "r12") in
+    let result = Exact.run ~validate_request ~store ~declaration_id ~package ~runner:locking (request "r12") in
     Unix.chmod directory 0o700;
     check bool "the run reports the failed write" true (Result.is_error result);
     let runner, sends, _ = counting_runner store (ref []) in
@@ -354,7 +356,7 @@ let consumer_schema = `Assoc ["$schema",`String "https://json-schema.org/draft/2
     `Assoc ["type",`String "string"];`Assoc ["type",`String "null"]]]]]
 let consumer_package = {package with exact_outputs=[{
   Types.name="author";schema;request_schema=Types.Consumer_request_schema}]}
-let consumer_run store runner request = require (Exact.run ~store ~declaration_id
+let consumer_run store runner request = require (Exact.run ~validate_request ~store ~declaration_id
   ~package:consumer_package ~runner request)
 
 let test_request_schema_authority_and_retention () =

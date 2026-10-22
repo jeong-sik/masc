@@ -1,0 +1,61 @@
+{
+  "run": 39661318402,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39661318402",
+  "head": "fab00b72a44b65a611bb97bddfa56c45f78e8a4e",
+  "status": "completed",
+  "conclusion": "success",
+  "minimal": true,
+  "backend": "posix",
+  "tests": 190,
+  "suites": [
+    {
+      "suite": "test_lane_addon_request_discovery",
+      "seconds": 0.434,
+      "tests": 7
+    },
+    {
+      "suite": "test_lane_addon_request_progress",
+      "seconds": 0.381,
+      "tests": 6
+    },
+    {
+      "suite": "test_workspace_memory_capture",
+      "seconds": 0.28,
+      "tests": 5
+    },
+    {
+      "suite": "test_workspace_memory_execution_capture",
+      "seconds": 0.022,
+      "tests": 5
+    },
+    {
+      "suite": "test_lane_addon_host_cycle",
+      "seconds": 2.184,
+      "tests": 44
+    },
+    {
+      "suite": "test_candle_appraiser_transport",
+      "seconds": 0.048,
+      "tests": 10
+    },
+    {
+      "suite": "test_fs_compat",
+      "seconds": 0.071,
+      "tests": 42
+    },
+    {
+      "suite": "test_lane_addon_worker",
+      "seconds": 32.637,
+      "tests": 71
+    }
+  ],
+  "full_raw_log_sha256": "492334e623da55f56a446b86dcadb19ebc2b795a4a04d0fa0bece2f909d75dae",
+  "public_excerpt_sha256": "9151fb1fedc6bbe80b4e71f9e7ddc0b1e90b903ac44c918fc8f87a870a1874f5",
+  "not_claimed": [
+    "new trusted semantic source execution",
+    "production Curator owner/worker/commit/wake",
+    "actual process restart",
+    "UI/installation",
+    "full regression"
+  ]
+}

@@ -1,6 +1,10 @@
 let ( let* ) = Result.bind
 type error = Binding_conflict | Store_unavailable of string | Invalid_identity of string
   | Invalid_request of string
+type installation = Configuration of string | Manual of string
+let installation_id = function
+  | Configuration id -> Yojson.Safe.to_string (`List [`String "configuration"; `String id])
+  | Manual id -> Yojson.Safe.to_string (`List [`String "manual"; `String id])
 type retained = {
   scope : string; request_id : string; installation_id : string;
   package_id : string; tool : string; request_digest : string; request : Yojson.Safe.t;

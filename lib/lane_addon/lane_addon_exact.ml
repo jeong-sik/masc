@@ -314,7 +314,11 @@ let claim key =
 
 let release key = Mutex.protect in_flight_lock (fun () -> Hashtbl.remove in_flight key)
 
-let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner request =
+type validation_authority =
+  store:Lane_addon_store.t -> declaration_id:string -> package:Lane_addon_types.package ->
+  request -> (Yojson.Safe.t -> (unit, string) result, string) result
+
+let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~validate_request request =
   let request_id = request.request_id in
   let key = Lane_addon_store.root store, declaration_id, request_id in
   (* Identity precedes permission: even a refused request owns its id. *)
@@ -359,15 +363,19 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner req
         match schema_for_request ~output:declared request with
         | Error reason -> deny reason
         | Ok schema ->
+        let* validate_domain = validate_request ~store ~declaration_id ~package request in
         let* lane = Runtime_schema.addon_lane ~declaration_id ~output:request.output in
         let lane_key = Runtime_schema.exact_lane_key (Runtime_schema.Addon lane) in
-        let validate answer = validate_answer ~output:declared request answer in
+        let validate answer =
+          let* checked = validate_answer ~output:declared request answer in
+          let* () = validate_domain (checked_json checked) in
+          Ok checked in
         let deliver = function
           | Call_final (Answered {output; slot; usage}) ->
               (match validate (checked_json output) with
                | Ok output -> Call_final (Answered {output; slot; usage})
                | Error detail -> Call_final (Invalid_output
-                   {detail = "the retained answer does not match the current package baseline or original request shape: " ^ detail}))
+                   {detail = "the retained answer does not match the package, original request or consumer semantics: " ^ detail}))
           | (Call_final (Invalid_output _ | Input_refused _) | Outcome_unknown | Not_allowed _ | Request_id_reused)
             as final -> final in
         match previous.final with

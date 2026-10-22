@@ -57,9 +57,31 @@ let prepare ~base_path ~keeper_name ~session_dir ~trace_id ~source =
 let retain t checkpoint =
   let* snapshot = Store.exact_snapshot_of_value ~expected_session_id:t.trace_id checkpoint
     |> Result.map_error (fun error -> Snapshot_failed error) in
-  match Store.retain_exact_snapshot ~session_dir:t.session_dir snapshot with
+  let outcome=Store.retain_exact_snapshot ~session_dir:t.session_dir snapshot in
+  let auxiliary=match outcome with Store.Installed installed -> installed.auxiliary
+    | Not_installed refused -> refused.auxiliary in
+  List.iter (function
+    | Store.Commit_observer_failed ((Eio.Cancel.Cancelled _ as cause),backtrace)
+    | Post_commit_unwind_interrupted ((Eio.Cancel.Cancelled _ as cause),backtrace) ->
+      Printexc.raise_with_backtrace cause backtrace
+    | Commit_observer_failed _ | Post_commit_unwind_interrupted _
+    | Commit_durability_unknown _ | Release_process_lock_failed _ -> ()) auxiliary;
+  match outcome with
   | Store.Installed {auxiliary=[];_} -> Ok (Store.exact_snapshot_reference snapshot)
   | (Store.Installed _ | Store.Not_installed _) as outcome -> Error (Retention_unconfirmed outcome)
+
+let bind_retired_input_cut t ~cut ~seed ~operation_id ~execution_digest ~observed ~call =
+  let* checkpoint=Keeper_input_history_cut.cut_checkpoint cut
+    |> Result.map_error (fun _ -> Source_changed) in
+  let* binding=Keeper_input_history_cut.bind_seed cut ~seed
+    |> Result.map_error (fun _ -> Source_changed) in
+  let* retained=retain t checkpoint in
+  let* ()=if Keeper_checkpoint_ref.equal retained (Keeper_input_history_cut.checkpoint binding)
+    then Ok () else Error Source_changed in
+  let* writer=Registry.bind_retired_input_cut ~base_path:t.base_path ~keeper_name:t.keeper_name
+    ~writer:t.writer ~operation_id ~execution_digest ~observed ~call ~cut:binding
+    |> Result.map_error (fun error -> Owner_failed error) in
+  Ok {t with writer}
 
 let publish_autonomous t checkpoint =
   let* checkpoint = retain t checkpoint in

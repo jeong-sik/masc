@@ -541,7 +541,61 @@ let test_prior_history_never_becomes_unobserved_or_releasable () = with_store @@
   | Store.Stored_operations {input_history=Store.Prior_input_history_unavailable;input_checkpoints=[];_} -> ()
   | Stored_operations _ | Missing_store -> fail "inspection hid the unknown history floor"
 
+let test_retired_cut_bind_and_input_owner_are_atomic () = with_store @@ fun path store operation ->
+  bind store operation (make_call operation);
+  Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
+  terminal store operation Agent.Retire;
+  let observed=read store in
+  let cut=checkpoint_of_bytes ~turn_count:1 101 in
+  let call=make_call ~id:next_call_id ~seed:2 operation in
+  let apply observed_input=Store.bind_direct_input_checkpoint store ~now:5. ~operation_id
+      ~execution_digest:operation.Operation.execution_digest ~observed ~call
+      ~observed_input ~checkpoint:cut in
+  (match apply None |> ok with
+   | Store.Input_checkpoint_source_changed _ -> ()
+   | Input_checkpoint_updated -> fail "stale input predecessor admitted a new native call");
+  check bool "stale input keeps retired native authority" true (Native.equal_state observed (read store));
+  Store.For_testing.fail_next_commit Store.For_testing.Fail_before_commit;
+  rejected "precommit failure was hidden" (apply (Some (checkpoint 1)));
+  check_input "precommit failure keeps old input" (Some (checkpoint 1)) store;
+  check bool "precommit failure keeps retired call" true (Native.equal_state observed (read store));
+  Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
+  rejected "uncertain bind became success" (apply (Some (checkpoint 1)));
+  check_input "uncertain commit installed cut input together" (Some cut) store;
+  check bool "uncertain commit installed matching next call" true (Native.equal_state (Native.Active call) (read store));
+  check int "uncertain bind releases no checkpoints" 0 (List.length (Store.take_released_checkpoints store));
+  (match apply (Some (checkpoint 1)) |> ok with
+   | Store.Input_checkpoint_source_changed _ -> ()
+   | Input_checkpoint_updated -> fail "old input witness replayed an uncertain bind");
+  with_reopened path store @@ fun reopened ->
+  check_input "cut ownership survives reopen" (Some cut) reopened;
+  check bool "new call survives reopen with input" true (Native.equal_state (Native.Active call) (read reopened))
+
+let test_retired_cut_native_refusals_keep_input () =
+  List.iter (fun recovery -> with_store @@ fun _path store operation ->
+    bind store operation (make_call operation);
+    Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
+    terminal store operation recovery;
+    let observed=read store in
+    let call=make_call ~id:next_call_id ~seed:2 operation in
+    let try_bind observed=Store.bind_direct_input_checkpoint store ~now:5. ~operation_id
+        ~execution_digest:operation.Operation.execution_digest ~observed ~call
+        ~observed_input:(Some (checkpoint 1)) ~checkpoint:(checkpoint_of_bytes ~turn_count:1 101) in
+    rejected "stale native state admitted cut" (try_bind Native.No_native_call);
+    (match recovery with
+     | Agent.Operator_repair_required Effect_outcome_unknown ->
+       rejected "unknown effect admitted cut" (try_bind observed)
+     | Retire -> try_bind observed |> ok |> input_updated);
+    match recovery with
+    | Agent.Operator_repair_required Effect_outcome_unknown ->
+      check_input "unknown effect preserves input" (Some (checkpoint 1)) store;
+      check bool "unknown native evidence remains" true (Native.equal_state observed (read store))
+    | Retire -> check_input "verified retire binding commits cut" (Some (checkpoint_of_bytes ~turn_count:1 101)) store)
+    [Agent.Retire; Agent.Operator_repair_required Agent.Effect_outcome_unknown]
+
 let () = run "native-call-owner-store" ["input ownership", [
+  test_case "retired response cut binds input and native authority atomically" `Quick test_retired_cut_bind_and_input_owner_are_atomic;
+  test_case "stale native and unknown effects preserve input" `Quick test_retired_cut_native_refusals_keep_input;
   test_case "unknown prior input never becomes fresh or releases evidence" `Quick
     test_prior_history_never_becomes_unobserved_or_releasable;
   test_case "closed stores refuse each input writer with a typed error" `Quick test_input_writes_on_closed_store_are_typed;

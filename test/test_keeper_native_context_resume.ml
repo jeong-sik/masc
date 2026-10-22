@@ -320,10 +320,131 @@ let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain
   | Owner.Operation_failed {detail;_} -> fail detail
   | Owner.Operation_deferred -> fail "input checkpoint observation deferred"
 
+let test_retired_input_history_cut () =
+  let root=Filename.temp_dir "keeper-native-cut-" "" in
+  Fun.protect ~finally:(fun () -> Eio_main.run (fun env ->
+    Eio.Path.rmtree ~missing_ok:true Eio.Path.(env#fs / root))) @@ fun () ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  ignore (Server_startup_state.mark_state_ready ());
+  Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+    |> require "native runtime";
+  let previous_catalog=Llm_provider.Model_catalog.global () in
+  Eio.Switch.on_release sw (fun () -> match previous_catalog with
+    | None -> Llm_provider.Model_catalog.clear_global ()
+    | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+  let catalog=Printf.sprintf
+      "[[models]]\nid_prefix = %S\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 8192\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n" model_id in
+  Llm_provider.Model_catalog.of_toml_string ~source:"native-cut-test" catalog
+    |> require "model catalog" |> Llm_provider.Model_catalog.set_global;
+  let workspace=Workspace.default_config root in
+  ignore (Workspace.init workspace ~agent_name:(Some "native-cut-test"));
+  let meta=Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String keeper_name;
+      "trace_id",`String session_id;"activation_mode",`String "manual"]) |> require "meta" in
+  Keeper_meta_store.replace_snapshot workspace meta |> require "persist meta";
+  let session_dir=Filename.concat (Keeper_fs.session_store_path workspace) session_id in
+  Fs_compat.mkdir_p session_dir;
+  let provider_calls=ref 0 in
+  let server=Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply_with (fun _ _ -> incr provider_calls; `OK,final_reply)) in
+  let provider_cfg=Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~provider_id:"fixture" ~model_id ~base_url:server.base_url ~request_path:"/v1/chat/completions" () in
+  let settled,resolve_settled=Eio.Promise.create () in
+  let execute ~sw:turn_sw ~keeper_name:_ ~claim =
+    let operation:Keeper_chat_operation.t=claim () |> require "claim" |> Option.get in
+    let binding:Native.binding={base_path=root;keeper_name;operation_id;session_id;session_dir;
+                               execution_digest=operation.execution_digest} in
+    let context=Agent_core.Context.create () in
+    let frame=Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+        (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation operation_id))
+      |> require "scope" in
+    Keeper_repetition_scope.save context frame;
+    let publish_input=ref true in
+    let sink (snapshot:Agent_core.Agent.checkpoint_snapshot)=
+      if !publish_input && snapshot.stage=Agent_core.Agent.After_assistant_collected then (
+        let checkpoint={snapshot.checkpoint with Agent_core.Checkpoint.session_id=session_id} in
+        let call=match Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id
+            |> require "active native call" with
+          | Keeper_native_call.Active call -> call
+          | No_native_call | Terminal_unacknowledged _ -> fail "publication requires Active call" in
+        let producer=Keeper_input_checkpoint_producer.prepare ~base_path:root ~keeper_name
+            ~session_dir ~trace_id:meta.runtime.trace_id ~source:(Some checkpoint)
+          |> require "input producer" in
+        Keeper_input_checkpoint_producer.publish_direct producer ~operation_id
+          ~execution_digest:operation.execution_digest ~call_id:call.call_id ~observed:call.checkpoint checkpoint
+          |> require "publish observed input history" |> ignore);
+      Ok () in
+    let config=Runtime_agent.default_config ~name:keeper_name ~provider_cfg
+        ~system_prompt:"Complete the response." ~tools:[] in
+    let config={config with context=Some context;session_id=Some session_id;checkpoint_sink=Some sink} in
+    let agent_ref=ref None in
+    let prepared=Native.prepare ~binding ~runtime_id ~config ~agent_core_checkpoint:None
+        ~input:(Native.New_input {blocks=[Agent_core.Types.Text goal];metadata=[]}) ~agent_ref ()
+      |> require "first native preparation" in
+    Runtime_agent.run_blocks ~sw:turn_sw ~net:env#net ~config:(Native.config prepared)
+      ~agent_ref [Agent_core.Types.Text goal] |> require "first provider dispatch" |> ignore;
+    publish_input:=false;
+    let previous=match Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id
+        |> require "retired native state" with
+      | Keeper_native_call.Terminal_unacknowledged (call,{Agent_core.Agent.recovery=Retire;_}) -> call
+      | No_native_call | Active _
+      | Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Operator_repair_required Effect_outcome_unknown;_}) ->
+        fail "first call did not retire" in
+    let source=Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:previous.checkpoint
+      |> require "retired source" in
+    let original=Keeper_checkpoint_store.exact_snapshot_checkpoint source in
+    let cut={original with messages=List.take (List.length original.messages-1) original.messages} in
+    let config={config with context=Some cut.context} in
+    let prepare ?retired_history_cut candidate=Native.prepare ~binding ~runtime_id ~config
+        ~agent_core_checkpoint:(Some candidate) ~input:Native.Continue_from_checkpoint
+        ~agent_ref:(ref None) ?retired_history_cut () in
+    check bool "ordinary input owner refuses unproven history cut" true (Result.is_error (prepare cut));
+    check bool "cut cannot replace earlier messages" true
+      (Result.is_error (Native.authorize_incomplete_response_cut ~binding
+         ~checkpoint:{cut with messages=[]} ()));
+    let proof=Native.authorize_incomplete_response_cut ~binding ~checkpoint:cut ()
+      |> require "authorize exact response cut" in
+    check bool "authorized proof cannot be reused for edited candidate" true
+      (Result.is_error (prepare ~retired_history_cut:proof {cut with model="changed-model"}));
+    let expected=Keeper_checkpoint_store.exact_snapshot_of_value ~expected_session_id:meta.runtime.trace_id cut
+      |> require "cut reference" |> Keeper_checkpoint_store.exact_snapshot_reference in
+    let agent_ref=ref None in
+    let prepared=Native.prepare ~binding ~runtime_id ~config ~agent_core_checkpoint:(Some cut)
+        ~input:Native.Continue_from_checkpoint ~agent_ref ~retired_history_cut:proof ()
+      |> require "verified cut preparation" in
+    Runtime_agent.continue_from_checkpoint ~sw:turn_sw ~net:env#net ~config:(Native.config prepared)
+      ~agent_ref ~checkpoint:(Option.get (Native.prepared_checkpoint prepared)) ()
+      |> require "dispatch after exact cut" |> ignore;
+    let owned=Registry.input_checkpoint ~base_path:root ~keeper_name ~trace_id:meta.runtime.trace_id
+      |> require "cut input owner" in
+    check bool "durable input owner advances to the exact cut" true
+      (match owned with Keeper_chat_operation_store.Input_observed reference ->
+         Keeper_checkpoint_ref.equal reference expected
+       | Input_unobserved | Prior_input_unavailable -> false);
+    check int "only the two intended provider calls execute" 2 !provider_calls;
+    Owner.Operation_succeeded {outcome_ref="retired-input-cut-verified"} in
+  let runner:Owner.operation_runner={ready=(fun ~keeper_name:_ -> true);execute;
+    on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution ->
+      Eio.Promise.resolve resolve_settled execution)} in
+  Registry.install_from_store ~sw ~operation_runner:(Some runner) ~on_turn_slot_released:None workspace
+    |> require "install Owner" |> ignore;
+  let input=Keeper_chat_operation_payload.input_to_json ~message:goal ~user_blocks:[]
+      ~turn_instructions:None ~surface_context:None ~attachments:[]
+    |> Keeper_chat_operation.canonical_json |> require "input" in
+  Registry.submit_operation ~base_path:root ~keeper_name ~operation_id
+    ~source:(`Assoc ["kind",`String "fixture"]) ~input |> require "submit" |> ignore;
+  match Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
+      (fun () -> Eio.Promise.await settled) with
+  | Owner.Operation_succeeded _ -> ()
+  | Operation_failed {detail;_} -> fail detail
+  | Operation_deferred -> fail "cut dispatch deferred"
+
 let () = match Array.to_list Sys.argv with
   | [_; "--native-context-child"; root] -> run_phase ~child:true root
   | _ -> run "native shared context restart"
-      ["context ownership", [test_case "resumed tool and hook changes reach durable checkpoint"
+      ["context ownership", [test_case "exact retired response cut advances input authority" `Quick test_retired_input_history_cut;
+       test_case "resumed tool and hook changes reach durable checkpoint"
         `Quick test_active_context_restart;
        test_case "first input checkpoint precedes native terminal settlement"
          `Quick (test_native_input_checkpoint_order ~uncertain_consume:false);

@@ -42,7 +42,7 @@ type prepared =
 
 type retired_history_cut =
   { observed : Native.state
-  ; messages : Agent_core.Types.message list
+  ; proof : Keeper_input_history_cut.t
   }
 
 let owner result = Result.map_error Owner.command_error_to_string result
@@ -75,7 +75,7 @@ let validate_scope binding (checkpoint : Agent_core.Checkpoint.t) =
       (Keeper_execution_scope_id.direct_operation binding.operation_id) -> Ok ()
   | Some _ | None -> Error "native checkpoint does not own the direct operation"
 
-let load_checkpoint binding reference =
+let load_checkpoint_snapshot binding reference =
   let* () =
     if Keeper_id.Trace_id.to_string reference.Keeper_checkpoint_ref.trace_id = binding.session_id
     then Ok () else Error "native checkpoint belongs to another session" in
@@ -84,7 +84,10 @@ let load_checkpoint binding reference =
     |> Result.map_error (fun _ -> "exact native checkpoint is unavailable") in
   let checkpoint = Checkpoint.exact_snapshot_checkpoint snapshot in
   let* () = validate_scope binding checkpoint in
-  Ok checkpoint
+  Ok snapshot
+
+let load_checkpoint binding reference =
+  load_checkpoint_snapshot binding reference |> Result.map Checkpoint.exact_snapshot_checkpoint
 
 let restore_checkpoints binding (call : Native.t) =
   let* () = if call.operation_digest = binding.execution_digest then Ok ()
@@ -217,38 +220,18 @@ let load ~binding =
       else Error "terminal native call operation input changed" in
     Ok (Terminal_pending (call, disposition))
 
-let contains_tool_result (message : Agent_core.Types.message) =
-  List.exists (function
-    | Agent_core.Types.ToolResult _ -> true
-    | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-    | ToolUse _ | Image _ | Document _ | Audio _ -> false) message.content
-
-let authorize_incomplete_response_cut ~binding ~checkpoint:(cut : Agent_core.Checkpoint.t) () =
-  let* observed = state binding in
-  let* source = match observed with
-    | Native.Terminal_unacknowledged (call, {Agent.recovery=Retire; _}) ->
-      let* () = if call.operation_digest = binding.execution_digest then Ok ()
-        else Error "native call operation input changed before response cut" in
-      load_checkpoint binding call.checkpoint
-    | Native.No_native_call | Native.Active _
-    | Native.Terminal_unacknowledged
-        (_, {Agent.recovery=Operator_repair_required Effect_outcome_unknown; _}) ->
+let authorize_incomplete_response_cut ~binding ~checkpoint () =
+  let* observed=state binding in
+  let* source=match observed with
+    | Native.Terminal_unacknowledged (call,{Agent.recovery=Retire;_}) ->
+      let* ()=if call.operation_digest=binding.execution_digest then Ok ()
+        else Error "native call input changed before response cut" in
+      load_checkpoint_snapshot binding call.checkpoint
+    | No_native_call | Active _
+    | Terminal_unacknowledged (_, {Agent.recovery=Operator_repair_required Effect_outcome_unknown;_}) ->
       Error "response cut requires an exact retired native call" in
-  let* messages = match List.rev source.messages with
-    | ({Agent_core.Types.role=Assistant; _} as last) :: earlier
-      when not (contains_tool_result last) -> Ok (List.rev earlier)
-    | {Agent_core.Types.role=(Assistant | User | System | Tool); _} :: _
-    | [] -> Error "response cut would remove more than an incomplete Assistant message" in
-  let* () = Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    let expected = {source with Agent_core.Checkpoint.messages} in
-    let candidate = {cut with Agent_core.Checkpoint.created_at=source.created_at} in
-    let* expected_json = Agent_core.Checkpoint.to_json_result expected
-      |> Result.map_error Agent_core.Error.to_string in
-    let* candidate_json = Agent_core.Checkpoint.to_json_result candidate
-      |> Result.map_error Agent_core.Error.to_string in
-    if Yojson.Safe.equal expected_json candidate_json then Ok ()
-    else Error "response cut differs from the exact retired checkpoint") in
-  Ok {observed; messages}
+  let* proof=Keeper_input_history_cut.prepare ~source ~candidate:checkpoint in
+  Ok {observed;proof}
 
 let binding_effect_observation ~binding =
   let settled =
@@ -329,10 +312,15 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
                        checkpoint_sidecar=resumed.checkpoint.working_context},
           Some resumed.checkpoint, resumed.input) in
   let* input_trace = Keeper_id.Trace_id.of_string binding.session_id in
+  let* input_source=match retired_history_cut with
+    | None -> Ok agent_core_checkpoint
+    | Some cut ->
+      let* ()=Keeper_input_history_cut.validate_candidate cut.proof agent_core_checkpoint in
+      Keeper_input_history_cut.source_checkpoint cut.proof |> Result.map Option.some in
   let* input_producer = Keeper_input_checkpoint_producer.prepare
       ~base_path:binding.base_path ~keeper_name:binding.keeper_name ~session_dir:binding.session_dir
       ~trace_id:input_trace
-      ~source:agent_core_checkpoint
+      ~source:input_source
     |> Result.map_error Keeper_input_checkpoint_producer.error_to_string in
   let input_producer = ref input_producer in
   let call_id, api, resume, initial_call = match resumed with
@@ -379,9 +367,10 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
                 terminal.settled_tool_results in
             let* () = if retained then Ok ()
               else Error "next native call is missing a canonically settled ToolResult" in
-            let expected = match retired_history_cut with
-              | None -> settled.messages
-              | Some cut -> cut.messages in
+            let* expected = match retired_history_cut with
+              | None -> Ok settled.messages
+              | Some cut -> Keeper_input_history_cut.cut_checkpoint cut.proof
+                  |> Result.map (fun checkpoint -> checkpoint.Agent_core.Checkpoint.messages) in
             if not terminal.has_tool_attempts || is_prefix expected seed.messages then Ok ()
             else Error "next native call does not retain the settled call's exact history"
           | Native.No_native_call -> Ok ()
@@ -392,10 +381,21 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
         let* seed_checkpoint = retain binding seed in
         Native.create ~call_id ~runtime_id ~operation_digest:binding.execution_digest
           ~api ~seed_checkpoint ~locator in
+    let* ()=match retired_history_cut with
+      | None -> Owner.bind_direct_native_call ~base_path:binding.base_path
+          ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
+          ~execution_digest:binding.execution_digest ~observed ~call |> owner
+      | Some cut ->
+        let* seed=Checkpoint.load_retained_exact_snapshot ~session_dir:binding.session_dir
+            ~reference:call.seed_checkpoint
+          |> Result.map_error (fun _ -> "exact next native seed is unavailable") in
+        let* producer=Keeper_input_checkpoint_producer.bind_retired_input_cut !input_producer
+            ~cut:cut.proof ~seed ~operation_id:binding.operation_id
+            ~execution_digest:binding.execution_digest ~observed ~call
+          |> Result.map_error Keeper_input_checkpoint_producer.error_to_string in
+        input_producer:=producer; Ok () in
     current_call := Some call;
-    Owner.bind_direct_native_call ~base_path:binding.base_path
-      ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
-      ~execution_digest:binding.execution_digest ~observed ~call |> owner in
+    Ok () in
   let terminal_checkpoint_source = ref Agent_snapshot in
   let on_terminal_disposition disposition =
     let* () = match !terminal_checkpoint_source with

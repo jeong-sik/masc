@@ -65,7 +65,11 @@ val authorize_incomplete_response_cut :
     this checkpoint removes exactly the last incomplete Assistant message
     from the current Retire receipt, preserving every earlier message and
     every other checkpoint field except its observation timestamp. The
-    removed message cannot contain a settled ToolResult. This is neither
+    removed message cannot contain a settled ToolResult. Pending input must be
+    absent. Preparation reads input authority against the original source;
+    actual scope publication retains the cut and atomically binds its input
+    reference with the next native call, using the actual next seed. The proof
+    cannot be reused for an edited checkpoint. This is neither
     acknowledgement nor an execution-journal mutation. *)
 
 val prepare :

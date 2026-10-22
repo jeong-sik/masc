@@ -362,3 +362,26 @@ Do not merge or install the v3 stack alone. History-cut/continuation
 reconciliation, operator-input response/reconnect/TUI integration, and actual
 whole-rollout acceptance cases are still required. Offline preparation and a
 conditional journal replacement do not substitute for those contracts.
+
+### Retired native response cuts
+
+The typed `Retry_without_thinking` path verifies the exact retained retired
+checkpoint and permits removal of only its final incomplete Assistant message,
+without a ToolResult. It preserves all other fields except the creation timestamp
+and refuses pending input. It does not treat matching `pending=None` alone as
+proof of history continuity.
+
+The input producer captures its predecessor against the original retained source.
+At actual next native scope publication, the adapter retains the exact cut and
+verifies that the actual next seed contains every cut message. Owner revalidates
+the original direct child, trace and admission state, then compares both the input
+predecessor and retired native state in one SQLite transaction. This binds the new
+call and publishes the cut input reference together. A stale predecessor or unknown
+native effect leaves both authorities unchanged. An uncertain commit remains an
+error even if it installed both; blind replay is refused. Retained files are
+preserved as evidence, and cancellation embedded in retention outcomes propagates.
+
+This connects the native retry path only. Operator history clear, authoritative
+host response admission, reconnect/TUI behavior and whole-issue acceptance remain
+unfinished. All #38005 stack layers remain Draft; these changes do not authorize
+live installation or merge.

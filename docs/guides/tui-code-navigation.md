@@ -83,7 +83,7 @@ state, including changes that have identical displayed lines. `Esc` closes the
 comparison without losing edits. Drafts survive navigation in this TUI session;
 `X` explicitly discards the current local draft. A submitted draft cannot be
 edited or discarded until its own acknowledgement settles. Drafts are not
-persisted across process exit; the existing quit confirmation reports their
+persisted across process exit; both q and Ctrl-C quit confirmations lead with their
 count and possible uncertainty of pending saves.
 
 A rejected save retains the draft. After a revision conflict or an uncertain

@@ -261,6 +261,8 @@ type _ command =
   | Begin_input_checkpoint : Keeper_id.Trace_id.t * Keeper_interrupt_token.t -> (input_checkpoint_writer, error) result command
   | Advance_input_checkpoint : input_checkpoint_writer * input_checkpoint_change ->
       (input_checkpoint_writer, error) result command
+  | Checkpoint_operation_input_branch : input_checkpoint_writer * Keeper_checkpoint_ref.t * Keeper_checkpoint_ref.t * Keeper_checkpoint_host_transform.t ->
+      (unit, error) result command
   | Bind_retired_input_cut : input_checkpoint_writer * retired_input_cut ->
       (input_checkpoint_writer, error) result command
   | Update_direct_native_call :
@@ -671,6 +673,7 @@ let answer : type response. response command -> answer = function
   | Begin_direct_input_response _ | Prepare_direct_input_response _ | Commit_direct_input_response _ -> In_its_drain_step
   | Direct_native_call _ | Direct_input_wait _ | Defer_direct_input_wait _ -> In_its_drain_step
   | Current_input_checkpoint | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _
+  | Checkpoint_operation_input_branch _
   | Begin_history_clear _ | Commit_history_clear _ -> In_its_drain_step
   | Update_direct_native_call _ | Bind_retired_input_cut _ -> In_its_drain_step
   | Defer_direct_checkpoint _ -> In_its_drain_step
@@ -1154,6 +1157,37 @@ let owns_running_operation t operation_id =
   | Some current -> Operation_id.equal current operation_id
   | None -> false
 
+let validate_retained_branch_checkpoint t ~operation_id ~observed ~checkpoint ~transformation =
+  let ( let* ) = Result.bind in
+  let invalid detail=Error (Chat_operation_store.Invalid_input detail) in
+  let session_dir=Filename.concat t.session_root (Keeper_id.Trace_id.to_string observed.Keeper_checkpoint_ref.trace_id) in
+  let load reference=Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference
+    |> Result.map_error (fun error -> Chat_operation_store.Invalid_input (match error with
+      | Keeper_checkpoint_store.Source_unavailable error -> Keeper_checkpoint_store.checkpoint_ref_load_error_to_string error
+      | Source_changed _ -> "host branch retained checkpoint identity changed"
+      | Candidate_identity_invalid error -> Keeper_checkpoint_store.checkpoint_identity_error_to_string error
+      | Candidate_session_mismatch _ -> "host branch retained trace changed"
+      | Candidate_turn_regressed _ -> "host branch retained turn regressed"
+      | Commit_not_installed _ -> "host branch retained installation is unconfirmed")) in
+  let* source=load observed in
+  let* candidate=load checkpoint in
+  let* ()=Keeper_checkpoint_host_transform.validate transformation ~source ~candidate
+    |> Result.map_error (fun detail -> Chat_operation_store.Invalid_input detail) in
+  let source=Keeper_checkpoint_store.exact_snapshot_checkpoint source in
+  let candidate=Keeper_checkpoint_store.exact_snapshot_checkpoint candidate in
+  let* ()=if Option.equal (fun left right -> Yojson.Safe.equal
+      (Agent_core.Agent_input_request.pending_to_json left)
+      (Agent_core.Agent_input_request.pending_to_json right)) source.pending_input candidate.pending_input then Ok ()
+    else invalid "host checkpoint cannot change the branch's complete pending input" in
+  List.fold_left (fun result (value:Agent_core.Checkpoint.t) ->
+    let* ()=result in
+    let* frame=Keeper_repetition_context.load value.context
+      |> Result.map_error (fun error -> Chat_operation_store.Invalid_input (Keeper_repetition_snapshot.error_to_string error)) in
+    match Keeper_repetition_snapshot.active frame with
+    | Some scope when Keeper_execution_scope_id.equal scope (Keeper_execution_scope_id.direct_operation operation_id) -> Ok ()
+    | Some _ | None -> invalid "host checkpoint no longer owns the original operation scope")
+    (Ok ()) [source;candidate]
+
 let capture_input_checkpoint_target t ~lane ~trace_id =
   let ( let* ) = Result.bind in
   let global () =
@@ -1198,7 +1232,10 @@ let prepare_direct_input_wait t ~trace_id ~operation_id ~request =
   let* reference = match observation with
     | Chat_operation_store.Input_observed reference
         when Keeper_id.Trace_id.equal reference.trace_id trace_id
-          && Keeper_checkpoint_ref.equal call.checkpoint reference -> Ok reference
+          && (Keeper_checkpoint_ref.equal call.checkpoint reference
+            || (Option.is_some branch
+              && Keeper_id.Trace_id.equal call.checkpoint.trace_id reference.trace_id
+              && call.checkpoint.turn_count=reference.turn_count)) -> Ok reference
     | Input_observed _ | Input_unobserved | Prior_input_unavailable ->
       invalid "direct input wait no longer names the original owned native checkpoint" in
   let session_dir = Filename.concat t.session_root (Keeper_id.Trace_id.to_string trace_id) in
@@ -1211,6 +1248,14 @@ let prepare_direct_input_wait t ~trace_id ~operation_id ~request =
       | Candidate_turn_regressed _ -> "owned input retained turn changed"
       | Commit_not_installed _ -> "owned input retained installation is unconfirmed")) in
   let checkpoint = Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot in
+  (* Retire is the actual Core publication N. A later host checkpoint H never
+     rewrites that receipt: verify the exact retained N -> H relation before
+     queuing H, including its complete pending request and repetition frontier. *)
+  let* ()=if Keeper_checkpoint_ref.equal call.checkpoint reference then Ok () else
+    let* native=Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:call.checkpoint
+      |> Result.map_error (fun _ -> Chat_operation_store.Invalid_input "retired native input checkpoint is unavailable") in
+    Keeper_checkpoint_host_transform.preserve ~source:native ~candidate:checkpoint
+      |> Result.map ignore |> Result.map_error (fun detail -> Chat_operation_store.Invalid_input detail) in
   let* frame = Keeper_repetition_context.load checkpoint.context
     |> Result.map_error (fun error -> Chat_operation_store.Invalid_input (Keeper_repetition_snapshot.error_to_string error)) in
   let* () = match Keeper_repetition_snapshot.active frame with
@@ -2058,6 +2103,28 @@ let start
                 "input checkpoint writer no longer owns this executing child and trace")) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Checkpoint_operation_input_branch (writer,observed,checkpoint,transformation), resolve) ->
+          let response=match writer.input_target,(Keeper_owner_reducer.projection state).meta,
+              Atomic.get t.turn_in_flight,Atomic.get t.child_cancel with
+            | Operation_target {operation_id;execution_digest},Some meta,
+                Some {lane=Chat_operation;interrupt_token;_},Some _
+                when writer.input_lane=Chat_operation
+                  && Keeper_interrupt_token.equal interrupt_token writer.input_child
+                  && owns_running_operation t operation_id
+                  && Keeper_id.Trace_id.equal meta.runtime.trace_id writer.input_trace
+                  && Keeper_id.Trace_id.equal observed.trace_id writer.input_trace
+                  && Keeper_id.Trace_id.equal checkpoint.trace_id writer.input_trace ->
+              run_operation_command t ~label:"publish retained operation host checkpoint" (fun () ->
+                let ( let* )=Result.bind in
+                let* ()=validate_retained_branch_checkpoint t ~operation_id ~observed ~checkpoint ~transformation in
+                Chat_operation_store.checkpoint_direct_input_branch t.operation_store ~now:(t.now ())
+                  ~operation_id ~execution_digest ~observed ~checkpoint) |> Result.map fst
+            | (Global_target | Operation_target _),(Some _ | None),
+                (Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),(Some _ | None) ->
+              Error (Operation_rejected (Chat_operation_store.Invalid_input
+                "host checkpoint requires its original operation branch child and trace")) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Bind_retired_input_cut (writer,{operation_id;execution_digest;observed;call;cut}), resolve) ->
           let checkpoint=Keeper_input_history_cut.checkpoint cut in
           let response=reject_if_stopping state (fun () ->
@@ -2900,6 +2967,12 @@ let input_checkpoint_reference writer = writer.input_reference
 let input_checkpoint_destination writer = match writer.input_target with
   | Global_target -> Global_input
   | Operation_target {operation_id;_} -> Operation_input operation_id
+let checkpoint_operation_input_branch t ~writer ~observed ~checkpoint ~transformation =
+  match Keeper_turn_preview_owner.current () with
+  | Some caller when Keeper_interrupt_token.equal caller writer.input_child ->
+    request t (Checkpoint_operation_input_branch (writer,observed,checkpoint,transformation))
+  | Some _ | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "host checkpoint publication requires its inherited original child"))
 let input_checkpoint t ~trace_id = request t (Input_checkpoint trace_id)
 let advance_autonomous_input_checkpoint t ~writer ~checkpoint =
   input_child_request t writer (Autonomous_input checkpoint)

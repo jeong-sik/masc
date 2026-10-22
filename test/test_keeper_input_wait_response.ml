@@ -425,7 +425,7 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
     let execute ~sw:_ ~keeper_name:_ ~claim =
       ready:=false;
       let result = try
-        let claimed=claim () |> owner_ok |> Option.get in
+        let (claimed:Keeper_chat_operation.t)=claim () |> owner_ok |> Option.get in
         check bool "same original operation claims its branch" true
           (Keeper_chat_operation.Operation_id.equal claimed.operation_id operation_id);
         let owner=Option.get !owner_cell in
@@ -436,6 +436,22 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
           (Keeper_checkpoint_ref.equal (Store.exact_snapshot_reference (exact consumed)) branched.candidate);
         check string "branch loading preserves global canonical bytes" g_bytes (Fs_compat.load_file canonical);
         Keeper_direct_checkpoint_continuation.consume ~base_path:root ~keeper_name ~operation_id admission |> value;
+        let capture_destination ()=Keeper_checkpoint_destination.capture_direct ~base_path:root ~keeper_name
+          ~session_dir ~trace_id:meta.runtime.trace_id ~operation_id |> value in
+        let cancelled_destination=capture_destination () in
+        (match Eio.Cancel.sub (fun cancellation ->
+           Eio.Cancel.cancel cancellation (Failure "cancel original branch host publication");
+           Keeper_checkpoint_destination.save cancelled_destination consumed) with
+         | exception Eio.Cancel.Cancelled _ -> ()
+         | Ok _ | Error _ -> fail "cancelled host publication returned without cancellation");
+        (match Keeper_checkpoint_destination.current_checkpoint cancelled_destination with
+         | Error _ -> () | Ok _ -> fail "cancelled publication exposed its old payload as confirmed latest");
+        (match Keeper_checkpoint_destination.save cancelled_destination consumed with
+         | Error _ -> () | Ok _ -> fail "cancelled dispatch retried its uncertain branch write");
+        let destination=capture_destination () in
+        let refused=Keeper_checkpoint_host_transform.preserve ~source:(exact consumed)
+          ~candidate:{consumed with messages=[]} in
+        (match refused with Error _ -> () | Ok _ -> fail "host proof discarded the accepted original response");
         let producer=Keeper_input_checkpoint_producer.prepare ~base_path:root ~keeper_name ~session_dir
             ~trace_id:meta.runtime.trace_id ~source:(Some consumed) |> prepared in
         (match Keeper_input_checkpoint_producer.destination producer with
@@ -446,25 +462,71 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
         let context=Core.Context.copy consumed.context in
         Core.Context.set context "original-native-setup" (`Bool true);
         let seed={consumed with Core.Checkpoint.context} in
+        (match Keeper_checkpoint_destination.save destination seed |> value with
+         | Store.Saved _ -> () | Stale_noop _ -> fail "host preparation was not confirmed");
+        let saved=Keeper_checkpoint_destination.current_checkpoint destination |> value |> Option.get in
+        let saved_bytes=Store.exact_snapshot_canonical_bytes (exact saved) in
+        Core.Context.set seed.context "later-native-context-mutation" (`Bool true);
+        let still_saved=Keeper_checkpoint_destination.current_checkpoint destination |> value |> Option.get in
+        check string "native mutable context does not rewrite a private confirmed host source"
+          saved_bytes (Store.exact_snapshot_canonical_bytes (exact still_saved));
         let seed_ref=Store.retain_exact_snapshot ~session_dir (exact seed)
             |> Store.require_confirmed_installation |> Result.get_ok in
+        let identity_proof=Keeper_checkpoint_host_transform.preserve ~source:(exact saved) ~candidate:saved |> value in
+        (match Keeper_owner.checkpoint_operation_input_branch owner ~writer
+            ~observed:(Store.exact_snapshot_reference (exact saved)) ~checkpoint:seed_ref
+            ~transformation:identity_proof with
+         | Error (Keeper_owner.Operation_rejected (Journal.Invalid_input _)) -> ()
+         | Error _ | Ok () -> fail "Owner reused a host proof for an edited retained candidate");
         let call_id="019a0010-1000-7000-8000-000000000053" in
         let locator=Core.Agent.execution_locator_of_yojson
             (`Assoc ["version",`Int 1;"run_id",`String "execution-run-owner-branch-continuation"]) |> value in
         let call=Native.create ~call_id ~runtime_id:"native.primary" ~operation_digest:operation.execution_digest
             ~api:Native.Continue_from_checkpoint ~seed_checkpoint:seed_ref ~locator |> value in
-        Keeper_owner.bind_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
-            ~observed:Native.No_native_call ~call |> owner_ok;
-        let ordinary={seed with Core.Checkpoint.turn_count=seed.turn_count+1;
+        Keeper_checkpoint_destination.publish_native destination ~checkpoint:seed (fun () ->
+          Keeper_owner.bind_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+            ~observed:Native.No_native_call ~call
+          |> Result.map_error Keeper_owner.error_to_string |> Result.map (fun () -> seed_ref,())) |> value;
+        let context=Core.Context.copy seed.context in
+        let observation=Keeper_repetition_snapshot.observation ~tool_name:"original-native-tool"
+          ~input_fingerprint:None ~output_fingerprint:None |> Result.get_ok in
+        let frame=Keeper_repetition_context.load context |> Result.get_ok in
+        let frame=Keeper_repetition_snapshot.record frame
+          ~scope:(Keeper_execution_scope_id.direct_operation operation_id) observation |> Result.get_ok in
+        Keeper_repetition_context.save context frame;
+        let ordinary={seed with Core.Checkpoint.context;turn_count=seed.turn_count+1;
           messages=seed.messages @ [Core.Types.assistant_msg "original branch continued"]} in
         let ordinary_ref=Store.retain_exact_snapshot ~session_dir (exact ordinary)
             |> Store.require_confirmed_installation |> Result.get_ok in
-        Keeper_owner.checkpoint_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
-            ~call_id ~observed:seed_ref ~checkpoint:ordinary_ref |> owner_ok;
+        Keeper_checkpoint_destination.publish_native destination ~checkpoint:ordinary (fun () ->
+          Keeper_owner.checkpoint_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
+            ~call_id ~observed:seed_ref ~checkpoint:ordinary_ref
+          |> Result.map_error Keeper_owner.error_to_string |> Result.map (fun () -> ordinary_ref,())) |> value;
+        let rollback={ordinary with Core.Checkpoint.context=Core.Context.copy seed.context} in
+        (match Keeper_checkpoint_host_transform.preserve ~source:(exact ordinary) ~candidate:rollback with
+         | Error _ -> () | Ok _ -> fail "host proof rolled back repetition observations");
+        let replay_source={ordinary with messages=ordinary.messages @ [Core.Types.assistant_msg ""]} in
+        let proof,projected,_=Keeper_checkpoint_host_transform.replay ~source:(exact replay_source)
+          ~history_messages:consumed.messages ~response_text:"" ~suppress_visible_response:false
+          ~stop_reason:Runtime_agent.Completed |> value in
+        check bool "typed direct replay can remove only the inert final Assistant" true
+          (projected.messages=ordinary.messages);
+        Keeper_checkpoint_host_transform.validate proof ~source:(exact replay_source) ~candidate:(exact projected) |> value;
+        let tool_bearing=Core.Types.make_message ~role:Core.Types.Assistant
+          [Core.Types.ToolResult {tool_use_id="original-result";content="settled result";
+            outcome=Core.Types.Tool_succeeded;json=None;content_blocks=None}] in
+        let effect_source={ordinary with messages=ordinary.messages @ [tool_bearing]} in
+        (match Keeper_checkpoint_host_transform.replay ~source:(exact effect_source)
+            ~history_messages:consumed.messages ~response_text:"" ~suppress_visible_response:true
+            ~stop_reason:Runtime_agent.Completed with
+         | Error _ -> () | Ok _ -> fail "host replay projection erased a retained ToolResult");
         let next_pending=pending ~run_id:"original-owner-second-run" ~request_id:"original-owner-second-request" in
         let next={ordinary with Core.Checkpoint.pending_input=Some next_pending} in
-        let _,next_ref=Keeper_input_checkpoint_producer.publish_direct producer ~operation_id
-            ~execution_digest:operation.execution_digest ~call_id ~observed:ordinary_ref next |> prepared in
+        let next_ref=Keeper_checkpoint_destination.publish_native destination ~checkpoint:next (fun () ->
+          Keeper_input_checkpoint_producer.publish_direct producer ~operation_id
+            ~execution_digest:operation.execution_digest ~call_id ~observed:ordinary_ref next
+          |> Result.map_error Keeper_input_checkpoint_producer.error_to_string
+          |> Result.map (fun (_producer,reference) -> reference,reference)) |> value in
         (* The producer was captured at C. Ordinary native advancement to seed
            and then ordinary_ref must not make it overwrite or borrow G. *)
         let branch=Keeper_owner.direct_input_branch owner ~operation_id |> owner_ok |> Option.get in
@@ -476,8 +538,21 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
          | No_native_call | Terminal_unacknowledged _ -> fail "native receipt disappeared");
         Keeper_owner.terminal_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
             ~call_id ~disposition:{Core.Agent.outcome=Core.Agent.Terminal_succeeded;recovery=Core.Agent.Retire} |> owner_ok;
+        let context=Core.Context.copy next.context in
+        Core.Context.set context "original-host-finalization" (`Bool true);
+        let finalized={next with Core.Checkpoint.context} in
+        (match Keeper_checkpoint_destination.save destination finalized |> value with
+         | Store.Saved _ -> () | Stale_noop _ -> fail "retired host finalization was not confirmed");
+        let host_ref=Store.exact_snapshot_reference (exact finalized) in
+        check bool "host finalization keeps the actual native Retire receipt separate" true
+          (match Keeper_owner.direct_native_call owner ~operation_id |> owner_ok with
+           | Native.Terminal_unacknowledged (actual,{Core.Agent.recovery=Retire;_}) ->
+             Keeper_checkpoint_ref.equal actual.checkpoint next_ref
+             && not (Keeper_checkpoint_ref.equal actual.checkpoint host_ref)
+           | No_native_call | Active _
+           | Terminal_unacknowledged (_, {Core.Agent.recovery=(Retire | Operator_repair_required Effect_outcome_unknown);_}) -> false);
         ignore (Keeper_owner.defer_direct_input_wait owner ~operation_id ~request:next_pending.request |> owner_ok);
-        Ok next_ref
+        Ok host_ref
       with exn -> Error exn in
       execution_result:=Some result;
       Keeper_owner.Operation_deferred in

@@ -612,6 +612,9 @@ val retain_exact_snapshot :
 (** The session subdirectory holding retained artifacts, each named
     [<sha256>.json] after its reference. *)
 val retained_dirname : string
+val retained_checkpoint_path : session_dir:string -> Keeper_checkpoint_ref.t -> string
+(** Diagnostic path of this exact retained artifact. This grants no read,
+    publication, deletion or ownership authority. *)
 
 type release_failure =
   | Lock_held_elsewhere

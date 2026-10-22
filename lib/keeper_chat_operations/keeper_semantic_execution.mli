@@ -187,6 +187,15 @@ type action =
   | Settle of terminal
 
 val error_to_string : error -> string
+val checkpoint_input_branch : now:float -> observed:Keeper_checkpoint_ref.t ->
+  checkpoint:Keeper_checkpoint_ref.t -> t -> (t, error) result
+(** Publish a retained host checkpoint under an existing running input branch.
+    Before native dispatch or after an exact Retire receipt, only the current
+    turn's metadata/history may be changed: the turn is preserved. Active native
+    execution permits confirmation of its already published checkpoint only.
+    Unknown effects, inactive phases and a changed branch predecessor refuse.
+    The caller must validate original child, retained bytes, pending ownership
+    and operation scope; references alone grant no physical authority. *)
 val phase_name : phase -> string
 val is_terminal : t -> bool
 val checkpoint_references : t -> Keeper_checkpoint_ref.t list

@@ -2403,7 +2403,10 @@ let defer_direct_input_wait store ~now ~operation_id ~execution_digest ~(waiting
         | None -> Error (Invalid_input "input wait has no original native execution") in
       let* () = match expected.native_call with
         | Keeper_native_call.Terminal_unacknowledged (call,{Agent_core.Agent.recovery=Agent_core.Agent.Retire;_})
-            when Keeper_checkpoint_ref.equal call.checkpoint waiting.checkpoint -> Ok ()
+            when Keeper_checkpoint_ref.equal call.checkpoint waiting.checkpoint
+              || (Option.is_some expected.input_branch
+                && Keeper_id.Trace_id.equal call.checkpoint.trace_id waiting.checkpoint.trace_id
+                && call.checkpoint.turn_count=waiting.checkpoint.turn_count) -> Ok ()
         | Keeper_native_call.Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Agent_core.Agent.Retire;_}) ->
           Error (Invalid_input "input wait differs from the retired native checkpoint")
         | Keeper_native_call.No_native_call | Keeper_native_call.Active _
@@ -2426,6 +2429,24 @@ let direct_input_branch store ~operation_id =
   let* operation = operation_or_unknown store.db operation_id in
   let* execution = direct_execution_with_db store.db operation in
   Ok (Option.bind execution (fun (execution : Semantic.t) -> execution.input_branch))
+
+let checkpoint_direct_input_branch store ~now ~operation_id ~execution_digest ~observed ~checkpoint =
+  let* ()=ensure_open store in
+  with_transaction store (fun () ->
+    let* operation=operation_or_unknown store.db operation_id in
+    let* ()=if String.equal operation.execution_digest execution_digest then Ok ()
+      else Error (Invalid_input "host branch checkpoint execution digest changed") in
+    let* ()=match operation.state with
+      | Operation.Running _ -> Ok ()
+      | Queued | Succeeded _ | Failed _ | Cancelled _ -> Error (Not_running operation_id) in
+    let* execution=direct_execution_with_db store.db operation in
+    let* execution=match execution with Some execution -> Ok execution
+      | None -> Error (Invalid_input "host branch checkpoint has no semantic execution") in
+    let* next=Semantic.checkpoint_input_branch ~now ~observed ~checkpoint execution
+      |> Result.map_error (fun error -> match error with
+        | Semantic.Native_call_unsettled -> Native_call_unsettled
+        | Invalid_record _ | Invalid_transition _ | Revision_exhausted -> Invalid_input (Semantic.error_to_string error)) in
+    update_semantic store ~expected:execution next)
 
 let validate_response_input_with_db store (execution:Semantic.t) (waiting:Semantic.input_wait) destination =
   let* input = input_observation_with_db store.db ~trace_id:waiting.checkpoint.trace_id in

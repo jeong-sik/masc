@@ -22,6 +22,11 @@ may submit. Other admitted callers can read a known request. `lane_call`,
 exports. A caller cannot grant host semantic authority by submitting JSON here.
 The two outputs need existing installation Exact routes; a standalone Curator
 route does not attach or configure this package.
+Configure them under
+`runtime.addon_exact_lanes.<installation-id>.classification` and
+`runtime.addon_exact_lanes.<installation-id>.briefing`, using the actual
+declaration ID for this installation. Classification and briefing are separate
+model selections. The host still owns prompt preparation and semantic admission.
 
 Pending and terminal requests live under the installation's persistent state in
 `workspace-curator`. New worker processes read the same original records. An ID
@@ -69,6 +74,12 @@ configuration/result wakes and fresh configured admission for new work. The
 replacement `test_workspace_memory_curator_lane` fixture starts that owner with a
 real persistent Python/MCP worker and common Exact loopback providers; resource
 launch/cleanup is substituted. Its execution evidence is separate from the
-contract-only check above. Registry delivery and full Dashboard/TUI observation,
-real provider/container lifecycle, integration and installation remain E02 work.
-This source change does not claim extraction completion.
+contract-only check above. Original registry publication and Owner ACK recovery
+are now connected, including Off maintenance and concurrent strict-store reads.
+The [selected execution receipt](../../docs/evidence/2026-10-22-curator-original-delivery/selected-execution-serialization.json)
+records226 passing cases across ten suites on the exact candidate. It includes
+production13 with this Python/MCP/loopback setup; it does not prove actual
+provider/container lifecycle or either UI. The candidate's whole tree was merged
+into the Candle branch; main integration, current runtime settings/UI cleanup
+and installed-runtime evidence remain unfinished E02 work. Extraction completion
+is not claimed.

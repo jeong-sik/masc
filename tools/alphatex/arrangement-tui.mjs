@@ -881,6 +881,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
             case 'vst-projection': status = 'Projecting WAV export instruments…'; break
             case 'vst-render': status = `Exporting VST instances ${progress.completed}/${progress.total} complete`; break
             case 'vst-mix': status = 'Mixing VST export sources…'; break
+            case 'sound-render': status = `Exporting stored sounds ${progress.completed}/${progress.total} complete`; break
             case 'wave-mix': status = 'Mixing complete arrangement for export…'; break
             default: return
           }

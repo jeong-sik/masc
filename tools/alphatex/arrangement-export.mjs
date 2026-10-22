@@ -6,6 +6,8 @@ import { pipeline } from 'node:stream/promises'
 import { arrangementPlaybackSchedule } from './arrangement.mjs'
 import { prepareArrangementAudio } from './arrangement-playback.mjs'
 import { prepareArrangementVst } from './arrangement-vst.mjs'
+import { prepareArrangementSound } from './arrangement-sound.mjs'
+import { isFluidSound } from './soundfont.mjs'
 import { arrangementTransportPath } from './playback.mjs'
 import { readWaveMetadata } from './wave-file.mjs'
 import { projectNanoseconds, rational } from './exact-time.mjs'
@@ -58,6 +60,7 @@ export async function renderArrangementWave(plan, path, { signal, executable = a
 // Cancellation joins the renderer first; cleanup never removes an old target.
 export async function exportArrangementWave(project, target, { sourceRoot, directory, signal,
   onProgress, prepareAudio = prepareArrangementAudio, prepareVst = prepareArrangementVst,
+  prepareSound = prepareArrangementSound,
   render = renderArrangementWave } = {}) {
   signal?.throwIfAborted()
   const selected = arrangementWaveProject(project), path = resolve(target)
@@ -65,19 +68,21 @@ export async function exportArrangementWave(project, target, { sourceRoot, direc
   let publication
   try {
     const schedule = arrangementPlaybackSchedule(selected), audible = new Set(schedule.map(clip => clip.id))
-    const kinds = new Map(selected.assets.map(asset => [asset.id, asset.kind]))
-    const part = midi => ({ ...selected, clips: selected.clips.filter(clip => audible.has(clip.id) && (kinds.get(clip.asset) === 'midi') === midi) })
+    const kinds = new Map(selected.assets.map(asset => [asset.id, asset.kind !== 'midi' ? 'audio'
+      : isFluidSound(asset.source.sound) ? 'soundfont' : 'vst']))
+    const part = kind => ({ ...selected, clips: selected.clips.filter(clip => audible.has(clip.id) && kinds.get(clip.asset) === kind) })
     const plans = []
-    for (const midi of [false, true]) {
-      const project = part(midi)
+    for (const [kind, prepare, progress] of [['audio', prepareAudio, 'wave-snapshot'],
+      ['vst', prepareVst, 'vst-projection'], ['soundfont', prepareSound, null]]) {
+      const project = part(kind)
       if (!project.clips.length) continue
-      onProgress?.({ kind: midi ? 'vst-projection' : 'wave-snapshot' })
-      const prepared = await (midi ? prepareVst : prepareAudio)(project, { sourceRoot, directory: temporary, signal, onProgress })
+      if (kind !== 'soundfont') onProgress?.({ kind: progress })
+      const prepared = await prepare(project, { sourceRoot, directory: temporary, signal, onProgress })
       const plan = JSON.parse(await readFile(prepared.path, { encoding: 'utf8', signal }))
       const placements = new Map(arrangementPlaybackSchedule(project).map(clip => [clip.id, clip]))
       plan.regions = plan.regions.map(region => {
         let frame = 0n
-        if (!midi) {
+        if (kind !== 'vst') {
           const clip = placements.get(region.id)
           if (!clip) throw new Error('WAV export region lost its authored placement')
           const [n, d] = clip.startNanoseconds ? rational(clip.startNanoseconds) : projectNanoseconds(project, clip.position)

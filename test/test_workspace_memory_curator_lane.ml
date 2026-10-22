@@ -62,6 +62,15 @@ let captures base_path store=records store |> List.map (fun record ->
   record,capture)
 let await clock condition=Eio.Time.with_timeout_exn clock F.fixture_wait_seconds (fun () ->
   let rec loop ()=if condition () then () else (Eio.Fiber.yield ();loop ()) in loop ())
+let await_owner clock base_path condition=
+  Eio.Time.with_timeout_exn clock F.fixture_wait_seconds (fun () ->
+    let rec loop ?after ()=
+      match Curator.For_testing.await_idle ?after ~base_path () with
+      | Curator.For_testing.Owner_idle checkpoint ->
+        if condition () then () else loop ~after:checkpoint ()
+      | Owner_stopped -> fail "original owner stopped before its expected idle state"
+      | Owner_missing -> fail "original owner disappeared before its expected idle state" in
+    loop ())
 let reconcile_until_export clock ~config =
   await clock (fun () ->
     ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
@@ -75,7 +84,33 @@ let ready_summary base_path=
   let state=get (Briefing.load ~directory:(Ledger.directory ~base_path)) in
   not (Briefing.needs_refresh ~sources:(Ledger.briefing_sources ledger)
     ~contract:(Briefing.contract ~template:(Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective) state)
-let settle_all clock base_path store count=await clock (fun () ->
+let timeout_diagnostic ~base_path ~store ~server =
+  let owner=match Curator.For_testing.snapshot ~base_path with
+    | None -> `Null
+    | Some state -> `Assoc ["pending",`Bool state.pending;"in_flight",`Bool state.in_flight;
+        "observation_retry",`Bool state.observation_retry;"stopped",`Bool state.stopped;
+        "idle_waiters",`Int state.idle_waiters] in
+  let publication = function
+    | Lane_addon_request_receipt.Unobserved -> `String "unobserved"
+    | Pending receipt -> `Assoc ["pending",`String receipt.digest]
+    | Acknowledged receipt -> `Assoc ["acknowledged",`String receipt.digest] in
+  let original (record:Owner.retained)=
+    let phase=match Progress.phase record.progress with
+      | Captured -> "captured" | Admission_wait _ -> "admission_wait"
+      | Dispatch_pending _ -> "dispatch_pending" | Judged _ -> "judged"
+      | Committing _ -> "committing" | Commit_unknown _ -> "commit_unknown"
+      | Finished _ -> "finished" | Conflicted _ -> "conflicted"
+      | Rejected _ -> "rejected" | Subdividing _ -> "subdividing" | Subdivided _ -> "subdivided" in
+    let observer=Progress.observer record.progress in
+    `Assoc ["request_id",`String record.request_id;"phase",`String phase;
+      "registration",publication observer.registration;"completion",publication observer.completion] in
+  let originals=Eio_unix.run_in_systhread (fun () ->
+    match Owner.discover ~store ~scope:Capture.scope with
+    | Ok records -> `List (List.map original records)
+    | Error error -> `Assoc ["error",`String (Owner.error_to_string error)]) in
+  `Assoc ["base_path",`String base_path;"owner",owner;"originals",originals;
+    "http_posts",`Int (F.post_count server)]
+let settle_all clock base_path store count=await_owner clock base_path (fun () ->
   List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=count && ready_summary base_path
   && Curator.For_testing.is_idle ~base_path && List.for_all (fun record -> is_finished record && observer_acknowledged record) (records store))
 let publish_routes base_path urls =
@@ -165,6 +200,8 @@ let with_fixture ?(on_response_error=(fun _ _ -> ()))
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path) (fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key (Some (Filename.concat base_path ".masc/config")) (fun () ->
   F.with_official_client_runtimes (fun () -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    Eio_guard.enable ();
+    Eio.Switch.on_release sw Eio_guard.disable;
     Fs_compat.set_fs (Eio.Stdenv.fs env);Masc_test_deps.init_eio_clock env;
     Process_eio.init ~cwd_default:(Eio.Stdenv.cwd env) ~proc_mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env);
     Fun.protect ~finally:(fun () -> Process_eio.reset_for_testing ();Fs_compat.clear_fs ()) (fun () ->
@@ -222,7 +259,17 @@ let with_fixture ?(on_response_error=(fun _ _ -> ()))
       Runtime.For_testing.with_backend (backend env base_path delivery) (fun () ->
         ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
         if start_owner then Curator.start ~sw ~config;
-        f ~sw ~clock:(Eio.Stdenv.clock env) ~base_path ~config ~store ~source ~declaration ~server ~urls ~mode ~delivery;
+        (match f ~sw ~clock:(Eio.Stdenv.clock env) ~base_path ~config ~store ~source ~declaration ~server ~urls ~mode ~delivery with
+         | () -> ()
+         | exception Eio.Time.Timeout ->
+           let backtrace=Printexc.get_raw_backtrace () in
+           (try Format.eprintf "Original owner timeout context: %a@." Yojson.Safe.pp
+               (timeout_diagnostic ~base_path ~store ~server)
+            with
+            | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+            | diagnostic_error -> Format.eprintf "Owner timeout diagnostic also failed: %s@."
+                (Printexc.to_string diagnostic_error));
+           Printexc.raise_with_backtrace Eio.Time.Timeout backtrace);
         Curator.For_testing.stop ~base_path;
         write source (declaration false);
         ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get))))))))))
@@ -232,19 +279,19 @@ let test_actual_production_pipeline ()=with_fixture ~invalid_first:true (fun ~sw
   check int "one classification and one Briefing original" 2 (List.length (records store));
   check int "each domain reaches the admitted good HTTP candidate" 2 (F.post_count server);
   let snapshots=records store |> List.map (fun record -> record.Owner.request_id,Progress.to_json record.progress) in
-  ignore (Curator.request ~base_path);await clock (fun () -> Curator.For_testing.is_idle ~base_path);
+  ignore (Curator.request ~base_path);await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
   check int "unchanged wake does not replay HTTP" 2 (F.post_count server);
   check (list (pair string json)) "original terminal and observer intents stay immutable" snapshots
     (records store |> List.map (fun record -> record.Owner.request_id,Progress.to_json record.progress)))
 let test_off_then_actual_metadata_on ()=with_fixture ~off:true (fun ~sw:_ ~clock ~base_path ~config ~store ~source ~declaration ~server ~urls:_ ~mode:_ ~delivery:_ ->
-  await clock (fun () -> Curator.For_testing.is_idle ~base_path);
+  await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
   check int "Off creates no original request" 0 (List.length (records store));
   check int "Off calls no provider" 0 (F.post_count server);
   save_source config source (declaration true);
   ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
   settle_all clock base_path store 1)
 let test_original_waits_for_actual_route_publication ()=with_fixture ~routes:false (fun ~sw:_ ~clock ~base_path ~config:_ ~store ~source:_ ~declaration:_ ~server ~urls ~mode:_ ~delivery:_ ->
-  await clock (fun () -> Curator.For_testing.is_idle ~base_path && List.length (records store)=1);
+  await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path && List.length (records store)=1);
   let original=(List.hd (records store)).Owner.request_id in
   check int "unconfigured route does not call a provider" 0 (F.post_count server);
   publish_routes base_path urls;
@@ -255,17 +302,17 @@ let test_refused_identity_does_not_remint_on_unrelated_fact ()=
   let blocked="A permanently refused original source" in
   with_fixture ~start_owner:false ~claims:[blocked] (fun ~sw ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode ~delivery:_ ->
     mode:=Refuse_fact blocked;Curator.start ~sw ~config;
-    await clock (fun () -> Curator.For_testing.is_idle ~base_path && match records store with
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path && match records store with
       | [record] -> (match Progress.phase record.Owner.progress with
         | Progress.Rejected _ -> true
         | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
         | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> false)
       | [] | _::_::_ -> false);
     let original=(List.hd (records store)).Owner.request_id and calls=F.post_count server in
-    ignore (Curator.request ~base_path);await clock (fun () -> Curator.For_testing.is_idle ~base_path);
+    ignore (Curator.request ~base_path);await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
     check int "unchanged refusal is not a new model request" calls (F.post_count server);
     commit_facts base_path [blocked;"A separate current source"];
-    await clock (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=1 && ready_summary base_path
+    await_owner clock base_path (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=1 && ready_summary base_path
       && Curator.For_testing.is_idle ~base_path);
     check bool "original refusal remains with its original ID" true
       (List.exists (fun record -> record.Owner.request_id=original) (records store));
@@ -275,7 +322,7 @@ let test_complete_discovery_blocks_malformed_original ()=with_fixture ~start_own
   owned (Owner.retain ~store ~scope:Capture.scope ~request_id
     ~installation_id:(Owner.installation_id (Owner.Configuration "curator")) ~package_id:Capture.package_id ~tool:Capture.tool
     ~request:(`Assoc ["malformed",`Bool true]));
-  Curator.start ~sw ~config;await clock (fun () -> Curator.For_testing.is_idle ~base_path);
+  Curator.start ~sw ~config;await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
   check int "invalid original inventory grants no replacement root" 1 (List.length (records store));
   check int "invalid original inventory dispatches no HTTP" 0 (F.post_count server))
 let test_new_child_requires_fresh_configured_admission ()=
@@ -333,11 +380,11 @@ let test_existing_intent_recovers_locally_off_then_runs_on ()=
     check bool "Off completes only the original already retained intention" true
       (List.exists (fun (original:Consumer.original) -> original.record.request_id=intent.request_id) recovered);
     Curator.start ~sw ~config;
-    await clock (fun () -> Curator.For_testing.is_idle ~base_path);
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
     check int "Off recovery starts no provider" 0 (F.post_count server);
     save_source config source (declaration true);
     ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
-    await clock (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=2
+    await_owner clock base_path (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=2
       && ready_summary base_path && Curator.For_testing.is_idle ~base_path);
     check bool "original child ID completes after actual reattachment" true
       (List.exists (fun record -> record.Owner.request_id=intent.request_id && is_finished record) (records store)))
@@ -400,7 +447,7 @@ let test_accepted_host_terminal_commits_off_without_worker ()=
     save_source config source (declaration false);
     ignore (Runtime.reconcile_configuration ~config ~directory:(Runtime.configuration_directory config) |> get);
     Curator.start ~sw ~config;
-    await clock (fun () -> Curator.For_testing.is_idle ~base_path && is_finished (original_record store capture));
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path && is_finished (original_record store capture));
     check int "accepted host result commits locally while Off" 1 (List.length (Ledger.dispositions (get (Ledger.load ~base_path))));
     check int "Off local commit never dispatches another provider" 1 (F.post_count server);
     delivery:=false;save_source config source (declaration true);
@@ -429,7 +476,7 @@ let test_pending_observation_recovers_on_existing_maintenance ?(unavailable_name
     let before=match Fs_compat.load_file_opt path with Some bytes -> bytes | None -> "" in
     write path (before ^ "{controlled-incomplete-history");
     Curator.start ~sw ~config;
-    await clock (fun () -> Curator.For_testing.is_idle ~base_path);
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
     let observer=Progress.observer (original_record store capture).progress in
     check bool "failed actual observation leaves original receipt pending" true
       (match observer.registration,observer.completion with
@@ -449,12 +496,12 @@ let test_pending_observation_recovers_on_existing_maintenance ?(unavailable_name
          | Error _ -> ()
          | Ok _ -> fail "unavailable original namespace must not become an empty successful discovery");
         Curator.retry_pending_observations ~base_path;
-        await clock (fun () -> Curator.For_testing.is_idle ~base_path);
+        await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path);
         check int "failed discovery starts no provider" 0 (F.post_count server));
       check string "failed discovery preserves the original pending receipt bytes" original_bytes
         (In_channel.with_open_bin original_path In_channel.input_all));
     Curator.retry_pending_observations ~base_path:(Filename.concat base_path ".");
-    await clock (fun () -> Curator.For_testing.is_idle ~base_path
+    await_owner clock base_path (fun () -> Curator.For_testing.is_idle ~base_path
       && observer_acknowledged (original_record store capture));
     check int "Off observer recovery never asks the provider" 0 (F.post_count server);
     check int "observer retry never applies a domain judgment" 0
@@ -474,7 +521,7 @@ let test_finished_identity_readded_after_observed_removal ()=
     check bool "original classification finished before removal" true (is_finished original);
     let progress=Progress.to_json original.Owner.progress and calls=F.post_count server in
     commit_facts base_path [];
-    await clock (fun () -> Ledger.dispositions (get (Ledger.load ~base_path))=[]
+    await_owner clock base_path (fun () -> Ledger.dispositions (get (Ledger.load ~base_path))=[]
       && Curator.For_testing.is_idle ~base_path);
     check int "observed source removal does not request a new model answer" calls (F.post_count server);
     commit_facts base_path [claim];
@@ -528,7 +575,7 @@ let test_successor_frontier_ignores_an_old_semantic_destination ()=
     check bool "the matching current domain has one continuation" true
       (Consumer.successor_is_current ~config ~capture:current_capture |> consumed);
     Curator.start ~sw ~config;
-    await clock (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=2
+    await_owner clock base_path (fun () -> List.length (Ledger.dispositions (get (Ledger.load ~base_path)))=2
       && ready_summary base_path && Curator.For_testing.is_idle ~base_path);
     let retained_old=original_record store old_capture in
     (match Progress.phase retained_old.progress with
@@ -550,6 +597,64 @@ let test_successor_frontier_ignores_an_old_semantic_destination ()=
     check bool "old selected facts are not reminted with the unrelated current work" true
       (List.for_all (fun (fact,_) -> not (List.mem fact old_facts)) (Ledger.dispositions (get (Ledger.load ~base_path))));
     check bool "the current continuation used the actual common provider" true (F.post_count server>0))
+let await_idle_checkpoint clock base_path=
+  Eio.Time.with_timeout_exn clock F.fixture_wait_seconds (fun () ->
+    match Curator.For_testing.await_idle ~base_path () with
+    | Owner_idle checkpoint -> checkpoint
+    | Owner_stopped -> fail "fixture owner stopped before idle"
+    | Owner_missing -> fail "fixture owner is missing")
+let await_fork clock promise=
+  Eio.Time.with_timeout_exn clock F.fixture_wait_seconds (fun () -> Eio.Promise.await_exn promise)
+let idle_waiter_count base_path=match Curator.For_testing.snapshot ~base_path with
+  | Some snapshot -> snapshot.idle_waiters
+  | None -> fail "fixture owner is missing during waiter observation"
+let test_idle_barrier_has_no_lost_wake ()=
+  with_fixture ~off:true (fun ~sw ~clock ~base_path ~config:_ ~store ~source:_ ~declaration:_
+      ~server ~urls:_ ~mode:_ ~delivery:_ ->
+    let first=await_idle_checkpoint clock base_path in
+    (* [fork_promise] runs the child immediately until its Promise wait. The
+       count observes actual registration; no sleep orders these actors. *)
+    let waiting=Eio.Fiber.fork_promise ~sw (fun () ->
+      Curator.For_testing.await_idle ~after:first ~base_path ()) in
+    check int "next-idle waiter is registered while the owner is idle" 1 (idle_waiter_count base_path);
+    (match Curator.request ~base_path with
+     | Curator.Queued -> () | No_owner -> fail "original owner disappeared"
+     | Unavailable detail -> fail detail);
+    (match await_fork clock waiting with
+     | Curator.For_testing.Owner_idle _ -> ()
+     | Owner_stopped | Owner_missing -> fail "wake did not reach the original idle boundary");
+    (* The later checkpoint has already happened before this subscription.
+       Comparing the original checkpoint under the mutex must return now. *)
+    Eio.Time.with_timeout_exn clock F.fixture_wait_seconds (fun () ->
+      match Curator.For_testing.await_idle ~after:first ~base_path () with
+      | Owner_idle _ -> () | Owner_stopped | Owner_missing -> fail "completed idle event was lost");
+    check int "resolved waiters are retired" 0 (idle_waiter_count base_path);
+    check int "waiting while Off creates no original" 0 (List.length (records store));
+    check int "waiting while Off calls no provider" 0 (F.post_count server))
+exception Cancel_idle_waiter
+let test_idle_barrier_cancel_and_stop ()=
+  with_fixture ~off:true (fun ~sw ~clock ~base_path ~config:_ ~store ~source:_ ~declaration:_
+      ~server ~urls:_ ~mode:_ ~delivery:_ ->
+    let first=await_idle_checkpoint clock base_path in
+    let context,resolve_context=Eio.Promise.create () in
+    let cancelled=Eio.Fiber.fork_promise ~sw (fun () ->
+      try Eio.Cancel.sub (fun cancel ->
+        Eio.Promise.resolve resolve_context cancel;
+        ignore (Curator.For_testing.await_idle ~after:first ~base_path ());false)
+      with Eio.Cancel.Cancelled Cancel_idle_waiter -> true) in
+    let survivor=Eio.Fiber.fork_promise ~sw (fun () ->
+      Curator.For_testing.await_idle ~after:first ~base_path ()) in
+    check int "both pending subscriptions are present" 2 (idle_waiter_count base_path);
+    Eio.Cancel.cancel (Eio.Promise.await context) Cancel_idle_waiter;
+    check bool "waiter observes its own cancellation" true (await_fork clock cancelled);
+    check int "cancellation removes only its own subscription" 1 (idle_waiter_count base_path);
+    Curator.For_testing.stop ~base_path;
+    (match await_fork clock survivor with
+     | Curator.For_testing.Owner_stopped -> ()
+     | Owner_idle _ | Owner_missing -> fail "stopping an owner was reported as idle");
+    check int "stop retires the surviving subscription" 0 (idle_waiter_count base_path);
+    check int "cancel and stop create no original" 0 (List.length (records store));
+    check int "cancel and stop call no provider" 0 (F.post_count server))
 let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "public owner uses real worker, semantic candidates and original terminal" `Quick test_actual_production_pipeline;
   test_case "actual Addon On wakes sources parked while Off" `Quick test_off_then_actual_metadata_on;
@@ -565,4 +670,6 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "new child requires fresh Off and semantic configuration authority" `Quick test_new_child_requires_fresh_configured_admission;
   test_case "new child rejects changed canonical worker inputs" `Quick test_new_child_rejects_changed_worker_inputs;
   test_case "existing successor intent recovers locally Off and completes after On" `Quick test_existing_intent_recovers_locally_off_then_runs_on;
-  test_case "accepted retained host terminal commits Off without another provider" `Quick test_accepted_host_terminal_commits_off_without_worker]]
+  test_case "accepted retained host terminal commits Off without another provider" `Quick test_accepted_host_terminal_commits_off_without_worker;
+  test_case "idle subscription observes queued and already completed wakes" `Quick test_idle_barrier_has_no_lost_wake;
+  test_case "idle subscription cancellation and owner stop preserve other waiters" `Quick test_idle_barrier_cancel_and_stop]]

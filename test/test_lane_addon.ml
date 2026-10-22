@@ -336,6 +336,26 @@ let test_a_failed_installation_is_read_as_unready () = with_fixture (fun env _ c
     ((unwrap (Runtime.tool_export_reading ~config
       ~access:Lane_addon_sources.Unauthenticated ~reserved:[])).unready = []))
 
+(* A caller learns which installation failed, never the host facts of why:
+   its text is the same whatever the failure. The operator's text renders the
+   lifecycle failure, so two failures read apart there. *)
+let test_a_failure_is_explained_only_to_the_operator () =
+  let unready cause : Lane_addon_unready.t = {installation="work";instance_id="work-1";package_id="msx";
+    declared_tools=["masc_msx_step"];service=Types.Mcp_tools;
+    reason=Lane_addon_unready.Failed {Lifecycle.cause;first=None}} in
+  let exited = unready (Lifecycle.Worker_failed "worker exited with status 3")
+  and unconfirmed = unready (Lifecycle.Cleanup_unconfirmed "socket directory is not private") in
+  check string "a caller's text is the same whatever the failure"
+    (Lane_addon_unready.message exited) (Lane_addon_unready.message unconfirmed);
+  check bool "the operator's text tells the failures apart" false
+    (String.equal (Lane_addon_unready.operator_message exited) (Lane_addon_unready.operator_message unconfirmed));
+  let refusal unready = Runtime.Unready_installations (unready, []) in
+  check string "a caller's refusal is the same whatever the failure"
+    (Runtime.export_refusal_message (refusal exited)) (Runtime.export_refusal_message (refusal unconfirmed));
+  check bool "the operator's refusal tells the failures apart" false
+    (String.equal (Runtime.export_refusal_operator_message (refusal exited))
+       (Runtime.export_refusal_operator_message (refusal unconfirmed)))
+
 (* A failed DOS installation may still hold the controller in its state, so a
    release is not reported as done, and a shared call names the installation. *)
 let test_a_failed_dos_installation_is_named_and_not_released () = with_fixture (fun env _ config dir _ ->
@@ -2165,6 +2185,7 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "startup and cleanup failures stay local" `Quick test_start_and_cleanup_failures_remain_optional;
   test_case "a failed installation is read as unready with its failure" `Quick
     test_a_failed_installation_is_read_as_unready;
+  test_case "a failure is explained only to the operator" `Quick test_a_failure_is_explained_only_to_the_operator;
   test_case "a failed DOS installation is named and not released" `Quick
     test_a_failed_dos_installation_is_named_and_not_released;
   test_case "a cleanup that is cut short can run again" `Quick test_a_cleanup_that_is_cut_short_can_run_again;

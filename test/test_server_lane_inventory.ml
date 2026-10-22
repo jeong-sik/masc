@@ -275,7 +275,7 @@ let machine_publication_reads_worker_observation () =
   check bool "worker refresh is visible" true
     (project (Ok (Some {snapshot with refreshing=true})) = Inventory.Running);
   let failed : Lane_addon_unready.t = {installation="worker";instance_id="worker";package_id="dos";
-    declared_tools=["masc_dos_screen"];service=Lane_addon_types.Mcp_tools;reason=Failed "worker failed"} in
+    declared_tools=["masc_dos_screen"];service=Lane_addon_types.Mcp_tools;reason=Failed {Lane_addon_lifecycle.cause=Worker_failed "worker failed";first=None}} in
   check bool "worker failure is not an empty machine" true
     (project (Error (Addon.Unready_installations (failed, []))) = Inventory.Publication_unavailable);
   check bool "missing installation has no current screen" true (project (Ok None) = Inventory.No_screen);
@@ -424,12 +424,12 @@ let browser_rows_read_the_addon_observation () =
     (state (Inventory.For_testing.browser_reading ~declarations:[] (Ok None)) Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Browser_lane.Enabled, Inventory.Browser_addon_absent));
   let failed : Lane_addon_unready.t = {installation="browser-work";instance_id="browser-worker";package_id="browser";
-    declared_tools=[];service=Lane_addon_types.Browser_service;reason=Failed "cleanup incomplete"} in
+    declared_tools=[];service=Lane_addon_types.Browser_service;reason=Failed {Lane_addon_lifecycle.cause=Cleanup_unconfirmed "cleanup incomplete";first=None}} in
   let refusal = Addon.Unready_installations (failed, []) in
-  check bool "a failed browser Add-on carries its reason" true
+  check bool "a failed browser Add-on shows the operator its failure" true
     (state (Inventory.For_testing.browser_reading ~declarations:[] (Error refusal)) Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Browser_lane.Enabled,
-         Inventory.Browser_addon_unavailable (Addon.export_refusal_message refusal)))
+         Inventory.Browser_addon_unavailable (Addon.export_refusal_operator_message refusal)))
 
 (* With no observation, the declarations tell an Add-on nobody declared from
    one switched off and one declared on that is not running. A declaration

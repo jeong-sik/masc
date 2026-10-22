@@ -461,6 +461,10 @@ type export_refusal =
   | Ambiguous_installations of string list
       (** More than one visible installation serves the name. *)
 val export_refusal_message : export_refusal -> string
+(** The refusal for any caller; see {!Lane_addon_unready.message}. *)
+val export_refusal_operator_message : export_refusal -> string
+(** The refusal with each failure rendered, for a surface that serves the
+    operator alone; see {!Lane_addon_unready.operator_message}. *)
 val observation_for_export :
   config:Workspace.config -> access:Lane_addon_sources.access -> name:string ->
   (export_observation option, export_refusal) result

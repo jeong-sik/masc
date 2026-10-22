@@ -1,4 +1,4 @@
-type reason = Starting | Stopping | Detaching | Failed of string
+type reason = Starting | Stopping | Detaching | Failed of Lane_addon_lifecycle.failed
 
 type t = {
   installation : string;
@@ -9,13 +9,17 @@ type t = {
   reason : reason;
 }
 
-let message t =
+let render ~failed t =
   let state = match t.reason with
     | Starting -> "is starting"
     | Stopping -> "is stopping"
     | Detaching -> "is detaching"
-    | Failed detail -> "failed: " ^ detail in
+    | Failed failure -> failed failure in
   Printf.sprintf "Add-on installation %s (package %s) %s" t.installation t.package_id state
+
+let message = render ~failed:(fun _ -> "failed; the operator can read why in Lane Add-ons")
+let operator_message =
+  render ~failed:(fun failure -> "failed: " ^ Lane_addon_lifecycle.failed_to_string failure)
 
 let declaring ~name unready = List.filter (fun t -> List.mem name t.declared_tools) unready
 

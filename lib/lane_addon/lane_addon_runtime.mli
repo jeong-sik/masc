@@ -1,6 +1,12 @@
 (** Optional observers run in independent server-owned fibers. No Keeper tool
     set, input queue, turn switch or environment owner is replaced. *)
-type operation = Attach | Inspect | Observe | Detach | Slice | Evidence | Act | Action_status
+type operation = Attach | Inspect | Observe | Detach | Retain | Slice | Evidence | Act | Action_status
+(** [Retain] is the operator's alone. It takes over the resources of a native
+    instance that failed because its cleanup was not confirmed, once the host
+    confirms its admission and browser child claims settled. The instance
+    becomes detached with [Native_retained], its leftover files stay in place,
+    and its declaration may start a new instance. Any other caller, state or
+    authority is refused without a change. *)
 type error = Request_rejected of string | Runtime_failed of string
 val error_to_string : error -> string
 val register_delivery_handler :

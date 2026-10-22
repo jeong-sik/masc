@@ -194,6 +194,17 @@ receipts remain distinct from successful contract validation.
    described below, including dedicated persistent-profile admission. Gecko
    persistent profiles still require their ownership boundary.
 
+   Replacement stays refused until the operator takes the retained allocation
+   over with `POST /api/v1/lane-addons/retain` (operator credential only). The
+   host first confirms what it can observe: the admission and each Chrome and
+   live BiDi child claim are Settled, and the allocation keeps its recorded
+   identity. It then records the acquisition as `retained` and the instance as
+   detached with `Native_retained`. It infers nothing it cannot observe and
+   removes nothing. The leftover files stay in place, and the declaration may
+   start a new instance. A Gecko build that relaunches itself during startup
+   leaves the group this way: geckodriver reports the original process exit,
+   while the relaunched browser keeps the instance profile (#45187).
+
    The tool proxy must
    preserve the exported tool's installation-selected command/result hooks;
    mandatory wire decoding does not replace those optional hooks. Upload leases, artifacts and model

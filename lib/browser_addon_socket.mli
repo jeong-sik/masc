@@ -29,3 +29,10 @@ val cleanup : admission:Native_addon_lease.t -> directory:string -> (unit, strin
     whether cleanup is required, including orphan recovery. Known directories
     are never reused and unknown contents are never recursively deleted. A
     missing acquisition record with an existing socket is unconfirmed. *)
+val retain : admission:Native_addon_lease.t -> directory:string -> (unit, string) result
+(** The operator takes over an allocation whose release could not be confirmed.
+    Like {!cleanup}, the claim must be Settled and each Chrome and live BiDi
+    child claim must settle. Unlike it, the allocation's contents are not read
+    or removed: the acquisition record becomes [retained], with the same
+    directory identity, and a later {!cleanup} of this claim returns [Ok ()]
+    without touching that directory. *)

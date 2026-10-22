@@ -596,4 +596,5 @@ let add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/lane-addons/attach" (post ~operation:Runtime.Attach ~tool_name:"masc_lane_attach")
   |> Http.Router.post "/api/v1/lane-addons/observe" (post ~operation:Runtime.Observe ~tool_name:"masc_lane_observe")
   |> Http.Router.post "/api/v1/lane-addons/detach" (post ~operation:Runtime.Detach ~tool_name:"masc_lane_detach")
+  |> Http.Router.post "/api/v1/lane-addons/retain" (post ~operation:Runtime.Retain ~tool_name:"lane_addon_retain_route")
   |> Http.Router.post "/api/v1/lane-addons/evidence" (post ~operation:Runtime.Evidence ~tool_name:"masc_lane_evidence")

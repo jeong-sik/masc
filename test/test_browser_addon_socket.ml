@@ -110,6 +110,42 @@ let interrupted_owned_cleanup () =
       Unix.rmdir obstruction;
       ok (Socket.cleanup ~admission ~directory);
       check "durable cleanup evidence resumes after receipt deletion" false (Sys.file_exists root))
+let acquisition_state directory =
+  match List.filter (fun name -> String.starts_with ~prefix:"browser-" name) (Array.to_list (Sys.readdir directory)) with
+  | [name] -> (match Yojson.Safe.from_file (Filename.concat directory name) with
+      | `Assoc fields -> (match List.assoc_opt "state" fields with
+          | Some (`String state) -> state | _ -> Alcotest.fail "acquisition record has no state")
+      | _ -> Alcotest.fail "acquisition record is not an object")
+  | names -> Alcotest.failf "expected one acquisition record, found %d" (List.length names)
+let operator_retains_unconfirmed_allocation () =
+  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+    (fun admission directory root ->
+      ignore (ok (Socket.acquire ~admission ~directory));
+      let profiles=Filename.concat root "profiles" in
+      Unix.mkdir profiles 0o700;
+      let file=Filename.concat profiles "escaped-browser-profile" in
+      Out_channel.with_open_bin file (fun out -> output_string out "preserve");
+      check "a launchable reservation cannot be retained" true (Result.is_error (Socket.retain ~admission ~directory));
+      check "a refused retain keeps the acquisition" true (acquisition_state directory = "acquired");
+      lease (Lease.retire admission);
+      check "missing worker receipt retains allocation" true (Result.is_error (Socket.cleanup ~admission ~directory));
+      ok (Socket.retain ~admission ~directory);
+      check "the acquisition record names the operator's retention" true (acquisition_state directory = "retained");
+      check "retained profile content remains" true (Sys.file_exists file);
+      ok (Socket.cleanup ~admission ~directory);
+      check "cleanup leaves a retained allocation in place" true (Sys.file_exists file);
+      check "cleanup does not release a retained allocation" true (acquisition_state directory = "retained");
+      ok (Socket.retain ~admission ~directory);
+      check "a repeated retain changes nothing" true (Sys.file_exists file && acquisition_state directory = "retained"))
+let retain_refuses_replaced_directory () =
+  with_claim ~automation:(Some {Browser_configuration.driver="/usr/bin/geckodriver";binary=None})
+    (fun admission directory root ->
+      ignore (ok (Socket.acquire ~admission ~directory));
+      let original=Filename.concat directory "original" in
+      Unix.rename root original;Unix.mkdir root 0o700;
+      lease (Lease.retire admission);
+      check "a different directory identity is not retained" true (Result.is_error (Socket.retain ~admission ~directory));
+      check "the refused retain keeps the acquisition" true (acquisition_state directory = "acquired"))
 let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "original allocation recovery and historical release" `Quick cleanup_after_reopen;
   Alcotest.test_case "crash before acquisition record" `Quick interrupted_acquisition;
@@ -117,4 +153,6 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "replacement identity is retained" `Quick replaced_directory;
   Alcotest.test_case "model bootstrap cleanup preserves separate receipts" `Quick model_configuration_cleanup;
   Alcotest.test_case "owned backend requires receipt and empty resource trees" `Quick owned_backend_cleanup;
-  Alcotest.test_case "owned cleanup resumes after interrupted file deletion" `Quick interrupted_owned_cleanup]]
+  Alcotest.test_case "owned cleanup resumes after interrupted file deletion" `Quick interrupted_owned_cleanup;
+  Alcotest.test_case "the operator retains an unconfirmed allocation in place" `Quick operator_retains_unconfirmed_allocation;
+  Alcotest.test_case "retain refuses a replaced allocation directory" `Quick retain_refuses_replaced_directory]]

@@ -58,7 +58,7 @@ let with_fixture run =
       Eio_context.with_test_env ~sw ~clock ~net:(Eio.Stdenv.net env)
         ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
         R.For_testing.reset (); run clock root (Workspace.default_config root))))))
-let native_installation_with_slot seed_slot () = with_fixture (fun clock root config ->
+let write_native_manifest root =
   let script = Filename.concat root "worker.py" in write script server;
   let manifest = Filename.concat root "native.toml" in
   write manifest (Printf.sprintf {|id = "native-runtime"
@@ -72,6 +72,9 @@ max_reply_bytes = 65536
 [world.actions]
 tool = "lane_act"
 |} script root);
+  manifest
+let native_installation_with_slot seed_slot () = with_fixture (fun clock root config ->
+  let manifest = write_native_manifest root in
   let attach () = dispatch config R.Attach ["manifest_path",`String manifest;
     "run_id",`String "native-world";"binding",`Assoc ["sources",`List []]] |> text "instance_id" in
   let inspect id = dispatch config R.Inspect ["instance_id",`String id]
@@ -167,6 +170,51 @@ let interrupted_reservation () = native_installation_with_slot (fun directory ->
   ignore (Native_addon_lease.prepare ~cleanup_context:None ~directories:[directory] ~instance_id:"unpublished"
     |> Result.map_error Native_addon_lease.error_to_string |> require);
   write (Filename.concat directory "intent.json") "") ()
+(* The operator takes over an instance whose cleanup was not confirmed. Only
+   the operator may, only for that failure, and a refusal leaves the record as
+   it was. The admission here has settled, so the instance becomes detached
+   with the retained release. *)
+let operator_retain () = with_fixture (fun clock root config ->
+  let manifest = write_native_manifest root in
+  let id = dispatch config R.Attach ["manifest_path",`String manifest;
+    "run_id",`String "native-world";"binding",`Assoc ["sources",`List []]] |> text "instance_id" in
+  let inspect () = dispatch config R.Inspect ["instance_id",`String id]
+    |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
+  let lifecycle () = require (Lane_addon_lifecycle.state_of_json (member "lifecycle" (inspect ()))) in
+  wait clock (fun () -> match lifecycle () with
+    | Lane_addon_lifecycle.Attached | Observing -> (inspect () |> member "observation_seq" |> Yojson.Safe.Util.to_int)>0
+    | Failed failure -> fail (Lane_addon_lifecycle.failure_detail failure.cause)
+    | Detaching _ | Detached _ -> fail "native fixture retired before observation");
+  let captured = match inspect () with `Assoc fields -> fields | _ -> fail "captured binding is not an object" in
+  ignore (dispatch config R.Detach ["instance_id",`String id]);
+  wait clock (fun () -> match lifecycle () with
+    | Lane_addon_lifecycle.Detached _ -> true | Attached | Observing | Failed _ | Detaching _ -> false);
+  R.For_testing.reset ();
+  let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let seed cause =
+    let state = Lane_addon_lifecycle.Failed (Lane_addon_lifecycle.failed cause) in
+    require (Lane_addon_store.save_binding store ~instance_id:id
+      (`Assoc (("phase", Lane_addon_types.phase_to_json (Lane_addon_lifecycle.project state))
+        :: ("lifecycle", Lane_addon_lifecycle.state_to_json state)
+        :: List.remove_assoc "phase" (List.remove_assoc "lifecycle" captured)))) in
+  let retain access = R.dispatch ~caller:"retain-tester" ~access ~config ~operation:R.Retain
+    (`Assoc ["instance_id",`String id]) in
+  let still_failed () = match lifecycle () with
+    | Lane_addon_lifecycle.Failed _ -> true | Attached | Observing | Detaching _ | Detached _ -> false in
+  seed (Lane_addon_lifecycle.Worker_failed "start refused");
+  check bool "a failure other than unconfirmed cleanup is not retained" true
+    (Result.is_error (retain Lane_addon_sources.Operator_configuration) && still_failed ());
+  seed (Lane_addon_lifecycle.Cleanup_unconfirmed "missing automation-closed.json");
+  check bool "a Keeper cannot retain" true
+    (Result.is_error (retain (Lane_addon_sources.Keeper "native-keeper")) && still_failed ());
+  check bool "an unauthenticated caller cannot retain" true
+    (Result.is_error (retain Lane_addon_sources.Unauthenticated) && still_failed ());
+  ignore (dispatch config R.Retain ["instance_id",`String id]);
+  let release = inspect () |> member "lifecycle" |> member "release" in
+  check string "the release names the operator's retention" "native_retained" (text "kind" release);
+  check string "the release names the exact incarnation" id (text "instance_id" release);
+  check bool "a detached instance is not retained again" true
+    (Result.is_error (retain Lane_addon_sources.Operator_configuration)))
 let browser_server = {|import argparse,hashlib,json,os,socket,subprocess,sys,threading
 p=argparse.ArgumentParser()
 p.add_argument("root");p.add_argument("mode")
@@ -491,4 +539,5 @@ let () =
     test_case "configuration resumes after interrupted slot namespace" `Quick interrupted_namespace;
     test_case "configuration resumes after interrupted slot metadata" `Quick interrupted_metadata;
     test_case "configuration retires unpublished reservation before fresh attach" `Quick interrupted_reservation;
+    test_case "the operator retains an unconfirmed native instance" `Quick operator_retain;
     test_case "browser service concurrent channels exact owner cancellation and failed readiness" `Quick browser_installation]]

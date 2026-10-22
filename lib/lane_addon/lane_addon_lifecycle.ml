@@ -93,6 +93,7 @@ type release =
   | Never_created
   | Released of { engine : engine; container_id : string option }
   | Native_released of { installation_id : string; instance_id : string }
+  | Native_retained of { installation_id : string; instance_id : string }
 type state =
   | Attached
   | Observing
@@ -255,6 +256,8 @@ let release_to_json = function
               "container_id", (match container_id with None -> `Null | Some id -> `String id)]
   | Native_released {installation_id;instance_id} -> `Assoc ["kind",`String "native_released";
       "installation_id",`String installation_id;"instance_id",`String instance_id]
+  | Native_retained {installation_id;instance_id} -> `Assoc ["kind",`String "native_retained";
+      "installation_id",`String installation_id;"instance_id",`String instance_id]
 
 let release_of_json = function
   | `Assoc ["kind", `String "never_created"] -> Ok Never_created
@@ -270,6 +273,9 @@ let release_of_json = function
        | ["installation_id",`String installation_id;"instance_id",`String instance_id;"kind",`String "native_released"]
          when String.trim installation_id<>"" && String.trim instance_id<>"" ->
            Ok (Native_released {installation_id;instance_id})
+       | ["installation_id",`String installation_id;"instance_id",`String instance_id;"kind",`String "native_retained"]
+         when String.trim installation_id<>"" && String.trim instance_id<>"" ->
+           Ok (Native_retained {installation_id;instance_id})
        | _ -> Error "invalid Lane release evidence")
   | _ -> Error "invalid Lane release evidence"
 

@@ -1,6 +1,6 @@
 let ( let* ) = Result.bind
 type t = {path:string;incarnation:string;automation:bool;models:bool;stagehand:bool;live_bidi:bool;device:int;inode:int}
-type acquisition = Missing | Acquired of int * int | Cleaning of int * int | Released
+type acquisition = Missing | Acquired of int * int | Cleaning of int * int | Retained of int * int | Released
 let socket_path t = t.path
 let arguments t ~max_message_bytes = ["--socket";t.path;"--incarnation";t.incarnation;
   "--max-message-bytes";string_of_int max_message_bytes] @ (if t.automation then ["--automation"] else [])
@@ -65,9 +65,11 @@ let slot admission directory =
 let record_of_instance instance_id directory = Filename.concat directory
   ("browser-" ^ Digestif.SHA256.(to_hex (digest_string instance_id)) ^ ".json")
 let record admission directory = record_of_instance (Native_addon_lease.instance_id admission) directory
-let acquired_json admission root info ~state = `Assoc ["state",`String state;
+let allocation_json admission root ~device ~inode ~state = `Assoc ["state",`String state;
   "incarnation",`String (Native_addon_lease.instance_id admission);"directory",`String root;
-  "device",`Int info.Unix.st_dev;"inode",`Int info.Unix.st_ino]
+  "device",`Int device;"inode",`Int inode]
+let acquired_json admission root info ~state =
+  allocation_json admission root ~device:info.Unix.st_dev ~inode:info.Unix.st_ino ~state
 let acquire ~admission ~directory = protect (fun () ->
   let* directory=slot admission directory in
   let* status=Native_addon_lease.status admission |> Result.map_error Native_addon_lease.error_to_string in
@@ -227,6 +229,7 @@ let acquisition ~instance_id ~root ~file ~directory =
        when incarnation=instance_id && root=known ->
          (match state with "acquired" -> Ok (Acquired (device,inode))
           | "cleaning" -> Ok (Cleaning (device,inode))
+          | "retained" -> Ok (Retained (device,inode))
           | _ -> Error "invalid browser allocation state")
      | _ -> Error "invalid browser socket resource identity")
   | Some _ -> Error "invalid browser socket resource record"
@@ -259,30 +262,65 @@ let cleanup ~admission ~directory = protect (fun () ->
       Browser_addon_live_bidi.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root in
     let file=record admission directory in
     let* identity=acquisition ~instance_id:(Native_addon_lease.instance_id admission) ~root ~file ~directory in
+    (* The operator took a retained allocation over. Its contents are not read,
+       removed or released here. *)
+    match identity with Retained _ -> Ok () | Missing|Acquired _|Cleaning _|Released ->
     let* ()=match Unix.lstat root with
       | info when private_root root info ->
         let* ()=match identity with
           | Released -> Error "released browser socket directory reappeared"
+          | Retained _ -> Error "retained browser allocation reached release"
           | Missing ->
             if Sys.readdir root=[||] then Ok ()
             else Error "unconfirmed browser acquisition contains resources"
           | Acquired (device,inode)|Cleaning (device,inode) ->
             if info.st_dev=device && info.st_ino=inode then Ok ()
             else Error "browser socket directory identity changed" in
-        let confirmed=match identity with Cleaning _ -> true | Missing|Acquired _|Released -> false in
+        let confirmed=match identity with Cleaning _ -> true | Missing|Acquired _|Retained _|Released -> false in
         let confirm ()=if confirmed then Ok () else
           Fs_compat.save_file_atomic_strict file
             (Yojson.Safe.to_string (acquired_json admission root info ~state:"cleaning")) in
-        let automation=match identity with Missing -> None | Acquired _|Cleaning _|Released -> automation in
-        let models=match identity with Missing -> None | Acquired _|Cleaning _|Released -> models in
-        let stagehand=match identity with Missing -> None | Acquired _|Cleaning _|Released -> stagehand in
-        let live_bidi=match identity with Missing -> None | Acquired _|Cleaning _|Released -> live_bidi in
+        let automation=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> automation in
+        let models=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> models in
+        let stagehand=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> stagehand in
+        let live_bidi=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> live_bidi in
         let* ()=cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi ~confirmed ~confirm in
         Unix.rmdir root;Ok ()
       | _ -> Error "browser socket directory identity changed"
       | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
         (match identity,Option.is_some automation || Option.is_some stagehand || Option.is_some live_bidi with
          | Acquired _,true -> Error "owned browser allocation vanished without confirmed cleanup"
-         | (Missing|Cleaning _|Released),_ | Acquired _,false -> Ok ()) in
+         | (Missing|Cleaning _|Retained _|Released),_ | Acquired _,false -> Ok ()) in
     sync (Filename.dirname root);
     Fs_compat.save_file_atomic_strict file (Yojson.Safe.to_string (`Assoc ["state",`String "released"])))
+let retain ~admission ~directory = protect (fun () ->
+  let* directory=slot admission directory in
+  let* status=Native_addon_lease.status admission |> Result.map_error Native_addon_lease.error_to_string in
+  let* ()=match status with
+    | Native_addon_lease.Settled -> Ok ()
+    | Awaiting_exec|Live _|Cleanup_pending _ -> Error "native browser resource cleanup is not settled" in
+  let* root=context_path admission in
+  match root with
+  | None -> Ok ()
+  | Some (root,_automation,_models,stagehand,live_bidi) ->
+    let incarnation=Native_addon_lease.instance_id admission in
+    let* ()=match stagehand with None -> Ok () | Some c ->
+      Browser_addon_stagehand.settle c ~incarnation ~directory:root in
+    let* ()=match live_bidi with None -> Ok () | Some c ->
+      Browser_addon_live_bidi.settle c ~incarnation ~directory:root in
+    let file=record admission directory in
+    let* identity=acquisition ~instance_id:incarnation ~root ~file ~directory in
+    let retained ~device ~inode =
+      Fs_compat.save_file_atomic_strict file
+        (Yojson.Safe.to_string (allocation_json admission root ~device ~inode ~state:"retained")) in
+    match identity,Unix.lstat root with
+    | (Retained _|Released),_ -> Ok ()
+    | (Acquired (device,inode)|Cleaning (device,inode)),info when private_root root info ->
+        if info.st_dev=device && info.st_ino=inode then retained ~device ~inode
+        else Error "browser socket directory identity changed"
+    | Missing,info when private_root root info -> retained ~device:info.st_dev ~inode:info.st_ino
+    | (Missing|Acquired _|Cleaning _),_ -> Error "browser socket directory identity changed"
+    | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
+        (match identity with
+         | Acquired (device,inode)|Cleaning (device,inode) -> retained ~device ~inode
+         | Missing|Retained _|Released -> Ok ()))

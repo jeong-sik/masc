@@ -1205,22 +1205,27 @@ let live_status_json ?(include_preflight = true)
       ( "volume_filesystem"
       , `List
           (List.map
-             (fun volume ->
-                match Keeper_volume_filesystem_watch.latest ~volume with
+             (fun (volume : Keeper_volume_filesystem_watch.volume) ->
+                match Keeper_volume_filesystem_watch.latest ~volume:volume.name with
                 | Some observation ->
-                  (* §3.3: the backup is the operator's to check and remove. *)
+                  (* §3.3: a work volume's backup is the operator's to check
+                     and remove. A build volume is recreated, never backed up. *)
                   let repair_backup =
-                    Option.bind observation.source (fun image ->
-                      let backup = Keeper_volume_repair.backup_path ~image in
-                      if Sys.file_exists backup then Some backup else None)
+                    match volume.kind with
+                    | Keeper_volume_filesystem_watch.Build -> None
+                    | Keeper_volume_filesystem_watch.Work ->
+                      Option.bind (Keeper_volume_filesystem_watch.source observation) (fun image ->
+                        let backup = Keeper_volume_repair.backup_path ~image in
+                        if Sys.file_exists backup then Some backup else None)
                   in
                   `Assoc
                     (Keeper_volume_filesystem_watch.observation_fields observation
                      @ [ "repair_backup", Json_util.string_opt_to_json repair_backup ])
                 | None ->
                   `Assoc
-                    [ "volume", `String volume
+                    [ "volume", `String volume.name
                     ; "observed_at", `Null
+                    ; "image", `Null
                     ; "filesystem", `Null
                     ; "observation_failed", `Null
                     ; "repair_backup", `Null

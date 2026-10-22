@@ -936,10 +936,12 @@ val rename_noreplace : string -> string -> unit
 
 val clone_file : string -> string -> unit
 (** Create [dst] as a copy-on-write clone of the regular file [src] with
-    macOS clonefile(2). Raises [Unix_error] without creating [dst] when [dst]
-    exists, when the filesystem cannot clone, and on other platforms
-    ([ENOSYS]); it never falls back to copying data, as [cp -c] does.
-    Blocking: a caller on an Eio domain runs it off the scheduler. *)
+    macOS fclonefileat(2). Raises [Unix_error] without creating [dst] when
+    [dst] exists (even as a dangling symlink), when [src] is a symlink
+    ([ELOOP]) or not a regular file ([EINVAL]), when the filesystem cannot
+    clone, and on other platforms ([ENOSYS]); it never falls back to copying
+    data, as [cp -c] does. Blocking: a caller on an Eio domain runs it off
+    the scheduler. *)
 
 (** [rename_if_exists ~src ~dst] renames [src] to [dst], returning [true]
     on success and [false] if [src] did not exist. Other I/O errors

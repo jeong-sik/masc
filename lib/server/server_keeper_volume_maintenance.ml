@@ -46,17 +46,26 @@ let site_line label = function
       site.inode
 ;;
 
-let damage_content ~keeper_name ~volume ~count ~first ~last =
+let what_happens_next = function
+  | Watch.Work ->
+    "Files on this volume may be unreadable or lost until e2fsck repairs it; the server repairs \
+     it the next time the Keeper is idle."
+  | Watch.Build ->
+    "The next fresh boot recreates this build volume; the server removes the Keeper's guests the \
+     next time it is idle."
+;;
+
+let damage_content ~keeper_name ~(volume : Watch.volume) ~count ~first ~last =
   String.concat
     "\n"
     [ Printf.sprintf
         "Keeper %s: volume %s has ext4 errors recorded by the guest kernel (%d errors)."
         keeper_name
-        volume
+        volume.name
         count
     ; site_line "First" first
     ; site_line "Last" last
-    ; "Files on this volume may be unreadable or lost until e2fsck repairs it."
+    ; what_happens_next volume.kind
     ]
 ;;
 
@@ -80,41 +89,41 @@ let post ~keeper_name ~volume ~content ~meta_json =
       (Board_types.show_board_error error)
 ;;
 
-let post_damage ~keeper_name (observation : Watch.observation) ~state ~count ~first ~last =
+let post_damage ~keeper_name ~(volume : Watch.volume) ~state ~count ~first ~last =
   post
     ~keeper_name
-    ~volume:observation.volume
-    ~content:(damage_content ~keeper_name ~volume:observation.volume ~count ~first ~last)
+    ~volume:volume.name
+    ~content:(damage_content ~keeper_name ~volume ~count ~first ~last)
     ~meta_json:
       (`Assoc
           [ "kind", `String notice_kind
           ; "keeper", `String keeper_name
-          ; "volume", `String observation.volume
+          ; "volume", `String volume.name
           ; "filesystem", Fs.state_to_yojson state
           ])
 ;;
 
-let report ~keeper_name ~previous (observation : Watch.observation) =
+let report ~keeper_name ~(volume : Watch.volume) ~previous (observation : Watch.observation) =
   match observation.result with
-  | Ok (Fs.Errors_recorded { count; first; last } as state) ->
+  | Ok { state = Fs.Errors_recorded { count; first; last } as state; _ } ->
     if Watch.damage_appeared ~previous observation
     then (
       Log.Server.warn
         "keeper volume filesystem errors keeper=%s volume=%s count=%d"
         keeper_name
-        observation.volume
+        volume.name
         count;
-      post_damage ~keeper_name observation ~state ~count ~first ~last)
-  | Ok Fs.Clean ->
+      post_damage ~keeper_name ~volume ~state ~count ~first ~last)
+  | Ok { state = Fs.Clean; _ } ->
     (match previous with
-     | Some { Watch.result = Ok (Fs.Errors_recorded _); _ } ->
+     | Some { Watch.result = Ok { state = Fs.Errors_recorded _; _ }; _ } ->
        Log.Server.info
          "keeper volume filesystem clean again keeper=%s volume=%s"
          keeper_name
-         observation.volume
+         volume.name
      | Some
          { Watch.result =
-             ( Ok Fs.Clean
+             ( Ok { state = Fs.Clean; _ }
              | Error (Watch.Inspect_refused _ | Watch.Inspect_unparsed _ | Watch.Image_unreadable _) )
          ; _
          }
@@ -124,7 +133,7 @@ let report ~keeper_name ~previous (observation : Watch.observation) =
      | Some { Watch.result = Error previous_failure; _ } when previous_failure = failure -> ()
      | Some
          { Watch.result =
-             ( Ok (Fs.Clean | Fs.Errors_recorded _)
+             ( Ok { state = Fs.Clean | Fs.Errors_recorded _; _ }
              | Error (Watch.Inspect_refused _ | Watch.Inspect_unparsed _ | Watch.Image_unreadable _) )
          ; _
          }
@@ -132,7 +141,7 @@ let report ~keeper_name ~previous (observation : Watch.observation) =
        Log.Server.warn
          "keeper volume filesystem unread keeper=%s volume=%s: %s"
          keeper_name
-         observation.volume
+         volume.name
          (Watch.failure_to_string failure))
 ;;
 
@@ -166,6 +175,48 @@ let end_episode volume =
     | Some Running | None -> marks)
 ;;
 
+(* The effects are arguments so the marks can be checked without a lane: a
+   repair that ran ends the episode's attempts, and a Keeper that was busy,
+   or a lane that refused, leaves the volume to the next pulse. *)
+let schedule_repair ~fork ~run_in_lane ~on_finished ~on_lane_error ~volume =
+  if claim_repair volume
+  then
+    fork
+      ~on_error:(fun () -> update_marks (Volume_map.remove volume))
+      (fun () ->
+         match run_in_lane () with
+         | Ok (`Ran receipt) ->
+           update_marks (Volume_map.add volume Attempted);
+           on_finished receipt
+         | Ok (`Busy _) -> update_marks (Volume_map.remove volume)
+         | Error error ->
+           update_marks (Volume_map.remove volume);
+           on_lane_error error)
+;;
+
+let helper_cleanup_failed ~keeper_name ~volume detail =
+  Log.Server.warn
+    "keeper volume repair helper cleanup keeper=%s volume=%s: %s"
+    keeper_name
+    volume
+    detail
+;;
+
+let remove_stale_repair_helper ~keeper_name =
+  Keeper_sandbox_microvm.remove_apple_volume_repair
+    ~run:(fun ~timeout_sec argv -> Process_eio.run_argv_with_status_split ~timeout_sec argv)
+    ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
+    ~remove_timeout_sec:(Env_config_sandbox.Runtime.microvm_remove_timeout_sec ())
+    ~keeper_name
+;;
+
+(* A helper a dead server left can still hold the volume, so it goes with the
+   guests, before the read that decides whether to repair. *)
+let teardown ~config ~meta ~keeper_name () =
+  Result.bind (Keeper_turn_sandbox_runtime.teardown_keeper_sandbox ~config ~meta ()) (fun () ->
+    remove_stale_repair_helper ~keeper_name)
+;;
+
 let repair_started_content ~keeper_name ~volume ~helper ~backup =
   String.concat
     "\n"
@@ -176,65 +227,65 @@ let repair_started_content ~keeper_name ~volume ~helper ~backup =
     ]
 ;;
 
-let helper_run ~(config : Workspace.config) ~keeper_name ~volume ~image =
-  match Keeper_meta_store.read_effective_meta config keeper_name with
-  | Error detail -> Error detail
-  | Ok None -> Error "the Keeper has no meta"
-  | Ok (Some meta) ->
-    (match Keeper_sandbox_image_resolver.for_keeper ~base_path:config.base_path meta with
-     | Error error -> Error (Keeper_sandbox_image_resolver.error_to_string error)
-     | Ok pinned ->
-       Ok
-         (fun () ->
-            let helper = Keeper_sandbox_microvm.volume_repair_name ~keeper_name in
-            post
-              ~keeper_name
-              ~volume
-              ~content:
-                (repair_started_content
-                   ~keeper_name
-                   ~volume
-                   ~helper
-                   ~backup:(Repair.backup_path ~image))
-              ~meta_json:
-                (`Assoc
-                    [ "kind", `String repair_started_kind
-                    ; "keeper", `String keeper_name
-                    ; "volume", `String volume
-                    ; "helper", `String helper
-                    ; "backup", `String (Repair.backup_path ~image)
-                    ]);
-            Keeper_sandbox_microvm.repair_apple_volume
-              ~run:(fun ~timeout_sec argv -> Process_eio.run_argv_with_status_split ~timeout_sec argv)
-              ~run_helper:(fun argv -> Process_eio.run_argv_with_status_split argv)
-              ~on_cleanup_error:(fun detail ->
-                Log.Server.warn
-                  "keeper volume repair helper cleanup keeper=%s volume=%s: %s"
-                  keeper_name
-                  volume
-                  detail)
-              ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
-              ~remove_timeout_sec:(Env_config_sandbox.Runtime.microvm_remove_timeout_sec ())
-              ~keeper_name
-              ~volume_name:volume
-              ~image:pinned.reference))
+let post_repair_started ~keeper_name ~volume ~image () =
+  let helper = Keeper_sandbox_microvm.volume_repair_name ~keeper_name in
+  let backup = Repair.backup_path ~image in
+  post
+    ~keeper_name
+    ~volume
+    ~content:(repair_started_content ~keeper_name ~volume ~helper ~backup)
+    ~meta_json:
+      (`Assoc
+          [ "kind", `String repair_started_kind
+          ; "keeper", `String keeper_name
+          ; "volume", `String volume
+          ; "helper", `String helper
+          ; "backup", `String backup
+          ])
+;;
+
+let helper_run ~(config : Workspace.config) ~meta ~keeper_name ~volume ~image =
+  match Keeper_sandbox_image_resolver.for_keeper ~base_path:config.base_path meta with
+  | Error error -> Error (Keeper_sandbox_image_resolver.error_to_string error)
+  | Ok pinned ->
+    Ok
+      (fun () ->
+         Keeper_sandbox_microvm.repair_apple_volume
+           ~run:(fun ~timeout_sec argv -> Process_eio.run_argv_with_status_split ~timeout_sec argv)
+           ~run_helper:(fun argv -> Process_eio.run_argv_with_status_split argv)
+           ~on_start:(post_repair_started ~keeper_name ~volume ~image)
+           ~on_cleanup_error:(helper_cleanup_failed ~keeper_name ~volume)
+           ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
+           ~remove_timeout_sec:(Env_config_sandbox.Runtime.microvm_remove_timeout_sec ())
+           ~keeper_name
+           ~volume_name:volume
+           ~image:pinned.reference
+         |> Result.map (fun (run : Keeper_sandbox_microvm.volume_repair_run) ->
+           { Repair.status = run.status
+           ; stdout = run.stdout
+           ; stderr = run.stderr
+           ; cleanup = run.cleanup
+           }))
 ;;
 
 let clone ~source ~target = Eio_unix.run_in_systhread (fun () -> Repair.clone_image ~source ~target)
 
-let repair_volume ~(config : Workspace.config) ~keeper_name ~volume ~image () =
+(* Runs inside the Keeper's maintenance lane. The meta is read here, once, so
+   the teardown and the helper image both follow the Keeper's TOML as it is
+   now. *)
+let repair_volume ~(config : Workspace.config) ~keeper_name ~(volume : Watch.volume) ~image () =
+  let meta =
+    match Keeper_meta_store.read_effective_meta config keeper_name with
+    | Ok (Some meta) -> Ok meta
+    | Ok None -> Error "the Keeper has no meta"
+    | Error detail -> Error detail
+  in
   Repair.repair
     ~now:Time_compat.now
     ~repair_id:(Random_id.uuid_v7 ())
-    ~helper:(helper_run ~config ~keeper_name ~volume ~image)
+    ~helper:(Result.bind meta (fun meta -> helper_run ~config ~meta ~keeper_name ~volume:volume.name ~image))
     ~backup_exists:(fun ~path -> Sys.file_exists path)
-    ~teardown:(fun () ->
-      Keeper_turn_sandbox_runtime.teardown_keeper_sandbox_by_name
-        ~config
-        ~keeper_name
-        ~backend:Keeper_sandbox.Micro_vm
-        ~microvm_backend:Keeper_microvm_backend.Apple_container
-        ())
+    ~teardown:(fun () -> Result.bind meta (fun meta -> teardown ~config ~meta ~keeper_name ()))
     ~read_image
     ~clone
     ~keeper:keeper_name
@@ -242,7 +293,7 @@ let repair_volume ~(config : Workspace.config) ~keeper_name ~volume ~image () =
     ~image
 ;;
 
-let rollback_line (receipt : Repair.receipt) =
+let rollback_lines (receipt : Repair.receipt) =
   match receipt.backup with
   | None -> []
   | Some backup ->
@@ -254,7 +305,7 @@ let rollback_line (receipt : Repair.receipt) =
     ]
 ;;
 
-let backup_present_line (receipt : Repair.receipt) =
+let follow_up_lines (receipt : Repair.receipt) =
   match receipt.outcome with
   | Repair.Backup_present ->
     [ Printf.sprintf
@@ -263,7 +314,14 @@ let backup_present_line (receipt : Repair.receipt) =
     ]
   | Repair.Helper_unavailable _ | Repair.Teardown_refused _ | Repair.Not_needed
   | Repair.Unreadable_before _ | Repair.Backup_unavailable _ | Repair.Helper_refused _
-  | Repair.Repaired | Repair.Repair_incomplete _ | Repair.Unreadable_after _ -> []
+  | Repair.Repaired | Repair.Repair_incomplete _ | Repair.Unreadable_after _
+  | Repair.Recreated_at_next_boot -> []
+;;
+
+let cleanup_lines (receipt : Repair.receipt) =
+  match receipt.helper_cleanup with
+  | None -> []
+  | Some detail -> [ "The helper was not removed after it ran: " ^ detail ]
 ;;
 
 let post_repair_finished ~(receipt : Repair.receipt) ~receipt_path =
@@ -284,8 +342,9 @@ let post_repair_finished ~(receipt : Repair.receipt) ~receipt_path =
               receipt.volume
               (Repair.outcome_to_string receipt.outcome)
           ]
-          @ backup_present_line receipt
-          @ rollback_line receipt
+          @ follow_up_lines receipt
+          @ rollback_lines receipt
+          @ cleanup_lines receipt
           @ [ receipt_line ]))
     ~meta_json:
       (`Assoc
@@ -310,7 +369,7 @@ let finish_repair ~(config : Workspace.config) (receipt : Repair.receipt) =
        receipt.volume
        detail);
   (match receipt.outcome with
-   | Repair.Repaired | Repair.Not_needed ->
+   | Repair.Repaired | Repair.Not_needed | Repair.Recreated_at_next_boot ->
      Log.Server.info
        "keeper volume repair keeper=%s volume=%s: %s"
        receipt.keeper
@@ -329,60 +388,52 @@ let finish_repair ~(config : Workspace.config) (receipt : Repair.receipt) =
 
 (* A repair can wait on e2fsck for as long as it takes, so it runs on its own
    fiber and the sweep goes on reading every other volume. *)
-let start_repair ~sw ~(config : Workspace.config) ~keeper_name ~volume ~image =
-  if claim_repair volume
-  then
-    Server_bootstrap_loops_fiber.fork_logged_fiber
-      ~sw
-      ~on_error:(fun exn ->
-        update_marks (Volume_map.remove volume);
-        Server_bootstrap_loops_fiber.log_server_fiber_crash "keeper_volume_repair" exn)
-      (fun () ->
-         match
-           Keeper_owner_registry.run_maintenance_if_idle
-             ~defer_to_chat:true
-             ~base_path:config.base_path
-             ~keeper_name
-             (repair_volume ~config ~keeper_name ~volume ~image)
-         with
-         | Ok (`Ran receipt) ->
-           update_marks (Volume_map.add volume Attempted);
-           finish_repair ~config receipt
-         | Ok (`Busy _) -> update_marks (Volume_map.remove volume)
-         | Error error ->
-           update_marks (Volume_map.remove volume);
-           Log.Server.warn
-             "keeper volume repair keeper=%s volume=%s: %s"
-             keeper_name
-             volume
-             (Keeper_owner_registry.command_error_to_string error))
+let start_repair ~sw ~(config : Workspace.config) ~keeper_name ~(volume : Watch.volume) ~image =
+  schedule_repair
+    ~fork:(fun ~on_error run ->
+      Server_bootstrap_loops_fiber.fork_logged_fiber
+        ~sw
+        ~on_error:(fun exn ->
+          on_error ();
+          Server_bootstrap_loops_fiber.log_server_fiber_crash "keeper_volume_repair" exn)
+        run)
+    ~run_in_lane:(fun () ->
+      Keeper_owner_registry.run_maintenance_if_idle
+        ~defer_to_chat:true
+        ~base_path:config.base_path
+        ~keeper_name
+        (repair_volume ~config ~keeper_name ~volume ~image))
+    ~on_finished:(finish_repair ~config)
+    ~on_lane_error:(fun error ->
+      Log.Server.warn
+        "keeper volume repair keeper=%s volume=%s: %s"
+        keeper_name
+        volume.name
+        (Keeper_owner_registry.command_error_to_string error))
+    ~volume:volume.name
 ;;
 
-let act_on ~sw ~config ~keeper_name (observation : Watch.observation) =
-  match observation with
-  | { result = Ok (Fs.Errors_recorded _); source = Some image; volume; _ } ->
-    start_repair ~sw ~config ~keeper_name ~volume ~image
-  (* A read needs the image path, so a recorded state always has one. *)
-  | { result = Ok (Fs.Errors_recorded _); source = None; _ } -> ()
-  | { result = Ok Fs.Clean; volume; _ } -> end_episode volume
-  | { result = Error (Watch.Inspect_refused _ | Watch.Inspect_unparsed _ | Watch.Image_unreadable _); _ } ->
-    ()
+let act_on ~schedule ~(volume : Watch.volume) (observation : Watch.observation) =
+  match observation.result with
+  | Ok { state = Fs.Errors_recorded _; source } -> schedule ~volume ~image:source
+  | Ok { state = Fs.Clean; _ } -> end_episode volume.name
+  | Error (Watch.Inspect_refused _ | Watch.Inspect_unparsed _ | Watch.Image_unreadable _) -> ()
 ;;
 
-let observe_volume ~sw ~config ~keeper_name volume =
+let observe_volume ~sw ~config ~keeper_name (volume : Watch.volume) =
   try
     let previous, observation =
-      Watch.observe ~now:(Time_compat.now ()) ~inspect ~read_image ~volume
+      Watch.observe ~now:(Time_compat.now ()) ~inspect ~read_image ~volume:volume.name
     in
-    report ~keeper_name ~previous observation;
-    act_on ~sw ~config ~keeper_name observation
+    report ~keeper_name ~volume ~previous observation;
+    act_on ~schedule:(start_repair ~sw ~config ~keeper_name) ~volume observation
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Server.warn
       "keeper volume filesystem sweep keeper=%s volume=%s: %s"
       keeper_name
-      volume
+      volume.name
       (Printexc.to_string exn)
 ;;
 

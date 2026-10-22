@@ -383,6 +383,11 @@ val volume_repair_guest_root : string
 val volume_repair_name : keeper_name:string -> string
 (** Stable bounded helper name, [masc-keeper-work-<keeper>-repair]. *)
 
+val volume_repair_script_with :
+  findmnt:string -> umount:string -> e2fsck:string -> guest_root:string -> string
+(** {!volume_repair_script} over the given tool paths and mount point, so a
+    test can run the same script against stub tools. *)
+
 val volume_repair_script : string
 (** Unmount {!volume_repair_guest_root}, stop if it is still mounted, then
     [e2fsck -f -y] and [e2fsck -f -n] on its device, printing both exit
@@ -405,22 +410,31 @@ val remove_apple_volume_repair :
   -> (unit, string) result
 (** {!remove_apple_work_volume_trim} for the repair helper. *)
 
+type volume_repair_run =
+  { status : Unix.process_status
+  ; stdout : string  (** As captured by [run_helper]. *)
+  ; stderr : string
+  ; cleanup : (unit, string) result
+        (** Removing the helper after it ran. A failure here does not undo
+            what e2fsck wrote. *)
+  }
+
 val repair_apple_volume :
   run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
   -> run_helper:(string list -> Unix.process_status * string * string)
+  -> on_start:(unit -> unit)
   -> on_cleanup_error:(string -> unit)
   -> timeout_sec:float
   -> remove_timeout_sec:float
   -> keeper_name:string
   -> volume_name:string
   -> image:string
-  -> (Unix.process_status * string * string, string) result
-(** Remove a repair helper a previous server left, then run
+  -> (volume_repair_run, string) result
+(** Remove a repair helper a previous server left, call [on_start], then run
     {!apple_volume_repair_argv} through [run_helper], which has no timeout.
     The switch release removes the helper and proves its absence after
     success, failure or cancellation. [Error] means a stale helper could not
-    be removed, so e2fsck did not run. The status, stdout and stderr are the
-    helper's own, uncut. *)
+    be removed, so the helper never started. *)
 
 val keeper_work_root : keeper_name:string -> string
 (** [<work root>/<sanitized keeper>]: what the shim jails requests under. *)

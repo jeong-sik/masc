@@ -103,3 +103,31 @@ ok /usr/sbin/e2fsck
 ok /usr/bin/findmnt
 ok /usr/bin/umount
 ```
+
+## 6. 실제로 망가진 파일시스템에서 helper 를 돌렸다
+
+§3 의 수리 전에 떠 둔 `volume.img.pre-fsck-20261022`(오류 31,027,637번, 실사용 42 GB)를 쓰고 쟀다. Keeper 볼륨은 건드리지 않았다.
+
+1. 임시 볼륨 `masc-fsck-probe-real-1022`(256 GB)를 만들었다. 그 이미지 자리에 백업을 `fclonefileat` 으로 복제했다.
+2. 복제의 superblock 은 백업과 같았다(`errors_recorded`, count 31027637).
+3. 수리 helper 와 같은 권한·스크립트로 `masc-sandbox:general` 을 돌렸다. 메모리를 보려고 `e2fsck -y` 에 `-tt` 만 더했다.
+
+결과(2026-10-22 12:38–12:43Z):
+
+```
+MemTotal:        1127716 kB
+e2fsck repair exit 1
+24337                                  (출력 줄 수)
+Memory used: 17300k/0k (2968k/14333k), time:  6.92/ 2.18/ 0.82
+I/O read: 4728MB, write: 38MB, rate: 689.09MB/s
+e2fsck verify exit 0
+helper seconds: 38
+after: {"state":"clean"}
+```
+
+- 망가진 파일시스템도 helper 가 마운트하고 풀었다.
+- `e2fsck` 는 helper VM 의 기본 메모리(1.1 GB) 중 17 MB 를 썼다.
+- `-y` 는 1(고침), `-n` 은 0(깨끗함)으로 끝났다. 호스트에서 읽은 superblock 은 `clean` 이었다.
+- 임시 볼륨은 지웠다.
+- 이 호스트의 데이터 볼륨은 이때 91% 찼고 359 GiB 가 남아 있었다.
+

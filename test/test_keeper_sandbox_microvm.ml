@@ -2256,32 +2256,69 @@ let test_volume_repair_argv_grants_only_sys_admin () =
      List.filteri (fun i _ -> i >= n - 4) argv)
 ;;
 
-let substring_at needle haystack =
-  let rec go i =
-    if i + String.length needle > String.length haystack then None
-    else if String.sub haystack i (String.length needle) = needle then Some i
-    else go (i + 1)
+(* The production script, run by /bin/sh against stub tools: findmnt names a
+   device and then reports the mount gone (or still there), and e2fsck exits
+   1 for the repair pass, as it does after fixing errors. *)
+let run_repair_script ~still_mounted =
+  let dir = Filename.temp_dir "volume-repair-script" "" in
+  let path name = Filename.concat dir name in
+  let write name contents =
+    Out_channel.with_open_bin (path name) (fun channel -> Out_channel.output_string channel contents);
+    Unix.chmod (path name) 0o755
   in
-  go 0
+  write "findmnt"
+    (Printf.sprintf
+       "#!/bin/sh\necho \"$*\" >> %s\ncase \"$*\" in\n*--noheadings*) echo /dev/vdz ;;\n*) [ -f %s ] && exit 0; exit 1 ;;\nesac\n"
+       (Filename.quote (path "findmnt.log"))
+       (Filename.quote (path "still-mounted")));
+  write "umount" "#!/bin/sh\nexit 0\n";
+  write "e2fsck"
+    (Printf.sprintf
+       "#!/bin/sh\necho \"$*\" >> %s\ncase \"$2\" in\n-y) exit 1 ;;\n*) exit 0 ;;\nesac\n"
+       (Filename.quote (path "e2fsck.log")));
+  if still_mounted then write "still-mounted" "";
+  let script =
+    M.volume_repair_script_with ~findmnt:(path "findmnt") ~umount:(path "umount")
+      ~e2fsck:(path "e2fsck") ~guest_root:"/masc-repair"
+  in
+  Out_channel.with_open_bin (path "repair.sh") (fun channel -> Out_channel.output_string channel script);
+  let code =
+    Sys.command
+      (Printf.sprintf "/bin/sh -eu %s > %s 2>&1" (Filename.quote (path "repair.sh"))
+         (Filename.quote (path "out")))
+  in
+  let read name =
+    if Sys.file_exists (path name) then In_channel.with_open_bin (path name) In_channel.input_all else ""
+  in
+  let result = code, read "out", read "e2fsck.log", read "findmnt.log" in
+  Array.iter (fun name -> Sys.remove (path name)) (Sys.readdir dir);
+  Sys.rmdir dir;
+  result
 ;;
 
-(* e2fsck must never run on a mounted filesystem: the script unmounts,
-   checks by mount point (--target finds the root filesystem once the volume
-   is gone, measured 2026-10-22), and only then repairs. *)
-let test_volume_repair_script_unmounts_before_e2fsck () =
-  let script = M.volume_repair_script in
-  let at needle =
-    match substring_at needle script with
-    | Some i -> i
-    | None -> Alcotest.failf "the script has no %S" needle
-  in
-  let unmount = at "/usr/bin/umount /masc-repair" in
-  let still_mounted = at "if /usr/bin/findmnt --mountpoint /masc-repair" in
-  let repair = at "/usr/sbin/e2fsck -f -y" in
-  let verify = at "/usr/sbin/e2fsck -f -n" in
-  Alcotest.(check bool) "unmount, check, repair, verify" true
-    (unmount < still_mounted && still_mounted < repair && repair < verify);
-  Alcotest.(check bool) "never --target" true (substring_at "--target" script = None)
+let test_volume_repair_script_runs_e2fsck_after_unmount () =
+  let code, out, e2fsck, findmnt = run_repair_script ~still_mounted:false in
+  (* e2fsck exits 1 after fixing errors; the script still reaches the
+     verify pass and exits 0, and the host reads the superblock. *)
+  Alcotest.(check int) "the script finishes" 0 code;
+  Alcotest.(check string) "repair then verify, on the unmounted device"
+    "-f -y /dev/vdz\n-f -n /dev/vdz\n" e2fsck;
+  (* --target would find the root filesystem once the volume is unmounted
+     (measured 2026-10-22); only --mountpoint answers for the volume. *)
+  Alcotest.(check string) "found and checked by mount point"
+    "--noheadings --output SOURCE --mountpoint /masc-repair\n--mountpoint /masc-repair\n" findmnt;
+  Alcotest.(check bool) "both exit codes are printed" true
+    (List.for_all
+       (fun line -> List.mem line (String.split_on_char '\n' out))
+       [ "e2fsck repair exit 1"; "e2fsck verify exit 0" ])
+;;
+
+let test_volume_repair_script_refuses_a_mounted_volume () =
+  let code, out, e2fsck, _ = run_repair_script ~still_mounted:true in
+  Alcotest.(check int) "the script stops" 1 code;
+  Alcotest.(check string) "e2fsck never runs" "" e2fsck;
+  Alcotest.(check bool) "says why" true
+    (List.mem "volume is still mounted; e2fsck not run" (String.split_on_char '\n' out))
 ;;
 
 let test_volume_repair_cleanup_brackets_the_helper () =
@@ -2294,10 +2331,10 @@ let test_volume_repair_cleanup_brackets_the_helper () =
   let expected_helper =
     M.apple_volume_repair_argv ~keeper_name:"x" ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
   in
-  let execute ~before =
+  let execute ~before ~after =
     let remaining = ref [ rm, (Unix.WEXITED 1, "", "already absent"); list, before
-                        ; rm, (Unix.WEXITED 1, "", "already absent"); list, absent ] in
-    let helper_ran = ref false in
+                        ; rm, (Unix.WEXITED 1, "", "already absent"); list, after ] in
+    let events = ref [] in
     let run ~timeout_sec:_ argv =
       match !remaining with
       | (expected, result) :: rest ->
@@ -2308,25 +2345,33 @@ let test_volume_repair_cleanup_brackets_the_helper () =
     in
     let run_helper argv =
       Alcotest.(check (list string)) "the repair helper" expected_helper argv;
-      helper_ran := true;
+      events := "helper" :: !events;
       Unix.WEXITED 0, "e2fsck repair exit 1", ""
     in
     let result =
-      M.repair_apple_volume ~run ~run_helper ~on_cleanup_error:(fun _ -> ())
+      M.repair_apple_volume ~run ~run_helper
+        ~on_start:(fun () -> events := "started" :: !events)
+        ~on_cleanup_error:(fun _ -> ())
         ~timeout_sec:30. ~remove_timeout_sec:180. ~keeper_name:"x"
         ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
     in
-    result, !helper_ran, remaining
+    result, List.rev !events, remaining
   in
-  let result, helper_ran, remaining = execute ~before:absent in
+  let result, events, remaining = execute ~before:absent ~after:absent in
   (match result with
-   | Ok (Unix.WEXITED 0, "e2fsck repair exit 1", "") -> ()
-   | Ok _ | Error _ -> Alcotest.fail "the helper's own status and output come back uncut");
-  Alcotest.(check bool) "the helper ran" true helper_ran;
+   | Ok { M.status = Unix.WEXITED 0; stdout = "e2fsck repair exit 1"; stderr = ""; cleanup = Ok () } -> ()
+   | Ok _ | Error _ -> Alcotest.fail "the helper's own status and output come back");
+  Alcotest.(check (list string)) "the start is announced after the stale check" [ "started"; "helper" ] events;
   Alcotest.(check int) "both cleanup inventories were read" 0 (List.length !remaining);
-  let result, helper_ran, _ = execute ~before:(Unix.WEXITED 0, "[{}]", "") in
+  (* e2fsck may have written the image, so a failed removal afterwards is
+     reported beside the result, not in place of it. *)
+  let result, _, _ = execute ~before:absent ~after:(Unix.WEXITED 1, "", "container service unavailable") in
+  (match result with
+   | Ok { M.status = Unix.WEXITED 0; cleanup = Error _; _ } -> ()
+   | Ok _ | Error _ -> Alcotest.fail "a failed cleanup after the run replaced its result");
+  let result, events, _ = execute ~before:(Unix.WEXITED 0, "[{}]", "") ~after:absent in
   (match result with Error _ -> () | Ok _ -> Alcotest.fail "an unproven stale helper still starts a repair");
-  Alcotest.(check bool) "no helper starts beside an unknown container" false helper_ran
+  Alcotest.(check (list string)) "nothing starts beside an unknown container" [] events
 ;;
 
 let trim_test_plan keeper_name =
@@ -3639,8 +3684,10 @@ let () =
             test_work_volume_trim_confirms_cleanup
         ; Alcotest.test_case "volume repair argv grants only CAP_SYS_ADMIN" `Quick
             test_volume_repair_argv_grants_only_sys_admin
-        ; Alcotest.test_case "volume repair script unmounts before e2fsck" `Quick
-            test_volume_repair_script_unmounts_before_e2fsck
+        ; Alcotest.test_case "volume repair script runs e2fsck after unmount" `Quick
+            test_volume_repair_script_runs_e2fsck_after_unmount
+        ; Alcotest.test_case "volume repair script refuses a mounted volume" `Quick
+            test_volume_repair_script_refuses_a_mounted_volume
         ; Alcotest.test_case "volume repair cleanup brackets the helper" `Quick
             test_volume_repair_cleanup_brackets_the_helper
         ; Alcotest.test_case "trim names preserve existing helpers and bound long names" `Quick

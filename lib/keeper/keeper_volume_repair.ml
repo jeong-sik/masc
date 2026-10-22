@@ -1,4 +1,5 @@
 module Fs = Keeper_volume_filesystem
+module Watch = Keeper_volume_filesystem_watch
 
 type outcome =
   | Helper_unavailable of string
@@ -15,11 +16,13 @@ type outcome =
       ; last : Fs.error_site option
       }
   | Unreadable_after of Fs.read_failure
+  | Recreated_at_next_boot
 
 type receipt =
   { repair_id : string
   ; keeper : string
   ; volume : string
+  ; kind : Watch.volume_kind
   ; image : string
   ; started_at : float
   ; finished_at : float
@@ -27,10 +30,18 @@ type receipt =
   ; backup : string option
   ; helper_status : string option
   ; helper_output : string option
+  ; helper_cleanup : string option
   ; outcome : outcome
   }
 
-type helper_run = unit -> (Unix.process_status * string * string, string) result
+type helper_finished =
+  { status : Unix.process_status
+  ; stdout : string
+  ; stderr : string
+  ; cleanup : (unit, string) result
+  }
+
+type helper_run = unit -> (helper_finished, string) result
 
 let schema = "masc.keeper.volume_repair.v1"
 let store_dirname = "keeper-volume-repairs"
@@ -43,6 +54,18 @@ let clone_image ~source ~target =
   | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
 ;;
 
+(* Once the helper has run, the superblock decides; the status only tells a
+   run that ended early apart from one whose e2fsck could not finish. *)
+let outcome_after_helper (run : helper_finished) ~status_label read =
+  match run.status, read with
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), Ok Fs.Clean -> Repaired
+  | Unix.WEXITED 0, Ok (Fs.Errors_recorded { count; first; last }) ->
+    Repair_incomplete { count; first; last }
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), Ok (Fs.Errors_recorded _) ->
+    Helper_refused (Printf.sprintf "helper %s: %s" status_label (String.trim run.stderr))
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), Error failure -> Unreadable_after failure
+;;
+
 let repair
       ~now
       ~repair_id
@@ -52,14 +75,15 @@ let repair
       ~read_image
       ~clone
       ~keeper
-      ~volume
+      ~(volume : Watch.volume)
       ~image
   =
   let started_at = now () in
-  let finish ?before ?backup ?helper_status ?helper_output outcome =
+  let finish ?before ?backup ?helper_status ?helper_output ?helper_cleanup outcome =
     { repair_id
     ; keeper
-    ; volume
+    ; volume = volume.name
+    ; kind = volume.kind
     ; image
     ; started_at
     ; finished_at = now ()
@@ -67,45 +91,46 @@ let repair
     ; backup
     ; helper_status
     ; helper_output
+    ; helper_cleanup
     ; outcome
     }
   in
-  let backup = backup_path ~image in
-  match helper with
-  | Error detail -> finish (Helper_unavailable detail)
-  | Ok run_helper ->
-    if backup_exists ~path:backup
-    then finish Backup_present
-    else (
-      match teardown () with
-      | Error detail -> finish (Teardown_refused detail)
-      | Ok () ->
-        let before = read_image ~path:image in
-        (match before with
-         | Error failure -> finish ~before (Unreadable_before failure)
-         | Ok Fs.Clean -> finish ~before Not_needed
-         | Ok (Fs.Errors_recorded _) ->
-           (match clone ~source:image ~target:backup with
-            | Error detail -> finish ~before (Backup_unavailable detail)
-            | Ok () ->
-              (match run_helper () with
-               | Error detail -> finish ~before ~backup (Helper_refused detail)
-               | Ok (status, stdout, stderr) ->
-                 let helper_status = Keeper_sandbox_exec_failure.status_label status in
-                 let helper_output = String.concat "\n" [ stdout; stderr ] in
-                 let outcome =
-                   match status with
-                   | Unix.WEXITED 0 ->
-                     (match read_image ~path:image with
-                      | Ok Fs.Clean -> Repaired
-                      | Ok (Fs.Errors_recorded { count; first; last }) ->
-                        Repair_incomplete { count; first; last }
-                      | Error failure -> Unreadable_after failure)
-                   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-                     Helper_refused
-                       (Printf.sprintf "helper %s: %s" helper_status (String.trim stderr))
-                 in
-                 finish ~before ~backup ~helper_status ~helper_output outcome))))
+  match volume.kind with
+  | Watch.Build ->
+    (match teardown () with
+     | Error detail -> finish (Teardown_refused detail)
+     | Ok () -> finish Recreated_at_next_boot)
+  | Watch.Work ->
+    let backup = backup_path ~image in
+    (match helper with
+     | Error detail -> finish (Helper_unavailable detail)
+     | Ok run_helper ->
+       if backup_exists ~path:backup
+       then finish Backup_present
+       else (
+         match teardown () with
+         | Error detail -> finish (Teardown_refused detail)
+         | Ok () ->
+           let before = read_image ~path:image in
+           (match before with
+            | Error failure -> finish ~before (Unreadable_before failure)
+            | Ok Fs.Clean -> finish ~before Not_needed
+            | Ok (Fs.Errors_recorded _) ->
+              (match clone ~source:image ~target:backup with
+               | Error detail -> finish ~before (Backup_unavailable detail)
+               | Ok () ->
+                 (match run_helper () with
+                  | Error detail -> finish ~before ~backup (Helper_refused detail)
+                  | Ok run ->
+                    let helper_status = Keeper_sandbox_exec_failure.status_label run.status in
+                    let helper_cleanup = Result.fold ~ok:(fun () -> None) ~error:Option.some run.cleanup in
+                    finish
+                      ~before
+                      ~backup
+                      ~helper_status
+                      ~helper_output:(String.concat "\n" [ run.stdout; run.stderr ])
+                      ?helper_cleanup
+                      (outcome_after_helper run ~status_label:helper_status (read_image ~path:image)))))))
 ;;
 
 let outcome_to_string = function
@@ -120,6 +145,8 @@ let outcome_to_string = function
   | Repair_incomplete { count; _ } ->
     Printf.sprintf "repair incomplete: the superblock still records %d errors" count
   | Unreadable_after failure -> "repair unconfirmed: " ^ Fs.read_failure_to_string failure
+  | Recreated_at_next_boot ->
+    "the Keeper's guests were removed; the next boot recreates this build volume"
 ;;
 
 let read_result_to_yojson = function
@@ -145,8 +172,14 @@ let outcome_to_yojson outcome =
       , [ "filesystem", Fs.state_to_yojson (Fs.Errors_recorded { count; first; last }) ] )
     | Unreadable_after failure ->
       "unreadable_after", [ "detail", `String (Fs.read_failure_to_string failure) ]
+    | Recreated_at_next_boot -> "recreated_at_next_boot", []
   in
   `Assoc (("kind", `String kind) :: fields)
+;;
+
+let volume_kind_to_string = function
+  | Watch.Work -> "work"
+  | Watch.Build -> "build"
 ;;
 
 let receipt_to_yojson receipt =
@@ -155,6 +188,7 @@ let receipt_to_yojson receipt =
     ; "repair_id", `String receipt.repair_id
     ; "keeper", `String receipt.keeper
     ; "volume", `String receipt.volume
+    ; "volume_kind", `String (volume_kind_to_string receipt.kind)
     ; "image", `String receipt.image
     ; "started_at", `Float receipt.started_at
     ; "finished_at", `Float receipt.finished_at
@@ -162,6 +196,7 @@ let receipt_to_yojson receipt =
     ; "backup", Json_util.string_opt_to_json receipt.backup
     ; "helper_status", Json_util.string_opt_to_json receipt.helper_status
     ; "helper_output", Json_util.string_opt_to_json receipt.helper_output
+    ; "helper_cleanup", Json_util.string_opt_to_json receipt.helper_cleanup
     ; "outcome", outcome_to_yojson receipt.outcome
     ]
 ;;

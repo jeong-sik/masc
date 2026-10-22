@@ -3,8 +3,11 @@
 #endif
 #include <errno.h>
 #if defined(__APPLE__)
+#include <fcntl.h>
 #include <sys/attr.h>
 #include <sys/clonefile.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 #include <caml/alloc.h>
 #include <caml/memory.h>
@@ -12,8 +15,10 @@
 #include <caml/signals.h>
 #include <caml/unixsupport.h>
 
-/* Clone [src] to the new path [dst] with clonefile(2). Unlike cp -c, a
-   filesystem that cannot clone is an error, never a data copy. Other
+/* Clone the regular file [src] to the new path [dst]. Unlike cp -c, a
+   filesystem that cannot clone is an error, never a data copy. The source is
+   opened without following a symlink and checked to be a regular file, so a
+   clone of a link is never mistaken for a copy of its target. Other
    platforms have no clonefile and report ENOSYS. */
 CAMLprim value caml_masc_clone_file(value v_src, value v_dst)
 {
@@ -23,7 +28,25 @@ CAMLprim value caml_masc_clone_file(value v_src, value v_dst)
   int result, saved_errno;
   caml_enter_blocking_section();
 #if defined(__APPLE__)
-  result = clonefile(src, dst, CLONE_NOFOLLOW);
+  {
+    int fd = open(src, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd == -1) {
+      result = -1;
+    } else {
+      struct stat st;
+      if (fstat(fd, &st) == -1) {
+        result = -1;
+      } else if (!S_ISREG(st.st_mode)) {
+        errno = EINVAL;
+        result = -1;
+      } else {
+        result = fclonefileat(fd, AT_FDCWD, dst, CLONE_NOFOLLOW);
+      }
+      saved_errno = errno;
+      close(fd);
+      errno = saved_errno;
+    }
+  }
 #else
   errno = ENOSYS;
   result = -1;

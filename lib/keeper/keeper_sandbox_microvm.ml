@@ -1323,7 +1323,7 @@ let volume_repair_name ~keeper_name =
    would find the root filesystem once the volume is gone (measured
    2026-10-22). The two e2fsck exit codes are printed as evidence only: the
    host reads the superblock again to decide what the repair did. *)
-let volume_repair_script =
+let volume_repair_script_with ~findmnt ~umount ~e2fsck ~guest_root =
   Printf.sprintf
     "device=$(%s --noheadings --output SOURCE --mountpoint %s)\n\
      %s %s\n\
@@ -1333,14 +1333,22 @@ let volume_repair_script =
      echo \"e2fsck repair exit $?\"\n\
      %s -f -n \"$device\"\n\
      echo \"e2fsck verify exit $?\""
-    findmnt_guest_path
-    volume_repair_guest_root
-    umount_guest_path
-    volume_repair_guest_root
-    findmnt_guest_path
-    volume_repair_guest_root
-    e2fsck_guest_path
-    e2fsck_guest_path
+    findmnt
+    guest_root
+    umount
+    guest_root
+    findmnt
+    guest_root
+    e2fsck
+    e2fsck
+;;
+
+let volume_repair_script =
+  volume_repair_script_with
+    ~findmnt:findmnt_guest_path
+    ~umount:umount_guest_path
+    ~e2fsck:e2fsck_guest_path
+    ~guest_root:volume_repair_guest_root
 ;;
 
 let apple_volume_repair_argv ~keeper_name ~volume_name ~image =
@@ -1359,25 +1367,36 @@ let remove_apple_volume_repair ~run ~timeout_sec ~remove_timeout_sec ~keeper_nam
     ~name:(volume_repair_name ~keeper_name) ~helper:"repair"
 ;;
 
+type volume_repair_run =
+  { status : Unix.process_status
+  ; stdout : string
+  ; stderr : string
+  ; cleanup : (unit, string) result
+  }
+
 (* The lifecycle of [reclaim_apple_work_volume]: a leftover helper is removed
-   first, and the release handler removes this one whatever happens. A
-   helper a dead server left runs beside the backup it made, and a backup
-   stops the repair before this point, so the removal reaches such a helper
-   only once the operator has removed that backup. [run_helper] has no
+   first, and the release handler removes this one whatever happens. Once
+   the helper has run, a failed removal is reported beside its result, never
+   in place of it: e2fsck may have written the image. [run_helper] has no
    timeout: cutting e2fsck short is worse than waiting for it. *)
-let repair_apple_volume ~run ~run_helper ~on_cleanup_error ~timeout_sec ~remove_timeout_sec
-    ~keeper_name ~volume_name ~image =
+let repair_apple_volume ~run ~run_helper ~on_start ~on_cleanup_error ~timeout_sec
+    ~remove_timeout_sec ~keeper_name ~volume_name ~image =
   let cleanup () = remove_apple_volume_repair ~run ~timeout_sec ~remove_timeout_sec ~keeper_name in
   let released = ref (Ok ()) in
   let result = Eio.Switch.run (fun sw ->
     Eio.Switch.on_release sw (fun () ->
       released := cleanup ();
       match !released with Ok () -> () | Error detail -> on_cleanup_error detail);
-    let ( let* ) = Result.bind in
-    let* () = cleanup () in
-    Ok (run_helper (apple_volume_repair_argv ~keeper_name ~volume_name ~image)))
+    match cleanup () with
+    | Error _ as error -> error
+    | Ok () ->
+      on_start ();
+      let status, stdout, stderr =
+        run_helper (apple_volume_repair_argv ~keeper_name ~volume_name ~image)
+      in
+      Ok (status, stdout, stderr))
   in
-  match !released with Ok () -> result | Error _ as error -> error
+  Result.map (fun (status, stdout, stderr) -> { status; stdout; stderr; cleanup = !released }) result
 ;;
 
 (** The keeper's root on the work volume: [<work root>/<keeper>], the

@@ -375,13 +375,16 @@ let test_volume_sweep_names_volumes_from_effective_meta () =
       ( Masc.Keeper_sandbox_microvm.work_volume_name ~keeper_name:name
       , Masc.Keeper_sandbox_microvm.build_volume_name ~keeper_name:name )
     with
-    | Ok work, Ok build -> [ work; build ]
+    | Ok work, Ok build ->
+      [ { Masc.Keeper_volume_filesystem_watch.name = work; kind = Masc.Keeper_volume_filesystem_watch.Work }
+      ; { name = build; kind = Masc.Keeper_volume_filesystem_watch.Build }
+      ]
     | Error detail, _ | _, Error detail -> Alcotest.failf "volume name refused: %s" detail
   in
   match
     Masc.Keeper_volume_filesystem_watch.volumes_of_durable_meta ~base_path:config.base_path durable
   with
-  | Ok volumes -> Alcotest.(check (list string)) "work and build volumes" expected volumes
+  | Ok volumes -> Alcotest.(check bool) "work and build volumes" true (volumes = expected)
   | Error detail -> Alcotest.failf "effective meta refused: %s" detail
 
 (* Named once and asserted by both tests below, so a reworded sentence is one

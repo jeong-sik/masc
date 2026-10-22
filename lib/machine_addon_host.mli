@@ -12,7 +12,9 @@ val call_shared :
   (Mcp_protocol.Mcp_types.tool_result, Lane_addon_runtime.tool_call_error) result
 (** Resolve a currently attached shared export, then revalidate its exact
     installation on invocation. The caller must already have authorized this
-    tool and principal. This never grants access to Keeper-private exports. *)
+    tool and principal. This never grants access to Keeper-private exports.
+    Without an export, a shared installation that declares [name] and cannot
+    serve is named with its reason. *)
 
 val release_shared_controller :
   events:Machine_addon_events.batch -> config:Workspace.config -> holder:string -> by:string ->
@@ -20,7 +22,9 @@ val release_shared_controller :
   (Mcp_protocol.Mcp_types.tool_result option, Lane_addon_runtime.tool_call_error) result
 (** Trusted lifecycle boundary only. The caller owns credential/lifecycle
     admission through this call; no credential lock is acquired here. [None]
-    means no shared controller-capable installation exists. Returned notices
+    means no visible installation declares the controller tool. One that
+    declares it but is starting, stopping, detaching or failed is [Unavailable]
+    with its reason: its state may still hold the controller. Returned notices
     must be published after credential admission ends. *)
 
 val dos_event_batch : author:string -> Machine_addon_events.batch

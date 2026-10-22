@@ -124,25 +124,33 @@ let call_shared ~principal ~config ~name ~arguments =
   let access = Lane_addon_sources.Unauthenticated in
   let reserved = List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
     Config.raw_all_tool_schemas in
-  match Lane_addon_runtime.tool_exports ~config ~access ~reserved with
+  match Lane_addon_runtime.tool_export_reading ~config ~access ~reserved with
   | Error detail -> Error (Lane_addon_runtime.Unavailable detail)
-  | Ok exports ->
+  | Ok reading ->
       match List.find_opt (fun (export : Lane_addon_tool_export.t) ->
-        String.equal export.tool.name name) exports with
-      | None -> Error (Lane_addon_runtime.Unavailable ("No attached shared Add-on provides " ^ name))
+        String.equal export.tool.name name) reading.exports with
+      | None -> Error (Lane_addon_runtime.Unavailable
+          (match Lane_addon_unready.summary (Lane_addon_unready.declaring ~name reading.unready) with
+           | Some reason -> reason
+           | None -> "No attached shared Add-on provides " ^ name))
       | Some export -> call ~principal ~config ~access ~reserved ~export ~arguments
 
 let release_shared_controller ~events ~config ~holder ~by ~reason =
   let access = Lane_addon_sources.Unauthenticated in
   let reserved = List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
     Config.raw_all_tool_schemas in
-  match Lane_addon_runtime.tool_exports ~config ~access ~reserved with
+  let name = Machine_controller_contract.(dos_tool_name Dos_pass) in
+  match Lane_addon_runtime.tool_export_reading ~config ~access ~reserved with
   | Error detail -> Error (Lane_addon_runtime.Unavailable detail)
-  | Ok exports ->
+  | Ok reading ->
       match List.find_opt (fun (export : Lane_addon_tool_export.t) ->
-        String.equal export.tool.name
-          Machine_controller_contract.(dos_tool_name Dos_pass)) exports with
-      | None -> Ok None
+        String.equal export.tool.name name) reading.exports with
+      | None ->
+          (* An installation that declares the controller but cannot serve may
+             still hold it in its state, so nothing was released. *)
+          (match Lane_addon_unready.summary (Lane_addon_unready.declaring ~name reading.unready) with
+           | Some reason -> Error (Lane_addon_runtime.Unavailable reason)
+           | None -> Ok None)
       | Some export ->
           let authorize ~release_controller ~snapshot:_ ~invoke:_ = release_controller ~holder ~reason in
           Lane_addon_runtime.call_exported_tool_with_authority ~on_complete:(fun () -> ())

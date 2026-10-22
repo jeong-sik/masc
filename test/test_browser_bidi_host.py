@@ -460,6 +460,8 @@ dragSource.onpointerup=e=>{const box=dropTarget.getBoundingClientRect();
             fronted = {row["id"]: row["active"] for row in call("tabs.list", {})["data"]}
             assert fronted[target["id"]] is True, fronted
             assert sum(1 for active in fronted.values() if active) == 1, fronted
+            front = capture(target["id"])
+            assert front["data"]["url"] == target["url"], front
             print(json.dumps({"activated": target["id"], "tabsActive": fronted, "goto": went["data"]}))
             assert len({row[0] for row in metadata}) == 1 and all(row[1] for row in metadata)
             assert all(row[2] == "webdriver_bidi" for row in metadata), metadata

@@ -111,7 +111,7 @@ export class InstrumentPicker {
       if (epoch !== this.epoch) return
       this.view = previous?.kind === 'loading'
         ? { kind: 'plugins', title: 'VST unavailable · install scripts/install-vst-host.sh',
-          items: this.soundfont ? [{ kind: 'soundfont', name: 'SoundFont (built-in player)' }] : [], cursor: 0, query: '', searching: false }
+          items: this.soundfont ? [{ kind: 'soundfont', name: 'SoundFont' }] : [], cursor: 0, query: '', searching: false }
         : previous
       this.failed(error)
       this.notify()
@@ -136,7 +136,7 @@ export class InstrumentPicker {
         typeof item?.path !== 'string' || typeof item?.name !== 'string')) {
         throw new Error('VST host returned an invalid plug-in catalog')
       }
-      const items = [...(this.soundfont ? [{ kind: 'soundfont', name: 'SoundFont (built-in player)' }] : []),
+      const items = [...(this.soundfont ? [{ kind: 'soundfont', name: 'SoundFont' }] : []),
         ...result.candidates.map(item => ({ name: item.name, plugin_path: item.path }))]
       this.view = { kind: 'plugins', title: 'Choose a VST instrument · candidates are checked when selected',
         items, cursor: Math.max(0, items.findIndex(item => item.plugin_path === this.recent?.plugin_path)),

@@ -21,6 +21,7 @@ type event =
   | Refused of refusal
   | Successor_intended of successor
   | Successor_observed of string
+  | Observer of Lane_addon_request_receipt.event
 type phase = Captured | Admission_wait of Yojson.Safe.t | Dispatch_pending of observation option
   | Judged of Yojson.Safe.t | Committing of commit
   | Commit_unknown of commit * Yojson.Safe.t | Finished of commit
@@ -30,6 +31,12 @@ type t
 val captured : t
 val phase : t -> phase
 val events : t -> event list
+val observer : t -> Lane_addon_request_receipt.t
+(** Orthogonal immutable observer intents/acknowledgements. Execution and commit
+    transitions preserve them. Completion intent requires an original Finished,
+    Conflicted or Refused (including its successor-link phases) fact. The domain
+    owner must additionally validate the entire receipt against its original
+    capture/judgment and confirm registry durability before recording an ACK. *)
 val append : t -> event -> (t, string) result
 (** Canonicalize payloads and validate the next transition. Dispatch is recorded
     before each admission RPC. Only an explicit pre-admission capacity refusal

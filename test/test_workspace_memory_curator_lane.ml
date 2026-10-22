@@ -399,16 +399,21 @@ let test_capture_refuses_a_batch_over_the_destination_frame ()=
     (fun ~sw:_ ~clock ~base_path:_ ~config ~store ~source:_ ~declaration:_ ~server:_ ~urls:_ ~mode:_ ~delivery:_ ->
     await clock (fun () -> (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[]);
     let (destination : Runtime.tool_request_destination)=Consumer.destination ~config |> consumed in
-    (* One claim longer than the declared frame, prepared without one, as a
-       batch sized before the package changed would be. *)
-    let claim=String.make (destination.max_reply_bytes+1) 'x' in
-    let fact : Ledger.pending_fact={fact=Ledger.Ordinary {keeper_id="writer";claim_sha256=Store.digest claim};claim} in
     let prompt=Prompt_registry.resolve_prompt Prompt_names.workspace_memory_curator in
     let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
       prompt ["workspace_memory_changes",Yojson.Safe.to_string input] in
-    let batch=match Request.prepare ~neighbor_limit:0 ~render ~ledger:Ledger.empty ~current:[fact] ~pending:[fact]
-        ~frame:max_int ~measure:(fun _ -> Ok 0) |> Result.map_error Request.error_to_string |> get with
+    let batch_of claim=
+      let fact : Ledger.pending_fact={fact=Ledger.Ordinary {keeper_id="writer";claim_sha256=Store.digest claim};claim} in
+      match Request.prepare ~neighbor_limit:0 ~render ~ledger:Ledger.empty ~current:[fact] ~pending:[fact]
+          ~frame:max_int ~measure:(fun _ -> Ok 0) |> Result.map_error Request.error_to_string |> get with
       | Some batch -> batch | None -> fail "expected one pending classification" in
+    (* The same capture path admits a batch inside the frame, so the refusal
+       below is the frame's, not the package or tool check's. *)
+    ignore (Consumer.capture_classification ~config ~request_id:(Capture.Request_id.fresh ()) ~prompt
+              ~ledger:Ledger.empty ~batch:(batch_of "A short changed fact") |> consumed);
+    (* One claim longer than the declared frame, prepared without one, as a
+       batch sized before the package changed would be. *)
+    let batch=batch_of (String.make (destination.max_reply_bytes+1) 'x') in
     let request_id=Capture.Request_id.fresh () in
     (match Consumer.capture_classification ~config ~request_id ~prompt ~ledger:Ledger.empty ~batch with
      | Error (Consumer.Rejected _) -> ()

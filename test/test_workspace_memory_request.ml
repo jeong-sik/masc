@@ -237,6 +237,7 @@ let test_first_batch_fills_the_frame_with_the_oldest_facts () =
   Alcotest.(check bool) "the five oldest facts fill a five-fact frame" true (batch.selected = List.take 5 facts);
   Alcotest.(check bool) "ranking stops at the first size that does not fit" true
     (batch.index_stats.queries_executed <= 2 * List.length batch.selected);
+  Alcotest.(check int) "one index table serves the whole preparation" 1 batch.index_stats.index_builds;
   Alcotest.(check int) "a frame that holds every fact takes them all" 40
     (List.length (get (within (40 * per_fact))).selected);
   (match within (per_fact - 1) with

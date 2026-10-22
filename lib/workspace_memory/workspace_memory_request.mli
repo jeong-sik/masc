@@ -64,19 +64,22 @@ val prepare
   -> frame:int
   -> measure:(batch -> (int, string) result)
   -> (batch option, error) result
-(** Prepare the longest prefix of [pending] whose request fits [frame], the
-    receiving Add-on's declared worker frame. [measure] gives the bytes the
-    host would send for a batch. The prefix keeps the given order
+(** Prepare a prefix of [pending] whose request fits [frame], the receiving
+    Add-on's declared worker frame, as [measure] counts the bytes the host
+    would send for a batch. The prefix keeps the given order
     ({!Workspace_memory_ledger.reconcile} gives its new facts oldest first).
     Each fact gets BM25-ranked facts from other Keepers in [current], bounded
-    by [neighbor_limit] (which may be zero). The size doubles from one fact
-    until it does not fit, then bisects. Ranking stops at the first size that
-    does not fit, so at most twice the chosen facts are ranked, each once:
-    the work follows the batch, not the backlog. [index_stats] counts every
-    ranking that ran. This is the
-    declared protocol frame, not an estimate of provider input capacity.
-    No pending facts return [Ok None] without building an index or rendering a
-    prompt. *)
+    by [neighbor_limit] (which may be zero), from one transient index table
+    built once for the whole preparation.
+    The size doubles from one fact until it does not fit, then bisects. Only a
+    measured size is returned. Bytes nearly always grow with the prefix but
+    can shrink a little when renumbering shortens local ids, so a slightly
+    longer prefix may also fit. Ranking stops at the first size that does not
+    fit, so at most twice the chosen facts are ranked, each once: the work
+    follows the batch, not the backlog. [index_stats] counts the build and
+    every query. This is the declared protocol frame, not an estimate of
+    provider input capacity. No pending facts return [Ok None] without
+    building an index or rendering a prompt. *)
 
 val narrow
   :  render:(Yojson.Safe.t -> (string, string) result)

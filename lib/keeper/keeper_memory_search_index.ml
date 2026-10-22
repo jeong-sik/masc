@@ -140,6 +140,20 @@ let search db ~count ~exclude_owner ~max_results expression =
        rows [])
 ;;
 
+let create_table db texts =
+  let* () =
+    match
+      Sqlite3.exec
+        db
+        "CREATE VIRTUAL TABLE memory_search USING \
+         fts5(ordinal UNINDEXED, owner UNINDEXED, claim, tokenize='trigram')"
+    with
+    | rc when Sqlite3.Rc.is_success rc -> Ok ()
+    | _ -> Error (sqlite_error db "create memory search index")
+  in
+  populate db texts
+;;
+
 let rank_many_with ~queries ~texts ~max_results =
   let expressions = List.map (fun (owner, query) -> owner, match_expression query) queries in
   let empty_stats = { index_builds = 0; indexed_rows = 0; queries_executed = 0 } in
@@ -155,17 +169,7 @@ let rank_many_with ~queries ~texts ~max_results =
     Domain_pool_ref.submit_cpu_or_inline @@ fun () ->
     (try
        with_database (Sqlite3.db_open ":memory:") (fun db ->
-         let* () =
-           match
-             Sqlite3.exec
-               db
-               "CREATE VIRTUAL TABLE memory_search USING \
-               fts5(ordinal UNINDEXED, owner UNINDEXED, claim, tokenize='trigram')"
-           with
-           | rc when Sqlite3.Rc.is_success rc -> Ok ()
-           | _ -> Error (sqlite_error db "create memory search index")
-         in
-         let* () = populate db texts in
+         let* () = create_table db texts in
          let rec search_all results executed = function
            | [] -> Ok (List.rev results,
                        { index_builds = 1; indexed_rows = List.length texts;
@@ -191,6 +195,70 @@ let rank_many ~queries texts =
 let rank_many_excluding_owners ~queries ~texts ~max_results =
   rank_many_with ~queries:(List.map (fun (owner, query) -> Some owner, query) queries)
     ~texts ~max_results:(Some max_results)
+;;
+
+let close_table db =
+  match Sqlite3.db_close db with
+  | true -> ()
+  | false -> log_cleanup "close" (Sqlite3.errmsg db)
+  | exception Sqlite3.Error detail -> log_cleanup "close" detail
+;;
+
+(* The table is built on the first [rank] that has work and serves every
+   later one. Each build and each [rank] is its own job on the domain pool
+   when the caller is an Eio fiber, like [rank_many_with]; the jobs run one
+   after another, so the database is never used by two at once. The caller
+   runs [f] itself. *)
+let with_excluding_owners ~texts ~max_results f =
+  let opened = ref None in
+  let stats = ref { index_builds = 0; indexed_rows = 0; queries_executed = 0 } in
+  let table () =
+    match !opened with
+    | Some db -> Ok db
+    | None ->
+      let* db =
+        Domain_pool_ref.submit_cpu_or_inline (fun () ->
+          match Sqlite3.db_open ":memory:" with
+          | exception Sqlite3.Error detail -> Error (Index_unavailable detail)
+          | db ->
+            (match create_table db texts with
+             | Ok () -> Ok db
+             | Error error -> close_table db; Error error
+             | exception Sqlite3.Error detail -> close_table db; Error (Index_unavailable detail)))
+      in
+      opened := Some db;
+      stats := { !stats with index_builds = !stats.index_builds + 1;
+                             indexed_rows = !stats.indexed_rows + List.length texts };
+      Ok db
+  in
+  let rank queries =
+    let expressions = List.map (fun (owner, query) -> owner, match_expression query) queries in
+    if max_results < 0 then Error (Index_unavailable "negative result limit")
+    else if max_results = 0 || texts = [] || not (List.exists (fun (_, e) -> Option.is_some e) expressions)
+    then Ok (List.map (fun _ -> []) queries)
+    else
+      let* db = table () in
+      let* results, executed =
+        Domain_pool_ref.submit_cpu_or_inline (fun () ->
+          let rec search_all results executed = function
+            | [] -> Ok (List.rev results, executed)
+            | (_, None) :: rest -> search_all ([] :: results) executed rest
+            | (owner, Some expression) :: rest ->
+              let* ranked = search db ~count:(List.length texts)
+                  ~exclude_owner:(Some owner) ~max_results:(Some max_results) expression in
+              search_all (ranked :: results) (executed + 1) rest
+          in
+          try search_all [] 0 expressions with Sqlite3.Error detail -> Error (Index_unavailable detail))
+      in
+      stats := { !stats with queries_executed = !stats.queries_executed + executed };
+      Ok results
+  in
+  let value =
+    Fun.protect
+      ~finally:(fun () -> Option.iter close_table !opened; opened := None)
+      (fun () -> f ~rank)
+  in
+  value, !stats
 ;;
 
 let rank ~query texts =

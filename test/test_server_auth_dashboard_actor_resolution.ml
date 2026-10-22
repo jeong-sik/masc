@@ -395,7 +395,8 @@ let test_workspace_bound_read_preconditions () =
     check bool "a foreign workspace cannot answer under the old identity" true
       (read path ["expected_base_path",[base ^ "/foreign"];"expected_masc_root",[root]]
        =Error Masc.Workspace.Workspace_precondition_failed))
-    ["/api/v1/dashboard/planning";"/api/v1/board";"/api/v1/setup/account-emails"];
+    ["/api/v1/dashboard/planning";"/api/v1/board";"/api/v1/setup/account-emails";
+     "/api/v1/dashboard/exact-lane-run-retention"];
   List.iter (fun malformed ->
     check bool "partial, duplicate and empty workspace values are refused" true
       (read "/api/v1/dashboard/planning" malformed

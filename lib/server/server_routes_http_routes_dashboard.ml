@@ -1825,6 +1825,13 @@ let add_routes ~sw ~clock router =
             |> Server_lane_inventory.to_json
             |> fun json -> Http.Response.json_value ~compress:true ~request:req json reqd)
          request reqd)
+  |> Http.Router.get "/api/v1/dashboard/exact-lane-run-retention" (fun request reqd ->
+       with_token_permission_auth ~permission:exact_lane_run_permission
+         (fun _state _agent_name req reqd ->
+            Exact_lane_run_registry.startup_observation (Exact_lane_run_registry.global ())
+            |> Server_exact_lane_retention_observation.to_json
+            |> fun json -> Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
   (* Paged, and without detail payloads. [lane=] and [run_kind=] filter BEFORE pagination so
      the Verifier's task/Goal review registries cannot be hidden behind a busy
      Librarian window. Serving every exact-output payload made this response

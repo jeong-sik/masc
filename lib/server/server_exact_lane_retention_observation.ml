@@ -11,6 +11,16 @@ let replay_to_json = function
       ]
 ;;
 
+let sweep_counts_to_json ~status (counts : Exact_lane_run_registry.payload_sweep_counts) =
+  `Assoc
+    [ "status", `String status
+    ; "examined_root_entries", `Int counts.examined_root_entries
+    ; "unlinked_entries", `Int counts.unlinked_entries
+    ; "removed_run_directories", `Int counts.removed_run_directories
+    ; "failed_root_entries", `Int counts.failed_root_entries
+    ]
+;;
+
 let sweep_to_json = function
   | Exact_lane_run_registry.Not_attempted ->
     `Assoc [ "status", `String "not_attempted" ]
@@ -21,13 +31,11 @@ let sweep_to_json = function
   | Exact_lane_run_registry.Root_unavailable ->
     `Assoc [ "status", `String "root_unavailable" ]
   | Exact_lane_run_registry.Swept counts ->
-    `Assoc
-      [ "status", `String (if counts.failed_root_entries = 0 then "completed" else "partial_failure")
-      ; "examined_root_entries", `Int counts.examined_root_entries
-      ; "unlinked_entries", `Int counts.unlinked_entries
-      ; "removed_run_directories", `Int counts.removed_run_directories
-      ; "failed_root_entries", `Int counts.failed_root_entries
-      ]
+    sweep_counts_to_json
+      ~status:(if counts.failed_root_entries = 0 then "completed" else "partial_failure")
+      counts
+  | Exact_lane_run_registry.Sweep_scope_failed counts ->
+    sweep_counts_to_json ~status:"scope_failure" counts
 ;;
 
 let to_json (observation : Exact_lane_run_registry.startup_observation) =

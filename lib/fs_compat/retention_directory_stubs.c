@@ -55,3 +55,29 @@ CAMLprim value caml_masc_retention_remove_empty(value v_fd, value v_name)
   caml_stat_free(name);
   CAMLreturn(Val_unit);
 }
+
+/* Checked unlink acknowledgements for owners that must count partial effects.
+   Neither operation follows a final symbolic link; the held parent owns it. */
+static value retention_unlink_checked(value v_fd, value v_name, int flags)
+{
+  CAMLparam2(v_fd, v_name);
+  int fd = Int_val(v_fd), removed = 0, saved = 0;
+  char *name = caml_stat_strdup(String_val(v_name));
+  caml_enter_blocking_section();
+  if (unlinkat(fd, name, flags) == 0) removed = 1;
+  else if (errno != ENOENT) saved = errno;
+  caml_leave_blocking_section();
+  caml_stat_free(name);
+  if (saved) { errno = saved; uerror("retention_unlinkat", v_name); }
+  CAMLreturn(Val_bool(removed));
+}
+
+CAMLprim value caml_masc_retention_unlink_entry(value v_fd, value v_name)
+{
+  return retention_unlink_checked(v_fd, v_name, 0);
+}
+
+CAMLprim value caml_masc_retention_remove_empty_checked(value v_fd, value v_name)
+{
+  return retention_unlink_checked(v_fd, v_name, AT_REMOVEDIR);
+}

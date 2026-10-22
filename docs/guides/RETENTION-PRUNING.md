@@ -96,22 +96,31 @@ retained with the existing server-restart terminal result.
 | `not_attempted` | Constructed with `create`, without a startup sweep. |
 | `replay_not_trusted` | Existing replay gate did not authorize a sweep. |
 | `root_absent` | The payload-root lookup observed `ENOENT`. |
-| `root_unavailable` | Root lookup/listing failed; inspect the existing Keeper warning. |
+| `root_unavailable` | Root binding/listing failed before a completed traversal was observed; inspect the existing Keeper warning. |
 | `completed` | Every listed root entry was visited without an observed failure. |
 | `partial_failure` | At least one listed root entry failed; earlier successful effects remain counted. |
+| `scope_failure` | Traversal completed but root-scope settlement failed; preserve the traversal counts without inventing another failed root entry. |
 
-Only the last two states carry counts. `examined_root_entries` is the visited
-root-listing length. `unlinked_entries` counts successful `Sys.remove` calls,
-including symlinks and other non-directory entries, **not regular files or
-bytes**. `removed_run_directories` counts successful `Unix.rmdir` calls separately.
+Only `completed`, `partial_failure` and `scope_failure` carry counts. `examined_root_entries` is the visited
+root-listing length. `unlinked_entries` counts successful descriptor-relative
+leaf unlinks, including symlinks and other non-directory entries, **not regular
+files or bytes**. `removed_run_directories` counts successful descriptor-relative
+empty-directory removals separately.
 `failed_root_entries` counts a failed root entry once even if successful unlinks
 preceded its failure. Other entries continue. These counts describe syscall
 acknowledgements, not fsync/power-loss durability or physical space reclaimed.
 An empty listed root completes with zero counts; an absent root does not invent a
 zero-removal receipt. Root lookup/listing and later removals are not an atomic
-filesystem snapshot and retain the existing path-based sweep authority. This
-observation change does not establish symlink confinement; that deletion boundary
-requires a separate repair and controlled filesystem evidence.
+filesystem snapshot. Cleanup binds the physical log parent, payload root and
+run directories through the existing no-follow directory capability. It does not
+canonicalize a payload-root or run-directory link. A linked root is refused;
+an unreferenced leaf link is unlinked relative to its held parent, never followed.
+Retained digest names and the existing replay gate remain the policy authority.
+This is per-pass descriptor confinement, not a boot lease or an atomic
+inode-conditional unlink. A concurrent name replacement can still affect which
+entry inside the held parent is unlinked. Native before evidence and unexecuted
+after fixtures are recorded in
+[the payload boundary evidence](../evidence/2026-10-22-exact-payload-nofollow/README.md).
 
 `compaction.status` is always `unobserved`: EOF and sweep completion do not prove
 compaction succeeded. `failure_log` identifies the original Keeper warning

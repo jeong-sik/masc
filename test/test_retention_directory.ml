@@ -169,8 +169,38 @@ let test_directory_failure_still_propagates () =
       (fun () -> ignore (Directory.names held : string list))) with
   | Some () -> () | None -> Alcotest.fail "fixture root disappeared"
 
+let test_checked_removals_acknowledge_only_actual_effects () =
+  let root = fresh () and outside = fresh () in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root; Fs_compat.remove_tree outside)
+    (fun () ->
+      let marker = Filename.concat outside "marker" in write marker;
+      Unix.symlink marker (Filename.concat root "link");
+      let child = Filename.concat root "child" in Unix.mkdir child 0o700;
+      write (Filename.concat child "blocking-entry");
+      bound root (fun held ->
+        Alcotest.(check bool) "missing unlink is not counted" false
+          (Directory.unlink_entry held "absent");
+        Alcotest.(check bool) "link name unlink acknowledged" true
+          (Directory.unlink_entry held "link");
+        Alcotest.(check bool) "repeated unlink is not counted twice" false
+          (Directory.unlink_entry held "link");
+        (match Directory.unlink_entry held "child" with
+         | true | false -> Alcotest.fail "unlink of a directory was not refused"
+         | exception Unix.Unix_error _ -> ());
+        (match Directory.remove_empty_child_checked held "child" with
+         | true | false -> Alcotest.fail "nonempty rmdir failure was swallowed"
+         | exception Unix.Unix_error _ -> ());
+        Sys.remove (Filename.concat child "blocking-entry");
+        Alcotest.(check bool) "empty directory removal acknowledged" true
+          (Directory.remove_empty_child_checked held "child");
+        Alcotest.(check bool) "missing directory is not counted twice" false
+          (Directory.remove_empty_child_checked held "child"));
+      Alcotest.(check string) "link target bytes remain" "sentinel"
+        (Fs_compat.load_file marker))
+
 let () = Alcotest.run "physical retention containment"
   ["owned pruning", [
+    Alcotest.test_case "checked removals acknowledge actual effects" `Quick test_checked_removals_acknowledge_only_actual_effects;
     Alcotest.test_case "mtime, links and FIFO" `Quick test_regular_mtime_and_special_entries;
     Alcotest.test_case "child link skipped" `Quick test_child_link_is_skipped;
     Alcotest.test_case "fractional mtime retention" `Quick test_fractional_mtime_boundary;

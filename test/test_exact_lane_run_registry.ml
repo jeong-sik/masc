@@ -926,7 +926,8 @@ let test_replay_removes_payload_files_no_row_names () =
      check int "one successful unlink" 1 counts.unlinked_entries;
      check int "one successful rmdir" 1 counts.removed_run_directories;
      check int "no failed root entries" 0 counts.failed_root_entries
-   | R.Not_attempted | R.Replay_not_trusted | R.Root_absent | R.Root_unavailable ->
+   | R.Not_attempted | R.Replay_not_trusted | R.Root_absent | R.Root_unavailable
+   | R.Sweep_scope_failed _ ->
      fail "clean replay did not record its sweep");
   let kept = R.get replayed ~run_id:"kept" |> Option.get in
   check bool "a retained run keeps its payload files" true
@@ -1557,7 +1558,8 @@ let test_startup_sweep_reports_partial_removal_without_conflating_units () =
      check int "no rmdir succeeded" 0 counts.removed_run_directories;
      let actual_unlinks = if Sys.file_exists removable then 1 else 2 in
      check int "successful unlinks survive the later error" actual_unlinks counts.unlinked_entries
-   | R.Not_attempted | R.Replay_not_trusted | R.Root_absent | R.Root_unavailable ->
+   | R.Not_attempted | R.Replay_not_trusted | R.Root_absent | R.Root_unavailable
+   | R.Sweep_scope_failed _ ->
      fail "expected an observed sweep with partial failure");
   check bool "independent root file was removed" false (Sys.file_exists unexpected);
   check bool "failed directory remains" true (Sys.file_exists blocker);
@@ -1580,11 +1582,103 @@ let test_startup_sweep_reports_unavailable_root () =
   remove_if_exists path
 ;;
 
+let with_payload_link_fixture f =
+  let path = fresh_log_path "exact-payload-nofollow-" in
+  let base = Filename.dirname path in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) (fun () ->
+    let outside = Filename.concat base "owned-marker-directory" in
+    Unix.mkdir outside 0o700;
+    let marker = Filename.concat outside "owned-marker.txt" in
+    let bytes = "owned marker outside the payload root must stay unchanged" in
+    Fs_compat.save_file marker bytes;
+    f path outside (fun () ->
+      check string "actual marker bytes outside payload root preserved" bytes
+        (Fs_compat.load_file marker)))
+;;
+
+let check_one_link_unlink replayed =
+  match (R.startup_observation replayed).payload_sweep with
+  | R.Swept counts ->
+    check int "one root entry examined" 1 counts.examined_root_entries;
+    check int "only the link name was unlinked" 1 counts.unlinked_entries;
+    check int "no directory removal claimed" 0 counts.removed_run_directories;
+    check int "no failure hidden" 0 counts.failed_root_entries
+  | R.Not_attempted | R.Replay_not_trusted | R.Root_absent | R.Root_unavailable
+   | R.Sweep_scope_failed _ ->
+    fail "expected a completed descriptor-bound sweep"
+;;
+
+let test_payload_root_link_is_refused_without_following_it () =
+  with_payload_link_fixture (fun path outside check_marker ->
+    Fs_compat.save_file path "";
+    let root = Filename.concat (Filename.dirname path) R.payload_dirname in
+    Unix.symlink outside root;
+    let replayed = R.replay path in
+    check bool "linked root is unavailable, not an empty successful sweep" true
+      ((R.startup_observation replayed).payload_sweep = R.Root_unavailable);
+    check_marker ();
+    check bool "root link itself is retained" true
+      ((Unix.lstat root).Unix.st_kind = Unix.S_LNK))
+;;
+
+let test_orphan_directory_link_only_unlinks_the_link_name () =
+  with_payload_link_fixture (fun path outside check_marker ->
+    Fs_compat.save_file path "";
+    let root = Filename.concat (Filename.dirname path) R.payload_dirname in
+    Unix.mkdir root 0o700;
+    let link = Filename.concat root "orphan-link" in
+    Unix.symlink outside link;
+    let replayed = R.replay path in
+    check_marker ();
+    check bool "unreferenced root link removed" false (Sys.file_exists link);
+    check_one_link_unlink replayed)
+;;
+
+let test_retained_directory_link_never_grants_target_cleanup () =
+  with_payload_link_fixture (fun path outside check_marker ->
+    let registry = R.create ~path () in
+    R.register_running registry ~run_id:"retained" ~lane:R.Librarian ~actor:"fixture"
+      ~started_at:1.0 ~input:(R.Exact_input (`String "original retained input"));
+    let dir = payload_run_dir path ~run_id:"retained" in
+    Unix.rename dir (Filename.concat (Filename.dirname path) "saved-original-directory");
+    Unix.symlink outside dir;
+    let replayed = R.replay path in
+    check_marker ();
+    check bool "the registry still names the retained run" true
+      (List.exists (fun (run : R.run) -> run.run_id = "retained") (R.list_runs replayed));
+    check bool "cleanup removed only the directory-link name" false (Sys.file_exists dir);
+    check_one_link_unlink replayed)
+;;
+
+let test_unreferenced_leaf_link_never_unlinks_its_target () =
+  with_payload_link_fixture (fun path outside check_marker ->
+    let registry = R.create ~path () in
+    R.register_running registry ~run_id:"retained" ~lane:R.Librarian ~actor:"fixture"
+      ~started_at:1.0 ~input:(R.Exact_input (`String "original retained input"));
+    let link = Filename.concat (payload_run_dir path ~run_id:"retained") "unexpected-link" in
+    Unix.symlink (Filename.concat outside "owned-marker.txt") link;
+    let replayed = R.replay path in
+    check_marker ();
+    check bool "unreferenced leaf link removed" false (Sys.file_exists link);
+    check_one_link_unlink replayed;
+    let retained = R.get replayed ~run_id:"retained" |> Option.get in
+    check bool "actual referenced input remains readable" true
+      (retained.input_availability = R.Available))
+;;
+
 let () =
   run
     "exact_lane_run_registry"
     [ ( "registry"
-      , [ test_case "startup observation is immutable and distinguishes absence" `Quick
+      , [ test_case "payload root link is refused without following it" `Quick
+            test_payload_root_link_is_refused_without_following_it
+        ; test_case "orphan directory link unlinks only its own name" `Quick
+            test_orphan_directory_link_only_unlinks_the_link_name
+        ; test_case "retained directory link cannot authorize target cleanup" `Quick
+            test_retained_directory_link_never_grants_target_cleanup
+        ; test_case "unreferenced leaf link cannot unlink its target" `Quick
+            test_unreferenced_leaf_link_never_unlinks_its_target
+        ; test_case "startup observation is immutable and distinguishes absence" `Quick
             test_startup_observation_is_immutable_and_distinguishes_absence
         ; test_case "startup sweep reports partial effects in separate units" `Quick
             test_startup_sweep_reports_partial_removal_without_conflating_units

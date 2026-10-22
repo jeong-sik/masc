@@ -174,7 +174,9 @@ let support backend operation = match backend with
       | Safari_unavailable -> missing)
     | Read_frames -> gecko_only backend (invoke ~mode:"frames" Read)
         [observed;"Explicit tabId; framePath consists of observed outer-to-inner frame selectors."]
-    | Frame_interaction -> missing
+    | Frame_interaction -> gecko_only backend (invoke ~action:"click" Interact)
+        [observed;"framePath (observed outer-to-inner iframe selectors) applies to click, fill, select_option and scroll with a selector. Inspect the same frame first; expectedUrl is the frame document's URL.";
+         "A live connection, the extension and Stagehand refuse a framed request before any effect."]
     | Read_dialog -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional Tabs
           ["Each list_tabs row of a tab blocked on a dialog carries dialog: type (alert, confirm, prompt or beforeunload), message and, for a prompt, defaultValue. It comes from the browser's own events since this connection began, so a dialog that was already open then is not listed.";

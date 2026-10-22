@@ -1,5 +1,5 @@
 (** Closed browser actions; selectors and text remain data. *)
-type request = { route : Browser_selection.preference; tab_id : int;
+type request = { route : Browser_selection.preference; tab_id : int; frame_path : string list;
   expected_url : string option; action : Browser_lane.interaction }
 val route_names : string list
 (** The argument names that pick the browser, not the action: [lane] and [clientId]. *)

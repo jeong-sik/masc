@@ -27,7 +27,7 @@ let scenario () = Eio_main.run (fun env ->
     let rec registered () = if B.connected_clients ()=[] then (Eio.Fiber.yield ();registered ()) in
     registered ();
     let issue () = send (W.Issue {route=B.Live_route (Some id);
-      verb=B.Page_interact {tab_id=7;expected_url=Some "https://example.org/";action=B.Hover (B.Selector "#row")};
+      verb=B.Page_interact {frame_path=[];tab_id=7;expected_url=Some "https://example.org/";action=B.Hover (B.Selector "#row")};
       actor=Some "keeper";timeout_sec=2.;only_if_idle=false}) in
     let pending = Eio.Fiber.fork_promise ~sw issue in
     let issued = command (Eio.Promise.await_exn poll) in
@@ -108,7 +108,7 @@ let scenario () = Eio_main.run (fun env ->
     check (list (option string)) "Chrome receives the original actor" [Some "chrome-keeper"] !chrome_actors;
     let chrome_pending=Eio.Fiber.fork_promise ~sw (fun () ->
       send (W.Issue {route=B.Stagehand_route;
-        verb=B.Page_interact {tab_id=7;expected_url=None;action=B.Hover (B.Selector "#row")};
+        verb=B.Page_interact {frame_path=[];tab_id=7;expected_url=None;action=B.Hover (B.Selector "#row")};
         actor=Some "chrome-keeper";timeout_sec=2.;only_if_idle=false})) in
     Eio.Promise.await chrome_entered;
     let retired=Eio.Fiber.fork_promise ~sw (fun () -> send W.Retire) in

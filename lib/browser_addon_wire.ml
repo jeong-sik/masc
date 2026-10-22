@@ -98,7 +98,7 @@ let verb_of_json ~route value =
   | "page.interact" ->
       let* fields = object_fields Browser_interaction.wire_fields args in
       let* request = Browser_interaction.parse (`Assoc (route_fields route @ fields)) in
-      Ok (B.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;action=request.action})
+      Ok (B.Page_interact {tab_id=request.tab_id;frame_path=request.frame_path;expected_url=request.expected_url;action=request.action})
   | "session.open" -> let* fields = fields ["headless"] in let* headless = optional_field fields "headless" boolean in Ok (B.Session_open {headless})
   | "session.close" -> let* _ = exact [] args in Ok B.Session_close
   | "session.status" -> let* _ = exact [] args in Ok B.Session_status

@@ -1071,6 +1071,7 @@ async function pageInteract(args, deadlineMs, signal) {
   // A later executeScript rejection can lose a result after a page effect.
   try {
     if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
+    if (args.framePath !== undefined) throw new Error("frame_path_is_not_supported_by_the_extension_yet");
     if (!['click', 'follow_link', 'fill', 'select_option', 'scroll', 'click_at', 'scroll_at'].includes(args.action)) throw new Error("unknown_interaction_action");
     const tab = await browser.tabs.get(args.tabId);
     signal?.throwIfAborted();

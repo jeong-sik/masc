@@ -295,7 +295,7 @@ let test_actor_feedback_outcomes () = Eio_main.run (fun _ ->
         if !overlay_fails then raise (Failure "overlay unavailable") else Ok (`Assoc ["value",`String "null"])
       | None -> call fake request in
   let invoke () = Executor.execute ~tabs ~call ~actor:"keeper-observed"
-    (Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/shop";
+    (Lane.Page_interact {frame_path=[];tab_id=0;expected_url=Some "http://127.0.0.1:1/shop";
       action=Lane.Hover_at {point;viewport=observed_viewport}}) in
   let check_feedback phase =
     let start=List.hd !begins and finish=List.hd !finishes in
@@ -320,7 +320,7 @@ let test_actor_feedback_outcomes () = Eio_main.run (fun _ ->
   check int "overlay failures neither block nor repeat authoritative input" 1
     (List.length (List.filter (function Wire.Page_hover _->true|_->false) fake.sent));
   let count=List.length !begins in
-  ignore (served (Executor.execute ~tabs ~call (Lane.Page_interact {tab_id=0;
+  ignore (served (Executor.execute ~tabs ~call (Lane.Page_interact {frame_path=[];tab_id=0;
     expected_url=Some "http://127.0.0.1:1/shop";action=Lane.Hover_at {point;viewport=observed_viewport}})));
   check int "anonymous calls invent no owner" count (List.length !begins);
   overlay_fails:=false;
@@ -332,7 +332,7 @@ let test_actor_feedback_outcomes () = Eio_main.run (fun _ ->
   (match Eio.Switch.run (fun sw ->
      Eio.Fiber.fork ~sw (fun () ->
        match Executor.execute ~tabs ~call:cancel_call ~actor:"keeper-observed"
-           (Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/shop";
+           (Lane.Page_interact {frame_path=[];tab_id=0;expected_url=Some "http://127.0.0.1:1/shop";
              action=Lane.Hover_at {point;viewport=observed_viewport}}) with
        | _ -> fail "cancelled native input returned normally"
        | exception (Eio.Cancel.Cancelled _ as exn) -> cancelled:=true;raise exn);
@@ -374,7 +374,7 @@ let test_semantic_pointer_input () =
          | value::rest -> responses:=rest;Ok (`Assoc ["value",`String (to_s value)])
          | [] -> fail "unexpected evaluation")
       | _ -> call fake request in
-    Executor.execute ~tabs ~call (Lane.Page_interact {tab_id=0;expected_url;action}) in
+    Executor.execute ~tabs ~call (Lane.Page_interact {frame_path=[];tab_id=0;expected_url;action}) in
   let viewport = Lane.Pointer.viewport_to_json observed_viewport in
   let resolved_point = Lane.Pointer.point_to_json point in
   let hovered = served (execute (Lane.Hover (Lane.Selector "#menu"))
@@ -413,7 +413,7 @@ let test_semantic_pointer_input () =
       check string "click binds the resolver's URL and viewport before native input"
         (Executor.evaluate_expression ~runtime:Executor.Scene_runtime
           ~body:Masc.Browser_interaction.pointer_guard_script
-          ~args:(Lane.interaction_args ~tab_id:0 ~expected_url
+          ~args:(Lane.interaction_args ~tab_id:0 ~frame_path:[] ~expected_url
             (Lane.Click_at {point;viewport=observed_viewport;button=Lane.Pointer.Primary}))) expression
     | _ -> fail "observed click must resolve, guard, and dispatch one native click")
     [Lane.Click "#menu-item";Lane.Click_node {document_id="d1";node_id="n1"}];
@@ -421,6 +421,10 @@ let test_semantic_pointer_input () =
     (rejected_before_effect (execute (Lane.Hover (Lane.Selector "#covered"))
       (`Assoc ["interactionFailure",`Assoc ["message",`String "element_pointer_obstructed";"effectStarted",`Bool false]])));
   check int "refusal sends only resolution" 1 (List.length fake.sent);
+  check bool "a framed request is refused before any input" true
+    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
+       (Lane.Page_interact { frame_path = ["iframe"]; tab_id = 0; expected_url; action = Lane.Click "#x" })));
+  check int "the framed refusal sends nothing" 1 (List.length fake.sent);
   check bool "malformed resolver geometry is before input" true
     (rejected_before_effect (execute (Lane.Hover (Lane.Selector "#menu")) (`Assoc [])));
   check int "malformed target sends no native input" 1 (List.length fake.sent);
@@ -441,14 +445,14 @@ let test_semantic_pointer_input () =
   fake.sent <- [];
   let raw = Lane.Drag {from=point;to_={x=0.75;y=0.5};viewport=observed_viewport;via=path;duration_ms=0} in
   ignore (served (Executor.execute ~tabs ~call:(call fake)
-    (Lane.Page_interact {tab_id=0;expected_url;action=raw})));
+    (Lane.Page_interact {frame_path=[];tab_id=0;expected_url;action=raw})));
   check bool "coordinate drags forward the same observed path" true
     (List.exists (function Wire.Page_drag_and_drop {route=[{x=480.;y=60.};{x=560.;y=240.}];_}->true|_->false) fake.sent);
   List.iter (fun action ->
     fake.sent <- [];
     check bool "movement duration is refused before input" true
       (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
-        (Lane.Page_interact {tab_id=0;expected_url;action})));
+        (Lane.Page_interact {frame_path=[];tab_id=0;expected_url;action})));
     check int "timing is refused before resolution too" 0 (List.length fake.sent))
     [Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";via=path;duration_ms=10};
      Lane.Drag {from=point;to_={x=0.75;y=0.5};viewport=observed_viewport;via=path;duration_ms=10}]
@@ -458,7 +462,7 @@ let test_hover_effect_boundary () =
   let tabs = Executor.Tabs.create () and fake = fake [shop ()] ~active:(Some "P2") in
   ignore (listed tabs fake);
   let invoke () = Executor.execute ~tabs ~call:(call fake)
-    (Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/shop";
+    (Lane.Page_interact {frame_path=[];tab_id=0;expected_url=Some "http://127.0.0.1:1/shop";
       action=Lane.Hover_at {point;viewport=observed_viewport}}) in
   fake.sent <- [];
   fake.failing <- (function Wire.Page_evaluate _ -> Some (Session.Rejected {code= -32603;message="observed_viewport_changed"}) | _ -> None);
@@ -493,10 +497,10 @@ let test_select_option () =
        ; "scrollX", `Int 0
        ; "scrollY", `Int 0
        ]);
-  let receipt = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action })) in
+  let receipt = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action })) in
   (match fake.sent with
    | [ Wire.Page_evaluate { expression; _ } ] ->
-     let args = Lane.interaction_args ~tab_id:0 ~expected_url action in
+     let args = Lane.interaction_args ~tab_id:0 ~frame_path:[] ~expected_url action in
      check string "select_option sends the shared interaction script with its selector and value"
        (Executor.evaluate_expression ~runtime:Executor.Scene_runtime ~body:Masc.Browser_interaction.script ~args)
        expression;
@@ -506,7 +510,7 @@ let test_select_option () =
    | _ -> fail "select_option must be exactly one page.evaluate");
   check string "the receipt keeps the action" "select_option" Yojson.Safe.Util.(member "action" receipt |> to_string);
   fake.evaluated <- Some (`Assoc ["interactionFailure", `Assoc ["message", `String "option_not_found"; "effectStarted", `Bool false]]);
-  (match Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action }) with
+  (match Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action }) with
    | Lane.Rejected_before_effect message ->
      check string "a page-script refusal is rejected before any effect, with its reason" "option_not_found" message
    | Lane.Answered _ | Lane.Lane_absent | Lane.Timed_out | Lane.Refused _ ->
@@ -528,31 +532,31 @@ let test_interactions () =
        ; "scrollX", `Int 0
        ; "scrollY", `Int 0
        ]);
-  let receipt = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action = click })) in
+  let receipt = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action = click })) in
   (match fake.sent with
    | [ Wire.Page_evaluate { expression; _ } ] ->
      check string "the automation lane's interaction script"
        (Executor.evaluate_expression ~runtime:Executor.Scene_runtime ~body:Masc.Browser_interaction.script
-          ~args:(Lane.interaction_args ~tab_id:0 ~expected_url click))
+          ~args:(Lane.interaction_args ~tab_id:0 ~frame_path:[] ~expected_url click))
        expression
    | _ -> fail "one page.evaluate");
   check int "the receipt names its tab" 0 Yojson.Safe.Util.(member "tabId" receipt |> to_int);
   fake.evaluated <- Some (`Assoc []);
   check bool "an empty scripted receipt is not success" true
     (refused (Executor.execute ~tabs ~call:(call fake)
-       (Lane.Page_interact { tab_id = 0; expected_url; action = click })));
+       (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action = click })));
   fake.evaluated <- Some (`Assoc [ "interactionFailure", `Bool true ]);
   check bool "a malformed failure is not success" true
     (refused (Executor.execute ~tabs ~call:(call fake)
-       (Lane.Page_interact { tab_id = 0; expected_url; action = click })));
+       (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action = click })));
   fake.evaluated <- Some (`Assoc [ "interactionFailure", `Assoc [ "message", `String "no element"; "effectStarted", `Bool false ] ]);
   check bool "a refusal before the click started is before effect" true
-    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action = click })));
+    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action = click })));
   fake.evaluated <- None;
   fake.sent <- [];
   let clicked =
     served (Executor.execute ~tabs ~call:(call fake)
-      (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button = Lane.Pointer.Primary } }))
+      (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button = Lane.Pointer.Primary } }))
   in
   (match List.rev fake.sent with
    | [ Wire.Page_evaluate _; Wire.Page_click { page_id = "P2"; x = 400.; y = 150.; button = Lane.Pointer.Primary }; Wire.Page_evaluate _ ] -> ()
@@ -563,7 +567,7 @@ let test_interactions () =
     fake.evaluated <- None;
     fake.sent <- [];
     ignore (served (Executor.execute ~tabs ~call:(call fake)
-      (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button } })));
+      (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button } })));
     check bool "the requested button reaches the runtime's click" true
       (List.exists (function Wire.Page_click { button = sent; _ } -> sent = button | _ -> false) fake.sent))
     [ Lane.Pointer.Middle; Lane.Pointer.Secondary ];
@@ -572,34 +576,34 @@ let test_interactions () =
     fake.sent <- [];
     check bool "touch is refused before effect" true
       (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
-        (Lane.Page_interact { tab_id = 0; expected_url; action })));
+        (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action })));
     check bool "and nothing was sent" true (fake.sent = []))
     [ Lane.Tap_at { point; viewport = observed_viewport };
       Lane.Swipe { from = point; to_ = point; viewport = observed_viewport; via = []; duration_ms = 0 } ];
   fake.evaluated <- None;
   fake.sent <- [];
   ignore (served (Executor.execute ~tabs ~call:(call fake)
-    (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Set_viewport (Lane.Fit { width = 800; height = 600 }) })));
+    (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action = Lane.Set_viewport (Lane.Fit { width = 800; height = 600 }) })));
   check bool "the size reaches the runtime's set_viewport_size" true
     (List.exists (function Wire.Page_set_viewport_size { width = 800; height = 600; _ } -> true | _ -> false) fake.sent);
   fake.sent <- [];
   check bool "restoring the browser's own size is refused before effect" true
     (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
-      (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Set_viewport Lane.Browser_default })));
+      (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action = Lane.Set_viewport Lane.Browser_default })));
   check bool "and nothing was sent to resize" true
     (List.for_all (function Wire.Page_set_viewport_size _ -> false | _ -> true) fake.sent);
   fake.evaluated <- Some (`Assoc [ "url", `String "http://127.0.0.1:1/shop"; "title", `Int 1 ]);
   fake.sent <- [];
   check bool "a malformed receipt after native input is refused" true
     (refused (Executor.execute ~tabs ~call:(call fake)
-       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button = Lane.Pointer.Primary } })));
+       (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button = Lane.Pointer.Primary } })));
   check bool "native input was sent before the malformed receipt" true
     (List.exists (function Wire.Page_click _ -> true | _ -> false) fake.sent);
   fake.evaluated <- Some (`Assoc []);
   fake.sent <- [];
   check bool "a malformed guard result is before effect" true
     (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
-       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button = Lane.Pointer.Primary } })));
+       (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button = Lane.Pointer.Primary } })));
   check bool "a malformed guard never sends native input" true
     (List.for_all (function Wire.Page_click _ -> false | _ -> true) fake.sent);
   fake.evaluated <- None;
@@ -607,7 +611,7 @@ let test_interactions () =
   fake.failing <- (function Wire.Page_evaluate _ -> Some (Session.Rejected { code = -32603; message = "page_url_changed" }) | _ -> None);
   check bool "a guard that refused is before effect" true
     (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
-       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button = Lane.Pointer.Primary } })));
+       (Lane.Page_interact { frame_path = []; tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport; button = Lane.Pointer.Primary } })));
   check bool "and nothing was clicked" true
     (List.for_all (function Wire.Page_click _ -> false | _ -> true) fake.sent)
 ;;
@@ -649,7 +653,7 @@ let test_zoom_requires_extension () =
   ignore (listed tabs fake);fake.sent<-[];
   check bool "owned Chrome refuses browser zoom before native input" true
     (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
-      (Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/shop";
+      (Lane.Page_interact {frame_path=[];tab_id=0;expected_url=Some "http://127.0.0.1:1/shop";
         action=Lane.Set_zoom {factor=1.5}})));
   check int "unsupported zoom sends no runtime request" 0 (List.length fake.sent)
 ;;
@@ -684,7 +688,7 @@ let test_native_keyboard_and_double_click () =
     Lane.Double_click_at {point;viewport=observed_viewport}] in
   List.iter (fun action ->
     fake.sent <- [];
-    let verb = Lane.Page_interact {tab_id=0;expected_url=Some "https://example.org";action} in
+    let verb = Lane.Page_interact {frame_path=[];tab_id=0;expected_url=Some "https://example.org";action} in
     let result = served (Executor.execute ~tabs ~call:(call fake) verb) in
     check string "receipt retains semantic input action" (Lane.interaction_verb action)
       Yojson.Safe.Util.(result |> member "action" |> to_string);
@@ -708,18 +712,18 @@ let test_native_keyboard_and_double_click () =
     fake.sent <- [];
     check bool "text controls are rejected before native input" true
       (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
-        (Lane.Page_interact {tab_id=0;expected_url=Some "https://example.org";
+        (Lane.Page_interact {frame_path=[];tab_id=0;expected_url=Some "https://example.org";
           action=Lane.Type_text {document_id="d1";text}})));
     check int "rejected text sends no runtime request" 0 (List.length fake.sent)) ["a\tb";"a\nb";"a\rb"];
   let supplementary=match Lane.Keyboard.of_wire ~key:"🙂" ~modifiers:[] with Ok key->key|Error detail->fail detail in
   fake.sent <- [];
   check bool "runtime cannot silently accept an unsupported supplementary key" true
     (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
-      (Lane.Page_interact {tab_id=0;expected_url=Some "https://example.org";
+      (Lane.Page_interact {frame_path=[];tab_id=0;expected_url=Some "https://example.org";
         action=Lane.Press_key {document_id="d1";key=supplementary}})));
   check int "unsupported key never reaches runtime" 0 (List.length fake.sent);
   ignore (served (Executor.execute ~tabs ~call:(call fake)
-    (Lane.Page_interact {tab_id=0;expected_url=Some "https://example.org";
+    (Lane.Page_interact {frame_path=[];tab_id=0;expected_url=Some "https://example.org";
       action=Lane.Type_text {document_id="d1";text="\xee\x80\x89"}})));
   check bool "Stagehand PUA remains literal text rather than a modifier chord" true
     (List.exists (function Wire.Page_type {text="\xee\x80\x89";_}->true|_->false) fake.sent)

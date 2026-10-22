@@ -65,12 +65,12 @@ let test_work_lifecycle () =
     (choose ~verb empty=Error Selection.No_available_browser)) [Lane.Session_close;Lane.Page_goto {url="https://example.org";tab_id=None}]
 let test_eligibility () =
   let extension=client "1" Lane.Web_extension in
-  let hover=Lane.Page_interact {tab_id=0;expected_url=None;action=Lane.Hover (Lane.Selector "#observed")} in
+  let hover=Lane.Page_interact {frame_path=[];tab_id=0;expected_url=None;action=Lane.Hover (Lane.Selector "#observed")} in
   check bool "extension cannot be silently selected for trusted hover" true
     (choose ~verb:hover {empty with live_clients=[extension]}=Error Selection.No_available_browser);
   check bool "disabled login is not selected" true
     (choose {empty with live_activity=Lane.Disabled;live_clients=[client "1" Lane.Webdriver_bidi]}=Error Selection.No_available_browser);
-  let timing=Lane.Page_interact {tab_id=0;expected_url=None;action=Lane.Drag_to {
+  let timing=Lane.Page_interact {frame_path=[];tab_id=0;expected_url=None;action=Lane.Drag_to {
     source=Lane.Selector "#from";destination=Lane.Selector "#to";via=[];duration_ms=10}} in
   selected {route=Lane.Automation_route;reason=Selection.Existing_work_session}
     (choose ~verb:timing {empty with stagehand=work Lane.Browser_open;automation=work Lane.Browser_open});

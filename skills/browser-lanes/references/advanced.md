@@ -6,9 +6,10 @@
 배열에 넣어 안쪽 frames를 읽고, 필요한 깊이까지 바깥→안쪽 순으로 이어간다.
 같은 경로의 `text`와 `elements`를 읽은 뒤 해당 탭·프레임에서 조작한다.
 
-`framePath`는 automation의 `BrowserRead` text/elements/frames 읽기와
-`BrowserAct upload`에 사용한다. `BrowserInteract`는 최상위 문서 전용이며
-`framePath`를 받지 않으므로, 프레임 안 요소의 click/fill은 아직 할 수 없다.
+`framePath`는 automation의 `BrowserRead` text/elements/frames 읽기, `BrowserAct upload`,
+`BrowserInteract`의 selector 기반 click/fill/select_option/scroll에 사용한다.
+`BrowserInteract`의 `expectedUrl`은 안쪽 frame 문서의 URL이다. live 연결, 확장,
+Stagehand는 `framePath`가 있는 요청을 효과 전에 거절하므로 최상위 문서만 조작할 수 있다.
 탭 이동, 히스토리, JS 대화상자와 screenshot에는 넣지 않는다. screenshot은
 최상위 viewport를 캡처하므로 스크롤한 프레임의 입력란이 화면 밖일 수 있다.
 

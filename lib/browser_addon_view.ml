@@ -51,7 +51,7 @@ let capture host json=run (fun () ->
 let interact host json=run (fun () ->
   let* request=parse Browser_interaction.parse json in
   let* receipt=Host.issue host ~preference:request.route
-    (B.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;action=request.action}) in
+    (B.Page_interact {tab_id=request.tab_id;frame_path=request.frame_path;expected_url=request.expected_url;action=request.action}) in
   Ok (Browser_binding.annotate receipt.binding receipt.data))
 let request_fields allowed = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key allowed) fields -> Ok fields

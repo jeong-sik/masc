@@ -33,7 +33,7 @@ let test_colliding_tabs_are_isolated () = with_clients (fun sw connect ->
      = Error (Lane.Ambiguous_clients [firefox.client_id; zen.client_id]));
   let result = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for
     ~target:(target firefox.client_id)
-    ~verb:(Lane.Page_interact {tab_id=1; expected_url=None; action=Lane.Click "#button"}) ~timeout_sec:1.) in
+    ~verb:(Lane.Page_interact {frame_path=[];tab_id=1; expected_url=None; action=Lane.Click "#button"}) ~timeout_sec:1.) in
   check bool "Zen cannot consume Firefox's tab-1 click" true
     (Lane.take_command ~client_info:zen ~window_sec:0.01 = Ok None);
   let command = take firefox in
@@ -67,7 +67,7 @@ let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connec
      or a clock-dependent scheduling race. No command has been dispatched. *)
   client.connected_until <- Monotonic_deadline.after ~seconds:0.;
   let answer = Lane.issue_for ~target:pinned
-    ~verb:(Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
+    ~verb:(Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Scroll {x=0;y=120}}) ~timeout_sec:1. in
   check bool "expiry after target resolution is the same selection failure" true
     (answer = Error (Lane.Selected_client_disconnected info.client_id));
@@ -77,7 +77,7 @@ let test_timed_out_queue_is_not_executed () = with_clients (fun _ connect ->
   let client = connect Lane.Firefox in
   check bool "unconsumed action times out" true
     (Lane.issue_for ~target:(target client.client_id)
-      ~verb:(Lane.Page_interact {tab_id=1; expected_url=None; action=Lane.Scroll {x=0;y=10}})
+      ~verb:(Lane.Page_interact {frame_path=[];tab_id=1; expected_url=None; action=Lane.Scroll {x=0;y=10}})
       ~timeout_sec:0.001 = Ok Lane.Timed_out);
   check bool "later poll drops timed-out queued action" true
     (Lane.take_command ~client_info:client ~window_sec:0.002 = Ok None))
@@ -114,7 +114,7 @@ let test_sources_and_live_policy () = with_clients (fun _ connect ->
 let viewport : Lane.Pointer.viewport =
   {document_id="observed-page"; width=800.; height=600.; scroll_x=0.; scroll_y=0.}
 let point : Lane.Pointer.point = {x=0.5;y=0.5}
-let interact action = Lane.Page_interact {tab_id=2; expected_url=Some "https://example.org"; action}
+let interact action = Lane.Page_interact {frame_path=[];tab_id=2; expected_url=Some "https://example.org"; action}
 let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Tab_listing -> Tabs_list
   | Text_read -> Page_read {tab_id=Some 2; max_chars=None}
@@ -339,7 +339,7 @@ let test_agent_activity () = Browser_lane.install_activity_observer (Some (fun _
  let client=activity_ok (Browser_lane.register info) in
  let viewport : Browser_lane.Pointer.viewport = {document_id="owned";width=100.;height=100.;scroll_x=0.;scroll_y=0.} in
  let point : Browser_lane.Pointer.point = {x=0.5;y=0.5} in
- let verb=Browser_lane.Page_interact {tab_id=1;expected_url=Some "https://example.org/";action=Hover_at {point;viewport}} in
+ let verb=Browser_lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org/";action=Hover_at {point;viewport}} in
  let queued=Eio.Fiber.fork_promise ~sw (fun () -> Browser_lane.issue_for_actor ~actor:(Some "fixture-keeper") ~target:(Live_client client) ~verb ~timeout_sec:20.) in
  let rec admitted () = match Browser_lane.client_interactions client with [] -> Eio.Fiber.yield ();admitted () | _::_ -> () in admitted ();
  let activity=Browser_lane.client_interactions client in

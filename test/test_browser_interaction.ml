@@ -11,7 +11,7 @@ let test_typed_actions () =
   check bool "page observation precondition retained" true
     (request.expected_url = Some "https://example.org/form");
   let scroll = parsed (fields "scroll" @ ["x", `Int (-10); "y", `Int 200]) in
-  let verb = Browser_lane.Page_interact {tab_id=scroll.tab_id;
+  let verb = Browser_lane.Page_interact {frame_path=[];tab_id=scroll.tab_id;
     expected_url=scroll.expected_url; action=scroll.action} in
   check bool "live interactions admitted" true (Browser_lane.verb_allowed_on_live verb);
   check bool "interactions are writes" false (Browser_lane.verb_is_read verb);
@@ -22,7 +22,7 @@ let test_native_keyboard_parser () =
     fields "press_key" @ bound @ ["key",`String "a";"modifiers",`List [`String "Meta"]];
     fields "double_click" @ ["expectedUrl",`String "https://example.org";"selector",`String "#editor"]] in
   List.iter (fun args -> let request=parsed args in
-    let wire=Browser_lane.interaction_args ~tab_id:request.tab_id ~expected_url:request.expected_url request.action in
+    let wire=Browser_lane.interaction_args ~tab_id:request.tab_id ~frame_path:request.frame_path ~expected_url:request.expected_url request.action in
     check bool "native input round trips closed action" true ((parsed Yojson.Safe.Util.(to_assoc wire)).action=request.action)) cases;
   List.iter (fun args -> check bool "bad keyboard or unobserved focus rejected" true
     (Result.is_error (Interaction.parse (`Assoc args))))
@@ -36,7 +36,7 @@ let test_browser_zoom_boundary () =
   let request=parsed (base @ ["factor",`Float 1.5]) in
   check bool "explicit factor is carried as browser zoom" true
     (request.action=Browser_lane.Set_zoom {factor=1.5});
-  let wire=Browser_lane.interaction_args ~tab_id:request.tab_id ~expected_url:request.expected_url request.action in
+  let wire=Browser_lane.interaction_args ~tab_id:request.tab_id ~frame_path:request.frame_path ~expected_url:request.expected_url request.action in
   check bool "native host receives the requested scale" true
     (Yojson.Safe.Util.member "factor" wire=`Float 1.5);
   List.iter (fun factor -> check bool "invalid browser API factor never enters a request" true
@@ -50,7 +50,7 @@ let test_activate_tab () =
   let args = fields "activate_tab" @ ["lane",`String "live";"expectedUrl",`String "https://example.org"] in
   let request = parsed args in
   check bool "activation is a typed live action" true (request.action=Browser_lane.Activate_tab);
-  let wire = Browser_lane.interaction_args ~tab_id:7 ~expected_url:request.expected_url request.action in
+  let wire = Browser_lane.interaction_args ~tab_id:7 ~frame_path:[] ~expected_url:request.expected_url request.action in
   check bool "wire pins tab URL and activation only" true
     (wire = `Assoc ["tabId",`Int 7;"action",`String "activate_tab";"expectedUrl",`String "https://example.org"]);
   List.iter (fun input -> check bool "activation rejects missing URL, unrelated inputs and automation" true
@@ -79,7 +79,7 @@ let test_semantic_pointer_actions () =
     (hover.action = Browser_lane.Hover (Browser_lane.Scene_node {document_id="doc";node_id="source"}));
   let drag = parsed (fields "drag_to" @ base @ ["source",`Assoc observed;
     "destination",`Assoc ["selector",`String "#target"]]) in
-  let wire = Browser_lane.interaction_args ~tab_id:7 ~expected_url:drag.expected_url drag.action in
+  let wire = Browser_lane.interaction_args ~tab_id:7 ~frame_path:[] ~expected_url:drag.expected_url drag.action in
   check bool "semantic drag round trips typed targets" true
     ((match Interaction.parse wire with Ok request -> request.action = drag.action | Error _ -> false));
   List.iter (fun input -> check bool "semantic target rejects mixed, missing and unrelated fields" true
@@ -102,7 +102,7 @@ let test_drag_options () =
       "source",`Assoc ["selector",`String "#source"];"destination",`Assoc ["selector",`String "#drop"]]] in
   List.iter (fun base ->
     let request = parsed (base @ ["via",via;"durationMs",`Int 120]) in
-    let wire = Browser_lane.interaction_args ~tab_id:request.tab_id
+    let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~frame_path:request.frame_path
       ~expected_url:request.expected_url request.action in
     check bool "ordered path and timing survive round trip" true
       ((parsed (Yojson.Safe.Util.to_assoc wire)).action = request.action);
@@ -146,7 +146,7 @@ let test_pointer_actions () =
   List.iter (fun (name,geometry) ->
     let input = fields name @ base @ geometry in
     let request = parsed input in
-    let wire = Browser_lane.interaction_args ~tab_id:request.tab_id
+    let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~frame_path:request.frame_path
       ~expected_url:request.expected_url request.action in
     ignore (match Interaction.parse wire with Ok _ -> () | Error e -> fail e);
     check bool "pointer action requires its observed URL" true
@@ -175,7 +175,7 @@ let test_click_button () =
   List.iter (fun (raw,expected) ->
     check bool ("button " ^ raw) true (button_of ["button",`String raw] = expected);
     let request = parsed (click ["button",`String raw]) in
-    let wire = Browser_lane.interaction_args ~tab_id:request.tab_id
+    let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~frame_path:request.frame_path
       ~expected_url:request.expected_url request.action in
     check bool ("button " ^ raw ^ " survives the wire round trip") true
       ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action))
@@ -190,7 +190,7 @@ let test_click_button () =
       @ ["expectedUrl",`String "https://example.org";"viewport",viewport;"point",point;
          "button",`String "middle"]))))
 let test_click_button_capability () =
-  let click button = Browser_lane.Page_interact {tab_id=1; expected_url=Some "https://example.org";
+  let click button = Browser_lane.Page_interact {frame_path=[];tab_id=1; expected_url=Some "https://example.org";
     action=Browser_lane.Click_at {point={x=0.5;y=0.5};
       viewport={document_id="d";width=100.;height=100.;scroll_x=0.;scroll_y=0.}; button}} in
   check bool "primary click keeps the plain pointer capability" true
@@ -243,11 +243,11 @@ let test_set_viewport () =
   check bool "width is refused on an action that has no size" true
     (Result.is_error (Interaction.parse (`Assoc (fields "scroll" @ ["x",`Int 0;"y",`Int 10;"width",`Int 800]))));
   let request = parsed (fields "set_viewport" @ url @ ["width",`Int 800;"height",`Int 600]) in
-  let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~expected_url:request.expected_url request.action in
+  let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~frame_path:request.frame_path ~expected_url:request.expected_url request.action in
   check bool "the size survives the wire round trip" true
     ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action);
   check bool "the lane asks for the viewport capability" true
-    (Browser_lane.live_capability (Browser_lane.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;
+    (Browser_lane.live_capability (Browser_lane.Page_interact {frame_path=[];tab_id=request.tab_id;expected_url=request.expected_url;
       action=request.action}) = Some Browser_lane.Viewport_resize)
 let test_select_option () =
   let base = fields "select_option" @ ["selector",`String "#country"] in
@@ -255,11 +255,11 @@ let test_select_option () =
   (match request.action with
    | Browser_lane.Select_option {selector="#country";value="kr"} -> ()
    | _ -> fail "select_option parsed as another action");
-  let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~expected_url:request.expected_url request.action in
+  let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~frame_path:request.frame_path ~expected_url:request.expected_url request.action in
   check bool "select_option survives the wire round trip" true
     ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action);
   check bool "select_option is the DOM interaction capability" true
-    (Browser_lane.live_capability (Browser_lane.Page_interact {tab_id=request.tab_id;
+    (Browser_lane.live_capability (Browser_lane.Page_interact {frame_path=[];tab_id=request.tab_id;
       expected_url=request.expected_url;action=request.action}) = Some Browser_lane.Dom_interaction);
   (match (parsed (base @ ["value",`String ""])).action with
    | Browser_lane.Select_option {value="";_} -> ()
@@ -288,11 +288,11 @@ let test_touch_actions () =
    | Browser_lane.Swipe {via=[];duration_ms=0;_} -> () | _ -> fail "swipe parsed as another action");
   List.iter (fun input ->
     let request = parsed input in
-    let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~expected_url:request.expected_url request.action in
+    let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~frame_path:request.frame_path ~expected_url:request.expected_url request.action in
     check bool "touch action survives the wire round trip" true
       ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action);
     check bool "touch action is the touch capability" true
-      (Browser_lane.live_capability (Browser_lane.Page_interact {tab_id=request.tab_id;
+      (Browser_lane.live_capability (Browser_lane.Page_interact {frame_path=[];tab_id=request.tab_id;
         expected_url=request.expected_url;action=request.action}) = Some Browser_lane.Touch_input);
     check bool "touch action requires its observed URL" true
       (Result.is_error (Interaction.parse (`Assoc (List.remove_assoc "expectedUrl" input)))))
@@ -329,6 +329,27 @@ let test_touch_sources_use_a_touch_pointer () =
   check bool "a swipe does not reuse the drag's source id" true (id swipe <> id drag);
   check string "a tap and a swipe share the touch source" (id Browser_lane.Pointer.Tap) (id swipe);
   check string "a click, a hover and a drag share the mouse source" (id Browser_lane.Pointer.Hover) (id drag)
+let test_frame_path () =
+  let frame = ["framePath",`List [`String "#outer";`String "iframe[name=inner]"]] in
+  List.iter (fun (action, extra) ->
+    let request = parsed (fields action @ frame @ extra) in
+    check (list string) (action ^ " keeps the frame path") ["#outer";"iframe[name=inner]"] request.frame_path;
+    let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~frame_path:request.frame_path
+      ~expected_url:request.expected_url request.action in
+    check bool (action ^ " frame path survives the wire") true
+      ((parsed Yojson.Safe.Util.(to_assoc wire)).frame_path = request.frame_path))
+    ["click",["selector",`String "#go"]; "fill",["selector",`String "#q";"text",`String "x"];
+     "select_option",["selector",`String "select";"value",`String "a"]; "scroll",["x",`Int 0;"y",`Int 5]];
+  check (list string) "no framePath means the top document" [] (parsed (fields "click" @ ["selector",`String "#go"])).frame_path;
+  let rejected label extra = check bool label true (Result.is_error (Interaction.parse (`Assoc extra))) in
+  rejected "empty path" (fields "click" @ ["selector",`String "#go";"framePath",`List []]);
+  rejected "blank selector" (fields "click" @ ["selector",`String "#go";"framePath",`List [`String " "]]);
+  rejected "non-string selector" (fields "click" @ ["selector",`String "#go";"framePath",`List [`Int 1]]);
+  rejected "not a list" (fields "click" @ ["selector",`String "#go";"framePath",`String "#f"]);
+  rejected "scene node cannot be framed" (fields "click" @ ["documentId",`String "d";"nodeId",`String "n"] @ frame);
+  rejected "coordinate input cannot be framed" (fields "click_at" @ frame @ ["expectedUrl",`String "https://example.org"]);
+  rejected "key input cannot be framed" (fields "press_key" @ frame @ ["expectedUrl",`String "https://example.org";"documentId",`String "d";"key",`String "Enter"])
+
 let () = run "browser interaction" ["typed boundary", [
   test_case "browser zoom boundary" `Quick test_browser_zoom_boundary;
   test_case "native keyboard and double click parser" `Quick test_native_keyboard_parser;
@@ -346,4 +367,5 @@ let () = run "browser interaction" ["typed boundary", [
   test_case "source hints preserve scope and reject malformed paths" `Quick test_source_context;
   test_case "observed node reference contract" `Quick test_scene_reference;
   test_case "closed live write actions" `Quick test_typed_actions;
-  test_case "malformed or mixed actions rejected" `Quick test_invalid_actions]]
+  test_case "malformed or mixed actions rejected" `Quick test_invalid_actions;
+  test_case "framePath contract" `Quick test_frame_path]]

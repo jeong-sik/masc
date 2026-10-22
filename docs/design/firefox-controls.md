@@ -101,7 +101,9 @@ claim a complete deployed Keeper/model/operator-browser session.
 
 Automation `BrowserRead mode=frames` requires `tabId` and returns iframe/frame
 selectors in the current document. Pass `framePath` as an outer-to-inner array of
-those selectors for text/elements/frames reads and element/scroll actions. Each
+those selectors for text/elements/frames reads, `BrowserAct upload`, and
+`BrowserInteract` click/fill/select_option/scroll with a selector (there
+`expectedUrl` is the frame document's URL). Each
 call selects its tab and frame chain under the session lock; there is no shared
 "selected frame" API. Nested cross-origin frames are supported by native
 WebDriver frame switching. Omit the path to operate on the top-level page.

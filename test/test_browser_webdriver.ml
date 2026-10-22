@@ -24,7 +24,7 @@ let test_session_lifecycle () =
     in
     let driver = Driver.create ~start_downloads ~request () in
     check bool "driver registration alone is closed" true (Driver.session_observation driver=Lane.Browser_closed);
-    (match Driver.execute driver (Lane.Page_interact {tab_id=7;expected_url=Some "https://example.org";action=Lane.Activate_tab}) with
+    (match Driver.execute driver (Lane.Page_interact {frame_path=[];tab_id=7;expected_url=Some "https://example.org";action=Lane.Activate_tab}) with
      | Lane.Rejected_before_effect _ -> () | _ -> fail "live-only activation must reject before selecting a WebDriver tab");
     check int "unsupported activation makes no backend request" 0 (List.length !calls);
     (match Driver.execute driver Lane.Tabs_list with
@@ -82,7 +82,7 @@ let test_zoom_requires_extension () = Eio_main.run (fun _ ->
   let calls=ref 0 in
   let request ~method_:_ ~path:_ ~body:_ = incr calls;Error (Driver.Transport "must not dispatch") in
   let driver=Driver.create ~start_downloads ~request () in
-  (match Driver.execute driver (Lane.Page_interact {tab_id=7;expected_url=Some "https://example.org";
+  (match Driver.execute driver (Lane.Page_interact {frame_path=[];tab_id=7;expected_url=Some "https://example.org";
       action=Lane.Set_zoom {factor=1.5}}) with
    | Lane.Rejected_before_effect _ -> ()
    | Lane.Answered _ | Lane.Lane_absent | Lane.Timed_out | Lane.Refused _ -> fail "unsupported zoom must be pre-effect");
@@ -384,17 +384,76 @@ let test_semantic_click_uses_native_pointer_input () =
     ignore (Driver.execute driver (Lane.Session_open {headless=None}));
     ignore (Driver.execute driver Lane.Tabs_list);
     List.iter (fun action ->
-      (match Driver.execute driver (Lane.Page_interact {tab_id=1;expected_url=None;action}) with
+      (match Driver.execute driver (Lane.Page_interact {frame_path=[];tab_id=1;expected_url=None;action}) with
        | Lane.Answered _ -> ()
        | Lane.Refused _ | Lane.Rejected_before_effect _ | Lane.Lane_absent | Lane.Timed_out -> fail "native semantic click failed"))
       [Lane.Click "#menu";Lane.Click_node {document_id="observed";node_id="menu"}];
     check int "one dispatch per semantic click" 2 !inputs;
     check int "each click releases native input" 2 !releases;
     fail_guard := true;
-    (match Driver.execute driver (Lane.Page_interact {tab_id=1;expected_url=None;action=Lane.Click "#menu"}) with
+    (match Driver.execute driver (Lane.Page_interact {frame_path=[];tab_id=1;expected_url=None;action=Lane.Click "#menu"}) with
      | Lane.Rejected_before_effect _ -> ()
      | Lane.Answered _ | Lane.Refused _ | Lane.Lane_absent | Lane.Timed_out -> fail "stale native guard must reject before input");
     check int "failed guard sends no input or fallback" 2 !inputs)
+
+let test_interact_enters_frames () =
+  Eio_main.run (fun _ ->
+    let order = ref [] and missing = ref false in
+    let viewport = `Assoc ["documentId",`String "observed";"width",`Int 300;"height",`Int 200;
+      "scrollX",`Int 0;"scrollY",`Int 0] in
+    let request ~method_ ~path ~body = match method_,path with
+      | `POST,"/session" -> Ok (`Assoc ["sessionId",`String "owned";"capabilities",`Assoc
+          ["webSocketUrl",`String "ws://localhost:1234/session/owned"]])
+      | `GET,"/session/owned/window/handles" -> Ok (`List [`String "tab"])
+      | `GET,"/session/owned/window" -> Ok (`String "tab")
+      | `POST,"/session/owned/window" -> order := "window" :: !order; Ok `Null
+      | `POST,"/session/owned/elements" ->
+        order := "find-frame" :: !order;
+        if !missing then Ok (`List [])
+        else Ok (`List [`Assoc ["element-6066-11e4-a52e-4f735466cecf",`String "frame-el"]])
+      | `POST,"/session/owned/frame" ->
+        (match Option.bind body (fun json -> Yojson.Safe.Util.(member "id" json |> to_option Fun.id)) with
+         | Some (`Assoc [_,`String "frame-el"]) -> order := "enter-frame" :: !order
+         | _ -> ());
+        Ok `Null
+      | `POST,"/session/owned/execute/sync" ->
+        order := "script" :: !order;
+        let args = match body with
+          | Some value -> Yojson.Safe.Util.(value |> member "args" |> to_list)
+          | None -> fail "missing script arguments" in
+        (match args with
+         | [`Assoc fields] when List.assoc_opt "action" fields = Some (`String "click") ->
+           check bool "the script receives the frame path" true
+             (List.assoc_opt "framePath" fields = Some (`List [`String "#frame"]));
+           Ok (`Assoc ["url",`String "https://example.test/frame";"viewport",viewport;
+             "point",`Assoc ["x",`Float 0.25;"y",`Float 0.5]])
+         | _ -> Ok (`Assoc ["url",`String "https://example.test/frame";"title",`String "frame";
+             "scrollX",`Int 0;"scrollY",`Int 0]))
+      | `POST,"/session/owned/actions" -> order := "pointer" :: !order; Ok `Null
+      | `DELETE,"/session/owned/actions" -> Ok `Null
+      | _ -> fail ("unexpected framed interaction request " ^ path) in
+    let driver = Driver.create ~start_downloads ~request () in
+    ignore (Driver.execute driver (Lane.Session_open {headless=None}));
+    ignore (Driver.execute driver Lane.Tabs_list);
+    order := [];
+    let framed action = Lane.Page_interact {frame_path=["#frame"];tab_id=1;expected_url=None;action} in
+    let framed_receipt = match Driver.execute driver (framed (Lane.Click "#go")) with
+      | Lane.Answered (`Assoc fields) -> (match List.assoc_opt "data" fields with Some data -> data | None -> fail "no data")
+      | Lane.Answered _ | Lane.Refused _ | Lane.Rejected_before_effect _ | Lane.Lane_absent | Lane.Timed_out -> fail "framed click failed" in
+    let seen = List.rev !order in
+    let index name = let rec go i = function [] -> fail (name ^ " never ran") | x :: _ when x = name -> i | _ :: rest -> go (i+1) rest in go 0 seen in
+    check bool "the frame is entered before the page script runs" true (index "enter-frame" < index "script");
+    (match framed_receipt with
+     | `Assoc fields -> check bool "the receipt names the frame chain" true
+         (List.assoc_opt "framePath" fields = Some (`List [`String "#frame"]))
+     | _ -> fail "receipt is not an object");
+    check bool "the pointer moves only after the frame is entered" true (index "enter-frame" < index "pointer");
+    order := []; missing := true;
+    (match Driver.execute driver (framed (Lane.Click "#go")) with
+     | Lane.Rejected_before_effect _ -> ()
+     | Lane.Answered _ | Lane.Refused _ | Lane.Lane_absent | Lane.Timed_out -> fail "an unknown frame must reject before effect");
+    check bool "no script or pointer runs after a missing frame" false
+      (List.exists (fun step -> step = "script" || step = "pointer") !order))
 
 let test_pointer_release_recovery () =
   Eio_main.run (fun _ ->
@@ -420,9 +479,9 @@ let test_pointer_release_recovery () =
     ignore (Driver.execute driver Lane.Tabs_list);
     let point : Lane.Pointer.point = {x=0.5;y=0.5} in
     let viewport : Lane.Pointer.viewport = {document_id="fixture";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
-    let click = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
+    let click = Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Click_at {point;viewport;button=Lane.Pointer.Primary}} in
-    let wheel = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
+    let wheel = Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Scroll_at {point;viewport;x=0;y=120}} in
     check bool "successful wheel is not overridden by failing release endpoint" true
       (match Driver.execute driver wheel with
@@ -470,7 +529,7 @@ let test_dialog_opened_by_a_click_can_be_answered () =
     ignore (Driver.execute driver Lane.Tabs_list);
     let point : Lane.Pointer.point = {x=0.5;y=0.5} in
     let viewport : Lane.Pointer.viewport = {document_id="fixture";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
-    let click = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
+    let click = Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Click_at {point;viewport;button=Lane.Pointer.Primary}} in
     (match Driver.execute driver click with
      | Lane.Refused _ | Lane.Answered _ -> ()
@@ -510,7 +569,7 @@ let test_touch_sends_a_touch_pointer_and_releases_it () =
     let point : Lane.Pointer.point = {x=0.5;y=0.5} in
     let viewport : Lane.Pointer.viewport = {document_id="fixture";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
     let interact action = Driver.execute driver
-      (Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";action}) in
+      (Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";action}) in
     List.iter (fun action -> match interact action with
       | Lane.Answered _ -> ()
       | Lane.Refused _ | Lane.Rejected_before_effect _ | Lane.Lane_absent | Lane.Timed_out -> fail "touch input was not served")
@@ -598,7 +657,7 @@ let test_pointer_guard_failure_rejects_before_effect () =
     ignore (Driver.execute driver Lane.Tabs_list);
     let point : Lane.Pointer.point = {x=0.5;y=0.5} in
     let viewport : Lane.Pointer.viewport = {document_id="fixture";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
-    let hover = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
+    let hover = Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Hover_at {point;viewport}} in
     check bool "failed hover guard is rejected before effect" true
       (match Driver.execute driver hover with Lane.Rejected_before_effect _ -> true | _ -> false);
@@ -625,7 +684,7 @@ let test_native_keyboard_and_double_click () = Eio_main.run (fun _ ->
   let point : Lane.Pointer.point = {x=0.5;y=0.5} in
   let viewport : Lane.Pointer.viewport = {document_id="d1";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
   List.iter (fun action ->
-    let verb=Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";action} in
+    let verb=Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";action} in
     submitted:=[];released:=0;
     (match Driver.execute driver verb with Lane.Answered _ -> () | _ -> fail "native input failed");
     check int "one native action sequence" 1 (List.length !submitted);
@@ -642,7 +701,7 @@ let test_native_keyboard_and_double_click () = Eio_main.run (fun _ ->
     [Lane.Type_text {document_id="d1";text="한🙂"};Lane.Press_key {document_id="d1";key};
      Lane.Double_click_at {point;viewport}];
   List.iter (fun text -> submitted:=[];released:=0;
-    (match Driver.execute driver (Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
+    (match Driver.execute driver (Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Type_text {document_id="d1";text}}) with
      | Lane.Rejected_before_effect _ -> () | _ -> fail "text controls/reserved scalars must reject before input");
     check int "rejected text sends no action sequence" 0 (List.length !submitted);
@@ -764,6 +823,7 @@ let () = run "native Firefox lane" ["behavior", [
   test_case "optional document never selects or blocks owner" `Quick test_optional_document_never_selects_or_blocks_owner;
   test_case "download setup failure rolls back session" `Quick test_download_setup_rollback;
   test_case "semantic clicks use native input" `Quick test_semantic_click_uses_native_pointer_input;
+  test_case "framed interaction enters the frame first" `Quick test_interact_enters_frames;
   test_case "pointer release failure recovery" `Quick test_pointer_release_recovery;
   test_case "a dialog opened by a click can be answered" `Quick test_dialog_opened_by_a_click_can_be_answered;
   test_case "pointer guard failure rejects before effect" `Quick test_pointer_guard_failure_rejects_before_effect;

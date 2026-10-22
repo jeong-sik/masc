@@ -381,7 +381,7 @@ let test_actor_stays_with_queued_interaction () =
     ignore (data (Backend.execute h.backend Lane.Tabs_list));
     let point = {Lane.Pointer.x=0.5;y=0.25} in
     let viewport = {Lane.Pointer.document_id="d1";width=800.;height=600.;scroll_x=0.;scroll_y=0.} in
-    let verb = Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/";
+    let verb = Lane.Page_interact {frame_path=[];tab_id=0;expected_url=Some "http://127.0.0.1:1/";
       action=Lane.Hover_at {point;viewport}} in
     Eio.Switch.run (fun sw ->
       let first=Eio.Fiber.fork_promise ~sw (fun () -> Backend.execute h.backend ~actor:"keeper-a" verb) in
@@ -452,7 +452,7 @@ let test_pointer_guard_and_input_keep_the_verb_slot () =
     Eio.Fiber.fork_promise ~sw:callers (fun () ->
       Backend.execute h.backend
         (Lane.Page_interact
-           { tab_id = 0; expected_url = Some url; action = Lane.Click_at { point; viewport; button = Lane.Pointer.Primary } }))
+           { frame_path = []; tab_id = 0; expected_url = Some url; action = Lane.Click_at { point; viewport; button = Lane.Pointer.Primary } }))
   in
   Eio.Promise.await guard_entered;
   let navigation =
@@ -522,7 +522,7 @@ let test_native_keyboard_quarantine () =
     let inputs=ref 0 in
     with_backend ~call_hook:(function Wire.Page_key_press _ -> incr inputs;Some (Error failure)|_->None) (fun h ->
       ignore (data (Backend.execute h.backend open_));ignore (data (Backend.execute h.backend Lane.Tabs_list));
-      let verb=Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/";
+      let verb=Lane.Page_interact {frame_path=[];tab_id=0;expected_url=Some "http://127.0.0.1:1/";
         action=Lane.Press_key {document_id="d1";key}} in
       (match Backend.execute h.backend verb with Lane.Refused _->()|_->fail "failed native keys must remain uncertain");
       let status=data (Backend.execute h.backend Lane.Session_status) in
@@ -539,7 +539,7 @@ let test_native_keyboard_quarantine () =
     [Session.Lost "native key reply missing";Session.Rejected {code= -32603;message="keyDown failed"}];
   with_backend ~call_hook:(function Wire.Page_key_press _ -> Some (Error (Session.Not_delivered "never written"))|_->None) (fun h ->
     ignore (data (Backend.execute h.backend open_));ignore (data (Backend.execute h.backend Lane.Tabs_list));
-    ignore (Backend.execute h.backend (Lane.Page_interact {tab_id=0;expected_url=Some "http://127.0.0.1:1/";
+    ignore (Backend.execute h.backend (Lane.Page_interact {frame_path=[];tab_id=0;expected_url=Some "http://127.0.0.1:1/";
       action=Lane.Press_key {document_id="d1";key}}));
     check bool "proven unsent keyboard input does not quarantine" true (Backend.session_observation h.backend=Lane.Browser_open))
 
@@ -547,7 +547,7 @@ let test_cancelled_native_keyboard_quarantines () =
   let entered,enter=Eio.Promise.create () and never,_=Eio.Promise.create () in
   with_backend ~call_hook:(function Wire.Page_type _ -> Eio.Promise.resolve enter ();Eio.Promise.await never | _->None) (fun h ->
     ignore (data (Backend.execute h.backend open_));ignore (data (Backend.execute h.backend Lane.Tabs_list));
-    Eio.Fiber.first (fun () -> ignore (Backend.execute h.backend (Lane.Page_interact {tab_id=0;
+    Eio.Fiber.first (fun () -> ignore (Backend.execute h.backend (Lane.Page_interact {frame_path=[];tab_id=0;
       expected_url=Some "http://127.0.0.1:1/";action=Lane.Type_text {document_id="d1";text="owned"}})))
       (fun () -> Eio.Promise.await entered);
     h.settle ();

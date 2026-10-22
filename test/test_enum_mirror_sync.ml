@@ -558,6 +558,7 @@ let test_capability_table_sharing_is_listed () =
     ; [ "middle_click"; "right_click" ] (* click_at with a button *)
     ; [ "key_chord"; "press_key" ] (* press_key with modifiers *)
     ; [ "html5_drop"; "pointer_drag" ] (* drag_to on Stagehand *)
+    ; [ "click"; "frame_interaction" ] (* click with framePath *)
     ]
   in
   let invocation = function

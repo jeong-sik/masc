@@ -390,7 +390,7 @@ let pointer ?(guard=Browser_interaction.pointer_guard_script) ?(receipt=Browser_
 let interact ~tabs ~call ~tab_id ~expected_url action =
   let* page_id = page_of ~tabs tab_id in
   let name = Browser_lane.interaction_verb action in
-  let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
+  let args = Browser_lane.interaction_args ~tab_id ~frame_path:[] ~expected_url action in
   let* action, expected_url = match (action : Browser_lane.interaction) with
     | Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
       Error (Browser_lane.Rejected_before_effect "drag movement timing requires automation or a live BiDi connection")
@@ -428,7 +428,7 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
     | Browser_lane.Tap_at _ | Browser_lane.Swipe _
     | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
     | Browser_lane.Fill_node _ -> Ok (action, expected_url) in
-  let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
+  let args = Browser_lane.interaction_args ~tab_id ~frame_path:[] ~expected_url action in
   match (action : Browser_lane.interaction) with
   | Browser_lane.Set_zoom _ -> Error (Browser_lane.Rejected_before_effect "set_zoom requires a connected WebExtension browser")
   | Browser_lane.Tap_at _ | Browser_lane.Swipe _ ->
@@ -552,7 +552,9 @@ let execute ~tabs ~call ?actor verb =
     | Browser_lane.Page_read { tab_id; max_chars } -> read_text ~tabs ~call ~tab_id ~max_chars
     | Browser_lane.Page_elements { tab_id; within } -> read_elements ~tabs ~call ~tab_id ~within
     | Browser_lane.Page_scene { tab_id; max_chars; view; scope } -> read_scene ~tabs ~call ~tab_id ~max_chars ~view ~scope
-    | Browser_lane.Page_interact { tab_id; expected_url; action } -> attributed_interact ~tabs ~call ~actor ~tab_id ~expected_url action
+    | Browser_lane.Page_interact { frame_path = _ :: _; _ } ->
+      Error (Browser_lane.Rejected_before_effect "framePath is not supported on a Stagehand browser yet; the page input runs in the top document only")
+    | Browser_lane.Page_interact { tab_id; frame_path = []; expected_url; action } -> attributed_interact ~tabs ~call ~actor ~tab_id ~expected_url action
     | Browser_lane.Page_instruct { tab_id; instruction } ->
       sentence ~tabs ~call ~tab_id ~outcome:act_outcome (fun page_id -> Wire.Act { page_id; instruction; timeout = Wire.sentence_timeout })
     | Browser_lane.Page_locate { tab_id; instruction } ->

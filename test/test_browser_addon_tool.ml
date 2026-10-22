@@ -10,7 +10,7 @@ let incarnation = "0b000000-0000-4000-8000-000000000001"
 let client_id = ok (B.client_id_of_string "0c000000-0000-4000-8000-000000000001")
 let arguments verb = `Assoc ["lane",`String "live";
   "clientId",`String (B.client_id_to_string client_id);"command",B.verb_json verb]
-let hover = B.Page_interact {tab_id=7;expected_url=Some "https://example.org/";
+let hover = B.Page_interact {frame_path=[];tab_id=7;expected_url=Some "https://example.org/";
   action=B.Hover (B.Selector "#row")}
 let hook_contract () =
   let hooks=ok (Hooks.prepare ~hooks:[Validate_input;Validate_output] Tool.definition) in

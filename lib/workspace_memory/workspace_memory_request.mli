@@ -49,7 +49,7 @@ val narrow
   : render:(Yojson.Safe.t -> (string, string) result)
   -> batch
   -> (batch option, error) result
-(** Call only after an actual provider input-size refusal. Retain half the
+(** Call only after an actual provider input-size or classification output-limit refusal. Retain half the
     selected whole rows, including their complete neighbors and related ledger
     entries, and prepend the other selected facts to [remaining]. The index is
     not queried again. [Ok None] means only one indivisible row remains.

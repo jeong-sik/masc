@@ -7,6 +7,7 @@ type refusal_stage = Before_dispatch | Execution
 type refusal = { stage : refusal_stage; evidence : Yojson.Safe.t }
 type change = { before : Yojson.Safe.t; after : Yojson.Safe.t }
 type commit = { judgment : Yojson.Safe.t; change : change }
+type successor = { request_id : string; request : Yojson.Safe.t }
 type event =
   | Dispatch_intended
   | Admission_declined of Yojson.Safe.t
@@ -18,10 +19,13 @@ type event =
   | Commit_observed of Yojson.Safe.t
   | Commit_conflicted of Yojson.Safe.t
   | Refused of refusal
+  | Successor_intended of successor
+  | Successor_observed of string
 type phase = Captured | Admission_wait of Yojson.Safe.t | Dispatch_pending of observation option
   | Judged of Yojson.Safe.t | Committing of commit
   | Commit_unknown of commit * Yojson.Safe.t | Finished of commit
   | Conflicted of commit * Yojson.Safe.t | Rejected of refusal
+  | Subdividing of refusal * successor | Subdivided of refusal * successor
 type t
 val captured : t
 val phase : t -> phase
@@ -34,7 +38,12 @@ val append : t -> event -> (t, string) result
     immediately after dispatch intent, before any execution observation.
     A late original judgment preserves earlier observations in the history.
     Commit retry requires a fresh exact before-state observation; confirmation
-    requires the exact captured after-state. Neither observation performs I/O. *)
+    requires the exact captured after-state. An execution refusal can retain
+    one immutable successor intent and acknowledge that same child's ID. Its
+    original refusal remains terminal; neither fact permits redispatch or
+    establishes that this consumer may narrow. The host checks that policy,
+    whole-child derivation and durable parent acknowledgement before admission.
+    Neither observation performs I/O. *)
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 (** Strictly decode and fold the complete ordered history from Captured.

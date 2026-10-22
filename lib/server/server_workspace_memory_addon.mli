@@ -49,6 +49,19 @@ val settle : config:Workspace.config -> request_id:string -> (commit_result, err
     selected facts and vanished ledger members; briefing rechecks current ledger
     sources and prompt contract, preserving additions and partial publication.
     No worker, model, observer completion, successor or scheduler runs here. *)
+type successor_result = Indivisible of Lane_addon_tool_request_owner.retained
+  | Successor_waiting of Lane_addon_tool_request_owner.retained
+  | Successor_ready of { parent:Lane_addon_tool_request_owner.retained;
+      child:Lane_addon_tool_request_owner.retained }
+val narrow : config:Workspace.config -> request_id:string -> (successor_result, error) Stdlib.result
+(** The serialized workspace owner may replace a positively size-refused
+    original batch with one whole-prefix child. Persist the child's ID and
+    complete immutable capture in its parent before retaining the child; read
+    the actual child back and acknowledge it in the parent before returning it.
+    Recovered intent always reuses that ID. Unconfirmed publication is not
+    permission to mint another child. No worker RPC, domain write or automatic
+    scheduling runs here. Briefing preserves its original prepared state.
+    Caller holds the workspace process lease throughout, including retries. *)
 module For_testing : sig
   val resume : store:Lane_addon_store.t -> base_path:string -> request_id:string ->
     call:(arguments:Yojson.Safe.t -> (Mcp_protocol.Mcp_types.tool_result, error) Stdlib.result) ->
@@ -61,4 +74,8 @@ module For_testing : sig
   (** Same real journal, restore, domain load, freshness and recovery. Only the
       effective briefing contract and domain save edge are supplied. Faults at
       this edge are not evidence of an actual filesystem failure stage. *)
+  val narrow : store:Lane_addon_store.t -> base_path:string -> request_id:string ->
+    (successor_result, error) Stdlib.result
+  (** Same actual strict parent/child journal and ancestry; no substituted
+      publication edge or worker. *)
 end

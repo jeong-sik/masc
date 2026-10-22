@@ -28,7 +28,9 @@ let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.pac
     else Ok (fun _ -> Ok ())
   | Some retained ->
     let* workspace = Eio_unix.run_in_systhread (fun () -> Capture.observe_workspace ~base_path) in
-    let* capture = Capture.restore ~workspace retained in
+    let* capture = Eio_unix.run_in_systhread (fun () -> Capture.restore ~workspace
+      ~load:(fun ~request_id -> Owner.load ~store ~scope:Capture.scope ~request_id
+        |> Result.map_error Owner.error_to_string) retained) in
     let destination = Capture.destination capture in
     let* () =
       if String.equal destination.installation_id (Owner.installation_id (Owner.Configuration declaration_id))

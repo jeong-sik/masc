@@ -387,3 +387,69 @@ is completed/success at exact `af9e1eeefe9b8b17fe82c643e9344aa3df87416a`, 147 ca
 including seven new owner-wake cases. It verifies the prior admission/commit/wake
 candidate, not this newer size-refusal layer, a live provider, browser or UI.
 A selected compiled execution for this layer is separate evidence.
+
+
+## Durable size successor, before production scheduling
+
+The original owner now retains one `Successor_intended` fact containing the
+child ID and its entire canonical capture, then retains and strictly reloads
+that child, then records `Successor_observed`. Subdividing/Subdivided keep the
+original execution refusal. This is recoverable publication across two records,
+under the existing serialized workspace lease; it is not a cross-file transaction.
+The link operation makes no worker call, model call, domain save or observer ACK.
+
+Capture format `workspace.memory.execution-capture.v2` requires an explicit
+nullable predecessor. Root constructors emit null; a child records its immediate
+original parent. The decoder is strict: missing predecessor and old-format
+records are errors, not inferred roots. This branch has no production scheduler
+cutover or installed-data migration. Before any child resume, commit or direct
+Exact authorization, strict restoration reads every ancestor and requires the
+matching acknowledged child, original size refusal and complete deterministic
+whole-batch reduction. Missing/unreadable parents, cycles and mismatches refuse.
+A child retained before parent acknowledgement cannot execute.
+
+Classification permits whole-row bisection on typed input capacity, context
+overflow, request-body refusal or output limit. Briefing permits the three input
+refusals only. Invalid_request, ordinary invalid output, unknown, pending and
+pre-dispatch refusal do not authorize a successor. One indivisible source
+returns Indivisible without truncation or another request. The captured template,
+workspace, ledger, destination revisions and complete prefix/remainder survive;
+neighbors are not recollected. Briefing.narrow preserves the identical prepared
+state and previous publication, so linking performs no extra domain write.
+
+A recovered Subdividing intent reuses its existing child ID and input. An
+unreadable/conflicting child is never absence. After Subdivided, absent child
+history is an explicit error: it may have dispatched before its record was lost,
+so the parent must not recreate it as Captured. Repeated or nested narrowing
+preserves existing child progress and never creates a sibling from the root.
+An uncertain publication requires fresh original reads; errors never mint a
+replacement ID. The production owner, original Off recovery and initial briefing
+prepared-state save still require integration with these boundaries.
+
+Focused verification follows the changed interfaces: Progress -> strict owner
+history (`test_lane_addon_request_progress`/discovery); Capture.restore -> root
+capture, original admission/commit and direct Exact authority (capture/commit/
+contract/common runner suites). Fifteen new commit-suite scenarios exercise real
+parent/child storage, reopen at intent/child boundaries, pre-ack refusal, missing
+acknowledged child, conflicting child, missing/cyclic ancestry, nested narrowing,
+whole-prefix domain commit and Briefing input-only policy. RPC answers in the
+child-commit scenario are controlled; this is not a live provider result.
+
+The prior selected run39676761394 on80525774 completed with failure: the code
+compiled, but two capacity fixtures incorrectly expected measurement HTTP for
+expired/future evidence, and a Candle fixture read a payload from the summary
+projection instead of `Runs.get`. Those assertions are corrected in the owning
+size layer at c18a1f8c5ab; the failed run is preserved separately and does not
+prove the correction or this successor layer. Parser checks are not typing or
+execution. A new selected compiled run remains separate evidence.
+
+
+Selected successor run39679636091 at062bea30 compiled and ran the selected
+suites, then failed three interrupted-link fixtures. A newly constructed capture
+kept noncanonical internal row key order, while a strict persisted restore read
+canonical rows. Narrowing re-rendered a different child's input_text/prompt from
+those equivalent rows. Capture.make now canonicalizes its internal whole-work
+snapshot while retaining the parent's original substitution bytes separately.
+This repairs deterministic fresh/restored narrowing rather than relaxing the
+exact child comparison. The failed run and earlier pre-MCP-dependency compile
+failure39679243670 remain historical; a new-head run is separate evidence.

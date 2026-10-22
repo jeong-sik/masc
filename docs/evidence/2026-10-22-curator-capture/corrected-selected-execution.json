@@ -1,0 +1,56 @@
+{
+  "run": 39653626146,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/39653626146",
+  "head": "d4d54edcd444d46c0405505e9808d684e18f1d5b",
+  "status": "completed",
+  "conclusion": "success",
+  "minimal": true,
+  "eio_backend": "posix",
+  "suites": [
+    {
+      "suite": "test_workspace_memory_execution_capture",
+      "seconds": 0.021,
+      "tests": 5
+    },
+    {
+      "suite": "test_workspace_memory_capture",
+      "seconds": 0.046,
+      "tests": 5
+    },
+    {
+      "suite": "test_workspace_memory_request",
+      "seconds": 0.041,
+      "tests": 5
+    },
+    {
+      "suite": "test_workspace_memory_ledger",
+      "seconds": 0.009,
+      "tests": 14
+    },
+    {
+      "suite": "test_workspace_memory_briefing",
+      "seconds": 0.355,
+      "tests": 9
+    },
+    {
+      "suite": "test_lane_addon_host_cycle",
+      "seconds": 1.836,
+      "tests": 44
+    },
+    {
+      "suite": "test_candle_appraiser_transport",
+      "seconds": 0.045,
+      "tests": 10
+    }
+  ],
+  "tests": 92,
+  "full_raw_log_sha256": "dcbb719018ba3f550eec5dcafeb89744561e87fafd0625e154609e79ecc40489",
+  "public_excerpt_sha256": "13f45614602708eea8ab4ccd4d9d950a4823c97dbf41061e88a46ea152ea4501",
+  "not_claimed": [
+    "new progress source execution",
+    "production owner integration",
+    "worker/provider execution",
+    "UI/installation",
+    "full regression"
+  ]
+}

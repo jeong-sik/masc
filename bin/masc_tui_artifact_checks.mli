@@ -17,5 +17,12 @@ val unchecked_on_day : reports_complete:bool ->
   entries:Masc_tui_resource_catalog.t list ->
   (unit, inventory) Masc_tui_fetched.t -> int option
 (** [None] when either inventory cannot establish the complete count. *)
+val next_unchecked : reports_complete:bool ->
+  entries:Masc_tui_resource_catalog.t list -> cursor:int ->
+  (unit, inventory) Masc_tui_fetched.t -> (int option, string) result
+(** Find the next unchecked published revision after [cursor], wrapping in the
+    supplied list's order. MCP entries are skipped. [Ok None] means a complete,
+    settled inventory establishes that no listed report is unchecked. Unknown,
+    partial or mismatched evidence is an error, including for an empty list. *)
 val label : status -> string
 val description : status -> string

@@ -404,6 +404,12 @@ digest and byte-length verification. A report API refusal leaves MCP resources
 available and records the refusal; per-report storage diagnostics remain visible.
 Report Markdown uses the shared document renderer; HTML has an inert document
 reading and a separate source presentation, selected with `v`.
+Press `u` to select the next unchecked report in the current format and day
+selection, wrapping at the end. With the reader focused, it opens that revision
+through the same verified read. Navigation never confirms a report. Refresh
+before navigating if report/check inventories are incomplete or unknown; a
+pending confirmation change must settle first. These refusals leave the current
+selection and reading in place.
 After reading a report, `{`/`}` opens the older/newer revision from its validated
 history. Each move fetches that exact revision and verifies the body again; it
 does not wrap at an end. The chosen revision stays open when the catalog refreshes

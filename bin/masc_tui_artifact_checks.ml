@@ -69,6 +69,28 @@ let unchecked_on_day ~reports_complete ~day ~entries inventory =
             | Some check -> check.state = Check.Unchecked in
           Some (if unchecked && Catalog.on_day day entry then count + 1 else count)) (Some 0) entries
 
+let next_unchecked ~reports_complete ~entries ~cursor inventory =
+  let* () =
+    if not reports_complete then Error "report inventory is incomplete; refresh before navigating confirmations"
+    else if Fetched.in_flight inventory then Error "confirmation query in progress"
+    else match Fetched.view_for ~equal:Unit.equal inventory ~key:() with
+      | Ready { diagnostics = []; _ } -> Ok ()
+      | Ready { diagnostics = _ :: _; _ } -> Error "some confirmation records could not be read"
+      | Absent -> Error "confirmation inventory has not been read"
+      | Loading -> Error "confirmation query in progress"
+      | Stale (_, detail) | Failed detail -> Error detail in
+  let* candidates = traverse (fun (index, entry) -> match entry with
+    | Catalog.Mcp _ -> Ok None
+    | Report report -> match resolve inventory report with
+      | Unknown detail -> Error detail
+      | Known None | Known (Some {state=Check.Unchecked;_}) -> Ok (Some index)
+      | Known (Some {state=Check.Checked;_}) -> Ok None)
+    (List.mapi (fun index entry -> index, entry) entries) in
+  let candidates = List.filter_map Fun.id candidates in
+  Ok (match List.find_opt (fun index -> index > cursor) candidates with
+    | Some _ as next -> next
+    | None -> List.nth_opt candidates 0)
+
 let label = function
   | Unknown _ -> "? check unknown"
   | Known None | Known (Some {state=Check.Unchecked;_}) -> "○ unchecked"

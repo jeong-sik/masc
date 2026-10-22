@@ -973,6 +973,8 @@ let for_surface = function
       [ b Act "f" "format" ~help:"cycle all resources, artifacts, Markdown and HTML"
       ; b Act "c" "check / uncheck"
           ~help:"explicitly toggle shared confirmation for the selected exact report revision"
+      ; b Navigate "u" "next unchecked"
+          ~help:"select the next unchecked report in this format/day scope; open it when the reader is focused"
       ; b Act "t" "today" ~help:"toggle the local publication day captured at this keypress"
       ; b Act "w" "layout" ~help:"switch full-width list/reader and side-by-side browsing"
       ; b Act "v" "document / source" ~detail:Detail_only

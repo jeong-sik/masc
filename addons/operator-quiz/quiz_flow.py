@@ -513,7 +513,7 @@ class Flow:
                               "sources": [source.to_json() for source in item.sources]} for item in history]}
         request_id = f"{session.session_id}-{AUTHOR}-{len(session.requests)}"
         return {"kind": "exact_output", "request_id": request_id, "output": AUTHOR, "system": self.prompts.author,
-                "messages": [json.dumps(payload, ensure_ascii=False, sort_keys=True)]}
+                "messages": [{"role": "user", "text": json.dumps(payload, ensure_ascii=False, sort_keys=True)}]}
 
     def _request_author(self, session: q.Session, sessions: list[q.Session], *, scope: str,
                         records: list[dict]) -> q.Event:
@@ -532,7 +532,7 @@ class Flow:
 
     @staticmethod
     def _payload(body: dict) -> dict:
-        return json.loads(body["messages"][0])
+        return json.loads(body["messages"][0]["text"])
 
     # -- the grade request --------------------------------------------------
 
@@ -613,7 +613,7 @@ class Flow:
         asked = sum(isinstance(e, q.GradeRequested) for e in session.grading_of(posed.question_id))
         request_id = f"{posed.ask_id}-{GRADE}-{posed.question_id}-{asked}"
         body = {"kind": "exact_output", "request_id": request_id, "output": GRADE, "system": self.prompts.grade,
-                "messages": [json.dumps(payload, ensure_ascii=False, sort_keys=True)]}
+                "messages": [{"role": "user", "text": json.dumps(payload, ensure_ascii=False, sort_keys=True)}]}
         key = digest(body)
         self.requests.write(key, body)
         requested = q.GradeRequested(posed.ask_id, posed.question_id, request_id, key)

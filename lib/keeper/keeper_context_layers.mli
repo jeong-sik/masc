@@ -79,9 +79,24 @@ type resend_on_resume =
 
 val resend_on_resume : source -> resend_on_resume
 
+(** How a section's text divides for a resume that may already hold part of
+    it ({!Keeper_official_client_host.resume_prompt}). *)
+type section_rows =
+  | Whole_section
+      (** One text: a resume holds all of it or none of it. *)
+  | Head_and_rows of { head : string; rows : string list; tail : string }
+      (** [head ^ String.concat "" rows ^ tail], byte for byte. The rows are
+          entries the renderer adds to, one per recorded turn, so a later turn
+          repeats most of them. A resume that holds some rows sends [head], the
+          rows it lacks, and [tail] (#45131). *)
+
 type prepared_content
 (** Immutable text and the SHA-256 computed from those exact UTF8 bytes. *)
 val prepare_content : string -> prepared_content
+(** A {!Whole_section}. *)
+val prepare_rows : head:string -> rows:string list -> tail:string -> prepared_content
+(** [head ^ String.concat "" rows ^ tail] as {!Head_and_rows}; with no rows it is
+    a {!Whole_section}. *)
 type rendered
 val text : rendered -> string
 val unattributed : unattributed -> string -> rendered
@@ -90,9 +105,11 @@ val prepend_unattributed : unattributed -> string -> rendered -> rendered
 val prepend_prepared_unattributed : unattributed -> prepared_content -> rendered -> rendered
 val receipt_to_json : rendered -> Yojson.Safe.t
 (** Renderer-issued raw UTF8 spans, not a prepared or delivered IPC claim. *)
-val sections : rendered -> (source * string) list
-(** Every span's source and exact text, in render order. The texts concatenate
-    to {!text} byte for byte. *)
+type section = { section_source : source; section_text : string; section_rows : section_rows }
+
+val sections : rendered -> section list
+(** Every span's source, exact text and division, in render order. The texts
+    concatenate to {!text} byte for byte. *)
 val assemble : content_of:(layer_id -> string option) -> rendered
 (** [assemble ~content_of] renders each layer in {!ordered} via [content_of]
     and concatenates the [Some] results in order; a [None] layer contributes

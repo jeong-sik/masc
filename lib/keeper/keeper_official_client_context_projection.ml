@@ -142,17 +142,33 @@ type resume_delivery =
   ; context_projection : Keeper_context_submission_link.t
   ; held_context : Session_store.held_context list
   ; unchanged_sections : Keeper_context_layers.source list
+  ; partly_held_sections : Keeper_context_layers.source list
   }
 
 let sha256_hex text = Digestif.SHA256.(digest_string text |> to_hex)
 
+(* One row of a World State section with rows, and the name and digest a
+   session holds it under. *)
+type world_state_row =
+  { row_text : string
+  ; row_held : Session_store.held_context
+  }
+
+(* How a resume compares one section: as one text, or as its head and tail and
+   each row between them ({!Keeper_context_layers.Head_and_rows}). *)
+type world_state_division =
+  | One_text
+  | Rows of { head : string; rows : world_state_row list; tail : string }
+
 (* One World State section of a [Dynamic_context] block whose renderer
-   partition the assembly kept: what rendered it, its exact text, and the name
-   and digest a session holds it under. *)
+   partition the assembly kept: what rendered it, its exact text, the name and
+   digest a session holds it under -- for a section with rows, its head and
+   tail -- and how a resume compares it. *)
 type world_state_section =
   { section : Keeper_context_layers.source
   ; section_text : string
   ; section_held : Session_store.held_context
+  ; division : world_state_division
   }
 
 (* What a resume compares with what the session holds: the carried context as
@@ -179,14 +195,45 @@ let carried_message context message =
   }
 ;;
 
-let world_state_section (section, section_text) =
-  { section
-  ; section_text
-  ; section_held =
-      { Session_store.context = Session_store.Context_section section
-      ; sha256 = sha256_hex section_text
+let held_section section sha256 =
+  { Session_store.context = Session_store.Context_section section; sha256 }
+;;
+
+let world_state_row section row_text =
+  let sha256 = sha256_hex row_text in
+  { row_text
+  ; row_held =
+      { Session_store.context = Session_store.Context_section_row { section; row_sha256 = sha256 }
+      ; sha256
       }
   }
+;;
+
+(* Rows that repeat one text cannot be named apart, so such a section is
+   compared as one text. *)
+let world_state_section
+      { Keeper_context_layers.section_source = section; section_text; section_rows }
+  =
+  let one_text =
+    { section; section_text; section_held = held_section section (sha256_hex section_text)
+    ; division = One_text }
+  in
+  match section_rows with
+  | Keeper_context_layers.Whole_section -> one_text
+  | Keeper_context_layers.Head_and_rows { head; rows; tail } ->
+    let rows = List.map (world_state_row section) rows in
+    let digests = List.map (fun row -> row.row_held.Session_store.sha256) rows in
+    if List.compare_lengths (List.sort_uniq String.compare digests) digests <> 0
+    then one_text
+    else
+      { section; section_text; section_held = held_section section (sha256_hex (head ^ tail))
+      ; division = Rows { head; rows; tail } }
+;;
+
+let held_rows_of section =
+  match section.division with
+  | One_text -> []
+  | Rows { rows; _ } -> List.map (fun row -> row.row_held) rows
 ;;
 
 (* A block is compared section by section only when it is the
@@ -260,12 +307,12 @@ let held_of_item item =
   match item.body with
   | Whole_text -> if item.resent_when_held then [] else [ item.held ]
   | World_state_sections sections ->
-    List.filter_map
+    List.concat_map
       (fun section ->
          match Keeper_context_layers.resend_on_resume section.section with
-         | Keeper_context_layers.Sent_every_resume -> None
+         | Keeper_context_layers.Sent_every_resume -> []
          | Keeper_context_layers.(Sent_when_changed | Sent_with_other_sections) ->
-           Some section.section_held)
+           section.section_held :: held_rows_of section)
       sections
 ;;
 
@@ -282,6 +329,8 @@ let carried_label = function
   | Session_store.Context_block block -> "block:" ^ Prompt_block_id.to_string block
   | Session_store.Context_section section ->
     "section:" ^ Keeper_context_layers.source_name section
+  | Session_store.Context_section_row { section; _ } ->
+    "section_row:" ^ Keeper_context_layers.source_name section
   | Session_store.Context_carrier -> "carrier"
   | Session_store.Librarian_working_state -> "librarian_working_state"
   | Session_store.Librarian_unread -> "librarian_unread"
@@ -310,6 +359,7 @@ let is_block item =
   match item.held.Session_store.context with
   | Session_store.Context_block _ -> true
   | Session_store.Context_section _
+  | Session_store.Context_section_row _
   | Session_store.Context_carrier
   | Session_store.Librarian_working_state
   | Session_store.Librarian_unread
@@ -328,31 +378,81 @@ let block_text item =
 
 let block_id item = match item.held.Session_store.context with
   | Session_store.Context_block id -> Some id
-  | Session_store.Context_section _ | Session_store.Context_carrier
+  | Session_store.Context_section _ | Session_store.Context_section_row _
+  | Session_store.Context_carrier
   | Session_store.Librarian_working_state | Session_store.Librarian_unread
   | Session_store.Historical_task_reference -> None
 
-let unchanged_sections_notice sections =
+let sections_notice key sections =
   Prompt_registry.render_prompt_template
-    Prompt_names.keeper_world_frame_unchanged_sections
+    key
     [ "sections", String.concat ", " (List.map Keeper_context_layers.source_name sections) ]
 ;;
 
+let unchanged_sections_notice =
+  sections_notice Prompt_names.keeper_world_frame_unchanged_sections
+;;
+
+let held_rows_notice = sections_notice Prompt_names.keeper_world_frame_held_rows_sections
+
+(* One World State section a resume sends: whole, or for a section with rows
+   the session holds in part, its head, the rows the session lacks and its
+   tail. [held_rows] is never empty. *)
+type section_out =
+  | Section_whole of world_state_section
+  | Section_new_rows of
+      { section : world_state_section
+      ; head : string
+      ; tail : string
+      ; sent_rows : world_state_row list
+      ; held_rows : world_state_row list
+      }
+
 (* What a resume sends for one carried context: all of it, or the World State
-   sections the session does not hold unchanged with the line naming the ones
-   it does. [unchanged] is never empty. *)
+   sections the session does not hold unchanged with the lines naming the ones
+   it holds unchanged and the ones it holds in part. [notices] is never
+   empty. *)
 type sent =
   | Sent_whole of carried
   | Sent_changed_sections of
       { item : carried
-      ; sections : world_state_section list
+      ; sections : section_out list
       ; unchanged : world_state_section list
-      ; notice : string
+      ; notices : string list
       }
 
 type carried_delivery =
   | Already_held
   | Sent of sent
+
+(* How much of one World State section the session holds. A section sent on
+   every resume is never held. Of a section with rows, the session holds part
+   when it holds at least one row and lacks a row or the head; a session that
+   holds no row is sent the section whole. *)
+type section_holding =
+  | Holds_none
+  | Holds_all
+  | Holds_rows of
+      { head : string
+      ; tail : string
+      ; sent_rows : world_state_row list
+      ; held_rows : world_state_row list
+      }
+
+let section_holding ~holds section =
+  match Keeper_context_layers.resend_on_resume section.section with
+  | Keeper_context_layers.Sent_every_resume -> Holds_none
+  | Keeper_context_layers.Sent_with_other_sections ->
+    if holds section.section_held then Holds_all else Holds_none
+  | Keeper_context_layers.Sent_when_changed ->
+    (match section.division with
+     | One_text -> if holds section.section_held then Holds_all else Holds_none
+     | Rows { head; rows; tail } ->
+       (match List.partition (fun row -> holds row.row_held) rows with
+        | [], _ -> Holds_none
+        | _ :: _, [] when holds section.section_held -> Holds_all
+        | (_ :: _ as held_rows), sent_rows -> Holds_rows { head; tail; sent_rows; held_rows }))
+;;
 
 let carried_delivery ~held item =
   let holds entry = List.mem entry held in
@@ -361,43 +461,80 @@ let carried_delivery ~held item =
     if (not item.resent_when_held) && holds item.held then Already_held
     else Sent (Sent_whole item)
   | World_state_sections sections ->
-    let resend section = Keeper_context_layers.resend_on_resume section.section in
-    let section_held section =
-      match resend section with
-      | Keeper_context_layers.Sent_every_resume -> false
-      | Keeper_context_layers.(Sent_when_changed | Sent_with_other_sections) ->
-        holds section.section_held
+    let holdings = List.map (fun section -> section, section_holding ~holds section) sections in
+    let holds_all = function
+      | Holds_all -> true
+      | Holds_none | Holds_rows _ -> false
     in
-    let left_out section =
-      match resend section with
-      | Keeper_context_layers.Sent_when_changed -> section_held section
-      | Keeper_context_layers.(Sent_every_resume | Sent_with_other_sections) -> false
-    in
-    if List.for_all section_held sections
+    if List.for_all (fun (_, holding) -> holds_all holding) holdings
     then Already_held
     else (
-      match List.partition (fun section -> not (left_out section)) sections with
-      | _, [] -> Sent (Sent_whole item)
-      | sent, (_ :: _ as unchanged) ->
-        (match unchanged_sections_notice (List.map (fun section -> section.section) unchanged) with
-         | Ok notice -> Sent (Sent_changed_sections { item; sections = sent; unchanged; notice })
-         | Error detail ->
-           (* Leaving a section out is sound only beside the line that names
-              it, so without that line every section goes out. *)
+      (* The frame and the sections sent on every resume go out whenever any
+         section does; only a section sent when changed is ever left out. *)
+      let out, unchanged =
+        List.fold_right
+          (fun (section, holding) (out, unchanged) ->
+             match holding with
+             | Holds_rows { head; tail; sent_rows; held_rows } ->
+               Section_new_rows { section; head; tail; sent_rows; held_rows } :: out, unchanged
+             | Holds_all ->
+               (match Keeper_context_layers.resend_on_resume section.section with
+                | Keeper_context_layers.Sent_when_changed -> out, section :: unchanged
+                | Keeper_context_layers.(Sent_every_resume | Sent_with_other_sections) ->
+                  Section_whole section :: out, unchanged)
+             | Holds_none -> Section_whole section :: out, unchanged)
+          holdings
+          ([], [])
+      in
+      let partly =
+        List.filter_map
+          (function
+            | Section_new_rows { section; _ } -> Some section.section
+            | Section_whole _ -> None)
+          out
+      in
+      let notices =
+        List.filter_map
+          (fun (render, sources) ->
+             match sources with
+             | [] -> None
+             | _ :: _ -> Some (render sources))
+          [ unchanged_sections_notice, List.map (fun section -> section.section) unchanged
+          ; held_rows_notice, partly
+          ]
+      in
+      match notices with
+      | [] -> Sent (Sent_whole item)
+      | _ :: _ ->
+        (match List.find_map (function Error detail -> Some detail | Ok _ -> None) notices with
+         | Some detail ->
+           (* Leaving a section or a row out is sound only beside the line that
+              names it, so without that line every section goes out whole. *)
            Log.Keeper.warn
-             "World State unchanged-sections line did not render; sending every section: %s"
+             "World State resume line did not render; sending every section: %s"
              detail;
-           Sent (Sent_whole item)))
+           Sent (Sent_whole item)
+         | None ->
+           Sent
+             (Sent_changed_sections
+                { item; sections = out; unchanged
+                ; notices = List.filter_map Result.to_option notices })))
 ;;
 
 let sent_item = function
   | Sent_whole item | Sent_changed_sections { item; _ } -> item
 ;;
 
+let section_out_text = function
+  | Section_whole section -> section.section_text
+  | Section_new_rows { head; tail; sent_rows; _ } ->
+    head ^ String.concat "" (List.map (fun row -> row.row_text) sent_rows) ^ tail
+;;
+
 let sent_text = function
   | Sent_whole item -> block_text item
   | Sent_changed_sections { sections; _ } ->
-    Some (String.concat "" (List.map (fun section -> section.section_text) sections))
+    Some (String.concat "" (List.map section_out_text sections))
 ;;
 
 let sent_unchanged = function
@@ -406,9 +543,23 @@ let sent_unchanged = function
     List.map (fun section -> section.section) unchanged
 ;;
 
-let sent_notice = function
-  | Sent_whole _ -> None
-  | Sent_changed_sections { notice; _ } -> Some notice
+(* The rows each section sent in part left out, by digest. *)
+let sent_held_rows = function
+  | Sent_whole _ -> []
+  | Sent_changed_sections { sections; _ } ->
+    List.filter_map
+      (function
+        | Section_whole _ -> None
+        | Section_new_rows { section; held_rows; _ } ->
+          Some
+            ( section.section
+            , List.map (fun row -> row.row_held.Session_store.sha256) held_rows ))
+      sections
+;;
+
+let sent_notices = function
+  | Sent_whole _ -> []
+  | Sent_changed_sections { notices; _ } -> notices
 ;;
 
 (* The line goes out as its own System message after the carrier it speaks
@@ -421,24 +572,24 @@ let unchanged_sections_message notice =
 let rec rendered_messages = function
   | [] -> []
   | sent :: rest when is_block (sent_item sent) ->
-    let rec take_blocks texts ids unchanged notices = function
+    let rec take_blocks texts ids unchanged held_rows notices = function
       | next :: rest when is_block (sent_item next) ->
         (match sent_text next, block_id (sent_item next) with
          | Some text, Some id ->
            take_blocks (text :: texts) (id :: ids)
              (List.rev_append (sent_unchanged next) unchanged)
-             (Option.fold ~none:notices ~some:(fun notice -> notice :: notices)
-                (sent_notice next))
+             (List.rev_append (sent_held_rows next) held_rows)
+             (List.rev_append (sent_notices next) notices)
              rest
-         | _ -> (texts, ids, unchanged, notices), next :: rest)
-      | rest -> (texts, ids, unchanged, notices), rest in
+         | _ -> (texts, ids, unchanged, held_rows, notices), next :: rest)
+      | rest -> (texts, ids, unchanged, held_rows, notices), rest in
     (match sent_text sent, block_id (sent_item sent) with
      | Some text, Some id ->
-       let (texts, ids, unchanged, notices), rest =
+       let (texts, ids, unchanged, held_rows, notices), rest =
          take_blocks [text] [id] (List.rev (sent_unchanged sent))
-           (Option.to_list (sent_notice sent)) rest in
+           (List.rev (sent_held_rows sent)) (List.rev (sent_notices sent)) rest in
        (extra_system_context_message (String.concat resume_section_separator (List.rev texts)),
-        Some (List.rev ids, List.rev unchanged))
+        Some (List.rev ids, List.rev unchanged, List.rev held_rows))
        :: List.rev_map (fun notice -> unchanged_sections_message notice, None) notices
        @ rendered_messages rest
      | _ -> ((sent_item sent).message,None) :: rendered_messages rest)
@@ -460,8 +611,9 @@ let resume_prompt ~goal ~held ?composed_context messages =
       Keeper_context_submission_link.concat ~separator:""
         [Keeper_context_submission_link.literal (history_role_label message.role);
          Keeper_context_submission_link.encoded_carrier ~assembly:composed_context
-           ~selected_blocks:(Option.map fst selection)
-           ?omitted_sections:(Option.map snd selection) message])
+           ~selected_blocks:(Option.map (fun (ids, _, _) -> ids) selection)
+           ?omitted_sections:(Option.map (fun (_, unchanged, _) -> unchanged) selection)
+           ?omitted_rows:(Option.map (fun (_, _, held_rows) -> held_rows) selection) message])
     |> Keeper_context_submission_link.concat ~separator:resume_section_separator
     |> Keeper_context_submission_link.trim in
   let composed = held_of_carried carried in
@@ -474,11 +626,12 @@ let resume_prompt ~goal ~held ?composed_context messages =
      State also replaces the previous one as a whole: after a turn that
      composed its sections, the sections the session holds as current are
      exactly those, so a section absent this turn goes out again when it
-     returns. *)
+     returns, and a row that left a section's window is no longer named. *)
   let supersedes item (previous : Session_store.held_context) =
     match item.body, previous.context with
     | World_state_sections _,
       ( Session_store.Context_section _
+      | Session_store.Context_section_row _
       | Session_store.Context_block Prompt_block_id.Dynamic_context
       | Session_store.Context_carrier ) -> true
     | World_state_sections _,
@@ -493,18 +646,22 @@ let resume_prompt ~goal ~held ?composed_context messages =
       (not item.resent_when_held)
       && (match item.held.context, previous_context with
           | Session_store.Context_carrier,
-            (Session_store.Context_block _ | Session_store.Context_section _)
+            ( Session_store.Context_block _ | Session_store.Context_section _
+            | Session_store.Context_section_row _ )
           | Session_store.Context_block _, Session_store.Context_carrier -> true
-          | Session_store.Context_block block, Session_store.Context_section _ ->
+          | Session_store.Context_block block,
+            (Session_store.Context_section _ | Session_store.Context_section_row _) ->
             Prompt_block_id.equal block Prompt_block_id.Dynamic_context
           | ( (( Session_store.Context_block _
                | Session_store.Context_section _
+               | Session_store.Context_section_row _
                | Session_store.Context_carrier
                | Session_store.Librarian_working_state
                | Session_store.Librarian_unread
                | Session_store.Historical_task_reference ) as current_context)
             , (( Session_store.Context_block _
                | Session_store.Context_section _
+               | Session_store.Context_section_row _
                | Session_store.Context_carrier
                | Session_store.Librarian_working_state
                | Session_store.Librarian_unread
@@ -528,7 +685,8 @@ let resume_prompt ~goal ~held ?composed_context messages =
       ~blocks:(Option.map (fun id -> [id]) (block_id item)) item.message projection)
     context_projection omitted in
   { prompt = Keeper_context_submission_link.text context_projection; held_context; context_projection
-  ; unchanged_sections = List.concat_map sent_unchanged sent }
+  ; unchanged_sections = List.concat_map sent_unchanged sent
+  ; partly_held_sections = List.concat_map (fun sent -> List.map fst (sent_held_rows sent)) sent }
 
 ;;
 

@@ -1796,6 +1796,34 @@ let test_held_context_is_read_only_from_the_acknowledged_frontier () =
     check bool "a compacted session holds nothing" true
       (held_context_for_resume (plan compacted) ~expected:(Some compacted) = []))
 
+(* The rows of a World State section are held one by one, each named by its own
+   digest (#45131). They survive reopen; a row named by a digest other than the
+   one it is held under is refused. *)
+let test_held_section_rows_are_named_by_their_own_digest () =
+  with_workspace "masc-held-rows-" (fun base_path ->
+    let section = Keeper_context_layers.Layer Keeper_context_layers.Own_recent_actions in
+    let row ~name ~sha256 =
+      { context = Context_section_row { section; row_sha256 = name }; sha256 }
+    in
+    let frontier held = Some { snapshot_sha256 = String.make 64 'a'; message_count = 1;
+      delivery = Held_by_vendor_session; acknowledged_turn = None; held_context = held } in
+    let claim ~keeper_name held =
+      claim_with_context_frontier ~context_frontier:(frontier held) ~base_path ~keeper_name
+        ~expected:None ~client_kind:Claude_code ~owner_epoch ~runtime_id:"claude.default"
+        ~tool_surface_sha256:empty_surface ~updated_at:1.
+    in
+    let one = String.make 64 '1' and two = String.make 64 '2' in
+    let held =
+      [ { context = Context_section section; sha256 = String.make 64 'c' }
+      ; row ~name:one ~sha256:one
+      ; row ~name:two ~sha256:two ]
+    in
+    let claimed = claim ~keeper_name:"held-rows" held |> Result.get_ok in
+    check bool "held rows survive reopen" true
+      (load ~base_path ~keeper_name:"held-rows" = Ok (Some claimed));
+    check bool "a row named by another digest is refused" true
+      (Result.is_error (claim ~keeper_name:"misnamed-row" [ row ~name:one ~sha256:two ])))
+
 (* A frontier that names no held context does not load: it is not read as
    "nothing held". *)
 let test_frontier_without_held_context_does_not_load () =
@@ -2280,6 +2308,8 @@ let () =
       , [ test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
         ; test_case "held context from the acknowledged frontier" `Quick
             test_held_context_is_read_only_from_the_acknowledged_frontier
+        ; test_case "held section rows are named by their own digest" `Quick
+            test_held_section_rows_are_named_by_their_own_digest
         ; test_case "frontier without held context does not load" `Quick
             test_frontier_without_held_context_does_not_load
         ; test_case "retry previous keeps the guarded conversation" `Quick

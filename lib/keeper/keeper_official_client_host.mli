@@ -276,6 +276,11 @@ type resume_delivery =
     (** World State sections the prompt left out because the session holds
         them unchanged, in render order; the prompt names exactly these
         ({!unchanged_sections_notice}). *)
+  ; partly_held_sections : Keeper_context_layers.source list
+    (** World State sections with rows the prompt sent in part because the
+        session holds some of their rows: each goes out as its head, the rows
+        the session lacks and its tail, in render order; the prompt names
+        exactly these ({!held_rows_notice}). *)
   }
 
 val start_held_context :
@@ -339,7 +344,13 @@ val resume_prompt :
     with the sections that changed, the ones sent on every resume and its
     frame; each section the session holds unchanged is left out, and one
     System message after the carrier names those ({!unchanged_sections_notice},
-    [unchanged_sections]). A line that does not render sends every section.
+    [unchanged_sections]). A section with rows
+    ({!Keeper_context_layers.Head_and_rows}) is compared row by row: when the
+    session holds some of its rows it goes out as its head, the rows the
+    session lacks and its tail, and one more System message names it
+    ({!held_rows_notice}, [partly_held_sections]). A session that holds none
+    of its rows gets it whole. A line that does not render sends every
+    section whole.
 
     [held_context] is [held] updated with every carried context this turn
     composed, whether sent or already held. Composed World State sections
@@ -357,6 +368,12 @@ val unchanged_sections_notice :
   Keeper_context_layers.source list -> (string, string) result
 (** The line {!resume_prompt} sends in place of the named World State sections
     ([keeper.world.frame.unchanged_sections]). *)
+
+val held_rows_notice :
+  Keeper_context_layers.source list -> (string, string) result
+(** The line {!resume_prompt} sends after World State sections it sent in part,
+    saying their earlier rows are still current in the session
+    ([keeper.world.frame.held_rows_sections]). *)
 
 val measure_message_bytes : Agent_core.Types.message -> int
 (** Bytes one message occupies in the canonical MASC encoding

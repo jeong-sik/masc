@@ -147,9 +147,47 @@ let test_sections_split_the_text_by_source () =
   check (list (pair string string)) "each span with its source, in order"
     [ "world_frame", "FRAME"; "wiki", "WIKI"; "fleet_messages", "FLEET";
       "host_workspace_recall", "RECALL" ]
-    (List.map (fun (source, text) -> L.source_name source, text) (L.sections rendered));
+    (List.map
+       (fun (section : L.section) -> L.source_name section.L.section_source, section.L.section_text)
+       (L.sections rendered));
   check string "the sections concatenate to the text" (L.text rendered)
-    (String.concat "" (List.map snd (L.sections rendered)))
+    (String.concat ""
+       (List.map (fun (section : L.section) -> section.L.section_text) (L.sections rendered)))
+
+(* A section with rows keeps its exact bytes and hands back its head, rows and
+   tail, so a resume can send only the rows a session lacks (#45131). *)
+let test_a_section_with_rows_keeps_its_bytes_and_its_rows () =
+  let rows = [ "- [turn 1] Read -> ok\n"; "- [turn 2] Execute -> ok\n" ] in
+  let rendered =
+    L.assemble_prepared ~content_of:(function
+      | L.Own_recent_actions ->
+        Some (L.prepare_rows ~head:"### Your Recent Actions (2 turns)\n" ~rows ~tail:"\n")
+      | L.Wiki -> Some (L.prepare_content "WIKI")
+      | _ -> None)
+  in
+  check string "the text is the head, the rows and the tail"
+    ("WIKI" ^ "### Your Recent Actions (2 turns)\n" ^ String.concat "" rows ^ "\n")
+    (L.text rendered);
+  match L.sections rendered with
+  | [ { L.section_rows = L.Whole_section; _ };
+      { L.section_source = L.Layer L.Own_recent_actions;
+        section_rows = L.Head_and_rows { head; rows = got; tail }; section_text } ] ->
+    check string "the head" "### Your Recent Actions (2 turns)\n" head;
+    check (list string) "the rows" rows got;
+    check string "the tail" "\n" tail;
+    check string "the section text joins them" (head ^ String.concat "" got ^ tail) section_text
+  | _ -> fail "the wiki is one text and recent actions is a head with rows"
+
+let test_a_section_without_rows_is_one_text () =
+  let rendered =
+    L.assemble_prepared ~content_of:(function
+      | L.Own_recent_actions -> Some (L.prepare_rows ~head:"HEAD" ~rows:[] ~tail:"TAIL")
+      | _ -> None)
+  in
+  match L.sections rendered with
+  | [ { L.section_rows = L.Whole_section; section_text; _ } ] ->
+    check string "no rows is the head and tail as one text" "HEADTAIL" section_text
+  | _ -> fail "a section with no rows is one text"
 
 let () =
   run "keeper_context_layers"
@@ -175,6 +213,10 @@ let () =
             test_assemble_all_present_follows_ordered;
           test_case "sections split the text by source" `Quick
             test_sections_split_the_text_by_source;
+          test_case "a section with rows keeps its bytes and its rows" `Quick
+            test_a_section_with_rows_keeps_its_bytes_and_its_rows;
+          test_case "a section without rows is one text" `Quick
+            test_a_section_without_rows_is_one_text;
         ] );
       ( "section names",
         [

@@ -37,9 +37,9 @@ val blocks_for_carrier : t -> string -> (Prompt_block_id.t * string) list option
     Otherwise the caller must retain
     the whole carrier. Separators alone do not prevent block delivery. *)
 
-val dynamic_context_sections : t -> (Keeper_context_layers.source * string) list option
+val dynamic_context_sections : t -> Keeper_context_layers.section list option
 (** The [Dynamic_context] block as its renderer's sections, each with its exact
-    text, in order: {!Keeper_context_layers.sections} of
+    text and division, in order: {!Keeper_context_layers.sections} of
     [dynamic_context_partition]. [None] when no partition was kept, when it has
     no section, or when two sections share a source, so a caller that cannot
     name every section apart keeps the block whole. *)

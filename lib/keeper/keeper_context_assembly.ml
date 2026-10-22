@@ -83,7 +83,12 @@ let dynamic_context_sections assembly =
   match Option.map Keeper_context_layers.sections assembly.dynamic_context_partition with
   | None | Some [] -> None
   | Some sections ->
-    let sources = List.map fst sections in
+    let sources =
+      List.map
+        (fun (section : Keeper_context_layers.section) ->
+           section.Keeper_context_layers.section_source)
+        sections
+    in
     if List.length (List.sort_uniq compare sources) = List.length sources
     then Some sections
     else None

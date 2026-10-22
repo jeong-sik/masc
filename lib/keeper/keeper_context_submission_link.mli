@@ -10,13 +10,17 @@ val encoded_carrier :
   assembly:Keeper_context_assembly.t option ->
   selected_blocks:Prompt_block_id.t list option ->
   ?omitted_sections:Keeper_context_layers.source list ->
+  ?omitted_rows:(Keeper_context_layers.source * string list) list ->
   Agent_core.Types.message -> t
 (** Encodes the actual message with the production codec. Attribution requires
     exact issuer bytes, or an exact ordered subset of its uniquely named blocks.
     [omitted_sections] (default none) are World State sections a resume left
     out of the selected [Dynamic_context] block; the block then attributes as
     its renderer's other sections, in order, and the proof names the ones left
-    out. *)
+    out. [omitted_rows] (default none) name, by sha256, the rows a resume left
+    out of a section it sent in part ({!Keeper_context_layers.Head_and_rows});
+    that section then attributes as its head, its other rows and its tail, and
+    the proof names the rows left out. *)
 val concat : separator:string -> t list -> t
 val trim : t -> t
 val omit_held : assembly:Keeper_context_assembly.t option ->

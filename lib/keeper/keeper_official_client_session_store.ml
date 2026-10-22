@@ -137,6 +137,7 @@ type context_delivery =
 type carried_context =
   | Context_block of Prompt_block_id.t
   | Context_section of Keeper_context_layers.source
+  | Context_section_row of { section : Keeper_context_layers.source; row_sha256 : string }
   | Context_carrier
   | Librarian_working_state
   | Librarian_unread
@@ -450,6 +451,15 @@ let validate binding =
       then Error "invalid canonical context frontier"
       else if List.exists (fun held -> not (valid_sha256 held.sha256)) frontier.held_context
       then Error "invalid held context digest"
+      else if List.exists
+                (fun held -> match held.context with
+                   | Context_section_row { row_sha256; _ } ->
+                     not (String.equal row_sha256 held.sha256)
+                   | Context_block _ | Context_section _ | Context_carrier
+                   | Librarian_working_state | Librarian_unread
+                   | Historical_task_reference -> false)
+                frontier.held_context
+      then Error "held section row is not named by its own digest"
       else if List.length (List.sort_uniq compare held_contexts) <> List.length held_contexts
       then Error "held context names one carried context twice"
       else (match frontier.acknowledged_turn with
@@ -737,6 +747,10 @@ let held_context_to_yojson { context; sha256 } =
     | Context_section section ->
       [ "context", `String "section"
       ; "section", `String (Keeper_context_layers.source_name section) ]
+    | Context_section_row { section; row_sha256 } ->
+      [ "context", `String "section_row"
+      ; "section", `String (Keeper_context_layers.source_name section)
+      ; "row_sha256", `String row_sha256 ]
     | Context_carrier -> [ "context", `String "carrier" ]
     | Librarian_working_state -> [ "context", `String "working_state" ]
     | Librarian_unread -> [ "context", `String "librarian_unread" ]
@@ -753,6 +767,13 @@ let held_context_of_yojson = function
       | [ "context", `String "section"; "section", `String section; "sha256", _ ] ->
         (match Keeper_context_layers.source_of_name section with
          | Some section -> Ok (Context_section section)
+         | None -> Error ("unknown held context section " ^ section))
+      | [ "context", `String "section_row"; "row_sha256", `String row_sha256
+        ; "section", `String section; "sha256", _ ] ->
+        (match Keeper_context_layers.source_of_name section with
+         | Some section when valid_sha256 row_sha256 ->
+           Ok (Context_section_row { section; row_sha256 })
+         | Some _ -> Error "invalid held section row digest"
          | None -> Error ("unknown held context section " ^ section))
       | [ "context", `String "carrier"; "sha256", _ ] -> Ok Context_carrier
       | [ "context", `String "working_state"; "sha256", _ ] -> Ok Librarian_working_state

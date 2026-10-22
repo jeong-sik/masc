@@ -6472,8 +6472,8 @@ let test_keeper_context_lifecycle_three_settled_turns () =
       match held.context with
       | Store.Context_block block -> Some (Prompt_block_id.to_string block, held.sha256)
       | Store.Librarian_unread -> None
-      | Store.Context_section _ | Store.Context_carrier | Store.Librarian_working_state
-      | Store.Historical_task_reference ->
+      | Store.Context_section _ | Store.Context_section_row _ | Store.Context_carrier
+      | Store.Librarian_working_state | Store.Historical_task_reference ->
         fail "unexpected non-issuer context in the fixture") frontier.held_context in
     check int "both issuer identities remain acknowledged" 2 (List.length acknowledged_blocks);
     check int "the independent native unread observation is also acknowledged" 1

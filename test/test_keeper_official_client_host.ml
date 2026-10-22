@@ -3043,7 +3043,7 @@ let test_every_world_state_section_goes_out_when_the_session_may_not_hold_it () 
     (List.for_all
        (fun (held : Keeper_official_client_session_store.held_context) ->
           match held.context with
-          | Keeper_official_client_session_store.Context_section _ -> false
+          | Keeper_official_client_session_store.(Context_section _ | Context_section_row _) -> false
           | Keeper_official_client_session_store.(
               Context_block _ | Context_carrier | Librarian_working_state | Librarian_unread
               | Historical_task_reference) -> true)
@@ -3053,6 +3053,139 @@ let test_every_world_state_section_goes_out_when_the_session_may_not_hold_it () 
     (section_names after_whole.unchanged_sections);
   check bool "the wiki is sent again after a whole World State" true
     (contains after_whole.prompt "WIKI-ONE")
+;;
+
+(* Recent actions: one row per recorded turn under a head that counts them, as
+   [Keeper_unified_prompt] renders it. The window moves one turn at a time. *)
+let action_row turn = Printf.sprintf "- [turn %d] Execute -> ok\n" turn
+
+let world_state_with_actions ?(head_note = "") turns =
+  let rows = List.map action_row turns in
+  Layers.assemble_prepared ~content_of:(function
+    | Layers.Workspace_memory ->
+      Some (Layers.prepare_content "## Shared workspace memory ledger\nMEMORY-LEDGER\n\n")
+    | Layers.Own_recent_actions ->
+      Some
+        (Layers.prepare_rows
+           ~head:(Printf.sprintf "### Your Recent Actions (%d turns)\n%s" (List.length rows) head_note)
+           ~rows ~tail:"\n")
+    | Layers.Fleet_messages -> Some (Layers.prepare_content "### Fleet Messages (1)\nFLEET-ONE\n\n")
+    | _ -> None)
+  |> Layers.prepend_unattributed World_frame "## Current World State\nWORLD-FRAME\n\n"
+;;
+
+let sends delivery turn = contains delivery.Host.prompt (Printf.sprintf "[turn %d]" turn)
+
+let held_row_count (delivery : Host.resume_delivery) =
+  List.length
+    (List.filter
+       (fun (held : Keeper_official_client_session_store.held_context) ->
+          match held.context with
+          | Keeper_official_client_session_store.Context_section_row _ -> true
+          | Keeper_official_client_session_store.(
+              Context_block _ | Context_section _ | Context_carrier | Librarian_working_state
+              | Librarian_unread | Historical_task_reference) -> false)
+       delivery.held_context)
+;;
+
+(* #45131: the window of recent actions changes on every turn, so compared as
+   one text it went out whole on every resume and piled up in the session.
+   Compared row by row, a resume sends the head, the rows the session lacks
+   and the tail, and one line says the earlier rows still hold. *)
+let test_a_resume_sends_only_the_recent_action_rows_the_session_lacks () =
+  use_markdown_prompts ();
+  let first = world_state_turn (world_state_with_actions [ 1; 2; 3 ]) in
+  let second = world_state_turn (world_state_with_actions [ 2; 3; 4 ]) in
+  let delivery = resume ~held:(start_holding first) second in
+  check bool "the new row is sent" true (sends delivery 4);
+  List.iter
+    (fun turn ->
+       check bool (Printf.sprintf "held row %d is not sent again" turn) false (sends delivery turn))
+    [ 2; 3 ];
+  check bool "the head goes out with the new row" true
+    (contains delivery.prompt "### Your Recent Actions (3 turns)");
+  check (list string) "recent actions is named as sent in part" [ "own_recent_actions" ]
+    (section_names delivery.partly_held_sections);
+  check (list string) "the unchanged standing sections are left out"
+    [ "workspace_memory"; "fleet_messages" ]
+    (section_names delivery.unchanged_sections);
+  let notice = Host.held_rows_notice delivery.partly_held_sections |> Result.get_ok in
+  check bool "the prompt carries the line naming the section sent in part" true
+    (contains delivery.prompt notice);
+  let same = resume ~held:delivery.held_context second in
+  check string "a session holding the head and every row is sent the goal alone" "GOAL"
+    same.prompt;
+  (* Turn 5 ran outside this session, so the session lacks two rows. *)
+  let later = resume ~held:delivery.held_context (world_state_turn (world_state_with_actions [ 4; 5; 6 ])) in
+  check bool "every row the session lacks is sent" true (sends later 5 && sends later 6);
+  check bool "the row the session holds is not sent" false (sends later 4);
+  check int "the session names only the rows of the current window" 3 (held_row_count later)
+;;
+
+(* A head that changed while the rows did not -- a new rejected-call digest --
+   goes out alone with its tail. *)
+let test_a_changed_head_goes_out_without_the_rows_the_session_holds () =
+  use_markdown_prompts ();
+  let first = world_state_turn (world_state_with_actions [ 1; 2 ]) in
+  let noted = world_state_turn (world_state_with_actions ~head_note:"REJECTED-DIGEST\n" [ 1; 2 ]) in
+  let delivery = resume ~held:(start_holding first) noted in
+  check bool "the changed head is sent" true (contains delivery.prompt "REJECTED-DIGEST");
+  check bool "no held row is sent" false (sends delivery 1 || sends delivery 2);
+  check (list string) "recent actions is named as sent in part" [ "own_recent_actions" ]
+    (section_names delivery.partly_held_sections)
+;;
+
+(* A session that holds none of the rows -- a new session, a compaction, or a
+   copy held as one text before rows were named -- gets the section whole. *)
+let test_recent_actions_go_out_whole_when_the_session_holds_no_row () =
+  use_markdown_prompts ();
+  let turn = world_state_with_actions [ 1; 2; 3 ] in
+  let fresh = resume ~held:[] (world_state_turn turn) in
+  check bool "every row is sent to a session holding nothing" true
+    (List.for_all (sends fresh) [ 1; 2; 3 ]);
+  check (list string) "nothing is named as sent in part" []
+    (section_names fresh.partly_held_sections);
+  let as_one_text =
+    [ { Keeper_official_client_session_store.context =
+          Keeper_official_client_session_store.Context_section
+            (Layers.Layer Layers.Own_recent_actions)
+      ; sha256 = Digestif.SHA256.(digest_string (Layers.text turn) |> to_hex)
+      } ]
+  in
+  let old_copy = resume ~held:as_one_text (world_state_turn (world_state_with_actions [ 2; 3; 4 ])) in
+  check bool "a copy held as one text names no row, so every row is sent" true
+    (List.for_all (sends old_copy) [ 2; 3; 4 ])
+;;
+
+(* The section sent in part is still the issuer's bytes: its head, its other
+   rows and its tail. Its attribution names the rows left out by digest. *)
+let test_recent_action_rows_sent_in_part_keep_their_issuer_attribution () =
+  use_markdown_prompts ();
+  let open Yojson.Safe.Util in
+  let first = world_state_turn (world_state_with_actions [ 1; 2; 3 ]) in
+  let second = world_state_turn (world_state_with_actions [ 2; 3; 4 ]) in
+  let delivery = resume ~held:(start_holding first) second in
+  let binding =
+    Keeper_context_submission_link.binding_to_json
+      ~slot:Runtime_official_client_write.Whole_write
+      delivery.context_projection
+      (Runtime_official_client_write.raw delivery.prompt)
+  in
+  check string "the carrier attributes to its issuer" "verified"
+    (binding |> member "issuer_attribution" |> member "status" |> to_string);
+  match binding |> member "occurrences" |> to_list with
+  | [ occurrence ] ->
+    (match occurrence |> member "source" |> member "omitted_world_state_rows" |> to_list with
+     | [ entry ] ->
+       check string "the rows left out are recent actions" "own_recent_actions"
+         (entry |> member "section" |> to_string);
+       check (list string) "the attribution names the rows left out by digest"
+         (List.map
+            (fun turn -> Digestif.SHA256.(digest_string (action_row turn) |> to_hex))
+            [ 2; 3 ])
+         (entry |> member "row_sha256" |> to_list |> List.map to_string)
+     | _ -> fail "one section was sent in part")
+  | _ -> fail "the World State carrier must be one attributed occurrence"
 ;;
 
 let test_unsupported_choice_refuses_before_projection () =
@@ -3107,6 +3240,22 @@ let () =
             "every section goes out when the session may not hold it"
             `Quick
             test_every_world_state_section_goes_out_when_the_session_may_not_hold_it
+        ; test_case
+            "a resume sends only the recent action rows the session lacks"
+            `Quick
+            test_a_resume_sends_only_the_recent_action_rows_the_session_lacks
+        ; test_case
+            "a changed head goes out without the rows the session holds"
+            `Quick
+            test_a_changed_head_goes_out_without_the_rows_the_session_holds
+        ; test_case
+            "recent actions go out whole when the session holds no row"
+            `Quick
+            test_recent_actions_go_out_whole_when_the_session_holds_no_row
+        ; test_case
+            "recent action rows sent in part keep their issuer attribution"
+            `Quick
+            test_recent_action_rows_sent_in_part_keep_their_issuer_attribution
         ] )
     ; ( "native posture admission (RFC-0390)"
       , [ test_case

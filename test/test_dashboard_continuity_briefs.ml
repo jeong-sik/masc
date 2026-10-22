@@ -164,30 +164,36 @@ let test_paused_keeper_is_not_critical () =
   check string "state" "warning" (state_of row);
   check string "note" "운영자 일시정지" (note_of row)
 
+(* A row this build cannot read is not read as a default. It stays in the list
+   as a critical row that names the Keeper and says why. *)
+let contains haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
+  at 0
+
+let check_unreadable what row ~reason_mentions =
+  check string (what ^ ": the Keeper is named") "omega"
+    Yojson.Safe.Util.(row.json |> member "name" |> to_string);
+  check string (what ^ ": it is critical") "critical" (state_of row);
+  check string (what ^ ": it is a bad tone") "bad"
+    Yojson.Safe.Util.(row.json |> member "tone" |> to_string);
+  check bool (what ^ ": the reason is given") true
+    (contains (note_of row) reason_mentions)
+
 (* Pause is read before health, so a paused keeper never reaches the health
-   parse. It must still reject a health this build cannot read: accepting
+   parse. It must still refuse a health this build cannot read: accepting
    producer drift for free on paused keepers would reopen the permissive
    fallback one field over. *)
-let test_unknown_status_is_rejected_even_when_paused () =
-  check_raises
-    "unknown status stays a rejected parse"
-    (Invalid_argument
-       "dashboard continuity: keeper \"omega\" has unknown health \"suspended\"")
-    (fun () ->
-      ignore
-        (build_one
-           (keeper ~health:"suspended" ~paused:(`Bool true) ())))
+let test_unknown_status_is_unreadable_even_when_paused () =
+  check_unreadable "unknown health"
+    (build_one (keeper ~health:"suspended" ~paused:(`Bool true) ()))
+    ~reason_mentions:"suspended"
 
-let test_non_boolean_paused_is_rejected () =
-  check_raises
-    "paused must be a boolean"
-    (Invalid_argument
-       "dashboard continuity: keeper paused is not a boolean: \"true\"")
-    (fun () ->
-      ignore
-        (build_one
-           (keeper ~health:"healthy" ~status:"active"
-              ~paused:(`String "true") ())))
+let test_non_boolean_paused_is_unreadable () =
+  check_unreadable "non-boolean paused"
+    (build_one
+       (keeper ~health:"healthy" ~status:"active" ~paused:(`String "true") ()))
+    ~reason_mentions:"paused"
 
 (* The operator snapshot lists a Keeper declared in config that has never
    booted as a declaration row: no diagnostic, so no health. Its presence must
@@ -217,18 +223,42 @@ let test_declaration_row_alone_gives_no_briefs () =
   check (list string) "a declared-only fleet has no continuity" []
     (names_of (build_continuity_briefs ~now_ts:1_000_000_000.0 [ declared_row ]))
 
-let test_non_boolean_declaration_only_is_rejected () =
+let test_non_boolean_declaration_only_is_unreadable () =
   let row =
     match keeper ~health:"healthy" () with
     | `Assoc fields -> `Assoc (("declaration_only", `String "yes") :: fields)
     | other -> other
   in
-  check_raises
-    "declaration_only must be a boolean"
-    (Invalid_argument
-       "dashboard continuity: keeper \"omega\": keeper row declaration_only \
-        is not a boolean: \"yes\"")
-    (fun () -> ignore (build_one row))
+  check_unreadable "non-boolean declaration_only" (build_one row)
+    ~reason_mentions:"declaration_only"
+
+(* One unreadable row must not fail the list or change the rows beside it.
+   Seen as a failure mode 2026-09-19: a single row that raised took the whole
+   execution render down with it. *)
+let named name = function
+  | `Assoc fields -> `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
+  | other -> other
+
+let test_unreadable_row_does_not_change_the_others () =
+  let alpha = named "alpha" (keeper ~health:"healthy" ~status:"active" ()) in
+  let gamma = named "gamma" (keeper ~health:"failing" ~status:"active" ()) in
+  let rows =
+    build_continuity_briefs ~now_ts:1_000_000_000.0
+      [ alpha; named "beta" (keeper ~health:"suspended" ()); gamma ]
+  in
+  check (list string) "every Keeper keeps a row" [ "alpha"; "beta"; "gamma" ]
+    (List.sort String.compare (names_of rows));
+  let row_of name =
+    List.find
+      (fun (row : continuity_context) ->
+        Yojson.Safe.Util.(row.json |> member "name" |> to_string) = name)
+      rows
+  in
+  check yojson "a readable row is the one it is alone" (build_one alpha).json
+    (row_of "alpha").json;
+  check yojson "another readable row is the one it is alone" (build_one gamma).json
+    (row_of "gamma").json;
+  check string "the unreadable row is critical" "critical" (state_of (row_of "beta"))
 
 let () =
   run "dashboard_continuity_briefs"
@@ -253,10 +283,10 @@ let () =
             test_paused_keeper_is_not_critical;
           test_case "context ratio does not change the state" `Quick
             test_context_ratio_does_not_change_the_state;
-          test_case "unknown status is rejected even when paused" `Quick
-            test_unknown_status_is_rejected_even_when_paused;
-          test_case "non-boolean paused is rejected" `Quick
-            test_non_boolean_paused_is_rejected;
+          test_case "unknown status is unreadable even when paused" `Quick
+            test_unknown_status_is_unreadable_even_when_paused;
+          test_case "non-boolean paused is unreadable" `Quick
+            test_non_boolean_paused_is_unreadable;
         ] );
       ( "declaration rows",
         [
@@ -264,7 +294,12 @@ let () =
             test_declaration_row_has_no_brief;
           test_case "declared-only fleet has no continuity" `Quick
             test_declaration_row_alone_gives_no_briefs;
-          test_case "non-boolean declaration_only is rejected" `Quick
-            test_non_boolean_declaration_only_is_rejected;
+          test_case "non-boolean declaration_only is unreadable" `Quick
+            test_non_boolean_declaration_only_is_unreadable;
+        ] );
+      ( "unreadable rows",
+        [
+          test_case "an unreadable row leaves the others as they are" `Quick
+            test_unreadable_row_does_not_change_the_others;
         ] );
     ]

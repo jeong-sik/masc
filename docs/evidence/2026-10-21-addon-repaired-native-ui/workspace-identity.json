@@ -1,0 +1,19 @@
+{
+  "paths": {
+    "cwd": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5",
+    "effective_base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5",
+    "effective_masc_root": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc",
+    "current_task_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5/.masc/current_task",
+    "current_task_shape": "absent",
+    "effective_has_masc_dir": true,
+    "roots_diverge": false,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5",
+    "env_masc_base_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5",
+    "resolution_source": "explicit_cli"
+  },
+  "overall_status": "degraded",
+  "status": "ok"
+}

@@ -528,6 +528,32 @@ let clear_wake e =
   e.wake <- promise; e.resolver <- resolver; e.pending <- Idle; e.host_due <- false
 let entries m = Hashtbl.to_seq_values m.entries |> List.of_seq
   |> List.sort (fun a b -> String.compare a.instance_id b.instance_id)
+(* Whether an entry can serve exports now. [Gone] is a detached entry: it no
+   longer stands for an installation, so its absence is the truth. *)
+type readiness = Ready of owned_connection | Unready of Lane_addon_unready.reason | Gone
+let readiness (e : entry) = match phase_of e, e.connection with
+  | Failed detail, (Some _ | None) -> Unready (Lane_addon_unready.Failed detail)
+  | Detaching, (Some _ | None) -> Unready Lane_addon_unready.Detaching
+  | Detached, (Some _ | None) -> Gone
+  | (Attached | Observing), (Some _ | None) when e.stopping -> Unready Lane_addon_unready.Stopping
+  | (Attached | Observing), Some connection when e.started -> Ready connection
+  | (Attached | Observing), (Some _ | None) -> Unready Lane_addon_unready.Starting
+let unready_of (e : entry) reason = {
+  Lane_addon_unready.installation = (match e.configuration with Some owner -> owner.id | None -> e.instance_id);
+  instance_id = e.instance_id; package_id = e.package.id; declared_tools = e.package.exported_tools;
+  service = e.package.worker_service; reason }
+let unready_message e reason = Lane_addon_unready.message (unready_of e reason)
+(* One pass over the entries this caller may read: the usable ones with their
+   connection, and every other non-detached one with why it cannot serve. *)
+type live_reading = { ready : (entry * owned_connection) list; unready : Lane_addon_unready.t list }
+let live_reading m access =
+  let ready, unready = List.fold_left (fun (ready, unready) (e : entry) ->
+    if not (can_read access e.visibility) then (ready, unready)
+    else match readiness e with
+      | Ready connection -> ((e, connection) :: ready, unready)
+      | Unready reason -> (ready, unready_of e reason :: unready)
+      | Gone -> (ready, unready)) ([], []) (entries m) in
+  { ready = List.rev ready; unready = List.rev unready }
 let status_coverage e = {
   source_id = e.instance_id; incarnation = e.instance_id;
   cursor = Some (string_of_int e.seq);
@@ -569,7 +595,10 @@ let resolve_machine_output m ~consumer_id machine =
       && e.pending = Idle && e.active_tool_calls = 0 && Option.is_none e.current_action ->
       Ok {Lane_addon_sources.worker_instance=e.instance_id;worker_seq=e.seq;
         worker_max_bytes=(Lane_addon_types.max_reply_bytes e.package);worker_output=e.output}
-  | [_] -> Error "machine worker observation is unavailable or refreshing"
+  | [e] -> Error (match readiness e with
+      | Unready reason -> unready_message e reason
+      | Ready _ | Gone -> if e.seq = 0 then "machine worker has no completed observation yet"
+          else "machine worker observation is refreshing")
   | [] -> Error "no shared machine worker is attached"
   | _ -> Error "multiple shared workers provide the machine"
 let resolve_lane_output m ~access ~visibility ~run_id ~installation_id =
@@ -581,7 +610,9 @@ let resolve_lane_output m ~access ~visibility ~run_id ~installation_id =
       Error "upstream read visibility changed; reattach this consumer before capturing new output"
   | [e] when e.run_id <> run_id -> Error "upstream installation belongs to another run"
   | [e] when e.stopping -> Error "upstream installation is being replaced or removed"
-  | [e] when e.seq = 0 -> Error "upstream installation has no completed output"
+  | [e] when e.seq = 0 -> Error (match readiness e with
+      | Unready reason -> unready_message e reason
+      | Ready _ | Gone -> "upstream installation has no completed output")
   | [e] ->
       (match e.configuration with
        | Some owner -> Ok {Lane_addon_sources.installation_id; instance_id=e.instance_id;
@@ -1605,15 +1636,19 @@ let manager config =
                      configuration_status = None; configuration_nudge = (fun () -> ()); configuration_visibility=[];
                      swept = []; sweep_retries = Hashtbl.create 2; sweep_warned = Hashtbl.create 2 } in
       Hashtbl.add managers root m; m
-let live_exports m access =
-  entries m |> List.concat_map (fun (e : entry) ->
-    if not e.started || e.stopping || not (can_read access e.visibility) then []
-    else match phase_of e, e.connection with
-      | (Attached | Observing), Some connection ->
-          connection.worker.exported_tools () |> List.filter_map (fun (tool : Mcp_protocol.Mcp_types.tool) ->
-            if List.mem tool.Mcp_protocol.Mcp_types.name e.package.exported_tools
-            then Some (Lane_addon_tool_export.create ~owner:connection.export_owner ~tool) else None)
-      | (Attached | Observing), None | (Failed _ | Detaching | Detached), _ -> [])
+let reading_exports (reading : live_reading) =
+  reading.ready |> List.concat_map (fun ((e : entry), connection) ->
+    connection.worker.exported_tools () |> List.filter_map (fun (tool : Mcp_protocol.Mcp_types.tool) ->
+      if List.mem tool.Mcp_protocol.Mcp_types.name e.package.exported_tools
+      then Some (Lane_addon_tool_export.create ~owner:connection.export_owner ~tool) else None))
+(* A held export that is no longer live names its own incarnation's state when
+   that incarnation is still visible; [ended] is the text when it is not. *)
+let installation_ended = "Add-on tool installation is no longer available"
+let ended_export ~ended (reading : live_reading) (export : tool_export) =
+  match List.find_opt (fun (unready : Lane_addon_unready.t) ->
+    String.equal unready.instance_id export.instance_id) reading.unready with
+  | Some unready -> Unavailable (Lane_addon_unready.message unready)
+  | None -> Unavailable ended
 
 let unique_exports ~reserved exports =
   let names = List.map (fun export -> export.tool.Mcp_protocol.Mcp_types.name) exports in
@@ -1623,17 +1658,30 @@ let unique_exports ~reserved exports =
     Error "Add-on tool name is provided by multiple visible installations"
   else Ok exports
 
-let tool_export_snapshot ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
-  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
-  let exports = match Hashtbl.find_opt managers root with
-    | None -> [] | Some m -> live_exports m access in
-  Lane_addon_tool_export.isolate ~reserved exports)
-
-let tool_exports ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
+type export_reading = { exports : tool_export list; unready : Lane_addon_unready.t list }
+type export_snapshot = {
+  exports : tool_export list;
+  conflicts : Lane_addon_tool_export.conflict list;
+  unready : Lane_addon_unready.t list;
+}
+let current_reading ~config ~access =
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
-  | None -> Ok []
-  | Some m -> unique_exports ~reserved (live_exports m access))
+  | None -> ({ ready = []; unready = [] } : live_reading)
+  | Some m -> live_reading m access
+
+let tool_export_snapshot ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
+  let reading = current_reading ~config ~access in
+  let isolated = Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
+  ({ exports = isolated.exports; conflicts = isolated.conflicts; unready = reading.unready } : export_snapshot))
+
+let tool_export_reading ~config ~access ~reserved = Eio_context.run_on_owner_domain (fun () ->
+  let reading = current_reading ~config ~access in
+  unique_exports ~reserved (reading_exports reading)
+  |> Result.map (fun exports -> ({ exports; unready = reading.unready } : export_reading)))
+
+let tool_exports ~config ~access ~reserved =
+  tool_export_reading ~config ~access ~reserved |> Result.map (fun (reading : export_reading) -> reading.exports)
 
 type export_observation = {
   instance_id : string;
@@ -1648,20 +1696,28 @@ let observation_for_export ~config ~access ~name = Eio_context.run_on_owner_doma
   match Hashtbl.find_opt managers root with
   | None -> Ok None
   | Some m ->
-      let candidates = entries m |> List.filter (fun (e : entry) ->
-        can_read access e.visibility && List.mem name e.package.exported_tools
-        && match phase_of e with Detached | Detaching -> false | Attached | Observing | Failed _ -> true) in
-      match candidates with
-      | [] -> Ok None
-      | [e] ->
-          (match phase_of e with
-           | Failed detail -> Error detail
-           | Detaching | Detached -> Ok None
-           | Attached | Observing ->
-               if e.seq = 0 || not e.started || e.stopping then Error "machine worker observation is not available yet"
+      (* A detaching incarnation gives way to its replacement; only when none
+         remains does it explain why the export cannot be read. *)
+      let serving, detaching = entries m |> List.filter (fun (e : entry) ->
+        can_read access e.visibility && List.mem name e.package.exported_tools)
+        |> List.filter_map (fun (e : entry) -> match readiness e with
+          | Gone -> None
+          | Unready Lane_addon_unready.Detaching -> Some (Either.Right e)
+          | Ready _ | Unready (Lane_addon_unready.Starting | Stopping | Failed _) -> Some (Either.Left e))
+        |> List.partition_map Fun.id in
+      match serving, Lane_addon_unready.summary
+          (List.map (fun e -> unready_of e Lane_addon_unready.Detaching) detaching) with
+      | [], None -> Ok None
+      | [], Some reason -> Error reason
+      | [e], (Some _ | None) ->
+          (match readiness e with
+           | Unready reason -> Error (unready_message e reason)
+           | Gone -> Ok None
+           | Ready _ ->
+               if e.seq = 0 then Error "machine worker observation is not available yet"
                else Ok (Some {instance_id=e.instance_id;observation_seq=e.seq;max_bytes=(Lane_addon_types.max_reply_bytes e.package);
                  refreshing=e.state = Lifecycle.Observing || e.pending <> Idle || e.active_tool_calls > 0 || Option.is_some e.current_action;output=e.output}))
-      | _ -> Error "multiple visible installations provide this machine")
+      | _ :: _ :: _, (Some _ | None) -> Error "multiple visible installations provide this machine")
 
 let with_tool_call_owner work =
   let cancelled, signal_cancelled = Eio.Promise.create () in
@@ -1675,16 +1731,17 @@ let with_tool_call_owner work =
     ignore (Eio.Promise.try_resolve signal_cancelled exn);
     raise exn
 
-let browser_services ~config ~access = Eio_context.run_on_owner_domain (fun () ->
-  let root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
-  match Hashtbl.find_opt managers root with
-  | None -> []
-  | Some m -> entries m |> List.filter_map (fun e ->
-      if not e.started || e.stopping || not (can_read access e.visibility) then None
-      else match phase_of e,e.connection with
-      | (Attached|Observing),Some connection when Option.is_some connection.worker.browser ->
-          Some {instance_id=e.instance_id;owner=connection.export_owner}
-      | (Attached|Observing|Failed _|Detaching|Detached),(None|Some _) -> None))
+type browser_reading = { services : browser_service list; unready : Lane_addon_unready.t list }
+let browser_service_reading ~config ~access = Eio_context.run_on_owner_domain (fun () ->
+  let reading = current_reading ~config ~access in
+  let services = reading.ready |> List.filter_map (fun ((e : entry), connection) ->
+    match connection.worker.browser with
+    | Some _ -> Some {instance_id=e.instance_id;owner=connection.export_owner}
+    | None -> None) in
+  let unready = reading.unready |> List.filter (fun (unready : Lane_addon_unready.t) ->
+    match unready.service with Browser_service -> true | Mcp_tools -> false) in
+  { services; unready })
+let browser_services ~config ~access = (browser_service_reading ~config ~access).services
 let call_browser_service ~config ~access ~(service:browser_service) ~command =
   with_tool_call_owner (fun () ->
     let* ()=match command with
@@ -1741,10 +1798,11 @@ let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) 
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
     let* m = match Hashtbl.find_opt managers root with
       | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
-    let snapshot = Lane_addon_tool_export.isolate ~reserved (live_exports m access) in
+    let reading = live_reading m access in
+    let snapshot = Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
     let* () = if List.exists (fun (current : tool_export) ->
         Lane_addon_tool_export.equal_owner current.owner export.owner && current.tool = export.tool) snapshot.exports
-      then Ok () else Error (Unavailable "Add-on tool installation is no longer available") in
+      then Ok () else Error (ended_export ~ended:installation_ended reading export) in
     let* e = match Hashtbl.find_opt m.entries export.instance_id with
       | Some e -> Ok e | None -> Error (Unavailable "Add-on tool connection is unavailable") in
     let installation_id = Lane_addon_tool_request_owner.installation_id (match e.configuration with
@@ -1771,10 +1829,11 @@ let with_tool_request_destination ~config ~access ~reserved ~(export : tool_expo
     Eio.Mutex.use_ro m.action_mutex (fun () ->
     Eio.Cancel.protect (fun () ->
       (* Acquiring the serializer can yield. Inspect authority only afterwards. *)
-      let snapshot = Lane_addon_tool_export.isolate ~reserved (live_exports m access) in
+      let reading = live_reading m access in
+      let snapshot = Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
       let* () = if List.exists (fun (current : tool_export) ->
           Lane_addon_tool_export.equal_owner current.owner export.owner && current.tool=export.tool) snapshot.exports
-        then Ok () else Error (Unavailable "Add-on tool installation is no longer available") in
+        then Ok () else Error (ended_export ~ended:installation_ended reading export) in
       let* e, owner = match Hashtbl.find_opt m.entries export.instance_id with
         | Some ({configuration=Some owner;connection=Some connection;_} as e)
           when Lane_addon_tool_export.equal_owner connection.export_owner export.owner -> Ok (e,owner)
@@ -1790,10 +1849,11 @@ let with_tool_request_destination ~config ~access ~reserved ~(export : tool_expo
           && d.enabled && d.package=e.package) snapshot.declarations with
         | Some declaration -> Ok declaration
         | None -> Error (Unavailable "Fresh Add-on declaration no longer permits the configured installation") in
-      let current=Lane_addon_tool_export.isolate ~reserved (live_exports m access) in
+      let reading = live_reading m access in
+      let current=Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
       let* ()=if List.exists (fun (candidate : tool_export) ->
           Lane_addon_tool_export.equal_owner candidate.owner export.owner && candidate.tool=export.tool) current.exports
-        then Ok () else Error (Unavailable "Add-on export ended during declaration confirmation") in
+        then Ok () else Error (ended_export ~ended:"Add-on export ended during declaration confirmation" reading export) in
       let destination = {
         installation_id=Lane_addon_tool_request_owner.installation_id
           (Lane_addon_tool_request_owner.Configuration owner.id);
@@ -1820,11 +1880,12 @@ let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~princi
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
     let* m = match Hashtbl.find_opt managers root with
       | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
-    let snapshot = Lane_addon_tool_export.isolate ~reserved (live_exports m access) in
+    let reading = live_reading m access in
+    let snapshot = Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
     let exports = snapshot.exports in
     let* () = if List.exists (fun (current : tool_export) ->
         Lane_addon_tool_export.equal_owner current.owner export.owner && current.tool = export.tool) exports then Ok ()
-      else Error (Unavailable "Add-on tool installation is no longer available") in
+      else Error (ended_export ~ended:installation_ended reading export) in
     let* e, connection = match Hashtbl.find_opt m.entries export.instance_id with
       | Some ({connection=Some connection; _} as e)
         when Lane_addon_tool_export.equal_owner connection.export_owner export.owner -> Ok (e, connection.worker)

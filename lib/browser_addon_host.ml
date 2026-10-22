@@ -13,14 +13,17 @@ let connect ~config ~access ~principal ~reserved =
     | Lane_addon_call_context.Anonymous -> Error (R.Host_refusal
         (Lane_addon_call_context.Rejected "browser calls require verified host authority"))
     | Keeper _|Authenticated_agent _|Host_actor _|Operator -> Ok () in
-  let* service=match R.browser_services ~config ~access with
+  let browser=R.browser_service_reading ~config ~access in
+  let* service=match browser.services with
     | [service] -> Ok service
-    | [] -> Error (R.Unavailable "no browser Add-on is attached")
+    | [] -> Error (R.Unavailable (match Lane_addon_unready.summary browser.unready with
+        | Some reason -> reason
+        | None -> "no browser Add-on is attached"))
     | _::_::_ -> Error (R.Unavailable "multiple visible browser Add-ons are attached") in
-  let* exports=R.tool_exports ~config ~access ~reserved |> Result.map_error (fun detail -> R.Unavailable detail) in
+  let* reading=R.tool_export_reading ~config ~access ~reserved |> Result.map_error (fun detail -> R.Unavailable detail) in
   let* export=match List.filter (fun (export:R.tool_export) ->
     export.instance_id=service.instance_id && export.tool.name=Browser_addon_tool.definition.name
-    && Lane_addon_tool_export.equal_owner export.owner service.owner) exports with
+    && Lane_addon_tool_export.equal_owner export.owner service.owner) reading.exports with
     | [export] -> Ok export
     | []|_::_::_ -> Error (R.Unavailable "the original browser Add-on command is unavailable") in
   Ok {config;access;principal;reserved;service;export}

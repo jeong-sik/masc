@@ -81,14 +81,27 @@ type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
 type tool_call_error = Unavailable of string | Outcome_unknown of string
   | Host_refusal of Lane_addon_call_context.host_refusal
+type export_reading = { exports : tool_export list; unready : Lane_addon_unready.t list }
+(** The usable exports and, from the same read, every visible non-detached
+    installation that cannot serve now. A caller that finds no export for a
+    name reports its declaring [unready] installations instead of absence. *)
+type export_snapshot = {
+  exports : tool_export list;
+  conflicts : Lane_addon_tool_export.conflict list;
+  unready : Lane_addon_unready.t list;
+}
 val tool_export_snapshot : config:Workspace.config -> access:Lane_addon_sources.access ->
-  reserved:string list -> Lane_addon_tool_export.snapshot
+  reserved:string list -> export_snapshot
 (** Live export snapshot with individual name conflicts quarantined. *)
-val tool_exports : config:Workspace.config -> access:Lane_addon_sources.access ->
-  reserved:string list -> (tool_export list, string) result
+val tool_export_reading : config:Workspace.config -> access:Lane_addon_sources.access ->
+  reserved:string list -> (export_reading, string) result
 (** Reads initialized live workers only; does not start or recover installations.
     The caller supplies the complete reserved host namespace. Collisions fail
-    explicitly. Visibility follows verified caller authority. *)
+    explicitly. Visibility follows verified caller authority; an installation
+    the caller cannot read is in neither list. *)
+val tool_exports : config:Workspace.config -> access:Lane_addon_sources.access ->
+  reserved:string list -> (tool_export list, string) result
+(** The exports of {!tool_export_reading}. *)
 val retain_tool_request_owner : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> export:tool_export -> scope:string -> request_id:string -> request:Yojson.Safe.t ->
   (unit, tool_call_error) result
@@ -151,7 +164,12 @@ val call_exported_tool_with_principal : principal:Lane_addon_call_context.princi
 (** Trusted host boundary only: principal must come from verified credentials,
     never from caller-supplied tool arguments. [access] still controls visibility. *)
 type browser_service = private {instance_id:string;owner:Lane_addon_tool_export.owner}
+type browser_reading = { services : browser_service list; unready : Lane_addon_unready.t list }
+val browser_service_reading : config:Workspace.config -> access:Lane_addon_sources.access -> browser_reading
+(** Usable browser services and, from the same read, the visible browser
+    installations that cannot serve now. *)
 val browser_services : config:Workspace.config -> access:Lane_addon_sources.access -> browser_service list
+(** The services of {!browser_service_reading}. *)
 type browser_service_status = Browser_ready of browser_service
   | Browser_refresh_needed of browser_service | Browser_unavailable | Browser_retired
 val browser_service_status : config:Workspace.config -> access:Lane_addon_sources.access ->
@@ -415,4 +433,5 @@ val observation_for_export :
   (export_observation option, string) result
 (** Read the last completed observation of the visible installation exporting
     [name], without an RPC or starting a worker. No installation is [None];
-    ambiguous, failed or not-yet-observed installations are errors. *)
+    ambiguous, failed, starting, stopping or not-yet-observed installations are
+    errors, and so is a detaching one that no replacement serves. *)

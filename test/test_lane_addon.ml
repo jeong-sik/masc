@@ -280,6 +280,38 @@ let test_start_and_cleanup_failures_remain_optional () = with_fixture (fun env _
   detach config retry;
   await_phase clock config retry "detached")
 
+let attach_exporting config dir mode names =
+  let path = manifest dir mode in
+  let original = In_channel.with_open_bin path In_channel.input_all in
+  write path (original ^ "\n[world.tools]\nexport = "
+    ^ Yojson.Safe.to_string (`List (List.map (fun name -> `String name) names)) ^ "\n");
+  unwrap (dispatch config Runtime.Attach ["manifest_path",`String path;
+    "run_id",`String "world";"binding",`Assoc ["sources",`List []]]) |> text "instance_id"
+
+(* A failed installation exports nothing, and the same read names it with its
+   failure instead of leaving the callers to report that none exists. *)
+let test_a_failed_installation_is_read_as_unready () = with_fixture (fun env _ config dir _ ->
+  let clock = Eio.Stdenv.clock env in
+  let id = attach_exporting config dir "start-error" ["masc_msx_step"] in
+  await_phase clock config id "failed";
+  let reading = unwrap (Runtime.tool_export_reading ~config
+    ~access:Lane_addon_sources.Unauthenticated ~reserved:[]) in
+  check Alcotest.int "a failed installation exports nothing" 0 (List.length reading.exports);
+  (match reading.unready with
+   | [unready] ->
+       check string "the unready installation is the failed one" id unready.installation;
+       check bool "its reason is the failure" true (match unready.reason with
+         | Lane_addon_unready.Failed _ -> true
+         | Starting | Stopping | Detaching -> false);
+       check bool "it is found by the tool it declares" true
+         (Lane_addon_unready.declaring ~name:"masc_msx_step" reading.unready = [unready])
+   | [] | _ :: _ :: _ -> fail "exactly the failed installation must be unready");
+  detach config id;
+  await_phase clock config id "detached";
+  check bool "a detached installation is no longer unready" true
+    ((unwrap (Runtime.tool_export_reading ~config
+      ~access:Lane_addon_sources.Unauthenticated ~reserved:[])).unready = []))
+
 (* A Detach that arrives while the start is still running must wait for the
    cleanup the start's failure leaves behind. The start's state turns Failed
    while its worker is still being torn down, and the Detach, woken at that
@@ -2030,6 +2062,8 @@ let () = run "Lane Add-on runtime" ["optional extension", [
     test_request_refusals_preserve_runtime_failure_distinction;
   test_case "hung and failed observers preserve primary progress" `Quick test_hang_error_coalescing_and_primary_progress;
   test_case "startup and cleanup failures stay local" `Quick test_start_and_cleanup_failures_remain_optional;
+  test_case "a failed installation is read as unready with its failure" `Quick
+    test_a_failed_installation_is_read_as_unready;
   test_case "a cleanup that is cut short can run again" `Quick test_a_cleanup_that_is_cut_short_can_run_again;
   test_case "Detach waits for a start that fails under it" `Quick test_detach_waits_for_a_start_that_fails_under_it;
   test_case "evidence remains optional and durable across detach" `Quick test_evidence_is_optional_retained_and_delivery_is_only_acceptance;

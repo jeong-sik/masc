@@ -426,7 +426,7 @@ let test_a_held_turn_keeps_only_the_rows_the_log_does_not_draw () =
     ]
   in
   let held =
-    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held"; ht_diagrams=[] } ]
+    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held"; ht_diagrams=[]; ht_generated=[] } ]
   in
   let retained = Tui_types.rows_the_logs_do_not_draw ~held rows in
   let retained_role role = List.exists (fun (row : Tui_types.msg_entry) ->
@@ -476,9 +476,9 @@ let test_source_scoped_row_check_matches_full_held_scan () =
     ]
   in
   let held =
-    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-a"; ht_diagrams=[] }
-    ; { Tui_types.ht_source = autonomous_source; ht_diagrams=[] }
-    ; { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-b"; ht_diagrams=[] }
+    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-a"; ht_diagrams=[]; ht_generated=[] }
+    ; { Tui_types.ht_source = autonomous_source; ht_diagrams=[]; ht_generated=[] }
+    ; { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-b"; ht_diagrams=[]; ht_generated=[] }
     ]
   in
   let full_scan =

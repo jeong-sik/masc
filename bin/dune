@@ -2226,6 +2226,7 @@
   masc_tui_keeper_chat_diff
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_transcript
+  masc_tui_chat_media
   masc_tui_keeper_control
   masc_tui_markdown
   masc_tui_observation_layout

@@ -17,7 +17,7 @@ type row = { fact : Workspace_memory_ledger.pending_fact; neighbors : Workspace_
 type ids
 
 type batch = private
-  { rows : row list  (** selected facts, oldest first *)
+  { rows : row list  (** selected facts in [pending] order *)
   ; selected : Workspace_memory_ledger.pending_fact list  (** the facts of [rows] *)
   ; input : Yojson.Safe.t
   ; rendered_prompt : string
@@ -31,7 +31,7 @@ type batch = private
     request-local ids. Ledger hashes stay in the host snapshot. *)
 
 val selected_ids : batch -> (string * Workspace_memory_ledger.pending_fact) list
-(** The request-local id of every selected fact, oldest first. The model
+(** The request-local id of every selected fact, in row order. The model
     answers with these ids. *)
 
 val claim_ids : batch -> (string * string) list
@@ -58,7 +58,8 @@ val prepare
   -> current:Workspace_memory_ledger.pending_fact list
   -> pending:Workspace_memory_ledger.pending_fact list
   -> (batch option, error) result
-(** Prepare every pending fact in the given order, with BM25-ranked facts
+(** Prepare every pending fact in the given order ({!Workspace_memory_ledger.reconcile}
+    gives its new facts oldest first), with BM25-ranked facts
     from other Keepers in [current]. One transient SQLite index serves all
     queries; the complete prompt is rendered once, without estimating provider
     input capacity. [neighbor_limit] bounds retrieval results and may be zero.

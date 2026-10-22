@@ -302,9 +302,8 @@ let test_successor_keeps_whole_rows_and_one_child final ()=with_workspace (fun b
    | Capture.Classification original,Capture.Classification child ->
      check bool "the oldest half of the selection is kept" true
        (child.batch.selected=List.take 2 original.batch.selected);
-     check json "complete original row payloads survive" (match original.batch.input with
-       | `Assoc fields -> `List (List.take 2 (match List.assoc "new_facts" fields with `List rows -> rows | _ -> fail "rows"))
-       | _ -> fail "original input") (Yojson.Safe.Util.member "new_facts" child.batch.input);
+     check bool "each kept row keeps its fact and neighbors" true
+       (child.batch.rows=List.take 2 original.batch.rows);
      check json "captured classification ledger stays unchanged" (Ledger.to_json original.ledger) (Ledger.to_json child.ledger)
    | Capture.Classification _,Capture.Briefing _ | Capture.Briefing _,(Capture.Classification _ | Capture.Briefing _) -> fail "wrong domain");
   check json "linking never saves a domain state" ledger_before (Ledger.to_json (get (Ledger.load ~base_path)));

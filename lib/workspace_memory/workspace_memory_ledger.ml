@@ -402,8 +402,11 @@ let facts_of_observation observation facts =
   | Workspace_memory_context.Missing -> Some []
   | Workspace_memory_context.Available snapshot -> Some (facts snapshot)
 
-(* Each fact keeps its store's [first_seen], the insertion time the store
-   preserves across re-observation, so new facts can be taken oldest first. *)
+(* Each fact carries its store's [first_seen] so new facts can be taken oldest
+   first. The ordinary store keeps it while the claim stays. The source store
+   keeps it only while the source file's sha256 also stays, so a pending
+   source-bound fact whose file changes is first seen again at that change,
+   under the same ledger identity. *)
 let observe_keeper (keeper : Workspace_memory_context.keeper) =
   let keeper_id = keeper.keeper_id in
   [ ( Ordinary_store keeper_id

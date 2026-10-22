@@ -193,6 +193,19 @@ let test_snapshot_is_bound_to_the_captured_ledger () =
   refused "a changed selected claim" (replace "input" (map_list "facts" (fun fact ->
     if member "id" fact = `String "f1" then replace "claim" (`String "Changed selected prose") fact else fact)
     input) snapshot);
+  (* Both rebuild to the same input, so only the row checks can refuse them. *)
+  let selected_rows f =
+    replace "input" (replace "new_facts" (`List (f (member "new_facts" input |> to_list))) input) snapshot in
+  refused "a row that repeats a neighbor" (selected_rows (function
+    | first :: rest ->
+      let neighbors = match member "neighbors" first |> to_list with
+        | neighbor :: others -> neighbor :: neighbor :: others
+        | [] -> Alcotest.fail "the first selected row needs a neighbor" in
+      replace "neighbors" (`List neighbors) first :: rest
+    | [] -> Alcotest.fail "expected a selected row"));
+  refused "a fact selected twice" (selected_rows (function
+    | first :: rest -> first :: first :: rest
+    | [] -> Alcotest.fail "expected a selected row"));
   let disposed = ledger_of (`Assoc [
     "schema", `String "workspace.memory.ledger.v1";
     "claims", `List [`Assoc ["claim_id", `String "c-release"; "claim", `String "The release evidence is ready"];

@@ -1,9 +1,10 @@
 import { validateSound } from './project-sound.mjs'
 import { openSynthStream } from './synth-stream.mjs'
+import { vstHostPath } from './vst-host.mjs'
 
 // The audio consumer owns the clock. No speculative queue or device is opened.
 export function openVstStream(sound, { sampleRate = 44100, signal,
-  command = 'masc-vst-host', args = [], spawnProcess } = {}) {
+  command = vstHostPath, args = [], spawnProcess } = {}) {
   validateSound(sound)
   if (sound.kind !== 'vst') throw new Error('Choose a project-bound VST sound')
   if (!Number.isInteger(sampleRate) || sampleRate <= 0 || sampleRate > 0xffffffff) throw new Error('Invalid VST stream sample rate')

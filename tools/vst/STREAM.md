@@ -1,6 +1,6 @@
 # Continuous VST synthesis protocol
 
-`masc-vst-host --stream` exchanges newline-delimited JSON on stdin/stdout.
+`host.py --stream` (the viewer runtime's `vst/host --stream`) exchanges newline-delimited JSON on stdin/stdout.
 Native diagnostics, including direct plug-in writes, go to stderr. The child
 loads one selected VST3 instrument on its main thread. It has no audio device,
 MIDI endpoint, transport timer, speculative render queue or session duration cap.
@@ -46,8 +46,8 @@ The JavaScript `openVstStream` owner in `tools/alphatex/vst-stream.mjs` allows o
 outstanding render. The output consumer requests another only when it has
 capacity, providing backpressure without a growing queue. Each block promise
 returns a Buffer of PCM. The ready identity is owned independently of later
-caller mutations. The module is shipped by `scripts/install-alphatex.sh`;
-`scripts/install-vst-host.sh` fingerprints and ships the updated native host.
+caller mutations. The module and the native host are shipped together by
+`scripts/install-alphatex.sh`.
 
 `{"kind":"stop"}` ends admission after earlier commands. The host resets its
 owned instrument and replies `{"kind":"stopped","frames":"total"}`. The

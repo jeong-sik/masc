@@ -227,8 +227,8 @@ legitimately be silent. There is no implicit SoundFont replacement.
 Preparation, instance WAVs and hash receipts live in one private playback tree.
 Cancellation joins the owned native child before deleting that tree; playback
 keeps it until the transport closes. The saved project owns musical source and
-preset state, not those temporary render files. Install both the current
-`install-alphatex.sh` and `install-vst-host.sh` helpers to use this route.
+preset state, not those temporary render files. `install-alphatex.sh` installs
+the VST host this route uses (Python 3.12+).
 Explicit MIDI output bindings continue to select physical MIDI playback;
 captured MIDI2/UMP uses its separate paired route.
 

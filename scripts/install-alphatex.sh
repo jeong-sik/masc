@@ -3,20 +3,23 @@
 set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 prefix=${HOME}/.local/bin
-if [ "$#" -gt 0 ]; then
-  if [ "$#" -ne 2 ] || [ "$1" != "--prefix" ]; then
-    printf '%s\n' 'usage: scripts/install-alphatex.sh [--prefix /path/to/bin]' >&2
-    exit 2
-  fi
-  prefix=$2
-fi
+python=python3
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --prefix) [ "$#" -ge 2 ] || exit 2; prefix=$2; shift 2 ;;
+    --python) [ "$#" -ge 2 ] || exit 2; python=$2; shift 2 ;;
+    *) printf '%s\n' 'usage: scripts/install-alphatex.sh [--prefix /path/to/bin] [--python python3]' >&2; exit 2 ;;
+  esac
+done
 command -v node >/dev/null 2>&1 || { printf '%s\n' 'Node.js 22 or newer is required' >&2; exit 1; }
 command -v pnpm >/dev/null 2>&1 || { printf '%s\n' 'pnpm is required to install the locked viewer dependencies' >&2; exit 1; }
 node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
 mkdir -p "$prefix"
 prefix=$(CDPATH= cd -- "$prefix" && pwd)
-runtime_files='ump-source.mjs ump-editor.mjs ump-tui.mjs capture-midi.mjs synth-stream.mjs soundfont-stream.mjs soundfont_stream.py soundfont.mjs soundfont_host.py ump-region-midi.mjs practice-midi.mjs practice-passes.mjs practice-sound.mjs practice-source.mjs practice-source-files.mjs practice-take.mjs render-midi-clock.mjs phrase-backing.mjs step-monitor-session.mjs step-monitor-worker.mjs step-monitor.mjs pcm-output.mjs native/PcmRing.swift native/PcmOutput.swift vst-stream.mjs midi-source-picker.mjs step-input.mjs midi-input.mjs native/MidiInput.swift arrangement-sound.mjs source-audio-clock.mjs native/SourceAudioClock.swift exact-time.mjs project-sound.mjs project-sound-files.mjs score-handoff.mjs native/WaveLoopClock.swift arrangement-loop.mjs midi-expression.mjs music-library-info.mjs music-library-worker.mjs music-workbench.mjs phrase-arrangement.mjs arrangement-practice.mjs native/PulseAudioClock.swift native/PulseLoopClock.swift recording-correction.mjs calibration-profile.mjs calibration-files.mjs capture-placement.mjs audio-calibration.mjs live-midi.mjs package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs capture.mjs session-data.mjs capture-time.mjs captured-source.mjs captured-source-files.mjs capture-playback.mjs music-session.mjs wave-file.mjs sequencer-project.mjs arrangement.mjs arrangement-files.mjs arrangement-editor.mjs arrangement-worker.mjs arrangement-tui.mjs arrangement-playback.mjs arrangement-recording.mjs sequencer-files.mjs sequencer-audio.mjs sequencer-midi.mjs midi-source.mjs midi-source-editor.mjs note-selection.mjs midi-source-playback.mjs sequencer-editor.mjs sequencer-vst.mjs sequencer-worker.mjs sequencer-tui.mjs playback.mjs native/MusicSession.swift native/MusicTransport.swift native/MidiTransport.swift native/WaveArrangement.swift native/CaptureAudioClock.swift native/UmpTransport.swift native/UmpOutput.swift native/UmpRegions.swift native/HybridMidiTransport.swift native/UmpLoopTransport.swift native/UmpState.swift native/Info.plist native/UmpLiveInput.swift native/LiveMidiMain.swift native/LiveMidiReservations.swift vst.mjs instruments.mjs status-reader.mjs arrangement-vst.mjs native/MidiRenderProjection.swift arrangement-export.mjs arrangement-midi-export.mjs'
-revision=$(node --input-type=module - "$repo_root/tools/alphatex" $runtime_files <<'FINGERPRINT'
+runtime_files='ump-source.mjs ump-editor.mjs ump-tui.mjs capture-midi.mjs synth-stream.mjs soundfont-stream.mjs soundfont_stream.py soundfont.mjs soundfont_host.py ump-region-midi.mjs practice-midi.mjs practice-passes.mjs practice-sound.mjs practice-source.mjs practice-source-files.mjs practice-take.mjs render-midi-clock.mjs phrase-backing.mjs step-monitor-session.mjs step-monitor-worker.mjs step-monitor.mjs pcm-output.mjs native/PcmRing.swift native/PcmOutput.swift vst-stream.mjs vst-host.mjs midi-source-picker.mjs step-input.mjs midi-input.mjs native/MidiInput.swift arrangement-sound.mjs source-audio-clock.mjs native/SourceAudioClock.swift exact-time.mjs project-sound.mjs project-sound-files.mjs score-handoff.mjs native/WaveLoopClock.swift arrangement-loop.mjs midi-expression.mjs music-library-info.mjs music-library-worker.mjs music-workbench.mjs phrase-arrangement.mjs arrangement-practice.mjs native/PulseAudioClock.swift native/PulseLoopClock.swift recording-correction.mjs calibration-profile.mjs calibration-files.mjs capture-placement.mjs audio-calibration.mjs live-midi.mjs package.json pnpm-lock.yaml engine.mjs audio.mjs diagnostics.mjs worker.mjs terminal.mjs viewer.mjs capture.mjs session-data.mjs capture-time.mjs captured-source.mjs captured-source-files.mjs capture-playback.mjs music-session.mjs wave-file.mjs sequencer-project.mjs arrangement.mjs arrangement-files.mjs arrangement-editor.mjs arrangement-worker.mjs arrangement-tui.mjs arrangement-playback.mjs arrangement-recording.mjs sequencer-files.mjs sequencer-audio.mjs sequencer-midi.mjs midi-source.mjs midi-source-editor.mjs note-selection.mjs midi-source-playback.mjs sequencer-editor.mjs sequencer-vst.mjs sequencer-worker.mjs sequencer-tui.mjs playback.mjs native/MusicSession.swift native/MusicTransport.swift native/MidiTransport.swift native/WaveArrangement.swift native/CaptureAudioClock.swift native/UmpTransport.swift native/UmpOutput.swift native/UmpRegions.swift native/HybridMidiTransport.swift native/UmpLoopTransport.swift native/UmpState.swift native/Info.plist native/UmpLiveInput.swift native/LiveMidiMain.swift native/LiveMidiReservations.swift vst.mjs instruments.mjs status-reader.mjs arrangement-vst.mjs native/MidiRenderProjection.swift arrangement-export.mjs arrangement-midi-export.mjs'
+# The VST host is part of this runtime, so its source and lock enter the revision.
+vst_files='../vst/host.py ../vst/requirements.lock'
+revision=$(node --input-type=module - "$repo_root/tools/alphatex" $runtime_files $vst_files <<'FINGERPRINT'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -130,6 +133,43 @@ if [ "$(uname -s)" = Darwin ] && [ ! -x "$support_dir/music-midi-live" ]; then
     trap - EXIT HUP INT TERM
   else
     printf '%s\n' 'Live MIDI input requires the Xcode command-line tools.' >&2
+  fi
+fi
+# The VST host lives inside this runtime: viewers start vst/host beside their
+# own modules, so a viewer never speaks to a host from another revision. The
+# Python environment depends only on the lock and is shared between runtimes.
+if [ ! -x "$support_dir/vst/host" ]; then
+  if command -v "$python" >/dev/null 2>&1 \
+      && "$python" -c 'import sys; sys.exit(sys.version_info < (3, 12))' 2>/dev/null; then
+    lock_digest=$(node -e 'process.stdout.write(require("node:crypto").createHash("sha256").update(require("node:fs").readFileSync(process.argv[1])).digest("hex"))' "$repo_root/tools/vst/requirements.lock")
+    environment="$prefix/../share/masc/vst-env/$lock_digest"
+    if [ ! -f "$environment/.installed" ]; then
+      # Only an environment that never finished installing is cleared.
+      "$python" -m venv --clear "$environment"
+      if command -v uv >/dev/null 2>&1; then
+        uv pip install --python "$environment/bin/python" --require-hashes -r "$repo_root/tools/vst/requirements.lock"
+      else
+        "$environment/bin/python" -m pip install --require-hashes -r "$repo_root/tools/vst/requirements.lock"
+      fi
+      touch "$environment/.installed"
+    fi
+    mkdir -p "$support_dir/vst"
+    install -m 644 "$repo_root/tools/vst/host.py" "$support_dir/vst/host.py"
+    vst_launcher=$(mktemp "$support_dir/vst/.host.XXXXXX")
+    trap 'rm -f "$vst_launcher"' EXIT HUP INT TERM
+    cat > "$vst_launcher" <<'VST_LAUNCHER'
+#!/bin/sh
+set -eu
+vst_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+VST_LAUNCHER
+    printf 'exec "$vst_dir/../../../vst-env/%s/bin/python" "$vst_dir/host.py" "$@"\n' "$lock_digest" >> "$vst_launcher"
+    chmod 755 "$vst_launcher"
+    # Discovery does not load every installed plug-in or open its editor.
+    printf '%s\n' '{"operation":"candidates"}' | "$vst_launcher" > /dev/null
+    mv -f "$vst_launcher" "$support_dir/vst/host"
+    trap - EXIT HUP INT TERM
+  else
+    printf '%s\n' "VST instruments require Python 3.12 or newer ($python); SoundFont playback remains available." >&2
   fi
 fi
 # The relative layout is shared by every prefix; no checkout or workspace path

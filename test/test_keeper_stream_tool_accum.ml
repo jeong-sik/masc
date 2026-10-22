@@ -1193,6 +1193,102 @@ let test_producer_and_keeper_reject_ambiguous_tool_inputs_together () =
     fixtures
 ;;
 
+let test_max_tokens_keeps_live_and_durable_tools_aligned () =
+  let module B = Masc.Keeper_chat_agent_core_stream_bridge in
+  let module E = Masc.Keeper_chat_events in
+  List.iter
+    (fun (label, arguments, close_tool) ->
+      let keeper = A.create () in
+      let bridge = ref (B.empty_state ()) in
+      let project event =
+        A.on_event keeper event;
+        let translated =
+          B.translate ~redact_text:Fun.id ~base_dir:(Filename.get_temp_dir_name ())
+            ~stream_scope:(A.current_stream_scope keeper) !bridge event
+        in
+        bridge := translated.bridge_state;
+        translated.chat_events
+      in
+      let prior =
+        [ message_start "prior"
+        ; start ~index:0 ~tool_id:(Some "prior-call") ~tool_name:(Some "Read")
+        ; json_snapshot ~index:0 {|{"path":"prior.md"}|}
+        ; stop ~index:0
+        ; message_stop_reason
+        ; Agent_core.Types.MessageStop
+        ]
+      in
+      List.iter (fun event -> ignore (project event)) prior;
+      seal_turn keeper [ 0 ];
+      let execution_id = Ids.Execution_id.of_string "exec-prior" in
+      (match record_execution_id keeper ~tool_call_id:"prior-call" ~execution_id with
+       | Ok () -> () | Error detail -> fail detail);
+      let producer = S.create_stream_acc () in
+      let events =
+        [ message_start "cut"
+        ; non_tool_start ~index:0 ~content_type:"text"
+        ; Agent_core.Types.ContentBlockDelta
+            { index = 0; delta = Agent_core.Types.TextDelta "report draft" }
+        ; stop ~index:0
+        ; start ~index:2 ~tool_id:(Some "cut-call") ~tool_name:(Some "masc_keeper_delegate")
+        ; json_delta ~index:2 arguments
+        ]
+        @ (if close_tool then [ stop ~index:2 ] else [])
+        @ [ Agent_core.Types.MessageDelta
+              { stop_reason = Some Agent_core.Types.MaxTokens; usage = None }
+          ; Agent_core.Types.MessageStop
+          ]
+      in
+      let emitted =
+        List.concat_map
+          (fun event ->
+             match S.resolve_event producer event with
+             | Agent_core.Types.Stream_event_accepted canonical -> project canonical
+             | Agent_core.Types.Stream_event_suppressed -> []
+             | Agent_core.Types.Stream_event_rejected _ -> fail (label ^ ": rejected fixture"))
+          events
+      in
+      (match S.finalize_stream_acc producer with
+       | Ok { content = [ Agent_core.Types.Text "report draft" ];
+              stop_reason = Agent_core.Types.MaxTokens; _ } -> ()
+       | Ok _ -> fail (label ^ ": cut tool entered canonical response")
+       | Error _ -> fail (label ^ ": producer lost surviving text"));
+      seal_turn ~turn:1 keeper [];
+      check (list string) (label ^ ": only prior execution persists") [ "prior-call" ]
+        (List.map (fun (call : Masc.Keeper_chat_store.tool_call) -> call.call_id)
+           (A.to_tool_calls keeper));
+      check bool (label ^ ": text remains deliverable") true
+        (B.terminal_message_had_text !bridge);
+      let quarantines = List.filter_map
+        (function E.Agent_core_stream_protocol_error error -> Some error | _ -> None)
+        emitted
+      in
+      (match quarantines with
+       | [ { E.kind = E.Sse_stream_incomplete;
+             quarantined_occurrence = Some occurrence; _ } ] ->
+         check int "cut scope only" (A.current_stream_scope keeper) occurrence.stream_scope;
+         check int "exact cut tool" 2 occurrence.block_index
+       | errors -> failf "%s: expected one tool quarantine, got %d" label (List.length errors));
+      check int (label ^ ": no second failure diagnostic") 0
+        (List.length (B.fail_stream !bridge ~reason:"outer failure").chat_events);
+      List.iter (fun event -> ignore (project event))
+        [ message_start "continuation"
+        ; start ~index:0 ~tool_id:(Some "next-call") ~tool_name:(Some "Read")
+        ; json_snapshot ~index:0 {|{"path":"next.md"}|}
+        ; stop ~index:0
+        ; message_stop_reason
+        ; Agent_core.Types.MessageStop
+        ];
+      seal_turn ~turn:2 keeper [ 0 ];
+      check (list string) (label ^ ": next response can continue")
+        [ "prior-call"; "next-call" ]
+        (List.map (fun (call : Masc.Keeper_chat_store.tool_call) -> call.call_id)
+           (A.to_tool_calls keeper)))
+    [ "closed parseable tool", {|{"prompt":"handoff"}|}, true
+    ; "open partial tool", {|{"prompt":"handoff|}, false
+    ]
+;;
+
 let test_official_receipt_does_not_certify_sibling_or_corrupt_scope () =
   let t = A.create () in
   start_runtime_attempt t;
@@ -1442,6 +1538,8 @@ let () =
             test_input_delta_after_stop_quarantines_the_call
         ; test_case "producer and keeper reject ambiguous inputs together" `Quick
             test_producer_and_keeper_reject_ambiguous_tool_inputs_together
+        ; test_case "MaxTokens preserves text and prior tools across continuation" `Quick
+            test_max_tokens_keeps_live_and_durable_tools_aligned
         ] )
     ; ( "execution identity"
       , [ test_case "recovered admission emits exact source and persists registered name" `Quick

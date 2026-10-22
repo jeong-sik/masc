@@ -1228,6 +1228,28 @@ let inspect_pending_inputs ~path =
     | Some (chat_operations, _, _, _, _) -> Some chat_operations)
 ;;
 
+(* The check [open_or_create] makes before it initializes or validates, run
+   on a read-only handle: an absent file or an empty database is accepted
+   because the Owner creates the schema there, and anything else must already
+   be this build's schema. *)
+let check_openable ~path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+  | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error))
+  | { Unix.st_kind = Unix.S_REG; _ } ->
+    (match Sqlite3.db_open ~mode:`READONLY path with
+     | exception Sqlite3.Error detail -> Error (Store_unavailable detail)
+     | db ->
+       let result =
+         try validate_open_candidate db with
+         | Sqlite3.Error detail -> Error (Store_unavailable detail)
+       in
+       if close_db db then result
+       else Error (Store_unavailable "failed to close read-only operation store"))
+  | { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _ } ->
+    Error (Integrity_error "operation store path is not a regular file")
+;;
+
 
 module Offline = struct
   type prepared_copy =

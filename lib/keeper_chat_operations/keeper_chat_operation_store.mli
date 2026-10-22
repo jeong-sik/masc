@@ -76,6 +76,13 @@ val inspect_pending_inputs : path:string -> (Operation.t list option, error) res
     Does not scan terminal history or run a whole-database integrity audit.
     [None] means no database, distinct from an empty validated snapshot. *)
 
+val check_openable : path:string -> (unit, error) result
+(** Read-only: whether {!open_or_create} would accept the file at [path]. An
+    absent file or an empty database passes, because the Owner creates the
+    schema there. A populated database must carry this build's application
+    id, user_version, schema identity, schema objects and input history
+    floor. Never creates, configures or changes the file. *)
+
 type input_checkpoint_update =
   | Input_checkpoint_updated
   | Input_checkpoint_source_changed of input_checkpoint_observation

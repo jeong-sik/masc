@@ -32,7 +32,14 @@
     [Refuse_boot] as well: while it does not decode, the keeper does not
     register and takes no turn; the row names the file that failed, and the
     snapshot and the WAL move aside together under the queue owner lock,
-    the WAL first. The goal store ([goals.json]) is
+    the WAL first. The chat operation journal
+    ([<masc>/keepers/<name>/chat-operations.sqlite3]) is [Refuse_boot]: a
+    journal this build does not accept leaves its keeper without an Owner
+    (2026-10-22, #44905). It is never moved aside here, even with
+    [--accept-store-quarantine]: the Owner inventory installs before boot
+    reconcile and has already refused it, so [quarantine] reports it as a
+    failure and the operator moves or prepares it with the server stopped.
+    The goal store ([goals.json]) is
 
     [Degrade_typed]: every goal writer refuses an unreadable store and no
     reader turns it into an empty goal list, so keepers run on tasks, board

@@ -5,6 +5,7 @@ let store_to_string : D.Refusing.t -> string = function
   | D.Refusing.Memory_current -> "memory_current"
   | D.Refusing.Official_client_session -> "official_client_session"
   | D.Refusing.Event_queue -> "event_queue"
+  | D.Refusing.Chat_operation_journal -> "chat_operation_journal"
 
 ;;
 
@@ -177,6 +178,46 @@ let examine_event_queue (config : Workspace.config) examination =
     discovery.keeper_names
 ;;
 
+(* The keepers are the persisted metadata names, the set the Owner inventory
+   installs, and the check is the journal's own read-only openability rule,
+   the same the deploy preflight runs. A journal this build does not accept
+   leaves its keeper without an Owner (2026-10-22, the v3 cut of #44905), so
+   it refuses boot. An absent journal reads as readable: the Owner creates
+   it. *)
+let examine_chat_operation_journal (config : Workspace.config) examination =
+  match Keeper_meta_store.persisted_keeper_names_read_only_result config with
+  | Error rejection ->
+    { examination with
+      discovery_failures =
+        { store = D.Refusing.Chat_operation_journal
+        ; path = Workspace.keepers_runtime_dir config
+        ; rejection
+        } :: examination.discovery_failures
+    }
+  | Ok names ->
+    List.fold_left
+      (fun examination keeper ->
+         let path =
+           Keeper_chat_operation_store.path_for_keeper
+             ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
+             ~keeper_name:keeper
+         in
+         match Keeper_chat_operation_store.check_openable ~path with
+         | Ok () -> { examination with readable = examination.readable + 1 }
+         | Error error ->
+           { examination with
+             undecodable =
+               { store = D.Refusing.Chat_operation_journal
+               ; keeper
+               ; path
+               ; rejection = Keeper_chat_operation_store.error_to_string error
+               }
+               :: examination.undecodable
+           })
+      examination
+      names
+;;
+
 (* RFC-0444 §2.3 row 8. Read only: nothing is created, repaired or moved,
    and [load_source] logs nothing itself, so this is the one line. *)
 let examine_goal_store (config : Workspace.config) =
@@ -193,6 +234,8 @@ let examine_refusing (store : D.Refusing.t) config examination =
   | D.Refusing.Official_client_session ->
     examine_official_client_session config examination
   | D.Refusing.Event_queue -> examine_event_queue config examination
+  | D.Refusing.Chat_operation_journal ->
+    examine_chat_operation_journal config examination
 
 ;;
 
@@ -233,6 +276,18 @@ let admit ~accept_quarantine examination =
   | _ :: _, _, (true | false) -> Error (discovery @ undecodable)
 ;;
 
+(* What differs from the general guidance below for one store. *)
+let undecodable_hint : D.Refusing.t -> string = function
+  | D.Refusing.Chat_operation_journal ->
+    " (stop the server, then move the journal aside or prepare it with \
+     `masc workspace-upgrade journal`; --accept-store-quarantine does not \
+     move it)"
+  | D.Refusing.Keeper_meta
+  | D.Refusing.Memory_current
+  | D.Refusing.Official_client_session
+  | D.Refusing.Event_queue -> ""
+;;
+
 let refusal_to_string undecodable =
   let guidance =
     if List.exists (function Discovery_failed _ -> true | Undecodable _ | Quarantine_failed _ -> false) undecodable
@@ -249,8 +304,9 @@ let refusal_to_string undecodable =
       :: List.map
            (function
             | Undecodable u ->
-              Printf.sprintf "  %s keeper=%s path=%s: %s"
+              Printf.sprintf "  %s keeper=%s path=%s: %s%s"
                 (store_to_string u.store) u.keeper u.path u.rejection
+                (undecodable_hint u.store)
             | Discovery_failed failure ->
               Printf.sprintf "  %s inventory path=%s: %s (repair directory access; quarantine cannot recover an unread inventory)"
                 (store_to_string failure.store) failure.path failure.rejection
@@ -339,6 +395,15 @@ let move_aside ~now ~base_path ~keepers_dir (u : undecodable) =
          row from [examine], is what moved. *)
       moved.path, moved.rejected_path, moved.moved_with)
     |> Result.map_error (fun error -> error ^ " (rejected: " ^ u.rejection ^ ")")
+  | D.Refusing.Chat_operation_journal ->
+    (* The Owner inventory installs before boot reconcile and has already
+       failed to open this journal; a journal moved now would leave the
+       keeper without an Owner until the next restart. *)
+    Error
+      ("not moved at boot: the Keeper Owner already refused this journal \
+        before boot reconcile; stop the server, then move it aside or \
+        prepare it with `masc workspace-upgrade journal` (rejected: "
+       ^ u.rejection ^ ")")
 ;;
 
 let quarantine ~now (config : Workspace.config) (examination : examination) =

@@ -711,6 +711,88 @@ let test_an_unreadable_session_binding_refuses_boot () =
 (* A claim reads a binding through a linked keeper directory, so boot must
    read it the same way, or a v1 binding behind the link stops every turn of
    that keeper while boot names nothing. *)
+(* 2026-10-22: the chat operation journal moved to v3 (#44905) and a restart
+   left every keeper without an Owner while the server itself started. Boot
+   and the preflight now name a journal this build does not accept. A
+   current journal, an empty file and an absent one read, because the Owner
+   opens the first and creates the schema in the others; a directory that is
+   not a keeper is not read; an accepted quarantine still refuses and leaves
+   the bytes in place, because the Owner refused the journal before boot
+   reconcile ran. *)
+let test_a_journal_this_build_rejects_refuses_boot () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let keepers_runtime_dir = Workspace.keepers_runtime_dir config in
+  let journal keeper_name =
+    Keeper_chat_operation_store.path_for_keeper ~keepers_runtime_dir ~keeper_name
+  in
+  List.iter
+    (fun keeper ->
+       match Keeper_meta_store.replace_snapshot config (meta keeper) with
+       | Ok () -> ()
+       | Error detail -> fail detail)
+    [ "stale"; "current"; "empty"; "absent" ];
+  let stale = journal "stale" in
+  Fs_compat.mkdir_p (Filename.dirname stale);
+  let db = Sqlite3.db_open stale in
+  List.iter
+    (fun sql ->
+       match Sqlite3.exec db sql with
+       | Sqlite3.Rc.OK -> ()
+       | rc -> failf "%s: %s" sql (Sqlite3.Rc.to_string rc))
+    [ Printf.sprintf "PRAGMA application_id=%Ld"
+        Keeper_chat_operation_store.For_testing.database_application_id
+    ; "PRAGMA user_version=2"
+    ; "CREATE TABLE operations (sequence INTEGER PRIMARY KEY)"
+    ];
+  check bool "the v2 fixture closes" true (Sqlite3.db_close db);
+  let stale_digest = file_digest stale in
+  let current = journal "current" in
+  Fs_compat.mkdir_p (Filename.dirname current);
+  (match Keeper_chat_operation_store.open_or_create ~path:current with
+   | Error error -> fail (Keeper_chat_operation_store.error_to_string error)
+   | Ok store ->
+     (match Keeper_chat_operation_store.close store with
+      | Ok () -> ()
+      | Error error -> fail (Keeper_chat_operation_store.error_to_string error)));
+  write_bytes (journal "empty") "";
+  write_bytes (Filename.concat keepers_runtime_dir "tool_usage/chat-operations.sqlite3")
+    "not a keeper and not sqlite";
+  let examination = R.examine config in
+  check (list string) "boot names only the stale journal" [ "chat_operation_journal" ]
+    (stores_of examination.R.undecodable);
+  check (list string) "at its path" [ stale ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  check int "the empty journal is left empty" 0
+    (Unix.stat (journal "empty")).Unix.st_size;
+  check bool "the absent journal is not created" false (Sys.file_exists (journal "absent"));
+  (match R.admit ~accept_quarantine:false examination with
+   | Ok _ -> fail "boot must refuse a journal this build cannot open"
+   | Error undecodable ->
+     let refusal = R.refusal_to_string undecodable in
+     check bool "the refusal names the keeper and the path" true
+       (String_util.contains_substring refusal
+          ("chat_operation_journal keeper=stale path=" ^ stale));
+     check bool "the refusal says quarantine will not move it" true
+       (String_util.contains_substring refusal
+          "--accept-store-quarantine does not move it"));
+  (match D.reader D.Id.Keeper_chat_operation_journal with
+   | D.Refuse_boot (_, scan) ->
+     (match D.run scan ~base_path with
+      | Ok { D.refused = 1; first_refusal = Some detail; _ } ->
+        check bool "the preflight refuses the same keeper's journal" true
+          (String.starts_with ~prefix:"stale: " detail)
+      | Ok report -> failf "the preflight refused %d, not 1" report.D.refused
+      | Error detail -> failf "preflight scan failed: %s" detail)
+   | D.Degrade_typed _ | D.Preflight_only _ -> fail "the journal store refuses boot");
+  let report = R.quarantine ~now:1_700_000_003.0 config examination in
+  (match report.R.quarantined, report.R.failed with
+   | [], [ { R.store = D.Refusing.Chat_operation_journal; keeper = "stale"; _ } ] -> ()
+   | _ -> fail "an accepted quarantine reports the journal as a failure and moves nothing");
+  check string "the stale journal keeps its bytes in place" stale_digest (file_digest stale)
+;;
+
 let test_a_binding_behind_a_linked_keeper_directory_refuses_boot () =
   with_workspace
   @@ fun config ->
@@ -1593,6 +1675,8 @@ let () =
             `Quick test_an_unreadable_session_binding_refuses_boot
         ; test_case "a binding behind a linked keeper directory refuses boot" `Quick
             test_a_binding_behind_a_linked_keeper_directory_refuses_boot
+        ; test_case "a journal this build rejects refuses boot and is not moved" `Quick
+            test_a_journal_this_build_rejects_refuses_boot
         ] )
     ; ( "event queue"
       , [ test_case "indirect queue files refuse and quarantine their directory entries" `Quick

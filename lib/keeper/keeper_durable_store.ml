@@ -850,6 +850,44 @@ let keeper_chat_transcript_store =
   }
 ;;
 
+(* Each keeper's chat operation journal is an SQLite file its Owner opens
+   when the Owner inventory installs. The Owner refuses a journal whose
+   application id, user_version or schema this build does not accept, so the
+   keeper has no Owner: it takes no turn and every chat message to it is
+   refused for the life of the process. On 2026-10-22 the journal generation
+   moved to v3 (#44905) and a restart left all 36 keepers without an Owner,
+   while the server itself started. The keepers are the persisted metadata
+   names, the set the inventory installs; the check is the store's own,
+   read-only, with the rule the Owner applies before it creates a schema. *)
+let chat_operation_journal_store =
+  { store = "keeper chat operation journal"
+  ; on_refusal =
+      "the keeper's Owner is not installed, so the keeper takes no turn and \
+       every chat message to it is refused until the process restarts with a \
+       journal this build accepts; with the server stopped, move the journal \
+       aside or prepare it with `masc workspace-upgrade journal`"
+  ; scan =
+      (fun ~base_path ->
+         let config = Workspace.default_config base_path in
+         let* names = Keeper_meta_store.persisted_keeper_names_read_only_result config in
+         Ok
+           (List.fold_left
+              (fun report keeper_name ->
+                 let path =
+                   Keeper_chat_operation_store.path_for_keeper
+                     ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
+                     ~keeper_name
+                 in
+                 count_row report
+                   (Keeper_chat_operation_store.check_openable ~path
+                    |> Result.map_error (fun error ->
+                      keeper_name ^ ": "
+                      ^ Keeper_chat_operation_store.error_to_string error)))
+              empty_report
+              names))
+  }
+;;
+
 module Id = struct
   type t =
     | Keeper_meta
@@ -874,6 +912,7 @@ module Id = struct
     | Memory_os_events
     | Keeper_event_queue
     | Keeper_chat_transcripts
+    | Keeper_chat_operation_journal
   [@@deriving enumerate]
 end
 
@@ -883,6 +922,7 @@ module Refusing = struct
     | Memory_current
     | Official_client_session
     | Event_queue
+    | Chat_operation_journal
 
   [@@deriving enumerate]
 end
@@ -923,6 +963,8 @@ let reader : Id.t -> reader = function
   | Id.Memory_os_events -> Preflight_only memory_os_events_store
   | Id.Keeper_event_queue -> Refuse_boot (Refusing.Event_queue, event_queue_store)
   | Id.Keeper_chat_transcripts -> Preflight_only keeper_chat_transcript_store
+  | Id.Keeper_chat_operation_journal ->
+    Refuse_boot (Refusing.Chat_operation_journal, chat_operation_journal_store)
 ;;
 
 let name id =

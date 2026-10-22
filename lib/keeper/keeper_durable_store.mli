@@ -16,8 +16,11 @@
       memory, and overwrites what it lost. The official-client session
       binding is here too: while it does not decode, every turn of its
       keeper fails. An unreadable event queue prevents registration and
-      stimulus selection, so its keeper takes no turn. The deploy preflight
-      reads both too.
+      stimulus selection, so its keeper takes no turn. A chat operation
+      journal this build does not accept leaves its keeper without an Owner;
+      boot refuses it and does not move it aside even when quarantine is
+      accepted, because the Owner inventory opens the journal before boot
+      reconcile runs. The deploy preflight reads all of them too.
 
     - [Degrade_typed]: boot decodes it once and logs one INFO line when it is
       unavailable. Keepers run without it and nothing overwrites it, so the
@@ -56,6 +59,7 @@ module Id : sig
     | Memory_os_events
     | Keeper_event_queue
     | Keeper_chat_transcripts
+    | Keeper_chat_operation_journal
   val all : t list
   (** Every constructor in declaration order, derived by
       [\[@@deriving enumerate\]]. *)
@@ -68,6 +72,7 @@ module Refusing : sig
     | Memory_current
     | Official_client_session
     | Event_queue
+    | Chat_operation_journal
 
 
   val all : t list

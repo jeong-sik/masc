@@ -919,6 +919,45 @@ let test_set_viewport_sends_the_size_or_clears_it () =
     check string "the size reaches BiDi in CSS pixels" {|{"width":800,"height":600}|} (Yojson.Safe.to_string size);
     check bool "no size clears the override with null" true (cleared = `Null)
   | other -> failf "expected two setViewport commands, saw %d" (List.length other)
+let test_ending_the_session_restores_a_sized_tab () =
+  let sent = ref [] in
+  let peer = Peer.create ~session_end:(fun () -> Ok ()) ~command:(fun method_ args ->
+    match method_ with
+    | "session.new" -> Ok (obj ["capabilities",obj ["browserName",`String "firefox";"browserVersion",`String "158.0"]])
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+    | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";"title",`String "fixture";
+        "innerWidth",`Int 800;"innerHeight",`Int 600;"devicePixelRatio",`Float 1.]))
+    | "browsingContext.setViewport" -> sent := args :: !sent; Ok `Null
+    | other -> failf "unexpected protocol command: %s" other) in
+  ignore (Peer.metadata peer);
+  let dispatch size = Peer.dispatch peer ~verb:Peer.Page_interact
+    (Browser_lane.interaction_args ~tab_id:1 ~expected_url:(Some "https://example.test/") (Browser_lane.Set_viewport size)) in
+  ignore (dispatch (Browser_lane.Fit {width=390;height=844}));
+  check int "one size was set" 1 (List.length !sent);
+  check bool "ending the session succeeds" true (ended_session peer = Ok ());
+  (match !sent with
+   | cleared :: _ :: [] ->
+     check bool "the sized tab gets its own size back" true (Yojson.Safe.Util.member "viewport" cleared = `Null);
+     check bool "in the context that was sized" true
+       (Yojson.Safe.Util.member "context" cleared = `String "owned")
+   | other -> failf "expected the size and one restore, saw %d commands" (List.length other))
+let test_a_tab_restored_by_the_caller_is_not_restored_again () =
+  let sent = ref [] in
+  let peer = Peer.create ~session_end:(fun () -> Ok ()) ~command:(fun method_ args ->
+    match method_ with
+    | "session.new" -> Ok (obj ["capabilities",obj ["browserName",`String "firefox";"browserVersion",`String "158.0"]])
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+    | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";"title",`String "fixture";
+        "innerWidth",`Int 800;"innerHeight",`Int 600;"devicePixelRatio",`Float 1.]))
+    | "browsingContext.setViewport" -> sent := args :: !sent; Ok `Null
+    | other -> failf "unexpected protocol command: %s" other) in
+  ignore (Peer.metadata peer);
+  let dispatch size = Peer.dispatch peer ~verb:Peer.Page_interact
+    (Browser_lane.interaction_args ~tab_id:1 ~expected_url:(Some "https://example.test/") (Browser_lane.Set_viewport size)) in
+  ignore (dispatch (Browser_lane.Fit {width=390;height=844}));
+  ignore (dispatch Browser_lane.Browser_default);
+  ignore (ended_session peer);
+  check int "the caller's restore is the last size command" 2 (List.length !sent)
 (* Firefox's error codes are read once where the answer arrives. The two
    this host acts on are their own cases; any other is kept as Firefox wrote
    it, and every code is written back as it was read. *)
@@ -1062,6 +1101,8 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "malformed JSON ends a pending command" `Quick test_malformed_json_ends_a_pending_command;
     test_case "invalid websocket frame reaches the error path" `Quick test_invalid_websocket_frame_ends_a_pending_command];
   "effect",[test_case "set_viewport sends the size, or null to restore it" `Quick test_set_viewport_sends_the_size_or_clears_it;
+    test_case "ending the session restores a sized tab" `Quick test_ending_the_session_restores_a_sized_tab;
+    test_case "a tab the caller restored is not restored again" `Quick test_a_tab_restored_by_the_caller_is_not_restored_again;
     test_case "open tab preserves existing context" `Quick test_open_tab_preserves_existing_context;
     test_case "open tab failure does not replay" `Quick test_open_tab_failure_does_not_replay;
     test_case "live act rejects other actions" `Quick test_live_act_rejects_other_actions_before_effect;

@@ -656,7 +656,7 @@ BiDi connection sends `browsingContext.setViewport` with the size, or with
 Firefox 158 reports the new `innerWidth` and `innerHeight` right after the
 command (probed 2026-10-22), and it accepts widths of 0 and 100000 without an
 error, so the lane bounds each side to 100 to 4096 CSS pixels itself. The
-override stays on the tab until it is cleared. Stagehand sends
+override stays on the tab until it is cleared. Firefox 158 keeps it after the session ends (probed 2026-10-22: a new session read the old size), so the peer gives each tab it sized its own size back when it ends the session. A host that dies without ending its session leaves the size on the tab. Stagehand sends
 `page.set_viewport_size` and has no call that restores the size; the owned
 Firefox driver and the WebExtension refuse the action before any effect.
 

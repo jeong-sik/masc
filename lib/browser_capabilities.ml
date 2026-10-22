@@ -163,7 +163,7 @@ let support backend operation = match backend with
     | Resize_viewport -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"set_viewport" Interact
           [observed;"Requires exact clientId/tabId and expectedUrl; " ^ viewport_bounds ^ ". With neither, the browser's own size returns.";
-           "The size is an override on that tab until it is restored; read the screenshot or scene again afterward. This is the page viewport, not the browser window."]
+           "The size is an override on that tab until it is restored, which this connection does for the tabs it sized when its session ends; read the screenshot or scene again afterward. This is the page viewport, not the browser window."]
       | Owned_chromium -> conditional ~action:"set_viewport" Interact
           [observed;"Requires expectedUrl; " ^ viewport_bounds ^ ". Stagehand has no call that restores the browser's own size, so this session keeps the override until it closes.";
            "Read the screenshot or scene again afterward. This is the page viewport, not the browser window."]

@@ -46,17 +46,26 @@ type session_failure = Session_refused of string | Session_failed of string
 let session_failure_message = function Session_refused why | Session_failed why -> why
 type t = { ask : string -> Yojson.Safe.t -> (Yojson.Safe.t,refusal) result;
   session_end : unit -> (unit,session_end_failure) result; mutable session_may_exist : bool;
-  mutable contexts : (string * int) list; mutable next_tab : int; mutable version : string option;
+  mutable contexts : (string * int) list; mutable next_tab : int;
+  (* The contexts this connection gave a viewport size. Firefox keeps that size after the session ends
+     (probed 2026-10-22, Firefox 158), so ending the session gives each of them its own size back. *)
+  mutable sized : string list; mutable version : string option;
   mutable profile : string option; mutable process_id : int option }
 let create ~session_end ~command =
-  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;version=None;profile=None;process_id=None}
+  {ask=command;session_end;session_may_exist=false;contexts=[];next_tab=0;sized=[];version=None;profile=None;process_id=None}
 let command t method_ params = Result.map_error (fun refusal -> method_ ^ ": " ^ refusal_message refusal) (t.ask method_ params)
 (* Firefox keeps a session whose socket closed and takes one session at a
    time, so one left behind refuses every later connection until that Firefox
    is restarted. Ending it closes no tab and leaves the browser running. *)
 let end_session t =
   if not t.session_may_exist then Ok ()
-  else let* () = t.session_end () in t.session_may_exist <- false; Ok ()
+  else begin
+    (* Best effort: a tab that is gone, or a command that gets no answer, must not keep the session open. *)
+    List.iter (fun context ->
+      ignore (t.ask "browsingContext.setViewport" (obj ["context",str context;"viewport",`Null]))) t.sized;
+    t.sized <- [];
+    let* () = t.session_end () in t.session_may_exist <- false; Ok ()
+  end
 let metadata t =
   (* Firefox may hold a session from the moment it is asked for one, whether
      or not its answer arrives. There is none when it refused, and none when
@@ -307,6 +316,9 @@ let set_viewport t context args size =
     | Browser_lane.Fit {width;height} -> obj ["width",`Int width;"height",`Int height]
     | Browser_lane.Browser_default -> `Null in
   let* _ = unknown (command t "browsingContext.setViewport" (obj ["context",str context;"viewport",viewport])) in
+  t.sized <- (match size with
+    | Browser_lane.Fit _ -> if List.mem context t.sized then t.sized else context :: t.sized
+    | Browser_lane.Browser_default -> List.filter (fun sized -> not (String.equal sized context)) t.sized);
   let* after = unknown (script t context Browser_interaction.viewport_receipt_script (obj [])) in
   let* old_url = unknown (string "url" observed) in
   match after with

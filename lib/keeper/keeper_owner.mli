@@ -383,6 +383,31 @@ val restart_interrupted_operations : t -> Chat_operation.t list
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
 val direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_native_call.state, error) result
+
+type input_checkpoint_writer
+(** Opaque witness for this Owner's current non-maintenance child and the
+    exact input predecessor it observed before dispatch. Capture/publication
+    require the caller's inherited Owner child binding. It grants checkpoint
+    publication only, not host input response or continuation admission. *)
+val begin_input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
+  (input_checkpoint_writer, error) result
+val input_checkpoint_reference : input_checkpoint_writer -> Keeper_checkpoint_ref.t option
+(** None means this trace has no recorded input observation. Some may name a
+    payload with pending_input=None; consumed evidence is never unobserved. *)
+val input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
+  (Keeper_checkpoint_ref.t option, error) result
+val advance_autonomous_input_checkpoint : t -> writer:input_checkpoint_writer ->
+  checkpoint:Keeper_checkpoint_ref.t -> (input_checkpoint_writer, error) result
+val advance_direct_input_checkpoint : t -> writer:input_checkpoint_writer ->
+  operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+  call_id:string -> observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t ->
+  (input_checkpoint_writer, error) result
+(** Revalidate current trace, original child token and lane in the mailbox,
+    then compare the predecessor inside the journal transaction. Direct input
+    and native checkpoint advance atomically. A cancelled child can still
+    record its receipt while Owner stops; a new writer cannot be admitted.
+    Stale witnesses refuse, uncertain commits remain Error, and callers must
+    reconcile both durable relations before any further publication. *)
 (** Admit a native call for dispatch: a fresh one, a replacement for a retired
     one, or the same call again when its scope resumes. A stopping Owner refuses
     it with [Owner_stopping]. Checkpoint and terminal receipts are still

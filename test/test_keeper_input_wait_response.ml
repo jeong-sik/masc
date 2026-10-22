@@ -106,9 +106,64 @@ let test_stale_run_request_and_source_are_refused () =
   | Error (Input_not_current _ | Input_checkpoint_failed _) | Ok _ ->
     fail "same-turn source replacement was not refused"
 
+let test_autonomous_input_owner_rejects_lost_response_lineage () =
+  let root = Filename.temp_dir "autonomous-input-owner-" "" in
+  Fun.protect ~finally:(fun () -> Eio_main.run (fun env ->
+    Eio.Path.rmtree ~missing_ok:true Eio.Path.(env#fs / root))) @@ fun () ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  ignore (Server_startup_state.mark_state_ready ());
+  let workspace = Workspace.default_config root in
+  ignore (Workspace.init workspace ~agent_name:(Some "autonomous-input-test"));
+  let original = source_checkpoint (pending ~run_id:"run-a" ~request_id:"request-a") in
+  let keeper_name = original.agent_name in
+  let meta = Masc_test_deps.meta_of_json_fixture (`Assoc [
+    "name",`String keeper_name;"trace_id",`String original.session_id;
+    "activation_mode",`String "manual"]) |> prepared in
+  Keeper_meta_store.replace_snapshot workspace meta |> prepared;
+  Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
+    ~on_turn_slot_released:None workspace |> prepared |> ignore;
+  let owner = Keeper_owner_registry.get ~base_path:root ~keeper_name |> prepared in
+  let session_dir = Filename.concat root original.session_id in
+  Unix.mkdir session_dir 0o700;
+  let accepted = ref None in
+  let prepare source = Keeper_input_checkpoint_producer.prepare ~base_path:root ~keeper_name
+      ~session_dir ~trace_id:meta.runtime.trace_id ~source in
+  let refused_source label source = match prepare source with
+    | Error (Keeper_input_checkpoint_producer.Source_changed | Source_missing) -> ()
+    | Error _ | Ok _ -> fail label in
+  (match Keeper_owner.run_autonomous_if_idle owner (fun () ->
+     let producer = prepare None |> prepared in
+     let producer = Keeper_input_checkpoint_producer.publish_autonomous producer original |> prepared in
+     let candidate = Response.prepare ~net:env#net ~source:(exact original)
+         ~expected_source_ref:(Store.exact_snapshot_reference (exact original))
+         ~pending:(Option.get original.pending_input) ~response:(Core.Hooks.Answer (`String "production")) |> prepared in
+     let consumed = Response.checkpoint candidate in
+     ignore (Keeper_input_checkpoint_producer.publish_autonomous producer consumed |> prepared);
+     accepted := Some consumed;
+     refused_source "old wait was resurrected" (Some original);
+     refused_source "missing source borrowed consumed evidence" None;
+     refused_source "pending=None hid the missing accepted answer"
+       (Some {original with pending_input=None});
+     let progressed = {consumed with messages=consumed.messages @ [Core.Types.
+       {role=Assistant;content=[Text "answer retained"];name=None;tool_call_id=None;metadata=[]}]} in
+     ignore (prepare (Some progressed) |> prepared)) with
+   | Ok (`Ran ()) -> ()
+   | Ok (`Busy _ | `Interrupted) | Error _ -> fail "autonomous publication did not run");
+  let reference = Keeper_owner.input_checkpoint owner ~trace_id:meta.runtime.trace_id |> prepared |> Option.get in
+  let observed = Store.load_retained_exact_snapshot ~session_dir ~reference |> prepared
+    |> Store.exact_snapshot_checkpoint in
+  check bool "consumed payload remains authoritative after child settlement" true
+    (observed.pending_input=None && observed.messages=(Option.get !accepted).messages);
+  ignore (Keeper_owner.begin_stopping owner |> prepared)
+
 let () =
   run "Keeper stored input response"
-    [ "candidate preparation",
+    [ "autonomous input ownership",
+      [test_case "consumed answer lineage survives settlement and rejects stale sources" `Quick
+         test_autonomous_input_owner_rejects_lost_response_lineage];
+      "candidate preparation",
       [ test_case "canonical responses preserve full source metadata" `Quick
           test_canonical_response_preserves_complete_checkpoint
       ; test_case "stale run, request and exact source are refused" `Quick

@@ -328,6 +328,13 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
                        context=Some context;
                        checkpoint_sidecar=resumed.checkpoint.working_context},
           Some resumed.checkpoint, resumed.input) in
+  let* input_trace = Keeper_id.Trace_id.of_string binding.session_id in
+  let* input_producer = Keeper_input_checkpoint_producer.prepare
+      ~base_path:binding.base_path ~keeper_name:binding.keeper_name ~session_dir:binding.session_dir
+      ~trace_id:input_trace
+      ~source:agent_core_checkpoint
+    |> Result.map_error Keeper_input_checkpoint_producer.error_to_string in
+  let input_producer = ref input_producer in
   let call_id, api, resume, initial_call = match resumed with
     | Some resumed ->
       resumed.call.call_id, resumed.call.api, Some resumed.call.locator, Some resumed.call
@@ -413,7 +420,23 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
     let checkpoint = {snapshot.checkpoint with Agent_core.Checkpoint.session_id=binding.session_id;
       working_context=(match config.checkpoint_sidecar with
         | Some _ as sidecar -> sidecar | None -> snapshot.checkpoint.working_context)} in
-    let* () = advance checkpoint in
+    let* () = match snapshot.stage with
+      | Agent.After_input_wait_changed ->
+        (match !current_call with
+         | None -> Error "native input checkpoint preceded locator publication"
+         | Some call ->
+           let* () = validate_scope binding checkpoint in
+           let* producer, reference = Keeper_input_checkpoint_producer.publish_direct !input_producer
+               ~operation_id:binding.operation_id ~execution_digest:binding.execution_digest
+               ~call_id ~observed:call.checkpoint checkpoint
+             |> Result.map_error Keeper_input_checkpoint_producer.error_to_string in
+           (* Publication returned a confirmed atomic input/native advance. *)
+           let* next = Native.advance call ~observed:call.checkpoint ~checkpoint:reference in
+           input_producer := producer;
+           current_call := Some next;
+           Ok ())
+      | After_assistant_collected | After_tool_results_appended
+      | After_context_injection | After_rejected_response_dropped -> advance checkpoint in
     let* () = match config.checkpoint_sink with
       | None -> Ok ()
       | Some sink -> sink {snapshot with checkpoint} in

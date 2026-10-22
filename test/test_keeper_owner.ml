@@ -5550,10 +5550,74 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
   | Error error -> fail (Owner.error_to_string error)
 ;;
 
+let test_input_writer_is_bound_to_child_and_predecessor () =
+  Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
+  let meta = make_meta "input-writer" in
+  let owner = start_owner ~sw
+      ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
+      ~keeper_name:meta.name ~initial_meta:(Some meta) |> owner_ok in
+  let trace_id = meta.runtime.trace_id in
+  let checkpoint bytes = Keeper_checkpoint_ref.create ~trace_id ~turn_count:0
+      ~canonical_checkpoint_bytes:bytes |> function
+    | Ok reference -> reference | Error _ -> fail "checkpoint identity" in
+  let refused label = function
+    | Error (Owner.Operation_rejected (Keeper_chat_operation_store.Invalid_input _)) -> ()
+    | Ok _ | Error _ -> fail label in
+  refused "idle caller captured a writer" (Owner.begin_input_checkpoint owner ~trace_id);
+  let started, start = Eio.Promise.create () in
+  let release, release_child = Eio.Promise.create () in
+  let finished, finish = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result = Owner.run_autonomous_if_idle owner (fun () ->
+      Eio.Promise.resolve start ();
+      Eio.Promise.await release) in
+    Eio.Promise.resolve finish result);
+  Eio.Promise.await started;
+  refused "outside fiber borrowed the active child's writer"
+    (Owner.begin_input_checkpoint owner ~trace_id);
+  Eio.Promise.resolve release_child ();
+  (match Eio.Promise.await finished with
+   | Ok (`Ran ()) -> ()
+   | Ok (`Busy _ | `Interrupted) | Error _ -> fail "isolated child did not finish");
+  let leaked = ref None in
+  (match Owner.run_autonomous_if_idle owner (fun () ->
+     let writer = Owner.begin_input_checkpoint owner ~trace_id |> owner_ok in
+     let stale = Owner.begin_input_checkpoint owner ~trace_id |> owner_ok in
+     let writer = Owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint:(checkpoint "wait") |> owner_ok in
+     leaked := Some writer;
+     refused "same child reused an old predecessor"
+       (Owner.advance_autonomous_input_checkpoint owner ~writer:stale ~checkpoint:(checkpoint "stale"));
+     refused "autonomous writer borrowed direct lane authority"
+       (Owner.advance_direct_input_checkpoint owner ~writer ~operation_id:(operation_id "unowned")
+         ~execution_digest:"unowned" ~call_id:"unowned" ~observed:(checkpoint "wait") ~checkpoint:(checkpoint "wrong lane"));
+     ignore (Owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint:(checkpoint "consumed") |> owner_ok)) with
+   | Ok (`Ran ()) -> ()
+   | Ok (`Busy _ | `Interrupted) | Error _ -> fail "autonomous writer did not execute");
+  let writer = Option.get !leaked in
+  refused "outside caller reused a former child"
+    (Owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint:(checkpoint "after child"));
+  (match Owner.run_autonomous_if_idle owner (fun () ->
+     refused "new child borrowed an old token"
+       (Owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint:(checkpoint "new child"));
+     let current = Owner.begin_input_checkpoint owner ~trace_id |> owner_ok in
+     check bool "new child observes consumed evidence" true
+       (Option.equal Keeper_checkpoint_ref.equal (Some (checkpoint "consumed"))
+         (Owner.input_checkpoint_reference current))) with
+   | Ok (`Ran ()) -> ()
+   | Ok (`Busy _ | `Interrupted) | Error _ -> fail "second child did not execute");
+  (match Owner.run_maintenance_if_idle owner (fun () ->
+     refused "maintenance captured an input writer" (Owner.begin_input_checkpoint owner ~trace_id)) with
+   | Ok (`Ran ()) -> ()
+   | Ok (`Busy _) | Error _ -> fail "maintenance did not execute");
+  ignore (Owner.begin_stopping owner |> owner_ok)
+;;
+
 let () =
   run
     "keeper owner"
-    [ ( "reducer"
+    [ ( "input ownership", [test_case "writer binds child, lane and exact predecessor" `Quick
+          test_input_writer_is_bound_to_child_and_predecessor] )
+    ; ( "reducer"
       , [ test_case "direct waiter ignores continuations and wakes on original input" `Quick
             test_direct_waiter_skips_continuations_and_wakes_on_new_input;
           test_case "direct waiter is released on owner closure" `Quick

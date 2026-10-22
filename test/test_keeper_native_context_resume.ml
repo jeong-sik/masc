@@ -187,7 +187,7 @@ let test_active_context_restart () =
         | `Signaled signal -> failf "child died from signal %d" signal));
       run_phase ~child:false root)
 
-let test_native_input_checkpoint_order ~uncertain_consume () =
+let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain_consume () =
   let root = Filename.temp_dir "keeper-native-input-" "" in
   Fun.protect ~finally:(fun () ->
     Eio_main.run (fun env -> Eio.Path.rmtree ~missing_ok:true Eio.Path.(env#fs / root)))
@@ -236,6 +236,7 @@ let test_native_input_checkpoint_order ~uncertain_consume () =
     let hooks = {Agent_core.Hooks.empty with before_turn=Some (fun _ ->
       if !resume then Agent_core.Hooks.Continue else Agent_core.Hooks.ElicitInput request)} in
     let sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+      if !resume && fail_before_canonical then Error "canonical write refused before installation" else
       let saved = Keeper_checkpoint_store.save_agent_core_classified
           ~history_retained:0 ~session_dir snapshot.checkpoint in
       match saved with
@@ -245,12 +246,14 @@ let test_native_input_checkpoint_order ~uncertain_consume () =
         if !resume then Error "canonical write committed; acknowledgement uncertain" else Ok () in
     let config = Runtime_agent.default_config ~name:keeper_name ~provider_cfg
         ~system_prompt:"Ask before proceeding." ~tools:[] in
-    let config = {config with context=Some context;hooks=Some hooks;checkpoint_sink=Some sink} in
+    let config = {config with context=Some context;hooks=Some hooks;checkpoint_sink=Some sink;
+      session_id=Some session_id} in
     let dispatch checkpoint blocks =
       let agent_ref = ref None in
       let prepared = Native.prepare ~binding ~runtime_id ~config
           ~agent_core_checkpoint:checkpoint ~input:(Native.New_input {blocks;metadata=[]})
-          ~agent_ref () |> require "prepare owned input call" in
+          ~agent_ref () |> (function Ok prepared -> prepared
+            | Error detail -> failf "prepare owned input call failed: %s" detail) in
       Runtime_agent.run_blocks ~sw:turn_sw ~net:env#net ~config:(Native.config prepared)
         ~agent_ref ?agent_core_checkpoint:(Native.prepared_checkpoint prepared) blocks in
     let first = dispatch None [Agent_core.Types.Text goal] |> require "first input pause" in
@@ -276,10 +279,26 @@ let test_native_input_checkpoint_order ~uncertain_consume () =
         (Result.is_error (dispatch (Some checkpoint) [Agent_core.Types.Text "continue"]));
       check bool "terminal cannot resurrect the old pending request" true
         ((retained_pending ()).pending_input = None));
+    let input_owner = Registry.input_checkpoint ~base_path:root ~keeper_name ~trace_id:meta.runtime.trace_id
+        |> require "read durable input owner" |> Option.get in
+    let input_snapshot = Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference:input_owner
+        |> (function Ok snapshot -> snapshot | Error _ -> fail "input owner artifact unavailable") in
+    let owned_input = Keeper_checkpoint_store.exact_snapshot_checkpoint input_snapshot in
+    check bool "durable input owner agrees with native receipt" true
+      (owned_input.pending_input = (retained_pending ()).pending_input);
+    if uncertain_consume then (
+      let stale = Native.prepare ~binding ~runtime_id ~config
+          ~agent_core_checkpoint:(Some checkpoint)
+          ~input:(Native.New_input {blocks=[Agent_core.Types.Text "stale retry"];metadata=[]})
+          ~agent_ref:(ref None) () in
+      check bool "stale original wait cannot dispatch after consumed owner" true (Result.is_error stale));
     let canonical = Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id
         |> require "read canonical input checkpoint" in
-    check bool "canonical and retained input observations agree" true
-      (canonical.pending_input = (retained_pending ()).pending_input);
+    if fail_before_canonical then
+      check bool "canonical remains stale while durable input owner records consumption" true
+        (canonical.pending_input <> owned_input.pending_input)
+    else check bool "canonical and retained input observations agree" true
+      (canonical.pending_input = owned_input.pending_input);
     check int "no provider dispatch is needed for either input boundary" 0 !provider_calls;
     Owner.Operation_succeeded {outcome_ref="input-checkpoint-observed"} in
   let runner : Owner.operation_runner =
@@ -307,4 +326,6 @@ let () = match Array.to_list Sys.argv with
        test_case "first input checkpoint precedes native terminal settlement"
          `Quick (test_native_input_checkpoint_order ~uncertain_consume:false);
        test_case "uncertain input consumption never rolls retained state back"
-         `Quick (test_native_input_checkpoint_order ~uncertain_consume:true)]]
+         `Quick (test_native_input_checkpoint_order ~uncertain_consume:true);
+       test_case "canonical refusal preserves consumed ownership and rejects stale source"
+         `Quick (test_native_input_checkpoint_order ~fail_before_canonical:true ~uncertain_consume:true)]]

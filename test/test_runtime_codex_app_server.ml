@@ -4271,6 +4271,13 @@ candidates = [%s]
                             (activate_repetition_boundary). *)
                          Keeper_tool_call_log.init ~base_path ();
                          let meta = production_keeper_meta ~base_path ~trace_id in
+                         (match Keeper_meta_store.replace_snapshot config meta with
+                          | Ok () -> ()
+                          | Error detail -> fail detail);
+                         (match Keeper_owner_registry.install_from_store ~sw
+                            ~operation_runner:None ~on_turn_slot_released:None config with
+                          | Ok _ -> ()
+                          | Error _ -> fail "production fixture Owner installation failed");
                          ignore
                            (Keeper_registry.For_testing.register
                               ~base_path
@@ -4306,7 +4313,7 @@ candidates = [%s]
                                        ())
                                 else None
                               in
-                              let settlement = Keeper_agent_run.run_turn ~approval_admission:Keeper_approval_origin.Unavailable
+                              let run () = Keeper_agent_run.run_turn ~approval_admission:Keeper_approval_origin.Unavailable
                                 ?trajectory_acc
                                 ~config
                                 ~meta
@@ -4335,6 +4342,12 @@ candidates = [%s]
                                 ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
                                 ~runtime_id
                                 () in
+                              let settlement = match Keeper_owner_registry.run_autonomous_if_idle
+                                  ~base_path ~keeper_name:meta.name run with
+                                | Ok (`Ran settlement) -> settlement
+                                | Ok (`Busy block) -> fail (Keeper_owner.autonomous_block_to_string block)
+                                | Ok `Interrupted -> fail "production fixture Owner child was interrupted"
+                                | Error error -> fail (Keeper_owner_registry.command_error_to_string error) in
                               (* Read while the turn's runtime catalog is
                                  still the published one. *)
                               after_turn settlement;

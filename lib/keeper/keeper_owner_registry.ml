@@ -810,6 +810,16 @@ let direct_native_call ~base_path ~keeper_name ~operation_id =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner -> Keeper_owner.direct_native_call owner ~operation_id)
 (* Binding admits a native call for dispatch, fresh or resumed, so it stays
    behind the stop fence; a stopping Owner refuses it as well. *)
+let begin_input_checkpoint ~base_path ~keeper_name ~trace_id =
+  with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.begin_input_checkpoint owner ~trace_id)
+let input_checkpoint ~base_path ~keeper_name ~trace_id =
+  with_native_call_receipt_command ~base_path ~keeper_name (fun owner -> Keeper_owner.input_checkpoint owner ~trace_id)
+let advance_autonomous_input_checkpoint ~base_path ~keeper_name ~writer ~checkpoint =
+  with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint)
+let advance_direct_input_checkpoint ~base_path ~keeper_name ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
+  with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.advance_direct_input_checkpoint owner ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint)
 let bind_direct_native_call ~base_path ~keeper_name ~operation_id ~execution_digest ~observed ~call =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.bind_direct_native_call owner ~operation_id ~execution_digest ~observed ~call)

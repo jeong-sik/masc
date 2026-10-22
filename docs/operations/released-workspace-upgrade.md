@@ -86,3 +86,23 @@ remain unavailable. Retaining pending operations and terminal outcomes is part
 of that preparation. No live data preparation or restart is implied by a source
 change or passing fixture. The response endpoint and producer wiring are separate
 implementation layers; the journal table alone does not make a wait actionable.
+
+### Input checkpoint producer boundary
+
+The next input layer captures an Owner-issued witness inside the original
+executing child. Publication rechecks its inherited child token, trace, lane,
+and exact predecessor in the Owner mailbox. Direct native/input references
+advance together; autonomous input changes retain and publish before canonical
+persistence. Consumed `pending_input=None` remains an observed retained payload
+when the canonical write fails.
+
+Admission also requires the source to preserve the retained input checkpoint's
+messages as an exact prefix and its complete pending request. Two empty pending
+fields do not prove that an accepted answer was retained. A history cut without
+that evidence is refused pending explicit continuation reconciliation. This is
+an incomplete recovery boundary, not proof that compaction, host responses,
+reconnection, or the operator waiting-state surface are integrated.
+
+Do not merge or install the v3 stack alone. Offline journal preparation that
+preserves queued and terminal evidence, complete continuation reconciliation,
+and actually executed direct/autonomous acceptance cases are still required.

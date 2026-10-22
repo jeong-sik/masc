@@ -78,12 +78,11 @@ val effective_instructions :
 (** Resolve the instruction body: the profile default when the keeper TOML
     states one, else the persisted keeper instructions. *)
 
-(** Whether the task that admitted this turn (its Current Task) is linked to
-    the goal. Other tasks the keeper holds do not mark goals.
-    [Held_task_link_unreadable]: the keeper holds a task but neither the
-    goal-task link registry nor its recovery copy could be read, so the answer
-    is unknown. A turn with no held task is [Not_served_by_held_task] for
-    every goal. *)
+(** Whether any task the keeper holds ([Claimed] or [InProgress], not only
+    its current task) is linked to the goal. [Held_task_link_unreadable]: the
+    backlog or the goal-task link registry could not be read authoritatively,
+    so the answer is unknown. A keeper holding no task is
+    [Not_served_by_held_task] for every goal. *)
 type held_task_link =
   | Served_by_held_task
   | Not_served_by_held_task
@@ -107,16 +106,16 @@ type goal_summary = {
 
 val active_goal_summaries :
   config:Workspace.config ->
-  current_task:Keeper_world_observation_inputs.current_task_observation ->
+  keeper_name:string ->
   (goal_summary list, Goal_store.unavailable) result
 (** Every Goal still open enough to progress. [Error] is the typed store
     failure (RFC-0444 §2.3 row 6); the Active Goals layer renders it with
     reason, file, mirror and reset step.
 
     A Goal is shared intent and names no keeper, so every turn carries the
-    same Goals, with or without a held task. [current_task] only sets
-    [summary_held_task_link] from the link registry (recovery copy included,
-    read only when a task is held and a Goal is open); it never removes a
+    same Goals, with or without a held task. [keeper_name] only sets
+    [summary_held_task_link] from the tasks it holds and the link registry,
+    both read authoritatively and only when a Goal is open; it never removes a
     Goal. {!Goal_phase.admits_self_directed_progress} decides which
     Goals stay -- [Verifying] stays in (the gate holds the phase, not the work)
     and terminal phases drop out. An unreadable primary returns [Error]
@@ -219,8 +218,8 @@ val build_prompt :
       state. [No_current_task] omits the layer.
     - [?active_goal_summaries]: the Active Goals layer, with a proof-pending
       annotation on [Verifying] goals (RFC-0387 stage 2), a [yours]
-      annotation on goals the held task serves, and an unknown-link
-      annotation on every goal when the link registry cannot be read. These
+      annotation on goals a held task serves, and an unknown-link annotation
+      on every goal when the held tasks or their links cannot be read. These
       are the workspace's open goals ({!active_goal_summaries}). Omitted or
       [Ok []], the layer is absent when the world Goal source is available.
       [Error] is the typed store failure ({!Goal_store.unavailable}, RFC-0444

@@ -178,10 +178,10 @@ Codex 의 권한 승격 객체이고 명령 자체는 문자열이다. 샌드박
    턴 비율이 낮을 수 있다. 목표는 항상 싣는 집합 20개 안팎, 나머지는 2번의 검색으로.
 4. **goal 목록은 시스템 프롬프트 밖.** 37개 5.2 KB 가 전 keeper 에게 같은 내용으로 가고,
    goal 이 하나 늘면 system 접두사가 통째로 바뀐다. system 의 `<available_goals>` 블록을
-   지우고, 관측 레이어 `### Active Goals`(`keeper_unified_prompt.ml`)는
-   `Workspace_goal_index.goals_for_task` 로 현재 task 에 링크된 goal 만 싣는다. task 없는
-   keeper 는 프롬프트에서 goal 을 못 보고 `masc_goal_list` 로 본다. 대시보드 프리뷰는 같은
-   함수라 함께 좁혀진다.
+   지우고, goal 은 턴의 관측 레이어 `### Active Goals`(`keeper_unified_prompt.ml`
+   `active_goal_summaries`)로 옮긴다. 이 레이어는 task 유무와 상관없이 진행 중인 goal 을
+   모두 싣고, keeper 가 잡은 task 에 링크된 goal 에 `yours` 를 붙인다(#45028). 대시보드
+   프리뷰도 같은 함수를 쓴다.
 5. **순서 고정.** 도구 배열은 결정적 순서(카탈로그 순서의 `always_loaded` 뒤에
    `keeper_tool_search`)로 내고 그 순서를 핀한다. `tool_surface_sha256` 은 이름순 정렬
    해시라 순서를 못 보므로(`keeper_official_client_session_store.ml`), `Tool_schemas`

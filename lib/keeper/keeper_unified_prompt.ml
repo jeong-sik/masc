@@ -182,9 +182,9 @@ let format_own_recent_actions_turn ~current_task_id (turn : Keeper_own_recent_ac
 ;;
 
 
-(* Whether the task that admitted this turn is linked to a goal.
-   [Held_task_link_unreadable] is a held task whose goal-task link registry and
-   its recovery copy could not be read: the answer is unknown, so the row says
+(* Whether any task the keeper holds is linked to a goal.
+   [Held_task_link_unreadable]: the backlog or the goal-task link registry
+   could not be read authoritatively, so the answer is unknown and the row says
    so instead of reading as unlinked. *)
 type held_task_link =
   | Served_by_held_task
@@ -1053,26 +1053,13 @@ let effective_instructions
    ordinary open work, nor disappear — review P0-1).
 
    A Goal is shared intent and names no keeper, so every turn carries the same
-   list whether or not the keeper holds a task, and whichever task it holds.
-   The keeper chooses which Goal its work advances. The task that admitted
-   this turn only marks the Goals its link registry entry names. The registry
-   is read the way the other keeper surfaces read it (recovery copy included),
-   and only when there is a held task and an open Goal; when neither copy
-   reads, every row is marked unknown rather than unlinked. *)
-let active_goal_summaries
-      ~(config : Workspace.config)
-      ~(current_task : Keeper_world_observation_inputs.current_task_observation)
-  =
-  let held_task_id =
-    match current_task with
-    | Keeper_world_observation_inputs.Current_task task
-    | Keeper_world_observation_inputs.Recovered_current_task { task; _ } ->
-      Some task.Masc_domain.id
-    | Keeper_world_observation_inputs.Current_task_missing { task_id; _ }
-    | Keeper_world_observation_inputs.Current_task_unavailable { task_id; _ } ->
-      Some (Keeper_id.Task_id.to_string task_id)
-    | Keeper_world_observation_inputs.No_current_task -> None
-  in
+   list whether or not the keeper holds a task. The keeper chooses which Goal
+   its work advances. The tasks the keeper holds ([Claimed] or [InProgress],
+   any of them, not only the current task) mark the Goals their link registry
+   entries name. The backlog and the link registry are read authoritatively,
+   like the turn's task context, and only when an open Goal exists; when either
+   read fails, every row is marked unknown rather than unlinked. *)
+let active_goal_summaries ~(config : Workspace.config) ~(keeper_name : string) =
   Result.map
     (fun goals ->
        let open_goals =
@@ -1081,23 +1068,38 @@ let active_goal_summaries
               Goal_phase.admits_self_directed_progress goal.phase)
            goals
        in
+       let served_goal_ids () =
+         let ( let* ) = Result.bind in
+         let* backlog = Workspace_backlog.read_backlog_r config in
+         match
+           Workspace_task.active_owned_task_ids_for_agent
+             config ~agent_name:keeper_name backlog
+         with
+         | [] -> Ok []
+         | held_task_ids ->
+           let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config in
+           Ok
+             (List.filter_map
+                (fun (goal_id, task_ids) ->
+                   if List.exists (fun task_id -> List.mem task_id held_task_ids) task_ids
+                   then Some goal_id
+                   else None)
+                links)
+       in
        let held_task_link =
-         match held_task_id, open_goals with
-         | None, _ | Some _, [] -> fun _goal_id -> Not_served_by_held_task
-         | Some task_id, _ :: _ ->
-           (match Workspace_goal_index.read_goal_task_links_r config with
-            | Ok links ->
+         match open_goals with
+         | [] -> fun _goal_id -> Not_served_by_held_task
+         | _ :: _ ->
+           (match served_goal_ids () with
+            | Ok served ->
               fun goal_id ->
-                if List.exists
-                     (fun (linked_goal, tasks) ->
-                        String.equal linked_goal goal_id && List.mem task_id tasks)
-                     links
+                if List.mem goal_id served
                 then Served_by_held_task
                 else Not_served_by_held_task
             | Error detail ->
               Log.Keeper.warn
-                "active goals: goal-task links unreadable for held task %s: %s"
-                task_id detail;
+                "active goals: held-task goal links unreadable keeper=%s: %s"
+                keeper_name detail;
               fun _goal_id -> Held_task_link_unreadable)
        in
        List.map

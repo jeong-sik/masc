@@ -1580,9 +1580,17 @@ let test_config_snapshot_carries_open_goals_without_a_task () =
        | Some text -> text
        | None -> Alcotest.failf "assembled prompt absent: %s" (Yojson.Safe.to_string prompt)) in
   let has needle = String_util.contains_substring assembled needle in
-  Alcotest.(check bool) "the layer counts the open goal" true (has "### Active Goals (1)");
+  let fragment key vars =
+    match Prompt_registry.render_prompt_template key vars with
+    | Ok text -> text
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check bool) "the layer counts the open goal" true
+    (has (fragment Prompt_names.keeper_world_active_goals_heading [ "count", "1" ]));
   Alcotest.(check bool) "the open goal is named" true
-    (has "- goal-open — Ship the preview release");
+    (has
+       (fragment Prompt_names.keeper_world_active_goals_row
+          [ "goal_id", "goal-open"; "title", "Ship the preview release" ]));
   Alcotest.(check bool) "its criterion travels with it" true (has "tags named v0.100.0");
   Alcotest.(check bool) "a completed goal is not offered" false (has "goal-done")
 ;;

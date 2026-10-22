@@ -29,3 +29,49 @@ their filtered page and exact detail through the server projection and TUI
 decoder, preserving measured and unmeasured durations. Parser checks establish
 syntax only. Compiled tests, an installed executable, and visible UI use are
 separate evidence.
+
+## Dashboard navigation
+
+The Dashboard uses `LaneNavigationTarget.kind=run_history` with the retained
+`LaneRunIdentity` vocabulary. `kind=exact` continues to name current builtin
+settings. A configuration row's diagnostics link converts to a history target
+at navigation; it does not make a history target usable by the Runtime editor.
+The existing workspace authority check applies to either target.
+
+Internal Agents reads the selected history source even if the current
+configuration matrix is absent or unavailable. Verifier still reads Task/Goal
+registries, and Stagehand explicitly reports that it retains no history. A
+missing current configuration row is not an error in a valid history selection.
+The original record's run ID and detail endpoint are unchanged; the history
+filter does not derive a run ID from an Addon installation scope.
+
+Refresh still uses the existing combined `Promise.allSettled` barrier. This
+separates history availability from configuration availability; it does not
+make a slow or pending unrelated read stop delaying the refresh.
+
+Focused Dashboard verification executes the real router and components with
+mocked API responses, plus the strict API decoder suite. It is not an actual
+server/browser session. The initial eight internal-agents fixture failures
+were reproduced against isolated base `689369c0bc938c1056cf6a21dd0c1b67d7d5f692`:
+terminal rows omitted required `completion_origin` and `usage`. Fixtures now
+state producer origin and absent usage; running rows omit both. The production
+parser remains strict. The four selected suites pass 91 cases; TypeScript and
+changed-file lint pass. TUI history discovery and Curator builtin retirement
+remain follow-up work.
+
+## Executed identity source
+
+Exact source `689369c0bc938c1056cf6a21dd0c1b67d7d5f692` completed
+[targeted CI](https://github.com/jeong-sik/masc/actions/runs/39710832458) with
+five suites and 453 passing cases, including real-file Curator replay through
+the server/TUI decoders. The same source completed
+[native macOS CI](https://github.com/jeong-sik/masc/actions/runs/39710835575),
+building the TUI, key-reference generator and server plus two suites with 29
+passing cases. The artifact receipt's source and TUI/server/key-reference
+byte hashes were checked independently.
+
+[The execution receipt](../evidence/2026-10-22-curator-original-delivery/retained-identity-execution.json)
+records source versus workflow identities, exact targets, log hashes and limits.
+These runs execute the identity layer, not the later Dashboard navigation
+delta. Its focused 91 cases and TypeScript/lint results are separate local
+evidence. No installed-runtime or visible-UI verification is claimed.

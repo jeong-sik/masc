@@ -93,3 +93,23 @@ test('a host that sent an invalid reply takes no new job while it is being kille
   await assert.rejects(second.promise, /VST host ended \(0\)/)
   await owner.close()
 })
+
+test('closing while a failed host is still dying keeps its failure and waits for it to end', async () => {
+  const children = []
+  const owner = openVstSession({ spawnProcess() {
+    const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+      kill() {} })
+    children.push(child); return child
+  } })
+  const job = owner.run({ operation: 'echo' })
+  const rejected = assert.rejects(job.promise, /invalid reply/)
+  children[0].stdout.write('not json\n')
+  await new Promise(resolve => setImmediate(resolve))
+  let closed = false
+  const closing = owner.close().then(() => { closed = true })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(closed, false)
+  children[0].emit('close', null, 'SIGKILL')
+  await rejected
+  await closing
+})

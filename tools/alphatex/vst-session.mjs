@@ -19,12 +19,14 @@ const cancelledError = label => {
 // ends rejects the jobs it owned, and the next job starts a new one.
 export function openVstSession({ command = vstHostPath, args = [], spawnProcess = spawn, label = 'VST' } = {}) {
   let host = null, nextId = 0, closed = false
-  const pending = new Map()
+  // Every started host until it closes, including one already being killed.
+  const pending = new Map(), hosts = new Set()
   function start() {
     const child = spawnProcess(command, [...args, '--serve'], { stdio: ['pipe', 'pipe', 'pipe'] })
     let text = '', stderr = Buffer.alloc(0), failure = null, ended
     // Sent jobs without a reply yet, cancelled ones included: the host is busy.
     const owned = { child, outstanding: new Set(), ended: new Promise(resolve => { ended = resolve }) }
+    hosts.add(owned)
     // A failed host takes no new job; the next run starts another.
     const fail = error => { failure ??= error; if (host === owned) host = null; child.kill('SIGKILL') }
     child.stdout.setEncoding('utf8')
@@ -54,6 +56,7 @@ export function openVstSession({ command = vstHostPath, args = [], spawnProcess 
     child.once('error', error => { failure ??= error })
     child.once('close', (code, signal) => {
       if (host === owned) host = null
+      hosts.delete(owned)
       const error = failure ?? new Error(`${label} host ended (${signal ?? code}): ${stderr.toString('utf8')}`)
       for (const [id, job] of pending) {
         if (job.owner === owned) { pending.delete(id); job.reject(error) }
@@ -88,12 +91,14 @@ export function openVstSession({ command = vstHostPath, args = [], spawnProcess 
     // cancel; an idle host is closed through its input.
     async close() {
       closed = true
-      for (const [id, job] of pending) { pending.delete(id); job.reject(cancelledError(label)) }
       const owned = host
-      if (!owned) return
-      if (owned.outstanding.size) owned.child.kill('SIGKILL')
-      else owned.child.stdin.end()
-      await owned.ended
+      // Jobs of a host that is already failing keep the failure it ends with.
+      for (const [id, job] of pending) {
+        if (job.owner === owned) { pending.delete(id); job.reject(cancelledError(label)) }
+      }
+      if (owned?.outstanding.size) owned.child.kill('SIGKILL')
+      else owned?.child.stdin.end()
+      await Promise.all([...hosts].map(value => value.ended))
     },
   }
 }

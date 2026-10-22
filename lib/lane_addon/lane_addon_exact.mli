@@ -197,7 +197,9 @@ val read_original_execution : store:Lane_addon_store.t -> declaration_id:string 
     unproven; malformed, conflicting and unreadable evidence returns [Error].
     A complete proof may precede final publication. This read never claims,
     writes, resolves a route, delivers to a worker or calls a provider. It grants
-    no Memory, queue-consumption or new execution authority. Offload the whole
+    no Memory, queue-consumption or new execution authority. Proof identity
+    includes the original Store root; moving the workspace directory makes
+    that proof a conflicting identity and returns [Error]. Offload the whole
     blocking scope to a system thread. *)
 val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
   schema:Yojson.Safe.t -> request -> (retained_observation, string) result

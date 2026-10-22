@@ -348,7 +348,7 @@ let test_original_execution_is_bound_to_one_attempt () =
        check bool "second original answer has its own proof" true (Exact.checked_json output=question)
      | Exact.No_completed_original | Exact.Completed_original _ -> fail "missing second original execution");
     check int "only the two explicit triggers send" 2 !sends;
-    let changed={original with messages=[{Exact.role=User;text="different original"}]} in
+    let changed=request ~message:"different original" original.request_id in
     check bool "read refuses a rebound request" true (Result.is_error (original_execution store changed));
     check bool "read refuses a schema from another original" true
       (Result.is_error (Exact.read_original_execution ~store ~declaration_id ~schema:(`Assoc []) ~attempt_ordinal:2 original));

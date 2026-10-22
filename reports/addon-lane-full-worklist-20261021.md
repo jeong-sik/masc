@@ -735,3 +735,5 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - [실제 포트와 남은 경계](../docs/design/librarian-addon-execution.md)에 따라 trusted original read, 실제 Store 실패·재개·시도 분리·손상 증거 거절과 실제 runner/classifier 시나리오를 작성 중이다. 이 작업의 타입/compiled 실행·실제 Librarian worker 연결·provider/두 UI/설치 검증은 아직 완료되지 않았다. A01–H06의 원래54개 항목명·완료 기준은 유지한다.
 
 - 후속 수리 #45049 exact `82f14e98249fb1992f57f627deb984a1dc543a4e`는 실제 [선택 실행39732659176](https://github.com/jeong-sik/masc/actions/runs/39732659176)의 gate60·Runtime cancellation8, 총68건 PASS와 현재 head의 MASC 승인5609990639를 확인했다. 원본 로그 SHA-256 `478d24afea9e97c9b7fece8ee9108328f6ad0e01bc70dd10b95715ed7564b8b6`. 이 결과는 다음 실행 proof 층·worker 추출·전체 회귀·운영 설치의 검증이 아니다.
+
+- #45054 exact `5d2193e51e8e6b19183afc6b38508b903514f8a7`의 [선택 CI39735118814](https://github.com/jeong-sik/masc/actions/runs/39735118814)는 테스트의 private `Exact.request` 레코드 갱신 때문에 컴파일에서 실패했다. 선택7suite는 실행되지 않았다. rebound request 시나리오는 공개 `request_of_json`을 쓰는 기존 fixture 생성자로 구성하도록 수정한다. 소스 승인과 부모68건은 이 층의 타입·동작 성공이 아니다. 같은7suite의 새 선택 결과는 별도로 확인한다.

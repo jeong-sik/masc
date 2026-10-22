@@ -13,6 +13,7 @@ type ids =
   { fact_ids : (string * Ledger.fact_ref) list
   ; claim_ids : (string * string) list
   ; conflict_ids : (string * string) list
+  ; selected_ids : (string * Ledger.pending_fact) list
   }
 
 type batch =
@@ -56,33 +57,36 @@ let rec traverse f = function
     Ok (y :: ys)
 
 (* A local id names one fact, claim or conflict inside one request. Facts are
-   numbered by first appearance: every selected fact oldest first, then each
+   numbered by first appearance: every selected fact in row order, then each
    neighbor the first time a row names it. The model reads each text once and
    the host keeps the map back to ledger identities. *)
-type numbering = { order : (string * Ledger.pending_fact) list; index : string Fact_map.t }
+type numbering =
+  { order : (string * Ledger.pending_fact) list; index : string Fact_map.t; count : int }
 
 let number numbering (pending : Ledger.pending_fact) =
   match Fact_map.find_opt pending.fact numbering.index with
   | Some _ -> numbering
   | None ->
-    let id = "f" ^ string_of_int (Fact_map.cardinal numbering.index + 1) in
-    { order = (id, pending) :: numbering.order; index = Fact_map.add pending.fact id numbering.index }
+    let count = numbering.count + 1 in
+    let id = "f" ^ string_of_int count in
+    { order = (id, pending) :: numbering.order; index = Fact_map.add pending.fact id numbering.index; count }
 
 let local numbering (pending : Ledger.pending_fact) =
   match Fact_map.find_opt pending.fact numbering.index with
   | Some id -> Ok id
   | None -> Error "a request row names a fact outside its numbering"
 
-type entries = { listed : (string * string) list; by_id : string String_map.t }
+type entries = { listed : (string * string) list; by_id : string String_map.t; count : int }
 
-let no_entries = { listed = []; by_id = String_map.empty }
+let no_entries = { listed = []; by_id = String_map.empty; count = 0 }
 
 let entry prefix entries id =
   match String_map.find_opt id entries.by_id with
   | Some local -> local, entries
   | None ->
-    let local = prefix ^ string_of_int (String_map.cardinal entries.by_id + 1) in
-    local, { listed = (local, id) :: entries.listed; by_id = String_map.add id local entries.by_id }
+    let count = entries.count + 1 in
+    let local = prefix ^ string_of_int count in
+    local, { listed = (local, id) :: entries.listed; by_id = String_map.add id local entries.by_id; count }
 
 let texts pairs =
   List.fold_left (fun map (id, text) -> String_map.add id text map) String_map.empty pairs
@@ -92,7 +96,8 @@ let build ~ledger rows =
     List.fold_left (fun map (fact, disposition) -> Fact_map.add fact disposition map)
       Fact_map.empty (Ledger.dispositions ledger) in
   let numbering =
-    List.fold_left number { order = []; index = Fact_map.empty } (List.map (fun row -> row.fact) rows) in
+    List.fold_left number { order = []; index = Fact_map.empty; count = 0 }
+      (List.map (fun row -> row.fact) rows) in
   let numbering =
     List.fold_left (fun numbering row -> List.fold_left number numbering row.neighbors) numbering rows in
   let facts = List.rev numbering.order in
@@ -119,13 +124,15 @@ let build ~ledger rows =
   let* new_facts = traverse (fun row ->
       let* id = local numbering row.fact in
       let* neighbors = traverse (local numbering) row.neighbors in
-      Ok (`Assoc ["id", `String id; "neighbors", `List (List.map (fun id -> `String id) neighbors)]))
+      Ok ((id, row.fact),
+          `Assoc ["id", `String id; "neighbors", `List (List.map (fun id -> `String id) neighbors)]))
       rows in
-  Ok (`Assoc ["new_facts", `List new_facts; "facts", `List (List.rev shown);
+  Ok (`Assoc ["new_facts", `List (List.map snd new_facts); "facts", `List (List.rev shown);
               "claims", `List claim_rows; "conflicts", `List conflict_rows],
       { fact_ids = List.map (fun (id, (pending : Ledger.pending_fact)) -> id, pending.fact) facts
       ; claim_ids = List.rev claims.listed
-      ; conflict_ids = List.rev conflicts.listed })
+      ; conflict_ids = List.rev conflicts.listed
+      ; selected_ids = List.map fst new_facts })
 
 let check_rows rows =
   let rec selected seen = function
@@ -152,12 +159,7 @@ let render_batch ~render ~ledger ~index_stats rows =
   let* rendered_prompt = render input |> Result.map_error (fun detail -> Render_failed detail) in
   Ok { rows; selected = List.map (fun (row : row) -> row.fact) rows; input; rendered_prompt; ids; index_stats }
 
-let selected_ids batch =
-  let ids =
-    List.fold_left (fun map (id, fact) -> Fact_map.add fact id map) Fact_map.empty batch.ids.fact_ids in
-  List.filter_map (fun (pending : Ledger.pending_fact) ->
-    Option.map (fun id -> id, pending) (Fact_map.find_opt pending.fact ids)) batch.selected
-
+let selected_ids batch = batch.ids.selected_ids
 let claim_ids batch = batch.ids.claim_ids
 let conflict_ids batch = batch.ids.conflict_ids
 
@@ -230,7 +232,8 @@ let batch_of_json ~ledger json =
        saw. Rebuilding from the rows and that ledger and requiring equality
        binds the request to the before-state its commit changes. *)
     let* expected, ids = build ~ledger rows in
-    let* () = if Yojson.Safe.equal expected input && ids = { fact_ids; claim_ids; conflict_ids } then Ok ()
+    let* () = if Yojson.Safe.equal expected input && ids.fact_ids = fact_ids
+                 && ids.claim_ids = claim_ids && ids.conflict_ids = conflict_ids then Ok ()
       else Error "snapshot differs from its selected facts or captured ledger context" in
     let* rendered_prompt = snapshot_text (List.assoc "rendered_prompt" fields) in
     let* stats = snapshot_fields ["index_builds"; "indexed_rows"; "queries_executed"] (List.assoc "index_stats" fields) in

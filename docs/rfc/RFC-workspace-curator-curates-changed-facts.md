@@ -109,6 +109,7 @@ keepers 디렉터리가 없으면 실행하지 않는다. keepers 디렉터리 �
 #### 묶음 고르기 (2026-10-22 개정)
 
 - **순서.** 분류할 사실은 Keeper 스냅샷의 `first_seen` 이 오래된 것부터 처리한다. 같은 시각이면 `fact_ref` 순서다.
+  - 일반 사실의 `first_seen` 은 주장이 같은 동안 그대로다. 파일에 묶인 사실은 파일 내용(sha256)이 바뀌면 그 시각으로 다시 시작한다. 원장 정체는 그대로라서, 아직 분류되지 않은 사실의 파일이 자주 바뀌면 줄 뒤로 밀린다.
 - **첫 묶음.** 오래된 순 접두사를, 받는 add-on 이 선언한 `max_reply_bytes` 안에 들어가는 만큼 고른다.
   - 이 한도는 모델 창을 바이트로 어림한 값이 아니다. Curator worker 는 받은 요청을 `lane_host_requests` 답장에 그대로 담아 돌려준다. 그 답장이 `max_reply_bytes` 의 뜻인 "worker 가 보낸 메시지" 한도에 걸린다(`RFC-0471-max-reply-bytes-bounds-one-thing.md` 표 1번).
   - 호스트는 자기가 보낼 submit 인자의 바이트를 잰다.

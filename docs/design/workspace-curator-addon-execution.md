@@ -32,7 +32,7 @@ Off, a disconnected worker and a delayed result.
 | Boundary | Authority that remains on the host |
 | --- | --- |
 | Fact intake | `Workspace_memory_context.collect`, physical workspace identity and exact source-bound fact references |
-| Classification input | `Workspace_memory_request.prepare` and its selected/remaining whole facts, rendered prompt and original ledger |
+| Classification input | `Workspace_memory_request.prepare` and its selected whole facts (oldest `first_seen` first, request-local ids), rendered prompt and original ledger |
 | Classification decision | `Workspace_memory_decision.decode` and the pure `Workspace_memory_ledger.apply` against the captured selected facts |
 | Durable effects | The original serialized owner calls `Workspace_memory_ledger.save`; a worker cannot write the ledger or Keeper memory |
 | Briefing input | `Workspace_memory_briefing.prepare`, source/contract identity, fixed pass and last complete publication |
@@ -78,7 +78,8 @@ credentials or installation ownership supplied by a model may become authority.
 Before the first worker RPC, the host must retain an immutable accepted request:
 
 - An opaque host request identity and kind, physical workspace binding, original
-  batch/pass identity and exact selected/remaining fact or source references.
+  batch/pass identity and exact selected fact references (classification) or
+  selected/remaining source references (briefing).
 - The captured input, effective prompt, schema/contract and their digests.
 - The original classification ledger snapshot or briefing prepared-state and
   expected publication identity needed to validate and recover its commit.
@@ -414,8 +415,10 @@ overflow, request-body refusal or output limit. Briefing permits the three input
 refusals only. Invalid_request, ordinary invalid output, unknown, pending and
 pre-dispatch refusal do not authorize a successor. One indivisible source
 returns Indivisible without truncation or another request. The captured template,
-workspace, ledger, destination revisions and complete prefix/remainder survive;
-neighbors are not recollected. Briefing.narrow preserves the identical prepared
+workspace, ledger and destination revisions survive. A classification child keeps
+the oldest half of the parent's rows with their neighbors, rebuilt against the
+captured ledger; a briefing child keeps the complete prefix/remainder. Neighbors
+are not recollected. Briefing.narrow preserves the identical prepared
 state and previous publication, so linking performs no extra domain write.
 
 A recovered Subdividing intent reuses its existing child ID and input. An

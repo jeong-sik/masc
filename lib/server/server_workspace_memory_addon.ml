@@ -110,13 +110,17 @@ let terminal ~capture ~record final =
     Ok (Judgment {capture;record;final;expected})
   | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
   | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused -> Ok (Terminal (final,record))
+let restore ~store ~workspace original =
+  Eio_unix.run_in_systhread (fun () -> Capture.restore ~workspace
+    ~load:(fun ~request_id -> Owner.load ~store ~scope:Capture.scope ~request_id
+      |> Result.map_error Owner.error_to_string) original) |> rejected
 let resume_with ~store ~base_path ~request_id ~call =
   let* original=Eio_unix.run_in_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
   let* original=match original with Some original -> Ok original
     | None -> Error (Unavailable "Original Curator request is absent; resume cannot recreate it") in
   let* workspace=Eio_unix.run_in_systhread (fun () -> Capture.observe_workspace ~base_path)
     |> Result.map_error (fun detail -> Unavailable detail) in
-  let* capture=rejected (Capture.restore ~workspace original) in
+  let* capture=restore ~store ~workspace original in
   let publish original event=Eio_unix.run_in_systhread (fun () -> advance ~store original event) in
   let observe (original : Owner.retained) reason observation evidence =
     let observation=observation evidence in
@@ -125,7 +129,7 @@ let resume_with ~store ~base_path ~request_id ~call =
       Ok (Awaiting (reason,original))
     | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending (None | Some _)
     | Progress.Judged _ | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _
-    | Progress.Conflicted _ | Progress.Rejected _ ->
+    | Progress.Conflicted _ | Progress.Rejected _ | Progress.Subdividing _ | Progress.Subdivided _ ->
       let* published=publish original (Progress.Execution_observed observation) in
       Ok (Awaiting (reason,record published)) in
   let finish original final =
@@ -172,13 +176,17 @@ let resume_with ~store ~base_path ~request_id ~call =
      | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused ->
        Error (Rejected "Original judgment does not contain an answered domain result"))
   | Progress.Committing _ | Progress.Commit_unknown _ -> Ok (Commit_pending original)
-  | Progress.Rejected {stage=Progress.Execution;evidence} ->
+  | Progress.Rejected {stage=Progress.Execution;evidence}
+  | Progress.Subdividing ({stage=Progress.Execution;evidence},_)
+  | Progress.Subdivided ({stage=Progress.Execution;evidence},_) ->
     let* final=rejected (Exact.final_of_json ~schema:(Capture.output_schema capture) evidence) in
     (match final with
      | Exact.Call_final (Exact.Answered _) -> Error (Rejected "Refused original work cannot contain an answered judgment")
      | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
      | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused -> terminal ~capture ~record:original final)
-  | Progress.Finished _ | Progress.Conflicted _ | Progress.Rejected {stage=Progress.Before_dispatch;_} -> Ok (Settled original)
+  | Progress.Finished _ | Progress.Conflicted _ | Progress.Rejected {stage=Progress.Before_dispatch;_}
+  | Progress.Subdividing ({stage=Progress.Before_dispatch;_},_)
+  | Progress.Subdivided ({stage=Progress.Before_dispatch;_},_) -> Ok (Settled original)
   | Progress.Captured | Progress.Admission_wait _ ->
     let* state,_evidence=invoke read in
     (match state with
@@ -270,13 +278,13 @@ let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
     | None -> Error (Unavailable "Original Curator commit is absent") in
   let* workspace=Eio_unix.run_in_systhread (fun () -> Capture.observe_workspace ~base_path)
     |> Result.map_error (fun detail -> Unavailable detail) in
-  let* capture=rejected (Capture.restore ~workspace original) in
+  let* capture=restore ~store ~workspace original in
   let phase=Progress.phase original.progress in
   let* judgment,stored=match phase with
     | Progress.Judged judgment -> Ok (judgment,None)
     | Progress.Committing commit | Progress.Commit_unknown (commit,_)
     | Progress.Finished commit | Progress.Conflicted (commit,_) -> Ok (commit.judgment,Some commit)
-    | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Rejected _ ->
+    | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Rejected _ | Progress.Subdividing _ | Progress.Subdivided _ ->
       Error (Rejected "Original Curator request has no domain judgment to commit") in
   let* expected,change=commit_plan capture judgment in
   let* ()=match stored with
@@ -290,7 +298,7 @@ let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
     match Progress.phase original.progress with
     | Progress.Commit_unknown (_,previous) when Yojson.Safe.equal previous evidence -> Error (Uncertain detail)
     | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
-    | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _ | Progress.Rejected _ ->
+    | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _ | Progress.Rejected _ | Progress.Subdividing _ | Progress.Subdivided _ ->
       let* _=publish original (Progress.Commit_uncertain evidence) in Error (Uncertain detail) in
   let observe original event ctor =
     let* published=publish original event in Ok (ctor (record published)) in
@@ -339,7 +347,7 @@ let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
              | Acknowledged record -> Ok (Commit_waiting record)
              | New record -> recover ~permission:Newly_stored record)
           | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
-          | Progress.Finished _ | Progress.Conflicted _ | Progress.Rejected _ ->
+          | Progress.Finished _ | Progress.Conflicted _ | Progress.Rejected _ | Progress.Subdividing _ | Progress.Subdivided _ ->
             Error (Rejected "Domain recovery lost its original commit intent") in
   match phase with
   | Progress.Finished _ -> Ok (Committed original)
@@ -350,7 +358,7 @@ let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
      | Acknowledged record -> Ok (Commit_waiting record)
      | New record -> recover ~permission:Newly_stored record)
   | Progress.Committing _ | Progress.Commit_unknown _ -> recover ~permission:Recovering original
-  | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Rejected _ ->
+  | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Rejected _ | Progress.Subdividing _ | Progress.Subdivided _ ->
     Error (Rejected "Original Curator request is not ready to commit")
 let settle ~config ~request_id =
   let base_path=config.Workspace.base_path in
@@ -358,4 +366,80 @@ let settle ~config ~request_id =
   let briefing_contract ()=let prompt=Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing in
     Briefing.contract ~template:prompt.effective in
   settle_with ~store ~base_path ~request_id ~briefing_contract ~save:(save_domain ~base_path)
-module For_testing = struct let resume=resume_with let settle=settle_with end
+type successor_result = Indivisible of Owner.retained | Successor_waiting of Owner.retained
+  | Successor_ready of {parent:Owner.retained;child:Owner.retained}
+let narrow_with ~store ~base_path ~request_id =
+  let read ~request_id = Eio_unix.run_in_systhread (fun () ->
+    Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
+  let* parent = read ~request_id in
+  let* parent = match parent with Some parent -> Ok parent
+    | None -> Error (Unavailable "Original Curator size refusal is absent") in
+  let* workspace = Eio_unix.run_in_systhread (fun () -> Capture.observe_workspace ~base_path)
+    |> Result.map_error (fun detail -> Unavailable detail) in
+  let* original = restore ~store ~workspace parent in
+  let publish parent event = Eio_unix.run_in_systhread (fun () -> advance ~store parent event) in
+  let derive refusal child_id =
+    let* final = match refusal.Progress.stage with
+      | Progress.Execution -> rejected (Exact.final_of_json ~schema:(Capture.output_schema original) refusal.evidence)
+      | Progress.Before_dispatch -> Error (Rejected "A pre-dispatch refusal cannot create a Curator successor") in
+    rejected (Capture.narrow ~request_id:child_id ~final original) in
+  let validate_intent refusal (intent : Progress.successor) =
+    let* id = rejected (Capture.Request_id.of_string intent.request_id) in
+    let* child = derive refusal id in
+    let* child = match child with Some child -> Ok child
+      | None -> Error (Rejected "An indivisible original batch cannot have a successor") in
+    let* expected = rejected (Lane_addon_action.canonical (Capture.to_json child)) in
+    let* () = if Yojson.Safe.equal expected intent.request then Ok ()
+      else Error (Rejected "Stored successor differs from the original whole-batch reduction") in
+    Ok child in
+  let confirm parent child =
+    let* _ = restore ~store ~workspace child in
+    Ok (Successor_ready {parent;child}) in
+  let finish parent intent =
+    let* child = read ~request_id:intent.Progress.request_id in
+    let* child = match child with Some child -> Ok child
+      | None -> Error (Unavailable "The original child capture is absent; acknowledged work cannot be recreated") in
+    let* () = if Yojson.Safe.equal child.request intent.request then Ok ()
+      else Error (Rejected "Retained child differs from its original parent intent") in
+    confirm parent child in
+  let retain_child parent refusal intent =
+    let* child = validate_intent refusal intent in
+    let destination = Capture.destination child in
+    let* () = Eio_unix.run_in_systhread (fun () ->
+      Owner.retain ~store ~scope:Capture.scope ~request_id:intent.Progress.request_id
+        ~installation_id:destination.installation_id ~package_id:destination.package_id
+        ~tool:destination.tool ~request:intent.request) |> owned in
+    (* This strict read and complete immutable equality establish only that the
+       intended child is durable. Ordinary restore still rejects it until ACK. *)
+    let* retained = read ~request_id:intent.request_id in
+    let* retained = match retained with Some retained -> Ok retained
+      | None -> Error (Uncertain "Child publication has no confirmed original capture") in
+    let* () = if Yojson.Safe.equal retained.request intent.request
+        && retained.installation_id=destination.installation_id
+        && retained.package_id=destination.package_id && retained.tool=destination.tool then Ok ()
+      else Error (Rejected "Another child binding cannot acknowledge the original successor") in
+    let* published = publish parent (Progress.Successor_observed intent.request_id) in
+    finish (record published) intent in
+  match Progress.phase parent.progress with
+  | Progress.Subdividing (refusal,intent) -> retain_child parent refusal intent
+  | Progress.Subdivided (refusal,intent) ->
+    let* _ = validate_intent refusal intent in finish parent intent
+  | Progress.Rejected refusal ->
+    let child_id = Capture.Request_id.fresh () in
+    let* child = derive refusal child_id in
+    (match child with
+     | None -> Ok (Indivisible parent)
+     | Some child ->
+       let* request = rejected (Lane_addon_action.canonical (Capture.to_json child)) in
+       let intent : Progress.successor = {request_id=Capture.Request_id.to_string child_id;request} in
+       let* published = publish parent (Progress.Successor_intended intent) in
+       (match published with
+        | Acknowledged parent -> Ok (Successor_waiting parent)
+        | New parent -> retain_child parent refusal intent))
+  | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
+  | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _ ->
+    Error (Rejected "Only an original execution size refusal can create a Curator successor")
+let narrow ~config ~request_id =
+  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  narrow_with ~store ~base_path:config.Workspace.base_path ~request_id
+module For_testing = struct let resume=resume_with let settle=settle_with let narrow=narrow_with end

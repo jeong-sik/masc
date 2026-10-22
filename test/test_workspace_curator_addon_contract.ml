@@ -116,7 +116,9 @@ let scenario domain () =
       let reopened=Store.create ~root:(Store.root store) in
       let retained=match owned (Owner.load ~store:reopened ~scope:Capture.scope ~request_id:original_id) with
         | Some value -> value | None -> fail "original host capture must precede the worker RPC" in
-      let original=get (Capture.restore ~workspace:(get (Capture.observe_workspace ~base_path)) retained) in
+      let original=get (Capture.restore ~workspace:(get (Capture.observe_workspace ~base_path))
+        ~load:(fun ~request_id -> Owner.load ~store ~scope:Capture.scope ~request_id
+          |> Result.map_error Owner.error_to_string) retained) in
       let exact=get (Binding.request original) in
       let read=`Assoc ["kind",`String "read";"request_id",`String original_id] in
       check bool "original worker absence is observed before admission" true
@@ -194,7 +196,7 @@ let scenario domain () =
         (match Lane_addon_request_progress.phase current.progress with
          | Lane_addon_request_progress.Judged _ -> true
          | Lane_addon_request_progress.Captured | Admission_wait _ | Dispatch_pending _ | Committing _
-         | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ -> false)
+         | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false)
     ))))))))
 
 let with_original_consumer f =
@@ -281,7 +283,7 @@ let test_original_output_limit_is_retained_without_worker_replay_or_a_judgment (
          | Lane_addon_request_progress.Rejected {stage=Execution;evidence} ->
            check bool "typed original terminal is retained as execution refusal" true (Yojson.Safe.equal evidence terminal)
          | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-         | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} -> fail "a limit cannot become a domain judgment")
+         | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} | Subdividing _ | Subdivided _ -> fail "a limit cannot become a domain judgment")
       | Consumer.Terminal _ | Consumer.Awaiting _ | Consumer.Judgment _ | Consumer.Commit_pending _ | Consumer.Settled _ ->
         fail "the original provider output limit changed meaning" in
     verify (resume call);

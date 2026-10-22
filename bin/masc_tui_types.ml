@@ -17297,6 +17297,21 @@ let runtime_config_edit_lines ~cols state =
 
 let dismiss_runtime_lane_notice (state : state) = state.runtime_lane_notice <- None
 
+(* A history jump replaces the editor even when it stays on Lanes. Only the
+   transient editor/picker closes: outstanding writes, receipts and drafts keep
+   their original owners. The caller separately admits and starts the read. *)
+let begin_lane_run_list (state : state) (lane : Lane_run_identity.t) =
+  state.slot_editor <- None;
+  state.runtime_lane_pick <- None;
+  dismiss_runtime_lane_notice state;
+  state.lanes_mode <- Lanes_run_list lane;
+  state.lane_runs <- None;
+  state.lane_runs_error <- None;
+  state.lane_runs_next <- None;
+  state.lane_runs_total <- None;
+  state.lane_runs_cursor <- 0;
+  state.lane_runs_scroll <- 0
+
 let set_runtime_lane_list_freshness (state : state) list freshness =
   match list with
   | Runtime_surface_list -> state.runtime_surface_lane_freshness <- freshness

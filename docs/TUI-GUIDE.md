@@ -873,6 +873,15 @@ failures and elapsed-time measurements. An exact row expands underneath the
 scrolling inventory. `d` shows complete configuration readings, and Enter opens
 its retained runs.
 
+To open retained observations without a current configuration row or installed
+Addon, press `:` and choose `go Workspace Curator history` (or search by the
+logical lane ID, such as `workspace_curator_exact`). Each history destination
+uses the original lane identity; Enter on a run opens its retained detail. This
+closes any model editor or picker on Lanes while preserving outstanding writes
+and configuration drafts. The normal inventory refresh and the history request
+run independently; history still requires the current workspace read authority.
+These destinations provide observation access, not a model configuration route.
+
 The `[runtime.exact_output_lanes.<lane-id>]` table supplies `slots` for catalog
 references and `cli_slots` for official-client runtime IDs. At least one slot
 across the two groups is required. The lane tries admitted catalog slots in

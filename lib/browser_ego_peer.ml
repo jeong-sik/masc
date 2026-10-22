@@ -7,17 +7,26 @@ let str value = `String value
 type run_failure = Exited of { code : int; output : string } | Timed_out | Unstarted of string
 type runner = string -> (string, run_failure) result
 
-(* The end of a run's output, cut where a UTF-8 character starts. *)
-let output_tail_bytes = 400
+(* At most this much of what ego wrote reaches a Keeper, cut where a UTF-8
+   character starts. ego's own error for a page step repeats the whole
+   expression, page script included. *)
+let excerpt_bytes = 400
+let starts_character text index = index >= String.length text || Char.code text.[index] land 0xC0 <> 0x80
+(* The end of a run's output: where it says why it stopped. *)
 let tail output =
   let output = String.trim output in
   let length = String.length output in
-  if length <= output_tail_bytes then output
+  if length <= excerpt_bytes then output
   else
-    let rec start index =
-      if index < length && Char.code output.[index] land 0xC0 = 0x80 then start (index + 1) else index in
-    let from = start (length - output_tail_bytes) in
+    let rec start index = if starts_character output index then index else start (index + 1) in
+    let from = start (length - excerpt_bytes) in
     "..." ^ String.sub output from (length - from)
+(* The start of an error ego threw: what failed comes first. *)
+let head message =
+  if String.length message <= excerpt_bytes then message
+  else
+    let rec stop index = if starts_character message index then index else stop (index - 1) in
+    String.sub message 0 (stop excerpt_bytes) ^ "..."
 
 let run_failure_message = function
   | Exited {code; output} -> Printf.sprintf "ego-browser nodejs exited with code %d: %s" code (tail output)
@@ -88,7 +97,7 @@ let answer output =
     | exception Yojson.Json_error _ -> Error (Unreadable "ego-browser nodejs answered unreadable JSON")
     | json -> match field "ok" json, field "value" json, field "error" json with
       | Some (`Bool true), Some value, None -> Ok value
-      | Some (`Bool false), None, Some (`String error) -> Error (Refused error)
+      | Some (`Bool false), None, Some (`String error) -> Error (Refused (head error))
       | _ -> Error (Unreadable "ego-browser nodejs answered outside its answer frame")
 
 let asked run ~step ~space ~args body = match run (script ~step ~space ~args body) with
@@ -113,25 +122,30 @@ let finish t =
   Result.map ignore (ask t ~step:"space.finish" ~args:`Null
     "  await task.finish({keep: []});\n  emit({ok: true, value: null});")
 
+(* A listing is the space's tabs now: a number whose page is no longer
+   listed is dropped, so a read of it is refused before any run. *)
 let tab_rows t =
   let* listed = ask t ~step:"tabs.list" ~args:`Null
       "  const tabs = await task.tabs();\n  emit({ok: true, value: tabs.map(tab => ({label: tab.label ?? null, targetId: tab.targetId, title: tab.title, url: tab.url, active: tab.active}))});" in
-  let row index json =
+  let row json =
     let* page = match field "label" json, field "targetId" json with
       | Some (`String label), _ when label <> "" -> Ok (Managed label)
       | Some `Null, Some (`String target) when target <> "" -> Ok (Unmanaged target)
       | _ -> Error "ego listed a tab without a label or a target id" in
     match field "title" json, field "url" json, field "active" json with
-    | Some (`String title), Some (`String url), Some (`Bool active) ->
-      Ok (obj ["id",`Int (remember t page);"index",`Int index;"url",str url;"title",str title;"active",`Bool active])
+    | Some (`String title), Some (`String url), Some (`Bool active) -> Ok (page, title, url, active)
     | _ -> Error "ego listed a tab without its title, URL or active state" in
-  match listed with
-  | `List rows ->
-    let rec collect index acc = function
-      | [] -> Ok (`List (List.rev acc))
-      | json :: rest -> let* row = row index json in collect (index + 1) (row :: acc) rest in
-    collect 0 [] rows
-  | _ -> Error "ego answered a tab list that is not a list"
+  let* rows = match listed with
+    | `List rows ->
+      let rec collect acc = function
+        | [] -> Ok (List.rev acc)
+        | json :: rest -> let* row = row json in collect (row :: acc) rest in
+      collect [] rows
+    | _ -> Error "ego answered a tab list that is not a list" in
+  let numbered = List.map (fun (page, title, url, active) -> remember t page, title, url, active) rows in
+  t.pages <- List.filter (fun (page, _) -> List.exists (fun (listed, _, _, _) -> listed = page) rows) t.pages;
+  Ok (`List (List.mapi (fun index (id, title, url, active) ->
+    obj ["id",`Int id;"index",`Int index;"url",str url;"title",str title;"active",`Bool active]) numbered))
 
 let unmanaged_refused = "was opened by the operator in the ego task space; this connection reads only the pages the space manages"
 

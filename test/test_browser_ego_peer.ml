@@ -92,6 +92,34 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
       ~run:(fun _ -> refused "EGO_TASK_SPACE_NAME_IN_USE: masc") in
   check (result reject string) "ego's own refusal is kept" (Error "EGO_TASK_SPACE_NAME_IN_USE: masc") (Result.map ignore in_use)
 
+(* A tab that left the listing loses its number: reading it is refused
+   before any run, and the bookkeeping does not grow with every listing. *)
+let test_a_tab_that_left_the_listing_loses_its_number () =
+  let listing = ref tabs and ran = ref [] in
+  let peer = opened (fun sent ->
+    ran := sent.step :: !ran;
+    match sent.step with "tabs.list" -> answered !listing | other -> failf "%s ran a script" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  listing := `List [List.hd (Yojson.Safe.Util.to_list tabs)];
+  (match dispatch peer Live.Tabs_list (obj []) with
+   | Ok rows -> check int "one tab" 1 (List.length (Yojson.Safe.Util.to_list rows))
+   | Error _ -> fail "the second listing failed");
+  ran := [];
+  List.iter (fun id ->
+    check string (Printf.sprintf "tab %d" id) "browser tab is no longer present"
+      (before_effect "a tab that left" (dispatch peer Live.Page_read (obj ["tabId",`Int id]))))
+    [2; 3];
+  check (list string) "no script ran" [] !ran
+
+(* What ego threw reaches the Keeper cut, where a character starts. *)
+let test_an_ego_error_is_cut () =
+  let long = "JavaScript evaluation failed: Error: Target closed; expression: " ^ String.concat "" (List.init 2000 (fun _ -> "é")) in
+  let peer = opened (fun _ -> refused long) in
+  let message = before_effect "a long error" (dispatch peer Live.Tabs_list (obj [])) in
+  check bool "starts with what failed" true (String.starts_with ~prefix:"JavaScript evaluation failed" message);
+  check bool "cut" true (String.length message < 500);
+  check bool "on a character boundary" true (String.is_valid_utf_8 message)
+
 let test_tabs_are_numbered_by_label () =
   let peer = opened (fun sent -> match sent.step with
     | "tabs.list" -> answered tabs
@@ -202,6 +230,43 @@ let png = "\137PNG\r\n\026\nfixture"
 let state ~url ~width = in_page (obj ["url",str url;"title",str "Slack";
   "viewport",obj ["width",`Int width;"height",`Int 600]])
 
+(* Every script the peer hands to ego parses as the ES module ego runs. *)
+let test_the_scripts_parse_as_modules () =
+  let scripts = ref [] in
+  let directory = capture_directory () in
+  let run script =
+    let sent = sent_of script in
+    scripts := (sent.step, script) :: !scripts;
+    match sent.step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"ownership",str "agent"])
+    | "tabs.list" -> answered tabs
+    | "page.capture" ->
+      let path = text (field "path" sent.args) in
+      Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel png);
+      answered (obj ["label",str "p1";"path",str path;"before",state ~url:"u" ~width:1;"after",state ~url:"u" ~width:1])
+    | "space.finish" -> answered `Null
+    | _ -> page_answer ~label:"p1" (obj ["url",str "u"]) in
+  let peer = match Peer.open_space ~run ~space:"masc" ~version:"0.6.0.16" ~capture_directory:directory with
+    | Ok peer -> peer | Error detail -> fail detail in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  List.iter (fun (verb, args) -> ignore (dispatch peer verb args))
+    [ Live.Page_read, obj ["tabId",`Int 1];
+      Live.Page_elements, obj ["tabId",`Int 1;"within",str "#main"];
+      Live.Page_scene, obj ["tabId",`Int 1];
+      Live.Page_capture, obj ["tabId",`Int 1] ];
+  check (result unit string) "finish" (Ok ()) (Peer.finish peer);
+  check (list string) "every step"
+    ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.capture";"space.finish"]
+    (List.rev_map fst !scripts);
+  List.iter (fun (step, script) ->
+    let file = Filename.concat directory (step ^ ".mjs") in
+    Out_channel.with_open_bin file (fun channel -> Out_channel.output_string channel script);
+    let pid = Unix.create_process "node" [|"node";"--check";file|] Unix.stdin Unix.stdout Unix.stderr in
+    match Unix.waitpid [] pid with
+    | _, Unix.WEXITED 0 -> ()
+    | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> failf "the %s script does not parse as a module" step)
+    !scripts
+
 let test_capture_reads_and_removes_the_file () =
   let directory = capture_directory () in
   let written = ref [] in
@@ -296,6 +361,9 @@ let () =
       test_case "the version line names ego lite and Chromium" `Quick test_version;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;
       test_case "tabs are numbered by page label" `Quick test_tabs_are_numbered_by_label;
+      test_case "a tab that left the listing loses its number" `Quick test_a_tab_that_left_the_listing_loses_its_number;
+      test_case "an ego error is cut" `Quick test_an_ego_error_is_cut;
+      test_case "the scripts parse as modules" `Quick test_the_scripts_parse_as_modules;
       test_case "reads run the shared page scripts" `Quick test_reads_run_the_shared_page_scripts;
       test_case "refusals run no script" `Quick test_refusals_run_no_script;
       test_case "answers outside the frame are refused" `Quick test_answers_outside_the_frame;

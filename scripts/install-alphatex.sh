@@ -167,14 +167,18 @@ install_vst_host() {
   mkdir -p "$support_dir/vst" || return 1
   install -m 644 "$repo_root/tools/vst/host.py" "$support_dir/vst/host.py" || return 1
   vst_launcher=$(mktemp "$support_dir/vst/.host.XXXXXX") || return 1
+  # An interrupted discovery or install removes the unfinished launcher.
+  trap 'rm -f "$vst_launcher"' EXIT HUP INT TERM
   if {
     printf '%s\n' '#!/bin/sh' 'set -eu' 'vst_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)'
     printf 'exec "$vst_dir/../../../vst-env/%s/bin/python" "$vst_dir/host.py" "$@"\n' "$lock_digest"
   } > "$vst_launcher" && chmod 755 "$vst_launcher" && vst_discovers "$vst_launcher" \
       && mv -f "$vst_launcher" "$support_dir/vst/host"; then
+    trap - EXIT HUP INT TERM
     return 0
   fi
   rm -f "$vst_launcher"
+  trap - EXIT HUP INT TERM
   return 1
 }
 if ! { [ -x "$support_dir/vst/host" ] && vst_discovers "$support_dir/vst/host" 2>/dev/null; }; then

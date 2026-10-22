@@ -128,7 +128,8 @@ let with_operation_lock ~access key f =
 ;;
 
 let records_dir (config : Workspace.config) =
-  Filename.concat (Workspace.keepers_runtime_dir config) ".shutdown-operations"
+  Filename.concat (Workspace.keepers_runtime_dir config)
+    (Common.keeper_runtime_store_dirname Common.Keeper_shutdown_operations)
 ;;
 
 (* Prefixing the portable Keeper name makes the path component reversible and

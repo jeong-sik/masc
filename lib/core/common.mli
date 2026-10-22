@@ -92,6 +92,8 @@ type keeper_runtime_store =
   | Keeper_reaction_ledger
   | Keeper_trajectories
   | Keeper_crash_events
+  | Keeper_shutdown_operations
+  | Keeper_configuration_removals
 (** Canonical child-store names under {!keepers_runtime_dirname}. *)
 
 val keeper_runtime_store_dirname : keeper_runtime_store -> string

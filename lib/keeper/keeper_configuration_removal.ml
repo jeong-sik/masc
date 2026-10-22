@@ -19,7 +19,8 @@ let error_to_string = function
   | Invalid_request detail | Conflict detail | Storage_error detail -> detail
 
 let directory config =
-  Filename.concat (Workspace.keepers_runtime_dir config) ".configuration-removals"
+  Filename.concat (Workspace.keepers_runtime_dir config)
+    (Common.keeper_runtime_store_dirname Common.Keeper_configuration_removals)
 let owner_directory config keeper_name =
   Filename.concat (directory config) ("_" ^ keeper_name)
 let record_path config keeper_name operation_id =

@@ -2,7 +2,7 @@ let ( let* ) = Result.bind
 module Snapshot = Keeper_repetition_snapshot
 module Id = Keeper_execution_scope_id
 
-let observation_of_call (call : Keeper_agent_result.tool_call_detail) =
+let observation_of_call (call : Keeper_tool_call_detail.t) =
   Snapshot.observation ~tool_name:call.tool_name
     ~input_fingerprint:call.input_fingerprint
     ~output_fingerprint:call.output_fingerprint
@@ -10,7 +10,7 @@ let observation_of_call (call : Keeper_agent_result.tool_call_detail) =
 let tool_calls state ~scope =
   let* calls = Snapshot.observations state ~scope in
   Ok (List.map (fun (observation : Snapshot.observation) ->
-    { Keeper_agent_result.tool_name = observation.tool_name
+    { Keeper_tool_call_detail.tool_name = observation.tool_name
     ; provider = "repetition_checkpoint"
     ; execution_outcome = Tool_result.Unknown
     ; typed_outcome = None

@@ -1,9 +1,9 @@
 (** Runtime context and tool-call adaptation for the shared pure repetition
     snapshot. Producers supply invocation identity; no inference from history. *)
-val observation_of_call : Keeper_agent_result.tool_call_detail ->
+val observation_of_call : Keeper_tool_call_detail.t ->
   (Keeper_repetition_snapshot.observation, Keeper_repetition_snapshot.error) result
 val tool_calls : Keeper_repetition_snapshot.t -> scope:Keeper_execution_scope_id.t ->
-  (Keeper_agent_result.tool_call_detail list, Keeper_repetition_snapshot.error) result
+  (Keeper_tool_call_detail.t list, Keeper_repetition_snapshot.error) result
 (** Only repetition fields are restored, newest first. They are observations
     for the detector, not current-turn receipt or execution-outcome evidence. *)
 val load : Agent_core.Context.t ->
@@ -29,7 +29,7 @@ module Execution : sig
   val scope : t -> Keeper_execution_scope_id.t
   (** Original producer-supplied identity; never derived from a checkpoint. *)
   val prepare : t -> source:Agent_core.Context.t -> target:Agent_core.Context.t ->
-    (Keeper_agent_result.tool_call_detail list, Keeper_repetition_snapshot.error) result
+    (Keeper_tool_call_detail.t list, Keeper_repetition_snapshot.error) result
   (** First direct attempt restores an absent/equal target before admission.
       An autonomous attempt retains shared Session scopes (including those of
       checkpointless official clients), merging source scopes only when any
@@ -38,7 +38,7 @@ module Execution : sig
       retaining every other scope but returning only its own observations.
       Later attempts reuse the same execution even when the provider returned
       no checkpoint. This projection does not grant pending-input authority. *)
-  val observe : t -> target:Agent_core.Context.t -> Keeper_agent_result.tool_call_detail -> unit
+  val observe : t -> target:Agent_core.Context.t -> Keeper_tool_call_detail.t -> unit
   (** Called by the serialized tool observer before checkpoint capture. Records
       validation failures explicitly; [failure] must stop later provider calls.
       The owner serializes prepare/observe and terminates old attempt callbacks

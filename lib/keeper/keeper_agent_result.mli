@@ -1,6 +1,6 @@
 (** Keeper Agent.run result surface helpers. *)
 
-type tool_call_detail =
+type tool_call_detail = Keeper_tool_call_detail.t =
   { tool_name : string
   ; provider : string
   ; execution_outcome : Tool_result.tool_call_outcome

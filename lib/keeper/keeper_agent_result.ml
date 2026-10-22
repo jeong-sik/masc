@@ -3,7 +3,7 @@
 open Keeper_agent_prompt_metrics
 open Keeper_agent_tool_surface
 
-type tool_call_detail =
+type tool_call_detail = Keeper_tool_call_detail.t =
   { tool_name : string
   ; provider : string
   ; execution_outcome : Tool_result.tool_call_outcome

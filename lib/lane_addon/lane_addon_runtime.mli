@@ -57,6 +57,23 @@ val authorize_retained_read : bindings:Yojson.Safe.t list -> access:Lane_addon_s
 val register_tool_change_handler : (unit -> unit) -> unit
 (** Server notification bridge. Callbacks signal clients to refresh their
     authorized inventories and must not acquire worker lifecycle locks. *)
+type owner_event = Export_inventory_changed | Configuration_observed
+  | Exact_result_delivered of { installation_id:string; instance_id:string; request_id:string }
+val subscribe_owner_events : config:Workspace.config -> package_id:string ->
+  (owner_event -> unit) -> (unit -> unit)
+(** Ephemeral hints scoped to this served workspace Store root and package.
+    Keeps the MCP tool-change bridge intact. The callback must synchronously
+    signal its existing owner only: no I/O, yield or Runtime/worker lock entry.
+    Callbacks run outside the subscription lock; lifecycle publishers can hold
+    their own locks. Registration does not replay state or start a worker; the
+    owner keeps its initial drain and strictly reloads original authority.
+    Configuration signals follow actual matching metadata publication, not
+    every reconciliation. Result signals require the original Exact request's
+    accepted=true reply, after the worker RPC lock has unwound; they are not
+    provider completion or domain commit receipts. Observer failure/cancellation
+    is isolated; publisher's own cancellation propagates. The returned closure
+    idempotently removes only this registration. Fence the original owner before
+    unsubscribe, since a copied callback snapshot can still be delivered. *)
 
 type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
@@ -294,6 +311,9 @@ val host_issue_to_json : host_issue -> Yojson.Safe.t
 (** The [issue] of an instance's [host_requests] in the inspect payload. *)
 
 module For_testing : sig
+  val with_tool_change_handler : (unit -> unit) -> (unit -> 'a) -> 'a
+  (** Temporarily observe the original MCP bridge without replacing owner
+      subscriptions; restores the preceding handler on exit. *)
   val with_cleanup_writer :
     (store:Lane_addon_store.t -> instance_id:string -> Yojson.Safe.t option ->
       (unit, string) result) -> (unit -> 'a) -> 'a

@@ -1,12 +1,13 @@
 type section = { heading : string; body : string }
 type document_kind = Captured | Observation
 type row = Heading of string | Content of string | Note of string
-type t = { title : string; sections : section list; offset : int;
+type position = Offset of int | End
+type t = { title : string; sections : section list; position : position;
   kind : document_kind; prepared : (int * row list) option; hints : string option }
 type movement = First | Last | By of int
 
-let create ~title sections = { title; sections; offset = 0; kind = Captured; prepared=None; hints=None }
-let create_observation ~title sections = { title; sections; offset = 0; kind = Observation; prepared=None; hints=None }
+let create ~title sections = { title; sections; position = Offset 0; kind = Captured; prepared=None; hints=None }
+let create_observation ~title sections = { title; sections; position = Offset 0; kind = Observation; prepared=None; hints=None }
 let replace ~title sections reading = {reading with title;sections;prepared=None;hints=None}
 let title reading = reading.title
 let hints reading = reading.hints
@@ -33,17 +34,19 @@ let rows ~width reading = match reading.prepared with
        @ List.map (fun line -> Content line) (wrap section.body))) reading.sections
 
 let scroll ~count ~height reading =
-  Masc_tui_scroll.normalize ~count ~height reading.offset
+  match reading.position with
+  | Offset offset -> Masc_tui_scroll.normalize ~count ~height offset
+  | End -> Masc_tui_scroll.maximum ~count ~height
 
 let move ~count ~height movement reading =
   let current = scroll ~count ~height reading in
-  let offset = match movement with
-    | First -> 0
-    | Last -> Masc_tui_scroll.maximum ~count ~height
+  let position = match movement with
+    | First -> Offset 0
+    | Last -> End
     | By delta ->
-        if delta > 0 then
+        Offset (if delta > 0 then
           min (Masc_tui_scroll.maximum ~count ~height)
             (current + min delta (max 0 (max_int - current)))
-        else max 0 (current + delta)
+        else max 0 (current + delta))
   in
-  { reading with offset }
+  { reading with position }

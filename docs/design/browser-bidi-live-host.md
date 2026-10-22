@@ -650,6 +650,14 @@ input is sent. A
 `secondary` click opens whatever the page binds to the context menu; observe the
 page afterwards, the receipt does not say what it did.
 
+`back`, `forward` and `reload` act on the named top-level tab through
+`browsingContext.traverseHistory` (delta -1 or 1) and `browsingContext.reload`
+(waiting for the document). Firefox's refusal, such as no earlier history entry,
+is a refusal before any effect. `close_tab` sends `browsingContext.close` with
+`promptUnload: false`, and only for a tab this connection opened with
+`open_tab`; a tab the operator opened is refused before any browser call,
+because it holds pages and unsaved state this host never saw.
+
 `set_viewport` resizes the tab's page viewport, not the browser window. A live
 BiDi connection sends `browsingContext.setViewport` with the size, or with
 `viewport: null` when no size is given, which gives the browser's own size back.

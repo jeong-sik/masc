@@ -60,7 +60,9 @@ let support backend operation = match backend with
     | Close_tab -> (match backend with
       | Owned_gecko | Owned_chromium -> conditional ~action:"close_tab" Act
           [observed;"Top-level tab only; the ID is retired after confirmed closure, not a lost or unconfirmed receipt."]
-      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable -> missing)
+      | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"close_tab" Act
+          [observed;"Only a tab this connection opened with open_tab; a tab the operator opened is refused before any effect. Closes without running the page's unload prompt."]
+      | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
     | Activate_tab -> (match backend with
       | Connected Browser_lane.Web_extension -> conditional ~action:"activate_tab" Interact
           [observed;"Changes the browser's active tab without promising window focus."]
@@ -72,15 +74,18 @@ let support backend operation = match backend with
           Unsupported "Direct navigation of a connected operator browser is not exposed; use an inspected follow_link or supported open_tab.")
     | Follow_link -> conditional ~action:"follow_link" Interact
         [observed;target;"Requires expectedUrl and an observed same-tab HTTP(S) anchor; rejects downloads, new-window targets and unsupported referrer semantics."]
-    | Back -> (match backend with Owned_gecko | Owned_chromium -> conditional ~action:"back" Act
+    | Back -> (match backend with
+        | Owned_gecko | Owned_chromium | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"back" Act
           [observed;"Top-level tab only; inspect the same tab after navigation or an unknown result."]
-        | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable -> missing)
-    | Forward -> (match backend with Owned_gecko | Owned_chromium -> conditional ~action:"forward" Act
+        | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
+    | Forward -> (match backend with
+        | Owned_gecko | Owned_chromium | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"forward" Act
           [observed;"Top-level tab only; inspect the same tab after navigation or an unknown result."]
-        | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable -> missing)
-    | Reload -> (match backend with Owned_gecko | Owned_chromium -> conditional ~action:"reload" Act
+        | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
+    | Reload -> (match backend with
+        | Owned_gecko | Owned_chromium | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"reload" Act
           [observed;"Top-level tab only; inspect the same tab after navigation or an unknown result."]
-        | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable -> missing)
+        | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
     | Session_lifecycle -> (match backend with
       | Owned_gecko | Owned_chromium -> conditional Session
           ["Actions open/status/close apply to the selected owned browser; status and close remain available while disabled."]

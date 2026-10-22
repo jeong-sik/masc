@@ -5938,6 +5938,8 @@ module Browser_lane_view = struct
     | Trusted_keyboard -> "native keys"
     | Browser_zoom -> "browser zoom"
     | Viewport_resize -> "viewport size"
+    | Tab_history -> "tab history"
+    | Tab_closing -> "tab closing"
     | Tab_activation -> "tab switch"
     | Tab_creation -> "new tab"
   (* What a live connection of this transport leaves out, read from the lane's

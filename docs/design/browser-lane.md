@@ -113,6 +113,8 @@ build their rejection from it.
 | `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer |
 | `trusted_button_click` | `click_at` with `button` `middle` or `secondary` | no | yes |
 | `viewport_resize` | `set_viewport` | no | yes |
+| `tab_history` | `back`, `forward`, `reload` | no | yes |
+| `tab_closing` | `close_tab`, only for a tab the same connection opened | no | yes |
 | `point_scroll` | `scroll_at` | yes | yes, a trusted wheel |
 | `trusted_hover` | `hover`, `hover_at` | no | yes |
 | `trusted_drag` | `drag_to`, `drag` | no | yes |

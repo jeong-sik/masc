@@ -126,6 +126,8 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Viewport_resize -> interact (Set_viewport (Fit {width=800;height=600}))
   | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
       | Browser_zoom -> interact (Set_zoom {factor=1.5})
+  | Tab_history -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Back})
+  | Tab_closing -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Close_tab})
   | Tab_activation -> interact Activate_tab
   | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new"))
 
@@ -136,7 +138,7 @@ let test_transport_table () =
   let unserved transport = List.filter (fun capability ->
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
   check (list capability) "the extension has no pointer the browser trusts"
-    Lane.[Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Trusted_keyboard; Viewport_resize; Tab_creation] (unserved Lane.Web_extension);
+    Lane.[Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Trusted_keyboard; Viewport_resize; Tab_history; Tab_closing; Tab_creation] (unserved Lane.Web_extension);
   check (list capability) "the BiDi peer has no tab activation"
     Lane.[Browser_zoom; Tab_activation] (unserved Lane.Webdriver_bidi);
   List.iter (fun capability ->

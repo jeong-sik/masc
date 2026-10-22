@@ -850,6 +850,8 @@ let test_peer_serves_what_the_lane_table_says () =
       | Viewport_resize -> interact (Set_viewport (Fit {width=800;height=600}))
       | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
       | Browser_zoom -> interact (Set_zoom {factor=1.5})
+      | Tab_history -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Back})
+      | Tab_closing -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Close_tab})
       | Tab_activation -> interact Activate_tab
   | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")) in
     (* The names the native host forwards (Browser_host.decode_poll). *)
@@ -859,19 +861,29 @@ let test_peer_serves_what_the_lane_table_says () =
       | "page.interact" -> Peer.Page_interact | "page.act" -> Peer.Page_act
       | other -> failf "the lane put a verb on the wire that the host does not forward: %s" other in
     let calls = ref [] in
+    let created = ref false in
     let command method_ _ =
       calls := method_ :: !calls;
       match method_ with
-      | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+      | "browsingContext.getTree" -> Ok (obj ["contexts",`List
+          (obj ["context",`String "owned"] :: if !created then [obj ["context",`String "created"]] else [])])
       | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";
           "title",`String "fixture";"active",`Bool true;
           "point",Lane.Pointer.point_to_json point;"viewport",Lane.Pointer.viewport_to_json viewport]))
-      | "browsingContext.create" -> Ok (obj ["context",`String "created"])
+      | "browsingContext.create" -> created := true; Ok (obj ["context",`String "created"])
       | "browsingContext.navigate" -> Ok `Null
       | "browsingContext.captureScreenshot" -> Ok (obj ["data",`String "png"])
-      | "input.performActions" | "input.releaseActions" | "browsingContext.setViewport" -> Ok `Null
+      | "input.performActions" | "input.releaseActions" | "browsingContext.setViewport"
+      | "browsingContext.traverseHistory" | "browsingContext.reload" | "browsingContext.close" -> Ok `Null
       | other -> failf "unexpected protocol command: %s" other in
     let peer = peer_of command in
+    (* The listing gives the operator's tab ID 1, then a tab this connection opens gets ID 2, so closing
+       one is something it can serve. *)
+    ignore (Peer.dispatch peer ~verb:Peer.Tabs_list (obj []));
+    (match Peer.dispatch peer ~verb:Peer.Page_act Yojson.Safe.Util.(
+       Lane.verb_json (Lane.Page_act (Lane.Action.Open_tab "https://example.test/new")) |> member "args") with
+     | Ok _ -> ()
+     | Error _ -> fail "the fixture could not open its own tab");
     List.iter (fun capability ->
       let name = Lane.live_capability_to_wire capability in
       let asked = verb_asking_for capability in
@@ -958,6 +970,58 @@ let test_a_tab_restored_by_the_caller_is_not_restored_again () =
   ignore (dispatch Browser_lane.Browser_default);
   ignore (ended_session peer);
   check int "the caller's restore is the last size command" 2 (List.length !sent)
+let test_tab_history_and_close_stay_on_their_tab () =
+  let sent = ref [] and created = ref false and history_error = ref false in
+  let peer = peer_of (fun method_ args ->
+    match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List
+        (obj ["context",`String "owned"] :: if !created then [obj ["context",`String "created"]] else [])])
+    | "browsingContext.create" -> created := true; Ok (obj ["context",`String "created"])
+    | "browsingContext.navigate" -> Ok `Null
+    | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";"title",`String "fixture";"active",`Bool true]))
+    | "browsingContext.traverseHistory" when !history_error ->
+      Error (Peer.Rejected (Peer.error_code_of_wire "no such history entry"))
+    | "browsingContext.traverseHistory" | "browsingContext.reload" | "browsingContext.close" ->
+      sent := (method_,args) :: !sent; Ok `Null
+    | other -> failf "unexpected protocol command: %s" other) in
+  let act tab_id interaction = Peer.dispatch peer ~verb:Peer.Page_act
+    (Browser_lane.Action.to_json (Browser_lane.Action.On_tab {tab_id;frame_path=[];interaction})) in
+  let member key json = Yojson.Safe.Util.member key json in
+  let last () = match !sent with latest :: _ -> latest | [] -> fail "nothing was sent" in
+  ignore (Peer.dispatch peer ~verb:Peer.Tabs_list (obj []));
+  let delta () = member "delta" (snd (last ())) in
+  (match act 1 Browser_lane.Action.Back with
+   | Ok receipt -> check string "back is named in the receipt" "back" Yojson.Safe.Util.(receipt |> member "action" |> to_string)
+   | Error _ -> fail "back was refused");
+  check bool "back goes one entry back in that tab's context" true
+    (fst (last ()) = "browsingContext.traverseHistory" && delta () = `Int (-1)
+     && member "context" (snd (last ())) = `String "owned");
+  ignore (act 1 Browser_lane.Action.Forward);
+  check bool "forward goes one entry forward" true (delta () = `Int 1);
+  ignore (act 1 Browser_lane.Action.Reload);
+  check bool "reload waits for the document" true
+    (fst (last ()) = "browsingContext.reload" && member "wait" (snd (last ())) = `String "complete");
+  history_error := true;
+  (match act 1 Browser_lane.Action.Back with
+   | Error (Peer.Before_effect _) -> ()
+   | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) -> fail "Firefox's refusal is not before effect");
+  let before = List.length !sent in
+  (match act 1 Browser_lane.Action.Close_tab with
+   | Error (Peer.Before_effect _) -> ()
+   | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) -> fail "a tab the operator opened was closed");
+  check int "nothing was sent to close the operator's tab" before (List.length !sent);
+  (match Peer.dispatch peer ~verb:Peer.Page_act
+     (Browser_lane.Action.to_json (Browser_lane.Action.Open_tab "https://example.test/new")) with
+   | Ok _ -> () | Error _ -> fail "opening a tab failed");
+  (match act 2 Browser_lane.Action.Close_tab with
+   | Ok receipt -> check bool "the receipt says it closed" true (member "closed" receipt = `Bool true)
+   | Error _ -> fail "a tab this connection opened was not closed");
+  check bool "the close does not run the page's unload prompt" true
+    (fst (last ()) = "browsingContext.close" && member "promptUnload" (snd (last ())) = `Bool false
+     && member "context" (snd (last ())) = `String "created");
+  match act 2 Browser_lane.Action.Close_tab with
+  | Error (Peer.Before_effect _) -> ()
+  | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) -> fail "a closed tab was closed again"
 (* Firefox's error codes are read once where the answer arrives. The two
    this host acts on are their own cases; any other is kept as Firefox wrote
    it, and every code is written back as it was read. *)
@@ -1103,6 +1167,7 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
   "effect",[test_case "set_viewport sends the size, or null to restore it" `Quick test_set_viewport_sends_the_size_or_clears_it;
     test_case "ending the session restores a sized tab" `Quick test_ending_the_session_restores_a_sized_tab;
     test_case "a tab the caller restored is not restored again" `Quick test_a_tab_restored_by_the_caller_is_not_restored_again;
+    test_case "history acts on its tab and close only on tabs it opened" `Quick test_tab_history_and_close_stay_on_their_tab;
     test_case "open tab preserves existing context" `Quick test_open_tab_preserves_existing_context;
     test_case "open tab failure does not replay" `Quick test_open_tab_failure_does_not_replay;
     test_case "live act rejects other actions" `Quick test_live_act_rejects_other_actions_before_effect;

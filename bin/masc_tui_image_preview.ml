@@ -1,7 +1,7 @@
 type order = Named_is_newer | Staged_is_newer | Unordered
 
 type output_source =
-  | Inline_data of string
+  | Inline_data of Masc_tui_image_payload.t
   | Inline_svg of string
   | Inline_mermaid of string
   | Server_path of string
@@ -10,7 +10,8 @@ type output_source =
 type preview =
   | Named_path of string
   | Staged of Masc_tui_keeper_chat_projection.attachment
-  | Stored_attachment of { name : string; reference : Tool_output.artifact_ref }
+  | Stored_attachment of { name : string; reference : Tool_output.artifact_ref;
+      format : Masc_tui_image_payload.format }
   | Output_image of { name : string; source : output_source }
   | Unavailable_image of { name : string; reason : string }
   | No_image
@@ -19,20 +20,25 @@ let persisted_attachment ~name ~mime ~data =
   if not (String.starts_with ~prefix:"image/" mime) then No_image
   else
     match Option.map Tool_output.decode_from_agent_core data with
-    | Some (Tool_output.Decoded reference) -> Stored_attachment { name; reference }
+    | Some (Tool_output.Decoded reference) -> Stored_attachment
+        { name; reference; format = Masc_tui_image_payload.format_of_mime mime }
     | Some (Tool_output.Not_marker | Tool_output.Invalid_marker _) | None ->
         Unavailable_image { name; reason = "image has no retained payload" }
 
 let output_image ~name ~src =
   let unavailable reason = Unavailable_image { name; reason } in
   match Tool_output.decode_from_agent_core src with
-  | Tool_output.Decoded reference -> Stored_attachment { name; reference }
+  | Tool_output.Decoded reference -> Stored_attachment
+      { name; reference; format = Masc_tui_image_payload.format_of_mime reference.mime }
   | Tool_output.Invalid_marker { detail } -> unavailable detail
   | Tool_output.Not_marker ->
     let uri = Uri.of_string src in
     let normalized = Uri.to_string uri in
     match Uri.scheme uri, Uri.host uri with
-    | Some "data", None -> Output_image { name; source = Inline_data src }
+    | Some "data", None ->
+      (match Masc_tui_image_payload.of_data_uri src with
+       | Ok payload -> Output_image { name; source = Inline_data payload }
+       | Error reason -> unavailable reason)
     | (Some "http" | Some "https"), Some host when host <> "" ->
       Output_image { name; source = Remote_uri normalized }
     | None, None when String.starts_with ~prefix:"/" (Uri.path uri) ->
@@ -41,7 +47,7 @@ let output_image ~name ~src =
 ;;
 
 let inline_svg ~name svg = Output_image { name; source = Inline_svg svg }
-let inline_payload ~name ~base64 = Output_image { name; source = Inline_data base64 }
+let inline_payload ~name payload = Output_image { name; source = Inline_data payload }
 let mermaid ~name source = Output_image { name; source = Inline_mermaid source }
 let mermaid_source source = Inline_mermaid source
 
@@ -98,19 +104,6 @@ let choose_preview ~conversation ~staged ~order =
       | Staged_is_newer -> Staged newest
       | Named_is_newer | Unordered -> image
 
-let decode_payload data =
-  let data = String.trim data in
-  let payload =
-    if String.starts_with ~prefix:"data:" data then
-      match String.index_opt data ',' with
-      | Some comma when String.ends_with ~suffix:";base64" (String.sub data 0 comma) ->
-          Ok (String.sub data (comma + 1) (String.length data - comma - 1))
-      | Some _ | None -> Error "image data URI is not base64"
-    else Ok data
-  in
-  Result.bind payload (fun payload ->
-    Result.map_error (fun (`Msg detail) -> detail) (Base64.decode payload))
-
 let decode_artifact (reference : Tool_output.artifact_ref) = function
   | `Assoc fields ->
       (match List.assoc_opt "sha256" fields, List.assoc_opt "bytes" fields,
@@ -122,6 +115,6 @@ let decode_artifact (reference : Tool_output.artifact_ref) = function
            else if not (String.equal
                Digestif.SHA256.(to_hex (digest_string content)) reference.sha256) then
              Error "sent image content does not match its recorded digest"
-           else decode_payload content
+           else Masc_tui_image_payload.decode_wire content
        | _ -> Error "sent image response requires sha256, bytes, and content")
   | _ -> Error "invalid sent image response"

@@ -161,6 +161,13 @@ renderer on selection. This serialization is separate from the unchanged
 original HTML source. Renderer validation still rejects scripts, event
 handlers, foreign content, embedded images and external href references;
 canvas remains unavailable. Browser CSS layout is not evaluated.
+Base64 SVG resource parts and SVG image data URIs retain their declared
+format through off-thread decoding and use this same offline renderer.
+Retained attachments preserve the original image format separately from the
+encoded wire blob's MIME, and verify wire size and digest before rendering.
+Other declared image formats keep
+the existing image converter path. Percent-encoded SVG data URIs are not
+supported by the base64 image path.
 Scripts, metadata, templates, embedded frames and explicit hidden subtrees do
 not contribute reading/image candidates. This reading does not execute CSS or
 JavaScript, and does not reproduce a browser's page layout.

@@ -86,7 +86,7 @@ let test_sent_image_keeps_reference_not_filename () =
   let image = Preview.in_message ~text:"look"
       ~attachments:[stored "../../wrong.png"] in
   match Preview.choose_preview ~conversation:image ~staged:[] ~order:Preview.Unordered with
-  | Preview.Stored_attachment { name; reference } ->
+  | Preview.Stored_attachment { name; reference; _ } ->
       check string "name remains a label" "../../wrong.png" name;
       check string "only validated digest locates payload" (String.make 64 'a') reference.sha256
   | _ -> fail "sent image must keep its actual payload reference"
@@ -112,16 +112,6 @@ let test_new_staging_and_new_paths_order_against_sent_images () =
   match Preview.in_message ~text:"newer/path.png" ~attachments:[] with
   | Preview.Named_path "newer/path.png" -> ()
   | _ -> fail "later message paths remain previewable"
-
-let test_retained_wire_payload_decode () =
-  List.iter (fun payload ->
-    check (result string string) "bare and data URI payloads decode"
-      (Ok "PNG") (Preview.decode_payload payload))
-    ["UE5H"; "data:image/png;base64,UE5H"];
-  check bool "non-base64 data URI rejected" true
-    (Result.is_error (Preview.decode_payload "data:image/png,UE5H"));
-  check bool "invalid base64 rejected" true
-    (Result.is_error (Preview.decode_payload "%%%%"))
 
 let artifact_reference content =
   let sha256 = Digestif.SHA256.(to_hex (digest_string content)) in
@@ -265,7 +255,6 @@ let () =
             test_missing_and_malformed_payloads_do_not_open_labels
         ; test_case "sent images preserve staging and path order" `Quick
             test_new_staging_and_new_paths_order_against_sent_images
-        ; test_case "retained wire payload decoding" `Quick test_retained_wire_payload_decode
         ; test_case "artifact validates wire bytes before base64 decoding" `Quick
             test_artifact_checks_the_retained_wire_content
         ; test_case "artifact requires typed envelope fields" `Quick

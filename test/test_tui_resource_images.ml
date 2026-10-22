@@ -10,7 +10,7 @@ let blob mime value =
     rc_kind = Mcp.Resource_blob {base64=value} }
 
 let payload = function
-  | Preview.Output_image {source=Inline_data data;_} -> data
+  | Preview.Output_image {source=Inline_data data;_} -> Masc_tui_image_payload.encoded data
   | Named_path _ | Staged _ | Stored_attachment _
   | Output_image {source=(Inline_svg _ | Inline_mermaid _ | Server_path _ | Remote_uri _);_}
   | Unavailable_image _ | No_image -> fail "expected retained inline bytes"
@@ -26,7 +26,7 @@ let test_wire_conservation () =
     match Images.images ~mime_type:None parts with
     | [2,image] ->
       check string "encoded bytes retained" "QUJDRA==" (payload image);
-      (match Preview.decode_payload (payload image) with
+      (match Masc_tui_image_payload.decode_wire (payload image) with
        | Ok bytes -> check string "original bytes" "ABCD" bytes
        | Error error -> fail error)
     | [] | _ :: _ -> fail "every response image keeps its original part number"
@@ -60,7 +60,7 @@ let test_source_ownership () =
 let test_decode_refusal () =
   match Images.images ~mime_type:None [blob (Some "image/png") "***"] with
   | [_,image] ->
-    (match Preview.decode_payload (payload image) with Error _ -> () | Ok _ -> fail "invalid payload decoded")
+    (match Masc_tui_image_payload.decode_wire (payload image) with Error _ -> () | Ok _ -> fail "invalid payload decoded")
   | [] | _ :: _ -> fail "decoding belongs to acquisition, not metadata selection"
 
 let test_malformed_parts_refused () =
@@ -116,6 +116,21 @@ let test_html_unavailable_sources () =
     | Named_path _ | Staged _ | Stored_attachment _ | Output_image _ | No_image ->
       fail "HTML image declaration must not grant an external read") candidates
 
+let test_retained_svg_format () =
+  let reference = match Tool_output.make_artifact_ref
+      ~sha256:(String.make 64 'a') ~bytes:4 ~mime:"text/plain" ~preview:"attachment payload" with
+    | Ok reference -> reference
+    | Error error -> fail (Tool_output.make_error_to_string error) in
+  let marker = Tool_output.encode_for_agent_core (Tool_output.Stored reference) in
+  match Preview.persisted_attachment ~name:"figure.svg" ~mime:"image/svg+xml" ~data:(Some marker) with
+  | Stored_attachment {reference;format;_} ->
+    check string "wire blob keeps its encoded-text MIME" "text/plain" reference.mime;
+    (match format with
+     | Masc_tui_image_payload.Svg -> ()
+     | General_image -> fail "original attachment format was replaced by wire MIME")
+  | Named_path _ | Staged _ | Output_image _ | Unavailable_image _ | No_image ->
+    fail "expected immutable retained attachment"
+
 let () = run "resource image sources" ["source decisions", [
   test_case "wire conservation" `Quick test_wire_conservation;
   test_case "malformed parts refused" `Quick test_malformed_parts_refused;
@@ -123,4 +138,5 @@ let () = run "resource image sources" ["source decisions", [
   test_case "immutable source ownership" `Quick test_source_ownership;
   test_case "payload decode refusal" `Quick test_decode_refusal;
   test_case "inert embedded HTML sources" `Quick test_html_embedded_sources;
-  test_case "external HTML declarations remain unavailable" `Quick test_html_unavailable_sources]]
+  test_case "external HTML declarations remain unavailable" `Quick test_html_unavailable_sources;
+  test_case "retained SVG keeps original format" `Quick test_retained_svg_format]]

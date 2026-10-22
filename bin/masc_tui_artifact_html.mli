@@ -1,7 +1,7 @@
 (** Inert, standards-parsed HTML reading. No scripts, CSS, navigation, URL
     resolution, file reads or image decoding. Original source stays caller-owned. *)
 type image_source =
-  | Embedded_base64 of string
+  | Embedded_base64 of Masc_tui_image_payload.t
   | Embedded_svg of string
   | Unavailable of string
 type image = { label : string; source : image_source }

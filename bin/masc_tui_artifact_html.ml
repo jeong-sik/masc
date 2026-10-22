@@ -1,7 +1,7 @@
 module Html = Markup_document
 
 type image_source =
-  | Embedded_base64 of string
+  | Embedded_base64 of Masc_tui_image_payload.t
   | Embedded_svg of string
   | Unavailable of string
 type image = { label : string; source : image_source }
@@ -76,19 +76,9 @@ let image attributes =
     | None -> Unavailable "image has no source"
     | Some raw ->
       let uri = String.trim raw in
-      (match String.index_opt uri ',' with
-       | Some comma ->
-         let header = String.sub uri 0 comma in
-         (match String.split_on_char ';' header with
-          | [media; encoding] when String.equal encoding "base64" ->
-            (match String.split_on_char ':' media with
-             | ["data"; mime] ->
-               (match String.split_on_char '/' (String.lowercase_ascii mime) with
-                | ["image"; subtype] when subtype <> "" -> Embedded_base64 uri
-                | _ -> Unavailable "data URI is not an image")
-             | _ -> Unavailable "external image; use the original web report")
-          | _ -> Unavailable "only base64 image data is available in the terminal")
-       | None -> Unavailable "external image; use the original web report") in
+      (match Masc_tui_image_payload.of_data_uri uri with
+       | Ok payload -> Embedded_base64 payload
+       | Error detail -> Unavailable detail) in
   {label;source}
 
 let svg_image node =

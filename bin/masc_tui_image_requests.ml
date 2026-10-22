@@ -1,10 +1,16 @@
 type source =
-  | Retained of Tool_output.artifact_ref
+  | Retained of { reference : Tool_output.artifact_ref;
+      format : Masc_tui_image_payload.format }
   | Generated of Masc_tui_image_preview.output_source
 
 let load ~host ~port ~cache_dir ~diagram_width ~diagram_colors source =
   let prepare bytes =
     Masc_tui_image_cache.prepare_payload ~run:Unix.system ~cache_dir:(cache_dir ()) bytes in
+  let prepare_declared format bytes = match format with
+    | Masc_tui_image_payload.Svg ->
+      Masc_tui_pele.render ~format:Svg ~cache_dir:(cache_dir ()) ~max_width:diagram_width
+        ~colors:diagram_colors bytes
+    | General_image -> prepare bytes in
   let peer path =
     match Masc_tui_http.http_get ~host ~port ~path with
     | Error _ as error -> error
@@ -12,17 +18,18 @@ let load ~host ~port ~cache_dir ~diagram_width ~diagram_colors source =
       Ok (status_code, body)
     | Ok (status_code, body) -> Error (Masc_tui_http.refusal ~status_code ~body) in
   match source with
-  | Retained reference ->
+  | Retained {reference;format} ->
     Result.bind (peer ("/api/v1/artifacts/" ^ reference.Tool_output.sha256))
       (fun (status_code, body) ->
         Eio_guard.run_in_systhread ~label:"tui-sent-image-decode" (fun () ->
           let ( let* ) = Result.bind in
           let* response = Masc_tui_http.decode_json ~allow_empty:false ~status_code ~body in
           let* bytes = Masc_tui_image_preview.decode_artifact reference response in
-          prepare bytes))
+          prepare_declared format bytes))
   | Generated (Masc_tui_image_preview.Inline_data data) ->
     Eio_guard.run_in_systhread ~label:"tui-output-image-decode" (fun () ->
-      Result.bind (Masc_tui_image_preview.decode_payload data) prepare)
+      Result.bind (Masc_tui_image_payload.decode data)
+        (prepare_declared (Masc_tui_image_payload.format data)))
   | Generated (Masc_tui_image_preview.Inline_svg svg) ->
     Eio_guard.run_in_systhread ~label:"tui-output-svg-convert" (fun () ->
       Masc_tui_pele.render ~format:Svg ~cache_dir:(cache_dir ()) ~max_width:diagram_width

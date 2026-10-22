@@ -4,7 +4,7 @@
 type order = Named_is_newer | Staged_is_newer | Unordered
 
 type output_source = private
-  | Inline_data of string
+  | Inline_data of Masc_tui_image_payload.t
   | Inline_svg of string
   | Inline_mermaid of string
   | Server_path of string
@@ -13,7 +13,8 @@ type output_source = private
 type preview =
   | Named_path of string
   | Staged of Masc_tui_keeper_chat_projection.attachment
-  | Stored_attachment of { name : string; reference : Tool_output.artifact_ref }
+  | Stored_attachment of { name : string; reference : Tool_output.artifact_ref;
+      format : Masc_tui_image_payload.format }
   | Output_image of { name : string; source : output_source }
   | Unavailable_image of { name : string; reason : string }
   | No_image
@@ -29,7 +30,7 @@ val output_image : name:string -> src:string -> preview
 val inline_svg : name:string -> string -> preview
 (** SVG markup supplied by the canonical SVG block, never a local path. *)
 
-val inline_payload : name:string -> base64:string -> preview
+val inline_payload : name:string -> Masc_tui_image_payload.t -> preview
 (** Retained encoded image bytes, never a URL or filesystem path. Decode and
     validate only in the existing off-thread image acquisition boundary. *)
 
@@ -64,9 +65,6 @@ val prioritize_sources : newly_observed:('a -> bool) -> ('a * preview list) list
     The caller supplies original source identity/arrival ownership, never time. *)
 
 val choose_preview : conversation:preview -> staged:Masc_tui_keeper_chat_projection.attachment list -> order:order -> preview
-
-val decode_payload : string -> (string, string) result
-(** Decode a retained wire payload (bare base64 or a base64 data URI). *)
 
 val decode_artifact : Tool_output.artifact_ref -> Yojson.Safe.t -> (string, string) result
 (** Verify the response identity, retained wire byte count, and content digest

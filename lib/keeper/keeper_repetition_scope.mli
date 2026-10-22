@@ -22,13 +22,22 @@ module Execution : sig
   (** Allocate once from the claimed operation, outside provider retry loops.
       Direct operations interrupted by process restart remain terminal under
       the owner store contract; this does not resurrect their execution. *)
+  val autonomous_admission : Uuidm.t -> t
+  (** Allocate once from the UUID issued by the admitted autonomous Owner child.
+      Carry this same execution through provider attempts; this constructor
+      neither commits semantic admission nor grants checkpoint resume authority. *)
   val scope : t -> Keeper_execution_scope_id.t
   (** Original producer-supplied identity; never derived from a checkpoint. *)
   val prepare : t -> source:Agent_core.Context.t -> target:Agent_core.Context.t ->
     (Keeper_agent_result.tool_call_detail list, Keeper_repetition_snapshot.error) result
-  (** First attempt loads and admits the direct scope. Later attempts reuse
-      its observations even if the previous provider returned no checkpoint.
-      Returns only this scope's prior calls, excluding other work. *)
+  (** First direct attempt restores an absent/equal target before admission.
+      An autonomous attempt retains shared Session scopes (including those of
+      checkpointless official clients), merging source scopes only when any
+      overlapping observations are equal. Malformed or conflicting evidence
+      refuses without changing the target. Then admit the original scope,
+      retaining every other scope but returning only its own observations.
+      Later attempts reuse the same execution even when the provider returned
+      no checkpoint. This projection does not grant pending-input authority. *)
   val observe : t -> target:Agent_core.Context.t -> Keeper_agent_result.tool_call_detail -> unit
   (** Called by the serialized tool observer before checkpoint capture. Records
       validation failures explicitly; [failure] must stop later provider calls.

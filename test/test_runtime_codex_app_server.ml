@@ -4313,7 +4313,8 @@ candidates = [%s]
                                        ())
                                 else None
                               in
-                              let run () = Keeper_agent_run.run_turn ~approval_admission:Keeper_approval_origin.Unavailable
+                              let run repetition_execution = Keeper_agent_run.run_turn ~approval_admission:Keeper_approval_origin.Unavailable
+                                ~repetition_execution
                                 ?trajectory_acc
                                 ~config
                                 ~meta

@@ -897,7 +897,7 @@ let with_input_wait_inventory ?(install_owner=true) ?(prior_unavailable=false) f
     | Keeper_chat_operation_store.Input_observed reference -> reference
     | Input_unobserved | Prior_input_unavailable -> fail "fixture has no owned input" in
   let publish checkpoint =
-    let result=Keeper_owner_registry.run_autonomous_if_idle ~base_path:dir ~keeper_name (fun () ->
+    let result=Keeper_owner_registry.run_autonomous_if_idle ~base_path:dir ~keeper_name (fun _execution ->
       let producer=Keeper_input_checkpoint_producer.prepare ~base_path:dir ~keeper_name ~session_dir
         ~trace_id:meta.runtime.trace_id ~source:!current
         |> Result.map_error Keeper_input_checkpoint_producer.error_to_string |> ok in
@@ -1083,7 +1083,7 @@ let test_input_response_http_accepts_only_original_wait ?(independent_global=fal
   let global_reference,global_pending=if independent_global then begin
     let owner=Keeper_owner_registry.get ~base_path:dir ~keeper_name
       |> Result.map_error Keeper_owner_registry.lookup_error_to_string |> ok in
-    match Keeper_owner.run_autonomous_if_idle owner (fun () ->
+    match Keeper_owner.run_autonomous_if_idle owner (fun _execution ->
       (* A committed resolution advances global input to C. An uncommitted
          resolution still owns W, even though C was physically installed. *)
       let source=match commit_fault,partial with

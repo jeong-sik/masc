@@ -952,7 +952,7 @@ let test_stopping_cancels_and_joins_autonomous_child () =
   in
   Eio.Fiber.fork ~sw (fun () ->
     let result =
-      Owner.run_autonomous_if_idle owner (fun () ->
+      Owner.run_autonomous_if_idle owner (fun _execution ->
         Eio.Promise.resolve resolve_child_started ();
         Eio.Promise.await never)
     in
@@ -1036,7 +1036,7 @@ let test_turn_slot_release_signals_availability () =
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Stream.add
       autonomous_result
-      (Owner.run_autonomous_if_idle owner (fun () ->
+      (Owner.run_autonomous_if_idle owner (fun _execution ->
          Eio.Promise.resolve resolve_autonomous_started ();
          Eio.Promise.await release_autonomous)));
   Eio.Promise.await autonomous_started;
@@ -1065,7 +1065,7 @@ let test_turn_slot_release_signals_availability () =
   (* Only a lane that asked and was refused is owed the signal. Nothing has
      been refused yet, so make the autonomous lane lose the slot to the chat
      turn now holding it. *)
-  (match Owner.run_autonomous_if_idle owner (fun () -> ()) with
+  (match Owner.run_autonomous_if_idle owner (fun _execution -> ()) with
    | Ok (`Busy (Owner.Turn_busy _)) -> ()
    | Ok (`Busy other) ->
      fail ("autonomous lost the slot for the wrong reason: "
@@ -1104,7 +1104,7 @@ let test_uncontested_turn_end_signals_nothing () =
   in
   List.iter
     (fun turn ->
-      match Owner.run_autonomous_if_idle owner (fun () -> ()) with
+      match Owner.run_autonomous_if_idle owner (fun _execution -> ()) with
       | Ok (`Ran ()) -> ()
       | Ok `Interrupted -> fail (Printf.sprintf "turn %d was reported interrupted" turn)
       | Ok (`Busy block) ->
@@ -1155,7 +1155,7 @@ let test_chat_lane_holder_blocks_autonomous_admission () =
    | Some { lane = _; _ } -> fail "chat operation did not take the turn lane"
    | None -> fail "no turn in flight while the chat runner was executing");
   (match
-     Owner.run_autonomous_if_idle owner (fun () ->
+     Owner.run_autonomous_if_idle owner (fun _execution ->
        fail "autonomous child ran while a chat operation held the turn")
    with
    | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Chat_operation; _ }))) -> ()
@@ -1374,7 +1374,7 @@ let test_health_state_change_observer_tracks_owner_projections () =
          (owner_ok
             (Owner.succeed_running_operation owner ~operation_id ~outcome_ref:"turn:health"));
        check int "terminal projection notifies once" 3 !notifications;
-       let turn_result = Owner.run_autonomous_if_idle owner (fun () -> ()) in
+       let turn_result = Owner.run_autonomous_if_idle owner (fun _execution -> ()) in
        (match turn_result with
         | Ok (`Ran ()) -> ()
         | Ok `Interrupted -> fail "the turn was reported interrupted"
@@ -1493,7 +1493,7 @@ let test_gate_wait_releases_owner_without_repeated_children () =
   let projection = Owner.operation_projection owner in
   check int "approval wait remains queued" 1 projection.queued_count;
   check bool "approval wait cannot request a yield" false projection.has_claimable_queued;
-  (match owner_ok (Owner.run_autonomous_if_idle owner (fun () -> "independent work")) with
+  (match owner_ok (Owner.run_autonomous_if_idle owner (fun _execution -> "independent work")) with
    | `Ran value -> check string "waiting released Owner" "independent work" value
    | `Interrupted -> fail "nothing interrupted the independent work"
    | `Busy _ -> fail "Gate waiting retained Owner slot");
@@ -1539,7 +1539,7 @@ let test_an_interrupt_ends_a_turn_waiting_on_its_own_owner () =
          (fun () ->
             turn
             := Some
-                 (Owner.run_autonomous_if_idle owner (fun () ->
+                 (Owner.run_autonomous_if_idle owner (fun _execution ->
                     Eio.Promise.resolve wait_started ();
                     ignore (Owner.await_idle_after_shutdown owner))))
          (fun () ->
@@ -1589,7 +1589,7 @@ let test_a_cancelled_caller_leaves_a_stop_that_waits_for_the_child () =
   let turn_done, resolve_turn_done = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
     ignore
-      (Owner.run_autonomous_if_idle owner (fun () ->
+      (Owner.run_autonomous_if_idle owner (fun _execution ->
          Eio.Promise.resolve resolve_child_started ();
          (* The stop fails the child switch; only the case ends this child. *)
          Eio.Cancel.protect (fun () -> Eio.Promise.await release_child)));
@@ -1649,7 +1649,7 @@ let test_cooling_retry_readiness_refreshes_on_wake () =
   check bool "cooling input is not ready" false cooling.has_claimable_queued;
   check bool "cooling input cannot be claimed" true
     (Option.is_none (Owner.claim_next_operation owner |> owner_ok));
-  (match Owner.run_autonomous_if_idle owner (fun () ->
+  (match Owner.run_autonomous_if_idle owner (fun _execution ->
        Owner.wake_operation_drain owner |> owner_ok;
        check bool "early wake does not request a yield" false
          (Owner.operation_projection owner).has_claimable_queued;
@@ -2312,7 +2312,7 @@ let test_autonomous_operator_interrupt_is_a_typed_outcome () =
   in
   Eio.Fiber.fork ~sw (fun () ->
     let result =
-      Owner.run_autonomous_if_idle owner (fun () ->
+      Owner.run_autonomous_if_idle owner (fun _execution ->
         Eio.Promise.resolve resolve_child_started ();
         (* Mirrors the keepalive cycle: the body sees the interrupt at a
            cancellation point and returns normally anyway. *)
@@ -2332,7 +2332,7 @@ let test_autonomous_operator_interrupt_is_a_typed_outcome () =
    | Error error -> fail ("interrupt surfaced as an error: " ^ Owner.error_to_string error));
   check bool "the interrupt releases the turn slot" true
     (Option.is_none (Owner.turn_in_flight owner));
-  (match Owner.run_autonomous_if_idle owner (fun () -> 42) with
+  (match Owner.run_autonomous_if_idle owner (fun _execution -> 42) with
    | Ok (`Ran 42) -> ()
    | Ok (`Ran _) | Ok `Interrupted | Ok (`Busy _) | Error _ ->
      fail "the Owner did not admit the next autonomous turn")
@@ -2419,7 +2419,7 @@ let test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone () =
   let autonomous_result = Eio.Stream.create 1 in
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Stream.add autonomous_result
-      (Owner.run_autonomous_if_idle owner (fun () ->
+      (Owner.run_autonomous_if_idle owner (fun _execution ->
          Eio.Promise.resolve resolve_autonomous_started ();
          try Eio.Promise.await release_autonomous; `Completed with
          | exn when Keeper_registry_types.is_operator_interrupt exn -> `Cancelled)));
@@ -2507,7 +2507,7 @@ let test_chat_interrupt_cancels_the_turn_and_the_queue_continues () =
   (* Only an operator's explicit pause closes admission. *)
   ignore (owner_ok (Owner.apply_meta owner
     (Pause { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }; updated_at = "manual" })));
-  (match Owner.run_autonomous_if_idle owner (fun () -> fail "paused autonomy ran") with
+  (match Owner.run_autonomous_if_idle owner (fun _execution -> fail "paused autonomy ran") with
    | Ok (`Busy Owner.Admission_paused) -> () | _ -> fail "autonomy bypassed the operator pause");
   ignore (owner_ok (Owner.submit_operation owner
     ~operation_id:fifth ~source:operation_source ~input:(operation_input "wait")));
@@ -4081,7 +4081,7 @@ let test_availability_recovers_under_an_autonomous_child () =
       let autonomous_result = Eio.Stream.create 1 in
       Eio.Fiber.fork ~sw (fun () ->
         let result =
-          Owner.run_autonomous_if_idle owner (fun () ->
+          Owner.run_autonomous_if_idle owner (fun _execution ->
             Eio.Promise.resolve resolve_started ();
             Eio.Promise.await release)
         in
@@ -4157,7 +4157,7 @@ let test_autonomous_admission_defers_to_a_queued_chat () =
    | Some _ -> fail "the chat started before the runner was ready");
   ready := true;
   (match
-     Owner.run_autonomous_if_idle owner (fun () ->
+     Owner.run_autonomous_if_idle owner (fun _execution ->
        fail "the autonomous lane ran ahead of a queued chat")
    with
    | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Chat_operation; _ }))) -> ()
@@ -4254,7 +4254,7 @@ let test_owner_linearizes_autonomous_and_chat_children () =
   let autonomous_result = Eio.Stream.create 1 in
   Eio.Fiber.fork ~sw (fun () ->
     let result =
-      Owner.run_autonomous_if_idle owner (fun () ->
+      Owner.run_autonomous_if_idle owner (fun _execution ->
         Eio.Promise.resolve resolve_autonomous_started ();
         Eio.Promise.await release_autonomous;
         42)
@@ -4280,7 +4280,7 @@ let test_owner_linearizes_autonomous_and_chat_children () =
      fail
        ("chat operation started beside autonomous child: "
         ^ Chat_operation.state_to_string state));
-  (match Owner.run_autonomous_if_idle owner (fun () -> fail "busy child ran") with
+  (match Owner.run_autonomous_if_idle owner (fun _execution -> fail "busy child ran") with
    | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Autonomous; _ }))) -> ()
    | Ok (`Busy _) -> fail "busy result projected the wrong lane"
    | Ok (`Ran _) -> fail "Owner admitted two autonomous children"
@@ -4334,7 +4334,7 @@ let test_unready_chat_queue_does_not_block_autonomous () =
           ~operation_id
           ~source:operation_source
           ~input:(operation_input "remain queued")));
-  (match Owner.run_autonomous_if_idle owner (fun () -> 7) with
+  (match Owner.run_autonomous_if_idle owner (fun _execution -> 7) with
    | Ok (`Ran value) -> check int "autonomous callback ran" 7 value
    | Ok `Interrupted -> fail "nothing interrupted the autonomous callback"
    | Ok (`Busy block) ->
@@ -4368,7 +4368,7 @@ let test_owner_shutdown_linearizes_and_awaits_child () =
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Stream.add
       child_result
-      (Owner.run_autonomous_if_idle owner (fun () ->
+      (Owner.run_autonomous_if_idle owner (fun _execution ->
          Eio.Promise.resolve resolve_child_started ();
          Eio.Promise.await release_child)));
   Eio.Promise.await child_started;
@@ -4516,11 +4516,11 @@ let test_autonomous_children_of_distinct_owners_do_not_cross_block () =
   let second = start "turn-owner-second" in
   Eio.Fiber.fork ~sw (fun () ->
     ignore
-      (Owner.run_autonomous_if_idle first (fun () ->
+      (Owner.run_autonomous_if_idle first (fun _execution ->
          Eio.Promise.resolve resolve_first_started ();
          Eio.Promise.await release_first)));
   Eio.Promise.await first_started;
-  (match Owner.run_autonomous_if_idle second (fun () -> 7) with
+  (match Owner.run_autonomous_if_idle second (fun _execution -> 7) with
    | Ok (`Ran 7) -> ()
    | Ok (`Ran value) -> failf "wrong second Owner result: %d" value
    | Ok `Interrupted -> fail "nothing interrupted the second Keeper's autonomous child"
@@ -5516,7 +5516,7 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
   let submit operation_id = ignore (owner_ok (Owner.submit_operation owner
     ~operation_id ~source:operation_source ~input:(operation_input "answer me"))) in
   let observe_busy () =
-    match Owner.run_autonomous_if_idle owner (fun () ->
+    match Owner.run_autonomous_if_idle owner (fun _execution ->
       fail "autonomous work passed a claimable user message") with
     | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Chat_operation; _ }))) -> ()
     | Ok (`Busy other) -> fail (Owner.autonomous_block_to_string other)
@@ -5543,7 +5543,7 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
   Eio.Promise.resolve resolve_next ();
   ignore (await_terminal owner next 1_000);
   check int "the refused autonomous lane keeps its release wake" 1 !released;
-  match Owner.run_autonomous_if_idle owner (fun () -> "continued") with
+  match Owner.run_autonomous_if_idle owner (fun _execution -> "continued") with
   | Ok (`Ran value) -> check string "autonomous work resumes" "continued" value
   | Ok (`Busy other) -> fail (Owner.autonomous_block_to_string other)
   | Ok `Interrupted -> fail "nothing interrupted the resumed autonomous work"
@@ -5568,7 +5568,7 @@ let test_input_writer_is_bound_to_child_and_predecessor () =
   let release, release_child = Eio.Promise.create () in
   let finished, finish = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
-    let result = Owner.run_autonomous_if_idle owner (fun () ->
+    let result = Owner.run_autonomous_if_idle owner (fun _execution ->
       Eio.Promise.resolve start ();
       Eio.Promise.await release) in
     Eio.Promise.resolve finish result);
@@ -5580,7 +5580,7 @@ let test_input_writer_is_bound_to_child_and_predecessor () =
    | Ok (`Ran ()) -> ()
    | Ok (`Busy _ | `Interrupted) | Error _ -> fail "isolated child did not finish");
   let leaked = ref None in
-  (match Owner.run_autonomous_if_idle owner (fun () ->
+  (match Owner.run_autonomous_if_idle owner (fun _execution ->
      let writer = Owner.begin_input_checkpoint owner ~trace_id |> owner_ok in
      let stale = Owner.begin_input_checkpoint owner ~trace_id |> owner_ok in
      let writer = Owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint:(checkpoint "wait") |> owner_ok in
@@ -5596,7 +5596,7 @@ let test_input_writer_is_bound_to_child_and_predecessor () =
   let writer = Option.get !leaked in
   refused "outside caller reused a former child"
     (Owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint:(checkpoint "after child"));
-  (match Owner.run_autonomous_if_idle owner (fun () ->
+  (match Owner.run_autonomous_if_idle owner (fun _execution ->
      refused "new child borrowed an old token"
        (Owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint:(checkpoint "new child"));
      let current = Owner.begin_input_checkpoint owner ~trace_id |> owner_ok in
@@ -5612,10 +5612,69 @@ let test_input_writer_is_bound_to_child_and_predecessor () =
   ignore (Owner.begin_stopping owner |> owner_ok)
 ;;
 
+let test_autonomous_owner_scope_survives_attempts_and_isolates_children () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_env env;
+  let owner = start_owner ~sw
+    ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
+    ~keeper_name:"autonomous-scope-owner"
+    ~initial_meta:(Some (make_meta "autonomous-scope-owner")) |> owner_ok in
+  let module Repetition = Keeper_repetition_scope in
+  let require = function
+    | Ok value -> value
+    | Error error -> fail (Keeper_repetition_snapshot.error_to_string error) in
+  let shared = Agent_core.Context.create_sync () in
+  let source = Agent_core.Context.create_sync () in
+  let call : Keeper_agent_result.tool_call_detail =
+    {tool_name="Execute";provider="fixture";execution_outcome=Tool_result.Ok;
+     typed_outcome=None;latency_ms=0.;task_id=None;route_evidence=None;
+     input_fingerprint=None;output_fingerprint=None} in
+  let ran = function
+    | Ok (`Ran value) -> value
+    | Ok (`Busy _ | `Interrupted) -> fail "admitted child did not complete"
+    | Error error -> fail (Owner.error_to_string error) in
+  let scope_a = Owner.run_autonomous_if_idle owner (fun execution ->
+    let scope = Repetition.Execution.scope execution in
+    check bool "scope origin is autonomous" true
+      (Option.is_none (Keeper_execution_scope_id.direct_operation_id scope));
+    check int "A begins without other invocation calls" 0
+      (List.length (Repetition.Execution.prepare execution ~source ~target:shared |> require));
+    Repetition.Execution.observe execution ~target:shared call;
+    Repetition.Execution.observe execution ~target:shared call;
+    (* The first provider supplied no checkpoint. The same admitted child
+       still carries both observations into a fresh retry context. *)
+    let retry = Agent_core.Context.create_sync () in
+    check int "A retry keeps its original observations" 2
+      (List.length (Repetition.Execution.prepare execution ~source ~target:retry |> require));
+    Repetition.Execution.observe execution ~target:retry call;
+    Repetition.save shared (Repetition.Execution.snapshot execution |> require);
+    scope) |> ran in
+  let before_b = Repetition.load shared |> require in
+  let scope_b = Owner.run_autonomous_if_idle owner (fun execution ->
+    let scope = Repetition.Execution.scope execution in
+    check bool "B receives a distinct original scope" false
+      (Keeper_execution_scope_id.equal scope_a scope);
+    check int "B excludes A even without a canonical checkpoint" 0
+      (List.length (Repetition.Execution.prepare execution ~source ~target:shared |> require));
+    Repetition.Execution.observe execution ~target:shared call;
+    scope) |> ran in
+  let frame = Repetition.load shared |> require in
+  check int "A frame remains retained after B" 3
+    (List.length (Repetition.tool_calls frame ~scope:scope_a |> require));
+  check int "B frame has only B's call" 1
+    (List.length (Repetition.tool_calls frame ~scope:scope_b |> require));
+  check int "captured A snapshot stays immutable" 1
+    (List.length (Keeper_repetition_snapshot.scope_ids before_b));
+  ignore (Owner.begin_stopping owner |> owner_ok)
+;;
+
 let () =
   run
     "keeper owner"
-    [ ( "input ownership", [test_case "writer binds child, lane and exact predecessor" `Quick
+    [ ( "autonomous scope", [test_case "same child retries; later child keeps separate repetition" `Quick
+          test_autonomous_owner_scope_survives_attempts_and_isolates_children] )
+    ; ( "input ownership", [test_case "writer binds child, lane and exact predecessor" `Quick
           test_input_writer_is_bound_to_child_and_predecessor] )
     ; ( "reducer"
       , [ test_case "direct waiter ignores continuations and wakes on original input" `Quick

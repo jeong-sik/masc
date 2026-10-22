@@ -27,13 +27,18 @@ let restore = Keeper_repetition_context.restore
 
 module Execution = struct
   type snapshot = Snapshot.t
+  type first_source = Restored_source | Shared_runtime
   type t =
     { scope : Id.t
+    ; first_source : first_source
     ; mutable current : (snapshot, Snapshot.error) result option
     }
 
   let direct_operation operation_id =
-    { scope = Id.direct_operation operation_id; current = None }
+    { scope = Id.direct_operation operation_id; first_source = Restored_source; current = None }
+
+  let autonomous_admission uuid =
+    { scope = Id.autonomous_admission uuid; first_source = Shared_runtime; current = None }
 
   let scope execution = execution.scope
 
@@ -42,12 +47,29 @@ module Execution = struct
   let prepare execution ~source ~target =
     let result =
       let* state = match execution.current with
-        | Some state -> state
+        | Some state ->
+          let* state = state in
+          let* () = install ~target state in
+          Ok state
         | None ->
-          let* state = load source in
-          Snapshot.admit state (Snapshot.Fresh execution.scope)
+          let* state = match execution.first_source with
+            | Restored_source -> restore ~source ~target
+            | Shared_runtime ->
+              (* Official clients need not produce a Core checkpoint. Keep
+                 their original Session frames, and reconcile each source
+                 scope without replacing different observations. All checks
+                 precede publication, so a conflict leaves the target intact. *)
+              let* source = load source in
+              let* target = load target in
+              List.fold_left (fun state scope ->
+                let* target = state in
+                Snapshot.restore_scope ~scope ~source ~target)
+                (Ok target) (Snapshot.scope_ids source)
+          in
+          let* state = Snapshot.admit state (Snapshot.Fresh execution.scope) in
+          save target state;
+          Ok state
       in
-      let* () = install ~target state in
       Ok state
     in
     execution.current <- Some result;
@@ -69,7 +91,7 @@ module Execution = struct
 
   let snapshot execution = match execution.current with
     | Some state -> state
-    | None -> Error (Snapshot.Invalid_snapshot "direct execution was not prepared")
+    | None -> Error (Snapshot.Invalid_snapshot "execution was not prepared")
 
   let resume execution state =
     match Snapshot.active state with
@@ -78,7 +100,7 @@ module Execution = struct
        | None -> execution.current <- Some (Ok state); Ok ()
        | Some (Ok current) when Snapshot.active current = Some execution.scope -> Ok ()
        | Some (Ok _ | Error _) -> Error Snapshot.Restore_target_conflict)
-    | Some _ | None -> Error (Snapshot.Invalid_snapshot "native Gate frame belongs to another operation")
+    | Some _ | None -> Error (Snapshot.Invalid_snapshot "native Gate frame belongs to another execution")
 
   let failure execution = match execution.current with
     | Some (Error error) -> Some error

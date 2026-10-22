@@ -297,9 +297,9 @@ let current_commit_observer () = match Fs_compat.execution_context () with
 let with_commit_observer observer operation = Eio.Fiber.with_binding commit_observer_key (Some observer) operation
 let capture_commit_observer operation =
   let observer = current_commit_observer () in
-  fun () -> match Fs_compat.execution_context () with
-    | Fs_compat.Non_eio -> operation ()
-    | Fs_compat.Eio_fiber -> Eio.Fiber.with_binding commit_observer_key observer operation
+  fun input -> match Fs_compat.execution_context () with
+    | Fs_compat.Non_eio -> operation input
+    | Fs_compat.Eio_fiber -> Eio.Fiber.with_binding commit_observer_key observer (fun () -> operation input)
 let failed_commit_deliveries observer = Atomic.get observer.failed_deliveries
 
 let notify_commit observer receipt =

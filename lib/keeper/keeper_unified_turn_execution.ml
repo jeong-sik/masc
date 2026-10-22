@@ -64,6 +64,7 @@ type ctx =
   ; hitl_resolution : Keeper_event_queue.hitl_resolution option
       (* Typed decision for the originating Keeper's exact external-effect
          Gate. It is never converted to a generic AGENT_CORE approval. *)
+  ; repetition_execution : Keeper_repetition_scope.Execution.t
   ; cleanup : unit -> unit
   ; config : Workspace.config
   ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_runtime_budget.turn_event_bus_summary
@@ -115,6 +116,7 @@ let run (ctx : ctx)
       ; approval_admission
       ; hitl_resolution
       ; shared_context
+      ; repetition_execution
       ; base_dir
       ; build_turn_prompt
       ; trajectory_acc
@@ -233,6 +235,7 @@ let run (ctx : ctx)
                  ~prev:Keeper_turn_fsm.Awaiting_provider
                  Keeper_turn_fsm.Streaming;
                Keeper_agent_run.run_turn
+                 ~repetition_execution
                  ~approval_admission
                  ~preview
                  ~event_scope

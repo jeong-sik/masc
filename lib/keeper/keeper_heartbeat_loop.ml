@@ -893,7 +893,7 @@ let run_keepalive_unified_turn
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         (Keeper_tool_call_log.capture_commit_observer
-         @@ Llm_provider.Http_request_observer.capture (fun () ->
+         @@ Llm_provider.Http_request_observer.capture (fun repetition_execution ->
            Keeper_turn_dispatch_authority.run (fun admission_token ->
     let source_batch = ref Keeper_heartbeat_source_batch.empty in
     let diagnostic_selection = ref None in
@@ -1210,6 +1210,7 @@ let run_keepalive_unified_turn
           in
           let run_fresh_cycle () =
             run_keeper_cycle
+              ~repetition_execution
               ~admission_token
               ?deferred_runtime_lane
               ~on_deferred_runtime_consumed

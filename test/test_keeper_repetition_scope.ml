@@ -220,6 +220,29 @@ let test_direct_prepare_preserves_conflicting_target () =
   check bool "conflicting target is unchanged" true
     (S.to_json other = (Runtime.load target |> require "target" |> S.to_json))
 
+let test_autonomous_shared_scope_conflict_is_not_published () =
+  let uuid = Uuidm.of_string "812f3e8b-df18-48e1-bd6e-0c6f4e6dd174" |> Option.get in
+  let old = id "conflicting-original" in
+  let original = S.admit S.empty (S.Fresh old) |> require "old admission" in
+  let original = record original old call in
+  let source = Agent_core.Context.create_sync () in
+  let target = Agent_core.Context.create_sync () in
+  Runtime.save source original;
+  let different = record original old call in
+  Runtime.save target different;
+  let before = Agent_core.Context.to_json target in
+  let execution = Runtime.Execution.autonomous_admission uuid in
+  (match Runtime.Execution.prepare execution ~source ~target with
+   | Error S.Restore_target_conflict -> ()
+   | _ -> fail "different observations were replaced during autonomous admission");
+  check bool "conflict leaves complete target unchanged" true
+    (Yojson.Safe.equal before (Agent_core.Context.to_json target));
+  check bool "scope failure remains visible" true
+    (Option.is_some (Runtime.Execution.failure execution));
+  let retry = Agent_core.Context.create_sync () in
+  check bool "fresh retry cannot erase the first conflict" true
+    (Result.is_error (Runtime.Execution.prepare execution ~source ~target:retry))
+
 let test_failed_scope_stops_official_provider_preparation () =
   let source = Agent_core.Context.create_sync () in
   let target = Agent_core.Context.create_sync () in
@@ -331,5 +354,6 @@ let () =
                ; test_case "direct retry without checkpoint then new operation" `Quick test_direct_retry_without_provider_checkpoint
                ; test_case "direct observation failure survives retry" `Quick test_direct_observation_failure_is_latched
                ; test_case "direct preparation retains conflicting target" `Quick test_direct_prepare_preserves_conflicting_target
+               ; test_case "autonomous shared scope conflict stays explicit" `Quick test_autonomous_shared_scope_conflict_is_not_published
                ; test_case "failed scope stops actual official preparation" `Quick test_failed_scope_stops_official_provider_preparation
                ; test_case "native terminal evidence precedes scope failure" `Quick test_native_terminal_evidence_precedes_scope_failure ] ]

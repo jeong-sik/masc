@@ -541,6 +541,7 @@ let continuation_channel_of_wake = function
 
 
 let run_keeper_cycle
+      ~repetition_execution
       ~(before_dispatch_authority : unit -> (unit, string) result)
       ~(execution_path : Keeper_unified_metrics_decision.execution_path)
       ?deferred_runtime_lane
@@ -842,7 +843,8 @@ let run_keeper_cycle
                   that the keeper holds no task. *)
                let preparation_turn_ref = Ids.Turn_ref.make
                  ~trace_id:runtime_manifest_context.manifest_trace_id ~absolute_turn:keeper_turn_id in
-               let preview = Keeper_turn_preview.reset ~keeper_name:meta.name ~execution_scope:None
+               let preview = Keeper_turn_preview.reset ~keeper_name:meta.name
+                 ~execution_scope:(Some (Keeper_repetition_scope.Execution.scope repetition_execution))
                  ~turn_ref:(Some preparation_turn_ref)
                  ~now:(Time_compat.now ())
                  ~redaction:(Keeper_secret_redaction.snapshot ~base_path:config.base_path
@@ -1201,6 +1203,7 @@ let run_keeper_cycle
                                (Keeper_heartbeat_source_batch.selections
                                   (Keeper_heartbeat_source_batch.sources turn_input))
                            ; hitl_resolution
+                           ; repetition_execution
                            ; cleanup
                            ; config
                            ; drain_turn_event_bus

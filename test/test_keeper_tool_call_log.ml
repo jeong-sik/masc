@@ -2543,10 +2543,10 @@ let test_commit_observer_capture_retains_scope_and_absence () =
         ~execution_id ~on_committed:(fun () -> ()) () in
     let captured_id = Ids.Execution_id.generate () in
     let captured = Keeper_tool_call_log.with_commit_observer first (fun () ->
-      Keeper_tool_call_log.capture_commit_observer (fun () -> append captured_id)) in
-    let absent = Keeper_tool_call_log.capture_commit_observer (fun () -> append (Ids.Execution_id.generate ())) in
+      Keeper_tool_call_log.capture_commit_observer append) in
+    let absent = Keeper_tool_call_log.capture_commit_observer append in
     Keeper_tool_call_log.with_commit_observer second (fun () ->
-      captured (); absent (); append (Ids.Execution_id.generate ()));
+      captured captured_id; absent (Ids.Execution_id.generate ()); append (Ids.Execution_id.generate ()));
     Alcotest.(check int) "actor handoff retains exactly the original observer" 1 (List.length !left);
     Alcotest.(check bool) "handoff preserves the physical identity" true
       (match !left with

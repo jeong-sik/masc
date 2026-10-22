@@ -684,7 +684,8 @@ let prepare_agent_setup
   let* historical_tool_calls, historical_order, history_pairs_at_setup =
     match repetition_execution with
     | None ->
-      (* The autonomous lane, seeded from the checkpoint history past what
+      (* Low-level calls without an Owner-supplied execution are seeded from
+         checkpoint history past what
          a previous repetition yield already judged
          ([Keeper_repetition_judged]); the count the run was set up over is
          what a yield in it records. The official-client lane persists no

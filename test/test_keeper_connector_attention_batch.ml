@@ -1632,7 +1632,7 @@ let test_official_turn_keeps_tool_result_until_completion () =
     | Error error -> fail (Owner_registry.lookup_error_to_string error)
   in
   (match
-     Owner_registry.run_autonomous_if_idle ~base_path ~keeper_name (fun () ->
+     Owner_registry.run_autonomous_if_idle ~base_path ~keeper_name (fun _execution ->
        let handed_off = ref false in
        let terminal_error = ref None in
        let tool =

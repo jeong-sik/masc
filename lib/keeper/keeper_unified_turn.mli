@@ -193,7 +193,8 @@ val continuation_channel_of_wake :
     conversations. *)
 
 val run_keeper_cycle
-  :  before_dispatch_authority:(unit -> (unit, string) result)
+  :  repetition_execution:Keeper_repetition_scope.Execution.t
+  -> before_dispatch_authority:(unit -> (unit, string) result)
   -> execution_path:Keeper_unified_metrics_decision.execution_path
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_deferred_runtime_consumed:(unit -> unit)

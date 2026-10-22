@@ -53,7 +53,7 @@ let with_request_metadata ~body ~metadata run =
 let capture run =
   match Eio.Fiber.get observer_key with
   | None -> run
-  | Some observer -> fun () -> with_observer observer run
+  | Some observer -> fun input -> with_observer observer (fun () -> run input)
 let delivery_failure_count observer = Atomic.get observer.delivery_failures
 
 let emit call phase =

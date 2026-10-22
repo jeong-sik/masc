@@ -304,10 +304,14 @@ val autonomous_block_to_yojson : autonomous_block -> Yojson.Safe.t
 
 val run_autonomous_if_idle
   :  t
-  -> (unit -> 'a)
+  -> (Keeper_repetition_scope.Execution.t -> 'a)
   -> ([ `Ran of 'a | `Busy of autonomous_block | `Interrupted ], error) result
 (** Mailbox-linearized autonomous admission. The callback runs in the Owner's
-    child switch, while the actor remains responsive. An already-started child
+    child switch with one Owner-issued autonomous repetition execution, while
+    the actor remains responsive. Only an admitted autonomous child allocates
+    the UUID; retries share that object and later children receive distinct
+    identities. This is physical turn admission, not durable semantic admission
+    or permission to consume another invocation's pending input. An already-started child
     returns [`Busy] without consuming turn input. A Queued chat whose runner is
     not ready does not block autonomous admission. Owner-directed cancellation
     returns [Error Owner_stopping]; its private child-stop signal never escapes

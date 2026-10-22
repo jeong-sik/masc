@@ -62,7 +62,7 @@ val wake_operation_drain
 val run_autonomous_if_idle
   :  base_path:string
   -> keeper_name:string
-  -> (unit -> 'a)
+  -> (Keeper_repetition_scope.Execution.t -> 'a)
   -> ([ `Ran of 'a | `Busy of Keeper_owner.autonomous_block | `Interrupted ], command_error) result
 (** Submit one autonomous turn attempt to the Keeper's Owner mailbox. *)
 

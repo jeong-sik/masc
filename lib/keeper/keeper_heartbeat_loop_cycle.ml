@@ -84,6 +84,7 @@ let deferred_runtime_lane = function
    inside the slot for the same reason as the chat lane: a concurrent turn
    must not interleave with this lane's meta writes (RFC-0225 §1). *)
 let run_keeper_cycle_admitted
+      ~repetition_execution
       ~before_dispatch_authority
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
@@ -102,6 +103,7 @@ let run_keeper_cycle_admitted
   let admitted_execution =
     In_turn_pulse.with_in_turn_liveness_pulse ~ctx ~meta:meta_after_triage ~stop (fun () ->
       Keeper_unified_turn.run_keeper_cycle
+        ~repetition_execution
         ~before_dispatch_authority
         ~execution_path:Keeper_unified_metrics_decision.Autonomous_cycle
         ?deferred_runtime_lane
@@ -190,6 +192,7 @@ let run_keeper_cycle_admitted
 ;;
 
 let run_keeper_cycle
+      ~repetition_execution
       ~admission_token
       ?deferred_runtime_lane
       ?on_deferred_runtime_consumed
@@ -233,6 +236,7 @@ let run_keeper_cycle
   in
   let outcome =
     run_keeper_cycle_admitted
+      ~repetition_execution
       ~before_dispatch_authority:
         (fun () -> Keeper_turn_dispatch_authority.validate admission_token)
       ?deferred_runtime_lane

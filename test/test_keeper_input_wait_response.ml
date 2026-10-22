@@ -136,7 +136,7 @@ let test_autonomous_input_owner_rejects_lost_response_lineage () =
   let refused_source label source = match prepare source with
     | Error (Keeper_input_checkpoint_producer.Source_changed | Source_missing) -> ()
     | Error _ | Ok _ -> fail label in
-  (match Keeper_owner.run_autonomous_if_idle owner (fun () ->
+  (match Keeper_owner.run_autonomous_if_idle owner (fun _execution ->
      let producer = prepare None |> prepared in
      let producer = Keeper_input_checkpoint_producer.publish_autonomous producer original |> prepared in
      let candidate = Response.prepare ~net:env#net ~source:(exact original)
@@ -351,7 +351,7 @@ let test_operation_response_preserves_producer_g ?(gate_case=None) ~canonical_in
   Eio.Switch.run (fun owner_sw ->
     Keeper_owner_registry.install_from_store ~sw:owner_sw ~operation_runner:None ~on_turn_slot_released:None workspace |> prepared |> ignore;
     let owner=Keeper_owner_registry.get ~base_path:root ~keeper_name |> prepared in
-    (match Keeper_owner.run_autonomous_if_idle owner (fun () ->
+    (match Keeper_owner.run_autonomous_if_idle owner (fun _execution ->
        let producer=Keeper_input_checkpoint_producer.prepare ~base_path:root ~keeper_name ~session_dir
          ~trace_id:meta.runtime.trace_id ~source:(Some original) |> prepared in
        ignore (Keeper_input_checkpoint_producer.publish_autonomous producer newer |> prepared);

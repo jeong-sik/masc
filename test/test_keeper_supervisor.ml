@@ -1370,7 +1370,7 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
           Masc.Keeper_owner_registry.run_autonomous_if_idle
             ~base_path:config.base_path
             ~keeper_name:name
-            (fun () -> ())
+            (fun _execution -> ())
         with
         | Ok (`Busy _) -> ()
         | Ok `Interrupted -> fail "nothing interrupted the refused autonomous lane"

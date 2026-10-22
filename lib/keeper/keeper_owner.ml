@@ -228,6 +228,10 @@ type retired_input_cut =
     observed:Keeper_native_call.state; call:Keeper_native_call.t;
     cut:Keeper_input_history_cut.binding }
 
+type 'a idle_work =
+  | Autonomous_work of (Keeper_repetition_scope.Execution.t -> 'a)
+  | Maintenance_work of (unit -> 'a)
+
 type _ command =
   | Exact_projection :
       (Keeper_owner_reducer.projection, error) result command
@@ -342,9 +346,8 @@ type _ command =
   | Observe_runtime_retry_waits : (unit, error) result command
   | Wake_operation_drain : (unit, error) result command
   | Run_if_idle :
-      { lane : turn_lane
-      ; defer_to_chat : bool
-      ; run : unit -> 'a
+      { defer_to_chat : bool
+      ; work : 'a idle_work
       }
       -> ('a autonomous_response, error) result command
   | Begin_shutdown :
@@ -1448,6 +1451,9 @@ let start
   (* Live witnesses are owned by this actor and tied to the exact durable
      retry. Restart loses the witness, never treating lost provider evidence
      as recovery; the persisted deadline still schedules its wake. *)
+  (* The mailbox alone uses this generator, only after autonomous admission.
+     Neither a busy request nor maintenance allocates an execution scope. *)
+  let fresh_autonomous_uuid = Uuidm.v4_gen (Random.State.make_self_init ()) in
   let retry_waits = ref [] in
   let cooling_wake_armed = ref false in
   let revalidate_retry_waits () =
@@ -2783,7 +2789,10 @@ let start
           else (
             Eio.Promise.resolve resolve (Ok ());
             loop state shutdown_operation_id)
-        | Command (Run_if_idle { lane; defer_to_chat; run }, resolve) ->
+        | Command (Run_if_idle { defer_to_chat; work }, resolve) ->
+          let lane = match work with
+            | Autonomous_work _ -> Autonomous
+            | Maintenance_work _ -> Maintenance in
           (match shutdown_operation_id with
            | Some operation_id ->
              Eio.Promise.resolve
@@ -2808,6 +2817,12 @@ let start
                      (Ok (Autonomous_busy (Turn_busy (Some in_flight))))
                  | None ->
                    let run_admitted_turn () =
+                     let run = match work with
+                       | Autonomous_work run ->
+                         let execution = Keeper_repetition_scope.Execution.autonomous_admission
+                           (fresh_autonomous_uuid ()) in
+                         (fun () -> run execution)
+                       | Maintenance_work run -> run in
                      (* The Owner keeps its slot until the turn settles. A
                         chat starts after a settled tool boundary yields this
                         turn or the turn completes. *)
@@ -3116,7 +3131,7 @@ let succeed_running_operation t ~operation_id ~outcome_ref =
 ;;
 
 let run_autonomous_if_idle t run =
-  match request t (Run_if_idle { lane = Autonomous; defer_to_chat = false; run }) with
+  match request t (Run_if_idle { defer_to_chat = false; work = Autonomous_work run }) with
   | Error _ as error -> error
   | Ok (Autonomous_ran value) -> Ok (`Ran value)
   | Ok (Autonomous_busy block) -> Ok (`Busy block)
@@ -3150,7 +3165,7 @@ let run_autonomous_if_idle t run =
 (* Maintenance is not interruptible ([Interrupt_maintenance_running]), so an
    operator interrupt reaching this lane is not a translated outcome. *)
 let run_maintenance_if_idle ?(defer_to_chat = false) t run =
-  match request t (Run_if_idle { lane = Maintenance; defer_to_chat; run }) with
+  match request t (Run_if_idle { defer_to_chat; work = Maintenance_work run }) with
   | Error _ as error -> error
   | Ok (Autonomous_ran value) -> Ok (`Ran value)
   | Ok (Autonomous_busy block) -> Ok (`Busy block)

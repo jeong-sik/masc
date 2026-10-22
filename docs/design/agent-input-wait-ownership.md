@@ -982,3 +982,28 @@ and carry the same repetition execution through runtime retries. Intake must
 exclude only parked original sources and independent work must not use their
 pending checkpoint as a fresh seed. Response/resume, original-source recovery,
 error/unknown-effect handling and current Acting/SSE reconciliation remain.
+
+
+### Owner-issued autonomous repetition scope
+
+The autonomous Owner callback now receives one `Repetition.Execution` allocated
+only after that child wins the physical slot. Its producer-issued autonomous UUID
+is carried through heartbeat, Cycle, Unified execution, AgentRun and the original
+preview. Provider retries in that child share the same execution object. A later
+independent child receives a different scope and does not count prior invocations'
+tool calls as its own. Maintenance continues to receive a unit callback.
+
+Official clients can complete without a Core checkpoint. Their shared Session
+repetition frames remain retained when another scope is admitted; overlapping
+checkpoint observations must match exactly before publication. A conflict is
+latched and leaves the target unchanged. Captured HTTP and durable Tool observers
+carry the execution argument across the Owner handoff under their original scope.
+
+This is physical execution identity and repetition isolation, not durable semantic
+admission. The autonomous journal APIs are still not connected to validated
+heartbeat intake, atomic wait publication, typed child settlement, source exclusion
+or explicit independent seed selection. In particular, canonical checkpoint
+fallback can still expose parked A's pending input to independent B; an explicit
+Owner-validated fork plus A's retained semantic ownership is required before that
+path is complete. Neither a new UUID nor these source tests prove A wait -> restart
+-> B -> original A response/resume, current SSE state or persistent Acting UI.

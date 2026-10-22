@@ -1219,6 +1219,8 @@ let test_post_observers_are_owned_across_concurrent_fibers () =
       Eio.Fiber.both (fun () -> post "outer-first")
         (fun () -> Observe.with_observer inner (fun () -> post "inner")));
       post "outer-second");
+    let captured = Observe.with_observer outer (fun () -> Observe.capture post) in
+    Observe.with_observer inner (fun () -> captured "captured"; post "inner-after");
     Observe.with_request_metadata ~body:"unbound"
       ~metadata:(fun () -> Alcotest.fail "unbound HTTP evaluated request metadata") (fun () -> post "unbound");
     let hashes events = List.filter_map (fun (event : Observe.event) -> match event.phase with
@@ -1226,19 +1228,19 @@ let test_post_observers_are_owned_across_concurrent_fibers () =
       | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) (List.rev !events) in
     let sha body = Digestif.SHA256.(digest_string body |> to_hex) in
     Alcotest.(check (list string)) "outer ownership survives concurrent nested binding"
-      (List.map sha ["outer-first";"outer-second"]) (hashes outer_events);
-    Alcotest.(check (list string)) "nested owner receives only its request" [sha "inner"] (hashes inner_events);
+      (List.map sha ["outer-first";"outer-second";"captured"]) (hashes outer_events);
+    Alcotest.(check (list string)) "nested owner excludes captured request" (List.map sha ["inner";"inner-after"]) (hashes inner_events);
     let inventories events = List.filter_map (fun (event : Observe.event) -> match event.phase with
       | Client_entered {tool_inventory;_} -> Some tool_inventory
       | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) (List.rev !events) in
     (match inventories outer_events,inventories inner_events with
-     | [Some No_tools_member;None],[None] -> ()
+     | [Some No_tools_member;None;None],[None;None] -> ()
      | _ -> Alcotest.fail "Tool metadata escaped its exact body or request scope");
     let components events = List.filter_map (fun (event : Observe.event) -> match event.phase with
       | Client_entered {request_components;_} -> Some request_components
       | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) (List.rev !events) in
     (match components outer_events,components inner_events with
-     | [Some Components_unavailable;None],[None] -> ()
+     | [Some Components_unavailable;None;None],[None;None] -> ()
      | _ -> Alcotest.fail "component metadata escaped its exact body or request scope");
     Eio.Switch.fail sw Exit
   with Exit -> ()

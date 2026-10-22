@@ -61,7 +61,7 @@ let create config intake_token seed meta =
   | Some committed -> committed
   | None -> fail "creation did not publish metadata"
 let run_input config meta checkpoint session =
-  match Registry.run_autonomous_if_idle ~base_path:config.Workspace.base_path ~keeper_name:"imp" (fun () ->
+  match Registry.run_autonomous_if_idle ~base_path:config.Workspace.base_path ~keeper_name:"imp" (fun _execution ->
     let producer = Keeper_input_checkpoint_producer.prepare ~base_path:config.base_path ~keeper_name:"imp"
       ~session_dir:session.Keeper_types.session_dir ~trace_id:meta.Keeper_meta_contract.runtime.trace_id
       ~source:(Some checkpoint) |> ok Keeper_input_checkpoint_producer.error_to_string in

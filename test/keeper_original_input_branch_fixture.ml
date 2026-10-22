@@ -90,7 +90,7 @@ let prepare ?(response_before_global=false) ~net ~clock ~workspace ~session_dir
       Store.load_agent_core_exact_snapshot ~session_dir ~session_id
       |> require "publicly accepted canonical C" |> Store.exact_snapshot_checkpoint
       else original in
-    (match Owner.run_autonomous_if_idle owner (fun () ->
+    (match Owner.run_autonomous_if_idle owner (fun _execution ->
       let context=Agent_core.Context.copy original.context ~eio:false in
       let scope=Keeper_execution_scope_id.autonomous_admission
         (Uuidm.of_string "00000000-0000-4000-8000-000000000010" |> Option.get) in

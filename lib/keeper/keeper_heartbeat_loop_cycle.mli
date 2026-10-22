@@ -36,7 +36,8 @@ val deferred_runtime_lane :
   cycle_outcome -> Keeper_turn_driver.deferred_runtime_lane option
 
 val run_keeper_cycle
-  :  admission_token:Keeper_turn_dispatch_authority.token
+  :  repetition_execution:Keeper_repetition_scope.Execution.t
+  -> admission_token:Keeper_turn_dispatch_authority.token
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?event_bus:Agent_core.Event_bus.t

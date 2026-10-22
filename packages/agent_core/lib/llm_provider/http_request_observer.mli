@@ -67,7 +67,7 @@ val with_request_metadata :
     exception records unavailable metadata without changing the HTTP result;
     reserved exceptions propagate. Unrelated nested HTTP bodies cannot inherit
     this request's metadata. [None] in a client event means unobserved. *)
-val capture : (unit -> 'a) -> (unit -> 'a)
+val capture : ('input -> 'a) -> ('input -> 'a)
 (** Capture the current observer in a closure before an actor/executor handoff.
     Invoking it rebinds that owner on the receiving fiber. Ordinary child
     fibers inherit bindings, but an already running actor does not. When no

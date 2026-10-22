@@ -261,8 +261,8 @@ let test_submit_in_the_replacement_gap_is_not_sent_and_reaches_the_next_worker (
     (fun clock config _worker _state root ->
       let directory=Filename.concat root ".masc/config/lane-addons" in
       let source=Filename.concat directory "quiz.toml" in
-      let export ()=Runtime.tool_exports ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]
-        |> unwrap |> List.find_opt (fun (export : Runtime.tool_export) -> export.tool.name="queue_question") in
+      let export ()=(Runtime.tool_export_reading ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]
+        |> unwrap).exports |> List.find_opt (fun (export : Runtime.tool_export) -> export.tool.name="queue_question") in
       let submit export=Runtime.call_exported_tool_with_principal ~principal:(Some Lane_addon_call_context.Operator)
         ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[] ~export ~arguments:(`Assoc [])
         |> Result.map_error Lane_addon_submit_once.call_error_of_runtime in

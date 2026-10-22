@@ -89,6 +89,35 @@ Chromium 쪽은 DevTools Protocol(`Input`, `Network`, `Runtime`, `Emulation`) �
 9. 클립보드.
 10. Gecko 전용 칸(select, iframe, 다이얼로그, 업로드, 다운로드)을 BiDi 연결과 Chromium 으로 넓히기.
 
+### 진행 현황 (2026-10-22)
+
+| 단위 | 상태 | PR |
+|---|---|---|
+| 3 우클릭·가운데 클릭 | 올림 (BiDi, 자동화 Firefox, Stagehand) | #45111, #45112 |
+| 4 창 크기 | `set_viewport` 만 올림 (BiDi, Stagehand). 창 목록·만들기·닫기는 아직 | #45114 |
+| 탭 기록·닫기 (표의 `back`, `forward`, `reload`, `close_tab`) | 올림 (BiDi, 이 연결이 연 탭만) | #45115 |
+| 8 터치 | 올림 (BiDi, 자동화 Firefox) | #45116 |
+| 2 표 출력 도구 | 도구는 안 만들고, 이 표의 수치를 손으로 한 번 뽑았다(아래) | 이 문서 |
+| 5, 6, 7, 9, 10 | 안 함 | |
+
+표 값(`Browser_capabilities.support` 를 세어 뽑은 수치, fixture 결과가 아니다). 스택 끝(#45116) 기준이다.
+연산은 53개이고, `Unsupported` 는 확장 40, BiDi 27, 자동화 Firefox 18, Stagehand 24, Safari 53 이다(2026-10-22 에 실제로 세었다).
+
+### 남은 단위의 기본 방침
+
+운영자의 실제 브라우저(연결된 BiDi, 확장)는 이 호스트가 모르는 로그인과 비밀 값을 갖는다.
+소유한 브라우저(자동화 Firefox, Stagehand)는 일회용이다. 아래는 이 구분으로 정한 기본값이고, 운영자가 뒤집을 수 있다.
+
+- 쿠키, web storage, 클립보드, 네트워크 요청·응답: 운영자 브라우저에서는 거절한다. 소유한 브라우저에서만 연다.
+  - 근거: BiDi `storage.getCookies` 는 Firefox 158 에서 돈다(프로브). Stagehand 4.1.0 에는 `context.cookies`, `context.add_cookies`,
+    `context.clear_cookies`, `context.clipboard_read_text`, `context.clipboard_write_text` 호출이 있다(`dist/index.d.mts`).
+  - 자동화 Firefox 는 BiDi 클라이언트가 다운로드 전용이라 쿠키·콘솔·네트워크를 하려면 그 클라이언트를 넓히는 작업이 먼저다.
+- 콘솔 읽기, 네트워크 읽기: 이벤트를 쌓아 두는 상태가 필요하다. 연결된 BiDi 피어는 이벤트를 버린다(`browser_bidi_peer.ml` 의 `Some (`String "event")`).
+  소유한 Firefox 에는 `Browser_downloads` 라는 닫힌 구독 모델(`subscribed_methods`)이 이미 있어서 같은 모양으로 `log.entryAdded` 를 더하는 것이 한 방법이다.
+  새 verb 가 필요해서 `Browser_lane.verb` 를 쓰는 곳 전부와 Add-on 도구 분류가 바뀐다. 한 PR 로 올리지 않고 타입과 구독, 읽기 도구를 나눈다.
+- 창 목록·만들기·닫기: Firefox 158 의 BiDi `browser.getClientWindows`, `browsingContext.create` 의 `type: window`, `browsingContext.close` 가 돈다(프로브).
+  `Browser_lane.Action.t` 에 창 동작을 더해야 해서 `page.act` 를 쓰는 Add-on 모듈 여럿이 바뀐다. 탭 정리와 같은 방침(이 연결이 만든 창만)으로 한다.
+
 각 단위는 공개 도구 스키마(`config/tools/masc_browser_*.toml`), 어댑터, 표, fixture 를 같이 바꾼다.
 표만 바꾸고 어댑터가 없는 변경, 어댑터만 만들고 표를 안 바꾸는 변경은 받지 않는다.
 

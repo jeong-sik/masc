@@ -81,15 +81,21 @@ let port ?await_change ?(before_listing = fun _ -> ()) worker : Runtime.For_test
     Ok (`Assoc [ "accepted", `Bool !(worker.consume) ]));
 }
 
-let backend ?await_change ?before_listing ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend = {
+let backend ?await_change ?before_listing ?exported_tool ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend = {
   start = (fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~package:_ ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {browser=None;
         resolved_image = (match Lane_addon_engine.image_of_inspect Lane_addon_types.Docker ("sha256:" ^ String.make 64 'a') with
           | Ok image -> Some image | Error detail -> Alcotest.fail detail);
       observe = (fun ~binding:_ ~sources:_ -> incr worker.observations; Ok { rows = []; coverage = [] });
-      exported_tools = (fun () -> []);
-      call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ ->
-        Error (Lane_addon_call_context.Transport_error "no exported tools"));
+      exported_tools = (fun () -> match exported_tool with
+        | None -> [] | Some (tool, _) -> [tool]);
+      call_exported_tool = (fun ~on_result ~authorize:_ ~principal:_ ~name:_ ~arguments ->
+        match exported_tool with
+        | None -> Error (Lane_addon_call_context.Transport_error "no exported tools")
+        | Some (_, invoke) ->
+          let result = invoke arguments in
+          (match result with Ok reply -> on_result reply | Error _ -> ());
+          result);
       action_schema = (fun () -> None); act = (fun ~arguments:_ -> Error "read-only");
       stop = (fun () -> before_stop (); Ok (Lane_addon_lifecycle.Released
         { engine = Lane_addon_lifecycle.Docker_engine "fixture-engine"; container_id = Some instance_id }));
@@ -127,7 +133,7 @@ let cycles config = match member "cycles" (host_requests config) with `Int n -> 
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 
-let with_installation ?await_change ?before_listing ?before_stop ?(make_runner = runner) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
+let with_installation ?await_change ?before_listing ?before_stop ?exported_tool ?(make_runner = runner) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
   let root = Filename.temp_dir "lane-host-cycle-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let config_root = Filename.concat root ".masc/config" in
@@ -153,7 +159,7 @@ let with_installation ?await_change ?before_listing ?before_stop ?(make_runner =
                 let state = { mode = ref mode; resolutions = ref 0 } in
                 Runtime.register_exact_runner (make_runner state);
                 let config = Workspace.default_config root in
-                Runtime.For_testing.with_backend (backend ?await_change ?before_listing ?before_stop worker) (fun () ->
+                Runtime.For_testing.with_backend (backend ?await_change ?before_listing ?before_stop ?exported_tool worker) (fun () ->
                   ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
                   f clock config worker state root;
                   let source = Filename.concat directory "quiz.toml" in
@@ -240,8 +246,7 @@ let test_retirement_cancels_exact_before_worker_cleanup_finishes () =
       Fun.protect ~finally:(fun () -> Eio.Promise.resolve finish ()) (fun () ->
         Eio.Promise.resolve enter ();
         (* Only retirement can end this provider call. *)
-        Eio.Promise.await (fst (Eio.Promise.create ()));
-        Exact.Call_refused (Exact.Provider_unavailable {detail="not reached"}))) in
+        Eio.Promise.await (fst (Eio.Promise.create ())))) in
   let before_stop () =
     Eio.Promise.await finished;
     Eio.Promise.resolve clean ();
@@ -276,6 +281,87 @@ let test_a_started_worker_gets_its_final_result_once () =
     check int "the runner was asked once" 1 !(state.resolutions);
     check bool "the cycle settled" true (member "issue" (host_requests config) = `Null);
     await clock (fun () -> !(worker.observations) >= 1))
+
+let test_an_exported_reply_starts_its_pending_host_work ~is_error () =
+  let tool = Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc [
+    "name", `String "queue_question";
+    "inputSchema", `Assoc ["type", `String "object"]]) |> unwrap in
+  let current_worker = ref None in
+  let invoke arguments =
+    let worker = match !current_worker with
+      | Some worker -> worker | None -> fail "the installation is not ready" in
+    worker.listing := [exact (text "request_id" arguments)];
+    Ok { (Mcp_protocol.Mcp_types.tool_result_of_text "request retained") with
+      is_error = Some is_error } in
+  let manifest = manifest ^ {|[world.tools]
+export=["queue_question"]
+|} in
+  with_installation ~manifest ~exported_tool:(tool, invoke)
+    (fun clock config worker state _root ->
+      current_worker := Some worker;
+      (* Finish initialization before submitting, so startup cannot discover
+         this request. There is no await_change, registry event or reconcile. *)
+      await clock (fun () -> cycles config >= 1 && !(worker.observations) >= 1);
+      let before = cycles config in
+      let export = match Runtime.tool_exports ~config
+        ~access:Lane_addon_sources.Operator_configuration ~reserved:[] |> unwrap with
+        | [export] -> export | _ -> fail "the original tool must be exported" in
+      let reply = match Runtime.call_exported_tool ~config
+        ~access:Lane_addon_sources.Operator_configuration ~reserved:[] ~export
+        ~arguments:(`Assoc ["request_id", `String "submitted-after-startup"]) with
+        | Ok reply -> reply | Error _ -> fail "the admitted worker call failed" in
+      check bool "retain the original worker error flag" is_error (reply.is_error = Some true);
+      await clock (fun () -> List.length !(worker.delivered) = 1);
+      check string "deliver to the submitted original request" "submitted-after-startup"
+        (text "request_id" (List.hd !(worker.delivered)));
+      check string "the host retained an answer" "answered"
+        (delivered_status (List.hd !(worker.delivered)));
+      check int "one model resolution after the exported reply" 1 !(state.resolutions);
+      check bool "a host cycle followed the exported reply" true (cycles config > before))
+
+let test_original_tool_destination_survives_replacement_and_reattachment () =
+  let tool = Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc [
+    "name", `String "queue_question"; "inputSchema", `Assoc ["type",`String "object"]]) |> unwrap in
+  let calls = ref 0 in
+  let invoke _ = incr calls; Ok (Mcp_protocol.Mcp_types.tool_result_of_text "unused") in
+  let manifest = manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n" in
+  with_installation ~manifest ~exported_tool:(tool,invoke) (fun clock config _worker _state root ->
+    let access = Lane_addon_sources.Operator_configuration in
+    let current () = match Runtime.tool_exports ~config ~access ~reserved:[] |> unwrap with
+      | [export] -> Some export | _ -> None in
+    await clock (fun () -> Option.is_some (current ()));
+    let original = Option.get (current ()) in
+    let bind export = Runtime.retain_tool_request_owner ~config ~access ~reserved:[] ~export
+      ~scope:"original-consumer" ~request_id:"original-request" ~request:(`Assoc ["input",`String "original"]) in
+    let accepted = function Ok () -> () | Error _ -> fail "the original installation lost its binding" in
+    accepted (bind original);
+    let directory = Filename.concat root ".masc/config/lane-addons" in
+    let source = Filename.concat directory "quiz.toml" in
+    write source {|id="replacement"
+run_id="quiz-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[]
+|};
+    ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
+    await clock (fun () -> match current () with
+      | Some export -> not (Lane_addon_tool_export.equal_owner original.owner export.owner)
+      | None -> false);
+    let replacement = Option.get (current ()) in
+    (match bind replacement with
+     | Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected _)) -> ()
+     | Ok () | Error (Runtime.Unavailable _ | Runtime.Outcome_unknown _ | Runtime.Host_refusal _) ->
+       fail "a replacement installation claimed original request ownership");
+    write source declaration;
+    ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
+    await clock (fun () -> match current () with
+      | Some export -> not (Lane_addon_tool_export.equal_owner replacement.owner export.owner)
+      | None -> false);
+    accepted (bind (Option.get (current ())));
+    (match bind original with
+     | Error (Runtime.Unavailable _) -> ()
+     | Ok () | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) -> fail "a stale worker handle retained authority");
+    check int "binding never invokes a worker tool" 0 !calls)
 
 let test_a_request_that_is_not_final_waits_for_the_next_event () =
   with_installation ~listing:[ exact "r2" ] ~mode:Off (fun clock config worker state  _root->
@@ -1126,9 +1212,15 @@ let () =
   run "lane add-on host request cycle"
     [ ( "cycle"
       , [ test_case "a started worker gets its final result once" `Quick test_a_started_worker_gets_its_final_result_once
+        ; test_case "an exported reply starts its pending host work" `Quick
+            (test_an_exported_reply_starts_its_pending_host_work ~is_error:false)
+        ; test_case "an exported worker error can retain pending host work" `Quick
+            (test_an_exported_reply_starts_its_pending_host_work ~is_error:true)
         ; test_case "model events admit and withdraw one exact scope" `Quick test_model_events_admit_and_withdraw_an_exact_scope
         ; test_case "withdrawal event can precede a stale listing" `Quick test_withdrawal_event_before_stale_listing
         ; test_case "retirement cancels exact before worker cleanup finishes" `Quick test_retirement_cancels_exact_before_worker_cleanup_finishes
+        ; test_case "original tool destination survives replacement and reattachment" `Quick
+            test_original_tool_destination_survives_replacement_and_reattachment
         ; test_case "a request that is not final waits for the next event" `Quick
             test_a_request_that_is_not_final_waits_for_the_next_event
         ; test_case "a request listed again after delivery ends the cycle" `Quick

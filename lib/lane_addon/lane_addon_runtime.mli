@@ -69,6 +69,15 @@ val tool_exports : config:Workspace.config -> access:Lane_addon_sources.access -
 (** Reads initialized live workers only; does not start or recover installations.
     The caller supplies the complete reserved host namespace. Collisions fail
     explicitly. Visibility follows verified caller authority. *)
+val retain_tool_request_owner : config:Workspace.config -> access:Lane_addon_sources.access ->
+  reserved:string list -> export:tool_export -> scope:string -> request_id:string -> request:Yojson.Safe.t ->
+  (unit, tool_call_error) result
+(** Trusted host consumer boundary, before any RPC for an original request.
+    Durably binds its scope/ID and captured request to this logical installation,
+    package and tool. A restarted worker on that installation retains ownership;
+    a replacement installation cannot claim absence and cause redispatch.
+    Current export authority is checked here and still rechecked by each call.
+    This binding neither executes work nor uses an observer receipt as authority. *)
 val call_exported_tool_with_authority : on_complete:(unit -> unit) -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal option ->
   config:Workspace.config -> access:Lane_addon_sources.access -> reserved:string list ->
   export:tool_export -> arguments:Yojson.Safe.t ->
@@ -78,7 +87,10 @@ val call_exported_tool_with_authority : on_complete:(unit -> unit) -> on_result:
     [on_result] records replies under worker RPC serialization. [on_complete]
     runs on the owner domain after mediation unwinds, including cancellation;
     caller cancellation alone does not run it. Both callbacks must be synchronous
-    and must not publish effects or acquire credential admission. *)
+    and must not publish effects or acquire credential admission. A completed
+    worker reply also schedules observation and, when this worker has host
+    requests, a host cycle. This includes worker error replies that may follow
+    a durable state change; host admission refusals do not trigger a cycle. *)
 val call_exported_tool_with_principal : principal:Lane_addon_call_context.principal option ->
   config:Workspace.config -> access:Lane_addon_sources.access -> reserved:string list ->
   export:tool_export -> arguments:Yojson.Safe.t ->

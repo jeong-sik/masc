@@ -551,8 +551,10 @@ the existing `keeper_artifact_read` artifact; identity and metadata stay bound t
 the original command. Later reads reuse the acknowledged publication.
 
 Retire closes fresh admission but still accepts the original exact Commit and
-Release. It joins active preparations and claims, including a committed claim
-whose host has not released it. The worker's outer shutdown scope observes the
+Release. It joins local preparations. A claimed or committed grant whose holder
+has not released it prevents deletion and returns a sticky failure without
+waiting for the remote holder. All files and exact grant states remain; late
+Commit and Release cannot clear that failure. The worker's outer shutdown scope observes the
 same cleanup when caller cancellation bypassed an orderly host Retire. Open Gecko
 teardown closes the original session before joining its BiDi reader, and the
 release fallback observes the same once-only close. Cleanup removes only exact

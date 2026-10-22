@@ -192,6 +192,8 @@ let test_worker_pays_once_with_isolated_inputs_and_integer_evidence () =
      check (list string) "grade sees no Task, identity, cost or priority" ["goal";"grades"] (keys (A.input (A.Grade goal)));
      check (list string) "relation sees only one title and the Goal"
        ["goal";"task_title"] (keys (A.input (A.Relation first)));
+     check (list string) "each relation retains the original candidate task ID"
+       ["task-a";"task-b";"external"] [first.task_id;second.task_id;third.task_id];
      check (list string) "only completion-window tasks are judged"
        ["Store the ledger";"Test the ledger";"Operator's contribution"]
        [first.task_title;second.task_title;third.task_title];
@@ -211,6 +213,47 @@ let test_worker_pays_once_with_isolated_inputs_and_integer_evidence () =
     (List.map (fun (r : A.task_relation) -> r.trace.run_id) p.relations);
   let decoded = Candle_payment.of_yojson (Candle_payment.to_yojson p) |> ok in
   check bool "ledger decode retains the issued payment and its evidence" true (decoded = p)
+
+let test_equal_task_titles_keep_distinct_retained_appraisals () =
+  with_workspace @@ fun _env config ->
+  let waiting, rows = obligation "same-task-titles" in
+  append config rows;
+  let sources : Candle_candidates.sources = {
+    task_lookups=(fun ~goal_id:_ ids -> Ok (List.map (fun id ->
+      let lookup = match List.assoc id task_rows with
+        | E.Found task -> E.Found {task with title="Same contribution title"}
+        | E.Deleted -> E.Deleted in
+      id, lookup) ids));
+    is_keeper=(fun () -> Ok (fun name -> List.mem name ["keeper-a";"keeper-b"]))} in
+  ignore (Candle_candidates.drain_with ~sources ~now ~base_path:config.base_path |> ok);
+  let calls = ref [] and relations = ref [] in
+  let appraise ~identity request =
+    (match request with
+     | A.Relation relation ->
+       let intent = Candle_appraisal_intent.make ~identity ~prompt:"Judge only the captured contribution." request |> ok in
+       let replay = Candle_appraisal_intent.make ~identity ~prompt:"Judge only the captured contribution." request |> ok in
+       check string "reconstructing an original request retains its ID"
+         (Candle_appraisal_intent.request_id intent) (Candle_appraisal_intent.request_id replay);
+       let snapshot = Candle_appraisal_intent.to_worker_request intent in
+       check string "the worker retains the original task" relation.task_id
+         Yojson.Safe.Util.(to_string (member "task_id" snapshot));
+       check bool "only the original Goal/title reach model input" true
+         Yojson.Safe.(equal Util.(member "input" snapshot) (A.input request));
+       relations := !relations @ [relation.task_id, intent]
+     | A.Grade _ | A.Weights _ -> ());
+    make_runner calls ~identity request in
+  (match drain config appraise with
+   | [Candle_appraise.Settled goal_id] -> check string "original payout settled" waiting.goal_id goal_id
+   | _ -> fail "the equal-title payout did not settle");
+  check (list string) "each original candidate is retained" ["task-a";"task-b";"external"]
+    (List.map fst !relations);
+  let ids = List.map (fun (_, intent) -> Candle_appraisal_intent.request_id intent) !relations in
+  check int "equal titles never reuse another task's model request" 3
+    (List.length (List.sort_uniq String.compare ids));
+  (match List.map (fun (_, intent) -> A.input (Candle_appraisal_intent.request intent)) !relations with
+   | [first;second;third] -> check bool "audit IDs add no model evidence" true (first=second && second=third)
+   | _ -> fail "three relation inputs were expected");
+  ignore (one_payment config waiting.goal_id)
 
 let test_allowed_large_weights_settle_with_exact_money_and_evidence () =
   let scenario ~goal_id ~amount ~weight_max ~weight expected =
@@ -671,72 +714,6 @@ let test_slow_goal_does_not_block_another_and_wakes_do_not_overlap_it () =
   ignore (one_payment config "slow");
   check int "settled Goal is never appraised again" 1 !slow_grades
 
-let test_server_records_the_request_before_dispatch_and_retains_its_answer () =
-  with_workspace @@ fun _env config ->
-  let path = Filename.concat config.base_path "appraisal-runs.jsonl" in
-  let registry = Runs.create ~path () in
-  (match Runs.install_global registry with Ok () -> () | Error Runs.Already_installed -> fail "fixture registry already installed");
-  let identity : A.identity = {goal_id="receipt";request_id="receipt-request";verification_run_id="receipt-verifier"} in
-  let request = A.Grade {goal={title="Ship the ledger";metric=Some "tests";target_value=Some "10"};
-    grades=[Option.get (Candle_grade.of_string "medium"), "Connected feature"]} in
-  let execute ~request:_ ~prompt:_ =
-    let run = match Runs.list_runs registry with
-      | [run] -> run | _ -> fail "request must be registered before dispatch" in
-    check bool "dispatch observes a Running request" true (run.status = Runs.Running);
-    let rows = In_channel.with_open_text path In_channel.input_lines
-      |> List.map Yojson.Safe.from_string in
-    check bool "registration is on disk before dispatch" true
-      (List.exists (fun json -> Yojson.Safe.Util.(member "event" json = `String "register"
-        && member "id" json = `String run.run_id)) rows);
-    Ok (`Assoc ["grade",`String "medium"], "fixture.http") in
-  let answer = match Server_candle_appraiser.For_testing.run ~base_path:config.base_path ~execute ~identity request with
-    | Ok answer -> answer | Error error -> fail (A.error_to_string error) in
-  let replayed = Runs.replay path in
-  let stored = match Runs.get replayed ~run_id:answer.trace.run_id with Some run -> run | None -> fail "completed receipt vanished" in
-  (match stored.status with
-   | Runs.Completed {outcome=Runs.Succeeded;selected_slot=Some slot;output;_} ->
-     check string "answering slot is durable" "fixture.http" slot;
-     check bool "accepted output is durable" true
-       Yojson.Safe.Util.(member "result" output = `Assoc ["grade",`String "medium"])
-   | _ -> fail "receipt lost successful answer");
-  let Runs.Exact_input input = stored.input in
-  check bool "receipt keeps verifier identity outside model input" true
-    Yojson.Safe.Util.(member "verification_run_id" input = `String identity.verification_run_id);
-  check bool "exact grading input survives restart" true
-    Yojson.Safe.Util.(member "actual_input" input = A.input request);
-  let empty_prompts = Filename.concat config.base_path "empty-prompts" in
-  Fs_compat.mkdir_p empty_prompts;
-  Fun.protect ~finally:(fun () -> Prompt_registry.set_markdown_dir "../config/prompts")
-    (fun () ->
-      Prompt_registry.set_markdown_dir empty_prompts;
-      let dispatched = ref false in
-      let execute ~request:_ ~prompt:_ =
-        dispatched := true;
-        Ok (`Assoc ["grade",`String "medium"], "fixture.http") in
-      (match Server_candle_appraiser.For_testing.run ~base_path:config.base_path ~execute ~identity request with
-       | Error (A.Transport_unavailable _) -> ()
-       | Error (A.Invalid_response _) -> fail "missing prompt is a source failure"
-       | Error (A.Execution_rejected _) -> fail "missing prompt is a recoverable source failure"
-       | Ok _ -> fail "missing prompt was accepted");
-      check bool "missing prompt does not dispatch a provider" false !dispatched;
-      let replayed = Runs.replay path in
-      let failures = Runs.list_runs replayed
-        |> List.filter (fun run -> run.Runs.run_id <> answer.trace.run_id) in
-      let failure = match failures with
-        | [summary] -> (match Runs.get replayed ~run_id:summary.run_id with
-            | Some full -> full
-            | None -> fail "missing prompt receipt cannot be loaded")
-        | _ -> fail "missing prompt lost its failed run receipt" in
-      let Runs.Exact_input input = failure.input in
-      match failure.status with
-      | Runs.Completed {outcome=Runs.Failed {code;_};selected_slot=None;output;_} ->
-        check string "render failure is recorded" "candle_appraisal_unavailable" code;
-        check bool "failed render invents no prompt" true
-          Yojson.Safe.Util.(member "rendered" (member "prompt" input) = `Null);
-        check bool "failed render dispatches no slot" true
-          Yojson.Safe.Util.(member "attempts" output = `List [])
-      | _ -> fail "missing prompt lost its failed run outcome")
-
 let test_clock_reversal_retries_but_malformed_history_rejects () =
   with_workspace @@ fun _env config ->
   let waiting = prepared config "clock-catchup" in
@@ -758,89 +735,72 @@ let test_clock_reversal_retries_but_malformed_history_rejects () =
       ~base_path:config.base_path malformed with
    | Candle_appraise.Rejected _ -> () | _ -> fail "reversed historical order became retryable")
 
-(* An actual lane publication repairs the provider, without a new Goal or
-   manual payout event. The normal maintenance pulse must reconsider debt. *)
-let test_published_appraiser_repair_releases_rejected_payout ~in_flight () =
+(* Only the Add-on port is scripted. The server consumer renders and retains
+   original intents, then the real payout worker decides the ledger effect. *)
+let test_retained_addon_results_resume_the_original_payout () =
   with_workspace @@ fun env config ->
-  let module F = Exact_output_fixture in
-  let module R = Runtime_exact_output_registry in
-  let waiting = prepared config "configuration-recovery" in
+  let waiting = prepared config "addon-recovery" in
+  let registry = Runs.create () in
+  let records = Hashtbl.create 8 in
+  let ready = ref false and submissions = ref 0 in
+  let reply id state extra =
+    let structured_content = `Assoc (["request_id", `String id; "state", `String state] @ extra) in
+    Ok {(Mcp_protocol.Mcp_types.tool_result_of_text "scripted Add-on state") with
+      structured_content=Some structured_content} in
+  let answer request =
+    let input = Yojson.Safe.Util.member "input" request in
+    match Yojson.Safe.Util.(to_string (member "stage" request)) with
+    | "grade" -> `Assoc ["grade", `String "medium"]
+    | "relation" -> `Assoc ["relation", `String "related"]
+    | "weights" ->
+      let keepers = Yojson.Safe.Util.(to_list (member "keepers" input)) in
+      `Assoc ["weights", `Assoc (List.map (fun keeper -> Yojson.Safe.Util.to_string keeper, `Int 1) keepers)]
+    | _ -> fail "unexpected appraisal stage" in
+  let status id request =
+    if !ready then reply id "finished" ["result", `Assoc ["status", `String "answered";
+      "output", answer request; "slot", `String "scripted-addon-exact"]]
+    else reply id "pending" [] in
+  let call ~arguments =
+    match Yojson.Safe.Util.(to_string (member "kind" arguments)) with
+    | "read" ->
+      let id = Yojson.Safe.Util.(to_string (member "request_id" arguments)) in
+      (match Hashtbl.find_opt records id with
+       | None -> reply id "absent" []
+       | Some request -> status id request)
+    | "submit" ->
+      let request = Yojson.Safe.Util.member "request" arguments in
+      let id = Yojson.Safe.Util.(to_string (member "request_id" request)) in
+      incr submissions;
+      check bool "each original judgment is submitted once" false (Hashtbl.mem records id);
+      Hashtbl.add records id request;
+      status id request
+    | _ -> fail "unexpected Add-on operation" in
+  let store = Lane_addon_store.create ~root:(Filename.concat config.base_path "request-ownership") in
+  let retain ~request_id ~request = Lane_addon_tool_request_owner.retain ~store
+    ~scope:"candle-appraisals" ~request_id ~installation_id:"original-installation"
+    ~package_id:"candle-appraiser" ~tool:"candle_appraise" ~request
+    |> Result.map_error (fun error -> Lane_addon_runtime.Unavailable (Lane_addon_tool_request_owner.error_to_string error)) in
+  let appraise = Server_candle_appraiser.For_testing.run ~registry ~base_path:config.base_path ~retain ~call in
   Eio.Switch.run (fun sw ->
-    let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
-    Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
-    @@ fun () ->
-    let release, release_refusal = Eio.Promise.create () in
-    let refused = F.start_server ~sw ~net ~clock
-      (F.Reply_with (fun _ _ ->
-         if in_flight then Eio.Promise.await release;
-         `Bad_request,
-         {|{"error":{"message":"model configuration refused","type":"invalid_request_error"}}|})) in
-    let answers =
-      [`Assoc ["grade", `String "medium"];
-       `Assoc ["relation", `String "related"];
-       `Assoc ["relation", `String "related"];
-       `Assoc ["relation", `String "related"];
-       `Assoc ["weights", `Assoc ["keeper-a", `Int 2; "keeper-b", `Int 1]]] in
-    let repaired = F.start_server ~sw ~net ~clock
-      (F.Replies (List.map F.openai_response answers)) in
-    let publish ?(unrelated = false) id base_url =
-      let snapshot = F.resolver_snapshot ~source:config.base_path [{F.id; base_url}] in
-      let lane : Runtime_schema.exact_output_lane_decl =
-        {owner = Runtime_schema.Builtin Standalone_lane.Candle_appraiser;enabled = true; slot_ids=[id];cli_slot_ids=[];
-         max_output_tokens=Some F.fixture_max_output_tokens;thinking=None} in
-      let lanes = if unrelated then [lane; {lane with owner = Runtime_schema.Builtin Standalone_lane.Librarian}] else [lane] in
-      match R.publish ~lanes snapshot with
-      | Ok _ -> () | Error error -> fail (R.publication_error_to_string error) in
-    publish "refused-slot" refused.base_url;
-    let probe = Server_candle_appraiser.declaration_change_probe () in
-    let samples = ref 0 in
-    let appraiser_declaration_changed () = incr samples; probe () in
-    let appraise = Server_candle_appraiser.run ~base_path:config.base_path in
-    Candle_payout_worker.start ~sw ~config ~appraise ~appraiser_declaration_changed ();
-    await env "permanent provider refusal" (fun () -> F.post_count refused = 1);
-    if not in_flight then (
-      idle env;
-      publish "refused-slot" refused.base_url;
-      Candle_payout_worker.pulse ();
-      idle env;
-      check int "same declaration does not retry refusal" 1 (F.post_count refused);
-      publish ~unrelated:true "refused-slot" refused.base_url;
-      Candle_payout_worker.pulse ();
-      idle env;
-      check int "unrelated publication does not retry refusal" 1 (F.post_count refused));
-    publish "repaired-slot" repaired.base_url;
-    if in_flight then (
-      let sampled = !samples in
-      Candle_payout_worker.pulse ();
-      await env "changed declaration sampled during old call" (fun () -> !samples > sampled);
-      check int "repair does not overlap the old call" 0 (F.post_count repaired);
-      Eio.Promise.resolve release_refusal ())
-    else (
-      let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
-      let enabled = Fs_compat.load_file path in
-      Fs_compat.save_file path "invalid = true\n";
-      let sampled = !samples in
-      Candle_payout_worker.pulse ();
-      idle env;
-      check int "disabled worker retains declaration baseline" sampled !samples;
-      check int "disabled worker does not dispatch repair" 0 (F.post_count repaired);
-      Fs_compat.save_file path enabled;
-      Candle_payout_worker.pulse ());
-    await env "retained obligation paid after normal pulse" (fun () -> paid config waiting.goal_id <> []);
+    Candle_payout_worker.start ~sw ~config ~appraise ();
     idle env;
-    let payment = one_payment config waiting.goal_id in
-    check string "same obligation is settled" waiting.request_id payment.identity.request_id;
-    check int "declared grade amount is conserved" 3001 payment.total_milli;
-    check int "allocation shares conserve the grade amount" payment.total_milli
-      (List.fold_left (fun total (a : Candle_payment.allocation) -> total + a.share_milli)
-         0 payment.allocations);
-    check int "every eligible task has a relation" 3 (List.length payment.relations);
-    check int "real Grade, three Relations and Weights completed" 5 (F.post_count repaired);
-    check int "original refusal dispatched once" 1 (F.post_count refused);
+    check int "only Grade is pending" 1 !submissions;
+    check int "pending judgment cannot authorize payment" 0 (List.length (paid config waiting.goal_id));
     Candle_payout_worker.pulse ();
     idle env;
-    check int "later pulse appends no second payment" 1 (List.length (paid config waiting.goal_id));
-    check int "later pulse does not appraise paid debt" 5 (F.post_count repaired))
+    check int "a pulse reads the retained original Grade" 1 !submissions;
+    ready := true;
+    Candle_payout_worker.pulse ();
+    await env "retained Add-on answers settle original obligation" (fun () -> paid config waiting.goal_id <> []);
+    idle env;
+    check int "Grade, three original Relations and Weights" 5 !submissions;
+    let payment = one_payment config waiting.goal_id in
+    check string "same obligation is paid" waiting.request_id payment.identity.request_id;
+    check string "trace names the actual answering host slot" "scripted-addon-exact" payment.grade_trace.slot_id;
+    Candle_payout_worker.pulse ();
+    idle env;
+    check int "settled debt is not submitted again" 5 !submissions;
+    check int "Paid is appended once" 1 (List.length (paid config waiting.goal_id)))
 
 (* Use the HTTP mutation boundary and real payout worker. Only model judgment
    is controlled; failed persistence and unrelated edits must not release debt. *)
@@ -932,39 +892,6 @@ let test_prompt_mutation_retries_rejected_payout ?(preset=false) ~clear () =
     [Prompt_names.candle_appraiser_grade; Prompt_names.candle_appraiser_relation;
      Prompt_names.candle_appraiser_weights]
 
-let test_declaration_probe_retains_usable_baseline () =
-  with_workspace @@ fun _env config ->
-  let module F = Exact_output_fixture in
-  let module R = Runtime_exact_output_registry in
-  let snapshot = F.resolver_snapshot ~source:config.base_path
-      [{F.id="slot-a";base_url="http://127.0.0.1:1"};
-       {F.id="slot-b";base_url="http://127.0.0.1:1"}] in
-  let publish ?(lane_id="candle_appraiser") id =
-    ignore (F.publish_registry ~lane_id ~slot_ids:[id] snapshot : R.t) in
-  let registry_ok = function Ok value -> value
-    | Error error -> fail (R.publication_error_to_string error) in
-  publish "slot-a";
-  let probe = Server_candle_appraiser.declaration_change_probe () in
-  check bool "initial declaration seeds baseline" false (probe ());
-  let retained = Option.get (R.prepare_retention ()) in
-  let reservation = registry_ok (R.For_testing.reserve_replacement retained) in
-  check bool "busy publication is not a change" false (probe ());
-  (match R.For_testing.abort_replacement reservation with
-   | Ok () -> () | Error _ -> fail "reservation abort failed");
-  ignore (registry_ok (R.unpublish ()));
-  check bool "unpublished registry is not a change" false (probe ());
-  publish ~lane_id:"librarian_exact" "slot-b";
-  check bool "missing Candle declaration is not a change" false (probe ());
-  publish "slot-a";
-  check bool "same declaration after missing stays unchanged" false (probe ());
-  publish "slot-b";
-  check bool "changed usable declaration recovers" true (probe ());
-  check bool "change is consumed once" false (probe ());
-  ignore (registry_ok (R.unpublish ()));
-  let initially_missing = Server_candle_appraiser.declaration_change_probe () in
-  publish "slot-a";
-  check bool "first usable declaration seeds missing baseline" false (initially_missing ())
-
 let test_configured_grade_and_distribution_reach_the_ledger () =
   List.iter (fun (rounding, tie, deduction, total, expected_shares, expected_amounts, unallocated) ->
     with_workspace @@ fun env config ->
@@ -1030,12 +957,11 @@ let () =
       ;test_case "preset appraisal prompt clear retries rejected payout" `Quick
         (test_prompt_mutation_retries_rejected_payout ~preset:true ~clear:true)
       ;test_case "persisted appraisal prompt clear retries rejected payout" `Quick (test_prompt_mutation_retries_rejected_payout ~clear:true)
-      ;test_case "published appraiser repair releases rejected payout" `Quick (test_published_appraiser_repair_releases_rejected_payout ~in_flight:false)
-      ;test_case "publication during refusal retains recovery event" `Quick (test_published_appraiser_repair_releases_rejected_payout ~in_flight:true)
-      ;test_case "declaration probe retains usable baseline" `Quick test_declaration_probe_retains_usable_baseline
+      ;test_case "retained Add-on results resume the original payout" `Quick test_retained_addon_results_resume_the_original_payout
       ;test_case "finite overflow retries after decay" `Quick test_finite_overflow_retries_after_decay
       ;test_case "clock catch-up retries but malformed history rejects" `Quick test_clock_reversal_retries_but_malformed_history_rejects
       ;test_case "worker pays once with isolated judgments and arithmetic" `Quick test_worker_pays_once_with_isolated_inputs_and_integer_evidence
+      ;test_case "equal task titles keep distinct retained appraisals" `Quick test_equal_task_titles_keep_distinct_retained_appraisals
       ;test_case "allowed large weights preserve exact money and Paid evidence" `Quick test_allowed_large_weights_settle_with_exact_money_and_evidence
       ;test_case "invalid weights wait for an event, not a pulse" `Quick test_invalid_weights_wait_for_an_event_not_a_pulse
       ;test_case "provider refusal waits for an event" `Quick test_refused_transport_waits_for_an_event
@@ -1050,4 +976,4 @@ let () =
       ;test_case "disable before ledger decision preserves waiting" `Quick test_disable_before_ledger_decision_preserves_the_obligation
       ;test_case "cumulative overflow refuses the real settlement" `Quick test_cumulative_overflow_refuses_the_real_settlement
       ;test_case "slow Goal cannot hold another or overlap itself" `Quick test_slow_goal_does_not_block_another_and_wakes_do_not_overlap_it
-      ;test_case "server receipt is durable before dispatch and after answer" `Quick test_server_records_the_request_before_dispatch_and_retains_its_answer]]
+]]

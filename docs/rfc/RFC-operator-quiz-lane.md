@@ -364,7 +364,7 @@ Both join the list of control tools that cannot be exported (`lib/lane_addon/lan
 
 **When the host asks.** Only on these five existing events, never on a timer:
 1. the worker finished initializing: first start, restart, or a new worker after `enabled = true`;
-2. an action of that instance reached a terminal receipt: a scheduled or ad hoc `compose`, a `dispute` or an `export`;
+2. an action of that instance reached a terminal receipt: a scheduled or ad hoc `compose`, a `dispute` or an `export`; or an exported worker tool returned a completed reply. Worker error replies also count because the worker may already have retained a request. A host admission refusal is not a completed worker reply;
 3. an installation question of that installation was answered (K4);
 4. a publication changed one of its add-on lanes (registry subscription, §3.3), for example when the operator edits that lane's table;
 5. its declaration was reconciled.

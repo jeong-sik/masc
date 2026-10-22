@@ -1,0 +1,428 @@
+{
+  "schema": "masc.transport_latency.v1",
+  "recorded_at": "2026-10-22T01:07:20.331Z",
+  "runner_sha256": "9543ead0698597854a6dd0ae20aa61d0079d2b063b2ed494fbab9c03139ea85d",
+  "base_url": "http://127.0.0.1:8935",
+  "node_version": "v26.3.0",
+  "options": {
+    "samples": 6,
+    "interval_ms": 1200,
+    "timeout_ms": 10000,
+    "method": "ping"
+  },
+  "authenticated": true,
+  "scope": "Read-only same-method MCP requests; rotating sequential warm connections. Setup excluded. HTTP JSON uses the MASC force-JSON header with both MCP Accept types. HTTP SSE means finite POST response, not observer push. Body bytes exclude headers, framing and TLS. Ambient server CPU/RSS are not attributable to one transport. No throughput or browser-render claim.",
+  "timing_scope": "total_ms ends after parsing and JSON-RPC ID/result validation, before canonical hash calculation in every lane. One method warmup per lane is separately retained. client_cpu_us is this Node process CPU during that request window, including unsolicited WS traffic, not server or browser CPU.",
+  "before": {
+    "identity": {
+      "runtime_instance_id": "01a160dc-5497-7000-a47b-361987628cc8",
+      "binary_commit": "b43722cb596bed252b7c4bb626173773550d1438",
+      "executable_sha256": "5753a7d54b223acb673462a8ebe17ad1588535129fc2f143ba39144600a5e7e3"
+    },
+    "scheduler": {
+      "pool_domains": 14,
+      "probe": "running",
+      "interval_ms": 100,
+      "window_s": 60,
+      "stall_threshold_ms": 1000,
+      "lag": {
+        "samples": 600,
+        "p50_ms": 1.1642499999999916,
+        "p95_ms": 1.9541669999999929,
+        "p99_ms": 4.394249999999989,
+        "max_ms": 24.328249999999997,
+        "mean_ms": 1.2611146616666615,
+        "stalls": 0,
+        "over_50ms_count": 0,
+        "over_200ms_count": 0
+      }
+    },
+    "overall_status": "degraded"
+  },
+  "after": {
+    "identity": {
+      "runtime_instance_id": "01a160dc-5497-7000-a47b-361987628cc8",
+      "binary_commit": "b43722cb596bed252b7c4bb626173773550d1438",
+      "executable_sha256": "5753a7d54b223acb673462a8ebe17ad1588535129fc2f143ba39144600a5e7e3"
+    },
+    "scheduler": {
+      "pool_domains": 14,
+      "probe": "running",
+      "interval_ms": 100,
+      "window_s": 60,
+      "stall_threshold_ms": 1000,
+      "lag": {
+        "samples": 600,
+        "p50_ms": 1.1736659999999899,
+        "p95_ms": 1.9567079999999875,
+        "p99_ms": 4.394249999999989,
+        "max_ms": 24.328249999999997,
+        "mean_ms": 1.2718607766666612,
+        "stalls": 0,
+        "over_50ms_count": 0,
+        "over_200ms_count": 0
+      }
+    },
+    "overall_status": "degraded"
+  },
+  "same_runtime": true,
+  "setup": [
+    {
+      "name": "http_json",
+      "valid": true,
+      "total_ms": 3.132334
+    },
+    {
+      "name": "http_sse",
+      "valid": true,
+      "total_ms": 2.3056250000000063
+    },
+    {
+      "name": "ws",
+      "valid": true,
+      "total_ms": 10.573416000000009
+    }
+  ],
+  "warmup": [
+    {
+      "transport": "http_json",
+      "status": 200,
+      "body_received_ms": 1.2728329999999914,
+      "reused_socket": true,
+      "request_body_bytes": 40,
+      "response_body_bytes": 167,
+      "media_type": "application/json",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 1.3611660000000114,
+      "client_cpu_us": 786
+    },
+    {
+      "transport": "http_sse",
+      "status": 200,
+      "body_received_ms": 1.2780000000000058,
+      "reused_socket": true,
+      "request_body_bytes": 40,
+      "response_body_bytes": 203,
+      "media_type": "text/event-stream",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 1.418999999999997,
+      "client_cpu_us": 814
+    },
+    {
+      "transport": "ws",
+      "valid": false,
+      "error": {
+        "kind": "Error",
+        "code": -32001
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "transport": "ws",
+      "closed": true
+    },
+    {
+      "transport": "http",
+      "status": 204,
+      "valid": true
+    },
+    {
+      "transport": "http",
+      "status": 204,
+      "valid": true
+    }
+  ],
+  "summary": {
+    "http_json": {
+      "attempted": 6,
+      "valid": 6,
+      "failures": 0,
+      "p50_ms": 1.1908339999999953,
+      "p95_ms": 1.4457499999998618,
+      "max_ms": 1.4457499999998618,
+      "client_cpu_p50_us": 389,
+      "request_body_bytes": 245,
+      "response_body_bytes": 1007
+    },
+    "http_sse": {
+      "attempted": 6,
+      "valid": 6,
+      "failures": 0,
+      "p50_ms": 1.2978749999999906,
+      "p95_ms": 1.5634170000000722,
+      "max_ms": 1.5634170000000722,
+      "client_cpu_p50_us": 606,
+      "request_body_bytes": 245,
+      "response_body_bytes": 1223
+    },
+    "ws": {
+      "attempted": 6,
+      "valid": 0,
+      "failures": 6,
+      "p50_ms": null,
+      "p95_ms": null,
+      "max_ms": null,
+      "client_cpu_p50_us": null,
+      "request_body_bytes": 0,
+      "response_body_bytes": 0
+    }
+  },
+  "samples": [
+    {
+      "transport": "http_json",
+      "round": 0,
+      "order": 0,
+      "status": 200,
+      "body_received_ms": 1.1216659999999905,
+      "reused_socket": true,
+      "request_body_bytes": 40,
+      "response_body_bytes": 167,
+      "media_type": "application/json",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 1.1908339999999953,
+      "client_cpu_us": 1072
+    },
+    {
+      "transport": "http_sse",
+      "round": 0,
+      "order": 1,
+      "status": 200,
+      "body_received_ms": 1.1777500000000032,
+      "reused_socket": true,
+      "request_body_bytes": 40,
+      "response_body_bytes": 203,
+      "media_type": "text/event-stream",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 1.2978749999999906,
+      "client_cpu_us": 1026
+    },
+    {
+      "transport": "ws",
+      "round": 0,
+      "order": 2,
+      "valid": false,
+      "elapsed_ms": 0.49741699999999867,
+      "error": {
+        "kind": "Error",
+        "code": -32001
+      }
+    },
+    {
+      "transport": "http_sse",
+      "round": 1,
+      "order": 0,
+      "status": 200,
+      "body_received_ms": 1.463709000000108,
+      "reused_socket": true,
+      "request_body_bytes": 41,
+      "response_body_bytes": 204,
+      "media_type": "text/event-stream",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 1.5634170000000722,
+      "client_cpu_us": 713
+    },
+    {
+      "transport": "ws",
+      "round": 1,
+      "order": 1,
+      "valid": false,
+      "elapsed_ms": 0.5663750000001073,
+      "error": {
+        "kind": "Error",
+        "code": -32001
+      }
+    },
+    {
+      "transport": "http_json",
+      "round": 1,
+      "order": 2,
+      "status": 200,
+      "body_received_ms": 1.0277080000000751,
+      "reused_socket": true,
+      "request_body_bytes": 41,
+      "response_body_bytes": 168,
+      "media_type": "application/json",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 1.075166999999965,
+      "client_cpu_us": 389
+    },
+    {
+      "transport": "ws",
+      "round": 2,
+      "order": 0,
+      "valid": false,
+      "elapsed_ms": 0.7174580000000788,
+      "error": {
+        "kind": "Error",
+        "code": -32001
+      }
+    },
+    {
+      "transport": "http_json",
+      "round": 2,
+      "order": 1,
+      "status": 200,
+      "body_received_ms": 1.1302090000003773,
+      "reused_socket": true,
+      "request_body_bytes": 41,
+      "response_body_bytes": 168,
+      "media_type": "application/json",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 1.2150409999999283,
+      "client_cpu_us": 522
+    },
+    {
+      "transport": "http_sse",
+      "round": 2,
+      "order": 2,
+      "status": 200,
+      "body_received_ms": 0.9016670000000886,
+      "reused_socket": true,
+      "request_body_bytes": 41,
+      "response_body_bytes": 204,
+      "media_type": "text/event-stream",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 0.9645000000000437,
+      "client_cpu_us": 413
+    },
+    {
+      "transport": "http_json",
+      "round": 3,
+      "order": 0,
+      "status": 200,
+      "body_received_ms": 1.3698330000001988,
+      "reused_socket": true,
+      "request_body_bytes": 41,
+      "response_body_bytes": 168,
+      "media_type": "application/json",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 1.4457499999998618,
+      "client_cpu_us": 428
+    },
+    {
+      "transport": "http_sse",
+      "round": 3,
+      "order": 1,
+      "status": 200,
+      "body_received_ms": 0.9278750000003129,
+      "reused_socket": true,
+      "request_body_bytes": 41,
+      "response_body_bytes": 204,
+      "media_type": "text/event-stream",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 0.9859169999999722,
+      "client_cpu_us": 410
+    },
+    {
+      "transport": "ws",
+      "round": 3,
+      "order": 2,
+      "valid": false,
+      "elapsed_ms": 0.34312499999987267,
+      "error": {
+        "kind": "Error",
+        "code": -32001
+      }
+    },
+    {
+      "transport": "http_sse",
+      "round": 4,
+      "order": 0,
+      "status": 200,
+      "body_received_ms": 1.2336670000004233,
+      "reused_socket": true,
+      "request_body_bytes": 41,
+      "response_body_bytes": 204,
+      "media_type": "text/event-stream",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 1.2983750000003056,
+      "client_cpu_us": 606
+    },
+    {
+      "transport": "ws",
+      "round": 4,
+      "order": 1,
+      "valid": false,
+      "elapsed_ms": 0.35258299999986775,
+      "error": {
+        "kind": "Error",
+        "code": -32001
+      }
+    },
+    {
+      "transport": "http_json",
+      "round": 4,
+      "order": 2,
+      "status": 200,
+      "body_received_ms": 0.9659590000001117,
+      "reused_socket": true,
+      "request_body_bytes": 41,
+      "response_body_bytes": 168,
+      "media_type": "application/json",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 0.9997080000002825,
+      "client_cpu_us": 232
+    },
+    {
+      "transport": "ws",
+      "round": 5,
+      "order": 0,
+      "valid": false,
+      "elapsed_ms": 0.5552079999997659,
+      "error": {
+        "kind": "Error",
+        "code": -32001
+      }
+    },
+    {
+      "transport": "http_json",
+      "round": 5,
+      "order": 1,
+      "status": 200,
+      "body_received_ms": 1.1610000000000582,
+      "reused_socket": true,
+      "request_body_bytes": 41,
+      "response_body_bytes": 168,
+      "media_type": "application/json",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 1.212666999999783,
+      "client_cpu_us": 385
+    },
+    {
+      "transport": "http_sse",
+      "round": 5,
+      "order": 2,
+      "status": 200,
+      "body_received_ms": 1.410874999999578,
+      "reused_socket": true,
+      "request_body_bytes": 41,
+      "response_body_bytes": 204,
+      "media_type": "text/event-stream",
+      "valid": true,
+      "result_sha256": "e059af036a8fb28c18ee2c6cc903bf8cfd123935e25e618c4d7dfd3fc52f8f85",
+      "total_ms": 1.465041000000383,
+      "client_cpu_us": 1447
+    }
+  ],
+  "diagnostics": [],
+  "ws_unsolicited": {
+    "messages": 163,
+    "payloads": 163,
+    "body_bytes": 33815
+  },
+  "passed": false
+}

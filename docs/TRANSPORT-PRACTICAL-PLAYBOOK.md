@@ -14,6 +14,21 @@
 
 ## Dashboard
 
+### Performance choice
+
+[2026-10-22 측정](evidence/transport-performance-20261022/README.md)에서 같은
+MCP `ping`의 중앙값은 WS 0.38ms, HTTP JSON 0.75ms, finite POST SSE 0.68ms였다.
+약 81KB인 `tools/list`에서는 각각 2.05ms, 2.15ms, 2.31ms로 차이가 줄었다.
+한 바이너리·격리 workspace·인증 비활성 조건에서 각 30회 측정한 값이다.
+운영 서버에서는 Dashboard hello 인증 뒤에도 일반 MCP ping의 WS 호출이
+`-32001`로 거절됐으므로, 이 수치를 인증된 일반 MCP의 WS 전환 근거로 쓰지 않는다.
+
+지속 연결하는 Dashboard 상호작용에는 WS를 유지하고, 인증된 일반 MCP는
+Streamable HTTP를 쓴다. 단방향 observer SSE와 finite POST SSE 응답은 별개다.
+대용량 snapshot·다운로드·브라우저 렌더링과 서버 CPU/메모리는 이 실험의 측정 범위가 아니다.
+
+### Surfaces
+
 - overview: `http://127.0.0.1:8935/dashboard#/overview`
 - transport snapshot API: `http://127.0.0.1:8935/api/v1/dashboard/transport-health`
 

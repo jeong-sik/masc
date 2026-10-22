@@ -5,6 +5,17 @@ module UI = Masc_tui_lane_addons
 module Draft = Masc_tui_lane_declaration
 module Owner = Masc.Lane_addon_declaration
 let ok = function Ok value -> value | Error message -> fail message
+(* The overview draws a standing mark between the cursor column and the
+   entry. The checks below read the entry text, so they drop the mark. *)
+let entry_lines lines = List.map (fun line ->
+  let plain = Masc_tui_theme.strip_sgr line in
+  List.fold_left (fun plain (cursor, standing) ->
+    let prefix = cursor ^ Masc_tui_lane_standing.mark standing ^ " " in
+    if String.starts_with ~prefix plain
+    then cursor ^ String.sub plain (String.length prefix) (String.length plain - String.length prefix)
+    else plain) plain
+    (List.concat_map (fun cursor -> List.map (fun standing -> cursor, standing)
+      Masc_tui_lane_standing.all) ["> "; "  "])) lines
 let read_ok = function Ok value -> value | Error _ -> fail "request scope was refused"
 let owner_ok = function Ok value -> value | Error error -> fail error.Owner.message
 let write path text = Out_channel.with_open_bin path (fun channel -> output_string channel text)
@@ -261,7 +272,7 @@ let configuration_and_ports () =
     (issue.focus=UI.Configurations && issue.presentation=UI.Technical
      && issue.configuration_cursor=1);
   let raw_issue = UI.lines ~width:120
-    {overview with instance_cursor=1; focus=UI.Instances; presentation=UI.Technical} in
+    {overview with instance_cursor=1; focus=UI.Instances; presentation=UI.Technical} |> entry_lines in
   check bool "raw detail follows the selected unresolved installation" true
     (List.exists
       (String.starts_with ~prefix:"> unresolved installation · /config/lane-addons/broken.toml")
@@ -297,7 +308,7 @@ let configuration_and_ports () =
       complete_config.declarations} in
   let off_snapshot = {snapshot with configuration=Some off_config} in
   check bool "desired off is visible while the same worker is still attached" true
-    (UI.lines ~width:160 {overview with snapshot=Some off_snapshot}
+    (UI.lines ~width:160 {overview with snapshot=Some off_snapshot} |> entry_lines
      |> List.exists (String.starts_with ~prefix:"> custom · Custom layer · off requested · attached"));
   let complete = {snapshot with configuration=Some complete_config} in
   let choices = UI.subscription_targets {view with snapshot=Some complete} in
@@ -329,14 +340,14 @@ let configuration_and_ports () =
     (UI.selected_source_path selected_unapplied);
   check bool "saved declaration is shown without claiming an active worker" true
     (List.exists (String.starts_with ~prefix:"  custom · no current worker · custom.toml")
-       (UI.lines ~width:120 {overview with snapshot=Some past}));
+       (UI.lines ~width:120 {overview with snapshot=Some past} |> entry_lines));
   let wrong_source = {snapshot with instances=List.map (fun (i : UI.instance) ->
     {i with source_path=Some "/config/lane-addons/elsewhere.toml"}) snapshot.instances} in
   check int "matching worker ID at another source cannot hide a declaration" 6
     (UI.overview_count wrong_source);
   check (option string) "retained historical source does not authorize a new owner edit" None
     (UI.selected_source_path {view with focus=UI.Instances;snapshot=Some past});
-  let lines = UI.lines ~width:100 view in
+  let lines = UI.lines ~width:100 view |> entry_lines in
   check bool "unknown parse identity remains unknown" true
     (List.exists (String.starts_with ~prefix:"> unresolved installation") lines);
   let worker_detail = UI.open_selected_instance {view with focus=UI.Instances;instance_cursor=0} in
@@ -469,13 +480,13 @@ let guided_actions () =
     input_sha256=UI.Action.input_digest input;action=request.action;state=UI.Action.Confirmed;
     result=Some (`Assoc []);detail=None} in
   ignore (UI.action_receipt request (UI.Action.to_json receipt) |> ok);
-  let compact = UI.lines ~width:100 {UI.initial with focus=UI.Instances; snapshot=Some snapshot} in
+  let compact = UI.lines ~width:100 {UI.initial with focus=UI.Instances; snapshot=Some snapshot} |> entry_lines in
   check bool "first screen names installed package" true
     (List.exists (fun line -> String.starts_with ~prefix:"> Useful observer" line) compact);
   let failed = {instance with title="MSX";phase=UI.Row.Failed (String.make 120 'x');
     action_schema=None} in
   let failed_lines = UI.lines ~width:76 {UI.initial with focus=UI.Instances;
-    snapshot=Some {snapshot with instances=[failed]}} in
+    snapshot=Some {snapshot with instances=[failed]}} |> entry_lines in
   check bool "failed row keeps retry and cleanup visible with its long reason" true
     (List.exists (String.starts_with ~prefix:"> MSX · failed") failed_lines
      && List.exists (String.starts_with
@@ -486,6 +497,25 @@ let guided_actions () =
     (List.fold_left (fun total line ->
        String.fold_left (fun total char -> if char='x' then total+1 else total) total line)
        0 failed_lines);
+  let module S = Masc_tui_lane_standing in
+  let standing = testable (fun f value -> Format.pp_print_string f (S.word value)) ( = ) in
+  check standing "a failed worker is failing" S.Failing (UI.instance_standing ~off_requested:false failed);
+  check standing "an attached worker is ready" S.Ready
+    (UI.instance_standing ~off_requested:false {instance with phase=UI.Row.Attached});
+  check standing "an attached worker whose declaration is switched off is changing" S.Changing
+    (UI.instance_standing ~off_requested:true {instance with phase=UI.Row.Attached});
+  check standing "an attached worker this server does not hold is unknown" S.Unobserved
+    (UI.instance_standing ~off_requested:false
+       {instance with phase=UI.Row.Attached;runtime_presence=UI.Retained_binding});
+  let declaration = {UI.source_path="/config/lane-addons/custom.toml";installation_id=Some "custom";
+    enabled=Some true;desired=Some "1";applied=None;instance_id=None;issues=[];
+    origin=UI.Parsed_declaration;application=None} in
+  check standing "a declaration with a TOML issue is failing" S.Failing
+    (UI.declaration_entry_standing {declaration with issues=["invalid TOML"]});
+  check standing "a declaration switched off is off" S.Off
+    (UI.declaration_entry_standing {declaration with enabled=Some false});
+  check standing "an applied declaration with no worker now waits" S.Waiting
+    (UI.declaration_entry_standing {declaration with applied=Some "1"});
   check bool "technical action schema is folded by default" false
     (List.exists (fun line -> String.contains line '{') compact);
   let form_schema = match schema with
@@ -601,7 +631,7 @@ let context_flow_uses_declared_connections () =
     (List.mem "  project-observer -> project-metric" (UI.lines ~width:160 view));
   let configured = {view with presentation=UI.Summary;focus=UI.Configurations;
     configuration_cursor=0;instance_cursor=1} in
-  let configured_lines = UI.lines ~width:160 configured in
+  let configured_lines = UI.lines ~width:160 configured |> entry_lines in
   let flow = UI.toggle_flow {configured with presentation=UI.Technical} in
   check bool "entering Flow moves hidden configuration focus to visible instances" true
     (flow.focus=UI.Instances && flow.presentation=UI.Flow);
@@ -652,7 +682,7 @@ let context_flow_uses_declared_connections () =
   check bool "overview starts with its selected worker regardless of hidden focus" true
     (List.exists (String.starts_with ~prefix:"> project-metric · Project metric · attached") configured_lines
      && not (List.exists (String.starts_with ~prefix:"  project-observer · Project observer · attached") configured_lines));
-  let observer_lines = UI.lines ~width:160 {configured with instance_cursor=0} in
+  let observer_lines = UI.lines ~width:160 {configured with instance_cursor=0} |> entry_lines in
   check bool "moving selection still exposes the preceding observer" true
     (List.exists (String.starts_with ~prefix:"> project-observer · Project observer · attached") observer_lines
      && List.exists (String.starts_with ~prefix:"  project-metric · Project metric · attached") observer_lines);
@@ -1322,7 +1352,7 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
     title=Printf.sprintf "Worker %d" index;
     display={display with description=Some (String.concat " " (List.init 30 (fun _ -> Printf.sprintf "description-%d" index)))}}) in
   let selected_overview = {overview with instance_cursor=5;snapshot=Some {snapshot with instances=many}} in
-  let selected_lines = UI.lines ~width:30 selected_overview in
+  let selected_lines = UI.lines ~width:30 selected_overview |> entry_lines in
   let first_rows = List.filteri (fun index _ -> index < 12) selected_lines |> String.concat "\n" in
   check bool "selected Add-on remains near the overview top despite preceding long descriptions" true
     (List.exists (String.starts_with ~prefix:"> Worker 5") (String.split_on_char '\n' first_rows)

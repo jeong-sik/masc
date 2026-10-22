@@ -246,8 +246,44 @@ let exact_outputs_wire_is_strict () =
     (snapshot [declared (match quiz_declaration [] with
        | `Assoc fields -> `Assoc (List.remove_assoc "exact_outputs" fields) | other -> other)])
 
+(* The mark each Lanes row draws comes from this one decision: a working
+   installation, a failed one and a lane nobody set up must not read alike. *)
+let standing_reads_what_the_row_says () =
+  let module S = Masc_tui_lane_standing in
+  let standing = Alcotest.testable (fun f value -> Format.pp_print_string f (S.word value)) ( = ) in
+  let row_of state = { Decode.id = "row"; label = "row"; purpose = "fixture purpose";
+    selection = Decode.Declaration "/config/lane-addons/browser-work.toml"; state } in
+  let worker phase = { Decode.instance_id = "worker"; incarnation = "worker"; run_id = "browser-work";
+    package_id = "browser"; title = "Browser connections"; package_revision = "0.1.0";
+    presence = Decode.Live; phase; applied_revision = None } in
+  let declared application = Decode.Valid { installation_id = "browser-work"; enabled = true;
+    run_id = "browser-work"; package_id = "browser"; title = "Browser connections";
+    desired_revision = "1"; source_revision = "1"; application; exact_outputs = [] } in
+  let package declaration instances = Decode.Package_state { declaration; instances } in
+  let check name expected state = Alcotest.check standing name expected (Display.row_standing (row_of state)) in
+  check "a declared worker that runs is ready" S.Ready
+    (package (Some (declared (Lane_addon_application.Applied "worker"))) [ worker Decode.Attached ]);
+  check "a failed worker is failing even beside an applied declaration" S.Failing
+    (package (Some (declared (Lane_addon_application.Applied "worker"))) [ worker (Decode.Failed "cleanup incomplete") ]);
+  check "a declaration whose application failed is failing" S.Failing
+    (package (Some (declared (Lane_addon_application.Failed [ "refused" ]))) []);
+  check "a worker that is starting is changing" S.Changing
+    (package (Some (declared Lane_addon_application.Starting_worker)) []);
+  check "a declaration switched off and cleaned up is off" S.Off
+    (package (Some (declared Lane_addon_application.Inactive)) []);
+  check "a declaration the server did not read is unknown" S.Unobserved (package (Some Decode.Unobserved) []);
+  check "a browser lane with no browser connected waits" S.Waiting (Decode.Browser_clients (Decode.Browser_enabled, 0));
+  check "a browser lane with a browser connected is ready" S.Ready (Decode.Browser_clients (Decode.Browser_enabled, 1));
+  check "a browser lane switched off is off" S.Off (Decode.Browser_executor (Decode.Browser_disabled, true));
+  check "an exact lane with no configuration is not set up" S.Not_set_up
+    (Decode.Exact_state (Decode.Unconfigured "no candidates"));
+  check "a machine switched off is off" S.Off (Decode.Machine_state (Decode.Machine_disabled, Decode.Stable));
+  check "a machine whose worker cannot be read is failing" S.Failing
+    (Decode.Machine_state (Decode.Machine_enabled, Decode.Publication_unavailable))
+
 let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
   Alcotest.test_case "machine activity and publication remain independent" `Quick machine_activity_and_publication_are_independent;
+  Alcotest.test_case "standing reads what the row says" `Quick standing_reads_what_the_row_says;
   Alcotest.test_case "browser activity and registration remain independent" `Quick browser_activity_and_backend_are_independent;
   Alcotest.test_case "exact off retains candidates and finishing work" `Quick disabled_exact_keeps_candidates_and_finishing_work;
   Alcotest.test_case "disabled intent keeps unfinished cleanup visible" `Quick disabled_is_desired_not_cleanup_proof;

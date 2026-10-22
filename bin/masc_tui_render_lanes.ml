@@ -11,6 +11,13 @@ module Rows = Masc_tui_rows
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
 
+let standing_colour standing = match Masc_tui_lane_standing.status standing with
+  | Masc_tui_theme.Ok -> Theme.ok ()
+  | Masc_tui_theme.Warn -> Theme.warn ()
+  | Masc_tui_theme.Bad -> Theme.bad ()
+  | Masc_tui_theme.Info -> Theme.info ()
+  | Masc_tui_theme.Muted -> Theme.muted ()
+
 let format_context_tokens = Masc_tui_types.format_context_tokens
 
 (* A refusal is bad news about the key pressed; a pending write is a warning
@@ -505,8 +512,11 @@ let render_lanes_overview (state : state) =
     | None -> "  All lanes"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.Masc.Tui_decode_lane_inventory.observed_at in
-        Printf.sprintf "  All lanes · observed %02d:%02d:%02d"
-          observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec in
+        let standings = Masc_tui_lane_standing.counts
+            (List.map Masc_tui_lane_inventory.row_standing snapshot.Masc.Tui_decode_lane_inventory.rows) in
+        Printf.sprintf "  All lanes · observed %02d:%02d:%02d%s"
+          observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
+          (if standings = "" then "" else " · " ^ standings) in
   box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ()) observed_heading;
   List.iter (fun notice -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ notice))
     (Masc_tui_types.lane_inventory_notice_lines ~cols state);
@@ -517,15 +527,19 @@ let render_lanes_overview (state : state) =
       ~overflow_takes_row:layout.sc_overflow_takes_row in
   let scroll = Masc_tui_scroll.normalize ~count:layout.sc_count ~height state.lanes_scroll
     |> Masc_tui_scroll.ensure_visible ~cursor:state.lanes_cursor ~height in
-  let summary row = Terminal_text.single_line (match state.lane_inventory with
-    | Some snapshot -> Masc_tui_lane_inventory.row_summary_in snapshot row
-    | None -> Masc_tui_lane_inventory.row_summary row) in
+  (* The standing leads the state, so a narrow STATE column still shows
+     whether the lane is ready, failing or never set up. *)
+  let summary row = Masc_tui_lane_standing.word (Masc_tui_lane_inventory.row_standing row) ^ " · "
+    ^ Terminal_text.single_line (match state.lane_inventory with
+      | Some snapshot -> Masc_tui_lane_inventory.row_summary_in snapshot row
+      | None -> Masc_tui_lane_inventory.row_summary row) in
   let status_width = List.fold_left (fun width row -> max width
       (Message_layout.display_width (summary row))) (String.length "STATE") inventory
     |> min (max 1 (inner / 2)) in
-  let label_width = max 1 (inner - status_width - 2) in
+  let mark_width = 2 in
+  let label_width = max 1 (inner - mark_width - status_width - 2) in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (fit_width "LANE" label_width ^ "  " ^ fit_width "STATE" status_width);
+    (String.make mark_width ' ' ^ fit_width "LANE" label_width ^ "  " ^ fit_width "STATE" status_width);
   let window = Rows.of_list ~first:scroll ~height inventory in
   for offset = 0 to height - 1 do
     let index = scroll + offset in
@@ -536,14 +550,25 @@ let render_lanes_overview (state : state) =
            else "  reading all lanes…")
     | None -> box_empty buf cols
     | Some row ->
-        let label = Masc_tui_lane_inventory.family_label row.selection ^ " · " ^ row.label
-          |> Terminal_text.single_line in
-        let text = fit_width label label_width ^ "  " ^ fit_width (summary row) status_width in
+        let standing = Masc_tui_lane_inventory.row_standing row in
+        let label = fit_width (Terminal_text.single_line
+            (Masc_tui_lane_inventory.family_label row.selection ^ " · " ^ row.label)) label_width in
+        let mark = fit_width (Masc_tui_lane_standing.mark standing) mark_width in
+        let state_text = fit_width (summary row) status_width in
         (* The final frame owns click geometry, including narrow terminals and
            scrolling. A retained mark names an identity, never a former index. *)
-        let marked = pressable (Press_lane_row row.id) (fit_width text inner) in
-        if index = state.lanes_cursor then box_line_selected buf cols marked
-        else box_line buf cols marked
+        let marked text = pressable (Press_lane_row row.id) (fit_width text inner) in
+        (* The selection band takes no colour of its own, so the selected row
+           keeps the mark and drops the styles. *)
+        if index = state.lanes_cursor then
+          box_line_selected buf cols (marked (mark ^ label ^ "  " ^ state_text))
+        else
+          let row_style = if Masc_tui_lane_standing.recedes standing then Theme.recede () else "" in
+          let state_style = match standing with
+            | Masc_tui_lane_standing.Failing -> Theme.bad ()
+            | Masc_tui_lane_standing.(Ready | Waiting | Changing | Off | Not_set_up | Unobserved) -> row_style in
+          box_line buf cols (marked (standing_colour standing ^ mark ^ Ansi.reset
+            ^ row_style ^ label ^ "  " ^ Ansi.reset ^ state_style ^ state_text ^ Ansi.reset))
   done;
   (match Masc_tui_scroll.position_row ~scroll ~height (List.length inventory) with
    | None -> ()

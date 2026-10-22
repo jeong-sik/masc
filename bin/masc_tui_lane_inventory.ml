@@ -59,6 +59,53 @@ let row_summary (row : row) = match row.state with
         | [] -> "no worker observed"
         | values -> String.concat "; " (List.map instance_summary values))
 
+module Standing = Masc_tui_lane_standing
+
+let instance_failed (item : instance) = match item.phase with
+  | Failed _ -> true
+  | Attached | Observing | Detaching | Detached -> false
+(* Without a usable declaration, the workers alone say how the row stands. A
+   retained worker is no longer running here. *)
+let instances_standing ~none (instances : instance list) =
+  let live phases = List.exists (fun (item : instance) ->
+    item.presence = Live && List.mem item.phase phases) instances in
+  if live [ Attached; Observing ] then Standing.Ready
+  else if live [ Detaching ] then Standing.Changing
+  else match instances with [] -> none | _ :: _ -> Standing.Off
+let application_standing : Masc.Lane_addon_application.t -> Standing.t = function
+  | Applied _ -> Standing.Ready
+  | Starting_worker | Cleaning_workers -> Standing.Changing
+  | Inactive -> Standing.Off
+  | Failed _ -> Standing.Failing
+  | Unknown _ -> Standing.Unobserved
+let row_standing (row : row) = match row.state with
+  | Exact_state (Unconfigured _) -> Standing.Not_set_up
+  | Exact_state (Disabled _) -> Standing.Off
+  | Exact_state (Registry_unavailable _) -> Standing.Unobserved
+  | Exact_state (Configured c) ->
+      if c.admitted_slots=[] && c.cli_slots=[] then Standing.Failing
+      else if Option.is_some c.admission_error then Standing.Failing
+      else Standing.Ready
+  | Browser_clients (Browser_disabled, _) | Browser_executor (Browser_disabled, _) -> Standing.Off
+  | Browser_clients (Browser_unobserved, _) | Browser_executor (Browser_unobserved, _) -> Standing.Unobserved
+  | Browser_clients (Browser_enabled, connected) -> if connected > 0 then Standing.Ready else Standing.Waiting
+  | Browser_executor (Browser_enabled, registered) -> if registered then Standing.Ready else Standing.Waiting
+  | Machine_state (Machine_disabled, _) -> Standing.Off
+  | Machine_state (Machine_unobserved, _) -> Standing.Unobserved
+  | Machine_state (Machine_enabled, (Stable | Running)) -> Standing.Ready
+  | Machine_state (Machine_enabled, No_screen) -> Standing.Waiting
+  | Machine_state (Machine_enabled, Publication_unavailable) -> Standing.Failing
+  | Package_state {declaration;instances} ->
+      (* A failed worker is what the operator has to see, whatever the
+         declaration says about the others. *)
+      if List.exists instance_failed instances then Standing.Failing
+      else match declaration with
+        | Some (Valid value) -> application_standing value.application
+        | Some (Invalid _) -> Standing.Failing
+        | Some Unobserved -> Standing.Unobserved
+        | Some Absent -> instances_standing ~none:Standing.Not_set_up instances
+        | None -> instances_standing ~none:Standing.Off instances
+
 let instance_lines (item : instance) =
   ["Instance: " ^ item.instance_id; "Incarnation: " ^ item.incarnation;
    "Run: " ^ item.run_id; "Package: " ^ item.package_id ^ " · " ^ item.package_revision;

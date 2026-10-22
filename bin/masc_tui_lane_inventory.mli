@@ -2,6 +2,10 @@
     measures/wraps cells. These functions perform no I/O or state mutation. *)
 val row_summary : Masc.Tui_decode_lane_inventory.row -> string
 (** Machine activity is displayed independently of its retained publication. *)
+val row_standing : Masc.Tui_decode_lane_inventory.row -> Masc_tui_lane_standing.t
+(** How the row stands. A package row with a failed worker is [Failing]
+    whatever its declaration says; otherwise the declaration's application
+    decides, and without a usable declaration its live workers do. *)
 val detail_lines : Masc.Tui_decode_lane_inventory.row -> string list
 val refused_cli_slot_lines :
   Masc.Keeper_lane_cli_oneshot.refused_slot list -> string list

@@ -223,6 +223,13 @@ val lines : ?height:int -> ?failed_note:string -> width:int -> t -> string list
 (** Printable rows wrapped to the actual frame width. Rendering and scrolling
     must use the same width so every field and receipt remains reachable. *)
 
+val instance_standing : off_requested:bool -> instance -> Masc_tui_lane_standing.t
+(** How a worker entry stands. [off_requested] is a declaration of the same
+    installation switched off while the worker is still attached. An attached
+    worker that is not a live entry of this server is [Unobserved]. *)
+val declaration_entry_standing : declaration -> Masc_tui_lane_standing.t
+(** How a declaration with no current worker stands. *)
+
 val action_json : action_request -> Yojson.Safe.t
 val action_receipt : action_request -> Yojson.Safe.t -> (Action.receipt, string) result
 

@@ -1305,6 +1305,45 @@ let installation_name (instance : instance) =
   | Some id -> id
   | None -> instance.id
 
+module Standing = Masc_tui_lane_standing
+
+(* What the overview says about a declaration with no current worker. The
+   words and the mark come from this one reading, so they cannot disagree. *)
+type declaration_reading = Configuration_issue | Needs_attention | Configured_off | No_current_worker | Pending
+let declaration_reading (declaration : declaration) =
+  if Option.is_none declaration.desired then Configuration_issue
+  else if declaration.issues<>[] then Needs_attention
+  else if declaration.enabled=Some false then Configured_off
+  else if Option.is_some declaration.applied then No_current_worker else Pending
+let declaration_reading_word = function
+  | Configuration_issue -> "configuration issue"
+  | Needs_attention -> "needs attention"
+  | Configured_off -> "configured off"
+  | No_current_worker -> "no current worker"
+  | Pending -> "pending"
+let declaration_standing = function
+  | Configuration_issue | Needs_attention -> Standing.Failing
+  | Configured_off -> Standing.Off
+  | No_current_worker -> Standing.Waiting
+  | Pending -> Standing.Changing
+let declaration_entry_standing declaration = declaration_standing (declaration_reading declaration)
+let off_requested (snapshot : snapshot) (item : instance) = match snapshot.configuration with
+  | Some config -> List.exists (fun (d : declaration) ->
+      d.enabled = Some false && d.instance_id = Some item.id
+      && Some d.source_path = item.source_path) config.declarations
+  | None -> false
+(* An attached worker this server does not hold live cannot be observed or
+   run from here ([can_observe]), so it does not read as ready. *)
+let instance_standing ~off_requested (item : instance) = match item.phase, item.runtime_presence with
+  | Row.Failed _, _ -> Standing.Failing
+  | Row.Detaching, _ -> Standing.Changing
+  | Row.Detached, _ -> Standing.Off
+  | (Row.Attached | Row.Observing), Live_entry -> if off_requested then Standing.Changing else Standing.Ready
+  | (Row.Attached | Row.Observing), (Retained_binding | Presence_unknown) -> Standing.Unobserved
+let standing_mark standing =
+  Span.render (Span.text (Span.fg (Masc_tui_theme.status (Standing.status standing)))
+    (Standing.mark standing)) ^ " "
+
 let instance_heading _snapshot (item : instance) =
   match installation_identity item with
   | None -> item.title
@@ -1379,14 +1418,12 @@ let overview_lines ~width view =
             match item with
             | `Declaration (_, declaration) ->
                 let name = Option.value ~default:"unresolved installation" declaration.installation_id in
-                let status = if Option.is_none declaration.desired then "configuration issue"
-                  else if declaration.issues<>[] then "needs attention"
-                  else if declaration.enabled=Some false then "configured off"
-                  else if Option.is_some declaration.applied then "no current worker" else "pending" in
+                let reading = declaration_reading declaration in
                 let edit = Option.bind snapshot.configuration (fun config ->
                   if Document.editable_source_path ~directory:config.directory declaration.source_path
                   then Some "  E:edit" else None) |> Option.value ~default:"" in
-                [marker ^ name ^ " · " ^ status ^ " · " ^ Filename.basename declaration.source_path;
+                [marker ^ standing_mark (declaration_standing reading) ^ name ^ " · "
+                 ^ declaration_reading_word reading ^ " · " ^ Filename.basename declaration.source_path;
                  "    " ^ declaration_application view declaration;
                  "    Enter:installation" ^ edit]
             | `Instance item ->
@@ -1403,13 +1440,10 @@ let overview_lines ~width view =
                         [name ^ " · add-on " ^ item.addon_id ^ " · run " ^ item.run_id] in
                 let count_text = if item.observation_seq=0 then "awaiting first observation"
                   else Printf.sprintf "%d records" item.rows_count in
-                let activity = match snapshot.configuration with
-                  | Some config when List.exists (fun (d : declaration) ->
-                      d.enabled = Some false && d.instance_id = Some item.id
-                      && Some d.source_path = item.source_path) config.declarations ->
-                      "off requested · "
-                  | Some _ | None -> "" in
-                let lead = marker ^ instance_heading snapshot item ^ " · " ^
+                let off_requested = off_requested snapshot item in
+                let activity = if off_requested then "off requested · " else "" in
+                let lead = marker ^ standing_mark (instance_standing ~off_requested item)
+                  ^ instance_heading snapshot item ^ " · " ^
                   activity ^
                   (match item.phase with
                     | Row.Failed _ -> "failed"

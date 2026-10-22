@@ -5985,7 +5985,7 @@
 (test
  (name test_tui_lane_addons)
  (modules test_tui_lane_addons)
- (libraries alcotest yojson unix masc masc.fs_compat masc_tui_lane_addons masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions otoml masc_tui_lane_declaration masc_tui_message_layout masc_tui_theme))
+ (libraries alcotest yojson unix masc masc.fs_compat masc_tui_lane_addons masc_tui_lane_standing masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions otoml masc_tui_lane_declaration masc_tui_message_layout masc_tui_theme))
 
 (test
  (name test_tui_lane_subscriptions)
@@ -6167,7 +6167,7 @@
 (test
  (name test_tui_lane_inventory)
  (modules test_tui_lane_inventory)
- (libraries masc masc.runtime masc.browser_lane masc_tui_lane_inventory alcotest yojson))
+ (libraries masc masc.runtime masc.browser_lane masc_tui_lane_inventory masc_tui_lane_standing alcotest yojson))
 
 (test
  (name test_tui_lane_declaration_path)

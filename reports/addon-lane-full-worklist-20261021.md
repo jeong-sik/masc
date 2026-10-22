@@ -600,3 +600,19 @@ current-disk11·Fusion persist14·concurrent mutation6 합31건 completed/succes
 진단 #44993은 그 위 별도 층이며 Native Stack44994다. 새 Core 소스·인터페이스·관련 테스트/실행기
 blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조합 전체 성공으로 부르지 않는다.
 현재 base/head 독립 재리뷰와 새 진단 fixture 실행은 별도다. 실행31건은 ACK·UI·설치를 증명하지 않는다.
+
+
+## E02/G03 조건부 원본 관측 전달 구현 — 2026-10-22
+
+- 이전 고정 source `a650bad6dc7a5133c9d0de516f15a54e42cf3b8b`의 production 진단 [run 39699404401](https://github.com/jeong-sik/masc/actions/runs/39699404401)은 completed/success이며 실제 public Curator→configured Python/MCP→공용 Exact loopback fixture 11건 PASS다. 원본 terminal 대기 실패의 진단을 추가한 후보에서 성공했다는 증거이며, 이전 timeout의 근본 원인 해결이나 실제 provider·Docker·두 UI·설치를 증명하지 않는다. 원본 실행 로그 SHA-256 `10412b11b51cd11527a17a4da2448ed57ca810ce21395d07fda4f3d95e1058af`.
+- 이번 후속은 strict current JSONL 비교·조건부 Register/Complete·실제 파일/부모 fsync·full payload 확인·원래 Owner receipt ACK를 연결한다. 같은 원본 재전달은 no-append이며 다른 genuine Producer 결과는 conflict다. 원래 execution/domain 효과는 재실행하지 않고 registry 잠금 해제 뒤 물리 capture/ancestry와 digest를 다시 읽어 registration ACK→completion ACK 순서로 저장한다.
+- 모든 의무가 ACK된 이력은 retention 뒤 재생성하지 않는다. 아직 pending인 completion은 같은 원래 identity로 복원할 수 있다. ACK는 역사적 publication 확인이며 영구적인 UI 목록 보관 약속이 아니다. typed Restart_replay correction의 이전 raw 행은 일반 compaction 뒤 영구 보존되지 않으며, G03 전체 audit 요구는 남는다.
+- delivery 실패는 pending으로 보존하고 기존 서버 maintenance tick이 해당 owner만 다시 깨운다. 새 timer·횟수 제한·즉시 busy retry를 추가하지 않는다. cold payload 준비는 caller에서 하고 blocking log callback에서 Eio 대기를 하지 않는다. 새 transaction마다 원래 log와 payload를 다시 확인한다.
+- 새 real-file reconciliation·Owner ACK·Off maintenance recovery 검사는 작성했고 parser/diff만 확인했다. 이 후속의 타입·실행은 아직 미검증이며 위 11건을 새 코드 성공으로 이월하지 않는다. 원래 54개 항목명·완료 기준과 E02/G03의 실제 provider·관측·설치 요구를 유지한다.
+
+
+## E02 원본 전달 실행과 연속 실패 재시도 수리 · 2026-10-22
+
+- [실제 선택 실행39705408417](../docs/evidence/2026-10-22-curator-original-delivery/selected-execution.json)은 exact042에서 컴파일 후 7개 suite155건 중154건 성공·1건 실패로 전체 FAIL이다. 원본 reconcile12·Core current13·Owner commit61·기존 Exact37·Fusion14·concurrent6은 각각 통과했다. public owner는11/12이며 Off 전 host terminal 대기 중 원래 Owner의 descriptor 검증 거절·retained Exact 부재·HTTP0건을 실제 로그로 확인했다. 같은 진단 문자열은 nlink0도 포함하므로 공격성 hardlink라고 단정하지 않는다. 파일 교체와 authority 읽기의 직렬화 후속은 남는다.
+- 독립 response 리뷰가 원래 ACK 실패→다음 발견 실패→retry 표시 해제로 Off owner가 다시 park하는 P2를 확인했다. 모든 refused pass에서 기존 retry 요구를 보존하도록 수리하고, 실제 scope를 regular file로 일시 차단해 strict discovery Error를 확인한 뒤 복원·기존 maintenance만으로 두 ACK를 회복하는13번째 시나리오를 추가했다. parser와 소스 검토는 새 실행 성공이 아니다.
+- 전체 run FAIL·원래042의 response FAIL·후속 수리를 구분하며 A01–H06의 원래54개 이름·완료 기준을 유지한다. 실제 provider·두 UI·설치와 전체 E02/G03 완료는 여전히 증명되지 않았다.

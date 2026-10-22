@@ -706,6 +706,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          is tried again on this tick. It comes before the work below so that a
          step that raises cannot skip the retry. *)
       Candle_payout_worker.pulse ();
+      Server_workspace_memory_curator.retry_pending_observations
+        ~base_path:(Mcp_server.workspace_config state).base_path;
       project_transition_outboxes Server_transition_outbox_recovery.Maintenance;
       reconcile_broadcast_mentions ();
       reconcile_goal_events ();

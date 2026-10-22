@@ -1942,7 +1942,7 @@ let test_http_caller_marker_stays_out_of_export_arguments () = with_fixture (fun
   let id = unwrap (dispatch config Runtime.Attach ["manifest_path",`String path;
     "run_id",`String "world";"binding",`Assoc ["sources",`List []]]) |> text "instance_id" in
   await clock (fun () ->
-    match Runtime.tool_exports ~config ~access ~reserved:[] with Ok [_] -> true | _ -> false);
+    match Runtime.tool_export_reading ~config ~access ~reserved:[] with Ok {exports=[_];_} -> true | _ -> false);
   let server = Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
   let metadata = `Assoc [
     "io.modelcontextprotocol/protocolVersion", `String "2026-07-28";

@@ -47,3 +47,16 @@ val rank_many_excluding_owners
     facts cannot crowd another Keeper out of the requested neighbor count.
     [max_results = 0] and empty/blank queries build no index. The stats report
     actual table construction and insertion, including the no-work case. *)
+
+val with_excluding_owners
+  :  texts:(string * string) list
+  -> max_results:int
+  -> (rank:((string * string) list -> ((int * float) list list, error) result) -> 'a)
+  -> 'a * batch_stats
+(** One transient table over [texts] for several rankings. [f ~rank] may call
+    [rank queries] any number of times; each answers like
+    {!rank_many_excluding_owners}. The table is built once, on the first
+    [rank] with work, and closed when [f] returns or raises. The stats count
+    that build and every query any [rank] ran. Each build and each [rank] is
+    one job on the process domain pool when the caller is an Eio fiber, and
+    the jobs never overlap; [f] itself runs in the caller's thread. *)

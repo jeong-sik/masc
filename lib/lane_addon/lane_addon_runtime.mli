@@ -114,6 +114,10 @@ type tool_request_destination = private {
   tool : string;
   source_revision : string;
   configuration_revision : string;
+  max_reply_bytes : int;
+  (** The destination package's declared worker frame. Arguments the host
+      sends this destination must measure at most this many
+      {!Lane_addon_host_delivery.arguments_bytes}. *)
 }
 val with_tool_request_destination : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> export:tool_export ->

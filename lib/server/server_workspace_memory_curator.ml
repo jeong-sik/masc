@@ -4,6 +4,7 @@ module Request = Workspace_memory_request
 module Briefing = Workspace_memory_briefing
 module Capture = Workspace_memory_execution_capture
 module Consumer = Server_workspace_memory_addon
+module Binding = Server_workspace_memory_addon_validation
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
@@ -104,15 +105,22 @@ let classify_new ~config ~originals ~new_work =
      its disposition was removed. A rejected original still fences its facts. *)
   let pending=List.filter (fun fact -> not (classification_blocked originals fact)) change.new_facts in
   if pending=[] || not new_work then Ok false else
+  (* Size the batch for the Add-on that receives it, before ranking any
+     neighbor. Without one there is no batch to build. *)
+  let* (destination : Lane_addon_runtime.tool_request_destination)=Consumer.destination ~config |> consumer in
+  let request_id=Capture.Request_id.fresh () in
   let resolution=Prompt_registry.resolve_prompt Prompt_names.workspace_memory_curator in
   let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
     resolution ["workspace_memory_changes",Yojson.Safe.to_string input] in
   let* batch=io (fun () -> Request.prepare ~neighbor_limit:(max 0 (List.length (Context.keepers context)-1))
     ~render ~ledger:change.ledger ~current:change.current_facts ~pending
+    ~frame:destination.max_reply_bytes ~measure:(Binding.classification_submit_bytes ~request_id)
     |> Result.map_error Request.error_to_string) in
   match batch with
   | None -> Ok false
-  | Some batch -> let* _=Consumer.capture_classification ~config ~prompt:resolution ~ledger:change.ledger ~batch |> consumer in
+  | Some batch ->
+    let* _=Consumer.capture_classification ~config ~request_id ~prompt:resolution ~ledger:change.ledger ~batch
+      |> consumer in
     Ok true
 let briefing_blocked ~sources ~contract ~state originals =
   let rec loop = function

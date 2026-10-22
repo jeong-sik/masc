@@ -32,7 +32,8 @@ let with_env name value f =
   let previous = Sys.getenv_opt name in Unix.putenv name value;
   Fun.protect ~finally:(fun () -> Unix.putenv name (Option.value ~default:"" previous)) f
 
-let manifest = {|id="quiz-package"
+let fixture_frame = 4096
+let manifest = Printf.sprintf {|id="quiz-package"
 revision="1"
 title="Host request fixture"
 contributions=["observe"]
@@ -44,8 +45,8 @@ schema="schemas/author.json"
 cpus=0.5
 memory_bytes=67108864
 pids=16
-max_reply_bytes=4096
-|}
+max_reply_bytes=%d
+|} fixture_frame
 let author_schema = {|{"type":"object","properties":{"question":{"type":"string"}},"required":["question"],"additionalProperties":false}|}
 let declaration = {|id="quiz"
 run_id="quiz-world"
@@ -500,12 +501,15 @@ let test_capture_factory_uses_actual_live_declaration_before_any_rpc () =
       let json=`Assoc ["installation",`String destination.installation_id;
         "package",`String destination.package_id;"tool",`String destination.tool;
         "source_revision",`String destination.source_revision;
-        "configuration_revision",`String destination.configuration_revision] in Ok (json,json) in
+        "configuration_revision",`String destination.configuration_revision;
+        "max_reply_bytes",`Int destination.max_reply_bytes] in Ok (json,json) in
     let captured=match Runtime.capture_tool_request_owner ~config ~access ~reserved:[] ~export
       ~scope:"trusted-capture" ~request_id:"original" ~capture with
       | Ok json -> json | Error _ -> fail "live configured capture was refused" in
     check string "source bytes come from the actual declaration" declaration.source_revision (text "source_revision" captured);
     check string "configuration comes from the admitted payload" declaration.revision (text "configuration_revision" captured);
+    check int "the frame comes from the installed package declaration" fixture_frame
+      (member "max_reply_bytes" captured |> Yojson.Safe.Util.to_int);
     check string "configured logical identity uses the original codec"
       (Lane_addon_tool_request_owner.installation_id (Lane_addon_tool_request_owner.Configuration declaration.id))
       (text "installation" captured);

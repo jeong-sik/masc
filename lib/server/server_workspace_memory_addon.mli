@@ -2,16 +2,24 @@
     The existing serialized workspace owner retains the process lease. *)
 type error = Unavailable of string | Rejected of string | Uncertain of string
 val error_to_string : error -> string
+val destination : config:Workspace.config -> (Lane_addon_runtime.tool_request_destination, error) result
+(** The live Add-on that provides [curate], read through the same fresh
+    declaration check a capture uses, with its declared frame. Sizes a batch
+    before any capture; it is not authority for an effect. No such Add-on is
+    [Unavailable]. *)
 val capture_classification : config:Workspace.config ->
+  request_id:Workspace_memory_execution_capture.Request_id.t ->
   prompt:Prompt_registry.prompt_resolution -> ledger:Workspace_memory_ledger.t ->
   batch:Workspace_memory_request.batch -> (Workspace_memory_execution_capture.t, error) result
 val capture_briefing : config:Workspace.config -> prompt:Prompt_registry.prompt_resolution ->
   batch:Workspace_memory_briefing.batch -> (Workspace_memory_execution_capture.t, error) result
 (** Mint once, capture actual live installation provenance and retain before
-    any worker RPC. Briefing requires its original prepared state to be saved
-    and freshly confirmed first, by the serialized owner. An error may follow
-    publication: discover original work before preparing another request.
-    No model or domain save runs here. *)
+    any worker RPC. A classification uses the [request_id] its batch was sized
+    under and is refused when its [submit] exceeds the destination's frame read
+    under the same lock. Briefing mints its own id, and requires its original
+    prepared state to be saved and freshly confirmed first, by the serialized
+    owner. An error may follow publication: discover original work before
+    preparing another request. No model or domain save runs here. *)
 type wait = Capacity | Worker_pending | Worker_unknown | Missing_after_dispatch | Journal_recheck
 type result =
   | Awaiting of wait * Lane_addon_tool_request_owner.retained

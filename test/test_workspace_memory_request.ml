@@ -52,7 +52,8 @@ let current = [changed; second; shared; disputed; unrelated; third]
 (* Three other Keepers hold the same claim text, so a limit of three takes
    exactly those; the unrelated fact never becomes a neighbor. *)
 let prepare ?(neighbors = 3) pending =
-  get (Request.prepare ~neighbor_limit:neighbors ~render ~ledger ~current ~pending)
+  get (Request.prepare ~neighbor_limit:neighbors ~render ~ledger ~current ~pending
+         ~frame:max_int ~measure:(fun _ -> Ok 0))
 
 let ids_of field batch = batch.Request.input |> member field |> to_list |> List.map (member "id")
 let contains ~sub text =
@@ -106,19 +107,22 @@ let test_narrow_keeps_the_oldest_half_and_its_context () =
    | Ok (Some again) -> Alcotest.check json "one parent always yields the same child"
                           (Request.batch_to_json narrowed) (Request.batch_to_json again)
    | Ok None | Error _ -> Alcotest.fail "narrowing the same parent changed");
-  Alcotest.(check int) "narrowing does not rebuild the index" 1 narrowed.index_stats.index_builds;
+  Alcotest.(check int) "narrowing does not rebuild the index"
+    batch.index_stats.index_builds narrowed.index_stats.index_builds;
   (match Request.narrow ~render:(fun _ -> Alcotest.fail "single row rendered again") ~ledger narrowed with
    | Ok None -> () | Ok (Some _) | Error _ -> Alcotest.fail "indivisible fact was dropped or truncated");
   (match Request.narrow ~render:(fun _ -> Error "render unavailable") ~ledger batch with
    | Error (Request.Render_failed _) -> ()
-   | Ok _ | Error (Request.Invalid_limit | Index_unavailable _ | Invalid_batch _) ->
+   | Ok _ | Error (Request.Invalid_limit | Index_unavailable _ | Invalid_batch _ | Measure_failed _
+                  | Exceeds_frame _) ->
      Alcotest.fail "narrow render failure hidden")
 
 let test_no_change_does_not_render_or_search () =
   let render_calls = ref 0 in
   let result = Request.prepare ~neighbor_limit:2
       ~render:(fun json -> incr render_calls; render json)
-      ~ledger:Ledger.empty ~current:[pending "writer" "a fact"] ~pending:[] in
+      ~ledger:Ledger.empty ~current:[pending "writer" "a fact"] ~pending:[]
+      ~frame:max_int ~measure:(fun _ -> Ok 0) in
   (match result with Ok None -> () | Ok (Some _) | Error _ -> Alcotest.fail "no change built a request");
   Alcotest.(check int) "render was not called" 0 !render_calls
 
@@ -135,7 +139,7 @@ let test_many_facts_drain_oldest_first_after_size_refusals () =
     | [] -> List.rev classified
     | _ :: _ ->
       let batch = narrow_to_single (get (Request.prepare ~neighbor_limit:0 ~render ~ledger:Ledger.empty
-        ~current:facts ~pending:remaining)) in
+        ~current:facts ~pending:remaining ~frame:max_int ~measure:(fun _ -> Ok 0))) in
       (match batch.selected with
        | [fact] -> drain (fact :: classified) (List.filter (fun other -> other <> fact) remaining)
        | [] | _ :: _ :: _ -> Alcotest.fail "a provider-refused batch must reach one complete fact") in
@@ -181,7 +185,8 @@ let test_snapshot_is_bound_to_the_captured_ledger () =
   let refused label ?(against = ledger) tampered =
     match Request.batch_of_json ~ledger:against tampered with
     | Error (Request.Invalid_batch _) -> ()
-    | Ok _ | Error (Request.Invalid_limit | Render_failed _ | Index_unavailable _) ->
+    | Ok _ | Error (Request.Invalid_limit | Render_failed _ | Index_unavailable _ | Measure_failed _
+                   | Exceeds_frame _) ->
       Alcotest.fail (label ^ " was restored") in
   let input = member "input" snapshot in
   refused "a changed membership" (replace "input" (map_list "facts" (fun fact ->
@@ -219,6 +224,35 @@ let test_snapshot_is_bound_to_the_captured_ledger () =
   refused "a selected fact the captured ledger already classified" ~against:disposed snapshot;
   refused "the same snapshot against an empty ledger" ~against:Ledger.empty snapshot
 
+let test_first_batch_fills_the_frame_with_the_oldest_facts () =
+  let facts = List.init 40 (fun i -> pending ("keeper-" ^ string_of_int i)
+      ("Changed claim number " ^ string_of_int i)) in
+  (* Stands in for the host's measure (the submit it would send) with a fixed
+     size per selected fact, so the frame is a number of facts. *)
+  let per_fact = 100 in
+  let within ?(measure = fun (batch : Request.batch) -> Ok (per_fact * List.length batch.rows)) frame =
+    Request.prepare ~neighbor_limit:1 ~render ~ledger:Ledger.empty ~current:facts ~pending:facts
+      ~frame ~measure in
+  let batch = get (within ((5 * per_fact) + (per_fact / 2))) in
+  Alcotest.(check bool) "the five oldest facts fill a five-fact frame" true (batch.selected = List.take 5 facts);
+  Alcotest.(check bool) "ranking stops at the first size that does not fit" true
+    (batch.index_stats.queries_executed <= 2 * List.length batch.selected);
+  Alcotest.(check int) "one index table serves the whole preparation" 1 batch.index_stats.index_builds;
+  Alcotest.(check int) "a frame that holds every fact takes them all" 40
+    (List.length (get (within (40 * per_fact))).selected);
+  (match within (per_fact - 1) with
+   | Error (Request.Exceeds_frame { fact; bytes; frame }) ->
+     Alcotest.(check bool) "the refusal names the oldest fact" true (fact = (List.hd facts).fact);
+     Alcotest.(check (pair int int)) "with its measured size and the frame" (per_fact, per_fact - 1) (bytes, frame)
+   | Ok _ | Error (Request.Invalid_limit | Render_failed _ | Index_unavailable _ | Invalid_batch _
+                  | Measure_failed _) ->
+     Alcotest.fail "a fact larger than the frame was not refused");
+  (match within ~measure:(fun _ -> Error "no request") max_int with
+   | Error (Request.Measure_failed _) -> ()
+   | Ok _ | Error (Request.Invalid_limit | Render_failed _ | Index_unavailable _ | Invalid_batch _
+                  | Exceeds_frame _) ->
+     Alcotest.fail "a failed measure was not reported")
+
 let () =
   Alcotest.run "Workspace memory request"
     [ "request shape", [Alcotest.test_case "each fact and entry is listed once" `Quick
@@ -228,7 +262,9 @@ let () =
                        ; Alcotest.test_case "model answer uses request-local ids" `Quick
                          test_model_answer_uses_request_local_ids
                        ; Alcotest.test_case "snapshot is bound to the captured ledger" `Quick
-                         test_snapshot_is_bound_to_the_captured_ledger ]
+                         test_snapshot_is_bound_to_the_captured_ledger
+                       ; Alcotest.test_case "first batch fills the frame with the oldest facts" `Quick
+                         test_first_batch_fills_the_frame_with_the_oldest_facts ]
     ; "provider refusal", [Alcotest.test_case "narrow keeps the oldest half" `Quick
                             test_narrow_keeps_the_oldest_half_and_its_context
                           ; Alcotest.test_case "many changes drain oldest first" `Quick

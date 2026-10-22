@@ -1861,7 +1861,7 @@ let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) 
 
 type tool_request_destination = {
   installation_id : string; package_id : string; tool : string;
-  source_revision : string; configuration_revision : string;
+  source_revision : string; configuration_revision : string; max_reply_bytes : int;
 }
 let with_tool_request_destination ~config ~access ~reserved ~(export : tool_export) ~publish =
   with_tool_call_owner (fun () ->
@@ -1901,7 +1901,8 @@ let with_tool_request_destination ~config ~access ~reserved ~(export : tool_expo
         installation_id=Lane_addon_tool_request_owner.installation_id
           (Lane_addon_tool_request_owner.Configuration owner.id);
         package_id=e.package.id;tool=export.tool.name;
-        source_revision=declaration.source_revision;configuration_revision=owner.revision} in
+        source_revision=declaration.source_revision;configuration_revision=owner.revision;
+        max_reply_bytes=Lane_addon_types.max_reply_bytes e.package} in
       publish destination))))
 let capture_tool_request_owner ~config ~access ~reserved ~export ~scope ~request_id ~capture =
   with_tool_request_destination ~config ~access ~reserved ~export ~publish:(fun destination ->

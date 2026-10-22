@@ -39,7 +39,7 @@ let test_classification_reopens_exact_batches_and_applies_only_selected () = wit
   let c = fact "writer" "Other pending evidence" in
   let neighbor = fact "reviewer" a.claim in
   let full = some (requested (Request.prepare ~neighbor_limit:1 ~render ~ledger:Ledger.empty
-      ~current:[a;b;c;neighbor] ~pending:[a;b;c])) in
+      ~current:[a;b;c;neighbor] ~pending:[a;b;c] ~frame:max_int ~measure:(fun _ -> Ok 0))) in
   let narrowed = some (requested (Request.narrow ~render ~ledger:Ledger.empty full)) in
   List.iter (fun (request_id, original) ->
     let request = `Assoc ["ledger", Ledger.to_json Ledger.empty; "batch", Request.batch_to_json original] in
@@ -67,12 +67,13 @@ let test_classification_reopens_exact_batches_and_applies_only_selected () = wit
 let test_pending_and_neighbor_boundaries_are_strict () =
   let a = fact "writer" "Shared original evidence" and b = fact "other" "Shared original evidence" in
   let full = some (requested (Request.prepare ~neighbor_limit:1 ~render ~ledger:Ledger.empty
-      ~current:[a;b] ~pending:[a])) in
+      ~current:[a;b] ~pending:[a] ~frame:max_int ~measure:(fun _ -> Ok 0))) in
   let snapshot = Request.batch_to_json full in
   let refused ?(ledger = Ledger.empty) raw =
     match Request.batch_of_json ~ledger raw with
     | Error (Request.Invalid_batch _) -> ()
-    | Error (Request.Invalid_limit | Request.Render_failed _ | Request.Index_unavailable _)
+    | Error (Request.Invalid_limit | Request.Render_failed _ | Request.Index_unavailable _
+           | Request.Measure_failed _ | Request.Exceeds_frame _)
     | Ok _ -> Alcotest.fail "invalid snapshot restored" in
   let input = member "input" snapshot in
   let rows field = match member field input with `List rows -> rows | _ -> Alcotest.fail "input table" in

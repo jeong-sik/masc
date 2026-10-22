@@ -6,6 +6,8 @@ type error =
   | Render_failed of string
   | Index_unavailable of string
   | Invalid_batch of string
+  | Measure_failed of string
+  | Exceeds_frame of { fact : Ledger.fact_ref; bytes : int; frame : int }
 
 type row = { fact : Ledger.pending_fact; neighbors : Ledger.pending_fact list }
 
@@ -30,6 +32,12 @@ let error_to_string = function
   | Render_failed detail -> "workspace curator prompt render: " ^ detail
   | Index_unavailable detail -> "workspace curator neighbor index: " ^ detail
   | Invalid_batch detail -> "workspace curator inconsistent request: " ^ detail
+  | Measure_failed detail -> "workspace curator request size: " ^ detail
+  | Exceeds_frame { fact; bytes; frame } ->
+    Printf.sprintf
+      "workspace curator: the oldest pending fact %s with its neighbors needs %d request bytes; \
+       the receiving Add-on declares a %d-byte frame"
+      (Yojson.Safe.to_string (Ledger.fact_ref_to_json fact)) bytes frame
 
 let ( let* ) = Result.bind
 
@@ -247,23 +255,68 @@ let batch_of_json ~ledger json =
          index_stats = { Index.index_builds; indexed_rows; queries_executed } } in
   decode () |> Result.map_error (fun detail -> Invalid_batch detail)
 
-let prepare ~neighbor_limit ~render ~ledger ~current ~pending =
+(* Rows ranked so far, newest first, for the first [count] pending facts. *)
+type ranked = { rows_rev : row list; count : int }
+
+let query (fact : Ledger.pending_fact) = keeper_id fact.fact, fact.claim
+
+(* Rank only the pending facts not ranked yet, below [size]. *)
+let rank_through ~rank ~sources pending ranked size =
+  if size <= ranked.count then Ok ranked
+  else
+    let fresh = List.filteri (fun index _ -> index >= ranked.count && index < size) pending in
+    let* rankings = rank (List.map query fresh)
+      |> Result.map_error (fun error -> Index_unavailable (Index.error_to_string error)) in
+    let rows = List.map2 (fun fact hits ->
+      { fact; neighbors = List.map (fun (ordinal, _) -> sources.(ordinal)) hits }) fresh rankings in
+    Ok { rows_rev = List.rev_append rows ranked.rows_rev; count = size }
+
+(* A probe batch records no ranking work of its own; [prepare] records the
+   whole preparation's work on the batch it keeps. *)
+let unranked = { Index.index_builds = 0; indexed_rows = 0; queries_executed = 0 }
+
+let prepare ~neighbor_limit ~render ~ledger ~current ~pending ~frame ~measure =
   if neighbor_limit < 0 then Error Invalid_limit
   else match pending with
   | [] -> Ok None
-  | _ :: _ ->
-    let texts = List.map (fun (fact : Ledger.pending_fact) ->
-      keeper_id fact.fact, fact.claim) current in
-    let queries = List.map (fun (fact : Ledger.pending_fact) ->
-      keeper_id fact.fact, fact.claim) pending in
-    let* rankings, index_stats =
-      Index.rank_many_excluding_owners ~queries ~texts ~max_results:neighbor_limit
-      |> Result.map_error (fun error -> Index_unavailable (Index.error_to_string error)) in
-    let sources = Array.of_list current in
-    let rows = List.map2 (fun fact ranked ->
-      { fact; neighbors = List.map (fun (ordinal, _) -> sources.(ordinal)) ranked }) pending rankings in
-    let* batch = render_batch ~render ~ledger ~index_stats rows in
-    Ok (Some batch)
+  | (oldest : Ledger.pending_fact) :: _ ->
+    let sources = Array.of_list current and total = List.length pending in
+    let search ~rank =
+      (* The oldest [size] facts, ranked and rendered, and the bytes the caller
+         would send for them. *)
+      let attempt ranked size =
+        let* ranked = rank_through ~rank ~sources pending ranked size in
+        let rows = List.take size (List.rev ranked.rows_rev) in
+        let* batch = render_batch ~render ~ledger ~index_stats:unranked rows in
+        let* bytes = measure batch |> Result.map_error (fun detail -> Measure_failed detail) in
+        Ok (ranked, batch, bytes) in
+      (* Bytes nearly always grow with the prefix, so doubling then bisecting
+         finds a large prefix that fits. They can shrink a little when a fact
+         many rows name as a neighbor joins the selection and its local id gets
+         shorter, so a slightly longer prefix may also fit. Only a measured
+         size is ever returned. [fits] is the largest size known to fit, with
+         its batch; [over] the smallest size known not to. *)
+      let rec search_between ranked (fits, batch) over =
+        if over - fits <= 1 then Ok (Some batch)
+        else
+          let middle = fits + ((over - fits) / 2) in
+          let* ranked, candidate, bytes = attempt ranked middle in
+          if bytes <= frame then search_between ranked (middle, candidate) over
+          else search_between ranked (fits, batch) middle in
+      let rec grow ranked (fits, batch) =
+        if fits = total then Ok (Some batch)
+        else
+          let next = min total (2 * fits) in
+          let* ranked, candidate, bytes = attempt ranked next in
+          if bytes <= frame then grow ranked (next, candidate)
+          else search_between ranked (fits, batch) next in
+      let* ranked, batch, bytes = attempt { rows_rev = []; count = 0 } 1 in
+      if bytes <= frame then grow ranked (1, batch)
+      else Error (Exceeds_frame { fact = oldest.fact; bytes; frame }) in
+    let result, stats =
+      Index.with_excluding_owners ~texts:(List.map query current) ~max_results:neighbor_limit search in
+    (* Every ranking this preparation ran, kept or not, is the batch's work. *)
+    Result.map (Option.map (fun batch -> { batch with index_stats = stats })) result
 
 let narrow ~render ~ledger batch =
   match batch.rows with

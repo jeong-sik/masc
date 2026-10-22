@@ -312,8 +312,17 @@ let save_exact_request t ~declaration_id ~request_id json =
   save_record_with ~sync_parent:sync_parent_directory t (exact_request_path ~declaration_id ~request_id) json
 let tool_request_owner_path ~scope ~request_id =
   Filename.concat "tool-request-owners" (Filename.concat (digest scope) (digest request_id ^ ".json"))
+let with_tool_request_owner_serialization t ~scope work =
+  (* The parent is the existing authority anchor, even before the store/scope
+     exists. Resolve its aliases without creating missing authority. Store and
+     descriptor checks inside [work] still reject external replacement. *)
+  let parent=Unix.realpath (Filename.dirname t.root) in
+  let key=Filename.concat parent (Filename.concat (Filename.basename t.root)
+    (Filename.concat "tool-request-owners" (digest scope))) in
+  File_lock_eio.with_mutex key work
 let save_tool_request_owner t ~scope ~request_id json =
-  save_record_with ~sync_parent:sync_parent_directory t (tool_request_owner_path ~scope ~request_id) json
+  protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
+    save_record_with ~sync_parent:sync_parent_directory t (tool_request_owner_path ~scope ~request_id) json))
 let broadcast_path ~instance_id ~request_id =
   Filename.concat "broadcasts" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
 let save_broadcast t ~instance_id ~request_id json =
@@ -516,7 +525,7 @@ let load_exact_request t ~declaration_id ~request_id =
 
 let owned_result value = Result.map_error Fs_compat.owned_regular_file_read_error_to_string value
 let with_tool_request_owner_scope ~sync_parent t ~scope fn =
-  let blocking () = protect (fun () ->
+  let blocking () = protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
     let* result = Fs_compat.with_owned_inventory_root (Filename.dirname t.root) (fun anchor ->
       let result =
         let owner_uid = Unix.geteuid () in
@@ -534,7 +543,7 @@ let with_tool_request_owner_scope ~sync_parent t ~scope fn =
         | None -> Ok None
         | Some result -> Result.map Option.some result in
       Ok result) |> owned_result in
-    result) in
+    result)) in
   match Fs_compat.execution_context () with
   | Fs_compat.Non_eio -> blocking ()
   | Fs_compat.Eio_fiber ->

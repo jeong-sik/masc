@@ -5505,7 +5505,7 @@
 (test
  (name test_lane_addon_request_discovery)
  (modules test_lane_addon_request_discovery)
- (libraries alcotest yojson masc masc.fs_compat unix))
+ (libraries alcotest yojson masc masc.fs_compat masc_process eio eio_main eio.unix threads unix))
 
 (test
  (name test_lane_addon_request_progress)

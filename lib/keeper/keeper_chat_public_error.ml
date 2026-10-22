@@ -6,6 +6,8 @@ type kind =
   | Cursor_refusal of Keeper_chat_event_log.cursor_refusal
 [@@deriving enumerate]
 
+let all = all_of_kind
+
 let code = function
   | Invalid_input -> "invalid_input"
   | Unknown_operation -> "unknown_operation"

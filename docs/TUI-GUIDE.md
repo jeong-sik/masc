@@ -289,6 +289,13 @@ The System surface's Themes pane picks a bundled base16 scheme (monokai,
 solarized, and others). Moving the cursor previews a scheme, `Esc` puts back
 whatever was in force, `Enter` keeps the pick and `x` withdraws it.
 
+Active navigation uses the theme's selection background. Markdown headings,
+code banners and table headers use palette-relative accents; headings also keep
+their weight and underline. Resources distinguish `[MD vN]`, `[HTML vN]` and
+`[MCP]` badges, with separate colours for explicit revision-check status.
+Selected cards use a neutral background and plain text so their contents stay
+readable. Colourless terminals retain selection and textual type/check labels.
+
 A kept pick is written to `runtime.toml` under a `[tui]` table, which the TUI
 reads at boot, so it is still there on the next start. Withdrawing removes the
 key rather than naming a scheme, because following the terminal is the absence

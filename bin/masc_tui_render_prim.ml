@@ -850,7 +850,7 @@ let surface_strip (state : state) ~cols =
     let surface, _ = ring.(i) in
     let entry =
       if i = active then
-        Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry
+        Theme.sidebar_selection () ^ Ansi.bold ^ Masc_tui_theme.Glyph.current_entry
         ^ label i ^ Ansi.reset
       else Ansi.dim ^ label i ^ Ansi.reset
     in

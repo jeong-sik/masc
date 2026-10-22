@@ -1082,6 +1082,9 @@
  ;; test_tool_blob_store clears the durable tool-call index between cases; the
  ;; index library is unwrapped, so its module is referenced bare.
  masc.keeper_tool_call_index
+ ;; test_enum_mirror_sync names the connected Browser_lane backends in the
+ ;; capability table it checks; the browser lane is its own library.
+ masc.browser_lane
  masc.agent_core mcp_protocol))
 
 (test

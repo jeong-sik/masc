@@ -54,7 +54,7 @@ store 마다 세 가지를 묻는다.
 | memory current | — | 아니오 | 돈다 (recall 빠짐) | Refuse_boot (0420) | — |
 | official-client session | 예 | 예 | **멈춤** | **Refuse_boot** | — |
 | Keeper event queue | — | — | **멈춤** | Refuse_boot (PR-3, #39239) | — |
-| Keeper chat operation journal | — | 예 (Owner 가 열지 않음) | **멈춤** (Owner 없음, 2026-10-22 v3) | Refuse_boot. Owner 목록이 부팅 검사보다 먼저 열기 때문에 격리를 받아도 옮기지 않음 (#32504) | — |
+| Keeper chat operation journal | — | 예 (Owner 가 열지 않음) | **멈춤** (Owner 없음, 2026-10-22 v3) | Refuse_boot. 검사는 스키마(application id, user_version, 스키마 객체)까지이고, Owner 가 시작하며 읽는 행은 보지 않음. Owner 목록이 부팅 검사보다 먼저 열기 때문에 부팅이 옮기지 않고, 목록에 있으면 격리를 받아도 아무것도 옮기지 않음 (#32504) | — |
 | Keeper checkpoint | — | — | **멈춤** (버전을 올리지 않은 변경만) | 목록 밖 (1장 아래) | — |
 | World constitution | 아니오 | 예 (append) | 돈다 (못 푼 줄은 빠짐) | 목록 밖 | 프롬프트가 `rejected` 줄을 보여 주지 않음 |
 | goal store | 예 | 예 | 돈다 | Degrade_typed (0444) | — |

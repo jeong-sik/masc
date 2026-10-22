@@ -79,6 +79,11 @@ let database_schema = "masc.keeper_chat_operations.v3"
 let database_application_id = 0x4d4b4f50L
 let database_user_version = 3L
 
+(* How long a connection waits for a sibling writer's lock before SQLite
+   answers SQLITE_BUSY: the Owner's own handle and the read-only check both
+   use it. *)
+let busy_timeout_ms = 5000
+
 let metadata_table_sql =
   "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema TEXT NOT NULL CHECK (schema = 'masc.keeper_chat_operations.v3'), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0)) STRICT"
 ;;
@@ -726,7 +731,10 @@ let configure db =
      returns SQLITE_BUSY and the Owner fences chat for the rest of the
      process (install smoke, 2026-09-14). Same contract as
      keeper_tool_call_index and tool_metrics_store. *)
-  let* () = exec db ~operation:"set busy timeout" "PRAGMA busy_timeout=5000" in
+  let* () =
+    exec db ~operation:"set busy timeout"
+      (Printf.sprintf "PRAGMA busy_timeout=%d" busy_timeout_ms)
+  in
   let* journal_mode =
     single_text db ~operation:"set DELETE journal mode" "PRAGMA journal_mode=DELETE"
   in
@@ -1228,21 +1236,40 @@ let inspect_pending_inputs ~path =
     | Some (chat_operations, _, _, _, _) -> Some chat_operations)
 ;;
 
+type openability = Journal_absent | Journal_openable
+
 (* The check [open_or_create] makes before it initializes or validates, run
-   on a read-only handle: an absent file or an empty database is accepted
-   because the Owner creates the schema there, and anything else must already
-   be this build's schema. *)
+   on a read-only handle that waits for a writer like the Owner's does: an
+   absent file or an empty database is accepted because the Owner creates the
+   schema there, and anything else must already be this build's schema. A
+   read-only handle cannot roll back a rollback journal an interrupted write
+   left behind, so a failure with one beside the file says so. *)
 let check_openable ~path =
   match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Journal_absent
   | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error))
   | { Unix.st_kind = Unix.S_REG; _ } ->
     (match Sqlite3.db_open ~mode:`READONLY path with
      | exception Sqlite3.Error detail -> Error (Store_unavailable detail)
      | db ->
        let result =
-         try validate_open_candidate db with
+         try
+           Sqlite3.busy_timeout db busy_timeout_ms;
+           validate_open_candidate db |> Result.map (fun () -> Journal_openable)
+         with
          | Sqlite3.Error detail -> Error (Store_unavailable detail)
+       in
+       let result =
+         match result with
+         | Ok _ -> result
+         | Error error when Sys.file_exists (path ^ "-journal") ->
+           Error
+             (Store_unavailable
+                (error_to_string error
+                 ^ "; a rollback journal from an interrupted write is beside it \
+                    and only a read-write open rolls it back, so move the two \
+                    files together"))
+         | Error _ -> result
        in
        if close_db db then result
        else Error (Store_unavailable "failed to close read-only operation store"))

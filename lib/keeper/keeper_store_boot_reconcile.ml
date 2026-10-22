@@ -178,12 +178,11 @@ let examine_event_queue (config : Workspace.config) examination =
     discovery.keeper_names
 ;;
 
-(* The keepers are the persisted metadata names, the set the Owner inventory
-   installs, and the check is the journal's own read-only openability rule,
-   the same the deploy preflight runs. A journal this build does not accept
-   leaves its keeper without an Owner (2026-10-22, the v3 cut of #44905), so
-   it refuses boot. An absent journal reads as readable: the Owner creates
-   it. *)
+(* The journals of every persisted metadata name, checked with the journal's
+   own read-only openability rule, the same the deploy preflight runs. A
+   journal this build does not accept leaves its keeper without an Owner
+   (2026-10-22, the v3 cut of #44905), so it refuses boot. An absent journal
+   is not examined: the Owner creates it. *)
 let examine_chat_operation_journal (config : Workspace.config) examination =
   match Keeper_meta_store.persisted_keeper_names_read_only_result config with
   | Error rejection ->
@@ -203,7 +202,9 @@ let examine_chat_operation_journal (config : Workspace.config) examination =
              ~keeper_name:keeper
          in
          match Keeper_chat_operation_store.check_openable ~path with
-         | Ok () -> { examination with readable = examination.readable + 1 }
+         | Ok Keeper_chat_operation_store.Journal_absent -> examination
+         | Ok Keeper_chat_operation_store.Journal_openable ->
+           { examination with readable = examination.readable + 1 }
          | Error error ->
            { examination with
              undecodable =
@@ -267,25 +268,33 @@ let examine config =
   }
 ;;
 
-let admit ~accept_quarantine examination =
-  let discovery = List.map (fun failure -> Discovery_failed failure) examination.discovery_failures in
-  let undecodable = List.map (fun row -> Undecodable row) examination.undecodable in
-  match discovery, undecodable, accept_quarantine with
-  | [], [], (true | false) | [], _ :: _, true -> Ok examination
-  | [], _ :: _, false -> Error undecodable
-  | _ :: _, _, (true | false) -> Error (discovery @ undecodable)
-;;
-
-(* What differs from the general guidance below for one store. *)
-let undecodable_hint : D.Refusing.t -> string = function
-  | D.Refusing.Chat_operation_journal ->
-    " (stop the server, then move the journal aside or prepare it with \
-     `masc workspace-upgrade journal`; --accept-store-quarantine does not \
-     move it)"
+(* Whether boot itself can move a store's file aside. A chat operation
+   journal cannot: the Owner inventory installs before boot reconcile and has
+   already opened, or failed to open, every journal, so a journal moved now
+   would still leave its keeper without an Owner until the next restart. *)
+let boot_moves_aside : D.Refusing.t -> bool = function
   | D.Refusing.Keeper_meta
   | D.Refusing.Memory_current
   | D.Refusing.Official_client_session
-  | D.Refusing.Event_queue -> ""
+  | D.Refusing.Event_queue -> true
+  | D.Refusing.Chat_operation_journal -> false
+;;
+
+(* Accepted quarantine moves rows only when boot can move every one of them,
+   so a refusal never follows a partial move. *)
+let admit ~accept_quarantine examination =
+  let discovery = List.map (fun failure -> Discovery_failed failure) examination.discovery_failures in
+  let undecodable = List.map (fun row -> Undecodable row) examination.undecodable in
+  match discovery, undecodable with
+  | _ :: _, _ -> Error (discovery @ undecodable)
+  | [], [] -> Ok examination
+  | [], _ :: _ ->
+    if accept_quarantine
+       && List.for_all
+            (fun (row : undecodable) -> boot_moves_aside row.store)
+            examination.undecodable
+    then Ok examination
+    else Error undecodable
 ;;
 
 let refusal_to_string undecodable =
@@ -294,6 +303,8 @@ let refusal_to_string undecodable =
     then "repair directory access and run `deployment_preflight_helper validate-stores` against this base path before restarting; quarantine cannot bypass an unread inventory"
     else if List.exists (function Quarantine_failed _ -> true | Undecodable _ | Discovery_failed _ -> false) undecodable
     then "repair the reported quarantine failure and run `deployment_preflight_helper validate-stores` against this base path before restarting; accepting quarantine does not bypass a failed move"
+    else if List.exists (function Undecodable u -> not (boot_moves_aside u.store) | Discovery_failed _ | Quarantine_failed _ -> false) undecodable
+    then "with the server stopped, move each chat_operation_journal aside together with any -journal file beside it, or upgrade it with `masc workspace-upgrade journal` (inspect, prepare, install), repair or strip the other files, and run `deployment_preflight_helper validate-stores` against this base path; --accept-store-quarantine moves nothing while a journal is listed"
     else "strip or repair the files and run `deployment_preflight_helper validate-stores` against this base path, or start with --accept-store-quarantine to move them aside and start those keepers with empty stores"
   in
   String.concat
@@ -304,9 +315,8 @@ let refusal_to_string undecodable =
       :: List.map
            (function
             | Undecodable u ->
-              Printf.sprintf "  %s keeper=%s path=%s: %s%s"
+              Printf.sprintf "  %s keeper=%s path=%s: %s"
                 (store_to_string u.store) u.keeper u.path u.rejection
-                (undecodable_hint u.store)
             | Discovery_failed failure ->
               Printf.sprintf "  %s inventory path=%s: %s (repair directory access; quarantine cannot recover an unread inventory)"
                 (store_to_string failure.store) failure.path failure.rejection
@@ -396,13 +406,11 @@ let move_aside ~now ~base_path ~keepers_dir (u : undecodable) =
       moved.path, moved.rejected_path, moved.moved_with)
     |> Result.map_error (fun error -> error ^ " (rejected: " ^ u.rejection ^ ")")
   | D.Refusing.Chat_operation_journal ->
-    (* The Owner inventory installs before boot reconcile and has already
-       failed to open this journal; a journal moved now would leave the
-       keeper without an Owner until the next restart. *)
+    (* [admit] refuses before any move while a journal is listed
+       ([boot_moves_aside]); this answers a caller that skipped it. *)
     Error
-      ("not moved at boot: the Keeper Owner already refused this journal \
-        before boot reconcile; stop the server, then move it aside or \
-        prepare it with `masc workspace-upgrade journal` (rejected: "
+      ("boot does not move a chat operation journal aside: the Owner \
+        inventory opens journals before boot reconcile (rejected: "
        ^ u.rejection ^ ")")
 ;;
 

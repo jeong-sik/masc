@@ -708,17 +708,14 @@ let test_an_unreadable_session_binding_refuses_boot () =
      | Error detail -> failf "the fresh binding does not read back: %s" detail)
 ;;
 
-(* A claim reads a binding through a linked keeper directory, so boot must
-   read it the same way, or a v1 binding behind the link stops every turn of
-   that keeper while boot names nothing. *)
 (* 2026-10-22: the chat operation journal moved to v3 (#44905) and a restart
    left every keeper without an Owner while the server itself started. Boot
    and the preflight now name a journal this build does not accept. A
-   current journal, an empty file and an absent one read, because the Owner
-   opens the first and creates the schema in the others; a directory that is
-   not a keeper is not read; an accepted quarantine still refuses and leaves
-   the bytes in place, because the Owner refused the journal before boot
-   reconcile ran. *)
+   current journal and an empty file read, an absent one is not examined,
+   because the Owner opens the first and creates the schema in the others; a
+   directory that is not a keeper is not read; an accepted quarantine still
+   refuses and moves nothing, because the Owner inventory opened the journal
+   before boot reconcile ran. *)
 let test_a_journal_this_build_rejects_refuses_boot () =
   with_workspace
   @@ fun config ->
@@ -774,9 +771,9 @@ let test_a_journal_this_build_rejects_refuses_boot () =
      check bool "the refusal names the keeper and the path" true
        (String_util.contains_substring refusal
           ("chat_operation_journal keeper=stale path=" ^ stale));
-     check bool "the refusal says quarantine will not move it" true
+     check bool "the refusal says quarantine moves nothing while it is listed" true
        (String_util.contains_substring refusal
-          "--accept-store-quarantine does not move it"));
+          "--accept-store-quarantine moves nothing while a journal is listed"));
   (match D.reader D.Id.Keeper_chat_operation_journal with
    | D.Refuse_boot (_, scan) ->
      (match D.run scan ~base_path with
@@ -786,13 +783,45 @@ let test_a_journal_this_build_rejects_refuses_boot () =
       | Ok report -> failf "the preflight refused %d, not 1" report.D.refused
       | Error detail -> failf "preflight scan failed: %s" detail)
    | D.Degrade_typed _ | D.Preflight_only _ -> fail "the journal store refuses boot");
-  let report = R.quarantine ~now:1_700_000_003.0 config examination in
-  (match report.R.quarantined, report.R.failed with
-   | [], [ { R.store = D.Refusing.Chat_operation_journal; keeper = "stale"; _ } ] -> ()
-   | _ -> fail "an accepted quarantine reports the journal as a failure and moves nothing");
+  (match R.admit ~accept_quarantine:true examination with
+   | Ok _ -> fail "an accepted quarantine must still refuse a journal"
+   | Error _ -> ());
   check string "the stale journal keeps its bytes in place" stale_digest (file_digest stale)
 ;;
 
+(* An accepted quarantine that lists a journal beside stores boot can move
+   refuses before it moves any of them, so the operator never restarts from a
+   half-applied quarantine. *)
+let test_a_listed_journal_keeps_every_other_store_in_place () =
+  with_workspace
+  @@ fun config ->
+  let fixture = seed config in
+  let journal =
+    Keeper_chat_operation_store.path_for_keeper
+      ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config) ~keeper_name:"sound"
+  in
+  write_bytes journal "not an operation journal";
+  let digests =
+    List.map file_digest [ fixture.broken_meta; fixture.broken_snapshot; journal ]
+  in
+  let examination = R.examine config in
+  check bool "the journal is listed" true
+    (List.mem "chat_operation_journal" (stores_of examination.R.undecodable));
+  check bool "beside a store boot can move" true
+    (List.mem "keeper_meta" (stores_of examination.R.undecodable));
+  (match R.admit ~accept_quarantine:true examination with
+   | Ok _ -> fail "quarantine was admitted while a journal is listed"
+   | Error refusal ->
+     check bool "the refusal says nothing is moved" true
+       (String_util.contains_substring (R.refusal_to_string refusal)
+          "--accept-store-quarantine moves nothing while a journal is listed"));
+  check (list string) "every listed file keeps its bytes in place" digests
+    (List.map file_digest [ fixture.broken_meta; fixture.broken_snapshot; journal ])
+;;
+
+(* A claim reads a binding through a linked keeper directory, so boot must
+   read it the same way, or a v1 binding behind the link stops every turn of
+   that keeper while boot names nothing. *)
 let test_a_binding_behind_a_linked_keeper_directory_refuses_boot () =
   with_workspace
   @@ fun config ->
@@ -1677,6 +1706,8 @@ let () =
             test_a_binding_behind_a_linked_keeper_directory_refuses_boot
         ; test_case "a journal this build rejects refuses boot and is not moved" `Quick
             test_a_journal_this_build_rejects_refuses_boot
+        ; test_case "a listed journal keeps every other store in place" `Quick
+            test_a_listed_journal_keeps_every_other_store_in_place
         ] )
     ; ( "event queue"
       , [ test_case "indirect queue files refuse and quarantine their directory entries" `Quick

@@ -11,16 +11,17 @@
     (RFC every-durable-store-has-one-boot-policy, RFC-0420, RFC-0444 §2.4):
     - [Refuse_boot]: boot decodes every file before any keeper loop starts
       and refuses to start while one is undecodable, unless the operator
-      passes [--accept-store-quarantine]. Keeper meta and memory current are
+      passes [--accept-store-quarantine] and boot can move every such file
+      aside. Keeper meta and memory current are
       here: without them a keeper starts as another keeper or with empty
       memory, and overwrites what it lost. The official-client session
       binding is here too: while it does not decode, every turn of its
       keeper fails. An unreadable event queue prevents registration and
       stimulus selection, so its keeper takes no turn. A chat operation
       journal this build does not accept leaves its keeper without an Owner;
-      boot refuses it and does not move it aside even when quarantine is
-      accepted, because the Owner inventory opens the journal before boot
-      reconcile runs. The deploy preflight reads all of them too.
+      boot refuses it and moves nothing while one is listed, even when
+      quarantine is accepted, because the Owner inventory opens journals
+      before boot reconcile runs. The deploy preflight reads all of them too.
 
     - [Degrade_typed]: boot decodes it once and logs one INFO line when it is
       unavailable. Keepers run without it and nothing overwrites it, so the

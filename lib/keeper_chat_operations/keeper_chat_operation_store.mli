@@ -76,12 +76,17 @@ val inspect_pending_inputs : path:string -> (Operation.t list option, error) res
     Does not scan terminal history or run a whole-database integrity audit.
     [None] means no database, distinct from an empty validated snapshot. *)
 
-val check_openable : path:string -> (unit, error) result
-(** Read-only: whether {!open_or_create} would accept the file at [path]. An
-    absent file or an empty database passes, because the Owner creates the
-    schema there. A populated database must carry this build's application
-    id, user_version, schema identity, schema objects and input history
-    floor. Never creates, configures or changes the file. *)
+type openability =
+  | Journal_absent  (** No file: the Owner creates one. *)
+  | Journal_openable  (** An empty database or this build's schema. *)
+
+val check_openable : path:string -> (openability, error) result
+(** Read-only: whether {!open_or_create} would accept the file at [path]. A
+    populated database must carry this build's application id, user_version,
+    schema identity, schema objects and input history floor. Rows are not
+    decoded. Waits for a writer's lock like the Owner's handle. A read-only
+    handle cannot roll back a rollback journal left by an interrupted write;
+    the error then names it. Never creates, configures or changes the file. *)
 
 type input_checkpoint_update =
   | Input_checkpoint_updated

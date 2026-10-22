@@ -35,10 +35,11 @@
     the WAL first. The chat operation journal
     ([<masc>/keepers/<name>/chat-operations.sqlite3]) is [Refuse_boot]: a
     journal this build does not accept leaves its keeper without an Owner
-    (2026-10-22, #44905). It is never moved aside here, even with
-    [--accept-store-quarantine]: the Owner inventory installs before boot
-    reconcile and has already refused it, so [quarantine] reports it as a
-    failure and the operator moves or prepares it with the server stopped.
+    (2026-10-22, #44905). Boot never moves it aside: the Owner inventory
+    installs before boot reconcile and has already opened, or failed to open,
+    every journal. While one is listed, [admit] refuses even with
+    [--accept-store-quarantine] and nothing is moved; the operator moves or
+    upgrades it with the server stopped.
     The goal store ([goals.json]) is
 
     [Degrade_typed]: every goal writer refuses an unreadable store and no
@@ -101,8 +102,11 @@ val admit
   -> examination
   -> (examination, refusal list) result
 (** Whether boot may go on. [Ok] when nothing is undecodable, or the operator
-    accepted the quarantine. Discovery failures always refuse boot, including
-    when quarantine was accepted: no per-keeper inventory was read.
+    accepted the quarantine and boot can move every undecodable file aside.
+    A chat operation journal is never moved by boot, so while one is listed
+    the quarantine is refused too and nothing is moved. Discovery failures
+    always refuse boot, including when quarantine was accepted: no per-keeper
+    inventory was read.
     [Error] names every store boot refuses to move;
     the files stay where they are. *)
 

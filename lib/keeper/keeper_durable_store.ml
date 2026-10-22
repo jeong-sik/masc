@@ -856,16 +856,20 @@ let keeper_chat_transcript_store =
    keeper has no Owner: it takes no turn and every chat message to it is
    refused for the life of the process. On 2026-10-22 the journal generation
    moved to v3 (#44905) and a restart left all 36 keepers without an Owner,
-   while the server itself started. The keepers are the persisted metadata
-   names, the set the inventory installs; the check is the store's own,
-   read-only, with the rule the Owner applies before it creates a schema. *)
+   while the server itself started. The journals read are those of every
+   persisted metadata name; the inventory installs an Owner for the ones whose
+   metadata decodes, and a keeper created after boot is not read here. The
+   check is the store's own, read-only, with the rule the Owner applies before
+   it creates a schema; it does not decode rows, which the Owner also reads
+   when it starts. An absent journal is not a row: the Owner creates it. *)
 let chat_operation_journal_store =
   { store = "keeper chat operation journal"
   ; on_refusal =
       "the keeper's Owner is not installed, so the keeper takes no turn and \
        every chat message to it is refused until the process restarts with a \
        journal this build accepts; with the server stopped, move the journal \
-       aside or prepare it with `masc workspace-upgrade journal`"
+       aside together with any -journal file beside it, or upgrade it with \
+       `masc workspace-upgrade journal` (inspect, prepare, install)"
   ; scan =
       (fun ~base_path ->
          let config = Workspace.default_config base_path in
@@ -878,11 +882,14 @@ let chat_operation_journal_store =
                      ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config)
                      ~keeper_name
                  in
-                 count_row report
-                   (Keeper_chat_operation_store.check_openable ~path
-                    |> Result.map_error (fun error ->
-                      keeper_name ^ ": "
-                      ^ Keeper_chat_operation_store.error_to_string error)))
+                 match Keeper_chat_operation_store.check_openable ~path with
+                 | Ok Keeper_chat_operation_store.Journal_absent -> report
+                 | Ok Keeper_chat_operation_store.Journal_openable -> count_row report (Ok ())
+                 | Error error ->
+                   count_row report
+                     (Error
+                        (keeper_name ^ ": "
+                         ^ Keeper_chat_operation_store.error_to_string error)))
               empty_report
               names))
   }

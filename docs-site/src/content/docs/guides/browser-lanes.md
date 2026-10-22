@@ -236,8 +236,8 @@ An act can change the page, so verify the result with Stagehand
 `observe` or `extract`; a failed act may have acted. `observe` and `extract`
 only read.
 
-Use observed selectors for `BrowserInteract` click/fill and `BrowserAct` element
-actions; a selector must match exactly one element. For `BrowserInteract`, pass
+Use observed selectors for `BrowserInteract` page input such as click/fill;
+a selector must match exactly one element. For `BrowserInteract`, pass
 `expectedUrl` from the last read to reject intervening navigation. Fill emits page
 events and does not itself press Enter or submit. Read or capture the page after
 an action, including an error, before deciding whether to retry.

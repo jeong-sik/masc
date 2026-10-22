@@ -156,15 +156,14 @@ BrowserRead {"lane":"automation","tabId":<반환된 id>,"maxChars":12000}
 ## 입력과 화면 확인
 
 `BrowserRead mode=elements`로 현재 컨트롤의 selector, 상태, 선택 항목의
-실제 value를 관측한다. 그 결과로 `BrowserAct`의 click, fill, press, select를
-호출하고 다시 읽어 결과를 확인한다. scroll, back, forward, reload도 지원한다.
-이 `BrowserAct` 동작들은 automation용이다. live 조작은 아래의
-`BrowserInteract` 경로를 사용한다.
+실제 value를 관측한다. 그 결과로 `BrowserInteract`의 click, fill, select_option,
+scroll을 호출하고 다시 읽어 결과를 확인한다. `BrowserAct`는 탭 열기·닫기,
+back, forward, reload, 대화상자, 업로드처럼 브라우저 수준 동작만 맡는다.
 
 ```text
 BrowserRead {"lane":"automation","tabId":<id>,"mode":"elements"}
-BrowserAct {"action":"fill","tabId":<id>,"selector":<관측한 selector>,"text":"검색어"}
-BrowserAct {"action":"press","tabId":<id>,"selector":<관측한 selector>,"key":"Enter"}
+BrowserInteract {"lane":"automation","action":"fill","tabId":<id>,"selector":<관측한 selector>,"text":"검색어"}
+BrowserInteract {"lane":"automation","action":"press_key","tabId":<id>,"expectedUrl":<읽은 URL>,"key":"Enter"}
 BrowserRead {"lane":"automation","tabId":<id>}
 BrowserRead {"lane":"automation","tabId":<id>,"mode":"screenshot"}
 keeper_analyze_image {"artifact":<반환된 artifact>,"query":"검색 결과와 화면 배치를 확인해줘"}

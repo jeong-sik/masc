@@ -1,11 +1,6 @@
 (** Closed Firefox interactions. Arguments are parsed before any browser effect. *)
 type key = Enter | Tab | Escape | Backspace | Delete | ArrowUp | ArrowDown | ArrowLeft | ArrowRight | Home | End
 type interaction =
-  | Click of string
-  | Fill of { selector : string; text : string }
-  | Press of { selector : string; key : key }
-  | Select of { selector : string; value : string }
-  | Scroll of { x : int; y : int }
   | Upload of { selector : string; paths : string list }
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Close_tab

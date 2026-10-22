@@ -156,28 +156,6 @@ let dialog_text t session =
 let element_call perform_effect id suffix body =
   perform_effect `POST ("/element/" ^ Uri.pct_encode id ^ suffix) (Some body)
 let interact t session ~perform_effect = function
-  | Browser_lane.Action.Click selector ->
-    let* id = element_id t session selector in element_call perform_effect id "/click" (`Assoc [])
-  | Browser_lane.Action.Fill {selector;text} ->
-    let* id = element_id t session selector in
-    let* _ = element_call perform_effect id "/clear" (`Assoc []) in
-    if text = "" then Ok `Null
-    else element_call perform_effect id "/value" (`Assoc ["text",`String text])
-  | Browser_lane.Action.Press {selector;key} ->
-    let* id = element_id t session selector in
-    element_call perform_effect id "/value" (`Assoc ["text",`String (Browser_lane.Action.webdriver_key key)])
-  | Browser_lane.Action.Select {selector;value} ->
-    let* id = element_id t session selector in
-    (* Resolve the option under this exact select, then use a native click. *)
-    let element = `Assoc ["element-6066-11e4-a52e-4f735466cecf",`String id] in
-    let* option = script t session
-      "const el=arguments[0]; if(el.localName!=='select') throw new Error('target is not a select'); const options=Array.from(el.options).filter(o=>o.value===arguments[1]); if(options.length!==1) throw new Error('option value must match exactly once'); return options[0];"
-      [element;`String value] in
-    let* id = string_field "element-6066-11e4-a52e-4f735466cecf" option in
-    element_call perform_effect id "/click" (`Assoc [])
-  | Browser_lane.Action.Scroll {x;y} ->
-    perform_effect `POST "/execute/sync" (Some (`Assoc ["script", `String "window.scrollBy({left:arguments[0],top:arguments[1],behavior:'instant'}); return {x:window.scrollX,y:window.scrollY};"
-      ; "args", `List [`Int x;`Int y]]))
   | Browser_lane.Action.Upload {selector;paths} ->
     let* id = element_id t session selector in
     let element = `Assoc ["element-6066-11e4-a52e-4f735466cecf",`String id] in
@@ -242,9 +220,7 @@ let execute_action t action =
         (match result with `List [] -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources session | _ -> ());
         Ok (`Assoc ["tabId",`Int id;"closed",`Bool true])
       | Browser_lane.Action.Dismiss_dialog | Browser_lane.Action.Back | Browser_lane.Action.Forward
-      | Browser_lane.Action.Reload | Browser_lane.Action.Click _ | Browser_lane.Action.Fill _
-      | Browser_lane.Action.Press _ | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _
-      | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _ ->
+      | Browser_lane.Action.Reload | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _ ->
         (* Do not issue another fallible browser request after an effect.
            The caller observes the resulting page with a separate read. *)
         Ok (`Assoc ["tabId",`Int id;"performed",`Bool true;"result",result]))

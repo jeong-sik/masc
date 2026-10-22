@@ -57,7 +57,7 @@ let upload_paths = function
   | B.Page_act (B.Action.On_tab {interaction=B.Action.Upload {paths;_};_}) -> Ok paths
   | Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_interact _
   | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
-  | Page_act (Open_tab _|On_tab {interaction=Click _|Fill _|Press _|Scroll _|Select _|Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
+  | Page_act (Open_tab _|On_tab {interaction=Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
   | Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> Error "grant requires one upload command"
 let release_failed t ~id exn =
   let backtrace=Printexc.get_raw_backtrace () in
@@ -119,7 +119,7 @@ let with_claim t ~id ~actor ~route ~verb f =
         Ok (f (B.Page_act (B.Action.On_tab {target with interaction=Upload {selector;paths=Lease.paths grant.snapshot}})))
     | Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_interact _
     | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
-    | Page_act (Open_tab _|On_tab {interaction=Click _|Fill _|Press _|Scroll _|Select _|Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
+    | Page_act (Open_tab _|On_tab {interaction=Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog;_})
     | Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> Error "grant command is not an upload")
 let discard t ~id =
   let snapshot=locked t (fun () -> match Hashtbl.find_opt t.grants id with

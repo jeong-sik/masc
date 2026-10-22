@@ -767,9 +767,7 @@ let test_native_tab_actions () =
     check int "unsupported action makes no runtime call" 0 (List.length fake.sent))
     (Lane.Action.On_tab {tab_id=1;frame_path=["iframe"];interaction=Reload} ::
      List.map (fun interaction -> Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})
-       [Click "#x";Fill {selector="#x";text="x"};Press {selector="#x";key=Enter};
-        Select {selector="#x";value="x"};Scroll {x=0;y=1};Upload {selector="#x";paths=["x"]};
-        Accept_dialog None;Dismiss_dialog]);
+       [Upload {selector="#x";paths=["x"]};Accept_dialog None;Dismiss_dialog]);
   List.iter (fun call ->
     let params = Wire.call_params call in
     let expected = match call with Wire.Context_new_page -> `Assoc [] | _ -> `Assoc ["page_id",`String "P2"] in

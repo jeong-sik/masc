@@ -33,6 +33,10 @@ val discover : store:Lane_addon_store.t -> scope:string -> (retained list, error
     inventory; no partial list is returned as complete. No directories, requests
     or dispatches are created. Results are observations; load/advance and actual
     workspace authority must be revalidated by the original serialized owner. *)
+val check_published : directory_name:string -> file_name:string -> Yojson.Safe.t -> (unit, string) result
+(** Decode one published record the way {!discover} reads it, with the scope
+    and request ID the record names: the complete record, and its scope
+    directory and filename. Reads nothing else and writes nothing. *)
 val retain : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   installation_id:string -> package_id:string -> tool:string -> request:Yojson.Safe.t -> (unit, error) result
 (** Persist the complete canonical request before dispatch. Same input and

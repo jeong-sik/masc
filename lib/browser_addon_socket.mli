@@ -7,6 +7,10 @@ val context : instance_id:string -> automation:Browser_configuration.automation 
   models:Browser_addon_models.configuration option -> (Yojson.Safe.t, string) result
 (** Selects a private per-instance socket directory without creating it. Persist
     this immutable descriptor through Native_addon_lease.prepare before mkdir. *)
+val decode_cleanup_context : instance_id:string -> Yojson.Safe.t option -> (unit, string) result
+(** Decode a reservation's retained cleanup descriptor the way {!acquire} and
+    {!cleanup} read it for [instance_id], without a claim, creating or removing
+    anything. [None] is a reservation with no browser allocation. *)
 val acquire : admission:Native_addon_lease.t -> directory:string -> (t, string) result
 (** Before payload spawn, acquire the directory selected by the original native
     reservation and persist its exact identity in that host claim slot. *)

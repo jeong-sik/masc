@@ -368,6 +368,20 @@ let validate_record ~schema record =
       let* final = decode_final (final_to_json final) in
       Ok (Retained_terminal final)
 
+(* The reads [run] applies to a retained record before it reuses it, with the
+   declaration and the original request the record names. *)
+let check_retained_record wire =
+  let* declaration_id = match wire with
+    | `Assoc fields -> (match List.assoc_opt "declaration_id" fields with
+        | Some (`String value) -> Ok value
+        | Some _ | None -> Error "record declaration_id")
+    | _ -> Error "record must be an object" in
+  let* stored = record_of_json wire in
+  let* original = request_of_json stored.request in
+  let* stored = bound_record ~declaration_id original wire in
+  let* _ = validate_record ~schema:None stored in
+  Ok ()
+
 let observe_retained ~store ~declaration_id ~schema request =
   let* schema = original_schema ~declaration_id ~schema request in
   let* wire = Lane_addon_store.load_exact_request store ~declaration_id ~request_id:request.request_id in

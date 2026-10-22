@@ -80,6 +80,20 @@ let discover ~store ~scope =
       then Error (Store_unavailable "original request filename does not match its ID")
       else restore (record :: records) rest in
   restore [] rows
+let check_published ~directory_name ~file_name json =
+  let field key = match json with
+    | `Assoc fields -> (match List.assoc_opt key fields with
+        | Some (`String value) when String.trim value <> "" -> Ok value
+        | Some _ | None -> Error ("missing original request " ^ key))
+    | _ -> Error "invalid original request record" in
+  let* scope = field "scope" in
+  let* request_id = field "request_id" in
+  let* _ = decode ~scope ~request_id json in
+  if not (String.equal directory_name (Lane_addon_store.digest scope))
+  then Error "original request directory does not match its scope"
+  else if not (String.equal file_name (Lane_addon_store.digest request_id ^ ".json"))
+  then Error "original request filename does not match its ID"
+  else Ok ()
 let retain ~store ~scope ~request_id ~installation_id ~package_id ~tool ~request =
   let* () = validate_identity ["scope", scope; "request_id", request_id;
     "installation_id", installation_id; "package_id", package_id; "tool", tool] in

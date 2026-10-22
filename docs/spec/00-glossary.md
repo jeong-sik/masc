@@ -3873,7 +3873,10 @@ status: reference
   RFC every-durable-store-has-one-boot-policy, RFC-0420, RFC-0444 §2.4).
   store 목록은 `Keeper_durable_store.Id.all` 하나이고, 배포 preflight
   (`deployment_preflight_helper validate-stores`)와 부팅 reconcile 이 같은 목록을
-  읽는다. `Refuse_boot`(keeper meta·current Memory OS snapshot·official-client
+  읽는다. Lane Add-on 기록(binding·native claim·action receipt·Exact 요청·원래
+  tool 요청)은 이 목록 밖에서 `Lane_addon_store_preflight.Store.all` 로 preflight
+  만 읽는다. 못 읽는 파일마다 경로·거절한 디코더·"서버를 멈추고 그 파일을 옆으로
+  옮긴 뒤 새 빌드를 켠다"는 단계를 찍고 배포를 멈춘다(#45106). `Refuse_boot`(keeper meta·current Memory OS snapshot·official-client
   session·event queue): 없으면 Keeper가 다른 Keeper로, 또는 빈 기억으로 뜨고
   잃은 것을 덮어쓰므로 부팅을 거절한다. official-client session 을 못 읽으면
   그 Keeper 의 모든 턴이 실패하고, event queue 를 못 읽으면 등록과 자극

@@ -24,14 +24,12 @@ let context ~instance_id ~automation ~stagehand ~live_bidi ~models = protect (fu
     "live_bidi",(match live_bidi with None -> `Null | Some c -> Browser_addon_live_bidi.configuration_to_json c);
     "models",(match models with None -> `Null | Some configuration -> Browser_addon_models.configuration_to_json configuration);
     "automation",(match automation with None -> `Null | Some configuration -> Browser_addon_automation.configuration_to_json configuration)]))
-let context_path admission =
-  let* context=Native_addon_lease.cleanup_context admission |> Result.map_error Native_addon_lease.error_to_string in
-  match context with
+let context_of_json ~instance_id = function
   | None -> Ok None
   | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=["automation";"directory";"kind";"live_bidi";"models";"stagehand"] ->
     (match List.assoc_opt "kind" fields,List.assoc_opt "directory" fields with
      | Some (`String "browser_socket"),Some (`String root) ->
-       let* expected=leaf (Native_addon_lease.instance_id admission) in
+       let* expected=leaf instance_id in
        if Filename.is_relative root || Filename.basename root<>expected
          || Unix.realpath (Filename.dirname root)<>Filename.dirname root then Error "invalid browser allocation path"
        else
@@ -54,6 +52,11 @@ let context_path admission =
          Ok (Some (root,automation,models,stagehand,live_bidi))
      | _ -> Error "unknown native cleanup descriptor")
   | Some _ -> Error "invalid native cleanup descriptor"
+let context_path admission =
+  let* context=Native_addon_lease.cleanup_context admission |> Result.map_error Native_addon_lease.error_to_string in
+  context_of_json ~instance_id:(Native_addon_lease.instance_id admission) context
+let decode_cleanup_context ~instance_id context = protect (fun () ->
+  context_of_json ~instance_id context |> Result.map ignore)
 let slot admission directory =
   let directory=Unix.realpath directory in
   if List.mem directory (Native_addon_lease.directories admission) then

@@ -54,6 +54,16 @@ val retain_jsonl : t -> history:string -> entry_count:int -> newest_first:'a lis
 val read_jsonl : t -> Lane_addon_types.evidence -> (string, string) result
 (** Reads a complete retained sequence, oldest first, validating every node.
     Explicit full-history reads allocate the requested result; capture does not. *)
+val bindings_directory : string
+val actions_directory : string
+val exact_requests_directory : string
+val tool_request_owners_directory : string
+(** The directories below {!root} that hold binding, action receipt, Exact
+    request and original tool request records. *)
+val binding_path : string -> string
+(** One instance's binding record, relative to {!root}. *)
+val observation_dir : string -> string
+(** One instance's observation directory, relative to {!root}. *)
 val save_binding : t -> instance_id:string -> Yojson.Safe.t -> (unit, string) result
 val remove_binding : t -> instance_id:string -> (unit, string) result
 (** Removes one binding record and syncs the containing directory. A retry

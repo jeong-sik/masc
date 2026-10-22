@@ -6,6 +6,9 @@
     helper's other subcommands ([validate-current-meta], the schedule
     ledger and signals) still find their own files; RFC
     every-durable-store-has-one-boot-policy moves them here in later steps.
+    [validate-stores] also reads the Lane Add-on records through
+    {!Lane_addon_store_preflight}, which names every refused file because its
+    fix is moving that file aside; boot does not read them.
 
     {!reader} is the one table. It sends each store to one of three policies
     (RFC every-durable-store-has-one-boot-policy, RFC-0420, RFC-0444 §2.4):

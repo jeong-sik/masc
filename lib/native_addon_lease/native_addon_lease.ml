@@ -59,17 +59,19 @@ let write_json slot fd value =
     let written = Unix.write fd bytes offset (Bytes.length bytes-offset) in
     if written=0 then raise (Sys_error "native lease write made no progress") else loop (offset+written) in
   loop 0; Unix.fsync fd; Unix.fsync slot.directory
-let parse fd decode = Unix.fsync fd;match read fd with
+let decode_bytes decode = function
   | "" -> Ok None
   | bytes -> (try decode (Yojson.Safe.from_string bytes) |> Result.map Option.some
       with Yojson.Json_error detail -> Error (State_invalid detail))
+let parse fd decode = Unix.fsync fd;decode_bytes decode (read fd)
 let sorted = List.sort (fun (a,_) (b,_) -> String.compare a b)
-let read_intent slot = parse slot.intent (function
+let intent_of_json = function
   | `Assoc fields -> (match sorted fields with
       | ["instance_id",`String instance;"state",`String "admitted"] when String.trim instance<>"" -> Ok (Admitted instance)
       | ["instance_id",`String instance;"state",`String "retired"] when String.trim instance<>"" -> Ok (Retired instance)
       | _ -> Error (State_invalid "invalid native admission intent"))
-  | _ -> Error (State_invalid "invalid native admission intent"))
+  | _ -> Error (State_invalid "invalid native admission intent")
+let read_intent slot = parse slot.intent intent_of_json
 let read_owner slot = parse slot.owner (function
   | `Assoc fields -> (match sorted fields with
       | ["instance_id",`String instance_id;"pid",`Int pid;"started",`String started]
@@ -85,8 +87,7 @@ let history_name instance =
 let with_history slot instance work =
   let fd = open_private_file slot.directory (history_name instance) false in
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> work fd)
-let read_history fd instance =
-  let* history = parse fd (function
+let history_of_json instance = function
   | `Assoc fields -> (match sorted fields with
       | ["cleanup_context",context;"instance_id",`String known;"state",`String state;"version",`Int 2] when known=instance ->
           let* state=match state with
@@ -95,10 +96,13 @@ let read_history fd instance =
           let cleanup_context=match context with `Null -> None | value -> Some value in
           Ok {state;cleanup_context}
       | _ -> Error (State_invalid "invalid native instance history"))
-  | _ -> Error (State_invalid "invalid native instance history")) in
-  match history with
+  | _ -> Error (State_invalid "invalid native instance history")
+let present_history = function
   | Some history -> Ok history
   | None -> Error (State_invalid "native instance history is empty")
+let read_history fd instance =
+  let* history = parse fd (history_of_json instance) in
+  present_history history
 let write_history slot instance history =
   let state = match history.state with Reserved -> "reserved" | Revoked -> "revoked" | Consumed -> "consumed" in
   write_metadata slot (history_name instance) (`Assoc ["instance_id",`String instance;"state",`String state;
@@ -204,10 +208,17 @@ let temporary_metadata name = match String.split_on_char '-' name with
        | Some pid, Some sequence -> pid > 0 && sequence > 0
        | None, (Some _ | None) | Some _, None -> false)
   | [] | [_] | [_;_] | [_;_;_] | _::_::_::_ -> false
+(* The files of a slot that are not an instance history. *)
+let slot_files = ["gate";"lease";"intent.json";"owner.json"]
+let history_instance name = function
+  | `Assoc fields -> (match List.assoc_opt "instance_id" fields with
+      | Some (`String instance) when name=history_name instance -> Ok instance
+      | None | Some _ -> Error (State_invalid "unknown native preparation metadata"))
+  | _ -> Error (State_invalid "unknown native preparation metadata")
 let preparation_histories path directory =
   Array.fold_left (fun result name ->
     let* histories = result in
-    if List.mem name ["gate";"lease";"intent.json";"owner.json"] then Ok histories
+    if List.mem name slot_files then Ok histories
     else
       let fd = open_private_file directory name false in
       Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
@@ -215,11 +226,7 @@ let preparation_histories path directory =
            launcher. Keep it for diagnosis after an interrupted atomic write. *)
         if temporary_metadata name then Ok histories
         else
-          let* instance = parse fd (function
-            | `Assoc fields -> (match List.assoc_opt "instance_id" fields with
-                | Some (`String instance) when name=history_name instance -> Ok instance
-                | None | Some _ -> Error (State_invalid "unknown native preparation metadata"))
-            | _ -> Error (State_invalid "unknown native preparation metadata")) in
+          let* instance = parse fd (history_instance name) in
           match instance with
           | None -> Error (State_invalid "native preparation history is empty")
           | Some instance ->
@@ -276,6 +283,50 @@ let recover_preparation ~directory:path =
                     | _::_::_ -> Error (State_invalid "unpublished native reservations disagree")))
       | [] | _::_::_ -> Error (Invalid_claim "native preparation requires one installation slot")))
 let cleanup_context t = with_slots t.directories (existing_context t)
+type recorded = { instance : string; history : string; context : Yojson.Safe.t option }
+(* The bytes of one slot file, [None] when it does not exist. *)
+let peek path =
+  match Unix.openfile path [Unix.O_RDONLY;Unix.O_CLOEXEC] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None
+  | fd -> Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Ok (Some (read fd)))
+(* The decoders [reopen], [current] and [recover_preparation] apply, without the
+   gate, the coordinator, fsync or [create]: a deploy check reads the slots of a
+   server that may still be running and must never wait on or change them.
+   Intents and histories are replaced by rename, so each read sees one whole
+   version of its file. *)
+let inspect ~directory =
+  let failed name error = Filename.concat directory name ^ ": " ^ error_to_string error in
+  let decode ?missing name decoder = protect (fun () ->
+    let* bytes = peek (Filename.concat directory name) in
+    match bytes, missing with
+    | None, None -> Ok None
+    | None, Some error -> Error error
+    | Some bytes, (None | Some _) -> decode_bytes decoder bytes) |> Result.map_error (failed name) in
+  let history instance =
+    let name = history_name instance in
+    let* history = decode name (history_of_json instance)
+        ~missing:(State_invalid "native instance history is missing") in
+    let* history = present_history history |> Result.map_error (failed name) in
+    Ok {instance; history=name; context=history.cleanup_context} in
+  let* intent = decode "intent.json" intent_of_json in
+  match intent with
+  | Some (Admitted instance | Retired instance) -> history instance |> Result.map Option.some
+  | None ->
+      let* names = protect (fun () -> Ok (Sys.readdir directory))
+        |> Result.map_error (fun error -> directory ^ ": " ^ error_to_string error) in
+      let* histories = Array.fold_left (fun result name ->
+        let* histories = result in
+        if List.mem name slot_files || temporary_metadata name then Ok histories
+        else
+          let* instance = decode name (history_instance name) in
+          match instance with
+          | None -> Error (failed name (State_invalid "native preparation history is empty"))
+          | Some instance -> let* recorded = history instance in Ok (recorded::histories))
+        (Ok []) names in
+      match histories with
+      | [] -> Ok None
+      | [recorded] -> Ok (Some recorded)
+      | _::_::_ -> Error (directory ^ ": unpublished native reservations disagree")
 let retire t = with_slots t.directories (fun slots ->
   let* () = traverse (fun slot -> check_current t slot |> Result.map ignore) slots in
   let* () = traverse (fun slot -> with_history slot t.instance_id (fun fd ->

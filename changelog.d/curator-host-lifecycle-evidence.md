@@ -1,0 +1,3 @@
+### Documentation
+
+- Record actual Curator worker On/Off/reattachment, preserved admitted Memory and state-volume identity in Dashboard and native TUI, without treating a reproduced renderer failure as domain completion.

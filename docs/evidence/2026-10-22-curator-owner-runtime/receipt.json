@@ -58,6 +58,59 @@
       "file": "tui-lanes-before-on.txt",
       "sha256": "1cd3ce641ba458a12f4a8af9e8d25f0bdc61e9d99069c680db05036042f0a15f",
       "original_bytes": true
+    },
+    {
+      "file": "first-on-inventory.json",
+      "sha256": "80d344b495a59e89f201159156d7a9ab289df9eeea3baeffc1504ea97586d58e",
+      "original_bytes": true
+    },
+    {
+      "file": "worker-boundary.json",
+      "sha256": "5a076fec1e23c848269aadd6e64bb85012a998a9d067a82c9c07429b4270a938",
+      "original_bytes": true
+    },
+    {
+      "file": "off-cleanup-inventory.json",
+      "sha256": "887cc4c2dfe49f364807292b162279eb2feb38835393e04bc50bf94da7a4af96",
+      "original_bytes": true
+    },
+    {
+      "file": "reattached-inventory.json",
+      "sha256": "82a0bd487e436e292760f4c670bc8ffc46ce4f53452a77047a7030e657f21764",
+      "original_bytes": true
+    },
+    {
+      "file": "reattachment.json",
+      "sha256": "312da74cdac63791712f4985b522fe3a12160a3092a234c62545498cbd2026d7",
+      "original_bytes": true
+    },
+    {
+      "file": "dashboard-worker-on.png",
+      "sha256": "b96d456f4ade8ecc5a70dd2b9c340317986b494394efc8d7ebca9a11dddbdce0",
+      "original_bytes": true
+    },
+    {
+      "file": "dashboard-reattached.png",
+      "sha256": "d40df42d5dc71bb1b5dc403d344ee80594df06f404b521548e73009aba0ea167",
+      "original_bytes": true
+    },
+    {
+      "file": "tui-worker-on.txt",
+      "sha256": "50c09f4b2054ab5195c7c5f071ab0a6467f52a4917aa106f532faa20a0f6e4a9",
+      "original_bytes": true
+    },
+    {
+      "file": "tui-reattached.txt",
+      "sha256": "b6cd2d3f2575d00db1d1676443892849816af875af34e82ddbaca2ac8b815116",
+      "original_bytes": true
     }
-  ]
+  ],
+  "actual_lifecycle": {
+    "first_incarnation": "01a161d1-adf6-7000-a5bb-d068f198269c",
+    "second_incarnation": "01a161d4-4188-7000-b79c-17a3edec7769",
+    "off_running_matching_containers": 0,
+    "reattachment_state_volume_preserved": true,
+    "original_current_bytes_preserved": true,
+    "model_output_or_domain_receipts_proved": false
+  }
 }

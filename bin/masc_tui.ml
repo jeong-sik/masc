@@ -25193,7 +25193,10 @@ and is loaded on demand through keeper_skill.
         | Some reader -> editing (Masc_tui_board_reader.document reader)
         | None -> match current_chat_call_reader state with
           | Some reader -> editing (Masc_tui_chat_call_reader.document reader)
-          | None -> Option.fold ~none:false ~some:editing (current_detail_reading state) in
+          | None -> match current_task_inspector state with
+            | Some reader -> editing (Masc_tui_original_task_read.document
+                (task_inspection_source reader.tci_original))
+            | None -> Option.fold ~none:false ~some:editing (current_detail_reading state) in
       let text_target =
         if not compact_viewport && reading_search_editing then Some Text_row_search
         else text_input_target state ~compact_viewport in
@@ -25258,7 +25261,6 @@ and is loaded on demand through keeper_skill.
           the composer under the card would put the link [y] just copied into a
           draft that goes to a Keeper on the next Enter. It is first, above the
           overlays the card is drawn over. *)
-       | Some (Pasted _) when Option.is_some (current_task_inspector state) -> ()
        | Some (Pasted paste) when Option.is_some (current_board_reader state) ->
            let reader=state.board_reader in
            insert_reading_search (Masc_tui_board_reader.document reader)
@@ -25271,6 +25273,14 @@ and is loaded on demand through keeper_skill.
                 (fun ~width ~height ~text -> state.chat_call_reader <- Some (origin,
                   Masc_tui_chat_call_reader.search_insert ~width ~height ~text reader)) paste.Masc_tui_paste.text
             | None -> ())
+       | Some (Pasted paste) when Option.is_some (current_task_inspector state) ->
+           Option.iter (fun reader ->
+             let original=reader.tci_original in
+             let source=task_inspection_source original in
+             insert_reading_search (Masc_tui_original_task_read.document source)
+               (fun ~width ~height ~text -> set_task_inspection_source original
+                 (Masc_tui_original_task_read.search_insert ~width ~height ~text source))
+               paste.Masc_tui_paste.text) (current_task_inspector state)
        | Some (Pasted paste) when Option.is_some (current_detail_reading state) ->
            Option.iter (fun reading ->
              insert_reading_search reading
@@ -26968,48 +26978,6 @@ and is loaded on demand through keeper_skill.
        (* /about is modal for the help sheet's reason: Esc closes it, c turns
           the candle to its other style, and everything else is swallowed so
           no surface binding or global quit fires under it. *)
-       | Some k when Option.is_some (current_task_inspector state) ->
-           (match current_task_inspector state with
-            | None -> ()
-            | Some reader ->
-              let original=reader.tci_original in
-              let source=task_inspection_source original in
-              let count,height=Masc_tui_render_overlays.detail_reading_viewport state
-                (Masc_tui_original_task_read.document source) in
-              if k="esc" then close_task_inspection_reader state
-              else if k="r" then
-                (match Masc_tui_original_task_read.displayed_source source with
-                 | Origin -> (match Masc_tui_original_task_read.origin source with
-                   | Task_creation _ -> launch_task_creation_read state ~mailbox:async_messages
-                   | Answered_ask _ -> launch_original_task_read state ~mailbox:async_messages)
-                 | Task -> launch_original_task_read state ~mailbox:async_messages
-                 | History -> launch_original_history_read state ~mailbox:async_messages ~earlier:false ~limit:(max 1 height)
-                 | Evidence -> launch_original_evidence_read state ~mailbox:async_messages ~next:false)
-              else if k="[" || k="]" then
-                (match task_creation_neighbor state ~older:(k="[") with
-                 | None -> ()
-                 | Some original ->
-                   close_task_inspection_reader state;
-                   if select_task_creation_inspection state original then
-                     launch_task_creation_read state ~mailbox:async_messages)
-              else if k="o" then launch_original_task_read state ~mailbox:async_messages
-              else if k="h" || k="H" then launch_original_history_read state ~mailbox:async_messages ~earlier:(k="H") ~limit:(max 1 height)
-              else if k="v" then launch_original_evidence_read state ~mailbox:async_messages ~next:true
-              else if k="b" then begin
-                cancel_task_inspection_read state;
-                set_task_inspection_source original (Masc_tui_original_task_read.back_to_origin (task_inspection_source original))
-              end
-              else
-                let movement=match k with
-                  | "j" | "down" | "wheel-down" -> Some (Masc_tui_detail_reading.By 1)
-                  | "k" | "up" | "wheel-up" -> Some (Masc_tui_detail_reading.By (-1))
-                  | "pagedown" -> Some (Masc_tui_detail_reading.By height)
-                  | "pageup" -> Some (Masc_tui_detail_reading.By (-height))
-                  | "home" | "g" -> Some Masc_tui_detail_reading.First
-                  | "end" | "G" -> Some Masc_tui_detail_reading.Last
-                  | _ -> None in
-                Option.iter (fun movement -> set_task_inspection_source original
-                  (Masc_tui_original_task_read.move ~count ~height movement source)) movement)
        | Some k when Option.is_some (current_board_reader state) ->
            let reader=state.board_reader in
            let document=Masc_tui_board_reader.document reader in
@@ -27059,6 +27027,52 @@ and is loaded on demand through keeper_skill.
               | Open | Retry -> launch_chat_call_read state ~mailbox:async_messages
               | Move movement -> update (Masc_tui_chat_call_reader.move ~count ~height movement reader)
               | Ignore -> ())
+       | Some k when Option.is_some (current_task_inspector state) ->
+           (match current_task_inspector state with
+            | None -> ()
+            | Some reader ->
+              let original=reader.tci_original in
+              let source=task_inspection_source original in
+              let count,height=Masc_tui_render_overlays.detail_reading_viewport state
+                (Masc_tui_original_task_read.document source) in
+              let _,cols=get_terminal_size () in
+              match Masc_tui_original_task_read.search_key
+                ~width:(Masc_tui_render_overlays.detail_reading_width cols) ~height ~key:k source with
+              | Some source -> set_task_inspection_source original source
+              | None -> if k="esc" then close_task_inspection_reader state
+              else if k="r" then
+                (match Masc_tui_original_task_read.displayed_source source with
+                 | Origin -> (match Masc_tui_original_task_read.origin source with
+                   | Task_creation _ -> launch_task_creation_read state ~mailbox:async_messages
+                   | Answered_ask _ -> launch_original_task_read state ~mailbox:async_messages)
+                 | Task -> launch_original_task_read state ~mailbox:async_messages
+                 | History -> launch_original_history_read state ~mailbox:async_messages ~earlier:false ~limit:(max 1 height)
+                 | Evidence -> launch_original_evidence_read state ~mailbox:async_messages ~next:false)
+              else if k="[" || k="]" then
+                (match task_creation_neighbor state ~older:(k="[") with
+                 | None -> ()
+                 | Some original ->
+                   close_task_inspection_reader state;
+                   if select_task_creation_inspection state original then
+                     launch_task_creation_read state ~mailbox:async_messages)
+              else if k="o" then launch_original_task_read state ~mailbox:async_messages
+              else if k="h" || k="H" then launch_original_history_read state ~mailbox:async_messages ~earlier:(k="H") ~limit:(max 1 height)
+              else if k="v" then launch_original_evidence_read state ~mailbox:async_messages ~next:true
+              else if k="b" then begin
+                cancel_task_inspection_read state;
+                set_task_inspection_source original (Masc_tui_original_task_read.back_to_origin (task_inspection_source original))
+              end
+              else
+                let movement=match k with
+                  | "j" | "down" | "wheel-down" -> Some (Masc_tui_detail_reading.By 1)
+                  | "k" | "up" | "wheel-up" -> Some (Masc_tui_detail_reading.By (-1))
+                  | "pagedown" -> Some (Masc_tui_detail_reading.By height)
+                  | "pageup" -> Some (Masc_tui_detail_reading.By (-height))
+                  | "home" | "g" -> Some Masc_tui_detail_reading.First
+                  | "end" | "G" -> Some Masc_tui_detail_reading.Last
+                  | _ -> None in
+                Option.iter (fun movement -> set_task_inspection_source original
+                  (Masc_tui_original_task_read.move ~count ~height movement source)) movement)
        | Some k when Option.is_some (current_detail_reading state) ->
            (match current_detail_reading state with
             | None -> ()

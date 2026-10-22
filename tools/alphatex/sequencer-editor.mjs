@@ -51,7 +51,9 @@ function setLocator(editor, side) {
   if (!meters) throw new Error('SMPTE frames have no bars; use :loop START END')
   if (editor.project.kind === 'midi-source' && !editor.performance) throw new Error('Choose a MIDI pattern first')
   const limit = editor.project.kind === 'midi-source' ? editor.performance.ticks : editor.project.length
-  const bar = barSpan(editor.tick, meters, editorAxis(editor).per), end = Math.min(bar.end, limit)
+  if (limit <= 0) throw new Error('This performance has no ticks to loop')
+  // An imported cursor can rest on the end tick itself; its bar is the last one.
+  const bar = barSpan(Math.min(editor.tick, limit - 1), meters, editorAxis(editor).per), end = Math.min(bar.end, limit)
   const current = editorView(editor).loop
   const loop = side === 'left'
     ? { start: bar.start, end: current.end > bar.start ? current.end : end }

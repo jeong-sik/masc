@@ -64,4 +64,7 @@ test('imported MIDI locators follow its time-signature map and keep the source u
   assert.deepEqual(editorView(placed).loop, { start: threeBeats, end: 4 * threeBeats })
   assert.equal(placed.project, editor.project)
   assert.throws(() => editorAction(editor, { kind: 'bars', delta: 1 }), /keeps the length of its performance/)
+  // The cursor can rest on the end tick, itself a bar line; the loop is the last bar.
+  const last = editorAction({ ...editor, tick: 4 * threeBeats }, { kind: 'locator', side: 'left' })
+  assert.deepEqual(editorView(last).loop, { start: 3 * threeBeats, end: 4 * threeBeats })
 })

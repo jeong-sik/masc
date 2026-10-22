@@ -94,7 +94,7 @@ const cursorRow = selected => selected ? [bold, cyan] : []
 // The loop as bars when both ends sit on bar lines, else in axis units.
 function loopLabel(view, axis, meters) {
   const { start, end } = view.loop, limit = view.displayLength ?? view.length
-  if (meters && isBarStart(start, meters, axis.per) && (end === limit || isBarStart(end, meters, axis.per))) {
+  if (meters && start < end && isBarStart(start, meters, axis.per) && (end === limit || isBarStart(end, meters, axis.per))) {
     const firstBar = barAt(start, meters, axis.per).bar, lastBar = barAt(end - 1, meters, axis.per).bar
     return firstBar === lastBar ? `bar ${firstBar}` : `bars ${firstBar}–${lastBar}`
   }

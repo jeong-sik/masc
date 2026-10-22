@@ -1775,7 +1775,7 @@ type lane_run_failure =
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_run_kind : lane_run_kind
-  ; lrs_lane : Standalone_lane.t
+  ; lrs_lane : Lane_run_identity.t
   ; lrs_subject_id : string option
   ; lrs_actor : string
   ; lrs_started_at : float
@@ -1836,7 +1836,7 @@ type librarian_preflight_reading =
 type lane_run_detail =
   { lrd_run_id : string
   ; lrd_run_kind : lane_run_kind
-  ; lrd_lane : Standalone_lane.t
+  ; lrd_lane : Lane_run_identity.t
   ; lrd_subject_id : string option
   ; lrd_actor : string
   ; lrd_started_at : float
@@ -1857,8 +1857,9 @@ type lane_run_detail =
   }
 
 val decode_lane_run_page :
-  lane:Standalone_lane.t -> Yojson.Safe.t -> (lane_run_page, string) result
-(** One cursor page of standalone-lane summaries. The server filters before
+  lane:Lane_run_identity.t -> Yojson.Safe.t -> (lane_run_page, string) result
+(** One cursor page of retained observations, independent of current model
+    configuration or Addon availability. The server filters before
     pagination; the decoder still checks [lane] so a mismatched response
     cannot move the cursor onto another lane. *)
 

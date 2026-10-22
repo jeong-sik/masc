@@ -1,13 +1,12 @@
-(** The standalone lanes: model-driven exact-output work that runs outside a
-    Keeper turn. A lane is one [\[runtime.exact_output_lanes.<id>\]] table and
-    one row of the standalone-lane projection. Browser Stagehand does not yet
-    retain run records; the other lanes name their records here.
+(** Currently configurable builtin exact-output routes outside a Keeper turn.
+    Each is one [\[runtime.exact_output_lanes.<id>\]] table and one row of the
+    standalone-lane projection. Retained observations have the independent
+    {!Lane_run_identity.t} vocabulary; route removal cannot erase that history.
 
     [Runtime.exact_lane] is this type. [Exact_lane_run_registry.lane] is its
     own type without [Verifier] or [Browser_stagehand], and
-    [Exact_lane_run_registry.lane_of_standalone]
-    matches on this one, so adding a lane here fails every match that has not
-    yet said what the new lane means. *)
+    [run_identity] matches every current route explicitly, so adding one must
+    state its original observation identity. *)
 
 (** [all] (derived) lists every lane once, in declaration order. *)
 type t =
@@ -21,9 +20,11 @@ type t =
 [@@deriving enumerate]
 
 val to_id : t -> string
-(** The lane's id: its table key in the runtime file, the [lane_id] the
-    standalone-lane projection serves, and the [lane] a run record carries.
-    Code that sends, stores or compares a lane id takes it from here. *)
+(** Current route's table/projection key, derived from {!run_identity}. *)
+
+val run_identity : t -> Lane_run_identity.t
+(** Observation identity of this current builtin route. The converse is not
+    an execution/configuration capability: retained records can outlive a route. *)
 
 val equal : t -> t -> bool
 

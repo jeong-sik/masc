@@ -6490,7 +6490,7 @@ let launch_clients_load state ~mailbox =
   end
   end
 
-let launch_lane_runs_load ?before state ~mailbox ~(lane : Standalone_lane.t) =
+let launch_lane_runs_load ?before state ~mailbox ~(lane : Lane_run_identity.t) =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   state.lane_runs_generation <- state.lane_runs_generation + 1;
@@ -6522,16 +6522,16 @@ let launch_lane_run_detail_load state ~mailbox ~run_id =
    answer can never draw under the new heading. *)
 
 let open_lane_run_list state ~mailbox (lane : Tui_decode.standalone_lane) =
-  state.lanes_mode <- Lanes_run_list lane.sl_lane;
+  state.lanes_mode <- Lanes_run_list (Standalone_lane.run_identity lane.sl_lane);
   state.lane_runs <- None;
   state.lane_runs_error <- None;
   state.lane_runs_next <- None;
   state.lane_runs_total <- None;
   state.lane_runs_cursor <- 0;
   state.lane_runs_scroll <- 0;
-  launch_lane_runs_load state ~mailbox ~lane:lane.sl_lane
+  launch_lane_runs_load state ~mailbox ~lane:(Standalone_lane.run_identity lane.sl_lane)
 
-let open_lane_run_detail state ~mailbox ~(lane : Standalone_lane.t) ~run_id =
+let open_lane_run_detail state ~mailbox ~(lane : Lane_run_identity.t) ~run_id =
   state.lanes_mode <- Lanes_run_detail (lane, run_id);
   state.lane_run_detail <- None;
   state.lane_run_detail_error <- None;
@@ -21567,7 +21567,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
   | Lane_runs_loaded (lane, generation, before, result) ->
       (match state.lanes_mode with
        | Lanes_run_list open_lane | Lanes_run_detail (open_lane, _)
-         when Standalone_lane.equal open_lane lane
+         when Lane_run_identity.equal open_lane lane
            && generation = state.lane_runs_generation
            && state.lane_runs_loading ->
            state.lane_runs_loading <- false;

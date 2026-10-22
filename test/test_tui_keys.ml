@@ -1010,10 +1010,10 @@ let test_resources_without_a_list_answers_nothing () =
 
 let test_lanes_sub_modes_stay_unsearchable () =
   let state = lanes_state () in
-  state.lanes_mode <- Lanes_run_list Standalone_lane.Librarian;
+  state.lanes_mode <- Lanes_run_list Lane_run_identity.Librarian;
   Alcotest.(check (option (list string))) "run list keeps / closed" None
     (Masc_tui_surface_search.surface_row_texts state Lanes);
-  state.lanes_mode <- Lanes_run_detail (Standalone_lane.Verifier, "vrf-1");
+  state.lanes_mode <- Lanes_run_detail (Lane_run_identity.Verifier, "vrf-1");
   Alcotest.(check (option (list string))) "run detail keeps / closed" None
     (Masc_tui_surface_search.surface_row_texts state Lanes)
 

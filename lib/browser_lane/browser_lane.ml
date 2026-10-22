@@ -503,8 +503,9 @@ let live_transport_of_string = function
 
    The ego connection runs fixed scripts in one ego lite task space
    (RFC-browser-live-ego). It reads that space's pages with the same page
-   scripts as the other connections; test_browser_ego_peer holds its column
-   to what Browser_ego_peer does. *)
+   scripts as the other connections, and opens, moves and closes only the
+   pages an agent opened there; test_browser_ego_peer holds its column to
+   what Browser_ego_peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
   | ( (Web_extension | Webdriver_bidi)
@@ -519,11 +520,12 @@ let live_transport_serves transport capability =
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer) -> true
   | Webdriver_bidi, Browser_zoom -> false
-  | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read) -> true
+  | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read
+                    | Tab_creation | Tab_navigation | Tab_closing) -> true
   | Ego_task_space, (Document_source | Dom_interaction | Point_click | Point_scroll | Trusted_hover
                     | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Browser_zoom | Viewport_resize | Tab_activation | Tab_history
-                    | Tab_navigation | Tab_closing | Tab_creation | Dialog_answer) -> false
+                    | Dialog_answer) -> false
 ;;
 
 let live_transports_serving capability =

@@ -123,8 +123,9 @@ build their rejection from it.
 | `touch_input` | `tap_at`, `swipe` | no | yes | no |
 | `viewport_resize` | `set_viewport` | no | yes | no |
 | `tab_history` | `back`, `forward`, `reload`, only for a tab the same connection opened | no | yes | no |
-| `tab_navigation` | `BrowserGoto`, only for a tab the same connection opened | no | yes | no |
-| `tab_closing` | `close_tab`, only for a tab the same connection opened | no | yes | no |
+| `tab_navigation` | `BrowserGoto`, only for a tab the same connection opened | no | yes | yes, only a page an agent opened in the task space |
+| `tab_closing` | `close_tab`, only for a tab the same connection opened | no | yes | yes, only a page an agent opened in the task space |
+| `tab_creation` | `open_tab` | no | yes | yes |
 | `dialog_answer` | `accept_dialog`, `dismiss_dialog`, only for a tab the same connection opened; the dialog is read from the tab's `list_tabs` row (`dialog`: type, message, defaultValue) | no | yes | no |
 | `point_scroll` | `scroll_at` | yes | yes, a trusted wheel | no |
 | `trusted_hover` | `hover`, `hover_at` | no | yes | no |
@@ -143,8 +144,10 @@ with `ego-browser nodejs` (RFC-browser-live-ego). Its reads run the same page
 scripts as the other connections, so selectors and `within` mean the same
 thing. Its tab IDs follow the page labels ego gives (`p1`, `p2`), which ego
 keeps for the life of the space. A tab the operator opened in that space is
-listed, and a read of it is refused before any script runs. Input and tab
-effects are not served on it.
+listed, and a read of it is refused before any script runs. It opens tabs,
+and moves and closes only the pages an agent opened in the space, its first
+page `p1` included; a load that fails after it started is answered as a
+partial effect with where the tab is now. Input is not served on it.
 
 A request its connection does not serve is a selection failure: the server
 queues no command and answers `live_transport_unsupported`. A Keeper tool's

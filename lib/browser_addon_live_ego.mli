@@ -15,6 +15,10 @@ val arguments : Browser_configuration.live_ego -> string list
 val run_command : env:Eio_unix.Stdenv.base -> timeout_s:float -> stdin:string -> command:string ->
   string list -> (string, Browser_ego_peer.run_failure) result
 
+(** Runs one script as [command nodejs] and answers within the window the
+    peer gives, stop included. *)
+val runner : env:Eio_unix.Stdenv.base -> command:string -> Browser_ego_peer.runner
+
 (** Read ego lite's version, open the task space, register one client and
     serve its commands until the owner retires; then end the task space. The
     caller's work starts once that client is attached. A configured ego that

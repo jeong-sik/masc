@@ -66,13 +66,18 @@ let support backend operation = match backend with
           ["Requires the exact observed clientId; creation can succeed even if navigation fails. Inspect the returned tabId before another create."]
       | Owned_gecko | Owned_chromium -> conditional ~action:"open_tab" Act
           ["Requires an open work session; creation and navigation can partially succeed. Preserve any created tabId in the partial receipt and inspect that exact browser/tab before another create."]
-      | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable -> missing)
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"open_tab" Act
+          ["Requires the exact observed clientId. Opens a page in the connection's ego task space; it shares the cookies of the operator's ego profile.";
+           "Creation can succeed even if navigation fails. Inspect the returned tabId before another create."]
+      | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
     | Close_tab -> (match backend with
       | Owned_gecko | Owned_chromium -> conditional ~action:"close_tab" Act
           [observed;"Top-level tab only; the ID is retired after confirmed closure, not a lost or unconfirmed receipt."]
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"close_tab" Act
           [observed;"Only a tab this connection opened with open_tab; a tab the operator opened is refused before any effect. Closes without running the page's unload prompt."]
-      | Connected (Browser_lane.Web_extension | Browser_lane.Ego_task_space) | Safari_unavailable -> missing)
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"close_tab" Act
+          [observed;"Only a page an agent opened in the ego task space; a tab the operator opened there is refused before any effect."]
+      | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
     | Activate_tab -> (match backend with
       | Connected Browser_lane.Web_extension -> conditional ~action:"activate_tab" Interact
           [observed;"Changes the browser's active tab without promising window focus."]
@@ -93,7 +98,10 @@ let support backend operation = match backend with
            "Waits for the new document. An error after the navigation started leaves the result unknown: inspect the same tab."]
       | Connected Browser_lane.Web_extension -> Unsupported
           "A connected WebExtension does not navigate a tab; use an inspected follow_link, or a live BiDi connection's open_tab and goto."
-      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
+      | Connected Browser_lane.Ego_task_space -> conditional Goto
+          [observed;"Requires the exact observed clientId and the tabId of a page an agent opened in the ego task space, its first page included; a tab the operator opened there is refused before any effect.";
+           "Waits for the page to load. A failed load is answered with where the tab is now; a stopped run leaves the result unknown: inspect the same tab."]
+      | Safari_unavailable -> missing)
     | Follow_link -> dom_input backend (conditional ~action:"follow_link" Interact
         [observed;target;"Requires expectedUrl and an observed same-tab HTTP(S) anchor; rejects downloads, new-window targets and unsupported referrer semantics."])
     | Back -> (match backend with

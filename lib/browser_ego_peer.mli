@@ -27,9 +27,11 @@ val output_limit_bytes : int
 
 val run_failure_message : run_failure -> string
 
-(** Runs one script and answers everything it wrote, stdout and stderr
-    together, once it exited with code 0. *)
-type runner = string -> (string, run_failure) result
+(** Runs one script and answers within [window_s] seconds, stopping the run
+    when it would not, with everything it wrote, stdout and stderr together,
+    once it exited with code 0. The peer gives each command the window the
+    server waits for its answer, less the time to deliver the answer. *)
+type runner = window_s:float -> string -> (string, run_failure) result
 
 (** The prefix of the one line each script writes its answer on. *)
 val result_marker : string
@@ -55,9 +57,13 @@ val open_space
 val space_id : t -> int
 
 (** Answers one live verb the way the BiDi peer answers it. Reads fail
-    before any effect. Verbs this connection does not serve are refused
-    before any effect; selection refuses them earlier
-    ({!Browser_lane.live_transport_serves}). *)
+    before any effect. [open_tab], [goto] and [close_tab] act only on pages
+    an agent opened in the space: a refusal the script makes before acting
+    is [Before_effect], a load that failed after it started is a
+    [Partial_failure] with where the tab is now, and a run that was stopped
+    or failed where the script cannot say is [Outcome_unknown]. Verbs this
+    connection does not serve are refused before any effect; selection
+    refuses them earlier ({!Browser_lane.live_transport_serves}). *)
 val dispatch
   :  t
   -> verb:Browser_live_peer.verb

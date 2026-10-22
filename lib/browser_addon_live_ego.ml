@@ -12,13 +12,6 @@ let arguments (configuration : Browser_configuration.live_ego) =
 let stop_grace_s = 2.
 (* ego-browser --version answers without starting the browser. *)
 let version_timeout_s = 10.
-(* Every command this connection serves is a read, which the server waits
-   Browser_lane.default_timeout_sec for, counted from when it was issued. A
-   run is given that less the stop grace and this margin, so a stopped run's
-   failure usually still arrives in time. One that does not is refused:
-   see [serve]. *)
-let delivery_margin_s = 2.
-let command_timeout_s = B.default_timeout_sec -. stop_grace_s -. delivery_margin_s
 let read_chunk_bytes = 65_536
 
 let run_command ~env ~timeout_s ~stdin ~command arguments =
@@ -57,6 +50,11 @@ let run_command ~env ~timeout_s ~stdin ~command arguments =
       | Ok (Some (`Exited code)) -> Error (Peer.Exited {code; output = Buffer.contents output})
       | Ok (Some (`Signaled signal)) -> Error (Peer.Signaled signal))
 
+(* Stopping a run spends the stop grace, so it is taken out of the window
+   the peer gives. *)
+let runner ~env ~command : Peer.runner = fun ~window_s script ->
+  run_command ~env ~timeout_s:(window_s -. stop_grace_s) ~stdin:script ~command ["nodejs"]
+
 let version ~env ~command =
   let* output = run_command ~env ~timeout_s:version_timeout_s ~stdin:"" ~command ["--version"]
     |> Result.map_error Peer.run_failure_message in
@@ -93,7 +91,7 @@ let run ~env ~owner (configuration : Browser_configuration.live_ego) work =
   and stopped, finish = Eio.Promise.create () in
   let serve_space directory ~version ~engine_version =
     let* peer = Peer.open_space ~space:configuration.space ~version ~capture_directory:directory
-        ~run:(fun script -> run_command ~env ~timeout_s:command_timeout_s ~stdin:script ~command ["nodejs"]) in
+        ~run:(runner ~env ~command) in
     let client_id = Uuidm.v4_gen (Random.State.make_self_init ()) () in
     let client = {B.client_id; browser = B.Ego_lite; version; engine_version; transport = B.Ego_task_space} in
     let poll window_sec = Browser_addon_owner.poll_live owner ~client ~window_sec in

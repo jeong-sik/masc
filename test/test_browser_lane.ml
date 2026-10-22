@@ -150,8 +150,8 @@ let test_transport_table () =
     Lane.[Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_answer] (unserved Lane.Web_extension);
   check (list capability) "the BiDi peer has no browser zoom"
     Lane.[Browser_zoom] (unserved Lane.Webdriver_bidi);
-  check (list capability) "the ego connection reads and captures"
-    Lane.[Tab_listing; Text_read; Element_inventory; Viewport_capture; Scene_read]
+  check (list capability) "the ego connection reads, captures, and opens, moves and closes its own pages"
+    Lane.[Tab_listing; Text_read; Element_inventory; Viewport_capture; Scene_read; Tab_navigation; Tab_closing; Tab_creation]
     (List.filter (Lane.live_transport_serves Lane.Ego_task_space) Lane.all_of_live_capability);
   List.iter (fun capability ->
     check bool (Lane.live_capability_to_wire capability ^ " is reachable on some connection") true

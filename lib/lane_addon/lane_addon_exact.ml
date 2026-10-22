@@ -124,6 +124,7 @@ type call_final =
   | Answered of { output : checked; slot : string; usage : usage option }
   | Invalid_output of { detail : string }
   | Input_refused of input_refusal
+  | Output_limit_reached of { detail : string }
 
 type final =
   | Call_final of call_final
@@ -176,6 +177,8 @@ let final_to_json = function
     `Assoc [ "status", `String "invalid_output"; "detail", `String detail ]
   | Call_final (Input_refused kind) ->
     `Assoc [ "status", `String "input_refused"; "kind", `String (input_refusal_to_string kind) ]
+  | Call_final (Output_limit_reached { detail }) ->
+    `Assoc [ "status", `String "output_limit_reached"; "detail", `String detail ]
   | Outcome_unknown -> `Assoc [ "status", `String "outcome_unknown" ]
   | Not_allowed { reason } -> `Assoc [ "status", `String "not_allowed"; "reason", `String reason ]
   | Request_id_reused -> `Assoc [ "status", `String "request_id_reused" ]
@@ -199,6 +202,10 @@ let retained_final_of_json json =
     in
     Ok (Call_final (Answered { output; slot; usage }))
   | "invalid_output" -> let* detail = text "detail" in Ok (Call_final (Invalid_output { detail }))
+  | "output_limit_reached" ->
+    let* detail = text "detail" in
+    if String.trim detail="" then Error "output limit requires non-blank detail"
+    else Ok (Call_final (Output_limit_reached { detail }))
   | "input_refused" ->
     let* kind = text "kind" in
     Option.to_result ~none:"final kind" (input_refusal_of_string kind)
@@ -217,7 +224,7 @@ let final_of_json ~schema json =
   | Call_final (Answered {output;slot;usage}) ->
       let* output = Lane_addon_action.validate_input ~schema ~name:"model result" output in
       Ok (Call_final (Answered {output;slot;usage}))
-  | Call_final (Invalid_output _ | Input_refused _) | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok final
+  | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _) | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok final
 
 let not_final_to_json = function
   | Lane_unavailable Lane_unconfigured -> `Assoc [ "reason", `String "lane_unconfigured" ]
@@ -376,7 +383,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~va
                | Ok output -> Call_final (Answered {output; slot; usage})
                | Error detail -> Call_final (Invalid_output
                    {detail = "the retained answer does not match the package, original request or consumer semantics: " ^ detail}))
-          | (Call_final (Invalid_output _ | Input_refused _) | Outcome_unknown | Not_allowed _ | Request_id_reused)
+          | (Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _) | Outcome_unknown | Not_allowed _ | Request_id_reused)
             as final -> final in
         match previous.final with
         | Some final -> Ok (Final (deliver final))

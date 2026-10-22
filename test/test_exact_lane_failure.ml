@@ -15,7 +15,8 @@ let failure =
        | F.Input_refused F.Invalid_request -> Format.pp_print_string fmt "input_refused invalid_request"
        | F.Input_refused F.Context_overflow -> Format.pp_print_string fmt "input_refused context_overflow"
        | F.Input_refused F.Input_capacity -> Format.pp_print_string fmt "input_refused input_capacity"
-       | F.Output_unusable -> Format.pp_print_string fmt "output_unusable")
+       | F.Output_unusable -> Format.pp_print_string fmt "output_unusable"
+       | F.Output_limit -> Format.pp_print_string fmt "output_limit")
     ( = )
 
 let refused refusal = Exact.Provider_response_refused { http_status = 400; refusal; retry_after_s = None }
@@ -37,11 +38,12 @@ let test_provider_refusals () =
 
 let test_answers_that_cannot_be_used () =
   List.iter (fun (label, cause) -> check failure label F.Output_unusable (F.execution cause))
-    [ "output limit", Exact.Output_limit_reached; "incomplete", Exact.Incomplete_output
+    [ "incomplete", Exact.Incomplete_output
     ; "missing", Exact.Missing_output; "ambiguous", Exact.Ambiguous_output 2
     ; "unexpected content", Exact.Unexpected_output_content; "invalid json", Exact.Invalid_json_output
     ; "empty completion", completion (Http.Empty_completion { stop_reason = Agent_core.Types.EndTurn }) ];
-  check failure "a body deadline may pass later" F.Transient (F.execution Exact.Response_body_deadline_exceeded)
+  check failure "a body deadline may pass later" F.Transient (F.execution Exact.Response_body_deadline_exceeded);
+  check failure "the actual output limit remains distinct" F.Output_limit (F.execution Exact.Output_limit_reached)
 
 let test_completion_failures () =
   check failure "an overflow named by the provider refuses the input" (F.Input_refused F.Context_overflow)

@@ -102,6 +102,27 @@ class CuratorWorker(unittest.TestCase):
             self.assertEqual(self.output(reopened[3])["result"], unknown)
             self.assertEqual(self.output(reopened[4])["requests"], [])
 
+    def test_output_limit_is_an_original_terminal_across_worker_restart(self):
+        for output in ("classification", "briefing"):
+            with self.subTest(output=output), tempfile.TemporaryDirectory() as directory:
+                state = Path(directory)
+                original = request("original-size-refusal", output)
+                self.run_worker(state, [submit(original)])
+                terminal = {"status": "output_limit_reached", "detail": "provider output limit"}
+                malformed = [{**terminal, "extra": True}, {"status": "output_limit_reached"},
+                             {**terminal, "detail": 12}]
+                replies = self.run_worker(state, [*[deliver(original["request_id"], x) for x in malformed],
+                                                  listing(), deliver(original["request_id"], terminal)])
+                self.assertTrue(all(x["isError"] for x in replies[:len(malformed)]))
+                self.assertEqual(self.output(replies[-2])["requests"], [original])
+                self.assertEqual(self.output(replies[-1]), {"accepted": True})
+                restored = self.run_worker(state, [read(original["request_id"]), submit(original), listing(),
+                                                   deliver(original["request_id"], {"status": "outcome_unknown"})])
+                self.assertEqual(self.output(restored[0])["result"], terminal)
+                self.assertEqual(self.output(restored[1])["result"], terminal)
+                self.assertEqual(self.output(restored[2])["requests"], [])
+                self.assertTrue(restored[3]["isError"])
+
     def test_id_reuse_cannot_change_roles_system_schema_or_output(self):
         with tempfile.TemporaryDirectory() as directory:
             original = request()

@@ -13,6 +13,7 @@
     - any slot failed in a way that may pass without changing the input
       (transient, credentials, configuration): not final, with the reason;
     - otherwise, a slot refused the input itself: [input_refused];
+    - otherwise, a slot exhausted its output limit: [output_limit_reached];
     - otherwise every slot answered and none could be used: [invalid_output].
 
     Resolution sends nothing. A lane that is unconfigured, off, without

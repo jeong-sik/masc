@@ -698,7 +698,7 @@ class Flow:
             case "input_refused":
                 self._reduce(session, sessions, body, str(result.get("kind")))
                 return
-            case "invalid_output":
+            case "invalid_output" | "output_limit_reached":
                 failure = q.AuthorInvalidOutput(request_id)
             case "outcome_unknown":
                 failure = q.AuthorOutcomeUnknown(request_id)
@@ -833,7 +833,7 @@ class Flow:
         match result["status"]:
             case "answered":
                 event = self._judgment(request, result.get("output"))
-            case "invalid_output":
+            case "invalid_output" | "output_limit_reached":
                 event = failed("invalid_output", _detail(result.get("detail")))
             case "input_refused":
                 event = failed("input_refused", _detail(result.get("kind")))

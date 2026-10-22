@@ -13,10 +13,11 @@ type t =
   | Configuration_refused
   | Input_refused of input_refusal
   | Output_unusable
+  | Output_limit
 
 let is_transient = function
   | Transient -> true
-  | Auth_refused | Configuration_refused | Input_refused _ | Output_unusable -> false
+  | Auth_refused | Configuration_refused | Input_refused _ | Output_unusable | Output_limit -> false
 
 let refusal = function
   | Exact.Rate_limited | Exact.Overloaded | Exact.Server_error | Exact.Network_error | Exact.Timeout
@@ -63,7 +64,8 @@ let execution = function
   | Exact.Provider_response_refused { refusal = provider_refusal; _ } -> refusal provider_refusal
   | Exact.Completion_failed { error; _ } -> completion error
   | Exact.Response_body_deadline_exceeded -> Transient
-  | Exact.Output_limit_reached | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
+  | Exact.Output_limit_reached -> Output_limit
+  | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
   | Exact.Unexpected_output_content | Exact.Invalid_json_output -> Output_unusable
 
 let candidate rejection =
@@ -72,7 +74,11 @@ let candidate rejection =
   | Exact.Runtime_slot_unavailable | Exact.Runtime_contract_rejected | Exact.Output_requirement_rejected ->
     Configuration_refused
   | Exact.Input_contract_rejected -> Input_refused Invalid_request
-  | Exact.Input_capacity _ -> Input_refused Input_capacity
+  | Exact.Input_capacity (Exact.Context_window_exceeded _
+      | Exact.Token_capacity_rejected (Exact.Capacity_input_rejected _)) -> Input_refused Input_capacity
+  | Exact.Input_capacity (Exact.Token_measurement_required _
+      | Exact.Token_capacity_rejected (Exact.Capacity_evidence_not_yet_valid _
+          | Exact.Capacity_evidence_expired _ | Exact.Capacity_boundary_unknown _)) -> Transient
 
 let codex_error = function
   | Runtime_codex_app_server.Invalid_config _

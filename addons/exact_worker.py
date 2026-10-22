@@ -109,7 +109,7 @@ def final_of_json(raw) -> dict:
             exact(result, fields, "answered result")
             object_value(result["output"], "output")
             text(result["slot"], "slot")
-        case "invalid_output":
+        case "invalid_output" | "output_limit_reached":
             exact(result, {"status", "detail"}, "invalid output")
             text(result["detail"], "detail")
         case "input_refused":

@@ -283,6 +283,15 @@ class Compose(Base):
         self.assertEqual(len(session.requests), 1)
         self.assertEqual(self.flow.listing(), [])
 
+    def test_output_limit_fails_without_reducing_or_repeating_the_author_request(self):
+        session_id = self.compose()
+        self.host.author = lambda payload: {"status": "output_limit_reached", "detail": "provider limit"}
+        self.host.run(self.flow)
+        session = self.session(session_id)
+        self.assertEqual(session.failure, q.AuthorInvalidOutput(f"{session_id}-author-0"))
+        self.assertEqual(len(session.requests), 1)
+        self.assertEqual(self.flow.listing(), [])
+
     def test_no_material_fails_without_an_author_request(self):
         self.host.board = []
         session_id = self.compose()
@@ -347,6 +356,16 @@ class Judging(Base):
         self.host.run(self.flow)
         (failure,) = [e for e in self.session(session_id).grading if isinstance(e, q.GradeFailed)]
         self.assertEqual(failure.kind, "invalid_output")
+
+    def test_grade_output_limit_preserves_the_waiting_answer(self):
+        session_id = self.wrote()
+        self.host.grade = lambda payload: {"status": "output_limit_reached", "detail": "provider limit"}
+        self.host.run(self.flow)
+        self.assertEqual(self.grade_requests(), [])
+        session = self.session(session_id)
+        (failure,) = [e for e in session.grading if isinstance(e, q.GradeFailed)]
+        self.assertEqual((failure.kind, failure.detail), ("invalid_output", "provider limit"))
+        self.assertEqual(g.verdict(session.posed[0], q.Wrote("facts"), ()), g.AWAITING_JUDGMENT)
 
     def test_a_final_failure_waits_until_the_next_compose(self):
         session_id = self.wrote()

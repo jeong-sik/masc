@@ -219,8 +219,8 @@ let delivery_handler = ref None
 let register_delivery_handler handler = delivery_handler := Some handler
 let sampling_factory = ref None
 let register_sampling_factory factory = sampling_factory := Some factory
-let exact_runner : Lane_addon_exact.runner option ref = ref None
-let register_exact_runner runner = exact_runner := Some runner
+let exact_runner : (Lane_addon_exact.runner * Lane_addon_exact.validation_authority) option ref = ref None
+let register_exact_runner ~validate_request runner = exact_runner := Some (runner, validate_request)
 let github_reader : Lane_addon_records.github ref = ref (fun ~repository_id:_ -> Error "this host has no GitHub reader")
 let register_github_reader reader = github_reader := reader
 let prepare_sampling_handler ~sw ~store ~instance_id ~(package : package) ~binding =
@@ -254,9 +254,9 @@ let state_owner_for ~store ~instance_id ~package_id ~configuration state_storage
   match state_storage with
   | Ephemeral -> Ok None
   | Persistent ->
-      let installation_id = Yojson.Safe.to_string (match configuration with
-        | Some (owner : configuration_owner) -> `List [`String "configuration"; `String owner.id]
-        | None -> `List [`String "manual"; `String instance_id]) in
+      let installation_id = Lane_addon_tool_request_owner.installation_id (match configuration with
+        | Some (owner : configuration_owner) -> Lane_addon_tool_request_owner.Configuration owner.id
+        | None -> Lane_addon_tool_request_owner.Manual instance_id) in
       offload (fun () -> Lane_addon_worker_state.create_owner
         ~workspace_root:(Lane_addon_store.root store) ~installation_id ~package_id)
       |> Result.map Option.some
@@ -933,7 +933,7 @@ let run_host_cycle m e (port : host_port) =
               (* A manual Attach has no declaration id, so it owns no add-on lane. *)
               Ok (Lane_addon_exact.Not_final (Lane_addon_exact.Lane_unavailable Lane_addon_exact.Lane_unconfigured))
           | Some _, None -> Error No_exact_runner
-          | Some owner, Some runner ->
+          | Some owner, Some (runner, validate_request) ->
              let result =
                try Eio.Cancel.sub (fun cancellation ->
                  e.cancel_exact <- Some (Eio.Cancel.cancel cancellation);
@@ -952,7 +952,8 @@ let run_host_cycle m e (port : host_port) =
                         if not (List.exists (fun request ->
                             Lane_addon_host_request.request_id request=exact.Lane_addon_exact.request_id) requests)
                         then raise Host_cycle_stopped else Ok () in
-                   Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package ~runner exact))
+                   Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package
+                     ~runner ~validate_request exact))
                with Eio.Cancel.Cancelled (Worker_detached | Host_request_withdrawn) ->
                  (* Consume only retirement/withdrawal of this exact call. Worker/root
                     cancellation must still propagate through this boundary. *)
@@ -1724,9 +1725,9 @@ let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) 
       then Ok () else Error (Unavailable "Add-on tool installation is no longer available") in
     let* e = match Hashtbl.find_opt m.entries export.instance_id with
       | Some e -> Ok e | None -> Error (Unavailable "Add-on tool connection is unavailable") in
-    let installation_id = Yojson.Safe.to_string (match e.configuration with
-      | Some owner -> `List [`String "configuration";`String owner.id]
-      | None -> `List [`String "manual";`String e.instance_id]) in
+    let installation_id = Lane_addon_tool_request_owner.installation_id (match e.configuration with
+      | Some owner -> Lane_addon_tool_request_owner.Configuration owner.id
+      | None -> Lane_addon_tool_request_owner.Manual e.instance_id) in
     Eio.Mutex.use_rw ~protect:true m.action_mutex (fun () ->
       offload (fun () -> Lane_addon_tool_request_owner.retain ~store:m.store ~scope ~request_id
         ~installation_id ~package_id:e.package.id ~tool:export.tool.name ~request)

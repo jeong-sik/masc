@@ -45,11 +45,12 @@ let current keepers_dir=Current.read_for_keepers_dir ~keepers_dir ~keeper_id:kee
 let claims keepers_dir=match current keepers_dir with None -> [] | Some snapshot ->
   List.map (fun (f:Types.fact) -> f.claim) snapshot.facts |> List.sort String.compare
 let original_owner base_path keepers_dir=Capture.observe_owner ~base_path ~keepers_dir ~keeper_id:keeper_name |> get
-let originals base_path keepers_dir store =
-  let owner=original_owner base_path keepers_dir in
+let originals_for ~keeper_name base_path keepers_dir store =
+  let owner=Capture.observe_owner ~base_path ~keepers_dir ~keeper_id:keeper_name |> get in
   let inventory=Parts.discover ~store ~owner ~restore_gate:(Gate.restore_size_evidence ~store ~owner) |> get in
   Owner.discover ~store ~scope:(Capture.scope owner) |> owned |> List.map (fun record ->
     let capture=Capture.restore ~owner ~load_parent:(Parts.load_parent inventory) record |> get in record,capture)
+let originals=originals_for ~keeper_name
 let new_claim claim=`Assoc ["claim",`String claim;"category",`String "fact";
   "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []]
 let answer select capture =
@@ -72,7 +73,7 @@ let publish_routes base_path urls =
   ignore (F.publish_registry ~lane_id:"librarian/admission" ~slot_ids:(List.map (fun (s:F.target_fixture) -> s.id) slots)
     (F.resolver_snapshot ~source:base_path slots) : Runtime_exact_output_registry.t)
 
-let backend env base_path delivery delivery_observed observation_observed after_submit transform_reply : Runtime.For_testing.backend = {
+let backend env base_path delivery delivery_observed observation_observed after_submit transform_reply observe_listing : Runtime.For_testing.backend = {
   start=(fun ~sw ~state_owner ~instance_id ~installation_id:_ ~package ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let state_owner=match state_owner with Some owner -> owner | None -> fail "persistent worker has no state owner" in
     let state=Filename.concat base_path ("worker-state-" ^ Store.digest (Lane_addon_worker_state.identity state_owner)) in
@@ -103,7 +104,9 @@ let backend env base_path delivery delivery_observed observation_observed after_
       stop=(fun () -> Protocol.close protocol;Ok (Lane_addon_lifecycle.Released
         {engine=Lane_addon_lifecycle.Docker_engine "fixture-resource-launch";container_id=Some instance_id}));
       host=Some {await_change=None;
-        list_requests=(fun () -> Protocol.host_requests protocol |> Result.map_error protocol_error);
+        list_requests=(fun () ->
+          let result=Protocol.host_requests protocol |> Result.map_error protocol_error in
+          Result.iter observe_listing result;result);
         deliver=(fun ~arguments ->
           let result=if !delivery then Error "controlled reply loss before worker delivery"
             else Protocol.host_result protocol ~arguments |> Result.map_error protocol_error in
@@ -130,10 +133,11 @@ type fixture = {
   observations:int ref; observation_changed:Eio.Condition.t; response_checkpoint:int ref;
   extra_server:(Capture.t -> Cohttp.Code.status_code * string) -> F.test_server;
   submit_barrier:(unit -> unit) ref;
+  host_listings:Yojson.Safe.t list ref;
   transform_reply:(Yojson.Safe.t -> Mcp_protocol.Mcp_types.tool_result -> Mcp_protocol.Mcp_types.tool_result) ref;
 }
 let observed_originals fixture=io (fun () -> originals fixture.base_path fixture.keepers_dir fixture.store)
-let start_memory_action fixture action =
+let start_memory_action ?(keeper_name=keeper_name) fixture action =
   let completed,resolve=Eio.Promise.create () in
   let outcome=Memory_lane.submit ~base_path:fixture.base_path ~keeper_name (fun () ->
     match action () with
@@ -147,8 +151,8 @@ let start_memory_action fixture action =
   completed
 let start_worker fixture=start_memory_action fixture (fun () ->
   Worker.run ~base_path:fixture.base_path ~keeper_name)
-let memory_action fixture action=
-  let result=Eio.Promise.await_exn (start_memory_action fixture action) in
+let memory_action ?(keeper_name=keeper_name) fixture action=
+  let result=Eio.Promise.await_exn (start_memory_action ~keeper_name fixture action) in
   Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;result
 let run_worker fixture=Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds
   (fun () ->
@@ -246,7 +250,9 @@ let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) f =
       let response=ref (fun capture -> `OK,F.openai_response (answer (fun _ -> true) capture)) in
       let original_for body=
         let messages=Yojson.Safe.from_string body |> member "messages" |> Yojson.Safe.Util.to_list in
-        let captures=io (fun () -> originals base_path keepers_dir store) in
+        let captures=io (fun () ->
+          Queue.list_keeper_ids ~keepers_dir |> get
+          |> List.concat_map (fun keeper_name -> originals_for ~keeper_name base_path keepers_dir store)) in
         let matches=List.filter (fun (_,capture) ->
           let original=Capture.request capture |> get |> Lane_addon_exact.request_to_json in
           let sent=member "messages" original |> Yojson.Safe.Util.to_list in
@@ -265,13 +271,15 @@ let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) f =
       let delivery_observed ()=incr deliveries;Eio.Condition.broadcast delivery_changed in
       let submit_barrier=ref (fun () -> ()) in
       let transform_reply=ref (fun _ response -> response) in
+      let host_listings=ref [] in
       let fixture={base_path;config;keepers_dir;store;source;declaration;server;
         set_response=(fun callback -> response:=callback);delivery_loss;deliveries;delivery_changed;
         clock=Eio.Stdenv.clock env;observations;observation_changed;response_checkpoint;
-        extra_server=start_server;submit_barrier;transform_reply} in
+        extra_server=start_server;submit_barrier;transform_reply;host_listings} in
       Runtime.For_testing.with_backend
         (backend env base_path delivery_loss delivery_observed observation_observed
-          (fun () -> !submit_barrier ()) (fun arguments response -> !transform_reply arguments response)) (fun () ->
+          (fun () -> !submit_barrier ()) (fun arguments response -> !transform_reply arguments response)
+          (fun listing -> host_listings:=listing :: !host_listings)) (fun () ->
         let exported,ready=Eio.Promise.create () in
         let stop=Runtime.subscribe_owner_events ~config ~package_id:Capture.package_id (function
           | Runtime.Export_inventory_changed -> ignore (Eio.Promise.try_resolve ready ())
@@ -760,6 +768,112 @@ let test_original_gate_root_publication_recovery cut ()=with_fixture (fun ~sw:_ 
        (io (fun () -> claims fixture.keepers_dir)));
   check int "publication recovery and refusal never repeat the original provider" posts (F.post_count fixture.server))
 
+let test_production_refresh_new_tail_quiesces_while_provider_pending ()=with_fixture (fun ~sw:_ fixture ->
+  let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+  fixture.set_response (fun capture ->
+    ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release;
+    `OK,F.openai_response (answer (fun _ -> true) capture));
+  Fun.protect ~finally:(fun () ->
+    Keeper_librarian_queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
+    ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
+    (match run_worker fixture with Worker.Pending _ -> ()
+     | Disabled | Idle | Recheck_new_input | Settled _ | Unavailable _ ->
+       fail "the original actual provider must remain pending");
+    Eio.Promise.await arrived;
+    Keeper_librarian_queue_refresh.install ();
+    io (fun () -> ignore (append fixture.keepers_dir "new-tail" "Durable tail"));
+    Keeper_librarian_queue_signal.changed ~base_path:fixture.base_path ~keeper_name;
+    (* This awaits the production consumer, not a synthetic outcome callback.
+       A self-waking refresh never releases its drain while the HTTP answer
+       remains blocked; only the enclosing fixture bounds a broken test. *)
+    Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
+    check (list string) "a later tail cannot ACK any pending original input" ["a";"b";"new-tail"]
+      (io (fun () -> List.map (fun (row:Queue.candidate) -> row.request_id) (pending_rows fixture.keepers_dir)));
+    check (list string) "refresh does not turn pending provider work into Memory" []
+      (io (fun () -> claims fixture.keepers_dir));
+    check int "the original provider remains the only active external execution" 1
+      (Memory_lane.For_testing.external_active ~base_path:fixture.base_path ~keeper_name);
+    check int "the pending tail starts no replacement provider" 1 (F.post_count fixture.server)))
+
+let only_live_instance fixture =
+  Runtime.dispatch ~access:Lane_addon_sources.Operator_configuration ~config:fixture.config
+    ~operation:Runtime.Inspect (`Assoc []) |> Result.map_error Runtime.error_to_string |> get
+  |> member "instances" |> Yojson.Safe.Util.to_list
+  |> function [instance] -> instance | [] | _::_::_ -> fail "expected one shared configured worker incarnation"
+let test_purged_original_does_not_block_another_keeper ()=with_fixture (fun ~sw:_ fixture ->
+  let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+  let second_keeper="librarian-after-purged-owner" in
+  fixture.set_response (fun capture ->
+    let actual=Keeper_identity.Keeper_id.to_string (Capture.input capture).Keeper_librarian.keeper_id in
+    if actual=keeper_name then (
+      ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release);
+    `OK,F.openai_response (answer (fun _ -> true) capture));
+  Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
+    (match run_worker fixture with Worker.Pending _ -> ()
+     | Disabled | Idle | Recheck_new_input | Settled _ | Unavailable _ -> fail "first actual provider must be pending");
+    Eio.Promise.await arrived;
+    let record,capture=match observed_originals fixture with [original] -> original
+      | [] | _::_::_ -> fail "expected the one original belonging to the purged Keeper" in
+    let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+    let original_file=original_path fixture ~scope:(Capture.scope owner) ~request_id:record.request_id in
+    let original_bytes=io (fun () -> Fs_compat.load_file original_file) in
+    let incarnation=member "instance_id" (only_live_instance fixture) in
+    let purged=Memory_lane.with_librarian_purge ~base_path:fixture.base_path ~keeper_name (fun () ->
+      check int "deletion follows real original provider cancellation and cleanup" 0
+        (Memory_lane.For_testing.external_active ~base_path:fixture.base_path ~keeper_name);
+      io (fun () ->
+        Unix.unlink (Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name);
+        Unix.unlink (Current.epoch_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name);
+        let memory=Current.path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+        match Fs_compat.load_file_opt memory with None -> () | Some _ -> Unix.unlink memory)) in
+    (match purged with Ok () -> () | Error error -> fail (Memory_lane.purge_cancel_error_to_string error));
+    (* The Python worker keeps A's unanswered request. Neither its state nor
+       the host original Store is cleared to let B pass. *)
+    io (fun () ->
+      let meta=Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String second_keeper;
+        "trace_id",`String "second-librarian-original-owner"]) |> get in
+      Keeper_meta_store.replace_snapshot fixture.config meta |> get;
+      Queue.append ~keepers_dir:fixture.keepers_dir ~keeper_id:second_keeper
+        ~request_id:"second-original" (fact "Durable second Keeper")
+        |> Result.map_error Queue.append_error_to_string |> get |> ignore);
+    let rec drive_second ()=
+      let before= !(fixture.deliveries) in
+      let outcome=memory_action ~keeper_name:second_keeper fixture (fun () ->
+        Worker.run ~base_path:fixture.base_path ~keeper_name:second_keeper) in
+      match outcome with
+      | Worker.Settled _ -> ()
+      | Pending _ | Recheck_new_input -> await_delivery fixture ~after:before;drive_second ()
+      | Disabled | Idle | Unavailable _ -> fail "a stale original prevented the other Keeper from making progress" in
+    drive_second ();
+    let second_record=io (fun () -> originals_for ~keeper_name:second_keeper
+      fixture.base_path fixture.keepers_dir fixture.store) |> function
+      | [record,_] -> record | [] | _::_::_ -> fail "expected the second Keeper's one original" in
+    check bool "the same actual worker lists stale A beside B without clearing A" true
+      (List.exists (fun listing ->
+        let requests=member "requests" listing |> Yojson.Safe.Util.to_list in
+        let includes id=List.exists (fun request -> member "request_id" request=`String id) requests in
+        includes record.request_id && includes second_record.request_id) !(fixture.host_listings));
+    check json "the second Keeper uses the same live configured worker" incarnation
+      (member "instance_id" (only_live_instance fixture));
+    check (list string) "the second Keeper commits its actual complete provider answer" ["Durable second Keeper"]
+      (io (fun () -> match Current.read_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:second_keeper |> get with
+        | None -> [] | Some snapshot -> List.map (fun (f:Types.fact) -> f.claim) snapshot.facts));
+    check bool "the second Keeper ACK follows its real Memory receipt" true
+      (io (fun () -> Queue.read_pending ~keepers_dir:fixture.keepers_dir ~keeper_id:second_keeper |> get |> Option.is_none));
+    check string "the purged Keeper's original request and progress remain inspectable" original_bytes
+      (io (fun () -> Fs_compat.load_file original_file));
+    let issue=member "issue" (member "host_requests" (only_live_instance fixture)) in
+    check string "the stale original retains its request-local host diagnostic" "exact_record_failed"
+      (member "kind" issue |> Yojson.Safe.Util.to_string);
+    check string "the diagnostic remains bound to the purged original" record.request_id
+      (member "request_id" issue |> Yojson.Safe.Util.to_string);
+    let exact=Capture.request capture |> get in
+    let schema=match exact.schema with Some schema -> schema | None -> fail "missing original schema" in
+    check bool "progress by another Keeper cannot invent a completed proof for the purged original" true
+      (match io (fun () -> Lane_addon_exact.read_latest_original_execution ~store:fixture.store
+          ~declaration_id:"librarian" ~schema exact |> get) with
+       | Lane_addon_exact.No_completed_latest -> true | Completed_latest _ -> false)))
+
 let ()=run "Actual Addon Librarian explicit-candidate owner" ["production",[
   test_case "actual Memory lane, worker, HTTP, domain validation and receipt-backed ACK" `Quick test_actual_happy_path;
   test_case "unchanged semantic deferral preserves the same original" `Quick test_unchanged_deferred_does_not_remint;
@@ -779,4 +893,6 @@ let ()=run "Actual Addon Librarian explicit-candidate owner" ["production",[
   test_case "mismatched retained final cannot borrow real original host proof" `Quick test_mismatched_retained_judgment_cannot_borrow_host_proof;
   test_case "pending first gate intent recovers the same absent child while Off" `Quick (test_original_gate_root_publication_recovery Before_child);
   test_case "published first gate before ACK recovers the same child while Off" `Quick (test_original_gate_root_publication_recovery Child_before_ack);
-  test_case "acknowledged missing first gate refuses without replacement" `Quick (test_original_gate_root_publication_recovery Acknowledged_then_missing)]]
+  test_case "acknowledged missing first gate refuses without replacement" `Quick (test_original_gate_root_publication_recovery Acknowledged_then_missing);
+  test_case "production refresh quiesces with a new tail while its provider remains pending" `Quick test_production_refresh_new_tail_quiesces_while_provider_pending;
+  test_case "a purged pending original cannot block another Keeper in the same shared worker" `Quick test_purged_original_does_not_block_another_keeper]]

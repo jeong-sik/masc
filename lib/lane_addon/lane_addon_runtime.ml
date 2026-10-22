@@ -155,7 +155,7 @@ let register_skill_export_handler handler = skill_export_handler := Some handler
    request, so a wake raised for an action never schedules a second capture
    of the same state. *)
 type observation_request = Idle | Run_actions | Refresh_sources | Observe_now
-(* Why the last host request cycle stopped before its listing settled. *)
+(* A cycle-wide failure, or the first request-local failure in the last cycle. *)
 type host_issue =
   | Listing_failed of string
   | Listing_refused of string
@@ -1028,6 +1028,7 @@ type host_attempt = Deliver of Yojson.Safe.t | Restore of Yojson.Safe.t | Wait o
 let run_host_cycle m e (port : host_port) =
   let delivered = Hashtbl.create 8 and tried = Hashtbl.create 8 in
   let waiting = ref [] in
+  let request_issue = ref None in
   let check_live () = if e.stopping then raise Host_cycle_stopped in
   let current_owner () : Lane_addon_host_delivery.owner = {
     instance_id=e.instance_id;
@@ -1191,26 +1192,37 @@ let run_host_cycle m e (port : host_port) =
           if Hashtbl.mem delivered request_id then Error (Relisted_delivered_request request_id)
           else if Hashtbl.mem tried request_id then each delivered_any rest
           else
-            let* attempt = try_request request in
-            match attempt with
-            | Restore arguments ->
-                let* () = deliver_arguments request arguments in
+            let outcome =
+              let* attempt = try_request request in
+              match attempt with
+              | Restore arguments ->
+                  Result.map (fun () -> true) (deliver_arguments request arguments)
+              | Deliver result ->
+                  Result.map (fun () -> true) (deliver request result)
+              | Wait reason ->
+                  waiting := (request_id, reason) :: !waiting;
+                  Ok false in
+            match outcome with
+            | Ok true ->
                 Hashtbl.replace delivered request_id ();
                 each true rest
-            | Deliver result ->
-                let* () = deliver request result in
-                Hashtbl.replace delivered request_id ();
-                each true rest
-            | Wait reason ->
+            | Ok false ->
                 (* Tried at most once per cycle, so it cannot keep a cycle running. *)
                 Hashtbl.replace tried request_id ();
-                waiting := (request_id, reason) :: !waiting;
-                each delivered_any rest in
+                each delivered_any rest
+            | Error ((Exact_record_failed _ | Ask_record_failed _ | Result_delivery_failed _) as issue) ->
+                (* Preserve the failure without delivering a fabricated terminal or
+                   retrying it in this cycle. Other original requests remain independent. *)
+                Hashtbl.replace tried request_id ();
+                (match !request_issue with None -> request_issue := Some issue | Some _ -> ());
+                each delivered_any rest
+            | Error ((Listing_failed _ | Listing_refused _ | Relisted_delivered_request _ | No_exact_runner) as issue) ->
+                Error issue in
     let* delivered_any = each false requests in
     if delivered_any then pass () else Ok () in
   let outcome = try pass () with Host_cycle_stopped -> Ok () in
   e.host_status <- { cycles = e.host_status.cycles + 1; waiting = List.rev !waiting;
-    issue = (match outcome with Ok () -> None | Error issue -> Some issue) }
+    issue = (match outcome with Ok () -> !request_issue | Error issue -> Some issue) }
 
 let run_host_watch ~sw ~cleanup_sw ~backend m e port await_change =
   fork_isolated ~sw (fun () ->

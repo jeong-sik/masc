@@ -399,8 +399,12 @@ type host_issue =
   | Exact_record_failed of { request_id : string; detail : string }
   | Ask_record_failed of { request_id : string; detail : string }
   | No_exact_runner
-(** What stopped an instance's last host request cycle (RFC operator-quiz
-    §4.4). A detail is the failure's own text and may be blank. *)
+(** A cycle-wide failure, or the first request-local failure in an instance's
+    last host request cycle (RFC operator-quiz §4.4). Exact, ask and result
+    delivery failures leave that request unresolved and do not suppress other
+    requests. Listing, protocol and missing-runner failures stop the cycle and
+    take precedence in this projection. A detail is the failure's own text and
+    may be blank. This diagnostic grants no execution or result authority. *)
 
 val host_issue_to_json : host_issue -> Yojson.Safe.t
 (** The [issue] of an instance's [host_requests] in the inspect payload. *)

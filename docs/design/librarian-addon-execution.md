@@ -333,6 +333,14 @@ the existing per-Keeper queue wake. Configuration/export hints scan actual
 pending queue names. The callback performs no filesystem or Runtime reentry;
 shutdown fences copied callbacks and removes this exact subscription.
 
+An unresolved original returns Pending without scheduling itself merely because
+a later queue tail exists. Immediate tail recheck requires a completed frontier
+walk. Invalid execution evidence remains Unavailable rather than becoming a
+normal wait or a partial-success result. In the shared worker, request-local
+Exact/ask/delivery errors remain diagnostic and are attempted only once per
+cycle, while other requests can continue. Listing/protocol/global-runner failures
+still stop the cycle. Purged originals are not rewritten as successful results.
+
 The focused production fixture uses actual Runtime, persistent Python worker,
 loopback HTTP/common Exact, serialized Memory lane, original journals, Current
 receipts and queue ACK. Its resource-launch edge is substituted; it does not

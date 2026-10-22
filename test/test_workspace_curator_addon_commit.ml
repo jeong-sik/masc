@@ -911,6 +911,52 @@ let test_discovery_rejects_duplicate_inventory_id ()=with_workspace (fun base_pa
   check bool "duplicate rows are not a valid complete forest" true
     (Result.is_error (Capture.recoverable_successors ~workspace:(get (Capture.observe_workspace ~base_path))
       [record;record])))
+let test_live_briefing_contract_on_recovery after_saved ()=with_workspace (fun base_path store ->
+  Eio.Switch.run @@ fun sw ->
+  let prompts=Filename.concat base_path "guarded-prompts" in
+  Fs_compat.mkdir_p prompts;
+  let key=Prompt_names.workspace_memory_briefing in
+  Out_channel.with_open_bin (Filename.concat prompts (key ^ ".md")) (fun channel ->
+    output_string channel ("---\ndescription: original recovery contract\n"
+      ^ "template_variables: [workspace_memory_briefing]\n---\n" ^ briefing_template));
+  Prompt_registry.clear ();
+  Eio_guard.enable ();
+  Eio.Switch.on_release sw (fun () ->
+    Fun.protect ~finally:Eio_guard.disable Prompt_registry.clear);
+  Prompt_registry.set_markdown_dir prompts;
+  get (Prompt_registry.set_override key briefing_template);
+  let current_contract ()=Briefing.contract ~template:(Prompt_registry.resolve_prompt key).effective in
+  let classification,answer=classification base_path ["Original briefing source a";"Original briefing source b"] in
+  let ledger=match after classification answer with
+    | Capture.Classification_commit ledger -> ledger | Briefing_commit _ -> fail "expected original ledger" in
+  get (Ledger.save ~base_path ledger);
+  let batch,capture,answer=prepare_briefing base_path ledger Briefing.empty in
+  let directory=Ledger.directory ~base_path in
+  let before=Briefing.prepared_state batch in
+  get (Briefing.save ~directory before);
+  let original=retain store capture answer in
+  let lost expected=
+    if after_saved then get (save base_path expected);
+    Error "controlled original save receipt loss" in
+  check bool "original failed save retains uncertainty" true
+    (match settle ~briefing_contract:current_contract ~save:lost base_path store original with
+     | Error (Consumer.Uncertain _) -> true
+     | Ok _ | Error (Consumer.Unavailable _ | Rejected _) -> false);
+  get (Prompt_registry.set_override key "Changed {{workspace_memory_briefing}}");
+  check bool "live registry changed after the original failed attempt" true (current_contract ()<>contract);
+  let briefing_contract=if after_saved then
+      (fun () -> fail "confirmed after-state must not resolve a current prompt")
+    else current_contract in
+  let result=settle ~briefing_contract ~save:no_save base_path store original |> accepted in
+  (match result,after_saved with
+   | Consumer.Committed _,true | Commit_conflict _,false -> ()
+   | Committed _,false | Commit_conflict _,true | Commit_waiting _,(false | true) ->
+     fail "original recovery used the wrong contract decision");
+  let expected=if after_saved then match after capture answer with
+      | Capture.Briefing_commit state -> state | Classification_commit _ -> fail "expected original briefing"
+    else before in
+  check json "recovery does not replace the original domain bytes"
+    (Briefing.to_json expected) (Briefing.to_json (get (Briefing.load ~directory))))
 let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "classification applies once and survives journal reopen" `Quick test_classification_commit_and_reopen;
   test_case "real save with lost receipt confirms after without another write" `Quick test_lost_save_receipt_after_publication;
@@ -974,4 +1020,8 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "discovery recovers nested original chain" `Quick test_discovery_nested_existing_intents;
   test_case "discovery refuses a missing original predecessor" `Quick test_discovery_rejects_dangling_parent;
   test_case "discovery refuses another physical workspace" `Quick test_discovery_rejects_foreign_workspace;
-  test_case "discovery refuses duplicate original IDs" `Quick test_discovery_rejects_duplicate_inventory_id]]
+  test_case "discovery refuses duplicate original IDs" `Quick test_discovery_rejects_duplicate_inventory_id;
+  test_case "Briefing recovery reads the changed live contract on its original fiber" `Quick
+    (test_live_briefing_contract_on_recovery false);
+  test_case "Briefing confirmed after-state bypasses changed live contract" `Quick
+    (test_live_briefing_contract_on_recovery true)]]

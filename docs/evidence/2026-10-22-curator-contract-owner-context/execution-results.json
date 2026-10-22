@@ -1,0 +1,42 @@
+{
+  "source": "cb2eeb1d271a0a436e34133e58ceda0c9a7b6efd",
+  "selected_suites": [
+    "test/test_workspace_memory_curator_lane",
+    "test/test_prompt_registry_dune_fallback",
+    "test/test_workspace_memory_execution_capture",
+    "test/test_workspace_memory_request",
+    "test/test_prompt_templates_render"
+  ],
+  "native_scenario": "addon-lifecycle",
+  "state": "execution complete; remaining actual Briefing eligibility mutex failure under repair",
+  "observed_at": "2026-10-22T04:33:44.429759+00:00",
+  "selected": {
+    "run": 39721673539,
+    "head": "cb2eeb1d271a0a436e34133e58ceda0c9a7b6efd",
+    "conclusion": "failure",
+    "passed": 30,
+    "attempted": 38,
+    "production_owner_passed": 7,
+    "production_owner_attempted": 15,
+    "failed_owner_cases": [
+      0,
+      1,
+      2,
+      3,
+      6,
+      7,
+      11,
+      12
+    ],
+    "log": "39721673539-ci-run-tests.log",
+    "cause": "Live briefing contract thunk is called inside eligibility systemthread; captured pure renderer regression passed"
+  },
+  "native": {
+    "run": 39721677397,
+    "conclusion": "success",
+    "workflow_head": "22528b6437bc2ba877255c61bc294736222a37fc",
+    "feature_head": "cb2eeb1d271a0a436e34133e58ceda0c9a7b6efd",
+    "artifact_id": 12402025847,
+    "actual_selected_tests": 29
+  }
+}

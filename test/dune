@@ -5516,6 +5516,11 @@
  (libraries alcotest digestif yojson masc unix))
 
 (test
+ (name test_lane_addon_request_discovery)
+ (modules test_lane_addon_request_discovery)
+ (libraries alcotest yojson masc masc.fs_compat unix))
+
+(test
  (name test_lane_addon_request_progress)
  (modules test_lane_addon_request_progress)
  (libraries alcotest yojson masc masc.fs_compat unix))

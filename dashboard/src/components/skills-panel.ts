@@ -1,6 +1,6 @@
 // Skills Panel — the published skill snapshot and exact parser-derived surface.
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { SkillSourceInspector } from './skill-source-inspector'
 import { SkillAsyncEvidenceView } from './skill-async-evidence-view'
@@ -19,6 +19,7 @@ import {
   type SkillEvidenceResponse,
   type SkillEditorLoaded,
   type SkillEditorPreview,
+  type SkillEditorSaveReceipt,
   type AsyncRequestObservation,
   type SkillIdentity,
   type SkillReference,
@@ -31,6 +32,9 @@ import {
 } from '../api/dashboard-skills'
 import { SurfaceCard } from './common/card'
 import { EmptyState, ErrorState, LoadingState } from './common/feedback-state'
+import { currentStoredTokenRevision } from '../api/core'
+import { storedTokenRevision } from '../api/token-revision'
+import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
 
 const POLL_INTERVAL_MS = 30_000
 
@@ -412,7 +416,14 @@ function AsyncRequestObservationView({
 interface SkillSourceEditorProps {
   reference: SkillReference
   onPublished: (message: string) => void | Promise<void>
+  onMutation?: (result: SkillMutationResult) => void
+  observationCurrent?: () => boolean
 }
+
+type SkillMutationResult =
+  | { kind: 'created'; receipt: SkillCreateReceipt }
+  | { kind: 'saved'; reference: SkillReference; receipt: SkillEditorSaveReceipt }
+  | { kind: 'request_error'; operation: 'create' | 'save'; detail: string }
 
 const REVISION_CONFLICT_GUIDANCE = 'This Skill changed after you loaded it. Copy this draft, reload the Skills workspace, then reapply it to the latest revision before saving.'
 
@@ -421,7 +432,7 @@ function editorPreviewSummary(preview: SkillEditorPreview): string {
   return `${profile.kind} · ${profile.execution} · ${profile.plan.node_count} nodes · revision ${profile.reference.content_revision.slice(0, 12)}`
 }
 
-export function SkillSourceEditor({ reference, onPublished }: SkillSourceEditorProps) {
+export function SkillSourceEditor({ reference, onPublished, onMutation, observationCurrent }: SkillSourceEditorProps) {
   const referenceIdentity = referenceKey(reference.identity, reference.content_revision)
   const open = useSignal(false)
   const loaded = useSignal<SkillEditorLoaded | null>(null)
@@ -466,6 +477,7 @@ export function SkillSourceEditor({ reference, onPublished }: SkillSourceEditorP
   ): boolean => {
     const currentReference = loaded.value?.reference
     return generation === requestGeneration.value
+      && (observationCurrent?.() ?? true)
       && currentReference !== undefined
       && referenceKey(currentReference.identity, currentReference.content_revision)
         === referenceKey(requestedReference.identity, requestedReference.content_revision)
@@ -475,6 +487,7 @@ export function SkillSourceEditor({ reference, onPublished }: SkillSourceEditorP
   }
 
   const load = async () => {
+    if (observationCurrent && !observationCurrent()) return
     const generation = nextRequestGeneration()
     const requestedReference = reference
     open.value = true
@@ -484,13 +497,13 @@ export function SkillSourceEditor({ reference, onPublished }: SkillSourceEditorP
     reloadRequired.value = false
     try {
       const result = await readSkillSource(requestedReference)
-      if (generation !== requestGeneration.value) return
+      if (generation !== requestGeneration.value || (observationCurrent && !observationCurrent())) return
       loaded.value = result
       draft.value = result.source_text
       preview.value = null
       previewedSource.value = null
     } catch (cause) {
-      if (generation !== requestGeneration.value) return
+      if (generation !== requestGeneration.value || (observationCurrent && !observationCurrent())) return
       loaded.value = null
       if (classifySkillEditorError(cause) === 'revision_conflict') {
         conflict.value = true
@@ -557,6 +570,7 @@ export function SkillSourceEditor({ reference, onPublished }: SkillSourceEditorP
                         type="button"
                         disabled=${busy.value !== null || reloadRequired.value}
                         onClick=${async () => {
+                          if (observationCurrent && !observationCurrent()) return
                           const requestedReference = loaded.value?.reference
                           if (!requestedReference) return
                           const requestedSource = draft.value
@@ -598,6 +612,7 @@ export function SkillSourceEditor({ reference, onPublished }: SkillSourceEditorP
                         data-testid="skill-source-save"
                         disabled=${busy.value !== null || !previewIsCurrent || reloadRequired.value}
                         onClick=${async () => {
+                          if (observationCurrent && !observationCurrent()) return
                           const requestedReference = loaded.value?.reference
                           if (!requestedReference) return
                           const requestedSource = draft.value
@@ -605,11 +620,15 @@ export function SkillSourceEditor({ reference, onPublished }: SkillSourceEditorP
                           busy.value = 'save'
                           status.value = null
                           conflict.value = false
+                          let received = false
                           try {
                             const receipt = await saveSkillSource(
                               requestedReference,
                               requestedSource,
                             )
+                            received = true
+                            // A sent mutation's receipt outlives this editor's read owner.
+                            onMutation?.({ kind: 'saved', reference: requestedReference, receipt })
                             if (!requestIsCurrent(generation, requestedReference, requestedSource)) {
                               return
                             }
@@ -627,6 +646,8 @@ export function SkillSourceEditor({ reference, onPublished }: SkillSourceEditorP
                               }
                             }
                           } catch (cause) {
+                            if (!received) onMutation?.({ kind: 'request_error', operation: 'save',
+                              detail: cause instanceof Error ? cause.message : String(cause) })
                             if (!requestIsCurrent(generation, requestedReference, requestedSource)) {
                               return
                             }
@@ -671,16 +692,90 @@ function skillTemplate(kind: 'instruction' | 'composition', name: string, descri
   return `${frontmatter}# ${name}\n\n${body}\n\n\`\`\`toml composition\n[[compositions]]\nname = ${JSON.stringify(name)}\ndescription = ${JSON.stringify(description)}\nexecution = "inline"\n\n[[compositions.nodes]]\nid = "lane"\ntool = "keeper_lane_status"\n[compositions.nodes.input]\nkind = "literal"\nvalue = {}\n\`\`\`\n`
 }
 
+interface SkillsObservationOwner {
+  readonly mount: number
+  readonly authRevision: number
+  readonly authority: ExecutionWorkspaceAuthority | null
+}
+
+function mutationMessage(result: SkillMutationResult): string {
+  switch (result.kind) {
+    case 'created': return `Create response: ${createReceiptMessage(result.receipt)}`
+    case 'saved': return result.receipt.status === 'saved_but_unpublished'
+      ? `Save response: saved but not published: ${result.receipt.reason}`
+      : `Save response: ${result.receipt.status}`
+    case 'request_error': return `${result.operation} request returned an error; effect not confirmed: ${result.detail}`
+  }
+}
+
 export function SkillsPanel() {
+  const authRevision = storedTokenRevision.value
+  const authority = executionWorkspaceAuthority.value
+  const mounts = useRef(0)
+  // The ordinal only keys UI lifetime. Authority remains the existing SSOT's
+  // object identity, including a new object with otherwise equal fields.
+  const owner = useMemo(() => ({ mount: ++mounts.current, authRevision, authority }), [authRevision, authority])
+  const receipts = useSignal<readonly { owner: SkillsObservationOwner; result: SkillMutationResult }[]>([])
+  return html`<div>
+    ${receipts.value.length > 0 ? html`<section aria-label="Skill mutation receipts" data-testid="skill-mutation-receipts">
+      ${receipts.value.map((receipt, index) => html`<div key=${index}>
+        ${mutationMessage(receipt.result)}
+        <span class="ss-muted"> · original workspace ${receipt.owner.authority?.workspaceRoot ?? 'unconfirmed'}
+          ${receipt.owner !== owner ? ' · previous access context' : ''}</span>
+      </div>`)}
+    </section>` : null}
+    ${authority === null
+      ? html`<p role="status">Confirm the current workspace before reading Skills.</p>`
+      : html`<${SkillsObservationPanel} key=${owner.mount} owner=${owner}
+          onMutation=${(result: SkillMutationResult) => { receipts.value = [...receipts.value, { owner, result }] }} />`}
+  </div>`
+}
+
+function SkillEvidenceLoader({ reference, isCurrent }: {
+  reference: SkillReference
+  isCurrent: () => boolean
+}) {
+  const result = useSignal<SkillEvidenceResponse | null>(null)
+  const error = useSignal<string | null>(null)
+  const loading = useSignal(false)
+  const active = useRef(true)
+  useEffect(() => () => { active.current = false }, [])
+  return html`<div>
+    <div class="mb-2 flex items-center justify-between"><strong>Retained evidence</strong>
+      <button class="ss-btn" type="button" disabled=${loading.value} onClick=${async () => {
+        if (!active.current || !isCurrent() || loading.value) return
+        loading.value = true
+        error.value = null
+        try {
+          const evidence = await fetchSkillEvidence(reference)
+          if (!active.current || !isCurrent()) return
+          if (referenceKey(evidence.reference.identity, evidence.reference.content_revision)
+              !== referenceKey(reference.identity, reference.content_revision)) {
+            throw new Error('Returned evidence does not match the selected Skill revision.')
+          }
+          result.value = evidence
+        } catch (cause) {
+          if (active.current && isCurrent()) error.value = cause instanceof Error ? cause.message : String(cause)
+        } finally {
+          if (active.current && isCurrent()) loading.value = false
+        }
+      }}>${loading.value ? 'Loading…' : 'Load'}</button>
+    </div>
+    ${error.value ? html`<div role="alert" class="text-[var(--color-status-err)]">${error.value}</div>` : null}
+    <${SkillEvidenceView} result=${result.value} />
+  </div>`
+}
+
+function SkillsObservationPanel({ owner, onMutation }: {
+  owner: SkillsObservationOwner
+  onMutation: (result: SkillMutationResult) => void
+}) {
   const response = useSignal<SkillsResponse | null>(null)
   const loading = useSignal(true)
   const error = useSignal<string | null>(null)
   const asyncObservation = useSignal<AsyncRequestObservation | null>(null)
   const asyncObservationError = useSignal<string | null>(null)
   const expanded = useSignal<string | null>(null)
-  const evidence = useSignal<Record<string, SkillEvidenceResponse>>({})
-  const evidenceErrors = useSignal<Record<string, string>>({})
-  const evidenceLoading = useSignal<string | null>(null)
   const createOpen = useSignal(false)
   const createKind = useSignal<'instruction' | 'composition'>('instruction')
   const createName = useSignal('')
@@ -690,42 +785,52 @@ export function SkillsPanel() {
   const createSource = useSignal('')
   const createStatus = useSignal<string | null>(null)
   const editorNotice = useSignal<string | null>(null)
+  const active = useRef(true)
+  const catalogGeneration = useRef(0)
+  const asyncGeneration = useRef(0)
+  const current = () => active.current
+    && currentStoredTokenRevision() === owner.authRevision
+    && executionWorkspaceAuthority.peek() === owner.authority
+    && owner.authority !== null
+
+  const load = async (signal?: AbortSignal) => {
+    if (!current()) return
+    const generation = ++catalogGeneration.current
+    try {
+      const res = await fetchSkills({ signal })
+      if (!current() || generation !== catalogGeneration.current) return
+      response.value = res
+      error.value = null
+    } catch (cause) {
+      if (!current() || generation !== catalogGeneration.current || isAbortError(cause)) return
+      error.value = cause instanceof Error ? cause.message : 'skills fetch failed'
+    } finally {
+      if (current() && generation === catalogGeneration.current) loading.value = false
+    }
+  }
 
   useEffect(() => {
-    let cancelled = false
     const ctl = new AbortController()
-    const load = async () => {
-      try {
-        const res = await fetchSkills({ signal: ctl.signal })
-        if (cancelled) return
-        response.value = res
-        error.value = null
-      } catch (e) {
-        if (cancelled || isAbortError(e)) return
-        error.value = (e as Error).message || 'skills fetch failed'
-      } finally {
-        if (!cancelled) loading.value = false
-      }
-    }
     const loadAsyncObservation = async () => {
+      const generation = ++asyncGeneration.current
       try {
         const observation = await fetchAsyncRequestObservation({ signal: ctl.signal })
-        if (cancelled) return
+        if (!current() || generation !== asyncGeneration.current) return
         asyncObservation.value = observation
         asyncObservationError.value = null
       } catch (e) {
-        if (cancelled || isAbortError(e)) return
+        if (!current() || generation !== asyncGeneration.current || isAbortError(e)) return
         asyncObservationError.value = (e as Error).message || 'async observation fetch failed'
       }
     }
-    load()
+    void load(ctl.signal)
     loadAsyncObservation()
     const iv = window.setInterval(() => {
-      load()
+      void load(ctl.signal)
       loadAsyncObservation()
     }, POLL_INTERVAL_MS)
     return () => {
-      cancelled = true
+      active.current = false
       ctl.abort()
       window.clearInterval(iv)
     }
@@ -745,15 +850,19 @@ export function SkillsPanel() {
   const rows = sortSkillRows(mergeSkillRows(res.snapshot.skills, res.surfaces))
   return html`
     <${SurfaceCard} testId="skills-panel">
+      ${error.value ? html`<div role="alert">Catalog refresh failed: ${error.value}</div>` : null}
       <div class="mb-3 flex items-center justify-between gap-2">
         <strong>Skill Studio</strong>
         <button class="ss-btn" type="button" onClick=${async () => {
           createOpen.value = !createOpen.value
           if (createOpen.value && writableSources.value.length === 0) {
             try {
-              writableSources.value = await fetchWritableSkillSources()
+              const sources = await fetchWritableSkillSources()
+              if (!current()) return
+              writableSources.value = sources
               createSource.value = writableSources.value[0]?.source_id ?? ''
             } catch (cause) {
+              if (!current()) return
               createStatus.value = cause instanceof Error ? cause.message : String(cause)
             }
           }
@@ -762,7 +871,9 @@ export function SkillsPanel() {
       ${createOpen.value ? html`
         <form class="mb-4 grid gap-2 rounded border border-[var(--color-border)] p-3" data-testid="skill-create" onSubmit=${async (event: SubmitEvent) => {
           event.preventDefault()
+          if (!current()) return
           createStatus.value = 'Validating and publishing…'
+          let received = false
           try {
             const sourceText = skillTemplate(createKind.value, createName.value, createDescription.value, createBody.value)
             const receipt = await createSkill({
@@ -770,9 +881,15 @@ export function SkillsPanel() {
               package_id: createName.value,
               source_text: sourceText,
             })
+            received = true
+            onMutation({ kind: 'created', receipt })
+            if (!current()) return
             createStatus.value = createReceiptMessage(receipt)
-            response.value = await fetchSkills()
+            await load()
           } catch (cause) {
+            if (!received) onMutation({ kind: 'request_error', operation: 'create',
+              detail: cause instanceof Error ? cause.message : String(cause) })
+            if (!current()) return
             createStatus.value = cause instanceof Error ? cause.message : String(cause)
           }
         }}>
@@ -837,29 +954,18 @@ export function SkillsPanel() {
                     : html`<p role="status">Exact source unavailable: this Skill has no published source reference.</p>`}
                   <div class="grid gap-3 p-2 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
                     <div><strong>Execution flow</strong>${row.surface && row.surface.kind !== 'unavailable' ? html`<${SkillFlowView} profile=${row.surface.profile} /><${SkillIoView} profile=${row.surface.profile} />` : html`<div class="ss-muted">No profile</div>`}</div>
-                    <div>
-                      <div class="mb-2 flex items-center justify-between"><strong>Retained evidence</strong><button class="ss-btn" type="button" disabled=${evidenceLoading.value === rowKey} onClick=${async () => {
-                        if (!row.surface) return
-                        evidenceLoading.value = rowKey
-                        evidenceErrors.value = { ...evidenceErrors.value, [rowKey]: '' }
-                        try { evidence.value = { ...evidence.value, [rowKey]: await fetchSkillEvidence(row.surface.reference) } }
-                        catch (cause) { evidenceErrors.value = { ...evidenceErrors.value, [rowKey]: cause instanceof Error ? cause.message : String(cause) } }
-                        finally { evidenceLoading.value = null }
-                      }}>${evidenceLoading.value === rowKey ? 'Loading…' : 'Load'}</button></div>
-                      ${evidenceErrors.value[rowKey] ? html`<div role="alert" class="text-[var(--color-status-err)]">${evidenceErrors.value[rowKey]}</div>` : null}
-                      <${SkillEvidenceView} result=${evidence.value[rowKey] ?? null} />
-                    </div>
+                    ${row.surface ? html`<${SkillEvidenceLoader} key=${rowKey}
+                      reference=${row.surface.reference} isCurrent=${current} />` : null}
                   </div>
                   ${row.surface ? html`
                     <${SkillSourceEditor}
                       reference=${row.surface.reference}
+                      onMutation=${onMutation}
+                      observationCurrent=${current}
                       onPublished=${async (message: string) => {
+                        if (!current()) return
                         editorNotice.value = message
-                        try {
-                          response.value = await fetchSkills()
-                        } catch (cause) {
-                          editorNotice.value = `${message} Catalog refresh failed: ${cause instanceof Error ? cause.message : String(cause)}`
-                        }
+                        await load()
                       }}
                     />
                   ` : null}

@@ -1,6 +1,8 @@
 import { html } from 'htm/preact'
+import type { Signal } from '@preact/signals'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../store'
 import type {
   SkillReference,
   SkillSnapshotRejection,
@@ -16,6 +18,12 @@ const editorApiMocks = vi.hoisted(() => ({
   readSkillSource: vi.fn(),
   saveSkillSource: vi.fn(),
 }))
+const workspace = vi.hoisted(() => ({ current: null as unknown as Signal<ExecutionWorkspaceAuthority | null> }))
+vi.mock('../store', async () => {
+  const { signal } = await import('@preact/signals')
+  workspace.current = signal<ExecutionWorkspaceAuthority | null>(null)
+  return { executionWorkspaceAuthority: workspace.current }
+})
 
 vi.mock('../api/dashboard-skills', async importOriginal => ({
   ...await importOriginal<typeof import('../api/dashboard-skills')>(),
@@ -27,7 +35,7 @@ vi.mock('../api/dashboard-skills', async importOriginal => ({
 }))
 
 import { decodeSkillsResponse, SkillsContractError } from '../api/dashboard-skills'
-import { ApiRequestError } from '../api/core'
+import { ApiRequestError, clearStoredToken, setStoredToken } from '../api/core'
 import {
   capabilityLabel,
   createReceiptMessage,
@@ -44,8 +52,14 @@ import {
   usageLabel,
 } from './skills-panel'
 
+beforeEach(() => {
+  expect(executionWorkspaceAuthority).toBe(workspace.current)
+  workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1 }
+  setStoredToken('fixture-token')
+})
 afterEach(() => {
   cleanup()
+  clearStoredToken()
   vi.clearAllMocks()
 })
 

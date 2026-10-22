@@ -1848,7 +1848,13 @@ currently loaded conversation, selected live speech and generated media,
 excluding thinking and superseded attempts. A generated image becomes available
 once its original response has persisted the completed block, including while
 the same operation continues through a tool call. Generated audio is available
-through `/listen`. Replayed events retain their original response ownership;
+through `/listen`. Preparing audio or MIDI runs in the background, including the
+workspace-bound peer download, local byte read, cache save and MIDI metadata.
+A newer `/listen`, leaving chat, changing Keeper, or workspace reconnection retires
+the pending playback authority. Returning to the original Keeper does not revive
+that request; the prepared result starts a player only while its original request
+is still current. Preparation is separate from audible playback verification.
+Replayed events retain their original response ownership;
 a late block from a closed or superseded response cannot replace current media. Names remain labels; opening uses the retained source.
 An unavailable image keeps its number and reports why it cannot be opened.
 The selected source is frozen before fetching or rendering. At capture, a

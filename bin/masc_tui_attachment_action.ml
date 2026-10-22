@@ -52,15 +52,12 @@ let cache_dir () =
   dir
 
 let target_path ~name ~sha256 =
-  let prefix =
-    if String.length sha256 > 8 then String.sub sha256 0 8 else sha256
-  in
   let base =
     match name with
     | Some name when not (String.equal name "") -> Filename.basename name
     | Some _ | None -> "attachment"
   in
-  Filename.concat (cache_dir ()) (prefix ^ "-" ^ base)
+  Filename.concat (Filename.concat (cache_dir ()) sha256) base
 
 (* {1 Players} *)
 
@@ -156,15 +153,6 @@ let describe_outcome { name; result; midi_summary } =
 
 (* {1 Effects} *)
 
-let write_file path bytes =
-  try
-    let channel = open_out_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr channel)
-      (fun () -> output_string channel bytes);
-    Ok ()
-  with Sys_error message -> Error message
-
 let digest_display_bytes = 12
 
 let display_name ~(sha256 : string) = function
@@ -182,67 +170,79 @@ let open_external ~name ~path =
     | Ok _ -> { name; result = Opened; midi_summary = None }
     | Error _ -> { name; result = Saved path; midi_summary = None }
 
-let run ~fetch (attachment : Masc_tui_types.board_attachment) ~midi_soundfont =
+type prepared =
+  | Prepared_url of string
+  | Prepared_file of {
+      name : string;
+      path : string;
+      action : action;
+      midi_summary : string option;
+    }
+
+let prepare ~fetch (attachment : Masc_tui_types.board_attachment) =
   match attachment.ba_source with
-  | Masc_tui_types.As_url url -> (
-      match Masc_tui_browser.open_url url with
-      | Ok _ -> { name = url; result = Opened; midi_summary = None }
-      | Error reason -> { name = url; result = Failed reason; midi_summary = None })
+  | Masc_tui_types.As_url url -> Ok (Prepared_url url)
   | Masc_tui_types.As_artifact { sha256; _ } ->
       let name = display_name ~sha256 attachment.ba_name in
+      let failed reason = Error { name; result = Failed reason; midi_summary = None } in
       match fetch ~sha256 with
-      | Error reason -> { name; result = Failed reason; midi_summary = None }
+      | Error reason -> failed reason
       | Ok bytes when String.length bytes > Tool_blob_store.max_served_bytes ->
-          { name
-          ; result =
-              Failed
-                (Printf.sprintf "attachment exceeds %d-byte artifact limit"
-                   Tool_blob_store.max_served_bytes)
-          ; midi_summary = None
-          }
-      | Ok bytes -> (
+          failed (Printf.sprintf "attachment exceeds %d-byte artifact limit"
+            Tool_blob_store.max_served_bytes)
+      | Ok bytes ->
           let path = target_path ~name:(Some name) ~sha256 in
-          match write_file path bytes with
-          | Error reason -> { name; result = Failed reason; midi_summary = None }
-          | Ok () -> (
-              match action_of attachment.ba_kind with
-              | Save_only -> { name; result = Saved path; midi_summary = None }
-              | Open_external -> open_external ~name ~path
-              | Play_local -> (
-                  match player_argvs ~path () with
-                  | [] ->
-                      { name
-                      ; result =
-                          Failed "no afplay/ffplay/mpg123/play executable found"
-                      ; midi_summary = None
-                      }
-                  | candidates ->
-                      let rec try_spawn = function
-                        | [] ->
-                            { name
-                            ; result = Failed "every player failed to start"
-                            ; midi_summary = None
-                            }
-                        | argv :: rest -> (
-                            match spawn argv with
-                            | Ok () -> { name; result = Played; midi_summary = None }
-                            | Error _ -> try_spawn rest)
-                      in
-                      try_spawn candidates)
-              | Play_midi ->
-                  let midi_summary =
-                    match Masc_tui_midi.read bytes with
-                    | Ok info -> Some (Masc_tui_midi.summary info)
-                    | Error _ -> None
-                  in
-                  (match midi_argv ~path ~soundfont:midi_soundfont () with
-                   | Ok argv -> (
-                       match spawn argv with
-                       | Ok () -> { name; result = Played; midi_summary }
-                       | Error reason ->
-                           { name; result = Failed reason; midi_summary })
-                   | Error _reason ->
-                       (* Without fluidsynth/soundfont, keep the saved file on
-                          disk and report its path + MIDI summary rather than
-                          handing arbitrary filenames to OS open handlers. *)
-                       { name; result = Saved path; midi_summary })))
+          let published =
+            try
+              Fs_compat.mkdir_p (Filename.dirname path);
+              Fs_compat.save_file_atomic_rename_only path bytes
+            with
+            | Sys_error detail -> Error detail
+            | Unix.Unix_error (code, _, _) -> Error (Unix.error_message code) in
+          match published with
+          | Error reason -> failed reason
+          | Ok () ->
+              let action = action_of attachment.ba_kind in
+              let midi_summary = match action with
+                | Play_midi ->
+                    (match Masc_tui_midi.read bytes with
+                     | Ok info -> Some (Masc_tui_midi.summary info)
+                     | Error _ -> None)
+                | Play_local | Open_external | Save_only -> None in
+              Ok (Prepared_file { name; path; action; midi_summary })
+
+let perform prepared ~midi_soundfont =
+  match prepared with
+  | Prepared_url url ->
+      (match Masc_tui_browser.open_url url with
+       | Ok _ -> { name = url; result = Opened; midi_summary = None }
+       | Error reason -> { name = url; result = Failed reason; midi_summary = None })
+  | Prepared_file { name; path; action; midi_summary } ->
+      match action with
+      | Save_only -> { name; result = Saved path; midi_summary }
+      | Open_external -> open_external ~name ~path
+      | Play_local ->
+          (match player_argvs ~path () with
+           | [] ->
+               { name; result = Failed "no afplay/ffplay/mpg123/play executable found";
+                 midi_summary }
+           | candidates ->
+               let rec try_spawn = function
+                 | [] -> { name; result = Failed "every player failed to start"; midi_summary }
+                 | argv :: rest ->
+                     (match spawn argv with
+                      | Ok () -> { name; result = Played; midi_summary }
+                      | Error _ -> try_spawn rest) in
+               try_spawn candidates)
+      | Play_midi ->
+          (match midi_argv ~path ~soundfont:midi_soundfont () with
+           | Ok argv ->
+               (match spawn argv with
+                | Ok () -> { name; result = Played; midi_summary }
+                | Error reason -> { name; result = Failed reason; midi_summary })
+           | Error _ -> { name; result = Saved path; midi_summary })
+
+let run ~fetch attachment ~midi_soundfont =
+  match prepare ~fetch attachment with
+  | Error outcome -> outcome
+  | Ok prepared -> perform prepared ~midi_soundfont

@@ -65,14 +65,9 @@ let serve_clip ~token request reqd =
        for media. The content type is the format found on disk, so a player
        is never told MP3 about WAVE bytes. *)
     let body = Fs_compat.load_file path in
-    let headers =
-      Httpun.Headers.of_list
-        ( ("content-type", Voice_bridge_core.clip_content_type format)
-        :: ("content-length", string_of_int (String.length body))
-        :: public_read_cors_headers request )
-    in
-    let response = Httpun.Response.create ~headers (`OK :> Httpun.Status.t) in
-    Httpun.Reqd.respond_with_string reqd response body)
+    Http.Response.bytes ~content_type:(Voice_bridge_core.clip_content_type format)
+      ~headers:(public_read_cors_headers request) body reqd)
+
 
 (* RFC-0301: serve a model-generated media file by deterministic store token.
    Unlike voice clips, this token is a content-derived locator, not a bearer
@@ -106,14 +101,10 @@ let serve_media ~base_path ~token request reqd =
             respond_json_value_with_cors ~status:`Not_found request reqd
               (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
         | Some body ->
-            let headers =
-              Httpun.Headers.of_list
-                (("content-type", Keeper_chat_media_store.content_type_of_path path)
-                 :: ("content-length", string_of_int (String.length body))
-                 :: cors_headers (get_origin request))
-            in
-            let response = Httpun.Response.create ~headers (`OK :> Httpun.Status.t) in
-            Httpun.Reqd.respond_with_string reqd response body)
+            Http.Response.bytes
+              ~content_type:(Keeper_chat_media_store.content_type_of_path path)
+              ~headers:(cors_headers (get_origin request)) body reqd)
+
 
 (* Owner-route JSON respond helper. Unlike [respond_public_read_json_value],
    this adds no public-read capability headers: the transcribe route is

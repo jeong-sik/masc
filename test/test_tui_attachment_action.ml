@@ -50,23 +50,29 @@ let test_allows_external_open_blocks_executable_extensions () =
   Alcotest.(check bool) "extensionless blocked" false
     (Action.allows_external_open ~name:"attachment")
 
-let test_target_path_uses_digest_prefix_and_basename () =
+let test_target_path_uses_full_digest_and_basename () =
   let path =
     Action.target_path ~name:(Some "riff.gp5")
       ~sha256:"0123456789abcdef0123456789abcdef"
   in
   Alcotest.(check bool) "it lives in the cache dir" true
     (String.starts_with ~prefix:(Action.cache_dir () ^ "/") path);
-  Alcotest.(check string) "the basename carries the digest prefix"
-    "01234567-riff.gp5" (Filename.basename path);
+  Alcotest.(check string) "the source directory carries the full digest"
+    "0123456789abcdef0123456789abcdef" (Filename.basename (Filename.dirname path));
+  Alcotest.(check string) "the original filename remains intact" "riff.gp5"
+    (Filename.basename path);
+  let other = Action.target_path ~name:(Some "riff.gp5")
+      ~sha256:"0123456789abcdef0123456789abcdeff" in
+  Alcotest.(check bool) "shared digest prefix cannot replace another prepared source"
+    false (String.equal path other);
   let unnamed =
     Action.target_path ~name:None
       ~sha256:"0123456789abcdef0123456789abcdef"
   in
-  Alcotest.(check string) "no name falls back to a word" "01234567-attachment"
+  Alcotest.(check string) "no name falls back to a word" "attachment"
     (Filename.basename unnamed);
   let separated = Action.target_path ~name:(Some "a/b.mid") ~sha256:"ffffffff" in
-  Alcotest.(check string) "a separator keeps only the basename" "ffffffff-b.mid"
+  Alcotest.(check string) "a separator keeps only the basename" "b.mid"
     (Filename.basename separated)
 
 (* A PATH with nothing in it picks no player; a PATH with one fake executable
@@ -181,14 +187,14 @@ let test_save_served_artifact_boundary () =
   Fun.protect
     ~finally:(fun () ->
       Filename.set_temp_dir_name previous;
-      Array.iter
-        (fun entry ->
-          let cache = Filename.concat root entry in
-          Array.iter (fun name -> Sys.remove (Filename.concat cache name))
-            (Sys.readdir cache);
-          Unix.rmdir cache)
-        (Sys.readdir root);
-      Unix.rmdir root)
+      let rec remove path =
+        match Unix.lstat path with
+        | {Unix.st_kind=Unix.S_DIR;_} ->
+            Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+            Unix.rmdir path
+        | {Unix.st_kind=(Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+            | Unix.S_FIFO | Unix.S_SOCK);_} -> Unix.unlink path in
+      remove root)
     (fun () ->
       Filename.set_temp_dir_name root;
       let limit = Tool_blob_store.max_served_bytes in
@@ -228,6 +234,87 @@ let test_save_served_artifact_boundary () =
       Alcotest.(check bool) "an oversized body never creates a saved file"
         false (Sys.file_exists target))
 
+let test_retired_writer_cannot_damage_prepared_audio () =
+  let nonce = Filename.temp_file "tui-listen-publication" "" in
+  let bytes = "complete prepared audio " ^ nonce in
+  let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let path = Action.target_path ~name:(Some "take.wav") ~sha256 in
+  let attachment : Masc_tui_types.board_attachment =
+    {ba_kind=Ak_audio; ba_name=Some "take.wav";
+     ba_source=As_artifact {sha256; bytes=String.length bytes}} in
+  let prepare () =
+    match Action.prepare ~fetch:(fun ~sha256:_ -> Ok bytes) attachment with
+    | Ok _ -> ()
+    | Error outcome -> Alcotest.fail (Action.describe_outcome outcome) in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists path then Sys.remove path;
+      if Sys.file_exists (Filename.dirname path) then Unix.rmdir (Filename.dirname path);
+      Sys.remove nonce)
+    (fun () ->
+      prepare ();
+      let retired_writer = Unix.openfile path [Unix.O_WRONLY] 0 in
+      Fun.protect ~finally:(fun () -> Unix.close retired_writer) (fun () ->
+        prepare ();
+        In_channel.with_open_bin path (fun player ->
+          (* A writer already holding the previous publication resumes only
+             after its successor has prepared and the player opened it. *)
+          Unix.ftruncate retired_writer 0;
+          ignore (Unix.write_substring retired_writer "partial" 0 7);
+          Alcotest.(check string) "retired writer cannot truncate the player source"
+            bytes (In_channel.input_all player));
+        Alcotest.(check string) "the published prepared source stays complete"
+          bytes (In_channel.with_open_bin path In_channel.input_all)))
+
+let listen_state () =
+  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935
+    ~refresh_interval:2. () in
+  state.view <- Keepers Keeper_message;
+  Masc_tui_types.retarget_message state (Some "music");
+  state
+
+let audio : Masc_tui_chat_media.playable =
+  {name="take.wav"; kind=`Audio; source=`Data "UklGRg=="}
+
+let test_listen_replacement_and_replay () =
+  let open Masc_tui_types in
+  let state = listen_state () in
+  let first = begin_chat_listen state ~keeper:"music" audio in
+  let second = begin_chat_listen state ~keeper:"music" audio in
+  Alcotest.(check bool) "earlier read cannot authorize playback" false
+    (take_chat_listen state first);
+  Alcotest.(check bool) "earlier result keeps the successor pending" true
+    (take_chat_listen state second);
+  Alcotest.(check bool) "same completion cannot play twice" false
+    (take_chat_listen state second)
+
+let test_listen_target_and_workspace_withdrawal () =
+  let open Masc_tui_types in
+  let state = listen_state () in
+  let first = begin_chat_listen state ~keeper:"music" audio in
+  retarget_message state (Some "other");
+  retarget_message state (Some "music");
+  Alcotest.(check bool) "A to B to A does not restore playback authority" false
+    (take_chat_listen state first);
+  let second = begin_chat_listen state ~keeper:"music" audio in
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "reconnection retires pending audio" false
+    (take_chat_listen state second);
+  let third = begin_chat_listen state ~keeper:"music" audio in
+  retarget_message state (Some "music");
+  Alcotest.(check bool) "same target preserves the active request" true
+    (take_chat_listen state third)
+
+let test_listen_surface_withdrawal () =
+  let open Masc_tui_types in
+  let state = listen_state () in
+  let request = begin_chat_listen state ~keeper:"music" audio in
+  state.view <- Overview;
+  reconcile_chat_listen state;
+  state.view <- Keepers Keeper_message;
+  Alcotest.(check bool) "returning to chat does not revive the withdrawn read" false
+    (take_chat_listen state request)
+
 let () =
   Alcotest.run "tui-attachment-action"
     [ ( "decisions"
@@ -236,7 +323,7 @@ let () =
         ; Alcotest.test_case "external open allowlists safe extensions" `Quick
             test_allows_external_open_blocks_executable_extensions
         ; Alcotest.test_case "the cache path names digest and file" `Quick
-            test_target_path_uses_digest_prefix_and_basename
+            test_target_path_uses_full_digest_and_basename
         ; Alcotest.test_case "no player in an empty path" `Quick
             test_player_argvs_empty_without_path
         ; Alcotest.test_case "the available player is picked" `Quick
@@ -246,7 +333,16 @@ let () =
         ; Alcotest.test_case "the outcome is one line" `Quick
             test_describe_outcome
         ] )
+    ; ( "listen ownership"
+      , [ Alcotest.test_case "replacement and duplicate completion" `Quick
+            test_listen_replacement_and_replay
+        ; Alcotest.test_case "target and workspace withdrawal" `Quick
+            test_listen_target_and_workspace_withdrawal
+        ; Alcotest.test_case "surface withdrawal" `Quick
+            test_listen_surface_withdrawal ] )
     ; ( "save"
-      , [ Alcotest.test_case "saving uses the authoritative served-byte boundary"
+      , [ Alcotest.test_case "retired writer cannot damage prepared audio" `Quick
+            test_retired_writer_cannot_damage_prepared_audio
+        ; Alcotest.test_case "saving uses the authoritative served-byte boundary"
             `Quick test_save_served_artifact_boundary ] )
     ]

@@ -8161,6 +8161,12 @@ type lane_nested_read =
   | Lane_subscriptions_read
   | Lane_declaration_read of { path : string; edit : bool }
 
+type listen_request = {
+  lr_ticket : unit ref;
+  lr_keeper : string;
+  lr_media : Masc_tui_chat_media.playable;
+}
+
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
   (* Opening process store; workspace withdrawal never replaces its owner. *)
@@ -9660,6 +9666,7 @@ type state = {
      alone cannot establish a newer image. Reset when attachments clear. *)
   mutable msg_attachments_since: image_observation option;
   mutable msg_target_keeper_name: string option;
+  mutable listen_request: listen_request option;
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: ((workspace_input_identity option * string) * keeper_composer_draft) list;
   (* The workspace the open chat belonged to while the server's identity is
@@ -11776,6 +11783,7 @@ let suspend_verification_evidence_read state =
   state.verification_evidence_request <- None
 
 let suspend_workspace_readings state =
+  state.listen_request <- None;
   close_task_inspection state
     ~reason:(Masc_tui_original_task_read.Workspace_unconfirmed "Waiting for original workspace identity.");
   suspend_verification_evidence_read state;
@@ -12460,9 +12468,26 @@ let accept_chat_visit (state : state) (completion : Masc_tui_chat_visit.completi
    the microphone occupied until the old terminal event settles, including an
    A -> B -> A return before that event. Reopening the same target is not a transfer. *)
 let retarget_message (state : state) target =
-  (if not (Option.equal String.equal state.msg_target_keeper_name target) then
-     withdraw_voice_capture state);
+  (if not (Option.equal String.equal state.msg_target_keeper_name target) then begin
+     state.listen_request <- None;
+     withdraw_voice_capture state
+   end);
   state.msg_target_keeper_name <- target
+
+let begin_chat_listen state ~keeper media =
+  let request = {lr_ticket=ref (); lr_keeper=keeper; lr_media=media} in
+  state.listen_request <- Some request;
+  request
+
+let reconcile_chat_listen state =
+  if not (view_is_chat state.view) then state.listen_request <- None
+
+let take_chat_listen state request =
+  match state.listen_request with
+  | Some current when current.lr_ticket == request.lr_ticket ->
+      state.listen_request <- None;
+      view_is_chat state.view && state.msg_target_keeper_name = Some request.lr_keeper
+  | Some _ | None -> false
 
 type voice_completion =
   | Voice_current of Masc.Voice_bridge.stop_request
@@ -16016,6 +16041,7 @@ let create_state
   msg_references = [];
   msg_attachments_since = None;
   msg_target_keeper_name = None;
+  listen_request = None;
   msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
   msg_unconfirmed_workspace = None;

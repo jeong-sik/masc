@@ -466,9 +466,9 @@ let error_certainty ?(was_unverified = false) error =
         else Outcome_unverified
     | Protocol_error
         { stream_error = Run_failed { accepted = false; code; _ }; _ } ->
-        (* The server says, per error kind, whether a refusal before
-           acceptance admitted nothing; a code this build does not know stays
-           unverified. *)
+        (* This build's [pre_acceptance] table decides whether the kind the
+           server named admitted nothing; a code this build does not know
+           stays unverified. *)
         (match Option.bind code Masc.Keeper_chat_public_error.of_code with
          | Some kind ->
            (match Masc.Keeper_chat_public_error.pre_acceptance kind with

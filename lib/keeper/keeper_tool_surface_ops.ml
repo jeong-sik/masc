@@ -502,25 +502,8 @@ let direct_reply_visible_text json =
   | Error error -> Error error
 ;;
 
-let owner_operation_error_code = function
-  | Keeper_owner_registry.Command_lifecycle_reserved _ -> "owner_stopping"
-  | Command_lookup_failed Inventory_stopping -> "owner_stopping"
-  | Command_lookup_failed
-      (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _
-      | Owner_initialization_failed _) ->
-    "store_unavailable"
-  | Command_rejected (Keeper_owner.Owner_stopping | Owner_closed) ->
-    "owner_stopping"
-  | Command_rejected (Keeper_owner.Operation_rejected error) ->
-    (match Keeper_owner.operation_error_kind error with
-     | Invalid_operation_input -> "invalid_input"
-     | Unknown_operation -> "unknown_operation"
-     | Operation_not_queued -> "not_queued"
-     | Operation_idempotency_conflict -> "idempotency_conflict"
-     | Operation_native_call_unsettled -> "native_call_unsettled"
-     | Operation_store_unavailable -> "store_unavailable")
-  | Command_rejected (Keeper_owner.Store_unavailable _ | Reducer_rejected _) ->
-    "store_unavailable"
+let owner_operation_error_code error =
+  Keeper_chat_public_error.(code (of_command_error error))
 ;;
 
 let operation_payload_error ~class_ code detail =

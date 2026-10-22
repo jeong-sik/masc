@@ -27,11 +27,12 @@ val of_code : string -> kind option
     about the operation. *)
 type pre_acceptance =
   | Not_accepted
-      (** The server answered before any Keeper Owner wrote the operation, so
-          nothing was admitted under its id. *)
+      (** This attempt reached no Keeper Owner, so it admitted nothing. An
+          earlier attempt under the same id may still have been admitted. *)
   | Acceptance_unknown
-      (** The failure may follow a durable admission; only a read of the exact
-          operation settles it. *)
+      (** The failure may follow a durable admission. The TUI keeps the
+          operation held and re-POSTs the same id until a stream reports a
+          terminal outcome. *)
 
 val pre_acceptance : kind -> pre_acceptance
 (** [Owner_unavailable] is [Not_accepted]: the request never reached an
@@ -39,3 +40,9 @@ val pre_acceptance : kind -> pre_acceptance
     absent or failed to start. [Store_unavailable] stays
     [Acceptance_unknown]: the Owner may have committed before its store
     failed. *)
+
+val of_command_error : Keeper_owner_registry.command_error -> kind
+(** The kind every surface answers a typed Owner command failure with: the
+    HTTP submission and control routes and the Keeper chat tools. A lookup
+    that reached no Owner (inventory not installed, Owner absent, unavailable
+    or failed to start) is [Owner_unavailable]. *)

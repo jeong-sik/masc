@@ -55,9 +55,9 @@ type pre_acceptance =
   | Not_accepted
   | Acceptance_unknown
 
-(* The kinds a submission can be refused with before any Owner wrote it are
-   [Not_accepted]. Every other kind keeps the client's operation fenced until
-   a read of the exact operation settles it. *)
+(* The kinds a submission attempt can be refused with before it reaches any
+   Owner are [Not_accepted]. Every other kind keeps the client's operation
+   held while the same id is re-POSTed. *)
 let pre_acceptance = function
   | Invalid_input | Unknown_operation | Not_queued | Owner_stopping | Owner_unavailable ->
     Not_accepted
@@ -66,4 +66,27 @@ let pre_acceptance = function
   | Journal_unreadable | Journal_corrupt | Journal_missing | Journal_pruned
   | Cursor_refusal (_ : Keeper_chat_event_log.cursor_refusal) ->
     Acceptance_unknown
+;;
+
+let of_command_error : Keeper_owner_registry.command_error -> kind = function
+  | Keeper_owner_registry.Command_lifecycle_reserved _ -> Owner_stopping
+  | Command_lookup_failed Keeper_owner_registry.Inventory_stopping -> Owner_stopping
+  (* The command never reached an Owner, so this attempt admitted nothing. *)
+  | Command_lookup_failed
+      ( Keeper_owner_registry.Inventory_not_installed _
+      | Keeper_owner_registry.Owner_not_found _
+      | Keeper_owner_registry.Owner_unavailable _
+      | Keeper_owner_registry.Owner_initialization_failed _ ) ->
+    Owner_unavailable
+  | Command_rejected (Keeper_owner.Owner_stopping | Keeper_owner.Owner_closed) -> Owner_stopping
+  | Command_rejected (Keeper_owner.Operation_rejected error) ->
+    (match Keeper_owner.operation_error_kind error with
+     | Keeper_owner.Invalid_operation_input -> Invalid_input
+     | Keeper_owner.Unknown_operation -> Unknown_operation
+     | Keeper_owner.Operation_not_queued -> Not_queued
+     | Keeper_owner.Operation_idempotency_conflict -> Idempotency_conflict
+     | Keeper_owner.Operation_native_call_unsettled -> Native_call_unsettled
+     | Keeper_owner.Operation_store_unavailable -> Store_unavailable)
+  | Command_rejected (Keeper_owner.Store_unavailable _ | Keeper_owner.Reducer_rejected _) ->
+    Store_unavailable
 ;;

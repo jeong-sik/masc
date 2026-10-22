@@ -1120,6 +1120,19 @@ let test_error_certainty () =
                    Masc.Keeper_chat_public_error.(code Owner_unavailable)
              }))
      = Chat.Verified_rejected);
+  (* A re-POST after a checkpoint or an unverified attempt: this attempt
+     reaching no Owner does not show that the id admitted nothing. *)
+  check bool "a re-POST that reached no owner keeps the fence" true
+    (Chat.error_certainty ~was_unverified:true
+       (Chat.protocol_error
+          (Chat.Run_failed
+             { accepted = false
+             ; message = "owner unavailable"
+             ; code =
+                 Some
+                   Masc.Keeper_chat_public_error.(code Owner_unavailable)
+             }))
+     = Chat.Outcome_unverified);
   check bool "a code this build does not know keeps the fence" true
     (Chat.error_certainty
        (Chat.protocol_error

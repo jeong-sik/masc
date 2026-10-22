@@ -647,3 +647,9 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 ## 실행 증거와 이후 상위 재배치의 분리 · 2026-10-22
 
 위226건 영수증을 보존한 뒤 외부 세션이 상위 Candle 브랜치를73c099621ccdbf376edba4fc3fd4ba5e4a37d55f로 재배치했다. 이전65727 대비134파일 변경에는 다른 실행/tool 인터페이스와 test 선언이 포함된다. 문서 전용 후속 #45007은 한 층이라 순서 교환 대상이 없었고, 기존 문서6파일 delta를 보존한 채 공식 gh stack rebase로 새 base에 다시 올렸다. 같은 소스의 새 조합 전체 실행으로226건을 이월하지 않는다. 원래47b9의 실행·첫 통합65727의 tree 동등성·나중 상위73c 조합을 각각 구분한다. 원래54개 기준과 실제 provider·두 UI·main·운영 설치 미완료 경계는 유지한다.
+
+## E02/G03 TUI 보존 이력의 독립 진입 · 2026-10-22
+
+- 팔레트의 typed history 목적지는 현재 설정 행·설치된 Addon 없이 원래 관측 identity를 찾는다. 기존 Lanes 비동기 조회와 workspace/generation 검사를 유지한다. 정상 inventory 조회도 별도로 시작하며 history가 그 성공을 기다리지는 않는다.
+- 독립 working-diff 리뷰에서 같은 Lanes의 기존 slot editor가 숨은 채 키를 받아 원래 모델 설정을 변경할 수 있는 P2를 찾았다. 실제 history 진입 함수가 transient editor/picker/notice를 닫도록 수리하고 idle·posting·receipt 재조회 상태에서 삭제 계획 거절과 원래 설정·초안·저장 상태 보존 검사를 추가했다. 현재 parser·diff 검사만 통과했으며 새 source의 compiled 실행·실제 화면은 아직 미검증이다.
+- 이 진입 구현은 실제 Curator Addon 모델 projection이나 builtin 설정 제거를 대신하지 않는다. 원래 A01–H06의54개 항목명·완료 기준과 provider·두 UI·설치 요구를 유지한다.

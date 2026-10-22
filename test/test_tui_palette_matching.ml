@@ -529,7 +529,7 @@ let test_an_installation_that_asked_has_one_results_row () =
     List.filter_map (function
       | _, Palette_addon_results id -> Some id
       | _, ( Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
-           | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons
+           | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _
            | Palette_goto _ | Palette_usage_scope _ | Palette_config _
            | Palette_gate_mode _ | Palette_chat _ | Palette_task _ | Palette_task_creation _
            | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
@@ -544,6 +544,19 @@ let test_an_installation_that_asked_has_one_results_row () =
   (match palette_matches state with
    | (_, Palette_addon_results "operator-quiz") :: _ -> ()
    | _ -> Alcotest.fail "the declaration id finds the installation's Results")
+;;
+
+let test_retained_history_is_available_without_current_configuration () =
+  let state=create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  (* No current configuration/installation reading supplies these targets. *)
+  check_bool "no current model rows" true (Option.is_none state.standalone_lanes);
+  check_bool "no current inventory" true (Option.is_none state.lane_inventory);
+  List.iter (fun lane ->
+    state.palette_query <- Lane_run_identity.to_id lane;
+    check_bool "the query offers the original observation target" true
+      (List.exists (fun (_,action) -> action=Palette_lane_history lane)
+        (palette_matches state)))
+    [Lane_run_identity.Workspace_curator; Lane_run_identity.Verifier]
 ;;
 
 let () =
@@ -584,6 +597,8 @@ let () =
             `Quick test_metrics_is_one_row_that_answers_its_other_names
         ; Alcotest.test_case "Add-ons do not require a Keeper" `Quick
             test_addons_do_not_require_a_keeper
+        ; Alcotest.test_case "retained history needs no current configuration" `Quick
+            test_retained_history_is_available_without_current_configuration
         ; Alcotest.test_case "an installation that asked has one Results row" `Quick
             test_an_installation_that_asked_has_one_results_row
         ; Alcotest.test_case "every surface and Config pane has a row" `Quick

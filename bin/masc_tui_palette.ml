@@ -43,6 +43,7 @@ type palette_action =
   | Palette_msx
   | Palette_dos
   | Palette_lane_addons
+  | Palette_lane_history of Lane_run_identity.t
   (* One installation's Results, by its declaration id. *)
   | Palette_addon_results of string
   | Palette_goto of surface
@@ -191,6 +192,9 @@ let palette_entries (state : state) =
   @ [ "go Task Review", Palette_goto Verification ]
   @ [ "go Task Verdicts", Palette_goto Harness ]
   @ [ "go Lanes", Palette_goto Lanes ]
+  @ List.map (fun lane ->
+      ("go " ^ Lane_run_identity.label lane ^ " history", Palette_lane_history lane))
+      Lane_run_identity.all
   @ [ "go Clients", Palette_goto Clients ]
   @ [ "go Schedules", Palette_goto Schedules ]
   @ [ "go Code", Palette_goto Code ]
@@ -324,6 +328,7 @@ let palette_action_words = function
   | Palette_usage_scope (Some scope_id) -> [scope_id]
   | Palette_addon_results id -> [id]
   | Palette_task_creation _ -> ["task-inspect"; "original Task"]
+  | Palette_lane_history lane -> [Lane_run_identity.to_id lane]
   | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
   | Palette_collab | Palette_msx | Palette_dos
   | Palette_lane_addons | Palette_usage_scope None | Palette_config _ | Palette_gate_mode _
@@ -347,7 +352,7 @@ let palette_matches (state : state) =
                | ( _
                  , ( Palette_browser_lane | Palette_hide_browser_lane
                    | Palette_connectors | Palette_collab | Palette_msx
-                   | Palette_dos | Palette_lane_addons | Palette_addon_results _ | Palette_goto _
+                   | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _ | Palette_goto _
                    | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
                    | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _
                    | Palette_board_post _ | Palette_code_file _
@@ -394,7 +399,7 @@ let selected_file state =
   match List.nth_opt matches cursor with
   | Some (_, Palette_code_file path) -> Some path
   | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
-    | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_addon_results _
+    | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _
     | Palette_goto _
     | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
@@ -407,7 +412,7 @@ let selected_location state =
   match List.nth_opt matches cursor with
   | Some (_, Palette_code_location (offer, location)) -> Some (offer, location)
   | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
-    | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_addon_results _
+    | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _
     | Palette_goto _
     | Palette_usage_scope _ | Palette_config _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _

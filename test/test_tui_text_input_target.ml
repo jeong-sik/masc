@@ -34,7 +34,8 @@ let target =
       | Some Tui_types.Text_board_draft -> "board-draft"
       | Some Tui_types.Text_board_attach_path -> "board-attach-path"
       | Some Tui_types.Text_fusion_launch -> "fusion-launch"
-      | Some Tui_types.Text_goal_drop_reason -> "goal-drop-reason"))
+      | Some Tui_types.Text_goal_drop_reason -> "goal-drop-reason"
+      | Some Tui_types.Text_resource_save -> "resource-save"))
     ( = )
 ;;
 

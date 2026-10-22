@@ -32,13 +32,19 @@ let scenario () =
             check bool "idle client does not block another request" true
               (match ok (W.reply_of_json (Yojson.Safe.from_string raw)) with
                | W.Snapshot_result _ -> true
-               | W.Poll_result _|Receipt|Issue_result _|Service_refusal _ -> false);
+               | W.Poll_result _|Receipt|Issue_result _|Service_refusal _
+               | Model_reply _|Download_reply _ -> false);
             Eio.Fiber.first
               (fun () -> Service.serve ~net ~owner ~socket_path:small ~max_message_bytes:1)
               (fun () ->
                 ready small;let flow=connect small in Eio.Flow.copy_string "{}\n" flow;
                 let reader=Eio.Buf_read.of_flow flow ~max_size:4096 in
-                let output=Eio.Buf_read.take_all reader in
+                (* No reply fits a 1-byte bound, so the service closes without
+                   reading the rest of the request. Linux then resets the
+                   connection where macOS sends EOF; neither carries a byte. *)
+                let output=match Eio.Buf_read.take_all reader with
+                  | output -> output
+                  | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> "" in
                 check int "small bound is never exceeded by fallback" 0 (String.length output));
             Owner.revoke owner);
         check bool "normal socket removed after cancellation" false (Sys.file_exists path);

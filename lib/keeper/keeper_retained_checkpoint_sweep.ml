@@ -124,8 +124,8 @@ let remove_unreferenced ~live dir report =
       report
       names
 
-(* Session directories nest under scope components, so every directory under
-   the session root is visited; symlinks are not followed. *)
+(* Every directory under the session root is visited, at any depth; symlinks
+   are not followed. *)
 let rec sweep_tree ~live dir report =
   match sorted_entries dir with
   | Error detail -> failed report detail

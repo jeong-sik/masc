@@ -79,8 +79,7 @@ let defer_direct_gate store reference =
     | Some operation -> operation | None -> fail "gate operation was not queued" in
   let obligation = Execution.gate_obligation ~approval_id:"approval" ~tool_name:"tool_execute"
       ~input_hash:(Digestif.SHA256.(digest_string "tool input" |> to_hex)) |> string_ok in
-  let waiting = Execution.gate_wait ~checkpoint:reference
-      ~session_scope:(Execution.session_scope [] |> string_ok) ~obligations:[obligation] |> string_ok in
+  let waiting = Execution.gate_wait ~checkpoint:reference ~obligations:[obligation] |> string_ok in
   ignore (Store.defer_direct_gate store ~now:12. ~operation_id
             ~execution_digest:operation.execution_digest ~waiting |> store_ok)
 

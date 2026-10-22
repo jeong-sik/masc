@@ -52,23 +52,14 @@ let rec original_prefix original current = match original, current with
   | first :: rest, current :: tail when first = current -> original_prefix rest tail
   | _ :: _, [] | _ :: _, _ :: _ -> false
 
-(* The scope is captured from the admitted session directory, never reconstructed
-   from a trace ID or from the operation's untyped source metadata. *)
-let session_scope ~config ~session_dir ~session_id =
-  let root = Keeper_fs.session_base_dir config in
-  let prefix = root ^ Filename.dir_sep in
-  if not (String.starts_with ~prefix session_dir) then Error "Gate session is outside the session root"
-  else
-    let relative = String.sub session_dir (String.length prefix) (String.length session_dir - String.length prefix) in
-    match List.rev (String.split_on_char '/' relative) with
-    | actual_id :: reversed_scope when actual_id = session_id -> Semantic.session_scope (List.rev reversed_scope)
-    | _ -> Error "Gate session directory does not match its checkpoint identity"
+(* A direct operation's session directory is its trace directory directly under
+   the session root; the admitted directory must be that one. *)
+let check_session_dir ~config ~session_dir ~session_id =
+  if String.equal session_dir (Keeper_fs.keeper_session_dir config session_id) then Ok ()
+  else Error "Gate session directory does not match its checkpoint identity"
 
-let scoped_session_dir ~config scope session_id =
-  Semantic.scoped_session_dir ~session_root:(Keeper_fs.session_base_dir config) scope session_id
-
-let retained ~config ~operation_id ~session_scope ~reference =
-  let session_dir = scoped_session_dir ~config session_scope
+let retained ~config ~operation_id ~reference =
+  let session_dir = Keeper_fs.keeper_session_dir config
     (Keeper_id.Trace_id.to_string reference.Keeper_checkpoint_ref.trace_id) in
   let* original = Checkpoint.load_retained_exact_snapshot ~session_dir ~reference
     |> Result.map_error (fun _ -> "original Gate checkpoint is not retained") in
@@ -80,11 +71,10 @@ let retained ~config ~operation_id ~session_scope ~reference =
   | Some _ | None -> Error "retained checkpoint does not own this original direct operation"
 
 let current_with_original ~config ~operation_id ~session_dir ~session_id (waiting : Semantic.gate_wait) =
-  let* scope = session_scope ~config ~session_dir ~session_id in
-  let* () = if scope = waiting.session_scope then Ok () else Error "Gate session scope changed" in
+  let* () = check_session_dir ~config ~session_dir ~session_id in
   let* reference = match waiting.checkpoint with Semantic.Agent_core value -> Ok value
     | Semantic.Official_client _ -> Error "official-client Gate has no Agent Core checkpoint" in
-  let* original = retained ~config ~operation_id ~session_scope:waiting.session_scope ~reference in
+  let* original = retained ~config ~operation_id ~reference in
   let* current = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
     |> Result.map_error (fun _ -> "current Keeper checkpoint is unavailable") in
   let original_checkpoint = Checkpoint.exact_snapshot_checkpoint original in
@@ -127,7 +117,7 @@ let confirm_retention ~session_dir snapshot =
   | Checkpoint.Installed _ | Checkpoint.Not_installed _ -> Error "Gate checkpoint retention is not durably confirmed"
 
 let capture_preparation ~source ~config ~operation_id ~session_dir ~session_id () =
-  let* session_scope = session_scope ~config ~session_dir ~session_id in
+  let* () = check_session_dir ~config ~session_dir ~session_id in
   let* source, snapshot = match source with
     | Returned_official_client {settled_session;frame} ->
       capture_native ~operation_id ~settled_session ~frame
@@ -149,11 +139,10 @@ let capture_preparation ~source ~config ~operation_id ~session_dir ~session_id (
         | Some _ | None -> Error "Gate yield checkpoint belongs to another operation" in
       Ok (Semantic.Prepared_agent_core {reference=Checkpoint.exact_snapshot_reference snapshot;
         canonical_checkpoint_bytes=Checkpoint.exact_snapshot_canonical_bytes snapshot}, Some snapshot) in
-  Ok ({Semantic.session_scope;source}, snapshot)
+  Ok (source, snapshot)
 
 let prepare_binding ~config ~keeper_name (binding : Semantic.gate_binding) =
   let base_path = config.Workspace.base_path in
-  let session_scope = binding.preparation.session_scope in
   let* obligations = List.fold_left (fun result approval_id ->
     let* obligations = result in
     let* obligation = bind ~base_path ~keeper_name approval_id in
@@ -162,15 +151,15 @@ let prepare_binding ~config ~keeper_name (binding : Semantic.gate_binding) =
   match Semantic.preparation_checkpoint binding.preparation with
   | Semantic.Official_client checkpoint ->
     let* () = match binding.runtime_suffix with None -> Ok () | Some _ -> Error "native Gate cannot own an Agent Core runtime checkpoint" in
-    let* waiting = Semantic.official_client_gate_wait ~checkpoint ~session_scope ~obligations in
+    let* waiting = Semantic.official_client_gate_wait ~checkpoint ~obligations in
     Ok waiting
   | Semantic.Agent_core reference ->
     let* waiting = match binding.runtime_suffix with
-      | None -> Semantic.gate_wait ~checkpoint:reference ~session_scope ~obligations
+      | None -> Semantic.gate_wait ~checkpoint:reference ~obligations
       | Some (lane : Semantic.runtime_suffix) ->
         let* runtime_retry = Semantic.runtime_retry ~not_before:None ~checkpoint:reference ~assignment_id:lane.assignment_id
           ~failed_runtime_id:lane.failed_runtime_id ~next_runtime_id:lane.next_runtime_id ~later_runtime_ids:lane.later_runtime_ids in
-        Semantic.gate_wait_with_runtime_retry ~checkpoint:reference ~session_scope ~obligations ~runtime_retry in
+        Semantic.gate_wait_with_runtime_retry ~checkpoint:reference ~obligations ~runtime_retry in
     Ok waiting
 
 let suspend ~source ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids () =
@@ -230,8 +219,8 @@ let reconcile ~config ~(meta : Keeper_meta_contract.keeper_meta) =
         let* () = match waiting.Semantic.checkpoint with
           | Semantic.Official_client checkpoint -> validate_native ~base_path ~keeper_name checkpoint
           | Semantic.Agent_core reference ->
-            let session_dir = scoped_session_dir ~config waiting.session_scope (Keeper_id.Trace_id.to_string reference.trace_id) in
-            let* bytes = match binding.preparation.source with
+            let session_dir = Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string reference.trace_id) in
+            let* bytes = match binding.preparation with
               | Semantic.Prepared_agent_core {canonical_checkpoint_bytes; _} -> Ok canonical_checkpoint_bytes
               | Semantic.Prepared_official_client _ -> Error "Gate preparation changed source owner" in
             let* snapshot = Checkpoint.exact_snapshot_of_canonical_bytes ~expected_session_id:reference.trace_id bytes
@@ -258,7 +247,7 @@ let reconcile ~config ~(meta : Keeper_meta_contract.keeper_meta) =
     match state.Semantic.resolution with
     | Some _ -> Ok ()
     | None ->
-      let session_dir = scoped_session_dir ~config state.waiting.session_scope session_id in
+      let session_dir = Keeper_fs.keeper_session_dir config session_id in
       let rec first_resolved = function
         | [] -> Ok ()
         | obligation :: remaining ->

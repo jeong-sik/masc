@@ -20,11 +20,11 @@ type t =
   (* References the semantic writes of the open transaction stopped naming.
      The transaction checks them against every owning execution before it
      commits, and empties this either way. *)
-  ; dropped : Semantic.retained_checkpoint list Atomic.t
+  ; dropped : Keeper_checkpoint_ref.t list Atomic.t
   (* References committed transactions released, until
      [take_released_checkpoints] hands them to the caller that removes the
      files. *)
-  ; released : Semantic.retained_checkpoint list Atomic.t
+  ; released : Keeper_checkpoint_ref.t list Atomic.t
   }
 
 type error =
@@ -909,10 +909,10 @@ let owning_semantic_rows db =
 
 (* [update_semantic] records the references one write stopped naming. *)
 let record_dropped store ~before ~after =
-  let named = List.map (fun (retained : Semantic.retained_checkpoint) -> retained.reference.sha256)
-      (Semantic.retained_checkpoints after) in
-  match List.filter (fun (retained : Semantic.retained_checkpoint) ->
-      not (List.mem retained.reference.sha256 named)) (Semantic.retained_checkpoints before) with
+  let named = List.map (fun (reference : Keeper_checkpoint_ref.t) -> reference.sha256)
+      (Semantic.checkpoint_references after) in
+  match List.filter (fun (reference : Keeper_checkpoint_ref.t) ->
+      not (List.mem reference.sha256 named)) (Semantic.checkpoint_references before) with
   | [] -> ()
   | dropped -> Atomic.set store.dropped (Atomic.get store.dropped @ dropped)
 ;;
@@ -932,12 +932,10 @@ let released_by_transaction store =
     let* rows = owning_semantic_rows store.db in
     let live = List.concat_map Semantic.checkpoint_references rows
       |> List.map (fun (reference : Keeper_checkpoint_ref.t) -> reference.sha256) in
-    let same_file (left : Semantic.retained_checkpoint) (right : Semantic.retained_checkpoint) =
-      String.equal left.reference.sha256 right.reference.sha256
-      && Semantic.session_scope_components left.session_scope
-         = Semantic.session_scope_components right.session_scope in
-    Ok (List.fold_left (fun released (retained : Semantic.retained_checkpoint) ->
-        if List.mem retained.reference.sha256 live || List.exists (same_file retained) released
+    let same_file (left : Keeper_checkpoint_ref.t) (right : Keeper_checkpoint_ref.t) =
+      String.equal left.sha256 right.sha256 in
+    Ok (List.fold_left (fun released (retained : Keeper_checkpoint_ref.t) ->
+        if List.mem retained.sha256 live || List.exists (same_file retained) released
         then released else retained :: released) [] dropped |> List.rev)
 ;;
 
@@ -966,12 +964,11 @@ let with_transaction store f =
   in_transaction store ~begin_operation:"begin operation transaction" ~store_error:Fun.id f
 ;;
 
-type released_checkpoint = Semantic.retained_checkpoint
+type released_checkpoint = Keeper_checkpoint_ref.t
 let take_released_checkpoints store = Atomic.exchange store.released []
-let released_reference (released : released_checkpoint) = released.reference
+let released_reference (released : released_checkpoint) = released
 let released_session_dir ~session_root (released : released_checkpoint) =
-  Semantic.scoped_session_dir ~session_root released.session_scope
-    (Keeper_id.Trace_id.to_string released.reference.trace_id)
+  Filename.concat session_root (Keeper_id.Trace_id.to_string released.trace_id)
 
 type inspection_scope =
   | Outstanding_integrity_audit

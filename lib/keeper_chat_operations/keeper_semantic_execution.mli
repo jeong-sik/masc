@@ -36,11 +36,6 @@ val gate_obligation : approval_id:string -> tool_name:string -> input_hash:strin
   (gate_obligation, string) result
 type runtime_suffix = private { assignment_id:string; failed_runtime_id:string; next_runtime_id:string; later_runtime_ids:string list }
 val runtime_suffix : assignment_id:string -> failed_runtime_id:string -> next_runtime_id:string -> later_runtime_ids:string list -> (runtime_suffix, string) result
-type session_scope
-val session_scope : string list -> (session_scope, string) result
-val session_scope_components : session_scope -> string list
-val scoped_session_dir : session_root:string -> session_scope -> string -> string
-(** [<session_root>/<scope components>/<session_id>]. *)
 type official_client_kind = Codex | Claude_code | Antigravity | Muse
 val official_client_kind_to_string : official_client_kind -> string
 (** The wire spelling every store and projection writes for a kind. *)
@@ -52,17 +47,16 @@ type official_client_checkpoint =
 type gate_checkpoint = Agent_core of Keeper_checkpoint_ref.t | Official_client of official_client_checkpoint
 val equal_gate_checkpoint : gate_checkpoint -> gate_checkpoint -> bool
 type gate_wait = private
-  { checkpoint : gate_checkpoint; session_scope : session_scope; obligations : gate_obligation list; runtime_retry : runtime_retry option }
-val gate_wait : checkpoint:Keeper_checkpoint_ref.t -> session_scope:session_scope -> obligations:gate_obligation list ->
+  { checkpoint : gate_checkpoint; obligations : gate_obligation list; runtime_retry : runtime_retry option }
+val gate_wait : checkpoint:Keeper_checkpoint_ref.t -> obligations:gate_obligation list ->
   (gate_wait, string) result
-val official_client_gate_wait : checkpoint:official_client_checkpoint -> session_scope:session_scope ->
+val official_client_gate_wait : checkpoint:official_client_checkpoint ->
   obligations:gate_obligation list -> (gate_wait, string) result
-val gate_wait_with_runtime_retry : checkpoint:Keeper_checkpoint_ref.t -> session_scope:session_scope -> obligations:gate_obligation list ->
+val gate_wait_with_runtime_retry : checkpoint:Keeper_checkpoint_ref.t -> obligations:gate_obligation list ->
   runtime_retry:runtime_retry -> (gate_wait, string) result
-type gate_preparation_source =
+type gate_preparation =
   | Prepared_agent_core of { reference : Keeper_checkpoint_ref.t; canonical_checkpoint_bytes : string }
   | Prepared_official_client of official_client_checkpoint
-type gate_preparation = { session_scope : session_scope; source : gate_preparation_source }
 val preparation_checkpoint : gate_preparation -> gate_checkpoint
 type gate_binding = private { approval_ids:string list; obligations:gate_obligation list; runtime_suffix:runtime_suffix option; unconfirmed_wait:gate_wait option; preparation:gate_preparation }
 val gate_binding : preparation:gate_preparation -> approval_ids:string list -> obligations:gate_obligation list -> runtime_suffix:runtime_suffix option -> (gate_binding, string) result
@@ -143,16 +137,9 @@ val is_terminal : t -> bool
 val checkpoint_references : t -> Keeper_checkpoint_ref.t list
 (** Every Agent Core checkpoint the record can still ask the store for: the
     one it resumes, a retry's, a Gate wait's and a Gate preparation's. A
-    retained continuation named by no record's list is never read again. *)
-
-type retained_checkpoint = { session_scope : session_scope; reference : Keeper_checkpoint_ref.t }
-(** Where a reference's retained file lives: under
-    [scoped_session_dir ~session_root session_scope] of its trace id. *)
-
-val retained_checkpoints : t -> retained_checkpoint list
-(** {!checkpoint_references} with each reference's session scope. A Gate's
-    references carry the scope the Gate recorded; every other reference of a
-    direct operation lives directly under the session root. *)
+    retained continuation named by no record's list is never read again. A
+    direct operation's references all live directly under the session root,
+    in the directory named by the reference's trace id. *)
 
 val gate_approval_ids : t -> string list
 (** Approval ids this execution may still read from the Gate store: the

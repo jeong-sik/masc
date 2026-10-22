@@ -25,12 +25,11 @@ let checkpoint bytes = Keeper_checkpoint_ref.create
     ~turn_count:3 ~canonical_checkpoint_bytes:(canonical_bytes bytes) |> require
 let obligation = Semantic.gate_obligation ~approval_id:"approval-original"
     ~tool_name:"tool_execute" ~input_hash:(Digestif.SHA256.(digest_string "original tool input" |> to_hex)) |> require
-let channel_scope = Semantic.session_scope ["channels"; "original-channel"] |> require
-let waiting = Semantic.gate_wait ~session_scope:channel_scope ~checkpoint:(checkpoint "input and effect references") ~obligations:[obligation] |> require
+let waiting = Semantic.gate_wait ~checkpoint:(checkpoint "input and effect references") ~obligations:[obligation] |> require
 let preparation_source = function
   | Semantic.Agent_core reference -> Semantic.Prepared_agent_core {reference;canonical_checkpoint_bytes=canonical_bytes "input and effect references"}
   | Semantic.Official_client checkpoint -> Semantic.Prepared_official_client checkpoint
-let preparation : Semantic.gate_preparation = {session_scope=channel_scope;source=preparation_source waiting.checkpoint}
+let preparation : Semantic.gate_preparation = preparation_source waiting.checkpoint
 let rec remove path = match Unix.lstat path with
   | {Unix.st_kind=Unix.S_DIR; _} -> Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path); Unix.rmdir path
   | _ -> Unix.unlink path
@@ -69,8 +68,8 @@ let test_wait_restart_resolution decision () = with_path (fun path ->
     Store.settle_running_after_restart store ~now:6. |> ok |> ignore;
     check bool "complete original input survives owner restart" true ((get store).input = Some input);
     let restored = Store.direct_gate_state store ~operation_id:original |> ok in
-    check bool "actual channel scope survives SQLite restart" true
-      (match restored with Some state -> state.waiting.session_scope = channel_scope | None -> false);
+    check bool "the Gate wait survives SQLite restart" true
+      (match restored with Some state -> Semantic.equal_gate_wait state.waiting waiting | None -> false);
     let wrong = Semantic.gate_obligation ~approval_id:"unrelated-approval" ~tool_name:obligation.tool_name
       ~input_hash:obligation.input_hash |> require in
     rejected (Store.resolve_direct_gate store ~now:7. ~operation_id:original
@@ -81,10 +80,7 @@ let test_wait_restart_resolution decision () = with_path (fun path ->
     Store.resolve_direct_gate store ~now:8. ~operation_id:original ~resolution |> ok |> ignore;
     let operation = match claim store with Some value -> value | None -> fail "exact resolution did not requeue original input" in
     check bool "same original request resumes" true (Operation.Operation_id.equal original operation.operation_id);
-    let wrong_scope = Semantic.gate_wait ~session_scope:(Semantic.session_scope [] |> require)
-      ~checkpoint:(match waiting.checkpoint with Semantic.Agent_core value -> value | Semantic.Official_client _ -> fail "expected Agent Core") ~obligations:[obligation] |> require in
-    rejected (Store.resume_direct_gate store ~now:9. ~operation_id:original ~waiting:wrong_scope ~resolution);
-    let changed = Semantic.gate_wait ~session_scope:(Semantic.session_scope [] |> Result.get_ok) ~checkpoint:(checkpoint "another invocation") ~obligations:[obligation] |> require in
+    let changed = Semantic.gate_wait ~checkpoint:(checkpoint "another invocation") ~obligations:[obligation] |> require in
     rejected (Store.resume_direct_gate store ~now:9. ~operation_id:original ~waiting:changed ~resolution);
     Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
     Store.resume_direct_gate store ~now:9. ~operation_id:original ~waiting ~resolution |> ok;
@@ -129,17 +125,13 @@ let test_unconfirmed_checkpoint_survives_restart () = with_path (fun path ->
     check bool "independent work remains claimable" true
       (match claim store with Some operation -> Operation.Operation_id.equal other operation.operation_id | None -> false)))
 
-let test_session_scope_validation () =
-  List.iter (fun components -> rejected (Semantic.session_scope components))
-    [[".."]; ["channels"; "../other"]; [""]; ["."]; ["/absolute"]; ["nul\000byte"]; ["a\\b"]]
-
 let test_fresh_gate_and_runtime_retry_restart () = with_path (fun path ->
   let reference = checkpoint "same original input completed effects and frozen runtime suffix" in
   let retry = Semantic.runtime_retry ~not_before:None ~checkpoint:reference ~assignment_id:"original-runtime-assignment"
     ~failed_runtime_id:"primary" ~next_runtime_id:"alternate" ~later_runtime_ids:["last"] |> require in
-  let waiting = Semantic.gate_wait_with_runtime_retry ~checkpoint:reference ~session_scope:(Semantic.session_scope [] |> require) ~obligations:[obligation]
+  let waiting = Semantic.gate_wait_with_runtime_retry ~checkpoint:reference ~obligations:[obligation]
     ~runtime_retry:retry |> require in
-  rejected (Semantic.gate_wait_with_runtime_retry ~checkpoint:(checkpoint "different input") ~session_scope:(Semantic.session_scope [] |> require)
+  rejected (Semantic.gate_wait_with_runtime_retry ~checkpoint:(checkpoint "different input")
     ~obligations:[obligation] ~runtime_retry:retry);
   with_store path (fun store ->
     let operation = admit store in
@@ -201,11 +193,11 @@ let test_exact_source_reconciliation_after_restart () = with_path (fun path ->
     let operation = admit store in
     let wrong_frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
       (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation other)) |> require in
-    let native_wait = Semantic.official_client_gate_wait ~session_scope:channel_scope ~obligations:[obligation]
+    let native_wait = Semantic.official_client_gate_wait ~obligations:[obligation]
       ~checkpoint:{Semantic.client_kind=Semantic.Codex; runtime_id="native.fixture"; session_id="native-session";
         turn_id="native-turn"; tool_surface_sha256=String.make 64 'a'; frame=wrong_frame} |> require in
     let wrong_binding = Semantic.gate_binding
-      ~preparation:{Semantic.session_scope=channel_scope;source=preparation_source native_wait.checkpoint}
+      ~preparation:(preparation_source native_wait.checkpoint)
       ~approval_ids:[obligation.approval_id] ~obligations:[] ~runtime_suffix:None |> require in
     let wrong_binding = Semantic.gate_binding_with_wait ~binding:wrong_binding ~waiting:native_wait |> require in
     (match Store.defer_direct_gate_reconciliation store ~now:3. ~operation_id:original
@@ -220,11 +212,11 @@ let test_exact_source_reconciliation_after_restart () = with_path (fun path ->
   with_store path (fun store ->
     Store.settle_running_after_restart store ~now:4. |> ok |> ignore;
     let observed = Store.direct_gate_binding store ~operation_id:original |> ok |> Option.get in
-    check bool "exact source and original channel survive SQLite restart" true
+    check bool "exact source survives SQLite restart" true
       (Option.fold ~none:false ~some:(Semantic.equal_gate_wait waiting) observed.unconfirmed_wait);
     rejected (Store.reconcile_direct_gate_binding store ~now:5. ~operation_id:original
       ~binding:unrecorded ~waiting);
-    let other_wait = Semantic.gate_wait ~checkpoint:(checkpoint "different bytes") ~session_scope:channel_scope
+    let other_wait = Semantic.gate_wait ~checkpoint:(checkpoint "different bytes")
       ~obligations:[obligation] |> require in
     rejected (Store.reconcile_direct_gate_binding store ~now:5. ~operation_id:original ~binding ~waiting:other_wait);
     check bool "unproven source cannot make the original claimable" true (claim store = None);
@@ -244,8 +236,7 @@ let test_exact_source_reconciliation_after_restart () = with_path (fun path ->
     Store.succeed_running store ~now:12. ~operation_id:original ~outcome_ref:"original-exact-resume" |> ok |> ignore))
 
 let test_unprepared_source_reconciliation_after_restart () = with_path (fun path ->
-  let preparation : Semantic.gate_preparation =
-    {session_scope=channel_scope;source=preparation_source waiting.checkpoint} in
+  let preparation : Semantic.gate_preparation = preparation_source waiting.checkpoint in
   let binding = Semantic.gate_binding ~preparation ~approval_ids:[obligation.approval_id]
     ~obligations:[] ~runtime_suffix:None |> require in
   with_store path (fun store ->
@@ -258,13 +249,10 @@ let test_unprepared_source_reconciliation_after_restart () = with_path (fun path
     let observed = Store.direct_gate_binding store ~operation_id:original |> ok |> Option.get in
     check bool "original preparation survives SQLite restart without a wait" true
       (observed.preparation = preparation && observed.unconfirmed_wait = None);
-    let wrong_scope = Semantic.gate_wait ~session_scope:(Semantic.session_scope [] |> require)
-      ~checkpoint:(checkpoint "input and effect references") ~obligations:[obligation] |> require in
-    rejected (Store.reconcile_direct_gate_binding store ~now:5. ~operation_id:original ~binding:observed ~waiting:wrong_scope);
     let wrong_reference = Keeper_checkpoint_ref.create
       ~trace_id:(Keeper_id.Trace_id.of_string "another-session" |> require)
       ~turn_count:3 ~canonical_checkpoint_bytes:"input and effect references" |> require in
-    let wrong_session = Semantic.gate_wait ~session_scope:channel_scope ~checkpoint:wrong_reference
+    let wrong_session = Semantic.gate_wait ~checkpoint:wrong_reference
       ~obligations:[obligation] |> require in
     rejected (Store.reconcile_direct_gate_binding store ~now:5. ~operation_id:original ~binding:observed ~waiting:wrong_session);
     check bool "wrong original identity cannot schedule replay" true (claim store = None);
@@ -279,15 +267,15 @@ let test_unprepared_source_reconciliation_after_restart () = with_path (fun path
 let test_changed_preparation_bytes () =
   let source = Semantic.Prepared_agent_core {reference=checkpoint "original exact bytes";
     canonical_checkpoint_bytes="substituted bytes"} in
-  rejected (Semantic.gate_binding ~preparation:{Semantic.session_scope=channel_scope;source}
+  rejected (Semantic.gate_binding ~preparation:source
     ~approval_ids:[obligation.approval_id] ~obligations:[] ~runtime_suffix:None)
 
 let test_invalid_preparation_checkpoint () =
   List.iter (fun bytes ->
     let reference = Keeper_checkpoint_ref.create ~trace_id:(Keeper_id.Trace_id.of_string "original-trace" |> require)
       ~turn_count:3 ~canonical_checkpoint_bytes:bytes |> require in
-    rejected (Semantic.gate_binding ~preparation:{Semantic.session_scope=channel_scope;
-      source=Semantic.Prepared_agent_core {reference;canonical_checkpoint_bytes=bytes}}
+    rejected (Semantic.gate_binding
+      ~preparation:(Semantic.Prepared_agent_core {reference;canonical_checkpoint_bytes=bytes})
       ~approval_ids:[obligation.approval_id] ~obligations:[] ~runtime_suffix:None))
     ["not JSON";"{}";
      (let checkpoint = Agent_core.Checkpoint.of_string (canonical_bytes "valid") |> require in
@@ -302,7 +290,7 @@ let test_invalid_native_preparation () =
     {client_kind=Semantic.Codex;runtime_id="native.fixture";session_id="original-session";
      turn_id="original-turn";tool_surface_sha256=String.make 64 'a';frame} in
   List.iter (fun checkpoint ->
-    rejected (Semantic.gate_binding ~preparation:{Semantic.session_scope=channel_scope;source=Semantic.Prepared_official_client checkpoint}
+    rejected (Semantic.gate_binding ~preparation:(Semantic.Prepared_official_client checkpoint)
       ~approval_ids:[obligation.approval_id] ~obligations:[] ~runtime_suffix:None))
     [{valid with runtime_id=""};{valid with session_id=" "};{valid with turn_id=""};
      {valid with tool_surface_sha256="invalid"};{valid with frame=Keeper_repetition_snapshot.empty}]
@@ -311,11 +299,10 @@ let () = run "direct Gate waiting" ["journal", [
   test_case "hash-valid pending payload must decode with its original identity" `Quick test_invalid_preparation_checkpoint;
   test_case "pending checkpoint bytes must match their exact reference" `Quick test_changed_preparation_bytes;
   test_case "native preparation rejects incomplete original identity" `Quick test_invalid_native_preparation;
-  test_case "unprepared source recovers after restart with original session authority" `Quick test_unprepared_source_reconciliation_after_restart;
+  test_case "unprepared source recovers after restart" `Quick test_unprepared_source_reconciliation_after_restart;
   test_case "a refused Gate binding is bad input, not a broken store" `Quick test_refused_binding_reads_as_input_not_corruption;
   test_case "exact unconfirmed source is reconciled by CAS after restart" `Quick test_exact_source_reconciliation_after_restart;
   test_case "unbound Gate identity and runtime suffix survive restart" `Quick test_unbound_gate_and_runtime_survive_restart;
-  test_case "session scope rejects traversal and ambiguous components" `Quick test_session_scope_validation;
   test_case "fresh Gate and frozen runtime retry survive restart together" `Quick test_fresh_gate_and_runtime_retry_restart;
   test_case "unconfirmed checkpoint preserves input and effects across restart" `Quick test_unconfirmed_checkpoint_survives_restart;
   test_case "approval resumes same request after independent work and restart" `Quick (test_wait_restart_resolution Semantic.Gate_approved);

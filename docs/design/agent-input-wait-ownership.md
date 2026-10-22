@@ -950,3 +950,35 @@ actual Tool effect/unknown-terminal assertions. That evidence covers the prior
 head and its six suites, including C-before-G detachment and the repaired HTTP
 resolution fixture; it does not execute this new waiting-outcome layer or every
 production error/fallback path.
+
+## Autonomous input-wait journal boundary (source)
+
+The journal now has an explicit autonomous execution admission: original
+producer UUID, canonical input, source membership, initialized scope frame and
+Running phase commit together. An existing admission is returned as an
+observation of that original lifetime, never permission to dispatch again.
+Direct identities cannot serve as autonomous aliases.
+
+The autonomous input-wait transaction compares its captured global input
+predecessor and original input digest, then publishes the retained input
+reference and `Suspend_input` together. It preserves the full pending request,
+original input and source ownership without inventing a direct native Retire
+receipt. The recovering wait frees the semantic running slot while pinning its
+own checkpoint. Later independent input publication cannot consume the wait;
+observing the exact duplicate does not overwrite that independent global input.
+Predecessor drift or a changed canonical question refuses the mutation.
+
+Seven source scenarios exercise actual SQLite transactions, close/reopen,
+independent admission/global publication, source conflicts, checkpoint pinning,
+direct-identity refusal, and admission/wait commit faults before and after COMMIT.
+Their checkpoint references are opaque fixtures: these scenarios do not execute
+Owner/Core or prove physical retained payload availability. They are unexecuted
+on this new layer until an exact-head result is recorded.
+
+This is the storage boundary for the next autonomous integration, not a working
+heartbeat wait/resume feature. The real Owner must mint/capture one original
+UUID, freshly validate intake, verify its child/scope/trace/full retained pending,
+and carry the same repetition execution through runtime retries. Intake must
+exclude only parked original sources and independent work must not use their
+pending checkpoint as a fresh seed. Response/resume, original-source recovery,
+error/unknown-effect handling and current Acting/SSE reconciliation remain.

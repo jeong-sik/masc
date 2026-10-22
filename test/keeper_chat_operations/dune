@@ -21,6 +21,12 @@
   masc.keeper_checkpoint_ref masc.keeper_registry digestif sqlite3 unix uuidm yojson))
 
 (test
+ (name test_keeper_autonomous_input_wait)
+ (modules test_keeper_autonomous_input_wait)
+ (libraries alcotest masc.agent_core masc.keeper_chat_operations masc.keeper_execution_scope
+  masc.keeper_checkpoint_ref masc.keeper_registry digestif unix uuidm yojson))
+
+(test
  (name test_keeper_direct_runtime_continuation)
  (modules test_keeper_direct_runtime_continuation)
  (libraries alcotest masc.keeper_chat_operations masc.keeper_execution_scope

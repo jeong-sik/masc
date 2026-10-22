@@ -502,6 +502,37 @@ val semantic_prepare :
     An uncertain commit is an error; reload by that identity before deciding a
     retry. Different outstanding operations may coexist with disjoint sources. *)
 
+val start_autonomous_execution :
+  t -> id:Keeper_execution_scope_id.t -> input:Yojson.Safe.t ->
+  sources:Semantic.source_member list -> now:float ->
+  (semantic_admission, semantic_error) result
+(** Commit one producer-supplied Autonomous_admission, original input, exact
+    source ownership and Running phase together. Direct identities are refused.
+    [Semantic_existing] only observes the unchanged original record, including
+    a parked wait; it never grants another provider dispatch. A failed or
+    uncertain commit must be reconciled by the same identity, not a fresh UUID.
+    The caller must be the admitted Owner child with freshly validated intake. *)
+
+type autonomous_input_wait_update =
+  | Autonomous_input_wait_installed of Semantic.t
+  | Autonomous_input_wait_existing of Semantic.t
+  | Autonomous_input_wait_source_changed of input_checkpoint_observation
+
+val defer_autonomous_input_wait :
+  t -> now:float -> id:Keeper_execution_scope_id.t -> input_sha256:string ->
+  observed:Keeper_checkpoint_ref.t option -> waiting:Semantic.input_wait ->
+  (autonomous_input_wait_update, semantic_error) result
+(** Atomically compare the captured global input predecessor, publish the
+    retained checkpoint and park only its original autonomous execution.
+    Original input/source membership remain owned, without a chat row, running
+    chat slot or invented native Retire receipt. An exact existing wait is a
+    read observation and never overwrites a newer independent global input.
+    Conflicting requests, changed admission digests, native effects and stale
+    predecessors leave both relations unchanged. Retention and complete pending
+    payload/scope/trace/child validation remain the Owner caller's obligations;
+    opaque references alone are not physical or response authority. This API
+    does not implement autonomous response, resume, heartbeat intake or seeding. *)
+
 (** Gate waiting remains the original queued operation, but cannot be claimed
     until a bound durable resolution is supplied. A deferred runtime retry
     whose provider-throttle [not_before] lies after [now] is likewise not

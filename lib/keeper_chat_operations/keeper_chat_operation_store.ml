@@ -2309,6 +2309,75 @@ let semantic_prepare store ~id ~input ~sources ~now =
           Ok (Semantic_created candidate))
 ;;
 
+let require_autonomous_identity id =
+  match Keeper_execution_scope_id.direct_operation_id id with
+  | None -> Ok ()
+  | Some _ -> Error (Semantic_store_error (Invalid_input
+      "autonomous execution requires its original autonomous admission identity"))
+
+let start_autonomous_execution store ~id ~input ~sources ~now =
+  let* () = require_autonomous_identity id in
+  let apply action execution = Semantic.apply ~now action execution
+    |> Result.map_error (fun error -> Invalid_execution error) in
+  let* candidate = Semantic.create ~id ~input ~sources ~now
+    |> Result.map_error (fun error -> Invalid_execution error) in
+  let* candidate = apply Semantic.Confirm_sources candidate in
+  let* candidate = apply Semantic.Begin_execution candidate in
+  with_semantic_transaction store (fun () ->
+    let* existing = semantic_get_with_db store.db id |> semantic_store_result in
+    match existing with
+    | Some current when Semantic.same_admission current candidate -> Ok (Semantic_existing current)
+    | Some _ -> Error (Admission_conflict id)
+    | None ->
+      let* outstanding = semantic_rows store.db ~active_only:true |> semantic_store_result in
+      let owners = List.filter (fun (execution : Semantic.t) ->
+        List.exists (fun selected -> List.exists (same_source selected)
+          (execution.sources @ execution.current_sources)) sources) outstanding in
+      if owners <> [] then Error (Sources_owned (List.map (fun (execution : Semantic.t) -> execution.id) owners))
+      else
+        let* () = insert_semantic store.db candidate |> semantic_store_result in
+        Ok (Semantic_created candidate))
+;;
+
+type autonomous_input_wait_update =
+  | Autonomous_input_wait_installed of Semantic.t
+  | Autonomous_input_wait_existing of Semantic.t
+  | Autonomous_input_wait_source_changed of input_checkpoint_observation
+
+let defer_autonomous_input_wait store ~now ~id ~input_sha256 ~observed
+    ~(waiting : Semantic.input_wait) =
+  let* () = require_autonomous_identity id in
+  let invalid detail = Error (Semantic_store_error (Invalid_input detail)) in
+  let* () = check_input_predecessor ~observed ~checkpoint:waiting.checkpoint |> semantic_store_result in
+  with_semantic_transaction store (fun () ->
+    let* current = semantic_get_with_db store.db id |> semantic_store_result in
+    let* current = match current with
+      | Some execution when String.equal execution.Semantic.input_sha256 input_sha256 -> Ok execution
+      | Some _ -> invalid "autonomous input wait admission digest changed"
+      | None -> invalid "autonomous input wait has no original admitted execution" in
+    let* () = match current.native_call with
+      | Keeper_native_call.No_native_call -> Ok ()
+      | Active _ | Terminal_unacknowledged _ -> Error (Semantic_store_error Native_call_unsettled) in
+    match input_wait_state (Some current) with
+    | Some expected when Semantic.equal_input_wait expected waiting ->
+      Ok (Autonomous_input_wait_existing current)
+    | Some _ -> invalid "autonomous input wait differs from its canonical pending request"
+    | None ->
+      let* previous = input_observation_with_db store.db ~trace_id:waiting.checkpoint.trace_id
+        |> semantic_store_result in
+      if not (input_predecessor_matches observed previous) then
+        Ok (Autonomous_input_wait_source_changed previous)
+      else
+        let* suspended = Semantic.apply ~now (Semantic.Suspend_input waiting) current
+          |> Result.map_error (fun error -> Invalid_execution error) in
+        let* () = detach_other_canonical_inputs store ~now ~publisher:None ~previous:observed waiting.checkpoint
+          |> semantic_store_result in
+        let* () = install_input_checkpoint_with_db store ~previous:observed waiting.checkpoint
+          |> semantic_store_result in
+        let* () = update_semantic store ~expected:current suspended |> semantic_store_result in
+        Ok (Autonomous_input_wait_installed suspended))
+;;
+
 let direct_execution_with_db db (operation : Operation.t) =
   let* execution = semantic_get_with_db db (Keeper_execution_scope_id.direct_operation operation.operation_id) in
   match execution with

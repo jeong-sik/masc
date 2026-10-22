@@ -109,7 +109,7 @@ let test_input_wait_survives_delivery_and_payload_projection () =
   let expected=[Masc.Keeper_chat_blocks.Status {kind=Masc.Keeper_chat_blocks.Waiting_for_input}] in
   let blocks=Stream.For_testing.persisted_reply_blocks ~reply:request.question ~turn_outcome:TO.Waiting_for_input None in
   check bool "persisted wait has a typed status block" true (blocks=Some expected);
-  (match Ops.direct_reply_projection (Yojson.Safe.to_string payload) with
+  (match Ops.direct_reply_projection payload with
    | Ok (Connector_input_wait {question=Some observed}) ->
      check string "connector preserves the canonical question" request.question observed
    | Ok (Connector_status ( {kind=(Continuation_checkpoint | Waiting_for_input | Awaiting_gate_approval)} )

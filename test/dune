@@ -3770,7 +3770,7 @@
 (test
  (name test_tui_palette_matching)
  (modules test_tui_palette_matching)
- (libraries masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched masc))
+ (libraries masc.runtime masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched masc))
 
 (test
  (name test_tui_workspace_entries)
@@ -5260,7 +5260,7 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries astring yojson masc_tui_runtime_config_receipt masc_tui_surface_search alcotest masc masc.server masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
+ (libraries astring yojson masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_surface_search alcotest masc masc.server masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 (rule
  (alias runtest-test_browser_elements)

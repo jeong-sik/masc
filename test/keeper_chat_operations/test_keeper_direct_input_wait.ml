@@ -227,8 +227,8 @@ let check_intent store = check bool "one exact response intent survives" true
 let stage_wait store =
   let operation=admit store in retire store operation Agent.Retire;
   ignore (defer store operation waiting |> ok);operation
-let names reference rows = List.exists (fun (row:Semantic.retained_checkpoint) ->
-  Keeper_checkpoint_ref.equal row.reference reference) rows
+let names reference rows = List.exists (fun (row:Keeper_checkpoint_ref.t) ->
+  Keeper_checkpoint_ref.equal row reference) rows
 let test_intent_survives_restart_without_resuming () = with_path @@ fun path ->
   with_store path (fun store ->
     let operation=stage_wait store in
@@ -253,7 +253,7 @@ let test_intent_survives_restart_without_resuming () = with_path @@ fun path ->
         Yojson.Safe.equal answer (`Assoc ["choice",`String "original";"z",`Int 2]) | _ -> false);
     let execution=semantic store in
     List.iter (fun reference ->
-      check bool "source and candidate retained by actual reopened semantic row" true (names reference (Semantic.retained_checkpoints execution));
+      check bool "source and candidate retained by actual reopened semantic row" true (names reference (Semantic.checkpoint_references execution));
       check bool "source and candidate confer no ordinary continuation authority" false (names reference (Semantic.continuation_checkpoints execution)))
       [response_source;response_candidate];
     check bool "original wait remains the pending authority" true (names owned (Semantic.continuation_checkpoints execution)))
@@ -289,7 +289,7 @@ let test_intent_commit_uncertainty after_commit () = with_path @@ fun path ->
     check_wait store;check_owner store;
     check bool "uncertainty does not enable a continuation" true (Store.claim_next store ~now:9. |> ok=None);
     List.iter (fun reference -> check bool "retention follows actual commit" after_commit
-      (names reference (Semantic.retained_checkpoints (semantic store)))) [response_source;response_candidate])
+      (names reference (Semantic.checkpoint_references (semantic store)))) [response_source;response_candidate])
 let test_intent_pins_exact_candidate_for_original () = with_path @@ fun path -> with_store path @@ fun store ->
   let operation=stage_wait store in prepare store operation response_intent |> ok;
   rejected (respond store operation waiting (response_checkpoint 3 "unbound consumed response"));

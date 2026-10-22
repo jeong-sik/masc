@@ -2,8 +2,10 @@
 
 This is the proposed E02 implementation contract under the
 [Addon worklist](../../reports/addon-lane-full-worklist-20261021.md).
-It specifies the missing execution boundary; it does not claim a Curator package,
-consumer, completed extraction or a working replacement has been implemented.
+It specifies the execution boundary. The [Curator worker](../../addons/workspace-curator/README.md)
+and [shared host semantic port](workspace-curator-semantic-validation.md) are now
+implemented; production consumer, commit recovery and wake integration remain.
+This is not a claim of completed extraction or an installed replacement.
 
 Source baseline: `3145acf9fc32ab77c25d97ab7e5710194cd270cf`.
 The Candle receipt follow-up changes neither Curator nor its domain interfaces.
@@ -95,9 +97,9 @@ The package retains opaque requests and their common Exact terminal results in
 installation state. It has no workspace ledger path, Keeper memory directory or
 provider credential. Reuse the common host-request/result protocol and the
 request-schema grant; do not add another provider client, route registry or a
-Curator-only background broker. Reusable retained-request storage should be
-shared with Candle at the package boundary rather than copying its worker with
-renamed fields. Domain request codecs and host commit logic remain separate.
+Curator-only background broker. Reusable retained-request storage is now shared
+with Candle in `addons/exact_worker.py`, including its MCP control loop and
+terminal lifetime. Domain request codecs and host commit logic remain separate.
 
 ## Result, uncertainty and commit recovery
 

@@ -43,7 +43,7 @@ let narrow ~config original =
   match result with
   | Consumer.Successor_ready _ -> Ok true
   | Indivisible record | Successor_waiting record -> Ok (changed original record)
-let step ~config original =
+let step ~config ~new_work original =
   let* result=Consumer.resume ~config ~request_id:(id original) |> consumer in
   match result with
   | Consumer.Judgment _ | Commit_pending _ ->
@@ -56,7 +56,7 @@ let step ~config original =
     let* current=match List.find_opt (fun current -> id current=id original) fresh with
       | Some current -> Ok current | None -> Error "Original Curator terminal vanished before successor evaluation" in
     let* eligible=size_refusal current in
-    if eligible && divisible current then narrow ~config current else Ok (changed original record)
+    if new_work && eligible && divisible current then narrow ~config current else Ok (changed original record)
 let observe ~config ~on_observation_failure originals =
   List.fold_left (fun complete original ->
     match Consumer.deliver_observation ~config ~request_id:(id original) with
@@ -156,7 +156,7 @@ let run_domain ~config ~on_inventory ~on_observation_failure domain =
   let* running=one_active selected in
   match running with
   | Some original ->
-    let result=step ~config original in
+    let result=step ~config ~new_work original in
     (match domain with
      | Classification -> result
      | Synthesis -> let* progressed=result in
@@ -168,6 +168,7 @@ let run_domain ~config ~on_inventory ~on_observation_failure domain =
       | Synthesis -> briefing_new ~config ~originals ~new_work ~busy:false in
     match successor with
     | None -> prepare ~originals:selected ~new_work
+    | Some _ when not new_work -> prepare ~originals:selected ~new_work
     | Some original ->
       match narrow ~config original with
       | Ok true -> Ok true

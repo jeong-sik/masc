@@ -664,6 +664,26 @@ let test_failed_registry_keeps_original_pending ()=with_workspace (fun base_path
     (acknowledged (Progress.observer delivered.original.progress).registration);
   check bool "later retry uses the actual file-backed registry" true (Sys.file_exists log_path))
 
+let test_conflicting_registry_keeps_original_pending ()=with_workspace (fun base_path store ->
+  let capture,_output=classification base_path ["A registry conflict is not primary authority"] in
+  let original=retain_capture store capture in
+  let prepared=prepare_observation base_path store original ~now:(fun () -> 43.) in
+  let path,registry=registry_at base_path in
+  Runs.reconcile_original registry ~run_id:prepared.registration.run_id ~lane:Runs.Workspace_curator
+    ~actor:"another-observer-actor" ~started_at:prepared.registration.receipt.observed_at
+    ~input:(Runs.Exact_input prepared.registration.input) ~completion:None
+    |> Result.map_error Runs.reconciliation_error_to_string |> get;
+  let owner_before=Fs_compat.load_file (owner_file store prepared.original)
+  and registry_before=Fs_compat.load_file path in
+  (match delivery base_path store registry prepared.original ~now:never_clock with
+   | Error (Consumer.Registry_delivery_failed Runs.Original_registration_conflict) -> ()
+   | Error (Original_observation_failed _ | Registry_delivery_failed (Invalid_original _ | Original_completion_conflict
+       | Failed_completion_conflict | Reconciliation_unavailable _ | Reconciliation_persistence_failed _)) | Ok _ ->
+     fail "registry conflict must remain typed pending delivery");
+  check string "conflict never acknowledges or rewrites the original" owner_before
+    (Fs_compat.load_file (owner_file store prepared.original));
+  check string "conflict never replaces the registry fact" registry_before (Fs_compat.load_file path))
+
 let test_typed_observer_rejects_semantically_forged_receipt terminal ()=with_workspace (fun base_path store ->
   let capture,output=classification base_path ["Original observation cannot be relabelled"] in
   let finished=settle ~save:(save base_path) base_path store (retain store capture output) |> accepted |> committed in
@@ -1013,6 +1033,8 @@ let ()=run "Curator original domain commit and recovery" ["domain",[
   test_case "actual registry publication survives lost ACK and historical eviction" `Quick test_actual_observer_delivery_and_ack_retry;
   test_case "actual registration ACK does not invent a terminal" `Quick test_registration_delivery_does_not_invent_completion;
   test_case "unavailable registry preserves pending original and permits exact retry" `Quick test_failed_registry_keeps_original_pending;
+  test_case "conflicting registry preserves pending original and registry evidence" `Quick
+    test_conflicting_registry_keeps_original_pending;
   test_case "typed observer follows actual original commit without Runtime" `Quick test_typed_observer_intents_follow_original_commit_without_runtime;
   test_case "generic valid registration cannot relabel original observer" `Quick (test_typed_observer_rejects_semantically_forged_receipt false);
   test_case "generic valid completion cannot replace original provider" `Quick (test_typed_observer_rejects_semantically_forged_receipt true);

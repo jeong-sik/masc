@@ -4,7 +4,10 @@ val start : sw:Eio.Switch.t -> config:Workspace.config -> unit
     settlement survives Off; new roots and successors use fresh configured
     Runtime authority. Classification and Briefing keep separate durable
     boundaries. Pending observer receipts are conditionally delivered and ACKed
-    independently of primary effects. Delivery failures remain pending. *)
+    independently of primary effects. Registry delivery failures remain pending
+    for maintenance retry without blocking new primary work. Original/receipt
+    preparation and ACK integrity failures still refuse new roots and successors
+    while existing original execution and settlement may progress. *)
 val retry_pending_observations : base_path:string -> unit
 (** Existing server maintenance calls this bounded wake-only edge. It wakes an
     existing owner only when its prior pass could not settle observations or

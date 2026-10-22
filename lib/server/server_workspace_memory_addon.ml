@@ -593,7 +593,11 @@ let deliver_observation_with ~store ~base_path ~registry ~request_id ~now =
   let* ()=Runs.reconcile_original registry ~run_id:registration.run_id ~lane:Runs.Workspace_curator
     ~actor:registration.actor ~started_at:registration.receipt.observed_at
     ~input:(Runs.Exact_input registration.input) ~completion:terminal
-    |> Result.map_error (fun error -> Registry_delivery_failed error) in
+    |> Result.map_error (function
+      | Runs.Invalid_original detail -> Original_observation_failed (Rejected detail)
+      | (Runs.Original_registration_conflict | Original_completion_conflict
+          | Failed_completion_conflict | Reconciliation_unavailable _
+          | Reconciliation_persistence_failed _) as error -> Registry_delivery_failed error) in
   (* Reconciliation returned with every registry lock released. Restore the
      physical original/ancestry and the full immutable receipt again before
      acknowledging that exact fact; no registry getter can manufacture an ACK. *)

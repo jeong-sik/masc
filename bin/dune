@@ -2166,6 +2166,8 @@
   masc_tui_keeper_control
   masc
   masc_tui_types
+  masc_tui_resource_catalog
+  masc_tui_resource_images
   masc_tui_ansi
   masc_tui_theme
   masc_tui_terminal_palette

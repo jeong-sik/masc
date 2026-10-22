@@ -541,6 +541,28 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
      back for it. *)
   (* The footer keeps action text separate from hints and search status so
      a long outcome cannot drop a confirmation or identity warning. *)
+  (* Acquisition belongs to the pending read, never to conversation history.
+     Completion clears it; a cancelled generation or withdrawn source stops
+     displaying it even before that worker's late result reaches the UI. *)
+  let image_progress =
+    match state.sent_image_read with
+    | Some pending
+      when pending.sir_generation = state.image_request_generation
+           && pending.sir_view = state.view
+           && (pending.sir_view = Resources
+               || pending.sir_keeper = state.msg_target_keeper_name)
+           && pending.sir_authority == state.workspace_read_authority
+           && not state.msx_open
+           && (pending.sir_view <> Resources
+               || (Masc_tui_resource_images.same_reading
+                     ~equal:Masc_tui_resource_catalog.equal_key
+                     pending.sir_resource state.resource_content
+                   && Option.is_none state.resource_pending_key
+                   && Option.is_none state.resource_content_error)) ->
+        Some (Terminal_text.single_line
+          (Printf.sprintf "Loading image (any key cancels): %s" pending.sir_name))
+    | Some _ | None -> None
+  in
   let action_text =
     match Masc_tui_types.runtime_form_save_notice state with
     | Some notice -> Some (Terminal_text.single_line notice)
@@ -550,6 +572,8 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
     | Some notice -> Some (Terminal_text.single_line notice)
     | None -> (match Masc_tui_types.keeper_settings_save_notice state with
     | Some notice -> Some (Terminal_text.single_line notice)
+    | None -> (match image_progress with
+    | Some _ -> image_progress
     | None -> (match state.last_action with
     | Some (text, set_at)
       when Unix.gettimeofday () -. set_at
@@ -559,7 +583,7 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
                     ~prefix:Masc_tui_types.armed_ask_submit_notice_prefix text)
                || Masc_tui_types.ask_submit_is_armed state) ->
       Some text
-    | Some _ | None -> None))))
+    | Some _ | None -> None)))))
   in
   let identity =
     match state.server_identity with

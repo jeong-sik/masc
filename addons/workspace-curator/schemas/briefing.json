@@ -1,0 +1,1 @@
+{"type":"object","properties":{"briefing":{"type":"string","minLength":1}},"required":["briefing"],"additionalProperties":false}

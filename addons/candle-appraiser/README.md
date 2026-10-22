@@ -74,12 +74,18 @@ caller envelope.
 Build the optional container from the repository root:
 
 ```sh
-docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.0 addons
+docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.1 addons
 ```
 
 The host mounts the package at `/addon` and its installation-owned persistent
 state at `/state`, using the existing container/engine ownership contract.
 Provider keys do not belong in this container.
+
+The package now shares `addons/exact_worker.py` with the Workspace Curator
+worker. The image includes that module beside `protocol.py`; the 0.1.1 image is
+required when mounting this package source. Pending and terminal records retain
+the original `candle-appraiser` directory, version and request digests. This
+refactor does not change who may submit judgments or settle payouts.
 
 Focused subprocess checks use scripted host results, not real provider answers:
 

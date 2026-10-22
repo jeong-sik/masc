@@ -1,8 +1,8 @@
 id = "candle-appraiser"
-revision = "0.1.0"
+revision = "0.1.1"
 title = "Candle appraisal worker"
 contributions = ["derive"]
-image = "masc-lane-candle-appraiser:0.1.0"
+image = "masc-lane-candle-appraiser:0.1.1"
 command = ["python3", "server.py", "--state", "/state"]
 
 [world.state]

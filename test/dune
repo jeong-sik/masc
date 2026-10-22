@@ -5887,8 +5887,14 @@
 (test
  (name test_candle_appraiser_contract)
  (modules test_candle_appraiser_contract)
- (deps (source_tree ../addons/candle-appraiser) ../addons/protocol.py)
+ (deps (source_tree ../addons/candle-appraiser) ../addons/protocol.py ../addons/exact_worker.py)
  (libraries masc_test_deps masc.server masc_candle masc_candle_runtime masc_process mcp_protocol eio_main yojson unix))
+
+(test
+ (name test_workspace_curator_addon_contract)
+ (modules test_workspace_curator_addon_contract)
+ (deps (source_tree ../addons/workspace-curator) ../addons/protocol.py ../addons/exact_worker.py)
+ (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol))
 
 (test
  (name test_lane_addon_host_cycle)

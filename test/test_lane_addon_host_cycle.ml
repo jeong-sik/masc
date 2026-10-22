@@ -215,6 +215,14 @@ let test_original_exact_semantic_dispatch_authority () =
     let guard ()=Runtime.authorize_captured_exact_dispatch ~store ~declaration_id:original.id
       ~package_id:original.package.id ~configuration_revision:original.revision in
     await clock (fun () -> Result.is_ok (guard ()));
+    let live_instances () =
+      Runtime.dispatch ~access:Lane_addon_sources.Operator_configuration ~config ~operation:Runtime.Inspect (`Assoc [])
+      |> Result.map_error Runtime.error_to_string |> unwrap
+      |> member "instances" |> Yojson.Safe.Util.to_list
+      |> List.filter (fun item -> text "runtime_presence" item = "live") in
+    let original_instance_id = match live_instances () with
+      | [instance] -> text "instance_id" instance
+      | [] | _::_::_ -> fail "one original live Runtime entry" in
     write source ("# formatting retains the original semantic authority\n" ^ declaration);
     check bool "raw-source formatting does not change original dispatch authority" true (Result.is_ok (guard ()));
     write source ("enabled=false\n" ^ declaration);
@@ -230,7 +238,8 @@ let test_original_exact_semantic_dispatch_authority () =
       ~package_id:changed.package.id ~configuration_revision:changed.revision in
     (* The first reconciliation retires the old revision. This fixture has no
        configuration service to attach its replacement on the next beat. *)
-    await clock (fun () -> host_requests config = `Null);
+    await clock (fun () -> not (List.exists (fun instance ->
+      text "instance_id" instance = original_instance_id) (live_instances ())));
     check bool "a replacement declaration alone grants no provider authority" true (Result.is_error (changed_guard ()));
     ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
     await clock (fun () -> Result.is_ok (changed_guard ()));

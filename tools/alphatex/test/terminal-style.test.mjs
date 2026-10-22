@@ -24,3 +24,8 @@ test('adjacent cells with the same styles share one segment', () => {
   assert.deepEqual(cellSegments([['·', []], ['·', []], ['█', [bold, cyan]], ['━', [cyan]], ['━', [cyan]]]),
     [['··', []], ['█', [bold, cyan]], ['━━', [cyan]]])
 })
+
+test('a line that is not a segment list is drawn as its text, as before', () => {
+  assert.equal(fitLine(undefined, 80), 'undefined')
+  assert.equal(fitLine(42, 80), '42')
+})

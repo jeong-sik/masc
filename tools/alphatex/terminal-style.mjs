@@ -19,10 +19,11 @@ export const cellWidth = char => {
 
 const paint = (text, styles) => text && styles.length ? `\x1b[${styles.join(';')}m${text}\x1b[0m` : text
 
-// A line is plain text or a list of [text, styles] segments. It stops before
-// the last terminal column; every style it opens is closed again.
+// A line is a list of [text, styles] segments or any other value, drawn as
+// its text as fit() did. It stops before the last terminal column; every
+// style it opens is closed again.
 export function fitLine(line, columns) {
-  const segments = typeof line === 'string' ? [[line, []]] : line
+  const segments = Array.isArray(line) ? line : [[String(line), []]]
   let used = 0, result = ''
   for (const [text, styles] of segments) {
     let piece = ''

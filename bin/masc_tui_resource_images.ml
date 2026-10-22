@@ -23,7 +23,7 @@ let images ~mime_type contents =
         |> List.map (fun (image : Masc_tui_artifact_html.image) ->
           let name = name ^ " · " ^ image.label in
           match image.source with
-          | Masc_tui_artifact_html.Embedded_base64 payload ->
+          | Masc_tui_artifact_html.Embedded_data payload ->
             Masc_tui_image_preview.inline_payload ~name payload
           | Embedded_svg source -> Masc_tui_image_preview.inline_svg ~name source
           | Unavailable reason -> Masc_tui_image_preview.Unavailable_image {name;reason})

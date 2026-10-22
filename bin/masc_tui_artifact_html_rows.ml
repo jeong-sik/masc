@@ -35,7 +35,7 @@ let render ?(image_action=Preview_image) ~width (projection : Html.t) =
         then style Ansi.Ansi.bold lines else lines) rows
     | Image image ->
       wrap ("▧ " ^ image.label ^ " · " ^ (match image.source with
-        | Html.Embedded_base64 _ | Embedded_svg _ -> (match image_action with
+        | Html.Embedded_data _ | Embedded_svg _ -> (match image_action with
           | Preview_image -> "Ctrl-O: embedded image"
           | No_image_action -> "embedded image")
         | Unavailable reason -> reason)) in

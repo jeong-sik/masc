@@ -11,6 +11,19 @@ device. The consumer supplies the audio clock, MIDI sample offsets and output
 capacity; this is the synthesis layer for live audition, not a completed TUI
 monitoring feature. See [stream protocol](STREAM.md).
 
+The phrase editor keeps one `host.py --serve` process while it is open. Each
+NDJSON line is `{"id", "job"}` with an ordinary job, or `{"cancel": id}`; each
+reply is `{"id", "ok", "result"|"error"|"cancelled"}`. Jobs run one at a time.
+The process keeps the instrument its latest `snapshot` or `render` left loaded,
+keyed by plug-in path, plug-in name and the sha256 of that state's preset bytes;
+a job for a different sound loads a fresh instance and replaces it. Playing the
+same sound again therefore does not load the plug-in again. A render stops at
+the next one-second block after its cancel. Silence and cancellation keep the
+instance; any other failure drops it. VST3 has no "samples loaded" signal, so a
+sample-streaming instrument can render silence for tens of seconds after it is
+loaded (Addictive Drums 2 took 30–40 s on 2026-10-22). The silence error states
+how long ago the instance was loaded.
+
 This is the native rendering component of the MIDI phrase Lane. It is not a
 new MASC container runtime, and its direct local commands are not
 `masc_lane_act` receipts. A container cannot load a macOS VST binary. The TUI

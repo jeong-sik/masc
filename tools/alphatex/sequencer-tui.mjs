@@ -18,6 +18,7 @@ import { openPlayback } from './playback.mjs'
 import { InstrumentPicker, pickerFooter, projectSoundLabel } from './instruments.mjs'
 import { defaultStateDirectory, snapshotWriter } from './vst.mjs'
 import { renderVstPhrase } from './sequencer-vst.mjs'
+import { openVstSession } from './vst-session.mjs'
 import { captureVstSound } from './project-sound-files.mjs'
 import { captureFluidSound, isFluidSound, renderFluidSound } from './soundfont.mjs'
 import { openStepInput, sameStepContext, stepControl } from './step-input.mjs'
@@ -107,6 +108,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   const sessionAbort = new AbortController()
   const directory = await mkdtemp(join(tmpdir(), 'masc-sequencer-'))
   const worker = new Worker(new URL('./sequencer-worker.mjs', import.meta.url))
+  // The chosen VST stays loaded across plays until the editor closes.
+  const vstSession = openVstSession()
   const jobs = new Map(), players = new Map()
   const nativeRenders = new Set(), observations = new Set()
   const audioInstrument = () => editor.project.sound ?? { kind: 'unselected' }
@@ -131,7 +134,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       if (!accepting || closed || suspended) return
       stop()
       if (choice.kind === 'vst' || choice.kind === 'fluid-selection') {
-        const capture = choice.kind === 'vst' ? captureVstSound(choice.selection) : captureFluidSound(choice.path ?? soundfontPath)
+        const capture = choice.kind === 'vst' ? captureVstSound(choice.selection, { run: vstSession.run }) : captureFluidSound(choice.path ?? soundfontPath)
         let cancelled = false
         const owned = { cancel() { if (!cancelled) { cancelled = true; capture.cancel() } } }
         pendingSound = owned
@@ -419,7 +422,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     if (snapshot.sound.kind === 'soundfont') return render(snapshot, { ...options, format: 'wav' })
     const sound = snapshot.sound, selection = sound.selection
     const preparation = render(snapshot, { ...options, format: 'vst-midi' })
-    const native = renderVstPhrase({ preparation, selection, sound, outputPath: join(directory, `${jobNumber}.vst.wav`), stateDirectory, loop: options.loop })
+    const native = renderVstPhrase({ preparation, selection, sound, outputPath: join(directory, `${jobNumber}.vst.wav`), stateDirectory, loop: options.loop, run: vstSession.run })
     nativeRenders.add(native)
     native.promise.finally(() => nativeRenders.delete(native)).catch(() => {})
     return { promise: native.promise, cancel: preparation.cancel, native }
@@ -795,7 +798,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     jobs.clear()
     try {
       await Promise.allSettled([task, childTask, picker.settled(), sourcePicker.settled(), worker.terminate(), ...players.values(), ...[...nativeRenders].map(job => job.promise), ...[...stepOwners].map(owner => owner.completion)])
-      await Promise.allSettled([...observations])
+      await Promise.allSettled([...observations, vstSession.close()])
       if (dirty()) {
         try { await save() }
         catch {

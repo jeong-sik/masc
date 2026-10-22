@@ -111,10 +111,51 @@ upgrade receipt, an installation, a freshness check after the function returns,
 or confirmation that the destination file and parent directory were synced.
 The caller owns both SQLite handles and must reserve the destination and hold
 the original configured BasePath lease before promoting any artifact. A failed
-or uncertain copy must be discarded; it is never installed or retried as if the
-result proved no write. The operator lease, durable publication/rollback, and
-prior-input reconciliation workflow remain to be implemented. This tool does
-not import a canonical checkpoint as response authority.
+or uncertain copy is never installed or retried as if the result proved no write.
+This primitive does not import a canonical checkpoint as response authority.
+
+### Operator recovery bundles
+
+Inspect one existing Keeper journal and then prepare the reviewed source bytes:
+
+```bash
+masc workspace-upgrade --base-path WORKSPACE --journal KEEPER
+masc workspace-upgrade --base-path WORKSPACE --prepare-journal KEEPER --source-sha256 SHA256
+masc workspace-upgrade --base-path WORKSPACE --journal-bundle BUNDLE_ID
+```
+
+The first command reads the owned journal and displays its SHA-256 without
+initialization or conversion. The second requires that digest and acquires the
+same configured BasePath lease as server startup. An active server, changed
+source bytes or descriptor identity, or a SQLite `-journal`, `-wal` or `-shm`
+entry refuses preparation. Companion evidence is retained and requires a
+separate recovery step; this command does not checkpoint or roll it back.
+
+`Keeper_journal_preparation` preserves exact original bytes in
+`.masc/upgrades/journals/<bundle-id>/original.sqlite3`. Only that private backup
+is opened with SQLite. It prepares `prepared.sqlite3`, confirms handle closure
+and file/directory syncs, rechecks the live source, and publishes `manifest.json`
+last through the shared atomic writer. The original journal is never replaced.
+The CLI digest pins reviewed bytes; its new invocation captures descriptor
+identity again and fences it throughout that preparation.
+
+A manifest rename followed by a sync failure returns a publication with
+`durability_confirmed=false`; an error may leave an unpublished bundle whose ID
+is retained for inspection. Neither outcome means no write or permits a blind
+retry. No bundle or original evidence is automatically deleted.
+
+The third command reads a published bundle after restart, verifies its owned
+files and hashes, and compares the original v2 and prepared v3 schemas, all
+original cells, next sequence and unavailable-input floor. Rewriting a hash
+cannot conceal a changed prepared sequence. This proves the bundle's internal
+relationship; it does not authenticate a wholly rewritten bundle from another
+same-UID process, certify past fsyncs, or prove that the live source remains
+unchanged. It grants no installation authority.
+
+Both preparation and inspection report `ready_to_install=false`. Explicit
+prior-input reconciliation, source revalidation before any future installation,
+atomic installation and rollback remain to be implemented. This command cannot
+make an unresolved copied journal usable by a Keeper.
 
 ### Input checkpoint producer boundary
 

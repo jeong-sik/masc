@@ -1,6 +1,9 @@
 module Upgrade = Released_workspace_upgrade
 type action = Inspect | Apply of { keeper_name : string; source_sha256 : string }
   | Restore of { backup_id : string }
+  | Inspect_journal of string
+  | Prepare_journal of { keeper_name : string; source_sha256 : string }
+  | Inspect_journal_bundle of string
 let ( let* ) = Result.bind
 let root base_path = Filename.concat base_path Common.masc_dirname
 let directory base_path = Filename.concat (root base_path) "config/keepers"
@@ -55,12 +58,35 @@ let restore base_path backup_id =
     "restored", `Bool true; "backup_id", `String backup_id;
     "durability_confirmed", `Bool result.durability_confirmed;
     "lock_release_confirmed", `Bool result.lock_release_confirmed])
+let journal base_path action =
+  let module Journal = Keeper_journal_preparation in
+  let result = match action with
+    | Inspect_journal keeper_name -> Journal.assess ~base_path ~keeper_name |> Result.map Journal.plan_to_json
+    | Prepare_journal {keeper_name;source_sha256} ->
+      let* plan = Journal.assess ~base_path ~keeper_name in
+      if Journal.source_sha256 plan <> source_sha256 then
+        Error {Journal.bundle_id=None;failure=Source_changed}
+      else let* outcome = Journal.prepare ~run_dir:(Host_config.host ()).base_path_lease_dir plan in
+        let receipt,confirmed = match outcome with
+          | Journal.Published receipt -> receipt,true
+          | Publication_unconfirmed receipt -> receipt,false in
+        Ok (`Assoc ["schema",`String "masc.keeper_journal_publication.v1";
+          "bundle",Journal.receipt_to_json receipt;"durability_confirmed",`Bool confirmed;
+          "ready_to_install",`Bool false])
+    | Inspect_journal_bundle bundle_id ->
+      Journal.load_recovery ~base_path ~bundle_id |> Result.map (fun receipt ->
+        `Assoc ["schema",`String "masc.keeper_journal_bundle_observation.v1";
+          "bundle",Journal.receipt_to_json receipt;"read_only",`Bool true;
+          "ready_to_install",`Bool false])
+    | Inspect | Apply _ | Restore _ -> Error {Journal.bundle_id=None;failure=Invalid_bundle} in
+  Result.map_error Journal.error_message result
 let run ~base_path ~action =
   let result = try
     let base_path = Unix.realpath (Env_config.normalize_masc_base_path_input base_path) in
     match action with Inspect -> inspect base_path
     | Apply {keeper_name; source_sha256} -> apply base_path keeper_name source_sha256
     | Restore {backup_id} -> restore base_path backup_id
+    | (Inspect_journal _ | Prepare_journal _ | Inspect_journal_bundle _) as action -> journal base_path action
     with Unix.Unix_error _ | Sys_error _ -> Error "The selected workspace cannot be read. No upgrade was completed." in
   match result with Ok value -> emit value; 0
   | Error message -> emit (`Assoc ["schema", `String "masc.workspace_upgrade_error.v1";

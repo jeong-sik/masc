@@ -153,6 +153,9 @@ let () =
     | "private" -> Private | "persistent" -> Persistent
     | _ -> failwith "profile mode must be private or persistent" in
   let manifest=Unix.realpath (argument "--manifest") in
+  let expected_skill_revision=In_channel.with_open_bin
+      (Filename.concat (Filename.dirname manifest) "skills/browser/SKILL.md") In_channel.input_all
+    |> Skill_reference.content_revision_of_source_text in
   let base_path=Filename.temp_dir "masc-browser-addon-probe-" "" |> Unix.realpath in
   let config_root=Filename.concat base_path ".masc/config" in
   Fs_compat.mkdir_p config_root;
@@ -217,8 +220,7 @@ let () =
     let open Yojson.Safe.Util in
     let declared=report |> member "declarations" |> to_list
       |> List.filter (fun item -> member "id" item=`String "browser") in
-    let refused=report |> member "issues" |> to_list |> List.filter (fun issue ->
-      member "id" issue=`String "browser" || member "source_path" issue=`String declaration) in
+    let refused=report |> member "issues" |> to_list in
     if member "complete" report<>`Bool true || List.length declared<>1 || refused<>[] then
       failwith ("browser declaration was not applied: " ^ Yojson.Safe.to_string report);
     await (fun () ->
@@ -230,6 +232,22 @@ let () =
       | [service] -> Some service
       | [] -> None | _::_::_ -> failwith "ambiguous fixture browser Add-ons") in
   let first=attach () in
+  record "the real catalog publishes the browser package Skill"
+    (let* catalog=Server_skill_snapshot_runtime.lookup ~base_path
+       |> Result.map_error Server_skill_snapshot_runtime.error_to_string in
+     match catalog with
+     | Server_skill_snapshot_runtime.Ready {snapshot;_} ->
+       (match Skill_catalog_snapshot.find_effective_by_name snapshot "browser" with
+        | Some entry when
+            Skill_reference.identity_source_id_to_string entry.identity=R.skill_source_id (R.Declaration "browser")
+            && Skill_reference.identity_package_id_to_string entry.identity="browser"
+            && entry.identity.name="browser"
+            && entry.directory="browser"
+            && Skill_reference.equal_content_revision entry.content_revision expected_skill_revision -> Ok `Null
+        | Some entry -> Error ("catalog Skill has unexpected identity or content: " ^
+            Yojson.Safe.to_string (Skill_reference.to_yojson (Skill_catalog_snapshot.entry_reference entry)))
+        | None -> Error "browser package Skill is absent")
+     | Not_registered|Uninitialized -> Error "workspace Skill catalog is unavailable");
   let host=Browser_addon_host.connect ~config ~access ~principal ~reserved:[]
     |> Result.map_error (function R.Unavailable s|Outcome_unknown s -> s
       | Host_refusal _ -> "host refused the fixture principal") |> require in

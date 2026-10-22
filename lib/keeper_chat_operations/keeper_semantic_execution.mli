@@ -136,6 +136,7 @@ type action =
   | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
   | Suspend_input of input_wait
+  | Resolve_input of { observed : input_wait; checkpoint : Keeper_checkpoint_ref.t }
   | Reconcile_gate_binding of gate_binding * gate_wait
   | Resolve_gate of gate_resolution
   | Resume_gate of gate_wait * gate_resolution

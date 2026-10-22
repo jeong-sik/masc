@@ -2410,6 +2410,32 @@ let defer_direct_input_wait store ~now ~operation_id ~execution_digest ~(waiting
   read_existing ()
 ;;
 
+let resolve_direct_input_wait store ~now ~operation_id ~execution_digest ~observed ~checkpoint =
+  let* () = ensure_open store in
+  with_transaction store (fun () ->
+    let* operation = operation_or_unknown store.db operation_id in
+    if operation.execution_digest <> execution_digest then Error (Invalid_input "input response execution digest changed")
+    else match operation.state with
+    | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ ->
+      Error (Not_queued operation_id)
+    | Operation.Queued ->
+      let* current = direct_execution_with_db store.db operation in
+      let* expected = match current,input_wait_state current with
+        | Some execution,Some waiting when Semantic.equal_input_wait waiting observed -> Ok execution
+        | (Some _ | None),(Some _ | None) -> Error (Invalid_input "input response no longer owns its original wait") in
+      let* () = match expected.native_call with
+        | Keeper_native_call.No_native_call -> Ok ()
+        | Active _ | Terminal_unacknowledged _ -> Error Native_call_unsettled in
+      let* input = input_observation_with_db store.db ~trace_id:observed.checkpoint.trace_id in
+      let* () = match input with
+        | Input_observed reference when Keeper_checkpoint_ref.equal reference observed.checkpoint -> Ok ()
+        | Input_observed _ | Input_unobserved | Prior_input_unavailable ->
+          Error (Invalid_input "input response predecessor changed; reconcile before another response") in
+      let* next = semantic_transition ~now (Semantic.Resolve_input {observed;checkpoint}) expected in
+      let* () = install_input_checkpoint_with_db store ~previous:(Some observed.checkpoint) checkpoint in
+      update_semantic store ~expected next)
+;;
+
 let defer_direct_runtime_retry store ~now ~operation_id ~execution_digest ~continuation =
   let* () = ensure_open store in
   let read_existing () =

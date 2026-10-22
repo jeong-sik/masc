@@ -223,6 +223,7 @@ type action =
   | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
   | Suspend_input of input_wait
+  | Resolve_input of { observed : input_wait; checkpoint : Keeper_checkpoint_ref.t }
   | Reconcile_gate_binding of gate_binding * gate_wait
   | Resolve_gate of gate_resolution
   | Resume_gate of gate_wait * gate_resolution
@@ -479,6 +480,19 @@ let apply ~now action current =
                | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Input_wait _); _}
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
            | Suspended _ | Settled _ -> reject ())
+      | Resolve_input {observed;checkpoint} ->
+          (match current.phase with
+           | Recovering {origin=Input_wait expected;_}
+               when equal_input_wait observed expected
+                 && Keeper_id.Trace_id.equal checkpoint.trace_id observed.checkpoint.trace_id
+                 && checkpoint.turn_count >= observed.checkpoint.turn_count
+                 && not (Keeper_checkpoint_ref.equal checkpoint observed.checkpoint) ->
+             unchanged (Suspended checkpoint)
+           | Recovering {origin=(Input_wait _ | Unconfirmed_sources | Confirmed_undispatched
+               | Checkpointed _ | Official_checkpointed _ | Interrupted_execution
+               | Runtime_retry _ | Gate_wait _ | Gate_binding _);_}
+           | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
+           | Suspended _ | Settled _ -> reject ())
       | Suspend_input waiting ->
           (match current.phase with
            | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
@@ -554,7 +568,7 @@ let apply ~now action current =
          | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
          | Require_reconciliation _ | Suspend _ | Suspend_official_checkpoint _
          | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
-         | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _ | Reconcile_gate_binding _
+         | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _ | Resolve_input _ | Reconcile_gate_binding _
          | Resolve_gate _ | Resume_gate _ | Discharge_gate _ ->
            if phase <> current.phase then
              Error Native_call_unsettled
@@ -569,7 +583,7 @@ let apply ~now action current =
               Ok Keeper_native_call.No_native_call
             | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
             | Require_reconciliation _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
-            | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
+            | Resolve_input _ | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
             | Settle (Completed | Cancelled | Failed _) -> Ok current.native_call)
          | Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown ->
            (match action with
@@ -582,7 +596,7 @@ let apply ~now action current =
               Error Native_call_unsettled
             | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
             | Require_reconciliation _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
-            | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
+            | Resolve_input _ | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
             | Settle (Cancelled | Failed _) -> Ok current.native_call)) in
     let gate_obligations = match action with
       | Suspend_gate_reconciliation (binding, _) -> binding.obligations
@@ -591,7 +605,7 @@ let apply ~now action current =
       | Settle _ -> []
       | Confirm_sources | Begin_execution | Resume_checkpoint _
       | Resume_official_checkpoint _ | Suspend_official_checkpoint _
-      | Require_reconciliation _ | Suspend _ | Suspend_input _ | Suspend_runtime_retry _
+      | Require_reconciliation _ | Suspend _ | Suspend_input _ | Resolve_input _ | Suspend_runtime_retry _
       | Resume_runtime_retry _ | Update_runtime_retry_wait _ | Resolve_gate _ | Resume_gate _ -> current.gate_obligations in
     if phase = current.phase && gate_obligations = current.gate_obligations
        && Keeper_native_call.equal_state native_call current.native_call

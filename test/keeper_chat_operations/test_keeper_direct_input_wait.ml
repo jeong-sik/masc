@@ -167,8 +167,55 @@ let test_semantic_wait_cannot_resume_or_complete () = with_path @@ fun path -> w
     (match reconciled.phase with Semantic.Recovering {origin=Semantic.Input_wait restored;_} -> Semantic.equal_input_wait restored waiting | _ -> false);
   rejected (Semantic.input_wait ~checkpoint:owned ~pending:{pending with run_id=""})
 
+let respond store operation observed checkpoint = Store.resolve_direct_input_wait store ~now:7.
+  ~operation_id:original ~execution_digest:operation.Operation.execution_digest ~observed ~checkpoint
+let consumed=checkpoint "consumed original input response bytes"
+let test_response_advances_original_and_input_together () = with_path @@ fun path ->
+  with_store path (fun store ->
+    let operation=admit store in retire store operation Agent.Retire;ignore (defer store operation waiting |> ok);
+    respond store operation waiting consumed |> ok;
+    check bool "response removes original wait" true (wait store=None);
+    check bool "consumed global input is published" true
+      (Store.input_checkpoint store ~trace_id:owned.trace_id |> ok=Store.Input_observed consumed);
+    check bool "same original input is queued" true ((current store).input=Some input);
+    rejected (respond store operation waiting consumed));
+  with_store path (fun store ->
+    let operation=match Store.claim_next store ~now:8. |> ok with Some op -> op | None -> fail "accepted response did not enable original" in
+    check bool "only original operation becomes claimable" true (Operation.Operation_id.equal original operation.operation_id);
+    Store.resume_direct_checkpoint store ~now:9. ~operation_id:original ~observed:(Semantic.Agent_core consumed) |> ok;
+    Store.succeed_running store ~now:10. ~operation_id:original ~outcome_ref:"actual original continuation" |> ok |> ignore)
+let test_response_stale_wait_digest_and_input_refuse () = with_path @@ fun path -> with_store path @@ fun store ->
+  let operation=admit store in retire store operation Agent.Retire;ignore (defer store operation waiting |> ok);
+  rejected (Store.resolve_direct_input_wait store ~now:7. ~operation_id:original ~execution_digest:"foreign" ~observed:waiting ~checkpoint:consumed);
+  let wrong=Semantic.input_wait ~checkpoint:owned ~pending:{pending with run_id="another-run"} |> value in
+  rejected (respond store operation wrong consumed);
+  rejected (respond store operation waiting owned);
+  let advanced=checkpoint "later independent owned input" in
+  Store.update_input_checkpoint store ~observed:(Some owned) ~checkpoint:advanced |> ok |> ignore;
+  rejected (respond store operation waiting consumed);
+  check_wait store;check bool "rejected response preserves actual newer input" true
+    (Store.input_checkpoint store ~trace_id:owned.trace_id |> ok=Store.Input_observed advanced)
+let test_response_commit_uncertainty after_commit () = with_path @@ fun path ->
+  with_store path (fun store ->
+    let operation=admit store in retire store operation Agent.Retire;ignore (defer store operation waiting |> ok);
+    ignore (Store.take_released_checkpoints store);
+    Store.For_testing.fail_next_commit (if after_commit then Fail_after_commit else Fail_before_commit);
+    (match respond store operation waiting consumed with Error (Store.Store_unavailable _) -> () | _ -> fail "uncertain response reported acceptance");
+    Store.For_testing.clear_commit_fault ();
+    check int "uncertainty releases no retained file authority" 0 (List.length (Store.take_released_checkpoints store));
+    check bool "input commit follows actual transaction" true
+      (Store.input_checkpoint store ~trace_id:owned.trace_id |> ok=Store.Input_observed (if after_commit then consumed else owned));
+    check bool "wait transition follows same commit" after_commit (wait store=None));
+  with_store path (fun store ->
+    check bool "actual response commit survives reopen" after_commit (wait store=None);
+    check bool "claimability follows actual response commit" after_commit (Store.has_claimable_queued store ~now:8. |> ok))
+
 let () = run "durable original input wait"
   ["store",[
+    test_case "accepted response atomically enables original continuation and survives reopen" `Quick test_response_advances_original_and_input_together;
+    test_case "stale response wait digest and input refuse atomically" `Quick test_response_stale_wait_digest_and_input_refuse;
+    test_case "response before-commit failure preserves wait and input" `Quick (test_response_commit_uncertainty false);
+    test_case "uncertain committed response stays an error but survives reopen" `Quick (test_response_commit_uncertainty true);
     test_case "original wait survives restart and elapsed time" `Quick test_wait_survives_restart_and_time;
     test_case "only retired native evidence can defer input" `Quick test_only_retired_native_can_wait;
     test_case "stale digest and input/native references refuse" `Quick test_stale_digest_and_checkpoint_refuse;

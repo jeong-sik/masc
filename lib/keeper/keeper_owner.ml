@@ -187,6 +187,10 @@ type history_clear_writer =
   { clear_child : Keeper_interrupt_token.t
   ; clear_authority : Keeper_history_clear.authority }
 
+type input_response_writer =
+  { response_child:Keeper_interrupt_token.t; response_operation:Operation_id.t;
+    response_digest:string; response_authority:Keeper_input_wait_response.authority }
+
 type input_checkpoint_writer =
   { input_trace : Keeper_id.Trace_id.t
   ; input_child : Keeper_interrupt_token.t
@@ -217,6 +221,11 @@ type _ command =
       Operation_id.t -> (bool, error) result command
   | Direct_checkpoint : Operation_id.t ->
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
+  | Begin_direct_input_response : {operation_id:Operation_id.t;
+      observed:Keeper_semantic_execution.input_wait; child:Keeper_interrupt_token.t} ->
+      (input_response_writer,error) result command
+  | Commit_direct_input_response : input_response_writer * Keeper_input_wait_response.receipt ->
+      (unit,error) result command
   | Direct_input_wait : Operation_id.t -> (Keeper_semantic_execution.input_wait option, error) result command
   | Defer_direct_input_wait : {operation_id:Operation_id.t; child:Keeper_interrupt_token.t} ->
       (Chat_operation.t, error) result command
@@ -622,6 +631,7 @@ let answer : type response. response command -> answer = function
   | Exact_operation _ -> In_its_drain_step
   | Has_newer_original_queued _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
+  | Begin_direct_input_response _ | Commit_direct_input_response _ -> In_its_drain_step
   | Direct_native_call _ | Direct_input_wait _ | Defer_direct_input_wait _ -> In_its_drain_step
   | Current_input_checkpoint | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _
   | Begin_history_clear _ | Commit_history_clear _ -> In_its_drain_step
@@ -2005,6 +2015,53 @@ let start
             | Keeper_native_call.Checkpoint _ | Keeper_native_call.Terminal _ -> persist () in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Begin_direct_input_response {operation_id;observed;child}, resolve) ->
+          let response = reject_if_stopping state (fun () ->
+            reject_if_shutdown shutdown_operation_id (fun () ->
+              match (Keeper_owner_reducer.projection state).meta,
+                  Atomic.get t.turn_in_flight, Atomic.get t.child_cancel with
+              | Some meta,Some {lane=Maintenance;interrupt_token;_},Some _
+                  when not meta.paused && Keeper_interrupt_token.equal child interrupt_token
+                    && Keeper_id.Trace_id.equal meta.runtime.trace_id observed.checkpoint.trace_id ->
+                run_operation_read t ~label:"capture original direct input response" (fun () ->
+                  let ( let* ) = Result.bind in
+                  let* operation = Chat_operation_store.get t.operation_store operation_id in
+                  let* operation = match operation with
+                    | Some ({Chat_operation.state=Queued;_} as operation) -> Ok operation
+                    | Some {state=(Running _ | Succeeded _ | Failed _ | Cancelled _);_} | None ->
+                      Error (Chat_operation_store.Invalid_input "response original operation is no longer queued") in
+                  let* waiting = Chat_operation_store.direct_input_wait t.operation_store ~operation_id in
+                  let* input = Chat_operation_store.input_checkpoint t.operation_store ~trace_id:meta.runtime.trace_id in
+                  match waiting,input with
+                  | Some waiting,Chat_operation_store.Input_observed reference
+                      when Keeper_semantic_execution.equal_input_wait waiting observed
+                        && Keeper_checkpoint_ref.equal reference waiting.checkpoint ->
+                    Ok {response_child=child;response_operation=operation_id;response_digest=operation.execution_digest;
+                      response_authority=Keeper_input_wait_response.authorize ~session_root:t.session_root ~operation_id ~waiting}
+                  | (Some _ | None),(Input_observed _ | Input_unobserved | Prior_input_unavailable) ->
+                    Error (Chat_operation_store.Invalid_input "response no longer names the exact original wait and input owner"))
+              | (Some _ | None),(Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),(Some _ | None) ->
+                Error (Operation_rejected (Chat_operation_store.Invalid_input
+                  "response admission requires its unpaused original maintenance child and trace")))) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Commit_direct_input_response (writer,receipt), resolve) ->
+          let observed=Keeper_input_wait_response.waiting writer.response_authority in
+          let response = match (Keeper_owner_reducer.projection state).meta,
+              Atomic.get t.turn_in_flight,Atomic.get t.child_cancel with
+            | Some meta,Some {lane=Maintenance;interrupt_token;_},Some _
+                when not meta.paused && Keeper_interrupt_token.equal interrupt_token writer.response_child
+                  && Keeper_id.Trace_id.equal meta.runtime.trace_id observed.checkpoint.trace_id
+                  && Keeper_input_wait_response.belongs_to receipt writer.response_authority ->
+              run_operation_command t ~label:"accept original direct input response" (fun () ->
+                Chat_operation_store.resolve_direct_input_wait t.operation_store ~now:(t.now ())
+                  ~operation_id:writer.response_operation ~execution_digest:writer.response_digest ~observed
+                  ~checkpoint:(Keeper_input_wait_response.installed_checkpoint receipt)) |> Result.map fst
+            | (Some _ | None),(Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),(Some _ | None) ->
+              Error (Operation_rejected (Chat_operation_store.Invalid_input
+                "response receipt lost its original unpaused maintenance child and trace")) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Direct_input_wait operation_id, resolve) ->
           let response = run_operation_read t ~label:"read original direct input wait" (fun () ->
             Chat_operation_store.direct_input_wait t.operation_store ~operation_id) in
@@ -2833,6 +2890,24 @@ let run_maintenance_if_idle ?(defer_to_chat = false) t run =
      hand it a cancellation its own context never produced. *)
   | Ok (Autonomous_raised (exn, backtrace)) ->
     Printexc.raise_with_backtrace exn backtrace
+;;
+
+let respond_direct_input_wait t ~net ~operation_id ~observed ~response =
+  let invalid detail = Error (Operation_rejected (Chat_operation_store.Invalid_input detail)) in
+  let run () =
+    let ( let* ) = Result.bind in
+    let* child = match Keeper_turn_preview_owner.current () with
+      | Some child -> Ok child | None -> invalid "response has no inherited maintenance child" in
+    let* writer = request t (Begin_direct_input_response {operation_id;observed;child}) in
+    let* receipt = Keeper_input_wait_response.install ~net ~authority:writer.response_authority ~response
+      |> Result.map_error (fun error -> Operation_rejected (Chat_operation_store.Invalid_input
+        (Keeper_input_wait_response.installation_error_to_string error))) in
+    request t (Commit_direct_input_response (writer,receipt)) in
+  match run_maintenance_if_idle t run with
+  | Error _ as error -> error
+  | Ok (`Busy block) -> Ok (`Busy block)
+  | Ok (`Ran (Error _ as error)) -> error
+  | Ok (`Ran (Ok ())) -> Ok `Accepted
 ;;
 
 let begin_shutdown t ~operation_id = request t (Begin_shutdown { operation_id })

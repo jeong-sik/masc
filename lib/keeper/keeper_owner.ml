@@ -232,6 +232,8 @@ type 'a idle_work =
   | Autonomous_work of (Keeper_repetition_scope.Execution.t -> 'a)
   | Maintenance_work of (unit -> 'a)
 
+type autonomous_journal = Not_requested | Requested
+
 type _ command =
   | Exact_projection :
       (Keeper_owner_reducer.projection, error) result command
@@ -263,6 +265,16 @@ type _ command =
   | Begin_history_clear : Keeper_interrupt_token.t -> (history_clear_writer, error) result command
   | Commit_history_clear : history_clear_writer * Keeper_history_clear.receipt -> (unit, error) result command
   | Begin_input_checkpoint : Keeper_id.Trace_id.t * Keeper_interrupt_token.t -> (input_checkpoint_writer, error) result command
+  | Start_autonomous_execution : {execution:Keeper_repetition_scope.Execution.t;
+      caller:Keeper_interrupt_token.t; input:Yojson.Safe.t;
+      sources:Keeper_semantic_execution.source_member list} ->
+      (Chat_operation_store.semantic_admission,error) result command
+  | Finish_autonomous_execution : {execution:Keeper_repetition_scope.Execution.t;
+      caller:Keeper_interrupt_token.t; ending:Chat_operation_store.autonomous_execution_end} ->
+      (Keeper_semantic_execution.t,error) result command
+  | Park_autonomous_input_wait : {execution:Keeper_repetition_scope.Execution.t;
+      caller:Keeper_interrupt_token.t; writer:input_checkpoint_writer;
+      checkpoint:Keeper_checkpoint_ref.t} -> (input_checkpoint_writer,error) result command
   | Advance_input_checkpoint : input_checkpoint_writer * input_checkpoint_change ->
       (input_checkpoint_writer, error) result command
   | Checkpoint_operation_input_branch : input_checkpoint_writer * Keeper_checkpoint_ref.t * Keeper_checkpoint_ref.t * Keeper_checkpoint_host_transform.t ->
@@ -447,6 +459,7 @@ type t =
   ; metadata_error : metadata_fault option ref
   ; operation_error : operation_fault option ref
   ; child_active : bool ref
+  ; autonomous_execution : (Keeper_repetition_scope.Execution.t * autonomous_journal) option ref
   ; child_cancel : child_cancel option Atomic.t
   ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; shutdown_idle_waiters : ((unit, error) result Eio.Promise.u) list ref
@@ -676,6 +689,7 @@ let answer : type response. response command -> answer = function
   | Begin_direct_input_response _ | Prepare_direct_input_response _ | Commit_direct_input_response _ -> In_its_drain_step
   | Direct_native_call _ | Direct_input_wait _ | Defer_direct_input_wait _ -> In_its_drain_step
   | Current_input_checkpoint | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _
+  | Start_autonomous_execution _ | Finish_autonomous_execution _ | Park_autonomous_input_wait _
   | Checkpoint_operation_input_branch _
   | Begin_history_clear _ | Commit_history_clear _ -> In_its_drain_step
   | Update_direct_native_call _ | Bind_retired_input_cut _ -> In_its_drain_step
@@ -1171,6 +1185,94 @@ let load_retained_branch_checkpoint t reference =
     | Candidate_turn_regressed _ -> "host branch retained turn regressed"
     | Commit_not_installed _ -> "host branch retained installation is unconfirmed"))
 
+let autonomous_semantic_result result =
+  Result.map_error (function
+    | Chat_operation_store.Semantic_store_error error -> error
+    | (Admission_conflict _ | Sources_owned _ | Invalid_execution _) as error ->
+      Chat_operation_store.Invalid_input (Chat_operation_store.semantic_error_to_string error)) result
+
+let require_autonomous_child t execution caller =
+  match !(t.autonomous_execution),Atomic.get t.turn_in_flight,Atomic.get t.child_cancel with
+  | Some (current,_),Some {lane=Autonomous;interrupt_token;_},Some _
+      when current==execution && Keeper_interrupt_token.equal caller interrupt_token -> Ok ()
+  | (Some _ | None),(Some {lane=(Autonomous | Maintenance | Chat_operation);_} | None),(Some _ | None) ->
+    Error (Chat_operation_store.Invalid_input
+      "autonomous journal requires the exact execution issued to this inherited child")
+
+let autonomous_frame execution =
+  Keeper_repetition_scope.Execution.snapshot execution
+  |> Result.map_error (fun error -> Chat_operation_store.Invalid_input
+       (Keeper_repetition_snapshot.error_to_string error))
+
+let admitted_autonomous t execution =
+  let ( let* ) = Result.bind in
+  let* current = Chat_operation_store.semantic_get t.operation_store
+      (Keeper_repetition_scope.Execution.scope execution) |> autonomous_semantic_result in
+  match current with
+  | Some current -> Ok current
+  | None -> Error (Chat_operation_store.Invalid_input "autonomous execution has no original journal admission")
+
+let retained_autonomous t execution reference =
+  let ( let* ) = Result.bind in
+  let invalid detail = Error (Chat_operation_store.Invalid_input detail) in
+  let* () = match (Atomic.get t.projection).meta with
+    | Some meta when Keeper_id.Trace_id.equal meta.runtime.trace_id reference.Keeper_checkpoint_ref.trace_id -> Ok ()
+    | Some _ | None -> invalid "autonomous checkpoint no longer belongs to the current trace" in
+  let* snapshot = load_retained_branch_checkpoint t reference in
+  let checkpoint = Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot in
+  let* frame = Keeper_repetition_context.load checkpoint.Agent_core.Checkpoint.context
+    |> Result.map_error (fun error -> Chat_operation_store.Invalid_input
+      (Keeper_repetition_snapshot.error_to_string error)) in
+  let* active = autonomous_frame execution in
+  let* () = match Keeper_repetition_snapshot.active frame with
+    | Some scope when Keeper_execution_scope_id.equal scope
+        (Keeper_repetition_scope.Execution.scope execution)
+        && Keeper_repetition_snapshot.equal frame active -> Ok ()
+    | Some _ | None -> invalid "retained checkpoint does not preserve the executing original frame" in
+  Ok (checkpoint,frame)
+
+let finish_autonomous t execution ending =
+  let ( let* ) = Result.bind in
+  let* current = admitted_autonomous t execution in
+  let* frame = match ending with
+    | Chat_operation_store.Autonomous_checkpointed reference ->
+      let* checkpoint,frame = retained_autonomous t execution reference in
+      (match checkpoint.pending_input with
+       | None -> Ok frame
+       | Some _ -> Error (Chat_operation_store.Invalid_input
+           "pending input must be parked with its original wait"))
+    | Autonomous_completed | Autonomous_cancelled | Autonomous_failed _
+    | Autonomous_reconciliation_required _ -> autonomous_frame execution in
+  Chat_operation_store.finish_autonomous_execution t.operation_store ~now:(t.now ())
+    ~id:current.id ~input_sha256:current.input_sha256 ~frame ~ending
+  |> autonomous_semantic_result
+
+let reconcile_autonomous_child_exit t =
+  let ( let* ) = Result.bind in
+  match !(t.autonomous_execution) with
+  | None | Some (_,Not_requested) -> Ok ()
+  | Some (execution,Requested) ->
+    run_operation_command t ~label:"reconcile autonomous child journal exit" (fun () ->
+      let* current = Chat_operation_store.semantic_get t.operation_store
+          (Keeper_repetition_scope.Execution.scope execution) |> autonomous_semantic_result in
+      match current with
+      | None -> Ok ()
+      | Some current ->
+        match current.Keeper_semantic_execution.phase with
+        | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> Ok ()
+        | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
+          (* No typed completion was committed. An invalid runtime projection
+             cannot grant resume authority; keep the known journal evidence. *)
+          let frame = match autonomous_frame execution with
+            | Ok frame -> frame
+            | Error _ -> current.frame in
+          Chat_operation_store.finish_autonomous_execution t.operation_store
+            ~now:(t.now ()) ~id:current.id ~input_sha256:current.input_sha256 ~frame
+            ~ending:(Chat_operation_store.Autonomous_reconciliation_required
+              "original autonomous child exited without a confirmed typed settlement")
+          |> autonomous_semantic_result |> Result.map ignore)
+    |> Result.map (fun (_,_) -> ())
+
 let validate_retained_branch_scope ~operation_id (checkpoint:Agent_core.Checkpoint.t) =
   let ( let* ) = Result.bind in
   let* frame=Keeper_repetition_context.load checkpoint.Agent_core.Checkpoint.context
@@ -1423,6 +1525,7 @@ let start
     ; metadata_error = ref None
     ; operation_error = ref None
     ; child_active = ref false
+    ; autonomous_execution = ref None
     ; child_cancel = Atomic.make None
     ; autonomous_lost_slot = ref false
     ; stopping_waiters = ref []
@@ -2095,6 +2198,61 @@ let start
                 "history clear receipt no longer belongs to its original maintenance child and trace")) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Start_autonomous_execution {execution;caller;input;sources}, resolve) ->
+          let response = reject_if_stopping state (fun () ->
+            reject_if_shutdown shutdown_operation_id (fun () ->
+              match require_autonomous_child t execution caller with
+              | Error error -> Error (Operation_rejected error)
+              | Ok () ->
+                (* Mark before storage: a lost admission acknowledgement must
+                   also revoke writers captured before admission. *)
+                t.autonomous_execution := Some (execution,Requested);
+                run_operation_command t ~label:"admit original autonomous execution" (fun () ->
+                  Chat_operation_store.start_autonomous_execution t.operation_store
+                    ~id:(Keeper_repetition_scope.Execution.scope execution) ~input ~sources ~now:(t.now ())
+                  |> autonomous_semantic_result)
+                |> Result.map fst)) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Finish_autonomous_execution {execution;caller;ending}, resolve) ->
+          let response = match require_autonomous_child t execution caller with
+            | Error error -> Error (Operation_rejected error)
+            | Ok () -> run_operation_command t ~label:"settle original autonomous execution"
+                (fun () -> finish_autonomous t execution ending) |> Result.map fst in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Park_autonomous_input_wait {execution;caller;writer;checkpoint}, resolve) ->
+          let response = match require_autonomous_child t execution caller with
+            | Error error -> Error (Operation_rejected error)
+            | Ok () ->
+              let persist () =
+                let ( let* ) = Result.bind in
+                let invalid detail = Error (Chat_operation_store.Invalid_input detail) in
+                let* () = match writer.input_lane,writer.input_target with
+                  | Autonomous,Global_target
+                      when Keeper_interrupt_token.equal caller writer.input_child
+                        && Keeper_id.Trace_id.equal writer.input_trace checkpoint.trace_id -> Ok ()
+                  | (Autonomous | Maintenance | Chat_operation),(Global_target | Operation_target _) ->
+                    invalid "autonomous wait writer no longer owns the original child and trace" in
+                let* current = admitted_autonomous t execution in
+                let* payload,frame = retained_autonomous t execution checkpoint in
+                let* pending = match payload.pending_input with
+                  | Some pending -> Ok pending
+                  | None -> invalid "autonomous wait retained checkpoint has no pending input" in
+                let* waiting = Keeper_semantic_execution.input_wait ~checkpoint ~pending
+                  |> Result.map_error (fun detail -> Chat_operation_store.Invalid_input detail) in
+                Chat_operation_store.defer_autonomous_input_wait t.operation_store ~now:(t.now ())
+                  ~id:current.id ~input_sha256:current.input_sha256
+                  ~observed:writer.input_reference ~waiting ~frame |> autonomous_semantic_result in
+              (match run_operation_command t ~label:"park original autonomous input wait" persist with
+               | Ok (Chat_operation_store.Autonomous_input_wait_installed _,_) ->
+                 Ok {writer with input_reference=Some checkpoint}
+               | Ok ((Autonomous_input_wait_existing _ | Autonomous_input_wait_source_changed _),_) ->
+                 Error (Operation_rejected (Chat_operation_store.Invalid_input
+                   "autonomous wait was not newly accepted; reconcile the original journal and global input"))
+               | Error _ as error -> error) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Begin_input_checkpoint (trace_id, caller), resolve) ->
           let response = reject_if_stopping state (fun () ->
             reject_if_shutdown shutdown_operation_id (fun () ->
@@ -2125,8 +2283,13 @@ let start
                   && flight.lane = writer.input_lane && flight.lane = lane ->
               let persist () = match writer.input_target,change with
                 | Global_target,Autonomous_input checkpoint ->
-                  Chat_operation_store.update_input_checkpoint t.operation_store ~now:(t.now ())
-                    ~observed:writer.input_reference ~checkpoint
+                  (match !(t.autonomous_execution) with
+                   | Some (_,Requested) ->
+                     Error (Chat_operation_store.Invalid_input
+                       "journal-admitted autonomous input requires its original typed wait publication")
+                   | None | Some (_,Not_requested) ->
+                     Chat_operation_store.update_input_checkpoint t.operation_store ~now:(t.now ())
+                       ~observed:writer.input_reference ~checkpoint)
                 | Global_target,Direct_input {operation_id;execution_digest;call_id;observed;checkpoint} ->
                   Chat_operation_store.update_direct_input_checkpoint t.operation_store ~now:(t.now ())
                     ~operation_id ~execution_digest ~call_id ~observed
@@ -2821,8 +2984,11 @@ let start
                        | Autonomous_work run ->
                          let execution = Keeper_repetition_scope.Execution.autonomous_admission
                            (fresh_autonomous_uuid ()) in
+                         t.autonomous_execution := Some (execution,Not_requested);
                          (fun () -> run execution)
-                       | Maintenance_work run -> run in
+                       | Maintenance_work run ->
+                         t.autonomous_execution := None;
+                         run in
                      (* The Owner keeps its slot until the turn settles. A
                         chat starts after a settled tool boundary yields this
                         turn or the turn completes. *)
@@ -2934,13 +3100,21 @@ let start
                    (error_to_string error);
                  failed)
             | Autonomous_child_finished { outcome; resolve = autonomous_resolve } ->
-              let response =
-                match outcome with
-                | Ok value -> Ok (Autonomous_ran value)
-                | Error (exn, backtrace) -> Ok (Autonomous_raised (exn, backtrace))
+              let settlement = reconcile_autonomous_child_exit t in
+              t.autonomous_execution := None;
+              (match settlement with
+               | Ok () -> ()
+               | Error error ->
+                 Log.Keeper.error ~keeper_name:t.keeper_name
+                   "autonomous journal exit settlement failed: %s" (error_to_string error));
+              let response = match outcome,settlement with
+                | Error (exn,backtrace),(Ok () | Error _) ->
+                  Ok (Autonomous_raised (exn,backtrace))
+                | Ok _,Error error -> Error error
+                | Ok value,Ok () -> Ok (Autonomous_ran value)
               in
               Eio.Promise.resolve autonomous_resolve response;
-              Ok ()
+              settlement
           in
           t.child_active := false;
           publish_turn_in_flight t None;
@@ -3046,6 +3220,21 @@ let checkpoint_operation_input_branch t ~writer ~observed ~checkpoint ~transform
 let input_checkpoint t ~trace_id = request t (Input_checkpoint trace_id)
 let advance_autonomous_input_checkpoint t ~writer ~checkpoint =
   input_child_request t writer (Autonomous_input checkpoint)
+let start_autonomous_execution t ~execution ~input ~sources =
+  match Keeper_turn_preview_owner.current () with
+  | Some caller -> request t (Start_autonomous_execution {execution;caller;input;sources})
+  | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "autonomous admission requires its inherited original child"))
+let finish_autonomous_execution t ~execution ~ending =
+  match Keeper_turn_preview_owner.current () with
+  | Some caller -> request t (Finish_autonomous_execution {execution;caller;ending})
+  | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "autonomous settlement requires its inherited original child"))
+let park_autonomous_input_wait t ~execution ~writer ~checkpoint =
+  match Keeper_turn_preview_owner.current () with
+  | Some caller -> request t (Park_autonomous_input_wait {execution;caller;writer;checkpoint})
+  | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "autonomous wait publication requires its inherited original child"))
 let advance_direct_input_checkpoint t ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
   input_child_request t writer (Direct_input {operation_id;execution_digest;call_id;observed;checkpoint})
 let bind_retired_input_cut t ~writer ~operation_id ~execution_digest ~observed ~call ~cut =

@@ -66,6 +66,19 @@ val run_autonomous_if_idle
   -> ([ `Ran of 'a | `Busy of Keeper_owner.autonomous_block | `Interrupted ], command_error) result
 (** Submit one autonomous turn attempt to the Keeper's Owner mailbox. *)
 
+val start_autonomous_execution : base_path:string -> keeper_name:string ->
+  execution:Keeper_repetition_scope.Execution.t -> input:Yojson.Safe.t ->
+  sources:Keeper_semantic_execution.source_member list ->
+  (Keeper_chat_operation_store.semantic_admission, command_error) result
+val finish_autonomous_execution : base_path:string -> keeper_name:string ->
+  execution:Keeper_repetition_scope.Execution.t ->
+  ending:Keeper_chat_operation_store.autonomous_execution_end ->
+  (Keeper_semantic_execution.t, command_error) result
+val park_autonomous_input_wait : base_path:string -> keeper_name:string ->
+  execution:Keeper_repetition_scope.Execution.t -> writer:Keeper_owner.input_checkpoint_writer ->
+  checkpoint:Keeper_checkpoint_ref.t ->
+  (Keeper_owner.input_checkpoint_writer, command_error) result
+
 val run_maintenance_if_idle
   :  ?defer_to_chat:bool
   -> base_path:string

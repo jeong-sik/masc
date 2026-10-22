@@ -2345,7 +2345,7 @@ type autonomous_input_wait_update =
   | Autonomous_input_wait_source_changed of input_checkpoint_observation
 
 let defer_autonomous_input_wait store ~now ~id ~input_sha256 ~observed
-    ~(waiting : Semantic.input_wait) =
+    ~(waiting : Semantic.input_wait) ~frame =
   let* () = require_autonomous_identity id in
   let invalid detail = Error (Semantic_store_error (Invalid_input detail)) in
   let* () = check_input_predecessor ~observed ~checkpoint:waiting.checkpoint |> semantic_store_result in
@@ -2358,6 +2358,8 @@ let defer_autonomous_input_wait store ~now ~id ~input_sha256 ~observed
     let* () = match current.native_call with
       | Keeper_native_call.No_native_call -> Ok ()
       | Active _ | Terminal_unacknowledged _ -> Error (Semantic_store_error Native_call_unsettled) in
+    let* observed_frame = Semantic.retain_repetition_frame ~now frame current
+      |> Result.map_error (fun error -> Invalid_execution error) in
     match input_wait_state (Some current) with
     | Some expected when Semantic.equal_input_wait expected waiting ->
       Ok (Autonomous_input_wait_existing current)
@@ -2368,7 +2370,7 @@ let defer_autonomous_input_wait store ~now ~id ~input_sha256 ~observed
       if not (input_predecessor_matches observed previous) then
         Ok (Autonomous_input_wait_source_changed previous)
       else
-        let* suspended = Semantic.apply ~now (Semantic.Suspend_input waiting) current
+        let* suspended = Semantic.apply ~now (Semantic.Suspend_input waiting) observed_frame
           |> Result.map_error (fun error -> Invalid_execution error) in
         let* () = detach_other_canonical_inputs store ~now ~publisher:None ~previous:observed waiting.checkpoint
           |> semantic_store_result in
@@ -2376,6 +2378,38 @@ let defer_autonomous_input_wait store ~now ~id ~input_sha256 ~observed
           |> semantic_store_result in
         let* () = update_semantic store ~expected:current suspended |> semantic_store_result in
         Ok (Autonomous_input_wait_installed suspended))
+;;
+
+type autonomous_execution_end =
+  | Autonomous_completed
+  | Autonomous_cancelled
+  | Autonomous_failed of string
+  | Autonomous_checkpointed of Keeper_checkpoint_ref.t
+  | Autonomous_reconciliation_required of string
+
+let finish_autonomous_execution store ~now ~id ~input_sha256 ~frame ~ending =
+  let* () = require_autonomous_identity id in
+  with_semantic_transaction store (fun () ->
+    let* current = semantic_get_with_db store.db id |> semantic_store_result in
+    let* current = match current with
+      | Some execution when String.equal execution.Semantic.input_sha256 input_sha256 -> Ok execution
+      | Some _ -> Error (Semantic_store_error (Invalid_input "autonomous settlement digest changed"))
+      | None -> Error (Semantic_store_error (Invalid_input "autonomous settlement has no admitted original")) in
+    let* () = match current.native_call with
+      | Keeper_native_call.No_native_call -> Ok ()
+      | Active _ | Terminal_unacknowledged _ -> Error (Semantic_store_error Native_call_unsettled) in
+    let* observed = Semantic.retain_repetition_frame ~now frame current
+      |> Result.map_error (fun error -> Invalid_execution error) in
+    let action = match ending with
+      | Autonomous_completed -> Semantic.Settle Semantic.Completed
+      | Autonomous_cancelled -> Semantic.Settle Semantic.Cancelled
+      | Autonomous_failed detail -> Semantic.Settle (Semantic.Failed detail)
+      | Autonomous_checkpointed checkpoint -> Semantic.Suspend checkpoint
+      | Autonomous_reconciliation_required detail -> Semantic.Require_reconciliation detail in
+    let* finished = Semantic.apply ~now action observed
+      |> Result.map_error (fun error -> Invalid_execution error) in
+    let* () = update_semantic store ~expected:current finished |> semantic_store_result in
+    Ok finished)
 ;;
 
 let direct_execution_with_db db (operation : Operation.t) =

@@ -521,6 +521,7 @@ type autonomous_input_wait_update =
 val defer_autonomous_input_wait :
   t -> now:float -> id:Keeper_execution_scope_id.t -> input_sha256:string ->
   observed:Keeper_checkpoint_ref.t option -> waiting:Semantic.input_wait ->
+  frame:Keeper_repetition_snapshot.t ->
   (autonomous_input_wait_update, semantic_error) result
 (** Atomically compare the captured global input predecessor, publish the
     retained checkpoint and park only its original autonomous execution.
@@ -532,6 +533,22 @@ val defer_autonomous_input_wait :
     payload/scope/trace/child validation remain the Owner caller's obligations;
     opaque references alone are not physical or response authority. This API
     does not implement autonomous response, resume, heartbeat intake or seeding. *)
+
+type autonomous_execution_end =
+  | Autonomous_completed
+  | Autonomous_cancelled
+  | Autonomous_failed of string
+  | Autonomous_checkpointed of Keeper_checkpoint_ref.t
+  | Autonomous_reconciliation_required of string
+val finish_autonomous_execution :
+  t -> now:float -> id:Keeper_execution_scope_id.t -> input_sha256:string ->
+  frame:Keeper_repetition_snapshot.t -> ending:autonomous_execution_end ->
+  (Semantic.t, semantic_error) result
+(** Retain the original scope's non-regressing observations and apply one typed
+    settlement in the same transaction. No native receipt is fabricated.
+    Completion cannot consume a parked input wait. Checkpoint authority and
+    physical child/frame validation belong to the Owner; commit uncertainty
+    stays Error and never permits fresh execution under another identity. *)
 
 (** Gate waiting remains the original queued operation, but cannot be claimed
     until a bound durable resolution is supplied. A deferred runtime retry

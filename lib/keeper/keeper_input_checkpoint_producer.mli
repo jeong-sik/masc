@@ -32,6 +32,11 @@ val bind_retired_input_cut : t -> cut:Keeper_input_history_cut.t ->
     Owner freshly validates the retained native-to-host relationship. Failure
     never grants replay authority. *)
 val publish_autonomous : t -> Agent_core.Checkpoint.t -> (t, error) result
+val publish_autonomous_wait : execution:Keeper_repetition_scope.Execution.t ->
+  t -> Agent_core.Checkpoint.t -> (t, error) result
+(** Retain full pending bytes, then park the already journal-admitted original
+    autonomous execution through its same Owner child and captured writer.
+    Retention and journal uncertainty remain failures, not response authority. *)
 val publish_direct : t -> operation_id:Keeper_chat_operation.Operation_id.t ->
   execution_digest:string -> call_id:string -> observed:Keeper_checkpoint_ref.t ->
   Agent_core.Checkpoint.t -> (t * Keeper_checkpoint_ref.t, error) result

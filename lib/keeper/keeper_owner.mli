@@ -319,6 +319,21 @@ val run_autonomous_if_idle
     ({!interrupt_turn}) returns [`Interrupted]: the child switch was failed
     with that exception, so the callback's own return value is not available. *)
 
+val start_autonomous_execution : t -> execution:Keeper_repetition_scope.Execution.t ->
+  input:Yojson.Safe.t -> sources:Keeper_semantic_execution.source_member list ->
+  (Keeper_chat_operation_store.semantic_admission, error) result
+(** Requires this Owner's current inherited autonomous child and the exact
+    execution object issued to it. Commit original input/source ownership and
+    Running together. The trusted producer must freshly validate frozen intake
+    before the first provider dispatch. Existing admission is observation only. *)
+val finish_autonomous_execution : t -> execution:Keeper_repetition_scope.Execution.t ->
+  ending:Keeper_chat_operation_store.autonomous_execution_end ->
+  (Keeper_semantic_execution.t, error) result
+(** Same original child/object, with its actual repetition frame. A checkpoint
+    outcome additionally validates retained bytes, original scope and absence
+    of a pending request. Unsettled child exit conservatively reconciles a
+    Running admission; it never marks it complete or consumes a parked wait. *)
+
 val run_maintenance_if_idle
   :  ?defer_to_chat:bool
   -> t
@@ -454,6 +469,14 @@ val input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
   (Keeper_chat_operation_store.input_checkpoint_observation, error) result
 val advance_autonomous_input_checkpoint : t -> writer:input_checkpoint_writer ->
   checkpoint:Keeper_checkpoint_ref.t -> (input_checkpoint_writer, error) result
+val park_autonomous_input_wait : t -> execution:Keeper_repetition_scope.Execution.t ->
+  writer:input_checkpoint_writer -> checkpoint:Keeper_checkpoint_ref.t ->
+  (input_checkpoint_writer, error) result
+(** Read the exact retained payload under the original Owner session root,
+    validate the complete pending and execution frame, then atomically publish
+    the captured global predecessor and Suspend_input with source ownership.
+    A duplicate wait is read evidence, never a new acceptance or overwrite of
+    independent input. The caller must stop until explicit response authority. *)
 val advance_direct_input_checkpoint : t -> writer:input_checkpoint_writer ->
   operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
   call_id:string -> observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t ->

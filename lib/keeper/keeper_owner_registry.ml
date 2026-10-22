@@ -851,6 +851,15 @@ let checkpoint_operation_input_branch ~base_path ~keeper_name ~writer ~observed 
 let advance_autonomous_input_checkpoint ~base_path ~keeper_name ~writer ~checkpoint =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint)
+let start_autonomous_execution ~base_path ~keeper_name ~execution ~input ~sources =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.start_autonomous_execution owner ~execution ~input ~sources)
+let finish_autonomous_execution ~base_path ~keeper_name ~execution ~ending =
+  with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.finish_autonomous_execution owner ~execution ~ending)
+let park_autonomous_input_wait ~base_path ~keeper_name ~execution ~writer ~checkpoint =
+  with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.park_autonomous_input_wait owner ~execution ~writer ~checkpoint)
 let advance_direct_input_checkpoint ~base_path ~keeper_name ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.advance_direct_input_checkpoint owner ~writer ~operation_id ~execution_digest ~call_id ~observed ~checkpoint)

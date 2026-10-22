@@ -44,7 +44,7 @@ let start store n = match Store.start_autonomous_execution store ~id:(scope n)
 let get store id = Store.semantic_get store id |> semantic |> Option.get
 let current_input store = Store.input_checkpoint store ~trace_id:owned.trace_id |> stored
 let defer store execution ~observed ~waiting = Store.defer_autonomous_input_wait store
-    ~now:2. ~id:execution.Semantic.id ~input_sha256:execution.input_sha256 ~observed ~waiting
+    ~now:2. ~id:execution.Semantic.id ~input_sha256:execution.input_sha256 ~observed ~waiting ~frame:execution.frame
 let installed = function
   | Store.Autonomous_input_wait_installed execution -> execution
   | Autonomous_input_wait_existing _ | Autonomous_input_wait_source_changed _ -> fail "wait was not installed"
@@ -104,7 +104,7 @@ let test_stale_predecessor_and_changed_request_refuse () = with_path @@ fun path
      | Error (Store.Semantic_store_error (Store.Invalid_input _)) -> ()
      | _ -> fail "matching request IDs replaced the canonical question");
     (match Store.defer_autonomous_input_wait store ~now:3. ~id:original.id ~input_sha256:(hash "foreign input")
-       ~observed:(Some before) ~waiting with
+       ~observed:(Some before) ~waiting ~frame:original.frame with
      | Error (Store.Semantic_store_error (Store.Invalid_input _)) -> ()
      | _ -> fail "changed original input digest was accepted");
     check bool "refusals preserve canonical wait and input" true
@@ -153,10 +153,42 @@ let test_admission_commit_fault after_commit () = with_path @@ fun path ->
      | Semantic_created _ | Semantic_existing _ -> fail "uncertainty replaced or duplicated original admission");
     check bool "admission alone invents no input checkpoint" true (current_input store=Store.Input_unobserved))
 
+let test_original_frame_and_typed_settlement () = with_path @@ fun path ->
+  with_store path (fun store ->
+    let module Frame=Keeper_repetition_snapshot in
+    let frame_value result=result |> Result.map_error Frame.error_to_string |> value in
+    let original=start store 1 in
+    let observation=Frame.observation ~tool_name:"original-call"
+        ~input_fingerprint:None ~output_fingerprint:None |> frame_value in
+    let frame=Frame.admit original.frame (Frame.Fresh (scope 99)) |> frame_value in
+    let frame=Frame.record frame ~scope:(scope 99) observation |> frame_value in
+    let frame=Frame.admit frame (Frame.Fresh original.id) |> frame_value in
+    let frame=Frame.record frame ~scope:original.id observation |> frame_value in
+    let parked=Store.defer_autonomous_input_wait store ~now:2. ~id:original.id
+        ~input_sha256:original.input_sha256 ~observed:None ~waiting ~frame |> semantic |> installed in
+    check int "shared runtime frame projects one original journal scope" 1 (List.length (Frame.scope_ids parked.frame));
+    let ending ending frame=Store.finish_autonomous_execution store ~now:3. ~id:original.id
+        ~input_sha256:original.input_sha256 ~frame ~ending in
+    (match ending Store.Autonomous_cancelled original.frame with
+     | Error (Store.Invalid_execution _) -> ()
+     | _ -> fail "settlement rolled back original observations");
+    check bool "rejected rollback preserves full wait and global input" true
+      (Semantic.to_json (get store original.id)=Semantic.to_json parked && current_input store=Store.Input_observed owned);
+    let ended=ending Store.Autonomous_cancelled frame |> semantic in
+    check bool "explicit cancellation settles only original scope" true
+      (ended.phase=Semantic.Settled Semantic.Cancelled && ended.input=None);
+    check bool "settled projected frame remains codec-coherent" true
+      (Result.is_ok (Semantic.of_json (Semantic.to_json ended)));
+    (match Store.start_autonomous_execution store ~now:4. ~id:(scope 2)
+        ~input:(input 2) ~sources:[source 1] |> semantic with
+     | Semantic_created _ -> ()
+     | Semantic_existing _ -> fail "settled original source was not released"))
+
 let () = run "autonomous input wait journal"
   ["ownership",[
     test_case "restart and independent work preserve original waiting source" `Quick test_original_wait_survives_restart_and_independent_work;
     test_case "stale predecessors and changed canonical requests refuse" `Quick test_stale_predecessor_and_changed_request_refuse;
+    test_case "original frame cannot regress and explicit settlement releases its source" `Quick test_original_frame_and_typed_settlement;
     test_case "direct identities cannot alias autonomous admissions" `Quick test_direct_identity_is_not_an_autonomous_alias];
    "commit uncertainty",[
     test_case "admission precommit fault reuses confirmed original identity" `Quick (test_admission_commit_fault false);

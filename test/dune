@@ -6352,3 +6352,9 @@
  (name test_run_tool_workflow)
  (modules test_run_tool_workflow)
  (libraries masc_test_deps))
+
+(test
+ (name test_keeper_autonomous_owner_journal)
+ (modules test_keeper_autonomous_owner_journal)
+ (libraries masc_test_deps masc.agent_core masc.keeper_chat_operations
+  masc.keeper_execution_scope masc.keeper_checkpoint_ref uuidm digestif))

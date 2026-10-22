@@ -587,6 +587,37 @@ let update_native_call ~now ~expected ~replacement current =
       let* ()=validate_canonical_input_origin next |> Result.map_error (fun detail -> Invalid_transition detail) in
       Ok next
 
+let retain_repetition_frame ~now candidate current =
+  let invalid detail = Error (Invalid_transition detail) in
+  let* () = if valid_time now then Ok () else invalid "invalid frame observation time" in
+  let* () = match current.phase with
+    | Settled _ -> invalid "terminal execution cannot acquire observations"
+    | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
+    | Recovering _ | Suspended _ -> Ok () in
+  let* () = match Snapshot.active candidate with
+    | Some scope when Scope_id.equal scope current.id -> Ok ()
+    | Some _ | None -> invalid "frame does not own the original active scope" in
+  let* frame = Snapshot.restore_scope ~scope:current.id ~source:candidate ~target:Snapshot.empty
+    |> Result.map_error (fun error -> Invalid_transition (Snapshot.error_to_string error)) in
+  let observations frame = Snapshot.observations frame ~scope:current.id
+    |> Result.map_error (fun error -> Invalid_transition (Snapshot.error_to_string error)) in
+  let* before = observations current.frame in
+  let* after = observations frame in
+  let rec prefix before after = match before,after with
+    | [],_ -> true
+    | expected::before,actual::after -> expected=actual && prefix before after
+    | _::_,[] -> false in
+  let* () = if prefix (List.rev before) (List.rev after) then Ok ()
+    else invalid "original repetition observations regressed or changed" in
+  if Snapshot.equal current.frame frame then Ok current
+  else
+    let* () = match current.phase with
+      | Running | Resuming_runtime_retry _ | Resuming_gate _ -> Ok ()
+      | Preparing | Ready | Recovering _ | Suspended _ | Settled _ ->
+        invalid "only an executing original scope may add observations" in
+    if current.revision=Int64.max_int then Error Revision_exhausted
+    else Ok {current with frame; revision=Int64.succ current.revision; updated_at=now}
+
 let apply ~now action current =
   if not (valid_time now) then Error (Invalid_transition "invalid transition time")
   else

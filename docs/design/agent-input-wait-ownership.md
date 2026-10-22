@@ -968,12 +968,12 @@ own checkpoint. Later independent input publication cannot consume the wait;
 observing the exact duplicate does not overwrite that independent global input.
 Predecessor drift or a changed canonical question refuses the mutation.
 
-Seven source scenarios exercise actual SQLite transactions, close/reopen,
+Storage scenarios exercise actual SQLite transactions, close/reopen,
 independent admission/global publication, source conflicts, checkpoint pinning,
 direct-identity refusal, and admission/wait commit faults before and after COMMIT.
 Their checkpoint references are opaque fixtures: these scenarios do not execute
-Owner/Core or prove physical retained payload availability. They are unexecuted
-on this new layer until an exact-head result is recorded.
+Owner/Core or prove physical retained payload availability. Execution results
+belong to their recorded exact head and do not certify later integration layers.
 
 This is the storage boundary for the next autonomous integration, not a working
 heartbeat wait/resume feature. The real Owner must mint/capture one original
@@ -999,11 +999,45 @@ checkpoint observations must match exactly before publication. A conflict is
 latched and leaves the target unchanged. Captured HTTP and durable Tool observers
 carry the execution argument across the Owner handoff under their original scope.
 
-This is physical execution identity and repetition isolation, not durable semantic
-admission. The autonomous journal APIs are still not connected to validated
-heartbeat intake, atomic wait publication, typed child settlement, source exclusion
-or explicit independent seed selection. In particular, canonical checkpoint
+This is physical execution identity and repetition isolation. The Owner journal
+boundary below binds it to admission, atomic wait publication and typed settlement;
+production heartbeat intake, source exclusion and explicit independent seed
+selection are not yet connected. In particular, canonical checkpoint
 fallback can still expose parked A's pending input to independent B; an explicit
 Owner-validated fork plus A's retained semantic ownership is required before that
 path is complete. Neither a new UUID nor these source tests prove A wait -> restart
 -> B -> original A response/resume, current SSE state or persistent Acting UI.
+
+### Owner-bound autonomous journal capability
+
+Owner journal admission requires both the inherited current autonomous child
+and the exact execution object issued to that child. A newly constructed object
+with the same UUID is insufficient. Requesting journal admission revokes ordinary
+global input publication for that child, including writers captured before the
+request or an uncertain commit acknowledgement.
+
+Input-wait publication reads the retained full checkpoint under the Owner's
+session root, checks the trace, complete pending request and current execution
+frame, then commits predecessor CAS, original-scope frame and waiting state in
+one SQLite transaction. The semantic record projects only its own scope from a
+shared runtime frame and accepts only appended observations. Equal duplicate
+waits are observations, not a new acceptance or global replacement.
+
+Typed completion, cancellation, failure, retained checkpoint and reconciliation
+are distinct settlement inputs. A non-input checkpoint additionally requires
+validated retained bytes with no pending request. An untyped physical child
+return reconciles a still-Running journal admission instead of completing it;
+an existing wait, suspended checkpoint or terminal record stays unchanged.
+Interrupted reconciliation does not pin an undisclosed runtime checkpoint or
+grant known-progress resume authority.
+
+The new boundary scenarios use actual Owner actors, SQLite, full retained
+checkpoint fixtures and process-local Owner restart. Independent B explicitly
+prepares a fresh Context, admits its own source and completes through the Owner.
+They also cover a forged equal scope object, stale writer, wrong retained scope,
+duplicate wait, typed checkpoint, post-wait exception and commit uncertainty.
+These are not actual provider/Core wait or production canonical-fallback tests.
+Heartbeat must still freeze freshly validated original input/source membership,
+call this admission before dispatch, exclude parked original sources, select an
+explicit independent fork seed and carry typed settlement through AgentRun.
+Autonomous response/resume and current/reconnected Acting/SSE remain outstanding.

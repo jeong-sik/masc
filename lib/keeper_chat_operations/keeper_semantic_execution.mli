@@ -239,6 +239,12 @@ val detach_canonical_input : now:float -> input_checkpoint:Keeper_checkpoint_ref
     continuation before an independent publisher advances global input. Keeps
     its complete original wait and all existing native/Gate/retry authority.
     Caller owns the same SQLite transaction as that global input replacement. *)
+val retain_repetition_frame : now:float -> Keeper_repetition_snapshot.t -> t -> (t, error) result
+(** Retain only this original scope from a caller-validated frame. Existing
+    observations must be an exact suffix of the candidate's newest-first
+    observations. A different active scope, rollback or terminal execution
+    refuses; equal evidence is unchanged. The Owner must validate the actual
+    executing child and retained checkpoint, not only this pure projection. *)
 val apply : now:float -> action -> t -> (t, error) result
 (** Resume_checkpoint requires that the caller re-read and validate the exact
     canonical checkpoint named by Suspended/Checkpointed. The journal owns

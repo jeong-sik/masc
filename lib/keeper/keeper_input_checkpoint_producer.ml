@@ -83,6 +83,13 @@ let publish_autonomous t checkpoint =
     |> Result.map_error (fun error -> Owner_failed error) in
   Ok {t with writer}
 
+let publish_autonomous_wait ~execution t checkpoint =
+  let* checkpoint = retain t checkpoint in
+  let* writer = Registry.park_autonomous_input_wait ~base_path:t.base_path
+    ~keeper_name:t.keeper_name ~execution ~writer:t.writer ~checkpoint
+    |> Result.map_error (fun error -> Owner_failed error) in
+  Ok {t with writer}
+
 let publish_direct t ~operation_id ~execution_digest ~call_id ~observed checkpoint =
   let* checkpoint = retain t checkpoint in
   let* writer = Registry.advance_direct_input_checkpoint ~base_path:t.base_path

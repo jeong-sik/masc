@@ -23,6 +23,13 @@ type report =
 
 type error =
   | Prior_input_history_unavailable of { path : string }
+  | Store_missing of { path : string }
+      (** A keeper directory has no operation store, so what that keeper
+          names is unknown and nothing was removed. An owner that has not
+          started yet and a store that was moved aside look the same here;
+          read as naming nothing, moved stores cost every retained file they
+          named (#45076). A keeper whose owner never starts keeps the pass
+          skipped, and the startup log names that store. *)
   | Store_unreadable of { path : string; detail : string }
       (** A keeper's operation store could not be read, so the live set is
           unknown and nothing was removed. One unreadable store stops the

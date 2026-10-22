@@ -174,9 +174,30 @@ let test_unreadable_store_removes_nothing () = with_root (fun root ->
   write orphan "{}";
   (match Sweep.run ~runtime_root:root with
    | Error (Sweep.Store_unreadable _) -> ()
-   | Error ((Sweep.Keeper_shares_store_directory _ | Sweep.Prior_input_history_unavailable _) as error) -> fail (Sweep.error_to_string error)
+   | Error ((Sweep.Keeper_shares_store_directory _ | Sweep.Prior_input_history_unavailable _
+            | Sweep.Store_missing _) as error) -> fail (Sweep.error_to_string error)
    | Ok _ -> fail "an unreadable store must stop the sweep");
   check bool "orphan kept while the live set is unknown" true (Sys.file_exists orphan))
+
+(* 2026-10-22 (#45076): the live stores were moved aside before a start. The
+   sweep read each missing store as naming nothing and removed the 53 retained
+   checkpoints (1.57 GB) those stores named, suspended executions' included. *)
+let test_missing_store_removes_nothing () = with_root (fun root ->
+  let held = checkpoint "held" and named_by_moved = checkpoint "named-by-moved-store" in
+  with_open (keeper_store root "present") (fun store ->
+    ignore (defer_direct_checkpoint store "sweep-held" held));
+  let moved_aside = keeper_store root "moved-aside" in
+  let kept_held = retained root ~session:["sweep-trace"] held in
+  let kept_moved = retained root ~session:["sweep-trace"] named_by_moved in
+  List.iter (fun path -> write path "{}") [kept_held; kept_moved];
+  (match Sweep.run ~runtime_root:root with
+   | Error (Sweep.Store_missing { path }) ->
+     check string "the missing store is named" moved_aside path
+   | Error ((Sweep.Store_unreadable _ | Sweep.Keeper_shares_store_directory _
+            | Sweep.Prior_input_history_unavailable _) as error) -> fail (Sweep.error_to_string error)
+   | Ok _ -> fail "a missing store must stop the sweep");
+  check bool "what the missing store named is kept" true (Sys.file_exists kept_moved);
+  check bool "what a present store names is kept" true (Sys.file_exists kept_held))
 
 let test_missing_directories_are_an_empty_sweep () = with_root (fun root ->
   let report = sweep root in
@@ -212,7 +233,7 @@ let test_prior_input_history_keeps_unnamed_retained_evidence () = with_root (fun
   write unnamed "accepted answer whose old owner may have retired";
   (match Sweep.run ~runtime_root:root with
    | Error (Sweep.Prior_input_history_unavailable _) -> ()
-   | Error (Store_unreadable _ | Keeper_shares_store_directory _) | Ok _ ->
+   | Error (Store_unreadable _ | Keeper_shares_store_directory _ | Store_missing _) | Ok _ ->
      fail "sweep did not preserve the unknown prior input boundary");
   check bool "unreferenced bytes survive while prior ownership is unknown" true (Sys.file_exists unnamed))
 
@@ -276,6 +297,7 @@ let () =
         ; test_case "workspace store directories are not keepers" `Quick
             test_workspace_store_directories_are_not_keepers
         ; test_case "an unreadable store removes nothing" `Quick test_unreadable_store_removes_nothing
+        ; test_case "a missing store removes nothing" `Quick test_missing_store_removes_nothing
         ; test_case "missing directories are an empty sweep" `Quick
             test_missing_directories_are_an_empty_sweep
         ] ) ]

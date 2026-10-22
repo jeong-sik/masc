@@ -1,25 +1,16 @@
-import { StatusReader } from '../status-reader.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
 import { EventEmitter } from 'node:events'
 import { join, resolve, dirname } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
 import { constants } from 'node:fs'
-import { arrangementRoute, selectArrangementRoute } from '../arrangement-playback.mjs'
 import { arrangementFromPhrase, arrangementFromMidiSource } from '../phrase-arrangement.mjs'
 import * as editor from '../sequencer-editor.mjs'
-import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceMeters, selectedMeter } from '../midi-source-editor.mjs'
+import { sourceTempos } from '../midi-source-editor.mjs'
 import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
-import { harmonyAt, PPQ, GM_DRUM_CHANNEL } from '../sequencer-project.mjs'
+import { PPQ } from '../sequencer-project.mjs'
 import { MidiSourcePicker as SourcePicker } from '../midi-source-picker.mjs'
-import { sourceSecondsAtTick, sourceTickAtSeconds } from '../midi-source-playback.mjs'
-import { isFluidSound } from '../soundfont.mjs'
-import { pickerFooter, selectionLabel, projectSoundLabel } from '../instruments.mjs'
-import { openStepInput, sameStepContext, stepControl } from '../step-input.mjs'
-import { phraseBacking } from '../phrase-backing.mjs'
-import * as terminalStyle from '../terminal-style.mjs'
-import * as meterBars from '../meter-bars.mjs'
+import { loadSubstituted } from './helpers/substituted-module.mjs'
 
 const frozenSound = selection => ({ kind: 'vst', selection, instrument: { identifier: 'Bass', version: '1' },
   preset: { data: Buffer.from('frozen state').toString('base64'), sha256: createHash('sha256').update('frozen state').digest('hex') } })
@@ -55,9 +46,9 @@ async function controller(options = {}) {
       super({ ...callbacks, discover: async () => { throw new Error('Unexpected MIDI source discovery') } })
     }
   }
-  const slot = `sequencer-${randomUUID()}`
-  globalThis[slot] = { StatusReader, ...terminalStyle, ...meterBars,
-    process, InstrumentPicker, MidiSourcePicker, pickerFooter, selectionLabel, projectSoundLabel, defaultStateDirectory: () => '/synthetic-vst',
+  // Only the names this controller test fakes; every other relative import is real.
+  const { viewSequencer } = await loadSubstituted(new URL('../sequencer-tui.mjs', import.meta.url), {
+    process, InstrumentPicker, MidiSourcePicker, defaultStateDirectory: () => '/synthetic-vst',
     snapshotWriter: () => async value => { observed.snapshots.push(value) },
     openVstSession() {
       const session = { closed: 0, run() { throw new Error('Unexpected VST host job') }, async close() { session.closed++ } }
@@ -65,32 +56,26 @@ async function controller(options = {}) {
     },
     captureVstSound(selection, captureOptions) { observed.soundCaptures.push(selection); observed.captureOptions.push(captureOptions); return options.capture?.(selection) ?? { promise: Promise.resolve(frozenSound(selection)), cancel() {} } },
     renderVstPhrase(value) { observed.native.push(value); return options.native(value) },
-    isFluidSound, GM_DRUM_CHANNEL,
     captureFluidSound() { throw new Error('Unexpected FluidSynth selection') },
     renderFluidSound() { throw new Error('Unexpected FluidSynth render') },
     mkdtemp: async () => '/synthetic-temp', rm: async () => {},
     writeFile: async path => { observed.writes.push(path) },
     copyFile: async (from, to) => { observed.copies.push([from, to]) },
-    arrangementRoute, selectArrangementRoute, dirname, constants, join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
+    dirname, constants, join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
     openPlayback(value) { observed.players++; if (options.playback) return options.playback(value); throw new Error('Unexpected playback') }, Worker,
-    Note: { fromMidi: String }, ...editor, harmonyAt, PPQ, sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceMeters, selectedMeter, sourceSecondsAtTick, sourceTickAtSeconds,
-    openStepInput, sameStepContext, stepControl, phraseBacking,
+    Note: { fromMidi: String },
     loadProject: async () => { throw new Error('Unexpected load') },
     saveProject: async (path, project) => { observed.saved.push(structuredClone(project)); return 'revision' },
     projectMidi() { throw new Error('Unexpected MIDI export') }, safeText: String,
     async openArrangement(value) { observed.arrangements.push(value); await options.arrangement?.(value) },
     async openSession(value) { observed.sessions++; await options.session?.(value) },
-  }
-  const source = (await readFile(new URL('../sequencer-tui.mjs', import.meta.url), 'utf8'))
-    .replace(/^import .*$/gm, '')
+  }, { rewrite: source => source
     .replace("new URL('./sequencer-worker.mjs', import.meta.url)", "new URL('file:///synthetic-worker')")
     .replace("await import('./music-session.mjs')", 'await Promise.resolve({ viewSession: openSession })')
-    .replaceAll("await import('./arrangement-tui.mjs')", 'await Promise.resolve({ viewArrangement: openArrangement })')
-  const prefix = `const {${Object.keys(globalThis[slot]).join(',')}} = globalThis[${JSON.stringify(slot)}];\n`
-  const { viewSequencer } = await import('data:text/javascript;base64,' + Buffer.from(prefix + source).toString('base64'))
+    .replaceAll("await import('./arrangement-tui.mjs')", 'await Promise.resolve({ viewArrangement: openArrangement })') })
   const signal = new AbortController()
   const done = viewSequencer({ root: '/synthetic', output: options.output, midiOutput: options.midiOutput,
-    initialDocument: options.initialDocument, signal: signal.signal }).finally(() => { delete globalThis[slot] })
+    initialDocument: options.initialDocument, signal: signal.signal })
   await new Promise(resolve => setImmediate(resolve))
   const key = (name, text = '') => process.stdin.emit('keypress', text, { name })
   return { observed, done, signal, process, key,

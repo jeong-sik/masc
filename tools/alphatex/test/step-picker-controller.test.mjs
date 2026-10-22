@@ -1,19 +1,14 @@
 import {MidiSourcePicker as ActualMidiSourcePicker}from '../midi-source-picker.mjs'
-import { StatusReader } from '../status-reader.mjs'
 import {phraseBacking} from '../phrase-backing.mjs'
 import {sameStepContext,stepControl}from '../step-input.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
 import { EventEmitter } from 'node:events'
-import { join, resolve } from 'node:path'
+import { join, resolve, dirname } from 'node:path'
+import { constants } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import * as editor from '../sequencer-editor.mjs'
-import { isFluidSound } from '../soundfont.mjs'
-import { GM_DRUM_CHANNEL } from '../sequencer-project.mjs'
-import { pickerFooter, projectSoundLabel } from '../instruments.mjs'
-import * as terminalStyle from '../terminal-style.mjs'
-import * as meterBars from '../meter-bars.mjs'
+import { loadSubstituted } from './helpers/substituted-module.mjs'
 
 // Exercise actual controller decisions with owned IO substitutes. No terminal
 // output, layout, audio hardware or player behavior is asserted.
@@ -34,10 +29,9 @@ async function controller(options = {}) {
     close() { this.view = null }
     async settled() {}
   }
-  const slot = `sequencer-${randomUUID()}`
-  globalThis[slot] = {
-    process, sameStepContext, stepControl, phraseBacking, ...editor, ...terminalStyle, ...meterBars, Worker, InstrumentPicker, StatusReader,
-    isFluidSound, GM_DRUM_CHANNEL, pickerFooter, projectSoundLabel,
+  // Only the names this controller test fakes; every other relative import is real.
+  const { viewSequencer } = await loadSubstituted(new URL('../sequencer-tui.mjs', import.meta.url), {
+    process, Worker, InstrumentPicker,
     openVstSession: () => ({ run() { throw new Error('Unexpected VST host job') }, async close() {} }),
     captureFluidSound() { throw new Error('Unexpected FluidSynth selection') },
     renderFluidSound() { throw new Error('Unexpected FluidSynth render') },
@@ -61,20 +55,16 @@ async function controller(options = {}) {
     },
     defaultStateDirectory: () => '/synthetic-vst', snapshotWriter: () => async () => {},
     mkdtemp: async () => '/synthetic-temp', rm: async () => {},
-    join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
+    join, resolve, dirname, constants, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
+    copyFile: async () => { throw new Error('Unexpected copy') },
     Note: { fromMidi: String }, safeText: String,
     saveProject: async (_path, project) => { observed.saved.push(structuredClone(project)); return 'revision' },
     writeFile: async (path, text, flags) => { observed.diagnostics.push({ path, value: JSON.parse(text), flags }) },
-  }
-  const source = (await readFile(new URL('../sequencer-tui.mjs', import.meta.url), 'utf8'))
-    .replace(/^import .*$/gm, '')
-    .replace("new URL('./sequencer-worker.mjs', import.meta.url)", "new URL('file:///synthetic-worker')")
-
-  const prefix = `const {${Object.keys(globalThis[slot]).join(',')}} = globalThis[${JSON.stringify(slot)}];\n`
-  const { viewSequencer } = await import('data:text/javascript;base64,' + Buffer.from(prefix + source).toString('base64'))
+  }, { rewrite: source => source
+    .replace("new URL('./sequencer-worker.mjs', import.meta.url)", "new URL('file:///synthetic-worker')") })
   const signal = new AbortController()
   const done = viewSequencer({ root: '/synthetic', output: options.output, midiOutput: options.midiOutput,
-    initialDocument: options.initialDocument, signal: signal.signal }).finally(() => { delete globalThis[slot] })
+    initialDocument: options.initialDocument, signal: signal.signal })
   await new Promise(resolve => setImmediate(resolve))
   const key = (name, text = '') => process.stdin.emit('keypress', text, { name })
   return { observed, done, signal, process, key,

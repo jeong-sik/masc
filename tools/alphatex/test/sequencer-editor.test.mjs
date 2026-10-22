@@ -1,4 +1,3 @@
-import { StatusReader } from '../status-reader.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { newEditor, editorCommand, editorAction, selectedNote } from '../sequencer-editor.mjs'
@@ -6,14 +5,15 @@ import { projectMidi, loadProject, saveProject } from '../sequencer-files.mjs'
 import { harmonyAt, PPQ } from '../sequencer-project.mjs'
 import { newArrangement } from '../arrangement.mjs'
 import { defaultStateDirectory } from '../vst.mjs'
-import * as terminalStyle from '../terminal-style.mjs'
-import * as meterBars from '../meter-bars.mjs'
-import { mkdtemp, rm, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { join, resolve, dirname } from 'node:path'
+import { constants } from 'node:fs'
+import { Note } from 'tonal'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import JZZ from 'jzz'
 import midiFiles from 'jzz-midi-smf'
+import { loadSubstituted } from './helpers/substituted-module.mjs'
 midiFiles(JZZ)
 
 test('revoicing compares existing voices with undo and retains rhythm, dynamics, other parts and exported keys', async () => {
@@ -139,22 +139,23 @@ test('editor admission rejects arrangements, unknown kinds and malformed phrase 
 
 test('loading a saved arrangement dispatches before phrase terminal or background resource admission', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'masc-arrangement-editor-admission-'))
-  const slot = `sequencer-admission-${randomUUID()}`
   const ownership = { raw: [], workers: 0, temporary: 0 }
   const dispatched = []
   const process = { stdin: { isTTY: true, setRawMode(value) { ownership.raw.push(value) } }, stdout: { isTTY: true } }
-  globalThis[slot] = { StatusReader, ...terminalStyle, ...meterBars, process, loadProject, newEditor, join, tmpdir, randomUUID, defaultStateDirectory,
+  const unexpected = name => () => { throw new Error(`Unexpected ${name} before arrangement dispatch`) }
+  // The real path helpers; every resource a phrase editor would open is refused.
+  const substitutes = { process, join, resolve, dirname, tmpdir, randomUUID, constants, Note,
     async openArrangement(options) { dispatched.push(options) },
     async mkdtemp() { ownership.temporary++; throw new Error('Unexpected terminal temporary directory') },
+    rm: unexpected('rm'), writeFile: unexpected('writeFile'), copyFile: unexpected('copyFile'),
+    emitKeypressEvents: unexpected('keypress setup'),
     Worker: class { constructor() { ownership.workers++; throw new Error('Unexpected terminal worker') } } }
   try {
     const path = join(directory, 'arrangement.json')
     await saveProject(path, newArrangement())
     assert.equal((await loadProject(path)).project.kind, 'arrangement')
-    const source = (await readFile(new URL('../sequencer-tui.mjs', import.meta.url), 'utf8')).replace(/^import .*$/gm, '')
-      .replace("await import('./arrangement-tui.mjs')", 'await Promise.resolve({ viewArrangement: openArrangement })')
-    const prefix = `const {${Object.keys(globalThis[slot]).join(',')}} = globalThis[${JSON.stringify(slot)}];\n`
-    const { viewSequencer } = await import('data:text/javascript;base64,' + Buffer.from(prefix + source).toString('base64'))
+    const { viewSequencer } = await loadSubstituted(new URL('../sequencer-tui.mjs', import.meta.url), substitutes,
+      { rewrite: source => source.replace("await import('./arrangement-tui.mjs')", 'await Promise.resolve({ viewArrangement: openArrangement })') })
     await viewSequencer({ path, root: directory })
     assert.equal(dispatched.length, 1)
     assert.equal(dispatched[0].loaded.path, path)
@@ -167,5 +168,5 @@ test('loading a saved arrangement dispatches before phrase terminal or backgroun
     assert.deepEqual(dispatched[1].loaded.project, newArrangement())
     assert.equal(dispatched[1].stateDirectory, stateDirectory)
     assert.deepEqual(ownership, { raw: [], workers: 0, temporary: 0 })
-  } finally { delete globalThis[slot]; await rm(directory, { recursive: true, force: true }) }
+  } finally { await rm(directory, { recursive: true, force: true }) }
 })

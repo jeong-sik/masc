@@ -65,9 +65,7 @@ let test_select_option_table () =
     check bool (label ^ " selects through BrowserInteract") true
       (invocation backend = Some (Cap.Interact, Some "select_option")))
     ["live BiDi",Cap.Connected Lane.Webdriver_bidi;"the extension",Cap.Connected Lane.Web_extension;
-     "Stagehand",Cap.Owned_chromium];
-  check bool "the owned Firefox keeps BrowserAct select" true
-    (invocation Cap.Owned_gecko = Some (Cap.Act, Some "select"));
+     "Stagehand",Cap.Owned_chromium;"the owned Firefox",Cap.Owned_gecko];
   check bool "Safari has no select" true (invocation Cap.Safari_unavailable = None)
 
 let test_list_windows_table () =

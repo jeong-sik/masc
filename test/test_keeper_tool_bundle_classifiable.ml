@@ -46,7 +46,7 @@ let with_publication_recovery_registry ~registry_root f =
     ~sw
     ~fs:(Eio.Stdenv.fs env)
     ~registry_root
-    f
+    (fun registry -> f registry (Eio.Stdenv.net env) sw)
 ;;
 
 let publication_recovery_turn_context ~registry ~keeper_name =
@@ -310,6 +310,9 @@ let with_bundle_tools
       ?(task_skill_names = ["gate-instruction"])
       ?(current_task_id = None)
       ?(tool_deny = [])
+      ?(addon_exports = [])
+      ?agent_cell
+      ?(check_on_demand = fun _ -> ())
       f
   =
   ignore (Masc_test_deps.init_unified_tool_registry ());
@@ -369,7 +372,20 @@ let with_bundle_tools
          Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
        in
        with_publication_recovery_registry ~registry_root:dir
-       @@ fun publication_recovery_registry ->
+       @@ fun publication_recovery_registry net sw ->
+       Option.iter (fun _ ->
+         (* Load receipts read the current Task from the same Owner projection
+            as a running Keeper, rather than from the frozen bundle metadata. *)
+         (match Keeper_owner_registry.install_from_store
+                  ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+          | Ok 0 -> ()
+          | Ok count -> failf "expected an empty Keeper inventory, got %d owners" count
+          | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
+         match Keeper_owner_registry.create_meta ~base_path:config.base_path meta with
+         | Ok (Some _) -> ()
+         | Ok None -> fail "fixture Owner did not persist its Keeper metadata"
+         | Error error -> fail (Keeper_owner_registry.command_error_to_string error))
+         agent_cell;
        let publication_recovery =
          publication_recovery_turn_context
            ~registry:publication_recovery_registry
@@ -379,7 +395,9 @@ let with_bundle_tools
          Masc.Keeper_tool_composition_plan_index.create ()
        in
        let capability_surface =
-         Keeper_capability_surface.create
+         Keeper_capability_surface.create_with_descriptors
+           ~tool_descriptors:(Keeper_tool_descriptor.all_descriptors ()
+             @ List.map Keeper_lane_addon_descriptor.create addon_exports)
            ~tool_deny
            ~sandbox_profile:Masc.Keeper_types_profile.Docker
            ~skill_names:None
@@ -403,7 +421,7 @@ let with_bundle_tools
            ~capability_surface
            ~identity_surface:
              { Masc.Keeper_tools_agent_core.offered = identity_tools ()
-             ; agent_cell = ref None
+             ; agent_cell = Option.value ~default:(ref None) agent_cell
              ; history = []
              ; load_receipts
              ; keeper_turn_id = 1
@@ -413,7 +431,11 @@ let with_bundle_tools
              (if record_activations then Some skill_activation_context else None)
            ()
        in
+       Option.iter (fun cell -> cell := Some (Agent_core.Agent.create
+         ~config:(Agent_core.Types.default_config ~model:"fixture-model")
+         ~net ~tools:bundle.agent_core_tools ())) agent_cell;
        Fun.protect ~finally:bundle.cleanup (fun () ->
+         check_on_demand bundle.on_demand_tool_names;
          f
            config
            meta
@@ -523,9 +545,7 @@ let test_stored_image_reader_is_callable_with_read_authority () =
 
 (* The handler is the tool. Reading only its schema would let a tool that
    answers nothing pass for one that works. *)
-let run_tool ?(tool_use_id = "bundle-instruction-activation")
-      (tool : Agent_core.Tool.t) input =
-  let invocation =
+let tool_invocation ~tool_use_id (tool : Agent_core.Tool.t) =
     Agent_core.Tool_contract.Invocation.create
       ~tool_use_id
       ~turn:0
@@ -536,7 +556,11 @@ let run_tool ?(tool_use_id = "bundle-instruction-activation")
         ; execution_mode = Agent_core.Tool_contract.Serial
         }
       ~completion:(Agent_core.Tool.completion tool)
-  in
+;;
+
+let run_tool ?(tool_use_id = "bundle-instruction-activation")
+      (tool : Agent_core.Tool.t) input =
+  let invocation = tool_invocation ~tool_use_id tool in
   match
     tool.handler
       (Agent_core.Tool.Execution_env.create ~invocation ())
@@ -544,6 +568,53 @@ let run_tool ?(tool_use_id = "bundle-instruction-activation")
   with
   | Ok output -> output.Agent_core.Llm_provider.Types.content
   | Error err -> err.Agent_core.Llm_provider.Types.message
+;;
+
+let test_addon_exports_load_into_the_running_agent () =
+  let name = "fixture_addon_command" in
+  let tool = match Mcp_protocol.Mcp_types.tool_of_yojson
+      (`Assoc ["name", `String name; "description", `String "Call the attached fixture";
+        "inputSchema", `Assoc ["type", `String "object";
+          "properties", `Assoc ["value", `Assoc ["type", `String "string"]];
+          "required", `List [`String "value"]; "additionalProperties", `Bool false]]) with
+    | Ok tool -> tool | Error detail -> fail detail in
+  let export = Lane_addon_tool_export.create
+      ~owner:(Lane_addon_tool_export.create_owner ~instance_id:"deferred-fixture") ~tool in
+  let cell = ref None in
+  with_bundle_tools ~agent_core:true ~addon_exports:[export] ~agent_cell:cell
+    (fun _config _meta _snapshot _index _surface tools ->
+      let agent = match !cell with Some agent -> agent | None -> fail "agent was not installed" in
+      let callable name = Agent_core.Tool_set.mem name (Agent_core.Agent.tools agent) in
+      check bool "unrequested Addon schema is absent from provider tools" false (callable name);
+      let loader = match List.find_opt (fun (tool : Agent_core.Tool.t) ->
+          tool.schema.name = Keeper_identity_tool_search.tool_name) tools with
+        | Some tool -> tool | None -> fail "deferred Addon has no loader" in
+      let invocation = tool_invocation ~tool_use_id:"bundle-addon-load" loader in
+      (match Agent_core.Tool.execute ~invocation loader (`Assoc ["names", `List [`String name]]) with
+       | Ok _ -> () | Error error -> fail error.Agent_core.Types.message);
+      check bool "requested Addon becomes callable in the same agent" true (callable name);
+      let loaded = match Agent_core.Tool_set.find name (Agent_core.Agent.tools agent) with
+        | Some tool -> tool | None -> fail "loaded Addon disappeared" in
+      check bool "loading keeps the original exported schema" true
+        (loaded.schema.input_schema = Some tool.input_schema));
+  with_bundle_tools ~agent_core:false ~addon_exports:[export]
+    ~check_on_demand:(fun names ->
+      check bool "official-client metadata defers the exported Addon tool" true
+        (List.mem name names))
+    (fun _config _meta _snapshot _index _surface tools ->
+      check bool "fixed-tool runtimes retain the complete Addon schema" true
+        (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) tools));
+  let cell = ref None in
+  with_bundle_tools ~agent_core:true ~addon_exports:[export] ~agent_cell:cell
+    ~tool_deny:["addon:" ^ name]
+    (fun _config _meta _snapshot _index _surface tools ->
+      let agent = match !cell with Some agent -> agent | None -> fail "agent was not installed" in
+      let loader = match List.find_opt (fun (tool : Agent_core.Tool.t) ->
+          tool.schema.name = Keeper_identity_tool_search.tool_name) tools with
+        | Some tool -> tool | None -> fail "fixture has no loader" in
+      ignore (run_tool loader (`Assoc ["names", `List [`String name]]));
+      check bool "loader cannot expose a denied Addon export" false
+        (Agent_core.Tool_set.mem name (Agent_core.Agent.tools agent)))
 ;;
 
 let fetch_blob_exn ~base_path reference =
@@ -1110,7 +1181,9 @@ let () =
   run
     "keeper_tool_bundle_classifiable"
     [ ( "the bundle"
-      , [ test_case "effect contracts survive bundle construction" `Quick
+      , [ test_case "Addon exports defer and load into the running agent" `Quick
+            test_addon_exports_load_into_the_running_agent
+        ; test_case "effect contracts survive bundle construction" `Quick
             test_bundle_effect_contracts
         ; test_case "no tool advertises a schema reference" `Quick
             test_no_tool_advertises_a_schema_reference

@@ -25,10 +25,18 @@ type declaration =
   | Absent
   | Unobserved
 type machine_publication = No_screen | Stable | Running | Publication_unavailable
+(** What the browser Add-on's last published observation says for a
+    built-in browser row. The server process holds no browser clients or
+    executors of its own: since #44295 they live in the browser Add-on
+    worker, so these rows read its cached observation. *)
+type 'a browser_reading =
+  | Browser_observed of 'a
+  | Browser_addon_absent
+  | Browser_addon_unavailable of string
 type state =
   | Exact_state of Server_standalone_lane_projection.lane_configuration
-  | Browser_clients of Browser_lane.activity * int
-  | Browser_executor of Browser_lane.activity * bool
+  | Browser_clients of Browser_lane.activity * int browser_reading
+  | Browser_executor of Browser_lane.activity * bool browser_reading
   | Machine_state of Machine_configuration.activity * machine_publication
   | Package_state of {
       declaration : declaration option;
@@ -48,6 +56,10 @@ val snapshot : config:Workspace.config -> t
 val to_json : t -> Yojson.Safe.t
 module For_testing : sig
   val machine_publication : (Lane_addon_runtime.export_observation option, string) result -> machine_publication
+  val browser_reading : (Lane_addon_runtime.export_observation option, string) result ->
+    Browser_addon_observation.published browser_reading
+  val browser_state : activity:Browser_lane.activity -> Browser_addon_observation.published browser_reading ->
+    Browser_lane.Lane_name.t -> state
   val package_rows : declarations:Lane_addon_config.snapshot ->
     instances:Lane_addon_runtime.inventory_instance list ->
     applications:Lane_addon_runtime.configuration_application list ->

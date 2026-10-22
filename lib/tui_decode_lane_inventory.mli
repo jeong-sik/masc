@@ -45,10 +45,17 @@ type instance = {
 type browser_activity = Browser_enabled | Browser_disabled | Browser_unobserved
 type machine_activity = Machine_enabled | Machine_disabled | Machine_unobserved
 type machine_publication = No_screen | Stable | Running | Publication_unavailable
+(** What the browser Add-on's last published observation says for a
+    built-in browser row: the observed value, no browser Add-on, or why its
+    observation cannot be read. *)
+type 'a browser_reading =
+  | Browser_observed of 'a
+  | Browser_addon_absent
+  | Browser_addon_unavailable of string
 type state =
   | Exact_state of configuration
-  | Browser_clients of browser_activity * int
-  | Browser_executor of browser_activity * bool
+  | Browser_clients of browser_activity * int browser_reading
+  | Browser_executor of browser_activity * bool browser_reading
   | Machine_state of machine_activity * machine_publication
   | Package_state of { declaration : declaration option; instances : instance list }
 type row = { id : string; label : string; purpose : string; selection : selection; state : state }

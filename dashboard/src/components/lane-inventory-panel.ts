@@ -19,6 +19,9 @@ const machineActivityText = { on: 'New execution and input enabled', off: 'Off �
   unobserved: 'Activity configuration unavailable' }
 const machinePublicationText = { no_screen: 'No screen observed', stable: 'Stable screen published',
   running: 'Machine running', unavailable: 'Worker observation unavailable' } as const
+function browserAddonText(addon: { kind: 'absent' } | { kind: 'unavailable'; detail: string }): string {
+  return addon.kind === 'absent' ? 'No browser Add-on' : `Browser Add-on unavailable · ${addon.detail}`
+}
 function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
   const state = row.state
   switch (state.kind) {
@@ -33,9 +36,12 @@ function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
           : `${config.kind}: ${config.detail}`,
       ...(lane ? [`${lane.status} · ${lane.runningCount} running · ${lane.retainedRunCount} retained runs`] : [])]
     }
-    case 'browser_clients': return [browserActivityText[state.activity], `${state.connected_clients} connected clients`]
+    case 'browser_clients': return [browserActivityText[state.activity],
+      state.addon.kind === 'observed' ? `${state.addon.connected_clients} connected clients` : browserAddonText(state.addon)]
     case 'browser_executor': return [browserActivityText[state.activity],
-      state.registered ? 'Executor registered · session activity unverified' : 'Executor not registered',
+      state.addon.kind === 'observed'
+        ? (state.addon.registered ? 'Executor registered · session activity unverified' : 'Executor not registered')
+        : browserAddonText(state.addon),
       'Status and close remain available while off. Executable and profile paths apply at server startup.']
     case 'machine': return [machineActivityText[state.activity],
       machinePublicationText[state.publication]]

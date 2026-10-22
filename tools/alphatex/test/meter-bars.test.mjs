@@ -38,3 +38,11 @@ test('signatures out of order or with invalid values are refused', () => {
   assert.throws(() => meterSegments([{ tick: 8, numerator: 4, denominator: 4 }, { tick: 4, numerator: 3, denominator: 4 }]), /tick order/)
   assert.throws(() => meterSegments([{ tick: 0, numerator: 0, denominator: 4 }]), /Invalid/)
 })
+
+test('the bar holding a tick spans whole ticks and ends early at a later signature', async () => {
+  const { barSpan } = await import('../meter-bars.mjs')
+  const segments = meterSegments([{ tick: 0, numerator: 4, denominator: 4 }, { tick: 6 * per, numerator: 3, denominator: 4 }])
+  assert.deepEqual(barSpan(5 * per, segments, per), { start: 4 * per, end: 6 * per })
+  assert.deepEqual(barSpan(7 * per, segments, per), { start: 6 * per, end: 9 * per })
+  assert.throws(() => barSpan(0, meterSegments([{ tick: 0, numerator: 1, denominator: 64 }]), 10), /between MIDI ticks/)
+})

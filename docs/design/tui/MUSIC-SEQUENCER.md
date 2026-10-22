@@ -25,6 +25,19 @@ without erasing that range. Phrase ranges are saved in the document; source
 ranges belong to the editing session and leave the original performance/export
 unchanged. The arrangement editor retains its own saved playback-loop selection.
 
+`{` starts that range at the bar under the cursor and `}` ends it after that bar;
+a side placed across the other makes the range that one bar. Bars come from the
+phrase meter or the imported time-signature map, where each signature starts a
+new bar at its tick; SMPTE frame documents have no bars and keep `:loop`. `>` and
+`<` make a phrase one bar longer or shorter (a partial last bar is completed or
+dropped first) and `:bars N` sets the count; a cut that would remove part of a
+note or a loop is refused with the bar it reaches. Imported MIDI keeps the length
+of its performance. The ruler numbers the bars and draws the loop range, bold
+while repetition is on. While a transport plays or pauses, the grid follows the
+playhead, draws its column and reverses the notes sounding under it; the cursor
+and playhead lines give `bar N beat M`. Status has its own line, and failures are
+drawn in red.
+
 Each save first writes and syncs a private local candidate and a separate publication
 inode in a sibling `.song.json.save-*` directory. Updating an existing project moves its current inode
 to that directory's `previous.json`, checks the claimed bytes against the loaded

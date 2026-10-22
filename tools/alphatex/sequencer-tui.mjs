@@ -8,12 +8,12 @@ import { emitKeypressEvents } from 'node:readline'
 import { Worker } from 'node:worker_threads'
 import { Note } from 'tonal'
 import { GM_DRUM_CHANNEL } from './sequencer-project.mjs'
-import { newEditor, editorCommand, editorAction, selectedNote, selectedNotes, editorView, editorAxis, editorHarmony, editorSound, stepInputEffect } from './sequencer-editor.mjs'
+import { newEditor, editorCommand, editorAction, selectedNote, selectedNotes, editorView, editorAxis, editorHarmony, editorMeters, editorSound, stepInputEffect } from './sequencer-editor.mjs'
 import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
 import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceMeters, selectedMeter } from './midi-source-editor.mjs'
 import { safeText } from './terminal.mjs'
-import { meterSegments, barAt, isBarStart, beatText } from './meter-bars.mjs'
+import { barAt, isBarStart, beatText } from './meter-bars.mjs'
 import { fitLine, cellSegments, bold, dim, inverse, red, green, yellow, blue, magenta, cyan } from './terminal-style.mjs'
 import { StatusReader } from './status-reader.mjs'
 import { openPlayback } from './playback.mjs'
@@ -51,6 +51,7 @@ const help = [
   ':copy-notes :cut-notes :paste-notes [AT [SEMITONES]] :delete-notes :move-notes OFFSET SEMITONES',
   'Tab: track; n: new track; m: mute; o: solo; u/y: undo/redo',
   '[/]: halve/double note length; +/-: velocity; g: grid; l: loop; Space: play/pause',
+  '{/}: loop from/to the bar under the cursor; </>: one bar shorter/longer; :bars N sets the length',
   's: save; r: recording; q/Esc: save and return; : opens command input',
   'All positions and lengths below use quarter-note beats starting at 0.',
   ':note C4 0 1 96              pitch, beat, duration, optional velocity',
@@ -90,6 +91,15 @@ const trackColors = [cyan, green, magenta, yellow, blue]
 const blackKeys = new Set([1, 3, 6, 8, 10])
 const transportStyles = { playing: [bold, green], paused: [cyan], rendering: [yellow], starting: [yellow], stopped: [dim], practicing: [magenta] }
 const cursorRow = selected => selected ? [bold, cyan] : []
+// The loop as bars when both ends sit on bar lines, else in axis units.
+function loopLabel(view, axis, meters) {
+  const { start, end } = view.loop, limit = view.displayLength ?? view.length
+  if (meters && isBarStart(start, meters, axis.per) && (end === limit || isBarStart(end, meters, axis.per))) {
+    const firstBar = barAt(start, meters, axis.per).bar, lastBar = barAt(end - 1, meters, axis.per).bar
+    return firstBar === lastBar ? `bar ${firstBar}` : `bars ${firstBar}–${lastBar}`
+  }
+  return `${start / axis.per}–${end / axis.per} ${axis.label}`
+}
 
 export async function viewSequencer({ path, root = resolve('music-projects'), embedded = false, signal,
   soundfontPath, sessionRoot, input, midi, output, midiOutput, initialDocument, pattern, initialPortBindings = [],
@@ -220,13 +230,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     // Bars follow the phrase meter or the imported signature map; SMPTE
     // frames have no bars. A map that cannot be read is shown, not drawn.
     let meters = null, meterProblem = null
-    if (editor.project.kind !== 'midi-source' || editor.info.timing.kind !== 'smpte') {
-      try {
-        meters = meterSegments(editor.project.kind === 'midi-source'
-          ? sourceMeters(editor).map(({ tick, numerator, denominator }) => ({ tick, numerator, denominator })).sort((a, b) => a.tick - b.tick)
-          : [{ tick: 0, numerator: project.meter[0], denominator: project.meter[1] }])
-      } catch (error) { meterProblem = error.message }
-    }
+    try { meters = editorMeters(editor) } catch (error) { meterProblem = error.message }
     // The cursor is shown exactly, as commands take it. A moving playhead is
     // cut down to a hundredth of a beat first, so it never reads one ahead.
     const position = (tick, rounded = false) => {
@@ -332,10 +336,24 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       const beatStart = tick => meters ? Number.isInteger(barAt(tick, meters, per).beat) : false
       const ruler = Array.from({ length: cols }, (_, x) => {
         const tick = first + x * editor.step
-        return tick >= project.length ? [' ', []] : x === playColumn ? ['▼', [bold, green]]
+        if (tick >= project.length) return [' ', []]
+        const [glyph, styles] = x === playColumn ? ['▼', [bold, green]]
           : barStart(tick) ? ['|', [bold]] : beatStart(tick) ? ['+', []] : ['·', [dim]]
+        // The loop range is drawn on the ruler, bold while repetition is on.
+        const inLoop = project.loop.start <= tick && tick < project.loop.end && x !== playColumn
+        return [glyph, inLoop ? [...new Set([...styles.filter(style => style !== dim), cyan, ...(loop ? [bold] : [])])] : styles]
       })
-      lines.push([['       ', []], ...cellSegments(ruler)], `       ${axis.label} ${first / per} → ${Math.min(project.length, first + cols * editor.step) / per}`)
+      // Bar numbers sit under their bar lines while they do not overlap.
+      const numbers = Array.from({ length: cols }, () => ' ')
+      for (let x = 0; meters && x < cols; x++) {
+        const tick = first + x * editor.step
+        if (tick >= project.length || !barStart(tick)) continue
+        const label = String(barAt(tick, meters, per).bar)
+        if (x + label.length > cols || numbers.slice(Math.max(0, x - 1), x + label.length).some(char => char !== ' ')) continue
+        for (const [offset, char] of [...label].entries()) numbers[x + offset] = char
+      }
+      lines.push([['       ', []], ...cellSegments(ruler)], meters ? [['  bar  ', [dim]], [numbers.join(''), [bold]]]
+        : `       ${axis.label} ${first / per} → ${Math.min(project.length, first + cols * editor.step) / per}`)
       const height = Math.max(1, rows - 11), high = Math.min(127, Math.max(height - 1, editor.pitch + Math.floor(height / 2)))
       for (let y = 0; y < height; y++) {
         const pitch = high - y
@@ -361,13 +379,13 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       const instrument = projectSoundLabel(audioInstrument())
       const destination = portBindings.length ? portBindings.map(binding => `${binding.port}→${binding.destination}`).join(', ')
         : selectedMidiOutput === undefined ? selectedOutput ?? 'system default' : `MIDI ${selectedMidiOutput}`
-      lines.push(`Playhead ${playhead === null ? '—' : position(playhead, true)} · loop ${project.loop.start / per}–${project.loop.end / per} · ${instrument} · output ${destination} · ${path}`)
+      lines.push(`Playhead ${playhead === null ? '—' : position(playhead, true)} · loop ${loop ? 'on' : 'off'} ${loopLabel(project, axis, meters)} · ${instrument} · output ${destination} · ${path}`)
     }
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
     lines.slice(0, rows - 2).forEach((line, row) => { output += `\x1b[${row + 1};1H${fit(line)}` })
     output += `\x1b[${rows - 1};1H${fit(sourcePicker.view ? '↑/↓:choose  Enter:arm keyboard  r:refresh  Esc/q:cancel' : picker.view ? pickerFooter(picker.view) : prompt !== null ? `:${prompt}` : harmony ? '↑/↓:choose interval  Enter:go to notes  :commands  Esc/q:return' : 'Space:play  i:instrument  Enter:note  arrows:cursor  Tab:track  :commands  ?:help')}`
-    if (!picker.view) output += `\x1b[${rows};1H${fit(sourcePicker.view ? openedSourceMenuOwner?.monitor ? 'Selection arms step input with the chosen instrument and audio output.' : 'Selection opens MIDI input only; no audio or output route.' : harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 'Ctrl-L:status  s:save  l:loop  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
+    if (!picker.view) output += `\x1b[${rows};1H${fit(sourcePicker.view ? openedSourceMenuOwner?.monitor ? 'Selection arms step input with the chosen instrument and audio output.' : 'Selection opens MIDI input only; no audio or output route.' : harmony && !picker.view ? ':harmony mix|track  :harmony-export PATH · analysis preserves the musical document' : 'Ctrl-L:status  s:save  l:loop  { }:loop bars  < >:bars  r:recording  q:save/back  n:new track  m:mute  o:solo')}`
     process.stdout.write(output)
   }
   function stop(options) {
@@ -791,10 +809,17 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         default:
           if (editor.eventView) {
             if (['+', '=', '-'].includes(text)) editor = editorAction(editor, { kind: `${eventKind}-value`, delta: text === '-' ? -1 : 1 })
-          } else if (text === '[' || text === ']') editor = editorAction(editor, { kind: 'duration', value: (selectedNote(editor)?.duration ?? editor.duration) * (text === '[' ? 0.5 : 2) })
+          } else if (text === '{' || text === '}') editor = editorAction(editor, { kind: 'locator', side: text === '{' ? 'left' : 'right' })
+          else if (text === '<' || text === '>') editor = editorAction(editor, { kind: 'bars', delta: text === '>' ? 1 : -1 })
+          else if (text === '[' || text === ']') editor = editorAction(editor, { kind: 'duration', value: (selectedNote(editor)?.duration ?? editor.duration) * (text === '[' ? 0.5 : 2) })
           else if (['+', '=', '-'].includes(text)) editor = editorAction(editor, { kind: 'velocity', value: (selectedNote(editor)?.velocity ?? editor.velocity) + (text === '-' ? -1 : 1) })
       }
       if (original !== editor.project) { stopPlayback(); status = notice('Edited') }
+      if (!editor.eventView && (text === '{' || text === '}')) {
+        // An imported source keeps its loop in the editor, not the document.
+        stopPlayback()
+        status = notice(`Loop ${loopLabel(editorView(editor), editorAxis(editor), editorMeters(editor))}${loop ? '' : ' · l turns repetition on'}`)
+      }
       changedContext(previous)
     }).catch(error => { status = failure(error.message) }).finally(draw)
   }

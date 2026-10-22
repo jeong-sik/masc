@@ -41,3 +41,16 @@ export function isBarStart(tick, segments, per) {
 }
 
 export const beatText = beat => Number.isInteger(beat) ? String(beat) : beat.toFixed(2)
+
+// The bar holding a tick, as integer ticks: [start, end). A later signature
+// ends a bar early. A bar line between ticks is refused rather than rounded.
+export function barSpan(tick, segments, per) {
+  const index = segments.findLastIndex(value => value.tick <= tick)
+  if (index < 0) throw new Error('Tick before the first time signature')
+  const segment = segments[index], scaledBar = segment.numerator * per * 4
+  const bar = Math.floor((tick - segment.tick) * segment.denominator / scaledBar)
+  const start = segment.tick + bar * scaledBar / segment.denominator
+  const end = Math.min(segments[index + 1]?.tick ?? Infinity, segment.tick + (bar + 1) * scaledBar / segment.denominator)
+  if (!Number.isInteger(start) || !Number.isInteger(end)) throw new Error('This bar line falls between MIDI ticks')
+  return { start, end }
+}

@@ -798,11 +798,10 @@ let run_bidi env config url ~firefox_profile ~stop =
                 `Assoc
                   [ "id", `String id; "ok", `Bool false; "error", `String message
                   ; "effectPhase", `String "not_started" ] }
-        | Error (Masc.Browser_bidi_peer.Partial_failure {tab_id;message}) ->
+        | Error (Masc.Browser_bidi_peer.Partial_failure {message;receipt;_}) ->
             { id; verb; outcome = Record.Failed
             ; payload = `Assoc ["id", `String id; "ok", `Bool false;
-                "error", `String message; "effectPhase", `String "partial"; "data", `Assoc ["action", `String "open_tab";
-                  "created", `Bool true; "tabId", `Int tab_id]] }
+                "error", `String message; "effectPhase", `String "partial"; "data", receipt] }
         | Error (Masc.Browser_bidi_peer.Outcome_unknown message) ->
             { id; verb; outcome = Record.Unknown; payload = failure id message }
       in

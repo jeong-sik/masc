@@ -973,13 +973,14 @@ let test_a_tab_restored_by_the_caller_is_not_restored_again () =
   ignore (ended_session peer);
   check int "the caller's restore is the last size command" 2 (List.length !sent)
 let test_history_and_close_act_only_on_tabs_this_connection_opened () =
-  let sent = ref [] and created = ref false and history_error = ref None in
+  let sent = ref [] and created = ref false and history_error = ref None and readable = ref true in
   let peer = peer_of (fun method_ args ->
     match method_ with
     | "browsingContext.getTree" -> Ok (obj ["contexts",`List
         (obj ["context",`String "owned"] :: if !created then [obj ["context",`String "created"]] else [])])
     | "browsingContext.create" -> created := true; Ok (obj ["context",`String "created"])
     | "browsingContext.navigate" -> Ok `Null
+    | "script.callFunction" when not !readable -> Error (Peer.Unsent "the connection ended")
     | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/";"title",`String "fixture";"active",`Bool true]))
     | "browsingContext.traverseHistory" | "browsingContext.reload" when !history_error <> None ->
       (match !history_error with Some code -> Error (Peer.Rejected (Peer.error_code_of_wire code)) | None -> fail "no error set")
@@ -1017,11 +1018,21 @@ let test_history_and_close_act_only_on_tabs_this_connection_opened () =
   (match act 2 Browser_lane.Action.Back with
    | Error (Peer.Before_effect _) -> ()
    | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) -> fail "a refusal before the step is not before effect");
-  (* A reload that lands on an error page is answered with an error after the tab moved. *)
+  (* A reload that lands on an error page is answered with an error after the
+     tab moved. Reading the tab again makes it a known partial effect, so the
+     connection stays; a tab that cannot be read leaves it unknown. *)
   history_error := Some "unknown error";
   (match act 2 Browser_lane.Action.Reload with
+   | Error (Peer.Partial_failure {tab_id;receipt;_}) ->
+     check int "the partial names the opened tab" 2 tab_id;
+     check bool "the receipt is the tab read again" true
+       (member "action" receipt = `String "reload" && member "url" receipt = `String "https://example.test/")
+   | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) -> fail "an error after a reload started was not read again");
+  readable := false;
+  (match act 2 Browser_lane.Action.Reload with
    | Error (Peer.Outcome_unknown _) -> ()
-   | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _) -> fail "an error after a reload started was called before effect");
+   | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _) -> fail "an unreadable tab after a failed reload was not unknown");
+  readable := true;
   history_error := None;
   (match act 2 Browser_lane.Action.Close_tab with
    | Ok receipt -> check bool "the receipt says it closed" true (member "closed" receipt = `Bool true)
@@ -1035,7 +1046,7 @@ let test_history_and_close_act_only_on_tabs_this_connection_opened () =
 (* Navigation follows the rule of the history steps: a tab the operator
    opened is refused before any command, and so is a URL that is not HTTP(S). *)
 let test_goto_acts_only_on_a_tab_this_connection_opened () =
-  let navigations = ref [] and created = ref false and navigate_error = ref None in
+  let navigations = ref [] and created = ref false and navigate_error = ref None and readable = ref true in
   let peer = peer_of (fun method_ args ->
     match method_ with
     | "browsingContext.getTree" -> Ok (obj ["contexts",`List
@@ -1046,6 +1057,7 @@ let test_goto_acts_only_on_a_tab_this_connection_opened () =
       (match !navigate_error with
        | Some code -> Error (Peer.Rejected (Peer.error_code_of_wire code))
        | None -> Ok `Null)
+    | "script.callFunction" when not !readable -> Error (Peer.Unsent "the connection ended")
     | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://example.test/next";"title",`String "next";"active",`Bool true]))
     | other -> failf "unexpected protocol command: %s" other) in
   ignore (Peer.dispatch peer ~verb:Peer.Tabs_list (obj []));
@@ -1076,11 +1088,22 @@ let test_goto_acts_only_on_a_tab_this_connection_opened () =
         && Yojson.Safe.Util.member "wait" latest = `String "complete"
         && Yojson.Safe.Util.member "url" latest = `String "https://example.test/next")
    | [] -> fail "nothing was navigated");
+  (* Firefox answers a failed navigation (an unknown host, a refused
+     connection) with an error. The tab is read again, so the connection
+     keeps it and its ID. *)
   navigate_error := Some "unknown error";
+  (match goto (Some 2) "https://unreachable.example.test/" with
+   | Error (Peer.Partial_failure {tab_id;receipt;_}) ->
+     check int "the partial names the opened tab" 2 tab_id;
+     check bool "the receipt is where the tab is now" true
+       Yojson.Safe.Util.(member "action" receipt = `String "goto" && member "tabId" receipt = `Int 2)
+   | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) ->
+     fail "an error after the navigation started was not read again");
+  readable := false;
   match goto (Some 2) "https://unreachable.example.test/" with
   | Error (Peer.Outcome_unknown _) -> ()
   | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _) ->
-    fail "an error after the navigation started was called before effect"
+    fail "an unreadable tab after a failed navigation was not unknown"
 let test_tabs_name_their_window () =
   let peer = peer_of (fun method_ _ ->
     match method_ with

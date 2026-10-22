@@ -164,8 +164,8 @@ let decode (issued:B.issued) =
 let payload = function
   | Ok data -> `Assoc ["ok",`Bool true;"data",data]
   | Error (Peer.Before_effect detail) -> `Assoc ["ok",`Bool false;"error",`String detail;"effectPhase",`String "not_started"]
-  | Error (Peer.Partial_failure {tab_id;message}) -> `Assoc ["ok",`Bool false;"error",`String message;
-      "effectPhase",`String "partial";"data",`Assoc ["action",`String "open_tab";"created",`Bool true;"tabId",`Int tab_id]]
+  | Error (Peer.Partial_failure {message;receipt;_}) -> `Assoc ["ok",`Bool false;"error",`String message;
+      "effectPhase",`String "partial";"data",receipt]
   | Error (Peer.Outcome_unknown detail) -> `Assoc ["ok",`Bool false;"error",`String detail]
 let accepted = function
   | W.Receipt -> Ok ()

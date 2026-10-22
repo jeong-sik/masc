@@ -5,8 +5,8 @@ let string name json = match field name json with
 let obj xs = `Assoc xs
 let str s = `String s
 let required name json = match field name json with Some v -> Ok v | None -> Error ("missing " ^ name)
-type created_tab_failure = { tab_id : int; message : string }
-type failure = Before_effect of string | Partial_failure of created_tab_failure | Outcome_unknown of string
+type partial_failure = { tab_id : int; message : string; receipt : Yojson.Safe.t }
+type failure = Before_effect of string | Partial_failure of partial_failure | Outcome_unknown of string
 (* The error codes Firefox answers that this host acts on, read once where
    the answer arrives; any other code is kept as Firefox wrote it.
    "session not created": Firefox will not serve a [session.new]. It takes
@@ -209,7 +209,8 @@ let open_tab t url =
   let message reason =
     Printf.sprintf "New tab was created as tabId %d on this connection. %s. Do not open another tab to retry." id reason in
   let partial reason = Partial_failure {tab_id=id;message=message reason ^
-    " Inspect it using this same clientId and tabId."} in
+    " Inspect it using this same clientId and tabId.";
+    receipt=obj ["action",str "open_tab";"created",`Bool true;"tabId",`Int id]} in
   let rpc_failure = function
     | Rejected (Other_error _) as refusal -> partial (refusal_message refusal)
     | Rejected (Session_not_created | Invalid_session_id) | Unanswered _ | Unsent _ as refusal ->
@@ -329,7 +330,8 @@ let keyboard t context args ~sources ~name =
    this host never saw, and these actions carry no expectedUrl to say which page the caller observed. Of
    Firefox's refusals, only [codes_before_acting] mean nothing happened. A reload or a history step waits for
    the document, and one that lands on an error page is answered with an error after the tab moved, so any
-   other error, like a command that got no answer, is [Outcome_unknown]. *)
+   other error, like a command that got no answer, may have had an effect: a navigation step reads the tab
+   again ([settle_navigation]) and a close stays [Outcome_unknown]. *)
 let codes_before_acting = ["no such history entry"; "invalid argument"; "no such frame"]
 let ask_on_tab t method_ params = match t.ask method_ params with
   | Ok result -> Ok result
@@ -344,6 +346,17 @@ let tab_receipt t context id name =
   match summary with
   | `Assoc fields -> Ok (obj (("tabId",`Int id)::("action",str name)::fields))
   | _ -> Error (Outcome_unknown ("invalid post-" ^ name ^ " observation"))
+(* A navigation step Firefox answered with an error may have moved the tab
+   already, onto an error page or part way. Reading the tab again settles
+   where it is, so the step is a known partial effect and the connection
+   stays; only a tab that cannot be read leaves the outcome unknown. *)
+let settle_navigation t context id name = function
+  | Ok _ -> tab_receipt t context id name
+  | Error (Outcome_unknown message) ->
+    (match tab_receipt t context id name with
+     | Ok receipt -> Error (Partial_failure {tab_id=id;message;receipt})
+     | Error _ -> Error (Outcome_unknown message))
+  | Error (Before_effect _ | Partial_failure _ as failure) -> Error failure
 let tab_action t ~tab_id interaction =
   let ask = ask_on_tab t in
   let* () = match interaction with
@@ -355,14 +368,16 @@ let tab_action t ~tab_id interaction =
     | Browser_lane.Action.Press _ | Browser_lane.Action.Select _ | Browser_lane.Action.Scroll _
     | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _ | Browser_lane.Action.Dismiss_dialog -> Ok () in
   let* context,id = Result.map_error (fun e -> Before_effect e) (resolve t (obj ["tabId",`Int tab_id])) in
-  let after = tab_receipt t context id in
   match interaction with
   | Browser_lane.Action.Back ->
-    let* _ = ask "browsingContext.traverseHistory" (obj ["context",str context;"delta",`Int (-1)]) in after "back"
+    settle_navigation t context id "back"
+      (ask "browsingContext.traverseHistory" (obj ["context",str context;"delta",`Int (-1)]))
   | Browser_lane.Action.Forward ->
-    let* _ = ask "browsingContext.traverseHistory" (obj ["context",str context;"delta",`Int 1]) in after "forward"
+    settle_navigation t context id "forward"
+      (ask "browsingContext.traverseHistory" (obj ["context",str context;"delta",`Int 1]))
   | Browser_lane.Action.Reload ->
-    let* _ = ask "browsingContext.reload" (obj ["context",str context;"wait",str "complete"]) in after "reload"
+    settle_navigation t context id "reload"
+      (ask "browsingContext.reload" (obj ["context",str context;"wait",str "complete"]))
   | Browser_lane.Action.Close_tab ->
     let* _ = ask "browsingContext.close" (obj ["context",str context;"promptUnload",`Bool false]) in
     t.opened <- List.filter (fun opened -> opened <> id) t.opened;
@@ -390,9 +405,8 @@ let goto t args =
     | Some _ | None ->
       refuse "a connected browser navigates only a tab this connection opened with open_tab; pass that tabId" in
   let* context,id = Result.map_error (fun e -> Before_effect e) (resolve t (obj ["tabId",`Int tab_id])) in
-  let* _ = ask_on_tab t "browsingContext.navigate"
-      (obj ["context",str context;"url",str url;"wait",str "complete"]) in
-  tab_receipt t context id "goto"
+  settle_navigation t context id "goto"
+    (ask_on_tab t "browsingContext.navigate" (obj ["context",str context;"url",str url;"wait",str "complete"]))
 
 (* The override stays on the tab until a later [Browser_default] clears it, so a refusal before the
    command leaves the viewport as it was. *)

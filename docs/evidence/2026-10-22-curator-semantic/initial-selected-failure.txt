@@ -1,0 +1,143 @@
+  OPAMSWITCH: ci-5-5-1
+  DUNE_JOBS: 4
+  MASC_TEST_SUITE_DEADLINE: 5400
+  CI_TEST_TIMEOUT_SEC: 6000
+  CI_TEST_HEARTBEAT_SEC: 30
+  CI_TEST_LOG_FILE: /home/runner/work/_temp/ci-run-tests.log
+  MASC_TEST_SUITE_LOG_ARTIFACT: test-suite-log
+  MINIMAL_CHECK: true
+  TARGET_SUITES: test_lane_addon_exact,test_lane_addon_exact_runner,test_lane_addon_host_cycle,test_lane_addon_exact_native,test_browser_addon_stagehand_model,test_workspace_memory_execution_capture,test_lane_addon_worker
+  TARGET_EIO_BACKEND: posix
+  TARGET_SUITE_TIMEOUT_SEC: 600
+  TARGET_SUITE_KILL_GRACE_SEC: 30
+##[endgroup]
+[targeted] EIO_BACKEND=posix timeout=600s per suite
+[targeted] @@test/runtest-test_lane_addon_exact_native: start 2026-10-21T19:34:46Z (dune alias)
+
+ASSERT and its message first
+  [OK]          runner          9   the cli tail answers after the http slots.
+ASSERT the conversation answers
+ASSERT HTTP roles remain in their original order
+  [FAIL]        runner         10   HTTP preserves conversation roles.
+[2026-10-21 19:43:36] [INFO] [ToolValidation] tool_input_validation rejected author: Your call to "author":\x0A{"value":{"wrong":"shape"}}\x0A\x0AErrors (fix these and call again):\x0A  "value/question": MISSING (required: string)
+ASSERT the HTTP path was attempted
+ASSERT the CLI process was never entered
+ASSERT the original request answers after configuration changes
+ASSERT one capable call
+  [OK]          runner         11   CLI refuses assistant history before disp...
+ASSERT partial request-shape rejection advances the HTTP walk
+ASSERT first candidate dispatched once
+ASSERT second candidate dispatched once
+  [OK]          runner         12   request shape advances HTTP without repla...
+[2026-10-21 19:43:36] [INFO] [ToolValidation] tool_input_validation rejected classification: Tool 'classification' declares no input fields but received arguments
+[2026-10-21 19:43:36] [INFO] [ToolValidation] tool_input_validation rejected classification: Tool 'classification' declares no input fields but received arguments
+ASSERT valid original fact decision must answer
+  [FAIL]        runner         13   original Curator facts advance HTTP and s...
+[2026-10-21 19:43:36] [INFO] [ToolValidation] tool_input_validation rejected classification: Tool 'classification' declares no input fields but received arguments
+[2026-10-21 19:43:36] [INFO] [ToolValidation] tool_input_validation rejected classification: Tool 'classification' declares no input fields but received arguments
+[2026-10-21 19:43:36] [INFO] [ToolValidation] tool_input_validation rejected classification: Tool 'classification' declares no input fields but received arguments
+ASSERT the next CLI's complete original decision must answer
+  [FAIL]        runner         14   original Curator semantics advance CLI tail.
+ASSERT a package name cannot grant missing host authority
+ASSERT missing capture sends nothing
+ASSERT worker cannot replace captured prompt bytes
+ASSERT worker cannot transfer this capture to another installation
+ASSERT relabeling the package does not bypass an original Curator capture
+ASSERT refusals do not enter the provider
+[2026-10-21 19:43:36] [INFO] [ToolValidation] tool_input_validation rejected classification: Tool 'classification' declares no input fields but received arguments
+ASSERT retained answers require the original physical workspace too
+ASSERT authority restoration reuses the original terminal
+  [FAIL]        runner         15   Curator authority precedes dispatch and r...
+[2026-10-21 19:43:36] [INFO] [ToolValidation] tool_input_validation rejected classification: Tool 'classification' declares no input fields but received arguments
+ASSERT invalid retained terminal is not retried
+  [OK]          runner         16   schema-only retained Curator answer has n...
+[2026-10-21 19:43:36] [INFO] [ToolValidation] tool_input_validation rejected briefing: Tool 'briefing' declares no input fields but received arguments
+[2026-10-21 19:43:36] [INFO] [ToolValidation] tool_input_validation rejected briefing: Tool 'briefing' declares no input fields but received arguments
+ASSERT nonblank original summary must answer
+  [FAIL]        runner         17   Curator briefing rejects blank before acc...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        runner         10   HTTP preserves conversation roles.         │
+└──────────────────────────────────────────────────────────────────────────────┘
+File "test/test_lane_addon_exact_runner.ml", line 238, character 8:
+FAIL HTTP roles remain in their original order
+
+   Expected: `["system"; "user"; "assistant"; "user"]'
+   Received: `["system"; "user"; "assistant"; "user"; "user"]'
+
+
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        runner         13   original Curator facts advance HTTP an...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+FAIL valid original fact decision must answer
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_lane_addon_exact_runner.test_original_curator_semantics_advance_http_and_survive_reopen.(fun) in file "test/test_lane_addon_exact_runner.ml", line 344, characters 15-62
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+ ──────────────────────────────────────────────────────────────────────────────
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        runner         14   original Curator semantics advance CLI...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+ ──────────────────────────────────────────────────────────────────────────────
+
+
+
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 273, characters 4-39
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+ ──────────────────────────────────────────────────────────────────────────────
+
+5 failures! in 0.138s. 18 tests run.
+##[endgroup]
+[targeted] test/test_lane_addon_exact_runner: FAIL exit 1 in 0s
+
+ASSERT stopped worker withdraws its tools
+ASSERT missing declared export fails startup
+ASSERT ambiguous advertised export fails startup
+  [OK]          lifecycle          4   exported tools follow worker lifetime.
+ASSERT Add-on Docker create failed: timed out after 1 seconds
+  [FAIL]        lifecycle          5   selected hooks bound actual dispatch a...
+ASSERT owned directory obstruction permits recovery
+ASSERT public read rejects a replaced canonical parent
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        lifecycle          5   selected hooks bound actual dispatc...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+FAIL Add-on Docker create failed: timed out after 1 seconds
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_lane_addon_worker.test_selected_hooks_bound_actual_dispatch.(fun) in file "test/test_lane_addon_worker.ml", line 2553, characters 15-93
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+
+ ──────────────────────────────────────────────────────────────────────────────
+
+1 failure! in 35.548s. 71 tests run.
+##[endgroup]
+[targeted] test/test_lane_addon_worker: FAIL exit 1 in 35s
+##[error]Process completed with exit code 1.
+

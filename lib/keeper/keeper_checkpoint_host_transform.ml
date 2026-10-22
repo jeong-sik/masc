@@ -10,7 +10,11 @@ let rec prefix expected actual = match expected,actual with
   | x::xs,y::ys -> x=y && prefix xs ys
   | _::_,[] -> false
 let freeze source (candidate:Core.Checkpoint.t) =
-  let candidate={candidate with context=Core.Context.copy candidate.context ~eio:true} in
+  (* This private copy is serialized on a checkpoint CPU worker and can also be
+     revalidated inside the Owner's storage systhread. Its table is detached
+     from the live Agent; a synchronous mutex keeps both paths independent of
+     the caller's Eio cancellation context. *)
+  let candidate={candidate with context=Core.Context.copy candidate.context ~eio:false} in
   Store.exact_snapshot_of_value ~expected_session_id:(Store.exact_snapshot_reference source).trace_id candidate
   |> Result.map_error Store.checkpoint_ref_load_error_to_string
 let invariant source frozen =

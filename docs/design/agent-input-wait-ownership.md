@@ -628,8 +628,37 @@ N-to-H preservation and H-to-cut-to-seed proof, then invokes that Store Bind.
 The returned branch writer names the actual next seed, while the canonical
 writer retains its existing exact-cut input relation. Store source regressions
 add stale predecessor/native/digest refusal and before/after-commit fault/reopen
-cases with distinct N/H and preserved global G. These new cases remain unexecuted
-until an actual exact-head result is inspected.
+cases with distinct N/H and preserved global G.
+
+The actual minimal run [39721832962](https://github.com/jeong-sik/masc/actions/runs/39721832962)
+checked out `2e6c249fb7ff0c4b27076a3b975c7e9bfb881b9a`: compilation passed;
+42 direct-input Store cases and five native-context cases passed. The physical
+response suite ran ten cases, with nine passing and one failing during the
+second native dispatch's retired-cut binding. Owner validation runs in a storage
+systhread; the host proof copied a private Context with an Eio mutex, whose later
+serialization attempted `Cancel.Get_context` outside an Eio fiber. Host proof
+copies now use a synchronous mutex; live Agent Context ownership is unchanged.
+This repair still needs execution on its new head.
+
+The earlier minimal run [39721391608](https://github.com/jeong-sik/masc/actions/runs/39721391608)
+checked out `7a8bedd781306e244cf4767621810f83be30c49f`, ran 121 cases, and
+passed 120. Its one failure was an invalid test message: a ToolResult with the
+Assistant role. The fixture now uses a valid Assistant ToolUse and Tool
+ToolResult pair, checks that both survive final-text suppression, and separately
+refuses removal of an open ToolUse. The later retired-cut failure occurred
+before this fixture, so it does not establish that this repair passes.
+
+Two additional source scenarios drive an approved and a denied original Gate
+through actual native continuation. The approved case uses an explicitly
+simulated external web-search read with real grant validation, durable replay
+artifact, resolution consumption and checkpoint admission. A second replay must
+recover the same output reference with no available simulated network outcomes.
+The denied case admits its exact rejection message. Both inspect actual loopback
+provider request bodies for every original User and admitted Gate message,
+retain the original continuation after a journal reopen and preserve independent
+G. The physical response suite now has twelve cases; these two new cases remain
+unexecuted. A journal reopen after settled execution is not a crash during an
+actual native invocation or evidence for production AgentRun finalization.
 
 Full Gate success/replay, all fallback/error paths, actual invocation crash recovery
 and public branch response acceptance remain unverified. The public exact-W

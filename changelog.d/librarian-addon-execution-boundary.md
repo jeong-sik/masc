@@ -1,3 +1,0 @@
-### Documentation
-
-- Define the next Librarian Addon execution boundary while preserving host Memory, absorption, pending-candidate and continuity authority; distinguish current shared-broker gaps from implemented behavior.

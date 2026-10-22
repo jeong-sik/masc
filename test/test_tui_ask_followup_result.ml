@@ -1097,7 +1097,13 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
       let channel=open_in path in
       Fun.protect ~finally:(fun () -> close_in channel) @@ fun () ->
       In_channel.input_lines channel |> List.map (fun line -> Log.Ring.entry_of_json (Yojson.Safe.from_string line))) in
-  let member key json=Yojson.Safe.Util.member key json in
+  (* Rows without structured details (for example the registry's
+     "unregistering keeper" Info line) carry [`Null] here. They are not the
+     rows these searches look for, so reading a field from them must yield
+     [`Null] instead of raising [Type_error] before any comparison. *)
+  let member key json=match json with
+    | `Assoc _ -> Yojson.Safe.Util.member key json
+    | _ -> `Null in
   let originals=[completed;failed;unstarted] in
   let selected (entry : Masc.Tui_decode.system_log_entry) =
     member "event" entry.sl_details=`String "tui_ask_followup" in

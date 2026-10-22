@@ -300,7 +300,7 @@ record: a host that held the lock under its predecessor's record would be
 read as that predecessor. A record that could not be written later does not
 stop a serving host; the next write that succeeds carries it.
 
-Four places read the record and say what it says, with what the operator
+Three places read the record and say what it says, with what the operator
 does next:
 
 - `masc doctor` prints a `browser_bidi_host` line. It reads the files, so it
@@ -337,8 +337,8 @@ does next:
   starts it, that MASC does and what its last start left
   ([the rows](../guides/tui-browser-lanes.md)).
 
-The doctor, the connection list and the Keeper's answer each read the
-record first and ask the server for its connections once, after that. What
+The doctor and the connection list each read the record first and ask the
+server for its connections once, after that. What
 an answer says of the host and the connections it lists are of that one
 list. The TUI draws what the connection list answered.
 

@@ -115,6 +115,8 @@ type keeper_runtime_store =
   | Keeper_reaction_ledger
   | Keeper_trajectories
   | Keeper_crash_events
+  | Keeper_shutdown_operations
+  | Keeper_configuration_removals
 
 let keeper_runtime_store_dirname = function
   | Keeper_tool_usage -> "tool_usage"
@@ -127,6 +129,8 @@ let keeper_runtime_store_dirname = function
   | Keeper_reaction_ledger -> "reaction-ledger"
   | Keeper_trajectories -> "trajectories"
   | Keeper_crash_events -> "crash-events"
+  | Keeper_shutdown_operations -> ".shutdown-operations"
+  | Keeper_configuration_removals -> ".configuration-removals"
 
 let keeper_runtime_stores =
   [ Keeper_tool_usage
@@ -139,6 +143,8 @@ let keeper_runtime_stores =
   ; Keeper_reaction_ledger
   ; Keeper_trajectories
   ; Keeper_crash_events
+  ; Keeper_shutdown_operations
+  ; Keeper_configuration_removals
   ]
 
 type keeper_runtime_store_placement =
@@ -157,7 +163,12 @@ let keeper_runtime_store_placement = function
   | Keeper_crash_events -> Keeper_scoped_dated
   | Keeper_reaction_ledger -> Keeper_scoped_versioned
   | Keeper_runtime_manifests -> Keeper_scoped_rotated
-  | Keeper_tool_usage -> Keepers_root_scoped
+  (* The two lifecycle record directories sit under keepers/ too. Read as
+     keeper directories, they made the retained checkpoint sweep skip every
+     startup (2026-10-22, #45089) and could be listed as retained keepers. *)
+  | Keeper_tool_usage
+  | Keeper_shutdown_operations
+  | Keeper_configuration_removals -> Keepers_root_scoped
   | Keeper_trajectories -> Workspace_scoped
 
 let keepers_root_store_dirnames =

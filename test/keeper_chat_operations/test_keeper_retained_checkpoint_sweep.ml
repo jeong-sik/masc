@@ -199,6 +199,23 @@ let test_missing_store_removes_nothing () = with_root (fun root ->
   check bool "what the missing store named is kept" true (Sys.file_exists kept_moved);
   check bool "what a present store names is kept" true (Sys.file_exists kept_held))
 
+(* 2026-10-22: keepers/.configuration-removals and keepers/.shutdown-operations
+   have no operation store. Read as keepers, they stopped every startup sweep
+   once a missing store stopped the pass (#45089). *)
+let test_lifecycle_record_directories_are_not_keepers () = with_root (fun root ->
+  with_open (keeper_store root "present") (fun _ -> ());
+  let keepers_dir = Filename.concat root Common.keepers_runtime_dirname in
+  List.iter (fun store ->
+    write
+      (List.fold_left Filename.concat keepers_dir
+         [Common.keeper_runtime_store_dirname store; "_retired"; "record.json"])
+      "{}")
+    [Common.Keeper_shutdown_operations; Common.Keeper_configuration_removals];
+  let orphan = retained root ~session:["sweep-trace"] (checkpoint "orphan") in
+  write orphan "{}";
+  let report = sweep root in
+  check int "orphan removed beside the lifecycle records" 1 report.removed)
+
 let test_missing_directories_are_an_empty_sweep () = with_root (fun root ->
   let report = sweep root in
   check int "nothing live" 0 report.live_references;
@@ -298,6 +315,8 @@ let () =
             test_workspace_store_directories_are_not_keepers
         ; test_case "an unreadable store removes nothing" `Quick test_unreadable_store_removes_nothing
         ; test_case "a missing store removes nothing" `Quick test_missing_store_removes_nothing
+        ; test_case "lifecycle record directories are not keepers" `Quick
+            test_lifecycle_record_directories_are_not_keepers
         ; test_case "missing directories are an empty sweep" `Quick
             test_missing_directories_are_an_empty_sweep
         ] ) ]

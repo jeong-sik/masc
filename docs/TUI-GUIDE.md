@@ -2099,13 +2099,30 @@ colour; an extension without a lexer draws plain, and a file past 500 KB
 draws plain rather than slowly. The pane then answers three more questions
 in place:
 
+CRLF files read with ordinary line breaks, without a carriage-return escape
+at the end of every line. A standalone carriage return or other control byte
+still appears escaped. This reading view does not change the source bytes.
+
 With file content focused, `y` asks the terminal to copy the whole original
 file through OSC 52. Tabs, indentation and original line endings are retained;
 colours, line numbers and display sanitation are not copied. The status reports
 the file and bytes sent, with terminal support unconfirmed. An initial, failed
 or suspended reading cannot supply source bytes; a same-file refresh keeps
 the observed source until new bytes arrive. Close History, Diff or Notes
-first. Mouse selection continues to copy displayed rows. Code is read-only.
+first. Mouse selection continues to copy displayed rows.
+
+`e` opens the exact source in `$EDITOR` and retains the returned candidate as
+a draft in this TUI session. `V` opens its comparison and `S` explicitly saves
+against the opening server revision. Navigation retains the draft; `Esc`
+closes only the comparison, and `X` discards an unsubmitted draft. The draft
+names its byte count and final line ending; comparison rows retain escaped
+controls so a change to the bytes remains visible.
+
+A conflict or uncertain save keeps the candidate. In that comparison, `r`
+reads the server again without authorizing another write, and `A` explicitly
+adopts the compared revision before another `S`. Repeated saves do not submit
+another write while one is pending. The quit warning includes retained drafts;
+they are not recovered after the TUI process exits.
 
 - `h`/`l` pan sideways by one display cell — the gutter stays put, the
   title says `(col N)`, and a double-width glyph on the boundary pads

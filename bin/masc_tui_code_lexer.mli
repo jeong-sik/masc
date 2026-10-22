@@ -60,7 +60,11 @@ val rows_of_segments : segment list -> segment list list
 
 val rows_of_source : language:string option -> string -> segment list list
 (** A whole file, lexed once and split into rows. [None] or an unlexed
-    language keeps every row a single plain-code segment. *)
+    language keeps every row a single plain-code segment. CRLF is a line
+    separator, like LF; its carriage return is absent from these reading
+    rows. Standalone carriage returns and other source bytes remain for the
+    caller's terminal sanitization. These rows are a reading projection, not
+    the original bytes used for copying, editing, revisions or diffs. *)
 
 val row_has_assignment : segment list -> bool
 (** True when a lexed configuration row contains an equals sign in code,

@@ -1230,6 +1230,21 @@ let language_of_path path =
    text at once -- an OCaml comment opened three rows up is state no single
    row holds -- and the rows split at the newlines the lexer carried. *)
 let rows_of_source ~language text =
+  (* Treat the two bytes of a CRLF as one line separator for reading. Keep
+     standalone CR (and every other control) for the terminal sanitizer.
+     The caller retains the original source separately for byte operations. *)
+  let text =
+    if not (String.contains text '\r') then text
+    else
+      let length = String.length text in
+      let reading = Buffer.create length in
+      for index = 0 to length - 1 do
+        if not (text.[index] = '\r' && index + 1 < length
+                && text.[index + 1] = '\n') then
+          Buffer.add_char reading text.[index]
+      done;
+      Buffer.contents reading
+  in
   let segments =
     match Option.bind language lexer_of_language with
     | Some lexer -> lexer text

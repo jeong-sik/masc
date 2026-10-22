@@ -93,11 +93,15 @@ let test_local_peer_loss () =
   state.msg_attachments <- [original];
   let local = pending state (Types.Draft_image_read (state.workspace_authority, original)) in
   let peer = pending state (Types.Peer_image_read state.workspace_read_authority) in
+  let file = pending state (Types.Local_file_image_read state.workspace_authority) in
   Types.suspend_workspace_readings state;
+  check bool "local file survives peer withdrawal" true (Types.image_reading_is_current state file);
   check bool "local draft survives peer withdrawal" true (Types.image_reading_is_current state local);
   check bool "peer reply loses its read epoch" false (Types.image_reading_is_current state peer);
   check bool "original attachment retained" true (List.hd state.msg_attachments == original);
-  check string "encoded attachment preserved" "AAAA" original.data
+  check string "encoded attachment preserved" "AAAA" original.data;
+  state.workspace_authority <- Types.Workspace_authority 1;
+  check bool "file owner cannot cross workspaces" false (Types.image_reading_is_current state file)
 
 let test_local_draft_replacement () =
   let state = state () and original = attachment () in
@@ -124,6 +128,26 @@ let test_peer_resource_owner () =
   state.resource_pending_key <- Some uri;
   check bool "pending replacement cannot paint" false (Types.image_reading_is_current state peer)
 
+let test_local_sources_on_resources () =
+  let state = state () and original = attachment () in
+  state.view <- Types.Resources;
+  state.msg_attachments <- [original];
+  let file = pending state (Types.Local_file_image_read state.workspace_authority) in
+  let draft = pending state (Types.Draft_image_read (state.workspace_authority, original)) in
+  let peer = pending state (Types.Peer_image_read state.workspace_read_authority) in
+  let check_owners () =
+    check bool "local file independent of resource reading" true (Types.image_reading_is_current state file);
+    check bool "draft independent of resource reading" true (Types.image_reading_is_current state draft);
+    check bool "peer still requires original resource reading" false (Types.image_reading_is_current state peer) in
+  check_owners ();
+  state.resource_content <- Some (uri, parts ());
+  state.resource_pending_key <- Some uri;
+  state.resource_content_error <- Some (uri, "previous resource refused");
+  check_owners ();
+  state.resource_pending_key <- None;
+  state.resource_content_error <- None;
+  check_owners ()
+
 let () = run "resource image admission" ["stored source",[
   test_case "original SVG and multipart admission" `Quick test_original_admission;
   test_case "wrong pending URI" `Quick test_wrong_pending;
@@ -131,4 +155,5 @@ let () = run "resource image admission" ["stored source",[
   test_case "new immutable observation" `Quick test_new_observation;
   test_case "local draft and peer withdrawal" `Quick test_local_peer_loss;
   test_case "local draft replacement and workspace" `Quick test_local_draft_replacement;
-  test_case "peer resource owner" `Quick test_peer_resource_owner]]
+  test_case "peer resource owner" `Quick test_peer_resource_owner;
+  test_case "local sources on Resources" `Quick test_local_sources_on_resources]]

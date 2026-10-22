@@ -289,6 +289,15 @@ let prepare_payload ~run ~cache_dir bytes =
       | Ok path -> read_bytes path
       | Error failures -> Error (conversion_failure_text failures))
 
+let prepare_file ~run ~cache_dir path =
+  let source =
+    try Ok (In_channel.with_open_bin path (fun channel ->
+      really_input_string channel (in_channel_length channel)))
+    with
+    | Sys_error detail -> Error detail
+    | End_of_file -> Error "the file ended sooner than its length said" in
+  Result.bind source (prepare_payload ~run ~cache_dir)
+
 type display = Pixel_graphics | Character_cells of { columns : int; rows : int }
 
 type presentation =

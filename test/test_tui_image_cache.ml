@@ -161,6 +161,28 @@ let converter_succeeds dir name bytes =
 
 let unwrap = function Ok value -> value | Error _ -> fail "unexpected workflow failure"
 
+let test_local_file_preserves_original () =
+  with_cache (fun cache_dir run ->
+    let source = Filename.concat cache_dir "original.bmp" in
+    write_file source bmp_header;
+    converter_succeeds cache_dir "sips" png_header;
+    check string "converted captured local bytes" png_header
+      (unwrap (Cache.prepare_file ~run ~cache_dir source));
+    check string "original source retained" bmp_header (read_file source))
+
+let test_local_file_failure_and_recovery () =
+  with_cache (fun cache_dir run ->
+    let source = Filename.concat cache_dir "late.png" in
+    check bool "missing local file refused" true
+      (Result.is_error (Cache.prepare_file ~run ~cache_dir source));
+    write_file source "";
+    check bool "empty source refused" true
+      (Result.is_error (Cache.prepare_file ~run ~cache_dir source));
+    write_file source png_header;
+    check string "explicit retry reads current source" png_header
+      (unwrap (Cache.prepare_file ~run ~cache_dir source));
+    check string "original bytes preserved" png_header (read_file source))
+
 let test_character_frame_refuses_unrepresentable_ratio () =
   with_cache (fun cache_dir _run ->
     let be32 n = String.init 4 (fun i -> Char.chr ((n lsr ((3 - i) * 8)) land 255)) in
@@ -515,7 +537,9 @@ let test_a_killed_decoder_is_described_as_killed () =
 let () =
   run "tui image cache"
     [ ( "workflows"
-      , [ test_case "character preview refuses an unrepresentable ratio before decoding" `Quick
+      , [ test_case "local conversion preserves original" `Quick test_local_file_preserves_original
+        ; test_case "local refusal and explicit recovery" `Quick test_local_file_failure_and_recovery
+        ; test_case "character preview refuses an unrepresentable ratio before decoding" `Quick
             test_character_frame_refuses_unrepresentable_ratio
         ; test_case "character decoder frame protocol and attempt cleanup" `Quick
             test_character_frame_protocol_and_cleanup

@@ -10668,66 +10668,41 @@ let retry_image_mosaic img =
           image_url_to_mosaic ~cols:mosaic_cols img));
       `Stop_daemon)
 
-let open_image state ~notice path =
+let open_remote_image state ~notice url =
   let refuse reason =
-    notice ~kind:Notice_failure (Printf.sprintf "/image %s: %s" path reason)
-  in
-  let is_remote =
-    String.starts_with ~prefix:"http://" path
-    || String.starts_with ~prefix:"https://" path
-  in
-  if is_remote && !terminal_draws_images = Some false then
-    match Masc_tui_browser.open_url path with
-    | Ok opener ->
-        notice ~kind:Notice_reply
-          (Printf.sprintf "Opened in browser (%s): %s" opener path)
-    | Error err ->
-        refuse (Printf.sprintf "Could not open browser: %s" err)
-  else
-    let local_path_res =
-      if is_remote then download_remote_image path else Ok path
-    in
-    match local_path_res with
+    notice ~kind:Notice_failure (Printf.sprintf "/image %s: %s" url reason) in
+  if !terminal_draws_images = Some false then
+    match Masc_tui_browser.open_url url with
+    | Ok opener -> notice ~kind:Notice_reply
+        (Printf.sprintf "Opened in browser (%s): %s" opener url)
+    | Error err -> refuse (Printf.sprintf "Could not open browser: %s" err)
+  else match download_remote_image url with
     | Error dl_err ->
-        (match Masc_tui_browser.open_url path with
-         | Ok opener ->
-             notice ~kind:Notice_reply
-               (Printf.sprintf "Image download failed. Opened in browser (%s): %s" opener path)
-         | Error _ ->
-             refuse (Masc_tui_image_cache.download_error_text dl_err))
-    | Ok local_path -> (
-        match !terminal_draws_images with
-        | Some false -> refuse terminal_draws_no_images
-        | Some true | None -> (
-            match read_file_bytes local_path with
-            | Error detail -> refuse detail
-            | Ok data when String.length data = 0 -> refuse "the file is empty"
-            | Ok initial_data ->
-                let prepared_data =
-                  match Masc.Keeper_vision_tool.sniff_image_media_type initial_data with
-                  | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
-                      initial_data
-                  | Ok _ | Error _ -> (
-                      match convert_to_png local_path with
-                      | Ok png_path -> (
-                          match read_file_bytes png_path with
-                          | Ok png_data -> png_data
-                          | Error _ -> initial_data)
-                      | Error _ -> initial_data)
-                in
-                match Masc.Keeper_vision_tool.sniff_image_media_type prepared_data with
-                | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
-                    draw_image state ~refuse ~title:path prepared_data
-                | Ok _ | Error _ ->
-                    if is_remote then
-                      match Masc_tui_browser.open_url path with
-                      | Ok opener ->
-                          notice ~kind:Notice_reply
-                            (Printf.sprintf "Terminal draws PNG only. Opened image in browser (%s): %s" opener path)
-                      | Error _ ->
-                          draw_image state ~refuse ~title:path prepared_data
-                    else
-                      draw_image state ~refuse ~title:path prepared_data))
+        (match Masc_tui_browser.open_url url with
+         | Ok opener -> notice ~kind:Notice_reply
+             (Printf.sprintf "Image download failed. Opened in browser (%s): %s" opener url)
+         | Error _ -> refuse (Masc_tui_image_cache.download_error_text dl_err))
+    | Ok local_path ->
+      match read_file_bytes local_path with
+      | Error detail -> refuse detail
+      | Ok data when String.length data = 0 -> refuse "the file is empty"
+      | Ok initial_data ->
+        let prepared_data =
+          match Masc.Keeper_vision_tool.sniff_image_media_type initial_data with
+          | Ok media when String.equal media Masc_tui_graphics.payload_media_type -> initial_data
+          | Ok _ | Error _ ->
+            (match convert_to_png local_path with
+             | Ok png_path -> (match read_file_bytes png_path with
+                 | Ok png_data -> png_data | Error _ -> initial_data)
+             | Error _ -> initial_data) in
+        match Masc.Keeper_vision_tool.sniff_image_media_type prepared_data with
+        | Ok media when String.equal media Masc_tui_graphics.payload_media_type ->
+          draw_image state ~refuse ~title:url prepared_data
+        | Ok _ | Error _ ->
+          match Masc_tui_browser.open_url url with
+          | Ok opener -> notice ~kind:Notice_reply
+              (Printf.sprintf "Terminal draws PNG only. Opened image in browser (%s): %s" opener url)
+          | Error _ -> draw_image state ~refuse ~title:url prepared_data
 
 (* Download a remote image and hand back PNG bytes ready for [draw_image], or
    why they could not be produced. Pure of the render loop: no terminal writes,
@@ -10868,6 +10843,8 @@ let settle_retired_sent_image state =
    and workspace/draft owner before forking and share completion admission. *)
 let open_preview_image ?skill_reference state ~mailbox ~notice ~name source =
   let dispatch = match source with
+    | Masc_tui_image_requests.Local_file _ ->
+      Some (enqueue_async, Local_file_image_read state.workspace_authority)
     | Masc_tui_image_requests.Draft attachment ->
       Some (enqueue_async, Draft_image_read (state.workspace_authority, attachment))
     | Retained _ | Generated _ ->
@@ -10922,6 +10899,16 @@ let open_preview_image ?skill_reference state ~mailbox ~notice ~name source =
         state.sent_image_read <- None;
         notice ~kind:Notice_failure "image preview requires an active background session"
 
+(* Only parsed HTTP(S) references use the explicit browser/download path.
+   All other selected paths keep their local file meaning. *)
+let open_image state ~mailbox ~notice path =
+  let uri = Uri.of_string path in
+  match Uri.scheme uri, Uri.host uri with
+  | Some ("http" | "https"), Some _ -> open_remote_image state ~notice path
+  | (Some _ | None), (Some _ | None) ->
+    open_preview_image state ~mailbox ~notice ~name:path
+      (Masc_tui_image_requests.Local_file path)
+
 let current_resource_images (state : state) =
   match state.resource_content, state.resource_pending_key, state.resource_content_error with
   | Some (uri, contents), None, None ->
@@ -10949,7 +10936,7 @@ let open_resource_image (state : state) ~mailbox =
 let open_selected_image state ~mailbox preview =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
   match preview with
-  | Masc_tui_image_preview.Named_path path -> open_image state ~notice path
+  | Masc_tui_image_preview.Named_path path -> open_image state ~mailbox ~notice path
   | Masc_tui_image_preview.Staged attachment ->
       open_preview_image state ~mailbox ~notice
         ~name:attachment.Masc_tui_keeper_chat_projection.name
@@ -11530,7 +11517,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
            open_measurement_artifact state ~mailbox ~sha256)
   | Masc_tui_command.View_image path ->
       Masc_tui_message_input.clear state.msg_input;
-      open_image state ~notice (String.trim path)
+      open_image state ~mailbox ~notice (String.trim path)
   | Masc_tui_command.Attach_image_missing_path ->
       notice ~kind:Notice_failure "/attach needs a path on the same line"
   | Masc_tui_command.Attach_image_ref_missing_value ->

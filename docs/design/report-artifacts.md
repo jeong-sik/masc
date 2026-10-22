@@ -188,7 +188,15 @@ server identity; previewing leaves the original encoded attachment intact.
 Their result still belongs to the original generation, view, Keeper, workspace
 authority and exact staged attachment object. Losing peer confirmation alone
 does not withdraw a local draft; replacement or removal of its attachment does.
-Named-file previews, browser layout and copied source bytes are unchanged.
+Selected local file paths use the same background pixel/colour-cell presenter.
+Their owner is the original local workspace epoch, so peer reconfirmation alone
+does not withdraw them. Local files and staged attachments opened through the
+Resources composer do not borrow that surface's unrelated document reading;
+only peer Resource images require the original resource response. The worker reads the chosen file once, preserves its
+source, and converts the captured bytes through the existing image converters.
+This is the file observed by the worker, not a retained file-revision guarantee.
+Explicit HTTP(S) image URLs keep their existing browser/download behavior.
+Browser layout and copied source bytes are unchanged.
 Acquisition progress is a temporary footer observation of the pending read,
 bound to its generation, view, Keeper, workspace and original resource reading.
 It disappears when that read completes or loses ownership; it is not appended

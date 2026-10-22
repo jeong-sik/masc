@@ -149,7 +149,7 @@ let scenario domain () =
           {F.id="original-complete";base_url=right.base_url}]) : Runtime_exact_output_registry.t);
       let run store=get (Exact.run ~store ~declaration_id:"curator" ~package
         ~runner:(Server_lane_addon_exact.runner ~base_path)
-        ~validate_request:(Server_lane_addon_exact.validate_request ~base_path) restored) in
+        ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path) restored) in
       let final=match run reopened with
         | Exact.Final (Exact.Call_final (Exact.Answered {slot="original-complete";_}) as final) -> final
         | Exact.Final _ | Exact.Not_final _ -> fail "original semantic rejection must reach the next HTTP candidate" in

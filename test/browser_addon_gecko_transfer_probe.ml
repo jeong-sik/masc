@@ -109,7 +109,7 @@ let () =
         "body",`String response]::!model_responses;flush ();status,response)) in
     ignore (F.publish_registry ~lane_id:"browser/locate" ~slot_ids:["probe"]
       (F.resolver_snapshot ~source:base_path [{F.id="probe";base_url=provider.base_url}]) : Runtime_exact_output_registry.t);
-    R.register_exact_runner ~validate_request:(Server_lane_addon_exact.validate_request ~base_path)
+    R.register_exact_runner ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path)
     (Server_lane_addon_exact.runner ~base_path);
     let access=Lane_addon_sources.Operator_configuration in
     let principal=Lane_addon_call_context.Keeper "gecko-transfer-probe" in

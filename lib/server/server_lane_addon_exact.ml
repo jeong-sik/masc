@@ -66,7 +66,7 @@ type http_outcome =
 let usage_of_api (usage : Agent_core.Types.api_usage) =
   { Addon.input_tokens = usage.input_tokens; output_tokens = usage.output_tokens }
 
-let execute_http ~note ~resolved ~requirement ~messages ~validate =
+let execute_http ~admission_class ~note ~resolved ~requirement ~messages ~validate =
   let candidate (slot : Registry.selected_slot) =
     match Exact.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target with
     | Ok candidate -> Some candidate
@@ -82,7 +82,7 @@ let execute_http ~note ~resolved ~requirement ~messages ~validate =
       note candidate_id Failure.Configuration_refused "duplicate slot";
       Http_exhausted
     | Ok snapshot ->
-      match Exact.start_flow ~admission_class:Agent_core.Llm_provider.Admission_class.Standard snapshot with
+      match Exact.start_flow ~admission_class snapshot with
       | Error (Exact.Flow_id_generation_failed detail) ->
         note "http" Failure.Transient detail;
         Http_exhausted
@@ -165,7 +165,7 @@ let cli_prompt messages =
   in
   texts [] messages
 
-let call ~cli_runner ~base_path ~(resolved : Registry.resolved_lane) ~schema (request : Addon.request) ~validate =
+let call ~admission_class ~cli_runner ~base_path ~(resolved : Registry.resolved_lane) ~schema (request : Addon.request) ~validate =
   let failures = ref [] in
   let note slot failure detail = failures := { slot; failure; detail } :: !failures in
   let requirement = Exact.make_output_requirement ~schema ~minimum_guarantee:Exact.Json_syntax in
@@ -181,7 +181,7 @@ let call ~cli_runner ~base_path ~(resolved : Registry.resolved_lane) ~schema (re
         request.messages
   in
   let ended () = ending (List.rev !failures) in
-  match execute_http ~note ~resolved ~requirement ~messages ~validate with
+  match execute_http ~admission_class ~note ~resolved ~requirement ~messages ~validate with
   | Http_answered { output; slot; usage } -> Addon.Call_ended (Addon.Answered { output; slot; usage })
   | Http_stopped -> ended ()
   | Http_exhausted ->
@@ -221,13 +221,17 @@ let resolve ~lane_key =
     | Ok resolved -> Ok resolved
 
 let runner_with ~cli_runner ~base_path : Addon.runner =
-  fun ~lane_key ~schema request ->
+  fun ~admission_class ~lane_key ~schema request ->
   Result.map
-    (fun resolved -> fun ~validate -> call ~cli_runner ~base_path ~resolved ~schema request ~validate)
+    (fun resolved -> fun ~validate -> call ~admission_class ~cli_runner ~base_path ~resolved ~schema request ~validate)
     (resolve ~lane_key)
 
 let runner ~base_path = runner_with ~cli_runner:None ~base_path
-let validate_request ~base_path = Server_workspace_memory_addon_validation.authorize ~base_path
+let authorize_request ~base_path ~store ~declaration_id ~package request =
+  Result.map
+    (fun validate_output ->
+      {Addon.admission_class=Agent_core.Llm_provider.Admission_class.Standard; validate_output})
+    (Server_workspace_memory_addon_validation.authorize ~base_path ~store ~declaration_id ~package request)
 
 module For_testing = struct
   let runner ~base_path ~cli_runner = runner_with ~cli_runner:(Some cli_runner) ~base_path

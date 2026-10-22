@@ -17,11 +17,12 @@ let is_browser_declaration (declaration : Lane_addon_config.declaration) =
   | Lane_addon_types.Mcp_tools -> false
 ;;
 
-(* The server reads declarations from the config root's [lane-addons]
-   directory whatever the root's status is, so this does too. *)
+(* The server reads declarations from the config root's Lane directory
+   whatever the root's status is, so this does too. *)
 let declaration_directory ~base_path =
   let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
-  Filename.concat resolution.Config_dir_resolver.config_root.Config_dir_resolver.path "lane-addons"
+  Lane_addon_config.directory
+    ~config_root:resolution.Config_dir_resolver.config_root.Config_dir_resolver.path
 ;;
 
 let judge ~base_path =

@@ -1842,7 +1842,9 @@ let call_manager_browser_service m ~access ~(service:browser_service) ~command =
       | None -> Error (Browser_addon_client.Unavailable "browser Add-on background owner is unavailable") in
     (* An idle document read starts no browser effect. The worker answers it,
        refuses it as busy or times it out by itself, and its answer changes
-       nothing the browser installation observes. *)
+       nothing the browser installation observes. A cancelled or lost read
+       therefore leaves no effect whose outcome is unknown; only its reader
+       learns that it failed. *)
     let idle_document_read=match command with
       | Browser_addon_wire.Issue {only_if_idle;_} -> only_if_idle
       | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _ -> false in
@@ -1871,7 +1873,7 @@ let call_manager_browser_service m ~access ~(service:browser_service) ~command =
            if changed && not e.stopping then wake e
        | Error (Browser_addon_client.Unavailable _) -> ()
        | Error (Browser_addon_client.Outcome_unknown detail) ->
-           if not e.stopping then (failed m e (Lifecycle.Effect_outcome_unknown detail);wake e));
+           if not e.stopping && not idle_document_read then (failed m e (Lifecycle.Effect_outcome_unknown detail);wake e));
       result)
 let call_browser_service ~config ~access ~service ~command =
   with_tool_call_owner (fun () ->
@@ -1900,7 +1902,16 @@ let read_browser_document m ~access ~route ~tab_id =
              Error message
          | Ok (Browser_addon_wire.(Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt)) ->
              Error "the browser Add-on answered the document read with another kind of reply"
-         | Error (Browser_addon_client.(Unavailable detail|Outcome_unknown detail)) -> Error detail)
+         (* Transport detail names host sockets and exceptions; it goes to
+            the operator log, and the reader gets the kind of failure. *)
+         | Error (Browser_addon_client.Unavailable detail) ->
+             Log.Misc.warn "Lane Add-on browser document read could not reach browser Add-on %s: %s"
+               service.instance_id detail;
+             Error "the browser Add-on could not be reached for the document read"
+         | Error (Browser_addon_client.Outcome_unknown detail) ->
+             Log.Misc.warn "Lane Add-on browser document read got no usable answer from browser Add-on %s: %s"
+               service.instance_id detail;
+             Error "the browser Add-on gave no usable answer to the document read")
     | [] ->
         (match Lane_addon_unready.summary reading.unready with
          | Some summary -> Error summary

@@ -8,9 +8,9 @@ import { copyToClipboard } from '../common/copyable-code'
 // Opaque origin: no allow-same-origin. Keep the CSP first so the body cannot
 // load subresources before the policy applies. Scripts support self-contained
 // interactive reports; no dashboard token or frame messaging bridge is supplied.
-export function artifactHtmlDocument(source: string): string {
+export function artifactHtmlDocument(source: string, interactive = true): string {
   return '<!doctype html><meta charset="utf-8">'
-    + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src \'none\'; frame-src \'none\'; object-src \'none\'; base-uri \'none\'; form-action \'none\'">'
+    + `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${interactive ? "'unsafe-inline'" : "'none'"}; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`
     + source
 }
 
@@ -32,6 +32,7 @@ export function ArtifactReader({ doc, fixedRevision, onClose }: {
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const [view, setView] = useState<'rendered' | 'source'>('rendered')
+  const [width, setWidth] = useState<'wide' | 'reading'>('wide')
   const [copyFeedback, setCopyFeedback] = useState('')
   const { artifact, content, revisions } = doc
   useLayoutEffect(() => {
@@ -71,6 +72,11 @@ export function ArtifactReader({ doc, fixedRevision, onClose }: {
             <span class="text-xs uppercase text-[var(--color-fg-muted)]">${artifact.format} · v${artifact.revision}</span>
             <button type="button" aria-pressed=${view === 'rendered'} onClick=${() => setView('rendered')}>미리보기</button>
             <button type="button" aria-pressed=${view === 'source'} onClick=${() => setView('source')}>원본</button>
+            ${artifact.format === 'markdown' && view === 'rendered' ? html`
+              <button type="button" aria-pressed=${width === 'wide'}
+                onClick=${() => setWidth(value => value === 'wide' ? 'reading' : 'wide')}>
+                ${width === 'wide' ? '넓은 폭' : '읽기 폭'}
+              </button>` : null}
           </div>
           <label class="flex min-w-0 items-center gap-1 text-xs">버전 ${' '}
             <select aria-label="문서 버전" value=${fixedRevision ? String(artifact.revision) : 'latest'}
@@ -96,7 +102,7 @@ export function ArtifactReader({ doc, fixedRevision, onClose }: {
         ${view === 'source'
           ? html`<pre tabIndex=${0} aria-label="문서 원본" class="m-0 flex-1 whitespace-pre-wrap break-words p-6 text-xs">${content}</pre>`
           : artifact.format === 'markdown'
-            ? html`<div class="mx-auto w-full max-w-[80ch] p-6 sm:p-10"><${Markdown} text=${content} /></div>`
+            ? html`<div class=${`mx-auto w-full min-w-0 p-4 sm:p-8 ${width === 'reading' ? 'max-w-[90ch]' : ''}`}><${Markdown} text=${content} /></div>`
             : html`<iframe title=${artifact.title} sandbox="allow-scripts" referrerPolicy="no-referrer"
                 class="min-h-0 w-full flex-1 border-0 bg-white" srcDoc=${artifactHtmlDocument(content)} />`}
       </div>

@@ -1,5 +1,6 @@
 module B = Browser_lane
 module Lease = B.Upload_lease
+module Requirement = Resource_requirement
 let ( let* ) = Result.bind
 type grant = {actor:string;route:B.route;verb:B.verb;snapshot:Lease.snapshot}
 type preparation = Staging | Withdrawn
@@ -11,17 +12,16 @@ type t = {directory:string;device:int;inode:int;mutex:Mutex.t;changed:Condition.
 let locked t f = Mutex.lock t.mutex;Fun.protect ~finally:(fun () -> Mutex.unlock t.mutex) f
 let protect f = try f () with
   | (Unix.Unix_error _|Sys_error _) as exn -> Error (Printexc.to_string exn)
-let private_directory path =
-  let info=Unix.lstat path in
-  if info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid ()
-    && info.st_perm=0o700 && Unix.realpath path=path then Ok info
-  else Error "upload allocation is not a canonical private directory"
+let uploads_label = "upload directory"
+let private_directory ~label path =
+  let* info=Requirement.lstat ~label Requirement.private_directory path in
+  let* ()=Requirement.canonical ~label path in Ok info
 let check t =
-  let* info=private_directory t.directory in
+  let* info=private_directory ~label:uploads_label t.directory in
   if info.Unix.st_dev=t.device && info.st_ino=t.inode then Ok ()
   else Error "upload allocation identity changed"
 let create ~directory = protect (fun () ->
-  let* _=private_directory directory in
+  let* _=private_directory ~label:"browser allocation directory" directory in
   let directory=Filename.concat directory "uploads" in
   Unix.mkdir directory 0o700;
   let info=Unix.lstat directory in
@@ -30,28 +30,26 @@ let create ~directory = protect (fun () ->
     serving=true;grants=Hashtbl.create 4})
 let source path = protect (fun () ->
   let before=Unix.lstat path in
-  if before.Unix.st_kind<>Unix.S_REG || before.st_uid<>Unix.geteuid ()
-    || before.st_nlink<>1 || before.st_perm<>0o600 then Error "upload source is not a private regular snapshot"
-  else
-    let fd=Unix.openfile path [Unix.O_RDONLY;Unix.O_CLOEXEC;Unix.O_NONBLOCK] 0 in
-    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-      let info=Unix.fstat fd in
-      if info.st_dev<>before.st_dev || info.st_ino<>before.st_ino || info.st_kind<>Unix.S_REG
-        || info.st_uid<>before.st_uid || info.st_nlink<>1 || info.st_perm<>0o600
-      then Error "upload source identity changed"
-      else if info.st_size>Lease.max_file_bytes then Error "upload source exceeds the per-file resource bound"
-      else
-        let bytes=Bytes.create info.st_size in
-        let rec read offset =
-          if offset=Bytes.length bytes then Ok ()
-          else match Unix.read fd bytes offset (Bytes.length bytes-offset) with
-            | 0 -> Error "upload source shortened during copy"
-            | count -> read (offset+count) in
-        let* ()=read 0 in
-        let after=Unix.fstat fd in
-        if after.st_size<>info.st_size || after.st_mtime<>info.st_mtime
-          || after.st_ctime<>info.st_ctime then Error "upload source changed during copy"
-        else Ok (Bytes.to_string bytes)))
+  let* ()=Requirement.check ~label:"upload source" Requirement.private_file ~path before in
+  let fd=Unix.openfile path [Unix.O_RDONLY;Unix.O_CLOEXEC;Unix.O_NONBLOCK] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+    let info=Unix.fstat fd in
+    if info.st_dev<>before.st_dev || info.st_ino<>before.st_ino || info.st_kind<>Unix.S_REG
+      || info.st_uid<>before.st_uid || info.st_nlink<>1 || info.st_perm<>0o600
+    then Error "upload source identity changed"
+    else if info.st_size>Lease.max_file_bytes then Error "upload source exceeds the per-file resource bound"
+    else
+      let bytes=Bytes.create info.st_size in
+      let rec read offset =
+        if offset=Bytes.length bytes then Ok ()
+        else match Unix.read fd bytes offset (Bytes.length bytes-offset) with
+          | 0 -> Error "upload source shortened during copy"
+          | count -> read (offset+count) in
+      let* ()=read 0 in
+      let after=Unix.fstat fd in
+      if after.st_size<>info.st_size || after.st_mtime<>info.st_mtime
+        || after.st_ctime<>info.st_ctime then Error "upload source changed during copy"
+      else Ok (Bytes.to_string bytes)))
 let upload_paths = function
   | B.Page_act (B.Action.On_tab {interaction=B.Action.Upload {paths;_};_}) -> Ok paths
   | Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_interact _

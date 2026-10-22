@@ -27,8 +27,10 @@ let check_path socket_path =
      not (String.equal (Filename.concat parent (Filename.basename socket_path)) socket_path)
   then invalid_arg "browser socket must have an absolute canonical path";
   let info = Unix.lstat parent in
-  if info.Unix.st_kind <> Unix.S_DIR || info.Unix.st_uid <> Unix.geteuid () || info.Unix.st_perm <> 0o700 then
-    invalid_arg "browser socket parent must be worker-owned with mode 0700";
+  (match Resource_requirement.check ~label:"browser socket parent"
+           Resource_requirement.private_directory ~path:parent info with
+   | Ok () -> ()
+   | Error detail -> invalid_arg detail);
   match Unix.lstat socket_path with
   | _ -> invalid_arg "browser socket path already exists"
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()

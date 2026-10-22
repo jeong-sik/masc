@@ -1,4 +1,5 @@
 module B = Browser_lane
+module Requirement = Resource_requirement
 let ( let* ) = Result.bind
 type descriptor = {snapshot_id:string;root_device:int;root_inode:int;
   device:int;inode:int;bytes:int;sha256:string}
@@ -81,19 +82,20 @@ let changed_source_message snapshot observed =
     "snapshotId",`String snapshot.descriptor.snapshot_id;
     "expected",file_observation snapshot.source_stat;
     "observed",file_observation observed])
-let private_directory path =
-  let info=Unix.lstat path in
-  if info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid ()
-    && info.st_perm=0o700 && Unix.realpath path=path then Ok info
-  else Error "download allocation is not a canonical private directory"
+let allocation_label = "download allocation"
+let snapshots_label = "download snapshot directory"
+let private_directory ~label path =
+  let* info=Requirement.lstat ~label Requirement.private_directory path in
+  let* ()=Requirement.canonical ~label path in Ok info
 let check t =
-  let* allocation=private_directory t.directory in let* root=private_directory t.root in
+  let* allocation=private_directory ~label:allocation_label t.directory in
+  let* root=private_directory ~label:snapshots_label t.root in
   if same_identity allocation t.allocation && same_identity root t.root_stat then Ok ()
   else Error "download allocation identity changed"
 let create ~directory = io (fun () ->
-  let* allocation=private_directory directory in
+  let* allocation=private_directory ~label:allocation_label directory in
   let root=Filename.concat directory "download-snapshots" in Unix.mkdir root 0o700;
-  let* root_stat=private_directory root in
+  let* root_stat=private_directory ~label:snapshots_label root in
   Ok {directory;allocation;root;root_stat;mutex=Mutex.create ();changed=Condition.create ();
     cleanup_mutex=Mutex.create ();serving=true;preparing=0;settled=false;failure=None;
     snapshots=Hashtbl.create 8;grants=Hashtbl.create 8})
@@ -106,12 +108,13 @@ let close_pins snapshots = List.fold_left (fun result snapshot ->
   let closed=close_pin snapshot in
   match result,closed with Error detail,_ | Ok (),Error detail -> Error detail
     | Ok (),Ok () -> Ok ()) (Ok ()) snapshots
+let source_parent = {Requirement.kind=Unix.S_DIR;mode=Clear 0o022;links=Any_count}
+let source_file = {Requirement.kind=Unix.S_REG;mode=Any_mode;links=Exactly_one}
 let source_parents t path =
   let downloads=Filename.concat t.directory "downloads" in
   let rec collect current acc =
     let stat=Unix.lstat current in
-    if stat.Unix.st_kind<>Unix.S_DIR || stat.st_uid<>Unix.geteuid () || stat.st_perm land 0o022<>0
-    then Error "download source parent is not owned" else
+    let* ()=Requirement.check ~label:"download source parent" source_parent ~path:current stat in
     let acc=(current,stat)::acc in
     if current=downloads then Ok acc
     else let parent=Filename.dirname current in
@@ -132,8 +135,7 @@ let copy t path id = io (fun () ->
   let* ()=if Unix.realpath path=path then Ok () else Error "download source must be canonical" in
   let* parents=source_parents t path in
   let before=Unix.lstat path in
-  let* ()=if before.Unix.st_kind=Unix.S_REG && before.st_uid=Unix.geteuid () && before.st_nlink=1
-    then Ok () else Error "download source is not an owned regular file" in
+  let* ()=Requirement.check ~label:"download source" source_file ~path before in
   let source=Unix.openfile path [Unix.O_RDONLY;Unix.O_CLOEXEC;Unix.O_NONBLOCK] 0 in
   let transferred=ref false in
   Fun.protect ~finally:(fun () -> if not !transferred then Unix.close source) (fun () ->

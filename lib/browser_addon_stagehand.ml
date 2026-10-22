@@ -2,6 +2,7 @@ module Lease = Native_addon_lease
 module Session = Browser_stagehand_session
 module Process = Browser_chromium_process
 module Profile = Browser_addon_chrome_profile
+module Requirement = Resource_requirement
 let ( let* ) = Result.bind
 
 type configuration = { chrome : string; extension : string; launcher : string;
@@ -117,11 +118,13 @@ let rec remove_profile path =
   | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
     Error "Chrome profile contains an unconfirmed resource"
 let profiles directory = Filename.concat directory "chromium-profiles"
+let profiles_label = "Chrome private profiles directory"
 let cleanup c ~incarnation ~directory = protect (fun () ->
   let* claim=original c ~incarnation ~directory in
   let* ()=settle c ~incarnation ~directory in
   match Unix.lstat (profiles directory) with
-  | info when info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid () && info.st_perm=0o700 ->
+  | info ->
+    let* ()=Requirement.check ~label:profiles_label Requirement.private_directory ~path:(profiles directory) info in
     let names=Sys.readdir (profiles directory) in
     let* ()=if names<>[||] && Option.is_none claim then Error "Chrome profiles have no original child claim"
       else Ok () in
@@ -130,7 +133,6 @@ let cleanup c ~incarnation ~directory = protect (fun () ->
       | Some uuid when Uuidm.to_string uuid=name -> remove_profile (Filename.concat (profiles directory) name)
       | None | Some _ -> Error "Chrome profile directory contains an unknown allocation") (Ok ()) names in
     Unix.rmdir (profiles directory);Ok ()
-  | _ -> Error "Chrome profile root identity changed"
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ())
 
 let read_configuration directory =
@@ -202,8 +204,8 @@ let open_session ~sw ~env ~owner ~directory ~configuration:c ~model ~headless ~l
       | Private -> protect (fun () ->
       (try Unix.mkdir (profiles directory) 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
       let root=Unix.lstat (profiles directory) in
-      let* ()=if root.Unix.st_kind=Unix.S_DIR && root.st_uid=Unix.geteuid () && root.st_perm=0o700
-        && Unix.realpath (profiles directory)=profiles directory then Ok () else Error "Chrome profile root is not private" in
+      let* ()=Requirement.check ~label:profiles_label Requirement.private_directory ~path:(profiles directory) root in
+      let* ()=Requirement.canonical ~label:profiles_label (profiles directory) in
       let profile=Filename.concat (profiles directory) instance_id in
       Unix.mkdir profile 0o700;Ok (Process.Private_profile profile))) in
     let profile=Process.profile_path selected_profile in

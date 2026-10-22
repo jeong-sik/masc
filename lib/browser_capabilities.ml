@@ -143,7 +143,7 @@ let support backend operation = match backend with
     | Scroll_page -> conditional ~action:"scroll" Interact [observed;"Scrolls the page; use scroll_at for a nested pane."]
     | Scroll_at -> conditional ~action:"scroll_at" Interact [observed;geometry;"Scrolls the pane at the observed viewport point."]
     | Fill -> conditional ~action:"fill" Interact
-        [observed;target;"Replaces text input/textarea value and emits input/change; this is not trusted keyboard typing or submission."]
+        [observed;target;"Replaces the value of a text input or textarea and emits input/change, or replaces the content of a contenteditable editor with insertText (the editor gets input events); this is not trusted keyboard typing or submission."]
     | Double_click -> if native backend then conditional ~action:"double_click" Interact
         [observed;target;"Native double click; application behavior must be observed afterward."] else missing
     | Type_text -> if native backend then conditional ~action:"type_text" Interact

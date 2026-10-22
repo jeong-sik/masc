@@ -453,6 +453,20 @@ let script = {js|function interactInPage(args) {
       if (typeof args.text !== "string") throw new Error("fill_text_required");
       const input = element instanceof HTMLInputElement;
       const textarea = element instanceof HTMLTextAreaElement;
+      if (!input && !textarea && element.isContentEditable === true) {
+        if (args.text === "" && element.textContent === "") return {action: args.action, urlBefore: before, url: location.href,
+          title: document.title, scrollX: window.scrollX, scrollY: window.scrollY};
+        element.focus();
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    effectStarted = true;
+        const applied = args.text === "" ? document.execCommand("delete") : document.execCommand("insertText", false, args.text);
+        if (!applied) throw new Error("editable_rejected_text");
+        if (!args.text.includes("\n") && element.textContent.replace(/\u00a0/g, " ") !== args.text.replace(/\u00a0/g, " ")) throw new Error("editable_changed_text");
+      } else {
       if ((!input && !textarea) || (input && !["text", "search", "email", "url", "tel", "password", "number"].includes(element.type)))
         throw new Error("element_is_not_a_text_input");
       if (element.readOnly) throw new Error("element_read_only");
@@ -468,6 +482,7 @@ let script = {js|function interactInPage(args) {
       element.dispatchEvent(new Event("input", {bubbles: true}));
       element.dispatchEvent(new Event("change", {bubbles: true}));
       if (element.value !== args.text) throw new Error("input_changed_during_events");
+      }
     }
   } else throw new Error("unknown_interaction_action");
   return {action: args.action, urlBefore: before, url: location.href,

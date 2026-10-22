@@ -15,7 +15,7 @@ import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sou
 import { safeText } from './terminal.mjs'
 import { StatusReader } from './status-reader.mjs'
 import { openPlayback } from './playback.mjs'
-import { InstrumentPicker, pickerFooter, selectionLabel } from './instruments.mjs'
+import { InstrumentPicker, pickerFooter, projectSoundLabel } from './instruments.mjs'
 import { defaultStateDirectory, snapshotWriter } from './vst.mjs'
 import { renderVstPhrase } from './sequencer-vst.mjs'
 import { captureVstSound } from './project-sound-files.mjs'
@@ -110,6 +110,8 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
   const jobs = new Map(), players = new Map()
   const nativeRenders = new Set(), observations = new Set()
   const audioInstrument = () => editor.project.sound ?? { kind: 'unselected' }
+  const statusBody = () => [status, '', `Instrument: ${projectSoundLabel(audioInstrument())}`,
+    `Project: ${path}`].join('\n')
   let currentVstRender = null, pendingSound = null
   const writeSnapshot = snapshotWriter(stateDirectory)
   let jobNumber = 0, generation = 0, transport = { kind: 'stopped' }, workerFailure = null, pendingDraw = null
@@ -154,8 +156,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       clearHarmony()
       editor = editorSound(editor, sound)
       selectedMidiOutput = undefined; portBindings = []
-      status = sound.kind === 'vst' ? `Selected ${sound.selection.name}` : isFluidSound(sound)
-        ? `Selected FluidSynth ${sound.engine.version} · ${sound.font.name} · MIDI control ${sound.engine.controlFrames} samples` : 'Selected SoundFont'
+      status = `Selected ${projectSoundLabel(sound)}`
       if (preview) play()
   }
   const picker = new InstrumentPicker({ directory: stateDirectory, notify: draw,
@@ -232,8 +233,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     } else if (picker.view) {
       lines.length = 0
       const sound = audioInstrument()
-      const selectedSound = sound.kind === 'unselected' ? 'Choose an instrument'
-        : selectionLabel(sound.kind === 'vst' ? sound.selection : null)
+      const selectedSound = projectSoundLabel(sound)
       lines.push(picker.view.title, `${selectedSound} · ${status}`)
       if (picker.view.query !== undefined) lines.push(`${picker.view.kind === 'preset_name' ? 'Name' : picker.view.kind === 'preset_path' ? 'Path' : picker.view.searching ? 'Search' : 'Filter'}: ${picker.view.query}`)
       const items = picker.items(), height = Math.max(1, rows - 6)
@@ -308,8 +308,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         if (pitch === editor.pitch) cells[cursor] = current ? '◆' : '◇'
         lines.push(`${noteName(pitch).padStart(5)}  ${cells.join('')}`)
       }
-      const instrument = audioInstrument().kind === 'vst' ? `VST ${audioInstrument().selection.name}` : isFluidSound(audioInstrument())
-        ? `FluidSynth ${audioInstrument().engine.version} · ${audioInstrument().font.name} · MIDI control ${audioInstrument().engine.controlFrames} samples` : audioInstrument().kind === 'soundfont' ? 'SoundFont' : 'choose instrument'
+      const instrument = projectSoundLabel(audioInstrument())
       const destination = portBindings.length ? portBindings.map(binding => `${binding.port}→${binding.destination}`).join(', ')
         : selectedMidiOutput === undefined ? selectedOutput ?? 'system default' : `MIDI ${selectedMidiOutput}`
       lines.push(`Playhead ${(playTick() / per).toFixed(2)} · loop ${project.loop.start / per}–${project.loop.end / per} · ${instrument} · output ${destination} · ${path}`)
@@ -627,7 +626,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     }
     if (statusReader.keypress(text, key, process.stdout)) { draw(); return }
     if (key.ctrl && key.name === 'l' || prompt === null && !picker.view && text === '!') {
-      statusReader.open('Phrase status at open', `${status}\n\nProject: ${path}`)
+      statusReader.open('Phrase status at open', statusBody())
       draw(); return
     }
     if (picker.view) {
@@ -643,7 +642,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       else if (key.name === 'backspace') prompt = [...prompt].slice(0, -1).join('')
       else if (key.name === 'return') {
         const line = prompt; prompt = null
-        if (statusReader.command(line, 'Phrase status at open', `${status}\n\nProject: ${path}`)) { draw(); return }
+        if (statusReader.command(line, 'Phrase status at open', statusBody())) { draw(); return }
         let admittedEffect
         try { admittedEffect = stepInputEffect(line) }
         catch (error) { status = error.message; draw(); return }

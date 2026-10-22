@@ -315,6 +315,14 @@ The body is fixed at open; reopen to observe a later status. This is not a
 history of overwritten statuses or recovery output printed only after exit.
 In an arrangement, the reading also captures the actual transport state,
 position and output device, plus the recording phase and selected inputs.
+Phrase and arrangement views identify the saved local sound: the VST name,
+preset and captured version; the frozen SoundFont name, FluidSynth version,
+bank style and control interval; or the built-in AlphaSynth choice. The full
+status reader keeps these names readable when the normal line is clipped.
+Arrangement sound information follows the selected MIDI region, or the library
+asset when no region is selected; an open instrument picker describes its own
+target asset. This describes the saved source sound. An explicitly selected
+external MIDI route still determines the playback destination.
 The preparing notice ends when the native player acknowledges playback;
 stopping explicitly reports the stopped state.
 

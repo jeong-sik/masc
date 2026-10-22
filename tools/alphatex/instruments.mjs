@@ -2,6 +2,7 @@ import { mkdir, readdir } from 'node:fs/promises'
 import { basename, join, resolve, win32 } from 'node:path'
 import { homedir } from 'node:os'
 import { nativeJob, loadSelection, saveSelection, presetDirectory } from './vst.mjs'
+import { safeText } from './terminal.mjs'
 
 // A selection is a plug-in plus an optional saved sound. The state line and the
 // picker both read these names so the two never disagree about what is chosen.
@@ -11,6 +12,24 @@ export function presetLabel(presetPath) {
 
 export function selectionLabel(selection) {
   return selection ? `${selection.name} · ${presetLabel(selection.preset_path)}` : 'SoundFont'
+}
+
+// Project sounds are already validated when loaded or adopted. Read their
+// captured identity here, without reopening paths or hashing inline font bytes.
+export function projectSoundLabel(sound) {
+  if (sound === undefined || sound.kind === 'unselected') return 'Choose an instrument'
+  switch (sound.kind) {
+    case 'vst':
+      return safeText(`VST · ${selectionLabel(sound.selection)} · ${sound.instrument.version}`)
+    case 'soundfont':
+      if (sound.engine === undefined) return 'SoundFont · AlphaSynth'
+      if (sound.engine.kind === 'fluidsynth') {
+        return safeText(`SoundFont · ${sound.font.name} · FluidSynth ${sound.engine.version} · ${sound.bankStyle.toUpperCase()} · control ${sound.engine.controlFrames} samples`)
+      }
+      throw new TypeError(`Unsupported SoundFont engine: ${sound.engine.kind}`)
+    default:
+      throw new TypeError(`Unsupported project sound: ${sound.kind}`)
+  }
 }
 
 // The picker's own actions as data: the footer renders them and the tests read

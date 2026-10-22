@@ -333,6 +333,43 @@ let test_listen_target_and_workspace_withdrawal () =
   Alcotest.(check bool) "same target preserves the active request" true
     (take_chat_listen state third)
 
+let test_partial_input_retires_midi_editor () =
+  let module Reader = Masc_tui_input_reader in
+  let open Masc_tui_types in
+  let original = Unix.dup Unix.stdin in
+  let incoming, outgoing = Unix.pipe () in
+  Fun.protect ~finally:(fun () ->
+    Unix.dup2 original Unix.stdin;
+    List.iter Unix.close [original; incoming; outgoing]) (fun () ->
+    Unix.dup2 incoming Unix.stdin;
+    let write text =
+      let rec loop offset =
+        if offset < String.length text then
+          loop (offset + Unix.write_substring outgoing text offset (String.length text - offset)) in
+      loop 0 in
+    List.iter (fun (prefix, suffix, recover) ->
+      let reader = Reader.create_input_reader () and state = listen_state () in
+      let midi = {audio with Masc_tui_chat_media.kind=`Midi; name="phrase.mid"} in
+      let request = begin_chat_listen ~destination:Listen_music_editor state ~keeper:"music" midi in
+      write prefix;
+      Alcotest.(check bool) "partial source has no complete event" true
+        (Reader.read_input ~timeout:0. reader () = None);
+      if recover then ignore (Reader.recover_paste reader);
+      Alcotest.(check bool) "next chunk has not arrived" false
+        (Reader.input_reader_has_ready_input reader);
+      if Reader.input_reader_has_started_input reader then
+        ignore (withdraw_chat_music_editor state);
+      Alcotest.(check bool) "late completion cannot take the terminal" false
+        (take_chat_listen state request);
+      write suffix;
+      ignore (Reader.read_input ~timeout:0. reader ());
+      Alcotest.(check bool) "finishing input cannot revive the old open" false
+        (take_chat_listen state request))
+      ["\027[200~draft", " tail\027[201~", false;
+       "\027[200~draft", " tail\027[201~", true;
+       "\027[", "A", false;
+       "\226", "\130\172", false])
+
 let test_listen_surface_withdrawal () =
   let open Masc_tui_types in
   let state = listen_state () in
@@ -366,6 +403,8 @@ let () =
             test_listen_replacement_and_replay
         ; Alcotest.test_case "MIDI editor intent and retirement" `Quick
             test_midi_editor_request_ownership
+        ; Alcotest.test_case "partial terminal input retains its owner" `Quick
+            test_partial_input_retires_midi_editor
         ; Alcotest.test_case "target and workspace withdrawal" `Quick
             test_listen_target_and_workspace_withdrawal
         ; Alcotest.test_case "surface withdrawal" `Quick

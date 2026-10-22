@@ -24584,6 +24584,11 @@ and is loaded on demand through keeper_skill.
       let drain_deadline_ns =
         Int64.add (Mtime_clock.elapsed_ns ()) async_drain_budget_ns
       in
+      let retire_music_editor_for_input () =
+        if Option.is_some interrupted_paste || input_reader_has_started_input input_reader then
+          withdraw_pending_music_editor state
+      in
+      retire_music_editor_for_input ();
       if
         drain_async_messages ~delivery_round:async_delivery_round ~deadline_ns:drain_deadline_ns
           ~input_pending:(fun () -> input_reader_has_ready_input input_reader) state ~base_path
@@ -33511,6 +33516,7 @@ and is loaded on demand through keeper_skill.
       (* Shares the pass deadline computed before the pre-input drain: when the
          pass budget is spent this applies nothing and the mailbox waits for
          the next pass. *)
+      retire_music_editor_for_input ();
       if
         drain_async_messages ~delivery_round:async_delivery_round ~deadline_ns:drain_deadline_ns
           ~input_pending:(fun () -> input_reader_has_ready_input input_reader) state ~base_path

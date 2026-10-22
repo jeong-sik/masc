@@ -1788,7 +1788,8 @@ to MASC. In Keeper chat, `/music midi` opens the newest readable MIDI attachment
 in the phrase editor, even when a newer voice or audio message follows it. The
 source is prepared from its original bytes before terminal handoff; leaving
 that conversation, replacing the request or entering another key, paste or mouse
-gesture retires its pending open. Already buffered input also keeps the terminal
+gesture retires its pending open. Already buffered input, a paste still arriving
+or an incomplete terminal/UTF-8 sequence also keeps the terminal
 in chat; run `/music midi` again when ready to enter the editor. The
 original attachment stays unchanged, and saved projects use the workspace's
 music project directory. The phrase editor's first audio Space opens instrument/preset selection;

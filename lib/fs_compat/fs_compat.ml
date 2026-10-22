@@ -1097,6 +1097,7 @@ type owned_inventory_root =
   }
 
 let owned_inventory_root_path root = root.inventory_path
+let owned_inventory_root_stat root = root.inventory_stat
 
 let inventory_root_current root =
   try

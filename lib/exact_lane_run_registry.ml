@@ -502,12 +502,32 @@ type failed_completion =
   ; failure : persistence_failure
   }
 
+type payload_sweep_counts =
+  { examined_root_entries : int
+  ; unlinked_entries : int
+  ; removed_run_directories : int
+  ; failed_root_entries : int
+  }
+
+type payload_sweep_status =
+  | Not_attempted
+  | Replay_not_trusted
+  | Root_absent
+  | Root_unavailable
+  | Swept of payload_sweep_counts
+
+type startup_observation =
+  { replay : Run_registry_core.replay_status
+  ; payload_sweep : payload_sweep_status
+  }
+
 type t =
   { store : Store.t
   ; path : string option
   ; failed_completions : (string * failed_completion) list Atomic.t
   ; projection : run list Atomic.t
   ; observation_mutex : Cross_context_mutex.t
+  ; startup_observation : startup_observation
   }
 
 type completion_error =
@@ -678,29 +698,36 @@ module String_set = Set.Make (String)
    retained row names. Every entry of the directory goes, including a temporary
    file a crashed write left behind. A removal that fails is logged and the
    directory stays; nothing reads it. *)
-let remove_files_in ~dir ~keep =
+let remove_files_in ~dir ~keep ~on_unlink =
   Array.iter
     (fun name ->
-       if not (String_set.mem name keep) then Sys.remove (Filename.concat dir name))
+       if not (String_set.mem name keep)
+       then (
+         Sys.remove (Filename.concat dir name);
+         on_unlink ()))
     (Sys.readdir dir)
 ;;
 
-let remove_payload_dir ~log_path ~run_id =
+let remove_payload_dir ~log_path ~run_id ~on_unlink ~on_directory_removed =
   let dir = payload_run_dir ~log_path ~run_id in
   try
     Eio_guard.run_in_systhread ~label:"exact-lane-payload-remove" (fun () ->
-      if Sys.file_exists dir
-      then (
-        remove_files_in ~dir ~keep:String_set.empty;
-        Unix.rmdir dir));
-    Keeper_fs.invalidate_dir dir
+      match Unix.stat dir with
+      | _ ->
+        remove_files_in ~dir ~keep:String_set.empty ~on_unlink;
+        Unix.rmdir dir;
+        on_directory_removed ()
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+    Keeper_fs.invalidate_dir dir;
+    Ok ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | (Sys_error _ | Unix.Unix_error _) as exn ->
     Log.Keeper.warn
       "exact_lane_run_registry: could not remove payload files of %s: %s"
       run_id
-      (Printexc.to_string exn)
+      (Printexc.to_string exn);
+    Error ()
 ;;
 
 let publish_projection t =
@@ -717,7 +744,10 @@ let publish_projection t =
     List.iter
       (fun run ->
          if not (String_set.mem run.run_id retained)
-         then remove_payload_dir ~log_path ~run_id:run.run_id)
+         then
+           ignore
+             (remove_payload_dir ~log_path ~run_id:run.run_id
+                ~on_unlink:(fun () -> ()) ~on_directory_removed:(fun () -> ())))
       previous
 ;;
 
@@ -740,47 +770,77 @@ let referenced_leaves (entry : Store.entry) =
    names. *)
 let sweep_payload_dirs t ~log_path =
   let root = Filename.concat (Filename.dirname log_path) payload_dirname in
-  let sweep () =
+  let sweep names =
     let referenced = Hashtbl.create 1024 in
     List.iter
       (fun (entry : Store.entry) -> Hashtbl.replace referenced entry.id (referenced_leaves entry))
       (Store.list_entries t.store);
+    (* These counters belong only to this synchronous startup sweep. Increment
+       after each successful effect, inside its joined systhread, so a later
+       failure cannot erase earlier successful removals. *)
+    let unlinked_entries = ref 0 in
+    let removed_run_directories = ref 0 in
+    let failed_root_entries = ref 0 in
+    let on_unlink () = incr unlinked_entries in
+    let on_directory_removed () = incr removed_run_directories in
     let sweep_entry name =
       let path = Filename.concat root name in
       match Hashtbl.find_opt referenced name, Sys.is_directory path with
-      | None, true -> remove_payload_dir ~log_path ~run_id:name
+      | None, true ->
+        remove_payload_dir ~log_path ~run_id:name ~on_unlink ~on_directory_removed
       | Some keep, true ->
         (* A retained run keeps the files its row names; a superseded
            registration of the same id and a torn temporary file go. *)
         Eio_guard.run_in_systhread ~label:"exact-lane-payload-remove" (fun () ->
-          remove_files_in ~dir:path ~keep)
-      | (None | Some _), false -> Sys.remove path
+          remove_files_in ~dir:path ~keep ~on_unlink);
+        Ok ()
+      | (None | Some _), false ->
+        Sys.remove path;
+        on_unlink ();
+        Ok ()
     in
     Array.iter
       (fun name ->
-         try sweep_entry name with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | (Sys_error _ | Unix.Unix_error _) as exn ->
+         match sweep_entry name with
+         | Ok () -> ()
+         | Error () -> incr failed_root_entries
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception ((Sys_error _ | Unix.Unix_error _) as exn) ->
+           incr failed_root_entries;
            Log.Keeper.warn
              "exact_lane_run_registry: could not sweep payload entry %s under %s: %s"
              name
              root
              (Printexc.to_string exn))
-      (Sys.readdir root)
+      names;
+    Swept
+      { examined_root_entries = Array.length names
+      ; unlinked_entries = !unlinked_entries
+      ; removed_run_directories = !removed_run_directories
+      ; failed_root_entries = !failed_root_entries
+      }
   in
   match Store.replay_status t.store with
   | Run_registry_core.Replayed { reached_end = true; malformed_lines = 0; _ } ->
-    if Sys.file_exists root
-    then (
-      try sweep () with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | (Sys_error _ | Unix.Unix_error _) as exn ->
-        Log.Keeper.warn
-          "exact_lane_run_registry: could not list payload entries under %s: %s"
-          root
-          (Printexc.to_string exn))
+    (* [Sys.file_exists] hides permission errors as false. Distinguish actual
+       absence from an unavailable root without inventing a cleanup policy. *)
+    (match
+       Eio_guard.run_in_systhread ~label:"exact-lane-payload-list" (fun () ->
+         match Unix.stat root with
+         | _ -> Some (Sys.readdir root)
+         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None)
+     with
+     | None -> Root_absent
+     | Some names -> sweep names
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception ((Sys_error _ | Unix.Unix_error _) as exn) ->
+       Log.Keeper.warn
+         "exact_lane_run_registry: could not list payload entries under %s: %s"
+         root
+         (Printexc.to_string exn);
+       Root_unavailable)
   | Run_registry_core.Replayed _ | Run_registry_core.Log_absent | Run_registry_core.Not_replayed
-    -> ()
+    -> Replay_not_trusted
 ;;
 
 let make ?path store =
@@ -790,6 +850,8 @@ let make ?path store =
     ; failed_completions = Atomic.make []
     ; projection = Atomic.make []
     ; observation_mutex = Cross_context_mutex.create ()
+    ; startup_observation =
+        { replay = Store.replay_status store; payload_sweep = Not_attempted }
     }
   in
   publish_projection t;
@@ -799,9 +861,11 @@ let make ?path store =
 let create ?path () = make ?path (Store.create ?path ())
 let replay path =
   let t = make ~path (Store.replay path) in
-  sweep_payload_dirs t ~log_path:path;
-  t
+  let payload_sweep = sweep_payload_dirs t ~log_path:path in
+  { t with startup_observation = { t.startup_observation with payload_sweep } }
 ;;
+
+let startup_observation t = t.startup_observation
 
 (* [Cross_context_mutex], not [Stdlib.Mutex]: this lock wraps
    [Store.register] / [Store.complete], whose critical section performs a

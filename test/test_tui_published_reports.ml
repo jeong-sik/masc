@@ -208,6 +208,70 @@ let failed_revision_navigation () =
    | Some (Catalog.Mcp_uri _) | None -> fail "neighbor after failure missing");
   check bool "failed body never fabricated from history" true (state.resource_content=None)
 
+let filtered_selection () =
+  let doc = entry (revision markdown) in
+  let page = entry (revision ~format:Published.Html html) in
+  let mcp = Catalog.Mcp { (Catalog.metadata doc) with name="status" } in
+  let state = state () in
+  Updates.listed state (Ok {Catalog.entries=[mcp;page;doc];notes=[]});
+  Updates.select_scope state Catalog.Markdown_reports;
+  let requested = ref None in
+  Updates.open_selected state ~read:(fun ~key -> requested := Some key);
+  check bool "filtered cursor requests exact displayed document" true
+    (!requested = Some (Catalog.key doc));
+  let owner = ref () in
+  state.resource_pending_key <- Some (Catalog.key doc);
+  state.resource_read_owner <- Some owner;
+  Updates.select_scope state Catalog.Html_reports;
+  check bool "hidden read loses ownership" true
+    (state.resource_pending_key=None && state.resource_read_owner=None);
+  Updates.read_done state ~request:{Catalog.key=Catalog.key doc;owner}
+    (Ok (Catalog.mcp_reading []));
+  check bool "hidden late response cannot restore content" true (state.resource_content=None);
+  requested := None;
+  Updates.open_selected state ~read:(fun ~key -> requested := Some key);
+  check bool "filter actions use visible cursor" true (!requested=Some (Catalog.key page));
+  check bool "inventory authorities retained" true
+    (state.resources_list=Some [mcp;page;doc]);
+  Updates.select_scope state Catalog.All_resources;
+  check int "all sources remain reachable" 3
+    (List.length (Option.value (Masc_tui_types.visible_resources state) ~default:[]))
+
+let captured_local_day () =
+  let now = get (Result.map_error (fun Time_codec.Invalid_rfc3339 -> "time fixture")
+    (Time_codec.parse_rfc3339 "2026-10-21T00:00:00Z")) in
+  let current = revision markdown in
+  let equivalent = { current with created_at="2026-10-21T09:00:00+09:00" } in
+  let older = { current with created_at="2026-10-19T00:00:00Z" } in
+  let state = state () in
+  Updates.listed state (Ok {Catalog.entries=[entry older;entry equivalent];notes=[]});
+  Updates.toggle_today state ~now;
+  check bool "timezone offsets compare as instants" true
+    (Masc_tui_types.visible_resources state=Some [entry equivalent]);
+  let captured = state.resource_day in
+  Updates.listed state (Ok {Catalog.entries=[entry current;entry older];notes=[]});
+  check bool "refresh preserves captured day" true (state.resource_day=captured);
+  check bool "refresh reselects metadata on captured day" true
+    (Masc_tui_types.visible_resources state=Some [entry current]);
+  Updates.toggle_today state ~now:(now +. 86400.);
+  check bool "toggle restores full date inventory" true
+    (state.resource_day=None && Masc_tui_types.visible_resources state=state.resources_list)
+
+let presentation_retains_source () =
+  let doc = entry (revision markdown) in
+  let parts = [{Masc_tui_mcp.rc_uri=None;rc_mime_type=Some "text/markdown";
+    rc_kind=Resource_text markdown}] in
+  let state = state () in
+  state.resources_list <- Some [doc];
+  state.resource_content <- Some (Catalog.key doc,parts);
+  state.resource_focus <- Masc_tui_types.Right_pane;
+  Updates.toggle_layout state;
+  Updates.toggle_presentation state;
+  check bool "presentation preserves immutable source object" true
+    (match state.resource_content with Some (_,original) -> original==parts | None -> false);
+  check bool "presentation makes no synthetic read" true
+    (state.resource_pending_key=None && state.resource_read_owner=None)
+
 let () = run "published report resources" ["report reading",[
   test_case "pinned revision and body integrity" `Quick exact_revision;
   test_case "HTML original admission" `Quick html_source;
@@ -218,4 +282,7 @@ let () = run "published report resources" ["report reading",[
   test_case "exact neighboring revision requests" `Quick revision_requests;
   test_case "pinned refresh and withdrawal" `Quick pinned_refresh;
   test_case "same key new request ownership" `Quick superseded_same_key;
-  test_case "navigation after a refused revision" `Quick failed_revision_navigation]]
+  test_case "navigation after a refused revision" `Quick failed_revision_navigation;
+  test_case "filtered selection and detached reads" `Quick filtered_selection;
+  test_case "captured local publication day" `Quick captured_local_day;
+  test_case "presentation preserves source" `Quick presentation_retains_source]]

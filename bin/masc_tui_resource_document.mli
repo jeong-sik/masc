@@ -13,8 +13,8 @@ val copy_source : Masc_tui_types.state -> ((string * string), string) result
     blobs, follows URIs or sanitizes payload bytes. The caller owns clipboard
     delivery; success does not establish terminal acknowledgement. *)
 val rows : cols:int -> t -> string list
-(** [cols] is the surface width after the Activity reservation, before the
-    Resources list/detail split. Both drawing and search use this projection.
+(** [cols] is the actual document pane width, after Activity and optional
+    Resources split. Both drawing and search use this projection.
     Each source part's CRLF is parsed before fencing, joining, Markdown and
     terminal sanitization;
     original parts and copy bytes are unchanged. Standalone CR stays escaped. *)

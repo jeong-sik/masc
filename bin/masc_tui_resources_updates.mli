@@ -35,3 +35,12 @@ val place_search_match : Masc_tui_types.state -> count:int -> index:int -> unit
 val step_text_part : Masc_tui_types.state -> delta:int -> unit
 (** Select an original text part for copying. Only focused, admitted Resources
     detail can move; selection clamps at either end and preserves reading state. *)
+
+val select_scope : Masc_tui_types.state -> Masc_tui_resource_catalog.scope -> unit
+(** Change the displayed inventory and reconcile selection/read ownership with
+    that same projection. Hidden reads lose ownership; no network request. *)
+val toggle_today : Masc_tui_types.state -> now:float -> unit
+(** Capture today's local date when enabled. The selection stays on that date
+    across midnight until toggled again, so cursor actions cannot drift. *)
+val toggle_layout : Masc_tui_types.state -> unit
+val toggle_presentation : Masc_tui_types.state -> unit

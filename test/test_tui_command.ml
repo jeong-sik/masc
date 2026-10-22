@@ -54,6 +54,7 @@ let describe = function
   | Command.Open_images index -> Printf.sprintf "images:%d" index
   | Command.List_images -> "list-images"
   | Command.Images_invalid_index -> "images-invalid-index"
+  | Command.Open_artifacts -> "open-artifacts"
   | Command.Open_music -> "open-music"
   | Command.Music_invalid_arguments -> "music-invalid-arguments"
   | Command.Open_metrics -> "open-metrics"

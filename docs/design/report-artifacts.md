@@ -119,3 +119,31 @@ its listed revision or changing credentials retires its request ownership.
 
 External references checked 2026-10-19 KST. These references establish the
 interaction and browser primitives; the checks above establish MASC behavior.
+
+## Terminal artifact library
+
+`/artifacts` (alias `/reports`) opens the existing authenticated report inventory
+without sending a Keeper message. The command palette also finds it under
+Artifacts / Resources. Published reports keep the Admin HTTP authority and exact
+revision, byte count, UTF-8 and digest checks used by Resources; MCP resources
+remain a separate typed authority.
+
+The library uses the full terminal width by default: Enter opens the selected
+reading and Esc returns to the list. `w` selects side-by-side browsing on wide
+terminals. `f` cycles all resources, all artifacts, Markdown and HTML. `t` toggles
+the local publication day captured at the keypress; the displayed date stays
+fixed across midnight until toggled again. A refresh applies that same filter to
+new metadata. Today means published or revised, not human-confirmed.
+
+List selection, search, cursor navigation and read requests all use the same
+filtered inventory. Filtering out an open or pending document retires its read
+owner; a late reply cannot restore it. The retained inventory still contains all
+sources so another filter can reach them. A fixed older report revision stays
+readable while its artifact remains in the selected inventory.
+
+The reader starts with compact report metadata. `i` expands its URI, type and
+size; `v` changes document/source presentation and `y` copies the selected
+original text part through the existing OSC 52 path. These display changes do
+not mutate source bytes or request another revision. HTML remains highlighted
+source in this unit; terminal HTML interpretation and embedded image extraction
+are separate work. Shared human confirmation is also not implemented here.

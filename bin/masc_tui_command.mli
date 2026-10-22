@@ -52,6 +52,8 @@ type t =
   | List_images
       (** [/images] lists and freezes image/diagram numbers until the next list. *)
   | Images_invalid_index
+  | Open_artifacts
+      (** [/artifacts] or [/reports] opens the published artifact library. *)
   | Open_music
       (** [/music] opens the terminal music library without score graphics. *)
   | Music_invalid_arguments

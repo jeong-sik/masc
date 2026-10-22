@@ -8,6 +8,18 @@ type reading =
   { parts : Masc_tui_mcp.resource_content list
   ; revisions : report list
   }
+type scope = All_resources | Published_reports | Markdown_reports | Html_reports
+type layout = Full_width | Side_by_side
+type presentation = Document | Source
+type day = { year : int; month : int; day : int }
+val local_day : float -> day
+val on_day : day -> t -> bool
+val select : scope:scope -> day:day option -> t list -> t list
+(** Preserve source order and typed identities. Date filtering includes only
+    reports whose publication instant falls on the selected local day. *)
+val scope_label : scope -> string
+val next_scope : scope -> scope
+
 type direction = Older | Newer
 type read_request = { key : key; owner : unit ref }
 

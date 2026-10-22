@@ -200,6 +200,11 @@ let detach_refused config id = match dispatch config Runtime.Detach ["instance_i
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 let await_phase clock config id expected = await clock (fun () -> phase (instance config id) = expected)
+(* A detached installation that never started keeps no history record, so
+   Inspect stops listing it instead of reporting it "detached". *)
+let await_unlisted clock config id = await clock (fun () ->
+  not (List.exists (fun value -> text "instance_id" value = id)
+    (inspect config |> member "instances" |> Yojson.Safe.Util.to_list)))
 let machine_runtime_config ~enabled = Printf.sprintf {|[providers.local]
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1/v1"
@@ -313,7 +318,7 @@ let test_a_failed_installation_is_read_as_unready () = with_fixture (fun env _ c
          (Lane_addon_unready.declaring ~name:"masc_msx_step" reading.unready = [unready])
    | [] | _ :: _ :: _ -> fail "exactly the failed installation must be unready");
   detach config id;
-  await_phase clock config id "detached";
+  await_unlisted clock config id;
   check bool "a detached installation is no longer unready" true
     ((unwrap (Runtime.tool_export_reading ~config
       ~access:Lane_addon_sources.Unauthenticated ~reserved:[])).unready = []))
@@ -347,7 +352,7 @@ let test_a_failed_dos_installation_is_named_and_not_released () = with_fixture (
    | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) ->
        fail "a release refused before any call is unavailable");
   detach config id;
-  await_phase clock config id "detached";
+  await_unlisted clock config id;
   let events = Machine_addon_host.dos_event_batch ~author:"operator" in
   let released = Fun.protect ~finally:(fun () -> Machine_addon_events.ready events) (fun () ->
     Machine_addon_host.release_shared_controller ~events ~config ~holder:"seat" ~by:"operator"

@@ -1248,6 +1248,36 @@ val read_private_jsonl_rows_locked_result :
   , Private_jsonl_rows.error )
   private_file_transaction_outcome
 
+module Private_jsonl_fold : sig
+  type 'a t =
+    | Missing
+    | Present of { value : 'a; rows_end : int; end_offset : int }
+
+  type error =
+    | Read_error of Private_jsonl_rows.error
+    | Snapshot_changed
+end
+
+val fold_private_jsonl_locked_result
+  : string -> init:'a -> f:('a -> string -> 'a)
+  -> ('a Private_jsonl_fold.t, Private_jsonl_fold.error)
+       private_file_transaction_outcome
+(** Stream every newline-terminated row, including blank rows, under the same
+    in-process path mutex and shared descriptor lock as the private JSONL
+    reader. Retains a read buffer and the current row, not the whole file.
+    [f] runs in the blocking worker and must not use Eio effects or re-enter
+    this path. The final unterminated fragment is not passed to [f];
+    [rows_end < end_offset] reports it explicitly. An empty file is [Present],
+    while only the initial open's ENOENT produces [Missing].
+
+    The opened regular descriptor and the current path target must have the
+    same identity and unchanged size/mtime/ctime before and after the fold.
+    Symlinks to regular files retain the existing reader contract. A changed
+    binding is [Snapshot_changed], never [Missing]. The operation does not
+    create, chmod, truncate, append or fsync. It is a read snapshot, not proof
+    of durable publication or permission to mutate later. Cancellation
+    propagates; descriptor settlement uses the existing transaction outcome. *)
+
 module Private_jsonl_window : sig
   type t =
     | Window_missing  (** No file at the path. *)

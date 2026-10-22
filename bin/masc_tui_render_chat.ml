@@ -3064,7 +3064,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                         | Keeper_chat_transcript.Unstreamed_skills
                         | Keeper_chat_transcript.Text_stretch _
                         | Keeper_chat_transcript.Media_stretch _
-                        | Keeper_chat_transcript.Thinking_stretch _
+                | Keeper_chat_transcript.Thinking_stretch _
                         | Keeper_chat_transcript.Tool_stretch _
                         | Keeper_chat_transcript.Reply_of_segment _
                         | Keeper_chat_transcript.Error_of_segment _ -> turn_rail_of ~siding:None
@@ -3453,7 +3453,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
             | Some
                 ( Keeper_chat_transcript.Text_stretch _
                 | Keeper_chat_transcript.Media_stretch _
-                        | Keeper_chat_transcript.Thinking_stretch _
+                | Keeper_chat_transcript.Thinking_stretch _
                 | Keeper_chat_transcript.Tool_stretch _
                 | Keeper_chat_transcript.Unstreamed_skills
                 | Keeper_chat_transcript.Reply_of_segment _
@@ -3632,7 +3632,7 @@ let search_anchor_of_tag = function
       , Some
           (( Keeper_chat_transcript.Text_stretch _
            | Keeper_chat_transcript.Media_stretch _
-                        | Keeper_chat_transcript.Thinking_stretch _
+           | Keeper_chat_transcript.Thinking_stretch _
            | Keeper_chat_transcript.Tool_stretch _
            | Keeper_chat_transcript.Unstreamed_skills
            | Keeper_chat_transcript.Reply_of_segment _

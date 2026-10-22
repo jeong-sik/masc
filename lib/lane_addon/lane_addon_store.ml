@@ -282,7 +282,11 @@ let read_jsonl t reference =
     ~f:(fun records _ -> function Empty -> Ok records
       | Record node -> Ok (node.bytes :: records)) in
   Ok (String.concat "" records)
-let binding_path instance_id = Filename.concat "bindings" (digest instance_id ^ ".json")
+let bindings_directory = "bindings"
+let actions_directory = "actions"
+let exact_requests_directory = "exact-requests"
+let tool_request_owners_directory = "tool-request-owners"
+let binding_path instance_id = Filename.concat bindings_directory (digest instance_id ^ ".json")
 let save_binding t ~instance_id json = write t (binding_path instance_id) (Yojson.Safe.to_string json)
 let remove_binding_with ~sync_parent t ~instance_id = protect (fun () ->
   let path = Filename.concat t.root (binding_path instance_id) in
@@ -295,7 +299,7 @@ let remove_binding_with ~sync_parent t ~instance_id = protect (fun () ->
   Ok ())
 let remove_binding = remove_binding_with ~sync_parent:sync_parent_directory
 let action_path ~instance_id ~request_id =
-  Filename.concat "actions" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
+  Filename.concat actions_directory (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
 (* One keyed JSON record, published with every directory below root synced. *)
 let save_record_with ~sync_parent t relative json = protect (fun () ->
   let path = Filename.concat t.root relative in
@@ -307,18 +311,18 @@ let save_action = save_action_with ~sync_parent:sync_parent_directory
 (* Keyed by the declaration id, not the instance id: an attach mints a new
    instance id, and a restarted worker must find what the host retained. *)
 let exact_request_path ~declaration_id ~request_id =
-  Filename.concat "exact-requests" (Filename.concat (digest declaration_id) (digest request_id ^ ".json"))
+  Filename.concat exact_requests_directory (Filename.concat (digest declaration_id) (digest request_id ^ ".json"))
 let save_exact_request t ~declaration_id ~request_id json =
   save_record_with ~sync_parent:sync_parent_directory t (exact_request_path ~declaration_id ~request_id) json
 let tool_request_owner_path ~scope ~request_id =
-  Filename.concat "tool-request-owners" (Filename.concat (digest scope) (digest request_id ^ ".json"))
+  Filename.concat tool_request_owners_directory (Filename.concat (digest scope) (digest request_id ^ ".json"))
 let with_tool_request_owner_serialization t ~scope work =
   (* The parent is the existing authority anchor, even before the store/scope
      exists. Resolve its aliases without creating missing authority. Store and
      descriptor checks inside [work] still reject external replacement. *)
   let parent=Unix.realpath (Filename.dirname t.root) in
   let key=Filename.concat parent (Filename.concat (Filename.basename t.root)
-    (Filename.concat "tool-request-owners" (digest scope))) in
+    (Filename.concat tool_request_owners_directory (digest scope))) in
   File_lock_eio.with_mutex key work
 let save_tool_request_owner t ~scope ~request_id json =
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
@@ -376,7 +380,7 @@ let issue_detail (error : Fs_compat.owned_regular_file_read_error) =
   "[" ^ tag ^ "] " ^ Fs_compat.owned_regular_file_read_error_to_string error
 
 let binding_inventory_with ~sync_parent ~root =
-  let directory = Filename.concat root "bindings" in
+  let directory = Filename.concat root bindings_directory in
   let listed = protect (fun () ->
     match Fs_compat.exact_path_kind directory with
     | Fs_compat.Exact_missing -> Ok []
@@ -531,7 +535,7 @@ let with_tool_request_owner_scope ~sync_parent t ~scope fn =
         let owner_uid = Unix.geteuid () in
         let parent = Fs_compat.owned_inventory_root_path anchor in
         let root = Filename.concat parent (Filename.basename t.root) in
-        let directory = Filename.concat root (Filename.concat "tool-request-owners" (digest scope)) in
+        let directory = Filename.concat root (Filename.concat tool_request_owners_directory (digest scope)) in
         let* observed = Fs_compat.with_owned_directory_inventory_if_present ~owner_uid
           ~inventory_root:anchor ~sync_directory:sync_parent directory (fun held names ->
             let* value = fn ~owner_uid held names in
@@ -565,6 +569,11 @@ let load_tool_request_owner t ~scope ~request_id =
       else read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name
         |> Result.map Option.some) in
   Ok (Option.join result)
+type namespace_entry = Record_entry | Staged_entry | Unknown_entry
+let tool_request_owner_entry name =
+  if Fs_compat.is_atomic_orphan_name name then Staged_entry
+  else if Filename.check_suffix name ".json" then Record_entry
+  else Unknown_entry
 let tool_request_owner_inventory_with ~after_listing ~sync_file ~sync_parent t ~scope =
   let* result = with_tool_request_owner_scope ~sync_parent t ~scope
     (fun ~owner_uid held names ->
@@ -572,9 +581,11 @@ let tool_request_owner_inventory_with ~after_listing ~sync_file ~sync_parent t ~
       let rec read records = function
         | [] -> Ok (List.rev records)
         | name :: rest ->
-          if Fs_compat.is_atomic_orphan_name name then read records rest
-          else if not (Filename.check_suffix name ".json") then Error "unknown entry in original request namespace"
-          else let* json = read_owned_tool_request ~sync_file ~sync_parent ~owner_uid held name in
+          match tool_request_owner_entry name with
+          | Staged_entry -> read records rest
+          | Unknown_entry -> Error "unknown entry in original request namespace"
+          | Record_entry ->
+            let* json = read_owned_tool_request ~sync_file ~sync_parent ~owner_uid held name in
             read ((name,json) :: records) rest in
       read [] names) in
   Ok (match result with None -> [] | Some records -> records)
@@ -705,8 +716,14 @@ type binding_reading = { readable : Yojson.Safe.t list; unreadable : unreadable_
    lacks an instance id or sequence, or sits beside a misnamed observation
    file is listed in [unreadable] and never hides its siblings. Only a
    directory that cannot be listed or synced fails the whole reading. *)
+let binding_sequence = function
+  | `Assoc fields ->
+      (match List.assoc_opt "instance_id" fields, List.assoc_opt "observation_seq" fields with
+       | Some (`String instance_id), Some (`Int sequence) when sequence >= 0 -> Ok (instance_id, sequence, fields)
+       | _ -> Error "invalid retained binding sequence")
+  | _ -> Error "invalid retained binding"
 let read_bindings t =
-  let directory = Filename.concat t.root "bindings" in
+  let directory = Filename.concat t.root bindings_directory in
   let* names = protect (fun () ->
     match Fs_compat.exact_path_kind directory with
     | Fs_compat.Exact_missing -> Ok []
@@ -722,16 +739,15 @@ let read_bindings t =
     | Ok (Some bytes) ->
         (match Yojson.Safe.from_string bytes with
          | exception Yojson.Json_error detail -> unreadable detail
-         | `Assoc fields as json ->
-             (match List.assoc_opt "instance_id" fields, List.assoc_opt "observation_seq" fields with
-              | Some (`String instance_id), Some (`Int sequence) when sequence >= 0 ->
+         | json ->
+             (match binding_sequence json with
+              | Ok (instance_id, sequence, fields) ->
                   (match highwater t instance_id with
                    | Ok retained ->
                        Some (Ok (`Assoc (("observation_seq", `Int (max sequence retained)) ::
                          List.remove_assoc "observation_seq" fields)))
                    | Error detail -> unreadable ~contents:json detail)
-              | _ -> unreadable ~contents:json "invalid retained binding sequence")
-         | json -> unreadable ~contents:json "invalid retained binding") in
+              | Error detail -> unreadable ~contents:json detail)) in
   let reading = List.fold_left (fun reading name ->
     if not (Filename.check_suffix name ".json") then reading
     else match read name with

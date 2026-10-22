@@ -291,7 +291,7 @@ PY
         # nothing, so the running server is left as it is.
         echo "install-local-build: checking stored state of $workspace_root"
         if ! "$preflight_helper" validate-stores --base-path "$workspace_root"; then
-          echo "install-local-build: this build cannot read the stored state listed above; nothing installed. Stop every server on $workspace_root, fix each listed store as its \"Fresh state required\" entry says (CHANGELOG.md, or changelog.d/ before a release), run this install again, then start the server." >&2
+          echo "install-local-build: this build cannot read the stored state listed above; nothing installed. Stop every server on $workspace_root, fix each listed store as its \"Fresh state required\" entry says (CHANGELOG.md, or changelog.d/ before a release) or as its \"fresh state:\" line above says, run this install again, then start the server." >&2
           exit 1
         fi
       else

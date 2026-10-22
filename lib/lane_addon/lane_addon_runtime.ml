@@ -439,6 +439,21 @@ let parse_retained_binding = function
                  | Ok _, Ok _ -> Ok { binding_fields = fields; read_visibility; binding_owner })))
   | _ -> Error { fault_instance = None; fault_owner = Owner_unreadable; fault_fields = [];
       fault_reason = Record_invalid "expected an object" }
+(* The reads [read_retained_bindings] makes of one record (the store's sequence
+   read, then [parse_retained_binding]), judged the way configuration
+   application judges a fault: a record that names its declaration and is
+   detached holds nothing anyone waits on, so it is kept as evidence and refuses
+   nothing. *)
+let check_retained_binding json =
+  let fault = match Lane_addon_store.binding_sequence json, json with
+    | Error detail, `Assoc fields -> Some (fault_of_fields fields (Record_invalid detail))
+    | Error detail, _ -> Some { fault_instance = None; fault_owner = Owner_unreadable; fault_fields = [];
+        fault_reason = Record_invalid detail }
+    | Ok _, _ -> Result.fold ~ok:(fun _ -> None) ~error:Option.some (parse_retained_binding json) in
+  match fault with
+  | None -> Ok ()
+  | Some fault when owner_is_terminal fault.fault_owner fault.fault_fields -> Ok ()
+  | Some fault -> Error (retained_fault_message fault.fault_reason)
 let fault_of_unreadable (unreadable : Lane_addon_store.unreadable_binding) =
   let located = unreadable.path ^ ": " ^ unreadable.detail in
   let unattributed reason = { fault_instance = None; fault_owner = Owner_unreadable;
@@ -1321,9 +1336,30 @@ let run ~sw backend m e =
         Eio.Cancel.protect (fun () -> finalize_actions m e);
         Eio.Condition.broadcast e.changed;
         release_detached m e; raise exn)
-let native_claim_root store = Filename.concat (Lane_addon_store.root store) "native-claims"
+let native_claims_directory = "native-claims"
+let native_claim_root store = Filename.concat (Lane_addon_store.root store) native_claims_directory
+(* Every directory under [native_claim_root] is one claim slot: an
+   installation's, or the Chrome or live BiDi child slot of one instance. Its
+   name is the digest of that id after the slot's prefix. *)
+type native_claim_slot = Installation_slot | Chrome_child_slot | Live_bidi_child_slot
+[@@deriving enumerate]
+let native_claim_slot_prefix = function
+  | Installation_slot -> ""
+  | Chrome_child_slot -> "browser-"
+  | Live_bidi_child_slot -> "live-bidi-"
+let native_claim_directory store slot ~id =
+  Filename.concat (native_claim_root store) (native_claim_slot_prefix slot ^ Lane_addon_store.digest id)
+let native_claim_slot_of_name name =
+  let digest_length = String.length (Lane_addon_store.digest "") in
+  let digest text = String.length text = digest_length
+    && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) text in
+  List.find_opt (fun slot ->
+    let prefix = native_claim_slot_prefix slot in
+    String.starts_with ~prefix name
+    && digest (String.sub name (String.length prefix) (String.length name - String.length prefix)))
+    all_of_native_claim_slot
 let native_directories store installation_id =
-  [Filename.concat (native_claim_root store) (Lane_addon_store.digest installation_id)]
+  [native_claim_directory store Installation_slot ~id:installation_id]
 let native_result result = Result.map_error (fun error ->
   Lifecycle.Cleanup_unconfirmed (Native_addon_lease.error_to_string error)) result
 let native_settled claim =
@@ -1418,16 +1454,16 @@ let backend ~store ~artifact_store () = match !override with
                     | Some {stagehand_enabled=true;stagehand=Some browser;_} ->
                       let* guardian=Native_addon_program.(locate Browser_process_owner) in
                       Browser_addon_stagehand.configuration ~browser ~launcher ~guardian
-                        ~claim_directory:(Filename.concat (native_claim_root store)
-                          ("browser-" ^ Lane_addon_store.digest instance_id)) |> Result.map Option.some
+                        ~claim_directory:(native_claim_directory store Chrome_child_slot ~id:instance_id)
+                        |> Result.map Option.some
                     | None | Some {stagehand_enabled=false;_}
                     | Some {stagehand_enabled=true;stagehand=None;_} -> Ok None in
                   let* live_bidi=match configuration with
                     | Some {live_enabled=true;live_bidi=Some browser;_} ->
                       let* guardian=Native_addon_program.(locate Browser_process_owner) in
                       Browser_addon_live_bidi.configuration ~browser ~launcher ~guardian
-                        ~claim_directory:(Filename.concat (native_claim_root store)
-                          ("live-bidi-" ^ Lane_addon_store.digest instance_id)) |> Result.map Option.some
+                        ~claim_directory:(native_claim_directory store Live_bidi_child_slot ~id:instance_id)
+                        |> Result.map Option.some
                     | None | Some {live_enabled=false;_}
                     | Some {live_enabled=true;live_bidi=None;_} -> Ok None in
                   Browser_addon_socket.context ~instance_id ~stagehand ~live_bidi
@@ -2026,6 +2062,46 @@ let is_live m (binding : retained_binding) =
 let historical m =
   let* reading = read_retained_bindings m in
   Ok { reading with readable = List.filter (fun binding -> not (is_live m binding)) reading.readable }
+(* The record decoder the inventory applies to one retained binding file.
+   [recovering] names the instances this process is still cleaning up; it only
+   changes the projected phase, never whether a record is read. *)
+let retained_inventory_instance ~recovering path json : (inventory_instance, retained_fault_reason) result =
+  let invalid result = Result.map_error (fun detail -> Record_invalid detail) result in
+  let* () = invalid (unique_json json) in
+  let* fields = match json with
+    | `Assoc fields -> Ok fields
+    | _ -> invalid (Error "expected an object") in
+  let* _visibility = read_authority fields in
+  let* instance_id = invalid (text fields "instance_id") in
+  let* () = match path with
+    | None -> Ok () (* In-process cleanup owns this already-admitted record. *)
+    | Some path when Filename.basename path = Lane_addon_store.digest instance_id ^ ".json" -> Ok ()
+    | Some _ -> invalid (Error "binding filename does not match its instance identity") in
+  let* incarnation = invalid (text fields "incarnation") in
+  let* () = if incarnation=instance_id then Ok ()
+    else invalid (Error "retained incarnation does not match its instance identity") in
+  let* run_id = invalid (text fields "run_id") in
+  let* package_id = invalid (text fields "addon_id") in
+  let* title = invalid (text fields "title") in
+  let* package_revision = invalid (text fields "revision") in
+  let* configuration = match List.assoc_opt "configuration" fields with
+    | None -> invalid (Error "missing retained configuration owner")
+    | Some _ -> invalid (configuration_of_fields fields) in
+  let* state = invalid (lifecycle_of_fields fields) in
+  let state = match state with
+    | Lifecycle.Detached release -> Lifecycle.Detached release
+    | Lifecycle.Failed failed -> Lifecycle.Failed failed
+    | Lifecycle.Detaching previous when recovering instance_id ->
+        Lifecycle.Detaching previous
+    | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ ->
+        Lifecycle.Failed (Lifecycle.failed Lifecycle.Previous_process) in
+  Ok {instance_id;incarnation;run_id;package_id;title;package_revision;
+      configuration;presence=Retained;phase=Lifecycle.project state}
+let check_inventory_record ~path json =
+  match retained_inventory_instance ~recovering:(fun _ -> false) (Some path) json, json with
+  | Ok _, _ -> Ok ()
+  | Error _, `Assoc fields when owner_is_terminal (owner_of_fields fields) fields -> Ok ()
+  | Error reason, _ -> Error (retained_fault_message reason)
 let inventory_at_root ~root =
   let stored = offload (fun () -> Lane_addon_store.binding_inventory ~root) in
   let manager = Hashtbl.find_opt managers root in
@@ -2040,38 +2116,8 @@ let inventory_at_root ~root =
     | Some m,`Assoc fields -> (match text fields "instance_id" with
         | Ok id -> not (Hashtbl.mem m.recovering id) | Error _ -> true)
     | None,_ | Some _,_ -> true) stored.records in
-  let decode path json =
-    let invalid result = Result.map_error (fun detail -> Record_invalid detail) result in
-    let* () = invalid (unique_json json) in
-    let* fields = match json with
-      | `Assoc fields -> Ok fields
-      | _ -> invalid (Error "expected an object") in
-    let* _visibility = read_authority fields in
-    let* instance_id = invalid (text fields "instance_id") in
-    let* () = match path with
-      | None -> Ok () (* In-process cleanup owns this already-admitted record. *)
-      | Some path when Filename.basename path = Lane_addon_store.digest instance_id ^ ".json" -> Ok ()
-      | Some _ -> invalid (Error "binding filename does not match its instance identity") in
-    let* incarnation = invalid (text fields "incarnation") in
-    let* () = if incarnation=instance_id then Ok ()
-      else invalid (Error "retained incarnation does not match its instance identity") in
-    let* run_id = invalid (text fields "run_id") in
-    let* package_id = invalid (text fields "addon_id") in
-    let* title = invalid (text fields "title") in
-    let* package_revision = invalid (text fields "revision") in
-    let* configuration = match List.assoc_opt "configuration" fields with
-      | None -> invalid (Error "missing retained configuration owner")
-      | Some _ -> invalid (configuration_of_fields fields) in
-    let* state = invalid (lifecycle_of_fields fields) in
-    let state = match state with
-      | Lifecycle.Detached release -> Lifecycle.Detached release
-      | Lifecycle.Failed failed -> Lifecycle.Failed failed
-      | Lifecycle.Detaching previous when Option.exists (fun m -> Hashtbl.mem m.recovering instance_id) manager ->
-          Lifecycle.Detaching previous
-      | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ ->
-          Lifecycle.Failed (Lifecycle.failed Lifecycle.Previous_process) in
-    Ok {instance_id;incarnation;run_id;package_id;title;package_revision;
-        configuration;presence=Retained;phase=Lifecycle.project state} in
+  let decode = retained_inventory_instance
+    ~recovering:(fun instance_id -> Option.exists (fun m -> Hashtbl.mem m.recovering instance_id) manager) in
   let owner_of_json = function `Assoc fields -> owner_of_fields fields | _ -> Owner_unreadable in
   let stored_issues = List.map (fun (path, detail) ->
     { issue_path = path; issue_owner = Owner_unreadable; issue_terminal = false;

@@ -35,6 +35,19 @@ val cleanup_context : t -> (Yojson.Safe.t option, error) result
 (** Immutable host-selected cleanup descriptor retained in every original
     reservation history, including retirement and process consumption. Missing
     or inconsistent required state is refused. It grants no process authority. *)
+type recorded = { instance : string; history : string; context : Yojson.Safe.t option }
+type inspection_error = { refusal : string; refused_instance : string option }
+(** [refusal] names the refused file; [refused_instance] is the instance the
+    slot's intent or history names, when it could be read. *)
+val inspect : directory:string -> (recorded option, inspection_error) result
+(** Read one slot the way {!reopen}, {!current} and {!recover_preparation} read
+    it, without the gate lock, fsync, creating or writing anything, so a running
+    owner of the slot is never blocked or changed: the intent and owner
+    receipt, and the instance histories those calls decode. With a published
+    intent this is the named instance's history, and every slot file must exist;
+    otherwise every history, of which at most one unconsumed may exist. [Some]
+    is the instance whose cleanup descriptor its host reads next, with the file
+    name of its history; [None] is a slot with no reservation. *)
 val retire : t -> (unit, error) result
 (** Durably refuse late execution before attempting cleanup. Idempotent for this
     exact claim; cannot retire a replacement's claim. *)

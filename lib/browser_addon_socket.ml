@@ -24,14 +24,12 @@ let context ~instance_id ~automation ~stagehand ~live_bidi ~models = protect (fu
     "live_bidi",(match live_bidi with None -> `Null | Some c -> Browser_addon_live_bidi.configuration_to_json c);
     "models",(match models with None -> `Null | Some configuration -> Browser_addon_models.configuration_to_json configuration);
     "automation",(match automation with None -> `Null | Some configuration -> Browser_addon_automation.configuration_to_json configuration)]))
-let context_path admission =
-  let* context=Native_addon_lease.cleanup_context admission |> Result.map_error Native_addon_lease.error_to_string in
-  match context with
+let context_of_json ~instance_id = function
   | None -> Ok None
   | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=["automation";"directory";"kind";"live_bidi";"models";"stagehand"] ->
     (match List.assoc_opt "kind" fields,List.assoc_opt "directory" fields with
      | Some (`String "browser_socket"),Some (`String root) ->
-       let* expected=leaf (Native_addon_lease.instance_id admission) in
+       let* expected=leaf instance_id in
        if Filename.is_relative root || Filename.basename root<>expected
          || Unix.realpath (Filename.dirname root)<>Filename.dirname root then Error "invalid browser allocation path"
        else
@@ -54,6 +52,9 @@ let context_path admission =
          Ok (Some (root,automation,models,stagehand,live_bidi))
      | _ -> Error "unknown native cleanup descriptor")
   | Some _ -> Error "invalid native cleanup descriptor"
+let context_path admission =
+  let* context=Native_addon_lease.cleanup_context admission |> Result.map_error Native_addon_lease.error_to_string in
+  context_of_json ~instance_id:(Native_addon_lease.instance_id admission) context
 let slot admission directory =
   let directory=Unix.realpath directory in
   if List.mem directory (Native_addon_lease.directories admission) then
@@ -61,8 +62,9 @@ let slot admission directory =
     if info.Unix.st_kind=Unix.S_DIR && info.st_uid=Unix.geteuid () && info.st_perm=0o700 then Ok directory
     else Error "browser claim slot is not private and host-owned"
   else Error "browser resource is outside its native claim"
-let record admission directory = Filename.concat directory
-  ("browser-" ^ Digestif.SHA256.(to_hex (digest_string (Native_addon_lease.instance_id admission))) ^ ".json")
+let record_of_instance instance_id directory = Filename.concat directory
+  ("browser-" ^ Digestif.SHA256.(to_hex (digest_string instance_id)) ^ ".json")
+let record admission directory = record_of_instance (Native_addon_lease.instance_id admission) directory
 let acquired_json admission root info ~state = `Assoc ["state",`String state;
   "incarnation",`String (Native_addon_lease.instance_id admission);"directory",`String root;
   "device",`Int info.Unix.st_dev;"inode",`Int info.Unix.st_ino]
@@ -204,6 +206,43 @@ let cleanup_contents ~admission ~root ~automation ~models ~stagehand ~live_bidi 
     | Unix.S_DIR|Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK ->
         Error "browser directory contains an unexpected resource") (Ok ())
     (Sys.readdir root |> Array.to_list)
+(* The socket acquisition record [cleanup] reads in the installation slot. *)
+let acquisition ~instance_id ~root ~file ~directory =
+  let* value=match Unix.lstat file with
+    | info when info.Unix.st_kind=Unix.S_REG && info.st_uid=Unix.geteuid () && info.st_nlink=1 ->
+      Fs_compat.load_owned_regular_file ~ownership_root:directory file
+        |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string
+        |> Result.map (Option.map Yojson.Safe.from_string)
+    | _ -> Error "browser socket record is not a host-owned regular file"
+    | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None in
+  match value with
+  | None -> Ok Missing
+  | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=["state"]
+      && List.assoc_opt "state" fields=Some (`String "released") -> Ok Released
+  | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=
+      ["device";"directory";"incarnation";"inode";"state"] ->
+    (match List.assoc_opt "incarnation" fields,List.assoc_opt "directory" fields,
+      List.assoc_opt "device" fields,List.assoc_opt "inode" fields,List.assoc_opt "state" fields with
+     | Some (`String incarnation),Some (`String known),Some (`Int device),Some (`Int inode),Some (`String state)
+       when incarnation=instance_id && root=known ->
+         (match state with "acquired" -> Ok (Acquired (device,inode))
+          | "cleaning" -> Ok (Cleaning (device,inode))
+          | _ -> Error "invalid browser allocation state")
+     | _ -> Error "invalid browser socket resource identity")
+  | Some _ -> Error "invalid browser socket resource record"
+let check_retained ~instance_id ~slot context = protect (fun () ->
+  let* root=context_of_json ~instance_id context in
+  match root with
+  | None -> Ok ()
+  | Some (root,_automation,_models,stagehand,live_bidi) ->
+    let* ()=match stagehand with None -> Ok () | Some c ->
+      Browser_addon_stagehand.check_retained_child c ~incarnation:instance_id ~directory:root in
+    let* ()=match live_bidi with None -> Ok () | Some c ->
+      Browser_addon_live_bidi.check_retained_child c ~incarnation:instance_id ~directory:root in
+    let file=record_of_instance instance_id slot in
+    let* (_ : acquisition)=acquisition ~instance_id ~root ~file ~directory:slot
+      |> Result.map_error (fun detail -> file ^ ": " ^ detail) in
+    Ok ())
 let cleanup ~admission ~directory = protect (fun () ->
   let* directory=slot admission directory in
   let* status=Native_addon_lease.status admission |> Result.map_error Native_addon_lease.error_to_string in
@@ -219,28 +258,7 @@ let cleanup ~admission ~directory = protect (fun () ->
     let* ()=match live_bidi with None -> Ok () | Some c ->
       Browser_addon_live_bidi.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root in
     let file=record admission directory in
-    let* value=match Unix.lstat file with
-      | info when info.Unix.st_kind=Unix.S_REG && info.st_uid=Unix.geteuid () && info.st_nlink=1 ->
-        Fs_compat.load_owned_regular_file ~ownership_root:directory file
-          |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string
-          |> Result.map (Option.map Yojson.Safe.from_string)
-      | _ -> Error "browser socket record is not a host-owned regular file"
-      | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None in
-    let* identity=match value with
-      | None -> Ok Missing
-      | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=["state"]
-          && List.assoc_opt "state" fields=Some (`String "released") -> Ok Released
-      | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=
-          ["device";"directory";"incarnation";"inode";"state"] ->
-        (match List.assoc_opt "incarnation" fields,List.assoc_opt "directory" fields,
-          List.assoc_opt "device" fields,List.assoc_opt "inode" fields,List.assoc_opt "state" fields with
-         | Some (`String incarnation),Some (`String known),Some (`Int device),Some (`Int inode),Some (`String state)
-           when incarnation=Native_addon_lease.instance_id admission && root=known ->
-             (match state with "acquired" -> Ok (Acquired (device,inode))
-              | "cleaning" -> Ok (Cleaning (device,inode))
-              | _ -> Error "invalid browser allocation state")
-         | _ -> Error "invalid browser socket resource identity")
-      | Some _ -> Error "invalid browser socket resource record" in
+    let* identity=acquisition ~instance_id:(Native_addon_lease.instance_id admission) ~root ~file ~directory in
     let* ()=match Unix.lstat root with
       | info when private_root root info ->
         let* ()=match identity with

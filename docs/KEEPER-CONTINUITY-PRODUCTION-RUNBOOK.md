@@ -95,6 +95,21 @@ stops the deploy on the same files before the executable starts. A refusal
 after a `deploy.sh` start means the preflight and boot disagree, which is a
 defect to report, not a reason to pass the flag. Design: RFC-0420.
 
+`validate-stores` also reads the Lane Add-on records under
+`<base>/.masc/lane-addons` (bindings, native claims, action receipts, Exact
+requests, original tool requests). Boot does not read them; their readers meet
+an old-shape file later and keep refusing it (#45106: an installation stayed
+`failed` and refused every new start). The preflight prints each refused file
+with the decoder that refused it and one `fresh state:` line: stop the server,
+move the listed paths aside, then start the new build. For a native claim the
+list is the slot directory together with the binding and observations of the
+instance it holds. A detached binding that names its declaration passes even
+when it does not parse, as declaration application passes it and keeps its
+fields as evidence; only a read of that one instance (Inspect by id, Observe,
+Detach) still fails on it. A Chrome or live BiDi child slot is read through the
+installation that holds it, so a child slot of an earlier instance is not read.
+The preflight only reads; it never moves these files.
+
 ## Containment and Rollback
 
 If checkpoint continuity regresses:

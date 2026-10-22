@@ -8,6 +8,11 @@ val configuration : browser:Browser_configuration.live_bidi -> launcher:string -
 val configuration_to_json : configuration -> Yojson.Safe.t
 val configuration_of_json : Yojson.Safe.t -> (configuration, string) result
 val claim_directories : configuration -> string list
+val check_retained_child : configuration -> incarnation:string -> directory:string -> (unit, string) result
+(** Read the child claim {!settle} recovers, without its gate lock, fence or any
+    write: the slot through [Native_addon_lease.inspect], and its cleanup
+    descriptor compared with the one this allocation recomputes. A missing
+    slot is [Ok]. *)
 val settle : configuration -> incarnation:string -> directory:string -> (unit, string) result
 val cleanup : configuration -> incarnation:string -> directory:string -> (unit, string) result
 (** Recovery stops only this allocation's original child claim and requires its

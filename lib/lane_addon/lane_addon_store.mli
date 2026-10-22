@@ -54,6 +54,26 @@ val retain_jsonl : t -> history:string -> entry_count:int -> newest_first:'a lis
 val read_jsonl : t -> Lane_addon_types.evidence -> (string, string) result
 (** Reads a complete retained sequence, oldest first, validating every node.
     Explicit full-history reads allocate the requested result; capture does not. *)
+val bindings_directory : string
+val actions_directory : string
+val exact_requests_directory : string
+val tool_request_owners_directory : string
+(** The directories below {!root} that hold binding, action receipt, Exact
+    request and original tool request records. *)
+val binding_path : string -> string
+(** One instance's binding record, relative to {!root}. *)
+val observation_dir : string -> string
+(** One instance's observation directory, relative to {!root}. *)
+val action_path : instance_id:string -> request_id:string -> string
+(** One action receipt, relative to {!root}. *)
+val binding_sequence : Yojson.Safe.t -> (string * int * (string * Yojson.Safe.t) list, string) result
+(** The instance id and observation sequence {!read_bindings} requires of
+    every binding record before it reads the rest, with the record's fields. *)
+type namespace_entry = Record_entry | Staged_entry | Unknown_entry
+val tool_request_owner_entry : string -> namespace_entry
+(** How {!tool_request_owner_inventory} treats one name in a scope directory:
+    a record, an interrupted staged write it skips, or an entry that fails the
+    whole inventory. *)
 val save_binding : t -> instance_id:string -> Yojson.Safe.t -> (unit, string) result
 val remove_binding : t -> instance_id:string -> (unit, string) result
 (** Removes one binding record and syncs the containing directory. A retry

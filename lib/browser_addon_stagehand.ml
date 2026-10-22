@@ -76,6 +76,20 @@ let original c ~incarnation ~directory = protect (fun () ->
        if known=Some (context c ~incarnation ~directory) then Ok (Some claim)
        else Error "Chrome child claim belongs to a different browser allocation")
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None)
+(* [original]'s reads without the gate or [recover_preparation]'s fence: the
+   child slot decoded by [Lease.inspect] and its descriptor compared with the
+   one this allocation recomputes. *)
+let check_retained_child c ~incarnation ~directory =
+  match Unix.lstat c.claim_directory with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+  | exception Unix.Unix_error (code, _, _) -> Error (c.claim_directory ^ ": " ^ Unix.error_message code)
+  | _ ->
+    (match Lease.inspect ~directory:c.claim_directory with
+     | Error (refused : Lease.inspection_error) -> Error refused.refusal
+     | Ok None -> Ok ()
+     | Ok (Some recorded) ->
+       if recorded.context = Some (context c ~incarnation ~directory) then Ok ()
+       else Error (c.claim_directory ^ ": Chrome child claim belongs to a different browser allocation"))
 let settled claim =
   let* status=lease (Lease.status claim) in
   match status with

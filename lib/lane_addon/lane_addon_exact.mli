@@ -183,6 +183,12 @@ type execution_authority =
     delivering a retained result never invokes the runner. The authorization is
     not serialized into the worker request or a durable admission-class audit. *)
 
+val check_retained_record : Yojson.Safe.t -> (unit, string) result
+(** Decode one retained record of the Exact store with the reads {!run}
+    applies before reusing it: the record envelope, its original request, the
+    declaration and request identity it names, and every attempt and final.
+    Reads nothing else and writes nothing. *)
+
 type retained_observation = Retained_absent | Retained_open | Retained_terminal of final
 
 type original_execution =

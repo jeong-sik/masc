@@ -888,9 +888,13 @@ let media_reading_maintenance_cmd =
 ;;
 
 (* Every store [Keeper_durable_store.preflight_scan] names: a deploy is where
-   the operator watches, so any file or row this build cannot read stops it. *)
+   the operator watches, so any file or row this build cannot read stops it.
+   The Lane Add-on records follow, each refused file named with the step that
+   clears it: their fix is moving that file aside, not a store-wide upgrade
+   (#45106). *)
 let validate_stores base_path =
   let module D = Masc.Keeper_durable_store in
+  let module L = Masc.Lane_addon_store_preflight in
   let reports =
     List.filter_map
       (fun id ->
@@ -911,6 +915,30 @@ let validate_stores base_path =
             Printf.printf "  first refusal: %s\n%!" detail;
             Printf.printf "  on refusal: %s\n%!" on_refusal))
     reports;
+  let lane_addon_reports =
+    List.map (fun store -> L.name store, L.on_refusal store, L.scan store ~base_path) L.Store.all
+  in
+  List.iter
+    (fun (name, on_refusal, result) ->
+       match result with
+       | Error detail -> Printf.printf "%s scan_failed=%s\n%!" name detail
+       | Ok (report : L.report) ->
+         Printf.printf
+           "%s rows=%d refused=%d\n%!"
+           name
+           report.rows
+           (List.length report.refusals);
+         List.iter
+           (fun (refusal : L.refusal) ->
+              Printf.printf
+                "  refusal: %s: %s: %s\n%!"
+                refusal.path
+                (L.decoder_name refusal.decoder)
+                refusal.detail;
+              Printf.printf "  fresh state: %s\n%!" (L.fresh_state_step refusal))
+           report.refusals;
+         if report.refusals <> [] then Printf.printf "  on refusal: %s\n%!" on_refusal)
+    lane_addon_reports;
   let refused =
     List.fold_left
       (fun total (_, _, result) ->
@@ -919,6 +947,13 @@ let validate_stores base_path =
          | Error _ -> total)
       0
       reports
+    + List.fold_left
+        (fun total (_, _, result) ->
+           match result with
+           | Ok (report : L.report) -> total + List.length report.refusals
+           | Error _ -> total)
+        0
+        lane_addon_reports
   in
   let failed_scans =
     List.filter_map
@@ -927,6 +962,12 @@ let validate_stores base_path =
          | Error _ -> Some name
          | Ok _ -> None)
       reports
+    @ List.filter_map
+        (fun (name, _, result) ->
+           match result with
+           | Error _ -> Some name
+           | Ok _ -> None)
+        lane_addon_reports
   in
   if failed_scans <> []
   then errorf "store scan failed: %s" (String.concat ", " failed_scans)

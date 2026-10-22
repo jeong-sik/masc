@@ -236,6 +236,28 @@ type retained_fault_reason =
   | Source_access_invalid
   | Record_invalid of string
 val retained_fault_message : retained_fault_reason -> string
+val check_retained_binding : Yojson.Safe.t -> (unit, string) result
+(** The reads configuration application, Inspect and restart recovery make of
+    one retained binding record (its instance id and sequence, then
+    [parse_retained_binding]), judged as configuration application judges a
+    fault. A record that names its declaration and is detached is [Ok] even
+    when it does not parse: no declaration waits on it and its fields stay
+    evidence. A per-instance read of that one instance (Inspect by id, Observe,
+    Detach, the evidence freeze) still refuses it. Reads and writes nothing. *)
+val check_inventory_record : path:string -> Yojson.Safe.t -> (unit, string) result
+(** The record decoder {!inventory} applies to the retained binding file at
+    [path], including its filename identity, with the same exemption for a
+    detached record that names its declaration. Reads and writes nothing. *)
+val native_claims_directory : string
+(** The directory below the Lane Add-on store root that holds the native claim
+    slots. *)
+type native_claim_slot = Installation_slot | Chrome_child_slot | Live_bidi_child_slot
+(** Who reads a native claim slot: the host recovering an installation reads
+    its cleanup descriptor through {!Browser_addon_socket}; a Chrome or live
+    BiDi child slot is compared with the descriptor its parent recomputes. *)
+val native_claim_slot_of_name : string -> native_claim_slot option
+(** The slot a directory name below {!native_claims_directory} names, as this
+    module creates it; [None] for a name it never creates. *)
 type retained_owner = Owned_by of configuration_owner | Unowned | Owner_unreadable
 (** Whose record it is. [Unowned] is a manual attach, which belongs to no
     declaration. [Owner_unreadable] is a record whose configuration cannot be

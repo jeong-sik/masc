@@ -224,11 +224,11 @@ val retained_fault_message : retained_fault_reason -> string
 val check_retained_binding : Yojson.Safe.t -> (unit, string) result
 (** The reads configuration application, Inspect and restart recovery make of
     one retained binding record (its instance id and sequence, then
-    [parse_retained_binding]), judged as they judge a fault: [Error] is a fault
-    that holds a declaration or a reader back. A record that names its
-    declaration and is detached is [Ok] even when it does not parse, because
-    nothing waits on it and its fields stay evidence. Reads and writes
-    nothing. *)
+    [parse_retained_binding]), judged as configuration application judges a
+    fault. A record that names its declaration and is detached is [Ok] even
+    when it does not parse: no declaration waits on it and its fields stay
+    evidence. A per-instance read of that one instance (Inspect by id, Observe,
+    Detach, the evidence freeze) still refuses it. Reads and writes nothing. *)
 val check_inventory_record : path:string -> Yojson.Safe.t -> (unit, string) result
 (** The record decoder {!inventory} applies to the retained binding file at
     [path], including its filename identity, with the same exemption for a

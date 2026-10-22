@@ -53,10 +53,11 @@ let name = function
 
 let on_refusal = function
   | Store.Bindings ->
-    "the Lane Add-on inventory lists the record as an issue, and a declaration \
-     the record names (every declaration, when its owner cannot be read) fails \
-     to apply while the record is there; a detached record that names its \
-     declaration is not refused, because nothing waits on it"
+    "the Lane Add-on inventory lists the record as an issue, a declaration the \
+     record names (every declaration, when its owner cannot be read) fails to \
+     apply while the record is there, and every read of that instance fails; a \
+     detached record that names its declaration is not refused here, because \
+     declaration application passes it and keeps its fields as evidence"
   | Native_claims ->
     "the host cannot confirm the cleanup of the instance the slot holds, so that \
      installation stays failed and refuses every new start (#45106)"

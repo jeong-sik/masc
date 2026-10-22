@@ -276,6 +276,7 @@ type KeeperChatCustomEvent =
       type: 'CUSTOM'
       name: 'KEEPER_MEDIA_DELTA'
       value: {
+        response: { content_generation: number; stream_scope: number }
         index?: number
         media_type?: string
         source_type?: 'base64' | 'url' | 'file_id'

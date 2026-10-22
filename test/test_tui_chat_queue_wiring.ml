@@ -2388,6 +2388,7 @@ let drawn_skills_of (log : Tui_types.turn_log) =
     (fun (item : Keeper_chat_transcript.drawn_item) ->
       match item.Keeper_chat_transcript.drawn with
       | Keeper_chat_transcript.Drawn_skill skills -> skills
+      | Keeper_chat_transcript.Drawn_media _
       | Keeper_chat_transcript.Drawn_thinking _ | Keeper_chat_transcript.Drawn_tools _
       | Keeper_chat_transcript.Drawn_text _ | Keeper_chat_transcript.Drawn_reply _
       | Keeper_chat_transcript.Drawn_status _ | Keeper_chat_transcript.Drawn_error _ ->

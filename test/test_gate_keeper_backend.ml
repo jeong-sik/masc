@@ -2611,11 +2611,13 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
         { index = start_index; content_type = "image"; _ };
       Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
       Keeper_chat_events.Agent_core_media_delta
-        { index; media_type; source_type; media_ref };
+        { index; media_type; source_type; media_ref; response };
     ] ->
       check int "block start index" 0 start_index;
       check int "block stop index" 0 stop_index;
       check int "block index" 0 index;
+      check int "producer generation" 0 response.response_generation;
+      check int "producer scope" 0 response.response_scope;
       check string "media type" "image/png" media_type;
       check bool "source type" true (source_type = Base64);
       check string "media ref is the persisted URL" expected_ref media_ref

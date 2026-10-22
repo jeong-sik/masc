@@ -164,7 +164,7 @@ let add ?at t ~seq (delta : Live.delta) =
   | Live.Run_started | Live.Checkpoint | Live.External_effect_completed | Live.Run_finished
   | Live.Batch_bound _ | Live.Runtime_attempt_started _ | Live.Provider_retry_observed _
   | Live.Stream_model_started _ | Live.Model_content_activity _ | Live.Stream_model_stopped _
-  | Live.Stream_details _ | Live.Text _ | Live.Thinking _ | Live.Native_tool_started _
+  | Live.Stream_details _ | Live.Text _ | Live.Media _ | Live.Thinking _ | Live.Native_tool_started _
   | Live.Native_tool_progress _ | Live.Native_tool_ended _ | Live.Tool_started _ | Live.Tool_admitted _ | Live.Tool_args _
   | Live.Tool_ended _ | Live.Tool_result _ | Live.Stream_protocol_error _
   | Live.Approval_requested _ | Live.Approval_settled _ | Live.Reply_details _ | Live.Run_failed _
@@ -178,7 +178,7 @@ let add ?at t ~seq (delta : Live.delta) =
   else begin
     (match delta with
      | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
-     | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
+     | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Media _ | Live.Thinking _ | Live.Stream_model_started _
      | Live.Provider_retry_observed _ | Live.Model_content_activity _
      | Live.Stream_details _ | Live.Stream_model_stopped _
      | Live.Native_tool_started _ | Live.Native_tool_ended _ | Live.Native_tool_progress _
@@ -197,7 +197,7 @@ let add ?at t ~seq (delta : Live.delta) =
       | Live.Run_started -> t.run_started <- true
       | Live.Batch_bound _ | Runtime_attempt_started _ | Provider_retry_observed _
       | Stream_model_started _ | Model_content_activity _ | Stream_model_stopped _
-      | Stream_details _ | Text _ | Thinking _ | Native_tool_started _ | Native_tool_progress _
+      | Stream_details _ | Text _ | Media _ | Thinking _ | Native_tool_started _ | Native_tool_progress _
       | Native_tool_ended _ | Tool_started _ | Tool_admitted _ | Tool_args _ | Tool_ended _ | Tool_result _
       | Stream_protocol_error _ | Approval_requested _ | Approval_settled _ | Accepted _
       | Checkpoint | External_effect_completed | Reply_details _ | Run_failed _ | Run_finished
@@ -297,7 +297,8 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
   | E.Agent_core_content_block_start _
   | E.Agent_core_content_block_stop _ -> None
   | E.Agent_core_thinking_delta { delta; index; response } -> Some (Live.Thinking {text=delta;index;response})
-  | E.Agent_core_thinking_signature_delta _ | E.Agent_core_media_delta _ -> None
+  | E.Agent_core_media_delta media -> Some (Live.Media media)
+  | E.Agent_core_thinking_signature_delta _ -> None
   | E.Agent_core_stream_protocol_error error ->
     Some
       (Live.Stream_protocol_error

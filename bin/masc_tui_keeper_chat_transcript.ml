@@ -220,6 +220,7 @@ type trail_node =
   | Node_response_boundary
   | Node_thinking of int * float * Buffer.t * thinking_block
   | Node_text of int * float * Buffer.t * int option
+  | Node_media of int * float * Masc.Keeper_chat_events.generated_media
   | Node_tool of int
   | Node_superseded of
       { attempt : int
@@ -266,6 +267,7 @@ type drawn =
   | Drawn_skill of skill_activity list
   | Drawn_tools of tool_block
   | Drawn_text of string
+  | Drawn_media of Masc.Keeper_chat_events.generated_media
   | Drawn_reply of string
   | Drawn_status of string
   | Drawn_error of string
@@ -273,6 +275,7 @@ type drawn =
 type drawn_origin =
   | Admission_of_request of string
   | Text_stretch of int
+  | Media_stretch of int
   | Thinking_stretch of int
   | Tool_stretch of int
   | Unstreamed_skills
@@ -599,7 +602,7 @@ let trail_thinking ~now t ~block text =
   (match t.reversed_trail with
    | Node_thinking (_, _, buffer, open_block) :: _ when same_thinking_block open_block block ->
        Buffer.add_string buffer text
-   | (Node_segment_boundary | Node_response_boundary | Node_text _ | Node_thinking _ | Node_tool _ | Node_superseded _) :: _ | [] ->
+   | (Node_segment_boundary | Node_response_boundary | Node_text _ | Node_thinking _ | Node_media _ | Node_tool _ | Node_superseded _) :: _ | [] ->
        let buffer = Buffer.create 256 in
        Buffer.add_string buffer text;
        t.reversed_trail <- Node_thinking (fresh_stretch t, now, buffer, block) :: t.reversed_trail)
@@ -607,7 +610,7 @@ let trail_thinking ~now t ~block text =
 let trail_text ~now t text =
   (match t.reversed_trail with
    | Node_text (_, _, buffer, scope) :: _ when scope = t.current_stream_scope -> Buffer.add_string buffer text
-   | (Node_segment_boundary | Node_response_boundary | Node_text _ | Node_thinking _ | Node_tool _ | Node_superseded _) :: _ | [] ->
+   | (Node_segment_boundary | Node_response_boundary | Node_text _ | Node_thinking _ | Node_media _ | Node_tool _ | Node_superseded _) :: _ | [] ->
        let buffer = Buffer.create 256 in
        Buffer.add_string buffer text;
        let id = fresh_stretch t in
@@ -727,6 +730,7 @@ type trail_item =
   | Trail_skill of skill_activity list
   | Trail_tools of tool_block
   | Trail_text of string
+  | Trail_media of Masc.Keeper_chat_events.generated_media
   | Trail_superseded of
       { attempt : int
       ; runtime_id : string option
@@ -739,7 +743,7 @@ type trail_item =
    current record, because the node names the call and the record keeps
    updating. Blank stretches are dropped here so the pane never budgets a row
    for an empty heading. *)
-let project_trail ?(response_boundary = fun acc -> acc) t ~thinking ~text ~tools ~skills ~superseded =
+let project_trail ?(response_boundary = fun acc -> acc) t ~thinking ~text ~media ~tools ~skills ~superseded =
   let call_of local_id =
     List.find_opt
       (fun (call : live_tool_call) -> call.local_id = local_id)
@@ -797,6 +801,9 @@ let project_trail ?(response_boundary = fun acc -> acc) t ~thinking ~text ~tools
           | items -> superseded ~attempt ~runtime_id items :: acc
         in
         walk segment acc [] rest
+    | Node_media (origin, at, value) :: rest ->
+        let acc = flush_tools ~segment acc group in
+        walk segment (media ~segment ~origin ~at value :: acc) [] rest
     | Node_thinking (origin, at, buffer, _) :: rest ->
         let acc = flush_tools ~segment acc group in
         let lines =
@@ -823,6 +830,7 @@ let trail t =
   project_trail t
     ~thinking:(fun ~segment:_ ~origin:_ ~at:_ lines -> Trail_thinking lines)
     ~text:(fun ~segment:_ ~origin:_ ~at:_ ~stream_scope:_ text -> Trail_text text)
+    ~media:(fun ~segment:_ ~origin:_ ~at:_ value -> Trail_media value)
     ~tools:(fun ~segment:_ ~origin:_ ~at:_ block -> Trail_tools block)
     ~skills:(fun ~segment:_ ~origin:_ ~at:_ skills -> Trail_skill skills)
     ~superseded:(fun ~attempt ~runtime_id items ->
@@ -1693,7 +1701,7 @@ let apply_delta ~now t (delta : Live.delta) =
         let rec split acc = function
           | ((Node_segment_boundary | Node_superseded _) :: _) as older -> (acc, older)
           | ((Node_response_boundary | Node_thinking _ | Node_text _
-             | Node_tool _) as node) :: rest -> split (node :: acc) rest
+             | Node_media _ | Node_tool _) as node) :: rest -> split (node :: acc) rest
           | [] -> (acc, [])
         in
         split [] t.reversed_trail
@@ -1862,6 +1870,22 @@ let apply_delta ~now t (delta : Live.delta) =
           Buffer.add_string t.text_buffer text;
           trail_text ~now t text
         end
+      end
+  | Live.Media media ->
+      let owner = media.Masc.Keeper_chat_events.response in
+      let terminal = match t.phase with Stream_ended | Stream_failed _ -> true | Waiting | Working -> false in
+      if not terminal
+         && not (response_is_closed t (owner.response_generation, owner.response_scope))
+         && admit_response_identity t (Some owner.response_generation) (Some owner.response_scope)
+      then begin
+        let previous = List.find_map (function
+          | Node_media (_, _, previous) when previous.response=owner && previous.index=media.index -> Some previous
+          | Node_segment_boundary | Node_response_boundary | Node_thinking _
+          | Node_text _ | Node_tool _ | Node_superseded _ | Node_media _ -> None) t.reversed_trail in
+        match previous with
+        | None -> t.reversed_trail <- Node_media (fresh_stretch t, now, media) :: t.reversed_trail
+        | Some previous when previous=media -> ()
+        | Some _ -> note_unreadable t "generated media conflicts with its original response block"
       end
   | Live.Thinking {text;index;response} ->
       let generation, stream_scope = match response with
@@ -2082,7 +2106,7 @@ let apply ~now t delta =
    | Live.Run_started | Live.Batch_bound _ | Live.Accepted _ -> ()
    | Live.Runtime_attempt_started _ | Live.Provider_retry_observed _
    | Live.Stream_model_started _ | Live.Model_content_activity _ | Live.Stream_model_stopped _
-   | Live.Stream_details _ | Live.Text _ | Live.Thinking _
+   | Live.Stream_details _ | Live.Text _ | Live.Media _ | Live.Thinking _
    | Live.Native_tool_started _ | Live.Native_tool_progress _ | Live.Native_tool_ended _
    | Live.Tool_started _ | Live.Tool_admitted _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
    | Live.Stream_protocol_error _ | Live.Approval_requested _ | Live.Approval_settled _
@@ -2375,7 +2399,7 @@ let with_noted_skills noted items =
       let skills_of item =
         match item.drawn with
         | Drawn_skill skills -> skills
-        | Drawn_thinking _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _
+        | Drawn_thinking _ | Drawn_media _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _
         | Drawn_status _ | Drawn_error _ ->
             []
       in
@@ -2385,7 +2409,7 @@ let with_noted_skills noted items =
             match item.drawn with
             | Drawn_skill skills ->
                 { item with drawn = Drawn_skill (List.map exact skills) }
-            | Drawn_thinking _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _
+            | Drawn_thinking _ | Drawn_media _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _
             | Drawn_status _ | Drawn_error _ ->
                 item)
           items
@@ -2422,6 +2446,7 @@ let compute_drawn t =
     project_trail ~response_boundary:(fun acc -> [Projected_response_boundary] :: acc) t
       ~thinking:(fun ~segment ~origin ~at lines -> item ~segment ~origin:(Thinking_stretch origin) ~at (Drawn_thinking lines))
       ~text:(fun ~segment ~origin ~at ~stream_scope text -> item ~stream_scope ~segment ~origin:(Text_stretch origin) ~at (Drawn_text text))
+      ~media:(fun ~segment ~origin ~at media -> item ~segment ~origin:(Media_stretch origin) ~at (Drawn_media media))
       ~tools:(fun ~segment ~origin ~at block -> item ~segment ~origin:(Tool_stretch origin) ~at (Drawn_tools block))
       ~skills:(fun ~segment ~origin ~at skills -> item ~segment ~origin:(Tool_stretch origin) ~at (Drawn_skill skills))
       ~superseded:(fun ~attempt ~runtime_id items ->
@@ -2443,15 +2468,15 @@ let compute_drawn t =
     match item.origin, item.superseded, item.drawn with
     | Text_stretch id, None, Drawn_text _ -> id >= t.response_first_stretch
     | Text_stretch _, None,
-      (Drawn_thinking _ | Drawn_skill _ | Drawn_tools _ | Drawn_reply _
+      (Drawn_thinking _ | Drawn_media _ | Drawn_skill _ | Drawn_tools _ | Drawn_reply _
       | Drawn_status _ | Drawn_error _)
     | Text_stretch _, Some _,
-      (Drawn_thinking _ | Drawn_skill _ | Drawn_tools _ | Drawn_text _
+      (Drawn_thinking _ | Drawn_media _ | Drawn_skill _ | Drawn_tools _ | Drawn_text _
       | Drawn_reply _ | Drawn_status _ | Drawn_error _)
-    | ( Admission_of_request _ | Thinking_stretch _ | Tool_stretch _
+    | ( Admission_of_request _ | Media_stretch _ | Thinking_stretch _ | Tool_stretch _
       | Unstreamed_skills | Reply_of_segment _ | Error_of_segment _ ),
       (None | Some _),
-      (Drawn_thinking _ | Drawn_skill _ | Drawn_tools _ | Drawn_text _
+      (Drawn_thinking _ | Drawn_media _ | Drawn_skill _ | Drawn_tools _ | Drawn_text _
       | Drawn_reply _ | Drawn_status _ | Drawn_error _) -> false
   in
   let text_count = List.length (List.filter current_text items) in
@@ -2468,7 +2493,7 @@ let compute_drawn t =
             let last =
               match item.superseded, item.drawn with
               | None, (Drawn_tools _ | Drawn_skill _) -> None
-              | (None, (Drawn_thinking _ | (Drawn_text _ | (Drawn_reply _ | (Drawn_status _ | Drawn_error _)))))
+              | (None, (Drawn_media _ | Drawn_thinking _ | (Drawn_text _ | (Drawn_reply _ | (Drawn_status _ | Drawn_error _)))))
               | (Some _, _) -> if current_text item then Some index else last
             in
             (index + 1, last))
@@ -2691,7 +2716,7 @@ let drawn_tool_gathering (item : drawn_item) =
   let scope = (item.segment, item.superseded) in
   match item.drawn with
   | Drawn_tools block -> Gathers_calls (scope, block)
-  | Drawn_thinking _ | Drawn_text _ | Drawn_reply _ -> Lets_calls_pass scope
+  | Drawn_media _ | Drawn_thinking _ | Drawn_text _ | Drawn_reply _ -> Lets_calls_pass scope
   | Drawn_skill _ | Drawn_status _ | Drawn_error _ -> Ends_gathering
 
 let gather_drawn_tools mode ~item ~with_item rows =

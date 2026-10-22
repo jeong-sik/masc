@@ -4903,6 +4903,7 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.Provider_retry_observed _
   | Masc_tui_keeper_chat_live.Batch_bound _
   | Masc_tui_keeper_chat_live.Run_started | Masc_tui_keeper_chat_live.Text _
+  | Masc_tui_keeper_chat_live.Media _
   | Masc_tui_keeper_chat_live.Thinking _ | Masc_tui_keeper_chat_live.Tool_started _ | Masc_tui_keeper_chat_live.Tool_admitted _
   | Masc_tui_keeper_chat_live.Native_tool_started _ | Masc_tui_keeper_chat_live.Native_tool_ended _ | Masc_tui_keeper_chat_live.Native_tool_progress _
   | Masc_tui_keeper_chat_live.Tool_args _ | Masc_tui_keeper_chat_live.Tool_ended _
@@ -13240,6 +13241,7 @@ let observed_turn_text_drawn state keeper_name =
           | Masc_tui_keeper_chat_transcript.Drawn_text _
           | Masc_tui_keeper_chat_transcript.Drawn_reply _ ->
               true
+          | Masc_tui_keeper_chat_transcript.Drawn_media _
           | Masc_tui_keeper_chat_transcript.Drawn_thinking _
           | Masc_tui_keeper_chat_transcript.Drawn_skill _
           | Masc_tui_keeper_chat_transcript.Drawn_tools _
@@ -13268,7 +13270,8 @@ let reasoning_drawn = function
    cannot establish coverage of that aggregate, withheld steps or omissions. *)
 type held_turn =
   { ht_source : Masc_tui_keeper_chat_log.journal_source
-  ; ht_diagrams : string list }
+  ; ht_diagrams : string list
+  ; ht_generated : Masc.Keeper_chat_events.generated_media list }
 
 let held_turn_of_log turn_log =
   let diagrams =
@@ -13278,10 +13281,16 @@ let held_turn_of_log turn_log =
          | None, (Drawn_text text | Drawn_reply text) ->
              Masc_tui_markdown.mermaid_sources text
          | Some _, _
-         | None, (Drawn_thinking _ | Drawn_skill _ | Drawn_tools _
+         | None, (Drawn_media _ | Drawn_thinking _ | Drawn_skill _ | Drawn_tools _
            | Drawn_status _ | Drawn_error _) -> [])
   in
-  { ht_source = turn_log_execution_source turn_log; ht_diagrams = diagrams }
+  let generated = Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript
+    |> List.filter_map (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+      match item.superseded, item.drawn with
+      | None, Drawn_media media -> Some media
+      | Some _, _ | None, (Drawn_thinking _ | Drawn_skill _ | Drawn_tools _
+        | Drawn_text _ | Drawn_reply _ | Drawn_status _ | Drawn_error _) -> None) in
+  { ht_source = turn_log_execution_source turn_log; ht_diagrams = diagrams; ht_generated = generated }
 ;;
 
 (* Tool rows require exact receipt coverage in [compute_chat_rows_for].
@@ -13301,7 +13310,22 @@ let log_draws_row (held : held_turn) (row : msg_entry) =
 (* The committed rows the pane still draws once these turns are held by
    settled logs: a turn has one source, and for a held turn that is the log.
    The same list when nothing is held, so the memo above it can tell. *)
-let media_remainder ~diagrams (row : msg_entry) =
+(* A partial journal may coexist with a durable failure or final output before
+   Reply_details arrives. Those rows retain their exact prose and media. Only
+   the same execution's persisted output occurrences can cover live media. *)
+let generated_media_uncovered_by_rows ~keeper_name ~source ~generated rows =
+  let persisted = rows |> List.concat_map (fun (row : msg_entry) ->
+    if row.me_keeper_name <> keeper_name || row.me_execution_source <> Some source then []
+    else match row.me_role with
+      | Message_keeper | Message_autonomous | Message_error | Message_status -> row.me_media
+      | Message_user _ | Message_tool | Message_skill _ | Message_thinking
+      | Message_local | Message_memory -> []) in
+  let _, _, uncovered = Masc_tui_chat_media.without_drawn_generated
+    ~covered:generated persisted [] in
+  uncovered
+;;
+
+let media_remainder_with_coverage ~diagrams ~generated (row : msg_entry) =
   match row.me_role, row.me_media with
   | (Message_keeper | Message_autonomous), (_ :: _ as media) ->
       (* Only the selected execution's actual speech establishes coverage.
@@ -13309,13 +13333,15 @@ let media_remainder ~diagrams (row : msg_entry) =
          what the log received. Retain every other media kind and source. *)
       let media, images = Masc_tui_chat_media.without_drawn_diagrams
           ~sources:diagrams media row.me_images in
-      if media = [] && images = [] then None
+      let media, images, remaining = Masc_tui_chat_media.without_drawn_generated
+          ~covered:generated media images in
+      (if media = [] && images = [] then None
       else Some {row with me_media=media; me_images=images; me_text =
           Masc_tui_chat_media.append_text ~text:"" media
-          |> Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true}
+          |> Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true}), remaining
   | (Message_keeper | Message_autonomous), []
   | (Message_tool | Message_skill _ | Message_thinking | Message_user _
-    | Message_status | Message_local | Message_error | Message_memory), _ -> None
+    | Message_status | Message_local | Message_error | Message_memory), _ -> None, generated
 ;;
 
 let rows_the_logs_do_not_draw ~held rows =
@@ -13330,6 +13356,7 @@ let rows_the_logs_do_not_draw ~held rows =
         (fun (turn : held_turn) ->
           Hashtbl.add by_source (execution_source_key_of_source turn.ht_source) turn)
         held;
+      let remaining = Hashtbl.create 16 in
       List.filter_map
         (fun (row : msg_entry) ->
           let candidates =
@@ -13340,8 +13367,15 @@ let rows_the_logs_do_not_draw ~held rows =
           in
           match List.filter (fun turn -> log_draws_row turn row) candidates with
           | [] -> Some row
-          | owners -> media_remainder
-              ~diagrams:(List.concat_map (fun turn -> turn.ht_diagrams) owners) row)
+          | (owner :: _ as owners) ->
+              let source = owner.ht_source |> execution_source_key_of_source in
+              let generated = match Hashtbl.find_opt remaining source with
+                | Some generated -> generated
+                | None -> List.concat_map (fun turn -> turn.ht_generated) owners in
+              let row, unused = media_remainder_with_coverage
+                ~diagrams:(List.concat_map (fun turn -> turn.ht_diagrams) owners) ~generated row in
+              Hashtbl.replace remaining source unused;
+              row)
         rows
 ;;
 
@@ -13375,7 +13409,7 @@ let skills_drawn_by_items items =
   List.concat_map (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
     match item.drawn with
       | Drawn_skill skills -> skills
-      | Drawn_thinking _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _ | Drawn_status _
+      | Drawn_media _ | Drawn_thinking _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _ | Drawn_status _
       | Drawn_error _ -> []) items
 
 let skills_in_source_rows ~keeper_name source rows =
@@ -16644,6 +16678,7 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
              (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
                match item.drawn with
                | Masc_tui_keeper_chat_transcript.Drawn_reply _ -> true
+               | Masc_tui_keeper_chat_transcript.Drawn_media _
                | Masc_tui_keeper_chat_transcript.Drawn_thinking _
                | Masc_tui_keeper_chat_transcript.Drawn_skill _
                | Masc_tui_keeper_chat_transcript.Drawn_tools _
@@ -16655,13 +16690,21 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
          else None)
   in
   let without_partial_replies rows =
+    let remaining = Hashtbl.create 16 in
     List.filter_map
       (fun (row : msg_entry) ->
         match row.me_role with
         | Message_keeper | Message_autonomous ->
             (match List.find_opt
                 (fun owner -> row.me_execution_source = Some owner.ht_source) partial_replies with
-             | Some owner -> media_remainder ~diagrams:owner.ht_diagrams row
+             | Some owner ->
+                 let source = execution_source_key_of_source owner.ht_source in
+                 let generated = match Hashtbl.find_opt remaining source with
+                   | Some generated -> generated | None -> owner.ht_generated in
+                 let row, unused = media_remainder_with_coverage
+                   ~diagrams:owner.ht_diagrams ~generated row in
+                 Hashtbl.replace remaining source unused;
+                 row
              | None -> Some row)
         | Message_status | Message_local | Message_error | Message_tool | Message_thinking
         | Message_memory | Message_user _ | Message_skill _ -> Some row)
@@ -16686,7 +16729,7 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
                match item.drawn with
                | Drawn_tools observed -> List.filter_map (fun (activity : Transcript.tool_activity) ->
                    activity.execution_id) observed.activities
-               | Transcript.Drawn_thinking _ | Transcript.Drawn_skill _ | Transcript.Drawn_text _
+               | Transcript.Drawn_media _ | Transcript.Drawn_thinking _ | Transcript.Drawn_skill _ | Transcript.Drawn_text _
                | Transcript.Drawn_reply _ | Transcript.Drawn_status _ | Transcript.Drawn_error _ -> []) drawn in
              let activities = List.filter (fun (activity : Transcript.tool_activity) ->
                not (Option.exists (fun id -> List.mem id executions) activity.execution_id)) block.activities in

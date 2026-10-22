@@ -215,7 +215,9 @@ describe('Keeper operation stream projection', () => {
     const before = requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0])
     expect(before.streamState).toBe('finalizing')
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_CONNECTED', value: null })
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_MEDIA_DELTA', value: { index: 0, media_type: 'image/png' } })
+    // Deliberately bypass the wire decoder with a malformed, unowned notice.
+    const unownedMedia: unknown = { type: 'CUSTOM', name: 'KEEPER_MEDIA_DELTA', value: { index: 0, media_type: 'image/png' } }
+    applyKeeperStreamEvent('sangsu', 'reply-1', unownedMedia as KeeperChatStreamEvent)
     expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).streamState).toBe(before.streamState)
     expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).delivery).toBe(before.delivery)
   })
@@ -363,7 +365,9 @@ describe('Keeper operation stream projection', () => {
     expect(before.responseState).toMatchObject({ closed: owner })
     expect(before.streamState).toBe('finalizing')
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_CONNECTED', value: null })
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'CUSTOM', name: 'KEEPER_MEDIA_DELTA', value: { index: 0, media_type: 'image/png' } })
+    // Deliberately bypass the wire decoder with a malformed, unowned notice.
+    const unownedMedia: unknown = { type: 'CUSTOM', name: 'KEEPER_MEDIA_DELTA', value: { index: 0, media_type: 'image/png' } }
+    applyKeeperStreamEvent('sangsu', 'reply-1', unownedMedia as KeeperChatStreamEvent)
     expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).streamState).toBe(before.streamState)
     expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)[0]).delivery).toBe(before.delivery)
   })

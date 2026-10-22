@@ -39,6 +39,7 @@ let delta_to_string : Live.delta -> string = function
                (token_count usage.Live.cache_creation_input_tokens))
         (Option.fold ~none:"none" ~some:Agent_core.Types.stop_reason_to_string stop_reason)
   | Live.Text {text=text; _} -> Printf.sprintf "text(%s)" text
+  | Live.Media media -> Yojson.Safe.to_string (Masc.Keeper_chat_events.generated_media_to_json media)
   | Live.Thinking {text;_} -> Printf.sprintf "thinking(%s)" text
   | Live.Native_tool_started { occurrence; tool_name } ->
       Printf.sprintf "native_tool_started(%d/%d,%s)" occurrence.stream_scope

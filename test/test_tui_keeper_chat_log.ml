@@ -87,6 +87,7 @@ let delta_to_string : Live.delta -> string = function
                (token_count usage.Live.cache_creation_input_tokens))
         (Option.fold ~none:"none" ~some:Agent_core.Types.stop_reason_to_string stop_reason)
   | Live.Text {text=text; _} -> "text(" ^ text ^ ")"
+  | Live.Media media -> Yojson.Safe.to_string (Masc.Keeper_chat_events.generated_media_to_json media)
   | Live.Thinking {text;_} -> "thinking(" ^ text ^ ")"
   | Live.Native_tool_started { occurrence; tool_name } ->
       Printf.sprintf "native_tool_started(%s,%s)" (occurrence_to_string occurrence)
@@ -411,10 +412,8 @@ let occurrence : E.tool_stream_occurrence =
 let occurrence_anon : E.tool_stream_occurrence =
   { stream_scope = 1; provider_message_id = None; block_index = 0 }
 
-(* Every constructor the server projects to a frame the live view ignores, or
-   to no frame at all, plus a tool trio without provider ids. Absent here:
-   [Agent_core_media_delta] (no renderer draws its URL yet, TUI or dashboard)
-   and [Event_error] (terminal; see [failed_turn]). *)
+(* Journal and live delivery retain the same generated media ownership and
+   reference. [Event_error] is terminal; see [failed_turn]. *)
 let golden : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-golden"; thread_id = "keeper:keeper.one" }
   ; E.Batch_bound
@@ -428,6 +427,9 @@ let golden : E.keeper_chat_event list =
   ; E.Text_message_start { message_id = "msg-1"; role = E.Assistant }
   ; E.Agent_core_thinking_delta {response=None; index = 0; delta = "weighing it" }
   ; E.Agent_core_thinking_signature_delta { index = 0; signature_bytes = 42 }
+  ; E.Agent_core_media_delta {index=3; media_type="image/png";
+      source_type=Agent_core.Types.Base64; media_ref="/api/v1/media/golden";
+      response={response_generation=7; response_scope=0}}
   ; E.Model_content_activity {content_generation=0; content_scope=0; content_index=0;
       content_provider_message_id=None; channel=E.Model_thinking; state=E.Content_observed}
   ; E.Model_content_activity {content_generation=0; content_scope=0; content_index=0;
@@ -1202,7 +1204,7 @@ let test_missing_start_text_scope_survives_journal_and_wire () =
         | Transcript.Drawn_text text -> "text:" ^ text
         | Drawn_reply text -> "reply:" ^ text
         | Drawn_skill _ -> "skill"
-        | Drawn_status _ | Drawn_error _ | Drawn_tools _ | Drawn_thinking _ -> "other")
+        | Drawn_media _ | Drawn_status _ | Drawn_error _ | Drawn_tools _ | Drawn_thinking _ -> "other")
           (Transcript.drawn transcript) in
       check (list string) "only a matching terminal text scope replaces the final stretch"
         ((if earlier then ["text:Earlier progress."] else [])

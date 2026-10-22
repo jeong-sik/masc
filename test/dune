@@ -3493,7 +3493,7 @@
 (test
  (name test_tui_chat_timeline_assembly)
  (modules test_tui_chat_timeline_assembly)
- (libraries masc masc.masc_types masc_tui_keeper_chat_log masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript
+ (libraries masc masc.agent_core masc_tui_chat_media masc.masc_types masc_tui_keeper_chat_log masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript
   masc_tui_message_layout masc_tui_types))
 
 (test
@@ -3548,7 +3548,7 @@
   masc_tui_message_layout
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
-  masc_tui_keeper_chat_transcript))
+  masc_tui_keeper_chat_transcript yojson))
 
 (test
  (name test_tui_native_status_groups)
@@ -3611,6 +3611,13 @@
   masc_tui_keeper_chat_history
   masc_tui_keeper_chat_transcript
   yojson))
+
+(test
+ (name test_tui_generated_media)
+ (modules test_tui_generated_media)
+ (libraries alcotest masc masc.agent_core masc.ag_ui masc.server
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_transcript masc_tui_chat_media yojson))
 
 (test
  (name test_tui_chat_media)

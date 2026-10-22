@@ -1,5 +1,13 @@
 type response_identity = Ag_ui.response_identity = { response_generation : int; response_scope : int }
 
+type generated_media =
+  { index : int
+  ; media_type : string
+  ; source_type : Agent_core.Types.media_source_kind
+  ; media_ref : string
+  ; response : response_identity
+  }
+
 type text_response = Ag_ui.text_response =
   | Unobserved_scope of int option
   | Observed_response of response_identity
@@ -128,16 +136,7 @@ type keeper_chat_event =
   | Model_content_activity of model_content_activity
   | Agent_core_thinking_delta of { index : int; delta : string; response : response_identity option }
   | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
-  | Agent_core_media_delta of
-      { index : int
-      ; media_type : string
-      ; source_type : Agent_core.Types.media_source_kind
-      ; media_ref : string
-          (* RFC-0301: reader-facing URL of the persisted media
-             ([/api/v1/media/<token>], via Keeper_chat_media_store), replacing the
-             pre-RFC byte count. The data channel carries the reference to the
-             actual payload, not a telemetry count. *)
-      }
+  | Agent_core_media_delta of generated_media
   | Agent_core_stream_protocol_error of stream_protocol_error
   | Tool_call_start of
       { occurrence : tool_stream_occurrence
@@ -647,6 +646,42 @@ let response_identity_of_json = function
       let* response_scope = index "stream_scope" in
       Ok {response_generation; response_scope}
   | _ -> Error "response identity must be an object"
+
+let generated_media_to_json (media : generated_media) =
+  `Assoc
+    [ "index", `Int media.index
+    ; "media_type", `String media.media_type
+    ; "source_type", `String (Agent_core.Types.media_source_kind_to_string media.source_type)
+    ; "media_ref", `String media.media_ref
+    ; "response", response_identity_to_json media.response
+    ]
+
+let generated_media_of_json = function
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let keys = List.sort String.compare (List.map fst fields) in
+    if keys <> ["index"; "media_ref"; "media_type"; "response"; "source_type"] then
+      Error "generated media requires exactly index, media_ref, media_type, response and source_type"
+    else
+      let nonblank key = match List.assoc_opt key fields with
+        | Some (`String value) when String.trim value <> "" -> Ok value
+        | Some _ | None -> Error ("generated media " ^ key ^ " must be a nonblank string") in
+      let* index = match List.assoc_opt "index" fields with
+        | Some (`Int n) when n >= 0 ->
+          Runtime_json_integer.of_json (`Int n)
+          |> Result.map_error (fun _ -> "generated media index must be a nonnegative safe integer")
+        | Some _ | None -> Error "generated media index must be a nonnegative safe integer" in
+      let* media_type = nonblank "media_type" in
+      let* media_ref = nonblank "media_ref" in
+      let* source_raw = nonblank "source_type" in
+      let* source_type = match Agent_core.Types.media_source_kind_of_string source_raw with
+        | Some kind -> Ok kind
+        | None -> Error "generated media source_type is unknown" in
+      let* response = match List.assoc_opt "response" fields with
+        | Some json -> response_identity_of_json json
+        | None -> Error "generated media response is required" in
+      Ok {index; media_type; source_type; media_ref; response}
+  | _ -> Error "generated media must be an object"
 
 let optional_response_identity_of_fields fields =
   match List.filter (fun (key, _) -> key = "response") fields with

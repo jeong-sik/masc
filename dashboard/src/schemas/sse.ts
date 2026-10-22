@@ -310,6 +310,13 @@ function requiredInteger(
     : fail(`ag_ui_event.value.${field}`, `Expected ${field} integer >= ${minimum}`)
 }
 
+function validateResponseOwner(value: unknown): SafeParseResult<true> {
+  const owner = exactCustomObject(value, 'response', ['content_generation', 'stream_scope'])
+  if (!owner.success) return owner
+  const generation = requiredInteger(owner.data, 'content_generation')
+  return generation.success ? requiredInteger(owner.data, 'stream_scope') : generation
+}
+
 function optionalString(
   value: Record<string, unknown>,
   field: string,
@@ -636,7 +643,7 @@ function validateKeeperCustomPayload(
     ],
     KEEPER_THINKING_DELTA: ['index', 'delta', 'response'],
     KEEPER_THINKING_SIGNATURE_DELTA: ['index', 'signature_bytes'],
-    KEEPER_MEDIA_DELTA: ['index', 'media_type', 'source_type', 'media_ref'],
+    KEEPER_MEDIA_DELTA: ['index', 'media_type', 'source_type', 'media_ref', 'response'],
     KEEPER_STREAM_PROTOCOL_ERROR: [
       'kind',
       'index',
@@ -838,12 +845,8 @@ function validateKeeperCustomPayload(
     }
     case 'KEEPER_THINKING_DELTA': {
       if (value.response !== undefined) {
-        const owner = exactCustomObject(value.response, 'response', ['content_generation', 'stream_scope'])
+        const owner = validateResponseOwner(value.response)
         if (!owner.success) return owner
-        const generation = requiredInteger(owner.data, 'content_generation', 0)
-        if (!generation.success) return generation
-        const scope = requiredInteger(owner.data, 'stream_scope', 0)
-        if (!scope.success) return scope
       }
       const index = requiredInteger(value, 'index')
       return index.success ? requiredString(value, 'delta', true) : index
@@ -853,6 +856,8 @@ function validateKeeperCustomPayload(
       return index.success ? requiredInteger(value, 'signature_bytes') : index
     }
     case 'KEEPER_MEDIA_DELTA': {
+      const owner = validateResponseOwner(value.response)
+      if (!owner.success) return owner
       const index = requiredInteger(value, 'index')
       if (!index.success) return index
       for (const field of ['media_type', 'media_ref']) {

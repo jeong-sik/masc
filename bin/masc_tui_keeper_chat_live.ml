@@ -55,6 +55,7 @@ type delta =
       ; index : int
       ; response : Masc.Keeper_chat_events.response_identity option
       }
+  | Media of Masc.Keeper_chat_events.generated_media
   | Native_tool_started of
       { occurrence : tool_occurrence; tool_name : string option }
   | Native_tool_progress of
@@ -259,6 +260,13 @@ let custom_deltas_unvalidated fields =
                        | Ok completion -> [Native_tool_ended {occurrence; completion}]
                        | Error detail -> [Undecodable (event ^ ": " ^ detail)])
                   | _ -> [Undecodable (event ^ " must carry at most one completion")]))
+  | Some "KEEPER_MEDIA_DELTA" ->
+      (match List.assoc_opt "value" fields with
+       | None -> [Undecodable "KEEPER_MEDIA_DELTA value is required"]
+       | Some value ->
+           match Masc.Keeper_chat_events.generated_media_of_json value with
+           | Ok media -> [Media media]
+           | Error detail -> [Undecodable detail])
   | Some "KEEPER_THINKING_DELTA" -> (
       match object_field fields "value" with
       | None -> [ Undecodable "KEEPER_THINKING_DELTA value is not an object" ]

@@ -1053,6 +1053,9 @@ let image_log_observations (state : state) =
                   | None, (Drawn_text text | Drawn_reply text) ->
                       Some (item.origin,
                         Masc_tui_image_preview.in_message_previews ~text ~attachments:[])
+                  | None, Drawn_media media ->
+                      Some (item.origin, Masc_tui_chat_media.images
+                        [Masc_tui_chat_media.of_generated media])
                   | Some _, _
                   | None, (Drawn_thinking _ | Drawn_skill _ | Drawn_tools _
                     | Drawn_status _ | Drawn_error _) -> None) in
@@ -2383,7 +2386,7 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
                 | Keeper_chat_live.Stream_model_started _
                 | Keeper_chat_live.Model_content_activity _
                 | Keeper_chat_live.Stream_model_stopped _ | Keeper_chat_live.Stream_details _
-                | Keeper_chat_live.Text _ | Keeper_chat_live.Thinking _
+                | Keeper_chat_live.Text _ | Keeper_chat_live.Media _ | Keeper_chat_live.Thinking _
                 | Keeper_chat_live.Native_tool_started _ | Keeper_chat_live.Native_tool_progress _
                 | Keeper_chat_live.Native_tool_ended _ | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_admitted _
                 | Keeper_chat_live.Tool_args _ | Keeper_chat_live.Tool_ended _
@@ -11018,8 +11021,38 @@ let boot_midi_soundfont : string option ref = ref None
    playback is the attachment action's job, so a MIDI reports what it is and
    the one-player-at-a-time rule holds here too. *)
 let conversation_media state =
-  image_session_rows state
-  |> List.concat_map (fun (entry : msg_entry) -> entry.me_media)
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+      let _, cols = get_terminal_size () in
+      let projection = keeper_message_projection state ~keeper_name ~chat_cols:cols in
+      let logs = selected_source_logs_for_keeper state keeper_name
+        |> List.map (fun log -> turn_log_execution_source log,
+          Keeper_chat_transcript.drawn log.tl_transcript) in
+      let projected = projection.tagged_entries |> List.concat_map (fun (tag, _) ->
+        match search_anchor_of_tag tag with
+        | Some (Search_history _) ->
+            (match message_of_tag tag with Some row -> row.me_media | None -> [])
+        | Some (Search_journal {source; origin; _}) ->
+            (match List.assoc_opt source logs with
+             | None -> []
+             | Some items -> items |> List.filter_map (fun (item : Keeper_chat_transcript.drawn_item) ->
+                 match item.origin=origin, item.superseded, item.drawn with
+                 | true, None, Drawn_media media -> Some (Masc_tui_chat_media.of_generated media)
+                 | (false | true), (None | Some _), (Drawn_media _ | Drawn_thinking _
+                   | Drawn_skill _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _
+                   | Drawn_status _ | Drawn_error _) -> None))
+        | Some (Search_child _ | Search_admission _) | None -> []) in
+      let queued = image_session_rows state |> List.concat_map (fun row ->
+        match Chat_queue.find state.msg_queued ~request_id:row.me_request_id, row.me_role with
+        | Some _, Message_user _ ->
+            if List.exists (fun (tag, _) -> match message_of_tag tag with
+              | Some shown -> msg_anchor shown=msg_anchor row | None -> false) projection.tagged_entries
+            then [] else row.me_media
+        | None, _ | Some _, (Message_keeper | Message_autonomous | Message_thinking
+          | Message_tool | Message_skill _ | Message_status | Message_local
+          | Message_error | Message_memory) -> []) in
+      projected @ queued
 
 let listen_newest_media state =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
@@ -20146,7 +20179,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                           | Keeper_chat_live.Stream_model_started _
                           | Keeper_chat_live.Model_content_activity _
                           | Keeper_chat_live.Stream_model_stopped _
-                          | Keeper_chat_live.Stream_details _ | Keeper_chat_live.Text _
+                          | Keeper_chat_live.Stream_details _ | Keeper_chat_live.Text _ | Keeper_chat_live.Media _
                           | Keeper_chat_live.Thinking _
                           | Keeper_chat_live.Native_tool_started _
                           | Keeper_chat_live.Native_tool_progress _
@@ -20171,7 +20204,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
              | Keeper_chat_live.Batch_bound _ | Keeper_chat_live.Runtime_attempt_started _
              | Keeper_chat_live.Provider_retry_observed _ | Keeper_chat_live.Stream_model_started _
              | Keeper_chat_live.Model_content_activity _ | Keeper_chat_live.Stream_model_stopped _
-             | Keeper_chat_live.Stream_details _ | Keeper_chat_live.Text _
+             | Keeper_chat_live.Stream_details _ | Keeper_chat_live.Text _ | Keeper_chat_live.Media _
              | Keeper_chat_live.Thinking _ | Keeper_chat_live.Native_tool_started _
              | Keeper_chat_live.Native_tool_progress _ | Keeper_chat_live.Native_tool_ended _
              | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_admitted _ | Keeper_chat_live.Tool_args _
@@ -20191,7 +20224,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                 | Keeper_chat_live.Stream_model_started _
                 | Keeper_chat_live.Model_content_activity _
                 | Keeper_chat_live.Stream_model_stopped _ | Keeper_chat_live.Stream_details _
-                | Keeper_chat_live.Text _ | Keeper_chat_live.Thinking _
+                | Keeper_chat_live.Text _ | Keeper_chat_live.Media _ | Keeper_chat_live.Thinking _
                 | Keeper_chat_live.Native_tool_started _ | Keeper_chat_live.Native_tool_progress _
                 | Keeper_chat_live.Native_tool_ended _ | Keeper_chat_live.Tool_started _ | Keeper_chat_live.Tool_admitted _
                 | Keeper_chat_live.Tool_args _ | Keeper_chat_live.Tool_ended _
@@ -20257,6 +20290,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                                                    | Keeper_chat_live.Stream_model_stopped _
                                                    | Keeper_chat_live.Stream_details _
                                                    | Keeper_chat_live.Text _
+                                                   | Keeper_chat_live.Media _
                                                    | Keeper_chat_live.Thinking _
                                                    | Keeper_chat_live.Native_tool_started _
                                                    | Keeper_chat_live.Native_tool_progress _
@@ -21224,7 +21258,7 @@ let rec apply_async_message ?(input_pending = fun () -> false) state ~base_path 
                          | Keeper_chat_live.Stream_model_started _
                          | Keeper_chat_live.Model_content_activity _
                          | Keeper_chat_live.Stream_model_stopped _
-                         | Keeper_chat_live.Stream_details _ | Keeper_chat_live.Text _
+                         | Keeper_chat_live.Stream_details _ | Keeper_chat_live.Text _ | Keeper_chat_live.Media _
                          | Keeper_chat_live.Thinking _
                          | Keeper_chat_live.Native_tool_started _
                          | Keeper_chat_live.Native_tool_progress _

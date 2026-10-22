@@ -902,6 +902,10 @@ let validate_custom_value ~name value =
     Masc.Keeper_chat_events.model_content_activity_of_json value
     |> Result.map (fun _ -> ())
     |> Result.map_error (fun detail -> Malformed_event detail)
+  else if String.equal name "KEEPER_MEDIA_DELTA" then
+    Masc.Keeper_chat_events.generated_media_of_json value
+    |> Result.map (fun _ -> ())
+    |> Result.map_error (fun detail -> Malformed_event detail)
   else if String.equal name "KEEPER_THINKING_DELTA" then
     (* The reasoning block a delta belongs to is read from [index]; a frame
        without one would be undecodable in the live view, so the strict pass

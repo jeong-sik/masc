@@ -571,7 +571,7 @@ let media_payload_too_large_event ~index ~size_bytes ~max_bytes =
     ~reason:(media_payload_too_large_reason ~size_bytes ~max_bytes)
     Keeper_chat_events.Media_payload_too_large
 
-let finalize_media_block ~max_wire_bytes ~redact_text ~base_dir ~index ~media_type
+let finalize_media_block ~response ~max_wire_bytes ~redact_text ~base_dir ~index ~media_type
     ~source_type ~chunks ~encoded_bytes =
   if encoded_bytes > max_wire_bytes
   then
@@ -586,7 +586,7 @@ let finalize_media_block ~max_wire_bytes ~redact_text ~base_dir ~index ~media_ty
   with
   | Ok (_token, media_ref) ->
       [ Keeper_chat_events.Agent_core_media_delta
-          { index; media_type; source_type; media_ref }
+          { index; media_type; source_type; media_ref; response }
       ]
   | Error err ->
       [ protocol_error ~index ~raw_bytes:(String.length data)
@@ -615,7 +615,7 @@ let end_model_content bridge_state ~stream_scope ~index events =
   | Some (_,_,false) | None -> {bridge_state; chat_events=events}
 ;;
 
-let close_open_content_blocks ~redact_text ~base_dir state =
+let close_open_content_blocks ~stream_scope ~redact_text ~base_dir state =
   let ordered =
     List.sort
       (fun (left, _) (right, _) -> Int.compare left right)
@@ -641,6 +641,7 @@ let close_open_content_blocks ~redact_text ~base_dir state =
          ; chat_events =
              chat_events
              @ finalize_media_block
+                 ~response:{response_generation=bridge_state.content_generation; response_scope=stream_scope}
                  ~max_wire_bytes:bridge_state.max_wire_bytes
                  ~redact_text ~base_dir ~index ~media_type ~source_type
                  ~chunks ~encoded_bytes
@@ -1015,7 +1016,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
            then cut_tool_scope bridge_state ~reason:"provider_max_tokens"
            else { bridge_state; chat_events = [] }
          in
-         let closed = close_open_content_blocks ~redact_text ~base_dir cut.bridge_state in
+         let closed = close_open_content_blocks ~stream_scope ~redact_text ~base_dir cut.bridge_state in
          { bridge_state =
              { closed.bridge_state with
                stream_phase = Stop_reason_seen stop_reason
@@ -1036,7 +1037,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
        | Message_stopped ->
          { bridge_state; chat_events = [ Agent_core_stream_message_stop (Some { response_generation = bridge_state.content_generation; response_scope = stream_scope }) ] }
        | Accepting_content | Stop_reason_seen _ ->
-         let closed = close_open_content_blocks ~redact_text ~base_dir bridge_state in
+         let closed = close_open_content_blocks ~stream_scope ~redact_text ~base_dir bridge_state in
          { bridge_state =
              { closed.bridge_state with
                stream_phase = Message_stopped
@@ -1521,7 +1522,9 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
               replace_block bridge_state index (Occupied_non_tool_block None)
           ; chat_events =
               block_stop
-              :: finalize_media_block ~max_wire_bytes:bridge_state.max_wire_bytes
+              :: finalize_media_block
+                   ~response:{response_generation=bridge_state.content_generation; response_scope=stream_scope}
+                   ~max_wire_bytes:bridge_state.max_wire_bytes
                    ~redact_text ~base_dir ~index ~media_type
                    ~source_type ~chunks ~encoded_bytes
           }

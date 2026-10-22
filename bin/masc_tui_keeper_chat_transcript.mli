@@ -532,6 +532,7 @@ type trail_item =
       (** One contiguous run of typed calls. A call keeps updating its facts
           (arguments, outcome) after later stretches open. *)
   | Trail_text of string  (** One contiguous stretch of reply text. *)
+  | Trail_media of Masc.Keeper_chat_events.generated_media
   | Trail_superseded of
       { attempt : int
       ; runtime_id : string option
@@ -624,6 +625,7 @@ type drawn =
   | Drawn_skill of skill_activity list
   | Drawn_tools of tool_block
   | Drawn_text of string  (** A reply stretch as it streamed. *)
+  | Drawn_media of Masc.Keeper_chat_events.generated_media
   | Drawn_reply of string
       (** The recorded visible reply. It replaces the response's one observed
           text stretch, or has a separate final row when multiple stretches
@@ -639,6 +641,7 @@ type drawn_origin =
       (** An HTTP receipt owned by the full request id, outside execution
           segments. It never establishes that the input was consumed. *)
   | Text_stretch of int
+  | Media_stretch of int
   | Thinking_stretch of int
   | Tool_stretch of int
   | Unstreamed_skills

@@ -426,7 +426,7 @@ let test_a_held_turn_keeps_only_the_rows_the_log_does_not_draw () =
     ]
   in
   let held =
-    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held"; ht_diagrams=[] } ]
+    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held"; ht_diagrams=[]; ht_generated=[] } ]
   in
   let retained = Tui_types.rows_the_logs_do_not_draw ~held rows in
   let retained_role role = List.exists (fun (row : Tui_types.msg_entry) ->
@@ -476,16 +476,16 @@ let test_source_scoped_row_check_matches_full_held_scan () =
     ]
   in
   let held =
-    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-a"; ht_diagrams=[] }
-    ; { Tui_types.ht_source = autonomous_source; ht_diagrams=[] }
-    ; { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-b"; ht_diagrams=[] }
+    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-a"; ht_diagrams=[]; ht_generated=[] }
+    ; { Tui_types.ht_source = autonomous_source; ht_diagrams=[]; ht_generated=[] }
+    ; { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-b"; ht_diagrams=[]; ht_generated=[] }
     ]
   in
   let full_scan =
     List.filter_map
       (fun (entry : Tui_types.msg_entry) ->
         if List.exists (fun turn -> Tui_types.log_draws_row turn entry) held
-        then Tui_types.media_remainder ~diagrams:[] entry
+        then fst (Tui_types.media_remainder_with_coverage ~diagrams:[] ~generated:[] entry)
         else Some entry)
       rows
   in
@@ -494,6 +494,45 @@ let test_source_scoped_row_check_matches_full_held_scan () =
     "source-scoped row check retains the exact same rows as a full held scan"
     (List.map (fun (r : Tui_types.msg_entry) -> r.me_text) full_scan)
     (List.map (fun (r : Tui_types.msg_entry) -> r.me_text) scoped)
+;;
+
+let test_generated_media_partial_and_failure_coverage () =
+  let module E = Masc.Keeper_chat_events in
+  let source = Masc_tui_keeper_chat_log.Operation "original" in
+  let media : E.generated_media = {index=0;media_type="image/png";
+    source_type=Agent_core.Types.Base64;media_ref="/api/v1/media/one";
+    response={response_generation=4;response_scope=0}} in
+  let second = {media with index=1} in
+  let block = Masc_tui_chat_media.of_generated media in
+  let project rows = Tui_types.generated_media_uncovered_by_rows
+    ~keeper_name:"alpha" ~source ~generated:[media;second] rows in
+  List.iter (fun role ->
+    let output = row ~request_id:"original" ~role ~phase:Tui_types.Turn_output
+      ~text:"Original failure or reply text" 1. in
+    let output = {output with me_media=[block]} in
+    Alcotest.(check bool) "one durable occurrence covers one live block" true
+      (project [output]=[second]);
+    Alcotest.(check bool) "other execution cannot cover this output" true
+      (project [{output with me_execution_source=Some (Masc_tui_keeper_chat_log.Operation "other")}]=[media;second]);
+    Alcotest.(check bool) "another keeper cannot lend output authority" true
+      (project [{output with me_keeper_name="other"}]=[media;second]);
+    Alcotest.(check bool) "unobserved source cannot lend output authority" true
+      (project [{output with me_execution_source=None}]=[media;second]);
+    Alcotest.(check bool) "two durable occurrences cover both blocks" true
+      (project [{output with me_media=[block;block]}]=[]);
+    Alcotest.(check bool) "withdrawn history restores live authority" true
+      (project []=[media;second]);
+    Alcotest.(check bool) "a failure placeholder is not persisted media" true
+      (project [{output with me_media=[Masc_tui_chat_media.Image {src="";cap=Some "unavailable"}]}]=[media;second]);
+    Alcotest.(check string) "failure and reply prose remain original"
+      "Original failure or reply text" output.me_text)
+    [Tui_types.Message_error;Message_status;Message_keeper;Message_autonomous];
+  let input = user ~request_id:"original" "input" 1. in
+  Alcotest.(check bool) "operator input is not generated-output authority" true
+    (project [{input with me_media=[block]}]=[media;second]);
+  let tool = tool ~request_id:"original" "result" 1. in
+  Alcotest.(check bool) "tool output is not provider generated-output authority" true
+    (project [{tool with me_media=[block]}]=[media;second])
 ;;
 
 let () =
@@ -542,6 +581,8 @@ let () =
             test_only_another_turn_breaks_a_run;
           Alcotest.test_case "a held turn keeps only the rows the log does not draw" `Quick
             test_a_held_turn_keeps_only_the_rows_the_log_does_not_draw;
+          Alcotest.test_case "generated media partial and failure ownership" `Quick
+            test_generated_media_partial_and_failure_coverage;
           Alcotest.test_case "source-scoped row check matches full held scan" `Quick
             test_source_scoped_row_check_matches_full_held_scan;
           Alcotest.test_case "an empty conversation has no edges" `Quick

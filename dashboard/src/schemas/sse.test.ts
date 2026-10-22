@@ -1511,19 +1511,34 @@ describe('Keeper response details generation protocol', () => {
 })
 
 
-describe('Keeper thinking response ownership protocol', () => {
+describe.each(['KEEPER_THINKING_DELTA', 'KEEPER_MEDIA_DELTA'] as const)('Keeper %s response ownership protocol', name => {
   const event = (response: unknown) => ({
     type: 'keeper_chat_operation_event', name: 'fixture', operation_id: 'kmsg-fixture',
-    ag_ui_event: { type: 'CUSTOM', threadId: 'keeper-consumer:fixture', runId: 'run-1',
-      name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: 'reason', response }, timestamp: 1712000000 },
+    ag_ui_event: { type: 'CUSTOM', threadId: 'keeper-consumer:fixture', runId: 'run-1', name,
+      value: name === 'KEEPER_THINKING_DELTA'
+        ? { index: 0, delta: 'reason', response }
+        : { index: 0, media_type: 'image/png', source_type: 'url', media_ref: 'https://example.com/generated.png', response },
+      timestamp: 1712000000 },
   })
-  it('retains complete response identity with thinking bytes', () => {
-    expect(SSEMessageSchema.safeParse(event({ content_generation: 7, stream_scope: 0 })).success).toBe(true)
+  it('retains the complete response identity with authored content', () => {
+    const response = { content_generation: 7, stream_scope: 0 }
+    expect(SSEMessageSchema.safeParse(event(response))).toMatchObject({
+      success: true, data: { ag_ui_event: { name, value: { response } } },
+    })
   })
-  it.each([null, {}, { content_generation: 7 },
+  it('requires ownership for media while retaining optional thinking ownership', () => {
+    expect(SSEMessageSchema.safeParse(event(undefined)).success).toBe(name === 'KEEPER_THINKING_DELTA')
+  })
+  it.each([null, {}, { content_generation: 7 }, { stream_scope: 0 },
+    { content_generation: -1, stream_scope: 0 },
+    { content_generation: 0.5, stream_scope: 0 },
+    { content_generation: Number.MAX_SAFE_INTEGER + 1, stream_scope: 0 },
+    { content_generation: '7', stream_scope: 0 },
     { content_generation: 7, stream_scope: -1 },
+    { content_generation: 7, stream_scope: 0.5 },
     { content_generation: 7, stream_scope: Number.MAX_SAFE_INTEGER + 1 },
-  ])('rejects malformed supplied thinking identity %j', value => {
+    { content_generation: 7, stream_scope: 0, extra: true },
+  ])('rejects malformed supplied content identity %j', value => {
     expect(SSEMessageSchema.safeParse(event(value)).success).toBe(false)
   })
 })

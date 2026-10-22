@@ -3,11 +3,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
-import { readFile } from 'node:fs/promises'
 import { join,resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { openPlayback } from '../playback.mjs'
+import { loadSubstituted } from './helpers/substituted-module.mjs'
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 async function scenario(paired, defaultOutput = false) {
  const process=new EventEmitter(),observed={plans:[],options:[],spawn:[],removed:[],kills:[],commands:[]}
@@ -15,9 +15,8 @@ async function scenario(paired, defaultOutput = false) {
  process.stdin=Object.assign(new EventEmitter(),{isTTY:true,isRaw:false,setRawMode(value){this.isRaw=value},resume(){},pause(){}})
  process.stdout=Object.assign(new EventEmitter(),{isTTY:true,columns:80,rows:24,write(){}})
  const timeline={duration:1,channels:0,midi:new Map(),manifest:{state:'recorded',input:{name:'Synthetic'}}}
- const slot='capture-controller-'+randomUUID()
  const abort=new AbortController()
- globalThis[slot]={ StatusReader,process,join,resolve,tmpdir,randomUUID,safeText:String,emitKeypressEvents(){},
+ const substitutes = { StatusReader,process,join,resolve,tmpdir,randomUUID,safeText:String,emitKeypressEvents(){},
   mkdtemp:async()=>'/private-owned-play',mkdir:async()=>{},rm:async path=>observed.removed.push(path),
   devices:async()=>({audio:[],midi:[]}),midiDestinations:async()=>[],readCapture:async()=>timeline,
   CaptureTimeline:class{},waveform(){throw Error('No waveform expected')},exportMidiClips(){throw Error('No export expected')},record(){throw Error('No recording expected')},spawn(){throw Error('Selected output must use native playback')},
@@ -31,9 +30,7 @@ async function scenario(paired, defaultOutput = false) {
    observed.child=child;return handle
   }
  }
- const source=(await readFile(new URL('../music-session.mjs',import.meta.url),'utf8')).replace(/^import .*$/gm,'')
- const prefix=`const {${Object.keys(globalThis[slot]).join(',')}}=globalThis[${JSON.stringify(slot)}];\n`
- const {viewSession}=await import('data:text/javascript;base64,'+Buffer.from(prefix+source).toString('base64'))
+ const { viewSession } = await loadSubstituted(new URL('../music-session.mjs', import.meta.url), substitutes)
  const output=defaultOutput?undefined:'selected-audio'
  const done=viewSession({directory:'/original-take',output,...(paired?{midiOutput:'123'}:{}),signal:abort.signal})
  try {
@@ -71,7 +68,7 @@ async function scenario(paired, defaultOutput = false) {
   await done
   assert.deepEqual(observed.removed,['/private-owned-play']);assert.equal(process.stdin.isRaw,false)
 
- }finally{abort.abort();if(observed.child){observed.child.stdout.end();observed.child.emit('close',0,null)}await done;delete globalThis[slot]}
+ }finally{abort.abort();if(observed.child){observed.child.stdout.end();observed.child.emit('close',0,null)}await done}
 }
 test('captured session passes explicit source bindings through the actual playback protocol and drains its child',()=>scenario(true))
 test('WAV-only session passes the selected audio output to native playback and drains its child',()=>scenario(false))

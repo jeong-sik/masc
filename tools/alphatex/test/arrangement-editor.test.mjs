@@ -24,6 +24,7 @@ import { importMidiSource, exportMidiSource, midiSourcePattern } from '../midi-s
 import { recordingEpoch, attachRecordedTake } from '../arrangement-recording.mjs'
 import { recordingCorrectionContext, recordingCorrectionCapture } from '../recording-correction.mjs'
 import { calibrationMilliseconds, calibrationResidual, validateCalibrationCapture } from '../calibration-profile.mjs'
+import { loadSubstituted } from './helpers/substituted-module.mjs'
 
 const waveAsset = { id: 'asset-1', name: 'Bass', kind: 'wave', file: `assets/${'a'.repeat(64)}.wav`, sha256: 'a'.repeat(64),
   metadata: { encoding: 'pcm', channels: 1, sampleRate: 48000, bitsPerSample: 16, validBits: 16, blockAlign: 2, frames: 48000 } }
@@ -96,8 +97,7 @@ async function controller(options={}){
     }
     async terminate(){observed.terminated=true}
   }
-  const slot=`arrange-controller-${randomUUID()}`
-  globalThis[slot]={ StatusReader,process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
+  const substitutes={ StatusReader,process,Worker:OwnedWorker,arrangementSchedule,arrangementRoute,selectArrangementRoute,arrangementPlaybackRequest,...editorAPI,join,dirname,resolve,tmpdir,randomUUID,
     observeTransport(value){observed.transport=value},
     defaultStateDirectory:()=>'/synthetic-state',pickerFooter,selectionLabel,
     InstrumentPicker:class {
@@ -182,14 +182,12 @@ async function controller(options={}){
     saveProject:async()=>{throw new Error('Unexpected unverified recovery')},
     saveArrangement:async(path,project,revision,extra)=>{observed.recovered.push({path,project,revision,...extra})},
   }
-  const source=(await readFile(new URL('../arrangement-tui.mjs',import.meta.url),'utf8')).replace(/^import .*$/gm,'')
+  const {viewArrangement}=await loadSubstituted(new URL('../arrangement-tui.mjs',import.meta.url),substitutes,{rewrite:source=>source
     .replace('function draw() {','function draw() { observeTransport(transport);')
     .replace("new URL('./arrangement-worker.mjs', import.meta.url)","new URL('file:///worker')")
     .replace("await import('./sequencer-tui.mjs')",'await Promise.resolve({viewSequencer:openSequencer})')
-    .replace("await import('./ump-tui.mjs')",'await Promise.resolve({viewUmpEditor:openUmpEditor})')
-  const prefix=`const {${Object.keys(globalThis[slot]).join(',')}}=globalThis[${JSON.stringify(slot)}];\n`
-  const {viewArrangement}=await import('data:text/javascript;base64,'+Buffer.from(prefix+source).toString('base64'))
-  const abort=new AbortController(),done=viewArrangement({root:'/synthetic',initialDocument:options.project,signal:abort.signal}).finally(()=>{delete globalThis[slot]})
+    .replace("await import('./ump-tui.mjs')",'await Promise.resolve({viewUmpEditor:openUmpEditor})')})
+  const abort=new AbortController(),done=viewArrangement({root:'/synthetic',initialDocument:options.project,signal:abort.signal})
   await flush()
   const key=(name,text='',extra={})=>process.stdin.emit('keypress',text,{name,...extra})
   return {observed,process,done,abort,key,worker:owner,command(line){key(undefined,':');key(undefined,line);key('return')}}

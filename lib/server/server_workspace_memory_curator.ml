@@ -57,11 +57,12 @@ let step ~config original =
       | Some current -> Ok current | None -> Error "Original Curator terminal vanished before successor evaluation" in
     let* eligible=size_refusal current in
     if eligible && divisible current then narrow ~config current else Ok (changed original record)
-let observe ~config originals =
+let observe ~config ~on_observation_failure originals =
   List.fold_left (fun complete original ->
-    match Consumer.prepare_observation ~config ~request_id:(id original) with
+    match Consumer.deliver_observation ~config ~request_id:(id original) with
     | Ok _ -> complete
     | Error error ->
+      on_observation_failure ();
       Log.Server.error "workspace curator original observation %s: %s" (id original) (Consumer.error_to_string error);
       false) true originals
 let one_active originals=match List.filter (fun original -> active (phase original)) originals with
@@ -141,10 +142,10 @@ let briefing_new ~config ~originals ~new_work ~busy =
     let* ()=if Yojson.Safe.equal (Briefing.to_json state) (Briefing.to_json prepared) then Ok ()
       else io (fun () -> Briefing.save ~directory prepared) in
     let* _=Consumer.capture_briefing ~config ~prompt:resolution ~batch |> consumer in Ok true
-let run_domain ~config ~on_inventory domain =
+let run_domain ~config ~on_inventory ~on_observation_failure domain =
   let* originals=Consumer.discover ~config |> consumer in
   on_inventory originals;
-  let new_work=observe ~config originals in
+  let new_work=observe ~config ~on_observation_failure originals in
   let selected=leaves originals |> List.filter (fun original -> kind original=domain) in
   let* running=one_active selected in
   match running with
@@ -171,14 +172,18 @@ let run_domain ~config ~on_inventory domain =
            another capture derived from the previous frontier. *)
         let* fresh=Consumer.discover ~config |> consumer in
         on_inventory fresh;
-        let new_work=observe ~config fresh in
+        let new_work=observe ~config ~on_observation_failure fresh in
         let selected=leaves fresh |> List.filter (fun original -> kind original=domain) in
         let* running=one_active selected in
         match running with Some _ -> Ok true | None -> prepare ~originals:selected ~new_work
-let run ~config ~on_inventory =
-  let classify=run_domain ~config ~on_inventory Classification in
-  let synthesize=run_domain ~config ~on_inventory Synthesis in
+let run ~config ~on_inventory ~on_observation_failure =
+  let classify=run_domain ~config ~on_inventory ~on_observation_failure Classification in
+  let synthesize=run_domain ~config ~on_inventory ~on_observation_failure Synthesis in
   let changed=function Ok changed -> changed | Error detail ->
+    (* Domain progression is not proof that observation discovery completed.
+       Preserve maintenance demand when an earlier read/step refused before
+       [observe], including a subsequent failure while ACKs are pending. *)
+    on_observation_failure ();
     Log.Server.error "workspace curator original owner: %s" detail;false in
   let classified=changed classify and synthesized=changed synthesize in
   classified || synthesized
@@ -188,6 +193,7 @@ type owner =
   ; mutable pending : bool
   ; mutable in_flight : bool
   ; mutable stopped : bool
+  ; mutable observation_retry : bool
   ; mutable wake : unit Eio.Promise.u option
   ; in_flight_revisions :
       (string * Keeper_memory_commit_notifications.store, int) Hashtbl.t
@@ -237,6 +243,18 @@ let request ~base_path =
   | exception Unix.Unix_error (error, operation, _) ->
     Unavailable (operation ^ ": " ^ Unix.error_message error)
 
+let retry_pending_observations ~base_path =
+  match Eio_guard.run_in_systhread ~label:"curator-retry-workspace" (fun () -> Unix.realpath base_path) with
+  | base_path ->
+  let owner=Stdlib.Mutex.protect owners_mutex (fun () -> Hashtbl.find_opt owners base_path) in
+  (match owner with
+  | None -> ()
+  | Some owner ->
+    let pending=Stdlib.Mutex.protect owner.mutex (fun () -> owner.observation_retry && not owner.stopped) in
+    if pending then ignore (wake owner))
+  | exception Unix.Unix_error (error,operation,_) ->
+    Log.Server.warn "workspace curator retry identity %s: %s: %s" base_path operation (Unix.error_message error)
+
 let start ~sw ~config =
   Eio.Switch.check sw;
   let base_path = Unix.realpath config.Workspace.base_path in
@@ -250,6 +268,7 @@ let start ~sw ~config =
     ; pending = true
     ; in_flight = false
     ; stopped = false
+    ; observation_retry = false
     ; wake = None
     ; in_flight_revisions = Hashtbl.create 8
     }
@@ -311,11 +330,16 @@ let start ~sw ~config =
         | `Run ->
           (* fire-and-forget: remaining facts queue another pulse; stopped owners need none. *)
           (try
-             let progressed=run ~config ~on_inventory:sync_routes in
+             let retry=ref false in
+             let progressed=run ~config ~on_inventory:sync_routes
+               ~on_observation_failure:(fun () -> retry:=true) in
+             Stdlib.Mutex.protect owner.mutex (fun () -> owner.observation_retry <- !retry);
              if progressed then ignore (wake owner)
            with
            | Eio.Cancel.Cancelled _ as error -> raise error
-           | exn -> Log.Server.error "workspace curator owner %s: %s" base_path (Printexc.to_string exn));
+           | exn ->
+             Stdlib.Mutex.protect owner.mutex (fun () -> owner.observation_retry <- true);
+             Log.Server.error "workspace curator owner %s: %s" base_path (Printexc.to_string exn));
           Stdlib.Mutex.protect owner.mutex (fun () ->
             owner.in_flight <- false;
             Hashtbl.clear owner.in_flight_revisions);

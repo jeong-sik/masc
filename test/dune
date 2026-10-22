@@ -5511,6 +5511,11 @@
  (libraries alcotest digestif yojson masc))
 
 (test
+ (name test_workspace_memory_capture)
+ (modules test_workspace_memory_capture)
+ (libraries alcotest digestif yojson masc unix))
+
+(test
  (name test_workspace_memory_log_reader)
  (modules test_workspace_memory_log_reader)
  (libraries alcotest digestif yojson masc masc.fs_compat unix))

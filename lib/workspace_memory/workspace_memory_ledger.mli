@@ -16,11 +16,17 @@ type fact_ref =
       { keeper_id : string
       ; claim_sha256 : string
       }
+
   | Source_bound of
       { keeper_id : string
       ; path : string
       ; claim_sha256 : string
       }
+
+val fact_ref_to_json : fact_ref -> Yojson.Safe.t
+val fact_ref_of_json : Yojson.Safe.t -> (fact_ref, string) result
+(** Strict source identity codec shared by ledger rows and retained Curator
+    batches. Unknown, missing and repeated fields are rejected. *)
 
 type disposition =
   | Claim_member of string  (** a [claim_id] in the ledger *)

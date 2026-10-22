@@ -837,11 +837,12 @@ let autocomplete ?(direction = Next) ?(keeper_names = []) text =
     if not (String.contains line ' ') then begin
       (* Command word completion *)
       let candidates =
-        if String.equal line "" then spelled_catalog
-        else
-          List.filter
-            (fun entry -> String.starts_with ~prefix:line entry.word)
-            spelled_catalog
+        match List.find_opt (fun entry -> String.equal entry.word line) spelled_catalog with
+        | Some entry -> [ entry ]
+        | None ->
+            List.filter
+              (fun entry -> String.starts_with ~prefix:line entry.word)
+              spelled_catalog
       in
       match candidates with
       | [] -> None

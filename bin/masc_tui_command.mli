@@ -309,6 +309,8 @@ val autocomplete :
 (** [autocomplete ?direction ?keeper_names text] computes the completed command line.
     [direction] defaults to [Next] (e.g. for Tab or ArrowDown). [Prev] moves backward
     through candidate commands and argument options (e.g. for ArrowUp or Shift-Tab).
+    An exact command word keeps its identity even when it prefixes another command;
+    completion only adds its argument separator, or returns [None] for no arguments.
     Returns [None] if [text] is not a slash command. *)
 
 val is_slash_navigable : ?keeper_names:string list -> string -> bool

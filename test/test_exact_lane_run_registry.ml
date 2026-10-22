@@ -920,6 +920,14 @@ let test_replay_removes_payload_files_no_row_names () =
   let replayed = R.replay path in
   check bool "a payload directory no row names is removed" false
     (Sys.file_exists (Filename.dirname orphan));
+  (match (R.startup_observation replayed).payload_sweep with
+   | R.Swept counts ->
+     check int "retained and orphan root entries examined" 2 counts.examined_root_entries;
+     check int "one successful unlink" 1 counts.unlinked_entries;
+     check int "one successful rmdir" 1 counts.removed_run_directories;
+     check int "no failed root entries" 0 counts.failed_root_entries
+   | R.Not_attempted | R.Replay_not_trusted | R.Root_absent | R.Root_unavailable ->
+     fail "clean replay did not record its sweep");
   let kept = R.get replayed ~run_id:"kept" |> Option.get in
   check bool "a retained run keeps its payload files" true
     (kept.input_availability = R.Available && kept.output_availability = Some R.Available);
@@ -1359,6 +1367,8 @@ let test_a_partial_replay_leaves_payload_files_alone () =
   Fs_compat.save_file path (Fs_compat.load_file path ^ "{\"event\":\"reg");
   Fs_compat.invalidate_cached_writer path;
   let replayed = R.replay path in
+  check bool "untrusted replay records its refusal" true
+    ((R.startup_observation replayed).payload_sweep = R.Replay_not_trusted);
   check bool "a replay that stopped at a torn tail sweeps nothing" true
     (Sys.file_exists unnamed);
   let kept = R.get replayed ~run_id:"kept" |> Option.get in
@@ -1385,6 +1395,8 @@ let test_a_replay_that_skipped_an_unreadable_row_leaves_payload_files_alone () =
   check bool "the replay reads to the end" true read.reached_end;
   check int "and skips the one row it cannot decode" 1 read.malformed_lines;
   let replayed = R.replay path in
+  check bool "untrusted replay records its refusal" true
+    ((R.startup_observation replayed).payload_sweep = R.Replay_not_trusted);
   check bool "a replay that skipped a row sweeps nothing" true (Sys.file_exists unnamed);
   let kept = R.get replayed ~run_id:"kept" |> Option.get in
   check bool "the runs it did read stay readable" true
@@ -1499,11 +1511,86 @@ let test_a_changed_payload_file_is_refused_not_served () =
       (run.input_availability = R.Available && run.output_availability = Some R.Available))
 ;;
 
+let test_startup_observation_is_immutable_and_distinguishes_absence () =
+  let path = fresh_log_path "exact-startup-observation-" in
+  let created = R.create ~path () in
+  let before = R.startup_observation created in
+  check bool "create has no replay or sweep" true
+    (before.replay = Run_registry_core.Not_replayed && before.payload_sweep = R.Not_attempted);
+  let absent = R.replay path |> R.startup_observation in
+  check bool "absent log does not authorize a sweep" true
+    (absent.replay = Run_registry_core.Log_absent && absent.payload_sweep = R.Replay_not_trusted);
+  Fs_compat.save_file path "";
+  let replayed = R.replay path in
+  let startup = R.startup_observation replayed in
+  check bool "clean empty log observes missing payload root" true
+    (startup.payload_sweep = R.Root_absent);
+  R.register_running replayed ~run_id:"later" ~lane:R.Librarian ~actor:"fixture"
+    ~started_at:1.0 ~input:(R.Exact_input `Null);
+  check bool "live registration does not rewrite startup observation" true
+    (R.startup_observation replayed == startup);
+  check bool "create observation also remains the same object" true
+    (R.startup_observation created == before);
+  remove_if_exists path
+;;
+
+let test_startup_sweep_reports_partial_removal_without_conflating_units () =
+  let path = fresh_log_path "exact-startup-partial-removal-" in
+  Fs_compat.save_file path "";
+  let root = Filename.concat (Filename.dirname path) R.payload_dirname in
+  Unix.mkdir root 0o700;
+  let orphan = Filename.concat root "orphan" in
+  Unix.mkdir orphan 0o700;
+  let removable = Filename.concat orphan "remove-me.json" in
+  Fs_compat.save_file removable "{}";
+  (* A nested directory makes Sys.remove fail independently of permissions.
+     readdir order is unspecified: compare acknowledgements with actual effects. *)
+  let blocker = Filename.concat orphan "nested-directory" in
+  Unix.mkdir blocker 0o700;
+  let unexpected = Filename.concat root "root-file" in
+  Fs_compat.save_file unexpected "{}";
+  let replayed = R.replay path in
+  (match (R.startup_observation replayed).payload_sweep with
+   | R.Swept counts ->
+     check int "two root entries examined" 2 counts.examined_root_entries;
+     check int "one partially failed root entry" 1 counts.failed_root_entries;
+     check int "no rmdir succeeded" 0 counts.removed_run_directories;
+     let actual_unlinks = if Sys.file_exists removable then 1 else 2 in
+     check int "successful unlinks survive the later error" actual_unlinks counts.unlinked_entries
+   | R.Not_attempted | R.Replay_not_trusted | R.Root_absent | R.Root_unavailable ->
+     fail "expected an observed sweep with partial failure");
+  check bool "independent root file was removed" false (Sys.file_exists unexpected);
+  check bool "failed directory remains" true (Sys.file_exists blocker);
+  remove_if_exists removable;
+  Unix.rmdir blocker;
+  Unix.rmdir orphan;
+  Unix.rmdir root;
+  remove_if_exists path
+;;
+
+let test_startup_sweep_reports_unavailable_root () =
+  let path = fresh_log_path "exact-startup-unavailable-root-" in
+  Fs_compat.save_file path "";
+  let root = Filename.concat (Filename.dirname path) R.payload_dirname in
+  Fs_compat.save_file root "not a directory";
+  let observation = R.replay path |> R.startup_observation in
+  check bool "a non-directory root is unavailable, not absent or swept" true
+    (observation.payload_sweep = R.Root_unavailable);
+  remove_if_exists root;
+  remove_if_exists path
+;;
+
 let () =
   run
     "exact_lane_run_registry"
     [ ( "registry"
-      , [ test_case "durable exact evidence" `Quick test_round_trip_preserves_exact_evidence
+      , [ test_case "startup observation is immutable and distinguishes absence" `Quick
+            test_startup_observation_is_immutable_and_distinguishes_absence
+        ; test_case "startup sweep reports partial effects in separate units" `Quick
+            test_startup_sweep_reports_partial_removal_without_conflating_units
+        ; test_case "startup sweep reports unavailable root" `Quick
+            test_startup_sweep_reports_unavailable_root
+        ; test_case "durable exact evidence" `Quick test_round_trip_preserves_exact_evidence
         ; test_case "memory and disk preserve available JSON null" `Quick
             test_memory_only_and_disk_null_are_available_values
         ; test_case "missing payload files preserve terminal identity" `Quick

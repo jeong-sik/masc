@@ -161,6 +161,42 @@ val cut_replay_log : execute:bool -> string -> Run_registry_core.cut_report
 (** Deployment-time store cut for {!storage_filename}. See
     {!Run_registry_core.Make.cut_replay_log}. *)
 
+type payload_sweep_counts =
+  { examined_root_entries : int
+  ; unlinked_entries : int
+  ; removed_run_directories : int
+  ; failed_root_entries : int
+  }
+(** [unlinked_entries] counts successful [Sys.remove] calls, including non-directory
+    entries and symlinks; it is not a byte or regular-file count.
+    [removed_run_directories] counts successful [Unix.rmdir] calls separately.
+    A failed root entry is counted once, including a partially removed directory;
+    successful effects before its failure remain in the other counters. *)
+
+type payload_sweep_status =
+  | Not_attempted
+  | Replay_not_trusted
+  | Root_absent
+  | Root_unavailable
+  | Swept of payload_sweep_counts
+(** [Replay_not_trusted] means the existing replay gate refused cleanup.
+    [Root_absent] means the root lookup observed [ENOENT]; [Root_unavailable]
+    means lookup or listing failed and the existing warning identifies it.
+    [Swept] visited the listed root entries; nonzero [failed_root_entries] means
+    partial failure, not a successful complete cleanup. *)
+
+type startup_observation =
+  { replay : Run_registry_core.replay_status
+  ; payload_sweep : payload_sweep_status
+  }
+
+val startup_observation : t -> startup_observation
+(** Immutable observation of this instance's construction/replay and startup
+    payload sweep. A pure read: no filesystem, replay, cleanup or payload read.
+    Later mutations do not update it. Compaction success is not observed by
+    this contract; neither replay EOF nor sweep completion proves compaction.
+    [create] records [Not_attempted], even when given a persistence path. *)
+
 val create : ?path:string -> unit -> t
 val replay : string -> t
 

@@ -531,13 +531,14 @@ let entries m = Hashtbl.to_seq_values m.entries |> List.of_seq
 (* Whether an entry can serve exports now. [Gone] is a detached entry: it no
    longer stands for an installation, so its absence is the truth. *)
 type readiness = Ready of owned_connection | Unready of Lane_addon_unready.reason | Gone
-let readiness (e : entry) = match phase_of e, e.connection with
-  | Failed detail, (Some _ | None) -> Unready (Lane_addon_unready.Failed detail)
-  | Detaching, (Some _ | None) -> Unready Lane_addon_unready.Detaching
-  | Detached, (Some _ | None) -> Gone
-  | (Attached | Observing), (Some _ | None) when e.stopping -> Unready Lane_addon_unready.Stopping
-  | (Attached | Observing), Some connection when e.started -> Ready connection
-  | (Attached | Observing), (Some _ | None) -> Unready Lane_addon_unready.Starting
+let readiness (e : entry) = match e.state, e.connection with
+  | Lifecycle.Failed failed, (Some _ | None) -> Unready (Lane_addon_unready.Failed failed)
+  | Lifecycle.Detaching _, (Some _ | None) -> Unready Lane_addon_unready.Detaching
+  | Lifecycle.Detached _, (Some _ | None) -> Gone
+  | (Lifecycle.Attached | Lifecycle.Observing), (Some _ | None) when e.stopping ->
+      Unready Lane_addon_unready.Stopping
+  | (Lifecycle.Attached | Lifecycle.Observing), Some connection when e.started -> Ready connection
+  | (Lifecycle.Attached | Lifecycle.Observing), (Some _ | None) -> Unready Lane_addon_unready.Starting
 let installation_name (e : entry) = match e.configuration with Some owner -> owner.id | None -> e.instance_id
 let unready_of (e : entry) reason = {
   Lane_addon_unready.installation = installation_name e;
@@ -1692,12 +1693,14 @@ type export_refusal =
   | Unready_installations of Lane_addon_unready.t * Lane_addon_unready.t list
   | Not_yet_observed of { installation : string; package_id : string }
   | Ambiguous_installations of string list
-let export_refusal_message = function
-  | Unready_installations (first, rest) -> String.concat "; " (List.map Lane_addon_unready.message (first :: rest))
+let refusal_text render = function
+  | Unready_installations (first, rest) -> String.concat "; " (List.map render (first :: rest))
   | Not_yet_observed {installation; package_id} ->
       Printf.sprintf "Add-on installation %s (package %s) has no completed observation yet" installation package_id
   | Ambiguous_installations installations ->
       "multiple visible installations provide this export: " ^ String.concat ", " installations
+let export_refusal_message = refusal_text Lane_addon_unready.message
+let export_refusal_operator_message = refusal_text Lane_addon_unready.operator_message
 
 let observation_for_export ~config ~access ~name = Eio_context.run_on_owner_domain (fun () ->
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in

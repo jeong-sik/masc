@@ -131,8 +131,10 @@ let browser_absence (declarations : Config.declaration list) =
   if List.exists (fun (d : Config.declaration) -> d.enabled) browsers then Browser_addon_not_running
   else match browsers with [] -> Browser_addon_absent | _ :: _ -> Browser_addon_off
 let browser_reading ~declarations = function
+  (* The inventory is served to the operator alone (CanAdmin), so a failure is
+     shown with its detail. *)
   | Error (Addon.Unready_installations _ | Not_yet_observed _ | Ambiguous_installations _ as refusal) ->
-      Browser_addon_unavailable (Addon.export_refusal_message refusal)
+      Browser_addon_unavailable (Addon.export_refusal_operator_message refusal)
   | Ok None -> browser_absence declarations
   | Ok (Some (snapshot : Addon.export_observation)) ->
       (match Browser_addon_observation.read snapshot.output with

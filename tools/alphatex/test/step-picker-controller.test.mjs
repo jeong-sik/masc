@@ -12,6 +12,7 @@ import * as editor from '../sequencer-editor.mjs'
 import { isFluidSound } from '../soundfont.mjs'
 import { GM_DRUM_CHANNEL } from '../sequencer-project.mjs'
 import { pickerFooter, projectSoundLabel } from '../instruments.mjs'
+import * as terminalStyle from '../terminal-style.mjs'
 
 // Exercise actual controller decisions with owned IO substitutes. No terminal
 // output, layout, audio hardware or player behavior is asserted.
@@ -34,7 +35,7 @@ async function controller(options = {}) {
   }
   const slot = `sequencer-${randomUUID()}`
   globalThis[slot] = {
-    process, sameStepContext, stepControl, phraseBacking, ...editor, Worker, InstrumentPicker, StatusReader,
+    process, sameStepContext, stepControl, phraseBacking, ...editor, ...terminalStyle, Worker, InstrumentPicker, StatusReader,
     isFluidSound, GM_DRUM_CHANNEL, pickerFooter, projectSoundLabel,
     openVstSession: () => ({ run() { throw new Error('Unexpected VST host job') }, async close() {} }),
     captureFluidSound() { throw new Error('Unexpected FluidSynth selection') },

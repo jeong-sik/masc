@@ -6,6 +6,7 @@ import { projectMidi, loadProject, saveProject } from '../sequencer-files.mjs'
 import { harmonyAt, PPQ } from '../sequencer-project.mjs'
 import { newArrangement } from '../arrangement.mjs'
 import { defaultStateDirectory } from '../vst.mjs'
+import * as terminalStyle from '../terminal-style.mjs'
 import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -141,7 +142,7 @@ test('loading a saved arrangement dispatches before phrase terminal or backgroun
   const ownership = { raw: [], workers: 0, temporary: 0 }
   const dispatched = []
   const process = { stdin: { isTTY: true, setRawMode(value) { ownership.raw.push(value) } }, stdout: { isTTY: true } }
-  globalThis[slot] = { StatusReader, process, loadProject, newEditor, join, tmpdir, randomUUID, defaultStateDirectory,
+  globalThis[slot] = { StatusReader, ...terminalStyle, process, loadProject, newEditor, join, tmpdir, randomUUID, defaultStateDirectory,
     async openArrangement(options) { dispatched.push(options) },
     async mkdtemp() { ownership.temporary++; throw new Error('Unexpected terminal temporary directory') },
     Worker: class { constructor() { ownership.workers++; throw new Error('Unexpected terminal worker') } } }

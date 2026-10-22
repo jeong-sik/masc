@@ -19,6 +19,8 @@ let with_directory f =
   in
   Fun.protect ~finally:(fun () -> remove dir) (fun () -> f (Unix.realpath dir))
 
+(* The stdlib has no unsetenv, so a PATH that was unset comes back as the
+   empty string; no later case in this executable reads it. *)
 let with_path value f =
   let previous = Sys.getenv_opt "PATH" in
   Unix.putenv "PATH" value;
@@ -27,11 +29,6 @@ let with_path value f =
 let executable path =
   Out_channel.with_open_bin path (fun out -> output_string out "#!/bin/sh\nexit 0\n");
   Unix.chmod path 0o755
-
-let contains text needle =
-  let n = String.length needle in
-  let rec loop i = i + n <= String.length text && (String.sub text i n = needle || loop (i + 1)) in
-  loop 0
 
 let test_every_program_has_its_own_name () =
   let names = List.map P.name P.all in
@@ -46,7 +43,8 @@ let test_locate_reads_path () =
            (match P.locate program with
             | Ok path -> failf "found %s with only an empty directory on PATH" path
             | Error message ->
-              check bool "the refusal names the program" true (contains message (P.name program)));
+              check bool "the refusal names the program" true
+                (String_util.contains_substring message (P.name program)));
            let path = Filename.concat dir (P.name program) in
            executable path;
            check (result string string) "found on PATH" (Ok (Unix.realpath path)) (P.locate program))

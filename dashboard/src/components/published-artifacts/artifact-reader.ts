@@ -5,7 +5,7 @@ import { Markdown } from '../common/markdown'
 import { navigate } from '../../router'
 import { copyToClipboard } from '../common/copyable-code'
 import type { ArtifactCheckState } from '../../api/published-artifact-checks'
-import { ArtifactCheckControl } from './artifact-check-control'
+import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
 
 // Opaque origin: no allow-same-origin. Keep the CSP first so the body cannot
 // load subresources before the policy applies. Scripts support self-contained
@@ -29,9 +29,9 @@ function downloadSource(doc: ArtifactDocument): void {
   URL.revokeObjectURL(url)
 }
 
-export function ArtifactReader({ doc, fixedRevision, checkState, authRevision, onCheckChanged, onClose }: {
+export function ArtifactReader({ doc, fixedRevision, checkState, authRevision, isCurrent, onMutation, onCheckChanged, onClose }: {
   doc: ArtifactDocument; fixedRevision: boolean; checkState: ArtifactCheckState;
-  authRevision: number; onCheckChanged: () => void; onClose: () => void
+  authRevision: number; isCurrent: () => boolean; onMutation: (outcome: ArtifactCheckOutcome) => void; onCheckChanged: () => void; onClose: () => void
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const [view, setView] = useState<'rendered' | 'source'>('rendered')
@@ -90,7 +90,7 @@ export function ArtifactReader({ doc, fixedRevision, checkState, authRevision, o
           </label>
         </div>
         <${ArtifactCheckControl} key=${JSON.stringify([authRevision,artifact.id,artifact.revision,artifact.body._blob.sha256])}
-          artifact=${artifact} state=${checkState} authRevision=${authRevision} onChanged=${onCheckChanged} />
+          artifact=${artifact} state=${checkState} authRevision=${authRevision} isCurrent=${isCurrent} onMutation=${onMutation} onChanged=${onCheckChanged} />
         <p role="status" class="m-0 text-xs">${copyFeedback}</p>
         <details class="text-xs text-[var(--color-fg-secondary)]">
           <summary class="cursor-pointer">보고서 정보</summary>

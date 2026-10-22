@@ -1,11 +1,17 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { currentStoredTokenRevision } from '../../api/core'
-import { setArtifactCheck, type ArtifactCheckState } from '../../api/published-artifact-checks'
+import { setArtifactCheck, type ArtifactCheck, type ArtifactCheckState } from '../../api/published-artifact-checks'
 import type { PublishedArtifact } from '../../api/published-artifacts'
 
-export function ArtifactCheckControl({ artifact, state, authRevision, onChanged }: {
-  artifact: PublishedArtifact; state: ArtifactCheckState; authRevision: number; onChanged: () => void
+export type ArtifactCheckOutcome = { artifact: PublishedArtifact; checked: boolean } & (
+  | { kind: 'received'; check: ArtifactCheck }
+  | { kind: 'unconfirmed'; detail: string }
+)
+
+export function ArtifactCheckControl({ artifact, state, authRevision, isCurrent, onMutation, onChanged }: {
+  artifact: PublishedArtifact; state: ArtifactCheckState; authRevision: number; isCurrent: () => boolean;
+  onMutation: (outcome: ArtifactCheckOutcome) => void; onChanged: () => void
 }) {
   const owner = useRef({ active: true })
   const [pending, setPending] = useState(false)
@@ -13,18 +19,21 @@ export function ArtifactCheckControl({ artifact, state, authRevision, onChanged 
   useEffect(() => () => { owner.current.active = false }, [])
 
   const toggle = async () => {
-    if (pending || state.kind !== 'known') return
+    if (pending || state.kind !== 'known' || !isCurrent()) return
     setPending(true)
     setMessage('')
+    const checked = !state.check?.checked
     try {
-      await setArtifactCheck(artifact, state.check, !state.check?.checked)
-      if (!owner.current.active || currentStoredTokenRevision() !== authRevision) return
+      const check = await setArtifactCheck(artifact, state.check, checked)
+      onMutation({ kind: 'received', artifact, checked, check })
+      if (!owner.current.active || currentStoredTokenRevision() !== authRevision || !isCurrent()) return
       setMessage('저장했습니다. 공유 확인 상태를 다시 조회합니다.')
     } catch (error) {
-      if (!owner.current.active || currentStoredTokenRevision() !== authRevision) return
+      onMutation({ kind: 'unconfirmed', artifact, checked, detail: error instanceof Error ? error.message : '확인 상태를 저장하지 못했습니다.' })
+      if (!owner.current.active || currentStoredTokenRevision() !== authRevision || !isCurrent()) return
       setMessage(`${error instanceof Error ? error.message : '확인 상태를 저장하지 못했습니다.'} 다시 조회한 상태에서 확인해 주세요.`)
     }
-    if (!owner.current.active || currentStoredTokenRevision() !== authRevision) return
+    if (!owner.current.active || currentStoredTokenRevision() !== authRevision || !isCurrent()) return
     // Even a timeout or conflict may follow an applied change. Never retry or
     // optimistically mark it checked: request an authoritative shared reread.
     setPending(false)

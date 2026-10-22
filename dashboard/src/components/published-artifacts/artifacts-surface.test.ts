@@ -6,7 +6,15 @@ import { route, navigate } from '../../router'
 import { ArtifactsSurface } from './artifacts-surface'
 import { copyToClipboard } from '../common/copyable-code'
 
+const workspaceOwner = vi.hoisted(() => ({ reset: () => {} }))
 const authOwner = vi.hoisted(() => ({ change: undefined as ((epoch: number) => void) | undefined }))
+
+vi.mock('../../store', async () => {
+  const { signal } = await import('@preact/signals')
+  const authority = signal<unknown>(null)
+  workspaceOwner.reset = () => { authority.value = { epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1 } }
+  return { executionWorkspaceAuthority: authority }
+})
 
 vi.mock('../../router', async () => {
   const { signal } = await import('@preact/signals')
@@ -37,6 +45,7 @@ const old = { ...first, revision: 1, title: '조사 초안' }
 const document = { artifact: first, content: '# 보고서\r\n한글과 😀', revisions: [first, old] }
 
 beforeEach(() => {
+  workspaceOwner.reset()
   vi.clearAllMocks()
   vi.mocked(post).mockReset()
   vi.mocked(currentStoredTokenRevision).mockReturnValue(0)

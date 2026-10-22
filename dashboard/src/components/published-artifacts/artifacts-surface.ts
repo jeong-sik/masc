@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { route, navigate } from '../../router'
 import { ApiRequestError, currentStoredTokenRevision } from '../../api/core'
 import { storedTokenRevision } from '../../api/token-revision'
@@ -8,10 +8,11 @@ import { fetchArtifactChecks, resolveArtifactCheck, type ArtifactCheckList, type
 import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import { ArtifactReader } from './artifact-reader'
 import { ArtifactPreview } from './artifact-preview'
-import { ArtifactCheckControl } from './artifact-check-control'
+import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
+import { executionWorkspaceAuthority } from '../../store'
 
-type Remote<T> = { key: string; kind: 'loaded'; data: T; receivedAt: number }
-  | { key: string; kind: 'error'; message: string }
+type Remote<T> = { key: object; kind: 'loaded'; data: T; receivedAt: number }
+  | { key: object; kind: 'error'; message: string }
 const errorMessage = (error: unknown) => error instanceof ApiRequestError && error.status === 404
   ? '문서 또는 선택한 버전을 찾지 못했습니다.'
   : error instanceof Error ? error.message : '문서를 불러오지 못했습니다.'
@@ -23,8 +24,38 @@ function isToday(timestamp: string, now: Date): boolean {
 }
 
 export function ArtifactsSurface() {
-  const { artifact: selectedId, revision } = route.value.params
   const authRevision = storedTokenRevision.value
+  const authority = executionWorkspaceAuthority.value
+  const mounts = useRef(0)
+  // The ordinal is only a component key. Authority is the existing SSOT object.
+  const owner = useMemo(() => ({ mount: ++mounts.current, authRevision, authority }), [authRevision, authority])
+  const [receipts, setReceipts] = useState<readonly { owner: typeof owner; outcome: ArtifactCheckOutcome }[]>([])
+  const current = () => owner.authority !== null
+    && currentStoredTokenRevision() === owner.authRevision
+    && executionWorkspaceAuthority.peek() === owner.authority
+  return html`<div>
+    ${receipts.length ? html`<section aria-label="문서 확인 요청 결과">
+      ${receipts.map(({ owner: original, outcome }, index) => html`<p key=${index}>
+        ${outcome.artifact.title} · ${outcome.artifact.id} · v${outcome.artifact.revision}
+        · SHA-256 ${outcome.artifact.body._blob.sha256}
+        · 원래 작업 공간 ${original.authority?.workspaceRoot}
+        · 요청: ${outcome.checked ? '확인' : '확인 해제'}
+        · ${outcome.kind === 'received'
+          ? `서버 응답: ${outcome.check.checked ? '확인' : '확인 해제'} · ${outcome.check.changed_by} · ${outcome.check.change_id}`
+          : `적용 여부 미확인: ${outcome.detail}`}
+        ${original !== owner ? ' · 이전 접근 상태의 요청 결과' : ''}
+      </p>`)}
+    </section>` : null}
+    ${authority === null ? html`<p role="status">현재 작업 공간을 확인한 뒤 아티팩트를 읽습니다.</p>`
+      : html`<${ArtifactsObservation} key=${owner.mount} authRevision=${authRevision} isCurrent=${current}
+          onMutation=${(outcome: ArtifactCheckOutcome) => setReceipts(previous => [...previous, { owner, outcome }])} />`}
+  </div>`
+}
+
+function ArtifactsObservation({ authRevision, isCurrent, onMutation }: {
+  authRevision: number; isCurrent: () => boolean; onMutation: (outcome: ArtifactCheckOutcome) => void
+}) {
+  const { artifact: selectedId, revision } = route.value.params
   const [refresh, setRefresh] = useState(0)
   const [query, setQuery] = useState('')
   const [format, setFormat] = useState<'all' | 'markdown' | 'html'>('all')
@@ -34,16 +65,20 @@ export function ArtifactsSurface() {
   const [catalog, setCatalog] = useState<Remote<ArtifactList> | null>(null)
   const [document, setDocument] = useState<Remote<ArtifactDocument> | null>(null)
   const [checks, setChecks] = useState<Remote<ArtifactCheckList> | null>(null)
-  const catalogKey = String(authRevision)
-  const documentKey = JSON.stringify([authRevision, selectedId, revision])
+  const catalogKey = useMemo(() => ({}), [])
+  const selections = useRef(0)
+  const documentKey = useMemo(() => ({ visit: ++selections.current }), [selectedId, revision])
+  const active = useRef(true)
+  const current = () => active.current && isCurrent()
+  useEffect(() => () => { active.current = false }, [])
 
   useEffect(() => setupVisibleAutoRefresh(() => setRefresh(n => n + 1), DEFAULT_PANEL_REFRESH_MS), [])
   useEffect(() => {
     const controller = new AbortController()
     void fetchPublishedArtifacts(controller.signal).then(data => {
-      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) setCatalog({ key: catalogKey, kind: 'loaded', data, receivedAt: Date.now() })
+      if (!controller.signal.aborted && current()) setCatalog({ key: catalogKey, kind: 'loaded', data, receivedAt: Date.now() })
     }, error => {
-      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) setCatalog({ key: catalogKey, kind: 'error', message: errorMessage(error) })
+      if (!controller.signal.aborted && current()) setCatalog({ key: catalogKey, kind: 'error', message: errorMessage(error) })
     })
     return () => controller.abort()
   }, [authRevision, catalogKey, refresh])
@@ -51,9 +86,9 @@ export function ArtifactsSurface() {
     const controller = new AbortController()
     setChecks(null)
     void fetchArtifactChecks(controller.signal).then(data => {
-      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) setChecks({ key: catalogKey, kind: 'loaded', data, receivedAt: Date.now() })
+      if (!controller.signal.aborted && current()) setChecks({ key: catalogKey, kind: 'loaded', data, receivedAt: Date.now() })
     }, error => {
-      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) setChecks({ key: catalogKey, kind: 'error', message: errorMessage(error) })
+      if (!controller.signal.aborted && current()) setChecks({ key: catalogKey, kind: 'error', message: errorMessage(error) })
     })
     return () => controller.abort()
   }, [authRevision, catalogKey, refresh])
@@ -61,9 +96,9 @@ export function ArtifactsSurface() {
     if (!selectedId) return
     const controller = new AbortController()
     void fetchPublishedArtifact(selectedId, revision, controller.signal).then(data => {
-      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) setDocument({ key: documentKey, kind: 'loaded', data, receivedAt: Date.now() })
+      if (!controller.signal.aborted && current()) setDocument({ key: documentKey, kind: 'loaded', data, receivedAt: Date.now() })
     }, error => {
-      if (!controller.signal.aborted && currentStoredTokenRevision() === authRevision) setDocument({ key: documentKey, kind: 'error', message: errorMessage(error) })
+      if (!controller.signal.aborted && current()) setDocument({ key: documentKey, kind: 'error', message: errorMessage(error) })
     })
     return () => controller.abort()
   }, [authRevision, selectedId, revision, documentKey, refresh])
@@ -75,7 +110,7 @@ export function ArtifactsSurface() {
     checkInventory?.kind === 'loaded' ? resolveArtifactCheck(artifact, checkInventory.data)
       : { kind: 'unknown', message: checkInventory?.kind === 'error' ? checkInventory.message : '확인 상태 조회 중' }
   const checkChanged = () => {
-    if (currentStoredTokenRevision() !== authRevision) return
+    if (!current()) return
     setChecks(null)
     setRefresh(n => n + 1)
   }
@@ -147,7 +182,7 @@ export function ArtifactsSurface() {
                   </button>
                   <div class="border-t border-[var(--color-border-default)] px-4 py-2">
                     <${ArtifactCheckControl} key=${JSON.stringify([authRevision,a.id,a.revision,a.body._blob.sha256])}
-                      artifact=${a} state=${checkState(a)} authRevision=${authRevision} onChanged=${checkChanged} />
+                      artifact=${a} state=${checkState(a)} authRevision=${authRevision} isCurrent=${current} onMutation=${onMutation} onChanged=${checkChanged} />
                   </div>
                   ${a.format === 'html' ? html`
                     <div class="border-t border-[var(--color-border-default)] px-4 py-2 text-sm">
@@ -156,7 +191,7 @@ export function ArtifactsSurface() {
                         ${previewId === a.id ? '미리보기 접기' : 'HTML 미리보기'}
                       </button>
                     </div>
-                    ${previewId === a.id ? html`<${ArtifactPreview} key=${JSON.stringify([authRevision, a.id, a.revision])} artifact=${a} authRevision=${authRevision} />` : null}
+                    ${previewId === a.id ? html`<${ArtifactPreview} key=${JSON.stringify([authRevision, a.id, a.revision, a.body._blob.sha256])} artifact=${a} authRevision=${authRevision} isCurrent=${current} />` : null}
                   ` : null}
                   </article>
                 </li>`)}
@@ -165,8 +200,8 @@ export function ArtifactsSurface() {
         ${!selectedId ? html`<div class="rounded-lg border border-dashed border-[var(--color-border-default)] p-8 text-sm text-[var(--color-fg-secondary)]">목록에서 문서를 선택하면 본문이 열립니다.</div>`
           : doc === null ? html`<p role="status">문서를 불러오고 있습니다.</p>`
           : doc.kind === 'error' ? html`<p role="alert">${doc.message}</p>`
-          : html`<${ArtifactReader} key=${selectedId} doc=${doc.data} fixedRevision=${revision !== undefined}
-              checkState=${checkState(doc.data.artifact)} authRevision=${authRevision} onCheckChanged=${checkChanged}
+          : html`<${ArtifactReader} key=${documentKey.visit} doc=${doc.data} fixedRevision=${revision !== undefined}
+              checkState=${checkState(doc.data.artifact)} authRevision=${authRevision} isCurrent=${current} onMutation=${onMutation} onCheckChanged=${checkChanged}
               onClose=${() => navigate('workspace', { section: 'artifacts' })} />`}
       </div>
     </section>

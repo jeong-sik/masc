@@ -359,8 +359,45 @@ let test_public_locate_retains_browser () = with_upload_context (fun config _met
           "instruction",`String "Click the menu";"tabId",`Int 3]));
       check int "unsupported act cannot become an observe or switch browsers" 1 (List.length !sent))))
 
+(* An extension built before [within] answers a scoped read with every control.
+   The tool refuses an answer that does not carry the page's own match count. *)
+let test_public_scoped_elements () = with_upload_context (fun config _meta ->
+  fixture (fun env _driver _calls _matches _extra ->
+    let sent=ref [] and answer=ref `Null in
+    Browser_addon_fixture.with_worker ~env ~config ~respond:(fun ~route verb ->
+      sent:=(route,verb)::!sent;
+      Lane.Answered (`Assoc ["ok",`Bool true;"data",!answer])) (fun _ ->
+      let invoke fields=Masc.Browser_addon_tools.handle ~config
+        ~access:Masc.Lane_addon_sources.Operator_configuration
+        ~principal:(Lane_addon_call_context.Host_actor "browser-reader") ~reserved:[]
+        ~keeper_name:None ~tool:Masc.Browser_capabilities.Read ~tool_name:"masc_browser_read"
+        ~start_time:(Tool_timing.start ()) (`Assoc fields) in
+      let read=["lane",`String "automation";"tabId",`Int 3;"mode",`String "elements";"within",`String "nav"] in
+      answer:=`Assoc ["tabId",`Int 3;"total",`Int 8;"truncated",`Bool false;
+        "elements",`List [`Assoc ["selector",`String "#outside"]]];
+      let refused=invoke read in
+      check bool "an answer without withinMatches is not a scoped answer" true
+        (Tool_result.is_failed refused);
+      let carried=Yojson.Safe.to_string (Tool_result.data refused) in
+      let rec mentions index=index+8<=String.length carried
+        && (String.sub carried index 8="#outside" || mentions (index+1)) in
+      check bool "the refusal does not pass on the unscoped controls" false (mentions 0);
+      check bool "the scope reaches the browser" true
+        (List.hd !sent=(Lane.Automation_route,Lane.Page_elements {tab_id=Some 3;within=Some "nav"}));
+      answer:=`Assoc ["tabId",`Int 3;"within",`String "nav";"withinMatches",`Int 1;
+        "total",`Int 2;"truncated",`Bool false;"elements",`List []];
+      check bool "a scoped answer is returned" true (Tool_result.is_success (invoke read));
+      check bool "within is refused outside elements" true
+        (Tool_result.is_failed (invoke ["lane",`String "automation";"tabId",`Int 3;
+          "mode",`String "text";"within",`String "nav"]));
+      check bool "an empty within is refused" true
+        (Tool_result.is_failed (invoke ["lane",`String "automation";"tabId",`Int 3;
+          "mode",`String "elements";"within",`String ""]));
+      check int "refused arguments send no browser command" 2 (List.length !sent))))
+
 let () = run "Firefox controls" ["behavior",[
   test_case "public locate keeps its owned browser through native routing" `Quick test_public_locate_retains_browser;
+  test_case "a scoped elements read needs the page's own match count" `Quick test_public_scoped_elements;
   test_case "navigation answer satisfies its output contract" `Quick test_goto_answer_satisfies_output_contract;
   test_case "production interact preserves failure phase" `Quick test_interact_production_failure_phase;
   test_case "download result reaches provider manifest" `Quick test_download_result_reaches_provider;

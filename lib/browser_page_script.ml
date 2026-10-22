@@ -24,7 +24,23 @@ const ariaRoles = new Set('alert alertdialog application article banner blockquo
 const effectiveRole = element => (element.getAttribute('role') || '').split(/\s+/)
   .find(role => ariaRoles.has(role)) || null;
 const actionRoles = new Set('button link checkbox radio switch menuitem menuitemcheckbox menuitemradio tab option combobox'.split(' '));
-const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'));
+// [within] is a CSS selector read by the page's own engine: only controls that
+// match it, or sit inside an element that matches it, are observed. An invalid
+// selector is refused rather than read as the whole page.
+const within = (arguments[0] || {}).within;
+let scope = null;
+if (within !== undefined) {
+  try { scope = new Set(document.querySelectorAll(within)); }
+  catch { throw new Error('invalid_css_selector'); }
+}
+// Membership in the matched set, not closest(): closest() reads :scope as
+// the control itself, while the count above reads it as the root element.
+const inScope = el => {
+  for (let node = el; node; node = node.parentElement) if (scope.has(node)) return true;
+  return false;
+};
+const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,summary,label,[contenteditable=true],[onclick],[role~=button],[role~=link],[role~=checkbox],[role~=radio],[role~=switch],[role~=menuitem],[role~=menuitemcheckbox],[role~=menuitemradio],[role~=tab],[role~=option],[role~=combobox]'))
+  .filter(el => scope === null || inScope(el));
 // A single synchronous observation shares styles and ancestor visibility.
 // Large feeds have many controls under the same ancestors; walking and
 // restyling that chain for every control repeats the same work.
@@ -132,9 +148,42 @@ function observe(el) {
   }
   return result;
 }
-return {url:location.href,title:document.title,total:visible.length,truncated:visible.length>200,
+return {url:location.href,title:document.title,
+  ...(scope === null ? {} : {within,withinMatches:scope.size}),
+  total:visible.length,truncated:visible.length>200,
   elements:visible.slice(0,200).map(observe)};
 |}
+
+(* The argument object [elements] reads. An empty selector would match
+   nothing in the page and is refused here; any other text goes to the
+   page's CSS engine, which decides whether it is a selector. *)
+let within_of_json = function
+  | None -> Ok None
+  | Some (`String "") -> Error "within must be a non-empty CSS selector"
+  | Some (`String selector) -> Ok (Some selector)
+  | Some _ -> Error "within must be a CSS selector string"
+;;
+
+let elements_args within =
+  `Assoc (Option.to_list (Option.map (fun selector -> "within", `String selector) within))
+;;
+
+(* A browser-lane extension built before [within] ignores it and answers with
+   every control, which would read as a scoped answer. The page's own
+   [withinMatches] count is the proof that the scope was applied. *)
+let scoped_elements_refused =
+  "the connected browser answered without applying within; its browser-lane extension \
+   predates within, so update it or read without within"
+
+let check_scoped_elements ~within reply =
+  match within, reply with
+  | None, _ -> Ok reply
+  | Some _, `Assoc fields ->
+    (match List.assoc_opt "withinMatches" fields with
+     | Some (`Int _) -> Ok reply
+     | Some _ | None -> Error scoped_elements_refused)
+  | Some _, _ -> Error scoped_elements_refused
+;;
 
 let frames = {|
 function selector(el) {

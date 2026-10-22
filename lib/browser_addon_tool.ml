@@ -75,7 +75,7 @@ let parse json =
   Ok (preference,verb,required_actions,upload_id)
 let command arguments = parse arguments |> Result.map (fun (_,verb,_,_) -> verb)
 let bound = function
-  | B.Page_read {tab_id;_}|Page_elements {tab_id} -> Option.is_some tab_id
+  | B.Page_read {tab_id;_}|Page_elements {tab_id;_} -> Option.is_some tab_id
   | Page_act (B.Action.Open_tab _) | Tabs_list | Session_open _ | Session_status -> false
   | Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_interact _|Session_close
   | Page_goto _|Page_act (B.Action.On_tab _)|Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> true
@@ -129,6 +129,19 @@ let invoke ~owner ~principal arguments =
       | `Assoc fields -> `Assoc (fields @ ["browserSelection",Browser_selection.to_json selected;
           "browserConnection",`Assoc (Browser_binding.connection_fields binding)])
       | value -> value in
+    (* A scoped elements answer counts only with the page's own match count:
+       an extension built before [within] answers with every control. *)
+    let unscoped=match reply with
+      | W.Issue_result (Ok (B.Answered (`Assoc fields))) when List.assoc_opt "ok" fields=Some (`Bool true) ->
+          Result.fold ~ok:(fun _ -> None) ~error:Option.some
+            (Browser_page_script.check_scoped_elements ~within:(B.elements_within verb)
+               (Option.value (List.assoc_opt "data" fields) ~default:`Null))
+      | Issue_result (Ok (B.Answered _|Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
+      | Issue_result (Error _)|Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _
+      | Poll_result _|Receipt -> None in
+    match unscoped with
+    | Some detail -> refused ~start_time detail
+    | None ->
     let failed,disposition=match reply with
       | W.Issue_result (Ok (B.Answered (`Assoc fields))) ->
           (match List.assoc_opt "ok" fields with

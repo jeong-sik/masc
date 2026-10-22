@@ -344,7 +344,7 @@ let keeper_id_variable (inp : input) =
   "keeper_id", Keeper_identity.Keeper_id.to_string inp.keeper_id
 ;;
 
-let facts_budget_variable (inp : input) =
+let facts_budget_variable ~facts_max_bytes (inp : input) =
   let current_ordinary =
     Option.fold
       ~none:0
@@ -357,16 +357,17 @@ let facts_budget_variable (inp : input) =
   ( "facts_budget"
   , Printf.sprintf
       "max=%d bytes; current ordinary=%d bytes"
-      (Env_config.KeeperMemoryOs.facts_max_bytes ())
+      facts_max_bytes
       current_ordinary )
 ;;
 
-let prompt_variables (inp : input) : (string * string) list =
+let prompt_variables_with_policy ~facts_max_bytes ~category_cap ~facts_per_category_cap
+    (inp : input) : (string * string) list =
   [ keeper_id_variable inp
-  ; facts_budget_variable inp
+  ; facts_budget_variable ~facts_max_bytes inp
   ; "memory_limits", Yojson.Safe.to_string
       (Keeper_memory_limits.to_json
-         (Keeper_memory_limits.current
+         (Keeper_memory_limits.measure ~category_cap ~facts_per_category_cap
             (Option.fold ~none:[]
                ~some:(fun (current : current_selection) -> current.facts) inp.current)))
   ; ( "keeper_instructions"
@@ -385,6 +386,13 @@ let prompt_variables (inp : input) : (string * string) list =
     , Keeper_counterpart_observation.render_for_prompt
         inp.counterpart_observations )
   ]
+;;
+
+let prompt_variables input =
+  prompt_variables_with_policy
+    ~facts_max_bytes:(Env_config.KeeperMemoryOs.facts_max_bytes ())
+    ~category_cap:(Env_config.KeeperMemoryOs.category_cap ())
+    ~facts_per_category_cap:(Env_config.KeeperMemoryOs.facts_per_category_cap ()) input
 ;;
 
 let continuity_prompt_variables (inp : input) ~continuity =

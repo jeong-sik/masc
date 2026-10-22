@@ -217,6 +217,19 @@ val read_original_execution : store:Lane_addon_store.t -> declaration_id:string 
     includes the original Store root; moving the workspace directory makes
     that proof a conflicting identity and returns [Error]. Offload the whole
     blocking scope to a system thread. *)
+type latest_original_execution =
+  | No_completed_latest
+  | Completed_latest of { attempt_ordinal : int; execution : execution_result }
+
+val read_latest_original_execution : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> request -> (latest_original_execution, string) result
+(** Strictly read the actual last original attempt and its matching host proof.
+    A later unresolved or never-dispatched attempt never borrows an earlier
+    proof. Validate the complete original history and all sparse proofs before
+    returning the actual ordinal; no caller guesses it from a worker result.
+    Missing evidence remains unproven. This read performs no effect and grants
+    no retry, partition, worker delivery, Memory or ACK authority. Offload the
+    complete blocking scope in Eio contexts. *)
 val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
   schema:Yojson.Safe.t -> request -> (retained_observation, string) result
 (** Read only the original host Exact record under the caller's workspace

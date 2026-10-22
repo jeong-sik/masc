@@ -2008,14 +2008,13 @@ type tool_request_destination = {
   installation_id : string; package_id : string; tool : string;
   source_revision : string; configuration_revision : string; max_reply_bytes : int;
 }
-let with_tool_request_destination ~config ~access ~reserved ~(export : tool_export) ~publish =
-  with_tool_call_owner (fun () ->
+let with_tool_request_destination_on_owner ~config ~access ~reserved ~(export : tool_export) ~prepare ~use =
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
     let* m = match Hashtbl.find_opt managers root with
       | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
     Eio.Mutex.use_ro m.configuration_mutex (fun () ->
     Eio.Mutex.use_ro m.action_mutex (fun () ->
-    Eio.Cancel.protect (fun () ->
+    let* prepared=Eio.Cancel.protect (fun () ->
       (* Acquiring the serializer can yield. Inspect authority only afterwards. *)
       let reading = live_reading m access in
       let snapshot = Lane_addon_tool_export.isolate ~reserved (reading_exports reading) in
@@ -2048,7 +2047,15 @@ let with_tool_request_destination ~config ~access ~reserved ~(export : tool_expo
         package_id=e.package.id;tool=export.tool.name;
         source_revision=declaration.source_revision;configuration_revision=owner.revision;
         max_reply_bytes=Lane_addon_types.max_reply_bytes e.package} in
-      publish destination))))
+      prepare destination) in
+    (* Local publication is protected; the worker RPC is cancellable while
+       these same serializers still preserve the admitted configuration. *)
+    Eio.Fiber.check ();
+    use prepared))
+let with_tool_request_destination ~config ~access ~reserved ~export ~publish =
+  with_tool_call_owner (fun () ->
+    with_tool_request_destination_on_owner ~config ~access ~reserved ~export
+      ~prepare:publish ~use:(fun value -> Ok value))
 let capture_tool_request_owner ~config ~access ~reserved ~export ~scope ~request_id ~capture =
   with_tool_request_destination ~config ~access ~reserved ~export ~publish:(fun destination ->
     let* value,request,summary = capture destination |> Result.map_error (fun detail ->
@@ -2063,8 +2070,7 @@ let capture_tool_request_owner ~config ~access ~reserved ~export ~scope ~request
           Host_refusal (Lane_addon_call_context.Rejected (Lane_addon_tool_request_owner.error_to_string error))) in
     Ok value)
 
-let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
-  with_tool_call_owner (fun () ->
+let call_exported_tool_on_owner ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
     Fun.protect ~finally:on_complete (fun () ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
     let* m = match Hashtbl.find_opt managers root with
@@ -2120,7 +2126,35 @@ let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~princi
         (match persist m e with Ok () -> () | Error detail ->
           Log.Misc.error "Cancelled Add-on tool state persistence: %s" detail);
         stop_entry ~sw ~backend:worker_backend m e);
-      raise exn)))
+      raise exn))
+
+let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~principal
+    ~config ~access ~reserved ~export ~arguments =
+  with_tool_call_owner (fun () -> call_exported_tool_on_owner ~on_complete ~on_result
+    ~authorize ~principal ~config ~access ~reserved ~export ~arguments)
+
+let call_captured_tool_request ~config ~access ~reserved ~export ~installation_id
+    ~package_id ~tool ~configuration_revision ~(original : Lane_addon_tool_request_owner.retained)
+    ~arguments =
+  with_tool_call_owner (fun () ->
+    with_tool_request_destination_on_owner ~config ~access ~reserved ~export
+      ~prepare:(fun destination ->
+        let* () = if destination.installation_id=installation_id
+            && destination.package_id=package_id && destination.tool=tool
+            && destination.configuration_revision=configuration_revision
+            && original.installation_id=installation_id && original.package_id=package_id
+            && original.tool=tool
+          then Ok () else Error (Host_refusal (Lane_addon_call_context.Rejected
+            "Captured request no longer owns this configured tool destination")) in
+        let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+        let* ()=offload (fun () -> Lane_addon_tool_request_owner.retain ~store
+          ~scope:original.scope ~request_id:original.request_id ~installation_id ~package_id ~tool
+          ~request:original.request) |> Result.map_error (fun error ->
+            Unavailable (Lane_addon_tool_request_owner.error_to_string error)) in
+        Ok ())
+      ~use:(fun () -> call_exported_tool_on_owner ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ())
+          ~authorize:None ~principal:(Some Lane_addon_call_context.Operator)
+          ~config ~access ~reserved ~export ~arguments))
 
 let call_exported_tool_with_principal = call_exported_tool_with_authority ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:None
 

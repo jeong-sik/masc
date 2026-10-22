@@ -112,7 +112,7 @@ Browser Stagehand는 기존 Addon 모델 경로를 B01·D01/D06·F에서 재사�
 | --- | --- | --- | --- |
 | E01 | Candle Appraiser 판단 실행을 Addon으로 추출 | 실제 eb484 host에서 초기 attach 계약 오류 재현·#44911 worker 수리. 실제 Verifier Task/Goal→Off 원래 Owed 보존→On 실제 provider Grade/Relation/Weights→Paid 1건→다시 Off/On 후 3결과·원장 바이트 동일 실측. native eb484+worker b427 혼합 조건. native #44168 68/68 편입 확인. 승인·운영 설치와 나머지 오류 경계는 별도 | Grade/Relation/Weights와 typed 오류·trace 유지; 원장·중복 정산 방지는 host; Off 뒤 obligation 보존 및 재연결 후 정산까지 확인 |
 | E02 | Workspace Curator의 모델 실행·작업 수명 추출 | db31 선택79·native29 PASS. 같은 실제 workspace에서 Off 원래 Briefing 복구→On 새 입력→final Off0·6요청 ACK·두 UI [실측](../docs/evidence/2026-10-22-curator-Off-recovery/README.md). 전체 실패 경계·통합·운영 설치 별도 | fact intake·batch·briefing의 durable 상태와 commit 권한을 유지하며 중지·재개 확인 |
-| E03 | Librarian 실행의 Addon 경계 검토·추출 | #45044 공통 admission202·#45045 원래 batch35 PASS. absorption65cb 컴파일 FAIL 보존, 수리#45049 exact82f gate60+취소8 PASS. 원래 host 실행 proof 연결 중; worker 추출·전체 실행 미완료 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
+| E03 | Librarian 실행의 Addon 경계 검토·추출 | #45044 공통 admission202·#45045 원래 batch35 PASS. absorption65cb 컴파일 FAIL 보존, 수리#45049 exact82f gate60+취소8 PASS. host 실행 proof #45054 exact9a7047 선택7suite(249+7) PASS. 다음 original owner/worker·gate·Memory/ACK 연결 중; 전체 추출 미완료 | checkpoint·absorption·memory lineage·pending 작업을 보존하고 Keeper 기억 연속성 검증 |
 | E04 | HITL Auto Judge 실행의 Addon 경계 검토·추출 | 조사·설계, Required | 승인 요청·판정 권한을 host에 유지하고 필수 판단 기능의 가용성 계약 보존 |
 | E05 | Board Attention 실행의 Addon 경계 검토·추출 | 조사·설계, Required | durable candidate→판단→전달/소비·quarantine·복구 의미와 필수 서비스 계약 보존 |
 | E06 | Verifier 실행의 Addon 경계 검토·추출 | 조사·설계 | 증거 검증과 Goal/Task 최종 전이를 분리하고 위조·이전 실행 증거 오적용 없이 재개 |
@@ -751,3 +751,9 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - 후속 수리 #45049 exact `82f14e98249fb1992f57f627deb984a1dc543a4e`는 실제 [선택 실행39732659176](https://github.com/jeong-sik/masc/actions/runs/39732659176)의 gate60·Runtime cancellation8, 총68건 PASS와 현재 head의 MASC 승인5609990639를 확인했다. 원본 로그 SHA-256 `478d24afea9e97c9b7fece8ee9108328f6ad0e01bc70dd10b95715ed7564b8b6`. 이 결과는 다음 실행 proof 층·worker 추출·전체 회귀·운영 설치의 검증이 아니다.
 
 - #45054 exact `5d2193e51e8e6b19183afc6b38508b903514f8a7`의 [선택 CI39735118814](https://github.com/jeong-sik/masc/actions/runs/39735118814)는 테스트의 private `Exact.request` 레코드 갱신 때문에 컴파일에서 실패했다. 선택7suite는 실행되지 않았다. rebound request 시나리오는 공개 `request_of_json`을 쓰는 기존 fixture 생성자로 구성하도록 수정한다. 소스 승인과 부모68건은 이 층의 타입·동작 성공이 아니다. 같은7suite의 새 선택 결과는 별도로 확인한다.
+
+## E03 공통 실행 proof 검증과 실제 owner 후속 · 2026-10-22
+
+- [공개 선택 실행 영수증](../docs/evidence/2026-10-22-addon-original-execution/README.md): exact9a7047의 CI39736226345에서 7suite, Alcotest249건과 별도 admission-mode7assertion PASS를 실제 원본 로그로 확인했다. 직전5d2193의 compile FAIL은 유지한다. #45054는 외부에서 Candle branch로 병합됐으며 main 통합·운영 설치는 별도다.
+- 다음 단위는 기존 실제 `Keeper_librarian_queue_refresh.run_explicit_admission → Keeper_memory_admission_worker.run`의 전체 명시 후보 경로를 원래 capture/discovery·worker resume·absorption transcript·locked Memory commit/receipt ACK·두 disjoint partition 복구로 연결한다. 현재 capture/dispatch/captured-gate/parts 포트를 작성 중이며 actual caller 전환과 compiled 검증은 아직 없다. 원래54항목/E03 완료로 세지 않는다.
+- 각 sibling은 자기 차례에 fresh Memory를 읽어 실행 capture를 보존한다. 새로운 후보/Memory가 이전 semantic deferred 입력의 재판단 근거가 되는 경우를 원래 lineage로 표현해야 하며, pending candidate를 영구 owner lock으로 막거나 unchanged wake마다 새 root를 만드는 구현은 허용하지 않는다.

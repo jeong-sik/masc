@@ -325,6 +325,71 @@ let resolve_librarian_prompt pass input =
            variables) )
 ;;
 
+type admission_policy = {
+  facts_max_bytes : int;
+  category_cap : int;
+  facts_per_category_cap : int;
+}
+type admission_preparation = {
+  policy : admission_policy;
+  rule_prompt : Prompt_registry.prompt_resolution;
+  prompt : Prompt_registry.prompt_resolution;
+  variables : (string * string) list;
+  rendered_prompt : string;
+  output_schema : Yojson.Safe.t;
+}
+let admission_schema () = Keeper_memory_admission_judgment.output_schema
+  ~memory_schema:Keeper_structured_output_schema.librarian_current_output_schema
+let admission_suffix ~batch ~retirement = "\n\n" ^
+  Keeper_memory_admission_judgment.prompt_suffix ~batch ^
+  Keeper_memory_admission_judgment.retirement_prompt_suffix ~batch retirement
+let validate_resolution (resolution : Prompt_registry.prompt_resolution) =
+  let source,effective=match resolution.override_value,resolution.file_value with
+    | Some value,_ -> Prompt_registry.Override,value
+    | None,Some value -> Prompt_registry.File,value
+    | None,None -> Prompt_registry.Missing,"" in
+  if source=resolution.source && effective=resolution.effective
+    && resolution.file_exists=Option.is_some resolution.file_value
+    && resolution.has_override=Option.is_some resolution.override_value
+  then Ok () else Error "Original Librarian prompt resolution is inconsistent"
+let validate_admission_preparation ~batch ~retirement ~input preparation =
+  let open Result.Syntax in
+  let policy=preparation.policy in
+  let* ()=if policy.facts_max_bytes>0 && policy.category_cap>0 && policy.facts_per_category_cap>0
+    then Ok () else Error "Original Librarian advisory limits are invalid" in
+  let* ()=validate_resolution preparation.rule_prompt in
+  let* ()=validate_resolution preparation.prompt in
+  let* rule=Prompt_registry.render_resolved_prompt_template
+    Prompt_names.librarian_working_contexts_rule preparation.rule_prompt [] in
+  let variables=(working_contexts_rule_variable,String.trim rule)
+    ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
+      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap input in
+  let* ()=if preparation.variables=variables then Ok ()
+    else Error "Original Librarian prompt variables differ from captured input" in
+  let* rendered=Prompt_registry.render_resolved_prompt_template
+    Prompt_names.librarian preparation.prompt preparation.variables in
+  let* actual_schema=Lane_addon_action.canonical preparation.output_schema in
+  let* expected_schema=Lane_addon_action.canonical (admission_schema ()) in
+  if String.trim rule<>"" && preparation.rendered_prompt=rendered ^ admission_suffix ~batch ~retirement
+    && Yojson.Safe.equal actual_schema expected_schema
+  then Ok () else Error "Original Librarian prompt/schema differs from its captured template and input"
+let prepare_admission ~batch ~retirement input =
+  let open Result.Syntax in
+  let policy={facts_max_bytes=Env_config.KeeperMemoryOs.facts_max_bytes ();
+    category_cap=Env_config.KeeperMemoryOs.category_cap ();
+    facts_per_category_cap=Env_config.KeeperMemoryOs.facts_per_category_cap ()} in
+  let* rule_prompt,rule=Prompt_registry.resolve_and_render_prompt_template
+    Prompt_names.librarian_working_contexts_rule [] in
+  let* ()=if String.trim rule<>"" then Ok () else Error "Librarian working-context rule rendered empty" in
+  let variables=(working_contexts_rule_variable,String.trim rule)
+    ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
+      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap input in
+  let* prompt,rendered=Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables in
+  let preparation={policy;rule_prompt;prompt;variables;
+    rendered_prompt=rendered ^ admission_suffix ~batch ~retirement;output_schema=admission_schema ()} in
+  let* ()=validate_admission_preparation ~batch ~retirement ~input preparation in
+  Ok preparation
+
 let prompt_and_input_for_librarian (inp : Keeper_librarian.input) =
   let open Result.Syntax in
   (* One asset, one message: the librarian's role statement lives at the top
@@ -669,9 +734,9 @@ type accepted =
    has no continuity obligation and does not read the working state, so a
    slip in it cannot refuse the Memory decision. The accepted answer carries
    the pair, so publication has no case for a continuity pass without one. *)
-let validate_selection ?continuity selected_input output =
+let validate_selection ?now ?continuity selected_input output =
   let open Result.Syntax in
-  let* selection = Keeper_librarian.selection_of_json_result selected_input output in
+  let* selection = Keeper_librarian.selection_of_json_result ?now selected_input output in
   match continuity with
   | None -> Ok { selection; continuity_answer = Memory_only; required_memory_ids = []; explicit_candidate_ids = []; admission_support = []; admission_recall_bindings = [] }
   | Some prepared ->
@@ -715,12 +780,15 @@ let validate_answer pass selected_input output =
     |> Result.map (fun pockets -> Working_context_answer pockets)
 ;;
 
-let validate_admission_answer batch selected_input output =
+type admission_proposal = Deferred | Accepted of accepted
+let validate_admission_proposal ~now ~batch ~input:selected_input output =
   let open Result.Syntax in
+  let* ()=if Float.is_finite now && now>=0. then Ok ()
+    else Error (Keeper_librarian.Admission_invalid "Original admission parsing time is invalid") in
   let module Judgment = Keeper_memory_admission_judgment in
   let invalid detail = Keeper_librarian.Admission_invalid detail in
   let* memory, judgments, change_support = Judgment.unwrap ~batch output |> Result.map_error invalid in
-  let* accepted = validate_selection selected_input memory in
+  let* accepted = validate_selection ~now selected_input memory in
   let* () = Judgment.verify ~facts:accepted.selection.facts judgments |> Result.map_error invalid in
   let selection = accepted.selection in
   let has_changes = selection.new_claims <> [] || selection.dropped <> []
@@ -728,7 +796,7 @@ let validate_admission_answer batch selected_input output =
   let* () = Judgment.verify_support ~new_claims:selection.new_claims ~has_changes
     ~change_support judgments |> Result.map_error invalid in
   let settled = Judgment.settled_requests judgments in
-  if settled = [] then Ok Admission_deferred_answer
+  if settled = [] then Ok Deferred
   else
     let claims = List.filter_map (fun (judgment : Judgment.judgment) ->
       match judgment.outcome with
@@ -758,8 +826,13 @@ let validate_admission_answer batch selected_input output =
                 target_memory_id=Keeper_memory_os_types.memory_id target} :: bindings)
          | _ -> Error (invalid "admitted lookup binding lacks its candidate or selected target")))
       (Ok []) judgments in
-    Ok (Memory_answer ({accepted with required_memory_ids; explicit_candidate_ids;
-      admission_support = change_support; admission_recall_bindings = List.rev admission_recall_bindings}, Commit_memory))
+    Ok (Accepted {accepted with required_memory_ids; explicit_candidate_ids;
+      admission_support = change_support; admission_recall_bindings = List.rev admission_recall_bindings})
+;;
+let validate_admission_answer ~now batch input output =
+  validate_admission_proposal ~now ~batch ~input output |> Result.map (function
+    | Deferred -> Admission_deferred_answer
+    | Accepted accepted -> Memory_answer (accepted,Commit_memory))
 ;;
 
 let try_cli_slots
@@ -1329,34 +1402,30 @@ let run_pass
           | None, Context_only, None -> Working_context_pass
         in
         let prompt_input = input_for_pass pass inp in
-        let prompt_variables, prompt_material =
-          resolve_librarian_prompt pass prompt_input
-        in
-        let prompt_material = match admission with
-          | None -> prompt_material
-          | Some batch -> Result.bind prompt_material (fun (material : librarian_prompt_material) ->
-              let module Judgment = Keeper_memory_admission_judgment in
-              match Keeper_memory_os_current.read_retirement_context ~keepers_dir ~keeper_id
+        let prompt_variables, prompt_material = match admission with
+          | None -> resolve_librarian_prompt pass prompt_input
+          | Some batch ->
+            let prepared =
+              let open Result.Syntax in
+              let* retirement = match Keeper_memory_os_current.read_retirement_context ~keepers_dir ~keeper_id
                   ~expected_revision ~current_facts:(match prompt_input.current with
                     | None -> [] | Some current -> current.facts) with
-              | Retirement_source_changed ->
-                  Error "Memory changed before admission retirement evidence was read; retry pending input"
-              | Retirement_source_unavailable detail -> Error detail
-              | Retirement_archive archive ->
-                  let retirement_evidence = match archive with
-                    | Ok archive -> Judgment.Available archive
-                    | Error detail -> Judgment.Unavailable detail in
-                  Ok {material with rendered = material.rendered ^ "\n\n" ^
-                    Judgment.prompt_suffix ~batch ^
-                    Judgment.retirement_prompt_suffix ~batch retirement_evidence}) in
+                | Retirement_source_changed -> Error "Memory changed before admission retirement evidence was read; retry pending input"
+                | Retirement_source_unavailable detail -> Error detail
+                | Retirement_archive archive -> Ok (match archive with
+                    | Ok archive -> Keeper_memory_admission_judgment.Available archive
+                    | Error detail -> Unavailable detail) in
+              prepare_admission ~batch ~retirement prompt_input in
+            (match prepared with
+             | Ok prepared -> prepared.variables,Ok {resolution=prepared.prompt;rendered=prepared.rendered_prompt}
+             | Error detail -> [],Error detail) in
+        let parsing_now=Time_compat.now () in
         let validate = match admission with
           | None -> validate_answer pass prompt_input
-          | Some batch -> validate_admission_answer batch prompt_input in
+          | Some batch -> validate_admission_answer ~now:parsing_now batch prompt_input in
         let requirement = match admission with
           | None -> output_requirement_of_pass pass
-          | Some _ -> Exact_output.make_output_requirement
-              ~schema:(Keeper_memory_admission_judgment.output_schema
-                ~memory_schema:Keeper_structured_output_schema.librarian_current_output_schema)
+          | Some _ -> Exact_output.make_output_requirement ~schema:(admission_schema ())
               ~minimum_guarantee:Exact_output.Json_syntax in
         Exact_lane_run_registry.register_running
           registry

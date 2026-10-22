@@ -1,0 +1,47 @@
+{
+  "run": 39736226345,
+  "head": "9a7047a25ce0c0a99d4fb38d9cc9dd452fc81854",
+  "status": "completed",
+  "conclusion": "success",
+  "suites": [
+    {
+      "suite": "test/test_lane_addon_exact",
+      "alcotest_cases": 37
+    },
+    {
+      "suite": "test/test_lane_addon_exact_runner",
+      "alcotest_cases": 38
+    },
+    {
+      "suite": "test/test_keeper_librarian_capacity_callback",
+      "alcotest_cases": 25
+    },
+    {
+      "suite": "test/test_keeper_memory_admission_queue",
+      "alcotest_cases": 35
+    },
+    {
+      "suite": "test/test_lane_addon_host_cycle",
+      "alcotest_cases": 51
+    },
+    {
+      "suite": "test/test_workspace_curator_addon_commit",
+      "alcotest_cases": 63
+    }
+  ],
+  "alcotest_total": 249,
+  "additional_suite": {
+    "suite": "test/test_keeper_librarian_admission_mode",
+    "assertions": 7,
+    "status": "passed"
+  },
+  "selected_suite_total": 7,
+  "log": "ci-run-tests.txt",
+  "sha256": "2fcba07a1ecc43bc81eb6fec62d3ce3d18d5fc809255da404ab919e77369714a",
+  "limits": [
+    "selected source only",
+    "not full regression",
+    "not installed runtime or UI",
+    "not full Librarian extraction"
+  ]
+}

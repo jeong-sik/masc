@@ -321,6 +321,7 @@ type live_capability =
   | Tab_navigation
   | Tab_closing
   | Tab_creation
+  | Dialog_answer
 [@@deriving enumerate]
 
 let live_capability_to_wire = function
@@ -346,6 +347,7 @@ let live_capability_to_wire = function
   | Tab_navigation -> "tab_navigation"
   | Tab_closing -> "tab_closing"
   | Tab_creation -> "tab_creation"
+  | Dialog_answer -> "dialog_answer"
 ;;
 
 let live_capability_of_wire raw =
@@ -381,13 +383,14 @@ let live_capability = function
   | Page_act (Action.On_tab {interaction = (Action.Back | Action.Forward | Action.Reload); _}) -> Some Tab_history
   | Page_act (Action.On_tab {interaction = Action.Close_tab; _}) -> Some Tab_closing
   | Page_goto _ -> Some Tab_navigation
+  | Page_act (Action.On_tab {interaction = (Action.Accept_dialog _ | Action.Dismiss_dialog); _}) -> Some Dialog_answer
   | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ -> None
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
   | Session_open _ | Session_close | Session_status
   | Page_act (Action.On_tab { interaction =
       ( Action.Click _ | Action.Fill _ | Action.Press _ | Action.Select _ | Action.Scroll _
-      | Action.Upload _ | Action.Accept_dialog _ | Action.Dismiss_dialog ); _ }) -> None
+      | Action.Upload _ ); _ }) -> None
   | Page_instruct _ | Page_locate _ | Page_extract _ -> None
 ;;
 
@@ -506,10 +509,10 @@ let live_transport_serves transport capability =
   | Web_extension, Browser_zoom -> true
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
-                    | Tab_closing) -> false
+                    | Tab_closing | Dialog_answer) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
-                    | Tab_closing) -> true
+                    | Tab_closing | Dialog_answer) -> true
   | Webdriver_bidi, Browser_zoom -> false
 ;;
 

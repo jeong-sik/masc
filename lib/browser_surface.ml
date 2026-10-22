@@ -1,6 +1,14 @@
 type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
 type request = { route : Browser_selection.preference; tab_id : int option }
-type tab = { id : int; title : string; url : string; active : bool; window_id : int option }
+type dialog_kind = Alert | Confirm | Prompt | Beforeunload
+type dialog = { kind : dialog_kind; message : string; default_value : string option }
+let dialog_kind_to_wire = function
+  | Alert -> "alert" | Confirm -> "confirm" | Prompt -> "prompt" | Beforeunload -> "beforeunload"
+let dialog_kind_of_wire = function
+  | "alert" -> Some Alert | "confirm" -> Some Confirm | "prompt" -> Some Prompt
+  | "beforeunload" -> Some Beforeunload | _ -> None
+type tab = { id : int; title : string; url : string; active : bool; window_id : int option;
+  dialog : dialog option }
 type selection = Requested of tab | Active of tab | None_active
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
@@ -79,7 +87,17 @@ let decode_tab json =
       | None -> Ok None
       | Some (`Int window_id) when window_id >= 0 -> Ok (Some window_id)
       | Some _ -> Error "malformed browser tab window" in
-    Ok {id;title;url;active;window_id}
+    let* dialog = match field "dialog" json with
+      | None -> Ok None
+      | Some dialog ->
+        (match field "type" dialog, field "message" dialog, field "defaultValue" dialog with
+         | Some (`String kind), Some (`String message), default_value ->
+           (match dialog_kind_of_wire kind, default_value with
+            | Some kind, None -> Ok (Some {kind;message;default_value=None})
+            | Some kind, Some (`String value) -> Ok (Some {kind;message;default_value=Some value})
+            | None, _ | Some _, Some _ -> Error "malformed browser tab dialog")
+         | _ -> Error "malformed browser tab dialog") in
+    Ok {id;title;url;active;window_id;dialog}
   | _ -> Error "malformed browser tab"
 let rec decode_tabs = function
   | [] -> Ok []
@@ -100,9 +118,16 @@ let decode_inventory = function
        else Error "malformed unavailable browser tab"
      | _ -> Error "malformed partial browser inventory")
   | _ -> Error "browser tabs must be a list or inventory"
+let dialog_json {kind;message;default_value} =
+  `Assoc (["type",`String (dialog_kind_to_wire kind);"message",`String message]
+    @ match default_value with Some value -> ["defaultValue",`String value] | None -> [])
 let tab_json tab = `Assoc (["id",`Int tab.id;"title",`String tab.title;
   "url",`String tab.url;"active",`Bool tab.active]
-  @ match tab.window_id with Some window_id -> ["windowId",`Int window_id] | None -> [])
+  @ (match tab.window_id with Some window_id -> ["windowId",`Int window_id] | None -> [])
+  @ match tab.dialog with
+    | None -> []
+    | Some {kind;message;default_value} ->
+      ["dialog",dialog_json {kind;message;default_value}])
 let source_name route = Browser_lane.Lane_name.to_wire (Browser_lane.route_lane_name route)
 let select ~tab_id tabs = match tab_id with
   | Some id -> (match List.find_opt (fun tab -> tab.id = id) tabs with

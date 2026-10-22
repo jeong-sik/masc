@@ -554,7 +554,7 @@ let test_interact_arguments_match_the_schema () =
 let test_capability_table_sharing_is_listed () =
   let module Cap = Masc.Browser_capabilities in
   let allowed =
-    [ [ "list_tabs"; "list_windows" ] (* BrowserTabs list_tabs rows carry windowId *)
+    [ [ "list_tabs"; "list_windows"; "read_dialog" ] (* BrowserTabs list_tabs rows carry windowId and dialog *)
     ; [ "middle_click"; "right_click" ] (* click_at with a button *)
     ; [ "key_chord"; "press_key" ] (* press_key with modifiers *)
     ; [ "html5_drop"; "pointer_drag" ] (* drag_to on Stagehand *)

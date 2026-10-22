@@ -125,6 +125,7 @@ build their rejection from it.
 | `tab_history` | `back`, `forward`, `reload`, only for a tab the same connection opened | no | yes |
 | `tab_navigation` | `BrowserGoto`, only for a tab the same connection opened | no | yes |
 | `tab_closing` | `close_tab`, only for a tab the same connection opened | no | yes |
+| `dialog_answer` | `accept_dialog`, `dismiss_dialog`, only for a tab the same connection opened; the dialog is read from the tab's `list_tabs` row (`dialog`: type, message, defaultValue) | no | yes |
 | `point_scroll` | `scroll_at` | yes | yes, a trusted wheel |
 | `trusted_hover` | `hover`, `hover_at` | no | yes |
 | `trusted_drag` | `drag_to`, `drag` | no | yes |

@@ -17,6 +17,8 @@ val unavailable_to_wire : unavailable -> string
 (** A code of lower-case letters, digits and underscores, at most 64
     characters: the form a native host accepts as a refusal reason. *)
 
+(** One operator sentence for the cause. The response carries it in [detail];
+    it is prose and never a code. *)
 val unavailable_message : unavailable -> string
 
 type error = Registration_refused of Browser_lane.registration_refusal

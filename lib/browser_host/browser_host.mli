@@ -149,6 +149,12 @@ val run_bidi
   -> stop:(unit -> string)
   -> (unit, string) result
 
+(** Whether this host keeps a lane's refusal reason (the [error] field of a
+    non-200 body) in its log: lower-case letters, digits and underscores, at
+    most 64 characters. Anything else is prose, and the host logs only the
+    status. A server that names its refusals must send a code this accepts. *)
+val is_refusal_code : string -> bool
+
 module For_testing : sig
   (** A transport step under its deadline: the step's outcome when it
       finished, even as the deadline passed; [None] only when it had not. *)

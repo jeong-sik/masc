@@ -166,6 +166,8 @@ let test_native_ingress_has_no_builtin_fallback () =
   let status,body=post router ~path:"/browser-lane/poll" ~headers in
   check int "builtin connection does not substitute for an absent Add-on" 503 status;
   check string "an absent Add-on is named by a code the host logs" "no_browser_addon" (refusal_code body);
+  check bool "a sentence for the operator rides beside the code" true
+    (Yojson.Safe.Util.(member "detail" body |> to_string) <> "");
   let root=Filename.concat lane "registrations" in
   let recorded=Masc.Browser_addon_registration.claim ~root ~client
     ~instance_id:"0b000000-0000-4000-8000-000000000001" in
@@ -180,11 +182,6 @@ let test_native_ingress_has_no_builtin_fallback () =
   check bool "identity conflict remains distinct from retirement" true
     (body=`Assoc ["ok",`Bool false;"error",`String "client_identity_changed"])
 
-(* The host keeps a refusal reason only when it is lower-case letters, digits
-   and underscores of at most this length (Browser_host.refusal_code_limit);
-   anything else is logged as a bare status. *)
-let host_refusal_code_limit = 64
-
 let test_unavailable_causes_have_host_readable_distinct_codes () =
   let module I = Masc.Browser_addon_ingress in
   let causes = [ I.No_addon; I.Ambiguous_addons; I.Observation_unavailable; I.Addon_unavailable;
@@ -194,9 +191,7 @@ let test_unavailable_causes_have_host_readable_distinct_codes () =
   check int "each cause has its own code" (List.length causes)
     (List.length (List.sort_uniq String.compare codes));
   List.iter (fun code ->
-    check bool ("the host keeps " ^ code) true
-      (code <> "" && String.length code <= host_refusal_code_limit
-       && String.for_all (function 'a' .. 'z' | '0' .. '9' | '_' -> true | _ -> false) code))
+    check bool ("the host keeps " ^ code) true (Browser_host.is_refusal_code code))
     codes;
   check bool "a payload is a diagnostic, not part of the code" true
     (I.unavailable_to_wire (I.Worker_refused "one") = I.unavailable_to_wire (I.Worker_refused "two"))

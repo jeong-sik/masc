@@ -368,7 +368,7 @@ type canonical_reply_payload =
   ; turn_ref : Ids.Turn_ref.t
   ; external_effect_target : Keeper_surface_post.delivery_target option
       (** Completed surface-post evidence. Required for [Terminal_effect_settled]
-          and optional for [Continuation_checkpoint], where completed delivery
+          and optional for [Continuation_checkpoint] and [Waiting_for_input], where completed delivery
           does not settle the unfinished operation. Rejected on other outcomes. *)
   ; visible_reply : string
   ; poll_body : string

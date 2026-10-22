@@ -98,16 +98,16 @@ let test_input_wait_survives_delivery_and_payload_projection () =
     TO.wire_key,`String (TO.to_label TO.Waiting_for_input);
     TO.turn_ref_wire_key,Ids.Turn_ref.to_yojson turn_ref;
     Masc.Keeper_surface_post.delivery_target_wire_key,`Assoc ["kind",`String "dashboard"]] in
-  let canonical=match Stream.canonical_reply_payload_of_body ~redact_text:Fun.id (Yojson.Safe.to_string payload) with
+  let canonical=match Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id (Yojson.Safe.to_string payload) with
     | Ok canonical -> canonical
     | Error error -> fail (Stream.canonical_reply_payload_error_to_string error) in
   check outcome "HTTP keeps explicit input-wait outcome" TO.Waiting_for_input canonical.turn_outcome;
   check bool "HTTP keeps earlier delivery evidence without making the wait terminal" true
     (Option.is_some canonical.external_effect_target);
   check bool "wordless waiting control is not an empty-reply failure" true
-    (Stream.direct_reply_terminal_error (Some payload) ""=None);
+    (Stream.For_testing.direct_reply_terminal_error (Some payload) ""=None);
   let expected=[Masc.Keeper_chat_blocks.Status {kind=Masc.Keeper_chat_blocks.Waiting_for_input}] in
-  let blocks=Stream.persisted_reply_blocks ~reply:request.question ~turn_outcome:TO.Waiting_for_input None in
+  let blocks=Stream.For_testing.persisted_reply_blocks ~reply:request.question ~turn_outcome:TO.Waiting_for_input None in
   check bool "persisted wait has a typed status block" true (blocks=Some expected);
   (match Ops.direct_reply_projection (Yojson.Safe.to_string payload) with
    | Ok (Connector_input_wait {question=Some observed}) ->

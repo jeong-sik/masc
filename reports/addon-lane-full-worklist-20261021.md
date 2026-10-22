@@ -554,3 +554,26 @@ Raw Floatlit 입력으로 바꿔 NaN/Infinity/-Infinity가 실제 finite decoder
 검사하며, production codec과 writer의 strict finite 거절은 유지한다. 이 수정의 새 실행
 결과는 아직 미확인이다. 원래54개 항목명·완료 기준과 실제 provider/UI/설치 미완료 경계는
 그대로 유지한다.
+
+## 2026-10-22 strict current registry observation prerequisite
+
+원래 관측 receipt의 조건부 전달 전에 Core의 current-disk 읽기 경계를 추가했다.
+실제 파일을 shared lock과 descriptor/path identity 검증 아래 전체 streaming으로 읽고,
+등록 없음·원래 Running·실제 Completed를 구분한다. 미초기화/volatile·불완전 startup·
+무관한 손상/고아 completion·partial tail·파일 교체는 거절하며 기존 Fusion lookup은 보존한다.
+전체 파일 복사와 prefix cache를 피하고 요청한 full payload와 등록 ID 집합만 보관한다.
+[설계 경계](../docs/design/registry-current-disk-observation.md)에 비용과 한계를 기록했다.
+새 11개 실제 파일/동시 실행 시나리오 소스와 parser 검사는 compiled 성공이 아니다.
+읽기 성공은 fsync·조건부 publication·Owner ACK를 의미하지 않으며 이 연결은 계속 남는다.
+
+production642의 [선택 실행39694880442](https://github.com/jeong-sik/masc/actions/runs/39694880442)는
+실제 public owner10/11, host-cycle51·commit58·worker-contract6 통과로 전체 FAIL이다.
+남은 timeout은 Off 전 Retained_terminal 대기이며 provider 응답 단계의 실제 진단을
+보존하지 않아 원인을 확정하지 않았다. timeout 상향/skip/terminal 주입으로 덮지 않는다.
+raw fixture 수정8ccc의 [선택 실행39697203989](https://github.com/jeong-sik/masc/actions/runs/39697203989)를
+요청했으며 이 기록은 실행 성공을 주장하지 않는다. 원래 A01–H06의 54개 이름·완료 기준은 유지한다.
+
+후속 [#44989](https://github.com/jeong-sik/masc/pull/44989) 작성 중 기존 Stack44922의19개 PR이
+외부에서 `fix/candle-derive-observation-20261022`에 병합된 사실을 REST로 확인했다.
+실제 대상3630add의 전체 tree는 이전8ccc와 동일하다. gh stack rebase의 conflict resolution에서
+이미 병합된 prefix를 제외하고 새 읽기 경계만 다시 올렸다. main 통합·운영 설치를 뜻하지 않는다.

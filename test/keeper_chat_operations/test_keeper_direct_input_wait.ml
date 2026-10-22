@@ -85,7 +85,7 @@ let test_wait_survives_restart_and_time () = with_path @@ fun path ->
     check bool "restart cannot redispatch unresolved input" true (Store.claim_next store ~now:1e12 |> ok=None);
     let references=Semantic.continuation_checkpoints (semantic store) in
     check bool "waiting checkpoint retained for original continuation" true
-      (List.exists (fun (row:Semantic.retained_checkpoint) -> Keeper_checkpoint_ref.equal owned row.reference) references);
+      (List.exists (fun (row:Keeper_checkpoint_ref.t) -> Keeper_checkpoint_ref.equal owned row) references);
     check bool "original digest/input persist after restart" true ((current store).input=Some input))
 
 let test_only_retired_native_can_wait () = with_path @@ fun path -> with_store path @@ fun store ->

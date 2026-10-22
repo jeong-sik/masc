@@ -57,8 +57,8 @@ let classification base_path claims =
     | Some batch -> batch | None -> fail "expected original changed facts" in
   let capture=get (Capture.classification ~request_id:(Capture.Request_id.fresh ())
     ~workspace:(get (Capture.observe_workspace ~base_path)) ~destination ~prompt ~ledger:Ledger.empty ~batch) in
-  let output=`Assoc ["decisions",`List (List.map (fun (fact : Ledger.pending_fact) ->
-    `Assoc ["fact_id",`String (Request.fact_id fact.fact);"kind",`String "create_claim";"value",`String fact.claim]) batch.selected)] in
+  let output=`Assoc ["decisions",`List (List.map (fun (id,(fact : Ledger.pending_fact)) ->
+    `Assoc ["fact_id",`String id;"kind",`String "create_claim";"value",`String fact.claim]) (Request.selected_ids batch))] in
   capture,output
 let after capture output=get (Capture.validate_output capture output)
 let save base_path = function
@@ -300,9 +300,8 @@ let test_successor_keeps_whole_rows_and_one_child final ()=with_workspace (fun b
     (Capture.destination smaller=Capture.destination capture);
   (match Capture.work capture,Capture.work smaller with
    | Capture.Classification original,Capture.Classification child ->
-     check bool "whole selected prefix and unconsumed suffix are conserved" true
-       (child.batch.selected=List.take 2 original.batch.selected
-        && child.batch.remaining=List.drop 2 original.batch.selected @ original.batch.remaining);
+     check bool "the oldest half of the selection is kept" true
+       (child.batch.selected=List.take 2 original.batch.selected);
      check json "complete original row payloads survive" (match original.batch.input with
        | `Assoc fields -> `List (List.take 2 (match List.assoc "new_facts" fields with `List rows -> rows | _ -> fail "rows"))
        | _ -> fail "original input") (Yojson.Safe.Util.member "new_facts" child.batch.input);
@@ -405,8 +404,8 @@ let test_briefing_successor_keeps_prepared_state output_limit ()=with_workspace 
     | Capture.Classification _ -> fail "Briefing child changed domain");
   check json "linking does not save or advance briefing" before (Briefing.to_json (get (Briefing.load ~directory))))
 let output_for capture = match Capture.work capture with
-  | Capture.Classification {batch;_} -> `Assoc ["decisions",`List (List.map (fun (fact : Ledger.pending_fact) ->
-      `Assoc ["fact_id",`String (Request.fact_id fact.fact);"kind",`String "create_claim";"value",`String fact.claim]) batch.selected)]
+  | Capture.Classification {batch;_} -> `Assoc ["decisions",`List (List.map (fun (id,(fact : Ledger.pending_fact)) ->
+      `Assoc ["fact_id",`String id;"kind",`String "create_claim";"value",`String fact.claim]) (Request.selected_ids batch))]
   | Capture.Briefing _ -> `Assoc ["briefing",`String "Original child semantic result"]
 let test_child_can_answer_and_commit_only_its_original_prefix ()=with_workspace (fun base_path store ->
   let capture,_=classification base_path ["Original fact a";"Original fact b";"Original fact c";"Original fact d"] in

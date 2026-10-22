@@ -240,8 +240,8 @@ let with_fixture ?(on_response_error=(fun _ _ -> ()))
           | Capture.Classification {batch;_} ->
             let refuse=bad || match !mode with Answer | Count_capacity -> false | Refuse_fact claim ->
               List.exists (fun (fact:Ledger.pending_fact) -> fact.claim=claim) batch.selected in
-            `Assoc ["decisions",`List (if refuse then [] else List.map (fun (fact:Ledger.pending_fact) ->
-              `Assoc ["fact_id",`String (Request.fact_id fact.fact);"kind",`String "create_claim";"value",`String fact.claim]) batch.selected)]
+            `Assoc ["decisions",`List (if refuse then [] else List.map (fun (id,(fact:Ledger.pending_fact)) ->
+              `Assoc ["fact_id",`String id;"kind",`String "create_claim";"value",`String fact.claim]) (Request.selected_ids batch))]
           | Capture.Briefing _ -> `Assoc ["briefing",`String (if bad then " " else "The original selected workspace evidence was synthesized.")] in
         `OK,F.openai_response output
         with
@@ -787,9 +787,9 @@ let test_briefing_successor_observes_live_contract ()=
     reconcile_until_export clock ~config;
     let classification=capture_classification config in
     let selected=match Capture.work classification with
-      | Capture.Classification {batch;_} -> batch.selected | Briefing _ -> fail "expected original classification" in
-    let answer=`Assoc ["decisions",`List (List.map (fun (fact:Ledger.pending_fact) ->
-      `Assoc ["fact_id",`String (Request.fact_id fact.fact);"kind",`String "create_claim";
+      | Capture.Classification {batch;_} -> Request.selected_ids batch | Briefing _ -> fail "expected original classification" in
+    let answer=`Assoc ["decisions",`List (List.map (fun (id,(fact:Ledger.pending_fact)) ->
+      `Assoc ["fact_id",`String id;"kind",`String "create_claim";
         "value",`String fact.claim]) selected)] in
     let ledger=match get (Capture.validate_output classification answer) with
       | Capture.Classification_commit ledger -> ledger | Briefing_commit _ -> fail "expected original ledger" in

@@ -53,7 +53,7 @@ let current = [changed; second; shared; disputed; unrelated; third]
    exactly those; the unrelated fact never becomes a neighbor. *)
 let prepare ?(neighbors = 3) pending =
   get (Request.prepare ~neighbor_limit:neighbors ~render ~ledger ~current ~pending
-         ~frame:max_int ~measure:(fun _ -> Ok 0))
+         ~size:Request.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0))
 
 let ids_of field batch = batch.Request.input |> member field |> to_list |> List.map (member "id")
 let contains ~sub text =
@@ -114,7 +114,7 @@ let test_narrow_keeps_the_oldest_half_and_its_context () =
   (match Request.narrow ~render:(fun _ -> Error "render unavailable") ~ledger batch with
    | Error (Request.Render_failed _) -> ()
    | Ok _ | Error (Request.Invalid_limit | Index_unavailable _ | Invalid_batch _ | Measure_failed _
-                  | Exceeds_frame _) ->
+                  | Exceeds_frame _ | Invalid_size _) ->
      Alcotest.fail "narrow render failure hidden")
 
 let test_no_change_does_not_render_or_search () =
@@ -122,7 +122,7 @@ let test_no_change_does_not_render_or_search () =
   let result = Request.prepare ~neighbor_limit:2
       ~render:(fun json -> incr render_calls; render json)
       ~ledger:Ledger.empty ~current:[pending "writer" "a fact"] ~pending:[]
-      ~frame:max_int ~measure:(fun _ -> Ok 0) in
+      ~size:Request.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0) in
   (match result with Ok None -> () | Ok (Some _) | Error _ -> Alcotest.fail "no change built a request");
   Alcotest.(check int) "render was not called" 0 !render_calls
 
@@ -139,7 +139,7 @@ let test_many_facts_drain_oldest_first_after_size_refusals () =
     | [] -> List.rev classified
     | _ :: _ ->
       let batch = narrow_to_single (get (Request.prepare ~neighbor_limit:0 ~render ~ledger:Ledger.empty
-        ~current:facts ~pending:remaining ~frame:max_int ~measure:(fun _ -> Ok 0))) in
+        ~current:facts ~pending:remaining ~size:Request.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0))) in
       (match batch.selected with
        | [fact] -> drain (fact :: classified) (List.filter (fun other -> other <> fact) remaining)
        | [] | _ :: _ :: _ -> Alcotest.fail "a provider-refused batch must reach one complete fact") in
@@ -186,7 +186,7 @@ let test_snapshot_is_bound_to_the_captured_ledger () =
     match Request.batch_of_json ~ledger:against tampered with
     | Error (Request.Invalid_batch _) -> ()
     | Ok _ | Error (Request.Invalid_limit | Render_failed _ | Index_unavailable _ | Measure_failed _
-                   | Exceeds_frame _) ->
+                   | Exceeds_frame _ | Invalid_size _) ->
       Alcotest.fail (label ^ " was restored") in
   let input = member "input" snapshot in
   refused "a changed membership" (replace "input" (map_list "facts" (fun fact ->
@@ -232,7 +232,7 @@ let test_first_batch_fills_the_frame_with_the_oldest_facts () =
   let per_fact = 100 in
   let within ?(measure = fun (batch : Request.batch) -> Ok (per_fact * List.length batch.rows)) frame =
     Request.prepare ~neighbor_limit:1 ~render ~ledger:Ledger.empty ~current:facts ~pending:facts
-      ~frame ~measure in
+      ~size:Request.Fill_frame ~frame ~measure in
   let batch = get (within ((5 * per_fact) + (per_fact / 2))) in
   Alcotest.(check bool) "the five oldest facts fill a five-fact frame" true (batch.selected = List.take 5 facts);
   Alcotest.(check bool) "ranking stops at the first size that does not fit" true
@@ -245,13 +245,46 @@ let test_first_batch_fills_the_frame_with_the_oldest_facts () =
      Alcotest.(check bool) "the refusal names the oldest fact" true (fact = (List.hd facts).fact);
      Alcotest.(check (pair int int)) "with its measured size and the frame" (per_fact, per_fact - 1) (bytes, frame)
    | Ok _ | Error (Request.Invalid_limit | Render_failed _ | Index_unavailable _ | Invalid_batch _
-                  | Measure_failed _) ->
+                  | Measure_failed _ | Invalid_size _) ->
      Alcotest.fail "a fact larger than the frame was not refused");
   (match within ~measure:(fun _ -> Error "no request") max_int with
    | Error (Request.Measure_failed _) -> ()
    | Ok _ | Error (Request.Invalid_limit | Render_failed _ | Index_unavailable _ | Invalid_batch _
-                  | Exceeds_frame _) ->
+                  | Exceeds_frame _ | Invalid_size _) ->
      Alcotest.fail "a failed measure was not reported")
+
+let test_next_batch_takes_at_most_the_answered_size () =
+  let facts = List.init 40 (fun i -> pending ("keeper-" ^ string_of_int i)
+      ("Changed claim number " ^ string_of_int i)) in
+  let per_fact = 100 in
+  let measure (batch : Request.batch) = Ok (per_fact * List.length batch.rows) in
+  let within size frame =
+    Request.prepare ~neighbor_limit:1 ~render ~ledger:Ledger.empty ~current:facts ~pending:facts
+      ~size ~frame ~measure in
+  let every_fact = 40 * per_fact in
+  let batch = get (within (Request.Up_to 3) every_fact) in
+  Alcotest.(check bool) "an answered size of three takes the three oldest facts" true
+    (batch.selected = List.take 3 facts);
+  Alcotest.(check int) "and ranks only those three" 3 batch.index_stats.queries_executed;
+  let batch = get (within (Request.Up_to 8) (5 * per_fact)) in
+  Alcotest.(check bool) "a frame below the answered size still bounds the batch" true
+    (batch.selected = List.take 5 facts);
+  Alcotest.(check bool) "without ranking past the answered size" true
+    (batch.index_stats.queries_executed <= 8);
+  Alcotest.(check int) "an answered size above the backlog takes the backlog" 40
+    (List.length (get (within (Request.Up_to 100) every_fact)).selected);
+  (match within (Request.Up_to 4) (per_fact - 1) with
+   | Error (Request.Exceeds_frame { fact; _ }) ->
+     Alcotest.(check bool) "the frame still refuses an oldest fact it cannot hold" true
+       (fact = (List.hd facts).fact)
+   | Ok _ | Error (Request.Invalid_limit | Render_failed _ | Index_unavailable _ | Invalid_batch _
+                  | Measure_failed _ | Invalid_size _) ->
+     Alcotest.fail "an answered size bypassed the frame");
+  (match within (Request.Up_to 0) every_fact with
+   | Error (Request.Invalid_size 0) -> ()
+   | Ok _ | Error (Request.Invalid_limit | Render_failed _ | Index_unavailable _ | Invalid_batch _
+                  | Measure_failed _ | Exceeds_frame _ | Invalid_size _) ->
+     Alcotest.fail "an empty batch size was accepted")
 
 let () =
   Alcotest.run "Workspace memory request"
@@ -264,7 +297,9 @@ let () =
                        ; Alcotest.test_case "snapshot is bound to the captured ledger" `Quick
                          test_snapshot_is_bound_to_the_captured_ledger
                        ; Alcotest.test_case "first batch fills the frame with the oldest facts" `Quick
-                         test_first_batch_fills_the_frame_with_the_oldest_facts ]
+                         test_first_batch_fills_the_frame_with_the_oldest_facts
+                       ; Alcotest.test_case "next batch takes at most the answered size" `Quick
+                         test_next_batch_takes_at_most_the_answered_size ]
     ; "provider refusal", [Alcotest.test_case "narrow keeps the oldest half" `Quick
                             test_narrow_keeps_the_oldest_half_and_its_context
                           ; Alcotest.test_case "many changes drain oldest first" `Quick

@@ -53,7 +53,7 @@ let classification base_path claims =
   let render input=Prompt_registry.render_resolved_prompt_template Prompt_names.workspace_memory_curator
     prompt ["workspace_memory_changes",Yojson.Safe.to_string input] in
   let batch=match Request.prepare ~neighbor_limit:0 ~render ~ledger:Ledger.empty
-      ~current:current.current_facts ~pending:current.new_facts ~frame:max_int ~measure:(fun _ -> Ok 0)
+      ~current:current.current_facts ~pending:current.new_facts ~size:Request.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0)
       |> Result.map_error Request.error_to_string |> get with
     | Some batch -> batch | None -> fail "expected original changed facts" in
   let capture=get (Capture.classification ~request_id:(Capture.Request_id.fresh ())

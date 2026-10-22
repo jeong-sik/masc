@@ -37,7 +37,7 @@ let classification workspace =
   let a = fact "writer" "Complete source evidence A" and b = fact "writer" "Complete source evidence B" in
   let render = render Prompt_names.workspace_memory_curator "workspace_memory_changes" classification_prompt in
   let full = some (requested (R.prepare ~neighbor_limit:0 ~render ~ledger:L.empty ~current:[a;b] ~pending:[a;b]
-      ~frame:max_int ~measure:(fun _ -> Ok 0))) in
+      ~size:R.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0))) in
   let batch = some (requested (R.narrow ~render ~ledger:L.empty full)) in
   a,b,batch,get (C.classification ~request_id:id ~workspace ~destination ~prompt:classification_prompt ~ledger:L.empty ~batch)
 let retain ?(scope=C.scope) ?(installation_id=destination.installation_id) ?(tool=destination.tool)
@@ -159,9 +159,51 @@ let test_descriptor_scope_refuses_replaced_root_before_return () = with_workspac
     Ok "unpublished candidate") in
   rejected observed)
 
+let test_next_classification_size_follows_the_last_answer () = with_workspace (fun root _store ->
+  let module P = Lane_addon_request_progress in
+  let workspace = get (C.observe_workspace ~base_path:root) in
+  let classify_render = render Prompt_names.workspace_memory_curator "workspace_memory_changes" classification_prompt in
+  let facts = List.init 4 (fun i -> fact ("keeper-" ^ string_of_int i) ("Changed fact " ^ string_of_int i)) in
+  let root_of count =
+    let batch = some (requested (R.prepare ~neighbor_limit:0 ~render:classify_render ~ledger:L.empty ~current:facts
+        ~pending:(List.take count facts) ~size:R.Fill_frame ~frame:max_int ~measure:(fun _ -> Ok 0))) in
+    get (C.classification ~request_id:(C.Request_id.fresh ()) ~workspace ~destination
+           ~prompt:classification_prompt ~ledger:L.empty ~batch) in
+  let commit : P.commit = {judgment=`Null;change={before=`Null;after=`Null}} in
+  let refusal : P.refusal = {stage=P.Execution;evidence=`Null} in
+  let size = Alcotest.testable (fun format -> function
+      | R.Fill_frame -> Format.pp_print_string format "Fill_frame"
+      | R.Up_to count -> Format.fprintf format "Up_to %d" count) ( = ) in
+  Alcotest.check size "no answered classification fills the frame" R.Fill_frame (C.classification_size []);
+  let older = root_of 3 in
+  Alcotest.check size "a root answered without a refusal tries twice its size" (R.Up_to 6)
+    (C.classification_size [older,P.Finished commit]);
+  let parent = root_of 4 in
+  let child = some (get (C.narrow ~request_id:(C.Request_id.fresh ())
+      ~final:(Lane_addon_exact.Call_final (Input_refused Input_capacity)) parent)) in
+  let link : P.successor = {request_id=C.Request_id.to_string (C.request_id child);request=`Null} in
+  Alcotest.check size "a child answered after a size refusal keeps its size" (R.Up_to 2)
+    (C.classification_size [older,P.Finished commit;parent,P.Subdivided (refusal,link);
+                            child,P.Conflicted (commit,`Null)]);
+  Alcotest.check size "the latest answer decides, whatever the list order" (R.Up_to 2)
+    (C.classification_size [child,P.Finished commit;older,P.Finished commit]);
+  let refused = root_of 1 in
+  let source id : B.source = {id;kind=B.Claim;text="Briefing evidence " ^ id} in
+  let briefing_prompt = prompt "Original briefing: {{workspace_memory_briefing}}" in
+  let briefing_render = render Prompt_names.workspace_memory_briefing "workspace_memory_briefing" briefing_prompt in
+  let briefing = match get (B.prepare ~sources:[source "a"] ~contract:(B.contract ~template:briefing_prompt.effective)
+      ~render:briefing_render B.empty) with
+    | B.Prepared batch -> get (C.briefing ~request_id:(C.Request_id.fresh ()) ~workspace ~destination
+                                 ~prompt:briefing_prompt ~batch)
+    | B.Unchanged | B.Cleanup _ -> Alcotest.fail "expected a briefing pass" in
+  Alcotest.check size "refused classifications and answered briefings are not evidence" (R.Up_to 2)
+    (C.classification_size [child,P.Finished commit;refused,P.Rejected refusal;briefing,P.Finished commit]))
+
 let () = Alcotest.run "Curator trusted host capture" ["capture",[
   Alcotest.test_case "canonical storage preserves exact original prompt and judgment" `Quick test_canonical_storage_preserves_original_prompt_and_selected_judgment;
   Alcotest.test_case "changed provenance, schema and original owner" `Quick test_changed_capture_provenance_and_owner_are_refused;
   Alcotest.test_case "physical root copy and replacement" `Quick test_physical_root_replacement_and_copy_are_refused;
   Alcotest.test_case "briefing original contract and partial publication" `Quick test_briefing_contract_and_partial_publication_are_original;
-  Alcotest.test_case "descriptor scope rejects a replaced root" `Quick test_descriptor_scope_refuses_replaced_root_before_return]]
+  Alcotest.test_case "descriptor scope rejects a replaced root" `Quick test_descriptor_scope_refuses_replaced_root_before_return;
+  Alcotest.test_case "next classification size follows the last answer" `Quick
+    test_next_classification_size_follows_the_last_answer]]

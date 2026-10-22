@@ -44,13 +44,16 @@ let retain ?(scope=C.scope) ?(installation_id=destination.installation_id) ?(too
   let request_id = C.Request_id.to_string id in
   owned (Owner.retain ~store ~scope ~request_id ~installation_id ~package_id:destination.package_id ~tool ~request);
   some (owned (Owner.load ~store:(Store.create ~root:(Store.root store)) ~scope ~request_id))
+let restore store ~workspace record = C.restore ~workspace
+  ~load:(fun ~request_id -> Owner.load ~store ~scope:C.scope ~request_id
+    |> Result.map_error Owner.error_to_string) record
 let rejected = function Error _ -> () | Ok _ -> Alcotest.fail "invalid host capture accepted"
 
 let test_canonical_storage_preserves_original_prompt_and_selected_judgment () = with_workspace (fun root store ->
   let workspace = get (C.observe_workspace ~base_path:root) in
   let a,b,batch,capture = classification workspace in
   let retained = retain ~request:(C.to_json capture) store in
-  let restored = get (C.restore ~workspace:(get (C.observe_workspace ~base_path:root)) retained) in
+  let restored = get (restore store ~workspace:(get (C.observe_workspace ~base_path:root)) retained) in
   Alcotest.(check string) "original substitution bytes survive canonical object ordering"
     (Yojson.Safe.to_string batch.input) (C.input_text restored);
   Alcotest.(check string) "actual original prompt is restored" batch.rendered_prompt (C.rendered_prompt restored);
@@ -77,9 +80,9 @@ let test_canonical_storage_preserves_original_prompt_and_selected_judgment () = 
     Prompt_registry.set_markdown_dir prompts;
     ignore (get (Prompt_registry.set_override key "Replacement instructions: {{workspace_memory_changes}}"));
     Alcotest.(check string) "new override does not replace captured template"
-      batch.rendered_prompt (C.rendered_prompt (get (C.restore ~workspace retained)))))
+      batch.rendered_prompt (C.rendered_prompt (get (restore store ~workspace retained)))))
 
-let test_changed_capture_provenance_and_owner_are_refused () = with_workspace (fun root _ ->
+let test_changed_capture_provenance_and_owner_are_refused () = with_workspace (fun root store ->
   let workspace = get (C.observe_workspace ~base_path:root) in
   let _,_,batch,capture = classification workspace in
   rejected (C.classification ~request_id:id ~workspace ~destination ~ledger:L.empty ~batch
@@ -102,11 +105,11 @@ let test_changed_capture_provenance_and_owner_are_refused () = with_workspace (f
     replace "request_id" (`String "019c0000-0000-7000-8000-000000000002") original] in
   List.iteri (fun i request ->
     let store = Store.create ~root:(Filename.concat root ("invalid-" ^ string_of_int i)) in
-    rejected (C.restore ~workspace (retain ~request store))) invalid;
+    rejected (restore store ~workspace (retain ~request store))) invalid;
   let wrong_scope = Store.create ~root:(Filename.concat root "wrong-scope") in
-  rejected (C.restore ~workspace (retain ~scope:"different-consumer" ~request:original wrong_scope));
+  rejected (restore store ~workspace (retain ~scope:"different-consumer" ~request:original wrong_scope));
   let wrong_tool = Store.create ~root:(Filename.concat root "wrong-tool") in
-  rejected (C.restore ~workspace (retain ~tool:"different" ~request:original wrong_tool)))
+  rejected (restore store ~workspace (retain ~tool:"different" ~request:original wrong_tool)))
 
 let test_physical_root_replacement_and_copy_are_refused () = with_workspace (fun root store ->
   let workspace = get (C.observe_workspace ~base_path:root) in
@@ -114,10 +117,10 @@ let test_physical_root_replacement_and_copy_are_refused () = with_workspace (fun
   let retained = retain ~request:(C.to_json capture) store in
   let other = Filename.concat (Filename.dirname root) "other-workspace" in Unix.mkdir other 0o700;
   let copy = retain ~request:retained.request (Store.create ~root:(Filename.concat other "store")) in
-  rejected (C.restore ~workspace:(get (C.observe_workspace ~base_path:other)) copy);
+  rejected (restore store ~workspace:(get (C.observe_workspace ~base_path:other)) copy);
   let moved = root ^ "-original" in
   Unix.rename root moved; Unix.mkdir root 0o700;
-  rejected (C.restore ~workspace:(get (C.observe_workspace ~base_path:root)) retained);
+  rejected (restore store ~workspace:(get (C.observe_workspace ~base_path:root)) retained);
   Unix.rmdir root;
   rejected (C.observe_workspace ~base_path:root))
 
@@ -134,7 +137,7 @@ let test_briefing_contract_and_partial_publication_are_original () = with_worksp
   rejected (make (prepared (B.contract ~template:"different-template")));
   let batch = some (get (B.narrow ~render (prepared (B.contract ~template:p.effective)))) in
   let capture = get (make batch) in
-  let restored = get (C.restore ~workspace (retain ~request:(C.to_json capture) store)) in
+  let restored = get (restore store ~workspace (retain ~request:(C.to_json capture) store)) in
   match get (C.validate_output restored (`Assoc ["briefing",`String "Partial original summary"])) with
   | C.Briefing_commit partial ->
     (match B.observe ~sources ~contract:(B.contract ~template:p.effective) partial with

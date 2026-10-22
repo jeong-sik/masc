@@ -3,6 +3,8 @@ module Request = Workspace_memory_request
 module Brief = Workspace_memory_briefing
 module Decision = Workspace_memory_decision
 module Owner = Lane_addon_tool_request_owner
+module Progress = Lane_addon_request_progress
+module Exact = Lane_addon_exact
 let ( let* ) = Result.bind
 module Request_id = struct
   type t = string
@@ -21,10 +23,11 @@ type destination = {
   source_revision : string; configuration_revision : string;
 }
 type work = Classification of {ledger : Ledger.t; batch : Request.batch} | Briefing of Brief.batch
-type t = {id : Request_id.t; workspace : workspace; destination : destination;
+type t = {id : Request_id.t; predecessor : Request_id.t option; workspace : workspace; destination : destination;
   prompt : Prompt_registry.prompt_resolution; work : work; input_text : string}
 let scope = "workspace-curator"
 let request_id t = t.id
+let predecessor t = t.predecessor
 let destination t = t.destination
 let work t = t.work
 let input_text t = t.input_text
@@ -135,24 +138,33 @@ let make ~request_id ~workspace ~destination ~prompt work =
   let* destination = destination_of_json (destination_json destination) in
   let* prompt = prompt_of_json (prompt_json prompt) in
   let input_text = Yojson.Safe.to_string (input work) in
-  let* work = work_of_json (work_json work) in
+  (* Preserve the parent's original substitution bytes separately. Its typed
+     work uses the same canonical snapshot before and after durable retention,
+     so narrowing cannot render a different child from reordered object keys. *)
+  let* snapshot = Lane_addon_action.canonical (work_json work) in
+  let* work = work_of_json snapshot in
   let* () = check ~prompt ~input_text work in
-  Ok {id=request_id;workspace;destination;prompt;work;input_text}
+  Ok {id=request_id;predecessor=None;workspace;destination;prompt;work;input_text}
 let classification ~request_id ~workspace ~destination ~prompt ~ledger ~batch =
   make ~request_id ~workspace ~destination ~prompt (Classification {ledger;batch})
 let briefing ~request_id ~workspace ~destination ~prompt ~batch =
   make ~request_id ~workspace ~destination ~prompt (Briefing batch)
-let to_json t = `Assoc ["schema",`String "workspace.memory.execution-capture.v1";
-  "request_id",`String (Request_id.to_string t.id);"workspace",workspace_json t.workspace;
+let to_json t = `Assoc ["schema",`String "workspace.memory.execution-capture.v2";
+  "request_id",`String (Request_id.to_string t.id);
+  "predecessor",optional (Option.map Request_id.to_string t.predecessor);"workspace",workspace_json t.workspace;
   "destination",destination_json t.destination;"prompt",prompt_json t.prompt;
   "work",work_json t.work;"input_text",`String t.input_text;"output_schema",schema t.work]
-let restore ~workspace (retained : Owner.retained) =
-  let* f = fields ["schema";"request_id";"workspace";"destination";"prompt";"work";"input_text";"output_schema"] retained.request in
+let restore_record ~workspace (retained : Owner.retained) =
+  let* f = fields ["schema";"request_id";"predecessor";"workspace";"destination";"prompt";"work";"input_text";"output_schema"] retained.request in
   let* () = match List.assoc "schema" f with
-    | `String "workspace.memory.execution-capture.v1" -> Ok ()
+    | `String "workspace.memory.execution-capture.v2" -> Ok ()
     | _ -> Error "unknown Curator execution capture schema" in
   let* id_text = text (List.assoc "request_id" f) in
   let* id = Request_id.of_string id_text in
+  let* predecessor = match List.assoc "predecessor" f with
+    | `Null -> Ok None
+    | `String value -> Result.map Option.some (Request_id.of_string value)
+    | _ -> Error "captured predecessor must be a request ID or null" in
   let* original_workspace = workspace_of_json (List.assoc "workspace" f) in
   let* () = if original_workspace = workspace then Ok () else Error "Curator request belongs to another physical workspace" in
   let* destination = destination_of_json (List.assoc "destination" f) in
@@ -166,7 +178,66 @@ let restore ~workspace (retained : Owner.retained) =
     else Error "Curator capture has a different domain output schema" in
   let* input_text = text (List.assoc "input_text" f) in
   let* () = check ~prompt ~input_text work in
-  Ok {id;workspace;destination;prompt;work;input_text}
+  Ok {id;predecessor;workspace;destination;prompt;work;input_text}
+let narrow ~request_id ~final t =
+  let* () = if Request_id.to_string request_id <> Request_id.to_string t.id then Ok ()
+    else Error "a successor must have its own original request ID" in
+  let* () = match final,t.work with
+    | Exact.Call_final (Exact.Input_refused (Exact.Input_capacity | Exact.Context_overflow
+        | Exact.Request_body_refused)),(Classification _ | Briefing _)
+    | Exact.Call_final (Exact.Output_limit_reached _),Classification _ -> Ok ()
+    | Exact.Call_final (Exact.Output_limit_reached _),Briefing _
+    | Exact.Call_final (Exact.Answered _ | Exact.Invalid_output _ | Exact.Input_refused Exact.Invalid_request),
+        (Classification _ | Briefing _)
+    | (Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused),(Classification _ | Briefing _) ->
+      Error "the original terminal does not permit this batch to be narrowed" in
+  let key,variable = match t.work with
+    | Classification _ -> Prompt_names.workspace_memory_curator,"workspace_memory_changes"
+    | Briefing _ -> Prompt_names.workspace_memory_briefing,"workspace_memory_briefing" in
+  let render input = Prompt_registry.render_resolved_prompt_template key t.prompt
+    [variable,Yojson.Safe.to_string input] in
+  let* smaller = match t.work with
+    | Classification {ledger;batch} ->
+      Request.narrow ~render batch |> Result.map_error Request.error_to_string
+      |> Result.map (Option.map (fun batch -> Classification {ledger;batch}))
+    | Briefing batch -> Brief.narrow ~render batch |> Result.map (Option.map (fun batch -> Briefing batch)) in
+  match smaller with
+  | None -> Ok None
+  | Some work ->
+    let* child = make ~request_id ~workspace:t.workspace ~destination:t.destination ~prompt:t.prompt work in
+    Ok (Some {child with predecessor=Some t.id})
+let restore ~workspace ~load retained =
+  let rec walk seen (retained : Owner.retained) =
+    let* () = if List.mem retained.request_id seen then Error "cyclic Curator predecessor chain" else Ok () in
+    let* capture = restore_record ~workspace retained in
+    match capture.predecessor with
+    | None -> Ok capture
+    | Some predecessor ->
+      let* parent = load ~request_id:(Request_id.to_string predecessor) in
+      let* parent = match parent with Some parent -> Ok parent
+        | None -> Error "original Curator predecessor is absent" in
+      let* original = walk (retained.request_id :: seen) parent in
+      let* refusal,successor = match Progress.phase parent.progress with
+        | Progress.Subdivided (refusal,successor) -> Ok (refusal,successor)
+        | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
+        | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _
+        | Progress.Rejected _ | Progress.Subdividing _ ->
+          Error "original Curator predecessor has not acknowledged this child" in
+      let* () = if String.equal successor.request_id retained.request_id
+          && Yojson.Safe.equal successor.request retained.request then Ok ()
+        else Error "Curator child differs from its predecessor's original intent" in
+      let* final = match refusal.stage with
+        | Progress.Execution -> Exact.final_of_json ~schema:(output_schema original) refusal.evidence
+        | Progress.Before_dispatch -> Error "Curator successor requires an original execution refusal" in
+      let* expected = narrow ~request_id:capture.id ~final original in
+      let* () = match expected with
+        | Some expected ->
+          let* expected = Lane_addon_action.canonical (to_json expected) in
+          if Yojson.Safe.equal expected retained.request then Ok ()
+          else Error "Curator successor is not the original whole-batch reduction"
+        | None -> Error "an indivisible original batch cannot have a successor" in
+      Ok capture in
+  walk [] retained
 type expected_commit = Classification_commit of Ledger.t | Briefing_commit of Brief.t
 let validate_output t raw = match t.work with
   | Classification {ledger;batch} ->

@@ -3267,17 +3267,6 @@ let standalone_lane_answer (lane : standalone_lane) =
         "Output meaning: selected memory facts plus committed snapshot metadata."
     ; sla_evidence = structured_output_without_ledger
     }
-  | Standalone_lane.Workspace_curator ->
-    { sla_output_meaning =
-        "Output meaning: the id of the proposal it published, with shared claims \
-         and conflicts that each cite source ids, and the sources it excluded \
-         with reasons."
-    ; sla_evidence =
-        "Evidence: structured-output generation over the HTTP slots, then the \
-         CLI slots, not a MASC tool loop; the run retains the exact memory \
-         inventory and rendered prompt as Input, the proposal as Output, \
-         outcome, and selected slot."
-    }
   | Standalone_lane.Candle_appraiser ->
     { sla_output_meaning =
         "Output meaning: the validated payout grade, each candidate Task's relation to the Goal, and Keeper weights, or no contributor."
@@ -3401,7 +3390,6 @@ let decode_standalone_lane json =
       Ok (Some decoded)
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
-    | Standalone_lane.Workspace_curator
     | Standalone_lane.Candle_appraiser
     | Standalone_lane.Verifier
     | Standalone_lane.Browser_stagehand -> Ok None

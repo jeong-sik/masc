@@ -412,7 +412,7 @@ authority다.
 
 - **저장 시점**: `set`은 선호를 읽는 lane(`librarian_exact`,
   `board_attention_exact`, `hitl_auto_judge`)만 받는다. 그 밖의 exact-output
-  lane(`workspace_curator_exact`, `verifier_exact`)을 가리키면 거절한다 — 읽지
+  lane(`candle_appraiser`, `verifier_exact`, `browser_stagehand_exact`)을 가리키면 거절한다 — 읽지
   않을 행을 저장하지 않는다. 지우기(`slot_id: null`)는 예외로 통과한다. 선호를
   읽던 lane이 나중에 읽기를 그만둬도 남은 행이 지워지지 않는 일이 없게 하려는
   것이다.

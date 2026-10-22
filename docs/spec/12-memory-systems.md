@@ -310,7 +310,7 @@ ledger and curator briefing under `<base-path>/.masc/workspace-memory/`:
 - `ledger.json`: durable workspace memory claims and cross-Keeper provenance
   managed through `lib/workspace_memory/`.
 - `briefing.json`: structured workspace briefing synthesized by the
-  `workspace_curator_exact` lane from current workspace memory, active tasks/goals,
+  installed Workspace Curator Addon’s `briefing` output from current workspace memory, active tasks/goals,
   and recent collaboration state.
 
 Both files use atomic temp-file write + file/parent `fsync` and strict schema

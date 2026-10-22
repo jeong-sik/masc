@@ -647,3 +647,11 @@ blob 동일성을 공개 영수증에 기록하되, 이 이전 실행을 새 조
 - Dashboard source79e8a662의 선택3개 suite37건, 전체 TypeScript, 변경6파일 ESLint가 실제 통과했다. 실제 Chromium에서 production component를 synthetic API로 열어 모델 상세를 확인하고 screenshot·GET/표시 관측을 보존했다. [공개 실행 근거](../docs/evidence/2026-10-22-addon-model-observation/README.md)는 실제 운영 Dashboard·worker·provider와 이 fixture를 구분한다.
 - TUI history parent a0d3f319의 [선택 실행39713823343](https://github.com/jeong-sik/masc/actions/runs/39713823343)은19+46=65건 실제 성공했다. 이 선택 검사는 main TUI 실행 파일을 빌드하지 않고 이후 Dashboard 변경을 실행하지 않는다. Native 결과는 별도 영수증으로 확인한다. 원래54개 기준과 builtin Curator retirement·실제 provider·두 UI lifecycle·통합·설치는 미완료로 유지한다.
 - 같은 TUI parent의 [native 실행39713826631](https://github.com/jeong-sik/masc/actions/runs/39713826631)도 실제 성공했다. matching TUI/server/key generator와 관련24+5=29건을 빌드·실행했으며 artifact12398028976의 실제 TUI/server/key-reference 해시를 영수증과 대조했다. workflow38b63과 featurea0d3를 구분한다. 이 결과도 대화형 화면·설치나 이후 Dashboard 실행의 증거는 아니다.
+
+
+## E02/B02 현재 Curator 모델 설정의 Addon 단일화 · 2026-10-22
+
+- `Standalone_lane`·`Runtime.exact_lane`의 builtin Curator 생성자와 전용 요구 API, 현재 overview·설정 write·선택 경로를 제거했다. 실제 설치 ID의 `runtime.addon_exact_lanes.<id>.classification`·`.briefing`이 모델 설정을 소유한다. Board/HITL Required 및 공용 Addon admission·semantic authority는 변경하지 않는다.
+- `Lane_run_identity.Workspace_curator`·Exact registry replay·원래 observer delivery를 유지한다. 두 UI의 별도 history 진입은 현재 builtin row 없이 원래 기록을 읽는다. 설치 scope run ID에서 원래 관측 ID를 만들지 않는다.
+- Dashboard 선택7개 suite175건, 전체 TypeScript, 변경6개 TS 파일 ESLint와 ML/MLI19개 parser가 실제 통과했다. HTTP endpoint의 builtin write 거절, 실제 설치별 classification/briefing HTTP·CLI 분리, 원래 persisted Curator history→server→TUI 검사를 선택 실행 범위에 포함한다. 이 OCaml 시나리오는 아직 compiled 실행 전이며 parser 성공을 실행 성공으로 세지 않는다.
+- 원래 A01–H06의54개 항목명·완료 기준은 유지한다. 실제 provider·container Off/On·두 UI lifecycle·whole-stack 통합·운영 설치를 완료로 선언하지 않는다.

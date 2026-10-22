@@ -197,7 +197,7 @@ let add ?at t ~seq (delta : Live.delta) =
       | Live.Run_started -> t.run_started <- true
       | Live.Batch_bound _ | Runtime_attempt_started _ | Provider_retry_observed _
       | Stream_model_started _ | Model_content_activity _ | Stream_model_stopped _
-      | Stream_details _ | Text _ | Thinking _ | Native_tool_started _ | Native_tool_progress _
+      | Stream_details _ | Text _ | Media _ | Thinking _ | Native_tool_started _ | Native_tool_progress _
       | Native_tool_ended _ | Tool_started _ | Tool_admitted _ | Tool_args _ | Tool_ended _ | Tool_result _
       | Stream_protocol_error _ | Approval_requested _ | Approval_settled _ | Accepted _
       | Checkpoint | External_effect_completed | Reply_details _ | Run_failed _ | Run_finished

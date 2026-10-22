@@ -1204,7 +1204,7 @@ let test_missing_start_text_scope_survives_journal_and_wire () =
         | Transcript.Drawn_text text -> "text:" ^ text
         | Drawn_reply text -> "reply:" ^ text
         | Drawn_skill _ -> "skill"
-        | Drawn_status _ | Drawn_error _ | Drawn_tools _ | Drawn_thinking _ -> "other")
+        | Drawn_media _ | Drawn_status _ | Drawn_error _ | Drawn_tools _ | Drawn_thinking _ -> "other")
           (Transcript.drawn transcript) in
       check (list string) "only a matching terminal text scope replaces the final stretch"
         ((if earlier then ["text:Earlier progress."] else [])

@@ -145,7 +145,7 @@ let test_workspace_location_is_preserved () = with_workspace (fun ~base_path ~ru
      fail "damaged bundle was classified as internally valid relocation"
    | Error {failure=(Invalid_keeper _ | Workspace_in_use | Unsafe_path _ | Source_absent
        | Source_changed | Companion_present _ | Store_failed _ | Io_failed _ | Invalid_bundle
-       | Input_selection_invalid _ | Input_source_changed _ | Input_history_unresolved _ | Input_retention_unconfirmed _);_} -> ()))
+       | Input_selection_invalid _ | Input_source_changed _ | Input_history_unresolved _ | Input_retention_unconfirmed _ | Installation_intent_unconfirmed _);_} -> ()))
 
 let test_companions_are_evidence () = with_workspace (fun ~base_path ~run_dir ~path ->
   let observed = plan base_path in
@@ -323,7 +323,7 @@ let test_input_selection_revalidation_and_active_owner () =
        (match cause.failure with Input_selection_invalid _ -> ()
         | Invalid_keeper _ | Workspace_in_use | Unsafe_path _ | Source_absent | Source_changed
          | Companion_present _ | Store_failed _ | Io_failed _ | Invalid_bundle | Bundle_workspace_mismatch _
-         | Input_source_changed _ | Input_history_unresolved _ | Input_retention_unconfirmed _ -> fail "wrong selection failure was lost")
+         | Input_source_changed _ | Input_history_unresolved _ | Input_retention_unconfirmed _ | Installation_intent_unconfirmed _ -> fail "wrong selection failure was lost")
      | Ok _ -> fail "unreviewed checkpoint selection was accepted");
     (match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
      | Base_path_acquired lease ->
@@ -384,7 +384,7 @@ let test_input_corrupt_retention_is_not_repaired () =
          | Installed _ -> fail "corrupt input was installed")
        | Invalid_keeper _ | Workspace_in_use | Unsafe_path _ | Source_absent | Source_changed
          | Companion_present _ | Store_failed _ | Io_failed _ | Invalid_bundle | Bundle_workspace_mismatch _
-         | Input_selection_invalid _ | Input_source_changed _ | Input_history_unresolved _ -> fail "retention failure evidence was lost")
+         | Input_selection_invalid _ | Input_source_changed _ | Input_history_unresolved _ | Installation_intent_unconfirmed _ -> fail "retention failure evidence was lost")
      | Ok _ -> fail "corrupt retained evidence was adopted");
     check string "corrupt evidence was not overwritten" "corrupt retained evidence" (contents retained))
 let test_input_rehash_cannot_hide_changed_derivative () =
@@ -420,7 +420,7 @@ let native_input_fixture ~terminal ~conflicting_seed ~base_path ~store ~snapshot
     | Some operation -> operation | None -> fail "native fixture did not claim operation" in
   let call_id = "019a0010-1000-7000-8000-0000000000d1" in
   let locator = Core.Agent.execution_locator_of_yojson
-    (`Assoc ["version",`Int 1;"run_id",`String "journal-input-native-run"]) |> fixture_ok in
+    (`Assoc ["version",`Int 1;"run_id",`String "execution-run-journal-input-native"]) |> fixture_ok in
   let seed_reference = Checkpoint.exact_snapshot_reference seed in
   let call = Keeper_native_call.create ~call_id ~runtime_id:"native.primary"
     ~operation_digest:operation.execution_digest ~api:Continue_from_checkpoint
@@ -450,7 +450,7 @@ let test_native_seed_is_history_not_current_input_authority () =
           | Input_history_unresolved _ -> ()
           | Invalid_keeper _ | Workspace_in_use | Unsafe_path _ | Source_absent | Source_changed
           | Companion_present _ | Store_failed _ | Io_failed _ | Invalid_bundle | Bundle_workspace_mismatch _
-          | Input_selection_invalid _ | Input_source_changed _ | Input_retention_unconfirmed _ ->
+          | Input_selection_invalid _ | Input_source_changed _ | Input_retention_unconfirmed _ | Installation_intent_unconfirmed _ ->
             fail "native history refusal lost its reason")
         | Ok _ -> fail "unsafe native history was accepted"))
     [None,false;Some (Core.Agent.Operator_repair_required Core.Agent.Effect_outcome_unknown),false;
@@ -527,8 +527,156 @@ let test_retention_post_commit_cancel_propagates_with_evidence () =
          check bool "full installation evidence retained" true (preserved==failure)
        | Invalid_keeper _ | Workspace_in_use | Unsafe_path _ | Source_absent | Source_changed
          | Companion_present _ | Store_failed _ | Io_failed _ | Invalid_bundle | Bundle_workspace_mismatch _
-         | Input_selection_invalid _ | Input_source_changed _ | Input_history_unresolved _ -> fail "installation evidence was discarded")
+         | Input_selection_invalid _ | Input_source_changed _ | Input_history_unresolved _ | Installation_intent_unconfirmed _ -> fail "installation evidence was discarded")
      | Ok _ -> fail "failed retention was accepted"))
+
+let install_digests plan =
+  let json = Journal.installation_plan_to_json plan in
+  Yojson.Safe.Util.(json |> member "source_sha256" |> to_string),
+  Yojson.Safe.Util.(json |> member "adopted_sha256" |> to_string)
+let install run_dir plan =
+  let expected_source_sha256,expected_adopted_sha256 = install_digests plan in
+  Journal.install ~run_dir ~expected_source_sha256 ~expected_adopted_sha256 plan
+let replaced = function Journal.Replaced record -> record
+  | Replacement_unconfirmed _ -> fail "normal journal replacement was unconfirmed"
+let with_installation f = with_input ~pending:true (fun ~base_path ~run_dir ~path ~session_dir:_
+    ~canonical ~metadata ~snapshot ~bundle:_ observed ->
+  let original = contents path in
+  let adoption = adopt run_dir observed |> ok |> adopted in
+  let plan = Journal.assess_installation ~base_path ~adoption_id:(Journal.input_adoption_id adoption) |> ok in
+  f ~base_path ~run_dir ~path ~canonical ~metadata ~snapshot ~adoption ~original plan)
+let test_installation_and_conditional_rollback_preserve_evidence () =
+  with_installation (fun ~base_path ~run_dir ~path ~canonical ~metadata ~snapshot ~adoption ~original _ ->
+    Unix.chmod path 0o640;
+    let plan = Journal.assess_installation ~base_path ~adoption_id:(Journal.input_adoption_id adoption) |> ok in
+    let before = contents canonical,contents metadata in
+    let record = install run_dir plan |> ok |> replaced in
+    let id = Journal.installation_id record in
+    let adopted_bytes = contents (Filename.concat (input_directory base_path (Journal.input_adoption_id adoption)) "adopted.sqlite3") in
+    check string "live target contains exact adopted database" adopted_bytes (contents path);
+    check int "installation preserves journal permissions" 0o640 (Unix.stat path).st_perm;
+    let recovered,classification = Journal.inspect_installation ~base_path ~installation_id:id |> ok in
+    check bool "restart sees adopted bytes" true (classification=Journal.Adopted_present);
+    check bool "intent alone is not a completion record" true
+      Yojson.Safe.Util.(Journal.installation_record_to_json recovered |> member "intent_only" |> to_bool);
+    let store = Store.open_existing ~path |> store_ok in
+    let observed = Store.input_checkpoint store ~trace_id:(Checkpoint.exact_snapshot_reference snapshot).trace_id |> store_ok in
+    Store.close store |> store_ok;
+    (match observed with
+     | Store.Input_observed reference -> check bool "installed input owner names exact selected payload" true
+       (Keeper_checkpoint_ref.equal reference (Checkpoint.exact_snapshot_reference snapshot))
+     | Input_unobserved | Prior_input_unavailable -> fail "installed selection was unavailable");
+    ignore (Journal.restore_installation ~run_dir recovered |> ok |> replaced);
+    check string "rollback restores exact original v2 bytes" original (contents path);
+    check int "rollback preserves journal permissions" 0o640 (Unix.stat path).st_perm;
+    let _,classification = Journal.inspect_installation ~base_path ~installation_id:id |> ok in
+    check bool "restart sees original bytes without inventing history" true (classification=Journal.Original_present);
+    check string "canonical never changed" (fst before) (contents canonical);
+    check string "metadata never changed" (snd before) (contents metadata);
+    ignore (Journal.load_input_adoption ~base_path ~adoption_id:(Journal.input_adoption_id adoption) |> ok);
+    Unix.unlink path;
+    let _,classification = Journal.inspect_installation ~base_path ~installation_id:id |> ok in
+    check bool "missing live journal is not inferred as installed or rolled back" true (classification=Journal.Missing);
+    (match Journal.restore_installation ~run_dir recovered with
+     | Error _ -> () | Ok _ -> fail "missing journal was automatically recreated"))
+let test_installation_requires_reviewed_digests_and_offline_owner () =
+  with_installation (fun ~base_path ~run_dir ~path ~canonical:_ ~metadata:_ ~snapshot:_ ~adoption:_ ~original plan ->
+    check int "readonly absent intent inventory stays empty" 0 (List.length (Journal.list_installations ~base_path |> ok));
+    check bool "discovery does not initialize an intent directory" false
+      (Sys.file_exists (Filename.concat (Filename.concat (Filename.concat base_path Common.masc_dirname) "upgrades") "journal-installs"));
+    let _,expected_adopted_sha256 = install_digests plan in
+    (match Journal.install ~run_dir ~expected_source_sha256:(String.make 64 '0') ~expected_adopted_sha256 plan with
+     | Error _ -> () | Ok _ -> fail "unreviewed installation succeeded");
+    (match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+     | Base_path_acquired lease ->
+       Fun.protect ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease) (fun () ->
+         expect_failure Journal.Workspace_in_use (install run_dir plan))
+     | Base_path_already_owned _ | Base_path_rejected _ -> fail "fixture lease unavailable");
+    write path (original ^ "late journal edit");
+    expect_failure Journal.Source_changed (install run_dir plan);
+    check string "stale source edit survives" (original ^ "late journal edit") (contents path))
+let test_changed_source_after_intent_is_not_overwritten () =
+  with_installation (fun ~base_path ~run_dir ~path ~canonical:_ ~metadata:_ ~snapshot:_ ~adoption:_ ~original plan ->
+    let expected_source_sha256,expected_adopted_sha256 = install_digests plan in
+    let changed = original ^ "changed before replacement" in
+    let result = Journal.For_testing.install ~run_dir ~expected_source_sha256 ~expected_adopted_sha256 plan
+      ~before_replacement:(fun () -> write path changed) ~sync_target_parent:sync_directory in
+    expect_failure Journal.Source_changed result;
+    let id = match result with Error {Journal.bundle_id=Some id;_} -> id
+      | Error {bundle_id=None;_} | Ok _ -> fail "durable intent identity was lost" in
+    let _,classification = Journal.inspect_installation ~base_path ~installation_id:id |> ok in
+    check bool "intent does not turn changed bytes into installed success" true (classification=Journal.Changed);
+    check string "concurrent edit survives" changed (contents path))
+let test_uncertain_intent_never_replaces_journal () =
+  with_installation (fun ~base_path ~run_dir ~path ~canonical:_ ~metadata:_ ~snapshot:_ ~adoption:_ ~original plan ->
+    let expected_source_sha256,expected_adopted_sha256 = install_digests plan in
+    let result = Journal.For_testing.install ~run_dir ~expected_source_sha256 ~expected_adopted_sha256 plan
+      ~before_replacement:(fun () -> fail "uncertain intent reached replacement") ~sync_target_parent:sync_directory
+      ~sync_intent_parent:(fun _ -> raise (Sys_error "intent parent fsync failed")) in
+    let id = match result with
+      | Error cause -> (match cause.Journal.failure,cause.bundle_id with
+        | Installation_intent_unconfirmed _,Some id -> id
+        | (Invalid_keeper _ | Workspace_in_use | Unsafe_path _ | Source_absent | Source_changed
+          | Companion_present _ | Store_failed _ | Io_failed _ | Invalid_bundle | Bundle_workspace_mismatch _
+          | Input_selection_invalid _ | Input_source_changed _ | Input_history_unresolved _ | Input_retention_unconfirmed _
+          | Installation_intent_unconfirmed _),(Some _ | None) -> fail "intent uncertainty evidence was lost")
+      | Ok _ -> fail "uncertain intent allowed installation" in
+    check string "uncertain intent never changes original" original (contents path);
+    let _,classification = Journal.inspect_installation ~base_path ~installation_id:id |> ok in
+    check bool "visible intent may accompany original bytes" true (classification=Journal.Original_present))
+let test_install_and_restore_sync_uncertainty_are_not_no_write () =
+  with_installation (fun ~base_path ~run_dir ~path ~canonical:_ ~metadata:_ ~snapshot:_ ~adoption:_ ~original plan ->
+    let expected_source_sha256,expected_adopted_sha256 = install_digests plan in
+    let result = Journal.For_testing.install ~run_dir ~expected_source_sha256 ~expected_adopted_sha256 plan
+      ~before_replacement:(fun () -> ()) ~sync_target_parent:(fun _ -> raise (Sys_error "target parent fsync failed")) |> ok in
+    let record = match result with Journal.Replacement_unconfirmed record -> record
+      | Replaced _ -> fail "uncertain install was reported durable" in
+    let _,classification = Journal.inspect_installation ~base_path ~installation_id:(Journal.installation_id record) |> ok in
+    check bool "uncertain installed bytes remain observable" true (classification=Journal.Adopted_present);
+    (match Journal.For_testing.restore_installation ~run_dir record ~before_replacement:(fun () -> ())
+      ~sync_target_parent:(fun _ -> raise (Sys_error "restore parent fsync failed")) |> ok with
+     | Journal.Replacement_unconfirmed _ -> () | Replaced _ -> fail "uncertain rollback was reported durable");
+    check string "uncertain rollback restored visible original" original (contents path))
+let test_rollback_refuses_later_journal_input_and_companion_changes () =
+  List.iter (fun change -> with_installation (fun ~base_path ~run_dir ~path ~canonical ~metadata:_
+      ~snapshot:_ ~adoption:_ ~original:_ plan ->
+    let record = install run_dir plan |> ok |> replaced in
+    change path canonical;
+    let journal_before = contents path and canonical_before = contents canonical in
+    (match Journal.restore_installation ~run_dir record with
+     | Error _ -> () | Ok _ -> fail "rollback overwrote later evidence");
+    check string "rollback preserves later journal bytes" journal_before (contents path);
+    check string "rollback preserves later canonical bytes" canonical_before (contents canonical);
+    ignore (Journal.load_installation ~base_path ~installation_id:(Journal.installation_id record) |> ok)))
+    [(fun path _ -> write path (contents path ^ "later operation"));
+     (fun _ canonical -> write canonical (contents canonical ^ " "));
+     (fun path _ -> write (path ^ "-wal") "unrecovered SQLite evidence")]
+let test_post_rename_cancellation_retains_intent_and_actual_bytes () =
+  with_installation (fun ~base_path ~run_dir ~path:_ ~canonical:_ ~metadata:_ ~snapshot:_ ~adoption:_ ~original:_ plan ->
+    let expected_source_sha256,expected_adopted_sha256 = install_digests plan in
+    let cancellation = Eio.Cancel.Cancelled (Failure "after journal atomic rename") in
+    (match Journal.For_testing.install ~run_dir ~expected_source_sha256 ~expected_adopted_sha256 plan
+      ~before_replacement:(fun () -> ()) ~sync_target_parent:(fun _ -> raise cancellation) with
+     | Ok _ | Error _ -> fail "post-rename cancellation became normal replacement result"
+     | exception (Eio.Cancel.Cancelled _ as cause) -> check bool "same cancellation propagates" true (cause==cancellation));
+    let entries = Journal.list_installations ~base_path |> ok in
+    let record,classification = match entries with
+      | [(_,result)] -> ok result
+      | [] | _::_::_ -> fail "cancelled install lost intent discovery" in
+    check bool "restart classifies actual adopted bytes after cancellation" true (classification=Journal.Adopted_present);
+    let id = Journal.installation_id record in
+    let broken_id = if id=String.make 32 '0' then String.make 32 '1' else String.make 32 '0' in
+    let broken_directory = Filename.concat (Filename.concat (Filename.concat (Filename.concat base_path Common.masc_dirname)
+      "upgrades") "journal-installs") broken_id in
+    Unix.mkdir broken_directory 0o700; write (Filename.concat broken_directory "manifest.json") "{";
+    Unix.chmod (Filename.concat broken_directory "manifest.json") 0o600;
+    let discovered = Journal.list_installations ~base_path |> ok in
+    (match List.assoc_opt broken_id discovered with
+     | Some (Error _) -> () | Some (Ok _) | None -> fail "partial intent diagnostic was hidden");
+    (match List.assoc_opt id discovered with
+     | Some result -> ignore (ok result) | None -> fail "partial intent hid a valid intent");
+    ignore (Journal.restore_installation ~run_dir record |> ok |> replaced);
+    check bool "invalid evidence remains for inspection" true (Sys.file_exists broken_directory))
 
 let () = run "Keeper journal offline bundles"
   ["operator preparation",[
@@ -549,4 +697,12 @@ let () = run "Keeper journal offline bundles"
     test_case "rehashed derivative cannot hide changed source cells" `Quick test_input_rehash_cannot_hide_changed_derivative;
     test_case "native seed history differs from current input authority" `Quick test_native_seed_is_history_not_current_input_authority;
     test_case "native adoption refuses late retained payload and identity edits" `Quick test_native_adoption_rechecks_retained_evidence;
-    test_case "post-commit cancellation preserves exception and durable artifact" `Quick test_retention_post_commit_cancel_propagates_with_evidence]]
+    test_case "post-commit cancellation preserves exception and durable artifact" `Quick test_retention_post_commit_cancel_propagates_with_evidence];
+   "offline installation",[
+    test_case "install and conditional rollback preserve source evidence" `Quick test_installation_and_conditional_rollback_preserve_evidence;
+    test_case "installation requires reviewed digests and offline owner" `Quick test_installation_requires_reviewed_digests_and_offline_owner;
+    test_case "late source edit preserves durable intent without replacement" `Quick test_changed_source_after_intent_is_not_overwritten;
+    test_case "uncertain intent never permits replacement" `Quick test_uncertain_intent_never_replaces_journal;
+    test_case "install and rollback sync uncertainty preserve visible result" `Quick test_install_and_restore_sync_uncertainty_are_not_no_write;
+    test_case "rollback refuses later journal input and companion changes" `Quick test_rollback_refuses_later_journal_input_and_companion_changes;
+    test_case "post-rename cancellation preserves intent and actual bytes" `Quick test_post_rename_cancellation_retains_intent_and_actual_bytes]]

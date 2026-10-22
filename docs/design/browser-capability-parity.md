@@ -94,10 +94,11 @@ Chromium 쪽은 DevTools Protocol(`Input`, `Network`, `Runtime`, `Emulation`) �
 | 단위 | 상태 | PR |
 |---|---|---|
 | 3 우클릭·가운데 클릭 | 올림 (BiDi, 자동화 Firefox, Stagehand) | #45111, #45112 |
-| 4 창 크기 | `set_viewport` 만 올림 (BiDi, Stagehand). 창 목록·만들기·닫기는 아직 | #45114 |
+| 4 창 크기 | `set_viewport` 만 올림 (BiDi, Stagehand) | #45114 |
 | 탭 기록·닫기 (표의 `back`, `forward`, `reload`, `close_tab`) | 올림 (BiDi, 이 연결이 연 탭만) | #45115 |
 | 8 터치 | 올림 (BiDi, 자동화 Firefox) | #45116 |
 | 2 표 출력 도구 | 도구는 안 만들고, 이 표의 수치를 손으로 한 번 뽑았다(아래) | 이 문서 |
+| 4 창 목록 | 올림 (BiDi 의 `tabs.list` 행에 `windowId`). 만들기·닫기는 아직 | #45118 |
 | 5, 6, 7, 9, 10 | 안 함 | |
 
 표 값(`Browser_capabilities.support` 를 세어 뽑은 수치, fixture 결과가 아니다). 스택 끝(#45116) 기준이다.

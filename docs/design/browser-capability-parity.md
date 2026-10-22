@@ -33,7 +33,7 @@
 
 | 연산 | 프로토콜 근거 | 상태 |
 |---|---|---|
-| 우클릭, 가운데 클릭 | BiDi `input.performActions` 의 `pointerDown/Up.button`. 지금 `browser_pointer.ml` 은 `button 0` 만 쓴다 | 버튼 번호 규칙은 스펙에서 아직 못 읽었다 |
+| 우클릭, 가운데 클릭 | BiDi `input.performActions` 의 `pointerDown/Up.button`. 지금 `browser_pointer.ml` 은 `button 0` 만 쓴다 | 스펙 문장은 읽지 못했다. 2026-10-22 에 Firefox 158(헤드리스)에 `input.performActions` 를 직접 보내 확인했다: 버튼 0 은 `click`, 1 은 `auxclick`, 2 는 `contextmenu` 와 `auxclick` 이 왔고 모두 `isTrusted` 였다 |
 | 터치 | BiDi `pointerType` 에 touch 가 있는지 | 스펙에서 못 읽었다 |
 | 창 크기 | BiDi `browsingContext.setViewport` | 명령 이름은 확인했다. 인자는 못 읽었다 |
 | 창 목록·만들기·닫기 | BiDi `browsingContext.create` | 명령 이름만 확인했다. `type` 값(tab/window)은 못 읽었다 |
@@ -121,7 +121,7 @@ Chromium 쪽은 DevTools Protocol(`Input`, `Network`, `Runtime`, `Emulation`) �
 | Stagehand | `lib/browser_stagehand_executor.ml` → `browser_stagehand_wire.ml` `page.click` | JSON-RPC 로 외부 런타임에 보낸다. 저장소에 런타임 소스가 없다. CDP `Input.dispatchMouseEvent` 호출은 OCaml 에 없다 |
 | 표 | `lib/browser_capabilities.ml` | `Right_click`, `Middle_click` 은 이미 연산 목록에 있고 `missing` 이다 |
 
-프로토콜 값(문서가 아니라 보고된 값이라 구현 단위에서 다시 확인한다): BiDi `input.performActions` 의 단추는 0 왼쪽, 1 가운데, 2 오른쪽이다. CDP 는 `button` 이 `"left"|"middle"|"right"` 이다.
+프로토콜 값: BiDi `input.performActions` 의 단추는 0 왼쪽, 1 가운데, 2 오른쪽이고, Firefox 158 에서 이벤트까지 확인했다(위 표). Stagehand 4.1.0 패키지의 `page.click` 은 `options.button` 으로 `"left"|"right"|"middle"` 를 받는다(`dist/index.d.mts` 의 `PageClickParams`). Chromium 에서 실제로 돌려 본 기록은 없다.
 
 ### 우클릭·가운데 클릭 설계 (단위 3)
 
@@ -129,7 +129,7 @@ Chromium 쪽은 DevTools Protocol(`Input`, `Network`, `Runtime`, `Emulation`) �
   - 이유: 어댑터 두 곳(`browser_webdriver.ml:473-482`, `bidi_peer.ml:259-264`)이 생성자를 나열하고 `Click` 을 기본으로 둔다. 새 `*_at` 생성자를 추가하면 컴파일은 되고 왼쪽 클릭이 나간다. 값으로 들고 있으면 모든 `Click` 자리가 컴파일 오류로 드러난다.
 - 공개 인자는 새 `action` 을 늘리지 않고 `click`, `click_at` 에 선택 인자 `button`(`primary` 기본, `middle`, `secondary`)을 더하는 쪽을 권한다. `action` 열거가 이미 16개다. 확정은 열린 결정에 넣는다.
 - 확장은 `Unsupported` 로 둔다. DOM 클릭으로 우클릭을 흉내 내지 않는다(코드가 이미 "신뢰된 hover 는 안 된다"고 적은 것과 같은 이유).
-- Stagehand 는 이 단위에서 `Unsupported` 로 둔다. 외부 런타임의 `page.click` 이 `button` 옵션을 받는지 확인하지 못했다. `click_count` 는 받는 것을 코드가 보여 주므로 가능성은 있다. 프로브(`test/stagehand_browser_probe.ml`)로 확인한 뒤 별도 단위로 연다.
+- Stagehand 는 3a(#45111)에서 거절하고, 3c(#45112)에서 `options.button` 으로 보낸다. 근거는 고정한 4.1.0 패키지의 스키마이고, 실제 Chromium 에서 `contextmenu`·`auxclick` 이 오는지는 프로브(`test/stagehand_browser_probe.ml`)로 아직 확인하지 못했다.
 - 막히는 곳: `Browser_lane` 의 `interaction` 타입은 수백 모듈이 임포트한다. 이 타입을 바꾸면 로컬 단독 타입 검사가 신뢰되지 않아서, 단위 3 은 CI 의 `merge-compile` 로만 컴파일이 증명된다. 그래서 단위 3 은 한 번에 쓰지 않고, 타입과 BiDi 두 어댑터와 표 변경(단위 3a), 프로브(3b), Stagehand(3c)로 쪼갠다.
 - 검증 방법: 실제 Firefox 를 쓰는 `test/browser_addon_firefox_probe.ml` 옆에 `oncontextmenu`·`onauxclick` 핸들러를 가진 픽스처를 더해 `isTrusted` 와 `event.button` 을 본다. 헤드가 있는 Firefox 에서 우클릭이 운영체제 메뉴를 띄우는지는 확인하지 못했다.
 

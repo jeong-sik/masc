@@ -22223,16 +22223,17 @@ let copy_reference_to_terminal render_schedule reference =
 
 let session_quit_notice (state : state) ~key =
   let waiting = Masc_tui_keeper_chat_queue.length state.msg_queued in
-  let drafts, saving =
+  let drafts, unconfirmed_save =
     List.fold_left
-      (fun (count, saving) draft ->
-        let submitted =
+      (fun (count, unconfirmed) draft ->
+        let unresolved =
           match Masc_tui_code_draft.phase draft with
-          | Masc_tui_code_draft.Saving _ -> true
+          | Masc_tui_code_draft.Saving _
+          | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Uncertain _, _) -> true
           | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _
-          | Masc_tui_code_draft.Needs_review _ -> false
+          | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Conflict _, _) -> false
         in
-        count + 1, saving || submitted)
+        count + 1, unconfirmed || unresolved)
       (0, false) state.code_drafts
   in
   match drafts with
@@ -22243,7 +22244,7 @@ let session_quit_notice (state : state) ~key =
       let queued =
         if waiting = 0 then "" else Printf.sprintf " + %d queued" waiting
       in
-      let pending = if saving then "; save unconfirmed" else "" in
+      let pending = if unconfirmed_save then "; save unconfirmed" else "" in
       Printf.sprintf
         "%s: lose %d Code draft(s)%s%s · press again to quit; any other key stays"
         key count queued pending

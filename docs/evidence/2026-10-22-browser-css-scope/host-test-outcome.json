@@ -1,0 +1,36 @@
+{
+ "passed": true,
+ "cleanup": [
+  {
+   "name": "native",
+   "pid": 19563,
+   "exit": 0
+  },
+  {
+   "name": "firefox",
+   "pid": 18727,
+   "exit": -15
+  }
+ ],
+ "cleanup_errors": [],
+ "tabs": [
+  {
+   "id": 1,
+   "index": 0,
+   "url": "http://127.0.0.1:50825/fixture",
+   "title": "BiDi native fixture",
+   "active": true,
+   "windowId": 0
+  },
+  {
+   "id": 2,
+   "index": 1,
+   "url": "http://127.0.0.1:50825/fixture",
+   "title": "BiDi native fixture",
+   "active": false,
+   "windowId": 0
+  }
+ ],
+ "version": "158.0.1",
+ "out": "<scratch evidence dir>"
+}

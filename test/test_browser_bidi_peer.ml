@@ -877,6 +877,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | "browsingContext.captureScreenshot" -> Ok (obj ["data",`String "png"])
       | "input.performActions" | "input.releaseActions" | "browsingContext.setViewport"
       | "browsingContext.traverseHistory" | "browsingContext.reload" | "browsingContext.close" -> Ok `Null
+      | "browsingContext.activate" -> Ok (obj [])
       | other -> failf "unexpected protocol command: %s" other in
     let peer = peer_of command in
     (* The listing gives the operator's tab ID 1, then a tab this connection opens gets ID 2, so closing
@@ -1104,6 +1105,68 @@ let test_goto_acts_only_on_a_tab_this_connection_opened () =
   | Error (Peer.Outcome_unknown _) -> ()
   | Ok _ | Error (Peer.Before_effect _ | Peer.Partial_failure _) ->
     fail "an unreadable tab after a failed navigation was not unknown"
+(* Activation checks the observed URL before Firefox is asked, and reads the
+   tab again afterwards: the receipt says the observed page is in front. *)
+let test_activation_brings_the_observed_tab_forward () =
+  let page_url = ref "https://example.test/" and visible = ref true
+  and activations = ref [] and activate_error = ref None in
+  let peer = peer_of (fun method_ args ->
+    match method_ with
+    | "browsingContext.getTree" -> Ok (obj ["contexts",`List [obj ["context",`String "owned"]]])
+    | "script.callFunction" ->
+      (* The URL guard runs in the page; a page that moved on throws there. *)
+      let expected = Yojson.Safe.Util.(match member "arguments" args with
+        | `List (first :: _) -> (match member "value" first with
+            | `String encoded -> member "expectedUrl" (Yojson.Safe.from_string encoded) | _ -> `Null)
+        | _ -> `Null) in
+      (match expected with
+       | `String url when url <> !page_url ->
+         Ok (obj ["type",`String "exception";"exceptionDetails",obj ["text",`String "Error: page_url_changed"]])
+       | _ -> Ok (script_value (obj ["url",`String !page_url;"title",`String "fixture";
+           "active",`Bool !visible;"scrollX",`Int 0;"scrollY",`Int 0])))
+    | "browsingContext.activate" ->
+      activations := args :: !activations;
+      (match !activate_error with
+       | Some code -> Error (Peer.Rejected (Peer.error_code_of_wire code))
+       | None -> Ok (obj []))
+    | other -> failf "unexpected protocol command: %s" other) in
+  ignore (Peer.dispatch peer ~verb:Peer.Tabs_list (obj []));
+  let activate expected = Peer.dispatch peer ~verb:Peer.Page_interact
+    (Browser_lane.interaction_args ~tab_id:1 ~expected_url:(Some expected) Browser_lane.Activate_tab) in
+  (match activate "https://example.test/" with
+   | Ok receipt ->
+     check bool "the receipt names the action and the page in front" true
+       Yojson.Safe.Util.(member "action" receipt = `String "activate_tab"
+         && member "active" receipt = `Bool true && member "url" receipt = `String "https://example.test/")
+   | Error _ -> fail "the observed tab was not activated");
+  check bool "Firefox is asked for the tab's own context" true
+    (match !activations with [latest] -> Yojson.Safe.Util.member "context" latest = `String "owned" | _ -> false);
+  (match activate "https://example.test/elsewhere" with
+   | Error (Peer.Before_effect _) -> ()
+   | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) -> fail "a moved page was activated");
+  check int "a moved page sends no activation" 1 (List.length !activations);
+  activate_error := Some "unsupported operation";
+  (match activate "https://example.test/" with
+   | Error (Peer.Before_effect _) -> ()
+   | Ok _ | Error (Peer.Partial_failure _ | Peer.Outcome_unknown _) ->
+     fail "Firefox's documented refusal is not before effect");
+  (* An error Firefox did not document for activation may come after the tab
+     moved; the tab is read again, so the outcome is known. *)
+  activate_error := Some "unknown error";
+  (match activate "https://example.test/" with
+   | Error (Peer.Partial_failure {receipt;_}) ->
+     check bool "the receipt reads the tab after the error" true
+       Yojson.Safe.Util.(member "action" receipt = `String "activate_tab" && member "active" receipt = `Bool true)
+   | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) -> fail "an answered activation error was not read again");
+  activate_error := None;
+  visible := false;
+  match activate "https://example.test/" with
+  | Error (Peer.Partial_failure {tab_id;receipt;_}) ->
+    check int "the partial names the tab" 1 tab_id;
+    check bool "a tab still hidden is reported as read, not in front" true
+      (Yojson.Safe.Util.member "active" receipt = `Bool false)
+  | Ok _ | Error (Peer.Before_effect _ | Peer.Outcome_unknown _) ->
+    fail "a tab still hidden after activation was not reported as read"
 let test_tabs_name_their_window () =
   let peer = peer_of (fun method_ _ ->
     match method_ with
@@ -1271,6 +1334,7 @@ let () = run "BiDi live peer" ["identity",[test_case "native keyboard release an
     test_case "a tab the caller restored is not restored again" `Quick test_a_tab_restored_by_the_caller_is_not_restored_again;
     test_case "history and close act only on tabs this connection opened" `Quick test_history_and_close_act_only_on_tabs_this_connection_opened;
     test_case "goto acts only on a tab this connection opened" `Quick test_goto_acts_only_on_a_tab_this_connection_opened;
+    test_case "activation brings the observed tab forward" `Quick test_activation_brings_the_observed_tab_forward;
     test_case "open tab preserves existing context" `Quick test_open_tab_preserves_existing_context;
     test_case "open tab failure does not replay" `Quick test_open_tab_failure_does_not_replay;
     test_case "live act rejects other actions" `Quick test_live_act_rejects_other_actions_before_effect;

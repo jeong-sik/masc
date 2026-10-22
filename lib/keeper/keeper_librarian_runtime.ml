@@ -1,7 +1,7 @@
 (** Runtime adapter for LLM-owned current Memory OS selection. *)
 
 module Exact_output = Agent_core.Exact_output
-module Failure_evidence = Keeper_librarian_failure_evidence
+module Failure_evidence = Keeper_exact_walk_failure
 
 let exact_lane_id = Standalone_lane.to_id Standalone_lane.Librarian
 
@@ -592,68 +592,24 @@ let no_callback_error_to_string : no_callback_error -> string = function
    Reading the slot that ended the walk only reported "none" for a walk whose
    earlier slot sent its request, failed and advanced (#38450). A token-count
    measurement is not a generation request and is not counted. *)
-let exact_execution_error
-      ~api_walk_only
-      ~semantic_rejections
-      (error : no_callback_error Exact_output.flow_execution_error)
-  =
-  let flow_evidence, failure_evidence = Failure_evidence.of_flow error in
-  let failure_evidence =
-    match semantic_rejections with
-    | [] -> failure_evidence
-    | _ :: _ -> Failure_evidence.with_invalid_output failure_evidence
-  in
-  (* A refusal seen before a local stop is not exhaustion. Inspect the real
-     flow terminal and each prior visit, independently of the union of size
-     causes used by historical range adaptation. Other dispatched provider
-     failures remain part of an exhausted walk, even when their input cause
-     is unknown. *)
-  let dispatched_valid_output_failure = function
-    | Exact_output.Completion_failed { dispatch = No_generation_dispatch; _ }
-    | Invalid_json_output -> false
-    | Completion_failed { dispatch = Generation_dispatch_started; _ }
-    | Provider_response_refused _ | Response_body_deadline_exceeded
-    | Output_limit_reached | Incomplete_output | Missing_output
-    | Ambiguous_output _ | Unexpected_output_content -> true
-  in
-  let final_dispatched = match error with
-    | Exact_output.Flow_exact_execution_failed {cause;_} ->
-      dispatched_valid_output_failure cause.cause
-    | Flow_candidates_exhausted _ | Flow_attempt_already_started _
-    | Flow_attempt_start_failed _ | Flow_measurement_start_failed _
-    | Flow_before_measurement_dispatch_callback_failed _
-    | Flow_measurement_terminal_callback_failed _
-    | Flow_before_dispatch_callback_failed _ | Flow_before_advance_callback_failed _ -> false
-  in
-  let prior_dispatched = List.for_all
-    (fun (advance : Exact_output.flow_advance_receipt) -> match advance.failed with
-      | Flow_advance_execution_failed {cause;_} -> dispatched_valid_output_failure cause
-      | Flow_advance_candidate_rejected _ -> false)
-    flow_evidence.advances in
-  let all_candidates_visited =
-    Exact_output.candidate_visit_count_to_int flow_evidence.candidate_visit_count
-      = List.length flow_evidence.declared_candidate_snapshot in
-  let exhausted_input_refusals =
-    match Exact_output.flow_execution_terminal_kind error,
-          failure_evidence.provider_input_refusals with
-    | Advanceable_candidates_exhausted, (_ :: _ as refusals)
-        when api_walk_only && semantic_rejections = []
-          && all_candidates_visited && not failure_evidence.invalid_output
-          && final_dispatched && prior_dispatched -> Some refusals
-    | (Advanceable_candidates_exhausted | Non_advanceable_terminal), ([] | _ :: _) -> None
-  in
-  let outward_effect =
-    match Exact_output.flow_evidence_generation_dispatch flow_evidence with
+let exact_execution_error ~declared_http ~excluded_http ~declared_cli ~semantic_rejections
+    (error : no_callback_error Exact_output.flow_execution_error) =
+  let http=Keeper_exact_walk_receipt.http_failure
+    ~callback_error_to_string:no_callback_error_to_string
+    ~rejection_to_string:Keeper_librarian.parse_error_to_string
+    (Exact_output.Flow_execution_terminal {cause=error;prior_rejections=semantic_rejections}) in
+  let cli=Keeper_exact_walk_receipt.cli ~visited:[] ~dispatched:[] ~failures:[] ~result:Not_reached in
+  let receipt=match Keeper_exact_walk_receipt.make ~declared_http ~excluded_http ~declared_cli ~http ~cli with
+    | Ok receipt -> receipt
+    | Error detail -> invalid_arg ("invalid original Librarian walk: " ^ detail) in
+  let outward_effect=match Keeper_exact_walk_receipt.generation_dispatch receipt with
     | Exact_output.No_generation_dispatch -> No_outward_effect
-    | Exact_output.Generation_dispatch_started -> Outward_effect_started
-  in
-  let detail =
-    Exact_output.flow_execution_error_to_string
-      ~callback_error_to_string:no_callback_error_to_string
-      ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt
-      error
-  in
-  { outward_effect; failure_evidence; exhausted_input_refusals; detail }
+    | Generation_dispatch_started -> Outward_effect_started in
+  let detail=Exact_output.flow_execution_error_to_string
+    ~callback_error_to_string:no_callback_error_to_string
+    ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt error in
+  {outward_effect;failure_evidence=Keeper_exact_walk_receipt.failure_evidence receipt;
+   exhausted_input_refusals=Keeper_exact_walk_receipt.exhausted_input_refusals receipt;detail}
 ;;
 
 (* The librarian's whole prompt is one User message; the cli one-shot needs
@@ -942,7 +898,9 @@ let execute_answer
       Error
         (Exact_execution_failed
            (exact_execution_error
-              ~api_walk_only:(cli_slots = [] && preflight.unusable = [])
+              ~declared_http:(List.map (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id) selected_slots)
+              ~excluded_http:(List.map (fun (slot : slot_refusal) -> slot.slot_id) preflight.unusable)
+              ~declared_cli:cli_slots
               ~semantic_rejections:prior_rejections cause))
     in
     (* The CLI tail follows the same advancement rule as HTTP successors;
@@ -966,7 +924,9 @@ let execute_answer
             (with_cli_failure
                (Exact_execution_failed
                   (exact_execution_error
-                     ~api_walk_only:(cli_slots = [] && preflight.unusable = [])
+                     ~declared_http:(List.map (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id) selected_slots)
+                     ~excluded_http:(List.map (fun (slot : slot_refusal) -> slot.slot_id) preflight.unusable)
+                     ~declared_cli:cli_slots
                      ~semantic_rejections:prior_rejections cause))
                cli_failure))
      | Exact_output.Non_advanceable_terminal -> terminal ())

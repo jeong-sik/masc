@@ -152,3 +152,58 @@ recovery guarantees. Remove current builtin settings only after their complete
 replacement works; preserve retained Librarian history independently. This
 first unit and design do not narrow E03 or declare any of the original 54 tasks
 complete.
+
+## Original host execution evidence through the common runner
+
+The common Exact call now returns a host-only `execution_result` with its actual
+outcome and an opaque `Keeper_exact_walk_receipt.t`. The worker's request,
+outcome, schema permission and digest format do not gain an evidence or priority
+field. The real server captures the original ordered HTTP declaration, catalog
+and target fingerprints, visits, generation and measurement evidence, advances,
+semantic rejections and complete official-client tail. The current builtin
+Librarian also consumes the shared classifier/receipt instead of maintaining a
+private exhaustion predicate. This is a production execution boundary; it does
+not yet dispatch a Librarian worker or give one commit authority.
+
+A receipt retains typed source observations and rederives policy after strict
+restore. Input-only recursive admission partitioning and exhausted API-only
+unread authority remain separate decisions. A mixed named capacity plus
+size-independent quota/outage failure vetoes recursive splitting. Under the
+existing unread contract, that same fully visited, actually dispatched API-only
+walk may retain its nonempty named causes. Preflight exclusion, declared CLI,
+semantic/invalid output, missing/duplicate visits and local stop cannot grant
+that exhaustion authority. Measurement, actual HTTP generation and official
+client dispatch are separate observations.
+
+Under the existing original request claim and workspace lease, the broker saves
+its started marker, runs the call, then retains and strictly rereads a host result
+link before publishing the attempt outcome. One canonical host-built Store link binds declaration and original request
+digest, retaining the sparse ordered completed attempts. Every attempt envelope
+binds its actual ordinal, original Store root, complete request, schema and
+outcome. An Exact record lost after a later ordinal cannot hide its earlier
+execution proof or authorize a second dispatch. A worker cannot choose this address. An existing different proof, failed
+write or failed read confirmation prevents outcome exposure. No extra queue,
+scheduler, registry, lockfile or retry timer is added.
+
+A confirmed proof with its original started marker recovers only that attempt's
+local outcome publication. The broker does not resolve a runner or call a
+provider again, and a recovered not-final attempt is returned before any later
+retry. Missing proof retains the existing unknown outcome; malformed or
+unreadable proof refuses rather than becoming absence. The complete original
+attempt history is shape-validated before recovery. Delivery still requires
+fresh package/request/consumer authority and validation against the current
+allowed output; bookkeeping recovery itself grants none of those effects.
+
+`read_original_execution` lets a trusted original consumer read a specifically
+bound request/schema/attempt, including while the package is Off. It reads and
+validates one original record and the matching durable host link without
+claiming, writing, delivering or executing. Generic old finals without proof
+remain explicitly unproven. This observation is not Memory lineage, a locked
+commit, an absorption transcript, queue ACK or permission to retry a provider.
+The consumer must still authenticate its original physical capture and current
+Memory/purge/retirement boundary before its separate effects.
+
+The new Store failure/recovery and actual runner/classifier scenarios require
+selected compiled verification on their own frozen source. Parser checks and
+synthetic broker publication fixtures do not prove real provider capture, UI,
+operator installation or completion of E03 or the original54 work items.

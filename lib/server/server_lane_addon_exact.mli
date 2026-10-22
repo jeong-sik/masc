@@ -16,7 +16,11 @@
     - otherwise, a slot exhausted its output limit: [output_limit_reached];
     - otherwise every slot answered and none could be used: [invalid_output].
 
-    Resolution sends nothing. A lane that is unconfigured, off, without
+    Every call returns a mandatory host-only original walk receipt alongside
+    its unchanged worker outcome. It captures complete actual HTTP generation,
+    measurement, semantic and CLI visits; diagnostic summaries are not used to
+    reconstruct that proof. The common owner confirms the receipt durably
+    before publishing the outcome. Resolution sends nothing. A lane that is unconfigured, off, without
     slots, or a registry that is not published, is reported before any call. *)
 
 val runner : base_path:string -> Lane_addon_exact.runner

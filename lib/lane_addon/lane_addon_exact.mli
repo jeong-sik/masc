@@ -143,7 +143,14 @@ type call_outcome =
   | Call_ended of call_final
   | Call_refused of provider_refusal
 
-type call = validate:(Yojson.Safe.t -> (checked, string) result) -> call_outcome
+type execution_result = {
+  outcome : call_outcome;
+  receipt : Keeper_exact_walk_receipt.t;
+}
+(** Host-created evidence of the original call. It is retained separately from
+    the unchanged worker outcome and cannot be supplied through worker JSON. *)
+
+type call = validate:(Yojson.Safe.t -> (checked, string) result) -> execution_result
 (** Sends the call. [validate] checks one answer against the package's
     declared schema. Raising other than [Eio.Cancel.Cancelled] is recorded as
     [Outcome_unknown]. *)
@@ -177,6 +184,23 @@ type execution_authority =
     not serialized into the worker request or a durable admission-class audit. *)
 
 type retained_observation = Retained_absent | Retained_open | Retained_terminal of final
+
+type original_execution =
+  | No_completed_original
+  | Completed_original of execution_result
+
+val read_original_execution : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> attempt_ordinal:int -> request ->
+  (original_execution, string) result
+(** Read the original host call evidence under the caller's original Store,
+    request, schema and one-based attempt identity. Missing proof remains
+    unproven; malformed, conflicting and unreadable evidence returns [Error].
+    A complete proof may precede final publication. This read never claims,
+    writes, resolves a route, delivers to a worker or calls a provider. It grants
+    no Memory, queue-consumption or new execution authority. Proof identity
+    includes the original Store root; moving the workspace directory makes
+    that proof a conflicting identity and returns [Error]. Offload the whole
+    blocking scope to a system thread. *)
 val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
   schema:Yojson.Safe.t -> request -> (retained_observation, string) result
 (** Read only the original host Exact record under the caller's workspace
@@ -213,14 +237,17 @@ val run :
     Request identity is checked before output selection. A refused output
     cannot reuse a retained id with another body. New refusals are retained;
     refusing delivery of an existing final records the refusal without
-    replacing the original final. A started attempt without an outcome is
-    retained as [Outcome_unknown] before selection is checked, so disabling an
+    replacing the original final. A started attempt without an outcome or
+    confirmed execution proof is retained as [Outcome_unknown] before selection is checked, so disabling an
     output cannot erase that uncertainty. Cancellation is checked after the started
     record is written and immediately before entering the provider call.
 
     [Error] when [declaration_id] cannot own an add-on lane, or when the
-    record cannot be read or written. Nothing is delivered then. If the
-    outcome of a sent call cannot be written, the started attempt stays, and
-    a later [run] reads it as [Outcome_unknown]. A cancelled call leaves its
+    record cannot be read or written. Nothing is delivered then. A returned
+    call's original host proof is saved and strictly confirmed before outcome
+    publication. Confirmed proof plus its original started marker permits
+    publication-only recovery without resolving or invoking a runner. Missing
+    proof keeps [Outcome_unknown]; invalid or unreadable proof refuses recovery.
+    A cancelled call leaves its
     attempt started too. An exception from the runner's resolution step
     propagates; nothing was sent and no attempt was written for it. *)

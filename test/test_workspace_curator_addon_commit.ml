@@ -245,6 +245,20 @@ let test_briefing_pass ?(on_conflict=fun _ _ _ -> ()) modification ()=with_works
         (Briefing.needs_refresh ~sources:(Ledger.briefing_sources fresh) ~contract complete))
   else on_conflict base_path store (conflicted result))
 module Exact = Lane_addon_exact
+
+(* These fixtures exercise host publication, not real provider capture. Their
+   explicit synthetic CLI success never claims API-only failure coverage. *)
+let executed outcome =
+  let module Receipt = Masc.Keeper_exact_walk_receipt in
+  let declared_cli, dispatched, result = match outcome with
+    | Exact.Call_ended (Exact.Answered {slot; _}) -> [slot], [slot], Receipt.Answered slot
+    | Exact.Call_ended (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
+    | Exact.Call_refused _ -> [], [], Receipt.Not_reached in
+  let receipt = match Receipt.make ~declared_http:[] ~excluded_http:[] ~declared_cli
+      ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture")
+      ~cli:(Receipt.cli ~visited:dispatched ~dispatched ~failures:[] ~result) with
+    | Ok receipt -> receipt | Error detail -> Alcotest.fail detail in
+  {Exact.outcome; receipt}
 let size_input=Exact.Call_final (Exact.Input_refused Exact.Input_capacity)
 let size_output=Exact.Call_final (Exact.Output_limit_reached {detail="Actual provider output limit"})
 let refuse store capture final =
@@ -464,8 +478,8 @@ let host_result base_path store capture output =
   let request=get (Server_workspace_memory_addon_validation.request capture) in
   let runner ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
     match validate output with
-    | Ok output -> Exact.Call_ended (Exact.Answered {output;slot="original-host";usage=None})
-    | Error detail -> Exact.Call_ended (Exact.Invalid_output {detail})) in
+    | Ok output -> executed (Exact.Call_ended (Exact.Answered {output;slot="original-host";usage=None}))
+    | Error detail -> executed (Exact.Call_ended (Exact.Invalid_output {detail}))) in
   get (Exact.run ~store ~declaration_id:"curator" ~package:(package ()) ~runner
     ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path) request)
 let test_original_host_terminal_recovers_without_a_live_runtime ()=with_workspace (fun base_path _ ->

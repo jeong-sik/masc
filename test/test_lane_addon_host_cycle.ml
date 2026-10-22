@@ -6,6 +6,20 @@ open Alcotest
 open Masc
 module Runtime = Lane_addon_runtime
 module Exact = Lane_addon_exact
+
+(* These fixtures exercise host publication, not real provider capture. Their
+   explicit synthetic CLI success never claims API-only failure coverage. *)
+let executed outcome =
+  let module Receipt = Masc.Keeper_exact_walk_receipt in
+  let declared_cli, dispatched, result = match outcome with
+    | Exact.Call_ended (Exact.Answered {slot; _}) -> [slot], [slot], Receipt.Answered slot
+    | Exact.Call_ended (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
+    | Exact.Call_refused _ -> [], [], Receipt.Not_reached in
+  let receipt = match Receipt.make ~declared_http:[] ~excluded_http:[] ~declared_cli
+      ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture")
+      ~cli:(Receipt.cli ~visited:dispatched ~dispatched ~failures:[] ~result) with
+    | Ok receipt -> receipt | Error detail -> Alcotest.fail detail in
+  {Exact.outcome; receipt}
 module F = Exact_output_fixture
 
 let member = Yojson.Safe.Util.member
@@ -63,8 +77,8 @@ let runner state : Exact.runner = fun ~admission_class:_ ~lane_key:_ ~schema:_ _
   | Answer json ->
       Ok (fun ~validate ->
         match validate json with
-        | Ok output -> Exact.Call_ended (Exact.Answered { output; slot = "fixture"; usage = None })
-        | Error detail -> Exact.Call_ended (Exact.Invalid_output { detail }))
+        | Ok output -> executed (Exact.Call_ended (Exact.Answered { output; slot = "fixture"; usage = None }))
+        | Error detail -> executed (Exact.Call_ended (Exact.Invalid_output { detail })))
 
 let port ?await_change ?deliver_reply ?(during_delivery=fun _ -> ()) ?(before_listing = fun _ -> ()) worker : Runtime.For_testing.host_port = {
   await_change;

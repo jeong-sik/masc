@@ -41,6 +41,24 @@ val in_message : text:string -> attachments:preview list -> preview
     the last path in the original text.
     Attachment display labels must never be included in [text]. *)
 
+val in_message_previews : text:string -> attachments:preview list -> preview list
+(** All named images, closed Mermaid fences and supplied image attachments,
+    oldest first within each group. The last item preserves {!in_message}'s
+    precedence. A Mermaid source also present as a supplied structured output
+    appears only once, with that output's caption. Does not read or decode bytes. *)
+
+val newest : preview list -> preview
+(** Last non-[No_image] item, or [No_image]. *)
+
+val newest_first : conversation:preview list -> staged:Masc_tui_keeper_chat_projection.attachment list -> order:order -> preview list
+(** Frozen selection catalog. Uses the same staged/conversation precedence as
+    {!choose_preview}, retaining every source within each group. *)
+
+val prioritize_sources : newly_observed:('a -> bool) -> ('a * preview list) list -> ('a * preview list) list * order
+(** Preserve source occurrences while moving current arrivals after older
+    sources. A newly observed source with no preview cannot supersede staging.
+    The caller supplies original source identity/arrival ownership, never time. *)
+
 val choose_preview : conversation:preview -> staged:Masc_tui_keeper_chat_projection.attachment list -> order:order -> preview
 
 val decode_payload : string -> (string, string) result

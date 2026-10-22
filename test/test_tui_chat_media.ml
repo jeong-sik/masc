@@ -169,7 +169,23 @@ let test_canonical_mermaid_fence_collision () =
   check (list string) "generated fence cannot close on a source line"
     [source] (Masc_tui_markdown.mermaid_sources text)
 
+let test_all_producer_images () =
+  let first = "flowchart TD\n A --> B" in
+  let second = "sequenceDiagram\n A->>B: ready" in
+  let media = [Media.Mermaid {source=first;caption=Some "first"};
+    Media.Image {src="data:image/png;base64,aW1hZ2U=";cap=Some "result"};
+    Media.Mermaid {source=second;caption=Some "second"};
+    Media.Voice {secs=None;wave=None;via=None;size=None;transcript=None;src=None}] in
+  match Media.images media with
+  | [Preview.Output_image {name="first";source=Inline_mermaid one};
+     Output_image {source=Inline_data _;_};
+     Output_image {name="second";source=Inline_mermaid two}] ->
+      check string "first source remains available" first one;
+      check string "later source remains available" second two
+  | _ -> fail "producer images were dropped or a voice became an image"
+
 let () = run "TUI retained output and playback" [ "history", [
+  test_case "all producer visual sources are retained" `Quick test_all_producer_images;
   test_case "canonical diagram preserves producer order and source" `Quick test_canonical_mermaid_preview;
   test_case "canonical source fence collision" `Quick test_canonical_mermaid_fence_collision;
   test_case "media-only autonomous turn" `Quick test_media_only_autonomous;

@@ -44,7 +44,7 @@ let entry_at ?(id = "") at : Tui_types.msg_entry =
   ; me_turn_sequence = None
   ; me_operation_seq = 0
   ; me_text = Printf.sprintf "row at %.0f" at
-  ; me_image = Masc_tui_image_preview.No_image
+  ; me_images = []
   ; me_media = []
   ; me_memory_summary = None
   ; me_journal = []
@@ -73,7 +73,7 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
   ; me_turn_sequence = turn_sequence
   ; me_operation_seq = operation_seq
   ; me_text = text
-  ; me_image = Masc_tui_image_preview.No_image
+  ; me_images = []
   ; me_media = []
   ; me_memory_summary = memory_summary
   ; me_journal = []
@@ -2130,7 +2130,7 @@ let test_journal_replacement_retains_history_media () =
       let row = { (chat_entry ~request_id ~role:(if autonomous then Tui_types.Message_autonomous else Message_keeper)
           ~text:(Media.append_text ~text:history.text history.media) ~at:2. ()) with
         me_identity=Tui_types.Persisted_row (Option.get history.structural_id);
-        me_media=history.media;me_image=image;
+        me_media=history.media;me_images=[image];
         me_turn_sequence=history.turn_sequence } in
       let state=Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
       state.view <- Tui_types.Keepers Tui_types.Keeper_message;
@@ -2153,7 +2153,7 @@ let test_journal_replacement_retains_history_media () =
       (match projected with
        | [remaining] ->
            check bool "remainder keeps durable source identity" true (remaining.me_identity=row.me_identity);
-           check bool "remainder keeps original image action" true (remaining.me_image=image);
+           check bool "remainder keeps original image action" true (remaining.me_images=[image]);
            check string "only media remains when journal owns prose"
              (Media.append_text ~text:"" history.media) remaining.me_text
        | _ -> fail "media remainder was dropped or duplicated");

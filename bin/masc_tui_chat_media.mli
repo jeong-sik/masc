@@ -15,6 +15,10 @@ val newest_image : t list -> Masc_tui_image_preview.preview option
 (** The last image or Mermaid output in producer order. Unsupported sources remain an
     explicit unavailable preview rather than exposing a local filesystem path. *)
 
+val images : t list -> Masc_tui_image_preview.preview list
+(** Every image/diagram in producer order, including explicitly unavailable
+    image sources. Filenames remain labels, not local filesystem paths. *)
+
 type playable = {
   name : string;
   kind : [ `Audio | `Midi ];

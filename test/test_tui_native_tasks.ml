@@ -122,7 +122,7 @@ let test_real_chat_projection_preserves_flags_and_terminal_safety () =
   state.msg_tool_visibility <- Masc_tui_types.Tools_full;
   state.msg_history <- [{Masc_tui_types.me_keeper_name=keeper;me_role=Message_keeper;
     me_identity=Persisted_row "settled";me_turn_phase=Turn_output;me_turn_sequence=None;
-    me_operation_seq=0;me_text="settled reply";me_image=Masc_tui_image_preview.No_image;
+    me_operation_seq=0;me_text="settled reply";me_images=[];
     me_memory_summary=None;me_journal=[];me_memory_pass=Layout.No_pass;me_gate=None;
     me_submitted_at=None;me_tool_block=None;me_skill_block=[];me_timestamp="";
     me_request_id="settled";me_execution_source=None;me_media=[];me_at=1.}];

@@ -146,8 +146,15 @@ let ask_context (ctx : context) arguments : Mcp_tool_runtime_ask.context =
 (* The wire name is parsed once and the operations are matched, so an operation
    added to [Tool_schemas_misc.misc_operation] is a compile error here. [None]
    means the name is not this facade's -- the tag dispatcher owns that case. *)
-let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sources.Unauthenticated) ctx ~name ~args : Tool_result.result option =
+let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sources.Unauthenticated)
+    ?(browser_principal=Lane_addon_call_context.Anonymous) ctx ~name ~args : Tool_result.result option =
   let start = Tool_timing.start () in
+  let browser tool=Browser_addon_tools.handle ~config:ctx.config ~access:lane_access
+    ~principal:browser_principal
+    ~reserved:(List.map (fun (schema:Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas)
+    ~keeper_name:(match lane_access with Lane_addon_sources.Keeper name -> Some name
+      | Operator_configuration|Unauthenticated -> None)
+    ~tool ~tool_name:name ~start_time:start args in
   (* Lane ownership uses the verified Keeper principal. The session name is
      still the attribution for unrelated tools and operator calls. *)
   let lane_caller = match lane_access with
@@ -279,19 +286,19 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
   | Some Tool_schemas_misc.Misc_web_fetch ->
       Some (handle_web_fetch ~tool_name:name ~start_time:start ctx args)
   | Some Tool_schemas_misc.Misc_browser_tabs ->
-      Some (Tool_misc_browser_lane.handle_tabs ~base_path:ctx.config.base_path ~tool_name:name ~start_time:start args)
+      Some (browser Browser_capabilities.Tabs)
   | Some Tool_schemas_misc.Misc_browser_read ->
-      Some (Tool_misc_browser_lane.handle_read ~base_path:ctx.config.base_path ~tool_name:name ~start_time:start args)
+      Some (browser Browser_capabilities.Read)
   | Some Tool_schemas_misc.Misc_browser_session ->
-      Some (Tool_misc_browser_lane.handle_session ~tool_name:name ~start_time:start args)
+      Some (browser Browser_capabilities.Session)
   | Some Tool_schemas_misc.Misc_browser_interact ->
-      Some (Tool_misc_browser_lane.handle_interact ~actor:ctx.agent_name ~base_path:ctx.config.base_path ~tool_name:name ~start_time:start args)
+      Some (browser Browser_capabilities.Interact)
   | Some Tool_schemas_misc.Misc_browser_goto ->
-      Some (Tool_misc_browser_lane.handle_goto ~tool_name:name ~start_time:start args)
+      Some (browser Browser_capabilities.Goto)
   | Some Tool_schemas_misc.Misc_browser_act ->
-      Some (Tool_misc_browser_lane.handle_act ~base_path:ctx.config.base_path ~tool_name:name ~start_time:start args)
+      Some (browser Browser_capabilities.Act)
   | Some Tool_schemas_misc.Misc_browser_instruct ->
-      Some (Tool_misc_browser_lane.handle_instruct ~tool_name:name ~start_time:start args)
+      Some (browser Browser_capabilities.Instruct)
   | Some (Tool_schemas_misc.Misc_msx _)
   | Some Tool_schemas_misc.Misc_dos_load
   | Some Tool_schemas_misc.Misc_dos_meta

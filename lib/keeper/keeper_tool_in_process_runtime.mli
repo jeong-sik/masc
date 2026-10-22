@@ -162,21 +162,21 @@ val handle_memory_retract_with_outcome
 (** Atomically retract one exact ordinary-current Memory OS fact. This is an
     internal self-write, not an external Gate effect. *)
 
-val handle_browser_tabs_with_outcome : config:Workspace.config -> args:Yojson.Safe.t -> Keeper_tool_execution.t
+val handle_browser_tabs_with_outcome : config:Workspace.config -> meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 (** One browser-lane queue hop (masc_browser_tabs); no gate — the verb set
     is closed and read-only at the state layer. *)
 
 val handle_browser_read_with_outcome : config:Workspace.config -> meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 
-val handle_browser_session_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
+val handle_browser_session_with_outcome : config:Workspace.config -> meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 
 val handle_browser_interact_with_outcome : config:Workspace.config -> meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 
-val handle_browser_goto_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
+val handle_browser_goto_with_outcome : config:Workspace.config -> meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 
 (** One Stagehand sentence (masc_browser_instruct). A failed act may have
     acted; a failed observe or extract read nothing into the page. *)
-val handle_browser_instruct_with_outcome : args:Yojson.Safe.t -> Keeper_tool_execution.t
+val handle_browser_instruct_with_outcome : config:Workspace.config -> meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 
 val handle_browser_act_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->

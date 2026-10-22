@@ -63,8 +63,12 @@ authority and common Exact HTTP flow against loopback providers, and retained
 terminal reads. Only the providers are fixtures in that flow. The production
 Curator scheduler is not started by this check.
 
-Production Curator owner/metadata wiring, typed admission and uncertain outcomes,
-domain commit recovery, Addon wake, real model Off/reconnect and both UIs remain
-E02 integration work. The current direct Curator route has not been switched by
-adding this package, and this document does not claim installation or extraction
-completion.
+The public production owner now uses the [original Addon execution and recovery
+path](../../docs/design/workspace-curator-production-owner.md), including actual
+configuration/result wakes and fresh configured admission for new work. The
+replacement `test_workspace_memory_curator_lane` fixture starts that owner with a
+real persistent Python/MCP worker and common Exact loopback providers; resource
+launch/cleanup is substituted. Its execution evidence is separate from the
+contract-only check above. Registry delivery and full Dashboard/TUI observation,
+real provider/container lifecycle, integration and installation remain E02 work.
+This source change does not claim extraction completion.

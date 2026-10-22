@@ -29,6 +29,9 @@ let resolve ~config ~reserved =
   | Some conflict -> Error (Rejected (Lane_addon_tool_export.conflict_to_string conflict))
   | None -> (match List.find_opt (fun (export : Runtime.tool_export) -> export.tool.name=Binding.tool) snapshot.exports with
       | Some export -> Ok export | None -> Error (Unavailable "No attached Add-on provides curate"))
+let same_semantic_destination (actual:Runtime.tool_request_destination) (expected:Capture.destination) =
+  actual.installation_id=expected.installation_id && actual.package_id=expected.package_id
+  && actual.tool=expected.tool && actual.configuration_revision=expected.configuration_revision
 let capture ~config make =
   let reserved=reserved () in
   let* export=resolve ~config ~reserved in
@@ -269,6 +272,26 @@ let eligible ~base_path ~briefing_contract capture = match Capture.work capture 
     let* ledger=Ledger.load ~base_path |> Result.map_error (fun detail -> Unavailable detail) in
     Briefing.batch_is_current ~sources:(Ledger.briefing_sources ledger) ~contract:(briefing_contract ()) batch
     |> rejected
+let successor_is_current ~config ~capture =
+  let reserved=reserved () in
+  let* export=resolve ~config ~reserved in
+  let* matching=Runtime.with_tool_request_destination ~config ~access:Lane_addon_sources.Operator_configuration
+    ~reserved ~export ~publish:(fun actual -> Ok (same_semantic_destination actual (Capture.destination capture)))
+    |> Result.map_error runtime_error in
+  if not matching then Ok false else
+  let base_path=config.Workspace.base_path in
+  let briefing_contract ()=Briefing.contract
+    ~template:(Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective in
+  Eio_unix.run_in_systhread (fun () ->
+    let* same_before=match Capture.work capture with
+      | Capture.Classification {ledger;_} ->
+        let* current=Ledger.load ~base_path |> Result.map_error (fun detail -> Unavailable detail) in
+        Ok (Yojson.Safe.equal (Ledger.to_json current) (Ledger.to_json ledger))
+      | Capture.Briefing batch ->
+        let* current=Briefing.load ~directory:(Ledger.directory ~base_path)
+          |> Result.map_error (fun detail -> Unavailable detail) in
+        Ok (Yojson.Safe.equal (Briefing.to_json current) (Briefing.to_json (Briefing.prepared_state batch))) in
+    if not same_before then Ok false else eligible ~base_path ~briefing_contract capture)
 let settle_with ~store ~base_path ~request_id ~briefing_contract ~save =
   let* original=Eio_unix.run_in_systhread (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
   let* original=match original with Some record -> Ok record
@@ -365,7 +388,7 @@ let settle ~config ~request_id =
   settle_with ~store ~base_path ~request_id ~briefing_contract ~save:(save_domain ~base_path)
 type successor_result = Indivisible of Owner.retained | Successor_waiting of Owner.retained
   | Successor_ready of {parent:Owner.retained;child:Owner.retained}
-let narrow_with ~store ~base_path ~request_id =
+let narrow_with ~admit ~store ~base_path ~request_id =
   let read ~request_id = Eio_unix.run_in_systhread (fun () ->
     Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
   let* parent = read ~request_id in
@@ -429,16 +452,33 @@ let narrow_with ~store ~base_path ~request_id =
      | Some child ->
        let* request = rejected (Lane_addon_action.canonical (Capture.to_json child)) in
        let intent : Progress.successor = {request_id=Capture.Request_id.to_string child_id;request} in
-       let* published = publish parent (Progress.Successor_intended intent) in
-       (match published with
-        | Acknowledged parent -> Ok (Successor_waiting parent)
-        | New parent -> retain_child parent refusal intent))
+       admit original (fun () ->
+         let* published = publish parent (Progress.Successor_intended intent) in
+         match published with
+         | Acknowledged parent -> Ok (Successor_waiting parent)
+         | New parent -> retain_child parent refusal intent))
   | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
   | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _ ->
     Error (Rejected "Only an original execution size refusal can create a Curator successor")
+let local_admission _ publish = publish ()
+let narrow_local ~store ~base_path ~request_id = narrow_with ~admit:local_admission ~store ~base_path ~request_id
 let narrow ~config ~request_id =
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-  narrow_with ~store ~base_path:config.Workspace.base_path ~request_id
+  let admit original publish =
+    let reserved=reserved () in
+    let* export=resolve ~config ~reserved in
+    Runtime.with_tool_request_destination ~config ~access:Lane_addon_sources.Operator_configuration
+      ~reserved ~export ~publish:(fun actual ->
+        let expected=Capture.destination original in
+        if not (same_semantic_destination actual expected) then
+          Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected
+            "New Curator successor requires its original configured installation inputs"))
+        else publish () |> Result.map_error (function
+          | Unavailable detail -> Runtime.Unavailable detail
+          | Uncertain detail -> Runtime.Outcome_unknown detail
+          | Rejected detail -> Runtime.Host_refusal (Lane_addon_call_context.Rejected detail)))
+    |> Result.map_error runtime_error in
+  narrow_with ~admit ~store ~base_path:config.Workspace.base_path ~request_id
 type original = {capture:Capture.t;record:Owner.retained}
 let discover_with ~store ~base_path =
   let scan () = Eio_unix.run_in_systhread (fun () ->
@@ -459,7 +499,7 @@ let discover_with ~store ~base_path =
         | Some parent ->
           match Progress.phase parent.progress with
           | Progress.Subdividing _ | Progress.Subdivided _ ->
-            let* result = narrow_with ~store ~base_path ~request_id in
+            let* result = narrow_local ~store ~base_path ~request_id in
             (match result with
              | Successor_ready _ -> Ok ()
              | Successor_waiting _ -> Error (Uncertain "Original successor recovery requires a fresh journal read")
@@ -522,7 +562,7 @@ let prepare_observation ~config ~request_id =
   let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   prepare_observation_with ~store ~base_path:config.Workspace.base_path ~request_id ~now:Time_compat.now
 module For_testing = struct
-  let resume=resume_with let settle=settle_with let narrow=narrow_with
+  let resume=resume_with let settle=settle_with let narrow=narrow_local
   let prepare_observation=prepare_observation_with
   let discover=discover_with
 end

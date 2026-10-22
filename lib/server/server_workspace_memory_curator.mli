@@ -1,74 +1,14 @@
-(** Server-owned changed-fact curation into the durable workspace ledger.
-    A configured exact-output lane is required. *)
+(** One serialized Addon-backed Curator owner per physical workspace. *)
 val start : sw:Eio.Switch.t -> config:Workspace.config -> unit
-(** Retained facts are reconsidered when this lane's publication changes,
-    including an enabled declaration published after this owner parked, and
-    when a replacement fence that turned this owner away closes. Off remains a
-    new-work refusal; already accepted work can finish. Uses the actual served
-    configuration for scoped Addon inventory/configuration/result wakes. *)
-
-(** Wake an existing owner, including after an explicit lane configuration
-    change. This performs no storage or provider work in the caller. *)
+(** Discover/recover original work before new capture. Existing accepted local
+    settlement survives Off; new roots and successors use fresh configured
+    Runtime authority. Classification and Briefing keep separate durable
+    boundaries. Observer intents are retained independently; registry delivery
+    is a separate integration boundary. *)
 type refresh = Queued | No_owner | Unavailable of string
-
 val request : base_path:string -> refresh
-
-val output_schema : Yojson.Safe.t
-
-type execution_failure =
-  | Input_too_large of string
-  | Output_too_large of string
-  | Execution_failed of string
-
+(** Signal the existing owner only; no storage or model work in the caller. *)
 module For_testing : sig
-  (** The real owner loop with a controlled admission predicate. The predicate
-      changing does not signal the owner, so fixtures can isolate Addon wakes. *)
-  val start_with_enabled
-    : sw:Eio.Switch.t
-    -> base_path:string
-    -> enabled:(unit -> bool)
-    -> execute:(rendered_prompt:string -> selected:Workspace_memory_ledger.pending_fact list
-       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
-    -> summarize:(batch:Workspace_memory_briefing.batch -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
-    -> unit
-
-  (** The production configuration predicate, with provider execution and
-      typed refusal evidence supplied by the fixture. *)
-  val start_configured
-    : sw:Eio.Switch.t
-    -> base_path:string
-    -> execute:(rendered_prompt:string -> selected:Workspace_memory_ledger.pending_fact list
-       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
-    -> summarize:(batch:Workspace_memory_briefing.batch -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
-    -> unit
-
-  (** The lane run itself: HTTP slots as one exact-output flow. *)
-  val execute
-    : resolved:Runtime_exact_output_registry.resolved_lane
-    -> rendered_prompt:string
-    -> selected:Workspace_memory_ledger.pending_fact list
-    -> ledger:Workspace_memory_ledger.t
-    -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, string) result
-
-  val execute_with_cli
-    : ?cli_runner:Keeper_lane_cli_oneshot.runner
-    -> ?base_path:string
-    -> resolved:Runtime_exact_output_registry.resolved_lane
-    -> rendered_prompt:string
-    -> selected:Workspace_memory_ledger.pending_fact list
-    -> ledger:Workspace_memory_ledger.t
-    -> unit
-    -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result
-
-  val configured : unit -> bool
-
-  val start
-    : sw:Eio.Switch.t
-    -> base_path:string
-    -> execute:(rendered_prompt:string -> selected:Workspace_memory_ledger.pending_fact list
-       -> ledger:Workspace_memory_ledger.t -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
-    -> summarize:(batch:Workspace_memory_briefing.batch -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result)
-    -> unit
   val is_idle : base_path:string -> bool
   val stop : base_path:string -> unit
 end

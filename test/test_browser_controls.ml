@@ -238,11 +238,15 @@ let test_download_result_reaches_provider () =
       let artifact = match Masc.Browser_download_artifact.publish ~base_path:config.base_path path with
         | Ok value -> value | Error detail -> fail detail in
       let payload = `Assoc ["downloads", `List [`Assoc ["artifact", artifact]]] in
+      (* The worker answers with a download grant; the server claims it and
+         the claim carries the publication that reaches the provider. *)
+      let grant = "6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f" in
+      let granted = `Assoc ["downloads", `List [`Assoc ["artifact", `Assoc ["downloadGrant", `String grant]]]] in
       let respond ~route:_ = function
         | Lane.Page_downloads {tab_id=1} ->
-          Lane.Answered (`Assoc ["ok",`Bool true;"data",payload])
+          Lane.Answered (`Assoc ["ok",`Bool true;"data",granted])
         | _ -> fail "unexpected browser action during download read" in
-      Browser_addon_fixture.with_worker ~env ~config ~respond (fun _browser ->
+      Browser_addon_fixture.with_worker ~downloads:[grant, artifact] ~env ~config ~respond (fun _browser ->
       let execution = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
           ~config ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "downloads";"tabId",`Int 1]) in
       check bool "browser read completes" true (execution.disposition = Tool_result.Completed ());
@@ -259,7 +263,14 @@ let test_download_result_reaches_provider () =
       check bool "binary download manifest is valid UTF-8 JSON" true (String.is_valid_utf_8 stored);
       match Tool_output.artifact_manifest_of_json (Yojson.Safe.from_string stored) with
       | Tool_output.Decoded_artifact_manifest {structured_content;artifact_refs;_} ->
-        check bool "download identity and reader survive" true (structured_content = payload);
+        (* The provider manifest carries the browser identity next to the
+           download rows; the rows themselves must survive exactly. *)
+        let member key = function `Assoc fields -> List.assoc_opt key fields | _ -> None in
+        let canonical value = Option.map Yojson.Safe.sort value in
+        check bool "download reader survives" true
+          (canonical (member "downloads" structured_content) = canonical (member "downloads" payload));
+        check bool "download identity survives" true
+          (Option.bind (member "browserSelection" structured_content) (member "lane") = Some (`String "automation"));
         (match artifact_refs with
          | [file] ->
            (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path:config.base_path) ~sha256:file.sha256 with

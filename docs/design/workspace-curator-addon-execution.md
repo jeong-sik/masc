@@ -490,3 +490,42 @@ corrupt-host fallback refusal, full domain rejection and canonical installation
 kind separation. Controlled provider callbacks are not live provider/actual Off
 lifecycle evidence. Production owner scheduling, original observer receipts,
 initial prepared-state/capture reconciliation and installed UI remain pending.
+
+
+## Complete original discovery before production cutover
+
+`Server_workspace_memory_addon.discover` provides the local recovery boundary
+for the future production scheduler. It first strictly discovers all original
+owners, observes the actual physical workspace and validates the entire capture
+forest. This includes the full immutable intent/whole-prefix derivation of each
+successor, all predecessor links and each acknowledged child. It never treats a
+malformed unrelated record as an empty or partial successful inventory.
+
+A legitimate interrupted publication has a Subdividing parent and either no
+child yet or its exact initial Captured child before the parent ACK. Ordinary
+`Capture.restore` still refuses that child for execution. The pure inventory
+check can validate this exact window without returning an executable capture;
+it returns only IDs of parents whose successor intention is already durable.
+The host then freshly loads those parents and completes only their existing
+retain/read/ACK sequence using the original child ID. It never narrows a merely
+Rejected original or mints another ID. An acknowledged missing child is an error
+and is never recreated.
+
+After recovery, the host repeats complete discovery/physical forest validation
+and ordinary strict restore before returning any original captures. Recovery
+errors or uncertainty return no partial successful inventory. The caller must
+hold the workspace process lease and serialize the whole operation; a returned
+observation does not replace fresh authority at any later effect edge. This is
+not a cross-process transaction, a worker admission or a new-work grant. The map
+exists only for one pure inventory check; record order is not execution priority.
+Complete scans, domain decoding and repeated ancestry/strict reads remain costs.
+
+The port uses local original journals and can recover an already stored intent
+without a live worker or model route. New root/new successor admission still
+needs the actual current configured Runtime authority, separately linearized
+with its action serializer. Do not infer that authority from this inventory or
+an old enabled boolean. Production still uses the old direct provider owner at
+this layer: switching its scheduler/frontier, new-child authority, registry
+receipt delivery, real worker/provider lifecycle, Dashboard/TUI and installation
+verification remain required. The new real-Store scenario definitions and
+parser checks are not compiled execution or those integration proofs.

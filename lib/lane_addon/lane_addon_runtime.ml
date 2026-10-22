@@ -2533,14 +2533,14 @@ let detach_entry ~sw m e =
 
 let configuration_directory config =
   let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
-  Filename.concat resolution.config_root.path "lane-addons"
+  Lane_addon_config.directory ~config_root:resolution.config_root.path
 
 let edit_directory config =
   let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
   match resolution.status with
   | Config_dir_resolver.Invalid_env_status -> Error {Lane_addon_declaration.code=Io_error;
       message=String.concat "; " resolution.warnings; current=None}
-  | Ready | Warn | Missing_status -> Ok (Filename.concat resolution.config_root.path "lane-addons")
+  | Ready | Warn | Missing_status -> Ok (Lane_addon_config.directory ~config_root:resolution.config_root.path)
 
 let authorize_document m ~access (document : Lane_addon_declaration.document) =
   match access with

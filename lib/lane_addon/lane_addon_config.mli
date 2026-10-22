@@ -49,3 +49,8 @@ val load_source : source_path:string -> source_text:string -> (declaration, stri
     Malformed files remain in [paths]. Duplicate declared IDs are all excluded
     from [declarations] and reported, without selecting an arbitrary winner. *)
 val load : directory:string -> snapshot
+
+val directory : config_root:string -> string
+(** The Lane directory under a resolved config root: [<config_root>/lane-addons].
+    The server, the declaration editor and [masc browser-lane-setup] all read
+    declarations from here. *)

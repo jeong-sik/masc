@@ -439,6 +439,51 @@ let narrow_with ~store ~base_path ~request_id =
 let narrow ~config ~request_id =
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   narrow_with ~store ~base_path:config.Workspace.base_path ~request_id
+type original = {capture:Capture.t;record:Owner.retained}
+let discover_with ~store ~base_path =
+  let scan () = Eio_unix.run_in_systhread (fun () ->
+    let* records = Owner.discover ~store ~scope:Capture.scope |> owned in
+    let* workspace = Capture.observe_workspace ~base_path
+      |> Result.map_error (fun detail -> Unavailable detail) in
+    Ok (workspace,records)) in
+  let* workspace,records = scan () in
+  let* pending = Eio_unix.run_in_systhread (fun () ->
+    Capture.recoverable_successors ~workspace records) |> rejected in
+  let rec recover = function
+    | [] -> Ok ()
+    | request_id::rest ->
+      let* parent = Eio_unix.run_in_systhread (fun () ->
+        Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
+      let* () = match parent with
+        | None -> Error (Unavailable "An original successor parent vanished during recovery")
+        | Some parent ->
+          match Progress.phase parent.progress with
+          | Progress.Subdividing _ | Progress.Subdivided _ ->
+            let* result = narrow_with ~store ~base_path ~request_id in
+            (match result with
+             | Successor_ready _ -> Ok ()
+             | Successor_waiting _ -> Error (Uncertain "Original successor recovery requires a fresh journal read")
+             | Indivisible _ -> Error (Rejected "An existing successor intent cannot become indivisible"))
+          | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
+          | Progress.Committing _ | Progress.Commit_unknown _ | Progress.Finished _ | Progress.Conflicted _
+          | Progress.Rejected _ -> Error (Rejected "Original successor intent changed during recovery") in
+      recover rest in
+  let* () = recover pending in
+  let* workspace,records = scan () in
+  let* pending = Eio_unix.run_in_systhread (fun () ->
+    Capture.recoverable_successors ~workspace records) |> rejected in
+  let* () = match pending with
+    | [] -> Ok ()
+    | _::_ -> Error (Uncertain "Original successor discovery changed during recovery") in
+  let rec restore_all acc = function
+    | [] -> Ok (List.rev acc)
+    | record::rest ->
+      let* capture = restore ~store ~workspace record in
+      restore_all ({capture;record}::acc) rest in
+  restore_all [] records
+let discover ~config =
+  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  discover_with ~store ~base_path:config.Workspace.base_path
 module Observation = Workspace_memory_observation_receipt
 module Receipt = Lane_addon_request_receipt
 type observation = {original:Owner.retained;registration:Observation.registration;
@@ -479,4 +524,5 @@ let prepare_observation ~config ~request_id =
 module For_testing = struct
   let resume=resume_with let settle=settle_with let narrow=narrow_with
   let prepare_observation=prepare_observation_with
+  let discover=discover_with
 end

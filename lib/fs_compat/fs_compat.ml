@@ -1544,18 +1544,43 @@ let with_owned_inventory_entry ?owner_uid ?(single_link = false) root path fn =
     | cause -> owned_file_operation_error ~path Read_contents cause
 ;;
 
-let owned_inventory_entry_kind root path =
-  with_owned_inventory_entry root path (fun _fd stat _parent -> Ok stat.Unix.st_kind)
+type owned_relative_path = string list
+
+let owned_relative_path components =
+  let invalid component =
+    String.equal component ""
+    || String.equal component Filename.current_dir_name
+    || String.equal component Filename.parent_dir_name
+    || String.contains component '/'
+  in
+  match components with
+  | [] -> Error "owned relative path has no component"
+  | _ :: _ ->
+    (match List.find_opt invalid components with
+     | Some component -> Error (Printf.sprintf "owned relative path component %S is not a name" component)
+     | None -> Ok components)
 ;;
 
-let with_owned_inventory_regular_file ~owner_uid root path fn =
+let owned_relative_path_to_string components = String.concat Filename.dir_sep components
+
+(* Spelled from the canonical held root, which the entry chain compares with. *)
+let owned_inventory_path root relative = List.fold_left Filename.concat root.inventory_path relative
+
+let owned_inventory_entry_kind root relative =
+  with_owned_inventory_entry root (owned_inventory_path root relative)
+    (fun _fd stat _parent -> Ok stat.Unix.st_kind)
+;;
+
+let with_owned_inventory_regular_file ~owner_uid root relative fn =
+  let path = owned_inventory_path root relative in
   with_owned_inventory_entry ~owner_uid ~single_link:true root path (fun file stat parent ->
     if stat.Unix.st_kind <> Unix.S_REG then
       owned_file_error (Path_is_not_regular_file {path;kind=stat.st_kind})
     else Ok (fn ~file ~parent ~stat))
 ;;
 
-let owned_inventory_entry_digest root path =
+let owned_inventory_entry_digest root relative =
+  let path = owned_inventory_path root relative in
   with_owned_inventory_entry root path (fun fd stat _parent ->
     if stat.Unix.st_kind <> Unix.S_REG
     then owned_file_error (Path_is_not_regular_file {path; kind=stat.st_kind})

@@ -856,20 +856,35 @@ let within_inventory_root ~root path =
   | exception Unix.Unix_error _ -> None
 ;;
 
+(* [real] is [root] or below it (see [within_inventory_root]); the root itself
+   is not an entry of itself. *)
+let inventory_relative ~root real =
+  let prefix = String.length root + 1 in
+  if String.length real <= prefix then Error "the held root is not one of its entries"
+  else Fs_compat.owned_relative_path
+      (String.split_on_char '/' (String.sub real prefix (String.length real - prefix)))
+;;
+
 let inventory_entry_kind inventory_root path =
   let root = Fs_compat.owned_inventory_root_path inventory_root in
   match within_inventory_root ~root path with
   | None -> Unavailable
   | Some real ->
-    (match Fs_compat.owned_inventory_entry_kind inventory_root real with
-     | Ok Unix.S_DIR -> Directory
-     | Ok Unix.S_REG -> Regular
-     | Ok (Unix.S_CHR) | Ok (Unix.S_BLK) | Ok (Unix.S_LNK) | Ok (Unix.S_FIFO) | Ok (Unix.S_SOCK) -> Other
-     | Error _ -> Unavailable)
+    (match inventory_relative ~root real with
+     | Error _ -> Unavailable
+     | Ok relative ->
+       (match Fs_compat.owned_inventory_entry_kind inventory_root relative with
+        | Ok Unix.S_DIR -> Directory
+        | Ok Unix.S_REG -> Regular
+        | Ok (Unix.S_CHR) | Ok (Unix.S_BLK) | Ok (Unix.S_LNK) | Ok (Unix.S_FIFO) | Ok (Unix.S_SOCK) -> Other
+        | Error _ -> Unavailable))
 ;;
 
 let inventory_digest_json ~inventory_root ~shown_name real =
-  match Fs_compat.owned_inventory_entry_digest inventory_root real with
+  let root = Fs_compat.owned_inventory_root_path inventory_root in
+  match Result.bind (inventory_relative ~root real) (fun relative ->
+      Fs_compat.owned_inventory_entry_digest inventory_root relative
+      |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string) with
   | Ok inspected ->
     `Assoc
       [ ("name", `String shown_name)

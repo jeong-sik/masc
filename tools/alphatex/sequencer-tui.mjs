@@ -13,6 +13,7 @@ import { loadProject, saveProject, projectMidi } from './sequencer-files.mjs'
 import { sourceTickAtSeconds, sourceSecondsAtTick } from './midi-source-playback.mjs'
 import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceMeters, selectedMeter } from './midi-source-editor.mjs'
 import { safeText } from './terminal.mjs'
+import { meterSegments, barAt, isBarStart, beatText } from './meter-bars.mjs'
 import { fitLine, cellSegments, bold, dim, inverse, red, green, yellow, blue, magenta, cyan } from './terminal-style.mjs'
 import { StatusReader } from './status-reader.mjs'
 import { openPlayback } from './playback.mjs'
@@ -216,6 +217,25 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
     const selection = new Set(selectedNotes(editor).map(note => note.id))
     const at = editorHarmony(editor)
     const trackColor = trackColors[editor.track % trackColors.length]
+    // Bars follow the phrase meter or the imported signature map; SMPTE
+    // frames have no bars. A map that cannot be read is shown, not drawn.
+    let meters = null, meterProblem = null
+    if (editor.project.kind !== 'midi-source' || editor.info.timing.kind !== 'smpte') {
+      try {
+        meters = meterSegments(editor.project.kind === 'midi-source'
+          ? sourceMeters(editor).map(({ tick, numerator, denominator }) => ({ tick, numerator, denominator })).sort((a, b) => a.tick - b.tick)
+          : [{ tick: 0, numerator: project.meter[0], denominator: project.meter[1] }])
+      } catch (error) { meterProblem = error.message }
+    }
+    // The cursor is shown exactly, as commands take it; a moving playhead is rounded.
+    const position = (tick, rounded = false) => {
+      const beats = `${rounded ? beatText(tick / per) : tick / per} ${axis.label}`
+      if (!meters) return meterProblem ? `${beats} (bars unavailable: ${meterProblem})` : beats
+      const { bar, beat } = barAt(tick, meters, per)
+      return `bar ${bar} beat ${beatText(beat)} · ${beats}`
+    }
+    const playing = ['playing', 'paused'].includes(transport.kind)
+    const playhead = playing ? playTick() : null
     const state = stepInput?.kind === 'practice-input' ? 'practicing' : transport.kind
     const statusLine = [...(stepInput ? [[`${stepInput.kind === 'practice-input' ? 'MIDI practice' : 'MIDI step'} · ${stepHeld} held · `, []]] : []),
       [status.text, status.failed ? [bold, red] : []]]
@@ -226,7 +246,7 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       [[`Track ${editor.track + 1}/${project.tracks.length}: `, []], [track.name, [bold, trackColor]],
         [` · ${percussion ? 'GM drums · ' : ''}${track.detail ?? `ch ${track.channel + 1} · program ${track.program} · level ${track.level} · pan ${track.pan}`}`, []],
         ...(track.muted ? [[' · MUTED', [dim]]] : []), ...(track.solo ? [[' · SOLO', [bold, yellow]]] : []), [` · ${track.notes.length} notes`, []]],
-      `Cursor ${editor.tick / per} · ${noteName(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · input length ${editor.duration / per} · velocity ${current?.velocity ?? editor.velocity}${selection.size ? ` · ${selection.size} selected` : ''}${editor.noteClipboard ? ` · ${editor.noteClipboard.notes.length} copied` : ''}`,
+      `Cursor ${position(editor.tick)} · ${noteName(editor.pitch)} · grid ${editor.step / per} · length ${(current?.duration ?? editor.duration) / per} · input length ${editor.duration / per} · velocity ${current?.velocity ?? editor.velocity}${selection.size ? ` · ${selection.size} selected` : ''}${editor.noteClipboard ? ` · ${editor.noteClipboard.notes.length} copied` : ''}`,
       [['Chord candidates: ', []], [at.candidates.join(' / ') || '—', at.candidates.length ? [bold, cyan] : [dim]], [` · ${at.notes.join(' ')}`, []]],
       statusLine,
     ]
@@ -300,11 +320,15 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
         `${event.id === editor.selectedExpressionID ? '>' : ' '} ${event.id} · ${event.tick / per} ${axis.label} · port ${event.port} ch ${event.channel + 1} · ${event.kind}${event.controller === undefined ? '' : ' ' + event.controller}${event.pitch === undefined ? '' : ' ' + Note.fromMidi(event.pitch)} · ${event.value}`, cursorRow(event.id === editor.selectedExpressionID)]])
       if (!events.length) lines.push('No expression events in this track/channel. :channel CH then :cc CTRL VALUE AT inserts one.')
     } else {
-      const first = Math.floor(editor.tick / (editor.step * cols)) * editor.step * cols
-      const barTicks = project.timingLabel ? per : project.meter[0] * per * 4 / project.meter[1]
+      // While a transport plays or pauses, the window follows the playhead.
+      const span = editor.step * cols, first = Math.floor((playhead ?? editor.tick) / span) * span
+      const playColumn = playhead === null ? null : Math.floor((playhead - first) / editor.step)
+      const barStart = tick => meters ? isBarStart(tick, meters, per) : tick % per === 0
+      const beatStart = tick => meters ? Number.isInteger(barAt(tick, meters, per).beat) : false
       const ruler = Array.from({ length: cols }, (_, x) => {
         const tick = first + x * editor.step
-        return tick >= project.length ? [' ', []] : tick % barTicks === 0 ? ['|', [bold]] : tick % per === 0 ? ['+', []] : ['·', [dim]]
+        return tick >= project.length ? [' ', []] : x === playColumn ? ['▼', [bold, green]]
+          : barStart(tick) ? ['|', [bold]] : beatStart(tick) ? ['+', []] : ['·', [dim]]
       })
       lines.push([['       ', []], ...cellSegments(ruler)], `       ${axis.label} ${first / per} → ${Math.min(project.length, first + cols * editor.step) / per}`)
       const height = Math.max(1, rows - 11), high = Math.min(127, Math.max(height - 1, editor.pitch + Math.floor(height / 2)))
@@ -319,15 +343,20 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
           for (let x = left; x <= right; x++) cells[x] = selection.has(note.id) ? ['▓', [bold, yellow]]
             : first + x * editor.step <= note.start ? ['█', [bold, trackColor]] : ['━', [trackColor]]
         }
+        // A note under the playhead is sounding; empty cells draw its line.
+        if (playColumn !== null && playColumn >= 0 && playColumn < cols && first + playColumn * editor.step < project.length) {
+          const [glyph, styles] = cells[playColumn]
+          cells[playColumn] = '█━▓'.includes(glyph) ? [glyph, [...styles, inverse]] : ['│', [green]]
+        }
         const cursor = Math.floor((editor.tick - first) / editor.step)
-        if (pitch === editor.pitch) cells[cursor] = [current ? '◆' : '◇', [bold, inverse]]
+        if (pitch === editor.pitch && cursor >= 0 && cursor < cols) cells[cursor] = [current ? '◆' : '◇', [bold, inverse]]
         const label = percussion ? [] : pitch % 12 === 0 ? [bold] : blackKeys.has(pitch % 12) ? [dim] : []
         lines.push([[noteName(pitch).padStart(5), label], ['  ', []], ...cellSegments(cells)])
       }
       const instrument = projectSoundLabel(audioInstrument())
       const destination = portBindings.length ? portBindings.map(binding => `${binding.port}→${binding.destination}`).join(', ')
         : selectedMidiOutput === undefined ? selectedOutput ?? 'system default' : `MIDI ${selectedMidiOutput}`
-      lines.push(`Playhead ${(playTick() / per).toFixed(2)} · loop ${project.loop.start / per}–${project.loop.end / per} · ${instrument} · output ${destination} · ${path}`)
+      lines.push(`Playhead ${playhead === null ? '—' : position(playhead, true)} · loop ${project.loop.start / per}–${project.loop.end / per} · ${instrument} · output ${destination} · ${path}`)
     }
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`

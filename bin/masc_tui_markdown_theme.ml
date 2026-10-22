@@ -22,30 +22,25 @@ let palette ~closing : Markdown.palette =
   ; emphasis = (Ansi.italic, Ansi.no_italic)
   ; strike = (Ansi.strike, Ansi.no_strike)
   ; code = (Theme.Syntax.code_span, closing)
-  (* Bold alone. [white] is a colour like any other -- on a light background
-     it is the background -- so painting a heading with it hid the heading on
-     exactly the terminals that read it as text. Bold already says heading. *)
-  (* Which heading is inside which, said the way a terminal can: the top
-     level is underlined as well as bold, the next is bold, and the rest are
-     bold and dim so they still read as headings without competing with the
-     two above. One span for every level drew a document with no shape. *)
+  (* Two palette-relative accents give documents a visible hierarchy, with
+     weight and underline in addition to hue. Lower headings keep bold. *)
   ; heading =
       (fun level ->
-        if level <= 1 then (Ansi.bold ^ Ansi.underline, closing)
-        else if level = 2 then (Ansi.bold, closing)
-        else (Ansi.bold ^ Ansi.dim, closing))
+        if level <= 1 then
+          (Ansi.bold ^ Ansi.underline ^ Theme.category Theme.Slot_1, closing)
+        else if level = 2 then
+          (Ansi.bold ^ Theme.category Theme.Slot_2, closing)
+        else (Ansi.bold, closing))
   ; quote = (Ansi.dim, closing)
   ; link_text = (Theme.Syntax.link, closing)
   ; link_target = (Ansi.dim, closing)
   ; rule = (Theme.Syntax.rule, closing)
   ; bullet = "\xe2\x80\xa2"
   ; code_gutter = "\xe2\x94\x82 "
-  (* Reverse video uses the terminal's own foreground and background, so the
-     language banner stays legible on both light and dark themes. *)
-  ; code_header = (Ansi.reverse, closing)
+  ; code_header = (Ansi.bold ^ Theme.category Theme.Slot_1, closing)
   ; code_border = (Theme.Syntax.rule, closing)
   ; quote_gutter = "\xe2\x96\x8f "
-  ; table_header = (Ansi.bold, closing)
+  ; table_header = (Ansi.bold ^ Theme.category Theme.Slot_1, closing)
   ; table_gutter = " \xe2\x94\x82 "
   ; table_rule_gutter = "\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80"
   ; table_frame = !table_frame_enabled

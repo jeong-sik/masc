@@ -49,7 +49,7 @@ let tool_verbs = Browser_lane.[
   "masc_browser_tabs", Tool_schemas_misc_toml.browser_tabs, [ Tabs_list ];
   "masc_browser_read", Tool_schemas_misc_toml.browser_read, [ Page_read { tab_id = None; max_chars = None } ];
   "masc_browser_interact", Tool_schemas_misc_toml.browser_interact,
-    [ Page_interact { tab_id = 1; expected_url = None; action = Scroll { x = 0; y = 1 } } ];
+    [ Page_interact { frame_path = []; tab_id = 1; expected_url = None; action = Scroll { x = 0; y = 1 } } ];
   "masc_browser_session", Tool_schemas_misc_toml.browser_session,
     [ Session_open { headless = None }; Session_close; Session_status ];
   "masc_browser_goto", Tool_schemas_misc_toml.browser_goto,

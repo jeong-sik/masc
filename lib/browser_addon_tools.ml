@@ -101,7 +101,7 @@ let prepare ~keeper_name ~upload_paths tool json =
   | Interact ->
       let* request=Browser_interaction.parse json in
       Ok {preference=request.route;required_actions=[];projection=Raw;
-        verb=B.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;action=request.action}}
+        verb=B.Page_interact {tab_id=request.tab_id;frame_path=request.frame_path;expected_url=request.expected_url;action=request.action}}
   | Act ->
       let* action=B.Action.parse json in
       let* action=match action,upload_paths with

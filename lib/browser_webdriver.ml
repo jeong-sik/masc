@@ -435,12 +435,16 @@ let rec execute_unlocked t = function
            | _ -> Error (Protocol "invalid document observation"))
         | `String _ -> Error (Protocol "document observation never switches the owner's current tab")
         | _ -> Error (Protocol "invalid current browser window")))
-  | Browser_lane.Page_interact { tab_id; expected_url; action } ->
+  | Browser_lane.Page_interact { tab_id; frame_path; expected_url; action } ->
     let* session = session t in
     with_tab t session (Some tab_id) (fun () ->
-      let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
+      let args = Browser_lane.interaction_args ~tab_id ~frame_path ~expected_url action in
       let action_name = Browser_lane.interaction_verb action in
-      let native_action = match action with
+      (* Inside a frame the script and the native pointer both use the frame's
+         own viewport coordinates (probed on Firefox 158 through geckodriver). *)
+      let native_action = match enter_frames t session frame_path with
+        | Error error -> Error error
+        | Ok () -> match action with
         | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
           let* resolved = script t session (Browser_scene_script.runtime ^ Browser_interaction.pointer_target_script) [args] in
           let* action = Result.map_error (fun message -> Protocol message)
@@ -457,7 +461,7 @@ let rec execute_unlocked t = function
         | Error error -> Ok (`Assoc ["interactionFailure",`Assoc
             ["message",`String (error_message error);"effectStarted",`Bool false]])
         | Ok (expected_url,action) ->
-        let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
+        let args = Browser_lane.interaction_args ~tab_id ~frame_path ~expected_url action in
         match action with
         | Browser_lane.Set_zoom _ -> Error (Protocol "set_zoom requires a connected WebExtension browser")
         | Browser_lane.Set_viewport _ -> Error (Protocol "set_viewport requires a live BiDi connection or Stagehand")

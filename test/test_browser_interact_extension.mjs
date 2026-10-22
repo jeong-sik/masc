@@ -148,6 +148,16 @@ for (const trusted of [{...observed,action:'drag',from:point,to:point},{...obser
   assert.equal(executions,beforeExecutions,`${trusted.action} never injects page input`);
   assert.equal(clicked,2,`${trusted.action} refusal does not click`);
 }
+// A framed request must not fall through to the top document.
+{
+  const beforeExecutions = executions, beforeClicks = clicked;
+  const refused = await command({tabId:7,expectedUrl:page.location.href,action:'click',selector:'#go',framePath:['iframe']});
+  assert.equal(refused.ok,false);
+  assert.equal(refused.error,'frame_path_is_not_supported_by_the_extension_yet');
+  assert.equal(refused.effectPhase,'not_started');
+  assert.equal(executions,beforeExecutions,'a framed request never injects page input');
+  assert.equal(clicked,beforeClicks,'a framed request does not click');
+}
 const pane = {scrollTop:0,scrollLeft:0,scrollHeight:1000,clientHeight:200,scrollWidth:100,clientWidth:100,
   parentElement:null,getRootNode:()=>({}),scrollBy({top}) {this.scrollTop=Math.max(-800,Math.min(0,this.scrollTop+top));}};
 button.parentElement=pane;

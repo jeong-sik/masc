@@ -10,7 +10,7 @@ let roundtrips () =
   let verbs = [B.Tabs_list; Page_read {tab_id=None;max_chars=None};Page_document {tab_id=7};
     Page_downloads {tab_id=7};Page_capture {tab_id=7};
     Page_scene {tab_id=7;max_chars=1000;view=B.Regions;scope=Some {document_id="doc";node_id="region"}};
-    Page_interact {tab_id=7;expected_url=Some "https://example.org";action=B.Fill_node {target={document_id="doc";node_id="edit"};text=""}};
+    Page_interact {frame_path=[];tab_id=7;expected_url=Some "https://example.org";action=B.Fill_node {target={document_id="doc";node_id="edit"};text=""}};
     Session_open {headless=Some false};Session_close;Session_status;
     Page_goto {url="https://example.org";tab_id=Some 7};Page_elements {tab_id=Some 7;within=None};
     Page_elements {tab_id=None;within=Some "nav[aria-label=\"Channels\"] > ul"};

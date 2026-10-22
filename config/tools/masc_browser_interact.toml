@@ -23,6 +23,12 @@ required = true
 minimum = 0
 
 [[params]]
+name = "framePath"
+type = "array"
+items = { type = "string" }
+description = "Observed outer-to-inner iframe selectors (preserve CSS escapes). Only for click, fill, select_option and scroll with a selector, on an automation Firefox; the selector and expectedUrl then refer to the innermost frame document. Omit for the top document."
+
+[[params]]
 name = "expectedUrl"
 type = "string"
 description = "Observed URL guard; required for explicit pointer actions, hover/drag_to, follow_link and activate_tab. Required also for double_click/type_text/press_key/set_zoom/set_viewport. Semantic click may omit it; the native backend captures and guards the resolved page URL."

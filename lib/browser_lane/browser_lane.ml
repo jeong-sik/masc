@@ -66,7 +66,7 @@ type verb =
   | Page_cookies of { tab_id : int }
   | Page_capture of { tab_id : int }
   | Page_scene of { tab_id : int; max_chars : int; view : scene_view; scope : node_ref option }
-  | Page_interact of { tab_id : int; expected_url : string option; action : interaction }
+  | Page_interact of { tab_id : int; frame_path : string list; expected_url : string option; action : interaction }
   | Session_open of { headless : bool option }
   | Session_close
   (* Reads the backend's own record of whether a session exists. It issues no
@@ -159,7 +159,7 @@ let drag_fields via duration_ms =
   (match via with [] -> [] | _::_ -> ["via", `List (List.map Pointer.point_to_json via)])
   @ (if duration_ms = 0 then [] else ["durationMs", `Int duration_ms])
 
-let interaction_args ~tab_id ~expected_url action =
+let interaction_args ~tab_id ~frame_path ~expected_url action =
   let node_fields target = ["documentId",`String target.document_id; "nodeId",`String target.node_id] in
   let target_fields = function Selector selector -> ["selector",`String selector]
     | Scene_node target -> node_fields target in
@@ -203,6 +203,7 @@ let interaction_args ~tab_id ~expected_url action =
     | Fill_node {target;text} -> verb :: ("text",`String text) :: node_fields target
     | Scroll {x; y} -> [verb; "x", `Int x; "y", `Int y] in
   `Assoc (("tabId", `Int tab_id) :: fields @
+    (if frame_path = [] then [] else ["framePath", `List (List.map (fun s -> `String s) frame_path)]) @
     (Option.map (fun url -> "expectedUrl", `String url) expected_url |> Option.to_list))
 
 let scene_args ~tab_id ~max_chars ~view ~scope =
@@ -238,8 +239,8 @@ let verb_json = function
     `Assoc ["verb",`String "page.scene";"args",scene_args ~tab_id ~max_chars ~view ~scope]
   | Page_capture { tab_id } ->
     `Assoc ["verb", `String "page.capture"; "args", `Assoc ["tabId", `Int tab_id]]
-  | Page_interact { tab_id; expected_url; action } ->
-    `Assoc ["verb", `String "page.interact"; "args", interaction_args ~tab_id ~expected_url action]
+  | Page_interact { tab_id; frame_path; expected_url; action } ->
+    `Assoc ["verb", `String "page.interact"; "args", interaction_args ~tab_id ~frame_path ~expected_url action]
   | Session_open { headless } ->
     `Assoc
       [ ("verb", `String "session.open")

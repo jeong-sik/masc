@@ -580,6 +580,9 @@ let dispatch ?actor ?request_id t ~verb args =
   | Page_interact -> on_tab (fun context id ->
       let* fields=pre (match args with `Assoc xs->Ok xs|_->Error "invalid interaction") in
       let* request=pre (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live))::fields))) in
+      let* () = match request.frame_path with
+        | [] -> Ok ()
+        | _ :: _ -> Error (Before_effect "framePath is not supported on a live BiDi connection yet; the page input runs in the top document only") in
       let* expected_url,action = match request.action with
         | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
           let* resolved = pre (script t context Browser_interaction.pointer_target_script args) in
@@ -592,7 +595,7 @@ let dispatch ?actor ?request_id t ~verb args =
         | Browser_lane.Tap_at _ | Browser_lane.Swipe _
         | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _
         | Browser_lane.Fill_node _ -> Ok (request.expected_url,request.action) in
-      let args = Browser_lane.interaction_args ~tab_id:id ~expected_url action in
+      let args = Browser_lane.interaction_args ~tab_id:id ~frame_path:[] ~expected_url action in
       let* receipt = match action with
       | Browser_lane.Double_click _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Click _ | Browser_lane.Click_node _ ->
         Error (Before_effect "unresolved semantic pointer target")

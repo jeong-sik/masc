@@ -1,0 +1,25 @@
+(include_subdirs no)
+
+(library
+ (name embedded_browser_addon)
+ (public_name masc.embedded_browser_addon)
+ (modules embedded_browser_addon)
+ (wrapped false))
+
+; The browser Lane Add-on package, written into the binary the way
+; embedded_browser_extension carries the Firefox extension. -m plain produces
+;   val read : string -> string option
+;   val file_list : string list
+; with each path relative to addons/browser. Only .toml, .json and .md files
+; are carried, so an editor's backup file or a Finder's .DS_Store in the
+; source directory is not written to an operator's machine. The package that
+; `masc browser-lane-setup` writes is always the one this binary was built
+; with, so a declaration never points at a checkout that can move or vanish.
+(rule
+ (target embedded_browser_addon.ml)
+ (deps
+  (source_tree ../../addons/browser))
+ (action
+  (with-stdout-to
+   %{target}
+   (run ocaml-crunch -m plain -e toml -e json -e md ../../addons/browser))))

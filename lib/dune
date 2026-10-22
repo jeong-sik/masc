@@ -269,6 +269,7 @@
   masc.parse_outcome
   masc.embedded_config
   masc.embedded_browser_extension
+  masc.embedded_browser_addon
   masc.fusion_core)
  (preprocess
   (pps

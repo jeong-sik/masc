@@ -251,3 +251,5 @@ let load ~directory =
                complete && not failure.unreadable)
         ([], [], true) results in
       {declarations = List.rev declarations; issues = List.rev issues; paths; complete}
+
+let directory ~config_root = Filename.concat config_root "lane-addons"

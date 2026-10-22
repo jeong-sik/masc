@@ -125,7 +125,7 @@ let snapshot ~config =
     {id=Lane_id.to_wire (Lane_id.Builtin lane); label=Lane_manifest.label lane;
      purpose=Lane_manifest.purpose lane; selection; state}) in
   let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
-  let directory = Filename.concat resolution.config_root.path "lane-addons" in
+  let directory = Config.directory ~config_root:resolution.config_root.path in
   let declarations : Config.snapshot = match resolution.status with
     | Config_dir_resolver.Invalid_env_status ->
         {declarations=[];paths=[];complete=false;

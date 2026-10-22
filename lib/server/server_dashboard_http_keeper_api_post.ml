@@ -28,6 +28,7 @@ let input_response_error_status =
       (Inventory_not_installed _ | Owner_unavailable _ | Owner_initialization_failed _ | Inventory_stopping) ->
     `Service_unavailable
   | Keeper_owner_registry.Response_owner_failed (Keeper_owner.Response_owner_error error) -> owner_status error
+  | Keeper_owner_registry.Response_owner_failed (Keeper_owner.Response_intent_error {cause;_}) -> owner_status cause
   | Keeper_owner_registry.Response_owner_failed
       (Keeper_owner.Response_installation_error
         (Keeper_input_wait_response.Invalid_response _

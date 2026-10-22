@@ -173,6 +173,15 @@ type input_response_intent =
   ; source : Keeper_checkpoint_ref.t
   ; candidate : Keeper_checkpoint_ref.t
   ; response : Agent_core.Hooks.elicitation_response }
+let canonical_input_response = function
+  | Agent_core.Hooks.Answer answer ->
+    Keeper_chat_operation.canonical_json answer
+    |> Result.map (fun answer -> Agent_core.Hooks.Answer answer)
+    |> Result.map_error (function
+      | Keeper_chat_operation.Duplicate_object_key key -> "duplicate response key: " ^ key
+      | Keeper_chat_operation.Non_finite_float -> "response contains a non-finite number")
+  | Agent_core.Hooks.Declined -> Ok Agent_core.Hooks.Declined
+  | Agent_core.Hooks.Timeout -> Ok Agent_core.Hooks.Timeout
 let input_response_intent ~(waiting : input_wait) ~source ~candidate ~response =
   if not (Keeper_id.Trace_id.equal waiting.checkpoint.trace_id source.Keeper_checkpoint_ref.trace_id
       && Keeper_id.Trace_id.equal source.trace_id candidate.Keeper_checkpoint_ref.trace_id)
@@ -182,21 +191,16 @@ let input_response_intent ~(waiting : input_wait) ~source ~candidate ~response =
      || Keeper_checkpoint_ref.equal waiting.checkpoint candidate
   then Error "input response intent changed trace, turn or consumed checkpoint identity"
   else
-    let* response = match response with
-      | Agent_core.Hooks.Answer answer ->
-        Keeper_chat_operation.canonical_json answer
-        |> Result.map (fun answer -> Agent_core.Hooks.Answer answer)
-        |> Result.map_error (function
-          | Keeper_chat_operation.Duplicate_object_key key -> "duplicate response key: " ^ key
-          | Keeper_chat_operation.Non_finite_float -> "response contains a non-finite number")
-      | Agent_core.Hooks.Declined -> Ok Agent_core.Hooks.Declined
-      | Agent_core.Hooks.Timeout -> Ok Agent_core.Hooks.Timeout in
+    let* response = canonical_input_response response in
     Ok {waiting;source;candidate;response}
 let equal_input_response_intent left right =
   equal_input_wait left.waiting right.waiting
   && Keeper_checkpoint_ref.equal left.source right.source
   && Keeper_checkpoint_ref.equal left.candidate right.candidate
-  && left.response = right.response
+  && (match left.response,right.response with
+      | Agent_core.Hooks.Answer left,Agent_core.Hooks.Answer right -> Yojson.Safe.equal left right
+      | Declined,Declined | Timeout,Timeout -> true
+      | (Answer _ | Declined | Timeout),(Answer _ | Declined | Timeout) -> false)
 
 type terminal = Completed | Cancelled | Failed of string
 type recovery_origin =
@@ -1113,6 +1117,7 @@ let of_json json =
         (match phase,native_call with
          | Recovering {origin=Input_wait waiting;_},Keeper_native_call.No_native_call
              when equal_input_wait waiting intent.waiting && Option.is_some (Scope_id.direct_operation_id id)
+               (* Minimum wait revision is three; preparing adds one transition. *)
                && revision >= 4L -> Ok ()
          | (Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _
            | Recovering {origin=(Input_wait _ | Unconfirmed_sources | Confirmed_undispatched | Checkpointed _

@@ -79,6 +79,11 @@ type input_response_intent = private
   ; source : Keeper_checkpoint_ref.t
   ; candidate : Keeper_checkpoint_ref.t
   ; response : Agent_core.Hooks.elicitation_response }
+val canonical_input_response : Agent_core.Hooks.elicitation_response ->
+  (Agent_core.Hooks.elicitation_response, string) result
+(** Canonicalize Answer JSON recursively before deriving a physical candidate
+    or recording an intent; reject duplicate keys and non-finite numbers.
+    Declined and Timeout remain distinct responses. *)
 val input_response_intent : waiting:input_wait -> source:Keeper_checkpoint_ref.t ->
   candidate:Keeper_checkpoint_ref.t -> response:Agent_core.Hooks.elicitation_response ->
   (input_response_intent, string) result

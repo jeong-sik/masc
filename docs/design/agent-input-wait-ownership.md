@@ -342,13 +342,39 @@ The optional fact is omitted when absent. A present null, malformed/duplicate/
 unknown fields, unknown response kind, mismatched wait or incompatible phase is
 rejected by the strict journal codec.
 
-This layer supplies the storage and retention boundary only. The existing Owner
-response path does not yet record an intent before its physical installation.
-The next layer must split prepare/confirmed candidate retention, intent commit,
-canonical CAS/reconfirmation and final resolution under fresh original Owner
-child authority, including restart. No matching hash or retained file read is a
-confirmed installation. Actual independent Producer publication of a newer global
-input G still needs typed lineage reconciliation that preserves its history,
-context and other pending request; refusing G here is not that recovery. R1 is
-not resolved, and these layers cannot become Ready or be installed on the
-strength of the intent foundation.
+The actual direct Owner now captures the original wait and persisted intent
+under its exclusive maintenance child. It prepares the Core response and freshly
+confirms retention of both S and C, serializes intent confirmation through that
+same Owner, then installs canonical under its captured exact predecessor CAS.
+Only a sealed receipt for the same authority and complete recorded intent can
+resolve the original journal wait. Intent journal errors preserve the prepared
+W/S/C fact separately from post-install resolution errors; HTTP classifies their
+original typed cause (including storage uncertainty as 500).
+
+After reopening, a fresh Owner/child obtains fresh authority from the original
+queued operation/digest/wait. An existing intent admits only its same typed
+response. Retained W/S/C, original scope, complete nonhistory data, source history
+and exact Core rederivation of C are checked again. Canonical S admits S->C;
+canonical C admits C->C through an actual durable rewrite, after the recorded
+intent proves that candidate. Missing/corrupt retained evidence or another
+canonical is refused without replacement. No hash equality or readback by itself
+mints a receipt or turns an uncertain acknowledgement into acceptance.
+
+The first journal commit is now intent confirmation, before canonical mutation.
+Actual HTTP pre/post-intent commit faults keep canonical W and the original wait;
+the committed fact survives an actual Owner close/reopen and admits only the
+same response. Separate scenarios install real S/C, inject a real SQLite
+resolution fault, reopen the journal in a fresh Owner and reconcile consumed C;
+a committed uncertain resolution is observed as an existing continuation and
+refused as a duplicate. These prepared resolution-fault scenarios exercise actual
+files, SQLite and fresh Owner HTTP recovery, not fault injection inside the
+Owner's final resolve invocation. The physical fixture also tests stale canonical
+CAS, corrupt retained C and fresh receipt authority.
+
+Actual independent Producer publication of newer global input G still needs
+typed lineage reconciliation preserving its history, context and other pending
+request; refusing G here is not that recovery. The canonical history-extension
+fixture keeps global input W and must not be cited as that independent integration.
+R1 remains incomplete. Shared Core R2, autonomous waiting, dedicated classification,
+snapshot/SSE and persistent/reconnected Acting/TUI also remain mandatory, and all
+layers stay Draft without installation or merge.

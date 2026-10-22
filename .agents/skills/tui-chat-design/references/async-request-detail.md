@@ -186,3 +186,10 @@
   `docs/audits/2026-10-19-tui-connectors-early-status.md`를 따른다.
   write 뒤 재활성과 실제 정리의 분리는
   `docs/audits/2026-10-19-tui-connectors-write-reactivation.md`를 따른다.
+
+- `/listen`은 원래 대화의 선택 media와 opaque ticket을 캡처한다. 내려받기는 원래
+  workspace precondition과 응답 receipt를 확인하고, 로컬 읽기·decode·cache 저장·MIDI
+  해석은 입력 handler 밖에서 수행한다. 실제 player 시작은 UI가 같은 ticket과 Keeper,
+  chat 방문을 받아들인 뒤에만 한다. 새 listen·대상 변경·화면 이탈·workspace 읽기 철회는
+  이전 ticket을 되살리지 않는다. 준비 반환·process 시작을 청취나 물리 오디오 완료로
+  부르지 않으며, 이미 시작한 player의 한 번에 하나 정책은 attachment action이 유지한다.

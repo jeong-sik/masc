@@ -302,6 +302,45 @@ let test_artifact_route_enforces_admin_token () =
            (Astring.String.is_infix ~affix:"maximum_bytes" oversized_response)))
 ;;
 
+let test_generated_audio_workspace_receipt () =
+  with_temp_base_path (fun base_path ->
+    Auth.save_auth_config base_path
+      {Masc_domain.default_auth_config with enabled=true; require_token=true};
+    let token = create_token_exn base_path ~agent_name:"audio-reader" ~role:Masc_domain.Admin in
+    let saved = Server_auth.For_testing.snapshot_server_state () in
+    Fun.protect
+      ~finally:(fun () -> Server_auth.For_testing.restore_server_state saved)
+      (fun () ->
+        let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+        Server_auth.For_testing.restore_server_state (Some state);
+        let payload = "RIFF\000\255audio\128bytes" in
+        let path = match Masc.Keeper_chat_media_store.persist_result
+          ~base_dir:base_path ~media_type:"audio/wav" ~data:payload with
+          | Ok (_, path) -> path | Error detail -> Alcotest.fail detail in
+        let router = Server_routes_http_routes_voice.add_routes (Http.Router.create ()) in
+        let encode = Uri.pct_encode ~component:`Query_value in
+        let base = Unix.realpath base_path in
+        let root = Unix.realpath (Masc.Workspace.masc_dir (Masc.Mcp_server.workspace_config state)) in
+        let query base = "?expected_base_path=" ^ encode base
+          ^ "&expected_masc_root=" ^ encode root in
+        let matched = dispatch router (http_request ~path:(path ^ query base) ~token ()) in
+        Alcotest.(check int) "original workspace reads generated audio" 200 (status_of_response matched);
+        check_workspace_receipt ["matched-v1"] matched;
+        let headers, body = headers_and_body matched in
+        Alcotest.(check string) "audio bytes are unchanged" payload body;
+        Alcotest.(check (option string)) "audio MIME" (Some "audio/wav")
+          (Httpun.Headers.get headers "content-type");
+        let refused = dispatch router
+          (http_request ~path:(path ^ query (base ^ "-other")) ~token ()) in
+        Alcotest.(check int) "different workspace cannot supply playback bytes" 409
+          (status_of_response refused);
+        check_workspace_receipt [] refused;
+        let unbound = dispatch router (http_request ~path ~token ()) in
+        check_workspace_receipt [] unbound;
+        let _, original = headers_and_body unbound in
+        Alcotest.(check string) "receipt is scoped to the bound request" payload original))
+;;
+
 (* --- blob_response shape --- *)
 
 let assert_json_field key expected json =
@@ -344,6 +383,8 @@ let () =
             test_artifact_bytes_require_operator_auth
         ; Alcotest.test_case "route enforces Admin bearer" `Quick
             test_artifact_route_enforces_admin_token
+        ; Alcotest.test_case "generated audio retains workspace receipt" `Quick
+            test_generated_audio_workspace_receipt
         ] );
       ( "blob_response",
         [

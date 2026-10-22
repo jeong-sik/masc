@@ -503,6 +503,7 @@ type async_msg =
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
       Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
+  | Listen_prepared of listen_request * (Masc_tui_attachment_action.prepared, string) result
   | Sent_image_ready of {
       generation : int;
       view : surface;
@@ -962,6 +963,7 @@ let rec workspace_message_is_read = function
   | Runtime_catalog_loaded _
   | Keeper_tool_approvals_loaded _
   | Approvals_summary_loaded _
+  | Listen_prepared _
   | Sent_image_ready _
   | Keeper_turns_loaded _
   | Gate_snapshot_loaded _
@@ -1170,7 +1172,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
     | Runtime_assignment_changed (_, _, _)
     | Keeper_chat_approval_answered (_, _, _, _)
-    | Keeper_tool_approvals_loaded (_, _, _) | Sent_image_ready _
+    | Keeper_tool_approvals_loaded (_, _, _) | Listen_prepared _ | Sent_image_ready _
     | Image_render_ready _ | Keeper_turns_loaded (_, _)
     | Keeper_chat_control_received (_, _, _) | Gate_snapshot_loaded (_, _, _)
     | Gate_approval_resolved (_, _, _, _, _)
@@ -1307,7 +1309,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
   | Runtime_assignment_changed (_, _, _)
   | Keeper_chat_approval_answered (_, _, _, _)
-  | Keeper_tool_approvals_loaded (_, _, _) | Sent_image_ready _
+  | Keeper_tool_approvals_loaded (_, _, _) | Listen_prepared _ | Sent_image_ready _
   | Image_render_ready _ | Keeper_turns_loaded (_, _)
   | Keeper_chat_control_received (_, _, _) | Gate_snapshot_loaded (_, _, _)
   | Gate_approval_resolved (_, _, _, _, _)

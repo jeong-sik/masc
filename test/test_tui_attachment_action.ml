@@ -228,6 +228,55 @@ let test_save_served_artifact_boundary () =
       Alcotest.(check bool) "an oversized body never creates a saved file"
         false (Sys.file_exists target))
 
+let listen_state () =
+  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935
+    ~refresh_interval:2. () in
+  state.view <- Keepers Keeper_message;
+  Masc_tui_types.retarget_message state (Some "music");
+  state
+
+let audio : Masc_tui_chat_media.playable =
+  {name="take.wav"; kind=`Audio; source=`Data "UklGRg=="}
+
+let test_listen_replacement_and_replay () =
+  let open Masc_tui_types in
+  let state = listen_state () in
+  let first = begin_chat_listen state ~keeper:"music" audio in
+  let second = begin_chat_listen state ~keeper:"music" audio in
+  Alcotest.(check bool) "earlier read cannot authorize playback" false
+    (take_chat_listen state first);
+  Alcotest.(check bool) "earlier result keeps the successor pending" true
+    (take_chat_listen state second);
+  Alcotest.(check bool) "same completion cannot play twice" false
+    (take_chat_listen state second)
+
+let test_listen_target_and_workspace_withdrawal () =
+  let open Masc_tui_types in
+  let state = listen_state () in
+  let first = begin_chat_listen state ~keeper:"music" audio in
+  retarget_message state (Some "other");
+  retarget_message state (Some "music");
+  Alcotest.(check bool) "A to B to A does not restore playback authority" false
+    (take_chat_listen state first);
+  let second = begin_chat_listen state ~keeper:"music" audio in
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "reconnection retires pending audio" false
+    (take_chat_listen state second);
+  let third = begin_chat_listen state ~keeper:"music" audio in
+  retarget_message state (Some "music");
+  Alcotest.(check bool) "same target preserves the active request" true
+    (take_chat_listen state third)
+
+let test_listen_surface_withdrawal () =
+  let open Masc_tui_types in
+  let state = listen_state () in
+  let request = begin_chat_listen state ~keeper:"music" audio in
+  state.view <- Overview;
+  reconcile_chat_listen state;
+  state.view <- Keepers Keeper_message;
+  Alcotest.(check bool) "returning to chat does not revive the withdrawn read" false
+    (take_chat_listen state request)
+
 let () =
   Alcotest.run "tui-attachment-action"
     [ ( "decisions"
@@ -246,6 +295,13 @@ let () =
         ; Alcotest.test_case "the outcome is one line" `Quick
             test_describe_outcome
         ] )
+    ; ( "listen ownership"
+      , [ Alcotest.test_case "replacement and duplicate completion" `Quick
+            test_listen_replacement_and_replay
+        ; Alcotest.test_case "target and workspace withdrawal" `Quick
+            test_listen_target_and_workspace_withdrawal
+        ; Alcotest.test_case "surface withdrawal" `Quick
+            test_listen_surface_withdrawal ] )
     ; ( "save"
       , [ Alcotest.test_case "saving uses the authoritative served-byte boundary"
             `Quick test_save_served_artifact_boundary ] )

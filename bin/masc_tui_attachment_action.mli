@@ -59,6 +59,20 @@ val describe_outcome : outcome -> string
 (** 상태 줄 한 줄: [playing <name>], [opened <name>], [saved <name> · <path>],
     [failed <name> · <reason>]. MIDI 요약이 있으면 뒤에 [ · <요약>]. *)
 
+type prepared
+(** Acquired bytes and saved file, without starting a player or external app. *)
+
+val prepare :
+  fetch:(sha256:string -> (string, string) result) ->
+  Masc_tui_types.board_attachment ->
+  (prepared, outcome) result
+(** Fetch, validate the served-byte boundary, save, and parse MIDI metadata.
+    Run outside the input loop. Failure never starts a process. *)
+
+val perform : prepared -> midi_soundfont:string option -> outcome
+(** Start the prepared action only after the caller admits its original owner.
+    Does not fetch, write or parse attachment bytes. *)
+
 val run :
   fetch:(sha256:string -> (string, string) result) ->
   Masc_tui_types.board_attachment ->

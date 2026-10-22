@@ -31,3 +31,7 @@ val step_revision :
 val place_search_match : Masc_tui_types.state -> count:int -> index:int -> unit
 (** Retain the logical match separately from the rendered scroll, whose last
     page may clamp before that row. Invalid landings or list focus do nothing. *)
+
+val step_text_part : Masc_tui_types.state -> delta:int -> unit
+(** Select an original text part for copying. Only focused, admitted Resources
+    detail can move; selection clamps at either end and preserves reading state. *)

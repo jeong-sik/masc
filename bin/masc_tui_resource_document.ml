@@ -9,6 +9,7 @@ type t = {
   error : string option;
   requested : bool;
   image_cursor : int;
+  text_cursor : int;
   revisions : Catalog.report list;
 }
 
@@ -34,8 +35,43 @@ let current (state : state) =
         | Some current -> Catalog.equal_key current key
         | None -> false in
       {entry;contents;error;requested;image_cursor=state.resource_image_cursor;
+       text_cursor=state.resource_text_cursor;
        revisions=state.resource_revision_history})
       (Catalog.entry_for_key entries key))
+
+let text_parts parts =
+  List.mapi (fun index (part : Masc_tui_mcp.resource_content) ->
+    match part.rc_kind with
+    | Resource_text source -> Some (index + 1, source)
+    | Resource_blob _ -> None) parts
+  |> List.filter_map Fun.id
+
+let admitted_text_parts state =
+  match state.resource_pending_key, current state with
+  | None, Some {entry;contents=Some parts;error=None;_} ->
+      Some (entry, text_parts parts)
+  | (Some _ | None), (Some _ | None) -> None
+
+let text_part_count state =
+  match admitted_text_parts state with
+  | Some (_, parts) -> List.length parts
+  | None -> 0
+
+let selected_text_part parts cursor =
+  if cursor < 0 then None else List.nth_opt parts cursor
+
+let copy_source state =
+  if not (server_authority_ready state) then
+    Error "Confirm the workspace before copying resource source"
+  else if state.view <> Resources || state.resource_focus <> Right_pane then
+    Error "Focus resource detail to copy its source"
+  else match admitted_text_parts state with
+    | None -> Error "Resource source is not currently readable"
+    | Some (entry, parts) ->
+      match selected_text_part parts state.resource_text_cursor with
+      | Some (part, source) ->
+          Ok (Printf.sprintf "%s · part %d" (Catalog.display_name entry) part, source)
+      | None -> Error "No selected text part in the current resource reading"
 
 let fenced_pretty_json text =
   let pretty =
@@ -82,7 +118,7 @@ let pretty_resource_text ~mime text =
   | None -> text
 
 let resource_document entry
-    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~revisions =
+    (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions =
   let resource = Catalog.metadata entry in
   let present = function
     | Some text when String.trim text <> "" -> text
@@ -135,12 +171,17 @@ let resource_document entry
     | None, None when requested -> "(reading resource…)"
     | None, None -> "(Enter reads the selected resource.)"
     | None, Some parts ->
+        let texts = text_parts parts in
+        let text_selection = match selected_text_part texts text_cursor with
+          | Some (part, _) -> Printf.sprintf "Text %d/%d · part %d · (/): select · y: copy source\n\n"
+              (text_cursor + 1) (List.length texts) part
+          | None -> "" in
         let images = Masc_tui_resource_images.images ~mime_type:resource.mime_type parts in
         let selection = match List.nth_opt images image_cursor with
           | Some (part, _) -> Printf.sprintf "Image %d/%d · part %d · ,/.: select · Ctrl-O: preview\n\n"
               (image_cursor + 1) (List.length images) part
           | None -> "" in
-        selection ^ (parts |> List.mapi (fun index part -> part_document (index + 1) part)
+        text_selection ^ selection ^ (parts |> List.mapi (fun index part -> part_document (index + 1) part)
         |> String.concat "\n\n")
   in
   metadata ^ "\n\n---\n\n" ^ body
@@ -153,6 +194,7 @@ let rows ~cols reading =
     ~sanitize:Terminal_text.single_line
     (resource_document reading.entry reading.contents ~error:reading.error
        ~requested:reading.requested ~image_cursor:reading.image_cursor
+       ~text_cursor:reading.text_cursor
        ~revisions:reading.revisions)
 
 let search_rows ~cols state =

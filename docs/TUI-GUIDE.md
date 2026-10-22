@@ -414,6 +414,12 @@ and YAML payloads use the shared code lexer, while Markdown uses the same
 renderer as chat and Board. Image parts retain their original encoded bytes:
 with detail focused, `,`/`.` selects an image and `Ctrl-O` previews it through
 the same terminal image presenter as chat. SVG text parts are also supported.
+With detail focused, `(`/`)` selects an original text part and `y` sends that
+part's exact source bytes to the terminal clipboard via OSC 52. Parts are not
+joined, pretty-printed or decoded for copying; JSON, HTML, tabs and line endings
+stay as received. Pending reads, refusals, withdrawn inventory and an unconfirmed
+workspace cannot copy a retained old body. Terminal clipboard support is
+unconfirmed; this action reports delivery of the request, not clipboard success.
 Other binary parts report their encoded size. Previews use the retained content,
 not the resource URI as a local path, and require terminal image support.
 Reading the resource again, opening another resource or changing workspace withdraws the earlier

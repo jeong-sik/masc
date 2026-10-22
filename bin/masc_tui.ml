@@ -13415,6 +13415,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.resource_revision_history <- [];
   state.resource_scroll <- 0;
   state.resource_image_cursor <- 0;
+  state.resource_text_cursor <- 0;
   state.observer_cursor <- None;
   state.observer_replay <- Observer_replay_unobserved;
   state.acting <- [];
@@ -28850,6 +28851,10 @@ and is loaded on demand through keeper_skill.
              ~delta:(if bracket = "]" then 1 else -1)
        | Some "\015" when state.view = Resources && state.resource_focus = Right_pane ->
            open_resource_image state ~mailbox:async_messages
+       | Some (("(" | ")") as direction)
+         when state.view = Resources && state.resource_focus = Right_pane ->
+           Masc_tui_resources_updates.step_text_part state
+             ~delta:(if direction = ")" then 1 else -1)
        | Some (("," | ".") as direction)
          when state.view = Resources && state.resource_focus = Right_pane ->
            step_resource_image state ~delta:(if direction = "." then 1 else -1)
@@ -30167,6 +30172,14 @@ and is loaded on demand through keeper_skill.
            (match state.view with
             | Approvals -> answer_presented_approval Confirm
             | Harness -> handle_harness_agree ()
+            | Resources ->
+                (match Masc_tui_resource_document.copy_source state with
+                 | Error detail -> report_action state "error" detail
+                 | Ok (label, source) ->
+                     copy_reference_to_terminal render_schedule source;
+                     report_action state "system"
+                       (Printf.sprintf "Sent %s source (%d bytes) via OSC 52 (terminal support unconfirmed)"
+                          label (String.length source)))
             | Code ->
                 (match Masc_tui_code_results.copy_file_source state with
                  | Error detail -> report_action state "error" detail
@@ -30177,7 +30190,7 @@ and is loaded on demand through keeper_skill.
                           path (String.length source)))
             | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules
             | Verification | Fusion | Repositories | Changes | Connectors | Runtime | Config
-            | Resources | Tools | System_logs | Keepers _ -> ())
+            | Tools | System_logs | Keepers _ -> ())
        (* Stepping the last search is what [n] means on a surface that binds
           it to nothing else, so it is the tail of this arm rather than an
           arm of its own above it. As its own arm it sat above every surface

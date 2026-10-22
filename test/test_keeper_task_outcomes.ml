@@ -1655,6 +1655,82 @@ let test_release_without_summary_is_refused () =
       true
       (refused (call "keeper_task_claim" (`Assoc [ "task_id", `String "task-002" ]))))
 
+let test_release_sources_reach_the_next_owner () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let owner = release_test_meta () in
+       let successor =
+         match Masc_test_deps.meta_of_json_fixture
+           (`Assoc [ "name", `String "handoff-successor";
+                     "trace_id", `String "trace-handoff-successor" ]) with
+         | Ok meta -> meta
+         | Error error -> fail error
+       in
+       List.iter
+         (fun name ->
+            ignore (Masc.Workspace.bind_session config ~agent_name:name
+              ~capabilities:[ "test" ] ()))
+         [ owner.name; successor.name ];
+       ignore (Masc.Workspace.add_task config ~title:"Finish the handoff report"
+         ~priority:1 ~description:"Retain the outgoing owner's sources");
+       let call meta name args =
+         Yojson.Safe.from_string (Task.handle_keeper_task_tool ~config ~meta ~name ~args)
+       in
+       let task () = match Masc.Workspace.get_tasks_raw config with
+         | [ task ] -> task
+         | _ -> fail "expected one handoff task"
+       in
+       check bool "outgoing owner claims" true
+         (accepted (call owner "keeper_task_claim" (`Assoc [ "task_id", `String "task-001" ])));
+       let release refs = call owner "keeper_task_release"
+           (`Assoc [ "task_id", `String "task-001";
+                     "summary", `String "draft complete; review remains";
+                     "next_step", `String "read the draft and request independent review";
+                     "evidence_refs", refs ])
+       in
+       List.iter
+         (fun refs ->
+            let before = task () in
+            check bool "invalid supplied sources are refused" true (refused (release refs));
+            let after = task () in
+            check bool "refusal does not release ownership" true
+              (before.task_status = after.task_status);
+            check bool "refusal does not change the handoff" true
+              (before.handoff_context = after.handoff_context))
+         [ `Null; `List [ `String "" ]; `List [ `String "/host/draft.md" ]; `String "note:draft" ];
+       let refs = [ "artifact:reports/draft.md"; "note:source bundle observed before handoff" ] in
+       check bool "valid handoff is accepted" true
+         (accepted (release (`List (List.map (fun value -> `String value) refs))));
+       let prior = match (task ()).handoff_context with
+         | Some handoff -> handoff
+         | None -> fail "release must persist its handoff"
+       in
+       check (list string) "release stores the exact sources" refs prior.evidence_refs;
+       check (option string) "outgoing author is recorded" (Some owner.name) prior.updated_by;
+       check bool "successor claims the same task" true
+         (accepted (call successor "keeper_task_claim" (`Assoc [ "task_id", `String "task-001" ])));
+       check bool "successor starts the same task" true
+         (match (task ()).task_status with
+          | Masc_domain.InProgress { assignee; _ } -> assignee = successor.name
+          | _ -> false);
+       let after = match (task ()).handoff_context with
+         | Some handoff -> handoff
+         | None -> fail "claim and auto-start must preserve the handoff"
+       in
+       check bool "same handoff survives ownership and auto-start" true (prior = after);
+       let listing = call successor "keeper_tasks_list"
+           (`Assoc [ "task_ids", `List [ `String "task-001" ]; "projection", `String "full" ]) in
+       let visible = listing |> U.member "snapshot" |> U.to_list |> List.hd
+                     |> U.member "handoff_context" in
+       check (list string) "successor reads sources through the real task tool" refs
+         (visible |> U.member "evidence_refs" |> U.to_list |> List.map U.to_string);
+       check string "successor reads the original author's attribution" owner.name
+         (visible |> U.member "updated_by" |> U.to_string))
+
 let () =
   Eio_main.run
   @@ fun env ->
@@ -1728,6 +1804,8 @@ let () =
         ; test_case
             "release without a summary is refused and keeps the task held"
             `Quick test_release_without_summary_is_refused
+        ; test_case "release sources reach the next owner" `Quick
+            test_release_sources_reach_the_next_owner
         ; test_case
             "done passes the declared notes parameter to the transition (task-1426)"
             `Quick test_done_passes_declared_notes_to_transition

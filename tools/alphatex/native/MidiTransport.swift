@@ -1463,6 +1463,20 @@ do {
         try emit(["kind": "destinations", "destinations": try destinations().map(\.json)])
         exit(0)
     }
+    if args.first == "export-vst" {
+        args.removeFirst()
+        var path: String?, output: String?
+        while !args.isEmpty {
+            switch args.removeFirst() {
+            case "--file": guard path == nil, !args.isEmpty else { throw MidiFailure("--file requires one render plan") }; path = args.removeFirst()
+            case "--output": guard output == nil, !args.isEmpty else { throw MidiFailure("--output requires one new part directory") }; output = args.removeFirst()
+            default: throw MidiFailure("unknown VST render projection option")
+            }
+        }
+        guard let path, let output else { throw MidiFailure("export-vst requires --file and --output") }
+        try emit(exportMidiRenderPlan(path: path, directory: output))
+        exit(0)
+    }
     guard args.first == "play" else { throw MidiFailure("usage: music-midi play --file TIMELINE_JSON --destination UID [--loop] | destinations") }
     args.removeFirst()
     var path: String?, uid: String?, loop = false

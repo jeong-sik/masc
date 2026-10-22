@@ -67,7 +67,7 @@ async function fixture(action) {
   project = editArrangement(project, { kind: 'lane-add', sourceKind: 'midi', name: 'Instrument' })
   project = editArrangement(project, { kind: 'region-add', name: 'One', asset: 'v', lane: 'lane-2', position: 480, offset: 1, extent: 478, repeat: 3 })
   project = editArrangement(project, { kind: 'region-add', name: 'Two', asset: 'v', lane: 'lane-2', position: 4000, offset: 0, extent: 480, repeat: 1 })
-  const start = (project, route = arrangementRoute({ output: 'AudioUID' }), selectedRun = run, selectedRequest = request, runSoundfont) => {
+  const start = (project, route = { kind: 'mixed', output: 'AudioUID', portBindings: [] }, selectedRun = run, selectedRequest = request, runSoundfont) => {
     assert.equal(arrangementPlaybackRequest(project, route).kind, 'prepare-sound')
     const owner = startSoundArrangement({ project, route, sourceRoot: root, directory: root, request: selectedRequest, cancelRequest, run: selectedRun, runSoundfont })
     owners.push(owner); return owner

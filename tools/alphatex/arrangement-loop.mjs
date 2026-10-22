@@ -12,7 +12,10 @@ export function arrangementLoop(project) {
   const range = validateLoop(project.playbackLoop)
   const start = range.start / project.ppq * 60 / project.tempo, end = range.end / project.ppq * 60 / project.tempo
   if (![start, end].every(Number.isFinite) || end <= start || end * 1e9 >= 2 ** 64) throw new Error('Arrangement loop exceeds the native clock precision or range')
-  return { start, end, duration: end - start,
+  // The native loop clock measures a tick span. Subtracting rounded absolute
+  // seconds changes the period when the same window moves along the timeline.
+  const duration = (range.end - range.start) / project.ppq * 60 / project.tempo
+  return { start, end, duration,
     startNanoseconds: fraction(...projectNanoseconds(project, range.start)), endNanoseconds: fraction(...projectNanoseconds(project, range.end)) }
 }
 const subtract = ([a, b], [c, d]) => [a * d - c * b, b * d]

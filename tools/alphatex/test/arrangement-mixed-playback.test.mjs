@@ -89,6 +89,7 @@ test('explicit mixed routing preserves each output intent while audible mute/sol
   assert.equal(arrangementPlaybackRequest(mutedAudio, route).kind, 'prepare-midi')
   route = selectArrangementRoute(route, { kind: 'output', path: 'Audio only' })
   assert.deepEqual(route, { kind: 'audio', output: 'Audio only' })
-  assert.throws(() => arrangementPlaybackRequest(mutedAudio, route), /MIDI destination/)
+  assert.deepEqual(arrangementPlaybackRequest(mutedAudio, route), { kind: 'prepare-vst', output: 'Audio only' })
+  assert.deepEqual(arrangementPlaybackRequest(project, route), { kind: 'prepare-vst', output: 'Audio only' })
   assert.equal(arrangementRoute({ output: 'Audio', midiOutput: '-42' }).kind, 'mixed')
 }))

@@ -44,6 +44,29 @@ test('arrangement loop range is an immutable project decision and worker prepara
  }finally{await c.worker.terminate();await rm(directory,{recursive:true,force:true})}
 })
 
+test('moving a loop window keeps its native period while MIDI preparation preserves every exact region edge',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'masc-loop-period-')),c=client()
+ try{
+  const initial={...project(),tempo:123},original=exportMidiSource(initial.assets[0].source)
+  const reference=arrangementLoop({...initial,playbackLoop:{start:0,end:3600}})
+  for(const start of [0,240,960]){
+   const selected=editArrangement(initial,{kind:'loop',range:{start,end:start+3600}})
+   const before=structuredClone(selected),range=arrangementLoop(selected)
+   assert.equal(range.duration,reference.duration)
+   const prepared=ok(await c.request({kind:'prepare-midi',project:selected,directory,midiOutput:'123'}))
+   const plan=JSON.parse(await readFile(prepared.path,'utf8'))
+   assert.equal(prepared.originSeconds,range.start)
+   assert.ok(plan.duration>=range.duration)
+   for(const region of plan.regions){
+    assert.ok(edge(region,0)>=0)
+    assert.ok(edge(region,region.repeatCount)<=plan.duration)
+   }
+   assert.deepEqual(selected,before)
+   assert.deepEqual(exportMidiSource(selected.assets[0].source),original)
+  }
+ }finally{await c.worker.terminate();await rm(directory,{recursive:true,force:true})}
+})
+
 test('one loop window retains a compressed run even for a long finite source region and never selects outside assets',()=>{
  const region={id:'a',source:'s',startSeconds:0,sourceStart:0,sourceEnd:1,repeatCount:1000000000,startNanoseconds:ns(0),periodNanoseconds:ns(1_000_000_000)}
  const selected=loopMidiRegions([region],{start:.25,end:999999999.75,startNanoseconds:ns(250_000_000),endNanoseconds:ns(999_999_999_750_000_000n)})

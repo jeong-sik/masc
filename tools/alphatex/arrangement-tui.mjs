@@ -8,7 +8,7 @@ import { Worker } from 'node:worker_threads'
 import { emitKeypressEvents } from 'node:readline'
 import { arrangementRoute, selectArrangementRoute, arrangementPlaybackRequest } from './arrangement-playback.mjs'
 import { startSoundArrangement } from './arrangement-sound.mjs'
-import { arrangementEditor, arrangementAction, arrangementCommand, arrangementCommandAdmission, arrangementImported, arrangementUmpDraft, arrangementPracticePass, arrangementPracticeSound, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected } from './arrangement-editor.mjs'
+import { arrangementEditor, arrangementAction, arrangementCommand, arrangementCommandAdmission, arrangementImported, arrangementUmpDraft, arrangementPracticePass, arrangementPracticeSound, arrangementCalibrated, arrangementRecordingCorrection, selectedRegion, arrangementTakes, arrangementTakeSelected, arrangementSound } from './arrangement-editor.mjs'
 import { captureFluidSound } from './soundfont.mjs'
 import { loadArrangement, verifyArrangementAssets, saveArrangement } from './arrangement-files.mjs'
 import { saveProject } from './sequencer-files.mjs'
@@ -22,9 +22,13 @@ import { recordingEpoch } from './arrangement-recording.mjs'
 import { recordingCorrectionContext, recordingCorrectionCapture } from './recording-correction.mjs'
 import { measureAudioCalibration } from './audio-calibration.mjs'
 import { calibrationMilliseconds, calibrationResidual, validateCalibrationCapture } from './calibration-profile.mjs'
+import { InstrumentPicker, pickerFooter, selectionLabel } from './instruments.mjs'
+import { defaultStateDirectory } from './vst.mjs'
+import { captureVstSound } from './project-sound-files.mjs'
 
 const help = [
   ':edit-ump [ASSET] edits native MIDI2 absolute pitch/velocity and onset voicings; raw capture stays unchanged',
+  'i chooses a VST/preset for the selected MIDI region or asset; Space plays it with WAV backing through the audio output',
   ':phrase opens a new phrase; :edit-midi [ASSET] [PATTERN] makes an editable variant; Enter places its new asset',
   ':practice BARS on|off   count-in bars and metronome; :record also starts stopped backing',
   ':record-calibration DIRECTORY   inspect next-take measurement; :record-correction pulse N | manual MS IN OUT | none',
@@ -78,7 +82,7 @@ const help = [
   'Channel scopes filter system/SysEx. Transport/edits finalize recording; loop passes become separate take lanes, with the last take selected.',
 ]
 
-export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput, initialRoute, stateDirectory } = {}) {
+export async function viewArrangement({ path, loaded, initialDocument, root = resolve('music-projects'), embedded = false, signal, output, midiOutput, initialRoute, stateDirectory = defaultStateDirectory() } = {}) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Arrangement editor requires a terminal')
   if ((path || loaded) && initialDocument) throw new Error('Open a saved arrangement or a new one, one at a time')
   if (signal?.aborted) return
@@ -111,11 +115,44 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   let calibration = null
   let calibrationInspection = null, recordingInspection = null
   const discovery = new AbortController()
+  let pickerAsset = null, pendingSound = null
+  const soundJobs = new Set()
+  function cancelSound() { pendingSound?.capture.cancel(); pendingSound = null }
+  const picker = new InstrumentPicker({ directory: stateDirectory, notify: draw,
+    active: () => editor.project.assets.find(asset => asset.id === pickerAsset)?.source?.sound?.selection,
+    selected(selection) {
+      enqueue(async () => {
+        if (!accepting || closed || suspended) return
+        await settleRecording(); stop(); cancelSound()
+        const project = editor.project, asset = pickerAsset, capture = captureVstSound(selection)
+        const owned = { capture }; pendingSound = owned; status = 'Capturing selected VST sound…'
+        const completion = capture.promise.then(sound => {
+          return enqueue(() => {
+            if (!accepting || closed || suspended || pendingSound !== owned || editor.project !== project) return
+            pendingSound = null
+            adopt(arrangementSound(editor, asset, sound))
+            route = { kind: 'audio', output: route.output }
+            status = `Selected ${selectionLabel(sound.selection)}`
+            play()
+          })
+        }).catch(error => { if (pendingSound === owned && accepting && !closed) status = error.message })
+          .finally(() => { if (pendingSound === owned) pendingSound = null; soundJobs.delete(completion); draw() })
+        soundJobs.add(completion)
+      })
+    }, failed: error => { status = error.message; draw() } })
+  async function chooseInstrument() {
+    await settleRecording(); stop(); cancelSound()
+    const id = selectedRegion(editor)?.asset ?? editor.asset
+    if (editor.project.assets.find(asset => asset.id === id)?.kind !== 'midi') throw new Error('Select a MIDI region or asset, then press i to choose its instrument')
+    pickerAsset = id
+    await picker.open()
+  }
   let complete
   const done = new Promise(resolve => { complete = resolve })
   function finish() {
     if (!accepting) return
     accepting = false
+    picker.close(); cancelSound()
     calibration?.abort()
     takeAbort?.abort()
     discovery.abort()
@@ -318,7 +355,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
   }
   function adopt(next) {
     if (next.project !== editor.project || next.region !== editor.region) calibrationInspection = recordingInspection = null
-    if (next.project !== editor.project) stop()
+    if (next.project !== editor.project) { cancelSound(); stop() }
     editor = next
     if (showTakes !== null && (editor.asset !== showTakes || !editor.project.assets.some(asset => asset.id === showTakes && asset.selectedTake !== undefined))) showTakes = null
   }
@@ -851,15 +888,22 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       if (takeTask) await Promise.allSettled([takeTask])
       await action()
     }).catch(error => { status = error.name === 'AbortError' ? 'Import or verification cancelled' : error.message }).finally(draw)
+    return task
   }
   function keypress(text, key = {}) {
     if (!accepting || closed || suspended) return
     if (key.ctrl && key.name === 'c') { finish(); return }
     if (statusReader.keypress(text, key, process.stdout)) { draw(); return }
-    if (key.ctrl && key.name === 'l' || prompt === null && text === '!') {
+    if (key.ctrl && key.name === 'l' || prompt === null && !picker.view && text === '!') {
       statusReader.open('Arrangement status at open', statusBody())
       draw(); return
     }
+    if (picker.view) {
+      if (key.name === 's' && !picker.view.searching && ['plugins', 'presets'].includes(picker.view.kind)) stop()
+      picker.keypress(text, key).catch(error => { status = error.message }).finally(draw)
+      return
+    }
+    if (pendingSound && key.name === 'escape') { cancelSound(); status = 'Instrument selection cancelled'; draw(); return }
     if (prompt !== null) {
       if (key.name === 'escape') prompt = null
       else if (key.name === 'backspace') prompt = [...prompt].slice(0, -1).join('')
@@ -899,6 +943,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     enqueue(async () => {
       let action
       switch (key.name) {
+        case 'i': await chooseInstrument(); return
         case 's': await settleRecording(); await save(); return
         case 'a': action = { kind: 'asset' }; break
         case 'tab': action = { kind: 'lane' }; break
@@ -948,6 +993,18 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     const monitorInfo = recording?.monitoring ?? monitoring?.info
     const reportedLatency = monitorInfo ? ` · ${((monitorInfo.latency.inputSeconds + monitorInfo.latency.outputSeconds) * 1000).toFixed(2)} ms reported I/O` : ''
     const rows = process.stdout.rows || 24, width = Math.max(1, (process.stdout.columns || 80) - 24)
+    if (picker.view) {
+      const items = picker.items(), capacity = Math.max(1, rows - 4)
+      const start = Math.max(0, (picker.view.cursor ?? 0) - capacity + 1)
+      const lines = [picker.view.title, `${pickerAsset} · ${status}`,
+        ...(picker.view.query === undefined ? [] : [`${picker.view.searching ? 'Search' : 'Filter'}: ${picker.view.query}`]),
+        ...items.slice(start, start + capacity).map((item, index) => `${start + index === picker.view.cursor ? '›' : ' '} ${picker.isActive(item) ? '●' : ' '} ${item.name}`)]
+      let output = '\x1b[H'
+      for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
+      lines.slice(0, rows - 1).forEach((line, index) => { output += `\x1b[${index + 1};1H${fit(line)}` })
+      process.stdout.write(output + `\x1b[${rows};1H${fit(pickerFooter(picker.view))}`)
+      return
+    }
     const policy = project.recordingCorrection ?? { kind: 'none' }
     const profile = recordingInspection?.profile ?? calibrationInspection?.profile ?? clip?.placement?.profile
     const residuals = profile?.pulses.map(pulse => calibrationMilliseconds(profile, pulse))
@@ -994,7 +1051,9 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
       if (!project.lanes.length) lines.push('Import a source, then Enter or :place to add its first lane and region.')
       lines.push(clip ? `${clip.id} · ${clip.name}${clip.audioChannel ? ` [input ${clip.audioChannel.input} → output ${clip.audioChannel.output}]` : ''}${clip.component ? ` (${clip.component}${clip.placement ? `, ${clip.placement.kind === 'calibrated' ? 'measured' : 'manual'} advance ${Number(clip.placement.advanceNanoseconds.numerator) / Number(clip.placement.advanceNanoseconds.denominator) / 1e6} ms` : ''})` : ''} · beat ${clip.position / project.ppq} · source ${clip.offset}+${clip.extent} ${['capture', 'practice'].includes(project.assets.find(asset => asset.id === clip.asset).kind) ? `host ticks${clip.sourceDivisor === undefined ? '' : ' / ' + clip.sourceDivisor}` : ''} · repeat ${clip.repeat}${clip.pattern === undefined ? '' : ` · pattern ${clip.pattern + 1}`}` : 'Up/Down selects a region on the current lane.')
       lines.push(asset ? `${asset.id} · ${asset.name}${asset.selectedTake === undefined ? '' : ` · take ${BigInt(asset.selectedTake) + 1n} (:takes)`} · ${asset.kind === 'wave' ? `${asset.metadata.frames} frames / ${asset.metadata.sampleRate} Hz / ${asset.metadata.channels} channels` : asset.kind === 'capture' ? `${asset.manifest.audioFrames} frames + ${asset.manifest.midiPacketCount} UMP packets; Enter opens the take` : asset.kind === 'practice' ? `${asset.metadata.packets} original UMP packets; Enter places a host-clock region` : 'original MIDI ticks; format-2 patterns require explicit selection'}` : 'No imported asset. :import-wave FILE or :import-midi FILE')
-      lines.push(`Library ${project.assets.length} sources · ${project.clips.length} regions · a cycles sources · ? help`, path)
+      const sounding = project.assets.find(asset => asset.id === (clip?.asset ?? editor.asset))
+      if (sounding?.kind === 'midi') lines.push(`Instrument ${sounding.source.sound?.kind === 'vst' ? selectionLabel(sounding.source.sound.selection) : 'choose with i'} · ${sounding.id}`)
+      lines.push(`Library ${project.assets.length} sources · ${project.clips.length} regions · a cycles sources · i instrument · ? help`, path)
     }
     let output = '\x1b[H'
     for (let row = 1; row <= rows; row++) output += `\x1b[${row};1H\x1b[2K`
@@ -1029,6 +1088,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     draw(); if (signal?.aborted) finish(); await done
   } finally {
     accepting = false; closed = true
+    picker.close(); cancelSound()
     clearInterval(ticker)
     stop()
     if (pendingDraw) clearImmediate(pendingDraw)
@@ -1037,6 +1097,7 @@ export async function viewArrangement({ path, loaded, initialDocument, root = re
     for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.off(name, onSignal)
     try {
       await task
+      await Promise.allSettled([picker.settled(), ...soundJobs])
       await Promise.allSettled([settleMonitoring(), settleLiveMidi()])
       await liveTransitions
       await Promise.allSettled([...preparations])

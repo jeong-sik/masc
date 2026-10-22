@@ -2,7 +2,7 @@ import { phraseDocument, importPhraseDocument } from './phrase-arrangement.mjs'
 import { parentPort } from 'node:worker_threads'
 import { dirname } from 'node:path'
 import { importArrangementWave, importArrangementMidi, importArrangementCapture, importCaptureMidi, importArrangementPractice, restorePracticeBacking, inspectPracticePasses, importPracticeMidi, prepareArrangementCapture, readUmpCapture, importUmpVariant, exportUmpCapture, saveArrangement, materializeArrangementAssets } from './arrangement-files.mjs'
-import { prepareArrangementWave, prepareArrangementMidi, prepareArrangementMixed, prepareArrangementAudio, prepareArrangementCaptureRegions } from './arrangement-playback.mjs'
+import { prepareArrangementWave, prepareArrangementMidi, prepareArrangementMixed, prepareArrangementAudio, prepareArrangementCaptureRegions, prepareArrangementInstrument } from './arrangement-playback.mjs'
 import { attachRecordedTake } from './arrangement-recording.mjs'
 import { analyzeCalibration } from './audio-calibration.mjs'
 import { inspectCalibration } from './calibration-files.mjs'
@@ -51,6 +51,7 @@ parentPort.on('message', async job => {
       case 'practice-passes': case 'practice-pass': result = await inspectPracticePasses(job.project, job.asset, job.pass, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'prepare-mixed': result = await prepareArrangementMixed(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal, midiOutput: job.midiOutput, portBindings: job.portBindings }); break
       case 'prepare-midi': result = await prepareArrangementMidi(job.project, { directory: job.directory, signal, midiOutput: job.midiOutput, portBindings: job.portBindings }); break
+      case 'prepare-vst': result = await prepareArrangementInstrument(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'prepare-audio': result = await prepareArrangementAudio(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'prepare-wave': result = await prepareArrangementWave(job.project, { sourceRoot: job.sourceRoot, directory: job.directory, signal }); break
       case 'import-wave': result = await importArrangementWave(job.project, job.path, { projectPath: job.projectPath, signal }); break
@@ -67,7 +68,7 @@ parentPort.on('message', async job => {
       default: throw new Error('Unknown arrangement IO request')
     }
     switch (job.kind) {
-      case 'prepare-capture': case 'prepare-mixed': case 'prepare-midi': case 'prepare-audio': case 'prepare-wave':
+      case 'prepare-capture': case 'prepare-mixed': case 'prepare-midi': case 'prepare-audio': case 'prepare-wave': case 'prepare-vst':
         result = await preparePractice(job.project, result, { signal }); break
     }
     parentPort.postMessage({ id: job.id, ok: true, result })

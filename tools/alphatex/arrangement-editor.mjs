@@ -8,6 +8,7 @@ import { beats, PPQ } from './sequencer-project.mjs'
 import { calibrationSelection } from './audio-calibration.mjs'
 import { manualCapturePlacement } from './capture-placement.mjs'
 import { validateCalibrationCapture, calibrationResidual } from './calibration-profile.mjs'
+import { validateSound } from './project-sound.mjs'
 
 export { arrangementTakes }
 
@@ -54,6 +55,17 @@ export function arrangementPracticePass(editor, target, selected) {
   if (!region) throw new Error('Selected practice region is no longer available')
   const next = edit(editor, { kind: 'region-change', id: region.id, ...selected.cut })
   return { ...next, asset: target.asset, pattern: undefined, lane: region.lane, region: region.id, tick: region.position }
+}
+export function arrangementSound(editor, id, sound) {
+  validateSound(sound)
+  if (sound.kind !== 'vst') throw new Error('Choose a VST instrument for arrangement playback')
+  const asset = editor.project.assets.find(asset => asset.id === id)
+  if (!asset || asset.kind !== 'midi') throw new Error('Select a MIDI region or asset to choose its instrument')
+  const next = { ...asset, source: { ...asset.source, sound: structuredClone(sound) },
+    ...(asset.phrase ? { phrase: { ...asset.phrase, sound: structuredClone(sound) } } : {}) }
+  const project = { ...editor.project, assets: editor.project.assets.map(asset => asset.id === id ? next : asset) }
+  validateArrangement(project)
+  return commit(editor, project)
 }
 function edit(editor, value) { return commit(editor, editArrangement(editor.project, value)) }
 export function arrangementPracticeSound(editor, asset, sound) { return edit(editor, { kind: 'practice-sound', asset, sound }) }

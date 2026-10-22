@@ -7,11 +7,13 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import base64
+import hashlib
+import math
 from fractions import Fraction
 
 import mido
 
-from host import midi_timeline, frame_timeline, snapshot, render, digest
+from host import midi_timeline, frame_timeline, snapshot, render, digest, mix, ProjectedMidi
 
 
 def encode(midi):
@@ -73,6 +75,147 @@ class MidiPhraseTests(unittest.TestCase):
                 midi_timeline(encode(midi))
 
 
+class ProjectedArrangementTests(unittest.TestCase):
+    def projection(self, folder, rows=None, duration=1.25):
+        rows = rows if rows is not None else [
+            {"seconds": 0, "bytes": [0xC0, 34]},
+            {"seconds": 0, "bytes": [0xB0, 0, 2]},
+            {"seconds": 0, "bytes": [0xB0, 64, 127]},
+            {"seconds": 0, "bytes": [0x90, 48, 91]},
+            {"seconds": 0, "bytes": [0x80, 48, 77]},
+            {"seconds": 1.125, "bytes": [0xE0, 3, 65]},
+            {"seconds": duration, "bytes": [0xB0, 64, 0]}]
+        data = b''.join((json.dumps(row) + '\n').encode() for row in [
+            {"schemaVersion": 1, "kind": "vst-midi-part", "duration": duration}, *rows])
+        path = Path(folder) / 'part.jsonl'
+        path.write_bytes(data)
+        return {"timeline_path": str(path), "timeline_duration": duration,
+                "timeline_event_count": len(rows), "timeline_sha256": hashlib.sha256(data).hexdigest()}
+
+    def test_stream_preserves_expression_release_velocity_and_zero_length_order(self):
+        with tempfile.TemporaryDirectory() as folder:
+            request = self.projection(folder)
+            with open(request['timeline_path'], 'rb') as stream:
+                projected = ProjectedMidi(stream, request)
+                self.assertEqual(list(projected), [
+                    (bytes([0xB0, 64, 127]), 0), (bytes([0x90, 48, 91]), 0),
+                    (bytes([0x80, 48, 77]), 0), (bytes([0xE0, 3, 65]), 1.125),
+                    (bytes([0xB0, 64, 0]), 1.25)])
+                self.assertTrue(projected.verified)
+
+    def test_invalid_wire_time_count_and_bytes_are_refused(self):
+        with tempfile.TemporaryDirectory() as folder:
+            for rows in ([{"seconds": 0, "bytes": [0x90, 48]}],
+                         [{"seconds": 0, "bytes": [0xF0, 1, 0xF8, 2, 0xF7]}],
+                         [{"seconds": 0, "bytes": [True]}],
+                         [{"seconds": 2, "bytes": [0xF8]}],
+                         [{"seconds": 1, "bytes": [0xF8]}, {"seconds": 0, "bytes": [0xF8]}]):
+                request = self.projection(folder, rows)
+                with open(request['timeline_path'], 'rb') as stream:
+                    with self.assertRaises(ValueError):
+                        list(ProjectedMidi(stream, request))
+            for key, value in [('timeline_sha256', '0' * 64), ('timeline_event_count', 99), ('timeline_duration', 2)]:
+                request = {**self.projection(folder), key: value}
+                with open(request['timeline_path'], 'rb') as stream:
+                    with self.assertRaises(ValueError):
+                        list(ProjectedMidi(stream, request))
+
+    def test_render_uses_common_sample_grid_and_verifies_last_exclusive_cleanup(self):
+        import numpy as np
+        from pedalboard.io import AudioFile
+
+        class Instrument:
+            name, identifier, manufacturer_name, version, is_instrument = 'Test', 'test', 'Test', '1', True
+            raw_state = b'state'
+
+            def __init__(self):
+                self.calls = []
+
+            def __call__(self, events, **clock):
+                self.calls.append((events, clock))
+                return np.full((2, int(np.float32(clock['duration']) * np.float32(clock['sample_rate']))), .125, dtype=np.float32)
+
+        with tempfile.TemporaryDirectory() as folder:
+            request = {**self.projection(folder), 'output_path': str(Path(folder) / 'result.wav'),
+                       'tail_seconds': 0, 'origin_seconds': .000123}
+            instrument = Instrument()
+            with patch('host.load_instrument', return_value=instrument):
+                result = render(request)
+            expected_origin = math.floor(Fraction(.000123) * 44100)
+            self.assertEqual(result['frame_origin'], expected_origin)
+            self.assertEqual(result['frames'], math.ceil((Fraction(.000123) + Fraction(1.25)) * 44100) - expected_origin)
+            emitted = [event for events, _ in instrument.calls for event in events]
+            self.assertEqual([list(data) for data, _ in emitted][:3], [[0xB0, 64, 127], [0x90, 48, 91], [0x80, 48, 77]])
+            # Assert the sample frame decoded by the actual Float32 host ABI.
+            native_frame = lambda value: int(np.float32(np.float32(value) * np.float32(44100)))
+            self.assertEqual(native_frame(emitted[0][1]), math.ceil(Fraction(.000123) * 44100) - expected_origin)
+            self.assertEqual(native_frame(emitted[3][1]), math.ceil((Fraction(.000123) + Fraction(1.125)) * 44100) - expected_origin - 44100)
+            self.assertTrue(instrument.calls[0][1]['reset'])
+            self.assertFalse(instrument.calls[1][1]['reset'])
+            with AudioFile(request['output_path']) as audio:
+                self.assertEqual(audio.frames, result['frames'])
+            # A bad final digest may be discovered after rendering. No output
+            # becomes visible and the private staging WAV is removed.
+            target = Path(folder) / 'rejected.wav'
+            with patch('host.load_instrument', return_value=Instrument()):
+                with self.assertRaises(ValueError):
+                    render({**request, 'output_path': str(target), 'timeline_sha256': '0' * 64})
+            self.assertFalse(target.exists())
+            self.assertFalse(list(Path(folder).glob('.vst-*.wav')))
+
+    def test_mix_retains_overlaps_silence_and_clock_without_normalizing(self):
+        import numpy as np
+        from pedalboard.io import AudioFile
+
+        with tempfile.TemporaryDirectory() as folder:
+            parts = []
+            for index, (origin, value) in enumerate([(2, .25), (4, .5)]):
+                path = Path(folder) / f'part-{index}.wav'
+                with AudioFile(str(path), 'w', 8, 2, bit_depth=32) as audio:
+                    audio.write(np.full((2, 4), value, dtype=np.float32))
+                parts.append({'output_path': str(path), 'wav_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+                              'frames': 4, 'frame_origin': origin})
+            target = Path(folder) / 'mixed.wav'
+            request = {'parts': parts, 'sample_rate': 8, 'frames': 10, 'output_path': str(target)}
+            result = mix(request)
+            self.assertEqual(result['peak'], .75)
+            with AudioFile(str(target)) as audio:
+                np.testing.assert_array_equal(audio.read(10), np.array([[0, 0, .25, .25, .75, .75, .5, .5, 0, 0]] * 2))
+            parts[0]['wav_sha256'] = '0' * 64
+            rejected = Path(folder) / 'rejected.wav'
+            with self.assertRaises(ValueError):
+                mix({**request, 'output_path': str(rejected)})
+            self.assertFalse(rejected.exists())
+
+    def test_silent_note_instance_fails_independently_but_control_only_instance_is_valid(self):
+        import numpy as np
+
+        class Silent:
+            name, identifier, manufacturer_name, version, is_instrument = 'Silent', 'silent', 'Test', '1', True
+            raw_state = b'state'
+
+            def __call__(self, events, **clock):
+                return np.zeros((2, int(np.float32(clock['duration']) * np.float32(clock['sample_rate']))), dtype=np.float32)
+
+        with tempfile.TemporaryDirectory() as folder:
+            # This last block previously became26890 frames after the native
+            # float32 API conversion although the admitted PCM clock needs26891.
+            duration = math.nextafter(26891 / 44100, 0)
+            for note in (False, True):
+                rows = [{'seconds': 0, 'bytes': [0x90, 60, 90] if note else [0xB0, 11, 90]}]
+                request = {**self.projection(folder, rows, duration), 'tail_seconds': 0,
+                           'output_path': str(Path(folder) / f'{note}.wav')}
+                with patch('host.load_instrument', return_value=Silent()):
+                    if note:
+                        with self.assertRaisesRegex(ValueError, 'produced silence'):
+                            render(request)
+                        self.assertFalse(Path(request['output_path']).exists())
+                    else:
+                        result = render(request)
+                        self.assertEqual(result['frames'], 26891)
+                        self.assertEqual(result['peak'], 0)
+
+
 class NativeBoundaryTests(unittest.TestCase):
     def test_private_frame_timeline_preserves_equal_time_order_and_block_edge_samples(self):
         import numpy as np
@@ -99,7 +242,7 @@ class NativeBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch('host.load_instrument', return_value=plugin):
             source, target = Path(folder) / 'frames.json', Path(folder) / 'render.wav'
             source.write_bytes(data)
-            result = render({'timeline_path': str(source), 'expected_timeline_sha256': digest(data),
+            result = render({'frames_path': str(source), 'expected_timeline_sha256': digest(data),
                              'output_path': str(target), 'sample_rate': 44100, 'tail_seconds': 0})
             self.assertEqual([call[:2] for call in plugin.calls], [(44100, [0, 7, 7]), (7, [0, 6])])
             self.assertEqual([call[3] for call in plugin.calls], [True, False])
@@ -124,7 +267,7 @@ class NativeBoundaryTests(unittest.TestCase):
             for value in cases:
                 data = json.dumps(value).encode(); source.write_bytes(data)
                 with self.subTest(value=value), self.assertRaises(ValueError):
-                    render({'timeline_path': str(source), 'expected_timeline_sha256': digest(data),
+                    render({'frames_path': str(source), 'expected_timeline_sha256': digest(data),
                             'output_path': str(target), 'sample_rate': 48000, 'tail_seconds': 0})
                 self.assertFalse(target.exists())
             data = json.dumps(base).encode(); source.write_bytes(data)

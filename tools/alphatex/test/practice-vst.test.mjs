@@ -34,7 +34,7 @@ async function fixture(run, configure) {
     const request = (value, issued) => new Promise((resolve, reject) => { const id = ++sequence; jobs.set(id, { resolve, reject }); issued?.(id); worker.postMessage({ ...value, id }) })
     const cancelRequest = request => worker.postMessage({ kind: 'cancel', request })
     const render = value => ({ cancel() {}, promise: (async () => {
-      calls.push(value); const timelineBytes = await readFile(value.timeline_path), timeline = JSON.parse(timelineBytes)
+      calls.push(value); const timelineBytes = await readFile(value.frames_path), timeline = JSON.parse(timelineBytes)
       assert.equal(hash(timelineBytes), value.expected_timeline_sha256)
       assert.equal(hash(await readFile(value.preset_path)), original.context.project.sound.preset.sha256)
       const bytes = wave(Number(timeline.frames), timeline.sampleRate); await writeFile(value.output_path, bytes, { flag: 'wx' })
@@ -52,7 +52,7 @@ async function fixture(run, configure) {
 test('captured sound route derives sample-frame VST input without changing raw UMP or source-native cuts', () => fixture(async ({ root, path, project, rows, calls, start, context }) => {
   const before = structuredClone(project), prepared = await start().promise, plan = await json(prepared.path), call = calls[0]
   assert.equal(calls.length, 1); assert.equal(call.midi_path, undefined); assert.equal(call.sample_rate, 48000)
-  const timeline = await json(call.timeline_path)
+  const timeline = await json(call.frames_path)
   assert.equal(timeline.kind, 'practice-vst'); assert.deepEqual(timeline.events.map(event => event.frame), ['0', '0', '0', '5', '49'])
   assert.deepEqual(timeline.events.map(event => event.bytes), [...context.backing.initial, [0xb0 | context.backing.channel, 74, 85], [0x90 | context.backing.channel, 60, 72], [0x80 | context.backing.channel, 60, 9]])
   const clip = plan.regions[0]
@@ -103,7 +103,7 @@ test('an original partial practice pass reaches the actual VST worker source clo
 test('captured track controls precede same-frame raw overrides in the actual worker render input', () => fixture(async ({ project, rows, calls, start, context }) => {
   const original = structuredClone(rows), before = structuredClone(project)
   await start().promise
-  const timeline = await json(calls[0].timeline_path), channel = context.backing.channel
+  const timeline = await json(calls[0].frames_path), channel = context.backing.channel
   assert.deepEqual(timeline.events, [
     { frame: '0', bytes: [0xb0 | channel, 7, 23] },
     { frame: '0', bytes: [0xb0 | channel, 10, 100] },
@@ -171,7 +171,7 @@ test('an end-boundary projected event gets one private guard sample without exte
   await publish()
   const imported = await importArrangementPractice(newArrangement(), input, { projectPath: path })
   const project = arrangementCommand(arrangementEditor(imported.project), 'place asset-1 0').editor.project
-  const result = await start(project).promise, plan = await json(result.path), timeline = await json(calls[0].timeline_path)
+  const result = await start(project).promise, plan = await json(result.path), timeline = await json(calls[0].frames_path)
   assert.equal(plan.regions[0].frameCount, 4800); assert.equal(timeline.frames, '4801')
   assert.equal(plan.assets[0].frames, 4801)
   assert.equal(plan.regions[0].sourceClock.end, '300000000')
@@ -184,7 +184,7 @@ test('cancel retains timeline, preset and render root until native close, then r
   const call = await Promise.race([entered, owner.promise.then(() => { throw new Error('Render was not intercepted') })]), directory = dirname(call.output_path)
   owner.cancel(); const disposed = owner.dispose(); let settled = false; disposed.then(() => { settled = true })
   await new Promise(resolve => setImmediate(resolve)); assert.equal(settled, false); assert.ok(cancelled > 0)
-  await access(call.timeline_path); await access(call.preset_path)
+  await access(call.frames_path); await access(call.preset_path)
   close({ preset_sha256: hash(await readFile(call.preset_path)) }); await assert.rejects(owner.promise); await disposed
   await assert.rejects(access(directory), { code: 'ENOENT' })
 }))

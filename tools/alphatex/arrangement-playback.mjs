@@ -14,6 +14,7 @@ import { practiceEnabled } from './arrangement-practice.mjs'
 import { arrangementLoop, loopMidiRegions } from './arrangement-loop.mjs'
 import { regionEdgeSeconds } from './exact-time.mjs'
 import { isFluidSound } from './soundfont.mjs'
+import { prepareArrangementVst } from './arrangement-vst.mjs'
 
 function requireRegionTransport(project) {
   const schedule = arrangementPlaybackSchedule(project)
@@ -149,11 +150,21 @@ export function arrangementPlaybackRequest(project, route) {
   const schedule = arrangementPlaybackSchedule(project), audible = new Set(schedule.map(clip => clip.asset))
   const assets = project.assets.filter(asset => audible.has(asset.id)), kinds = new Set(assets.map(asset => asset.kind))
   if (!kinds.size) throw new Error('No audible arrangement regions')
+  // An explicit audio route renders each captured VST source/port natively.
+  // Practice, FluidSynth and external-MIDI combinations retain their shared
+  // sound/capture owner below rather than entering the VST-only projection.
+  if (route.kind === 'audio' && route.midiOutput === undefined && kinds.has('midi')
+      && !(route.portBindings ?? []).some(binding => audible.has(binding.asset))
+      && assets.every(asset => asset.kind === 'wave'
+        || asset.kind === 'midi' && asset.source.sound?.kind === 'vst')) {
+    if (!route.output) throw new Error('Choose :output AUDIO_UID for the stored VST sounds')
+    return { kind: 'prepare-vst', output: route.output }
+  }
   if (arrangementSoundAssets(project, route).length) {
     if (!route.output) throw new Error('Choose :output AUDIO_UID or :mixed-output AUDIO_UID for the stored instrument sounds')
     return { kind: 'prepare-sound', output: route.output, route }
   }
-  if (practiceEnabled(project) && kinds.has('midi') && (route.kind !== 'mixed' || !route.output)) throw new Error('Choose :mixed-output AUDIO_UID for the practice click and MIDI backing')
+  if (practiceEnabled(project) && kinds.has('midi') && route.kind !== 'audio' && (route.kind !== 'mixed' || !route.output)) throw new Error('Choose :mixed-output AUDIO_UID for the practice click and MIDI backing')
   if (kinds.has('capture') || kinds.has('practice')) {
     if (kinds.has('practice') && !route.output) throw new Error('Select :mixed-output AUDIO_UID for the practice MIDI clock')
     const notes = schedule.some(clip => clip.component !== 'audio' && assets.some(asset => asset.id === clip.asset
@@ -165,12 +176,30 @@ export function arrangementPlaybackRequest(project, route) {
     if (route.kind === 'midi' || (notes || kinds.has('midi')) && route.kind !== 'mixed') throw new Error('Select :mixed-output AUDIO_UID and MIDI destinations for raw UMP regions')
     return { kind: 'prepare-capture', output: route.output, midiOutput: route.midiOutput, sourceBindings: route.sourceBindings ?? [], ...(kinds.has('midi') ? { portBindings: route.portBindings ?? [] } : {}) }
   }
+  if (kinds.has('midi') && route.kind === 'audio') return { kind: 'prepare-vst', output: route.output }
   if (kinds.size > 1 && route.kind !== 'mixed') throw new Error('Select :mixed-output AUDIO_UID and MIDI destinations for mixed playback')
   if (kinds.has('wave') && route.kind === 'midi') throw new Error('Choose an audio output for audible WAV regions')
-  if (kinds.has('midi') && route.kind === 'audio') throw new Error('Choose a MIDI destination for audible MIDI regions')
   return { kind: kinds.size > 1 ? 'prepare-mixed' : kinds.has('wave') ? 'prepare-wave' : 'prepare-midi',
     ...(kinds.has('wave') || practiceEnabled(project) ? { output: route.output } : {}),
     ...(kinds.has('midi') ? { midiOutput: route.midiOutput, portBindings: route.portBindings } : {}) }
+}
+
+export async function prepareArrangementInstrument(project, options = {}) {
+  const vst = await prepareArrangementVst(project, options)
+  try {
+    const schedule = requireRegionTransport(project)
+    const waves = new Set(project.assets.filter(asset => asset.kind === 'wave').map(asset => asset.id))
+    const clips = project.clips.filter(clip => waves.has(clip.asset) && schedule.some(audible => audible.id === clip.id))
+    if (!clips.length) return vst
+    const wave = await prepareArrangementWave({ ...project, clips }, { ...options, directory: dirname(vst.path) })
+    const plan = JSON.parse(await readFile(vst.path, { encoding: 'utf8', signal: options.signal }))
+    const backing = JSON.parse(await readFile(wave.path, { encoding: 'utf8', signal: options.signal }))
+    plan.assets.push(...backing.assets); plan.regions.push(...backing.regions)
+    plan.duration = Math.max(plan.duration, backing.duration)
+    await writeFile(vst.path, JSON.stringify(plan), { signal: options.signal })
+    options.signal?.throwIfAborted()
+    return { ...vst, duration: plan.duration }
+  } catch (error) { await rm(dirname(vst.path), { recursive: true, force: true }); throw error }
 }
 
 export async function prepareArrangementMixed(project, options = {}) {

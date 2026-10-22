@@ -12,6 +12,8 @@ val copy_source : Masc_tui_types.state -> ((string * string), string) result
     workspace and focused Resources detail; never concatenates parts, decodes
     blobs, follows URIs or sanitizes payload bytes. The caller owns clipboard
     delivery; success does not establish terminal acknowledgement. *)
+val export_source : Masc_tui_types.state -> (Masc_tui_resource_export.t, string) result
+(** Only a ready, focused, admitted report with one original text body. *)
 val rows : cols:int -> t -> string list
 (** [cols] is the actual document pane width, after Activity and optional
     Resources split. Both drawing and search use this projection.

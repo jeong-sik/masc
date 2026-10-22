@@ -8084,6 +8084,13 @@ type listen_request = {
   lr_destination : listen_destination;
 }
 
+type resource_save_prompt = {
+  rsp_document : Masc_tui_resource_export.t;
+  rsp_path : Masc_tui_message_input.t;
+  rsp_authority : workspace_authority;
+  rsp_read_authority : unit ref;
+}
+
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
   (* Opening process store; workspace withdrawal never replaces its owner. *)
@@ -8490,6 +8497,7 @@ type state = {
   mutable resource_focus: pane_focus;
   mutable resource_image_cursor: int;
   mutable resource_text_cursor: int;
+  mutable resource_save_prompt: resource_save_prompt option;
   (* The Config surface owns the files the server reads. runtime.toml is one;
      the prompt registry is the other, and a prompt is edited the same way —
      $EDITOR over the effective text, the server persists what comes back. *)
@@ -12495,6 +12503,7 @@ type text_input_target =
   | Text_ask_answer
   | Text_fusion_launch
   | Text_preset_name
+  | Text_resource_save
   | Text_runtime_lane_name
   | Text_runtime_param
   | Text_runtime_model_form
@@ -12552,6 +12561,7 @@ let text_input_target (state : state) ~compact_viewport =
      | Some _ | None -> None)
   else if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
   else if state.keeper_deletions_open then None
+  else if state.view = Resources && Option.is_some state.resource_save_prompt then Some Text_resource_save
   (* A drop reason takes every key on the goal detail it was opened on, so
      its letters never reach the lifecycle keys under it. *)
   else if
@@ -12643,7 +12653,7 @@ let text_input_target (state : state) ~compact_viewport =
 let quit_key_allowed_for = function
   | Some
       ( Text_collab_form | Text_account_login | Text_browser_url | Text_ask_answer | Text_fusion_launch
-      | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
+      | Text_preset_name | Text_resource_save | Text_runtime_lane_name | Text_runtime_param
       | Text_runtime_account_form | Text_runtime_model_form
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
@@ -15396,6 +15406,7 @@ let create_state
   resource_focus = Left_pane;
   resource_image_cursor = 0;
   resource_text_cursor = 0;
+  resource_save_prompt = None;
   config_pane = Config_runtime;
   tools_pane = Tools_surface;
   theme_choice = None;

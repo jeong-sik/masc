@@ -76,7 +76,7 @@ checking rendered application state, and gathering evidence across tabs.
 | `hover` | `documentId`/`nodeId` or a unique `selector`, plus `expectedUrl`; resolves the current visible, unobstructed element without clicking | live BiDi or automation |
 | `drag_to` | `source` and `destination`, each `{documentId,nodeId}` or `{selector}`, plus `expectedUrl` | live BiDi or automation |
 | `hover_at` | normalized `point`, captured `viewport`, and `expectedUrl`; moves the trusted pointer without clicking | live BiDi or automation |
-| `click_at`, `scroll_at` | normalized `point` and captured `viewport`; scroll adds `x`/`y`; `click_at` also takes `button` (`primary` by default, `middle`, `secondary`) | live or automation; a `middle` or `secondary` click needs live BiDi or automation |
+| `click_at`, `scroll_at` | normalized `point` and captured `viewport`; scroll adds `x`/`y`; `click_at` also takes `button` (`primary` by default, `middle`, `secondary`) | live or automation; a `middle` or `secondary` click needs live BiDi, automation or Stagehand |
 | `drag` | normalized `from`/`to` and captured `viewport`; trusted pointer press, move and release | live BiDi or automation |
 | `activate_tab` | the selected live `clientId`/`tabId` | live WebExtension only |
 

@@ -1,6 +1,6 @@
 ---
 name: ocaml-coding
-description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, 변경 검증, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 막히는 I/O 와 executor의 실제 worker 정리, .mli 먼저 고치기, 있을 거라고 착각하기 쉬운 표준 라이브러리 호출을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
+description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보는 점검표다. 오류를 Result 와 닫힌 합타입으로 다루는 법, 예외 잡기와 Eio 취소, fiber 예약 순서와 예약 반환·CAS·파일 교체·변경 검증, Mutex·Lazy 선택, 자원 정리(Switch.on_release 와 Fun.protect), 막히는 I/O 와 executor의 실제 worker 정리, .mli 먼저 고치기, 있을 거라고 착각하기 쉬운 표준 라이브러리 호출을 다룬다. lib/·bin/·test/ 의 .ml/.mli 를 새로 쓰거나 고칠 때 쓴다."
 ---
 
 # masc OCaml 점검표
@@ -16,7 +16,7 @@ description: "masc 저장소에서 OCaml 5.5 + Eio 코드를 쓰기 전에 보�
 
 이 점검표에는 여러 기능에 두루 통하는 OCaml·Eio 규칙만 둔다. 한 기능의 설계와 경계는
 그 모듈의 `.mli` 에 적는다. 본문이 `Common.max_tool_result_wire_bytes` 를 넘으면
-`keeper_skill` 이 이 Skill 을 통째로 거절해서 모든 Keeper 가 읽지 못한다.
+Skill 카탈로그가 이 Skill 을 통째로 빼서 모든 Keeper 가 읽지 못한다.
 
 ## 1. 상태와 오류는 닫힌 합타입
 
@@ -63,7 +63,14 @@ Eio 는 취소를 `Eio.Cancel.Cancelled` 예외로 전한다. 모든 예외를 �
   | exception ex -> Error (Printexc.to_string ex)
   ```
 
-## 3. 변경 검증
+## 3. fiber 예약과 변경 검증
+
+- `Eio.Fiber.fork` 의 `fn` 은 다른 fiber 로 넘어가지 않고 바로 돈다. 호출한 쪽을 붙잡으면 안 되는
+  child 는 실제 작업 전에 `Eio.Fiber.yield ()` 한다. fiber 가 I/O 에서 양보하면 먼저 예약된 다른
+  fiber 가 돌 수 있으므로 "전체 발견이 끝난 뒤 실행된다" 같은 순서를 주장하지 않는다.
+
+- 예약을 돌려주는 함수(`fork`, maintenance `pulse` 등)의 반환은 예약일 뿐 성공이 아니다.
+  예약·시작·실제 반환·중단을 서로 다른 사실로 기록하고, 예약 반환을 성공·전달·완료로 바꾸어 쓰지 않는다.
 
 - 제공받은 switch로 자동 복구 fiber를 예약할 때는 discovery 전과 실제 예약 직전에
   `Eio.Switch.check`를 한다. `Cancel.protect`도 취소된 switch를 다시 켜지 않는다.
@@ -181,7 +188,7 @@ Keeper 는 `keeper_skill` 을 같은 `identity` 에 `file = "references/mli-firs
 | `Unix.putenv k ""` | 있다 | 지우는 게 아니다. `Sys.getenv_opt k` 는 `Some ""` 을 준다 |
 | `List.take` / `List.drop` | 있다 (5.3 부터) | 음수면 `Invalid_argument` |
 | `String.starts_with ~prefix` | 있다 (4.13 부터) | 분기 판단에 쓰지 않는다(1절) |
-| `Option.get_or` | 없다 | `match` 로 쓴다(3절) |
+| `Option.get_or` | 없다 | `match` 로 쓴다(1절) |
 | `Lazy.Mutexed` | 있다 (5.5 부터) | 5절 |
 
 같은 함수에서 "Unbound value" 가 두 번 나오면 그 함수가 있는지부터 의심하고 인터페이스를 연다.
@@ -190,7 +197,7 @@ Keeper 는 `keeper_skill` 을 같은 `identity` 에 `file = "references/mli-firs
 
 ```sh
 rg -n 'with _ ->|\| exception _ ->|with [a-z_]+ ->' <file>   # 2절
-rg -n 'Option\.value.*~default:|\| *_ *-> *Some' <file>       # 3절
+rg -n 'Option\.value.*~default:|\| *_ *-> *Some' <file>       # 1절
 rg -n 'Fun\.protect' <file>                                    # 6절: finally 안에 Eio 연산이 있나
 rg -n 'Stdlib\.Lazy|lazy \(' <file>                            # 5절: 여러 fiber 가 force 하나
 rg -n 'failwith|assert false' <file>                           # 1절

@@ -544,6 +544,63 @@ schema = "schemas/author.json"
       "a schema that is not an object", "[world.exact_outputs.author]\nschema = \"schemas/text.json\"\n";
       "an unsupported keyword", "[world.exact_outputs.author]\nschema = \"schemas/pattern.json\"\n" ])
 
+let exact_outputs_are_selected_independently () = with_directory (fun _root packages directory ->
+  let manifest = install_package packages in
+  let schema = {|{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}|} in
+  write (Filename.concat packages "answer.json") schema;
+  write manifest (package () ^ {|
+[world.tools]
+hooks = ["validate_input", "validate_output"]
+[world.exact_outputs.plan]
+schema = "answer.json"
+[world.exact_outputs.extract]
+schema = "answer.json"
+|});
+  let path = Filename.concat directory "browser.toml" in
+  let install extra =
+    write path (declaration ~extra msx_binding);
+    Config.load_file ~path in
+  let names (value:Config.declaration) = List.map
+      (fun (output:Lane_addon_types.exact_output) -> output.name) value.package.exact_outputs in
+  let default = unwrap (install "") in
+  check (list string) "omission keeps package outputs" ["extract";"plan"] (names default);
+  let all = unwrap (install {|exact_outputs = ["plan", "extract"]|}) in
+  check string "explicit full selection has the same effective identity" default.revision all.revision;
+  check (list string) "selection order does not replace package order" ["extract";"plan"] (names all);
+  let selected = unwrap (install {|exact_outputs = ["plan"]|}) in
+  check (list string) "one named model output can be enabled" ["plan"] (names selected);
+  check bool "selection retains the package schema" true
+    ((List.hd selected.package.exact_outputs).schema=Yojson.Safe.from_string schema);
+  check bool "changing model selection changes worker inputs" true (selected.revision<>default.revision);
+  check bool "model selection leaves tool hooks alone" true (selected.package.tool_hooks=default.package.tool_hooks);
+  let off = unwrap (install {|exact_outputs = []|}) in
+  check (list string) "empty selection disables all exact outputs" [] (names off);
+  check bool "disabling model outputs keeps both contract hooks" true
+    (off.package.tool_hooks=[Validate_input;Validate_output]);
+  check bool "disabling outputs changes worker identity" true (off.revision<>default.revision);
+  let unchecked = unwrap (install {|exact_outputs = ["plan"]
+tool_hooks = []|}) in
+  check (list string) "model output remains selected without contract hooks" ["plan"] (names unchecked);
+  check bool "tool validation can be disabled independently" true (unchecked.package.tool_hooks=[]);
+  let all_off = unwrap (install {|exact_outputs = []
+tool_hooks = []|}) in
+  check bool "all optional middleware can be disabled together" true
+    (all_off.package.exact_outputs=[] && all_off.package.tool_hooks=[]);
+  let restored = unwrap (install "") in
+  check string "restoring package defaults restores effective identity" default.revision restored.revision;
+  List.iter (fun selection ->
+    match install ("exact_outputs = " ^ selection) with
+    | Ok _ -> failf "invalid exact-output selection accepted: %s" selection
+    | Error detail -> check bool "selection failure identifies exact output policy" true (contains detail "exact output" || contains detail "exact_outputs"))
+    [ {|["unknown"]|}; {|["plan", "plan"]|}; {|["plan", 1]|}; {|[""]|};
+      {|[" plan"]|}; "true"; {|"plan"|}; "{}" ];
+  write manifest (package ());
+  check bool "selection cannot invent a package output" true
+    (Result.is_error (install {|exact_outputs = ["plan"]|}));
+  let absent = unwrap (install "") in
+  let empty = unwrap (install {|exact_outputs = []|}) in
+  check string "empty override without declarations keeps effective identity" absent.revision empty.revision)
+
 let assembled_fusion_declarations () =
   List.iter (fun name ->
     let loaded = unwrap (Config.load_file ~path:(repo_file
@@ -777,6 +834,7 @@ let () = run "Lane Add-on declarative composition"
      test_case "tool hooks are selectable per installation and revisioned" `Quick tool_hooks_are_selected_and_revisioned;
      test_case "exact outputs are package schemas in the configuration identity" `Quick exact_outputs_are_package_schemas;
      test_case "operator asks are a package declaration" `Quick operator_asks_are_a_package_declaration;
+     test_case "exact outputs are selectable independently from tool hooks" `Quick exact_outputs_are_selected_independently;
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
      test_case "the shipped operator quiz declaration loads with its manifest" `Quick shipped_operator_quiz_declaration_loads;
      test_case "the operator quiz worker speaks the host contract" `Quick operator_quiz_worker_speaks_the_host_contract;

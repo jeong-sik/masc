@@ -26,9 +26,14 @@ type snapshot = {
 
 (** Resolve relative manifest and snapshot-file paths from the declaration's
     directory. The semantic revision excludes comments and the source filename,
-    but includes the resolved package, selected [tool_hooks] override and ordered
-    binding values. Omitted hooks use the package default; [] disables both
-    optional tool-contract hooks. [enabled] is
+    but includes the resolved package, selected [tool_hooks] and [exact_outputs]
+    overrides and ordered binding values. Omitted hooks use the package default;
+    [] disables both optional tool-contract hooks. Omitted [exact_outputs] keeps
+    every package-declared output; [] disables model-generation outputs for this
+    installation. An explicit list selects only unique declared names, in the
+    package's canonical order, without supplying schemas or provider settings.
+    [declaration.package.exact_outputs] is the effective selection. These two
+    choices are independent. [enabled] is
     desired worker activity, separate from this payload revision. During the
     accepting deployment stage an absent key retains the current enabled behavior. *)
 val load_file : path:string -> (declaration, string) result

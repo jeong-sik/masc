@@ -414,9 +414,9 @@ let answer_json ~output ~usage =
      @ usage)
 ;;
 
-let answer_of_success (success : Exact.success) =
+let answer_of_output ?(usage : Agent_core.Types.api_usage option) output =
   let usage =
-    match success.usage with
+    match usage with
     | None -> []
     (* WORKAROUND(#38669): wire parsers fill unreported counts with zero.
        This request has input text and a structured output, so either zero
@@ -425,12 +425,14 @@ let answer_of_success (success : Exact.success) =
     | Some usage when usage.input_tokens <= 0 || usage.output_tokens <= 0 -> []
     | Some usage -> [ "usage", usage_json usage ]
   in
-  answer_json ~output:success.output ~usage
+  answer_json ~output ~usage
 ;;
+
+let answer_of_success (success : Exact.success) = answer_of_output ?usage:success.usage success.output
 
 (* An official-client one-shot reports no token usage, and Stagehand's usage
    field is optional, so the key is left out. *)
-let answer_of_cli_output output = answer_json ~output ~usage:[]
+let answer_of_cli_output output = answer_of_output output
 
 (* ---- Serving -------------------------------------------------------------- *)
 

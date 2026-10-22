@@ -117,7 +117,21 @@ check required object keys, visited primitive types and `anyOf` before accepting
 the result. The consuming SDK owns complete validation of its schema dialect;
 this partial guard is not a full JSON Schema validator. Baseline and grant are
 both pinned to the worker incarnation. The bundled fixed `locate` output does
-not grant request schemas. Stagehand/Chrome integration remains follow-up work.
+not grant request schemas.
+
+The package's `stagehand` output grants request schemas and declares an open
+structured-object baseline. `Browser_addon_stagehand_model.for_owner` constructs
+the actual Stagehand session model callback only for that selected contract.
+It routes text/structured protocol requests through the original owner queue
+and the host's shared Exact Output runner, then returns Stagehand's existing
+structured answer format and reported usage. The result itself is not wrapped.
+User/assistant roles and text-block order remain; blocks within one turn join
+with two newlines. Image/tool blocks, text/tool generations and supplied
+temperature/stop options are refused before model queue admission. Caller
+cancellation withdraws the waiter; retirement wakes it; uncertain results return
+an error without an automatic retry. Captured-protocol/loopback-provider scenarios
+are defined for this callback. Their execution and actual owned Chrome startup
+and session integration remain unverified follow-up work.
 
 The bundled package declares the fixed `locate` output and connects it to owned
 Gecko `page.locate`. Configure an existing model slot for the installation's

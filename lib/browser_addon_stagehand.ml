@@ -1,25 +1,28 @@
 module Lease = Native_addon_lease
 module Session = Browser_stagehand_session
 module Process = Browser_chromium_process
+module Profile = Browser_addon_chrome_profile
 let ( let* ) = Result.bind
 
 type configuration = { chrome : string; extension : string; launcher : string;
-  guardian : string; claim_directory : string }
+  guardian : string; claim_directory : string; profile:Profile.t }
 
 let absolute path = path<>"" && not (Filename.is_relative path) && not (String.contains path '\000')
 let configuration ~(browser:Browser_configuration.stagehand) ~launcher ~guardian ~claim_directory =
-  let* ()=match browser.profile with
-    | None -> Ok ()
-    | Some _ -> Error "the browser Add-on Chrome backend requires a fresh private profile; configured operator profiles are not yet supported" in
-  if List.for_all absolute [browser.chrome;browser.extension;launcher;guardian;claim_directory] then
-    Ok {chrome=browser.chrome;extension=browser.extension;launcher;guardian;claim_directory}
-  else Error "Chrome Add-on resources must have absolute paths without NUL"
+  let* ()=if List.for_all absolute [browser.chrome;browser.extension;launcher;guardian;claim_directory]
+    then Ok () else Error "Chrome Add-on resources must have absolute paths without NUL" in
+  let* profile=Profile.select ~path:browser.profile in
+  Ok {chrome=browser.chrome;extension=browser.extension;launcher;guardian;claim_directory;profile}
+
+let claim_directories c = c.claim_directory :: (match c.profile with
+  | Profile.Private -> [] | Persistent profile -> [Profile.claim_directory profile])
 
 let configuration_to_json c = `Assoc ["chrome",`String c.chrome;"extension",`String c.extension;
-  "launcher",`String c.launcher;"guardian",`String c.guardian;"claim_directory",`String c.claim_directory]
+  "launcher",`String c.launcher;"guardian",`String c.guardian;"claim_directory",`String c.claim_directory;
+  "profile",Profile.to_json c.profile]
 let configuration_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=
-      ["chrome";"claim_directory";"extension";"guardian";"launcher"] ->
+      ["chrome";"claim_directory";"extension";"guardian";"launcher";"profile"] ->
     let field name=match List.assoc_opt name fields with
       | Some (`String path) when absolute path -> Ok path
       | None | Some _ -> Error ("invalid Chrome resource: " ^ name) in
@@ -28,7 +31,9 @@ let configuration_of_json = function
     let* launcher=field "launcher" in
     let* guardian=field "guardian" in
     let* claim_directory=field "claim_directory" in
-    Ok {chrome;extension;launcher;guardian;claim_directory}
+    let* profile=match List.assoc_opt "profile" fields with
+      | Some value -> Profile.of_json value | None -> Error "missing Chrome profile lifetime" in
+    Ok {chrome;extension;launcher;guardian;claim_directory;profile}
   | _ -> Error "invalid Chrome Add-on configuration"
 
 let protect work = try work () with
@@ -57,8 +62,9 @@ let verify_browser ~admission ~receipt cdp =
     original () in
   (match result with Ok () -> () | Error detail -> Browser_cdp.lost cdp detail);
   result
-let context ~incarnation ~directory = `Assoc ["kind",`String "browser_addon_chrome";
-  "incarnation",`String incarnation;"directory",`String directory]
+let context c ~incarnation ~directory = `Assoc ["kind",`String "browser_addon_chrome";
+  "incarnation",`String incarnation;"directory",`String directory;
+  "profile",Profile.to_json c.profile]
 let original c ~incarnation ~directory = protect (fun () ->
   match Unix.lstat c.claim_directory with
   | _ ->
@@ -67,7 +73,7 @@ let original c ~incarnation ~directory = protect (fun () ->
      | Lease.Unpublished -> Ok None
      | Current claim ->
        let* known=lease (Lease.cleanup_context claim) in
-       if known=Some (context ~incarnation ~directory) then Ok (Some claim)
+       if known=Some (context c ~incarnation ~directory) then Ok (Some claim)
        else Error "Chrome child claim belongs to a different browser allocation")
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok None)
 let settled claim =
@@ -146,12 +152,20 @@ let open_session ~sw ~env ~owner ~directory ~configuration:c ~model ~headless ~l
   let extension_id=Browser_stagehand_wire.extension_id_of_real_path extension in
   let* ()=Eio_unix.run_in_systhread (fun () -> settle c ~incarnation ~directory) in
   let instance_id=fresh_id () in
+  let verify_profile ()=match c.profile with
+    | Profile.Private -> Ok () | Persistent profile -> Profile.verify profile in
   (* The stable child reservation precedes any profile allocation. It survives
      worker death and fences a launcher delayed past detach or failed startup. *)
-  let* admission=Eio_unix.run_in_systhread (fun () -> lease (Lease.prepare
-    ~directories:[c.claim_directory] ~instance_id ~cleanup_context:(Some (context ~incarnation ~directory)))) in
+  let* admission,child_admission=Eio_unix.run_in_systhread (fun () ->
+    let* ()=verify_profile () in
+    let* admission=lease (Lease.prepare ~directories:(claim_directories c) ~instance_id
+      ~cleanup_context:(Some (context c ~incarnation ~directory))) in
+    let* child_admission=lease (Lease.reopen ~directories:[c.claim_directory] ~instance_id) in
+    Ok (admission,child_admission)) in
   let process=ref None and input=ref None in
-  let retire () = Eio_unix.run_in_systhread (fun () -> lease (Lease.retire admission)) in
+  (* The shared profile slot may already belong to a successor after physical
+     exit. Recovery/retirement stays bound to this exact original child slot. *)
+  let retire () = Eio_unix.run_in_systhread (fun () -> lease (Lease.retire child_admission)) in
   let request_stop () =
     let result=retire () in
     Option.iter Eio.Flow.close !input;input:=None;
@@ -161,25 +175,30 @@ let open_session ~sw ~env ~owner ~directory ~configuration:c ~model ~headless ~l
      group before this final claim observation runs. *)
   Eio.Switch.on_release sw (fun () ->
     match Eio_unix.run_in_systhread (fun () ->
-      let* ()=lease (Lease.retire admission) in settled admission) with
+      let* ()=lease (Lease.retire child_admission) in settled child_admission) with
     | Ok () -> ()
     | Error detail -> Log.Server.warn "browser Add-on Chrome cleanup: %s" detail);
   let start () =
-    let* profile=Eio_unix.run_in_systhread (fun () -> protect (fun () ->
+    let* selected_profile=Eio_unix.run_in_systhread (fun () -> match c.profile with
+      | Profile.Persistent profile ->
+        let* ()=Profile.before_launch profile in Ok (Process.Operator_profile (Profile.path profile))
+      | Private -> protect (fun () ->
       (try Unix.mkdir (profiles directory) 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
       let root=Unix.lstat (profiles directory) in
       let* ()=if root.Unix.st_kind=Unix.S_DIR && root.st_uid=Unix.geteuid () && root.st_perm=0o700
         && Unix.realpath (profiles directory)=profiles directory then Ok () else Error "Chrome profile root is not private" in
       let profile=Filename.concat (profiles directory) instance_id in
-      Unix.mkdir profile 0o700;Ok profile)) in
+      Unix.mkdir profile 0o700;Ok (Process.Private_profile profile))) in
+    let profile=Process.profile_path selected_profile in
     let output=Eio.Path.open_out ~sw ~append:true ~create:(`If_missing 0o600)
       Eio.Path.(Eio.Stdenv.fs env / Filename.concat directory "chromium.log") in
     let keepalive_read,keepalive_write=Eio_unix.pipe sw in
     let ready_read,ready_write=Eio_unix.pipe sw in
     input:=Some keepalive_write;
-    let argv=[c.launcher;"--instance";instance_id;"--slot";c.claim_directory;"--";
-      c.guardian;"--instance";instance_id;"--"] @
-      Process.argv ~chrome:c.chrome ~profile:(Process.Private_profile profile) ~extension_id ~headless in
+    let argv=[c.launcher;"--instance";instance_id] @
+      List.concat_map (fun slot -> ["--slot";slot]) (claim_directories c) @
+      ["--";c.guardian;"--instance";instance_id;"--"] @
+      Process.argv ~chrome:c.chrome ~profile:selected_profile ~extension_id ~headless in
     Eio.Switch.check sw;
     let child=Eio.Process.spawn ~sw
       (Posix_spawn_process_mgr.foreground_mgr ~clock:(Eio.Stdenv.clock env) ~grace_seconds:stop_grace_s)
@@ -199,16 +218,36 @@ let open_session ~sw ~env ~owner ~directory ~configuration:c ~model ~headless ~l
       then Ok () else Error "Chrome bootstrap does not name its original process owner" in
     let* ()=Eio_unix.run_in_systhread (original_browser ~admission ~receipt) in
     Eio.Flow.close ready_read;
-    let* port,path=await_endpoint ~env ~profile ~process:child in
-    let url=Process.browser_ws_url ~port ~path in
     (* No extension event handler or model callback is installed until the
        connection has independently identified the original browser child. *)
     let current_session=ref None in
-    let* cdp=Browser_cdp.connect ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
-      ~url ~max_message:(64*1024*1024)
-      ~command_deadline_s:Browser_lane.Stagehand_open_budget.cdp_command_deadline_s
-      ~on_event:(fun event -> Option.iter (fun session -> Session.on_cdp_event session event) !current_session) in
-    let* ()=verify_browser ~admission ~receipt cdp in
+    let connect () =
+      let* port,path=await_endpoint ~env ~profile ~process:child in
+      let url=Process.browser_ws_url ~port ~path in
+      let* cdp=Browser_cdp.connect ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
+        ~url ~max_message:(64*1024*1024)
+        ~command_deadline_s:Browser_lane.Stagehand_open_budget.cdp_command_deadline_s
+        ~on_event:(fun event -> Option.iter (fun session -> Session.on_cdp_event session event) !current_session) in
+      let result=let* ()=verify_browser ~admission ~receipt cdp in
+        let* ()=Eio_unix.run_in_systhread verify_profile in Ok (cdp,url) in
+      (match result with Ok _ -> () | Error detail -> Browser_cdp.lost cdp detail);
+      result in
+    let* cdp,url=match c.profile with
+      | Profile.Private -> connect ()
+      | Persistent _ ->
+        (* A preserved DevToolsActivePort may name a previous session. Only
+           read-only bootstrap observations may be repeated, before installing
+           the extension, model callback or any input. Never reset that file. *)
+        let rec observe () =
+          let* ()=Eio_unix.run_in_systhread (fun () ->
+            let* ()=original_browser ~admission ~receipt () in verify_profile ()) in
+          match connect () with
+          | Ok _ as ready -> ready
+          | Error _ -> Eio.Time.sleep (Eio.Stdenv.clock env) port_poll_s;observe () in
+        (match Eio.Time.with_timeout (Eio.Stdenv.clock env)
+          Browser_lane.Stagehand_open_budget.devtools_port_timeout_s (fun () -> Ok (observe ())) with
+         | Ok result -> result
+         | Error `Timeout -> Error "original Chrome did not publish a verified debugging endpoint") in
     let session=Session.create ~sw ~clock:(Eio.Stdenv.clock env)
       ~worker_wait_s:Browser_lane.Stagehand_open_budget.service_worker_wait_s
       ~init_answer_s:Browser_lane.Stagehand_open_budget.init_answer_s
@@ -223,7 +262,7 @@ let open_session ~sw ~env ~owner ~directory ~configuration:c ~model ~headless ~l
     let retirement=request_stop () in
     Option.iter (fun child -> ignore (Eio.Process.await child)) !process;
     let* ()=retirement in
-    Eio_unix.run_in_systhread (fun () -> settled admission)) in
+    Eio_unix.run_in_systhread (fun () -> settled child_admission)) in
   match start () with
   | Ok _ as opened -> opened
   | Error detail -> (match stop_failed () with

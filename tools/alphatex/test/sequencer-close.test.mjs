@@ -9,13 +9,15 @@ import { constants } from 'node:fs'
 import { arrangementRoute, selectArrangementRoute } from '../arrangement-playback.mjs'
 import { arrangementFromPhrase, arrangementFromMidiSource } from '../phrase-arrangement.mjs'
 import * as editor from '../sequencer-editor.mjs'
-import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo } from '../midi-source-editor.mjs'
+import { sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceMeters, selectedMeter } from '../midi-source-editor.mjs'
 import { importMidiSource, midiSourcePattern } from '../midi-source.mjs'
 import { harmonyAt, PPQ, GM_DRUM_CHANNEL } from '../sequencer-project.mjs'
 import { MidiSourcePicker as SourcePicker } from '../midi-source-picker.mjs'
 import { sourceSecondsAtTick, sourceTickAtSeconds } from '../midi-source-playback.mjs'
 import { isFluidSound } from '../soundfont.mjs'
-import { pickerFooter, selectionLabel } from '../instruments.mjs'
+import { pickerFooter, selectionLabel, projectSoundLabel } from '../instruments.mjs'
+import { openStepInput, sameStepContext, stepControl } from '../step-input.mjs'
+import { phraseBacking } from '../phrase-backing.mjs'
 
 const frozenSound = selection => ({ kind: 'vst', selection, instrument: { identifier: 'Bass', version: '1' },
   preset: { data: Buffer.from('frozen state').toString('base64'), sha256: createHash('sha256').update('frozen state').digest('hex') } })
@@ -23,7 +25,7 @@ const frozenSound = selection => ({ kind: 'vst', selection, instrument: { identi
 // Exercise actual controller decisions with owned IO substitutes. No terminal
 // output, layout, audio hardware or player behavior is asserted.
 async function controller(options = {}) {
-  const observed = { saved: [], workers: [], writes: [], copies: [], sessions: 0, players: 0, arrangements: [], pickers: [], native: [], snapshots: [], soundCaptures: [] }
+  const observed = { saved: [], workers: [], writes: [], copies: [], sessions: 0, players: 0, arrangements: [], pickers: [], native: [], snapshots: [], soundCaptures: [], captureOptions: [], vstSessions: [] }
   const process = new EventEmitter()
   process.stdin = new EventEmitter()
   Object.assign(process.stdin, { isTTY: true, isRaw: false,
@@ -53,9 +55,13 @@ async function controller(options = {}) {
   }
   const slot = `sequencer-${randomUUID()}`
   globalThis[slot] = { StatusReader,
-    process, InstrumentPicker, MidiSourcePicker, pickerFooter, selectionLabel, defaultStateDirectory: () => '/synthetic-vst',
+    process, InstrumentPicker, MidiSourcePicker, pickerFooter, selectionLabel, projectSoundLabel, defaultStateDirectory: () => '/synthetic-vst',
     snapshotWriter: () => async value => { observed.snapshots.push(value) },
-    captureVstSound(selection) { observed.soundCaptures.push(selection); return options.capture?.(selection) ?? { promise: Promise.resolve(frozenSound(selection)), cancel() {} } },
+    openVstSession() {
+      const session = { closed: 0, run() { throw new Error('Unexpected VST host job') }, async close() { session.closed++ } }
+      observed.vstSessions.push(session); return session
+    },
+    captureVstSound(selection, captureOptions) { observed.soundCaptures.push(selection); observed.captureOptions.push(captureOptions); return options.capture?.(selection) ?? { promise: Promise.resolve(frozenSound(selection)), cancel() {} } },
     renderVstPhrase(value) { observed.native.push(value); return options.native(value) },
     isFluidSound, GM_DRUM_CHANNEL,
     captureFluidSound() { throw new Error('Unexpected FluidSynth selection') },
@@ -65,7 +71,8 @@ async function controller(options = {}) {
     copyFile: async (from, to) => { observed.copies.push([from, to]) },
     arrangementRoute, selectArrangementRoute, dirname, constants, join, resolve, tmpdir: () => '/synthetic', randomUUID, emitKeypressEvents() {},
     openPlayback(value) { observed.players++; if (options.playback) return options.playback(value); throw new Error('Unexpected playback') }, Worker,
-    Note: { fromMidi: String }, ...editor, harmonyAt, PPQ, sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceSecondsAtTick, sourceTickAtSeconds,
+    Note: { fromMidi: String }, ...editor, harmonyAt, PPQ, sourceExpressions, selectedExpression, sourceTempos, selectedTempo, sourceMeters, selectedMeter, sourceSecondsAtTick, sourceTickAtSeconds,
+    openStepInput, sameStepContext, stepControl, phraseBacking,
     loadProject: async () => { throw new Error('Unexpected load') },
     saveProject: async (path, project) => { observed.saved.push(structuredClone(project)); return 'revision' },
     projectMidi() { throw new Error('Unexpected MIDI export') }, safeText: String,
@@ -222,6 +229,22 @@ test('reopened document auditions its frozen sound without consulting the picker
   assert.deepEqual(view.observed.native[0].sound, document.sound)
   view.key('q'); await view.done
   assert.deepEqual(view.observed.saved.at(-1).sound, document.sound)
+})
+
+test('one VST session serves the sound capture and every play, and closes with the editor', async () => {
+  const selection = { plugin_path: '/synth.vst3', plugin_name: null, preset_path: null, name: 'Bass' }
+  const view = await controller({ autoSoundfont: false,
+    native: ({ preparation }) => ({ promise: preparation.promise.then(() => new Promise(() => {})), cancel() {} }) })
+  view.key('return'); view.key('i'); await flush()
+  view.observed.pickers[0].close(); view.observed.pickers[0].selected(selection); await flush(); await flush()
+  view.key('space'); await flush(); view.key('space'); await flush()
+  const [session] = view.observed.vstSessions
+  assert.equal(view.observed.vstSessions.length, 1)
+  assert.equal(view.observed.captureOptions[0].run, session.run)
+  assert.ok(view.observed.native.length >= 2)
+  for (const render of view.observed.native) assert.equal(render.run, session.run)
+  view.key('q'); await view.done
+  assert.equal(session.closed, 1)
 })
 
 test('closing during sound capture waits for child closure and refuses late adoption/playback', async () => {

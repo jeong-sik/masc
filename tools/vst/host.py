@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Native VST3 rendering, or --stream request-driven continuous synthesis.
 
-Default input/output are single JSON objects; --stream uses NDJSON. Native
+Default input/output are single JSON objects; --stream and --serve use NDJSON.
+--serve runs jobs one at a time in one process and keeps the instrument the
+latest snapshot or render loaded, so the next job does not load it again. Native
 diagnostics go to stderr, including plug-in destructors. Only the explicit edit
 job opens a plug-in editor. No operation opens an audio device.
 """
@@ -20,6 +22,8 @@ from pathlib import Path
 import sys
 import tempfile
 import struct
+import threading
+import time
 from fractions import Fraction
 
 
@@ -221,6 +225,58 @@ def candidates():
                            for path in sorted(set(VST3Plugin.installed_plugins))]}
 
 
+class Cancelled(Exception):
+    """A --serve job stopped by its caller between rendered blocks."""
+
+
+class SilentRender(ValueError):
+    """Sounding notes rendered to all-zero PCM."""
+
+
+class Retained:
+    """The instrument a --serve session keeps between jobs.
+
+    One instance: the one the latest snapshot or render left in a known state,
+    keyed by plug-in path, plug-in name and the sha256 of that state's preset
+    bytes. A job asking for anything else releases it, then loads a fresh
+    instance as a one-shot job does, so two instruments are never held.
+
+    The raw state is recorded when the instance is kept. A controller or a
+    cancelled render can move a parameter, so reuse first restores that state
+    when it differs. `used` tells the serve loop whether the current job
+    touched the instance; a job that failed before reaching it keeps it.
+    """
+
+    def __init__(self):
+        self.drop()
+
+    def take(self, key):
+        if self.plugin is None or key != self.key:
+            return None
+        self.used = True
+        if self.plugin.raw_state != self.state:
+            self.plugin.raw_state = self.state
+        return self.plugin
+
+    def keep(self, key, plugin, loaded_at):
+        self.key, self.plugin, self.loaded_at, self.state, self.used = key, plugin, loaded_at, plugin.raw_state, True
+
+    def drop(self):
+        self.key, self.plugin, self.loaded_at, self.state, self.used = None, None, None, None, False
+
+
+def retained_key(request, state_sha256):
+    return (nonempty(request.get("plugin_path"), "plugin_path"), request.get("plugin_name"), state_sha256)
+
+
+def load_frozen_preset(plugin, data):
+    """Load preset bytes from a private copy; the caller's file may go away."""
+    with tempfile.TemporaryDirectory(prefix="masc-vst-state-") as folder:
+        frozen = Path(folder) / "sound.vstpreset"
+        frozen.write_bytes(data)
+        plugin.load_preset(str(frozen))
+
+
 def load_instrument(request):
     from pedalboard import load_plugin
 
@@ -273,22 +329,25 @@ def edit(request):
             "preset_sha256": digest(data)}
 
 
-def snapshot(request):
+def snapshot(request, retained=None):
     """Capture an actual default/preset state without opening the native editor."""
+    if retained is not None:
+        retained.drop()
     plugin = load_instrument(request)
+    loaded_at = time.monotonic()
     preset = request.get("preset_path")
     if preset is not None:
-        data = Path(nonempty(preset, "preset_path")).read_bytes()
-        with tempfile.TemporaryDirectory(prefix="masc-vst-state-") as folder:
-            frozen = Path(folder) / "sound.vstpreset"
-            frozen.write_bytes(data)
-            plugin.load_preset(str(frozen))
+        load_frozen_preset(plugin, Path(nonempty(preset, "preset_path")).read_bytes())
     data = plugin.preset_data
+    if retained is not None:
+        # The instance now holds exactly these bytes; a render of the sound
+        # captured here reuses it.
+        retained.keep(retained_key(request, digest(data)), plugin, loaded_at)
     return {"instrument": description(plugin),
             "preset": {"data": base64.b64encode(data).decode("ascii"), "sha256": digest(data)}}
 
 
-def render(request):
+def render(request, retained=None, cancelled=lambda: False):
     from pedalboard.io import AudioFile
     import numpy as np
 
@@ -323,18 +382,29 @@ def render(request):
             midi_bytes = Path(nonempty(request["midi_path"], "midi_path")).read_bytes()
             events, phrase_seconds = midi_timeline(midi_bytes)
             source_receipt = {"midi_sha256": digest(midi_bytes)}
-        plugin = load_instrument(request)
+        preset = request.get("preset_path")
+        preset_bytes = preset_hash = None
+        if preset is not None:
+            preset_bytes = Path(nonempty(preset, "preset_path")).read_bytes()
+            preset_hash = digest(preset_bytes)
+        key = retained_key(request, preset_hash) if retained is not None else None
+        plugin = retained.take(key) if retained is not None else None
+        if plugin is None:
+            if retained is not None:
+                retained.drop()
+            plugin = load_instrument(request)
+            if preset_bytes is not None:
+                load_frozen_preset(plugin, preset_bytes)
+            loaded_at = time.monotonic()
+            if retained is not None:
+                retained.keep(key, plugin, loaded_at)
+        else:
+            loaded_at = retained.loaded_at
         expected = request.get("expected_instrument")
         if expected is not None:
             actual = description(plugin)
             if not isinstance(expected, dict) or any(expected.get(key) != actual[key] for key in ("identifier", "version")):
                 raise ValueError("installed VST identity/version differs from the project sound")
-        preset = request.get("preset_path")
-        preset_hash = None
-        if preset is not None:
-            preset = Path(nonempty(preset, "preset_path"))
-            preset_hash = digest(preset.read_bytes())
-            plugin.load_preset(str(preset))
         state_hash = digest(plugin.raw_state)
         # Quantize source time and origin together, once on the common PCM
         # grid. Frame-owned practice projections already carry that decision.
@@ -350,7 +420,10 @@ def render(request):
         os.close(stage_fd)
         try:
             with AudioFile(stage_name, "w", sample_rate, 2, bit_depth=32) as output:
+                started_at = time.monotonic()
                 while rendered < frames:
+                    if cancelled():
+                        raise Cancelled("VST render cancelled")
                     # Exact integer offsets fit the native Float32 ABI.
                     count = min(sample_rate, 1 << 24, frames - rendered)
                     block = []
@@ -372,7 +445,12 @@ def render(request):
             for _ in iterator:
                 pass
             if peak == 0 and (projection is None or projection.sounding):
-                raise ValueError("selected VST produced silence; check its preset, sample library, and license")
+                if retained is None:
+                    raise SilentRender("selected VST produced silence; check its preset, sample library, and license")
+                # VST3 reports no "samples loaded" state, so the age is stated, not judged.
+                raise SilentRender(f"selected VST produced silence {started_at - loaded_at:.0f}s after it was loaded."
+                                   " A sample-streaming instrument may still be reading its samples; play again."
+                                   " If it stays silent, check its preset, sample library, and license")
             with open(stage_name, "rb") as rendered_audio:
                 wave_hash = hashlib.file_digest(rendered_audio, "sha256").hexdigest()
             os.link(stage_name, output_path)
@@ -446,7 +524,7 @@ def mix(request):
             "wav_sha256": wave_hash, "instances": len(parts)}
 
 
-def run(request):
+def run(request, retained=None, cancelled=lambda: False):
     if not isinstance(request, dict):
         raise ValueError("VST job must be an object")
     match request.get("operation"):
@@ -457,9 +535,9 @@ def run(request):
         case "edit":
             return edit(request)
         case "render":
-            return render(request)
+            return render(request, retained, cancelled)
         case "snapshot":
-            return snapshot(request)
+            return snapshot(request, retained)
         case "mix":
             return mix(request)
         case _:
@@ -551,6 +629,56 @@ def stream_synthesis(source, emit):
     emit({'kind': 'stopped', 'frames': str(total)})
 
 
+def serve(source, emit, retained=None):
+    """NDJSON jobs in one process: {"id", "job"} runs, {"cancel": id} stops.
+
+    Jobs run in arrival order on this thread; a reader thread admits cancels
+    while a render runs. A cancel reaches a render between blocks; other jobs
+    finish and their reply is dropped by the caller. The retained instrument
+    survives silence and cancellation. Any other failure of a job that used it
+    leaves its state unknown, so the next job loads a fresh instance.
+    """
+    import queue
+
+    retained = Retained() if retained is None else retained
+    jobs, cancelled, failure = queue.Queue(), set(), []
+
+    def admit():
+        try:
+            for line in source:
+                request = json.loads(line)
+                if isinstance(request, dict) and type(request.get("cancel")) is int:
+                    cancelled.add(request["cancel"])
+                elif (isinstance(request, dict) and type(request.get("id")) is int
+                      and isinstance(request.get("job"), dict)):
+                    jobs.put((request["id"], request["job"]))
+                else:
+                    raise ValueError("VST serve request must be {id, job} or {cancel}")
+        except Exception as error:
+            failure.append(error)
+        finally:
+            jobs.put(None)
+
+    threading.Thread(target=admit, daemon=True).start()
+    while (item := jobs.get()) is not None:
+        job_id, job = item
+        retained.used = False
+        try:
+            if job_id in cancelled:
+                raise Cancelled("VST job cancelled")
+            reply = {"id": job_id, "ok": True, "result": run(job, retained, lambda: job_id in cancelled)}
+        except Cancelled:
+            reply = {"id": job_id, "ok": False, "cancelled": True}
+        except Exception as error:
+            if retained.used and not isinstance(error, SilentRender):
+                retained.drop()
+            reply = {"id": job_id, "ok": False, "error": f"{type(error).__name__}: {error}"}
+        cancelled.discard(job_id)
+        emit(reply)
+    if failure:
+        raise failure[0]
+
+
 def main():
     # C++ plug-ins can print directly to fd 1; Python redirect_stdout alone
     # does not protect the JSON channel. Keep a private descriptor for replies.
@@ -567,6 +695,16 @@ def main():
                 return 0
             except Exception as error:
                 emit({'kind': 'error', 'message': f'{type(error).__name__}: {error}'})
+                return 1
+            finally:
+                os.close(reply_fd)
+        if sys.argv[1:] == ['--serve']:
+            try:
+                serve(sys.stdin, emit)
+                return 0
+            except Exception as error:
+                # Replies are per job; a broken request stream ends the session.
+                print(f'{type(error).__name__}: {error}', file=sys.stderr)
                 return 1
             finally:
                 os.close(reply_fd)

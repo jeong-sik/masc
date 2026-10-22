@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 import base64
@@ -13,7 +14,7 @@ from fractions import Fraction
 
 import mido
 
-from host import midi_timeline, frame_timeline, snapshot, render, digest, mix, ProjectedMidi
+from host import midi_timeline, frame_timeline, snapshot, render, digest, mix, ProjectedMidi, Retained, serve, Cancelled, SilentRender
 
 
 def encode(midi):
@@ -379,6 +380,142 @@ class NativeBoundaryTests(unittest.TestCase):
         code, reply = self.job({"operation": "unknown"})
         self.assertNotEqual(code, 0)
         self.assertFalse(reply["ok"])
+
+
+class Kept:
+    """A loaded instrument whose preset bytes are its whole state."""
+    name, identifier, manufacturer_name, version, is_instrument = 'Kept', 'kept', 'Test', '1', True
+
+    def __init__(self, data=b'default', level=.125, wait=None):
+        self.preset_data, self.raw_state, self.level, self.wait = data, b'state', level, wait
+
+    def load_preset(self, path):
+        self.preset_data = Path(path).read_bytes()
+
+    def __call__(self, events, **clock):
+        import numpy as np
+        if self.wait is not None:
+            self.wait.wait(5)
+        frames = int(np.float32(clock['duration']) * np.float32(clock['sample_rate']))
+        return np.full((2, frames), self.level, dtype=np.float32)
+
+
+class ServeTests(unittest.TestCase):
+    selection = {'plugin_path': '/Library/Audio/Plug-Ins/VST3/Kept.vst3', 'plugin_name': None}
+
+    def bound_render(self, folder, name, preset_bytes, rows=None):
+        preset = Path(folder) / f'{name}.vstpreset'
+        preset.write_bytes(preset_bytes)
+        return {**ProjectedArrangementTests.projection(self, folder, rows), **self.selection, 'operation': 'render',
+                'preset_path': str(preset), 'output_path': str(Path(folder) / f'{name}.wav'), 'tail_seconds': 0}
+
+    def test_render_reuses_the_instance_its_snapshot_left_loaded(self):
+        retained = Retained()
+        with tempfile.TemporaryDirectory() as folder, patch('host.load_instrument', side_effect=[Kept()]) as load:
+            captured = snapshot({'operation': 'snapshot', **self.selection}, retained)
+            sound = base64.b64decode(captured['preset']['data'])
+            for name in ('first', 'second'):
+                result = render(self.bound_render(folder, name, sound), retained)
+                self.assertEqual(result['preset_sha256'], captured['preset']['sha256'])
+            self.assertEqual(load.call_count, 1)
+
+    def test_a_different_sound_loads_a_fresh_instance_and_replaces_it(self):
+        retained, first, second = Retained(), Kept(), Kept()
+        with tempfile.TemporaryDirectory() as folder, patch('host.load_instrument', side_effect=[first, second]) as load:
+            snapshot({'operation': 'snapshot', **self.selection}, retained)
+            render(self.bound_render(folder, 'other', b'another sound'), retained)
+            self.assertEqual(load.call_count, 2)
+            self.assertIs(retained.plugin, second)
+            self.assertEqual(second.preset_data, b'another sound')
+
+    def test_a_cancel_between_blocks_publishes_nothing_and_keeps_the_instance(self):
+        retained = Retained()
+        with tempfile.TemporaryDirectory() as folder, patch('host.load_instrument', side_effect=[Kept()]):
+            request = self.bound_render(folder, 'cancelled', b'default')
+            with self.assertRaises(Cancelled):
+                render(request, retained, cancelled=lambda: True)
+            self.assertFalse(Path(request['output_path']).exists())
+            self.assertFalse(list(Path(folder).glob('.vst-*.wav')))
+            self.assertIsNotNone(retained.plugin)
+
+    def test_reuse_restores_a_state_a_render_moved(self):
+        retained, plugin = Retained(), Kept()
+        with tempfile.TemporaryDirectory() as folder, patch('host.load_instrument', side_effect=[plugin]) as load:
+            captured = snapshot({'operation': 'snapshot', **self.selection}, retained)
+            sound = base64.b64decode(captured['preset']['data'])
+            render(self.bound_render(folder, 'first', sound), retained)
+            plugin.raw_state = b'moved by a controller'
+            result = render(self.bound_render(folder, 'second', sound), retained)
+            self.assertEqual(load.call_count, 1)
+            self.assertEqual(plugin.raw_state, b'state')
+            self.assertEqual(result['state_sha256'], digest(b'state'))
+
+    def test_a_preset_file_removed_during_loading_still_loads_and_is_kept(self):
+        retained = Retained()
+        with tempfile.TemporaryDirectory() as folder:
+            request = self.bound_render(folder, 'removed', b'bound sound')
+
+            def load(_request):
+                # The caller rejected a cancelled job and removed its file.
+                Path(request['preset_path']).unlink()
+                return Kept()
+            with patch('host.load_instrument', side_effect=load):
+                render(request, retained)
+            self.assertEqual(retained.plugin.preset_data, b'bound sound')
+
+    def test_a_job_that_fails_before_using_the_instance_keeps_it(self):
+        retained = Retained()
+        with tempfile.TemporaryDirectory() as folder, patch('host.load_instrument', side_effect=[Kept()]):
+            snapshot({'operation': 'snapshot', **self.selection}, retained)
+            kept = retained.plugin
+            existing = self.bound_render(folder, 'existing', b'default')
+            Path(existing['output_path']).write_bytes(b'')
+            replies = self.serve_lines([{'id': 1, 'job': existing}], retained)
+            self.assertRegex(replies[0]['error'], '^FileExistsError')
+            self.assertIs(retained.plugin, kept)
+
+    def serve_lines(self, lines, retained, after=None):
+        replies = []
+
+        def source():
+            yield from (json.dumps(line) + '\n' for line in lines)
+            if after is not None:
+                after.set()
+        serve(source(), replies.append, retained)
+        return replies
+
+    def test_serve_keeps_a_silent_instance_and_drops_one_whose_render_failed(self):
+        import numpy as np
+        retained = Retained()
+        silent, broken = Kept(level=0), Kept(level=np.nan)
+        with tempfile.TemporaryDirectory() as folder, patch('host.load_instrument', side_effect=[silent, broken]):
+            replies = self.serve_lines([
+                {'id': 1, 'job': {'operation': 'snapshot', **self.selection}},
+                {'id': 2, 'job': self.bound_render(folder, 'silent', b'default')}], retained)
+            self.assertEqual([reply['id'] for reply in replies], [1, 2])
+            self.assertTrue(replies[0]['ok'])
+            self.assertRegex(replies[1]['error'], r'^SilentRender: selected VST produced silence \d+s after it was loaded')
+            self.assertIs(retained.plugin, silent)
+            replies = self.serve_lines([{'id': 3, 'job': self.bound_render(folder, 'broken', b'other sound')}], retained)
+            self.assertFalse(replies[0]['ok'])
+            self.assertIsNone(retained.plugin)
+
+    def test_serve_cancels_a_queued_job_before_it_starts(self):
+        admitted = threading.Event()
+        with tempfile.TemporaryDirectory() as folder, patch('host.load_instrument', side_effect=[Kept(wait=admitted)]) as load:
+            replies = self.serve_lines([
+                {'id': 1, 'job': self.bound_render(folder, 'held', b'default')},
+                {'id': 2, 'job': self.bound_render(folder, 'queued', b'default')},
+                {'cancel': 2}], Retained(), after=admitted)
+            self.assertEqual(replies[0]['id'], 1)
+            self.assertTrue(replies[0]['ok'])
+            self.assertEqual(replies[1], {'id': 2, 'ok': False, 'cancelled': True})
+            self.assertEqual(load.call_count, 1)
+            self.assertFalse((Path(folder) / 'queued.wav').exists())
+
+    def test_serve_ends_on_a_request_that_is_not_a_job_or_cancel(self):
+        with self.assertRaisesRegex(ValueError, 'must be'):
+            self.serve_lines([{'operation': 'candidates'}], Retained())
 
 
 if __name__ == "__main__":

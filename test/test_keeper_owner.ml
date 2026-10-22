@@ -4825,6 +4825,31 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
            ; "operation_id", `String operation_id_raw
            ]
        in
+       let check_cancel_refused expected_state =
+         let read () =
+           let result = Keeper_tool_surface_ops.keeper_delegate_status_body
+             ~config ~caller:"agent-operation-caller" reference in
+           check bool "operation remains readable" true (Tool_result.is_success result);
+           Tool_result.data result
+         in
+         let before = read () in
+         check string "cancellation precondition" expected_state
+           Yojson.Safe.Util.(before |> member "state" |> to_string);
+         let result = Keeper_tool_surface_ops.keeper_delegate_cancel_body
+           ~config ~caller:"agent-operation-caller" reference in
+         (match result with
+          | Tool_result.Failed failure ->
+            check bool "nonqueued cancellation is a workflow refusal" true
+              (failure.class_ = Tool_result.Workflow_rejection);
+            check bool "owner error retains its conservative effect boundary" true
+              (failure.effect_disposition = Tool_result.Effect_outcome_unknown)
+          | Tool_result.Completed _ | Tool_result.Deferred _ ->
+            fail "nonqueued cancellation must fail");
+         check string "state refusal keeps its public error" "not_queued"
+           Yojson.Safe.Util.(Tool_result.data result |> member "error" |> to_string);
+         check string "refused cancellation preserves the exact operation"
+           (Yojson.Safe.to_string before) (Yojson.Safe.to_string (read ()))
+       in
        let status =
          Keeper_tool_surface_ops.keeper_delegate_status_body
            ~config
@@ -4912,8 +4937,10 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
            ~content:"SAME-TURN-WRONG-OPERATION" () |> Result.get_ok |> ignore;
          let owner = Owner_registry.get ~base_path ~keeper_name:meta.name |> Result.get_ok in
          ignore (owner_ok (Owner.claim_next_operation owner));
+         check_cancel_refused "Running";
          ignore (owner_ok (Owner.succeed_running_operation owner ~operation_id
            ~outcome_ref:(Ids.Turn_ref.to_string turn_ref)));
+         check_cancel_refused "Succeeded";
          let read caller = Keeper_tool_surface_ops.keeper_delegate_status_body
            ~config ~caller reference in
          let status = read "agent-operation-caller" in
@@ -4961,6 +4988,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
          (Tool_result.is_success cancelled);
        check string "agent cancel is terminal" "Cancelled"
          Yojson.Safe.Util.(Tool_result.data cancelled |> member "state" |> to_string);
+       check_cancel_refused "Cancelled";
        let listed_after_cancel =
          Keeper_tool_surface_ops.keeper_delegate_list_body
            ~config

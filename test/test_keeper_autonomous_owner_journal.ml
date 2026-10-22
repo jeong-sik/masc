@@ -139,7 +139,12 @@ let test_wait_restart_and_independent_work () = with_root @@ fun root ->
       (Owner.park_autonomous_input_wait owner ~execution:old_execution ~writer:old_writer ~checkpoint:reference);
     check bool "Owner restart preserves complete wait" true
       (Yojson.Safe.equal (Semantic.to_json parked) (Semantic.to_json (get root scope)));
-    let b=Owner.run_autonomous_if_idle owner (fun execution ->
+    let canonical=Core.Checkpoint.of_string bytes |> Result.map_error Core.Error.to_string |> value in
+    let canonical={canonical with pending_input=None;turn_count=9;
+      messages=[Core.Types.user_msg "unrelated canonical history"]} in
+    Physical.save_agent_core_classified ~session_dir:(Filename.concat root canonical.session_id)
+      ~history_retained:0 canonical |> value |> ignore;
+    let b,seed=Owner.run_autonomous_if_idle owner (fun execution ->
       ignore (prepare execution);
       refused "fresh child borrowed old execution object"
         (Owner.start_autonomous_execution owner ~execution:old_execution ~input:(`String "original-A")
@@ -148,8 +153,29 @@ let test_wait_restart_and_independent_work () = with_root @@ fun root ->
         (Owner.start_autonomous_execution owner ~execution ~input:(`String "original-B")
           ~sources:[source "original-A"]);
       let admitted=start owner execution "original-B" in
+      let seed=Owner.capture_autonomous_input_seed owner ~execution |> owner_value in
+      refused "same child recaptured seed after admission"
+        (Owner.capture_autonomous_input_seed owner ~execution);
+      let selected=match Owner.autonomous_input_seed_history seed with
+        | Physical.Saved_history checkpoint -> checkpoint
+        | No_saved_history | Saved_history_superseded _ -> fail "original retained history was not selected" in
+      let original=Core.Checkpoint.of_string bytes |> Result.map_error Core.Error.to_string |> value in
+      check string "B seed preserves all original fields except pending; canonical is not a fallback"
+        (Core.Checkpoint.to_string {original with pending_input=None}) (Core.Checkpoint.to_string selected);
+      Core.Context.set selected.context "seed-caller-mutation" (`Bool true);
+      let untouched=match Owner.autonomous_input_seed_history seed with
+        | Physical.Saved_history checkpoint -> Core.Context.get checkpoint.context "seed-caller-mutation"
+        | No_saved_history | Saved_history_superseded _ -> fail "seed changed history kind" in
+      check bool "seed getter owns a separate mutable context" true (untouched=None);
+      let bound=Owner.bind_autonomous_input_seed owner ~seed |> owner_value in
+      check bool "B writer retains original W predecessor" true
+        (Option.equal Keeper_checkpoint_ref.equal (Some reference) (Owner.input_checkpoint_reference bound));
+      refused "seed writer bypassed the original typed publication guard"
+        (Owner.advance_autonomous_input_checkpoint owner ~writer:bound ~checkpoint:reference);
       Owner.finish_autonomous_execution owner ~execution ~ending:Journal.Autonomous_completed |> owner_value |> ignore;
-      admitted.id) |> ran in
+      admitted.id,seed) |> ran in
+    refused "escaped seed was rebound outside its inherited child"
+      (Owner.bind_autonomous_input_seed owner ~seed);
     check bool "B has its own original identity" false (Scope.equal scope b);
     Owner.run_autonomous_if_idle owner (fun execution ->
       ignore (prepare execution);
@@ -338,7 +364,72 @@ let test_registry_producer_wait () = with_root @@ fun root ->
   check int "unavailable ownership admits no queue sources" 0
     (Keeper_heartbeat_source_batch.count unavailable.source_batch);
   check bool "intake never ACKs or mutates the parked original queue source" true
-    (before=selections ())
+    (before=selections ());
+  let b=List.find (fun (selection:Keeper_event_queue_state.pending_selection) ->
+    selection.source.post_id="independent-source-B") (selections ()) in
+  Keeper_owner_registry.run_autonomous_if_idle ~base_path:root ~keeper_name:meta.name (fun execution ->
+    ignore (prepare execution);
+    let sources=Keeper_heartbeat_source_batch.semantic_members
+        (Keeper_heartbeat_source_batch.of_selections [b]) |> value in
+    Keeper_owner_registry.start_autonomous_execution ~base_path:root ~keeper_name:meta.name
+      ~execution ~input:(`String "registry-independent-B") ~sources |> registry_value |> created |> ignore;
+    let seed=Keeper_owner_registry.capture_autonomous_input_seed ~base_path:root ~keeper_name:meta.name
+        ~execution |> registry_value in
+    (match Owner.autonomous_input_seed_history seed with
+     | Physical.Saved_history checkpoint -> check bool "Registry seed is independent of A pending" true (checkpoint.pending_input=None)
+     | No_saved_history | Saved_history_superseded _ -> fail "Registry lost retained A history");
+    let bound=Keeper_owner_registry.bind_autonomous_input_seed ~base_path:root ~keeper_name:meta.name
+        ~seed |> registry_value in
+    check bool "Registry binding captures an existing retained global predecessor" true
+      (Option.is_some (Owner.input_checkpoint_reference bound));
+    Keeper_owner_registry.finish_autonomous_execution ~base_path:root ~keeper_name:meta.name
+      ~execution ~ending:Journal.Autonomous_completed |> registry_value |> ignore)
+  |> registry_value |> function
+  | `Ran () -> ()
+  | `Busy _ | `Interrupted -> fail "Registry did not run independent seed child"
+
+let test_canonical_seed_observation () = with_root @@ fun root ->
+  with_owner root (fun owner meta _sw ->
+    let session_dir=Filename.concat root (Keeper_id.Trace_id.to_string meta.runtime.trace_id) in
+    Unix.mkdir session_dir 0o700;
+    Owner.run_autonomous_if_idle owner (fun execution ->
+      let context=prepare execution in
+      ignore (start owner execution "fresh-independent");
+      let seed=Owner.capture_autonomous_input_seed owner ~execution |> owner_value in
+      (match Owner.autonomous_input_seed_history seed with
+       | Physical.No_saved_history -> ()
+       | Saved_history _ | Saved_history_superseded _ -> fail "absent canonical became saved history");
+      let candidate={(checkpoint context) with pending_input=None} in
+      Physical.save_agent_core_classified ~session_dir ~history_retained:0 candidate |> value |> ignore;
+      refused "canonical appearing after capture borrowed newer history"
+        (Owner.bind_autonomous_input_seed owner ~seed);
+      refused "changed canonical permitted replacement seed in the same child"
+        (Owner.capture_autonomous_input_seed owner ~execution);
+      Owner.finish_autonomous_execution owner ~execution ~ending:Journal.Autonomous_completed |> owner_value |> ignore)
+    |> ran;
+    Owner.run_autonomous_if_idle owner (fun execution ->
+      ignore (prepare execution);ignore (start owner execution "canonical-independent");
+      let seed=Owner.capture_autonomous_input_seed owner ~execution |> owner_value in
+      (match Owner.autonomous_input_seed_history seed with
+       | Physical.Saved_history checkpoint -> check bool "canonical source has no pending input" true (checkpoint.pending_input=None)
+       | No_saved_history | Saved_history_superseded _ -> fail "actual canonical history was not loaded");
+      ignore (Owner.bind_autonomous_input_seed owner ~seed |> owner_value);
+      let canonical_path=Physical.agent_core_checkpoint_path ~session_dir
+          ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) in
+      Fs_compat.save_file canonical_path "{";
+      check bool "corrupt canonical remains a seed binding failure" true
+        (Result.is_error (Owner.bind_autonomous_input_seed owner ~seed));
+      Owner.finish_autonomous_execution owner ~execution ~ending:Journal.Autonomous_completed |> owner_value |> ignore)
+    |> ran;
+    Fs_compat.save_file (Physical.agent_core_checkpoint_path ~session_dir
+      ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+      (Core.Checkpoint.to_string (checkpoint (Core.Context.create_sync ())));
+    Owner.run_autonomous_if_idle owner (fun execution ->
+      ignore (prepare execution);ignore (start owner execution "unowned-pending");
+      refused "unowned canonical pending input was stripped for another invocation"
+        (Owner.capture_autonomous_input_seed owner ~execution);
+      Owner.finish_autonomous_execution owner ~execution ~ending:Journal.Autonomous_completed |> owner_value |> ignore)
+    |> ran)
 
 let () = run "autonomous Owner journal"
   ["original ownership",[
@@ -346,7 +437,8 @@ let () = run "autonomous Owner journal"
     test_case "unsettled physical return reconciles rather than completing" `Quick test_unsettled_exit;
     test_case "retained checkpoint and later child exception preserve original authority" `Quick test_checkpoint_and_exception_boundaries;
     test_case "actual operator interruption survives journal settlement failure" `Quick test_interrupt_survives_settlement_failure;
-    test_case "Registry and Producer publish the retained original wait" `Quick test_registry_producer_wait];
+    test_case "Registry and Producer publish the retained original wait" `Quick test_registry_producer_wait;
+    test_case "canonical seed observations stay bound to the original physical child" `Quick test_canonical_seed_observation];
    "commit uncertainty",[
     test_case "precommit failure preserves both original relations" `Quick (test_wait_commit_uncertainty false);
     test_case "lost acknowledgement preserves actual wait and input" `Quick (test_wait_commit_uncertainty true)]]

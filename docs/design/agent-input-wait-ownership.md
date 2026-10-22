@@ -1072,3 +1072,47 @@ as projection cases; unavailable ownership is supplied as an explicit failed
 observation. Existing Board/Connector intake fixtures supply their explicit
 empty ownership data and do not prove journal integration. None of these
 fixtures executes an autonomous provider/Core wait or the production seed path.
+
+### Owner-issued independent input seed observation
+
+The current autonomous child can capture one opaque seed after its Running
+journal admission. Capture and bind both require the exact Owner-issued
+Execution object and inherited child token. The first successful capture is
+fixed for that physical child, including when its acknowledgement is lost;
+a later global observation cannot replace it. Bind rechecks the same trace,
+Running admission and original source observation before returning its captured
+predecessor writer. The immutable source is not a dispatch or replay permit.
+
+When global input is recorded, the Owner reads its exact retained bytes under
+that Owner's original session root. A full pending request can be omitted only
+from B's seed copy, and only while exactly one other nonterminal semantic record
+owns that same complete wait and checkpoint. A's W, journal and global pointer
+are unchanged. Every other checkpoint field remains present. Each history getter
+copies the mutable Context so the caller cannot edit the captured observation.
+
+With a fresh unobserved input journal, canonical history is observed separately;
+an unowned pending request or any failed read refuses capture. Canonical bytes
+are decoded explicitly rather than borrowing a cached lineage value. Missing
+history and superseded history are explicit variants. Superseded history follows
+the existing version policy: its comparison establishes that policy observation,
+not unchanged old bytes or physical filesystem CAS authority. Prior unavailable
+input never becomes fresh history.
+
+The retained Owner restart fixture now captures B from A's exact W while an
+unrelated canonical payload exists, checks the full pending-free copy and Context
+isolation, and refuses recapture, escaped-child reuse and legacy publication.
+The Registry/Producer fixture also admits B from its actual queue selection and
+uses the Registry capture/bind commands against A's retained wait. A separate
+actual Owner fixture covers absent history appearing after capture, canonical
+history, corruption and unowned canonical pending input. These are
+checkpoint fixtures and source changes until their selected execution completes.
+
+Production heartbeat admission and AgentRun context preparation do not yet use
+this API. A pending-free checkpoint is not proof of settled tool effects and
+must never authorize another invocation's native, retry or Gate continuation.
+Integration still needs the selected source's actual continuation/effect evidence,
+explicit seed selection in RunContext, seed-bound Producer publication for B,
+and typed progress/wait/settlement sinks. Existing pending equality guards remain
+unchanged; this API must not become a global bypass of them. Actual provider/Core
+A wait -> independent B -> original A response/restart and Acting/SSE remain
+required before claiming the feature complete.

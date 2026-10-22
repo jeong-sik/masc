@@ -217,6 +217,17 @@ type input_checkpoint_writer =
   ; input_target : input_checkpoint_target
   }
 
+type autonomous_seed_origin =
+  | Retained_input_seed of Keeper_checkpoint_ref.t * Keeper_execution_scope_id.t option
+  | Canonical_history_seed of Keeper_checkpoint_ref.t
+  | Absent_history_seed
+  | Superseded_history_seed of int * int
+type autonomous_input_seed =
+  { seed_execution:Keeper_repetition_scope.Execution.t
+  ; seed_writer:input_checkpoint_writer
+  ; seed_origin:autonomous_seed_origin
+  ; seed_history:Keeper_checkpoint_store.turn_history }
+
 type input_checkpoint_change =
   | Autonomous_input of Keeper_checkpoint_ref.t
   | Direct_input of
@@ -269,6 +280,10 @@ type _ command =
       caller:Keeper_interrupt_token.t; input:Yojson.Safe.t;
       sources:Keeper_semantic_execution.source_member list} ->
       (Chat_operation_store.semantic_admission,error) result command
+  | Capture_autonomous_input_seed : Keeper_repetition_scope.Execution.t * Keeper_interrupt_token.t ->
+      (autonomous_input_seed,error) result command
+  | Bind_autonomous_input_seed : autonomous_input_seed * Keeper_interrupt_token.t ->
+      (input_checkpoint_writer,error) result command
   | Reserved_sources : (Keeper_semantic_execution.source_member list,error) result command
   | Finish_autonomous_execution : {execution:Keeper_repetition_scope.Execution.t;
       caller:Keeper_interrupt_token.t; ending:Chat_operation_store.autonomous_execution_end} ->
@@ -461,6 +476,7 @@ type t =
   ; operation_error : operation_fault option ref
   ; child_active : bool ref
   ; autonomous_execution : (Keeper_repetition_scope.Execution.t * autonomous_journal) option ref
+  ; autonomous_input_seed : autonomous_input_seed option ref
   ; child_cancel : child_cancel option Atomic.t
   ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; shutdown_idle_waiters : ((unit, error) result Eio.Promise.u) list ref
@@ -691,7 +707,7 @@ let answer : type response. response command -> answer = function
   | Direct_native_call _ | Direct_input_wait _ | Defer_direct_input_wait _ -> In_its_drain_step
   | Current_input_checkpoint | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _
   | Start_autonomous_execution _ | Finish_autonomous_execution _ | Park_autonomous_input_wait _
-  | Reserved_sources
+  | Reserved_sources | Capture_autonomous_input_seed _ | Bind_autonomous_input_seed _
   | Checkpoint_operation_input_branch _
   | Begin_history_clear _ | Commit_history_clear _ -> In_its_drain_step
   | Update_direct_native_call _ | Bind_retired_input_cut _ -> In_its_drain_step
@@ -1214,6 +1230,70 @@ let admitted_autonomous t execution =
   | Some current -> Ok current
   | None -> Error (Chat_operation_store.Invalid_input "autonomous execution has no original journal admission")
 
+let require_running_autonomous t execution =
+  let ( let* ) = Result.bind in
+  let* current=admitted_autonomous t execution in
+  match current.Keeper_semantic_execution.phase with
+  | Running -> Ok ()
+  | Preparing | Ready | Resuming_runtime_retry _ | Resuming_gate _
+  | Recovering _ | Suspended _ | Settled _ ->
+    Error (Chat_operation_store.Invalid_input "independent input seed requires its Running autonomous admission")
+
+let select_autonomous_input_seed t execution trace_id =
+  let ( let* ) = Result.bind in
+  let module Physical=Keeper_checkpoint_store in
+  let invalid detail=Error (Chat_operation_store.Invalid_input detail) in
+  let* observed=Chat_operation_store.input_checkpoint t.operation_store ~trace_id in
+  let session_dir=Filename.concat t.session_root (Keeper_id.Trace_id.to_string trace_id) in
+  match observed with
+  | Chat_operation_store.Prior_input_unavailable ->
+    invalid "independent seed cannot infer fresh history from unavailable prior input"
+  | Input_observed reference ->
+    let* snapshot=load_retained_branch_checkpoint t reference in
+    let checkpoint=Physical.exact_snapshot_checkpoint snapshot in
+    let* owner=match checkpoint.Agent_core.Checkpoint.pending_input with
+      | None -> Ok None
+      | Some pending ->
+        let* expected=Keeper_semantic_execution.input_wait ~checkpoint:reference ~pending
+          |> Result.map_error (fun detail -> Chat_operation_store.Invalid_input detail) in
+        let* outstanding=Chat_operation_store.semantic_outstanding t.operation_store |> autonomous_semantic_result in
+        let owners=List.filter (fun (candidate:Keeper_semantic_execution.t) ->
+          not (Keeper_execution_scope_id.equal candidate.id (Keeper_repetition_scope.Execution.scope execution))
+          && match candidate.phase with
+          | Recovering {origin=Input_wait waiting;_} -> Keeper_semantic_execution.equal_input_wait expected waiting
+          | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
+          | Suspended _ | Settled _
+          | Recovering {origin=(Unconfirmed_sources | Confirmed_undispatched | Checkpointed _
+              | Official_checkpointed _ | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _);_} -> false) outstanding in
+        (match owners with
+         | [owner] -> Ok (Some owner.Keeper_semantic_execution.id)
+         | [] | _::_::_ -> invalid "independent seed requires one exact other owner of the full pending input") in
+    let checkpoint={checkpoint with pending_input=None;context=Agent_core.Context.copy checkpoint.context} in
+    Ok (Retained_input_seed (reference,owner),Physical.Saved_history checkpoint,Some reference)
+  | Input_unobserved ->
+    let canonical=match Physical.load_agent_core_exact_snapshot ~session_dir
+        ~session_id:(Keeper_id.Trace_id.to_string trace_id) with
+      | Error _ as error -> error
+      | Ok snapshot -> Physical.exact_snapshot_of_canonical_bytes
+          ~expected_session_id:trace_id (Physical.exact_snapshot_canonical_bytes snapshot) in
+    match canonical with
+    | Ok snapshot ->
+      let checkpoint=Physical.exact_snapshot_checkpoint snapshot in
+      (match checkpoint.Agent_core.Checkpoint.pending_input with
+       | Some _ -> invalid "unobserved canonical pending input has no original journal owner"
+       | None -> Ok (Canonical_history_seed (Physical.exact_snapshot_reference snapshot),
+           Physical.Saved_history {checkpoint with context=Agent_core.Context.copy checkpoint.context},None))
+    | Error Physical.Ref_not_found -> Ok (Absent_history_seed,Physical.No_saved_history,None)
+    | Error (Physical.Ref_read_failed (Physical.Superseded_version {expected;got})) ->
+      Ok (Superseded_history_seed (expected,got),Physical.Saved_history_superseded {expected;got},None)
+    | Error error -> invalid (Physical.checkpoint_ref_load_error_to_string error)
+
+let autonomous_input_seed_history seed = match seed.seed_history with
+  | Keeper_checkpoint_store.Saved_history checkpoint ->
+    Keeper_checkpoint_store.Saved_history
+      {checkpoint with context=Agent_core.Context.copy checkpoint.context}
+  | (No_saved_history | Saved_history_superseded _) as history -> history
+
 let retained_autonomous t execution reference =
   let ( let* ) = Result.bind in
   let invalid detail = Error (Chat_operation_store.Invalid_input detail) in
@@ -1528,6 +1608,7 @@ let start
     ; operation_error = ref None
     ; child_active = ref false
     ; autonomous_execution = ref None
+    ; autonomous_input_seed = ref None
     ; child_cancel = Atomic.make None
     ; autonomous_lost_slot = ref false
     ; stopping_waiters = ref []
@@ -2198,6 +2279,47 @@ let start
             | (Some _ | None),(Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),(Some _ | None) ->
               Error (Operation_rejected (Chat_operation_store.Invalid_input
                 "history clear receipt no longer belongs to its original maintenance child and trace")) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Capture_autonomous_input_seed (execution,caller), resolve) ->
+          let response=reject_if_stopping state (fun () -> reject_if_shutdown shutdown_operation_id (fun () ->
+            match require_autonomous_child t execution caller,(Keeper_owner_reducer.projection state).meta with
+            | Ok (),Some meta -> run_operation_read t ~label:"capture independent autonomous input seed" (fun () ->
+                let ( let* )=Result.bind in
+                let* ()=require_running_autonomous t execution in
+                let* ()=match !(t.autonomous_input_seed) with
+                  | None -> Ok ()
+                  | Some _ -> Error (Chat_operation_store.Invalid_input
+                      "the original autonomous child already captured its input seed") in
+                let* seed_origin,seed_history,input_reference=select_autonomous_input_seed t execution meta.runtime.trace_id in
+                let seed_writer={input_trace=meta.runtime.trace_id;input_child=caller;
+                  input_lane=Autonomous;input_reference;input_target=Global_target} in
+                let seed={seed_execution=execution;seed_writer;seed_origin;seed_history} in
+                t.autonomous_input_seed := Some seed;
+                Ok seed)
+            | Error error,(Some _ | None) -> Error (Operation_rejected error)
+            | Ok (),None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+                "independent seed requires current Keeper metadata")))) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Bind_autonomous_input_seed (seed,caller), resolve) ->
+          let response=reject_if_stopping state (fun () -> reject_if_shutdown shutdown_operation_id (fun () ->
+            match require_autonomous_child t seed.seed_execution caller,(Keeper_owner_reducer.projection state).meta with
+            | Ok (),Some meta when Keeper_interrupt_token.equal caller seed.seed_writer.input_child
+                && Keeper_id.Trace_id.equal meta.runtime.trace_id seed.seed_writer.input_trace ->
+              run_operation_read t ~label:"bind original autonomous input seed" (fun () ->
+                let ( let* )=Result.bind in
+                let* ()=require_running_autonomous t seed.seed_execution in
+                let* ()=match !(t.autonomous_input_seed) with
+                  | Some current when current==seed -> Ok ()
+                  | Some _ | None -> Error (Chat_operation_store.Invalid_input
+                      "independent seed is not the original capture of this autonomous child") in
+                let* origin,_,_=select_autonomous_input_seed t seed.seed_execution meta.runtime.trace_id in
+                if origin=seed.seed_origin then Ok seed.seed_writer
+                else Error (Chat_operation_store.Invalid_input "independent seed input or original ownership changed"))
+            | Error error,(Some _ | None) -> Error (Operation_rejected error)
+            | Ok (),(Some _ | None) -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+                "independent seed lost its original child and trace")))) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
         | Command (Reserved_sources, resolve) ->
@@ -2992,9 +3114,11 @@ let start
                          let execution = Keeper_repetition_scope.Execution.autonomous_admission
                            (fresh_autonomous_uuid ()) in
                          t.autonomous_execution := Some (execution,Not_requested);
+                         t.autonomous_input_seed := None;
                          (fun () -> run execution)
                        | Maintenance_work run ->
                          t.autonomous_execution := None;
+              t.autonomous_input_seed := None;
                          run in
                      (* The Owner keeps its slot until the turn settles. A
                         chat starts after a settled tool boundary yields this
@@ -3109,6 +3233,7 @@ let start
             | Autonomous_child_finished { outcome; resolve = autonomous_resolve } ->
               let settlement = reconcile_autonomous_child_exit t in
               t.autonomous_execution := None;
+                         t.autonomous_input_seed := None;
               (match settlement with
                | Ok () -> ()
                | Error error ->
@@ -3232,6 +3357,16 @@ let start_autonomous_execution t ~execution ~input ~sources =
   | Some caller -> request t (Start_autonomous_execution {execution;caller;input;sources})
   | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
       "autonomous admission requires its inherited original child"))
+let capture_autonomous_input_seed t ~execution =
+  match Keeper_turn_preview_owner.current () with
+  | Some caller -> request t (Capture_autonomous_input_seed (execution,caller))
+  | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "independent seed requires its inherited original autonomous child"))
+let bind_autonomous_input_seed t ~seed =
+  match Keeper_turn_preview_owner.current () with
+  | Some caller -> request t (Bind_autonomous_input_seed (seed,caller))
+  | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "independent seed binding requires its inherited original autonomous child"))
 let reserved_sources t = request t Reserved_sources
 let finish_autonomous_execution t ~execution ~ending =
   match Keeper_turn_preview_owner.current () with

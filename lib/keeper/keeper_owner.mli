@@ -450,6 +450,32 @@ type input_checkpoint_writer
 type input_checkpoint_destination =
   | Global_input
   | Operation_input of Chat_operation.Operation_id.t
+type autonomous_input_seed
+val capture_autonomous_input_seed : t -> execution:Keeper_repetition_scope.Execution.t ->
+  (autonomous_input_seed, error) result
+(** Capture history for this exact current autonomous child after its
+    Running journal admission. A recorded global input is loaded only from its
+    exact retained payload. Pending input can be omitted from the independent
+    seed only when exactly one other nonterminal execution owns that full wait.
+    Original pending bytes, ownership and global input remain unchanged.
+    With fresh unobserved input, read canonical history strictly; an unowned
+    pending request, unavailable prior input or failed read refuses the seed.
+    Exactly one seed can be captured by the original physical child; a lost
+    capture acknowledgement does not permit a second seed. This is not permission
+    to consume an answer, resume an original invocation, dispatch a provider,
+    or overwrite canonical history. Pending=None alone never proves settled
+    tool effects or native/retry/Gate continuation authority. *)
+val autonomous_input_seed_history : autonomous_input_seed -> Keeper_checkpoint_store.turn_history
+(** Explicitly selected history; each call copies its mutable Context. Absence
+    and superseded history are explicit and must never mean canonical fallback. *)
+val bind_autonomous_input_seed : t -> seed:autonomous_input_seed ->
+  (input_checkpoint_writer, error) result
+(** Revalidate the same inherited child, original execution, Running admission,
+    current input/history observation and full pending ownership. Return the
+    captured predecessor writer, never borrow a newer global checkpoint. This
+    binding does not relax the existing typed publication or pending guards.
+    Superseded history follows the existing version-policy observation; it does
+    not attest unchanged raw bytes or grant canonical filesystem CAS authority. *)
 val input_checkpoint_destination : input_checkpoint_writer -> input_checkpoint_destination
 (** Captured by the original child from the actual journal. Callers cannot
     select or change this destination, including after an independent global

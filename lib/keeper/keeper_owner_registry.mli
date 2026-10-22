@@ -70,6 +70,12 @@ val start_autonomous_execution : base_path:string -> keeper_name:string ->
   execution:Keeper_repetition_scope.Execution.t -> input:Yojson.Safe.t ->
   sources:Keeper_semantic_execution.source_member list ->
   (Keeper_chat_operation_store.semantic_admission, command_error) result
+val capture_autonomous_input_seed : base_path:string -> keeper_name:string ->
+  execution:Keeper_repetition_scope.Execution.t ->
+  (Keeper_owner.autonomous_input_seed, command_error) result
+val bind_autonomous_input_seed : base_path:string -> keeper_name:string ->
+  seed:Keeper_owner.autonomous_input_seed ->
+  (Keeper_owner.input_checkpoint_writer, command_error) result
 val reserved_sources : base_path:string -> keeper_name:string ->
   (Keeper_semantic_execution.source_member list, command_error) result
 val finish_autonomous_execution : base_path:string -> keeper_name:string ->

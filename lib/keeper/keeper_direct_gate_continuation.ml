@@ -393,7 +393,12 @@ let load ~config ~meta ~operation_id ~session_dir =
          Error detail)
 
 type pending = Bound_checkpoint of Keeper_checkpoint_ref.t | Bound_official_client of Semantic.official_client_checkpoint | Checkpoint_reconciliation
+  | Input_wait of Semantic.input_wait
 let pending ~base_path ~keeper_name ~operation_id =
+  let* input_wait = Owner.direct_input_wait ~base_path ~keeper_name ~operation_id |> owner in
+  match input_wait with
+  | Some waiting -> Ok (Some (Input_wait waiting))
+  | None ->
   let* cooperative = Owner.direct_checkpoint ~base_path ~keeper_name ~operation_id |> owner in
   match cooperative with
   | Some (Semantic.Agent_core checkpoint) -> Ok (Some (Bound_checkpoint checkpoint))

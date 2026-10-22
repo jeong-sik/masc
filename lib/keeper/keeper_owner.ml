@@ -217,6 +217,9 @@ type _ command =
       Operation_id.t -> (bool, error) result command
   | Direct_checkpoint : Operation_id.t ->
       (Keeper_semantic_execution.gate_checkpoint option, error) result command
+  | Direct_input_wait : Operation_id.t -> (Keeper_semantic_execution.input_wait option, error) result command
+  | Defer_direct_input_wait : {operation_id:Operation_id.t; child:Keeper_interrupt_token.t} ->
+      (Chat_operation.t, error) result command
   | Direct_native_call : Operation_id.t -> (Keeper_native_call.state, error) result command
   | Current_input_checkpoint : (current_input_checkpoint, error) result command
   | Input_checkpoint : Keeper_id.Trace_id.t -> (Chat_operation_store.input_checkpoint_observation, error) result command
@@ -619,7 +622,7 @@ let answer : type response. response command -> answer = function
   | Exact_operation _ -> In_its_drain_step
   | Has_newer_original_queued _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
-  | Direct_native_call _ -> In_its_drain_step
+  | Direct_native_call _ | Direct_input_wait _ | Defer_direct_input_wait _ -> In_its_drain_step
   | Current_input_checkpoint | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _
   | Begin_history_clear _ | Commit_history_clear _ -> In_its_drain_step
   | Update_direct_native_call _ | Bind_retired_input_cut _ -> In_its_drain_step
@@ -1099,6 +1102,53 @@ let run_operation_read t ~label f =
     |> Result.map_error (record_operation_error t)
 ;;
 
+let prepare_direct_input_wait t ~trace_id ~operation_id =
+  let ( let* ) = Result.bind in
+  let invalid detail = Error (Chat_operation_store.Invalid_input detail) in
+  let* operation = Chat_operation_store.get t.operation_store operation_id in
+  let* operation = match operation with
+    | Some operation -> Ok operation
+    | None -> Error (Chat_operation_store.Unknown_operation operation_id) in
+  let* native = Chat_operation_store.direct_native_call t.operation_store ~operation_id in
+  let* call = match native with
+    | Keeper_native_call.Terminal_unacknowledged (call,{Agent_core.Agent.recovery=Retire;_}) -> Ok call
+    | Keeper_native_call.No_native_call | Active _
+    | Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Operator_repair_required Effect_outcome_unknown;_}) ->
+      Error Chat_operation_store.Native_call_unsettled in
+  let* observation = Chat_operation_store.input_checkpoint t.operation_store ~trace_id in
+  let* reference = match observation with
+    | Chat_operation_store.Input_observed reference
+        when Keeper_id.Trace_id.equal reference.trace_id trace_id
+          && Keeper_checkpoint_ref.equal call.checkpoint reference -> Ok reference
+    | Input_observed _ | Input_unobserved | Prior_input_unavailable ->
+      invalid "direct input wait no longer names the original owned native checkpoint" in
+  let session_dir = Filename.concat t.session_root (Keeper_id.Trace_id.to_string trace_id) in
+  let* snapshot = Keeper_checkpoint_store.load_retained_exact_snapshot ~session_dir ~reference
+    |> Result.map_error (fun error -> Chat_operation_store.Invalid_input (match error with
+      | Keeper_checkpoint_store.Source_unavailable error -> Keeper_checkpoint_store.checkpoint_ref_load_error_to_string error
+      | Source_changed _ -> "owned input retained bytes changed"
+      | Candidate_identity_invalid error -> Keeper_checkpoint_store.checkpoint_identity_error_to_string error
+      | Candidate_session_mismatch _ -> "owned input retained trace changed"
+      | Candidate_turn_regressed _ -> "owned input retained turn changed"
+      | Commit_not_installed _ -> "owned input retained installation is unconfirmed")) in
+  let checkpoint = Keeper_checkpoint_store.exact_snapshot_checkpoint snapshot in
+  let* frame = Keeper_repetition_context.load checkpoint.context
+    |> Result.map_error (fun error -> Chat_operation_store.Invalid_input (Keeper_repetition_snapshot.error_to_string error)) in
+  let* () = match Keeper_repetition_snapshot.active frame with
+    | Some scope when Keeper_execution_scope_id.equal scope
+        (Keeper_execution_scope_id.direct_operation operation_id) -> Ok ()
+    | Some _ | None -> invalid "owned input checkpoint does not retain its original operation scope" in
+  let* pending = match checkpoint.pending_input with
+    | Some pending -> Ok pending
+    | None -> invalid "owned input checkpoint has no pending request" in
+  (* pending.run_id is the lifecycle invocation, not the native locator run ID.
+     Their binding is the original child's published, retired exact checkpoint. *)
+  let* waiting = Keeper_semantic_execution.input_wait
+      ~checkpoint:(Keeper_checkpoint_store.exact_snapshot_reference snapshot) ~pending
+    |> Result.map_error (fun detail -> Chat_operation_store.Invalid_input detail) in
+  Ok (operation,waiting)
+;;
+
 let reject_if_stopping state f =
   if (Keeper_owner_reducer.projection state).stopping then Error Owner_stopping else f ()
 ;;
@@ -1446,7 +1496,11 @@ let start
                    | Ok None ->
                      (match Chat_operation_store.direct_gate_binding t.operation_store ~operation_id with
                       | Ok (Some _) -> Ok ()
-                      | Ok None -> Error (Chat_operation_store.Integrity_error "deferred operation has no continuation")
+                      | Ok None ->
+                        (match Chat_operation_store.direct_input_wait t.operation_store ~operation_id with
+                         | Ok (Some _) -> Ok ()
+                         | Ok None -> Error (Chat_operation_store.Integrity_error "deferred operation has no continuation")
+                         | Error error -> Error error)
                       | Error error -> Error error)
                    | Error error -> Error error)
                 | Error error -> Error error)
@@ -1949,6 +2003,32 @@ let start
           let response = match change with
             | Keeper_native_call.Bind _ -> reject_if_stopping state persist
             | Keeper_native_call.Checkpoint _ | Keeper_native_call.Terminal _ -> persist () in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Direct_input_wait operation_id, resolve) ->
+          let response = run_operation_read t ~label:"read original direct input wait" (fun () ->
+            Chat_operation_store.direct_input_wait t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Defer_direct_input_wait {operation_id;child}, resolve) ->
+          let response = match (Keeper_owner_reducer.projection state).meta,
+              Atomic.get t.turn_in_flight, Atomic.get t.child_cancel,
+              (Atomic.get t.operation_projection).running_operation_id with
+            | Some meta,Some {lane=Chat_operation;interrupt_token;_},Some _,Some running
+                when Keeper_interrupt_token.equal child interrupt_token
+                  && Operation_id.equal operation_id running ->
+              (match run_operation_read t ~label:"read exact original input wait" (fun () ->
+                 prepare_direct_input_wait t ~trace_id:meta.runtime.trace_id ~operation_id) with
+               | Error _ as error -> error
+               | Ok (operation,waiting) ->
+                 run_operation_command t ~label:"defer original direct input wait" (fun () ->
+                   Chat_operation_store.defer_direct_input_wait t.operation_store ~now:(t.now ())
+                     ~operation_id ~execution_digest:operation.execution_digest ~waiting)
+                 |> Result.map fst)
+            | (Some _ | None),(Some {lane=(Autonomous | Chat_operation | Maintenance);_} | None),
+                (Some _ | None),(Some _ | None) ->
+              Error (Operation_rejected (Chat_operation_store.Invalid_input
+                "input waiting requires its original executing direct child")) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
         | Command (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint}, resolve) ->
@@ -2590,6 +2670,12 @@ let create_from_input_birth t meta seed =
 let direct_checkpoint t ~operation_id = request t (Direct_checkpoint operation_id)
 let defer_direct_checkpoint t ~operation_id ~execution_digest ~checkpoint =
   request t (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint})
+let direct_input_wait t ~operation_id = request t (Direct_input_wait operation_id)
+let defer_direct_input_wait t ~operation_id =
+  match Keeper_turn_preview_owner.current () with
+  | Some child -> request t (Defer_direct_input_wait {operation_id;child})
+  | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
+      "input waiting requires an inherited executing child"))
 let direct_native_call t ~operation_id = request t (Direct_native_call operation_id)
 let input_child_request t writer change =
   match Keeper_turn_preview_owner.current () with

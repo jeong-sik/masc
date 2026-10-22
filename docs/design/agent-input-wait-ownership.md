@@ -160,9 +160,39 @@ fixtures exercise real journal transactions, restart, identity refusal,
 independent work, cancellation and commit faults; their opaque checkpoint
 references do not establish filesystem availability or runtime integration.
 
-The actual turn/Owner producer does not yet call this API: `InputRequired`
-still follows the existing result delivery path. Wiring that producer, durable
-autonomous waiting, Owner-serialized response admission/CAS and continuation,
-live/retained reconciliation, SSE invalidation and persistent TUI projection
-remain required. All #38005 layers remain Draft; this contract does not
-authorize installation, merge or whole-issue completion.
+## Direct turn and Owner admission
+
+The direct turn now calls `Keeper_owner_registry.defer_direct_input_wait` for
+its typed `Runtime_agent.InputRequired` result. It supplies the original
+operation identity, never a question or pending-request value. The existing
+Owner requires the inherited current chat child and its running operation,
+then reads the current trace's input relation under its original session root.
+The owned reference must equal the original retired native call's checkpoint.
+
+The Owner loads that exact retained snapshot with the same
+`load_retained_exact_snapshot` used by the host observation. It checks the
+original operation's repetition scope and derives the complete pending value
+from those bytes before committing the journal wait. Missing, corrupt or changed
+retained bytes, consumed input and foreign scope refuse. Canonical/history
+cannot substitute. The lifecycle invocation ID in `pending.run_id` differs
+from the durable native locator's execution run ID; their binding is the actual
+child-published checkpoint and native receipt, not equality between those IDs.
+
+Child completion and the HTTP operation-pending selector recognize the input
+wait as a committed nonterminal continuation. It supplies no ordinary resume
+reference. Delivery or transcript failure after deferral cannot turn the queued
+wait into terminal operation success or failure. Existing visible question
+projection is retained independently of this durable operation lifetime.
+
+The six additional Owner fixtures use real inherited children, SQLite and
+retained files. They cover independent work, actual Owner reopen and cancellation,
+no inherited child, consumed input, missing/corrupt/hash-mismatched retained
+evidence despite readable canonical state, and foreign operation scope. They do
+not execute a provider or the complete direct-turn/HTTP/UI path.
+
+Dedicated input-wait surface classification, durable autonomous waiting,
+Owner-serialized response admission/CAS and continuation, live/retained
+reconciliation, SSE invalidation and persistent TUI projection remain required.
+Caller and response integration must ship together before this stack can become
+ready. All #38005 layers remain Draft; this contract does not authorize
+installation, merge or whole-issue completion.

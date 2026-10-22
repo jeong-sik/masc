@@ -206,9 +206,19 @@ function SkillIoView({ profile }: { profile: SkillSurfaceProfile }) {
   `
 }
 
-function SkillPerformanceView({ statistics }: {
+function SkillPerformanceView({ statistics, io }: {
   statistics: SkillEvidenceResponse['composition_statistics']
+  io: SkillSurfaceProfile['io'] | null
 }) {
+  const modelOrchestrated = io?.kind === 'model_orchestrated'
+  const applicability = modelOrchestrated
+    ? html`<p>Executor timing: N/A for this model-orchestrated declaration. Retained executor results, when present, remain evidence below.</p>` : null
+  if (modelOrchestrated && (statistics === null || statistics.records === 0)) {
+    return html`<section aria-label="Skill performance" class="rounded border border-[var(--color-border-default)] p-3">
+      <strong>Executor performance</strong>${applicability}
+      <p class="ss-muted">${statistics === null ? 'Retained executor statistics unavailable.' : 'No retained executor runs for this exact revision.'}</p>
+    </section>`
+  }
   if (!statistics) return null
   const durations = [
     { label: 'Completed', ...statistics.completed, color: 'var(--color-status-ok)' },
@@ -223,6 +233,7 @@ function SkillPerformanceView({ statistics }: {
   return html`
     <section class="space-y-3 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3" aria-label="Skill performance">
       <div class="flex flex-wrap justify-between gap-2"><strong>Executor performance</strong><span>${statistics.records} retained runs</span></div>
+      ${applicability}
       <div class="ss-muted text-3xs">Mean executor duration · same revision · all Keepers · shared 0 → ${peak.toFixed(1)}ms axis</div>
       ${durations.map(row => html`
         <div class="grid grid-cols-[6rem_minmax(0,1fr)_auto] items-center gap-2" key=${row.label}>
@@ -313,13 +324,13 @@ function compositionCoverageLabel(scope: SkillEvidenceResponse['coverage']['comp
   }
 }
 
-function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null }) {
+function SkillEvidenceView({ result, io }: { result: SkillEvidenceResponse | null; io: SkillSurfaceProfile['io'] | null }) {
   if (!result) return html`<div class="ss-muted">Load retained exact-revision evidence.</div>`
   const activationGapCount = result.coverage.activation_gaps.length
   const coverageSummary = html`${result.coverage.activation_sessions_inspected} retained sessions inspected · ${result.coverage.activation_ledgers_loaded} activation ledgers loaded · ${activationGapCount} activation gaps · ${result.coverage.activation_owner_gap_count} owner gaps · ${result.coverage.composition_records_read} composition records read · ${compositionCoverageLabel(result.coverage.composition_scope)}`
   if (result.status === 'not_observed_in_retained_coverage') {
     return html`
-      <${SkillPerformanceView} statistics=${result.composition_statistics} />
+      <${SkillPerformanceView} statistics=${result.composition_statistics} io=${io} />
       <div class="text-[var(--color-status-warn)]">No exact-revision run was found in the retained coverage. This is not proof that it never ran.</div>
       <div class="ss-muted text-3xs">${coverageSummary} · ${result.coverage.activation_scope}</div>
       ${result.coverage.composition_unavailable.length > 0 ? html`<div class="text-[var(--color-status-warn)] text-3xs">Composition unavailable: ${result.coverage.composition_unavailable.join(' · ')}</div>` : null}
@@ -335,7 +346,7 @@ function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null })
   const output = composition?.result.data
   return html`
     <div class="space-y-2" data-testid="skill-retained-evidence">
-      <${SkillPerformanceView} statistics=${result.composition_statistics} />
+      <${SkillPerformanceView} statistics=${result.composition_statistics} io=${io} />
       ${activationEvidence.map((item, index) => {
         const activation = item.activation
         const actions = Array.isArray(activation.actions) ? activation.actions.length : 0
@@ -740,8 +751,9 @@ export function SkillsPanel() {
   </div>`
 }
 
-function SkillEvidenceLoader({ reference, isCurrent }: {
+function SkillEvidenceLoader({ reference, io, isCurrent }: {
   reference: SkillReference
+  io: SkillSurfaceProfile['io'] | null
   isCurrent: () => boolean
 }) {
   const result = useSignal<SkillEvidenceResponse | null>(null)
@@ -771,7 +783,7 @@ function SkillEvidenceLoader({ reference, isCurrent }: {
       }}>${loading.value ? 'Loading…' : 'Load'}</button>
     </div>
     ${error.value ? html`<div role="alert" class="text-[var(--color-status-err)]">${error.value}</div>` : null}
-    <${SkillEvidenceView} result=${result.value} />
+    <${SkillEvidenceView} result=${result.value} io=${io} />
   </div>`
 }
 
@@ -965,7 +977,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
                   <div class="grid gap-3 p-2 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
                     <div><strong>Execution flow</strong>${row.surface && row.surface.kind !== 'unavailable' ? html`<${SkillFlowView} profile=${row.surface.profile} /><${SkillIoView} profile=${row.surface.profile} />` : html`<div class="ss-muted">No profile</div>`}</div>
                     ${row.surface ? html`<${SkillEvidenceLoader} key=${rowKey}
-                      reference=${row.surface.reference} isCurrent=${current} />` : null}
+                      reference=${row.surface.reference} io=${row.surface.kind === 'unavailable' ? null : row.surface.profile.io} isCurrent=${current} />` : null}
                   </div>
                   ${row.surface ? html`
                     <${SkillSourceEditor}

@@ -850,6 +850,33 @@ let keeper_chat_transcript_store =
   }
 ;;
 
+(* 2026-10-22: #44905 moved this journal to user_version 3 and the 36 live
+   journals were version 2. Nothing before the start read them, so every
+   keeper owner refused its journal at runtime (#45075). The scan is the
+   owner's own read-only open: schema version, integrity and every record. *)
+let keeper_chat_operation_store =
+  { store = "keeper chat operations"
+  ; on_refusal =
+      "that keeper's owner does not start, so it takes no chat message and \
+       settles no queued or running operation; with the server stopped, \
+       prepare the journal with `masc workspace-upgrade journal` before this \
+       build serves it"
+  ; scan =
+      (fun ~base_path ->
+         let module Store = Keeper_chat_operation_store in
+         let keepers_runtime_dir = runtime_keepers_dir ~base_path in
+         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+           if Common.is_keepers_root_store_dirname keeper_id
+           then report
+           else
+             let path = Store.path_for_keeper ~keepers_runtime_dir ~keeper_name:keeper_id in
+             match Store.inspect_durable_records ~path with
+             | Ok Store.Missing_durable_store -> report
+             | Ok (Store.Stored_durable_records _) -> count_row report (Ok ())
+             | Error error -> count_row report (Error (path ^ ": " ^ Store.error_to_string error))))
+  }
+;;
+
 module Id = struct
   type t =
     | Keeper_meta
@@ -874,6 +901,7 @@ module Id = struct
     | Memory_os_events
     | Keeper_event_queue
     | Keeper_chat_transcripts
+    | Keeper_chat_operations
   [@@deriving enumerate]
 end
 
@@ -923,6 +951,7 @@ let reader : Id.t -> reader = function
   | Id.Memory_os_events -> Preflight_only memory_os_events_store
   | Id.Keeper_event_queue -> Refuse_boot (Refusing.Event_queue, event_queue_store)
   | Id.Keeper_chat_transcripts -> Preflight_only keeper_chat_transcript_store
+  | Id.Keeper_chat_operations -> Preflight_only keeper_chat_operation_store
 ;;
 
 let name id =
